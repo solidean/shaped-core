@@ -1,18 +1,22 @@
+#include <clean-core/common/hash.hh>
 #include <clean-core/container/map.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/math/bit.hh> // cc::bit_cast
 #include <clean-core/string/format.hh>
 #include <clean-core/string/string.hh>
 #include <nexus/test.hh>
 #include <shaped-viewer/fwd.hh>
 #include <shaped-viewer/rendering/frame_constants.hh>
+#include <shaped-viewer/rendering/pathtrace_routine.hh> // pt_light_table, pt_frame_constants_gpu
 #include <shaped-viewer/resources/resource_data.hh>
 #include <shaped-viewer/scene/background.hh>
 #include <shaped-viewer/scene/light.hh>
 #include <shaped-viewer/scene/mesh.hh>
 #include <shaped-viewer/scene/pbr_material.hh>
 #include <shaped-viewer/scene/triangle_geometry.hh>
+#include <shaped-viewer/stable_id.hh>
 #include <shaped-viewer/view/camera.hh>
-#include <shaped-viewer/view/view_id.hh>
+#include <shaped-viewer/view/layer.hh>
 #include <shaped-viewer/view/viewer_definition.hh>
 #include <typed-geometry/geometry/primitives/triangle.hh>
 #include <typed-geometry/linalg/cross.hh> // tg::cross + tg::dual
@@ -20,6 +24,11 @@
 #include <typed-geometry/linalg/pos_ops.hh> // tg::distance
 #include <typed-geometry/linalg/vec.hh>
 #include <typed-geometry/linalg/vec_ops.hh> // tg::normalize
+#include <typed-geometry/scalar/angle.hh>
+#include <typed-geometry/scalar/constants.hh>
+#include <typed-geometry/scalar/scalar.hh> // tg::abs
+
+#include <type_traits>
 
 
 using namespace cc::primitive_defines;
@@ -193,40 +202,6 @@ TEST("sv - pbr_material_gpu::from preserves fields")
     CHECK(g.emissive == m.emissive);
 }
 
-TEST("sv - area_light_gpu::from lays out the rect and its emitting face")
-{
-    static_assert(sizeof(sv::area_light_gpu) == 80); // five 16-byte cbuffer lanes
-
-    auto const light = sv::area_light{.center = tg::pos3f(0, 3, 0),
-                                      .half_extent_u = tg::vec3f(0.75f, 0, 0),
-                                      .half_extent_v = tg::vec3f(0, 0, 0.5f),
-                                      .emission = tg::vec3f(12, 12, 12)};
-    auto const g = sv::area_light_gpu::from(light);
-
-    CHECK(g.center == tg::vec3f(0, 3, 0));
-    CHECK(g.u == light.half_extent_u);
-    CHECK(g.v == light.half_extent_v);
-    CHECK(g.emission == light.emission);
-    CHECK(g.normal == tg::vec3f(0, -1, 0)); // cross(+x, +z) faces down
-
-    SECTION("swapping the two half-extents spans the same rect, flipping the face")
-    {
-        auto flipped = light;
-        flipped.half_extent_u = light.half_extent_v;
-        flipped.half_extent_v = light.half_extent_u;
-        CHECK(sv::area_light_gpu::from(flipped).normal == tg::vec3f(0, 1, 0));
-    }
-
-    SECTION("emission has no usable default")
-    {
-        // Negative on every channel, so a light that was never given an emission is reported on use instead of
-        // tracing as a black rect.
-        CHECK(sv::area_light{}.emission[0] < 0);
-        CHECK(sv::area_light{}.emission[1] < 0);
-        CHECK(sv::area_light{}.emission[2] < 0);
-    }
-}
-
 namespace
 {
 /// The radiance `shaders/background.hlsli` reconstructs along `d`, evaluated on the CPU so the factories can be
@@ -303,7 +278,7 @@ TEST("sv - background factories reconstruct the radiance they promise")
     {
         auto const dir = tg::normalize(tg::vec3f(0.3f, 0.9f, -0.2f));
         auto const c = tg::vec3f(1.0f, 0.8f, 0.6f);
-        auto const bg = sv::background::sun(dir, c);
+        auto const bg = sv::background::lobe(dir, c);
 
         // Some unit vector across the lobe's axis, to walk away from the peak with.
         auto const across = tg::dual(tg::cross(dir, tg::vec3f(0, 0, 1))).normalized();
@@ -322,13 +297,13 @@ TEST("sv - background factories reconstruct the radiance they promise")
         CHECK(at_60[0] < c[0]);
 
         // The direction is normalized for the caller, so its length cannot change the lobe.
-        CHECK(near(radiance_along(sv::background::sun(dir * 7.0f, c), dir), c, 1e-3f));
+        CHECK(near(radiance_along(sv::background::lobe(dir * 7.0f, c), dir), c, 1e-3f));
     }
 
     SECTION("backgrounds superpose, which is what lets the presets compose")
     {
         auto const sky = sv::background::gradient(tg::vec3f(0.2f, 0.6f, 1.0f), tg::vec3f(0.1f, 0.1f, 0.1f));
-        auto const sun = sv::background::sun(up, tg::vec3f(2, 2, 2));
+        auto const sun = sv::background::lobe(up, tg::vec3f(2, 2, 2));
         auto const d = tg::normalize(tg::vec3f(1, 3, -2));
 
         CHECK(near(radiance_along(sky.combined_with(sun), d), radiance_along(sky, d) + radiance_along(sun, d)));
@@ -340,7 +315,7 @@ TEST("sv - background factories reconstruct the radiance they promise")
         // Not free: a `sun` dips below zero in a ring behind its lobe, so a preset built on one only reads as a sky if its ambient outweighs that dip.
         // The miss clamps, but a clamp hides that rather than fixing it.
         auto worst = 1.0f;
-        for (auto const& bg : {sv::background::daylight(), sv::background::studio()})
+        for (auto const& bg : {sv::daylight().sky, sv::background::studio()})
             for (auto ix = -2; ix <= 2; ++ix)
                 for (auto iy = -2; iy <= 2; ++iy)
                     for (auto iz = -2; iz <= 2; ++iz)
@@ -633,4 +608,397 @@ TEST("sv - a scene item's placement is an affine tg transform")
 
     // The renderer packs these two halves, not a mat4 — the linear part carries no translation of its own.
     CHECK(item.transform.translation() == tg::vec3f(0, 2, 0));
+}
+
+// ---- stable ids ------------------------------------------------------------------------------------------
+
+TEST("sv - a light id and a view id are different types over one scheme")
+{
+    static_assert(!std::is_same_v<sv::view_id, sv::light_id>, "a view's id must not key a light's state");
+
+    auto const a = sv::light_id::from_string("key");
+    CHECK(a == sv::light_id::from_string("key"));
+    CHECK(a != sv::light_id::from_string("fill"));
+
+    // The same name under a pushed scope is a different id — what makes a loop of lights under scoped_id(i) legal.
+    auto const scoped = sv::light_id::from_string("key", sv::push_id_seed(0, i64(3)));
+    CHECK(scoped != a);
+    CHECK(scoped == sv::light_id::from_string("key", sv::push_id_seed(0, i64(3))));
+}
+
+// ---- lights ----------------------------------------------------------------------------------------------
+
+TEST("sv - each light factory picks its path and its natural unit")
+{
+    using namespace tg::literals;
+
+    auto const point = sv::light::point(tg::pos3f(1, 2, 3));
+    CHECK(point.path() == sv::light_path::point);
+    CHECK(point.emission.unit == sv::light_unit::candela);
+    CHECK(point.placement.translation() == tg::vec3f(1, 2, 3));
+    CHECK(point.shaping.kind == sv::light_shaping_kind::none);
+
+    // A spot is a point with a cone, not a path of its own.
+    auto const spot = sv::light::spot(tg::pos3f(0, 3, 0), tg::vec3f(0, -1, 0), 30_deg_f, 20_deg_f);
+    CHECK(spot.path() == sv::light_path::point);
+    CHECK(spot.shaping.kind == sv::light_shaping_kind::cone);
+    CHECK(spot.shaping.inner == 20_deg_f);
+    CHECK(spot.shaping.outer == 30_deg_f);
+    CHECK(near(spot.placement.transform(tg::vec3f(0, 0, -1)), tg::vec3f(0, -1, 0))); // points along -Z
+
+    auto const rect = sv::light::rect(tg::pos3f(0, 3, 0), tg::vec3f(0.75f, 0, 0), tg::vec3f(0, 0, 0.5f));
+    CHECK(rect.path() == sv::light_path::area);
+    CHECK(rect.shape() == sv::area_shape::rect);
+    CHECK(rect.emission.unit == sv::light_unit::nit);
+    CHECK(near(tg::vec3f(rect.half_extents()[0], rect.half_extents()[1], 0), tg::vec3f(0.75f, 0.5f, 0)));
+
+    auto const directional = sv::light::directional(tg::vec3f(0, -1, 0));
+    CHECK(directional.path() == sv::light_path::distant_point);
+    CHECK(directional.emission.unit == sv::light_unit::lux);
+
+    auto const sun = sv::light::sun(tg::vec3f(0, -1, 0));
+    CHECK(sun.path() == sv::light_path::distant_disc);
+    CHECK(tg::abs(sun.angular_radius().degree() - 0.265f) < 1e-4f);
+
+    // A sun of no size is parallel light, which is a different path rather than a degenerate disc.
+    CHECK(sv::light::sun(tg::vec3f(0, -1, 0), tg::angle_f()).path() == sv::light_path::distant_point);
+}
+
+TEST("sv - a light's unit, face and cone are checked against its path")
+{
+    using namespace tg::literals;
+
+    auto point = sv::light::point(tg::pos3f(0, 0, 0));
+    auto rect = sv::light::rect(tg::pos3f(0, 3, 0), tg::vec3f(1, 0, 0), tg::vec3f(0, 0, 1));
+    auto sun = sv::light::sun(tg::vec3f(0, -1, 0));
+
+    // Every factory builds a valid light.
+    CHECK(sv::light_problem(point).empty());
+    CHECK(sv::light_problem(rect).empty());
+    CHECK(sv::light_problem(sun).empty());
+
+    // A unit the path accepts is fine, and one it cannot mean asserts where it is written.
+    CHECK(sv::light_problem(point.lumens(800)).empty());
+    CHECK(sv::light_problem(rect.candela(50)).empty());
+    CHECK_ASSERTS(point.nits(10));
+    CHECK_ASSERTS(point.lux(10));
+    CHECK_ASSERTS(sun.candela(10));
+    CHECK_ASSERTS(rect.lux(10));
+
+    // Faces are an area light's, and a cone on a distant light would be a barn door.
+    CHECK(sv::light_problem(rect.face(sv::light_face::both)).empty());
+    CHECK_ASSERTS(point.face(sv::light_face::back));
+    CHECK_ASSERTS(sun.cone(0_deg_f, 10_deg_f));
+    CHECK_ASSERTS(point.spread(10_deg_f));
+    CHECK_ASSERTS(point.cone(20_deg_f, 10_deg_f)); // inner beyond outer
+
+    // A negative color would emit negative light, and a NaN exposure would drop every path that sees the light.
+    CHECK_ASSERTS(point.color(tg::vec3f(1, -0.1f, 1)));
+    CHECK_ASSERTS(point.exposure(cc::bit_cast<f32>(0x7FC00000u))); // a quiet NaN
+    CHECK_ASSERTS(point.exposure(200));
+    CHECK(sv::light_problem(point.exposure(-3)).empty());
+
+    // The emission is a public aggregate, so a direct write skips the setters; the GPU layout is the gate that remains.
+    // Candela on a sun would otherwise be read as lux, silently.
+    auto bypassed = sv::light::sun(tg::vec3f(0, -1, 0));
+    bypassed.emission.unit = sv::light_unit::candela;
+    CHECK(!sv::light_problem(bypassed).empty());
+    CHECK_ASSERTS(sv::light_gpu::from(bypassed));
+}
+
+TEST("sv - two equal lights compare equal, and any difference is seen")
+{
+    auto const a = sv::light::rect(tg::pos3f(0, 3, 0), tg::vec3f(1, 0, 0), tg::vec3f(0, 0, 1)).nits(12);
+    auto const b = sv::light::rect(tg::pos3f(0, 3, 0), tg::vec3f(1, 0, 0), tg::vec3f(0, 0, 1)).nits(12);
+    CHECK(a == b);
+
+    auto brighter = a;
+    brighter.nits(13);
+    CHECK(brighter != a);
+
+    // Same unit, same intensity, different path: the payload's alternative is part of the comparison.
+    CHECK(sv::light::point(tg::pos3f(0, 3, 0)) != sv::light::spot(tg::pos3f(0, 3, 0), tg::vec3f(0, -1, 0), tg::angle_f()));
+}
+
+TEST("sv - light_gpu::from lays out the rect and its emitting face")
+{
+    static_assert(sizeof(sv::light_gpu) == 96); // six 16-byte lanes, as sv::light in shaders/light.hlsli
+
+    auto const light = sv::light::rect(tg::pos3f(0, 3, 0), tg::vec3f(0.75f, 0, 0), tg::vec3f(0, 0, 0.5f)).nits(12);
+    auto const g = sv::light_gpu::from(light);
+
+    CHECK(g.path == u32(sv::light_path::area));
+    CHECK(near(g.position, tg::vec3f(0, 3, 0)));
+    CHECK(tg::abs(g.area - 4.0f * 0.75f * 0.5f) < 1e-5f); // stored, so both estimators read one number
+    CHECK(near(g.emission, tg::vec3f(12, 12, 12)));
+
+    // The same rect the old half-extent spelling described, emitting along cross(u, v) = cross(+x, +z) = -y.
+    CHECK(near(g.normal, tg::vec3f(0, -1, 0)));
+    CHECK(near(tg::normalize(tg::dual(tg::cross(g.u, g.v))), g.normal));
+    CHECK(tg::abs(tg::dual(tg::cross(g.u, g.v)).length() - 0.75f * 0.5f) < 1e-5f);
+    CHECK(tg::abs(tg::abs(tg::dot(g.u, tg::vec3f(0, 0, 1))) - 0.5f) < 1e-5f);
+    CHECK(tg::abs(tg::abs(tg::dot(g.v, tg::vec3f(1, 0, 0))) - 0.75f) < 1e-5f);
+
+    SECTION("the back face emits the other way")
+    {
+        auto back = light;
+        back.face(sv::light_face::back);
+        CHECK(near(sv::light_gpu::from(back).normal, tg::vec3f(0, 1, 0)));
+    }
+
+    SECTION("every unit converts to the same radiance through the rect's area")
+    {
+        // A = 4 * 0.75 * 0.5 = 1.5: 12 nits is 18 cd along the normal and pi * 1.5 * 12 lm from one face.
+        auto l = light;
+        CHECK(near(sv::light_gpu::from(l.candela(18)).emission, tg::vec3f(12, 12, 12)));
+        CHECK(near(sv::light_gpu::from(l.lumens(tg::pi<f32> * 1.5f * 12)).emission, tg::vec3f(12, 12, 12)));
+    }
+
+    SECTION("exposure is stops on top, and color only tints")
+    {
+        auto l = light;
+        l.exposure(1).color(tg::vec3f(1, 0.5f, 0));
+        CHECK(near(sv::light_gpu::from(l).emission, tg::vec3f(24, 12, 0)));
+    }
+
+    SECTION("a uniform scale in the placement grows the area a flux is spread over")
+    {
+        auto const placement = tg::similarity_transform3f::make_uniform_scaling(2.0f);
+        auto const scaled = sv::light::rect(placement, tg::vec2f(1, 1));
+        CHECK(tg::abs(scaled.area() - 16.0f) < 1e-5f);
+    }
+}
+
+TEST("sv - the light table groups by path and keeps each run in the order it was given")
+{
+    // Tagged by path, told apart by position.x so the order can be read back.
+    auto const record = [](sv::light_path path, float tag)
+    { return sv::light_gpu{.position = tg::vec3f(tag, 0, 0), .path = u32(path)}; };
+
+    auto const given = cc::vector<sv::light_gpu>{
+        record(sv::light_path::area, 0), record(sv::light_path::distant_disc, 1), record(sv::light_path::point, 2),
+        record(sv::light_path::area, 3), record(sv::light_path::point, 4)};
+    auto const table = sv::pt_light_table::grouped(given);
+
+    // point, then area, then distant_point (empty), then distant_disc.
+    CHECK(table.path_count[0] == 2);
+    CHECK(table.path_count[1] == 2);
+    CHECK(table.path_count[2] == 0);
+    CHECK(table.path_count[3] == 1);
+    CHECK(table.path_offset[0] == 0);
+    CHECK(table.path_offset[1] == 2);
+    CHECK(table.path_offset[2] == 4);
+    CHECK(table.path_offset[3] == 4);
+
+    auto const tags = cc::vector<float>{2, 4, 0, 3, 1};
+    REQUIRE(table.records.size() == tags.size());
+    for (auto i = isize(0); i < tags.size(); ++i)
+        CHECK(table.records[i].position[0] == tags[i]);
+
+    SECTION("the frame block receives the same table")
+    {
+        auto fc = sv::pt_frame_constants_gpu{};
+        table.describe_in(fc);
+        CHECK(fc.light_count == 5);
+        for (auto i = 0; i < 4; ++i)
+        {
+            CHECK(fc.path_offset[i] == table.path_offset[i]);
+            CHECK(fc.path_count[i] == table.path_count[i]);
+        }
+    }
+
+    SECTION("no lights is an empty table, which the frame block reads as lit by the environment alone")
+    {
+        auto const empty = sv::pt_light_table::grouped({});
+        auto fc = sv::pt_frame_constants_gpu{};
+        empty.describe_in(fc);
+        CHECK(empty.records.empty());
+        CHECK(fc.light_count == 0);
+    }
+}
+
+// The accumulation restarts when a hash of the uploaded bytes changes, and the lights are among them.
+// So two lights built the same way must lay out to the same bytes, pads included — otherwise the image restarts every
+// frame and never converges, which looks like noise rather than like a bug.
+TEST("sv - equal lights lay out to identical bytes, and any change is seen in them")
+{
+    auto const make
+        = [] { return sv::light::rect(tg::pos3f(0, 3, 0), tg::vec3f(1, 0, 0), tg::vec3f(0, 0, 0.5f)).nits(12); };
+
+    auto const a = sv::light_gpu::from(make());
+    auto const b = sv::light_gpu::from(make());
+    auto const bytes = [](sv::light_gpu const& g) { return cc::span<sv::light_gpu const>(&g, 1).as_bytes(); };
+
+    CHECK(cc::make_hash_of_bytes(bytes(a)) == cc::make_hash_of_bytes(bytes(b)));
+
+    auto dimmer = make();
+    dimmer.nits(11);
+    CHECK(cc::make_hash_of_bytes(bytes(sv::light_gpu::from(dimmer))) != cc::make_hash_of_bytes(bytes(a)));
+
+    auto flipped = make();
+    flipped.face(sv::light_face::back);
+    CHECK(cc::make_hash_of_bytes(bytes(sv::light_gpu::from(flipped))) != cc::make_hash_of_bytes(bytes(a)));
+}
+
+TEST("sv - light_gpu::from converts every path to the quantity its estimator reads")
+{
+    using namespace tg::literals;
+    auto const down = tg::vec3f(0, -1, 0);
+
+    SECTION("a point is an intensity; a flux spreads over the whole sphere")
+    {
+        auto const candela = sv::light_gpu::from(sv::light::point(tg::pos3f(1, 2, 3)).candela(800));
+        CHECK(candela.path == u32(sv::light_path::point));
+        CHECK(near(candela.position, tg::vec3f(1, 2, 3)));
+        CHECK(near(candela.emission, tg::vec3f(800, 800, 800)));
+
+        // Unshaped: the falloff is a constant 1 whatever the direction.
+        CHECK(candela.cone_scale == 0.0f);
+        CHECK(candela.cone_offset == 1.0f);
+
+        auto const lumen = sv::light_gpu::from(sv::light::point(tg::pos3f(0, 0, 0)).lumens(4.0f * tg::pi<f32> * 100));
+        CHECK(near(lumen.emission, tg::vec3f(100, 100, 100)));
+    }
+
+    SECTION("a spot's cone is glTF's falloff, full inside the inner angle and zero past the outer")
+    {
+        auto const g = sv::light_gpu::from(sv::light::spot(tg::pos3f(0, 3, 0), down, 30_deg_f, 20_deg_f).candela(1));
+        CHECK(near(g.normal, down));
+
+        auto const falloff = [&](tg::angle_f a)
+        {
+            auto const x = cc::clamp(tg::cos(a) * g.cone_scale + g.cone_offset, 0.0f, 1.0f);
+            return x * x;
+        };
+        CHECK(tg::abs(falloff(10_deg_f) - 1.0f) < 1e-5f);
+        CHECK(tg::abs(falloff(20_deg_f) - 1.0f) < 1e-4f);
+        CHECK(falloff(25_deg_f) > 0.0f);
+        CHECK(falloff(25_deg_f) < 1.0f);
+        CHECK(falloff(31_deg_f) == 0.0f);
+    }
+
+    SECTION("a directional light is an irradiance along the direction it travels")
+    {
+        auto const g = sv::light_gpu::from(sv::light::directional(down).lux(5));
+        CHECK(g.path == u32(sv::light_path::distant_point));
+        CHECK(near(g.normal, down));
+        CHECK(near(g.emission, tg::vec3f(5, 5, 5)));
+    }
+
+    SECTION("a sun is a disc of radiance that delivers its illuminance to a surface facing it")
+    {
+        auto const g = sv::light_gpu::from(sv::light::sun(down, 2_deg_f).lux(10));
+        CHECK(g.path == u32(sv::light_path::distant_disc));
+        CHECK(tg::abs(g.one_minus_cos_angular_radius - 1.5230484e-4f) < 1e-9f); // 1 - cos(1 deg), taken in double
+
+        // pi * sin(r)^2 * L back to the lux it was given.
+        auto const sin_r = tg::sin(1_deg_f);
+        CHECK(tg::abs(tg::pi<f32> * sin_r * sin_r * g.emission[0] - 10.0f) < 1e-3f);
+
+        // The shader's projected solid angle, pi * (1 - cos) * (1 + cos), has to agree with the pi * sin^2 the lux was
+        // divided by, even for a disc far smaller than the sun — where a stored cosine would round most of it away.
+        for (auto const diameter : {0.53f, 0.1f, 0.02f})
+        {
+            auto const small = sv::light_gpu::from(sv::light::sun(down, tg::angle_f::make_from_degree(diameter)).lux(10));
+            auto const omc = small.one_minus_cos_angular_radius;
+            auto const delivered = tg::pi<f32> * omc * (2.0f - omc) * small.emission[0];
+            CHECK(tg::abs(delivered - 10.0f) < 1e-3f * 10.0f);
+        }
+    }
+
+    SECTION("a two-sided rect sets its flag, and its flux is shared between both faces")
+    {
+        auto const rect = [] { return sv::light::rect(tg::pos3f(0, 3, 0), tg::vec3f(1, 0, 0), tg::vec3f(0, 0, 0.5f)); };
+        auto one = rect();
+        one.lumens(tg::pi<f32> * 2.0f * 12);
+        auto both = rect();
+        both.face(sv::light_face::both).lumens(tg::pi<f32> * 2.0f * 12);
+
+        CHECK(sv::light_gpu::from(one).flags == 0u);
+        CHECK((sv::light_gpu::from(both).flags & sv::light_gpu::flag_two_sided) != 0u);
+        CHECK(near(sv::light_gpu::from(one).emission, tg::vec3f(12, 12, 12)));
+        CHECK(near(sv::light_gpu::from(both).emission, tg::vec3f(6, 6, 6)));
+    }
+
+    SECTION("a spread is a hard-edged cone about the rect's face")
+    {
+        auto l = sv::light::rect(tg::pos3f(0, 3, 0), tg::vec3f(1, 0, 0), tg::vec3f(0, 0, 1));
+        l.spread(20_deg_f);
+        auto const g = sv::light_gpu::from(l);
+        auto const falloff = [&](tg::angle_f a)
+        {
+            auto const x = cc::clamp(tg::cos(a) * g.cone_scale + g.cone_offset, 0.0f, 1.0f);
+            return x * x;
+        };
+        CHECK(falloff(10_deg_f) == 1.0f);
+        CHECK(falloff(30_deg_f) == 0.0f);
+    }
+
+    // The width between the two angles is clamped only to keep a hard edge finite.
+    // Clamped too wide, the ramp's slope is capped and a narrow cone never reaches full intensity on its own axis.
+    SECTION("a narrow cone still reaches full intensity on its axis")
+    {
+        auto const on_axis = [](sv::light_gpu const& g)
+        {
+            auto const x = cc::clamp(g.cone_scale + g.cone_offset, 0.0f, 1.0f); // cos = 1
+            return x * x;
+        };
+
+        auto tight = sv::light::rect(tg::pos3f(0, 3, 0), tg::vec3f(1, 0, 0), tg::vec3f(0, 0, 1));
+        tight.spread(1_deg_f);
+        CHECK(on_axis(sv::light_gpu::from(tight)) == 1.0f);
+
+        // Inner defaults to 0, so the ramp meets 1 exactly on the axis, up to rounding.
+        CHECK(on_axis(sv::light_gpu::from(sv::light::spot(tg::pos3f(0, 3, 0), down, 2_deg_f).candela(1))) > 0.999f);
+    }
+}
+
+TEST("sv - a layer nobody lit falls back to a sun, which it can turn off")
+{
+    auto const l = sv::layer{};
+    REQUIRE(l.fallback_light.has_value());
+    CHECK(l.fallback_light.value().path() == sv::light_path::distant_disc);
+    CHECK(sv::light_problem(l.fallback_light.value()).empty());
+}
+
+// The daylight preset used to fold a soft sun lobe into its sky, and now hands a real sun back beside it.
+// If the sky still carried its lobe, a scene set up with both would be lit by the sun twice.
+TEST("sv - daylight's sky carries no sun, so the pair counts it once")
+{
+    auto const day = sv::daylight();
+
+    // A gradient lives in bands 0 and 1 alone; any band-2 energy is a lobe.
+    for (auto i = 4; i < sv::background::sh_coefficient_count; ++i)
+        CHECK(day.sky.sh[i] == tg::vec3f(0, 0, 0));
+
+    // The sun is a light, high in the sky and travelling down.
+    CHECK(day.sun.path() == sv::light_path::distant_disc);
+    CHECK(sv::light_problem(day.sun).empty());
+    CHECK(sv::light_gpu::from(day.sun).normal[1] < 0.0f);
+}
+
+TEST("sv - a light's camera visibility and shadowing reach its GPU record, with 0 as the default")
+{
+    auto const rect = [] { return sv::light::rect(tg::pos3f(0, 3, 0), tg::vec3f(1, 0, 0), tg::vec3f(0, 0, 1)); };
+
+    // An ordinary light sets neither bit, so a zeroed record behaves as one.
+    auto const plain = sv::light_gpu::from(rect());
+    CHECK((plain.flags & sv::light_gpu::flag_visible_to_camera) == 0u);
+    CHECK((plain.flags & sv::light_gpu::flag_casts_no_shadow) == 0u);
+    CHECK(plain.link_mask == ~0u); // reserved, and "every instance" meanwhile
+
+    auto seen = rect();
+    seen.visible_to_camera().casts_shadows(false);
+    auto const g = sv::light_gpu::from(seen);
+    CHECK((g.flags & sv::light_gpu::flag_visible_to_camera) != 0u);
+    CHECK((g.flags & sv::light_gpu::flag_casts_no_shadow) != 0u);
+
+    // A sun has an extent and may be seen; a point or a parallel light has none, and asserts.
+    auto sun = sv::light::sun(tg::vec3f(0, -1, 0));
+    CHECK(sv::light_problem(sun.visible_to_camera()).empty());
+    CHECK_ASSERTS(sv::light::point(tg::pos3f(0, 0, 0)).visible_to_camera());
+    CHECK_ASSERTS(sv::light::directional(tg::vec3f(0, -1, 0)).visible_to_camera());
+
+    // Any light may cast no shadow.
+    CHECK(sv::light_problem(sv::light::point(tg::pos3f(0, 0, 0)).casts_shadows(false)).empty());
 }

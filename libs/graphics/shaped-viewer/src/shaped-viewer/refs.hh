@@ -8,6 +8,7 @@
 #include <shaped-viewer/layout/box_style.hh>
 #include <shaped-viewer/layout/layout_tree.hh>
 #include <shaped-viewer/view/view_data.hh>
+#include <typed-geometry/scalar/angle.hh>
 
 #include <type_traits>
 
@@ -68,16 +69,35 @@ private:
 };
 
 /// One light in a scene — the counterpart of `mesh_ref`, handed back by `scene_ref::add_light`.
+///
+/// It indexes the caller's light list, in the order the lights were added, and never the GPU buffer, which the renderer
+/// is free to reorder.
+/// The setters forward to `sv::light`'s, so `scene.add_spot_light(...).candela(800)` reads like building the light.
 class sv::light_ref
 {
 public:
     light_ref(frame* f, view_index view, u32 layer, u32 light) : _frame(f), _view(view), _layer(layer), _light(light) {}
 
-    /// Replaces the whole light.
-    void light(area_light const& l);
+    /// The identity this light keeps across frames.
+    [[nodiscard]] light_id id() const;
+
+    /// Replaces the whole light, keeping its id.
+    void light(sv::light const& l);
+
+    light_ref& candela(f32 value);
+    light_ref& lux(f32 value);
+    light_ref& nits(f32 value);
+    light_ref& lumens(f32 value);
+    light_ref& color(tg::vec3f c);
+    light_ref& exposure(f32 stops);
+    light_ref& face(light_face f);
+    light_ref& cone(tg::angle_f inner_half_angle, tg::angle_f outer_half_angle);
+    light_ref& spread(tg::angle_f half_angle);
+    light_ref& visible_to_camera(bool visible = true);
+    light_ref& casts_shadows(bool casts);
 
 private:
-    [[nodiscard]] area_light& target() const;
+    [[nodiscard]] scene_light& target() const;
 
     frame* _frame = nullptr;
     view_index _view = view_index(0);
@@ -153,9 +173,32 @@ public:
     /// The same with all three lengths given — see `sv::arrow_style`.
     void add_arrow(tg::segment3f const& segment, arrow_style const& style, material_id material = material_id::invalid);
 
-    /// Adds an area light.
-    /// A scene with none is still lit: the trace falls back to one key light rather than rendering black.
-    light_ref add_light(area_light const& light);
+    /// Adds a light under `id`, which is what it is known by across frames.
+    ///
+    /// The id is hashed under the frame's id stack, exactly as a view's is, so a loop of lights is scoped the way a loop
+    /// of views is: `f.scoped_id(i)` around the body, or a `##i` suffix.
+    /// Two lights with one id in one scene layer assert, since they would share whatever the renderer keeps per light.
+    ///
+    /// A layer with no lights is still lit: it is traced under its `fallback_light`, a sun by default, which
+    /// `fallback_light(cc::nullopt)` turns off.
+    light_ref add_light(cc::string_view id, sv::light const& light);
+
+    /// Sugar over `add_light` with the matching `sv::light` factory; chain the setters on the result.
+    light_ref add_point_light(cc::string_view id, tg::pos3f position);
+    light_ref add_spot_light(cc::string_view id,
+                             tg::pos3f position,
+                             tg::vec3f direction,
+                             tg::angle_f outer_half_angle,
+                             tg::angle_f inner_half_angle = {});
+    light_ref add_rect_light(cc::string_view id, tg::pos3f center, tg::vec3f half_extent_u, tg::vec3f half_extent_v);
+    light_ref add_directional_light(cc::string_view id, tg::vec3f direction);
+    light_ref add_sun_light(cc::string_view id,
+                            tg::vec3f direction,
+                            tg::angle_f angular_diameter = tg::angle_f::make_from_degree(0.53f));
+
+    /// The light this layer is traced under when it has none of its own — `sv::default_fallback_light()` unless set.
+    /// `cc::nullopt` turns it off, and the layer is lit by its background alone.
+    void fallback_light(cc::optional<sv::light> const& light);
 
     /// The environment a missed ray sees.
     void background(sv::background const& bg);

@@ -100,6 +100,9 @@ Reader for both glTF 2.0 containers, the JSON `.gltf` and the binary `.glb`, ove
 See [gltf.hh](../src/babel-serializer/geometry/gltf.hh) for the structure and the data path.
 It established three of the rules in [coding-guidelines.md](coding-guidelines.md): bytes-instead-of-a-stream, one strong enum per index role, and the import-issue list.
 
+- `[done]` **`KHR_lights_punctual`**, the first extension the reader interprets: `data::lights`, and `node::light` naming one.
+  A file that requires it now loads; every other required extension still refuses the file, and every other used one is still an issue.
+  It set the pattern the `KHR_materials_*` set follows: the extension's data lands in the plain struct it belongs to, defaults filled in, nothing validated.
 - `[planned]` **skins / animations / cameras** — recorded today only as "skipped".
   Animations need channels + samplers + interpolation, which is a subsystem rather than a field.
 - `[planned]` **morph targets** — tolerated (ignored) today, so adding them breaks nothing.

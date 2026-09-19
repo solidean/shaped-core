@@ -43,30 +43,94 @@ bool pt_occluded(float3 origin, float3 dir, float dist)
     return sp.visible < 0.5;
 }
 
-/// Direct light from the rectangular area light, with the BSDF folded in and weighted against the BSDF sampler.
+/// Direct light from one of the trace's lights, with the BSDF folded in and weighted against the BSDF sampler.
 ///
-/// The second strategy is the raygen's continuation ray reaching the rect analytically, which is what makes this bounded on a
-/// near-smooth surface.
+/// One light is picked uniformly and its choice is part of the density (`pt_light_pdf`, `pt_disc_pdf`), which is what keeps
+/// one shadow ray per hit an unbiased estimate of every light at once.
+///
+/// A point or a parallel light is a delta: no sampled ray can ever reach it, so it takes no weighting at all and its estimate
+/// is divided by the probability of picking it alone.
+/// A rect and a disc are reachable by the raygen's continuation ray too, and weight against it.
+/// That second strategy is what makes this bounded on a near-smooth surface.
 /// Without it, light sampling alone has to carry the whole GGX peak: `bsdf_eval` at a uniformly picked point on the rect is
 /// ~1/(pi*alpha^2) where the half-vector lines up and near zero everywhere else, so a mirror lit by a small light produces a
 /// huge value at a tiny probability — one bright pixel per few thousand samples, which is what a firefly is.
-float3 pt_estimate_area_light(sv::bsdf bsdf, sv::frame frame, float3 wo_local, float3 p, float3 n_geom, inout uint rng)
+float3 pt_estimate_light(sv::bsdf bsdf,
+                         sv::frame frame,
+                         float3 wo_local,
+                         float3 p,
+                         float3 n_geom,
+                         bool last_bounce,
+                         inout uint rng)
 {
-    // uniform sample on the oriented rectangle: center +/- along each world half-edge vector
-    float s = pt_rand(rng) * 2.0 - 1.0;
-    float t = pt_rand(rng) * 2.0 - 1.0;
-    AreaLight light = pt_bindings::frame.light;
+    uint const count = pt_bindings::frame.light_count;
+    if (count == 0u)
+        return float3(0, 0, 0);
 
-    float3 lp = light.center + s * light.u + t * light.v;
+    // No draw when there is nothing to choose between, so a one-light scene keeps the sample sequence it always had.
+    uint const index = count == 1u ? 0u : min(uint(pt_rand(rng) * float(count)), count - 1u);
+    sv::light light = pt_bindings::Lights[index];
 
-    float3 to_light = lp - p;
-    float dist2 = dot(to_light, to_light);
-    float dist = sqrt(dist2);
-    float3 wi = to_light / dist;
+    // Filled per path: where the shadow ray goes and how far, what arrives along it before the BSDF — radiance, or
+    // irradiance for a delta light — and the density of having chosen that direction, the light's pick included.
+    float3 wi = float3(0, 0, 0);
+    float shadow_dist = 0.0;
+    float3 incoming = float3(0, 0, 0);
+    float pdf = 0.0;
+    bool delta = false;
 
-    float cos_light = dot(light.normal, -wi);
-    if (cos_light <= 0.0)
-        return float3(0, 0, 0); // the light's emitting face is turned away
+    if (light.path == sv::light_path_area)
+    {
+        // uniform sample on the oriented rectangle: center +/- along each world half-edge vector
+        float s = pt_rand(rng) * 2.0 - 1.0;
+        float t = pt_rand(rng) * 2.0 - 1.0;
+        float3 to_light = light.position + s * light.u + t * light.v - p;
+        float dist2 = dot(to_light, to_light);
+        float dist = sqrt(dist2);
+        wi = to_light / dist;
+
+        float cos_face = dot(light.normal, -wi);
+        float cos_light = (light.flags & sv::light_flag_two_sided) != 0u ? abs(cos_face) : cos_face;
+        if (cos_light <= 0.0)
+            return float3(0, 0, 0); // the light's emitting face is turned away
+
+        // Stop just short of the light surface, so the light's own geometry does not count as an occluder.
+        shadow_dist = dist - 2e-3;
+        incoming = light.emission * sv::light_cone(light, cos_light);
+
+        // Formed in pt_common.hlsli, because the raygen's half of this weighting has to arrive at the same number.
+        pdf = pt_light_pdf(light, dist2, cos_light);
+    }
+    else if (light.path == sv::light_path_point)
+    {
+        float3 to_light = light.position - p;
+        float dist2 = max(dot(to_light, to_light), 1e-12);
+        float dist = sqrt(dist2);
+        wi = to_light / dist;
+
+        shadow_dist = dist - 2e-3;
+        incoming = light.emission * (sv::light_cone(light, dot(light.normal, -wi)) / dist2);
+        pdf = pt_light_select_pdf();
+        delta = true;
+    }
+    else if (light.path == sv::light_path_distant_point)
+    {
+        wi = -light.normal;
+        shadow_dist = 1e20;
+        incoming = light.emission;
+        pdf = pt_light_select_pdf();
+        delta = true;
+    }
+    else // sv::light_path_distant_disc
+    {
+        wi = pt_sample_cone(-light.normal, light.one_minus_cos_angular_radius, pt_rand(rng), pt_rand(rng));
+        shadow_dist = 1e20;
+        incoming = light.emission;
+        pdf = pt_disc_pdf(light);
+    }
+
+    if (all(incoming <= float3(0, 0, 0)))
+        return float3(0, 0, 0);
 
     float3 wi_local = sv::to_local(frame, wi);
     if (wi_local.z <= 0.0)
@@ -76,24 +140,27 @@ float3 pt_estimate_area_light(sv::bsdf bsdf, sv::frame frame, float3 wo_local, f
     if (all(f <= float3(0, 0, 0)))
         return float3(0, 0, 0);
 
-    // Stop just short of the light surface, so the light's own geometry does not count as an occluder.
-    if (pt_occluded(p + n_geom * 1e-3, wi, dist - 2e-3))
+    if (sv::light_casts_shadows(light) && pt_occluded(p + n_geom * 1e-3, wi, shadow_dist))
         return float3(0, 0, 0);
 
-    // Formed in pt_common.hlsli, because the raygen's half of this weighting has to arrive at the same number.
-    float pdf = pt_light_pdf(dist2, cos_light);
+    // The other strategy for this direction is the BSDF sample the raygen may take, so balance the two — except for a
+    // delta light, which that sample can never reach, and on the last bounce, where the raygen takes none.
+    float w = delta || last_bounce ? 1.0 : pt_mis_weight(pdf, sv::bsdf_pdf(bsdf, wo_local, wi_local));
 
-    // The other strategy for this direction is the BSDF sample the raygen may take, so balance the two.
-    float w = pt_mis_weight(pdf, sv::bsdf_pdf(bsdf, wo_local, wi_local));
-
-    return light.emission * f * (wi_local.z / pdf) * w;
+    return incoming * f * (wi_local.z / pdf) * w;
 }
 
 /// Direct light from the SH environment, with the BSDF folded in and weighted against the BSDF sampler.
 ///
 /// One uniform-hemisphere sample: the probe has no sharp features, so a radiance-proportional sampler is not worth its cost,
 /// and the multiple-importance weight already cuts the variance a bright, non-uniform sky would add.
-float3 pt_estimate_environment(sv::bsdf bsdf, sv::frame frame, float3 wo_local, float3 p, float3 n_geom, inout uint rng)
+float3 pt_estimate_environment(sv::bsdf bsdf,
+                               sv::frame frame,
+                               float3 wo_local,
+                               float3 p,
+                               float3 n_geom,
+                               bool last_bounce,
+                               inout uint rng)
 {
     // cos(theta) = u1 uniform in [0, 1] gives a uniform solid-angle pick about the normal.
     float u1 = pt_rand(rng);
@@ -112,8 +179,8 @@ float3 pt_estimate_environment(sv::bsdf bsdf, sv::frame frame, float3 wo_local, 
         return float3(0, 0, 0);
 
     // The other strategy for this direction is the BSDF sample the raygen may take, so balance the two.
-    float w = pt_mis_weight(PT_ENV_PDF, sv::bsdf_pdf(bsdf, wo_local, wi_local));
-
+    // No bounce ray follows the last hit, so there is nothing to balance against there.
+    float w = last_bounce ? 1.0 : pt_mis_weight(PT_ENV_PDF, sv::bsdf_pdf(bsdf, wo_local, wi_local));
     return background_radiance(pt_bindings::background.sh, wi) * f * (wi_local.z / PT_ENV_PDF) * w;
 }
 
@@ -219,8 +286,9 @@ void pt_shade(inout PtPayload payload, sv::shading_context ctx, float3 N, float3
         return;
     }
 
-    payload.direct = pt_estimate_area_light(bsdf, frame, wo_local, p, N, rng)
-                   + pt_estimate_environment(bsdf, frame, wo_local, p, N, rng);
+    bool const last_bounce = payload.last_bounce != 0u;
+    payload.direct = pt_estimate_light(bsdf, frame, wo_local, p, N, last_bounce, rng)
+                   + pt_estimate_environment(bsdf, frame, wo_local, p, N, last_bounce, rng);
 
     // The continuation, importance-sampled from the closure the material just described.
     float3 u = float3(pt_rand(rng), pt_rand(rng), pt_rand(rng));

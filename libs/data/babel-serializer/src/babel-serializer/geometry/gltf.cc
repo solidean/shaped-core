@@ -23,6 +23,12 @@ constexpr u32 glb_magic = 0x46546C67;      // 'g','l','T','F' little-endian
 constexpr u32 glb_chunk_json = 0x4E4F534A; // 'J','S','O','N'
 constexpr u32 glb_chunk_bin = 0x004E4942;  // 'B','I','N',0
 
+/// Whether this reader interprets `name` — the one extension a file may require of it.
+[[nodiscard]] bool is_implemented_extension(cc::string_view name)
+{
+    return name == "KHR_lights_punctual";
+}
+
 // JSON member readers.
 // All of them are kind-tolerant by design: a required property is checked explicitly at its use site.
 // Everything else falls back rather than failing, which is what makes exporter junk harmless.
@@ -48,6 +54,13 @@ bool bool_member(json::ref obj, cc::string_view key, bool fallback = false)
 {
     auto const member = obj[key];
     return member.is_bool() ? member.as_bool() : fallback;
+}
+
+/// Whether an optional index read by `index_member` is neither absent (-1) nor one of `count` entries.
+/// `index_member` casts any number, so a negative index other than -1 reaches validation as itself and is rejected here.
+[[nodiscard]] bool is_outside(isize raw, isize count)
+{
+    return raw < -1 || raw >= count;
 }
 
 /// A glTF cross-reference: an integer member read as a typed index, `invalid` when absent or not a number.
@@ -431,15 +444,17 @@ public:
 
         collect_strings(root["extensionsUsed"], result.extensions_used);
         collect_strings(root["extensionsRequired"], result.extensions_required);
-        if (!result.extensions_required.empty())
-            return cc::error(cc::format("glTF parse error: the file requires extension '{}', which this reader does "
-                                        "not implement",
-                                        result.extensions_required[0]));
+        for (auto const& extension : result.extensions_required)
+            if (!is_implemented_extension(extension))
+                return cc::error(cc::format("glTF parse error: the file requires extension '{}', which this reader "
+                                            "does not implement",
+                                            extension));
 
-        // This reader interprets no extension at all, so every one the file uses is one we drop on the floor.
+        // Every extension but the implemented one is dropped on the floor, and each is on the record.
         for (auto const& extension : result.extensions_used)
-            add_issue(gltf::issue_kind::unsupported,
-                      cc::format("extension '{}' is used by the file but not interpreted", extension));
+            if (!is_implemented_extension(extension))
+                add_issue(gltf::issue_kind::unsupported,
+                          cc::format("extension '{}' is used by the file but not interpreted", extension));
 
         note_unmodelled_array(root, "skins", "skins");
         note_unmodelled_array(root, "animations", "animations");
@@ -449,6 +464,7 @@ public:
         CC_RETURN_IF_ERROR(parse_buffer_views(root));
         CC_RETURN_IF_ERROR(parse_accessors(root));
         CC_RETURN_IF_ERROR(parse_meshes(root));
+        parse_lights(root);
         parse_nodes(root);
         parse_scenes(root);
         parse_materials(root);
@@ -698,6 +714,45 @@ public:
         return cc::unit{};
     }
 
+    /// KHR_lights_punctual's lights, which live in the document's own `extensions` rather than in a top-level array.
+    ///
+    /// A light of an unknown type is kept as `light_type::unknown`, so the indices nodes name stay the file's own, and
+    /// is on the record; what to make of it is the caller's call.
+    void parse_lights(json::ref root)
+    {
+        auto const lights = root["extensions"]["KHR_lights_punctual"]["lights"];
+        if (!lights.is_array())
+            return;
+
+        for (auto i = isize(0); i < lights.size(); ++i)
+        {
+            auto const entry = lights[i];
+            auto l = gltf::light();
+
+            auto const type = entry["type"].as_string();
+            if (type == "directional")
+                l.type = gltf::light_type::directional;
+            else if (type == "point")
+                l.type = gltf::light_type::point;
+            else if (type == "spot")
+                l.type = gltf::light_type::spot;
+            else
+                add_issue(gltf::issue_kind::malformed, cc::format("light {}: unknown type '{}'", i, type));
+
+            l.color = vec3_member(entry, "color", tg::vec3f(1, 1, 1));
+            l.intensity = float_member(entry, "intensity", 1.0f);
+            if (entry["range"].is_number())
+                l.range = f32(entry["range"].as_double());
+
+            auto const spot = entry["spot"];
+            l.inner_cone_angle = float_member(spot, "innerConeAngle", 0.0f);
+            l.outer_cone_angle = float_member(spot, "outerConeAngle", 0.78539816f);
+
+            l.name = string_member(entry, "name");
+            result.lights.push_back(cc::move(l));
+        }
+    }
+
     void parse_nodes(json::ref root)
     {
         auto const nodes = root["nodes"];
@@ -717,6 +772,7 @@ public:
             nod.child_count = i32(result.node_children.size()) - nod.first_child;
 
             nod.mesh = index_member<gltf::mesh_index>(entry, "mesh");
+            nod.light = index_member<gltf::light_index>(entry["extensions"]["KHR_lights_punctual"], "light");
 
             // `matrix` and TRS are mutually exclusive in the spec; whichever the file used is what we keep.
             auto const matrix = entry["matrix"];
@@ -890,7 +946,7 @@ public:
         {
             auto const& acc = result.accessors[i];
             auto const raw = isize(int(acc.buffer_view));
-            if (raw >= view_count)
+            if (is_outside(raw, view_count))
                 return cc::error(cc::format(
                     "glTF parse error: accessor {} references bufferView {}, but the file has {}", i, raw, view_count));
             if (raw < 0)
@@ -918,11 +974,11 @@ public:
         for (auto i = isize(0); i < result.primitives.size(); ++i)
         {
             auto const& prim = result.primitives[i];
-            if (isize(int(prim.indices)) >= accessor_count)
+            if (is_outside(isize(int(prim.indices)), accessor_count))
                 return cc::error(cc::format("glTF parse error: primitive {} references index accessor {}, but the file "
                                             "has {}",
                                             i, isize(int(prim.indices)), accessor_count));
-            if (isize(int(prim.material)) >= material_count)
+            if (is_outside(isize(int(prim.material)), material_count))
                 return cc::error(cc::format("glTF parse error: primitive {} references material {}, but the file has "
                                             "{}",
                                             i, isize(int(prim.material)), material_count));
@@ -931,38 +987,41 @@ public:
         for (auto i = isize(0); i < node_count; ++i)
         {
             auto const& nod = result.nodes[i];
-            if (isize(int(nod.mesh)) >= mesh_count)
+            if (is_outside(isize(int(nod.mesh)), mesh_count))
                 return cc::error(cc::format("glTF parse error: node {} references mesh {}, but the file has {}", i,
                                             isize(int(nod.mesh)), mesh_count));
+            if (is_outside(isize(int(nod.light)), result.lights.size()))
+                return cc::error(cc::format("glTF parse error: node {} references light {}, but the file has {}", i,
+                                            isize(int(nod.light)), result.lights.size()));
         }
 
         for (auto const child : result.node_children)
-            if (isize(int(child)) >= node_count)
+            if (is_outside(isize(int(child)), node_count))
                 return cc::error(cc::format("glTF parse error: a node lists child {}, but the file has {} nodes",
                                             isize(int(child)), node_count));
 
         for (auto const root_node : result.scene_nodes)
-            if (isize(int(root_node)) >= node_count)
+            if (is_outside(isize(int(root_node)), node_count))
                 return cc::error(cc::format("glTF parse error: a scene lists node {}, but the file has {}",
                                             isize(int(root_node)), node_count));
 
-        if (isize(int(result.default_scene)) >= scene_count)
+        if (is_outside(isize(int(result.default_scene)), scene_count))
             return cc::error(cc::format("glTF parse error: `scene` is {}, but the file has {} scenes",
                                         isize(int(result.default_scene)), scene_count));
 
         for (auto i = isize(0); i < texture_count; ++i)
         {
             auto const& tex = result.textures[i];
-            if (isize(int(tex.source)) >= image_count)
+            if (is_outside(isize(int(tex.source)), image_count))
                 return cc::error(cc::format("glTF parse error: texture {} references image {}, but the file has {}", i,
                                             isize(int(tex.source)), image_count));
-            if (isize(int(tex.sampler)) >= sampler_count)
+            if (is_outside(isize(int(tex.sampler)), sampler_count))
                 return cc::error(cc::format("glTF parse error: texture {} references sampler {}, but the file has {}",
                                             i, isize(int(tex.sampler)), sampler_count));
         }
 
         for (auto i = isize(0); i < image_count; ++i)
-            if (isize(int(result.images[i].buffer_view)) >= view_count)
+            if (is_outside(isize(int(result.images[i].buffer_view)), view_count))
                 return cc::error(cc::format("glTF parse error: image {} references bufferView {}, but the file has {}",
                                             i, isize(int(result.images[i].buffer_view)), view_count));
 
@@ -973,8 +1032,8 @@ public:
     cc::result<cc::unit> validate_texture_refs()
     {
         auto const texture_count = result.textures.size();
-        auto const check
-            = [texture_count](gltf::texture_ref const& ref) -> bool { return isize(int(ref.texture)) < texture_count; };
+        auto const check = [texture_count](gltf::texture_ref const& ref) -> bool
+        { return !is_outside(isize(int(ref.texture)), texture_count); };
 
         for (auto i = isize(0); i < result.materials.size(); ++i)
         {

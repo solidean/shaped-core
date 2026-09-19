@@ -1,4 +1,5 @@
 #include <clean-core/common/assert.hh>
+#include <clean-core/common/utility.hh> // cc::min
 #include <shaped-graphics/backends/vulkan/vulkan_format.hh>
 
 namespace sg::backend::vulkan
@@ -196,5 +197,27 @@ VkBufferUsageFlags to_vk_buffer_usage(sg::buffer_usages usage)
     // Unconditional rather than usage-gated — a buffer's usages say how a shader reads it, not whether it may be bound
     // at all, and there is no cost to the bit on a buffer nothing binds.
     return flags | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+}
+
+isize region_row_bytes(sg::pixel_format format, sg::texture_region const& region)
+{
+    int const block_extent = sg::format_block_extent(format);
+    int const block_size = sg::format_block_size(format);
+    isize const blocks_x = (region.size[0] + block_extent - 1) / block_extent;
+    return blocks_x * isize(block_size);
+}
+
+isize region_block_rows(sg::pixel_format format, sg::texture_region const& region)
+{
+    int const block_extent = sg::format_block_extent(format);
+    return (region.size[1] + block_extent - 1) / block_extent;
+}
+
+isize copyable_block_rows(sg::pixel_format format, sg::texture_region const& region, isize first_row, isize row_count)
+{
+    isize const rows_per_slice = region_block_rows(format, region);
+    if ((rows_per_slice * region_row_bytes(format, region)) % 4 == 0)
+        return row_count;
+    return cc::min(row_count, rows_per_slice - first_row % rows_per_slice);
 }
 } // namespace sg::backend::vulkan

@@ -455,10 +455,10 @@ EXAMPLE("shaped-viewer/openpbr-spheres")
         float const light_u = grid_width * 0.5f + 2.0f;
         float const light_v = grid_depth * 0.5f + 2.0f;
 
-        scene.add_light({.center = tg::pos3f(0, 7.0f, grid_depth * 0.5f),
-                         .half_extent_u = tg::vec3f(light_u, 0, 0),
-                         .half_extent_v = tg::vec3f(0, 0, light_v),
-                         .emission = tg::vec3f(1, 1, 1) * (150.0f / (light_u * light_v))});
+        scene
+            .add_rect_light("key", tg::pos3f(0, 7.0f, grid_depth * 0.5f), tg::vec3f(light_u, 0, 0),
+                            tg::vec3f(0, 0, light_v))
+            .nits(150.0f / (light_u * light_v));
 
         scene.background(sv::background::studio().scaled(0.6f));
     }

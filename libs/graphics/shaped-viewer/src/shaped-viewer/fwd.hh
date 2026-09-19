@@ -39,7 +39,14 @@ enum class bindless_table : u8;
 struct bindless_table_budget;
 struct bindless_config;
 
-struct view_id;
+// stable identities across frames (stable_id.hh) — one template, one tag per kind
+template <class Tag>
+struct stable_id;
+struct view_id_tag;
+struct light_id_tag;
+using view_id = stable_id<view_id_tag>;
+using light_id = stable_id<light_id_tag>;
+
 struct camera;
 struct camera_basis;
 struct perspective_projection;
@@ -53,9 +60,23 @@ struct fps_camera_controller_config;
 class fps_camera_controller;
 struct pbr_material;
 struct pbr_material_gpu;
-struct area_light;
-struct area_light_gpu;
+// lights (scene/light.hh) — one record whatever the kind, tagged by the path the tracer takes
+enum class light_path : u8;
+enum class area_shape : u8;
+enum class light_unit : u8;
+enum class light_face : u8;
+enum class light_shaping_kind : u8;
+struct light_shaping;
+struct point_payload;
+struct area_payload;
+struct distant_point_payload;
+struct distant_disc_payload;
+struct light_emission;
+class light;
+struct scene_light;
+struct light_gpu;
 struct background;
+struct sky_and_sun; // a sky and the sun that lights it, as sv::daylight() hands them back (scene/background.hh)
 struct background_gpu;
 struct render_settings;
 struct scene_item;
@@ -98,6 +119,7 @@ struct tangent_frame_options;
 struct asset_loader_config;
 struct asset_material;
 struct asset_node;
+struct asset_light; // one light a file placed (asset/asset_data.hh)
 struct asset_data;
 class asset;
 class asset_loader;
@@ -208,6 +230,7 @@ class material_shader_cache;
 struct trace_desc;
 class pbr_raytrace_routine;
 struct pt_frame_constants_gpu;
+struct pt_light_table; // the lights one trace samples, grouped by path (rendering/pathtrace_routine.hh)
 struct pt_trace_desc;
 class pathtrace_routine;
 class view_renderer;

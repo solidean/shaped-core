@@ -64,10 +64,7 @@ ASYNC_INVOCABLE_TEST("sv - headless viewer runs a frame loop with no window", (s
 
         auto scene = view.add_scene();
         scene.add_mesh(mesh);
-        scene.add_light({.center = tg::pos3f(0, 1.9f, 0),
-                         .half_extent_u = tg::vec3f(0.4f, 0, 0),
-                         .half_extent_v = tg::vec3f(0, 0, 0.4f),
-                         .emission = tg::vec3f(12, 12, 12)});
+        scene.add_rect_light("key", tg::pos3f(0, 1.9f, 0), tg::vec3f(0.4f, 0, 0), tg::vec3f(0, 0, 0.4f)).nits(12);
 
         accumulated = view.accumulated_frames();
         pending_at_end = f.pending_resource_work();
@@ -157,10 +154,7 @@ ASYNC_INVOCABLE_TEST("sv - a capture writes a complete image and ends the loop",
 
         auto scene = view.add_scene();
         scene.add_mesh(mesh);
-        scene.add_light({.center = tg::pos3f(0, 1.9f, 0),
-                         .half_extent_u = tg::vec3f(0.4f, 0, 0),
-                         .half_extent_v = tg::vec3f(0, 0, 0.4f),
-                         .emission = tg::vec3f(12, 12, 12)});
+        scene.add_rect_light("key", tg::pos3f(0, 1.9f, 0), tg::vec3f(0.4f, 0, 0), tg::vec3f(0, 0, 0.4f)).nits(12);
 
         ++frames;
         // The capture ends the loop itself; this only stops a hang from becoming a test timeout.
@@ -337,4 +331,44 @@ ASYNC_INVOCABLE_TEST("sv - a capture that times out writes beside the requested 
         CHECK(decoded.value().height == 48);
     }
     cc::remove_file(partial);
+}
+
+// A light's id is hashed under the frame's id stack exactly as a view's is, so the same name under two scopes names
+// two lights — and the same name twice in one layer is the aliasing that stable identity exists to prevent.
+ASYNC_INVOCABLE_TEST("sv - light ids are scoped like view ids, and a duplicate in one layer asserts",
+                     (sg::context_handle const& ctx_h))
+{
+    auto& ctx = *ctx_h;
+
+    if (!sv_test::shared_env().has_compiler)
+        SKIP("no DXC compiler to build the viewer's shaders");
+
+    auto v_r = sv::viewer::try_create(ctx, "sv-test/light-ids", {.width = 32, .height = 32, .headless = true});
+    REQUIRE(v_r.has_value());
+    auto viewer = cc::move(v_r.value());
+
+    for (auto f : viewer.frames())
+    {
+        auto scene = f.window().view().add_scene();
+        auto const unscoped = scene.add_point_light("bulb", tg::pos3f(0, 2, 0)).id();
+
+        auto scoped = sv::light_id();
+        {
+            auto const scope = f.scoped_id(0);
+            scoped = scene.add_point_light("bulb", tg::pos3f(1, 2, 0)).id();
+        }
+
+        CHECK(unscoped == sv::light_id::from_string("bulb"));
+        CHECK(scoped != unscoped);
+
+        // Asserted before anything is appended, so the layer keeps the two lights it already had.
+        CHECK_ASSERTS(scene.add_point_light("bulb", tg::pos3f(0, 3, 0)));
+
+        // A second layer is a second namespace: the same id there is not a duplicate.
+        CHECK(f.window().view().add_scene().add_point_light("bulb", tg::pos3f(0, 2, 0)).id() == unscoped);
+
+        viewer.request_close();
+    }
+
+    co_await cc::async_settled(sv::background_work(ctx));
 }

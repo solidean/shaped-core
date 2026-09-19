@@ -150,10 +150,8 @@ image_stats trace_furnace(sg::context& ctx,
         auto fc = sv::pt_frame_constants_gpu{};
         fc.camera = sv::camera_gpu::from(cam);
 
-        // No area light at all: a zeroed rect has no normal to face, so the integrator's own intersection rejects it and
-        // the environment is the only source.
+        // No light at all: `light_count` stays 0 and no light buffer is bound, so the environment is the only source.
         // That is what makes "the image equals the environment" the whole statement rather than half of one.
-        fc.light = {};
 
         // Long enough that a path crossing the interface twice and bouncing internally still finishes.
         // Scattering events do not count against this — they have their own cap — so it bounds surface crossings alone.

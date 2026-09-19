@@ -4,9 +4,9 @@
 #include <clean-core/error/optional.hh>
 #include <shaped-graphics/resource/pixel_format.hh>
 #include <shaped-viewer/fwd.hh>
+#include <shaped-viewer/stable_id.hh>
 #include <shaped-viewer/view/camera.hh>
 #include <shaped-viewer/view/layer.hh>
-#include <shaped-viewer/view/view_id.hh>
 #include <typed-geometry/linalg/vec.hh>
 
 /// A resource a view keeps across frames, and the rule that invalidates it.

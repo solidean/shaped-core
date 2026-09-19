@@ -5,7 +5,7 @@
 #include <shaped-graphics/routine/render_routine.hh>
 #include <shaped-viewer/fwd.hh>
 #include <shaped-viewer/rendering/layout_routine.hh> // plan_textures
-#include <shaped-viewer/view/view_id.hh>
+#include <shaped-viewer/stable_id.hh>
 
 /// The textures a render plan resolved to, owned for the length of the frame that recorded it.
 ///

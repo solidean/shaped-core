@@ -10,6 +10,7 @@
 #include <shaped-graphics/backends/vulkan/vulkan_buffer.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_download_async.hh>
+#include <shaped-graphics/backends/vulkan/vulkan_format.hh> // region_row_bytes, copyable_block_rows
 #include <shaped-graphics/backends/vulkan/vulkan_texture.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_texture_copy_regions.hh>
 #include <shaped-graphics/resource/pixel_format.hh>
@@ -282,7 +283,9 @@ bool vulkan_download_async_system::run_one_window()
         auto chunk = cc::min(_window_bytes, job.size_in_bytes - done);
         if (job.is_texture && job.row_bytes > 0)
         {
-            chunk = (chunk / job.row_bytes) * job.row_bytes;
+            auto const rows = copyable_block_rows(job.texture_source->format(), job.region, done / job.row_bytes,
+                                                  chunk / job.row_bytes);
+            chunk = rows * job.row_bytes;
             CC_ASSERT(chunk > 0, "the async download window is smaller than one texture row");
         }
 
@@ -321,9 +324,9 @@ bool vulkan_download_async_system::run_one_window()
 
             if (job.is_texture)
             {
-                // No image barrier at all: the direct queue put the texture in the layout this copy needs before the
-                // transfer was enqueued, and the semaphore wait that orders this submit after that one also makes its
-                // writes visible here.
+                // No image barrier at all: the layout this copy needs was settled before the transfer was enqueued —
+                // by the direct queue, or for a fresh texture by an upload's own transition submit — and the semaphore
+                // waits that order this submit after those also make their writes visible here.
                 // That is the whole point of settling the layout up front — a transfer that claims no layout has none
                 // for the validation layer to disagree with, and it reads submit-call order rather than GPU order.
                 auto const range = sg::subresource_range(job.subresource);
@@ -343,7 +346,7 @@ bool vulkan_download_async_system::run_one_window()
                     job.region, texture->description().format, first_row, row_count, job.row_bytes,
                     VkDeviceSize(isize(slot) * _window_bytes), subresource, cc::span<VkBufferImageCopy>(copies));
 
-                // GENERAL rather than a transfer-optimal layout: it is what the direct queue put the image in,
+                // GENERAL rather than a transfer-optimal layout: it is what the layout was settled to before the enqueue,
                 // and one layout for both directions is what keeps a transfer of the other direction from
                 // moving it — see vulkan_context::async_ready_layout.
                 if (count > 0)
@@ -716,21 +719,10 @@ sg::stream_download_handle vulkan_download_async_system::stream_to_sink_buffer(s
 
 namespace
 {
-/// Bytes per row of `region`, the granularity a texture readback's chunks fall on.
-[[nodiscard]] isize region_row_bytes(sg::pixel_format format, sg::texture_region const& region)
-{
-    int const block_extent = sg::format_block_extent(format);
-    int const block_size = sg::format_block_size(format);
-    isize const blocks_x = (region.size[0] + block_extent - 1) / block_extent;
-    return blocks_x * isize(block_size);
-}
-
 /// The tightly-packed size of `region`, which is what a readback delivers.
 [[nodiscard]] isize region_size_bytes(sg::pixel_format format, sg::texture_region const& region)
 {
-    int const block_extent = sg::format_block_extent(format);
-    isize const blocks_y = (region.size[1] + block_extent - 1) / block_extent;
-    return region_row_bytes(format, region) * blocks_y * isize(region.size[2]);
+    return region_row_bytes(format, region) * region_block_rows(format, region) * isize(region.size[2]);
 }
 
 void validate_texture_source(std::shared_ptr<vulkan_texture const> const& src)

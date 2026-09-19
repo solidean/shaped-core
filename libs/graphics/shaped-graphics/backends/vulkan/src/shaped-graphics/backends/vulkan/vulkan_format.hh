@@ -1,9 +1,11 @@
 #pragma once
 
+#include <clean-core/container/vector.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_common.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/resource/pixel_format.hh>
 #include <shaped-graphics/resource/texture_descriptions.hh>
+#include <shaped-graphics/resource/texture_region.hh>
 #include <shaped-graphics/types.hh>
 
 /// sg vocabulary translated into Vulkan enums and flag bits.
@@ -26,4 +28,21 @@ namespace sg::backend::vulkan
 /// The VkBufferUsageFlags an sg buffer usage set implies.
 /// Falls back to TRANSFER_DST_BIT for an empty set, so a usage-less buffer is still legal.
 [[nodiscard]] VkBufferUsageFlags to_vk_buffer_usage(sg::buffer_usages usage);
+
+/// Tightly-packed bytes per row of `region` — a row of BLOCKS, so one BC row covers four texel rows.
+/// This is the granularity a streamed texture's chunks and a transfer window are both clamped to.
+[[nodiscard]] isize region_row_bytes(sg::pixel_format format, sg::texture_region const& region);
+
+/// How many block rows one depth slice of `region` holds.
+[[nodiscard]] isize region_block_rows(sg::pixel_format format, sg::texture_region const& region);
+
+/// How many of `row_count` block rows from `first_row` one window may copy.
+///
+/// All of them, unless a depth slice of `region` is not a multiple of 4 bytes: then the band stops at its slice's end.
+/// A copy after the first in a band starts on a slice boundary, and a queue family without graphics or compute needs a
+/// copy's buffer offset 4-aligned (VUID-vkCmdCopyBufferToImage-commandBuffer-07737 and its image-to-buffer twin).
+[[nodiscard]] isize copyable_block_rows(sg::pixel_format format,
+                                        sg::texture_region const& region,
+                                        isize first_row,
+                                        isize row_count);
 } // namespace sg::backend::vulkan

@@ -2,6 +2,7 @@
 #include <clean-core/common/asserts.hh>
 #include <clean-core/common/hash.hh>
 #include <clean-core/common/profiling.hh>
+#include <clean-core/container/fixed_array.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_coroutine.hh> // cc::async_start
@@ -312,8 +313,8 @@ pathtrace_routine::pipeline_variant const* pathtrace_routine::_variant_for(sg::c
 
     auto const pipeline_layout = ctx.cached.acquire_pipeline_layout({.groups = cc::move(groups_for_layout)});
 
-    // Payload is PtPayload from pt_common.hlsli: rng, the medium (extinction, albedo, g), the wavelength channel, five
-    // float3 results, and bsdf_pdf + hit_t = 26 lanes.
+    // Payload is PtPayload from pt_common.hlsli: rng, the medium (extinction, albedo, g), the wavelength channel, the
+    // last-bounce flag, five float3 results, and bsdf_pdf + hit_t = 27 lanes.
     //
     // Depth 2 rather than 1, because the shading moved into the closest-hit: the raygen's trace is the first level and the
     // shadow rays that hit shader casts for next-event estimation are the second.
@@ -334,7 +335,9 @@ pathtrace_routine::pipeline_variant const* pathtrace_routine::_variant_for(sg::c
     auto rpd = sg::raytracing_pipeline_description{
         .layout = pipeline_layout,
         .max_recursion_depth = 2,
-        .max_payload_size = isize(sizeof(u32) * 26),
+        // PtPayload's 27 four-byte fields (shaders/pt_common.hlsli); a field added there has to be counted here, or
+        // the state object is refused and every trace declines.
+        .max_payload_size = isize(sizeof(u32) * 27),
         .max_attribute_size = has_intersection ? isize(sizeof(float) * 3) : isize(sizeof(float) * 2)};
     auto const raygen_h = rpd.add_raygen_shader(*compiled_rg);
     auto const miss_h = rpd.add_miss_shader(*compiled_ms);
@@ -399,6 +402,36 @@ void pathtrace_routine::_finish_variant(sg::context& ctx, pipeline_variant& vari
     variant.pending_hits = {};
 }
 
+pt_light_table pt_light_table::grouped(cc::span<light_gpu const> lights)
+{
+    auto out = pt_light_table{};
+    for (auto const& l : lights)
+    {
+        CC_ASSERT(l.path < 4, "a light_gpu names a path the frame block has no slot for");
+        ++out.path_count[l.path];
+    }
+
+    for (auto i = 1; i < 4; ++i)
+        out.path_offset[i] = out.path_offset[i - 1] + out.path_count[i - 1];
+
+    // A counting sort: each light lands at its path's next free slot, so each run keeps the order it was given in.
+    out.records = cc::vector<light_gpu>::create_defaulted(lights.size());
+    auto next = cc::fixed_array<u32, 4>{out.path_offset[0], out.path_offset[1], out.path_offset[2], out.path_offset[3]};
+    for (auto const& l : lights)
+        out.records[next[l.path]++] = l;
+    return out;
+}
+
+void pt_light_table::describe_in(pt_frame_constants_gpu& fc) const
+{
+    fc.light_count = u32(records.size());
+    for (auto i = 0; i < 4; ++i)
+    {
+        fc.path_offset[i] = path_offset[i];
+        fc.path_count[i] = path_count[i];
+    }
+}
+
 sg::routine_outcome pathtrace_routine::execute(sg::command_list& cmd, pt_trace_desc const& d)
 {
     CC_RECORD_SCOPE("sv.pathtrace");
@@ -425,12 +458,22 @@ sg::routine_outcome pathtrace_routine::execute(sg::command_list& cmd, pt_trace_d
     // Refit isn't implemented, so the TLAS is rebuilt each frame from this frame's instances.
     auto const tlas = cmd.raytracing.build_tlas(d.instances);
 
+    // A binding cannot be empty, so a trace with no lights binds one zeroed record that `light_count == 0` never reads.
+    auto lights = d.lights;
+    if (lights.raw() == nullptr)
+    {
+        lights
+            = ctx.transient.create_buffer<light_gpu>(1, sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);
+        cmd.upload.pod_to_buffer(lights, light_gpu{});
+    }
+
     auto const group = ctx.transient.create_binding_group(
         variant->group_layout, {{.name = "scene", .view = tlas->as_view()},
                                 {.name = "Output", .view = d.output.as_readwrite_view()},
                                 {.name = "frame", .view = d.frame.as_uniform_buffer()},
                                 {.name = "background", .view = d.background.as_uniform_buffer()},
-                                {.name = "Instances", .view = d.instance_table.as_readonly_buffer()}});
+                                {.name = "Instances", .view = d.instance_table.as_readonly_buffer()},
+                                {.name = "Lights", .view = lights.as_readonly_buffer()}});
 
     cmd.raytracing.bind_pipeline(*variant->pipeline);
     cmd.raytracing.bind_group(0, *group);

@@ -27,7 +27,7 @@ sv::viewer_definition            // { vector<view_data> views; layout_tree nodes
 sv::view_data                    // { view_id id; vec2i resolution; bool resolution_follows_layout; camera; vector<layer> layers; refresh_policy refresh; vector<temporal_input>; }
                                  //   the definition of ONE TEXTURE. Deliberately no position: the leaf referencing it decides where it goes,
                                  //   which is what makes "relayout must not restart a converged image" a property of the type
-sv::layer                        // { layer_kind kind; layer_blend blend; float opacity; layout_node_id root_node; vector<scene_item> items; vector<area_light>; background; render_settings; }
+sv::layer                        // { layer_kind kind; layer_blend blend; float opacity; layout_node_id root_node; vector<scene_item> items; vector<scene_light> lights; optional<light> fallback_light; background; render_settings; }
 sv::layer_kind                   // layout | scene_3d | scene_2d | ui — composited in order, each over the ones before it
                                  //   a `layout` layer renders a whole tree INTO this view's texture; that is the recursion in the model
                                  //   scene_2d draws nothing (shaped-core has no 2D renderer); ui is not wired yet
@@ -54,15 +54,28 @@ sv::scene_item                   // { scene_item_kind kind; mesh_id mesh; instan
                                  //   mint one with resources.acquire_scene_item(mesh); the three ids have to come from ONE material resolution
                                  //   build the placement with tg's factories (make_rotation(quat), make_translation(vec), make_from_linear_mat(mat3)) and tg::compose
                                  //   default-constructs to the identity; the renderer packs its linear part + translation into the TLAS's row-major 3x4
-sv::area_light                   // { pos3f center; vec3f half_extent_u, half_extent_v; vec3f emission; } — a world-space rect emitting along cross(half_extent_u, half_extent_v); one typed list per light kind on the view
-                                 //   emission has no default (it is -1): set it, or the first use warns to stderr
-sv::area_light_gpu::from(light)  // -> area_light_gpu { vec3f center, u, v, emission, normal; } — the rect in GPU lane layout (u/v are the half-extents, normal = cross(u, v))
+sv::light                        // ONE record for every kind of light, tagged by the path the tracer takes (docs/lights.md); factories are the only way to build one
+sv::light::point(p) / ::spot(p, dir, outer, inner = 0) / ::rect(center, half_u, half_v) / ::rect(similarity, half_extents) / ::directional(dir) / ::sun(dir, diameter = 0.53 deg)
+                                 //   each picks its path and natural unit: candela for point/spot, nits for rect, lux for directional/sun; sun(dir, 0) IS directional
+                                 //   rect(center, u, v) emits along cross(u, v), and u, v must be perpendicular — the placement cannot shear
+l.candela(v) / .lux(v) / .nits(v) / .lumens(v)   // -> light& — value and unit together; a unit the path cannot mean ASSERTS, and leaves l unchanged
+l.color(c) / .exposure(stops) / .face(light_face) / .cone(inner, outer) / .spread(half_angle)   // face: area only; cone: never on a distant light; spread: area only
+l.visible_to_camera(bool = true) / .casts_shadows(bool)   // seen by the camera: off by default, rect or sun only; shadows: on by default
+l.path() -> light_path           // point | area | distant_point | distant_disc — the integrator's branches, not a list of shapes
+l.placement                      // tg::similarity_transform3f; a light points along its -Z (a spot's axis, a rect's front, a sun's travel)
+l.emission                       // light_emission { color, intensity, unit, exposure, face, visible_to_camera, casts_shadows } — a plain aggregate, so designated initializers work
+sv::light_problem(l)             // -> string_view, empty when valid; what the setters, add_light and light_gpu::from assert on — so a direct field write is caught before the GPU
+sv::light_unit                   // candela | lux | nit | lumen; ONE NIT IS ONE UNIT OF TRACER RADIANCE, the same as OpenPBR emission_luminance
+sv::scene_light                  // { light_id id; light light; } — one light as a layer holds it
+sv::light_gpu::from(light)       // -> light_gpu, 96 bytes, tagged by path; emission is point intensity / rect radiance / parallel irradiance / sun radiance; the cone is glTF's scale + offset
 sv::background                   // { vec3f sh[16]; } — order-3 RGB SH environment a missed ray sees (the flat and pt misses both reconstruct radiance from it)
 sv::background::uniform(radiance)              // -> background — the same radiance in every direction (band 0 alone)
 sv::background::gradient(zenith, nadir)        // -> background — vertical (+y) gradient, exact: zenith straight up, nadir straight down, their average on the horizon
-sv::background::sun(direction, radiance)       // -> background — soft lobe peaking at exactly `radiance` along `direction` (normalized for you); truncated clamped cosine, so it leaves a floor (3/34 of the peak across, 1/17 behind) and dips slightly negative in the ring between
-sv::background::daylight() / ::studio()        // -> background — presets: blue sky + warm ground + soft sun / neutral gray brighter overhead
-bg.combined_with(other) / bg.scaled(factor)    // -> background — SH is linear, so environments superpose and scale; how gradient + sun compose into a preset
+sv::background::lobe(direction, radiance)      // -> background — soft lobe peaking at exactly `radiance` along `direction` (normalized for you); a fill, NEVER a sun: no shadow, a smeared reflection
+                                               //   truncated clamped cosine, so it leaves a floor (3/34 of the peak across, 1/17 behind) and dips slightly negative in the ring between
+sv::background::studio()                       // -> background — neutral gray brighter overhead
+sv::daylight()                                 // -> sky_and_sun { background sky; light sun; } — the sky holds NO sun; set both: background(d.sky) + add_light("sun", d.sun)
+bg.combined_with(other) / bg.scaled(factor)    // -> background — SH is linear, so environments superpose and scale; how a gradient and a lobe compose
 sv::background_gpu::from(bg)     // -> background_gpu { vec4f sh[16]; } — GPU lane layout (each coeff widened to a vec4); the miss's Background cbuffer at b1
 sv::pbr_material                 // { vec3f base_color, emissive; float metallic, roughness; } — pbr_raytrace_routine's vocabulary, flat per-triangle
                                  //   the path tracer shades through sv::material instead; the same four fields are attributes of the builtin `pbr` type
@@ -528,12 +541,12 @@ sv::tangent_frame_options        // { bool prefer_file = true; frame_generation 
 sv::frame_generation             // none (let the geometric fallback answer) | smooth | crease  — only `none` is implemented
 
 sv::asset_data                   // { string name; vector<mesh> meshes; vector<asset_material> materials;
-                                 //   vector<asset_node> nodes; vector<string> issues; }
+                                 //   vector<asset_node> nodes; vector<asset_light> lights; vector<string> issues; }
 a.find_mesh(name) / a.meshes_with_material(name) / a.material(name)   // -> mesh const* / vector<mesh const*> / material_id
 a.override_material(name, id)    // -> isize, how many meshes moved; rewrites the SLOT's meshes
 a.bounds()                       // -> optional<aabb3f> in world space — what a camera frames
 sv::asset_material               // { string name; material_id material; vector<i32> meshes; } — name is the FILE's, meshes are the slot's
-sv::asset_node                   // { string name; i32 parent; affine_transform3f transform; i32 first_mesh, mesh_count; }
+sv::asset_node                   // { string name; i32 parent; affine_transform3f transform; i32 first_mesh, mesh_count; i32 first_light, light_count; }
 
 // the resolver seam — nothing in the importer opens a file
 sv::uri_resolver                 // function_ref<result<pinned_data<byte const>>(string_view)> — the borrowed, per-call form
@@ -558,6 +571,11 @@ Gotchas:
 - **`import_materials = false` imports no textures either**: a map with no material to bind into is noise, and the fallback `pbr` material declares different attribute names.
 - **A successful load with a non-empty `issues` is the normal case.** Check it before concluding you got everything the file described.
 - **glTF today maps the core metallic-roughness set plus emission.** babel does not interpret the `KHR_materials_*` extensions yet, so transmission, ior, clearcoat and sheen do not cross.
+- **glTF lights cross as `asset_data::lights`** — `{ id, light, optional range }`, world-placed like the meshes: `for (auto const& l : a.lights) scene.add_light(l.id, l.light);`
+  `id` is the file's name, `name##i` when shared, or `light##i` when empty (bumped past any name already taken); `range` is kept but not honoured, and says so in `issues`.
+  Ids are unique within one asset only: placing it twice in a layer asserts on the duplicate unless each placement sits under its own `f.scoped_id(...)`.
+  Unflattened, a light sits at its node's local transform and `asset_node::first_light` / `light_count` say which node placed it.
+  A file of nothing but lights imports fine: an asset is empty only with neither meshes nor lights.
 - **EVERY glTF mesh crosses, and `scene` / `default_scene` are ignored.**
   Which arrangement a file called default is a decision about what the caller wanted, and honouring it would drop meshes `find_mesh` is then asked for and cannot answer.
   A mesh no node places is imported at the origin, with an issue; the node tree is still recorded on `asset_data::nodes`.
@@ -723,8 +741,11 @@ sv::pathtrace_routine::is_ready(cmd)                 // -> whether the LAST exec
 sv::pt_trace_desc                                    // the trace's targets and constants, plus:
                                                      //   instance_table — one sv::instance_gpu per TLAS instance, in that order
                                                      //   hit_groups     — the permutations, in hit-group index order; tlas_instance::hit_group_offset indexes it
+                                                     //   lights         — every light, grouped by path (pt_light_table::records); NULL means none, and light_count must be 0
                                                      //   bindless       — &resources.freeze()'s value, bound as the pipeline's second group
-sv::pt_frame_constants_gpu                           // { camera_gpu camera; area_light_gpu light; i32 samples_per_pixel, max_bounces; u32 seed, accum_frame; } — 256 bytes
+sv::pt_frame_constants_gpu                           // { camera_gpu camera; i32 samples_per_pixel, max_bounces; u32 seed, accum_frame; u32 light_count; u32 path_offset[4], path_count[4]; } — 256 bytes
+sv::pt_light_table::grouped(span<light_gpu>)         // -> { records grouped by path, path_offset[4], path_count[4] } — a counting sort; each run keeps the given order
+table.describe_in(fc)                                // writes light_count + the per-path table into the frame block, so the two cannot disagree
 
 // Also present, driven directly (not by the view_renderer): the flat single-bounce IBL trace.
 sv::pbr_raytrace_routine::execute(cmd, trace_desc)   // builds the frame TLAS + one image-based-lit sample per pixel (SH diffuse irradiance + Fresnel env reflection) into the UAV target (no-op if the shaders did not compile)
@@ -732,12 +753,14 @@ sv::pbr_raytrace_routine::execute(cmd, trace_desc)   // builds the frame TLAS + 
 sv::shader_package()                                 // register once on an slib::shader_library before rendering
 ```
 
-[`pathtrace_routine.hh`](src/shaped-viewer/rendering/pathtrace_routine.hh) describes the integrator: next-event estimation toward both the area light and the SH environment.
+[`pathtrace_routine.hh`](src/shaped-viewer/rendering/pathtrace_routine.hh) describes the integrator: next-event estimation toward one light, picked uniformly, and the SH environment.
 Each is balance-heuristic weighted against the BSDF-sampled bounce ray, so a near-smooth surface under a small light converges instead of sparkling.
 That is why it converges at far fewer `samples_per_pixel` than a naive path tracer.
 What a caller supplies is a view.
-The `view_renderer` builds `pt_frame_constants_gpu` from the view's first `area_light` plus `render_settings::samples_per_pixel` / `max_bounces`.
-A view with an empty `area_lights` list falls back to an overhead rect facing down, so the scene is lit even without matching emissive geometry.
+The `view_renderer` groups the layer's lights into a `pt_light_table`, uploads it as `Lights`, and writes its table into `pt_frame_constants_gpu`.
+Every path is traced; a point or a parallel light is a delta and has next-event estimation alone (docs/lights.md).
+The pick probability `1/N` is inside the light's density, so the next-event sample and the bounce ray reaching a light stay balanced whatever N is.
+A layer with no lights falls back to `layer::fallback_light` — `sv::default_fallback_light()`, a sun — which `scene.fallback_light(cc::nullopt)` turns off.
 That is unlike a Cornell box, whose light rect must match the emitter.
 The view's `background` (RGB SH) is packed to `background_gpu` and bound at b1.
 The flat and path-tracer misses both reconstruct from it the environment radiance an escaped ray sees; the shadow miss carries visibility only.
@@ -860,9 +883,11 @@ layout.style(box_style)
 leaf.add_view("id") -> view_ref;  leaf.post_process(p);  leaf.fit(m);  leaf.sampler(m);  leaf.allow_zoom(b)
 scene.add_mesh(sv::mesh)    -> mesh_ref                   // geometry, attributes and textures upload here, keyed by the mesh's own hashes
 scene.add_mesh(sv::resident_mesh)         -> mesh_ref                   // already resources: nothing to look up
-scene.add_light(area_light)      -> light_ref                  // both hand back a typed handle rather than chaining
+scene.add_light("id", sv::light) -> light_ref               // the id is hashed under the id stack, like a view's; one id twice in a layer ASSERTS
+scene.add_point_light / add_spot_light / add_rect_light / add_directional_light / add_sun_light("id", ...) -> light_ref
+scene.fallback_light(optional<light>)                        // traced when the layer has none; a sun by default, nullopt for none
 scene.background(bg) / .settings(render_settings)
-mesh_ref.transform(t);  light_ref.light(l)
+mesh_ref.transform(t);  light_ref.light(l);  light_ref.id();  light_ref.candela(800).color(c)   // light_ref takes light's setters
 ```
 
 Every id — `add_view`, `window`, `push_id`, `scoped_id`, `display_name` — is formattable (`add_view("angle##{}", i)`) and understands ImGui's `##`:
@@ -893,7 +918,7 @@ for (auto f : sv::interactive("main"))
     auto rows = f.window().view().layout_rows({.padding = 8, .spacing = 6});
 
     auto s = rows.add_view("left").add_scene();
-    s.add_light({.center = {0, 3, 0}, .half_extent_u = {0.75f, 0, 0}, .half_extent_v = {0, 0, 0.75f}, .emission = {12, 12, 12}});
+    s.add_rect_light("key", {0, 3, 0}, {0.75f, 0, 0}, {0, 0, 0.75f}).nits(12);
     s.add_mesh(mesh);   // the upload happens here, and only when a hash changed
 
     // a view whose layer is another layout — its own texture, subdivided again

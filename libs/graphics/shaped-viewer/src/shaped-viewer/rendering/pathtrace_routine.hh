@@ -3,6 +3,7 @@
 #include <clean-core/bytes/hash128.hh>
 #include <clean-core/container/map.hh>
 #include <clean-core/container/span.hh>
+#include <clean-core/container/vector.hh>
 #include <clean-core/thread/async.hh> // sg::async_compiled_shader is a cc::shared_async
 #include <shaped-graphics/binding/compiled_shader.hh>
 #include <shaped-graphics/fwd.hh>
@@ -13,21 +14,20 @@
 #include <shaped-viewer/fwd.hh>
 #include <shaped-viewer/resources/instance_data.hh>
 #include <shaped-viewer/scene/background.hh>
-#include <shaped-viewer/scene/light.hh> // area_light_gpu
+#include <shaped-viewer/scene/light.hh> // light_gpu
 #include <shaped-viewer/view/camera.hh> // camera_gpu
 #include <typed-geometry/linalg/pos.hh>
 
-/// The per-view constant block the path tracer reads at b0 (the FrameConstants cbuffer in shaders/pt_common.hlsli).
-/// Mirrors that cbuffer lane-for-lane — keep them in lockstep.
+/// The per-view constant block the path tracer reads at b0 (the FrameConstants struct in shaders/pt_common.hlsli).
+/// Mirrors it lane-for-lane — keep them in lockstep.
 ///
-/// Beyond the camera it carries the single rectangular area light the integrator samples for direct lighting, plus the two path-tracer controls (samples-per-pixel and bounce depth).
-/// Laid out as 16-byte lanes to match HLSL cbuffer packing: each `vec3` pairs with the scalar after it to fill one lane.
-///
-/// The view_renderer fills the light with `area_light_gpu::from(view's area_light)`.
+/// The camera, the sample controls, and the table that indexes `pt_trace_desc::lights`: how many there are, and where each
+/// path's run starts in a buffer grouped by path.
+/// `pt_light_table::describe_in` is what fills that table, so it cannot disagree with the buffer it describes.
+/// Laid out as 16-byte lanes to match HLSL cbuffer packing, which is why the table is two `uint4`s rather than arrays.
 struct sv::pt_frame_constants_gpu
 {
     camera_gpu camera;
-    area_light_gpu light;
 
     i32 samples_per_pixel = 16; // primary rays integrated per pixel, accumulated in the one dispatch
     i32 max_bounces = 5;        // path length: primary hit + this many diffuse bounces
@@ -41,22 +41,52 @@ struct sv::pt_frame_constants_gpu
     /// what this frame renders — the scene, the camera or the shaders having moved.
     u32 accum_frame = 0;
 
+    /// How many lights `pt_trace_desc::lights` holds; 0 lights the scene by the environment alone.
+    u32 light_count = 0;
+    u32 _pad0[3] = {};
+
+    /// Where each `light_path`'s run starts in the grouped buffer, and how long it is, indexed by the path.
+    u32 path_offset[4] = {};
+    u32 path_count[4] = {};
+
     // Pad the block to a full 256-byte CBV range (see frame_constants.hh).
-    f32 _reserved[24] = {};
+    f32 _reserved[32] = {};
 };
 
 namespace sv
 {
 
 static_assert(sizeof(pt_frame_constants_gpu) == 256, "pt_frame_constants_gpu must be a full 256-byte CBV block");
+static_assert(u32(light_path::distant_disc) == 3, "the frame block's path table has one slot per light_path");
 
 } // namespace sv
 
+/// The lights one trace samples, grouped by path — what `pt_trace_desc::lights` holds and the frame block's table indexes.
+///
+/// Grouping is what lets a loop over every light of one path run in one branch, which is where the tracer visits lights
+/// wholesale: a bounce ray tests every area light it could have reached.
+/// It is a counting sort over the lights the flatten walks anyway, so it costs nothing a frame did not already spend.
+///
+/// The buffer's order is this table's, never the caller's: a `light_ref` indexes the layer's list, and nothing may
+/// carry an index across from one to the other.
+struct sv::pt_light_table
+{
+    /// grouped by path in `light_path` order, each run keeping the order the lights were given in
+    cc::vector<light_gpu> records;
+    u32 path_offset[4] = {};
+    u32 path_count[4] = {};
+
+    [[nodiscard]] static pt_light_table grouped(cc::span<light_gpu const> lights);
+
+    /// Writes the count and the per-path table into `fc`.
+    void describe_in(pt_frame_constants_gpu& fc) const;
+};
+
 /// Everything one view's path trace binds.
-/// Mirrors trace_desc, but the frame block is a pt_frame_constants_gpu — it carries the area light and the sample controls the integrator needs.
+/// Mirrors trace_desc, but the frame block is a pt_frame_constants_gpu — it carries the sample controls and the light table the integrator needs.
 struct sv::pt_trace_desc
 {
-    sg::buffer<pt_frame_constants_gpu> frame;    // the FrameConstants cbuffer (camera + light + sample controls)
+    sg::buffer<pt_frame_constants_gpu> frame;    // the FrameConstants cbuffer (camera + sample controls + light table)
     sg::buffer<background_gpu> background;       // the Background cbuffer (SH environment probe) the miss reads
     cc::span<sg::tlas_instance const> instances; // one per scene item; the TLAS is (re)built from these
 
@@ -70,6 +100,12 @@ struct sv::pt_trace_desc
     /// One `sv::instance_gpu` per entry of `instances`, in that same order — the closest-hit's `Instances`, read by `InstanceID()`.
     /// Everything a hit needs is reached from here, which is what lets one view hold any number of meshes and materials.
     sg::buffer<instance_gpu> instance_table;
+
+    /// Every light the trace samples, grouped by path as `pt_light_table` groups them — the shaders' `Lights`.
+    ///
+    /// Null means no lights at all, and then the frame block's `light_count` must be 0.
+    /// The routine binds a zeroed stand-in for it, since a binding cannot be empty.
+    sg::buffer<light_gpu> lights;
 
     /// The permutations this trace's instances shade with, one hit group each, in hit-group index order.
     ///
@@ -110,11 +146,13 @@ struct sv::pt_trace_desc
 /// Pipelines are cached on that set, so a scene whose materials are stable builds one and rebinds it every frame.
 ///
 /// The bindings come in two groups, and that split is the reflection's rather than a convenience:
-/// group 0 is the trace's own (the TLAS, the targets, the constants, the instance table), group 1 is the manager's bindless tables, which sv owns as a schema and no shader gets to redeclare.
+/// group 0 is the trace's own (the TLAS, the targets, the constants, the instance table, the lights).
+/// Group 1 is the manager's bindless tables, which sv owns as a schema and no shader gets to redeclare.
 /// Where the tracer shades a surface is the generated hit group; how it integrates is `shaders/pathtrace.hlsl`, which is shared.
-/// The raygen bounces each ray diffusely and estimates direct light at every hit by next-event estimation toward two sources: the rectangular area light and the SH environment.
+/// The raygen bounces each ray diffusely and estimates direct light at every hit by next-event estimation toward two sources: one light, picked uniformly from the trace's, and the SH environment.
 /// **Both are gathered by balance-heuristic multiple importance sampling** against the BSDF-sampled bounce ray.
-/// The environment pairs with that ray escaping, the light with it crossing the rect, which is analytic and so is intersected rather than traced.
+/// The environment pairs with that ray escaping, a light with it crossing that light, which is analytic and so is intersected rather than traced.
+/// Lights are analytic and occlude nothing, so the bounce ray counts every light it crosses before the surface, each against its own density.
 /// The light half is what keeps a near-smooth surface usable.
 /// Light sampling alone has to carry the whole GGX peak there — a huge value at a tiny probability, which is a firefly per few thousand samples rather than a converging estimate.
 /// `samples_per_pixel` paths per pixel accumulate in one dispatch.

@@ -11,7 +11,7 @@
 #include <shaped-viewer/fwd.hh>
 #include <shaped-viewer/impl/view_state.hh>
 #include <shaped-viewer/resources/gpu_resource_manager.hh>
-#include <shaped-viewer/view/view_id.hh>
+#include <shaped-viewer/stable_id.hh>
 
 /// How a viewer is created.
 /// All defaults are sensible for a windowed, path-traced viewer.

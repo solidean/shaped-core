@@ -6,6 +6,7 @@
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
 #include <shaped-viewer/fwd.hh>
+#include <shaped-viewer/scene/light.hh>
 #include <shaped-viewer/scene/mesh.hh>
 #include <typed-geometry/geometry/primitives/aabb.hh>
 #include <typed-geometry/transform/transform.hh>
@@ -36,7 +37,7 @@ struct sv::asset_material
 /// The importer flattens by default, so this is a record rather than something the meshes depend on.
 /// `parent` is -1 for a root, and a parent always precedes its children, so one forward pass can accumulate transforms.
 /// `transform` is the node's LOCAL transform whatever `flatten_hierarchy` said; what flattening changes is the transform
-/// on the MESHES, not the one here.
+/// on the MESHES and LIGHTS, not the one here.
 struct sv::asset_node
 {
     cc::string name;
@@ -48,6 +49,29 @@ struct sv::asset_node
     /// the meshes this node placed, as a run in `asset_data::meshes`
     i32 first_mesh = 0;
     i32 mesh_count = 0;
+
+    /// the lights this node placed, as a run in `asset_data::lights`
+    i32 first_light = 0;
+    i32 light_count = 0;
+};
+
+/// One light a file placed — what `scene.add_light(l.id, l.light)` takes.
+///
+/// Placed like the meshes are: world-placed by default, at its node's local transform when the loader does not flatten.
+/// An unflattened light is found through its node's `first_light` run, whose parents compose its world placement.
+/// Only a position and a direction come from the node, since a punctual light is unaffected by its node's scale.
+struct sv::asset_light
+{
+    /// What to pass `add_light`: the file's own name, `name##i` when the name is shared, or `light##i` when it is empty,
+    /// the suffix bumped past any id already taken — so every light of one asset has its own id, and a human still reads
+    /// the file's name.
+    cc::string id;
+
+    sv::light light;
+
+    /// The file's cut-off hint, kept for a re-export.
+    /// The tracer does not honour it: the extension makes it optional, and cutting a light off draws an edge in the image.
+    cc::optional<f32> range;
 };
 
 /// Everything one loaded file describes, as plain data made of the types the scene API already takes.
@@ -80,6 +104,16 @@ struct sv::asset_data
     /// the hierarchy, in a parents-first order
     cc::vector<sv::asset_node> nodes;
 
+    /// Every light the file places, in the order its nodes were walked.
+    ///
+    ///     auto const scope = f.scoped_id("lamp-2");   // one scope per placement of the asset
+    ///     for (auto const& l : asset.lights)
+    ///         scene.add_light(l.id, l.light);
+    ///
+    /// The ids are unique within one asset, not across placements: two lights with one id in one layer assert, so
+    /// placing the same asset twice takes a scope around each.
+    cc::vector<sv::asset_light> lights;
+
     /// babel's issues plus the importer's own, forwarded verbatim
     ///
     /// A successful load with a non-empty `issues` is the normal case for a real-world asset: check it before
@@ -88,7 +122,7 @@ struct sv::asset_data
 
     // queries
 public:
-    [[nodiscard]] bool is_empty() const { return meshes.empty(); }
+    [[nodiscard]] bool is_empty() const { return meshes.empty() && lights.empty(); }
 
     /// The mesh named `name`, or nullptr.
     /// First match wins — a name is not an identity here either.

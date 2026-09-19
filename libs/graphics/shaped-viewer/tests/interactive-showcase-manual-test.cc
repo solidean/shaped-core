@@ -29,10 +29,8 @@ TEST("sv - interactive showcase (manual)", nx::config::manual)
     auto const box_data = sv_test::make_cornell_box();
     auto const box = sv_test::as_mesh("cornell box", box_data.positions, box_data.materials);
 
-    auto const key_light = sv::area_light{.center = tg::pos3f(0, 3, 0),
-                                          .half_extent_u = tg::vec3f(0.75f, 0, 0),
-                                          .half_extent_v = tg::vec3f(0, 0, 0.75f),
-                                          .emission = tg::vec3f(12.0f, 12.0f, 12.0f)};
+    auto const key_light
+        = sv::light::rect(tg::pos3f(0, 3, 0), tg::vec3f(0.75f, 0, 0), tg::vec3f(0, 0, 0.75f)).nits(12.0f);
 
     // A cool-blue SH sky: bright overhead, dimmer below.
     auto const sky = sv::background::gradient(tg::vec3f(0.70f, 0.96f, 1.44f), tg::vec3f(0.21f, 0.28f, 0.37f));
@@ -66,7 +64,7 @@ TEST("sv - interactive showcase (manual)", nx::config::manual)
 
             auto scene = view.add_scene();
             scene.add_mesh(cloud);
-            scene.add_light(key_light);
+            scene.add_light("key", key_light);
             scene.background(sky);
         }
 
@@ -83,7 +81,7 @@ TEST("sv - interactive showcase (manual)", nx::config::manual)
 
             auto left_scene = left.add_scene();
             left_scene.add_mesh(box);
-            left_scene.add_light(key_light);
+            left_scene.add_light("key", key_light);
 
             // Nearest sampling, so Ctrl+wheel here reads out texels rather than smearing them.
             auto pixels = inner.leaf();
@@ -96,7 +94,7 @@ TEST("sv - interactive showcase (manual)", nx::config::manual)
 
             auto right_scene = right.add_scene();
             right_scene.add_mesh(cloud);
-            right_scene.add_light(key_light);
+            right_scene.add_light("key", key_light);
         }
 
         // A wipe between two takes on the same scene: one leaf, two views, one draw.
@@ -109,8 +107,8 @@ TEST("sv - interactive showcase (manual)", nx::config::manual)
 
             auto a_scene = a.add_scene();
             a_scene.add_mesh(cloud);
-            a_scene.add_light(key_light);
-            a_scene.background(sv::background::sun(tg::vec3f{0, 1, 0}, tg::vec3f{1, 0, 0})
+            a_scene.add_light("key", key_light);
+            a_scene.background(sv::background::lobe(tg::vec3f{0, 1, 0}, tg::vec3f{1, 0, 0})
                                    .combined_with(sv::background::uniform(tg::vec3f(0, 0, 1))));
 
             auto b = compare.add_view("wipe-b");
@@ -118,7 +116,7 @@ TEST("sv - interactive showcase (manual)", nx::config::manual)
 
             auto b_scene = b.add_scene();
             b_scene.add_mesh(box);
-            b_scene.add_light(key_light);
+            b_scene.add_light("key", key_light);
         }
 
         // A small inset over everything, out of the flow so its siblings tile as if it were not there.
@@ -136,7 +134,7 @@ TEST("sv - interactive showcase (manual)", nx::config::manual)
 
         auto inset_scene = inset.add_scene();
         inset_scene.add_mesh(cloud);
-        inset_scene.add_light(key_light);
+        inset_scene.add_light("key", key_light);
         inset_scene.background(sky);
     }
 

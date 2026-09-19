@@ -1,5 +1,6 @@
 #include <shaped-viewer/scene/background.hh>
 #include <typed-geometry/linalg/vec_ops.hh> // tg::normalize
+#include <typed-geometry/scalar/constants.hh>
 
 namespace sv
 {
@@ -21,7 +22,7 @@ constexpr f32 zh_cos1 = 2.0943951f; // 2 pi / 3
 constexpr f32 zh_cos2 = 0.7853982f; // pi / 4
 
 // The truncated lobe overshoots: it reconstructs 17/16 along its own axis, where the clamped cosine is 1.
-// Dividing it out is what makes `sun`'s peak the radiance the caller asked for.
+// Dividing it out is what makes `lobe`'s peak the radiance the caller asked for.
 constexpr f32 zh_cos_peak = 16.0f / 17.0f;
 } // namespace
 
@@ -44,7 +45,7 @@ background background::gradient(tg::vec3f zenith, tg::vec3f nadir)
     return bg;
 }
 
-background background::sun(tg::vec3f direction, tg::vec3f radiance)
+background background::lobe(tg::vec3f direction, tg::vec3f radiance)
 {
     auto const d = tg::normalize(direction);
     auto const x = d[0];
@@ -68,12 +69,6 @@ background background::sun(tg::vec3f direction, tg::vec3f radiance)
     return bg;
 }
 
-background background::daylight()
-{
-    return gradient(tg::vec3f(0.55f, 0.78f, 1.30f), tg::vec3f(0.26f, 0.22f, 0.18f))
-        .combined_with(sun(tg::vec3f(0.6f, 0.7f, 0.4f), tg::vec3f(0.90f, 0.78f, 0.60f)));
-}
-
 background background::studio()
 {
     return gradient(tg::vec3f(0.90f, 0.90f, 0.90f), tg::vec3f(0.25f, 0.25f, 0.25f));
@@ -93,5 +88,16 @@ background background::scaled(f32 factor) const
     for (auto i = 0; i < sh_coefficient_count; ++i)
         out.sh[i] = sh[i] * factor;
     return out;
+}
+
+sky_and_sun daylight()
+{
+    // The sun the old soft lobe stood for: its warm tint, and the illuminance it delivered to a surface facing it.
+    // A clamped-cosine lobe of peak radiance P gives 2 pi / 3 * P there, so its 0.9 peak becomes about 1.9 lux.
+    auto const toward_sun = tg::vec3f(0.6f, 0.7f, 0.4f);
+    auto sun = light::sun(-toward_sun).lux(0.90f * 2.0f * tg::pi<f32> / 3.0f);
+    sun.color(tg::vec3f(1.0f, 0.78f / 0.90f, 0.60f / 0.90f));
+
+    return {.sky = background::gradient(tg::vec3f(0.55f, 0.78f, 1.30f), tg::vec3f(0.26f, 0.22f, 0.18f)), .sun = sun};
 }
 } // namespace sv
