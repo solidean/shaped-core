@@ -513,6 +513,29 @@ auto res = test->execute_fuzzer(seed);      // one deterministic run; res.failin
 auto min = res.failing_run.value().minimize(rng);   // shrink; min.emit_regression("test", dialect)
 ```
 
+Async ops — an op returning `cc::shared_async<T>` is awaited, one step at a time, and `T` is what reaches the slot:
+
+```cpp
+#include <nexus/async-test.hh>
+#include <nexus/fuzz/async.hh>                // needed wherever an async op is registered
+
+ASYNC_TEST("cache survives random sequences")
+{
+    auto test = nx::fuzz::test::create();
+    test->add_op("mk", [] { return cache(); });                                          // sync, mixed freely
+    test->add_op("load", [](cache& c) -> cc::shared_async<entry> { co_return co_await c.load("a"); });
+    test->add_op("flush", [](cache& c) -> cc::shared_async<cc::unit> { co_await c.flush(); });   // async void
+    test->set_inherit_home(true);             // run every op where this body is homed (a thread-bound device)
+
+    SECTION("fuzz") { CHECK(co_await test->execute_fuzz_test_async()); }
+    SECTION("regression") { auto e1 = co_await test->eval_op_async("load", c0); /* ... */ }
+}
+// execute_fuzz_test() on a test holding ANY async op is a setup error naming them; the awaited entry runs any mix
+// an async op's CHECKs count for its step from any thread — AND so does anything else reporting for the test meanwhile
+// the engine TAKES the value out of the op's node; keep a pending handle in a slot by wrapping it in your own struct
+// async invariants work (-> cc::shared_async<bool>); async preconditions and seed values do not compile
+```
+
 ## Recording — what did this test record?
 
 ```cpp

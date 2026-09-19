@@ -85,6 +85,11 @@ class Git:
         out = self.run(["ls-files", "-z"], timeout=60, check=False)
         return [p for p in out.split("\0") if p]
 
+    def ls_tree(self, rev: str) -> list[str]:
+        """Every path tracked at `rev`, as posix — the set an entry written against that commit could refer to."""
+        out = self.run(["ls-tree", "-r", "--name-only", "-z", rev], timeout=60, check=False)
+        return [p for p in out.split("\0") if p]
+
     def merge_base(self, a: str, b: str) -> str | None:
         out = self.run(["merge-base", a, b], timeout=30, check=False)
         return out.strip() or None

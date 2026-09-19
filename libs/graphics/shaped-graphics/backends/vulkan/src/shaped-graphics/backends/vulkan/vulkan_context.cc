@@ -4,6 +4,7 @@
 #include <clean-core/common/log.hh>
 #include <clean-core/record/domain.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh>
+#include <shaped-graphics/backends/vulkan/vulkan_forward_waits.hh>
 #include <shaped-graphics/exceptions.hh>
 
 namespace sg::backend::vulkan
@@ -240,7 +241,10 @@ void vulkan_context::shutdown()
             _epoch_timeline = VK_NULL_HANDLE;
         }
 
-        vkDestroyDevice(_device, nullptr); // _queue is owned by the device
+        {
+            device_driver_barrier const barrier; // see vulkan_forward_waits.hh
+            vkDestroyDevice(_device, nullptr);   // _queue is owned by the device
+        }
         _device = VK_NULL_HANDLE;
     }
 

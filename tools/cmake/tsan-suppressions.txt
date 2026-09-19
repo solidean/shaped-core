@@ -15,6 +15,16 @@
 # Uninstrumented, so TSan sees its atomics as plain memory and reports its internal handoffs as races.
 called_from_lib:libvulkan_radeon.so
 
+# The Khronos validation layer, loaded by sg's vulkan contexts whenever validation is on.
+# `vvl::GetCopyBufferImageDeviceVUID` (cc_vuid_maps.cpp) builds a function-local static map on first use: one copy actor
+# builds it under __cxa_guard, and the other reads it through the inlined fast-path guard check, an acquire load TSan
+# cannot see in an uninstrumented library.
+# It fires only when the upload and download actors validate their first copy of the process at the same moment.
+# Named by function rather than `called_from_lib`, which cannot be used for this layer: it hides the layer's mutex
+# locks but not the condition-variable waits it makes through libstdc++, and TSan then reports those as unlocks of an
+# unlocked mutex.
+race:GetCopyBufferImageDeviceVUID
+
 # The prebuilt DXC we vendor (extern/dxc), reached through ssc::dxc.
 # What survives here is LLVM's ManagedStatic lazy init, once per process: a std::atomic release store under a mutex,
 # read by an acquire load outside it, which is correct and which TSan cannot see because it models no atomics in an

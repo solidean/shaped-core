@@ -1,3 +1,4 @@
+#include <clean-core/common/macros.hh> // CC_HAS_THREADS
 #include <clean-core/common/utility.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/string/string.hh>
@@ -5,6 +6,7 @@
 #include <clean-core/thread/mutex.hh>
 #include <nexus/test.hh>
 
+#include <thread>
 #include <type_traits>
 
 
@@ -337,4 +339,35 @@ TEST("mutex - lambda capture")
 
         CHECK(counter == 6);
     }
+}
+
+TEST("mutex - wait_for returns whether the predicate held")
+{
+    auto m = cc::mutex<bool>{false};
+    auto cv = std::condition_variable();
+
+    SECTION("a predicate that never holds times out, and a zero timeout does not wait")
+    {
+        CHECK(!m.wait_for(cv, 0.0, [](bool const& b) { return b; }));
+    }
+
+    SECTION("a predicate that already holds returns at once, whatever the timeout")
+    {
+        m.lock([](bool& b) { b = true; });
+        CHECK(m.wait_for(cv, 1e9, [](bool const& b) { return b; }));
+    }
+
+#if CC_HAS_THREADS
+    SECTION("another thread satisfying it ends the wait")
+    {
+        auto setter = std::thread(
+            [&]
+            {
+                m.lock([](bool& b) { b = true; });
+                cv.notify_all();
+            });
+        CHECK(m.wait_for(cv, 1e9, [](bool const& b) { return b; })); // waits on the condition, never on the clock
+        setter.join();
+    }
+#endif
 }

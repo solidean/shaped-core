@@ -50,6 +50,7 @@ from .lib.annotate.table import (
     build as build_tokens,
     glossary_problems,
     glossary_terms,
+    history_for as round_history,
     index_for as repo_index,
     problems as token_problems,
 )
@@ -112,6 +113,7 @@ __all__ = [
     "glossary_problems",
     "glossary_terms",
     "repo_index",
+    "round_history",
     "token_problems",
     "AnswerFile",
     "Comment",

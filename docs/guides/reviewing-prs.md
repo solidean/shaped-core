@@ -157,6 +157,8 @@ A bug gets fixed in an hour; a type that carves the problem at the wrong joint o
 - **Does the abstraction pay for itself?** A "manager" that fixes a layout and hides what its consumer needs is the anti-pattern.
   A small helper over one thing the caller still owns is the pattern.
 - **Which library does this belong in?** Dependency direction is a hard rule; "could live lower" is the more common finding.
+- **Does a setter read like a getter?** A bare-noun method that changes state reads as a query at the call site.
+  The async fuzz design proposed `test->inherit_home()`, and the maintainer renamed it `set_inherit_home(bool)`: the verb says it mutates, and the bool makes switching it off expressible.
 - **Does a new accessor name an internal of a library still in flux?** Then it pins the internal, and the public shape should say only the outcome.
   pr-170's fix for a test drain needed to wait on sv's fallback shader compile, and first added `sv::frame::fallback_shader_compile()`.
   The maintainer rejected it: sv is alpha and will change a lot, so the accessor exposed a very internal thing for a bad reason.
@@ -397,6 +399,24 @@ pr-174 is the worked case.
 The review recommended that `cc::async_backlog::track_node` compact its whole ring once it doubles past what last survived, instead of pruning from the front.
 The maintainer accepted it with exactly this condition: larger compactions behind a record scope, and a comment that they may cause frame stutter in pathological situations.
 What landed opens `CC_RECORD_SCOPE_IF(count >= 1024, "cc.async_backlog.compact")`.
+
+### A new link on the async ambient chain is a tax; carry state on what the path already found
+
+The ambient chain is how state follows async work across threads, and everything pushed onto it is paid for.
+Pushing a scope allocates a link, and every node started under it retains the chain.
+Lookups are cheap only for as long as the tag is absent.
+So a design that needs a flag, a sink or an owner to reach work on any worker first asks whether an object the path already looks up can carry it.
+
+The async fuzz design is the worked case.
+A CHECK inside an async fuzz op can fire on any worker, and the first proposal caught it with a capture tag pushed onto the chain around every step.
+The maintainer declined that as a perf tax, and pointed out that the fuzz is nexus's own and may reach into the running test.
+Every check already finds its test through the chain in `current_context()`.
+So the design settled on one atomic pointer on `test_context`, set for each async step and read right after that lookup: a relaxed load per check, and nothing per step, spawn or poll.
+
+The same review showed why intercepting beats undoing.
+The maintainer's own first shape was a snapshot of the test's check state, restored after each step.
+A restore cannot take back the log line each failure writes, nor the throws the per-test failure cap has already made.
+A divert read before either happens has nothing to undo.
 
 ### The `#ifdef` arm this machine does not compile is where the defect is
 

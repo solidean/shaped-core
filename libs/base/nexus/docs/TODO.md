@@ -8,14 +8,15 @@ The shape of what exists is in [parallel-execution](parallel-execution.md) and t
   That body's checks are then counted for the test that blocked, and its own test reports "no CHECK/REQUIRE".
   The async ambient scope was meant to keep attribution with the node, and here it does not.
   Found when sg's transfer fuzz test swapped a parking wait for `async_blocking_get`: under `--thorough`, random sync children of the vulkan never-block sweep lost their checks in 3 of 4 runs.
-  The fuzz test now runs alone under `exclusive()` as a workaround; the fix is the attribution itself, and why the stolen node's ambient does not win is not traced yet.
+  That test has since moved to async fuzz ops and blocks nowhere, so nothing in the tree is known to hit this now.
+  The fix is still the attribution itself, and why the stolen node's ambient does not win is not traced yet.
 
 - **Investigate: whether an async invocation can admit an `exclusive()` child under a non-exclusive driver.**
   Today it is refused: the driver holds the phase lock shared, so a child asking for the whole phase would wait on its own driver.
   Tags are already arranged: a child's `exclusive(tag)` is taken from the phase around it, refused only when driver and child both hold tags.
   The expectation was that `exclusive()` works the same way.
   The shape to try: the invocation releases or upgrades the driver's shared hold around an exclusive child.
-  sg's transfer fuzz test could then go back to being an invocable in each backend's sweep instead of a standalone test.
+  Nothing in the tree needs it yet; the case to wait for is an invocable that genuinely cannot share its phase with its siblings.
 
 - **A windowed `ASYNC_EXAMPLE` in shaped-rendering**, a frame loop that awaits its work and presents on main.
   That is the case homes were built for, and nothing in the tree demonstrates it yet: `sr::window` and sg's present paths still run as they did before homes.

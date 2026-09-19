@@ -459,6 +459,9 @@ Three writers share **one** failure slot on the promise — a dependency short-c
 `co_await cc::async_settled(a)` waits without short-circuiting, and leaves you to read `a->try_value()` / `a->try_error()`.
 `cc::async_as_result(a)` is the same wait handed back as a `cc::result`, at the cost of a copy.
 
+A plain `co_await a` hands back a reference into the node, which a move-only value cannot leave through.
+`co_await cc::async_take(cc::move(a))` moves the value out instead, and still short-circuits on failure; any other handle to the node afterwards reads a moved-from value.
+
 `co_await cc::async_fail(e)` is the uniform failure spelling.
 `co_return cc::error(...)` also works, but only for a non-`unit` `T`.
 `return_void` and `return_value` cannot coexist, so a `cc::unit` coroutine keeps the bare `co_return;` and fails through `async_fail`.

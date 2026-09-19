@@ -18,6 +18,7 @@
 #include <nexus/bench/report.hh>
 #include <nexus/impl/host_loop.hh>
 #include <nexus/impl/rec_session.hh>
+#include <nexus/impl/watchdog.hh>
 #include <nexus/tests/alias.hh>
 #include <nexus/tests/entry.hh>
 #include <nexus/tests/execute.hh>
@@ -622,6 +623,12 @@ int nx::run(int argc, char** argv)
                                });
         return 0; // not reached: the host loop ends the process
     }
+
+    // A test run only: an app, a command or an example is a program that may legitimately sit idle, and a benchmark times itself.
+    auto const is_test_run = !is_entry_run
+                          && (config.selected_bucket == nx::config::test_bucket::normal
+                              || config.selected_bucket == nx::config::test_bucket::manual);
+    auto const watchdog = impl::run_watchdog(is_test_run ? config.watchdog_secs : 0.0);
 
     return report_run(config, reporting, execute_tests(schedule, config));
 }

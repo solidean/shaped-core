@@ -241,6 +241,11 @@ nx::args_builder build_cli(nx::test_schedule_config& config, cli_state& state)
     args.action(
         {"match-files"}, [&config] { config.mode = filter_mode::file; }, "read the filters as globs over source files");
     args.arg({"thorough"}, config.thorough, "run every test at full strength, however long that takes (nx::is_thorough)");
+    args.arg({"watchdog"}, config.watchdog_secs,
+             {.desc = "print every thread's stack after this many seconds with no test starting or finishing; 0 turns "
+                      "it off",
+              .metavar = "SECS",
+              .validate = nx::arg::at_least(0.0)});
     args.action({"match-names"}, [&config] { config.mode = filter_mode::name; }, "read the filters as test names only");
 
     args.group("recording");

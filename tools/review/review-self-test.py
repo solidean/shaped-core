@@ -1389,6 +1389,98 @@ def test_a_line_reference_carries_its_line(root: Path) -> None:
     assert token.line == 63 and token.href.endswith("#L63"), token
 
 
+# ---- references in answered rounds ------------------------------------------
+#
+# A land-changes review answers an entry and then carries out what it asked, which moves the very paths the entry named.
+# Judging answered text against the current tree would make the review's own success a validation error.
+
+
+_THEN = "abcdef1234567890abcdef1234567890abcdef12"
+
+
+def _history_tokens(root: Path, rounds: list[tuple[int, str]], now: list[str], then: list[str]):
+    body = "".join(f"\n## prose\nround: {r}\n\n{text}\n" for r, text in rounds)
+    entry = parse_text(ENTRY + body, Path("entry.md"))
+    history = lambda r: (_index_of(root, then), _THEN) if r == 1 else None  # noqa: E731
+    return build_tokens(entry, _index_of(root, now), history=history)
+
+
+def test_an_answered_round_names_paths_as_they_were(root: Path) -> None:
+    """A path the fix moved is drawn as removed, not reported — and nothing else about the strictness loosens."""
+    now = ["lib/moved/place.py", "lib/fresh.py"]
+    then = ["lib/place.py"]
+    tokens = {t.text: t for t in _history_tokens(root, [
+        (1, "See `lib/place.py`, `new:lib/fresh.py` and `lib/typo.py`."),
+    ], now, then)}
+
+    gone = tokens["lib/place.py"]
+    assert gone.css == "ref-old" and not gone.problem, gone
+    assert _THEN[:8] in gone.note, gone.note
+
+    created = tokens["new:lib/fresh.py"]
+    assert not created.problem and created.href.endswith("lib/fresh.py"), created
+
+    assert "not a file" in tokens["lib/typo.py"].problem, "a path missing then and now is still a mistake"
+
+
+def test_open_text_is_still_judged_against_the_current_tree(root: Path) -> None:
+    """Only a finalized round gets its tree; the round being written has nothing to excuse it."""
+    tokens = _history_tokens(root, [(2, "See `lib/place.py`.")], ["lib/moved/place.py"], ["lib/place.py"])
+    assert "not a file" in tokens[0].problem, tokens[0]
+
+
+def test_the_open_round_decides_a_literal_both_rounds_name(root: Path) -> None:
+    """The page wraps a literal one way, so the strict reading has to win it."""
+    tokens = _history_tokens(root, [(1, "Was `lib/place.py`."), (2, "Still `lib/place.py`.")],
+                             ["lib/moved/place.py"], ["lib/place.py"])
+    assert len(tokens) == 1 and "not a file" in tokens[0].problem, tokens
+
+
+def test_a_round_head_is_recorded_and_survives_the_file(root: Path) -> None:
+    """Rounds finalized before the record existed stay unknown, and are judged against the current tree."""
+    from tools.review.lib.core.config import ReviewConfig, dump, load
+
+    cfg = ReviewConfig(name="r", goals=["land-changes"], head="h3")
+    cfg.record_round_head(3)
+    assert cfg.round_heads == ["", "", "h3"], cfg.round_heads
+    cfg.head = "h4"
+    cfg.record_round_head(4)
+
+    path = root / "review.toml"
+    path.write_text(dump(cfg), encoding="utf-8")
+    loaded = load(path)
+    assert loaded.round_heads == ["", "", "h3", "h4"], loaded.round_heads
+    assert loaded.head_of_round(3) == "h3" and loaded.head_of_round(1) == "" and loaded.head_of_round(9) == ""
+
+
+def test_a_collect_that_fails_keeps_the_round_handed_back(root: Path) -> None:
+    """The maintainer already pressed send; an entry that breaks the collect must not make them press it again."""
+    repo = root / "repo"
+    repo.mkdir()
+    git_init(repo)
+    commit(repo, "first", {"a.txt": numbered(3)})
+    commit(repo, "second", {"a.txt": numbered(6)})
+    cli = [sys.executable, str(REPO_ROOT / "review.py")]
+    for argv in (["init", "r", "--goal", "pr-comment", "--range", "HEAD~1..HEAD"], ["ingest", "r"], ["generate", "r"]):
+        done = subprocess.run(cli + argv, cwd=repo, capture_output=True, text=True)
+        assert done.returncode == 0, f"{argv}: {done.stderr or done.stdout}"
+
+    review_root = repo / ".tmp" / "reviews" / "r"
+    broken = review_root / "entries" / "050-broken.md"
+    broken.write_text("---\nid: 050\ntitle: broken\n---\n\n## nonsense\n\nnot a block type\n", encoding="utf-8")
+    signal = review_root / ".signal"
+    signal.write_text(json.dumps({"action": "send", "round": 1, "at": 0}), encoding="utf-8")
+
+    failed = subprocess.run(cli + ["round", "r", "--no-wait"], cwd=repo, capture_output=True, text=True)
+    assert failed.returncode != 0, failed.stdout
+    assert signal.is_file(), "a failed collect consumed the send"
+
+    broken.unlink()
+    collected = subprocess.run(cli + ["round", "r", "--no-wait"], cwd=repo, capture_output=True, text=True)
+    assert collected.returncode == 0, collected.stderr or collected.stdout
+    assert not signal.is_file(), "a finalized round leaves no send behind"
+
+
 GLOSSARY = """
 ## prose
 glossary: true
