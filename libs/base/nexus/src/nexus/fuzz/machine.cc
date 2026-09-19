@@ -5,6 +5,9 @@
 #include <clean-core/error/exception.hh>
 #include <clean-core/math/random.hh>
 #include <clean-core/platform/native.hh>
+#include <clean-core/string/format.hh>
+#include <clean-core/thread/async.hh>
+#include <clean-core/thread/async_coroutine.hh>
 #include <nexus/tests/check.hh>
 
 
@@ -28,6 +31,7 @@ fuzz_machine::fuzz_machine(cc::span<fuzz_operation* const> ops)
         op_info oi;
         oi.op = op;
         oi.is_invariant = op->is_invariant();
+        oi.is_async = op->is_async();
         for (auto at : op->arg_types())
             oi.arg_types.push_back(intern(at));
         for (bool m : op->arg_is_mutable())
@@ -186,48 +190,114 @@ bool fuzz_machine::preconditions_fulfilled(state const& s, executed_operation co
 
 fuzz_machine::execute_result fuzz_machine::execute_operation(state& s, executed_operation const& exec) const
 {
+    CC_ASSERT(!_operations[int(exec.operation)].is_async, "an async op is executed through execute_operation_async");
+    auto step = start_step(s, exec);
+    return finish_step(s, exec, step);
+}
+
+cc::shared_async<fuzz_machine::execute_result> fuzz_machine::execute_operation_async(state& s,
+                                                                                     executed_operation const& exec,
+                                                                                     cc::async_scheduler* home) const
+{
+    auto step = start_step(s, exec, home);
+    if (step.pending != nullptr)
+    {
+        // Held across the await: whatever the op's work reports for this test, from any thread, is the step's.
+        auto const divert = nx::impl::scoped_test_check_divert(*step.async_sink);
+        co_await cc::async_settled(step.pending);
+    }
+    co_return finish_step(s, exec, step);
+}
+
+cc::shared_async<typed_value> fuzz_operation::eval_async_boxed(cc::vector<typed_value> storage,
+                                                               cc::vector<typed_value*> external,
+                                                               cc::async_scheduler* home) const
+{
+    auto args = cc::vector<typed_value*>();
+    auto next = 0;
+    for (auto* const e : external)
+        args.push_back(e != nullptr ? e : &storage[next++]);
+    co_return co_await cc::async_take(impl::place(invoke_async(args, home), home));
+}
+
+fuzz_machine::started_step fuzz_machine::start_step(state& s, executed_operation const& exec, cc::async_scheduler* home) const
+{
     auto const& oi = _operations[int(exec.operation)];
 
-    cc::vector<typed_value> synth;
+    auto step = started_step();
     cc::vector<typed_value*> buf;
-    auto args = assemble_args(s, exec, synth, buf);
+    auto args = assemble_args(s, exec, step.synth, buf);
 
     // Capture CHECK/REQUIRE failures (without aborting or polluting the host test) and reroute a
     // failing CC_ASSERT into an exception (CC_ASSERT would otherwise abort right after the handler).
-    nx::impl::check_capture_sink sink;
-    nx::impl::scoped_check_capture cap(sink);
+    nx::impl::scoped_check_capture cap(step.sink);
     auto handler = cc::impl::scoped_assertion_handler([](cc::impl::assertion_info const& info)
-                                                      { throw impl::assertion_failure{info.message}; });
+                                                      { throw nx::impl::captured_assertion(info.message); });
 
-    typed_value result;
     try
     {
-        result = oi.op->invoke(args);
+        if (oi.is_async)
+        {
+            step.async_sink = cc::make_unique<nx::impl::async_check_capture_sink>();
+            step.pending = oi.op->invoke_async(args, home);
+        }
+        else
+            step.result = oi.op->invoke(args);
     }
-    catch (impl::assertion_failure const& e)
+    catch (nx::impl::captured_assertion const& e)
     {
         cc::string msg = "assertion failed: ";
         msg += e.message;
-        return fuzz_machine::execute_result{.ok = false, .error = cc::move(msg)};
+        step.failure = fuzz_machine::execute_result{.ok = false, .error = cc::move(msg)};
     }
     catch (std::exception const& e)
     {
-        return fail("uncaught exception: ", e.what());
+        step.failure = fail("uncaught exception: ", e.what());
     }
     catch (...)
     {
-        return fail("uncaught unknown exception");
+        step.failure = fail("uncaught unknown exception");
+    }
+    return step;
+}
+
+fuzz_machine::execute_result fuzz_machine::finish_step(state& s, executed_operation const& exec, started_step& step) const
+{
+    if (step.failure.has_value())
+        return cc::move(step.failure.value());
+
+    if (step.pending != nullptr)
+    {
+        CC_ASSERT(step.pending->is_ready(), "an async step is finished only once its op has resolved");
+        if (auto const* const err = step.pending->try_error())
+            return fuzz_machine::execute_result{
+                .ok = false,
+                .error = cc::format("async op failed: {}", err->underlying().to_string())};
+
+        auto const failed = step.async_sink->failed.load(cc::memory_order_relaxed);
+        if (failed > 0)
+        {
+            auto first = cc::string();
+            step.async_sink->first_message.lock([&](cc::string& m) { first = cc::move(m); });
+            if (first.empty())
+                return fail("a CHECK/REQUIRE failed");
+            return fuzz_machine::execute_result{.ok = false, .error = cc::format("a CHECK/REQUIRE failed: {}", first)};
+        }
+
+        auto resolved = cc::into_result(cc::move(step.pending));
+        step.result = cc::move(resolved.value());
     }
 
-    if (sink.failed > 0)
+    if (step.sink.failed > 0)
     {
-        if (sink.first_message.empty())
+        if (step.sink.first_message.empty())
             return fail("a CHECK/REQUIRE failed");
         cc::string msg = "a CHECK/REQUIRE failed: ";
-        msg += sink.first_message;
+        msg += step.sink.first_message;
         return fuzz_machine::execute_result{.ok = false, .error = cc::move(msg)};
     }
 
+    auto& result = step.result;
     if (exec.result_must_be_true && (!result.is_valid() || !result.get_bool()))
         return fail("invariant violated");
 

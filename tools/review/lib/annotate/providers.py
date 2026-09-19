@@ -76,12 +76,18 @@ class FileProvider:
     Unresolved is an error too, because the exceptional cases are marked rather than guessed: `new:` for a file
     this change intends to create, which must *not* resolve, and `old:` for one it removes, which may go either way.
     A single "might not exist" marker would let a stale `new:` sit forever, and stale is what the strictness is for.
+
+    `history` is set for text from a round already answered: the tree at the head that round was read at.
+    Such text named paths as they were then, and a land-changes review moves them — so it is judged against that tree,
+    and a path gone since is drawn as removed rather than reported, without editing an entry the maintainer read.
     """
 
     index: RepoIndex
     regions: tuple[str, ...] = (PROSE, CODE, DIFF)
     kind: str = "file"
     seen: set[str] = field(default_factory=set)
+    history: RepoIndex | None = None
+    history_rev: str = ""
 
     def tokens(self, text: str) -> list[Token]:
         out: list[Token] = []
@@ -113,6 +119,16 @@ class FileProvider:
         end_line = int(end) if end else 0
         shown = literal[len(intent) + 1:] if intent != PLAIN else literal
 
+        if self.history is not None:
+            then = self.history.resolve(ref)
+            if then.state == RESOLVED and intent != NEW:
+                resolution = self.index.resolve(then.path)
+                if resolution.state != RESOLVED:
+                    return Token(text=literal, kind=self.kind, css="ref-old", regions=self.regions, label=shown,
+                                 note=_gone_since(self.history_rev))
+            elif then.state == MISSING and intent == NEW:
+                intent = PLAIN if resolution.state == RESOLVED else NEW
+
         if resolution.state == AMBIGUOUS:
             listed = ", ".join(resolution.candidates[:4]) + ("…" if len(resolution.candidates) > 4 else "")
             return Token(text=literal, kind=self.kind, css="ref-bad", regions=self.regions,
@@ -136,6 +152,10 @@ class FileProvider:
         )
 
 
+def _gone_since(rev: str) -> str:
+    return f"as of {rev[:8]}, when this was answered; gone since" if rev else "gone since this was answered"
+
+
 # A folder: the same characters as a path, ending in a slash.
 # The trailing slash is what distinguishes a reference from a word, since a directory has no suffix to check
 # against the repository the way `looks_like_a_path` checks a file's.
@@ -156,12 +176,15 @@ class DirProvider:
     Narrowing what counts as a reference would trade a loud false positive for a silent one: a typo'd path
     quietly staying plain text, which is the failure this strictness exists to catch.
     `raw:` is the per-span escape for something that only looks like a reference.
+    `history` is judged exactly as FileProvider's is.
     """
 
     index: RepoIndex
     regions: tuple[str, ...] = (PROSE, CODE, DIFF)
     kind: str = "dir"
     seen: set[str] = field(default_factory=set)
+    history: RepoIndex | None = None
+    history_rev: str = ""
 
     def tokens(self, text: str) -> list[Token]:
         out: list[Token] = []
@@ -181,6 +204,17 @@ class DirProvider:
             self.seen.add(literal)
             shown = literal[len(intent) + 1:] if intent != PLAIN else literal
             resolution = self.index.resolve_dir(ref)
+
+            if self.history is not None:
+                then = self.history.resolve_dir(ref)
+                if then.state == RESOLVED and intent != NEW:
+                    resolution = self.index.resolve_dir(then.path)
+                    if resolution.state != RESOLVED:
+                        out.append(Token(text=literal, kind=self.kind, css="ref-old", regions=self.regions,
+                                         label=shown, note=_gone_since(self.history_rev)))
+                        continue
+                elif then.state == MISSING and intent == NEW:
+                    intent = PLAIN if resolution.state == RESOLVED else NEW
 
             if resolution.state == AMBIGUOUS:
                 listed = ", ".join(resolution.candidates[:4]) + ("…" if len(resolution.candidates) > 4 else "")

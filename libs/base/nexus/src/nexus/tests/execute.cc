@@ -32,7 +32,9 @@
 #include <nexus/async-test.hh> // the submit_test_async seam an ASYNC_TEST body reaches us through
 #include <nexus/fwd.hh>        // also what puts the bare sized aliases in scope inside nx
 #include <nexus/impl/rec_session.hh>
+#include <nexus/impl/watchdog.hh>
 #include <nexus/tests/check.hh>
+#include <nexus/tests/check_divert.hh>
 #include <nexus/tests/entry.hh>
 #include <nexus/tests/impl/test_ambient.hh>
 #include <nexus/tests/invoke_tests.hh>
@@ -185,6 +187,9 @@ struct nx::impl::test_context
     cc::atomic<int> off_thread_failed_checks = {0};
     cc::mutex<cc::vector<test_error>> off_thread_errors;
     cc::mutex<cc::vector<nx::recorded_metric>> off_thread_metrics;
+
+    // While set, every check reported for this test is tallied here instead — see scoped_test_check_divert.
+    cc::atomic<nx::impl::async_check_capture_sink*> check_divert = {nullptr};
 
     // Set once the test's stats have been finalized, after which nothing more may be recorded here.
     // A check arriving later comes from work that outlived the test, and is reported as an orphan naming it.
@@ -339,11 +344,6 @@ struct running_test_slot
 {
     cc::atomic<nx::test_declaration const*> declaration = {nullptr};
     cc::atomic<int> section = {0};
-
-    /// When this thread started what it is running, on the steady clock.
-    /// The hang watchdog's whole input: a slot still holding the same test long past a deadline is the definition of
-    /// a hung test, and nothing else in the run notices one.
-    cc::atomic<double> started_secs = {0.0};
 };
 
 running_test_slot g_running_tests[max_running_test_slots];
@@ -394,14 +394,11 @@ private:
 /// Publishes `decl` (and its section index) as what this thread is running.
 void publish_running_test(running_test_slot* slot, nx::test_declaration const& decl, int section)
 {
+    nx::impl::watchdog_heartbeat();
     if (slot == nullptr)
         return;
     slot->section.store(section, cc::memory_order_relaxed);
-    slot->started_secs.store(cc::current_time_steady_secs(), cc::memory_order_relaxed);
-
-    // Last, and with release ordering, so a watchdog that sees the declaration never reads the previous test's
-    // start time and blames this one for its predecessor's runtime.
-    slot->declaration.store(&decl, cc::memory_order_release);
+    slot->declaration.store(&decl, cc::memory_order_relaxed);
 }
 
 /// The tests running on OTHER threads right now, as one annotation line, or empty when this test is alone.
@@ -568,6 +565,7 @@ void test_execute_end(cc::unique_ptr<test_context> owned, bool keep_alive)
     ctx.root_section->finalize_section_to(ctx.execution->root, require_checks);
 
     ctx.is_finished.store(true, cc::memory_order_release);
+    nx::impl::watchdog_heartbeat();
 
     if (keep_alive)
         g_leaked_contexts.lock([&](cc::vector<cc::unique_ptr<test_context>>& kept) { kept.push_back(cc::move(owned)); });
@@ -1421,6 +1419,18 @@ nx::impl::scoped_check_capture::~scoped_check_capture()
     g_check_capture = nullptr;
 }
 
+nx::impl::scoped_test_check_divert::scoped_test_check_divert(async_check_capture_sink& sink) : _ctx(current_context())
+{
+    CC_ASSERT(_ctx != nullptr, "a check divert needs a running test");
+    auto* const previous = _ctx->check_divert.exchange(&sink, cc::memory_order_acq_rel);
+    CC_ASSERT(previous == nullptr, "nested check diverts are not supported");
+}
+
+nx::impl::scoped_test_check_divert::~scoped_test_check_divert()
+{
+    _ctx->check_divert.store(nullptr, cc::memory_order_release);
+}
+
 void nx::impl::submit_test_async(async_test_sink& sink, cc::shared_async<cc::unit> root)
 {
     CC_ASSERT(root != nullptr, "an ASYNC_TEST body must return a valid async");
@@ -1596,29 +1606,6 @@ cc::span<cc::vector<cc::string> const> nx::impl::current_section_scopes()
     return ctx->section_scopes;
 }
 
-isize nx::impl::snapshot_running_tests(cc::span<nx::impl::running_test_snapshot> out)
-{
-    auto const claimed = cc::min(g_running_slots_claimed.load(cc::memory_order_relaxed), max_running_test_slots);
-    auto written = isize(0);
-
-    for (auto i = 0; i < claimed && written < out.size(); ++i)
-    {
-        // Acquire, paired with the release in publish_running_test: the start time below must be this test's.
-        auto const* const decl = g_running_tests[i].declaration.load(cc::memory_order_acquire);
-        if (decl == nullptr || decl->name.empty())
-            continue;
-
-        out[written] = nx::impl::running_test_snapshot{
-            .name = decl->name,
-            .section = g_running_tests[i].section.load(cc::memory_order_relaxed),
-            .started_secs = g_running_tests[i].started_secs.load(cc::memory_order_relaxed),
-        };
-        ++written;
-    }
-
-    return written;
-}
-
 void nx::impl::report_running_test() noexcept
 {
     // Every running test, not just this thread's: under -jN the faulting thread is often not the interesting one.
@@ -1770,6 +1757,31 @@ void nx::impl::report_check_result(check_result result)
     {
         report_orphan_check(cc::move(result), cc::format("\"{}\" had already finished — its async work outlived it",
                                                          ctx.execution->instance.declaration->name));
+        return;
+    }
+
+    // Diverted: a tool such as the fuzz engine is awaiting code expected to fail often, on whichever thread runs it.
+    // Tallied before anything is logged, counted or thrown, so a diverted failure leaves no trace on the test.
+    // A failing CC_ASSERT still has to stop the code that asserted, so it throws — into that code's async node, as its error.
+    // Outside a poll nothing would catch that throw, and the assert aborts the process next; it is reported as usual instead, so the abort is explained.
+    auto* const divert = ctx.check_divert.load(cc::memory_order_acquire);
+    if (divert != nullptr && (result.op != cmp_op::assert_fail || cc::async_is_polling()))
+    {
+        divert->executed.fetch_add(1, cc::memory_order_relaxed);
+        if (result.op == cmp_op::skip || result.passed)
+            return;
+        divert->failed.fetch_add(1, cc::memory_order_relaxed);
+        if (result.kind == check_kind::require || result.op == cmp_op::assert_fail)
+            divert->require_failed.store(true, cc::memory_order_relaxed);
+        auto message = cc::format("{} | {}", result.expr, render_expanded(result));
+        divert->first_message.lock(
+            [&](cc::string& first)
+            {
+                if (first.empty())
+                    first = message;
+            });
+        if (result.op == cmp_op::assert_fail)
+            throw captured_assertion(cc::move(message));
         return;
     }
 
@@ -3101,10 +3113,16 @@ cc::shared_async<nx::invocation_result> nx::impl::async_invoke_tests_impl(cc::st
 
 cc::thread_bound_scheduler* nx::impl::invoking_home()
 {
-    auto* const home = cc::impl::async_tls().home;
-    CC_ASSERT(home != nullptr && home->is_inside_own_body(), "invocation_options::inherit_home needs the invoking body "
-                                                             "to run in a home; give the driver main_thread");
+    auto* const home = invoking_home_if_any();
+    CC_ASSERT(home != nullptr, "invocation_options::inherit_home needs the invoking body to run in a home; give the "
+                               "driver main_thread");
     return home;
+}
+
+cc::thread_bound_scheduler* nx::impl::invoking_home_if_any()
+{
+    auto* const home = cc::impl::async_tls().home;
+    return home != nullptr && home->is_inside_own_body() ? home : nullptr;
 }
 
 u64 nx::test_seed()

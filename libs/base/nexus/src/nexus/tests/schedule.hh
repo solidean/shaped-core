@@ -99,24 +99,18 @@ struct nx::test_schedule_config
     // worth paying to be able to ask what a test recorded, and worth skipping when timing the tests themselves.
     bool no_recording = false;
 
+    // --watchdog SECS: after this long with no test starting or finishing, the run is reported as hung and exits with code 4.
+    // The report names the running tests, every thread's stack and open scopes, and outstanding tracked work, and writes the recording.
+    // 0 turns it off.
+    // A test run gets it; an app, command, example or benchmark does not, and neither does a run under a debugger.
+    double watchdog_secs = 60.0;
+
     // The run seed every test's seed derives from, and whether this run shuffles its order by it.
     // A real run draws the seed from the clock unless --seed pins it, prints it first, and shuffles both the schedule and every invocation's children.
     // A hand-built config keeps schedule and match order, for the same reason `jobs` defaults to 1 here.
     // A test's seed is derived from its NAME rather than its position, so re-running one test by name with the same seed hands it the seed it had in the full run.
     u64 seed = 0;
     bool shuffle = false;
-
-    // How long one test may run before the run is declared hung, in seconds; 0 disables the watchdog.
-    //
-    // A guard that turns a hang into a message rather than a budget: a green run never reaches it, so the value
-    // costs nothing until something is already wrong.
-    // Generous on purpose — tight enough to catch a merely slow test is tight enough to be flaky on a loaded
-    // machine, and the failure it would produce looks exactly like the one it exists to report.
-    // A hand-built config leaves it off, since a test that drives a schedule is not a run anybody is waiting on.
-    double test_timeout_secs = 0;
-
-    // The same for the whole run, which catches one that makes progress forever without any test overrunning.
-    double run_timeout_secs = 0;
 
     // Let every test run at full strength rather than narrowed to what a default run can afford.
     // Read from a test body through nx::is_thorough(); set via --thorough.

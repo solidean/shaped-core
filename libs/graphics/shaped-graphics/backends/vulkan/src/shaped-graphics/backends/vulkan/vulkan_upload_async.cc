@@ -236,6 +236,7 @@ void vulkan_upload_async_system::signal_on_queue(vulkan_group_value const& value
         .pSignalSemaphores = &value.group->timeline,
     };
     (void)_ctx->queue_guard().lock([&](int&) { return vkQueueSubmit(_ctx->upload_queue(), 1, &submit, VK_NULL_HANDLE); });
+    note_signal_submitted(value.group->forward_waits, signal_value);
 }
 
 void vulkan_upload_async_system::settle_now(vulkan_async_upload_job& job, bool delivered)
@@ -312,9 +313,8 @@ void vulkan_upload_async_system::admit(vulkan_async_upload_job job)
     if (job.source != nullptr && _waker != nullptr)
         job.source->set_waker([waker = _waker] { waker->wake(); });
 
-    // Counted from here, and released only when the window carrying its last copy has run — so a caller that drains
-    // the context is waiting for the GPU to have the bytes, not merely for them to have been staged.
-    job.drain = _drain.start();
+    // Already counted from the moment the caller handed it over, and released only when the window carrying its last
+    // copy has run — so a caller that drains the context waits for the GPU to have the bytes, inbox included.
     _pending.push_back(cc::move(job));
 }
 
@@ -629,10 +629,15 @@ bool vulkan_upload_async_system::run_one_window()
             .signalSemaphoreCount = signal_count,
             .pSignalSemaphores = signals,
         };
+        if (job.download_wait.is_pending())
+            before_forward_wait(job.download_wait.group->forward_waits, job.download_wait.value);
+
         // Vulkan queues are externally synchronized — see vulkan_context::queue_guard.
         VkResult const r = _ctx->queue_guard().lock(
             [&](int&) { return vkQueueSubmit(_ctx->upload_queue(), 1, &submit, VK_NULL_HANDLE); });
         CC_ASSERT(r == VK_SUCCESS, "vkQueueSubmit (async upload) failed");
+        if (signal_count == 2)
+            note_signal_submitted(job.completion.group->forward_waits, job.completion.value);
 
         _window_log.note({
             .window_value = _window_next_value,
@@ -713,6 +718,7 @@ void vulkan_upload_async_system::upload_buffer(sg::raw_buffer_handle const& buff
     if (auto const pending = dst->_pending_async_download_value.load(cc::memory_order_acquire); pending != 0)
         job.download_wait = {.group = dst->_download_group, .value = pending};
 
+    job.drain = _drain.start(); // before the hand-over, so a job still in the inbox is counted too
     _actor->enqueue_message(cc::move(job));
 }
 
@@ -772,6 +778,7 @@ sg::stream_upload_handle vulkan_upload_async_system::stream_source_buffer(sg::ra
         }
     };
 
+    job.drain = _drain.start(); // before the hand-over, so a job still in the inbox is counted too
     _actor->enqueue_message(cc::move(job));
     return sg::stream_upload_handle(cc::move(control));
 }
@@ -833,6 +840,7 @@ void vulkan_upload_async_system::upload_texture(sg::raw_texture_handle const& te
     dst->_pending_async_upload_value.store(job.completion.value, cc::memory_order_release);
     job.wait_token = sg::submission_token(dst->_last_used_submission_token.load(cc::memory_order_acquire));
 
+    job.drain = _drain.start(); // before the hand-over, so a job still in the inbox is counted too
     _actor->enqueue_message(cc::move(job));
 }
 
@@ -898,6 +906,7 @@ sg::stream_upload_handle vulkan_upload_async_system::stream_source_texture(sg::r
         }
     };
 
+    job.drain = _drain.start(); // before the hand-over, so a job still in the inbox is counted too
     _actor->enqueue_message(cc::move(job));
     return sg::stream_upload_handle(cc::move(control));
 }

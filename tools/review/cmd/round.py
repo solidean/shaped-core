@@ -82,7 +82,6 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
         print(review.console.dim(f"round {cfg.next_round} of {cfg.name} was already handed back; collecting it"), flush=True)
 
     if waiting is not None:
-        paths.signal.unlink(missing_ok=True)
         raise SystemExit(_collect(args, ctx, paths, cfg, waiting))
 
     if not args.wait:
@@ -94,7 +93,6 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
     while time.monotonic() < deadline:
         if paths.signal.is_file():
             payload = review.read_json(paths.signal)
-            paths.signal.unlink(missing_ok=True)
             raise SystemExit(_collect(args, ctx, paths, cfg, payload))
 
         time.sleep(_POLL_SECONDS)
@@ -104,8 +102,14 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
 
 
 def _collect(args: argparse.Namespace, ctx: Context, paths, cfg, payload: dict) -> int:
-    """Act on one signal: a pause keeps everything and freezes nothing, a send finalizes the round."""
+    """Act on one signal: a pause keeps everything and freezes nothing, a send finalizes the round.
+
+    A send's signal is consumed by the finalize itself, never before it.
+    A collect that fails — an entry that no longer parses, say — then leaves the round handed back, so fixing the
+    entry and collecting again works instead of waiting for a send the maintainer already made.
+    """
     if str(payload.get("action", "send")) == "pause":
+        paths.signal.unlink(missing_ok=True)
         review.record(paths.log, "pause", round=cfg.next_round)
         print(review.console.yellow("paused: answers are kept, nothing was finalized"))
         return EXIT_PAUSED

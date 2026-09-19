@@ -1,6 +1,7 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/exception.hh>
 #include <clean-core/error/result.hh>
+#include <clean-core/memory/unique_ptr.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <clean-core/thread/async_thread_pool.hh>
@@ -529,4 +530,33 @@ TEST("async coroutine - a coroutine fan-out tree is correct on a pool")
 {
     cc::async_thread_pool pool;
     CHECK(cc::async_blocking_get_on(pool, coro_sum_tree(10)) == 1024);
+}
+
+ASYNC_TEST("async coroutine - async_take moves a move-only value out of the node")
+{
+    auto const make = []() -> cc::shared_async<cc::unique_ptr<int>> { co_return cc::make_unique<int>(42); };
+
+    auto node = make();
+    auto const keep = node; // a second handle, to observe the husk the take leaves behind
+    auto taken = co_await cc::async_take(cc::move(node));
+
+    REQUIRE(taken != nullptr);
+    CHECK(*taken == 42);
+    REQUIRE(keep->has_value());
+    CHECK(keep->value() == nullptr); // moved out, not copied
+}
+
+ASYNC_TEST("async coroutine - async_take short-circuits on a failing dependency")
+{
+    auto after_take = 0;
+    auto const co = [](int* after) -> cc::shared_async<int>
+    {
+        auto const v = co_await cc::async_take(coro_failing());
+        ++*after;
+        co_return v;
+    }(&after_take);
+
+    auto const r = co_await cc::async_as_result(co);
+    CHECK(r.has_error());
+    CHECK(after_take == 0);
 }

@@ -185,19 +185,6 @@ nx::args_builder build_cli(nx::test_schedule_config& config, cli_state& state)
               .metavar = "N",
               .validate = nx::arg::at_least(0)});
 
-    // Named apart from dev.py's own --timeout, which is a per-BINARY kill rather than a per-test deadline.
-    // The two are meant to compose: this one fires first and prints a report, and that one is the backstop for a
-    // run too stuck to reach even this.
-    args.arg({"hang-timeout"}, config.test_timeout_secs,
-             {.desc = "seconds one test may run before the run is reported as hung and fails; 0 disables it",
-              .metavar = "SECS",
-              .validate = nx::arg::at_least(0.0)});
-
-    args.arg({"hang-run-timeout"}, config.run_timeout_secs,
-             {.desc = "seconds the whole run may take before it is reported as hung and fails; 0 disables it",
-              .metavar = "SECS",
-              .validate = nx::arg::at_least(0.0)});
-
     args.group("selection");
     args.action(
         {"tests"}, [] {},
@@ -254,6 +241,11 @@ nx::args_builder build_cli(nx::test_schedule_config& config, cli_state& state)
     args.action(
         {"match-files"}, [&config] { config.mode = filter_mode::file; }, "read the filters as globs over source files");
     args.arg({"thorough"}, config.thorough, "run every test at full strength, however long that takes (nx::is_thorough)");
+    args.arg({"watchdog"}, config.watchdog_secs,
+             {.desc = "after this many seconds with no test starting or finishing, report the hung run and exit 4; 0 "
+                      "turns it off",
+              .metavar = "SECS",
+              .validate = nx::arg::at_least(0.0)});
     args.action({"match-names"}, [&config] { config.mode = filter_mode::name; }, "read the filters as test names only");
 
     args.group("recording");
@@ -318,24 +310,6 @@ cc::vector<cc::string> args_for(nx::test_declaration const& decl, nx::test_sched
 nx::test_schedule_config nx::test_schedule_config::create_from_args(int argc, char** argv)
 {
     auto config = test_schedule_config();
-
-    // A real run is watched; a hand-built config is not.
-    //
-    // The asymmetry is the same one `jobs` and `shuffle` have: a run nobody is sitting in front of — CI, above all —
-    // should turn a hang into a report rather than into a job that burns its whole budget and hands back nothing.
-    // A test that builds a schedule is not that, and a deadline there would fire on a debugger breakpoint.
-    //
-    // **Thirty seconds because dev.py kills the binary at sixty.**
-    // The two deadlines are a pair, and the order matters: the inner one has to fire first, or the outer kill takes
-    // the process before anything has said which test was stuck and what every thread was doing.
-    // A value above dev.py's would make this feature unreachable in the loop it exists for.
-    // Generous against the tests themselves either way — the whole suite runs in a few seconds.
-    config.test_timeout_secs = 30;
-
-    // Left off, because dev.py's per-binary timeout already bounds the run and two overlapping run-level caps would
-    // only disagree.
-    // A binary driven by something else can set it.
-    config.run_timeout_secs = 0;
 
     // A real run uses every core unless --jobs says otherwise, which is the opposite of the struct's own default.
     // A suite that only passes one test at a time is hiding something, and the place to find that out is the ordinary run.

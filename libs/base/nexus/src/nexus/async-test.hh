@@ -84,6 +84,9 @@ cc::shared_async<invocation_result> async_invoke_tests_impl(cc::string name,
 // The home the calling body runs in, for invocation_options::inherit_home; asserts there is one.
 [[nodiscard]] cc::thread_bound_scheduler* invoking_home();
 
+// The same, or null when the calling body runs in no home.
+[[nodiscard]] cc::thread_bound_scheduler* invoking_home_if_any();
+
 template <class... Args>
 cc::shared_async<invocation_result> async_invoke_tests_boxed(cc::string_view name,
                                                              bool in_parallel,

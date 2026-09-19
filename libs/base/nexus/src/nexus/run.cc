@@ -1,5 +1,6 @@
 #include "run.hh"
 
+#include <clean-core/common/assert.hh> // cc::impl::is_debugger_connected
 #include <clean-core/common/utility.hh>
 #include <clean-core/container/set.hh>
 #include <clean-core/container/span.hh>
@@ -17,9 +18,9 @@
 #include <nexus/args/ambient.hh>
 #include <nexus/bench/environment.hh>
 #include <nexus/bench/report.hh>
-#include <nexus/impl/hang_watchdog.hh>
 #include <nexus/impl/host_loop.hh>
 #include <nexus/impl/rec_session.hh>
+#include <nexus/impl/watchdog.hh>
 #include <nexus/tests/alias.hh>
 #include <nexus/tests/entry.hh>
 #include <nexus/tests/execute.hh>
@@ -608,11 +609,12 @@ int nx::run(int argc, char** argv)
                                    .benchmark_pinned = benchmark_pinned,
                                    .cpu_sampler = cc::make_unique<cc::process_cpu_sampler>()};
 
-    // Armed for the whole run, including the hosted path below, which stops it from its own finish callback.
-    //
-    // After the schedule is built rather than before: a deadline that covers discovery would fire on a binary that
-    // is slow to enumerate rather than on one that is stuck, and those are different problems.
-    impl::start_hang_watchdog({.per_test_secs = config.test_timeout_secs, .per_run_secs = config.run_timeout_secs});
+    // A test run only: an app, a command or an example is a program that may legitimately sit idle, and a benchmark times itself.
+    // Nor under a debugger, where a test paused at a breakpoint is not a hung one.
+    auto const is_test_run = !is_entry_run
+                          && (config.selected_bucket == nx::config::test_bucket::normal
+                              || config.selected_bucket == nx::config::test_bucket::manual);
+    auto const watchdog_secs = is_test_run && !cc::impl::is_debugger_connected() ? config.watchdog_secs : 0.0;
 
     // A host that owns the thread gets the run in steps, and the report once the last one finishes.
     // Its callbacks — a WebGPU readback, a timer — run only between steps, so a blocking run there would never see them.
@@ -624,23 +626,29 @@ int nx::run(int argc, char** argv)
             test_schedule_config config;
             run_reporting reporting;
             cc::unique_ptr<impl::test_run> run;
+            cc::unique_ptr<impl::run_watchdog> watchdog;
         };
         auto* const hosted
             = new hosted_run{.schedule = cc::move(schedule), .config = config, .reporting = cc::move(reporting)};
         hosted->run = cc::make_unique<impl::test_run>(hosted->schedule, hosted->config);
-        impl::run_in_host_loop([hosted] { return hosted->run->step(); },
-                               [hosted]
-                               {
-                                   impl::stop_hang_watchdog();
-                                   auto const code
-                                       = report_run(hosted->config, hosted->reporting, hosted->run->take_result());
-                                   delete hosted;
-                                   return code;
-                               });
+        hosted->watchdog = cc::make_unique<impl::run_watchdog>(watchdog_secs);
+        impl::run_in_host_loop(
+            [hosted]
+            {
+                // Between steps is the only moment anything runs here, so this is where a quiet run is noticed.
+                hosted->watchdog->poll();
+                return hosted->run->step();
+            },
+            [hosted]
+            {
+                auto const code = report_run(hosted->config, hosted->reporting, hosted->run->take_result());
+                delete hosted;
+                return code;
+            });
         return 0; // not reached: the host loop ends the process
     }
 
-    auto const result = execute_tests(schedule, config);
-    impl::stop_hang_watchdog();
-    return report_run(config, reporting, result);
+    auto const watchdog = impl::run_watchdog(watchdog_secs);
+
+    return report_run(config, reporting, execute_tests(schedule, config));
 }

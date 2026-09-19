@@ -129,6 +129,7 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
         text = "\n".join([*header, "\n\n".join(body), *footer])
 
     if args.finalize:
+        cfg.record_round_head(limit)
         cfg.watermark = cfg.next_round
         review.save(paths.config, cfg)
         review.write_atomic(paths.round_file(limit), text + "\n")
