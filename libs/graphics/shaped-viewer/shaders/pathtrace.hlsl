@@ -184,8 +184,10 @@ void PathTraceRayGen()
             // A ray that escapes while still inside a solid travelled an unbounded distance through it, so nothing
             // survives — no light it would cross, and no sky. It means the transmissive geometry is not closed, which
             // is an authoring fact rather than a case worth estimating.
-            if (inside && hit_t < 0.0)
-                break;
+            //
+            // Both light loops are skipped for it and the path ends below, rather than breaking here: with a `break` ahead
+            // of the two loops, WARP traces views black where they should be lit, though the logic is the same.
+            bool const escaped_inside = inside && hit_t < 0.0;
 
             // The BSDF strategy for every light a sampled ray can reach, and the camera's view of the ones it may see.
             //
@@ -201,6 +203,7 @@ void PathTraceRayGen()
             //
             // The primary ray has no next-event estimate to balance against, so it counts a light at full weight — and only
             // one the camera is meant to see, and only in front of the surface, since a camera does not see through walls.
+            if (!escaped_inside)
             {
                 uint const begin = pt_bindings::frame.path_offset[sv::light_path_area];
                 uint const end = begin + pt_bindings::frame.path_count[sv::light_path_area];
@@ -229,6 +232,7 @@ void PathTraceRayGen()
                 }
             }
 
+            if (!escaped_inside)
             {
                 uint const begin = pt_bindings::frame.path_offset[sv::light_path_distant_disc];
                 uint const end = begin + pt_bindings::frame.path_count[sv::light_path_distant_disc];
@@ -253,6 +257,9 @@ void PathTraceRayGen()
 
             if (hit_t < 0.0)
             {
+                if (escaped_inside)
+                    break;
+
                 // Escaped to the SH environment (PtMiss wrote its radiance back in `emission`). The primary ray
                 // sees the sky directly, at full weight; a bounce ray is the BSDF strategy of the hit's own
                 // environment estimate, so weight it against that sampler's uniform-hemisphere pdf.
