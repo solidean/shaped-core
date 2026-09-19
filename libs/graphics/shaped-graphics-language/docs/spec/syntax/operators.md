@@ -21,7 +21,7 @@ Back to the [phases](_index.md); the reasons are in [why/operators.md](why/opera
 | 10 | add-like `+` `-` | left | `a + b - c` |
 | 11 | mul-like `*` `/` `%` | left | `a * b / c` |
 | 12 | [application](forms.md#application) | | `cross a b` |
-| 13 | prefix and postfix operators | | `-x`, `~x` |
+| 13 | prefix and postfix operators | | `-x`, `~x`, `..x` |
 | 14 | [postfix forms](forms.md#postfix-forms): calls and member access | | `f(x).y[i]` |
 | 15 | atoms | | `x`, `1.5`, `(a, b)` |
 
@@ -52,13 +52,15 @@ Back to the [phases](_index.md); the reasons are in [why/operators.md](why/opera
 
 * **OP-6** The comparisons are exactly `<`, `<=`, `==`, `!=`, `>=` and `>`.
 * **OP-7** An operator that ends in `=` and is not a comparison is an assignment operator, whatever its first character.
-* **OP-8** The range operators are `..<` and `..=`, and `..` alone is the normal error `bare-range`.
-* **OP-9** The prefix operators are `-`, `+` and `~`.
+* **OP-8** The range operators are `..<` and `..=`, and an infix `..` alone is the normal error `bare-range`.
+* **OP-9** The prefix operators are `-`, `+`, `~` and the splat `..`.
 * **OP-10** An operator the language does not define is the normal error `unknown-operator`, and it is placed by OP-5 and OP-7.
 * **OP-11** `^` is exclusive or, and there is no exponent operator ([why](why/operators.md#op-11)).
 * **OP-12** `!` alone and every operator that starts with `?` are reserved, and they are the normal error `reserved-operator`.
 * **OP-13** `and`, `or`, `not`, `as` and `in` are **word operators**: symbols that the keyword table marks as operators.
 * **OP-14** `:`, `->` and `=>` are operators of the ladder, and they are not operator tokens.
+* **OP-30** The prefix `..` is the splat, and where it may stand is decided by the AST ([AST-28](ast.md#lists), [why](why/operators.md#op-30)).
+* **OP-31** The postfix `..` is reserved by OP-24, and it is kept free for a half-open range ([why](why/operators.md#op-31)).
 
 ```sgl
 let h = (x >> 16) ^ x
@@ -67,12 +69,19 @@ let n = -x + ~y
 count += 1
 bits <<= 2
 let f = i as float
+let wide = (..normal, 0)
 ```
 
 `!` is reserved, so the line below reports `reserved-operator`; it is written `not ready`.
 
 ```sgl error
 let waiting = !ready
+```
+
+The `..` below is a postfix operator, so the line reports `reserved-operator`; the splat is written `..normal`.
+
+```sgl error
+let wide = (normal.., 0)
 ```
 
 ## Mixing
@@ -130,6 +139,8 @@ let either = a and b or c
 | `a - b` | subtraction |
 | `foo -a` | `foo` applied to `-a` |
 | `(-a, -b)` | two negations |
+| `(..a, b)` | the splat of `a`, and `b` |
+| `(a.., b)` | `reserved-operator` |
 | `a-b` | `operator-needs-spaces`, then subtraction |
 | `a->b` and `x=>y` | `operator-needs-spaces`, then `->` and `=>` |
 | `0..<4` and `0 ..< 4` | the same range |

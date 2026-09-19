@@ -56,10 +56,9 @@ The other members carry none.
 
 Both are what the tooling mirrors into the host language ([host-code-generation.md](host-code-generation.md)).
 
-**Attributes are an open set.**
+**Attributes are an open set**, which is normative now: [AST-87 to AST-92](../syntax/ast.md#attributes).
 An attribute is validated per pair of name and node kind, in a later phase, and an unknown one is a warning.
-`@unroll` is an example of one that would go on a statement rather than a declaration.
-So the set of places an attribute may stand stays additive.
+`@unroll` is an example of one that goes on a statement rather than a declaration.
 
 ## What it touches
 
@@ -87,5 +86,4 @@ So the set of places an attribute may stand stays additive.
 * The full list of semantics besides `@position`, and how interpolation qualifiers are spelled.
 * Depth output, and a pixel stage without color targets.
 * The stages beyond vertex and pixel, several of which the terminology still marks as undecided.
-* Where the line runs between an unknown attribute, a warning, and a known attribute on a node kind that does not accept it.
-  The draft [ast.md](../syntax/ast.md) calls the second a normal error.
+* What a known attribute on a node kind that does not accept it is: the unknown one is a warning, and this one is not decided.

@@ -86,6 +86,29 @@ Each term links to the rule that defines it.
 | **ascription** | every `:` that is not the block colon: `x : int` |
 | **computes-as** | the operator `=>` |
 | **number literal** | a number assembled from fused tokens by the form phase (NUM-2) |
+| **name-free** | the AST phase never looks a name up, and keeps a neutral node where only lookup can decide (AST-2) |
+| **type position** | the right side of `:`, of `->` or of `as`; the expression there is ordinary, and the AST records the position (AST-10) |
+| **reserved name** | an identifier whose meaning is fixed, such as `self`; it is no keyword ([keywords.md](keywords.md#reserved-names)) |
+| **call spelling** | how a `call` node is written: paren, juxtaposition, infix or prefix (AST-15) |
+| **argument** | an element of a paren group in the AST: an optional name, a value, and whether it is a splat (AST-23) |
+| **object shorthand** | a bare name as an element of a curly paren literal, short for `a = a` (AST-27) |
+| **splat** | the prefix operator `..` on a whole element of a paren group: `(..normal, 0)` (AST-28) |
+| **arm** | one `pattern => result` statement of a `case` block (AST-36) |
+| **body** | a block, or the right side of an `=>` (AST-42) |
+| **pattern** | what a `let` declares: a name, `_`, or a round list of patterns (AST-44) |
+| **signature** | what follows `fun`: a name, then `[type parameters]`, `(parameters)` and `{bindings}` in this order (AST-66) |
+| **parameter** | a field in the parameters of a signature (AST-68) |
+| **binding entry** | an element of the bindings of a signature (AST-69) |
+| **signature-only** | a function without a body (AST-72) |
+| **composition short form** | `binding name = other` or `binding name = (a, b)` (AST-74) |
+| **setting** | one `name = value` line of a `sampler` block (AST-76) |
+| **member** | a statement of a `struct`, `enum` or `binding` block, or an element of a `struct_type` (AST-77) |
+| **field** | the member `name: type`, with an optional default; also what a parameter is (AST-79) |
+| **property** | the member `name => expression`: read-only, no parameter list, no keyword (AST-81) |
+| **method** | the member `fun` and a signature; an instance method when it has a receiver, and static otherwise (AST-82) |
+| **receiver** | the first parameter of a method when it is `self` or `mut self` (AST-83) |
+| **case** | a bare name as a member of an `enum`; not the keyword `case` (AST-78) |
+| **owner** | the declaration or `struct_type` a member stands in; it decides which members are allowed (AST-85) |
 | **diagnostic** | a kind, a byte span and a message (DIAG-1) |
 | **normal error** | a forbidden construct with one reasonable reading, which the tree carries (DIAG-4) |
 | **fatal error** | a construct with no reasonable reading (DIAG-6) |

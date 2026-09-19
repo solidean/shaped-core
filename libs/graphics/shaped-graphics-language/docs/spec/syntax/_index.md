@@ -16,7 +16,7 @@ bytes -> line tree -> tokens -> group tokens -> form tree -> AST
 | tokens | each line to tokens, in the mode its parent hands down | [tokens.md](tokens.md), [strings-and-comments.md](strings-and-comments.md) | `TOK`, `STR`, `CMT` |
 | group tokens | tokens to short flat runs: parentheses matched, lines folded, attributes attached | [groups.md](groups.md) | `GRP` |
 | form tree | each run to a form, by one generic precedence ladder | [forms.md](forms.md), [numbers.md](numbers.md), [operators.md](operators.md) | `FORM`, `NUM`, `OP` |
-| AST | forms to declarations, statements and expressions | [ast.md](ast.md), a draft | none yet |
+| AST | forms to declarations, statements and expressions, without looking a name up | [ast.md](ast.md) | `AST` |
 
 [diagnostics.md](diagnostics.md) defines normal and fatal errors and lists every diagnostic kind, with the ids `DIAG`.
 Each normative file has a twin of the same name in `why/` that holds the reasons, for example [why/line-tree.md](why/line-tree.md).
@@ -57,4 +57,4 @@ fun area(size: vec2) -> float:
 | tokens | line 1: `fun` `area` `(` `size` `:` `vec2` `)` `->` `float` `:`; line 2: one comment; line 3: `return` `size` `.` `x` `*` `size` `.` `y` |
 | group tokens | line 1: `fun` `area` `(…)` `->` `float`, with the children as a block; the comment is attached, not in a run |
 | form tree | keyword form `fun` with the argument `area(size : vec2) -> float` and a composite of one form: keyword form `return` with `size.x * size.y` |
-| AST | a function declaration with one parameter, a return type and one return statement |
+| AST | a function declaration with one parameter, a return type and a block of one `return` expression |

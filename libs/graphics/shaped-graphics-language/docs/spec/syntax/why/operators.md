@@ -73,3 +73,15 @@ No identifier can contain `..`, so that spelling was never at risk, and the exem
 SGL has no pointers, so nobody needs `a->b`.
 `->` and `=>` look like operators, and one rule for every arrow-shaped token is easier to hold than a list of exceptions.
 They have no prefix or postfix reading, so only the spelling that is fused on both sides is reported.
+
+## OP-30
+
+`..` already says "and the rest" in the two range operators, so the splat borrows a mark the reader knows.
+The form parser only reads it, as a prefix operator like `-`, because it does not know what a list is.
+Why it is a prefix, and why it must be a whole element, is in [AST-28](ast.md#ast-28).
+
+## OP-31
+
+A half-open range wants the spelling `a..`: `for i in 1..:` with a `break` inside reads like the ranges that have an end.
+A postfix splat would have taken exactly that spelling.
+So the postfix `..` stays reserved, and it reports `reserved-operator` like every other postfix operator until the range is decided.

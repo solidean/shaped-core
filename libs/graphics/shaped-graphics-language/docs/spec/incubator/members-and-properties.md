@@ -4,7 +4,8 @@
 
 ## The idea
 
-Enums and structs can have member functions and properties.
+Enums and structs can have methods and properties.
+How a member line is read is normative now: [ast.md](../syntax/ast.md#members), AST-77 to AST-86.
 
 ```sgl sketch
 struct vec3:
@@ -12,8 +13,8 @@ struct vec3:
     y: float
     z: float
     length => (x * x + y * y + z * z).sqrt()
-    with_length(self, l: float) => self * (l / self.length)
-    set_zero(mut self):
+    fun with_length(self, l: float) => self * (l / self.length)
+    fun set_zero(mut self):
         self.x = 0
         self.y = 0
         self.z = 0
@@ -22,45 +23,44 @@ struct vec3:
 * **A property** is a name followed by `=>` and an expression, such as `length`.
   It is read like a field, `v.length`, and computed on every read.
 * **Properties are read-only.**
-  A property is a member function with a non-`mut` `self`, and there is no setter.
-* **A member function** names its receiver as its first parameter: `self` reads, `mut self` may write.
-* **A member function without `self` is static.**
+  A property is a method with a non-`mut` `self`, and there is no setter.
+* **`fun` is mandatory on a method, and only a property is keyword-free** ([AST-82](../syntax/ast.md#members)).
+  A property is a computed field, and a method is a function like any other.
+* **A method** names its receiver as its first parameter: `self` reads, `mut self` may write.
+* **A method without `self` is static.**
   That is what "named constructors" are made of.
 
 ```sgl sketch
 struct vec3:
     ...
-    unit_x() => vec3(1, 0, 0)
+    fun unit_x() => vec3(1, 0, 0)
 
 let d = vec3.unit_x().with_length 2
 ```
 
-`self` probably wants to be a keyword as well.
+`self` is a reserved name and no keyword, so that `self.x = 0` stays an assignment ([AST-13](../syntax/ast.md#atoms)).
 
 The same property syntax is what a local binding uses to forward a member, `skymap => frame.fancy_sky` ([binding-effects.md](binding-effects.md)).
 
 ## What it touches
 
-* The keyword table: `self`.
-* The AST phase: a member line of a `struct` or `enum` block is a field, a property or a member function, told apart by its form.
+* The [reserved names](../keywords.md#reserved-names): `self`.
+* The AST phase: a member line of a `struct` or `enum` block is a field, a property or a method, told apart by its shape.
 * Name resolution: `v.length` and `v.with_length(2)` look into the type of `v`, and `vec3.unit_x()` looks into the type itself.
 * Mutability: `mut self` needs a mutable receiver at the call.
-* [Structural types](structural-types.md): the synthesized constructor takes the fields only, never properties or member functions.
+* [Structural types](structural-types.md): the synthesized constructor takes the fields only, never properties or methods.
 * [Scopes](scopes.md): a struct is an unordered scope, so members may refer to each other in any order.
 
 ## Already fixed by the syntax
 
-* `name => expr` is a computes-as form, and `name(params) => expr` is a call form on its left side: both parse today without a keyword.
-* A member line that ends in the block colon takes a block, which gives `set_zero(mut self):` its body.
+* `name => expr` is a computes-as form, so a property parses without a keyword.
+* A method is a `fun` keyword form, the same one a function at file level is, and the block colon gives `fun set_zero(mut self):` its body.
 * Member access is a form, a fused DOT and a name, so a property read and a field read are one form.
 * `mut` is a keyword already.
 
 ## Open
 
-* Whether a member function may optionally carry `fun`.
 * Whether members are in scope unqualified inside a body: `length` above reads `x`, not `self.x`.
 * Whether a property may name `self` at all, given that it has no parameter list to declare it in.
-* Whether `self` is a keyword or an ordinary parameter name with a special first position.
-* Whether binding groups may carry member functions too, beyond the forwarding properties.
 * Whether a property may be declared outside the type, as an extension in another module.
-* How a static member function and the synthesized constructor function of the same struct share one name space.
+* How a static method and the synthesized constructor function of the same struct share one name space.

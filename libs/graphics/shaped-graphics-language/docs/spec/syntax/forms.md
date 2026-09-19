@@ -86,7 +86,7 @@ let samples : array[vec3, 16]
 |---|---|
 | `f(x).y[i]` | call with `[i]` of: member `y` of: call with `(x)` of `f` |
 | `f(1)(2)[3]` | three calls in a row; a later phase may reject it |
-| `buffer[float]` | call with `[float]` of `buffer`; the AST reads type arguments or a subscript |
+| `buffer[float]` | call with `[float]` of `buffer`; the AST reads it as `index`, type arguments or a subscript ([AST-14](ast.md#atoms)) |
 
 ## Leading-dot forms
 
@@ -134,7 +134,7 @@ let z = scale (a + b) 2.0
 
 ```sgl
 let mut count = 0
-print "total:", count
+print "total: $count"
 assert count == 0, "count starts at zero"
 if count > 0:
     return count + 2
@@ -146,7 +146,7 @@ else if count < 0:
 |---|---|
 | `let mut count = 0` | assignment of `0` to: keyword form `let mut` with `count` |
 | `let x : int = 10` | assignment of `10` to: keyword form `let` with `x : int` |
-| `print "total:", count` | keyword form `print` with two arguments |
+| `assert count == 0, "zero"` | keyword form `assert` with two arguments |
 | `fun f(x: int) -> int => x + 1` | `=>` of: keyword form `fun` with `f(x: int) -> int`, and: `x + 1` |
 | `if done => return` | `=>` of: keyword form `if` with `done`, and: keyword form `return` |
 | `let k = case kind:` | assignment to `let k` of: keyword form `case` with `kind` and the block |
@@ -182,7 +182,7 @@ let a = 1; let b = 2
 |---|---|
 | `let sum = a +` | assignment to `let sum` of: `a` plus a missing form |
 | `a , b` | an error form of `a`, `,` and `b`; the comma and `b` are each reported |
-| `print a, b` | keyword form `print` with two arguments |
+| `assert a, b` | keyword form `assert` with two arguments |
 
 The right side of `+` is not there, so the line below reports `expected-expression`.
 

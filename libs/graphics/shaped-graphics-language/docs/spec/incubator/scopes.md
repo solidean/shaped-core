@@ -42,7 +42,7 @@ It applies to the names of types, functions and variables, and never to the name
 ## What it touches
 
 * Name resolution: two lookup disciplines, chosen by the kind of scope a name is looked up in.
-* The AST phase: which constructs open a scope, and of which kind.
+* The AST phase: it records declarations in source order and builds no scope ([AST-94, AST-95](../syntax/ast.md#what-the-ast-records-and-does-not-check)).
 * Diagnostics: a use before the declaration in an ordered scope, which can name the declaration further down.
 * Notation: the replacement table that is in effect is itself a matter of scope, since a `use` may bring notations in.
 

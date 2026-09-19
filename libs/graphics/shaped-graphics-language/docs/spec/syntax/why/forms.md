@@ -30,7 +30,7 @@ Because it is decided by spans, `1.max(2)`, `t.0` and `scene.lights[2].color` ne
 
 Type arguments in angle brackets are the best-known parsing problem of C++ and its descendants: `a < b > c` is a comparison chain or a template, and only name lookup can tell.
 Square brackets are already a group, so `buffer[float]` parses with no lookahead and no lookup.
-It is the same form as a subscript, and the AST tells them apart by what the head resolves to, which it knows by then.
+It is the same form as a subscript, and it stays one node in the AST, until name lookup knows what the head is ([AST-14](ast.md#ast-14)).
 `[]` also signals intent: these arguments can be deduced.
 A compile-time function called with `()` works on types too, and gets no deduction.
 
@@ -53,7 +53,7 @@ Juxtaposition calls are an experiment that is accepted from the start, and they 
 
 ## FORM-31
 
-A keyword form takes whole expressions, so `return a + 2`, `assert a == b, "msg"` and `print "total:", total` need no parentheses.
+A keyword form takes whole expressions, so `return a + 2`, `assert a == b, "msg"` and `print "total: $total"` need no parentheses.
 This is the counterweight to tight application.
 A function call by juxtaposition binds tightly, because its arguments are usually small.
 A keyword binds loosely, because what follows `return` or `if` is usually a whole expression.

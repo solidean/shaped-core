@@ -7,7 +7,7 @@ Back to the [specification](_index.md).
 
 Definitions:
 
-* `fun` - declares a function
+* `fun` - declares a function; mandatory on a method too, and only a property is keyword-free ([AST-82](syntax/ast.md#members))
 * `let` - declares a variable (TODO: or `var`?)
 * `mut` - marks a variable as mutable
 * `struct` - defines a new structure type
@@ -41,11 +41,19 @@ These never start a keyword form; they are operators of the [precedence ladder](
 
 Special support:
 
-* `assert` - assertions and test checks
-* `print` - logging, printing, errors, warnings
+* `assert` - assertions and test checks: `assert condition` or `assert condition, message`, nothing more ([AST-57](syntax/ast.md#assert-and-print))
+* `print` - logging, printing, errors, warnings: exactly one message, with interpolation for the rest ([AST-58](syntax/ast.md#assert-and-print))
 * `notation` - for "notation \phi => φ"
 
 (we could provide them as builtin functions with special parsing support BUT they are compiled out in production code so I want it to be visually clear that they are special)
+
+## Reserved names
+
+A reserved name is no keyword: the form parser reads it as an identifier, and its meaning is fixed, so no declaration may take it.
+It never starts a keyword form, so `self.x = 0` is an assignment.
+
+* `self` - the receiver of a method or a property; the AST reads it as `self_ref` ([AST-13](syntax/ast.md#atoms))
+* `true` / `false` - the two values of `bool`; the AST reads them as names, and name lookup gives them their meaning
 
 TODO:
 

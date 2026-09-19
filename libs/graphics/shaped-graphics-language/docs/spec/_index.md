@@ -57,4 +57,4 @@ The info string of a fenced example says what a test does with it.
 | `sgl sketch` | is not checked: it depends on a later phase, on planned syntax or on an open point |
 
 An example is checked through the form tree.
-The AST is a draft, so what only the AST rejects, such as interpolation, does not make an `sgl` example fail.
+What only the AST reports does not make an `sgl` example fail yet, so an example the AST rejects is an `sgl sketch`, and the sentence before it says what is reported.

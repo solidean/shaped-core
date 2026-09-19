@@ -58,7 +58,8 @@ The bet rests on the [function model](function-model.md): every function inlines
 ## Already fixed by the syntax
 
 * Type arguments are a fused square list, the same form as a subscript: `buffer[float]` and `weights[3]` parse alike.
-* The AST has one expression family, and it records which expressions stand in a type position.
+* The AST has one expression family, and it records which expressions stand in a type position ([AST-9 to AST-11](../syntax/ast.md#expressions)).
+* A curly list of `name: type` elements reads as `struct_type` ([AST-30](../syntax/ast.md#types)).
 * `[]` signals arguments a caller may omit and have deduced.
   A compile-time function that takes a type through `()` gets no deduction.
 * `->` stands only in function types and return types, so its right-hand side is always a type position.
@@ -67,7 +68,7 @@ The bet rests on the [function model](function-model.md): every function inlines
 ## Open
 
 * The exact set of normal forms: identifiers, tuples and object literals certainly, and what else.
-* How an anonymous struct type such as `{ pos: hpos4, uv: vec2 }` fits: its members are ascriptions, while `{int, int}` would be a value of types.
+* How the `struct_type` node `{pos: hpos4, uv: vec2}` fits the normal forms: its members are fields, while `{int, int}` is a value of types.
 * Whether an argument of a `[]` list is a type position, or becomes one only once the head resolves.
 * How far the partial evaluator goes: which control flow and which builtin functions it must be able to run.
 * What the diagnostic looks like when a type position does not reduce, given that the cause may sit several inlined calls away.

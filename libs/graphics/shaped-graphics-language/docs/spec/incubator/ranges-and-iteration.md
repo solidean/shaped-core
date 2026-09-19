@@ -24,7 +24,18 @@ for i in 0..<count:
     total += weight i
 ```
 
-`for <var> in <range>:` — nothing else, for now.
+`for <var> in <range>:` — nothing else, for now ([AST-54](../syntax/ast.md#loops)).
+
+**Maybe: a half-open range, `a..`.**
+A loop that counts up until something inside it says stop:
+
+```sgl sketch
+for i in 1..:
+    if converged i => break
+    refine i
+```
+
+This is the reason the postfix `a..` is kept free and the splat is the prefix `..x` ([OP-31](../syntax/operators.md#the-operator-table)).
 
 **Later: custom iterators.**
 The loop form may open up to user-defined iteration, which is what voxel tracing and grid tracing want.
@@ -34,7 +45,7 @@ Because functions inline completely ([function-model.md](function-model.md)), an
 ## What it touches
 
 * The builtin type set: `range`, and which element types it admits (integers certainly, floats for membership only).
-* The AST phase: `for` accepts exactly one `in` expression.
+* The AST phase: `for` accepts exactly one `in` expression, and `x in r` elsewhere reads as `membership`.
 * A future iterator protocol, and how a loop over one is inlined.
 
 ## Already fixed by the syntax
@@ -43,9 +54,11 @@ Because functions inline completely ([function-model.md](function-model.md)), an
 * `in` is a word operator sharing one left-associative level with `:`, `->` and `as`, so `x as int in 0..=10 : bool` reads left to right.
 * A keyword form takes whole expressions, so `for i in 0..<n:` is `for` plus the single expression `i in 0..<n`.
 * A range operator is exempt from the rule that infix operators need spaces, so `0..<4` and `0 ..< 4` are both accepted.
+* The postfix `..` is reserved, and it reports `reserved-operator` today.
 
 ## Open
 
 * Stepped and reversed ranges.
+* The half-open range `a..`: whether it exists, and what it means outside a `for`.
 * Whether `in` also tests membership in arrays or sets, or only in ranges.
 * The shape of the iterator protocol.

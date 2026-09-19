@@ -24,8 +24,10 @@ let clip : hpos4 = mvp * v.pos
 ```sgl sketch
 normal = (mvp as mat3) * v.normal
 color = color as rgba8
-normal = (normal.., 0) as vec4f16
+normal = (..normal, 0) as vec4f16
 ```
+
+The prefix `..` is the splat, which spreads the elements of `normal` into the list ([AST-28](../syntax/ast.md#lists)).
 
 **The format types are not a special mechanism.**
 `rgba8` and `vec4f16` will probably be prelude type defines, potentially `@builtin`.
@@ -56,6 +58,7 @@ The transformation hierarchy that `tg` has might be modelled later as well, inst
 
 ## Already fixed by the syntax
 
+* The splat is the prefix operator `..`, as a whole element of a paren group.
 * `as` is a word operator, and its right-hand side is a type position ([types-as-values.md](types-as-values.md)).
 * Type arguments are a fused square list, so `texture2d[rgba8]` needs nothing new.
 * A symbol may end in digits, so `float3`, `vec4f16` and `rgba8` are plain identifiers.
@@ -68,5 +71,4 @@ The transformation hierarchy that `tg` has might be modelled later as well, inst
 * What `color as rgba8` does to the value: clamp, quantize, or only retype while the target quantizes on write.
 * What arithmetic a format type has, or whether it must be converted before any use.
 * The naming scheme of the format types, and whether it follows the format names of `sg`.
-* A postfix `..` as a splat operator, as in `(normal.., 0)`.
 * Whether the transformation hierarchy of `tg` is modelled, so that `mvp * v.pos` is typed by spaces.

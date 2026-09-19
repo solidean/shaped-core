@@ -22,7 +22,7 @@ Each file has the same shape, so an idea can be picked up cold:
 | [types-as-values.md](types-as-values.md) | everything is a value, and an expression in a type position must reduce to a normal form that reads as a type |
 | [scopes.md](scopes.md) | ordered scopes such as functions, unordered ones such as structs and the root, and nested functions that capture nothing |
 | [binding-effects.md](binding-effects.md) | each `binding` is a binding group, functions list the bindings they use, and a local `binding` rebinds for a library |
-| [members-and-properties.md](members-and-properties.md) | structs and enums carry member functions and read-only properties, `self` names the receiver, and no `self` means static |
+| [members-and-properties.md](members-and-properties.md) | structs and enums carry methods and read-only properties, `self` names the receiver, and no `self` means static |
 | [stage-interfaces.md](stage-interfaces.md) | entry points by stage attribute, stage-to-stage types that must match, and attributes as an open, additive set |
 | [host-code-generation.md](host-code-generation.md) | `@vertex` and `@pixel` structs from which the tooling exports C++ vertex setup and render target definitions |
 | [modules-and-prelude.md](modules-and-prelude.md) | an optional `module` line, export by default, and a standard prelude that is added automatically |
