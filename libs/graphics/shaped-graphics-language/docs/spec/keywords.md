@@ -11,6 +11,7 @@ Definitions:
 * `const` - real constants
 * `use` - import other modules
 * `module` - declares a module
+* `type` - declares a type alias or a template arg
 
 Control flow and expressions:
 
@@ -24,6 +25,7 @@ Control flow and expressions:
 * `break` - breaks from loop iteration
 * `case` - generalized if expression
 * `as` - used for naming imports ("use our-materials as mat") and conversions "i as float"
+* `and`/`or`/`not` - logical connectives
 
 Special support:
 
