@@ -1,5 +1,10 @@
 # SGL Keywords
 
+The keyword table is data handed to the form parser ([FORM-2](syntax/forms.md#the-parser)).
+A keyword is a symbol token like any other; the table is what makes it a keyword.
+A keyword that leads a run starts a [keyword form](syntax/forms.md#keyword-forms).
+Back to the [specification](_index.md).
+
 Definitions:
 
 * `fun` - declares a function
@@ -20,13 +25,18 @@ Control flow and expressions:
 * `for` - looping
 * `while` - looping
 * `loop` - looping
-* `in` - full loop syntax is `for <var> in <a>..<b>:` where `..` is either `..<` or `..=` but never plain `..`
 * `return` - returns from a function
 * `continue` - continue next loop iteration
 * `break` - breaks from loop iteration
 * `case` - generalized if expression
-* `as` - used for naming imports ("use our-materials as mat") and conversions "i as float"
-* `and`/`or`/`not` - logical connectives
+
+Word operators:
+
+These never start a keyword form; they are operators of the [precedence ladder](syntax/operators.md#the-precedence-ladder).
+
+* `in` - membership in a range, `x in 0..<1`; the full loop syntax is `for <var> in <a>..<b>:` where `..` is either `..<` or `..=` but never plain `..`
+* `as` - names an import (`use our_materials as mat`) and converts a value (`i as float`)
+* `and` / `or` / `not` - logical connectives, one precedence level
 
 Special support:
 

@@ -103,6 +103,14 @@ One-liner per library:
   sr is also home to the **window abstraction** (`sr::window_system` / `sr::window`) — SDL3-backed, leaking no SDL into its API, feeding `sg::swapchain_description` a native handle.
   The API is always present; without a backend (SDL3 not fetched) `window_system::try_create` fails instead of the types disappearing.
   `SR_HAS_WINDOW` (1/0) says whether a backend was compiled in.
+* **`libs/graphics/shaped-graphics-language`** — SGL, our own shading language, and its whole toolchain in one library: compiler, linter, formatter, language server.
+  Today the syntactic half: bytes → line tree → tokens → group tokens → form tree, one flat lossless `sgl::parsed_file` per file.
+  **Total and local by construction**: any bytes parse to a tree plus diagnostics, and no syntax error escapes its indentation.
+  Namespace `sgl`. Depends on clean-core alone, and the syntactic half must stay that way — an editor links it to parse.
+  [docs/spec/](libs/graphics/shaped-graphics-language/docs/spec/_index.md) is the language: normative rules with stable ids under `syntax/`, every "why" mirrored under `syntax/why/`,
+  and ideas that are not spec yet under `incubator/`.
+  **Every `sgl` fence in the spec is a test**, so the spec and the parser cannot drift apart silently.
+  Early stage.
 * **`libs/graphics/shaped-viewer`** — professional, RTX-enabled visualization renderer with a dev-friendly API.
   Namespace `sv`. Depends on shaped-rendering, plus babel-serializer for the asset importer.
   A first vertical slice today: path-traced views blitted into a window, dx12 + DXR.

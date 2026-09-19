@@ -2,6 +2,10 @@
 
 Kind of like a glossary.
 We strive to be consistent with `sg`, not with any existing shader language.
+The specification uses each term in one meaning.
+Back to the [specification](_index.md).
+
+## Graphics terms
 
 * "inline constants". called push constants or root constants or SetBytes* in other apis
 * "buffer"
@@ -24,3 +28,65 @@ We strive to be consistent with `sg`, not with any existing shader language.
         * "closest_hit"
         * "any_hit"
         * "intersection"
+
+## Syntax terms
+
+Each term links to the rule that defines it.
+
+| term | meaning |
+|---|---|
+| **line tree** | the tree whose nodes are lines, built from indentation alone ([line-tree.md](syntax/line-tree.md)) |
+| **form tree** | the tree whose nodes are forms, generic and nearly independent of the language ([forms.md](syntax/forms.md)) |
+| **AST** | the interpretation of the form tree as declarations, statements and expressions ([ast.md](syntax/ast.md)) |
+| **line** | a node of the line tree: the bytes up to and with one line end |
+| **blank line** | a line that is empty or holds only spaces and tabs (LINE-6) |
+| **indentation** | the leading run of spaces and tabs of a line (LINE-7) |
+| **indentation width** | the indentation counted in columns: a space is 1, a tab advances to the next multiple of 4 (LINE-8) |
+| **parent**, **child** | the parent of a line is the nearest line above it with a smaller indentation width (LINE-11) |
+| **sibling** | a line with the same parent; the next sibling is the next one in source order |
+| **top-level line** | a line without a parent (LINE-12) |
+| **line kind** | blank, code, comment or string content (LINE-20) |
+| **mode** | how a line is tokenized: code, comment or string content (TOK-1) |
+| **token** | a span of one line with a kind; whitespace is the gap between tokens and is no token |
+| **symbol** | the one token kind for names, keywords, number parts, attributes and hash literals (TOK-12) |
+| **wildcard** | the symbol that is exactly `_` (TOK-17) |
+| **operator** | a token that is a run of operator characters, or that starts with two dots (TOK-22) |
+| **word operator** | `and`, `or`, `not`, `as`, `in`: a symbol the keyword table marks as an operator (OP-13) |
+| **fused** | a token that touches the token before it, on one line and with no whitespace between (TOK-31) |
+| **comment line** | a code line whose only token is a comment; it owns every deeper line below it (CMT-3) |
+| **documentation comment** | a comment that starts with `///` (CMT-2) |
+| **quoted literal** | a quote open, a body and a quote close, with any of the three quote characters (STR-1) |
+| **one-line string** | a quoted literal that opens and closes on one line (STR-2) |
+| **multi-line string** | a quoted literal whose opening quote ends its line and whose content is the children (STR-7) |
+| **interpolation** | `$name`, `$name.member` or `$(expr)` inside a double-quoted literal (STR-23) |
+| **tagged opener** | a quote followed by exactly one symbol and the end of the line; reserved (STR-31) |
+| **group token** | a token, or a paren group with its elements as children; the output of the grouping phase (GRP-1) |
+| **paren group** | an opener, its closer and the elements between; round, square or curly (GRP-1) |
+| **opener**, **closer** | `(` `[` `{` and `)` `]` `}`; the closing quote is the closer of an open string |
+| **run** | the flat sequence of group tokens that the form parser reads into one form |
+| **block colon** | a `:` that is the last token of its line; it makes the children a block (GRP-9) |
+| **block** | the children of a line that ends in the block colon, each a statement of its own |
+| **element line** | a child line of an open paren group: a run of elements, or the continuation of the element above (GRP-14, GRP-40) |
+| **continuation line** | a child line whose group tokens are appended to the run of its parent (GRP-24) |
+| **attribute** | a symbol that starts with `@`, with optional arguments in a fused round group (GRP-27) |
+| **form** | a node of the form tree |
+| **keyword** | a symbol that the keyword table lists (FORM-5) |
+| **identifier** | a symbol that is no keyword, number, hash literal, attribute or wildcard (FORM-8) |
+| **hash literal** | a symbol that starts with `#`, such as `#ff00bb` (FORM-7) |
+| **applied** | a paren group that is fused to a symbol, a quoted literal or a paren group before it (FORM-10) |
+| **paren literal** | a paren group that is not applied (FORM-11) |
+| **named argument** | `name = value` directly inside a paren group (FORM-15) |
+| **call** | a form and a paren group applied to it (FORM-18) |
+| **member access** | a form, a fused DOT and a name (FORM-20) |
+| **leading-dot form** | a DOT that is not fused with a name fused to it, such as `.point` (FORM-23) |
+| **application** | a head and inline arguments by juxtaposition: `f a b` (FORM-26) |
+| **keyword form** | leading keywords, comma-separated arguments and an optional block (FORM-30) |
+| **composite** | the forms of a block, in order (FORM-36) |
+| **missing form** | the form that stands where an operand was expected and none stood (FORM-40) |
+| **ascription** | every `:` that is not the block colon: `x : int` |
+| **computes-as** | the operator `=>` |
+| **number literal** | a number assembled from fused tokens by the form phase (NUM-2) |
+| **diagnostic** | a kind, a byte span and a message (DIAG-1) |
+| **normal error** | a forbidden construct with one reasonable reading, which the tree carries (DIAG-4) |
+| **fatal error** | a construct with no reasonable reading (DIAG-6) |
+| **notation** | a replacement inside symbols, applied during name lookup ([notation.md](notation.md)) |

@@ -206,6 +206,10 @@ add_subdirectory(libs/graphics/shaped-graphics)
 add_subdirectory(libs/graphics/shaped-rendering)
 add_subdirectory(libs/graphics/shaped-viewer)
 
+# shaped-graphics-language (sgl): the SGL compiler, linter and language server. The syntactic half is over clean-core
+# alone, so it sits beside the graphics stack rather than on it.
+add_subdirectory(libs/graphics/shaped-graphics-language)
+
 # shaped-shader-compiler-dxc (ssc): HLSL -> sg::compiled_shader via DXC. Windows-only, and only when
 # DXC has been built (extern/dxc adds the `dxc` target). Run `uv run extern/dxc/build-dxc.py` (dev.py
 # does this automatically) to enable it.
