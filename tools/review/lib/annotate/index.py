@@ -88,6 +88,18 @@ class RepoIndex:
                         roots.setdefault(found.relative_to(review_root).as_posix(), review_root)
         return RepoIndex(roots)
 
+    @staticmethod
+    def build_at(repo: Path, rev: str) -> RepoIndex:
+        """The tracked paths at one commit, for an entry answered while the review stood there.
+
+        Nothing is readable through it: the files are not on disk as they were, so it decides whether a reference
+        held, never where one points now.
+        """
+        try:
+            return RepoIndex({path: repo for path in Git(repo).ls_tree(rev)})
+        except Exception:  # noqa: BLE001 — as in build: an unreadable commit is an empty index, never a failed render.
+            return RepoIndex({})
+
     def looks_like_a_path(self, ref: str) -> bool:
         """Whether this is a reference at all, rather than prose that happens to hold a dot.
 

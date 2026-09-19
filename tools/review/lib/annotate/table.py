@@ -16,6 +16,7 @@ surface than a second matcher — and the table is data, so the suite asserts it
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from pathlib import Path
 
 from ..entry.answers import AnswerFile
@@ -58,7 +59,8 @@ def _referencing_text(text: str) -> list[str]:
 
 
 def build(entry: Entry, index: RepoIndex, *, answers: AnswerFile | None = None, confirm_shas=None,
-          terms: list | None = None) -> list[Token]:
+          terms: list | None = None,
+          history: Callable[[int], tuple[RepoIndex, str] | None] | None = None) -> list[Token]:
     """Every token this entry's text carries, deduplicated by literal.
 
     The maintainer's own answers are scanned too.
@@ -67,14 +69,20 @@ def build(entry: Entry, index: RepoIndex, *, answers: AnswerFile | None = None, 
 
     Each provider sees the regions its own kind belongs in.
     A path means the same thing in a code comment as in prose; a sha is safe everywhere; a term is not.
+
+    `history(round)` is the tree a finalized round was read at, with its sha, or None to judge it against the current one.
+    Text still open is scanned first, so where both name one literal the current tree decides it.
     """
-    files = FileProvider(index=index)
-    dirs = DirProvider(index=index)
+    seen_files: set[str] = set()
+    seen_dirs: set[str] = set()
     commits = CommitProvider(confirm=confirm_shas) if confirm_shas is not None else None
     glossary = GlossaryProvider(terms=terms) if terms else None
     tokens: list[Token] = []
 
-    def scan(text: str) -> None:
+    def scan(text: str, then: tuple[RepoIndex, str] | None) -> None:
+        past, rev = then if then is not None else (None, "")
+        files = FileProvider(index=index, seen=seen_files, history=past, history_rev=rev)
+        dirs = DirProvider(index=index, seen=seen_dirs, history=past, history_rev=rev)
         for fragment in _referencing_text(text):
             # Files first: a folder token is only ever the trailing-slash form, so the two cannot claim the
             # same span, and ordering them keeps the page's longest-first sort from having to break a tie.
@@ -86,16 +94,22 @@ def build(entry: Entry, index: RepoIndex, *, answers: AnswerFile | None = None, 
             # The glossary entry is skipped: underlining a definition inside its own definition says nothing.
             tokens.extend(glossary.tokens(text, skip_entry=entry.slug))
 
+    texts: list[tuple[str, int]] = []
     for block in entry.blocks:
-        scan(block.prose)
-        scan(block.head)
-        for option in block.options:
-            scan(option.label)
+        texts.append((block.prose, block.round))
+        texts.append((block.head, block.round))
+        texts.extend((option.label, block.round) for option in block.options)
     if answers is not None:
-        for answer in answers.answers.values():
-            scan(answer.text)
-        for comment in answers.comments.values():
-            scan(comment.text)
+        texts.extend((answer.text, 0 if answer.tentative else answer.round) for answer in answers.answers.values())
+        texts.extend((comment.text, 0 if comment.tentative else comment.round) for comment in answers.comments.values())
+
+    then_of = {r: (history(r) if history is not None and r else None) for _, r in texts}
+    for text, r in texts:
+        if then_of[r] is None:
+            scan(text, None)
+    for text, r in texts:
+        if then_of[r] is not None:
+            scan(text, then_of[r])
     return tokens
 
 
@@ -133,3 +147,27 @@ def glossary_problems(entries) -> list[str]:
 
 def index_for(repo: Path, review_root: Path | None = None) -> RepoIndex:
     return RepoIndex.build(repo, review_root)
+
+
+def history_for(repo: Path, cfg,
+                trees: dict[str, RepoIndex] | None = None) -> Callable[[int], tuple[RepoIndex, str] | None]:
+    """The tree each finalized round was read at, for `build(history=...)`.
+
+    None for a round still open, one that predates the record, or one read at the current head — those are judged
+    against the tree as it is now.
+    Each commit is listed once however many entries ask about it; pass `trees` to keep that across calls, which is
+    safe to keep forever since a commit's tree never changes.
+    """
+    cache: dict[str, RepoIndex] = trees if trees is not None else {}
+
+    def at(round_number: int) -> tuple[RepoIndex, str] | None:
+        if round_number > cfg.watermark:
+            return None
+        sha = cfg.head_of_round(round_number)
+        if not sha or sha == cfg.head:
+            return None
+        if sha not in cache:
+            cache[sha] = RepoIndex.build_at(repo, sha)
+        return cache[sha], sha
+
+    return at

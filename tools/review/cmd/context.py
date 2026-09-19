@@ -162,13 +162,15 @@ class Context:
         """Every file reference that does not hold, across the review.
 
         Ambiguous is always the author's to fix, by writing a longer path.
+        Text from a finalized round is judged at the head that round was read at, since the fixes it ordered move paths.
         Unresolved is one too, because the exceptions are marked rather than guessed — `new:` for a file the change
         intends to create, `old:` for one it removes.
         """
         index = review.repo_index(self.repo, paths.root)
+        history = review.round_history(self.repo, review.load(paths.config))
         problems: list[str] = []
         for entry in entries:
-            tokens = review.build_tokens(entry, index)
+            tokens = review.build_tokens(entry, index, history=history)
             problems.extend(review.token_problems(entry, tokens))
         return problems
 
