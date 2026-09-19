@@ -24,8 +24,9 @@ namespace cc
 /// pair on a path measured in nanoseconds — so this reports the work a component chose to track and says nothing
 /// about the rest, rather than pretending to a completeness it does not have.
 ///
-/// Never waits: a report must not hang on the thing it is reporting about.
+/// Never waits for the registry: a report must not hang on the thing it is reporting about.
 /// False means `f` never ran.
+/// A backlog's own counts, read through `outstanding_count()`, still take that backlog's lock.
 [[nodiscard]] bool try_for_each_async_backlog(cc::function_ref<void(async_backlog const&)> f);
 
 /// Writes every live backlog and what it still owes to stderr.

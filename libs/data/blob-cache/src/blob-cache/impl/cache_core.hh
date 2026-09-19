@@ -27,7 +27,7 @@ struct cache_core
     cc::atomic<bool> is_closed = {false};
 
     /// The stores acquire queued and nobody awaits.
-    cc::async_backlog backlog;
+    cc::async_backlog backlog = cc::async_backlog("bcache");
 
     /// False for a cache built by create_disabled(), which has no actor at all.
     bool has_actor() const { return actor != nullptr; }
