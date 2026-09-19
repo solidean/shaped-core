@@ -850,6 +850,62 @@ TEST("sv::asset_loader - a glTF's punctual lights arrive world-placed, in the un
     CHECK(sv::display_name_of(a.lights[2].id) == "bulb");
 }
 
+// What the file can say and sv cannot mean arrives as an issue, never as an assert: every id stays unique even against
+// names that already carry a suffix, a negative color is clamped, and a light of an undefined type is left out.
+TEST("sv::asset_loader - a glTF's lights import whatever their names, colors and types")
+{
+    auto lib = make_library();
+    auto const loader = sv::asset_loader({.materials = &lib});
+
+    auto const doc = babel::gltf::read(cc::string_view(R"({"asset": {"version": "2.0"},
+        "extensionsUsed": ["KHR_lights_punctual"],
+        "extensions": {"KHR_lights_punctual": {"lights": [
+            {"type": "point", "name": "a"},
+            {"type": "point", "name": "a"},
+            {"type": "point", "name": "a##1"},
+            {"type": "point"},
+            {"type": "point", "name": "light##3"},
+            {"type": "point", "name": "tinted", "color": [1, -0.5, 0.25]},
+            {"type": "area", "name": "panel", "intensity": 1000}
+        ]}},
+        "nodes": [
+            {"extensions": {"KHR_lights_punctual": {"light": 0}}},
+            {"extensions": {"KHR_lights_punctual": {"light": 1}}},
+            {"extensions": {"KHR_lights_punctual": {"light": 2}}},
+            {"extensions": {"KHR_lights_punctual": {"light": 3}}},
+            {"extensions": {"KHR_lights_punctual": {"light": 4}}},
+            {"extensions": {"KHR_lights_punctual": {"light": 5}}},
+            {"extensions": {"KHR_lights_punctual": {"light": 6}}}
+        ]})"));
+    REQUIRE(doc.has_value());
+
+    auto const asset = loader.load(doc.value(), "names.gltf");
+    REQUIRE(asset.has_value());
+    auto const& a = asset.value();
+
+    // The area light is not a light sv knows, so it is left out rather than guessed at.
+    REQUIRE(a.lights.size() == 6);
+    auto noted_type = false;
+    for (auto const& issue : a.issues)
+        noted_type = noted_type || cc::string_view(issue).find(cc::string_view("does not define")) >= 0;
+    CHECK(noted_type);
+
+    // Every id is distinct: what the documented `add_light` loop needs, since a duplicate in one layer asserts.
+    for (auto i = isize(0); i < a.lights.size(); ++i)
+        for (auto j = i + 1; j < a.lights.size(); ++j)
+            CHECK(a.lights[i].id != a.lights[j].id);
+
+    // The file's own names win, and a generated id steps past them rather than taking them.
+    CHECK(a.lights[2].id == "a##1");
+    CHECK(a.lights[4].id == "light##3");
+    CHECK(a.lights[1].id == "a##2");
+    CHECK(a.lights[3].id == "light##4");
+
+    // A negative channel is clamped to 0 rather than reaching the light's own validity check.
+    CHECK(a.lights[5].light.emission.color == tg::vec3f(1, 0, 0.25f));
+    CHECK(sv::light_problem(a.lights[5].light).empty());
+}
+
 // Unflattened, a light sits at its node's local transform, so a caller has to find its node to compose the parents —
 // which is what each node's light run is for.
 TEST("sv::asset_loader - an unflattened light is found through its node and composes to where the file put it")

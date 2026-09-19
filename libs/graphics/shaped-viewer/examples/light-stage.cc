@@ -7,9 +7,9 @@
 //   three spots   red, green and blue from three sides onto a white sphere.
 //                 Light adds, so where all three land the sphere is white, and each of its shadows is lit by the other
 //                 two — the shadows come out cyan, magenta and yellow.
-//   two neons     thin rects on the back wall, seen by the camera, and reflected in the glossy floor.
+//   two neons     thin rects on the back wall, seen by the camera.
 //   a bulb        a warm point light by the steps, falling off with the square of the distance.
-//   the moon      a small cool sun, low from the left, raking long parallel shadows off the row of posts.
+//   the moon      a small cool sun, low from the left, the dim blue fill the night sky would give.
 //
 // Every light is additive with every other, so what a region shows is the sum of what reaches it.
 // ../docs/lights.md has the design behind all of it; shaped-viewer/lights shows each kind alone, side by side.
@@ -119,7 +119,7 @@ EXAMPLE("shaped-viewer/light-stage")
         scene.add_sphere(tg::sphere3f(center, 0.75f), white);
         scene.add_sphere(tg::sphere3f(tg::pos3f(1.4f, 0.5f, -0.9f), 0.5f), chrome);
 
-        // A row of posts on the left, for the moon to rake across.
+        // A row of posts on the left, which the spots' spill picks out against the wall.
         for (auto i = 0; i < 5; ++i)
         {
             auto const x = -4.2f + 0.55f * float(i);
@@ -138,7 +138,7 @@ EXAMPLE("shaped-viewer/light-stage")
         spot_at("blue", tg::pos3f(2.6f, 3.4f, -0.8f), tg::vec3f(0.08f, 0.22f, 1.0f));
 
         // Neon strips on the back wall, facing the stage: cross(+y, +x) is -z.
-        // Visible, so they read as the tubes they are, and they are what the floor reflects.
+        // Visible, so they read as the tubes they are.
         // Dim on purpose: a few nits is already past white on two channels, and much more clips all three to white.
         scene
             .add_rect_light("neon-magenta", tg::pos3f(-2.6f, 3.3f, 3.15f), tg::vec3f(0, 0.08f, 0), tg::vec3f(1.5f, 0, 0))
@@ -153,7 +153,7 @@ EXAMPLE("shaped-viewer/light-stage")
         // A warm bulb beside the steps.
         scene.add_point_light("bulb", tg::pos3f(3.2f, 1.9f, -0.2f)).candela(6).color(tg::vec3f(1.0f, 0.62f, 0.28f));
 
-        // The moon: low from the left and a little behind, so the posts' shadows run long across the floor.
+        // The moon: low from the left and a little behind, a cool fill under the colored lights.
         // Seven times the real moon's width, which is what keeps it from speckling: a tiny disc lighting the floor at all
         // has an enormous radiance, and the rare bounce ray that escapes into it lands one bright dot.
         scene.add_sun_light("moon", tg::vec3f(1.0f, -0.42f, -0.35f), 3.5_deg_f).lux(1.2f).color(tg::vec3f(0.55f, 0.65f, 1.0f));

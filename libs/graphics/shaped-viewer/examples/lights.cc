@@ -136,10 +136,11 @@ EXAMPLE("shaped-viewer/lights")
         directional.background(studio);
         directional.add_directional_light("sun", slant).lux(2);
 
-        // Ten degrees across rather than half of one, so the penumbra is wide enough to see at this size.
+        // Sixteen degrees across rather than half of one, so the penumbra is wide enough to see at this size: the posts'
+        // shadows blur as they lengthen, where the directional panel's stay sharp.
         auto sun = panel("sun");
         sun.background(studio);
-        sun.add_sun_light("sun", slant, 10_deg_f).lux(2);
+        sun.add_sun_light("sun", slant, 16_deg_f).lux(2);
 
         // The preset hands back a sky with no sun in it and the sun beside it: set both, or half the daylight is missing.
         auto const day = sv::daylight();

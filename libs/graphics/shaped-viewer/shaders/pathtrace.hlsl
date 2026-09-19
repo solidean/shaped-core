@@ -38,6 +38,12 @@ void PathTraceRayGen()
         float3 radiance = float3(0, 0, 0);
         float prev_pdf = 0.0; // pdf of the direction the last hit sampled, for the escaped-environment MIS
 
+        // Whether the vertex this segment left ran next-event estimation, which a surface hit does and a medium scatter
+        // does not.
+        // A light the segment then reaches is weighted against that estimate only when it exists; after a scatter the
+        // phase-sampled ray is the only strategy there is and takes the full weight.
+        bool prev_did_nee = true;
+
         // What the next segment travels through: vacuum until the path refracts into a solid.
         // Tracked here rather than in the hit because what a medium does is a property of the DISTANCE travelled, and the
         // distance is not known until the segment ends.
@@ -129,6 +135,7 @@ void PathTraceRayGen()
                     // Reading it at forward scattering instead would be right only for an isotropic medium, and silently
                     // wrong for every anisotropic one.
                     prev_pdf = pt_hg_phase(dot(dir, scattered), medium_g);
+                    prev_did_nee = false;
                     dir = scattered;
 
                     ++scatters;
@@ -174,6 +181,12 @@ void PathTraceRayGen()
                 throughput *= exp(-medium_sigma_t * hit_t);
             }
 
+            // A ray that escapes while still inside a solid travelled an unbounded distance through it, so nothing
+            // survives — no light it would cross, and no sky. It means the transmissive geometry is not closed, which
+            // is an authoring fact rather than a case worth estimating.
+            if (inside && hit_t < 0.0)
+                break;
+
             // The BSDF strategy for every light a sampled ray can reach, and the camera's view of the ones it may see.
             //
             // Every rect this segment crosses counts, not only the nearest: lights are analytic and occlude nothing — a
@@ -209,14 +222,13 @@ void PathTraceRayGen()
                     }
                     else if (in_front || !sv::light_casts_shadows(light))
                     {
-                        float w = pt_mis_weight(prev_pdf, pt_light_pdf(light, t_light * t_light, cos_light));
+                        float w = prev_did_nee ? pt_mis_weight(prev_pdf, pt_light_pdf(light, t_light * t_light, cos_light))
+                                               : 1.0;
                         radiance += throughput * arriving * w;
                     }
                 }
             }
 
-            // A path still inside a solid when it escapes travelled an unbounded distance through it, and sees nothing.
-            if (!(inside && hit_t < 0.0))
             {
                 uint const begin = pt_bindings::frame.path_offset[sv::light_path_distant_disc];
                 uint const end = begin + pt_bindings::frame.path_count[sv::light_path_distant_disc];
@@ -232,18 +244,15 @@ void PathTraceRayGen()
                             radiance += throughput * light.emission;
                     }
                     else if (hit_t < 0.0 || !sv::light_casts_shadows(light))
-                        radiance += throughput * light.emission * pt_mis_weight(prev_pdf, pt_disc_pdf(light));
+                    {
+                        float w = prev_did_nee ? pt_mis_weight(prev_pdf, pt_disc_pdf(light)) : 1.0;
+                        radiance += throughput * light.emission * w;
+                    }
                 }
             }
 
             if (hit_t < 0.0)
             {
-                // A ray that escapes while still inside a solid travelled an unbounded distance through it, so nothing
-                // survives. It means the transmissive geometry is not closed, which is an authoring fact rather than a
-                // case worth estimating.
-                if (inside)
-                    break;
-
                 // Escaped to the SH environment (PtMiss wrote its radiance back in `emission`). The primary ray
                 // sees the sky directly, at full weight; a bounce ray is the BSDF strategy of the hit's own
                 // environment estimate, so weight it against that sampler's uniform-hemisphere pdf.
@@ -270,6 +279,7 @@ void PathTraceRayGen()
 
             throughput *= weight;
             prev_pdf = pdf;
+            prev_did_nee = true;
 
             // The offset follows the direction rather than the normal: a refracted continuation leaves on the far side, and
             // pushing it along +N would start it back inside the surface it just crossed.

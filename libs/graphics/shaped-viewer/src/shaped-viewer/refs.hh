@@ -179,12 +179,9 @@ public:
     /// of views is: `f.scoped_id(i)` around the body, or a `##i` suffix.
     /// Two lights with one id in one scene layer assert, since they would share whatever the renderer keeps per light.
     ///
-    /// A scene with no lights is still lit: the trace falls back to one key light rather than rendering black.
+    /// A layer with no lights is still lit: it is traced under its `fallback_light`, a sun by default, which
+    /// `fallback_light(cc::nullopt)` turns off.
     light_ref add_light(cc::string_view id, sv::light const& light);
-
-    /// The same with the path-independent half given as a designated initializer — for a caller holding the values as
-    /// data rather than building them up.
-    light_ref add_light(cc::string_view id, sv::light const& light, light_emission const& emission);
 
     /// Sugar over `add_light` with the matching `sv::light` factory; chain the setters on the result.
     light_ref add_point_light(cc::string_view id, tg::pos3f position);

@@ -147,7 +147,7 @@ referencing one glTF mesh produce ten meshes with ten transforms over a single u
 `asset_data::nodes` keeps the tree for callers who want it.
 
 **A glTF's `KHR_lights_punctual` lights land on `asset_data::lights`**, placed by the same walk and the same `flatten_hierarchy` rule as the meshes.
-Each is an `sv::light` plus the id to add it under — the file's name, or `name##i` when the name is empty or shared.
+Each is an `sv::light` plus the id to add it under — the file's name, `name##i` when shared, or `light##i` when empty, bumped past any id already taken.
 A punctual light takes only a position and a direction from its node, since the extension says its node's scale does not affect it.
 `range` is kept on the `asset_light` and not honoured by the tracer, and a cone or intensity the extension forbids is clamped; each is an issue.
 

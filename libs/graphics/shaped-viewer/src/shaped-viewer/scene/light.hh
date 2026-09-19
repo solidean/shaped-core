@@ -63,6 +63,8 @@ enum class sv::light_unit : sv::u8
 
     /// Luminous flux, the whole output in every direction — the number a bulb is sold by.
     /// Held fixed while an area light is resized, so a bigger light is softer rather than brighter.
+    /// A shaped light converts as if it were unshaped, Blender's convention: a spot's lumens are those of the whole bulb
+    /// behind its cone, and a spread rect's those of the open face, so narrowing either makes it no brighter.
     lumen,
 };
 
@@ -132,10 +134,9 @@ struct sv::distant_disc_payload
     [[nodiscard]] friend constexpr bool operator==(distant_disc_payload const&, distant_disc_payload const&) = default;
 };
 
-/// Everything about a light that does not depend on its path — a plain aggregate, so it takes designated initializers.
-///
-/// `unit` defaults to `candela`, which only a point or an area accepts: a designated emission for a distant light has
-/// to name `lux`.
+/// Everything about a light that does not depend on its path.
+/// Its unit is set by the factory to the one the path is naturally given in, and moved only by the unit setters on
+/// `sv::light`, which check it against the path.
 struct sv::light_emission
 {
     /// chromaticity, nominally in [0, 1] and must be >= 0; the brightness is `intensity`
@@ -154,6 +155,9 @@ struct sv::light_emission
     /// Whether a camera ray reaching the light sees it.
     /// Only a light with an extent — an area light or a sun — can be seen; off by default, so a softbox lights a shot
     /// without appearing in it.
+    /// It governs primary rays only: a mirror or glass shows the light whatever this says.
+    /// And lights occlude nothing, so a visible rect adds to what lies behind it rather than hiding it — a softbox seen
+    /// in front of a lit wall looks translucent.
     bool visible_to_camera = false;
 
     /// Whether geometry between the light and a surface blocks it.
@@ -187,6 +191,8 @@ public:
 
     /// A point source at `position` restricted to a cone about `direction`, in candela.
     /// The cone is glTF's: full intensity inside `inner_half_angle`, falling to zero at `outer_half_angle`.
+    /// The angles come outer first — the reverse of `cone(inner, outer)` — which is what lets `inner` default to a cone
+    /// that falls off from its axis.
     [[nodiscard]] static light spot(tg::pos3f position,
                                     tg::vec3f direction,
                                     tg::angle_f outer_half_angle,
@@ -271,7 +277,7 @@ namespace sv
 [[nodiscard]] cc::string_view light_problem(light const& l);
 
 /// The light a scene layer with no lights of its own is traced under, unless the layer turns it off.
-/// A sun from above and slightly behind, about as bright on the ground as the old overhead key light was.
+/// A dim sun from above and slightly behind.
 [[nodiscard]] light default_fallback_light();
 } // namespace sv
 
@@ -315,8 +321,8 @@ struct sv::light_gpu
     u32 flags = 0;           ///< `flag_*` bits
     tg::vec3f emission = {}; ///< the canonical quantity above, per path
     f32 cone_scale = 0;      ///< glTF's falloff scale; 0 for an unshaped light
-    tg::vec3f normal
-        = {}; ///< the placement's -Z: a rect's front face, a spot's axis, the direction a distant light travels
+    /// the placement's -Z: a rect's front face, a spot's axis, the direction a distant light travels
+    tg::vec3f normal = {};
     f32 cone_offset = 1; ///< glTF's falloff offset; 1 for an unshaped light
 
     /// distant_disc: `1 - cos` of the disc's angular radius.

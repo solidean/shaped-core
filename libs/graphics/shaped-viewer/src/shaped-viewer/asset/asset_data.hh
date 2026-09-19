@@ -62,8 +62,9 @@ struct sv::asset_node
 /// Only a position and a direction come from the node, since a punctual light is unaffected by its node's scale.
 struct sv::asset_light
 {
-    /// What to pass `add_light`: the file's own name, or `name##i` when the name is empty or shared — so every light of
-    /// one asset has its own id, and a human still reads the file's name.
+    /// What to pass `add_light`: the file's own name, `name##i` when the name is shared, or `light##i` when it is empty,
+    /// the suffix bumped past any id already taken — so every light of one asset has its own id, and a human still reads
+    /// the file's name.
     cc::string id;
 
     sv::light light;

@@ -844,8 +844,8 @@ TEST("gltf - KHR_lights_punctual lights and the nodes that place them")
     CHECK(doc.lights[2].inner_cone_angle == 0.1f);
     CHECK(doc.lights[2].outer_cone_angle == 0.4f);
 
-    // An unknown type is kept in place, so node indices stay the file's, and the substitution is on the record.
-    CHECK(doc.lights[3].type == babel::gltf::light_type::point);
+    // An unknown type is kept in place as unknown, so node indices stay the file's, and it is on the record.
+    CHECK(doc.lights[3].type == babel::gltf::light_type::unknown);
     CHECK(count_issues(doc, babel::gltf::issue_kind::malformed) == 1);
 
     // The implemented extension is not reported as dropped.
@@ -859,5 +859,11 @@ TEST("gltf - KHR_lights_punctual lights and the nodes that place them")
     // A node naming a light the file does not have is an index error, like any other.
     CHECK(babel::gltf::read(cc::string_view(R"({"asset": {"version": "2.0"},
         "nodes": [{"extensions": {"KHR_lights_punctual": {"light": 0}}}]})"))
+              .has_error());
+
+    // So is a negative one: only an absent index reads as invalid, and -2 is not absent.
+    CHECK(babel::gltf::read(cc::string_view(R"({"asset": {"version": "2.0"},
+        "extensions": {"KHR_lights_punctual": {"lights": [{"type": "point"}]}},
+        "nodes": [{"extensions": {"KHR_lights_punctual": {"light": -2}}}]})"))
               .has_error());
 }

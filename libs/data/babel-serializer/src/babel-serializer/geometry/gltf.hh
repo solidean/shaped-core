@@ -191,8 +191,11 @@ enum class babel::gltf::wrap_mode : babel::u16
 };
 
 /// A KHR_lights_punctual light's `type`.
+/// `unknown` is a type the extension does not define, or none at all; the light keeps its slot so node indices stay the
+/// file's own, and the reader records it as malformed.
 enum class babel::gltf::light_type : babel::u8
 {
+    unknown,
     directional,
     point,
     spot,
@@ -458,7 +461,7 @@ struct babel::gltf::sampler
 /// `intensity` is in candela for a point or spot and in lux for a directional light, as the extension specifies.
 struct babel::gltf::light
 {
-    light_type type = light_type::point;
+    light_type type = light_type::unknown;
 
     /// linear RGB
     tg::vec3f color = tg::vec3f(1, 1, 1);

@@ -572,7 +572,7 @@ Gotchas:
 - **A successful load with a non-empty `issues` is the normal case.** Check it before concluding you got everything the file described.
 - **glTF today maps the core metallic-roughness set plus emission.** babel does not interpret the `KHR_materials_*` extensions yet, so transmission, ior, clearcoat and sheen do not cross.
 - **glTF lights cross as `asset_data::lights`** — `{ id, light, optional range }`, world-placed like the meshes: `for (auto const& l : a.lights) scene.add_light(l.id, l.light);`
-  `id` is the file's name, or `name##i` when empty or shared; `range` is kept but not honoured, and says so in `issues`.
+  `id` is the file's name, `name##i` when shared, or `light##i` when empty (bumped past any name already taken); `range` is kept but not honoured, and says so in `issues`.
   Ids are unique within one asset only: placing it twice in a layer asserts on the duplicate unless each placement sits under its own `f.scoped_id(...)`.
   Unflattened, a light sits at its node's local transform and `asset_node::first_light` / `light_count` say which node placed it.
   A file of nothing but lights imports fine: an asset is empty only with neither meshes nor lights.
@@ -884,7 +884,6 @@ leaf.add_view("id") -> view_ref;  leaf.post_process(p);  leaf.fit(m);  leaf.samp
 scene.add_mesh(sv::mesh)    -> mesh_ref                   // geometry, attributes and textures upload here, keyed by the mesh's own hashes
 scene.add_mesh(sv::resident_mesh)         -> mesh_ref                   // already resources: nothing to look up
 scene.add_light("id", sv::light) -> light_ref               // the id is hashed under the id stack, like a view's; one id twice in a layer ASSERTS
-scene.add_light("id", light, light_emission{...})            // the path-independent half as a designated initializer
 scene.add_point_light / add_spot_light / add_rect_light / add_directional_light / add_sun_light("id", ...) -> light_ref
 scene.fallback_light(optional<light>)                        // traced when the layer has none; a sun by default, nullopt for none
 scene.background(bg) / .settings(render_settings)

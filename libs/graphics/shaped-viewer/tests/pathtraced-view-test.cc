@@ -672,6 +672,63 @@ ASYNC_INVOCABLE_TEST("sv - every kind of light delivers the illuminance its unit
     co_await cc::async_settled(sv::background_work(ctx));
 }
 
+// The same illuminance with a bounce ray in flight, for the sun, the one path whose bounce branch can escape into it.
+//
+// At one bounce the ray that would reach the sun is never traced, so the test above pins next-event estimation alone.
+// Here the floor is alone under a black sky, so a bounce off it can only escape — into the disc or into nothing — and
+// the floor's radiance is still exactly the sun's direct light, split between the two strategies.
+// The parallel light beside it has no bounce branch at all, which is what makes the comparison absolute: an error in the
+// sun's bounce weighting does not cancel against anything.
+ASYNC_INVOCABLE_TEST("sv - a sun delivers its illuminance with its bounce-ray strategy in play",
+                     (sg::context_handle const& ctx_h))
+{
+#if defined(CC_ARCH_ARM64) && defined(_WIN32)
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
+         "libs/graphics/shaped-viewer/docs/TODO.md");
+#endif
+
+    auto& ctx = *ctx_h;
+    if (auto const reason = cannot_trace(ctx); reason.has_value())
+        SKIP(reason.value());
+
+    using namespace tg::literals;
+
+    auto floor = sv_test::cornell_box{};
+    auto const white = sv::pbr_material{.base_color = tg::vec3f(0.73f, 0.73f, 0.73f), .roughness = 1.0f};
+    sv_test::cb_push_quad(floor, tg::pos3f(-5, 0, -5), tg::pos3f(-5, 0, 5), tg::pos3f(5, 0, 5), tg::pos3f(5, 0, -5),
+                          white);
+
+    auto resources = sv::gpu_resource_manager::create(ctx);
+    auto cam = sv::camera::looking_at(tg::pos3d(0, 4, -0.5), tg::pos3d(0, 0, 0));
+    cam.projection.aspect_ratio = 1.0;
+    auto scene = make_light_scene(resources, floor.positions, floor.materials, cam);
+    REQUIRE(scene.has_value());
+    scene.value().max_bounces = 2; // the second segment is the bounce ray, and it escapes
+    scene.value().samples_per_pixel = 256;
+
+    // Wide, so the bounce ray escapes into it often enough to carry a real share of the weight.
+    auto const down = tg::vec3f(0, -1, 0);
+    auto const lights = cc::vector<sv::light>{
+        sv::light::directional(down).lux(2.0f),
+        sv::light::sun(down, 60_deg_f).lux(2.0f),
+    };
+
+    auto tables = cc::vector<sv::pt_light_table>();
+    for (auto const& l : lights)
+        tables.push_back(table_of(cc::span<sv::light const>(&l, 1)));
+
+    auto const traced = trace_under(&ctx, &resources, scene.value(), tables);
+    auto const& images = co_await traced;
+    REQUIRE(images.size() == tables.size());
+
+    auto const size = scene.value().size;
+    auto const reference = mean_brightness(images[0], size, 2);
+    CHECK(reference > 0.1f);
+    CHECK(tg::abs(mean_brightness(images[1], size, 2) - reference) < 0.03f * reference);
+
+    co_await cc::async_settled(sv::background_work(ctx));
+}
+
 // One nit is one unit of the tracer's radiance, and that has to hold on both sides of it: for a surface's own emission
 // (OpenPBR's `emission_luminance`) and for an area light's `nits`.
 // Otherwise an emissive mesh and a light of the same luminance would disagree, by a constant nobody could name.

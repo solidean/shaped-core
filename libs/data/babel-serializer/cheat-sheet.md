@@ -113,7 +113,8 @@ doc.attributes;   // cc::vector<attribute>   — every primitive attribute, flat
 doc.primitives;   // cc::vector<primitive>   — flattened { first_attribute, attribute_count, indices, material, mode }
 doc.meshes; doc.nodes; doc.scenes; doc.materials; doc.textures; doc.images; doc.samplers;
 doc.lights;       // cc::vector<light> — KHR_lights_punctual, the one interpreted extension:
-                  //   { type: directional|point|spot, color, intensity (cd, or lux when directional), optional range, inner/outer_cone_angle, name }
+                  //   { type: unknown|directional|point|spot, color, intensity (cd, or lux when directional), optional range, inner/outer_cone_angle, name }
+                  //   unknown: a type the extension does not define, kept in its slot so node indices hold, and recorded as malformed
                   //   node.light names one (light_index); it points down that node's -Z, and the node's scale does not touch it
 doc.default_scene;     // scene_index; the document's `scene`
 ```

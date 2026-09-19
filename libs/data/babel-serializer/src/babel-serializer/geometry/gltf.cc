@@ -56,6 +56,13 @@ bool bool_member(json::ref obj, cc::string_view key, bool fallback = false)
     return member.is_bool() ? member.as_bool() : fallback;
 }
 
+/// Whether an optional index read by `index_member` is neither absent (-1) nor one of `count` entries.
+/// `index_member` casts any number, so a negative index other than -1 reaches validation as itself and is rejected here.
+[[nodiscard]] bool is_outside(isize raw, isize count)
+{
+    return raw < -1 || raw >= count;
+}
+
 /// A glTF cross-reference: an integer member read as a typed index, `invalid` when absent or not a number.
 template <class Index>
 Index index_member(json::ref obj, cc::string_view key)
@@ -709,8 +716,8 @@ public:
 
     /// KHR_lights_punctual's lights, which live in the document's own `extensions` rather than in a top-level array.
     ///
-    /// A light of an unknown type is kept, as a point, so the indices nodes name stay the file's own; the substitution
-    /// is on the record.
+    /// A light of an unknown type is kept as `light_type::unknown`, so the indices nodes name stay the file's own, and
+    /// is on the record; what to make of it is the caller's call.
     void parse_lights(json::ref root)
     {
         auto const lights = root["extensions"]["KHR_lights_punctual"]["lights"];
@@ -730,8 +737,7 @@ public:
             else if (type == "spot")
                 l.type = gltf::light_type::spot;
             else
-                add_issue(gltf::issue_kind::malformed,
-                          cc::format("light {}: unknown type '{}', read as a point light", i, type));
+                add_issue(gltf::issue_kind::malformed, cc::format("light {}: unknown type '{}'", i, type));
 
             l.color = vec3_member(entry, "color", tg::vec3f(1, 1, 1));
             l.intensity = float_member(entry, "intensity", 1.0f);
@@ -940,7 +946,7 @@ public:
         {
             auto const& acc = result.accessors[i];
             auto const raw = isize(int(acc.buffer_view));
-            if (raw >= view_count)
+            if (is_outside(raw, view_count))
                 return cc::error(cc::format(
                     "glTF parse error: accessor {} references bufferView {}, but the file has {}", i, raw, view_count));
             if (raw < 0)
@@ -968,11 +974,11 @@ public:
         for (auto i = isize(0); i < result.primitives.size(); ++i)
         {
             auto const& prim = result.primitives[i];
-            if (isize(int(prim.indices)) >= accessor_count)
+            if (is_outside(isize(int(prim.indices)), accessor_count))
                 return cc::error(cc::format("glTF parse error: primitive {} references index accessor {}, but the file "
                                             "has {}",
                                             i, isize(int(prim.indices)), accessor_count));
-            if (isize(int(prim.material)) >= material_count)
+            if (is_outside(isize(int(prim.material)), material_count))
                 return cc::error(cc::format("glTF parse error: primitive {} references material {}, but the file has "
                                             "{}",
                                             i, isize(int(prim.material)), material_count));
@@ -981,41 +987,41 @@ public:
         for (auto i = isize(0); i < node_count; ++i)
         {
             auto const& nod = result.nodes[i];
-            if (isize(int(nod.mesh)) >= mesh_count)
+            if (is_outside(isize(int(nod.mesh)), mesh_count))
                 return cc::error(cc::format("glTF parse error: node {} references mesh {}, but the file has {}", i,
                                             isize(int(nod.mesh)), mesh_count));
-            if (isize(int(nod.light)) >= result.lights.size())
+            if (is_outside(isize(int(nod.light)), result.lights.size()))
                 return cc::error(cc::format("glTF parse error: node {} references light {}, but the file has {}", i,
                                             isize(int(nod.light)), result.lights.size()));
         }
 
         for (auto const child : result.node_children)
-            if (isize(int(child)) >= node_count)
+            if (is_outside(isize(int(child)), node_count))
                 return cc::error(cc::format("glTF parse error: a node lists child {}, but the file has {} nodes",
                                             isize(int(child)), node_count));
 
         for (auto const root_node : result.scene_nodes)
-            if (isize(int(root_node)) >= node_count)
+            if (is_outside(isize(int(root_node)), node_count))
                 return cc::error(cc::format("glTF parse error: a scene lists node {}, but the file has {}",
                                             isize(int(root_node)), node_count));
 
-        if (isize(int(result.default_scene)) >= scene_count)
+        if (is_outside(isize(int(result.default_scene)), scene_count))
             return cc::error(cc::format("glTF parse error: `scene` is {}, but the file has {} scenes",
                                         isize(int(result.default_scene)), scene_count));
 
         for (auto i = isize(0); i < texture_count; ++i)
         {
             auto const& tex = result.textures[i];
-            if (isize(int(tex.source)) >= image_count)
+            if (is_outside(isize(int(tex.source)), image_count))
                 return cc::error(cc::format("glTF parse error: texture {} references image {}, but the file has {}", i,
                                             isize(int(tex.source)), image_count));
-            if (isize(int(tex.sampler)) >= sampler_count)
+            if (is_outside(isize(int(tex.sampler)), sampler_count))
                 return cc::error(cc::format("glTF parse error: texture {} references sampler {}, but the file has {}",
                                             i, isize(int(tex.sampler)), sampler_count));
         }
 
         for (auto i = isize(0); i < image_count; ++i)
-            if (isize(int(result.images[i].buffer_view)) >= view_count)
+            if (is_outside(isize(int(result.images[i].buffer_view)), view_count))
                 return cc::error(cc::format("glTF parse error: image {} references bufferView {}, but the file has {}",
                                             i, isize(int(result.images[i].buffer_view)), view_count));
 
@@ -1026,8 +1032,8 @@ public:
     cc::result<cc::unit> validate_texture_refs()
     {
         auto const texture_count = result.textures.size();
-        auto const check
-            = [texture_count](gltf::texture_ref const& ref) -> bool { return isize(int(ref.texture)) < texture_count; };
+        auto const check = [texture_count](gltf::texture_ref const& ref) -> bool
+        { return !is_outside(isize(int(ref.texture)), texture_count); };
 
         for (auto i = isize(0); i < result.materials.size(); ++i)
         {

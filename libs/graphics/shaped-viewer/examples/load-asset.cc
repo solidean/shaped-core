@@ -189,13 +189,11 @@ EXAMPLE("shaped-viewer/load-asset")
         // lit floor and the sky gradient.
         // And it throws the pillars' shadows toward the camera, which is what makes them read as standing on the floor
         // rather than hovering over it.
-        // The emission falls as the rect grows, which is the same constant openpbr-spheres uses: what matters is that
-        // the light dominates the sky, not that the scene is bright.
-        float const light_u = 2.0f;
-        float const light_v = 2.0f;
-        scene.add_rect_light("key", tg::pos3f(-2.4f, 7.0f, 1.0f), tg::vec3f(light_u, 0, 0), tg::vec3f(0, 0, light_v))
+        // A fixed output in lumens, so resizing the rect softens the light rather than brightening it: what matters is
+        // that the light dominates the sky, not that the scene is bright.
+        scene.add_rect_light("key", tg::pos3f(-2.4f, 7.0f, 1.0f), tg::vec3f(2, 0, 0), tg::vec3f(0, 0, 2))
             .color(tg::vec3f(1.0f, 0.97f, 0.92f))
-            .nits(90.0f / (light_u * light_v));
+            .lumens(360.0f * tg::pi<f32>);
 
         // Deliberately dim: a bright sky is a dome light, and a dome fills the space under the roof until the pillars
         // cast no shadow anyone can see.

@@ -2,6 +2,7 @@
 #include <babel-serializer/image/image.hh>
 #include <clean-core/common/utility.hh> // cc::move
 #include <clean-core/container/map.hh>
+#include <clean-core/container/set.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/string/format.hh>
 #include <shaped-viewer/asset/asset_loader.hh>
@@ -634,12 +635,18 @@ struct gltf_importer
 
     /// The file's light `index`, placed at `placement` — a position and the -Z it points down, and nothing else of it.
     ///
-    /// The extension says a node's scale does not affect its light, which is why a scaled or even sheared node is not an
-    /// issue here: the direction is normalized, and the intensity is read from the light alone.
-    /// What the extension permits and sv cannot mean — a negative intensity, a cone out of order — is clamped and noted.
+    /// The extension says a node's scale does not affect its light, so the intensity is read from the light alone and
+    /// the direction is the placement's image of -Z, normalized.
+    /// A node's own scale keeps -Z along -Z, up to sign; a parent's non-uniform scale over a rotated child skews it, and
+    /// a negative z scale flips it — both kept as they come out, which is what three.js does too.
+    /// What the extension permits and sv cannot mean — a negative intensity or color, a cone out of order — is clamped
+    /// and noted, and a light of a type sv does not know is skipped and noted.
     void emit_light(bg::light_index index, tg::affine_transform3f const& placement)
     {
-        auto const& l = *doc.find(index);
+        auto const* const found = doc.find(index);
+        if (found == nullptr)
+            return;
+        auto const& l = *found;
         auto const where = placement.transform(tg::pos3f::zero);
         auto const direction = placement.transform(tg::vec3f(0, 0, -1));
         auto const label = l.name.empty() ? cc::format("light {}", int(index)) : cc::format("light '{}'", l.name);
@@ -657,9 +664,23 @@ struct gltf_importer
             intensity = 0.0f;
         }
 
+        // Each channel held to >= 0, a NaN included, since a light emits no negative light.
+        auto color = l.color;
+        for (auto c = 0; c < 3; ++c)
+            if (!(color[c] >= 0.0f))
+                color[c] = 0.0f;
+        if (color != l.color)
+            note(cc::format("gltf: {} has color ({}, {}, {}), imported as ({}, {}, {})", label, l.color[0], l.color[1],
+                            l.color[2], color[0], color[1], color[2]));
+
         auto light = sv::light::point(where);
         switch (l.type)
         {
+        case bg::light_type::unknown:
+            // babel kept it only so node indices hold; a guess at what the file meant would be a real light nobody
+            // authored.
+            note(cc::format("gltf: {} is of a type the extension does not define, so it was not imported", label));
+            return;
         case bg::light_type::directional:
             light = sv::light::directional(direction).lux(intensity);
             break;
@@ -683,7 +704,7 @@ struct gltf_importer
             break;
         }
         }
-        light.color(l.color);
+        light.color(color);
 
         if (l.range.has_value())
             note(cc::format("gltf: {} has a range of {}, kept on the light but not honoured by the tracer", label,
@@ -692,11 +713,14 @@ struct gltf_importer
         out.lights.push_back({.id = l.name, .light = light, .range = l.range});
     }
 
-    /// Makes every light id unique within the asset: a name that is empty or shared is suffixed with the light's index in
-    /// `lights`, which keeps what a human reads while giving each its own identity.
+    /// Makes every light id unique within the asset: a name that is empty or shared becomes `name##i`, or `light##i`
+    /// for an empty one, with `i` its index in `lights` — which keeps what a human reads while giving each its own
+    /// identity.
     ///
     /// Which names are shared is settled before any is renamed, since renaming the first of two would otherwise leave the
     /// second looking unique.
+    /// A generated id can still meet a name the file already uses — `a##1` beside two `a`s — so every final id goes
+    /// into a set, and a taken one bumps its suffix until it is new.
     void disambiguate_light_ids()
     {
         auto shared = cc::vector<u8>::create_filled(out.lights.size(), u8(0));
@@ -705,12 +729,25 @@ struct gltf_importer
                 if (j != i && out.lights[j].id == out.lights[i].id)
                     shared[i] = 1;
 
+        // The names that stay as they are claim their ids first, so a generated one never takes a name the file chose.
+        auto taken = cc::set<cc::string>();
+        for (auto i = isize(0); i < out.lights.size(); ++i)
+            if (!out.lights[i].id.empty() && shared[i] == 0)
+                taken.insert(out.lights[i].id);
+
         for (auto i = isize(0); i < out.lights.size(); ++i)
         {
-            if (out.lights[i].id.empty())
-                out.lights[i].id = cc::format("light##{}", i);
-            else if (shared[i] != 0)
-                out.lights[i].id = cc::format("{}##{}", out.lights[i].id, i);
+            auto& id = out.lights[i].id;
+            if (!id.empty() && shared[i] == 0)
+                continue;
+
+            auto const base = id.empty() ? cc::string("light") : cc::string(id);
+            auto suffix = i;
+            auto candidate = cc::format("{}##{}", base, suffix);
+            while (taken.contains(candidate))
+                candidate = cc::format("{}##{}", base, ++suffix);
+            taken.insert(candidate);
+            id = cc::move(candidate);
         }
     }
 

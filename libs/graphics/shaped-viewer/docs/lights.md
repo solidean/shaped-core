@@ -15,8 +15,8 @@ scene.add_spot_light("key", tg::pos3f(0, 3, 0), tg::vec3f(0, -1, 0), 25_deg_f).c
 scene.add_rect_light("softbox", center, half_u, half_v).nits(12).spread(20_deg_f);
 scene.add_sun_light("sun", tg::vec3f(-0.3f, -1, -0.2f)).lux(110'000);
 
-// the same through the record, with the path-independent half as a designated initializer
-scene.add_light("key", sv::light::spot(p, down, 25_deg_f), {.intensity = 800, .unit = sv::light_unit::candela});
+// the same through the record, with the factory and the setters on the light itself
+scene.add_light("key", sv::light::spot(p, down, 25_deg_f).candela(800));
 ```
 
 The `shaped-viewer/lights` example puts every kind side by side over one stage — [lights.cc](../examples/lights.cc).
@@ -81,6 +81,10 @@ There is no separate `normalize` flag because the unit already says which one wa
 Units are resolved when a light is laid out for the GPU, so the shader sees one quantity per path and never a unit.
 An area light converts through its emitting area A: a Lambertian face of radiance L emits `pi * A * L` lumens, and `L * A` candela along its normal.
 
+**Lumens on a shaped light count as if it were unshaped**, Blender's convention.
+A spot's lumens are divided by `4 pi` whatever its cone, and a spread rect's by `pi * A` per face whatever its spread.
+So a spot's lumens are the whole bulb's behind the cone, and narrowing either light makes it no brighter.
+
 ## Shaping and faces
 
 A cone is not a kind of light, it is a *shaping* on one.
@@ -110,7 +114,7 @@ Nothing keeps such state yet; the id is taken now because it is one argument whi
 
 Factories are the only way to build a light, and each leaves it valid.
 A setter applies its change to a copy and commits it only once `light_problem` finds nothing, so a setter that asserts leaves the light as it was.
-`placement`, `emission` and `shaping` stay public so `light_emission` works as a designated initializer, which means a direct write can still make a light invalid.
+`placement`, `emission` and `shaping` stay public, so a direct write can still make a light invalid.
 `light_gpu::from` asserts `light_problem` too, so whichever way a light was built, an invalid one never reaches the tracer.
 `light_problem` is public, for a caller holding a light from elsewhere.
 
@@ -141,7 +145,9 @@ Two tests pin all of this.
 `sv - every kind of light traces to the sum of each alone` traces one light of each path alone and all four together.
 Light is additive, and dropping the pick from a density puts the sum off by a clear factor.
 `sv - every kind of light delivers the illuminance its unit promises` puts each path above a floor at the same illuminance and asks the floor to agree.
-That pins every unit conversion, and the sun's second strategy with it.
+That pins every unit conversion, at one bounce, where next-event estimation carries it all.
+`sv - a sun delivers its illuminance with its bounce-ray strategy in play` repeats the sun at two bounces against a parallel light.
+The parallel light has no bounce branch, so an error in the sun's bounce weighting shows there instead of cancelling.
 
 A layer with no lights of its own is traced under `layer::fallback_light`, a sun unless the layer sets another or turns it off.
 

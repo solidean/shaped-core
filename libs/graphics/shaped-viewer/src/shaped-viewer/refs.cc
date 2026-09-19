@@ -219,13 +219,6 @@ light_ref scene_ref::add_light(cc::string_view id, sv::light const& light)
     return light_ref(_frame, _view, _layer, u32(lights.size() - 1));
 }
 
-light_ref scene_ref::add_light(cc::string_view id, sv::light const& light, light_emission const& emission)
-{
-    auto l = light;
-    l.emission = emission;
-    return add_light(id, l);
-}
-
 light_ref scene_ref::add_point_light(cc::string_view id, tg::pos3f position)
 {
     return add_light(id, sv::light::point(position));
