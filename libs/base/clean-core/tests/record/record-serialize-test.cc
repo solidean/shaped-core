@@ -13,6 +13,7 @@
 #include <clean-core/record/serialize.hh>
 #include <clean-core/record/system.hh>
 #include <clean-core/record/trace.hh>
+#include <clean-core/streams/file_stream.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/thread/thread.hh>
 #include <nexus/test.hh>
@@ -268,7 +269,7 @@ REC_TEST("record/crash - the dump writes the same format, through the constraine
 
     // Exactly the path the crash handler takes, which is what makes the constrained writer testable at all rather
     // than something to find out about during a crash.
-    REQUIRE(cc::rec::write_crash_dump_now());
+    REQUIRE(cc::rec::write_dump_now(cc::rec::dump_mode::constrained).has_value());
 
     auto loaded = cc::rec::load_recording(path);
     REQUIRE(loaded.has_value());
@@ -282,6 +283,190 @@ REC_TEST("record/crash - the dump writes the same format, through the constraine
     CHECK(cc::remove_file(path));
 }
 
+namespace
+{
+/// A sink that keeps only what a test needs to assert about, so nothing here holds a dump in memory twice.
+struct counting_sink final : cc::rec::dump_sink
+{
+    isize bytes = 0;
+    bool finished = false;
+
+    bool write(cc::span<byte const> chunk) override
+    {
+        bytes += chunk.size();
+        return true;
+    }
+
+    void finish(bool) override { finished = true; }
+};
+} // namespace
+
+REC_TEST("record/crash - a quiescent dump loads like any other, with the consumer stopped first")
+{
+    rec_fixture const fixture(deterministic_config());
+
+    auto const path = cc::temp_file_path("cc-record-quiescent", ".ccrec");
+    cc::rec::install_crash_dump({.path = path, .arena_bytes = 2 << 20});
+
+    record_everything();
+    CC_RECORD_MARK("just-before-the-hang");
+
+    // The hang path.
+    // A hang is not a fault: the process is healthy except that one thread is not moving, so this may stop the
+    // consumer and close the chunk-recycling race the fault path lives with.
+    REQUIRE(cc::rec::write_dump_now(cc::rec::dump_mode::quiescent) == cc::rec::dump_mode::quiescent);
+
+    auto loaded = cc::rec::load_recording(path);
+    REQUIRE(loaded.has_value());
+
+    auto const& r = loaded.value().events();
+    CHECK(r.count("just-before-the-hang") == 1);
+    CHECK(r.scopes("outer").size() == 1);
+
+    CHECK(cc::remove_file(path));
+}
+
+REC_TEST("record/crash - a quiescent dump falls back rather than waiting on a consumer that does not yield")
+{
+    if (!threads_available())
+        SKIP("no second thread to hold the consumer busy from");
+
+    rec_fixture const fixture(deterministic_config());
+
+    // The shape it exists for: a consumer stuck in a pass, as a thread recording in a tight loop keeps it.
+    // Here a listener blocks inside the pass until released, which holds the consumer exactly as long as the test wants.
+    struct blocking_listener final : cc::rec::listener
+    {
+        void on_chunk(cc::rec::chunk_view const&) override
+        {
+            entered.store(true, cc::memory_order_release);
+            while (!released.load(cc::memory_order_acquire))
+                cc::this_thread_sleep_secs(0.001);
+        }
+        [[nodiscard]] cc::string_view listener_name() const override { return "blocking"; }
+
+        cc::atomic<bool> entered = false;
+        cc::atomic<bool> released = false;
+    };
+
+    auto const path = cc::temp_file_path("cc-record-quiescent-fallback", ".ccrec");
+    cc::rec::install_crash_dump({.path = path, .arena_bytes = 2 << 20, .consumer_pause_timeout_secs = 0.01});
+
+    blocking_listener blocker;
+    {
+        scoped_listener const registered(blocker);
+
+        CC_RECORD_MARK("while-the-consumer-is-stuck");
+        auto drainer = std::thread([] { cc::rec::flush_blocking(); });
+        while (!blocker.entered.load(cc::memory_order_acquire))
+            cc::this_thread_sleep_secs(0.001);
+
+        // Constrained, and said so: the dump did not hang, and it did not pretend the race was closed.
+        CHECK(cc::rec::write_dump_now(cc::rec::dump_mode::quiescent) == cc::rec::dump_mode::constrained);
+
+        blocker.released.store(true, cc::memory_order_release);
+        drainer.join();
+    }
+
+    auto loaded = cc::rec::load_recording(path);
+    REQUIRE(loaded.has_value());
+    CHECK(loaded.value().events().count("while-the-consumer-is-stuck") == 1);
+
+    CHECK(cc::remove_file(path));
+    cc::rec::install_crash_dump({.path = path, .arena_bytes = 2 << 20});
+}
+
+REC_TEST("record/crash - a sink of the caller's own gets the bytes a file would")
+{
+    rec_fixture const fixture(deterministic_config());
+
+    // The seam that exists for a browser, where there is no filesystem at all and what happens to a dump is the
+    // application's policy rather than clean-core's.
+    struct collecting_sink final : cc::rec::dump_sink
+    {
+        cc::vector<byte> bytes;
+        bool finished = false;
+        bool finished_ok = false;
+
+        bool write(cc::span<byte const> chunk) override
+        {
+            for (auto const b : chunk)
+                bytes.push_back(b);
+            return true;
+        }
+
+        void finish(bool ok) override
+        {
+            finished = true;
+            finished_ok = ok;
+        }
+    };
+
+    auto const path = cc::temp_file_path("cc-record-sink", ".ccrec");
+    cc::rec::install_crash_dump({.path = path, .arena_bytes = 2 << 20});
+
+    CC_RECORD_MARK("went-to-a-sink");
+
+    auto sink = collecting_sink();
+    REQUIRE(cc::rec::write_dump(sink, cc::rec::dump_mode::quiescent).has_value());
+
+    CHECK(sink.finished);
+    CHECK(sink.finished_ok);
+    REQUIRE(!sink.bytes.empty());
+
+    // **A whole dump, not merely some bytes.**
+    //
+    // Written out and loaded back, which is the only check that says the seam carries a complete file rather than a
+    // prefix of one — the failure a byte count would miss entirely.
+    {
+        auto created = cc::file_write_stream_adapter::create(path);
+        REQUIRE(created.has_value());
+
+        cc::write_stream out = created.value();
+        REQUIRE(out.write(cc::span<byte const>(sink.bytes)).has_value());
+        REQUIRE(out.flush().has_value());
+    }
+
+    auto loaded = cc::rec::load_recording(path);
+    REQUIRE(loaded.has_value());
+    CHECK(loaded.value().events().count("went-to-a-sink") == 1);
+
+    CHECK(cc::remove_file(path));
+}
+
+REC_TEST("record/crash - an installed sink takes the dump the path would have taken")
+{
+    rec_fixture const fixture(deterministic_config());
+
+    // Static because installation is process-wide and permanent -- the crash hook it rides is never removed -- so a
+    // sink that died with this test would leave a dangling one installed for whatever crashes next.
+    static auto installed_sink = counting_sink();
+    installed_sink = counting_sink();
+
+    auto const path = cc::temp_file_path("cc-record-installed-sink", ".ccrec");
+    cc::rec::install_crash_dump({.path = path, .sink = &installed_sink, .arena_bytes = 2 << 20});
+
+    CHECK(cc::rec::is_crash_dump_installed());
+
+    // The path is still reported, because it is still what was configured -- the sink is what overrides where the
+    // bytes go, not what was asked for.
+    CHECK(cc::rec::crash_dump_path() == path);
+
+    CC_RECORD_MARK("into-the-installed-sink");
+    REQUIRE(cc::rec::write_dump_now(cc::rec::dump_mode::constrained).has_value());
+
+    CHECK(installed_sink.bytes > 0);
+    CHECK(installed_sink.finished);
+
+    // Nothing asserts about the path being untouched: cc::remove_file answers "is it gone" rather than "was it
+    // there", so it cannot tell an absent file from a deleted one, and there is no existence query to use instead.
+    // What the sink received is the claim, and it is checked above.
+
+    // The sink is cleared for whatever runs next, since installation is process-wide and this one's is a static
+    // about to be reset by the next run of this test.
+    cc::rec::install_crash_dump({.path = path, .arena_bytes = 2 << 20});
+}
+
 REC_TEST("record/crash - the dump sees events no listener ever drained")
 {
     rec_fixture const fixture(deterministic_config());
@@ -293,7 +478,7 @@ REC_TEST("record/crash - the dump sees events no listener ever drained")
     // The dump reads the chunks directly, which is the whole point on a path where nothing is going to run again.
     CC_RECORD_MARK("never-drained");
 
-    REQUIRE(cc::rec::write_crash_dump_now());
+    REQUIRE(cc::rec::write_dump_now(cc::rec::dump_mode::constrained).has_value());
 
     auto loaded = cc::rec::load_recording(path);
     REQUIRE(loaded.has_value());
@@ -312,7 +497,7 @@ REC_TEST("record/crash - an arena too small truncates the dump and says so")
     cc::rec::install_crash_dump({.path = path, .arena_bytes = 4096});
 
     CC_RECORD_MARK("will-not-fit");
-    REQUIRE(cc::rec::write_crash_dump_now());
+    REQUIRE(cc::rec::write_dump_now(cc::rec::dump_mode::constrained).has_value());
 
     auto loaded = cc::rec::load_recording(path);
     REQUIRE(loaded.has_value());
@@ -462,7 +647,7 @@ REC_TEST("record/crash - a preamble's open scope survives the dump's streaming w
     cc::rec::install_crash_dump({.path = path, .arena_bytes = 2 << 20});
 
     fill_chunks_inside_a_scope();
-    REQUIRE(cc::rec::write_crash_dump_now());
+    REQUIRE(cc::rec::write_dump_now(cc::rec::dump_mode::constrained).has_value());
 
     auto loaded = cc::rec::load_recording(path);
     REQUIRE(loaded.has_value());
@@ -512,7 +697,7 @@ REC_TEST("record/crash - a dump carrying a relation is not shifted by its own ta
     CC_RECORD_RELATION(cc::rec::relation_parent_of, parent, child);
     CC_RECORD_MARK("after-the-relation");
 
-    REQUIRE(cc::rec::write_crash_dump_now());
+    REQUIRE(cc::rec::write_dump_now(cc::rec::dump_mode::constrained).has_value());
 
     auto loaded = cc::rec::load_recording(path);
     REQUIRE(loaded.has_value());
@@ -588,7 +773,7 @@ REC_TEST("record/crash - pinned bytes survive the dump's streaming writer")
         CC_RECORD_PINNED("dumped.buffer", pinned);
 
         // Still pinned when the dump runs, which is what it reads the bytes through.
-        REQUIRE(cc::rec::write_crash_dump_now());
+        REQUIRE(cc::rec::write_dump_now(cc::rec::dump_mode::constrained).has_value());
     }
 
     auto loaded = cc::rec::load_recording(path);

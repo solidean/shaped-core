@@ -181,9 +181,9 @@ def register(
     for candidate in candidates:
         existing_id = known.get(candidate.digest)
         if existing_id and (change := ledger.get(existing_id)) is not None:
-            # A superseded change is left alone: it is a record of something that WAS claimed, and re-pointing it
-            # would quietly bring it back to life.
-            if not change.superseded and change.claim != candidate.claim:
+            # A superseded or absorbed change is left alone: it is a record of something that WAS claimed, and
+            # re-pointing it would quietly bring it back to life.
+            if not change.superseded and not change.absorbed_by and change.claim != candidate.claim:
                 change.claim = candidate.claim
                 change.summary = candidate.summary
                 if candidate.body:

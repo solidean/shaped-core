@@ -10,8 +10,9 @@
 #include <shaped-graphics/backends/vulkan/vulkan_barrier.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_buffer.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh>
-#include <shaped-graphics/backends/vulkan/vulkan_format.hh> // append_block_row_copies
+#include <shaped-graphics/backends/vulkan/vulkan_format.hh> // region_row_bytes, copyable_block_rows
 #include <shaped-graphics/backends/vulkan/vulkan_texture.hh>
+#include <shaped-graphics/backends/vulkan/vulkan_texture_copy_regions.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_upload_async.hh>
 #include <shaped-graphics/resource/pixel_format.hh>
 
@@ -240,6 +241,7 @@ void vulkan_upload_async_system::signal_on_queue(vulkan_group_value const& value
         .pSignalSemaphores = &value.group->timeline,
     };
     (void)_ctx->queue_guard().lock([&](int&) { return vkQueueSubmit(_ctx->upload_queue(), 1, &submit, VK_NULL_HANDLE); });
+    note_signal_submitted(value.group->forward_waits, signal_value);
 }
 
 void vulkan_upload_async_system::settle_now(vulkan_async_upload_job& job, bool delivered)
@@ -395,9 +397,8 @@ void vulkan_upload_async_system::admit(vulkan_async_upload_job job)
     if (job.source != nullptr && _waker != nullptr)
         job.source->set_waker([waker = _waker] { waker->wake(); });
 
-    // Counted from here, and released only when the window carrying its last copy has run — so a caller that drains
-    // the context is waiting for the GPU to have the bytes, not merely for them to have been staged.
-    job.drain = _drain.start();
+    // Already counted from the moment the caller handed it over, and released only when the window carrying its last
+    // copy has run — so a caller that drains the context waits for the GPU to have the bytes, inbox included.
     _pending.push_back(cc::move(job));
 }
 
@@ -626,20 +627,27 @@ bool vulkan_upload_async_system::run_one_window()
             // validation layer to disagree with, and it reads submit-call order rather than GPU order.
             auto const range = sg::subresource_range(job.subresource);
 
-            // Which block rows of the region this chunk covers, split per depth slice it crosses.
-            auto copies = cc::vector<VkBufferImageCopy>();
-            append_block_row_copies(copies, texture->format(),
-                                    {.aspectMask = vk_aspect_mask_from(range, texture->format()),
-                                     .mipLevel = u32(job.subresource.mip_level),
-                                     .baseArrayLayer = u32(job.subresource.array_layer),
-                                     .layerCount = 1},
-                                    job.region, dst_offset / job.row_bytes, chunk_bytes / job.row_bytes,
-                                    VkDeviceSize(isize(slot) * _window_bytes));
-            // GENERAL rather than a transfer-optimal layout: it is what the direct queue put the image in,
+            // Which rows of the region this chunk covers.
+            auto const first_row = dst_offset / job.row_bytes;
+            auto const row_count = chunk_bytes / job.row_bytes;
+
+            // A row is a BLOCK row on a compressed format and rows run slice-major on a 3D one, so a run of them is
+            // not one box — see vulkan_texture_copy_regions.hh.
+            VkBufferImageCopy copies[max_copy_regions] = {};
+            auto const subresource = VkImageSubresourceLayers{.aspectMask = vk_aspect_mask_from(range, texture->format()),
+                                                              .mipLevel = u32(job.subresource.mip_level),
+                                                              .baseArrayLayer = u32(job.subresource.array_layer),
+                                                              .layerCount = 1};
+            auto const count = build_texture_copy_regions(
+                job.region, texture->description().format, first_row, row_count, job.row_bytes,
+                VkDeviceSize(isize(slot) * _window_bytes), subresource, cc::span<VkBufferImageCopy>(copies));
+
+            // GENERAL rather than a transfer-optimal layout: it is what the layout was settled to before the enqueue,
             // and one layout for both directions is what keeps a transfer of the other direction from
             // moving it — see vulkan_context::async_ready_layout.
-            vkCmdCopyBufferToImage(_window_buffers[slot], _staging, texture->_image, VK_IMAGE_LAYOUT_GENERAL,
-                                   u32(copies.size()), copies.data());
+            if (count > 0)
+                vkCmdCopyBufferToImage(_window_buffers[slot], _staging, texture->_image, VK_IMAGE_LAYOUT_GENERAL,
+                                       u32(count), copies);
         }
         else
         {
@@ -707,10 +715,15 @@ bool vulkan_upload_async_system::run_one_window()
             .signalSemaphoreCount = signal_count,
             .pSignalSemaphores = signals,
         };
+        if (job.download_wait.is_pending())
+            before_forward_wait(job.download_wait.group->forward_waits, job.download_wait.value);
+
         // Vulkan queues are externally synchronized — see vulkan_context::queue_guard.
         VkResult const r = _ctx->queue_guard().lock(
             [&](int&) { return vkQueueSubmit(_ctx->upload_queue(), 1, &submit, VK_NULL_HANDLE); });
         CC_ASSERT(r == VK_SUCCESS, "vkQueueSubmit (async upload) failed");
+        if (signal_count == 2)
+            note_signal_submitted(job.completion.group->forward_waits, job.completion.value);
 
         _window_log.note({
             .window_value = _window_next_value,
@@ -791,6 +804,7 @@ void vulkan_upload_async_system::upload_buffer(sg::raw_buffer_handle const& buff
     if (auto const pending = dst->_pending_async_download_value.load(cc::memory_order_acquire); pending != 0)
         job.download_wait = {.group = dst->_download_group, .value = pending};
 
+    job.drain = _drain.start(); // before the hand-over, so a job still in the inbox is counted too
     _actor->enqueue_message(cc::move(job));
 }
 
@@ -824,9 +838,11 @@ sg::stream_upload_handle vulkan_upload_async_system::stream_source_buffer(sg::ra
     job.sequence = _next_sequence.fetch_add(1, cc::memory_order_relaxed);
     job.completion = {.group = dst->_upload_group, .value = dst->_upload_group->reserve()};
 
-    // The streaming tier deliberately stamps only the LIFETIME value: a later command list waits on nothing, which is
-    // the guarantee it trades away for its priority.
-    // Deferred deletion still gates on it, so the buffer cannot go while a copy is queued.
+    // The streaming tier stamps the STREAM value rather than the async one, and the difference is no longer whether
+    // anything waits.
+    // A command list waits on this stamp too (vulkan_command_list.cc) and so does a readback, so what the async
+    // stamp adds is the absence of the stall warning — see promote_to_async below.
+    // Deferred deletion gates on it as well, so the buffer cannot go while a copy is queued.
     dst->_pending_stream_copy_value.store(job.completion.value, cc::memory_order_release);
     job.wait_token = sg::submission_token(dst->_last_used_submission_token.load(cc::memory_order_acquire));
     if (auto const pending = dst->_pending_async_download_value.load(cc::memory_order_acquire); pending != 0)
@@ -848,6 +864,7 @@ sg::stream_upload_handle vulkan_upload_async_system::stream_source_buffer(sg::ra
         }
     };
 
+    job.drain = _drain.start(); // before the hand-over, so a job still in the inbox is counted too
     _actor->enqueue_message(cc::move(job));
     return sg::stream_upload_handle(cc::move(control));
 }
@@ -904,6 +921,7 @@ void vulkan_upload_async_system::upload_texture(sg::raw_texture_handle const& te
     dst->_pending_async_upload_value.store(job.completion.value, cc::memory_order_release);
     job.wait_token = sg::submission_token(dst->_last_used_submission_token.load(cc::memory_order_acquire));
 
+    job.drain = _drain.start(); // before the hand-over, so a job still in the inbox is counted too
     _actor->enqueue_message(cc::move(job));
 }
 
@@ -973,6 +991,7 @@ sg::stream_upload_handle vulkan_upload_async_system::stream_source_texture(sg::r
         }
     };
 
+    job.drain = _drain.start(); // before the hand-over, so a job still in the inbox is counted too
     _actor->enqueue_message(cc::move(job));
     return sg::stream_upload_handle(cc::move(control));
 }

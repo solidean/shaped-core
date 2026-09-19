@@ -2,23 +2,30 @@
 
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/error/optional.hh>
+#include <clean-core/memory/unique_ptr.hh>
 #include <clean-core/string/string.hh>
 #include <nexus/fuzz/executed_operation.hh>
 #include <nexus/fuzz/fwd.hh>
 #include <nexus/fuzz/operation.hh>
 #include <nexus/fwd.hh>
+#include <nexus/tests/check.hh>
+#include <nexus/tests/check_divert.hh>
 #include <nexus/tests/typed_value.hh>
 
 #include <typeindex>
 
 namespace nx::fuzz::impl
 {
-/// Thrown by the engine's scoped assertion handler so a failing CC_ASSERT inside an operation
-/// unwinds into the per-operation try/catch instead of aborting the process.
-struct assertion_failure
+/// Homes a cold engine coroutine on `home`, when there is one, so sync ops it runs inline run there too.
+/// Every coroutine the awaited engine starts goes through here; an unplaced one would be an unhomed helper, and run on compute.
+template <class T>
+[[nodiscard]] cc::shared_async<T> place(cc::shared_async<T> node, cc::async_scheduler* home)
 {
-    cc::string message;
-};
+    if (home != nullptr)
+        (void)node->try_home_cold(*home);
+    return node;
+}
 } // namespace nx::fuzz::impl
 
 /// The runtime model of a fuzz test: types and operations flattened into dense, integer-indexed
@@ -36,6 +43,7 @@ struct nx::fuzz::fuzz_machine
         cc::vector<bool> arg_is_mutable;
         type_index return_type = type_index::invalid; // invalid for void
         bool is_invariant = false;
+        bool is_async = false; // returns a cc::shared_async the engine awaits
     };
 
     struct type_info
@@ -84,9 +92,41 @@ struct nx::fuzz::fuzz_machine
     /// Looks up the interned index of a runtime type, or type_index::invalid if the machine never saw it.
     [[nodiscard]] type_index index_of(std::type_index t) const;
 
-    /// Runs one step against the state.
+    /// A step whose op has been called but whose outcome is not judged yet.
+    /// It owns everything the op may still point into — the synthesized cc::random arguments and the capture sink — so it must outlive the op's work.
+    struct started_step
+    {
+        typed_value result;
+        cc::optional<execute_result> failure; // the op threw or asserted
+        nx::impl::check_capture_sink sink;
+        cc::vector<typed_value> synth;
+
+        // An async op's pending result, and the sink its work is diverted into while it is awaited.
+        // The sink is boxed because a divert holds its address.
+        cc::shared_async<typed_value> pending;
+        cc::unique_ptr<nx::impl::async_check_capture_sink> async_sink;
+    };
+
+    /// Runs one step of a synchronous op against the state: start_step then finish_step.
     /// Detects thrown exceptions, captured CHECK/REQUIRE failures, failed CC_ASSERTs and false bool invariants, mapping any of them to a failing result.
     [[nodiscard]] execute_result execute_operation(state& s, executed_operation const& exec) const;
+
+    /// The same for any op, awaiting an async one with its checks diverted off the running test.
+    /// The state and the step must outlive the returned handle, which is cold.
+    /// A non-null `home` places an async op's body there.
+    [[nodiscard]] cc::shared_async<execute_result> execute_operation_async(state& s,
+                                                                           executed_operation const& exec,
+                                                                           cc::async_scheduler* home) const;
+
+    /// Calls the step's op under the check capture and the rerouted assertion handler.
+    /// An async op is only called, not awaited: its handle is left in `pending`, placed on `home` when that is non-null.
+    [[nodiscard]] started_step start_step(state& s,
+                                          executed_operation const& exec,
+                                          cc::async_scheduler* home = nullptr) const;
+
+    /// Judges a started step and, if it passed, writes its result into the return slot.
+    /// An async step's `pending` must be resolved by then.
+    [[nodiscard]] execute_result finish_step(state& s, executed_operation const& exec, started_step& step) const;
 
     /// Checks the operation's preconditions against the prospective input slots (no mutation).
     [[nodiscard]] bool preconditions_fulfilled(state const& s, executed_operation const& exec) const;

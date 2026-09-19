@@ -48,6 +48,7 @@ class ReviewConfig:
     `base` and `head` are commit shas; `base_spec` and `head_spec` are what the user typed, kept for messages only.
     `repo` is the checkout under review, relative to the review folder when the two can be expressed that way, so moving the pair keeps it valid.
     `watermark` is the last finalized round, so the next one is `watermark + 1`.
+    `round_heads[r - 1]` is the head round `r` was read at, written when it is finalized; "" where it predates the record.
     """
 
     name: str
@@ -62,6 +63,7 @@ class ReviewConfig:
     coalesce_gap: int = 20
     run_prefixes: list[str] = field(default_factory=list)
     watermark: int = 0
+    round_heads: list[str] = field(default_factory=list)
     tool_version: int = TOOL_VERSION
     created: str = ""
     title: str = ""
@@ -79,6 +81,33 @@ class ReviewConfig:
     @property
     def next_round(self) -> int:
         return self.watermark + 1
+
+    def head_of_round(self, round_number: int) -> str:
+        """The head a finalized round was read at, or "" when the review never recorded it."""
+        if 1 <= round_number <= len(self.round_heads):
+            return self.round_heads[round_number - 1]
+        return ""
+
+    def record_round_head(self, round_number: int) -> None:
+        """Pin the current head as the one `round_number` was read at, as that round is finalized."""
+        heads = self.round_heads[: round_number - 1]
+        heads.extend([""] * (round_number - 1 - len(heads)))
+        self.round_heads = [*heads, self.head]
+
+    def backfill_round_heads(self, known: dict[int, str]) -> bool:
+        """Fill every finalized round recorded as "" from `known`, and report whether anything changed.
+
+        Only a blank is filled: a head recorded when its round was finalized is the record, and outranks a recovery.
+        """
+        changed = False
+        heads = list(self.round_heads) + [""] * max(0, self.watermark - len(self.round_heads))
+        for round_number in range(1, self.watermark + 1):
+            if not heads[round_number - 1] and known.get(round_number):
+                heads[round_number - 1] = known[round_number]
+                changed = True
+        if changed:
+            self.round_heads = heads
+        return changed
 
     def require_changeset(self) -> None:
         if not self.has_changeset:
@@ -131,8 +160,10 @@ def dump(cfg: ReviewConfig) -> str:
         _emit("context", cfg.context),
         _emit("coalesce_gap", cfg.coalesce_gap),
         "",
-        "# The last finalized round.",
+        "# The last finalized round, and the head each finalized round was read at.",
+        "# An answered entry names paths as they were then, so its references resolve against that head.",
         _emit("watermark", cfg.watermark),
+        _emit("round_heads", cfg.round_heads),
     ]
     for key, value in sorted(cfg.extra.items()):
         lines.append(_emit(key, value))
@@ -143,7 +174,7 @@ _KNOWN = {
     "name", "title", "goals", "created", "tool_version",
     "repo", "upstream",
     "base", "head", "base_spec", "head_spec",
-    "context", "coalesce_gap", "watermark", "run_prefixes",
+    "context", "coalesce_gap", "watermark", "round_heads", "run_prefixes",
 }
 
 
@@ -183,6 +214,7 @@ def load(path: Path) -> ReviewConfig:
         coalesce_gap=int(raw.get("coalesce_gap", 20)),
         run_prefixes=[str(p) for p in raw.get("run_prefixes", [])],
         watermark=int(raw.get("watermark", 0)),
+        round_heads=[str(h) for h in raw.get("round_heads", [])],
         tool_version=version,
         created=str(raw.get("created", "")),
         extra={k: v for k, v in raw.items() if k not in _KNOWN},

@@ -99,6 +99,12 @@ struct nx::test_schedule_config
     // worth paying to be able to ask what a test recorded, and worth skipping when timing the tests themselves.
     bool no_recording = false;
 
+    // --watchdog SECS: after this long with no test starting or finishing, the run is reported as hung and exits with code 4.
+    // The report names the running tests, every thread's stack and open scopes, and outstanding tracked work, and writes the recording.
+    // 0 turns it off.
+    // A test run gets it; an app, command, example or benchmark does not, and neither does a run under a debugger.
+    double watchdog_secs = 60.0;
+
     // The run seed every test's seed derives from, and whether this run shuffles its order by it.
     // A real run draws the seed from the clock unless --seed pins it, prints it first, and shuffles both the schedule and every invocation's children.
     // A hand-built config keeps schedule and match order, for the same reason `jobs` defaults to 1 here.

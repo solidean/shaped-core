@@ -226,7 +226,7 @@ private:
     cc::vector<package_entry> _packages;
 
     /// Mutable because compiling is const, and tracking what it handed out changes nothing a caller can observe.
-    mutable cc::async_backlog _backlog;
+    mutable cc::async_backlog _backlog = cc::async_backlog("slib.shader_library");
 
     /// The reload watcher's actor, the flag that tells a sleeping poll loop to give up, and the wake a filesystem notification comes in through.
     /// Both are shared because the actor owns the impl and only hands it back once it has stopped.

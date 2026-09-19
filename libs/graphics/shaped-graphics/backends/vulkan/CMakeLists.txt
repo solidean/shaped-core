@@ -11,6 +11,7 @@ add_library(shaped-graphics-vulkan
     src/shaped-graphics/backends/vulkan/vulkan_descriptor_heap.cc
     src/shaped-graphics/backends/vulkan/vulkan_epoch.cc
     src/shaped-graphics/backends/vulkan/vulkan_completion_group.cc
+    src/shaped-graphics/backends/vulkan/vulkan_forward_waits.cc
     src/shaped-graphics/backends/vulkan/vulkan_query.cc
     src/shaped-graphics/backends/vulkan/vulkan_command_list.queries.cc
     src/shaped-graphics/backends/vulkan/vulkan_download_async.cc
@@ -53,6 +54,7 @@ target_sources(shaped-graphics-vulkan
     src/shaped-graphics/backends/vulkan/vulkan_descriptor_functions.hh
     src/shaped-graphics/backends/vulkan/vulkan_descriptor_heap.hh
     src/shaped-graphics/backends/vulkan/vulkan_epoch.hh
+    src/shaped-graphics/backends/vulkan/vulkan_forward_waits.hh
     src/shaped-graphics/backends/vulkan/vulkan_command_list.hh
     src/shaped-graphics/backends/vulkan/vulkan_barrier.hh
     src/shaped-graphics/backends/vulkan/vulkan_binding_group_layout.hh
@@ -151,6 +153,8 @@ if(SC_BUILD_TESTS)
         tests/vulkan-barrier-test.cc
         tests/vulkan-buffer-access-test.cc
         tests/vulkan-concurrent-lists-test.cc
+        tests/vulkan-copy-regions-test.cc
+        tests/vulkan-forward-waits-test.cc
         tests/vulkan-compute-test.cc
         tests/vulkan-entry.cc
         tests/vulkan-raster-test.cc

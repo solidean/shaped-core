@@ -726,6 +726,21 @@ template <class F>
     return impl::async_make_run_on_awaiter(cc::make_async_lazy_on(home, cc::forward<F>(f)));
 }
 
+/// Await `a` and MOVE its value out, where a plain `co_await a` hands back a reference into the node.
+/// The awaited form of cc::into_result: it is how a move-only value leaves a node, and it needs a handle nobody else reads.
+/// Any other live handle to the node afterwards reads a moved-from value.
+/// A failing `a` short-circuits this coroutine, as a plain await does.
+///
+///   auto mesh = co_await cc::async_take(load_mesh(path)); // mesh is a value, not a reference into the node
+template <class U>
+[[nodiscard]] impl::async_awaiter_run_on<U> async_take(shared_async<U> a)
+{
+    static_assert(!std::is_const_v<U>, "async_take MOVES the value out, which a read-only async<T const> does not "
+                                       "allow");
+    CC_ASSERT(a != nullptr, "cannot take from a null async");
+    return impl::async_make_run_on_awaiter(cc::move(a));
+}
+
 /// Fail this coroutine's node.
 /// The uniform failure spelling — a cc::unit coroutine has no `co_return cc::error(...)`, because return_void and return_value cannot coexist.
 template <class X>

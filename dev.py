@@ -48,6 +48,7 @@ from tools.dev.cmd import (  # noqa: E402
     pgo,
     profiling,
     run,
+    symbolize,
     test,
     test_web,
 )
@@ -72,6 +73,7 @@ COMMANDS = [
     diagnose,
     info,
     assembly,
+    symbolize,
     profiling,
     deps,
     doctor,

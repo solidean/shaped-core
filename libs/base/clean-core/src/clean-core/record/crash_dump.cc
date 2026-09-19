@@ -3,8 +3,10 @@
 #include <clean-core/common/time.hh>
 #include <clean-core/common/utility.hh>
 #include <clean-core/error/crash_handler.hh>
+#include <clean-core/error/optional.hh>
 #include <clean-core/platform/module_table.hh>
 #include <clean-core/record/chunk.hh>
+#include <clean-core/record/impl/published_blocks.hh>
 #include <clean-core/record/impl/serialized_format.hh>
 #include <clean-core/record/impl/system_state.hh>
 #include <clean-core/record/impl/thread_state.hh>
@@ -24,10 +26,12 @@ constexpr isize max_path_bytes = 1024;
 struct installed_dump
 {
     bool is_installed = false;
+    cc::rec::dump_sink* sink = nullptr;
     char path[max_path_bytes] = {};
     isize path_length = 0;
     isize max_event_bytes = 0;
     bool seal_calling_thread = true;
+    double consumer_pause_timeout_secs = 1.0;
 
     /// Reserved at install time.
     /// Everything the builder needs comes out of this.
@@ -40,6 +44,47 @@ struct installed_dump
 };
 
 installed_dump g_dump;
+
+/// The sink `crash_dump_options::path` stands for.
+///
+/// Opened on first write rather than at install time: a handle held for the life of the process would be one more
+/// thing a crash could be holding, and the open is a syscall the fault path can afford.
+struct file_sink final : cc::rec::dump_sink
+{
+    explicit file_sink(cc::string_view path) : _path(path) {}
+
+    bool write(cc::span<byte const> bytes) override
+    {
+        if (!_opened)
+        {
+            _opened = true;
+            auto opened = cc::impl::native_file::open(_path, cc::impl::file_mode::write_truncate);
+            if (opened.has_error())
+                return false;
+            _file = cc::move(opened.value());
+            _is_open = true;
+        }
+
+        if (!_is_open)
+            return false;
+
+        isize written = 0;
+        while (written < bytes.size())
+        {
+            auto n = _file.write(cc::span<byte const>(bytes.data() + written, bytes.size() - written));
+            if (n.has_error() || n.value() <= 0)
+                return false;
+            written += n.value();
+        }
+        return true;
+    }
+
+private:
+    cc::string_view _path;
+    cc::impl::native_file _file;
+    bool _opened = false;
+    bool _is_open = false;
+};
 
 /// The stack buffer a pointer-carrying payload is patched through.
 /// The events that need it are small — a preamble is forty bytes, a literal value sixteen — and one that somehow
@@ -62,60 +107,8 @@ constexpr isize pointer_scratch_bytes = 256;
     return false;
 }
 
-/// Writes `bytes` in full, looping over short writes.
-bool write_all(cc::impl::native_file& file, cc::span<byte const> bytes)
-{
-    isize written = 0;
-    while (written < bytes.size())
-    {
-        auto n = file.write(cc::span<byte const>(bytes.data() + written, bytes.size() - written));
-        if (n.has_error() || n.value() <= 0)
-            return false;
-        written += n.value();
-    }
-    return true;
-}
-
-/// Walks one thread's chunk queue, offering every published block to `f`.
-///
-/// Reads only up to each chunk's committed watermark, which is release-stored after the bytes it covers.
-/// So a live thread can never hand back a torn event, and none of this needs the thread stopped.
-void for_each_published_block(cc::rec::impl::thread_state const& ts, cc::function_ref<bool(cc::rec::chunk_view const&)> f)
-{
-    auto const info = cc::rec::thread_info{.id = ts.tid, .index = ts.index, .name = cc::string_view(ts.name)};
-
-    for (auto const* c = ts.queue_head.load(cc::memory_order_acquire); c != nullptr;
-         c = c->next_in_thread.load(cc::memory_order_acquire))
-    {
-        auto const committed = c->committed.load(cc::memory_order_acquire);
-        if (committed == 0)
-            continue;
-
-        // The seal pair is plain memory, published by the release store on `is_sealed`, so reading it from a live
-        // chunk races the owner writing it.
-        // A live chunk therefore reports zero, which event_view's interpolation already reads as "only the base pair
-        // is known".
-        auto const is_sealed = c->is_sealed.load(cc::memory_order_acquire);
-
-        auto const view = cc::rec::chunk_view{
-            .source = c,
-            .thread = info,
-            .bytes = cc::span<byte const>(c->data, isize(committed)),
-            .chunk_seq = c->seq,
-            .layer = c->layer,
-            .base_cycles = c->base_cycles,
-            .base_wall_secs = c->base_wall_secs,
-            .seal_cycles = is_sealed ? c->seal_cycles : 0,
-            .seal_wall_secs = is_sealed ? c->seal_wall_secs : 0,
-        };
-
-        if (!f(view))
-            return;
-    }
-}
-
 /// The whole dump, allocation-free from here down.
-bool write_dump()
+bool write_dump_to(cc::rec::dump_sink& sink)
 {
     if (!g_dump.is_installed || !cc::rec::is_initialized())
         return false;
@@ -138,37 +131,30 @@ bool write_dump()
     auto const walked = cc::rec::impl::try_for_each_thread_state(
         [&](cc::rec::impl::thread_state& ts)
         {
-            for_each_published_block(ts,
-                                     [&](cc::rec::chunk_view const& view)
-                                     {
-                                         if (event_bytes + view.bytes.size() > g_dump.max_event_bytes)
-                                             return false;
-                                         if (!builder.add_block(view))
-                                             return false;
-                                         event_bytes += view.bytes.size();
-                                         return true;
-                                     });
+            cc::rec::impl::for_each_published_block(ts,
+                                                    [&](cc::rec::chunk_view const& view)
+                                                    {
+                                                        if (event_bytes + view.bytes.size() > g_dump.max_event_bytes)
+                                                            return false;
+                                                        if (!builder.add_block(view))
+                                                            return false;
+                                                        event_bytes += view.bytes.size();
+                                                        return true;
+                                                    });
         });
     if (!walked)
         return false;
 
     auto const parts = builder.finish();
 
-    auto file = cc::impl::native_file::open(cc::string_view(g_dump.path, g_dump.path_length),
-                                            cc::impl::file_mode::write_truncate);
-    if (file.has_error())
-        return false;
-
     auto const header_bytes
         = cc::span<byte const>(reinterpret_cast<byte const*>(&parts.header), isize(sizeof(parts.header)));
     // Every section finish() laid out, in the order it laid them out.
     // The relation table was missing here, which was invisible for as long as no dump contained a relation event and
     // silently shifted every section after `units` the moment one did.
-    if (!write_all(file.value(), header_bytes) || !write_all(file.value(), parts.strings)
-        || !write_all(file.value(), parts.domains) || !write_all(file.value(), parts.units)
-        || !write_all(file.value(), parts.relations) || !write_all(file.value(), parts.fields)
-        || !write_all(file.value(), parts.descs) || !write_all(file.value(), parts.threads)
-        || !write_all(file.value(), parts.modules) || !write_all(file.value(), parts.blocks))
+    if (!sink.write(header_bytes) || !sink.write(parts.strings) || !sink.write(parts.domains) || !sink.write(parts.units)
+        || !sink.write(parts.relations) || !sink.write(parts.fields) || !sink.write(parts.descs)
+        || !sink.write(parts.threads) || !sink.write(parts.modules) || !sink.write(parts.blocks))
         return false;
 
     // The event bytes go out straight from the chunks, with the descriptor pointer in each header rewritten into its
@@ -190,8 +176,7 @@ bool write_dump()
             auto const index = builder.desc_index_of_pointer(original);
             header.desc = reinterpret_cast<cc::rec::desc const*>(uintptr_t(index));
 
-            if (!write_all(file.value(),
-                           cc::span<byte const>(reinterpret_cast<byte const*>(&header), isize(sizeof(header)))))
+            if (!sink.write(cc::span<byte const>(reinterpret_cast<byte const*>(&header), isize(sizeof(header)))))
                 return false;
 
             auto const rest = cc::rec::impl::event_bytes_for(payload) - isize(sizeof(header));
@@ -209,10 +194,10 @@ bool write_dump()
 
                 cc::memcpy(scratch, payload_bytes, size_t(rest));
                 builder.rewrite_payload_pointers(*original, cc::span<byte>(scratch, payload));
-                if (!write_all(file.value(), cc::span<byte const>(scratch, rest)))
+                if (!sink.write(cc::span<byte const>(scratch, rest)))
                     return false;
             }
-            else if (rest > 0 && !write_all(file.value(), cc::span<byte const>(payload_bytes, rest)))
+            else if (rest > 0 && !sink.write(cc::span<byte const>(payload_bytes, rest)))
                 return false;
 
             offset += isize(sizeof(header)) + rest;
@@ -224,16 +209,29 @@ bool write_dump()
     for (isize i = 0; i < builder.blob_count(); ++i)
     {
         auto const blob = builder.blob_at(i);
-        if (!write_all(file.value(), cc::span<byte const>(blob.data, isize(blob.size))))
+        if (!sink.write(cc::span<byte const>(blob.data, isize(blob.size))))
             return false;
     }
 
     return true;
 }
 
+/// The installed destination: the caller's sink, or a file at the installed path.
+///
+/// The file sink is a local rather than a member, so nothing holds a handle between dumps.
+cc::optional<cc::rec::dump_mode> write_dump_through_installed(cc::rec::dump_mode mode)
+{
+    if (!g_dump.is_installed)
+        return {};
+
+    auto file = file_sink(cc::string_view(g_dump.path, g_dump.path_length));
+    return cc::rec::write_dump(g_dump.sink != nullptr ? *g_dump.sink : static_cast<cc::rec::dump_sink&>(file), mode);
+}
+
 void crash_hook() noexcept
 {
-    (void)write_dump();
+    // A fault, so the constrained path: no waiting, and the consumer left running.
+    (void)write_dump_through_installed(cc::rec::dump_mode::constrained);
 }
 } // namespace
 
@@ -246,8 +244,10 @@ void cc::rec::install_crash_dump(cc::rec::crash_dump_options const& options)
         g_dump.path[i] = options.path[i];
     g_dump.path[g_dump.path_length] = '\0';
 
+    g_dump.sink = options.sink;
     g_dump.max_event_bytes = options.max_event_bytes;
     g_dump.seal_calling_thread = options.seal_calling_thread;
+    g_dump.consumer_pause_timeout_secs = options.consumer_pause_timeout_secs;
 
     // Reserved here, and never touched again except by the dump itself.
     g_dump.arena.resize_to_uninitialized(options.arena_bytes);
@@ -258,9 +258,43 @@ void cc::rec::install_crash_dump(cc::rec::crash_dump_options const& options)
         cc::add_crash_context_hook(&crash_hook);
 }
 
-bool cc::rec::write_crash_dump_now()
+cc::optional<cc::rec::dump_mode> cc::rec::write_dump_now(cc::rec::dump_mode mode)
 {
-    return write_dump();
+    return write_dump_through_installed(mode);
+}
+
+cc::optional<cc::rec::dump_mode> cc::rec::write_dump(cc::rec::dump_sink& sink, cc::rec::dump_mode mode)
+{
+    if (!g_dump.is_installed)
+        return {};
+
+    auto ok = false;
+    auto taken = mode;
+    if (mode == cc::rec::dump_mode::quiescent)
+    {
+        // The consumer stopped for the duration, which closes the chunk-recycling race the fault path lives with.
+        // One that does not yield in time gets the constrained path instead, and the result says so.
+        if (!cc::rec::impl::try_with_consumer_paused(g_dump.consumer_pause_timeout_secs,
+                                                     [&] { ok = write_dump_to(sink); }))
+        {
+            taken = cc::rec::dump_mode::constrained;
+            ok = write_dump_to(sink);
+        }
+    }
+    else
+    {
+        ok = write_dump_to(sink);
+    }
+
+    sink.finish(ok);
+    if (!ok)
+        return {};
+    return taken;
+}
+
+bool cc::rec::is_crash_dump_installed()
+{
+    return g_dump.is_installed;
 }
 
 cc::string_view cc::rec::crash_dump_path()

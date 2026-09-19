@@ -122,6 +122,7 @@ sg::submission_token vulkan_context::submit_vulkan_command_list(std::unique_ptr<
     // list's read of a buffer the transfer queue wrote as READ_RACING_WRITE — and a satisfied wait costs nothing.
     cc::vector<VkSemaphore> async_waits;
     cc::vector<u64> async_wait_values;
+    cc::vector<vulkan_completion_group*> async_wait_groups; // kept alive by the resources this list touches
     auto const add_async_wait = [&](vulkan_completion_group_handle const& group, u64 value)
     {
         if (group == nullptr || value == 0)
@@ -135,6 +136,7 @@ sg::submission_token vulkan_context::submit_vulkan_command_list(std::unique_ptr<
             }
         async_waits.push_back(group->timeline);
         async_wait_values.push_back(value);
+        async_wait_groups.push_back(group.get());
     };
 
     // A STREAMING transfer's values join the async ones here.
@@ -311,6 +313,9 @@ sg::submission_token vulkan_context::submit_vulkan_command_list(std::unique_ptr<
                 .signalSemaphoreCount = signal_count,
                 .pSignalSemaphores = signal_semaphores,
             };
+            for (isize i = 0; i < async_wait_groups.size(); ++i)
+                before_forward_wait(async_wait_groups[i]->forward_waits, async_wait_values[i]);
+
             VkResult const sr
                 = _queue_guard.lock([&](int&) { return vkQueueSubmit(_queue, 1, &submit, VK_NULL_HANDLE); });
             // Record device loss here but don't throw inside the lock; the throw happens after it releases.

@@ -15,7 +15,7 @@ attachments/x.txt     captured output and screenshots — agent-owned
 answers/040-x.json    the answers, and the maintainer's comments — server-owned
 rounds/round-1.md     a finalized round's transcript
 log.jsonl             every action, append-only
-.signal               the one-shot mailbox `round --wait` polls
+.signal               the one-shot mailbox `round --wait` polls, consumed only by a finalize that succeeds
 ```
 
 ## Who writes what
@@ -69,6 +69,11 @@ It is a **lint rather than a boundary**: the check is a prefix test and the comm
 What it says is that `dev.py example` is the blessed place for things meant to be run to show functionality — it guards against an unintended side effect, not against a command that means harm.
 `title` is what the page and the tab show, set by `review title` once the range has actually been read.
 `watermark` is the last finalized round, so the next one is `watermark + 1`.
+`round_heads` is the head each finalized round was read at, one per round, written by `delta --finalize`.
+It is what an answered entry's file references are judged against, since the fixes a land-changes round orders move the paths it named.
+A round finalized before the field existed is recorded as `""`.
+`sync` and `delta --finalize` recover it from `log.jsonl` — the `init` or `sync` head in force when that round was finalized — and write it here once, so the log is never asked twice.
+Running `sync` with nothing moved is enough to repair an older review.
 `tool_version` guards a format the running tool is too old to understand.
 
 ## A design review

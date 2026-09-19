@@ -46,6 +46,12 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
                    help="The run seed, forwarded to the runner: test order, invocation order and every "
                         "nx::test_seed derive from it. Every nexus run prints the one it drew, so a failure "
                         "reproduces with the seed from its log.")
+    p.add_argument("--watchdog", type=float, default=None, metavar="SECS",
+                   help="After SECS with no test starting or finishing, the runner reports the hung run under a "
+                        "[nexus watchdog] marker — outstanding work, running and awaiting tests, every thread's "
+                        "stack and open scopes, then the recording — and exits with code 4. "
+                        "Forwarded to the runner. Defaults to half the per-binary timeout, so the report lands "
+                        "before the timeout kills the binary; 0 turns it off.")
     p.add_argument("--test-args", metavar="LINE",
                    help="A command line for the selected test itself, reachable from its body through "
                         "nx::test_args(). Forwarded to the runner as one string and tokenized there, "
@@ -100,6 +106,12 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
 
     if args.seed is not None:
         runner_args = ["--seed", str(args.seed), *runner_args]
+
+    # The runner's own default is 60 s, which the default timeout would kill it before reaching.
+    watchdog = args.watchdog
+    if watchdog is None:
+        watchdog = timeout / 2 if timeout > 0 else 0
+    runner_args = ["--watchdog", f"{watchdog:g}", *runner_args]
 
     # One string, deliberately: the runner tokenizes it, so the test's own flags never have to survive
     # dev.py's argument handling — which strips a leading `--` and would otherwise eat the separator.

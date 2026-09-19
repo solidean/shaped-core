@@ -175,7 +175,7 @@ public:
 
     /// Work started against this context that nobody has to await — pipeline builds, or what a routine kicks off on the frame path.
     /// Such work references the context, so `routines.clear()` waits for it, and a test awaits `ctx.backlog.settled()` before it ends.
-    cc::async_backlog backlog;
+    cc::async_backlog backlog = cc::async_backlog("sg.context");
 
     /// Per-context render-routine registry (see routine_registry / render_routine).
     /// Routines are reached by type through `sg::render_routine::acquire_exclusive(cmd)`, or `acquire(cmd)` to only read.

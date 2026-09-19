@@ -22,7 +22,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
 from ..annotate.index import RepoIndex
-from ..annotate.table import build as build_tokens, glossary_terms, to_json as tokens_to_json
+from ..annotate.table import build as build_tokens, glossary_terms, history_for, to_json as tokens_to_json
 from ..changeset.ledger import Ledger
 from ..core import config as config_module
 from ..core.atomic import stat_key, write_json
@@ -65,6 +65,7 @@ class ReviewApp:
         self._terms: list | None = None
         self._terms_digest: str = ""
         self._head_sha: str = ""
+        self._trees_at: dict[str, RepoIndex] = {}  # a commit's tree never changes, so this is never invalidated
 
         # Rendered entry payloads, keyed on the watcher's digest plus that entry's answers file.
         # An entry's HTML depends on exactly those two — its own text, and what has been answered on it — so a
@@ -155,6 +156,10 @@ class ReviewApp:
             self._index, self._index_key = RepoIndex.build(self.repo, self.paths.root), key
         return self._index
 
+    def history(self):
+        """The tree each finalized round was read at, for text answered back then — see table.history_for."""
+        return history_for(self.repo, self.config(), self._trees_at)
+
     def terms(self) -> list:
         """Every glossary term in the review, which is what makes one entry's vocabulary reach the others.
 
@@ -213,7 +218,7 @@ class ReviewApp:
             with timing.span("/api/entry/", "tokens"):
                 tokens = build_tokens(entry, self.index(), answers=answers,
                                       confirm_shas=Git(self.repo).which_are_commits,
-                                      terms=self.terms())
+                                      terms=self.terms(), history=self.history())
             payload = {"slug": slug, "html": html, "broken": False, "tokens": tokens_to_json(tokens)}
             return 200, self._remember(slug, digest, payload)
         return 404, {"error": f"no entry {slug!r}"}

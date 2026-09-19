@@ -35,7 +35,7 @@ from .lib.core.config import (
     now,
     save,
 )
-from .lib.core.log import record
+from .lib.core.log import heads_at_finalize, record
 from .lib.core.paths import (
     ReviewNameError,
     ReviewPaths,
@@ -50,6 +50,7 @@ from .lib.annotate.table import (
     build as build_tokens,
     glossary_problems,
     glossary_terms,
+    history_for as round_history,
     index_for as repo_index,
     problems as token_problems,
 )
@@ -112,6 +113,7 @@ __all__ = [
     "glossary_problems",
     "glossary_terms",
     "repo_index",
+    "round_history",
     "token_problems",
     "AnswerFile",
     "Comment",
@@ -196,6 +198,7 @@ __all__ = [
     "parse_entry_text",
     "read_json",
     "read_jsonl",
+    "heads_at_finalize",
     "record",
     "register",
     "render_entry",

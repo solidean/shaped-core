@@ -45,18 +45,4 @@ namespace sg::backend::vulkan
                                         sg::texture_region const& region,
                                         isize first_row,
                                         isize row_count);
-
-/// The copies that move `row_count` block rows of `region`, starting at block row `first_row`, between an image and a
-/// tightly-packed buffer range starting at `buffer_offset`.
-///
-/// Rows are counted slice-major: a 3D region's rows run through a whole depth slice before the next, so a band can
-/// cross slices, and that takes one copy per slice it touches.
-/// Each copy's extent is in texels, clamped to the region, which is what lets its last block row be partial.
-void append_block_row_copies(cc::vector<VkBufferImageCopy>& out,
-                             sg::pixel_format format,
-                             VkImageSubresourceLayers const& subresource,
-                             sg::texture_region const& region,
-                             isize first_row,
-                             isize row_count,
-                             VkDeviceSize buffer_offset);
 } // namespace sg::backend::vulkan

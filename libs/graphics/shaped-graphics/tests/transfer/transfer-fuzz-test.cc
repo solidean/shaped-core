@@ -1,10 +1,10 @@
-#include "../backends/sg_backends.hh"
-
 #include <clean-core/container/pinned_data.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/math/random.hh>
 #include <clean-core/thread/async.hh>
-#include <nexus/fuzz/test.hh>
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
+#include <nexus/fuzz/async.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/command_list/command_list.hh>
 #include <shaped-graphics/context/context.hh>
@@ -14,23 +14,22 @@
 using namespace cc::primitive_defines;
 
 
-// Backend-agnostic inline buffer transfer: upload / download over the public sg API, run against every
-// available backend (see tests/context/context-test.cc for the invocable/alias mechanism).
+// Backend-agnostic buffer transfer: upload / download over the public sg API, fuzzed in each backend's sweep.
+// See tests/context/context-test.cc for the invocable mechanism.
 //
-// This is an nx::fuzz API-sequence fuzz test — see libs/base/nexus/docs/fuzz-testing.md, especially
-// "Fuzzing over external, shared state": the `trace` below drops its open command list in its destructor
-// and move-assignment, so the engine's discarded replays never leak a list onto the shared context.
+// This is an nx::fuzz API-sequence fuzz test — see libs/base/nexus/docs/fuzz-testing.md, especially "Fuzzing over external, shared state".
+// The `trace` below drops its open command list in its destructor and move-assignment, so the engine's discarded replays never leak a list onto the shared context.
+// The ops that wait for the GPU are async ops, awaited by the engine one step at a time, so nothing here blocks.
 //
 // The full search is a thorough-run cost: on vulkan nearly all of it is synchronization validation, which is the point of running it there.
 // A default run narrows the seed count instead of dropping the layer, so every backend still sees random op sequences under its own checks.
 
-namespace
-{
-void fuzz_transfers(sg::context_handle const& ctx)
+ASYNC_INVOCABLE_TEST("sg - upload download fuzz test", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
 
     auto test = nx::fuzz::test::create();
+    test->set_inherit_home(true); // a thread-bound device's sweep homes this body, and every op must run there too
 
     // Fuzz state threaded through the ops.
     // It holds the context so it can DROP a still-open list explicitly when the engine discards a partial state — a command list must be submitted or dropped, never just leaked.
@@ -111,11 +110,11 @@ void fuzz_transfers(sg::context_handle const& ctx)
                  })
         ->execute_at_least(5);
     test->add_op("advance epoch + wait",
-                 [&](trace& t)
+                 [&](trace& t) -> cc::shared_async<cc::unit>
                  {
                      t.ensure_submitted_cmd(); // no open cmdlist
                      ctx->advance_epoch();
-                     (void)cc::async_blocking_get(ctx->idle_completion());
+                     (void)co_await ctx->idle_completion();
                  })
         ->execute_at_least(5);
 
@@ -198,10 +197,10 @@ void fuzz_transfers(sg::context_handle const& ctx)
                 {.src = t.buffer, .dst = t.buffer, .count = cnt, .src_offset = src_start, .dst_offset = dst_start});
         });
 
-    // Each check blocks on a full wait_for readback round-trip, so this op dominates fuzz runtime; a bounded
+    // Each check awaits a full readback round-trip, so this op dominates fuzz runtime; a bounded
     // count still verifies the model against the GPU across varied op histories without the default's 50 stalls.
     test->add_op("download + check",
-                 [&](cc::random& rng, trace& t)
+                 [&](cc::random& rng, trace& t) -> cc::shared_async<cc::unit>
                  {
                      auto v0 = rng.uniform(0, int(t.data.size() - 1));
                      auto v1 = rng.uniform(0, int(t.data.size() - 1));
@@ -214,8 +213,7 @@ void fuzz_transfers(sg::context_handle const& ctx)
                      auto dl = t.cmd->download.data_from_buffer<u32>(t.buffer, start, end - start);
                      t.ensure_submitted_cmd();
 
-                     (void)cc::async_blocking_get(ctx->idle_completion());
-                     auto dl_data = dl.try_get_data().value();
+                     auto const dl_data = co_await dl.data();
 
                      CHECK(ref_data.size() == dl_data.size());
                      for (auto i = 0; i < end - start; ++i)
@@ -232,7 +230,7 @@ void fuzz_transfers(sg::context_handle const& ctx)
     // ordered after the recorded writes it must observe; the read auto-waits on the last submitted writer
     // (and on any pending async upload), so the issue-time snapshot of t.data is the correct reference.
     test->add_op("async download + check",
-                 [&](cc::random& rng, trace& t)
+                 [&](cc::random& rng, trace& t) -> cc::shared_async<cc::unit>
                  {
                      auto v0 = rng.uniform(0, int(t.data.size() - 1));
                      auto v1 = rng.uniform(0, int(t.data.size() - 1));
@@ -247,8 +245,7 @@ void fuzz_transfers(sg::context_handle const& ctx)
                          ref[i] = t.data[start + i];
 
                      auto dl = ctx->download.data_from_buffer<u32>(t.buffer, start, cnt);
-                     (void)cc::async_blocking_get(ctx->idle_completion());
-                     auto dl_data = dl.try_get_data().value();
+                     auto const dl_data = co_await dl.data();
 
                      CHECK(isize(cnt) == dl_data.size());
                      for (auto i = 0; i < cnt; ++i)
@@ -259,53 +256,9 @@ void fuzz_transfers(sg::context_handle const& ctx)
     if (!nx::is_thorough())
         test->cap_seed_count(24);
 
-    CHECK(test->execute_fuzz_test());
+    CHECK(co_await test->execute_fuzz_test_async());
 
-    // The ops start async transfers they do not all await, and a test settles what it started.
-    (void)cc::async_blocking_get(ctx->idle_completion());
+    // The ops start async transfers they do not all await, and a test settles what it started: the context's detached work, then the GPU.
+    co_await cc::async_settled(ctx->backlog.settled());
+    (void)co_await ctx->idle_completion();
 }
-} // namespace
-
-// A workaround, not the shape this test wants: one test running alone over every backend's context, instead of an invocable in each backend's sweep.
-// The fuzz ops are synchronous and block on their downloads, and a blocking get participates in the pool while it waits.
-// Beside other tests that ran their bodies on this thread and credited their checks here, so alone there is nothing to take.
-// An async op sequence retires it; nexus's TODO records the attribution half.
-TEST("sg - upload download fuzz test", exclusive())
-{
-    auto fuzzed = 0;
-    for (auto& factory : sg_test::context_factories())
-    {
-        auto ctx = factory.create();
-        if (ctx.has_error())
-            continue; // that backend has no device here
-        fuzz_transfers(ctx.value());
-        ctx.value()->shutdown();
-        ++fuzzed;
-    }
-    if (fuzzed == 0)
-        SKIP("no backend here has a context factory with a device, which a wasm build never does");
-}
-
-/*
-INVOCABLE_TEST("sg - upload download fuzz test", (sg::context_handle const& ctx))
-{
-    REQUIRE(ctx != nullptr);
-    
-    auto test = nx::fuzz::test::create();
-
-    enum class buffer_idx : uint32_t;
-    enum class cmd_list_idx : uint32_t;
-
-    struct trace {
-        cc::vector<sg::raw_buffer_handle> buffers;
-        cc::vector<sg::command_list> cmd_lists;
-    };
-
-    test->add_value("trace", trace{});
-    test->add_op("add1", [](int a) { return a + 1; });
-
-    SECTION("fuzz")
-    {
-        CHECK(test->execute_fuzz_test());
-    }
-}*/

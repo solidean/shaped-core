@@ -337,10 +337,9 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   The dxc end-to-end window tests block the same way, being synchronous throughout.
   No frame loop in the tree uses `try_advance_epoch` yet.
   The completion-signal seam is callback-shaped now (`arm_completion_signal`), and a never-block tier-1 driver on dx12 and vulkan proves the suite gets by without waiting.
-  Two gaps that driver leaves:
-  - **dx12's and vulkan's own caller-thread waits** — inline ring back-pressure, a ring budget change, the transient descriptor ring, swapchain acquire — still wait under a `never_block` config.
-    They are backend internals no WebGPU code reaches, and the intended fix is the growth fallback *after* the wait, with a knob to skip the wait and trade VRAM for throughput.
-  - **The transfer fuzz test skips under `never_block`**, since its ops are synchronous and read downloads after a blocking drain; awaiting an op would need nexus fuzz support.
+  The gap that driver leaves is **dx12's and vulkan's own caller-thread waits**, which still wait under a `never_block` config.
+  They are inline ring back-pressure, a ring budget change, the transient descriptor ring and swapchain acquire.
+  All are backend internals no WebGPU code reaches, and the intended fix is the growth fallback *after* the wait, with a knob to skip the wait and trade VRAM for throughput.
 
 - **`shaped-graphics-test` crashed once with an access violation, in the release preset under load.**
   The sixth of twelve loaded repeats of the release suite faulted; the binary has no symbols there and its log was overwritten before the faulting site was known.

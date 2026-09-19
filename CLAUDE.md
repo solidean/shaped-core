@@ -399,6 +399,7 @@ A stale "no cc:: equivalent yet" reason sends the next author back to the old wa
 | Find what a header or TU costs to compile | `uv run dev.py compile-time headers/tu "<glob>"` ([compile-times](docs/guides/compile-times.md)) |
 | Find what a target's precompiled header is worth | `uv run dev.py compile-time pch "<glob>"` ([precompiled-headers](docs/guides/precompiled-headers.md)) |
 | See a function's codegen         | `uv run dev.py assembly search/show` ([disassembly](docs/guides/disassembly.md)) |
+| Resolve a wasm stack after the fact | `uv run dev.py symbolize --obj <sidecar> report.txt` ([platforms](docs/platforms.md#wasm-debug-sidecars-sc_wasm_debug_sidecars)) |
 | See what a function *actually ran* | `uv run dev.py assembly trace --target <t> --symbol <s>` ([instruction-tracer](tools/instruction-tracer/readme.md)) |
 | Compute test coverage            | `uv run dev.py coverage run` ([docs/guides/coverage.md](docs/guides/coverage.md)) |
 | Profile-guided optimization      | `uv run dev.py pgo run` ([docs/guides/pgo.md](docs/guides/pgo.md))               |

@@ -508,3 +508,23 @@ REC_TEST("record/sampling - a live rate change is picked up too")
     CHECK(cc::rec::current_sampling_config().rate_hz == 900.0);
     CHECK(cc::rec::current_sampling_config().max_frames == 8);
 }
+
+REC_TEST("record/sampling - a platform that cannot walk a foreign thread refuses to sample")
+{
+    if (cc::stack_capture_from_context_available())
+        SKIP("this platform can walk a foreign thread, so there is nothing to refuse");
+
+    rec_fixture const fixture(deterministic_config());
+
+    // The refusal is the behaviour, not a fallback.
+    //
+    // wasm is the case this exists for: capturing a stack works there now, so the old gate of "can we capture at
+    // all" no longer separates the two — and a sampler that quietly sampled only the thread that started it would
+    // report a profile of the wrong thing.
+    cc::rec::start_sampling({.rate_hz = 1000.0});
+    CHECK(!cc::rec::is_sampling());
+
+    // And it is still safe to stop something that never started.
+    cc::rec::stop_sampling();
+    CHECK(!cc::rec::is_sampling());
+}

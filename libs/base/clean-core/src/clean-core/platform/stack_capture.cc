@@ -4,7 +4,10 @@
 #include <clean-core/platform/intrinsics.hh>
 
 #if defined(__EMSCRIPTEN__)
-// No walkable native stack.
+// No walkable native stack, so the JS engine's own account of it is the only one there is.
+#include <clean-core/platform/impl/wasm_frames.hh>
+#include <clean-core/string/string_view.hh>
+#include <emscripten/emscripten.h>
 #elif defined(_WIN32)
 #include <clean-core/platform/win32_sanitized.hh>
 #else
@@ -39,12 +42,157 @@ using namespace cc::primitive_defines;
 namespace
 {
 #if defined(__EMSCRIPTEN__)
-constexpr bool has_stack_capture = false;
+constexpr bool has_stack_capture = true;
 #elif defined(_WIN32) || defined(__linux__) || defined(__APPLE__)
 constexpr bool has_stack_capture = true;
 #else
 constexpr bool has_stack_capture = false;
 #endif
+
+#if defined(__EMSCRIPTEN__)
+
+/// How many frames of engine text one capture is willing to hold.
+///
+/// Also what `Error.stackTraceLimit` is raised to, and the two must agree: the engine truncates at its limit
+/// without saying so, so a buffer larger than the limit reports a short stack as a complete one.
+/// The default limit is 10, which is far too shallow to diagnose anything and is why this is set at all.
+constexpr int max_frames = 128;
+
+/// Room for that many lines of frame text.
+/// A named frame runs about 120 bytes and a long C++ signature rather more, so this is generous on purpose:
+/// the buffer truncating loses the OUTERMOST frames, which are the ones a reader wants least, but it loses them
+/// silently.
+constexpr isize frame_text_bytes = 48 * 1024;
+
+/// The capture's own frames, which a caller never means to see.
+///
+/// `emscripten_get_callstack` already drops itself and everything inside it, so what remains of ours is
+/// `capture_wasm_text` and `cc::capture_stack`.
+/// Both are kept out of line for exactly this reason — the count is only a constant while neither can be inlined
+/// away.
+///
+/// **Counted in WASM frames, and the JS frames among them are dropped with them.**
+/// Under -fexceptions a call that might throw goes through a JS `invoke_*` trampoline, and whether one lands on
+/// this particular path depends on what the optimizer knew about the callee — so the number of frames between the
+/// caller and here is not fixed, while the number of OUR OWN functions in it is.
+/// Counting raw frames instead is what left `cc::stacktrace::current` at the top of its own traces.
+constexpr isize own_wasm_frames = 2;
+
+/// Scratch for one capture's text, per thread.
+///
+/// Static rather than local: the shadow stack is 64 KiB by default and a crash handler is already deep in it, so
+/// a buffer this size belongs anywhere but there.
+/// Per thread rather than process-wide because two threads may capture at once, and the cost of the duplication
+/// is linear memory, which is the cheapest thing wasm has.
+[[nodiscard]] char* frame_text_buffer()
+{
+#if defined(CC_HAS_THREADS) && CC_HAS_THREADS
+    static thread_local char buffer[frame_text_bytes];
+#else
+    static char buffer[frame_text_bytes];
+#endif
+    return buffer;
+}
+
+/// Raises the engine's stack-trace limit, once per thread.
+///
+/// V8 defaults it to 10 and truncates silently, so without this every capture is ten frames and claims to be whole.
+/// It is a property of the JS realm, and every pthread is a Web Worker with a realm of its own — so it is set on the
+/// calling thread, by the calling thread, rather than once on the main thread, which would leave every worker at 10.
+void ensure_stack_trace_limit()
+{
+#if defined(CC_HAS_THREADS) && CC_HAS_THREADS
+    static thread_local bool done = false;
+#else
+    static bool done = false;
+#endif
+    if (done)
+        return;
+    done = true;
+    EM_ASM({ Error.stackTraceLimit = $0; }, max_frames);
+}
+
+/// The engine's account of this thread's call stack, as text, or empty.
+///
+/// Kept out of line so the number of our own frames above the caller stays a constant — see `own_wasm_frames`.
+CC_DONT_INLINE cc::string_view capture_wasm_text()
+{
+    ensure_stack_trace_limit();
+
+    auto* const buffer = frame_text_buffer();
+    auto const written = ::emscripten_get_callstack(EM_LOG_C_STACK, buffer, int(frame_text_bytes));
+    if (written <= 0)
+        return {};
+
+    // The reported count includes the terminator, which is not part of the text.
+    auto size = isize(written);
+    while (size > 0 && buffer[size - 1] == 0)
+        --size;
+    return cc::string_view(buffer, size);
+}
+
+/// Parses the engine's text into addresses, innermost first.
+cc::stack_capture_result capture_wasm(cc::span<void*> out, isize skip)
+{
+    auto const text = capture_wasm_text();
+    if (text.empty())
+        return {};
+
+    auto result = cc::stack_capture_result();
+    auto own_remaining = own_wasm_frames;
+    auto remaining_skip = skip;
+
+    auto rest = text;
+    while (!rest.empty())
+    {
+        auto const newline = rest.find('\n');
+        auto const line = newline < 0 ? rest : rest.subview(cc::offset_size{.offset = 0, .size = newline});
+        rest = newline < 0 ? cc::string_view() : rest.subview(newline + 1);
+
+        auto const frame = cc::impl::parse_wasm_frame(line);
+        if (!frame.has_value())
+            continue;
+
+        // Our own frames first, by function rather than by frame: a JS trampoline sitting among them belongs to
+        // this path too, and goes with them.
+        if (own_remaining > 0)
+        {
+            if (!frame.value().is_js)
+                --own_remaining;
+            continue;
+        }
+
+        // `skip` counts callers, not reported frames, for the same reason and with the same consequence: a
+        // trampoline the caller never wrote must not consume the skip a wrapper asked for.
+        // Otherwise `skip = 1` drops a JS frame and leaves the wrapper at the top of its own trace.
+        if (remaining_skip > 0)
+        {
+            if (!frame.value().is_js)
+                --remaining_skip;
+            continue;
+        }
+
+        if (result.count >= out.size())
+        {
+            result.truncated = true;
+            break;
+        }
+
+        // A module offset rather than a pointer, which is what an address IS here: there is nothing to dereference,
+        // and a symbolizer resolves it against the module it came from.
+        auto const address = frame.value().address();
+        out[result.count] = reinterpret_cast<void*>(uintptr_t(address));
+        ++result.count;
+
+        // The name is in hand and will not be later: it exists only in the text this parse just consumed.
+        // Filing it here is what makes cc::symbolizer able to answer at all on this platform.
+        cc::impl::remember_wasm_symbol(address, frame.value().name);
+    }
+
+    return result;
+}
+
+#endif // __EMSCRIPTEN__
 
 #if defined(_WIN32)
 
@@ -350,6 +498,15 @@ bool cc::stack_walk_available(cc::stack_walk walk)
     return false;
 }
 
+bool cc::stack_capture_supports_stop_frame()
+{
+#if defined(__EMSCRIPTEN__)
+    return false;
+#else
+    return has_stack_capture;
+#endif
+}
+
 bool cc::stack_capture_from_context_available()
 {
 #if defined(_WIN32) && !defined(__EMSCRIPTEN__)
@@ -389,10 +546,38 @@ bool cc::stack_capture_available()
     return has_stack_capture;
 }
 
-cc::stack_capture_result cc::capture_stack(cc::span<void*> out, isize skip, void const* stop_frame, cc::stack_walk walk)
+isize cc::stack_capture_cost_ns()
+{
+#if defined(__EMSCRIPTEN__)
+    // Measured under node 22 at -O2, roughly 33 frames deep: 10.2 us through Emscripten's own PC helpers and 20.0 us
+    // through the text path this uses.
+    // Both are the engine formatting the string, which is why owning the parse changes nothing about the number.
+    return 20'000;
+#elif CC_CAN_UNWIND_TABLES
+    return 1'000;
+#elif CC_CAN_CHASE_FRAME_POINTERS
+    // A few nanoseconds a frame, so a deep stack rather than a shallow one is what this names.
+    return 200;
+#else
+    return 0;
+#endif
+}
+
+CC_DONT_INLINE cc::stack_capture_result cc::capture_stack(cc::span<void*> out,
+                                                          isize skip,
+                                                          void const* stop_frame,
+                                                          cc::stack_walk walk)
 {
     if (out.empty() || skip < 0)
         return {};
+
+#if defined(__EMSCRIPTEN__)
+    // No chain and no tables: the engine's own text is the only account of the stack there is.
+    // `stop_frame` names a stack address, and wasm has no stack addresses to compare against, so it cannot apply.
+    (void)stop_frame;
+    (void)walk;
+    return capture_wasm(out, skip);
+#endif
 
     // Named here rather than left unnamed in the signature: only the chasing path reads it, and Windows compiles
     // neither that path nor the fallback below — so the parameter is genuinely unused there and nowhere else.

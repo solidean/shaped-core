@@ -5,6 +5,7 @@ project(nexus LANGUAGES CXX)
 add_library(nexus
     src/nexus/run.cc
     src/nexus/impl/host_loop.cc
+    src/nexus/impl/watchdog.cc
     src/nexus/args/builder.cc
     src/nexus/args/diagnostic.cc
     src/nexus/args/value.cc
@@ -46,6 +47,8 @@ add_library(nexus
     src/nexus/tests/export/timings_json.cc
     src/nexus/tests/export/listing_json.cc
     src/nexus/fuzz/machine.cc
+    src/nexus/fuzz/generator.cc
+    src/nexus/fuzz/minimizer.cc
     src/nexus/fuzz/runner.cc
     src/nexus/fuzz/run.cc
     src/nexus/fuzz/test.cc
@@ -99,6 +102,7 @@ target_sources(nexus
     src/nexus/bench/bench.hh
     src/nexus/tests/alias.hh
     src/nexus/tests/check.hh
+    src/nexus/tests/check_divert.hh
     src/nexus/tests/config.hh
     src/nexus/tests/entry.hh
     src/nexus/tests/invoke_tests.hh
@@ -120,10 +124,13 @@ target_sources(nexus
     src/nexus/tests/export/listing_json.hh
 
     src/nexus/fuzz/fwd.hh
+    src/nexus/fuzz/async.hh
     src/nexus/fuzz/signature.hh
     src/nexus/fuzz/operation.hh
     src/nexus/fuzz/executed_operation.hh
     src/nexus/fuzz/machine.hh
+    src/nexus/fuzz/generator.hh
+    src/nexus/fuzz/minimizer.hh
     src/nexus/fuzz/runner.hh
     src/nexus/fuzz/run.hh
     src/nexus/fuzz/regression_dialect.hh
@@ -222,6 +229,7 @@ if(SC_BUILD_TESTS)
         tests/test-invocable-test.cc
         tests/test-alias-test.cc
         tests/test-typed-value-test.cc
+        tests/test-watchdog-test.cc
         tests/bench-barriers-test.cc
         tests/bench-statistics-test.cc
         tests/bench-run-test.cc
@@ -229,6 +237,7 @@ if(SC_BUILD_TESTS)
         tests/bench-self-benchmark.cc
         tests/bench-hardware-counters-test.cc
         tests/bench-cache-traversal-test.cc
+        tests/fuzz-async-test.cc
         tests/fuzz-engine-test.cc
         tests/fuzz-minimize-test.cc
         tests/fuzz-regression-test.cc

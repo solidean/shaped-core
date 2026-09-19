@@ -13,112 +13,86 @@
 
 #if defined(__EMSCRIPTEN__)
 
+#include <clean-core/container/fixed_vector.hh>
+#include <clean-core/platform/impl/wasm_frames.hh>
+#include <clean-core/platform/stack_capture.hh>
+#include <clean-core/platform/symbolize.hh>
+#include <clean-core/string/format.hh>
+
 using namespace cc::primitive_defines;
 
 namespace
 {
-/// What emscripten_get_callstack is asked for.
-///
-/// EM_LOG_C_STACK is what selects the compiled frames, and it is load-bearing rather than a filter: without it the
-/// call reports one JS frame and no wasm frames at all.
-/// It does NOT exclude the JS frames above them, so a trace ends with the module loader -- callMain, run, and the
-/// loader's own line.
-/// Those are kept rather than stripped, because in a wasm host they are a true account of who called us.
-///
-/// EM_LOG_DEMANGLE is deliberately absent: it is deprecated, and names come back demangled without it, since they
-/// are read from the wasm name section that emcc writes demangled and --profiling-funcs is what keeps.
-constexpr int callstack_flags = EM_LOG_C_STACK;
+/// The deepest trace this renders.
+/// Matches what a capture is willing to produce, so nothing is lost between the two.
+constexpr isize max_trace_frames = 128;
 
-/// The whole callstack as one string, or empty when the platform reports none.
-/// Its length is asked for first, since it is not knowable in advance and a short buffer truncates silently.
-cc::string capture_callstack_text()
+/// One frame, as a line a person reads.
+///
+/// `module+offset` is the fallback rather than an error: a build with no name section still names WHERE a frame is,
+/// which is exactly what the offline resolver needs and all it needs.
+[[nodiscard]] cc::string render(cc::symbol_info const& info, u32 address)
 {
-    auto const needed = ::emscripten_get_callstack(callstack_flags, nullptr, 0);
-    if (needed <= 0)
-        return {};
+    if ((address & cc::impl::wasm_js_frame_bit) != 0)
+    {
+        auto const line = address & ~cc::impl::wasm_js_frame_bit;
+        return info.has_function() ? cc::format("{} (js:{})", info.function, line) : cc::format("js:{}", line);
+    }
 
-    auto text = cc::string::create_filled(needed, '\0');
-    auto const written = ::emscripten_get_callstack(callstack_flags, text.data(), needed);
-    if (written <= 0)
-        return {};
-
-    // The reported count includes the terminator, which is not part of the text.
-    auto size = isize(written);
-    while (size > 0 && text[size - 1] == '\0')
-        --size;
-    text.resize_down_to(size);
-    return text;
+    if (info.has_function())
+        return cc::format("{} (wasm+{:#x})", info.function, address);
+    return cc::format("wasm+{:#x}", address);
 }
+
+/// The deepest stack any of the overloads below reads.
+/// A fixed buffer, so a capture allocates nothing beyond the trace it returns.
+constexpr isize capture_buffer_frames = max_trace_frames;
 } // namespace
+
+cc::stacktrace cc::stacktrace::from_frames(cc::span<void* const> frames, std::size_t max_depth) noexcept
+{
+    auto result = cc::stacktrace();
+
+    auto symbols = cc::symbolizer();
+    for (auto const* f = frames.begin(); f != frames.end(); ++f)
+    {
+        if (std::size_t(result._frames.size()) >= max_depth)
+            break;
+
+        auto const address = u32(reinterpret_cast<uintptr_t>(*f));
+        result._frames.push_back(cc::stacktrace_entry(address, render(symbols.resolve(*f), address)));
+    }
+
+    return result;
+}
+
+// **The skew is cc::capture_stack's problem, not this one's.**
+//
+// The previous version of this looked for its own frames by NAME, which found nothing in a build with no name
+// section and silently kept them -- the same class of bug as trusting Emscripten's own frame offset.
+// Going through the capture means one place gets it right and a test pins it.
+//
+// The `+ 1` in each is this overload's own frame, which a caller never means to see.
 
 cc::stacktrace cc::stacktrace::current() noexcept
 {
-    return current(0, ~std::size_t(0));
+    void* frames[capture_buffer_frames] = {};
+    auto const captured = cc::capture_stack(cc::span<void*>(frames), 1);
+    return from_frames(cc::span<void* const>(frames, captured.count), ~std::size_t(0));
 }
 
 cc::stacktrace cc::stacktrace::current(std::size_t skip) noexcept
 {
-    return current(skip, ~std::size_t(0));
+    void* frames[capture_buffer_frames] = {};
+    auto const captured = cc::capture_stack(cc::span<void*>(frames), isize(skip) + 1);
+    return from_frames(cc::span<void* const>(frames, captured.count), ~std::size_t(0));
 }
 
 cc::stacktrace cc::stacktrace::current(std::size_t skip, std::size_t max_depth) noexcept
 {
-    auto result = cc::stacktrace();
-    auto const text = capture_callstack_text();
-
-    // One frame per line, which is the shape emscripten_get_callstack emits.
-    // The capture's OWN frames come back too, and a caller means "start at me", exactly where
-    // std::stacktrace::current begins -- so everything up to and including the last current() frame goes first, and
-    // `skip` counts from there.
-    //
-    // Found by name rather than by counting, because how many frames the overload chain contributes depends on what
-    // the optimizer inlined and that is not a number to hard-code.
-    // Where the name section was stripped nothing matches and the capture's own frames stay: that is the Release wasm
-    // build, where every frame is an index anyway.
-    auto const own = cc::string_view("cc::stacktrace::current");
-
-    auto const each_line = [&](auto&& visit)
-    {
-        auto begin = isize(0);
-        for (auto i = isize(0); i <= text.size(); ++i)
-        {
-            if (i < text.size() && text[i] != '\n')
-                continue;
-            auto const line = text.subview({.start = begin, .end = i});
-            begin = i + 1;
-            if (!line.empty())
-                visit(line);
-        }
-    };
-
-    auto first_caller = isize(0);
-    auto index = isize(0);
-    each_line(
-        [&](cc::string_view line)
-        {
-            ++index;
-            if (line.contains(own))
-                first_caller = index;
-        });
-
-    auto seen = isize(0);
-    auto dropped = std::size_t(0);
-    each_line(
-        [&](cc::string_view line)
-        {
-            if (seen++ < first_caller)
-                return;
-            if (dropped < skip)
-            {
-                ++dropped;
-                return;
-            }
-            if (std::size_t(result._frames.size()) >= max_depth)
-                return;
-            result._frames.push_back(cc::stacktrace_entry(cc::string(line)));
-        });
-
-    return result;
+    void* frames[capture_buffer_frames] = {};
+    auto const captured = cc::capture_stack(cc::span<void*>(frames), isize(skip) + 1);
+    return from_frames(cc::span<void* const>(frames, captured.count), max_depth);
 }
 
 #endif // __EMSCRIPTEN__

@@ -228,12 +228,21 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
         ledger, candidates, round_number=cfg.next_round,
         write_body=write_body, only_uncovered=args.rest,
     )
+    # The bulk decides for the hunks under it that nobody has read yet, whichever came first.
+    absorbed: list = []
+    if bulking:
+        bulk = next((c for c in [*result.created, *result.reused] if c.is_bulk), None)
+        if bulk is not None:
+            absorbed = ledger.absorb_into(bulk, keep=ctx.discharged(ctx.entries(paths)))
+
     review.record(
         paths.log, "ingest", created=len(result.created), reused=len(result.reused), repointed=len(result.repointed),
-        bulk=args.bulk or "", rest=args.rest,
+        bulk=args.bulk or args.bulk_commits or "", rest=args.rest, absorbed=len(absorbed),
     )
 
     print(f"{len(result.created)} changes created, {len(result.reused)} already known")
+    if absorbed:
+        print(f"{len(absorbed)} earlier change(s) absorbed into the bulk claim; an entry already discharging one keeps it")
     if inside_bulk:
         print(f"{inside_bulk} skipped as lying wholly inside a bulk claim")
     if result.repointed:

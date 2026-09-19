@@ -122,6 +122,9 @@ Three things follow, and they are what a reviewer should actually do differently
   That is the first action of the review, not a later verification step.
   On this repo it usually means: the author is on Linux and only vulkan compiles there, so a Windows box compiles dx12 — or the reverse.
   Everything the author's machine could not parse is where the defects are, and [the `#ifdef` arm rule](#the-ifdef-arm-this-machine-does-not-compile-is-where-the-defect-is) is the general form of it.
+- **wasm is one of those platforms on every box.**
+  The emsdk carries its own node, and `dev.py test --preset emscripten-… --emsdk-path <emsdk>` builds and runs the suite with it.
+  "No browser here" is not a reason to review wasm code by reading alone.
 - **Land the fixes rather than filing them.**
   A compile error is not a finding — it is work, and it is yours.
   File the *pattern* if there is one worth naming, and put the fix in the working tree.
@@ -138,6 +141,19 @@ The review's first ask proposed adding a Windows CI gate, and the answer settled
 ```raw
 CI was red anyways. your task here is to fix the compilation as well. no process changes needed. (it is by design)
 ```
+
+pr-184 is the case for the "run" half rather than the "compile" half.
+The branch was green on its author's four Windows presets, and carried a Linux thread-stack reporter its own header said had never run.
+Running it here, on Linux, found four defects no reading had.
+The manual hang test was undefined behaviour, and the hang-path dump could wait forever.
+The recording it wrote was overwritten a moment later, and every thread's stack came back empty.
+The same review first read the wasm half instead of running it, and the maintainer's answer was:
+
+```raw
+but why did you not build wasm? i thought we have node and deno on this system
+```
+
+Once built, the wasm threads preset reproduced the per-worker stack limit that the review had until then only argued from a standalone probe.
 
 **The corollary for the review artifact:** a red CI is not something to report back, because the author already knows.
 What is worth reporting is what the failures turned out to *be*, which is a different and much shorter list.
@@ -157,6 +173,8 @@ A bug gets fixed in an hour; a type that carves the problem at the wrong joint o
 - **Does the abstraction pay for itself?** A "manager" that fixes a layout and hides what its consumer needs is the anti-pattern.
   A small helper over one thing the caller still owns is the pattern.
 - **Which library does this belong in?** Dependency direction is a hard rule; "could live lower" is the more common finding.
+- **Does a setter read like a getter?** A bare-noun method that changes state reads as a query at the call site.
+  The async fuzz design proposed `test->inherit_home()`, and the maintainer renamed it `set_inherit_home(bool)`: the verb says it mutates, and the bool makes switching it off expressible.
 - **Does a new accessor name an internal of a library still in flux?** Then it pins the internal, and the public shape should say only the outcome.
   pr-170's fix for a test drain needed to wait on sv's fallback shader compile, and first added `sv::frame::fallback_shader_compile()`.
   The maintainer rejected it: sv is alpha and will change a lot, so the accessor exposed a very internal thing for a bad reason.
@@ -397,6 +415,24 @@ pr-174 is the worked case.
 The review recommended that `cc::async_backlog::track_node` compact its whole ring once it doubles past what last survived, instead of pruning from the front.
 The maintainer accepted it with exactly this condition: larger compactions behind a record scope, and a comment that they may cause frame stutter in pathological situations.
 What landed opens `CC_RECORD_SCOPE_IF(count >= 1024, "cc.async_backlog.compact")`.
+
+### A new link on the async ambient chain is a tax; carry state on what the path already found
+
+The ambient chain is how state follows async work across threads, and everything pushed onto it is paid for.
+Pushing a scope allocates a link, and every node started under it retains the chain.
+Lookups are cheap only for as long as the tag is absent.
+So a design that needs a flag, a sink or an owner to reach work on any worker first asks whether an object the path already looks up can carry it.
+
+The async fuzz design is the worked case.
+A CHECK inside an async fuzz op can fire on any worker, and the first proposal caught it with a capture tag pushed onto the chain around every step.
+The maintainer declined that as a perf tax, and pointed out that the fuzz is nexus's own and may reach into the running test.
+Every check already finds its test through the chain in `current_context()`.
+So the design settled on one atomic pointer on `test_context`, set for each async step and read right after that lookup: a relaxed load per check, and nothing per step, spawn or poll.
+
+The same review showed why intercepting beats undoing.
+The maintainer's own first shape was a snapshot of the test's check state, restored after each step.
+A restore cannot take back the log line each failure writes, nor the throws the per-test failure cap has already made.
+A divert read before either happens has nothing to undo.
 
 ### The `#ifdef` arm this machine does not compile is where the defect is
 

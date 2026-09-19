@@ -787,6 +787,7 @@ cc::mutex<std::vector<int>> m;
 m.lock([](auto& d){ d.push_back(1); });   // -> result of the callback
 m.try_lock([](auto& d){ ... });           // -> cc::optional<R> (or bool for void) — nullopt if not acquired
 m.wait(cv, pred, [](auto& d){ ... });     // wait on condition_variable, then operate
+bool ok = m.wait_for(cv, 1.0, pred);      // bounded: true once pred holds, false on timeout; without threads checks once
 auto g = m.lock_scoped();                 // -> cc::mutex_guard<T> — RAII hold; g-> / *g reach the value, released when g dies
                                           // move-only. NOT the default: lock(f) is, and it keeps references inside the callback.
                                           // for the critical section that cannot be one call (spans your statements / handed to a caller)
@@ -966,7 +967,9 @@ cc::async_shared_mutex<T> rw;  auto r = co_await rw.lock_shared();  // or co_awa
 cc::async_semaphore s(4);  auto p = co_await s.acquire(2);  // FIFO, head-of-line
 // FIFO handoff; NOT recursive (a second lock_shared while a writer waits deadlocks). Threads off: still real exclusion.
 // DETACHED WORK (#include <clean-core/thread/async_backlog.hh>) — what a component started and nobody awaits, kept WEAKLY
-cc::async_backlog backlog;                               // one per component that detaches; immovable
+cc::async_backlog backlog = cc::async_backlog("sg.context"); // one per component that detaches; immovable; name it
+cc::try_for_each_async_backlog([](cc::async_backlog const& b) {}); // -> bool; every live backlog; never waits on the registry
+cc::report_async_backlogs("why");                        // stderr: each named backlog and what it still owes
 auto n = backlog.start(compile(desc));                   // async_start + track: THE spelling for fire-and-forget
 backlog.track(promise);                                  // already running / a manual node an actor will push
 co_await cc::async_settled(backlog.settled());           // pinned at the CALL; resolved if nothing pending; rounds; never fails
@@ -1007,6 +1010,7 @@ co_await cc::async_all(a, b, c);      // require ALL, park once; then `co_await 
                                       // them in sequence, since one await parks on one dependency
 co_await cc::async_settled(a);        // wait WITHOUT short-circuiting, then read a->try_value()/try_error() (no copy)
 cc::result<int> r = co_await cc::async_as_result(a);   // same, as a value (copies; needs a copyable U)
+auto owned = co_await cc::async_take(cc::move(a));  // await and MOVE the value out (move-only U); other handles see a husk
 co_await cc::async_yield();           // -> async_step_status::yield; makes the node stealable and lets newer local
                                       // work go first. NOT a fairness knob (LIFO deque pops it back), NOT a way to
                                       // wait on something external — that is a manual node
@@ -1298,8 +1302,19 @@ loaded.value().is_truncated(); loaded.value().cycles_per_second(); loaded.value(
 #include <clean-core/record/crash_dump.hh>
 cc::install_crash_handler();                                  // the hook list this rides on
 cc::rec::install_crash_dump({.path = "crash.ccrec"});         // reserves its arena NOW; the handler allocates nothing
-cc::rec::write_crash_dump_now();                              // -> bool; the identical path, on demand
+cc::rec::write_dump_now(cc::rec::dump_mode::constrained);     // -> optional<dump_mode>; the identical path, on demand
+cc::rec::write_dump_now(cc::rec::dump_mode::quiescent);       // the hang path: pauses the consumer first (bounded), and
+                                                              // comes back `constrained` when the consumer did not yield
+cc::rec::write_dump(sink, mode);                              // into a cc::rec::dump_sink of your own — a browser's route
+cc::rec::install_crash_dump({.path = p, .sink = &my_static_sink}); // the sink wins over the path; it must outlive the process
+cc::rec::is_crash_dump_installed();                           // bool
 // reads the chunks directly, so it sees events NO listener ever drained, and suspends no thread
+
+#include <clean-core/record/thread_scopes.hh>                 // what every thread has open, WITHOUT stopping any
+cc::rec::try_read_thread_scopes([](cc::rec::thread_scope_view const& t) {}); // -> bool; false = registry busy, f never ran
+                                                              // t.levels outermost first, NULL where open but unnamed;
+                                                              // t.depth may exceed t.levels; views valid only in the callback
+cc::rec::report_thread_scopes("why");                         // the stderr rendering; the crash report prints it too
 ```
 
 ## Strings — encoding conversion
@@ -1347,7 +1362,13 @@ cc::scoped_environment_variable const s("K", "v");  // set for a scope, restored
                                                     // pass it when spawning that child; never set it here first.
 
 #include <clean-core/platform/stacktrace.hh>       // cc::stacktrace = std::stacktrace where available
-cc::stacktrace::current();                          // CC_HAS_STACKTRACE guards rendering (empty stub on wasm)
+cc::stacktrace::current();                          // CC_HAS_STACKTRACE guards rendering; wasm has its own backend,
+                                                    // frames render as `name (wasm+0x…)` — `dev.py symbolize` reads that
+
+#include <clean-core/platform/stack_capture.hh>    // allocation-free addresses, safe from a crash handler
+cc::capture_stack(span_of_void_ptrs, skip);         // -> stack_capture_result{count, truncated, broken, stopped}
+cc::stack_capture_cost_ns();                        // POLICY input: ~200 ns chasing frames, ~1 us Windows, ~20 us wasm
+cc::stack_capture_supports_stop_frame();            // false on wasm: no stack addresses, so stop_frame is ignored
 
 CC_HAS_THREAD_SANITIZER                             // 0/1 (common/macros.hh) — for the few things TSan's
                                                     // instrumentation genuinely CHANGES: a stack walk sees frames
@@ -1361,7 +1382,7 @@ auto const g = cc::leak_scope();                    // ...and this for what it O
 
 #include <clean-core/error/crash_handler.hh>
 cc::install_crash_handler();                        // segfault/abort/etc -> stderr: reason + hooks + stacktrace
-                                                    // + EVERY other thread's stack (Windows; where a hang lives)
+                                                    // + EVERY other thread's stack (Windows, Linux) + open scopes
 cc::add_crash_context_hook(&fn);                    // void()noexcept printed before the trace (keep it tiny)
 cc::report_all_thread_stacks("why");                // the SAME report with nothing having crashed — for a wait that
                                                     // never finished, where the thread that noticed is never the one

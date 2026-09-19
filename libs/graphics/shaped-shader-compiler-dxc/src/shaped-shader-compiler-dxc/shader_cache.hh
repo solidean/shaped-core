@@ -63,5 +63,5 @@ private:
 
     cc::optional<bcache::blob_cache*> _blob_cache;
     cc::key_value_cache<cc::hash128, sg::async_compiled_shader> _cache;
-    cc::async_backlog _backlog;
+    cc::async_backlog _backlog = cc::async_backlog("ssc.dxc.shader_cache");
 };
