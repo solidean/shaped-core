@@ -81,12 +81,16 @@ if(SC_BUILD_TESTS)
         tests/forms/form-parser-test.cc
 
         tests/spec/spec-examples-test.cc
+
+        tests/samples/samples-test.cc
     )
     sc_nexus_binary(shaped-graphics-language-test KINDS tests)
 
     # The spec's `sgl` fences are test input, read from the source tree so an edited example needs no reconfigure.
     target_compile_definitions(shaped-graphics-language-test
-        PRIVATE SGL_SPEC_DIR="${CMAKE_CURRENT_SOURCE_DIR}/docs/spec")
+        PRIVATE
+        SGL_SPEC_DIR="${CMAKE_CURRENT_SOURCE_DIR}/docs/spec"
+        SGL_SAMPLES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/samples")
 
     target_link_libraries(shaped-graphics-language-test
         PRIVATE

@@ -1,0 +1,92 @@
+// declares this file as belonging to the example module
+// a module is optional: you can write your shaders without but if you want to make reusable stuff, you need a module
+// aka without a module everything is private in a sense
+// with module everything is exported by default and we can later do a "private" keyword or similar
+// (my guess is that the majority of symbols are intended to be public in a shader setting)
+module example
+
+// we also automatically have a standard prelude that is added (opt-out via shader config)
+// which predefines lots of useful types
+// we have float3 etc as component-wise types with otherwise weak semantics
+// and then tg mirrors of vec3 pos3 etc. maybe the hpos4 i showed here
+
+// each "binding" is a binding group
+// members that are not resources are grouped into a single implicit constant buffer
+// storage buffers and separate constant buffers are separate
+binding frame:
+    view: mat4
+    proj: mat4
+    light_dir: vec3
+
+binding instance:
+    model: mat4
+    tex_color: texture2d[rgba8]
+
+// the reason we annotate bindings on functions is that we can have a lot more bindings and variants per file
+// and our modules can also have a lot of them
+// but only the entry point bindings decide what is needed in the pipeline layout
+
+// inline constants could simply be a @inline annotation for a binding (which would only allow constant entries then)
+
+// static samplers can be declared inline
+sampler bilinear:
+    // TODO - setup
+
+// structs annotated with @vertex become valid vertex inputs
+// and the sgl tooling can export c++ code for it and for its vertex setup
+// we support packed and separate vertex inputs but this is for the necessary sg vertex inputs
+@vertex struct basic_vertex:
+    pos: pos3
+    normal: vec3
+    uv: vec2
+
+// defines the framebuffer format
+// member order = target order
+// and we can also auto-generate named c++ definitions to set up the targets
+@pixel struct pixel:
+    color: rgba8
+    normal: vec4f16
+
+// example helper function
+fun make_mvp(model: mat4){frame} => frame.proj * frame.view * model
+
+// {...} for functions declares which bindings they want to use and in which order
+// this is like an effect system where it checks that every function inside has their bindings satisfied
+// later we have a system to rewrite bindings so shader libraries can declare "i need this by binding" without dictating the whole binding group
+@vertex fun my_vs(v: basic_vertex){frame, instance} -> {
+    // an anon type can be used here
+    // the type needs to match the arguments of my_ps
+    // we also could have declared a struct and use that
+    // @position is a semantic and needed for exactly one output here
+    @position pos: hpos4
+    normal: vec3
+    uv: vec2
+}:
+    // obvious in the real world you'd want to precompose them on the cpu
+    // TODO: we might later model the better transformation hierarchy we have in tg as well
+    // make_mvp has "frame" as implicit binding parameter
+    let mvp = make_mvp instance.model
+    return {
+        pos = mvp * v.pos
+        normal = (mvp as mat3) * v.normal
+        uv = v.uv
+    }
+
+@pixel fun my_ps(
+    pos: hpos4
+    normal: vec3
+    uv: vec2
+){frame, instance} -> pixel:
+    // we can use other modules locally, not just globally
+    use brdf_library as brdf
+
+    let color = brdf.lighting_diffuse(
+        base_color = instance.tex_color.sample(bilinear, uv)
+        normal = normal
+        light_dir = frame.light_dir
+    )
+
+    return {
+        color = color as rgba8 // explicit conversion preferred!
+        normal = (normal.., 0) as vec4f16 // oh, do we want postfix ".." as a splat operator?
+    }
