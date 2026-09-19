@@ -246,7 +246,7 @@ cc::symbol_info const& cc::symbolizer::resolve(void const* address)
         }
 
 #if defined(__EMSCRIPTEN__)
-    // The address is a code offset into the one module a wasm process has, so the offset into the module IS the
+    // The address is an offset into the one module a wasm process has, so the offset into the module IS the
     // address, and there is no base to subtract.
     auto const offset = u32(key);
     if ((offset & cc::impl::wasm_js_frame_bit) != 0)

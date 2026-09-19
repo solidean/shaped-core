@@ -51,12 +51,11 @@ All four build and run their suites; only the plain one is gated in CI, which is
 They are deployment tiers rather than a performance gradient: threads mean `SharedArrayBuffer` and therefore a cross-origin-isolated page, while WebGPU alone imposes no such requirement.
 `SC_WASM_EXCEPTIONS=wasm-exceptions` is the one knob that still fails configure as not-yet-supported — [requirements.md](requirements.md#emscripten--wasm) owns all three.
 
-
 ### WASM debug sidecars (`SC_WASM_DEBUG_SIDECARS`)
 
 `off` (the default), `source-map`, `dwarf` or `both` — where a wasm build's debug info goes when it is not going into the binary.
 
-A stripped build's captured stack is byte offsets into the code section, and those offsets are **byte-identical to what a named build of the same source produces**.
+A stripped build's captured stack is byte offsets into the module file, and those offsets are **byte-identical to what a named build of the same source produces**.
 So the names can live outside the artifact entirely, and be attached afterwards.
 
 The two sidecars are not equally priced, which is why they are not one switch.
@@ -76,6 +75,7 @@ And `dwarf` would leave it un-stripped as well, which makes the offline path moo
 **Nothing checks a sidecar against the stack it resolves.**
 An offset from another build of the same source resolves to a plausible, confident, wrong name, and neither `dev.py symbolize` nor `llvm-symbolizer` can tell.
 Keeping a sidecar beside the artifact it was built with is what stands in for a recorded build identity.
+
 ### SteamOS
 
 SteamOS is generic Linux x64 to the build, and Tier 2 rather than Tier 1 only because no CI runner runs it.

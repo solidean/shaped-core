@@ -47,9 +47,10 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
                         "nx::test_seed derive from it. Every nexus run prints the one it drew, so a failure "
                         "reproduces with the seed from its log.")
     p.add_argument("--watchdog", type=float, default=None, metavar="SECS",
-                   help="After SECS with no test starting or finishing, the runner prints every thread's stack to "
-                        "stderr under a [nexus watchdog] marker, and again while the run stays stuck. "
-                        "Forwarded to the runner. Defaults to half the per-binary timeout, so the stacks land "
+                   help="After SECS with no test starting or finishing, the runner reports the hung run under a "
+                        "[nexus watchdog] marker — outstanding work, running and awaiting tests, every thread's "
+                        "stack and open scopes, then the recording — and exits with code 4. "
+                        "Forwarded to the runner. Defaults to half the per-binary timeout, so the report lands "
                         "before the timeout kills the binary; 0 turns it off.")
     p.add_argument("--test-args", metavar="LINE",
                    help="A command line for the selected test itself, reachable from its body through "

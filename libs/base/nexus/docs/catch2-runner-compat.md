@@ -45,7 +45,7 @@ Two properties of the declaration are load-bearing for this compatibility layer:
 | `--pgo-json <file>` | Writes recorded `nx::pgo` metrics to `<file>` (additive). Not a Catch2 flag |
 | `--timings-json <file>` | Writes each test's wall-clock interval (Unix epoch seconds) and thread to `<file>` (additive), plus a `children` count on a test that dispatched some. Not a Catch2 flag |
 | `--thorough` | Sets `test_schedule_config::thorough`, which a test body reads through `nx::is_thorough()`, and runs the `thorough_only` tests a default run skips (see [test-runtime.md](test-runtime.md)). Not a Catch2 flag |
-| `--watchdog <secs>` | After `<secs>` (default 60) with no test starting or finishing, prints a `[nexus watchdog]` line and every thread's stack to stderr, and again after every further `<secs>` while the run stays stuck. It only reports; `0` turns it off. Test runs only. Not a Catch2 flag |
+| `--watchdog <secs>` | After `<secs>` (default 60) with no test starting or finishing, prints a `[nexus watchdog]` report — outstanding work, running and awaiting tests, every thread's stack and open scopes, where the recording went — and exits with code 4. `0` turns it off, and a run under a debugger never arms it. Test runs only. Not a Catch2 flag |
 | `--benchmark-json <file>` | Writes the full benchmark results — every statistic and every sample — to `<file>` (additive). Not a Catch2 flag |
 | `--benchmark-rec <file>` | Writes a `.ccrec` of the whole run to `<file>`; needs the recorder, so `--no-recording` turns it off. Not a Catch2 flag |
 | `--benchmark-verbose` | Prints the full statistics block under every row of a benchmark table. Not a Catch2 flag |

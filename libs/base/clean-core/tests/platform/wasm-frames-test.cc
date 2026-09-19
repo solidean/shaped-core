@@ -7,7 +7,7 @@
 // So they are checked in as samples: a wasm run could only ever assert about the engine it happens to be under,
 // and the format that breaks us is the one on the engine nobody ran.
 //
-// Every V8 sample here was produced on this machine (node 22, emscripten 6.0.1) and pasted verbatim.
+// Every V8 sample here was produced under node 22 and emscripten 6.0.1, and pasted verbatim.
 // The SpiderMonkey samples follow its documented `NAME@URL:line:col` spelling.
 
 using cc::impl::parse_wasm_frame;
@@ -20,7 +20,7 @@ TEST("wasm_frames - V8 names a wasm frame by module, index and code offset")
     REQUIRE(f.has_value());
     CHECK(!f.value().is_js);
     CHECK(f.value().function_index == 11);
-    CHECK(f.value().code_offset == 0x4d1);
+    CHECK(f.value().module_offset == 0x4d1);
     CHECK(f.value().name == "deep2()");
     CHECK(f.value().module == "wasm://wasm/probe_o0.wasm-0001957a");
     CHECK(f.value().address() == 0x4d1);
@@ -37,7 +37,7 @@ TEST("wasm_frames - a stripped build keeps its offset and loses only the name")
     REQUIRE(named.has_value());
     REQUIRE(stripped.has_value());
 
-    CHECK(stripped.value().code_offset == named.value().code_offset);
+    CHECK(stripped.value().module_offset == named.value().module_offset);
     CHECK(stripped.value().function_index == named.value().function_index);
     CHECK(stripped.value().name.empty());
     CHECK(!stripped.value().is_js);
@@ -50,7 +50,7 @@ TEST("wasm_frames - SpiderMonkey's spelling parses to the same frame")
     REQUIRE(f.has_value());
     CHECK(!f.value().is_js);
     CHECK(f.value().function_index == 11);
-    CHECK(f.value().code_offset == 0x4d1);
+    CHECK(f.value().module_offset == 0x4d1);
     CHECK(f.value().name == "deep2()");
 }
 
@@ -60,7 +60,7 @@ TEST("wasm_frames - a JS frame is reported as one, with its line as the address"
 
     REQUIRE(f.has_value());
     CHECK(f.value().is_js);
-    CHECK(f.value().code_offset == 1917);
+    CHECK(f.value().module_offset == 1917);
     CHECK(f.value().name == "callMain");
     CHECK(f.value().module == "C:\\work\\probe_o0.js");
 
@@ -74,7 +74,7 @@ TEST("wasm_frames - an anonymous JS frame has a location and no name")
 
     REQUIRE(f.has_value());
     CHECK(f.value().is_js);
-    CHECK(f.value().code_offset == 623);
+    CHECK(f.value().module_offset == 623);
     CHECK(f.value().name.empty());
 }
 

@@ -131,7 +131,7 @@ constexpr cc::string_view wasm_function_marker = "wasm-function[";
 
     // Older V8 spelled the second number as a decimal offset WITHIN the function, which names no place in the module.
     // Rejecting it is the point: it is a different quantity rather than a smaller version of this one.
-    if (!read_hex_u32(rest, frame.code_offset))
+    if (!read_hex_u32(rest, frame.module_offset))
         return false;
     if (!rest.empty())
         return false;
@@ -163,7 +163,7 @@ constexpr cc::string_view wasm_function_marker = "wasm-function[";
         return false;
 
     frame.module = prefix_of(location, second_last);
-    frame.code_offset = line_number;
+    frame.module_offset = line_number;
     frame.function_index = 0;
     frame.is_js = true;
     return true;
@@ -252,7 +252,7 @@ cc::atomic<bool> g_symbol_insert_busy = false;
 
 [[nodiscard]] isize slot_of(u32 address)
 {
-    // Fibonacci hashing, so consecutive code offsets do not land in consecutive slots.
+    // Fibonacci hashing, so consecutive module offsets do not land in consecutive slots.
     auto const mixed = u32(address * 2654435761u);
     return isize(mixed & u32(symbol_slots - 1));
 }

@@ -162,6 +162,19 @@ void cc::rec::report_thread_scopes(char const* reason) noexcept
                 std::fwrite(t.name.data(), 1, size_t(t.name.size()), stderr);
             else
                 std::fputs("<unnamed>", stderr);
+
+            // The OS's id too, which is what the machine stacks above it are listed under.
+            if (t.native_tid != 0)
+            {
+                char digits[24] = {};
+                auto n = 0;
+                for (auto v = t.native_tid; v != 0; v /= 10)
+                    digits[n++] = char('0' + v % 10);
+                std::fputs(" (tid ", stderr);
+                while (n > 0)
+                    std::fputc(digits[--n], stderr);
+                std::fputc(')', stderr);
+            }
             if (!t.is_alive)
                 std::fputs(" [exited]", stderr);
 

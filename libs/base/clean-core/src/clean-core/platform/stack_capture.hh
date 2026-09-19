@@ -114,7 +114,7 @@ namespace cc
 /// Whether `stop_frame` means anything in this build.
 ///
 /// It names a STACK address, and wasm has no stack a program can address — the call stack lives inside the JS
-/// engine and a capture there reads code offsets out of frame text.
+/// engine and a capture there reads module offsets out of frame text.
 /// So a stop frame is silently ignored rather than honored, and a profiling caller that bounds its walk by the
 /// innermost open scope gets the whole stack instead of a suffix of it.
 [[nodiscard]] bool stack_capture_supports_stop_frame();
@@ -134,7 +134,7 @@ namespace cc
 /// permanent tax on another, and the only way a sampler or a logging policy can tell is to ask.
 ///
 /// Chasing a frame pointer is a few nanoseconds a frame, unwinding from tables on Windows is roughly a
-/// microsecond for a deep stack, and wasm is **about ten microseconds**: there the only mechanism is asking the
+/// microsecond for a deep stack, and wasm is **about twenty microseconds**: there the only mechanism is asking the
 /// JS engine to format an error, which no amount of care on our side makes cheaper.
 ///
 /// Zero where no capture is possible at all.

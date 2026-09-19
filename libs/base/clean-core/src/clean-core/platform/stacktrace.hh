@@ -7,7 +7,7 @@
 //
 // Emscripten ships no <stacktrace> either but is NOT the stub: it gets a backend of its own below, and that backend
 // is cc::capture_stack plus cc::symbolizer — the same two halves this type is everywhere else.
-// A wasm frame does carry an address, a byte offset into the module's code section, so there is nothing special
+// A wasm frame does carry an address, a byte offset into the module file, so there is nothing special
 // about the platform at this level; what differs is only where a name comes from.
 // Names come from the wasm name section, which the wasm presets keep with --profiling-funcs; without it the frames
 // are still there and read as offsets rather than names.
@@ -60,7 +60,7 @@ struct cc::stacktrace_entry
 
     [[nodiscard]] cc::string const& description() const { return _text; }
 
-    /// The byte offset into the module's code section, which is what an offline resolver takes.
+    /// The byte offset into the module file, which is what an offline resolver takes.
     /// A JS frame instead carries its line, tagged with cc::impl::wasm_js_frame_bit.
     [[nodiscard]] cc::u32 address() const { return _address; }
 

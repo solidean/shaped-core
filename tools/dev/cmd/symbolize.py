@@ -1,13 +1,13 @@
-"""`symbolize` — turn wasm code offsets back into function names and source lines.
+"""`symbolize` — turn wasm module offsets back into function names and source lines.
 
-A wasm stack is captured as byte offsets into the module's code section (see
+A wasm stack is captured as byte offsets into the module file, not into its code section (see
 `libs/base/clean-core/src/clean-core/platform/impl/wasm_frames.hh`), and a build that shipped no name section reports
 nothing else.
 Those offsets are still resolvable — against the build's own debug info, after the fact, by a tool rather than by the
 program.
 
 This is that tool.
-It reads offsets from text and resolves each through the emsdk's `llvm-symbolizer`, which takes a wasm code offset
+It reads offsets from text and resolves each through the emsdk's `llvm-symbolizer`, which takes a wasm module offset
 directly and answers with `function` plus `file:line:column`.
 
 The intended shape is a pipe, because the text it reads is what clean-core already prints:
@@ -53,7 +53,7 @@ _JS_FRAME_BIT = 0x8000_0000
 
 
 def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
-    p = sub.add_parser(NAME, help="Resolve wasm code offsets to names and source lines")
+    p = sub.add_parser(NAME, help="Resolve wasm module offsets to names and source lines")
     p.add_argument(
         "input",
         nargs="?",
@@ -98,7 +98,7 @@ def _find_symbolizer(emsdk_path: str | None) -> Path | None:
 
 
 def _offsets_in(text: str) -> list[int]:
-    """Every wasm code offset the text mentions, in the order it mentions them.
+    """Every wasm module offset the text mentions, in the order it mentions them.
 
     Order matters: this is a stack, and printing it back out of order would be worse than not printing it.
     Duplicates are kept for the same reason — a recursive call site appears once per level, and collapsing it would
@@ -135,7 +135,7 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
         offsets = _offsets_in(text)
 
     if not offsets:
-        print("symbolize: no wasm code offsets found in the input", file=sys.stderr)
+        print("symbolize: no wasm module offsets found in the input", file=sys.stderr)
         raise SystemExit(1)
 
     # One process for the whole stack rather than one per frame: llvm-symbolizer reads addresses from stdin and

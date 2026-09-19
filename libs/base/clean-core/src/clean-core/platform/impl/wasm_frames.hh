@@ -8,9 +8,11 @@
 //
 // A wasm frame has no return address in linear memory, so the only account of the call stack is the string a JS
 // engine formats for an Error.
-// Each of its lines names the module and — this is the part that matters — the **byte offset into the code
-// section** where the call is, which is an address in every sense that matters: DWARF and source maps both resolve
-// against it, and it survives stripping the name section.
+// Each of its lines names the module and — this is the part that matters — the **byte offset into the module**
+// where the call is, which is an address in every sense that matters: it survives stripping the name section, and
+// llvm-symbolizer resolves it against the build's DWARF as it is.
+// It counts from the start of the file, not from the code section; a tool that adds the code section's start to it
+// resolves every frame to the wrong function.
 //
 // Two engine spellings, and they are handled together because a parser that knows one silently reports nothing on
 // the other:
@@ -63,7 +65,7 @@ void remember_wasm_symbol(u32 address, cc::string_view name);
 /// What `address` was called when it was captured, or empty.
 [[nodiscard]] cc::string_view wasm_symbol_for(u32 address);
 
-/// The bit marking an address as a JS line number rather than a wasm code offset.
+/// The bit marking an address as a JS line number rather than a wasm module offset.
 ///
 /// A wasm module cannot reach 2 GiB of code, so the top bit is free, and Emscripten's own helpers already use it
 /// this way — worth matching, since a recording may be read by their tooling as well as ours.
@@ -72,17 +74,17 @@ inline constexpr u32 wasm_js_frame_bit = 0x8000'0000u;
 
 /// One frame of a JS engine's stack trace, as far as text can say.
 ///
-/// `code_offset` is what a symbolizer resolves, and it is meaningful only against the module it came from — see
+/// `module_offset` is what a symbolizer resolves, and it is meaningful only against the module it came from — see
 /// the build identity recorded beside a wasm stack.
 struct cc::impl::wasm_frame
 {
-    /// Byte offset into the module's code section, or the source line for a JS frame.
-    cc::u32 code_offset = 0;
+    /// Byte offset into the module file, or the source line for a JS frame.
+    cc::u32 module_offset = 0;
 
     /// The module's function index, from `wasm-function[N]`; 0 for a JS frame.
     cc::u32 function_index = 0;
 
-    /// A JS frame rather than a wasm one, so `code_offset` is a line number and `function_index` means nothing.
+    /// A JS frame rather than a wasm one, so `module_offset` is a line number and `function_index` means nothing.
     bool is_js = false;
 
     /// The function's name, empty when the build kept no name section.
@@ -93,6 +95,8 @@ struct cc::impl::wasm_frame
     /// A view into the line, as `name` is.
     cc::string_view module;
 
-    /// The address a capture writes for this frame: the code offset, or the line number with `wasm_js_frame_bit` set.
-    [[nodiscard]] cc::u32 address() const { return is_js ? (code_offset | wasm_js_frame_bit) : code_offset; }
+    /// The address a capture writes for this frame: the module offset, or the line number with `wasm_js_frame_bit` set.
+    /// A JS frame is identified by its line alone, so two scripts' frames on one line share an address — and a name.
+    /// Rare in practice, since the JS frames on a wasm stack are the loader's own.
+    [[nodiscard]] cc::u32 address() const { return is_js ? (module_offset | wasm_js_frame_bit) : module_offset; }
 };

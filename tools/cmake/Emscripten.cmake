@@ -59,7 +59,7 @@ if(EMSCRIPTEN)
 
     # Debug info BESIDE the artifact, for resolving a captured stack after the fact.
     #
-    # A stripped build's stack is still byte offsets into the code section, and those offsets are byte-identical to
+    # A stripped build's stack is still byte offsets into the module file, and those offsets are byte-identical to
     # what a named build of the same source produces -- measured.
     # So the names can live outside the binary entirely.
     #
