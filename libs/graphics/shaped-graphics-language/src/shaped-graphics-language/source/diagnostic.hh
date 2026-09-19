@@ -24,6 +24,10 @@ enum class sgl::diagnostic_kind : sgl::u8
     unknown_character,
     undelimited_string,
     missing_string_end,
+    unknown_escape,
+    stray_dollar,
+    underindented_string_content,
+    reserved_string_opener,
 
     missing_closer,
     unmatched_closer,

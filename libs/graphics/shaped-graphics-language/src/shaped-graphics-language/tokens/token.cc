@@ -44,6 +44,8 @@ cc::string_view sgl::to_string(token_kind kind)
         return "quote_close";
     case token_kind::string_body:
         return "string_body";
+    case token_kind::dollar:
+        return "dollar";
     case token_kind::comment:
         return "comment";
     case token_kind::error:

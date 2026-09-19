@@ -851,6 +851,13 @@ def test_sgl_is_highlighted_by_its_line_tree(root: Path) -> None:
     assert kinds["..<"] == "Token.Operator", "a range must not be read as the number `0.`"
     assert kinds["+"] == "Token.Operator", "the child of a trailing comment's line is still code"
 
+    interpolated = 'print "n = $count, $p.x and $(a + b) cost $$5"\n'
+    pieces = [(str(kind), value) for _, kind, value in SglLexer(stripnl=False).get_tokens_unprocessed(interpolated)]
+    assert "".join(value for _, value in pieces) == interpolated
+    drawn = {value: kind for kind, value in pieces}
+    assert drawn["$count"] == drawn["$p.x"] == drawn["$(a + b)"] == "Token.Literal.String.Interpol"
+    assert drawn["$$"] == "Token.Literal.String.Escape", "a doubled dollar is a literal one, not an interpolation"
+
     html = render_markdown("\n".join(["```sgl", "fun shade() -> vec3:", "```", ""]))
     assert "pg-nf" in html, "an `sgl` fence must reach this lexer rather than fall through as plain text"
 

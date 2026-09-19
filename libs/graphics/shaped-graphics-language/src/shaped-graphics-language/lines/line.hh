@@ -33,6 +33,9 @@ struct sgl::line
     u32 indent_bytes = 0;
     u32 indent_columns = 0;
 
+    /// Set by the tokenizer on a line that ends in an opening quote, whose children are therefore string content.
+    bool opens_string = false;
+
     i32 parent = -1;
     i32 first_child = -1;
     i32 next_sibling = -1;

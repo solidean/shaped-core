@@ -37,8 +37,11 @@ enum class sgl::token_kind : sgl::u8
     /// `"`, `'` or a backquote; which one is the byte it spans.
     quote_open,
     quote_close,
-    /// Everything between two quotes on one line, escapes unprocessed; or a whole line of multi-line string content.
+    /// A piece of a string between its quotes and its interpolations, escapes unprocessed.
+    /// A string is never one token: `"a $b c"` is a quote, a body, an interpolation, a body and a quote.
     string_body,
+    /// The `$` of an interpolation; a name with its fused `.member` run follows, or a round paren holding code.
+    dollar,
 
     /// `//` to the end of the line, or a whole line owned by a comment-only line above it.
     comment,

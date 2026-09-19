@@ -81,6 +81,9 @@ sgl::print_source(file)      // == file.source for EVERY input: the lossless inv
 
 - **`parse` never fails.** Check `file.diagnostics`, and expect `form_kind::missing` and `form_kind::error` inside a tree.
 - **Whitespace is not stored.** It is the gap between two token spans; comments are tokens and are gone from groups onwards.
+- **A string is not a token either.** It is `quote_open`, then `string_body` pieces and interpolations, then `quote_close`.
+  An interpolation is a `dollar` token followed by symbol and dot tokens, or by the tokens of its parentheses; a `quoted` group holds them all as children.
+- **`line::opens_string`** says a line ends in an opening quote, so its children are string content and its next sibling owes the closer.
 - **A number is not a token.** `1.5e-3` is five tokens that the form parser assembles; a sign directly on it is part of the literal.
 - **Operator spacing is syntax.** Spaced on both sides is infix, fused on the right only is prefix, fused on both sides is an error — except ranges.
 - **`operator_run` is flat** for one precedence level (operands and `op` leaves alternate); assignment and `=>` hold two operands and nest right.

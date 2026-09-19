@@ -132,12 +132,12 @@ struct grouper
 
     /// Closes by force whatever is open above `depth`, reporting each paren that never met its closer.
     /// An open quote is not reported: the tokenizer already said what was wrong with it.
-    void close_down_to(isize depth)
+    void close_down_to(isize depth, bool is_reported_already = false)
     {
         while (stack.size() > depth)
         {
             auto const& g = file.groups[stack.back().group];
-            if (is_list(g.kind) && g.close_token < 0)
+            if (is_list(g.kind) && g.close_token < 0 && !is_reported_already)
                 report(diagnostic_kind::missing_closer, g.token);
             pop();
         }
@@ -255,8 +255,13 @@ struct grouper
         for (auto i = first_line; i >= 0; i = file.lines[i].next_sibling)
         {
             auto const& l = file.lines[i];
-            if (l.token_count > 0)
-                append_new({.token = i32(l.first_token)});
+            auto const depth = stack.size();
+            next_starts_line = true;
+            for (auto t = i32(l.first_token); t < i32(l.first_token + l.token_count); ++t)
+                take_token(l, t);
+            // An interpolation ends with its line, and the tokenizer has already said so if it did not close.
+            close_down_to(depth, true);
+            next_starts_line = false;
             take_string_content(l.first_child);
         }
     }
@@ -281,9 +286,18 @@ struct grouper
         for (auto t = first; t <= (has_block_colon ? last - 1 : last); ++t)
             take_token(l, t);
 
-        // An opener with a body on its own line is an undelimited string, which ends with the line; one without is multi-line.
-        if (top_is_open_string() && file.groups[stack.back().group].first_child >= 0)
-            pop();
+        // A string still open on a line that opens none is undelimited, and ends with the line.
+        // An interpolation it left open goes with it, and the tokenizer has reported both already.
+        if (!l.opens_string)
+            for (auto depth = stack.size() - 1; depth >= unit_depth; --depth)
+            {
+                auto const& g = file.groups[stack[depth].group];
+                if (g.kind == group_kind::quoted && g.close_token < 0)
+                {
+                    close_down_to(depth, true);
+                    break;
+                }
+            }
 
         if (has_block_colon)
         {

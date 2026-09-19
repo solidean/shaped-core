@@ -42,15 +42,6 @@ constexpr cc::string_view spec_files[] = {
     "incubator/string-family.md",
 };
 
-/// Diagnostics the spec defines and the tokenizer does not report yet: all of them live inside a string.
-/// An `sgl error` example that names one of these is skipped, so this list is the debt, and it only shrinks.
-constexpr cc::string_view not_reported_yet[] = {
-    "stray-dollar",
-    "unknown-escape",
-    "underindented-string-content",
-    "reserved-string-opener",
-};
-
 enum class fence_kind : u8
 {
     /// `sgl`: parses without a single diagnostic.
@@ -137,7 +128,6 @@ TEST("sgl spec - every checked example in the spec parses the way its fence says
 {
     auto failures = cc::string();
     auto checked = 0;
-    auto pending = 0;
 
     for (auto const file : spec_files)
     {
@@ -147,14 +137,6 @@ TEST("sgl spec - every checked example in the spec parses the way its fence says
             if (e.kind == fence_kind::sketch)
                 continue;
 
-            auto is_pending = false;
-            for (auto const kind : not_reported_yet)
-                is_pending = is_pending || e.lead.contains(cc::format("`{}`", kind));
-            if (e.kind == fence_kind::error && is_pending)
-            {
-                ++pending;
-                continue;
-            }
             ++checked;
 
             auto const parsed = sgl::parse(e.source);
@@ -184,6 +166,4 @@ TEST("sgl spec - every checked example in the spec parses the way its fence says
     CHECK(failures == "");
     // A spec whose examples all quietly became sketches would pass the check above.
     CHECK(checked > 40);
-    // Every entry of the debt list must still be owed; one that no example needs any more is deleted.
-    CHECK(pending >= int(sizeof(not_reported_yet) / sizeof(not_reported_yet[0])));
 }

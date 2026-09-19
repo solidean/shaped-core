@@ -57,9 +57,9 @@ void dump_group(parsed_file const& file, cc::string& out, i32 index, int depth)
         out += "\"";
         for (auto child = g.first_child; child >= 0; child = file.groups[child].next_sibling)
         {
-            if (child != g.first_child)
+            if (child != g.first_child && file.groups[child].starts_line)
                 out += "\\n";
-            out += file.text_of(file.tokens[file.groups[child].token].where);
+            dump_group(file, out, child, depth);
         }
         out += "\"";
         break;

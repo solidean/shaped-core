@@ -62,3 +62,12 @@ A literal dollar is `$$` and not `\$` so that one rule covers one-line and multi
 Only double quotes interpolate, which leaves single quotes and backquotes free for a later meaning.
 The tokens are produced now, so that tools and the highlighter agree on them, and the AST rejects them until the semantics exist.
 The reserved `"""` opener is meant for the raw variant, a multi-line string without interpolation.
+
+## STR-31
+
+A tagged opener and a one-word string that nobody has closed yet are the same characters: `print "hello`.
+The second is what every string looks like while it is being typed, so it cannot be the reading that turns the lines below it into content.
+
+What tells them apart is whether the line has children, and the line tree knows that before a single token is read.
+A tag only means something when there is content for it to describe, so requiring the content costs the tagged form nothing.
+It keeps the rule local as well: the decision looks at one line and at whether anything hangs below it, never at what those lines hold.

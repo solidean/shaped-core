@@ -14,6 +14,14 @@ cc::string_view sgl::to_string(diagnostic_kind kind)
         return "undelimited-string";
     case diagnostic_kind::missing_string_end:
         return "missing-string-end";
+    case diagnostic_kind::unknown_escape:
+        return "unknown-escape";
+    case diagnostic_kind::stray_dollar:
+        return "stray-dollar";
+    case diagnostic_kind::underindented_string_content:
+        return "underindented-string-content";
+    case diagnostic_kind::reserved_string_opener:
+        return "reserved-string-opener";
     case diagnostic_kind::missing_closer:
         return "missing-closer";
     case diagnostic_kind::unmatched_closer:
@@ -68,6 +76,10 @@ sgl::severity sgl::default_severity_of(diagnostic_kind kind)
     case diagnostic_kind::unknown_character:
     case diagnostic_kind::undelimited_string:
     case diagnostic_kind::missing_string_end:
+    case diagnostic_kind::unknown_escape:
+    case diagnostic_kind::stray_dollar:
+    case diagnostic_kind::underindented_string_content:
+    case diagnostic_kind::reserved_string_opener:
     case diagnostic_kind::missing_closer:
     case diagnostic_kind::unmatched_closer:
     case diagnostic_kind::empty_block:

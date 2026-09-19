@@ -55,6 +55,7 @@ let b = 2
 | `\u{…}` | the code point with that hexadecimal number |
 
 * **STR-4** Any other escape is the normal error `unknown-escape`, and it stands for the character after the backslash.
+* **STR-44** `\u{…}` holds one to six hexadecimal digits; any other `\u` is `unknown-escape`.
 * **STR-5** There is no escape for `$`: a literal dollar is `$$` ([interpolation](#interpolation)).
 * **STR-6** A quoted literal with content and no closing quote on its line is the normal error `undelimited-string`, and it closes at the end of the line ([why](why/strings-and-comments.md#str-6)).
 
@@ -147,6 +148,12 @@ log("
 * **STR-27** `$$` is a literal dollar.
 * **STR-28** A `$` followed by anything else is the normal error `stray-dollar`, and it stands for itself.
 * **STR-29** The token phase and the form phase accept interpolation; the AST rejects it until its semantics exist.
+* **STR-38** A name in an interpolation is letters, digits, `_` and non-ASCII code points, and it does not start with a digit: `'`, `@`, `#` and `\` end it.
+* **STR-39** A string is a sequence of tokens: the opening quote, string bodies and interpolations in source order, and the closing quote.
+* **STR-40** An interpolation is a `$` token followed by symbol and DOT tokens, or by the tokens of its parentheses.
+* **STR-41** A quote inside the parentheses of `$(expr)` opens a string of its own.
+* **STR-42** A `$(` with no matching `)` on its line is the normal error `missing-closer`, and the interpolation ends with the line.
+* **STR-43** `$$` stays in the string body; the value of the string holds one `$` for it.
 
 ```sgl
 print "total: $total of $stats.count, that is $(100 * total / stats.count)%"
@@ -162,7 +169,20 @@ print "cost in $ is unknown"
 ## Reserved openers
 
 * **STR-30** `"""` as the last token of its line is tokenized as an opening quote, and it is the normal error `reserved-string-opener`.
-* **STR-31** A quote followed by exactly one symbol and then the end of the line is a **tagged opener**: it is tokenized as an opening quote, and it is the normal error `reserved-string-opener`.
+* **STR-31** A quote followed by exactly one name and then the end of the line, on a line that has children, is a **tagged opener** ([why](why/strings-and-comments.md#str-31)).
+* **STR-45** A tagged opener is tokenized as an opening quote and a symbol, and it is the normal error `reserved-string-opener`.
+* **STR-34** The same spelling on a line without children is a one-line string with no closing quote, and STR-6 applies.
+* **STR-35** No whitespace stands between the quote and the name of a tagged opener.
+* **STR-36** A `"""` opener is closed by `"""` at the start of the next sibling, and its content does not interpolate.
+* **STR-37** A tagged opener is closed like any multi-line string, and its content interpolates when the quote is `"`.
+
+`"""` is reserved, so the line below reports `reserved-string-opener`.
+
+```sgl error
+let raw = """
+    text, and $this is no interpolation
+"""
+```
 
 ```sgl sketch
 let shader = """
@@ -181,7 +201,6 @@ let config = "json
 
 ## Open
 
-* How a `$(` without a `)` on its line recovers.
-* Whether the sibling after a `"""` opener must start with `"""` or with `"`.
-* Whether a tagged opener allows whitespace between the quote and the symbol, and whether it exists for all three quote characters.
-* Whether a `\u{…}` escape with no digits, too many digits or a surrogate value is `unknown-escape` or a kind of its own.
+* Whether a tagged opener exists for all three quote characters, as it does today, or for `"` only.
+* Whether a `\u{…}` escape that names a surrogate, or a value past the last code point, is `unknown-escape` or a kind of its own.
+* Whether a tag is a free name or must name something declared.

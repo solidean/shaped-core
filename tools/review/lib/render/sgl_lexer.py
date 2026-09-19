@@ -38,6 +38,8 @@ _ESCAPE = re.compile(r"\\.")
 # tokens for the form phase to assemble; a highlighter has no later phase, so it assembles them here.
 _FRACTION = re.compile(r"[.](?![.])[0-9][0-9A-Za-z_']*")
 _EXPONENT = re.compile(r"(?<=[eEpP])[+-][0-9][0-9A-Za-z_']*")
+# `$name`, `$name.member`, `$$`, and `$(…)` without nested parentheses, which is as far as a highlighter needs to see.
+_INTERPOLATION = re.compile(r"\$\$|\$[A-Za-z_][0-9A-Za-z_]*(?:\.[A-Za-z_][0-9A-Za-z_]*)*|\$\([^()]*(?:\([^()]*\)[^()]*)*\)")
 _QUOTE_TOKEN = {'"': String.Double, "'": String.Single, "`": String.Backtick}
 
 
@@ -82,9 +84,13 @@ class SglLexer(Lexer):
             if mode == "comment":
                 yield at, Comment.Single, content
                 stack.append(_Line(indent, "comment", ""))
-            elif mode == "string":
-                yield at, String, content
-                stack.append(_Line(indent, "string", ""))
+            elif mode in ("string", "raw-string"):
+                if mode == "string":
+                    for offset, token, value in _interpolated(content, 0, len(content), String, False):
+                        yield at + offset, token, value
+                else:
+                    yield at, String, content
+                stack.append(_Line(indent, mode, ""))
             else:
                 closes = previous_sibling.open_quote if previous_sibling is not None else ""
                 child_mode, open_quote = "code", ""
@@ -128,9 +134,12 @@ def _code_tokens(line: str, closes: str):
         if ch in _QUOTE_TOKEN:
             token = _QUOTE_TOKEN[ch]
             end = _closing_quote(line, i + 1, ch)
-            if end < 0 and not line[i + 1:].strip():
+            if line[i:].strip() == ch * 3:
+                end = -1
+            if end < 0 and (not line[i + 1:].strip() or line[i:].strip() == ch * 3):
                 # An open quote with nothing after it: the children are the string, and the next sibling closes it.
-                yield i, token, line[i:], ("string", ch)
+                is_raw = ch != '"' or line[i:].strip() == '"""'
+                yield i, token, line[i:], ("raw-string" if is_raw else "string", ch)
                 return
             if end < 0:
                 yield i, Error, ch, code
@@ -218,7 +227,27 @@ def _closing_quote(line: str, start: int, quote: str) -> int:
     return -1
 
 
+def _interpolated(line: str, start: int, end: int, token, has_escapes: bool):
+    """A stretch of string text as (offset, token, value), with its escapes and interpolations picked out."""
+    pattern = re.compile(_ESCAPE.pattern + "|" + _INTERPOLATION.pattern) if has_escapes else _INTERPOLATION
+    at = start
+    for found in pattern.finditer(line, start, end):
+        if found.start() > at:
+            yield at, token, line[at:found.start()]
+        is_escape = found.group().startswith("\\") or found.group() == "$$"
+        yield found.start(), String.Escape if is_escape else String.Interpol, found.group()
+        at = found.end()
+    if end > at:
+        yield at, token, line[at:end]
+
+
 def _quoted(line: str, start: int, end: int, token, state):
+    if token is String.Double:
+        yield start, token, line[start], state
+        for offset, kind, value in _interpolated(line, start + 1, end - 1, token, True):
+            yield offset, kind, value, state
+        yield end - 1, token, line[end - 1], state
+        return
     at = start
     for escape in _ESCAPE.finditer(line, start, end - 1):
         if escape.start() > at:
