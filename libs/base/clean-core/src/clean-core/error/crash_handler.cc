@@ -18,19 +18,6 @@
 #include <tlhelp32.h> // CreateToolhelp32Snapshot — and the only way to enumerate this process's threads
 #endif
 
-// Sanitizers (ASan/TSan/MSan) install their own fault handlers and print far richer diagnostics, so overriding them would suppress those reports.
-// Detect an active sanitizer and make installation a no-op there, leaving the runtime's handlers in place.
-#if defined(__SANITIZE_ADDRESS__) || defined(__SANITIZE_THREAD__)
-#define CC_CRASH_HANDLER_SANITIZED 1
-#elif defined(__has_feature)
-#if __has_feature(address_sanitizer) || __has_feature(thread_sanitizer) || __has_feature(memory_sanitizer)
-#define CC_CRASH_HANDLER_SANITIZED 1
-#endif
-#endif
-#ifndef CC_CRASH_HANDLER_SANITIZED
-#define CC_CRASH_HANDLER_SANITIZED 0
-#endif
-
 namespace
 {
 // Context hooks are stored in a fixed array so the crash path never allocates.

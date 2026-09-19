@@ -4,16 +4,15 @@
 
 #if defined(__linux__) && !defined(__EMSCRIPTEN__)
 
-#include <clean-core/platform/stack_capture.hh>
-#include <clean-core/platform/symbolize.hh>
-#include <clean-core/string/string_view.hh>
+#include <clean-core/container/span.hh>
 #include <clean-core/thread/atomic.hh>
-#include <dirent.h>
+#include <fcntl.h>
 #include <semaphore.h>
 #include <signal.h>
 #include <sys/syscall.h>
 #include <time.h>
 #include <unistd.h>
+#include <unwind.h>
 
 #include <cerrno>
 #include <cstdio>
@@ -39,6 +38,10 @@ constexpr isize max_frames = 64;
 /// crash handler.
 constexpr isize max_threads = 128;
 
+/// How long one thread gets to answer.
+/// A thread that is running or blocked answers within microseconds; this only bounds one that cannot answer at all.
+constexpr double answer_timeout_secs = 1.0;
+
 /// What one asked thread is doing.
 enum class slot_state : int
 {
@@ -47,9 +50,13 @@ enum class slot_state : int
     answered,  ///< frames below are this thread's
 };
 
+/// The one slot the collector and the handler share.
+///
+/// One, because the collector asks a single thread at a time and waits for it: the tid names who may answer, so a
+/// late answer from a thread that already timed out finds the slot re-addressed and writes nothing.
 struct thread_slot
 {
-    /// The kernel thread id this slot belongs to while a request is outstanding.
+    /// The kernel thread id that may answer, or 0 between requests.
     cc::atomic<i32> tid = {0};
 
     cc::atomic<int> state = {int(slot_state::idle)};
@@ -58,11 +65,9 @@ struct thread_slot
     cc::atomic<i32> frame_count = {0};
 };
 
-thread_slot g_slots[max_threads];
+thread_slot g_slot;
 
 /// Posted by the handler, waited on by the collector.
-/// One rather than one per slot: the collector asks a single thread at a time, which keeps the handler's work to a
-/// slot write and a post.
 sem_t g_answered;
 
 cc::atomic<bool> g_installed = false;
@@ -72,106 +77,167 @@ cc::atomic<bool> g_installed = false;
     return i32(::syscall(SYS_gettid));
 }
 
+/// The frames one unwind has collected so far.
+struct unwind_state
+{
+    cc::span<void*> frames;
+    isize count = 0;
+};
+
+_Unwind_Reason_Code collect_frame(_Unwind_Context* context, void* user)
+{
+    auto& state = *static_cast<unwind_state*>(user);
+    if (state.count >= state.frames.size())
+        return _URC_END_OF_STACK;
+
+    auto const pc = _Unwind_GetIP(context);
+    if (pc == 0)
+        return _URC_END_OF_STACK;
+
+    state.frames[state.count++] = reinterpret_cast<void*>(pc);
+    return _URC_NO_REASON;
+}
+
 /// The handler every asked thread runs.
 ///
-/// **Async-signal-safe, and that is a requirement rather than a preference.**
-/// cc::capture_stack is documented allocation-free and lock-free; sem_post is on the POSIX list; nothing else here
-/// touches anything a signal could have interrupted.
+/// Unwinds from tables rather than chasing frame pointers: an asked thread is almost always parked inside the C
+/// library, which keeps no frame chain, so a chase stops at the first link and reports nothing.
+/// The unwinder knows the signal trampoline and walks through it into the interrupted code.
 void report_own_stack(int) noexcept
 {
     auto const self = current_tid();
-
-    for (auto& slot : g_slots)
-    {
-        if (slot.state.load(cc::memory_order_acquire) != int(slot_state::requested))
-            continue;
-        if (slot.tid.load(cc::memory_order_relaxed) != self)
-            continue;
-
-        auto const captured = cc::capture_stack(cc::span<void*>(slot.frames, max_frames), 1);
-        slot.frame_count.store(i32(captured.count), cc::memory_order_relaxed);
-
-        // Released last, so the collector never reads frames the handler has not finished writing.
-        slot.state.store(int(slot_state::answered), cc::memory_order_release);
-        ::sem_post(&g_answered);
+    if (g_slot.tid.load(cc::memory_order_acquire) != self)
+        return; // a late answer to a request that already timed out
+    if (g_slot.state.load(cc::memory_order_acquire) != int(slot_state::requested))
         return;
-    }
+
+    auto state = unwind_state{.frames = cc::span<void*>(g_slot.frames)};
+    _Unwind_Backtrace(&collect_frame, &state);
+    g_slot.frame_count.store(i32(state.count), cc::memory_order_relaxed);
+
+    // Released last, so the collector never reads frames the handler has not finished writing.
+    g_slot.state.store(int(slot_state::answered), cc::memory_order_release);
+    ::sem_post(&g_answered);
 }
+
+/// The layout the kernel writes for getdents64, which glibc declares only under a name that varies by version.
+struct linux_dirent64
+{
+    u64 d_ino;
+    i64 d_off;
+    unsigned short d_reclen;
+    unsigned char d_type;
+    char d_name[1];
+};
 
 /// Every thread in this process, from the OS rather than from a registry.
 ///
 /// A registry would only know the threads clean-core created, and the one worth reporting is routinely somebody
 /// else's.
+/// Read with raw syscalls into a stack buffer, because opendir allocates and this runs inside a fault handler.
 [[nodiscard]] isize enumerate_tids(cc::span<i32> out)
 {
-    auto* const dir = ::opendir("/proc/self/task");
-    if (dir == nullptr)
+    auto const fd = int(::syscall(SYS_openat, AT_FDCWD, "/proc/self/task", O_RDONLY | O_DIRECTORY | O_CLOEXEC));
+    if (fd < 0)
         return 0;
 
+    alignas(8) char buffer[4096];
     auto count = isize(0);
     while (count < out.size())
     {
-        auto const* const entry = ::readdir(dir);
-        if (entry == nullptr)
+        auto const read = ::syscall(SYS_getdents64, fd, buffer, sizeof(buffer));
+        if (read <= 0)
             break;
-        if (entry->d_name[0] < '0' || entry->d_name[0] > '9')
-            continue;
 
-        // Parsed by hand rather than with atoi, which is not async-signal-safe.
-        // Note that opendir/readdir above are not either — see the hazard list in the header.
-        auto value = i32(0);
-        for (auto const* c = entry->d_name; *c != '\0'; ++c)
+        for (auto offset = 0l; offset < read && count < out.size();)
         {
-            if (*c < '0' || *c > '9')
-            {
-                value = 0;
-                break;
-            }
-            value = value * 10 + (*c - '0');
-        }
+            auto const* const entry = reinterpret_cast<linux_dirent64 const*>(buffer + offset);
+            offset += entry->d_reclen;
 
-        if (value != 0)
-            out[count++] = value;
+            // Parsed by hand rather than with atoi, which is not async-signal-safe; "." and ".." fail the digit test.
+            auto value = i32(0);
+            for (auto const* c = entry->d_name; *c != '\0'; ++c)
+            {
+                if (*c < '0' || *c > '9')
+                {
+                    value = 0;
+                    break;
+                }
+                value = value * 10 + (*c - '0');
+            }
+
+            if (value != 0)
+                out[count++] = value;
+        }
     }
 
-    ::closedir(dir);
+    ::close(fd);
     return count;
 }
 
-/// Asks one thread and waits for it, or gives up.
-[[nodiscard]] bool ask(thread_slot& slot, i32 tid, double timeout_secs)
+/// Writes `value` in decimal, or as `0x…` hex, without formatting through anything that could allocate.
+void write_number(u64 value, bool hex)
 {
-    slot.frame_count.store(0, cc::memory_order_relaxed);
-    slot.tid.store(tid, cc::memory_order_relaxed);
-    slot.state.store(int(slot_state::requested), cc::memory_order_release);
+    char digits[24] = {};
+    auto n = 0;
+    auto const base = hex ? 16u : 10u;
+    do
+    {
+        digits[n++] = "0123456789abcdef"[value % base];
+        value /= base;
+    } while (value != 0);
+
+    if (hex)
+        std::fputs("0x", stderr);
+    while (n > 0)
+        std::fputc(digits[--n], stderr);
+}
+
+/// Asks one thread and waits for it, or gives up.
+[[nodiscard]] bool ask(i32 tid)
+{
+    g_slot.frame_count.store(0, cc::memory_order_relaxed);
+    g_slot.state.store(int(slot_state::requested), cc::memory_order_relaxed);
+    g_slot.tid.store(tid, cc::memory_order_release);
 
     // tgkill rather than pthread_kill: the thread list is kernel tids, and translating them back to pthread_t
     // would need a registry this deliberately does without.
     if (::syscall(SYS_tgkill, ::getpid(), tid, g_signal) != 0)
-    {
-        slot.state.store(int(slot_state::idle), cc::memory_order_release);
         return false;
-    }
 
     auto deadline = timespec{};
     ::clock_gettime(CLOCK_REALTIME, &deadline);
-    deadline.tv_sec += time_t(timeout_secs);
-    deadline.tv_nsec += long((timeout_secs - double(time_t(timeout_secs))) * 1e9);
-    if (deadline.tv_nsec >= 1'000'000'000)
+    deadline.tv_nsec += long(answer_timeout_secs * 1e9);
+    while (deadline.tv_nsec >= 1'000'000'000)
     {
         deadline.tv_nsec -= 1'000'000'000;
         ++deadline.tv_sec;
     }
 
-    while (::sem_timedwait(&g_answered, &deadline) != 0)
+    for (;;)
     {
-        // EINTR is this process's own signals arriving, and waiting through them is the point.
-        if (errno == EINTR)
-            continue;
-        return false;
-    }
+        if (::sem_timedwait(&g_answered, &deadline) != 0)
+        {
+            // EINTR is this process's own signals arriving, and waiting through them is the point.
+            if (errno == EINTR)
+                continue;
+            return false;
+        }
 
-    return slot.state.load(cc::memory_order_acquire) == int(slot_state::answered);
+        // A post from a thread that answered after its own timeout is spent here rather than mistaken for this one.
+        if (g_slot.state.load(cc::memory_order_acquire) == int(slot_state::answered))
+            return true;
+    }
+}
+
+/// Ends a request, and swallows any answer that is still on its way so the next request starts from zero.
+void retire_request()
+{
+    g_slot.tid.store(0, cc::memory_order_release);
+    g_slot.state.store(int(slot_state::idle), cc::memory_order_release);
+    while (::sem_trywait(&g_answered) == 0)
+    {
+    }
 }
 } // namespace
 
@@ -188,6 +254,14 @@ void cc::impl::install_posix_thread_stack_reporter()
     g_signal = SIGRTMIN + 3;
     if (::sem_init(&g_answered, 0, 0) != 0)
         return;
+
+    // One unwind now, so whatever the unwinder sets up on first use — its lookup caches, a lazily bound symbol — is
+    // done before any thread has to do it inside the handler.
+    {
+        void* warm[4] = {};
+        auto state = unwind_state{.frames = cc::span<void*>(warm)};
+        _Unwind_Backtrace(&collect_frame, &state);
+    }
 
     struct sigaction action;
     ::memset(&action, 0, sizeof(action));
@@ -216,46 +290,37 @@ bool cc::impl::report_posix_thread_stacks() noexcept
 
     auto const self = current_tid();
 
-    // Outside the loop, so one thread's debug info is not opened and closed per frame.
-    auto symbols = cc::symbolizer();
-
     for (auto i = isize(0); i < count; ++i)
     {
         if (tids[i] == self)
             continue;
 
-        auto& slot = g_slots[i];
-
         std::fputs("  thread ", stderr);
-        char buffer[32] = {};
-        auto written = isize(0);
-        for (auto v = tids[i]; v > 0; v /= 10)
-            buffer[written++] = char('0' + (v % 10));
-        for (auto j = written; j > 0; --j)
-            std::fputc(buffer[j - 1], stderr);
+        write_number(u64(tids[i]), false);
         std::fputs(":\n", stderr);
 
-        // One second, and the number is a guess that has never been tested against a real stuck thread.
-        if (!ask(slot, tids[i], 1.0))
+        if (!ask(tids[i]))
         {
             // **Reported rather than skipped.** A thread that cannot answer is often the one that matters, and
             // saying nothing about it reads as there being nothing to say.
             std::fputs("    <unresponsive; it did not run the handler within the budget>\n", stderr);
-            slot.state.store(int(slot_state::idle), cc::memory_order_release);
+            retire_request();
             continue;
         }
 
-        auto const frames = slot.frame_count.load(cc::memory_order_relaxed);
+        // Raw addresses: resolving them would mean the symbolizer's allocating cache inside a fault handler.
+        // They are absolute, so an offline resolver also needs the module bases the recording carries.
+        auto const frames = g_slot.frame_count.load(cc::memory_order_relaxed);
+        if (frames == 0)
+            std::fputs("    <no frames; the unwinder found nothing to walk>\n", stderr);
         for (auto f = i32(0); f < frames; ++f)
         {
-            auto const& info = symbols.resolve(slot.frames[f]);
-            auto const line = info.to_string();
             std::fputs("    ", stderr);
-            std::fwrite(line.data(), 1, size_t(line.size()), stderr);
+            write_number(u64(reinterpret_cast<uintptr_t>(g_slot.frames[f])), true);
             std::fputc('\n', stderr);
         }
 
-        slot.state.store(int(slot_state::idle), cc::memory_order_release);
+        retire_request();
     }
 
     return true;
