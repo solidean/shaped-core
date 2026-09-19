@@ -143,6 +143,9 @@ struct nx::impl::test_section
 struct nx::impl::test_context
 {
     nx::test_execution* execution = nullptr;
+
+    // This test's entry in the in-flight table, or -1 when the table was full.
+    int in_flight_slot = -1;
     nx::test_schedule_config const* config = nullptr;
     cc::unique_ptr<test_section> root_section;
     cc::vector<test_section*> curr_section;
@@ -350,6 +353,27 @@ running_test_slot g_running_tests[max_running_test_slots];
 cc::atomic<int> g_running_slots_claimed = {0};
 thread_local int g_running_slot = -1;
 
+/// Every test that has begun and not yet ended, whether or not a thread is running it right now.
+///
+/// The running-test slots above name what each thread is executing, and an ASYNC_TEST that awaits holds no thread.
+/// So a report about a run that stopped would name nothing for exactly the hang that is most common; this table is
+/// what names it.
+/// Claimed and released with one compare-exchange each, so it costs a test nothing it would notice.
+constexpr int max_in_flight_tests = 256;
+cc::atomic<nx::test_declaration const*> g_in_flight_tests[max_in_flight_tests] = {};
+
+/// Claims a free entry for `decl`, or returns -1 once the table is full, which costs a name in a report and nothing else.
+int claim_in_flight(nx::test_declaration const& decl)
+{
+    for (auto i = 0; i < max_in_flight_tests; ++i)
+    {
+        nx::test_declaration const* expected = nullptr;
+        if (g_in_flight_tests[i].compare_exchange_strong(expected, &decl, cc::memory_order_relaxed))
+            return i;
+    }
+    return -1;
+}
+
 /// This thread's crash-context slot, or null once the table is full.
 running_test_slot* running_test_slot_for_this_thread()
 {
@@ -508,6 +532,7 @@ cc::unique_ptr<test_context> test_execute_begin(nx::test_execution& execution,
     ctx.filter_offset = filter_offset;
     ctx.root_section->location = execution.instance.declaration->location;
     ctx.curr_section.push_back(ctx.root_section.get());
+    ctx.in_flight_slot = claim_in_flight(*execution.instance.declaration);
 
     // The ambient here is still the DISPATCHING test's context — this one is installed by the caller, just after us.
     // So a nested execution inherits its ancestor's sink, and only a top-level one owns a buffer.
@@ -565,6 +590,8 @@ void test_execute_end(cc::unique_ptr<test_context> owned, bool keep_alive)
     ctx.root_section->finalize_section_to(ctx.execution->root, require_checks);
 
     ctx.is_finished.store(true, cc::memory_order_release);
+    if (ctx.in_flight_slot >= 0)
+        g_in_flight_tests[ctx.in_flight_slot].store(nullptr, cc::memory_order_relaxed);
     nx::impl::watchdog_heartbeat();
 
     if (keep_alive)
@@ -1635,6 +1662,25 @@ void nx::impl::report_running_test() noexcept
 
     if (reported == 0)
         cc::eprint("running test: <none>\n");
+
+    // Begun and not ended, but on no thread: an ASYNC_TEST between polls, which is what an awaiting hang looks like.
+    // A test that IS on a thread appears above as well, and is skipped here rather than named twice.
+    for (auto const& entry : g_in_flight_tests)
+    {
+        auto const* const decl = entry.load(cc::memory_order_relaxed);
+        if (decl == nullptr || decl->name.empty())
+            continue;
+
+        auto on_a_thread = false;
+        for (auto i = 0; i < claimed && !on_a_thread; ++i)
+            on_a_thread = g_running_tests[i].declaration.load(cc::memory_order_relaxed) == decl;
+        if (on_a_thread)
+            continue;
+
+        cc::eprint("   awaiting: \"");
+        cc::eprint(decl->name);
+        cc::eprint("\"\n");
+    }
 
     // The console holds back attributed warnings until the run judges them, so a crash would otherwise lose them.
     nx::impl::report_withheld_log_records();
