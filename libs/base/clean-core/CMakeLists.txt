@@ -38,6 +38,7 @@ add_library(clean-core
     src/clean-core/platform/module_table.cc
     src/clean-core/platform/symbolize.cc
     src/clean-core/platform/impl/text_file.cc
+    src/clean-core/platform/impl/wasm_frames.cc
     src/clean-core/platform/system_info.cc
     src/clean-core/platform/system_identifier.cc
     src/clean-core/platform/resource_limits.cc
@@ -65,6 +66,7 @@ add_library(clean-core
     src/clean-core/record/impl/serialized_format.cc
     src/clean-core/record/serialize.cc
     src/clean-core/record/crash_dump.cc
+    src/clean-core/record/thread_scopes.cc
     src/clean-core/record/trace.cc
     src/clean-core/record/ambient.cc
     src/clean-core/record/async_scope.cc
@@ -73,6 +75,7 @@ add_library(clean-core
     src/clean-core/record/hot_functions.cc
     src/clean-core/record/splicing_listener.cc
     src/clean-core/error/crash_handler.cc
+    src/clean-core/error/impl/posix_thread_stacks.cc
     src/clean-core/string/to_string.cc
     src/clean-core/string/from_string.cc
     src/clean-core/string/format.cc
@@ -149,6 +152,7 @@ target_sources(clean-core
     src/clean-core/platform/module_table.hh
     src/clean-core/platform/symbolize.hh
     src/clean-core/platform/impl/text_file.hh
+    src/clean-core/platform/impl/wasm_frames.hh
     src/clean-core/platform/system_info.hh
     src/clean-core/platform/system_identifier.hh
     src/clean-core/platform/resource_limits.hh
@@ -225,6 +229,7 @@ target_sources(clean-core
     src/clean-core/error/result.hh
     src/clean-core/error/optional.hh
     src/clean-core/error/crash_handler.hh
+    src/clean-core/error/impl/posix_thread_stacks.hh
 
     src/clean-core/record/domain_fwd.hh
     src/clean-core/record/fwd.hh
@@ -254,6 +259,8 @@ target_sources(clean-core
     src/clean-core/record/hot_functions.hh
     src/clean-core/record/splicing_listener.hh
     src/clean-core/record/crash_dump.hh
+    src/clean-core/record/thread_scopes.hh
+    src/clean-core/record/impl/published_blocks.hh
     src/clean-core/record/trace.hh
     src/clean-core/record/impl/ambient_hook.hh
     src/clean-core/record/async_scope.hh
@@ -506,6 +513,7 @@ if(SC_BUILD_TESTS)
         tests/platform/environment-test.cc
         tests/platform/file_path-test.cc
         tests/platform/stack-capture-test.cc
+        tests/platform/wasm-frames-test.cc
         tests/platform/stacktrace-test.cc
         tests/platform/symbolize-test.cc
         tests/platform/system_info-test.cc
@@ -594,6 +602,7 @@ if(SC_BUILD_TESTS)
         tests/record/record-trace-test.cc
         tests/record/record-async-scope-test.cc
         tests/record/record-sampling-test.cc
+        tests/record/record-thread-scopes-test.cc
     tests/record/record-hot-functions-test.cc
     tests/record/record-retention-test.cc
     tests/record/record-splicing-test.cc

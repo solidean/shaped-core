@@ -230,3 +230,84 @@ ASYNC_TEST("async backlog - work tracked from many pool nodes is all waited for"
     CHECK(backlog.outstanding_count() == 0);
 }
 #endif
+
+// The registry, which is what lets a hang report say WHOSE work is outstanding rather than only that some is.
+//
+// It covers tracked work only -- a node awaited in the ordinary way is in nobody's list -- and the report says so
+// rather than implying a completeness it does not have.
+
+namespace
+{
+/// How many live backlogs carry `name`, and what the first of them still owes.
+struct registry_probe
+{
+    isize found = 0;
+    isize outstanding = 0;
+    bool readable = false;
+};
+
+[[nodiscard]] registry_probe probe_registry(cc::string_view name)
+{
+    auto probe = registry_probe();
+    probe.readable = cc::try_for_each_async_backlog(
+        [&](cc::async_backlog const& b)
+        {
+            if (b.name() != name)
+                return;
+            if (probe.found == 0)
+                probe.outstanding = b.outstanding_count();
+            ++probe.found;
+        });
+    return probe;
+}
+} // namespace
+
+TEST("async_backlog - a live backlog is findable by name, and a destroyed one is not")
+{
+    auto const name = cc::string_view("backlog-under-test");
+
+    CHECK(probe_registry(name).found == 0);
+
+    {
+        auto const backlog = cc::async_backlog(name);
+        CHECK(backlog.name() == name);
+
+        auto const probe = probe_registry(name);
+        CHECK(probe.readable);
+        CHECK(probe.found == 1);
+        CHECK(probe.outstanding == 0);
+    }
+
+    // Unregistered on destruction, which is the part that matters: a report walking a dangling entry is worse than
+    // one reporting nothing.
+    CHECK(probe_registry(name).found == 0);
+}
+
+TEST("async_backlog - the registry reports what a backlog still owes")
+{
+    auto const name = cc::string_view("backlog-with-outstanding-work");
+    auto backlog = cc::async_backlog(name);
+
+    auto const work = cc::make_async_manual<int>();
+    backlog.track(work);
+    CHECK(backlog.outstanding_count() == 1);
+
+    auto const during = probe_registry(name);
+    CHECK(during.readable);
+    REQUIRE(during.found == 1);
+    CHECK(during.outstanding == 1);
+
+    work->push_value(7);
+
+    CHECK(probe_registry(name).outstanding == 0);
+}
+
+TEST("async_backlog - an unnamed backlog is still findable, just not attributable")
+{
+    auto const backlog = cc::async_backlog();
+    CHECK(backlog.name().empty());
+
+    auto seen = 0;
+    CHECK(cc::try_for_each_async_backlog([&](cc::async_backlog const&) { ++seen; }));
+    CHECK(seen > 0);
+}

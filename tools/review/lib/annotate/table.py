@@ -15,6 +15,8 @@ surface than a second matcher — and the table is data, so the suite asserts it
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import re
 from collections.abc import Callable
 from pathlib import Path
@@ -72,6 +74,10 @@ def build(entry: Entry, index: RepoIndex, *, answers: AnswerFile | None = None, 
 
     `history(round)` is the tree a finalized round was read at, with its sha, or None to judge it against the current one.
     Text still open is scanned first, so where both name one literal the current tree decides it.
+
+    A superseded block is scanned last and never raises a problem.
+    It still renders, struck, so its references still link where they can; but it is retired text that the block
+    replacing it already corrected, and failing on it would leave no way to make `validate` pass.
     """
     seen_files: set[str] = set()
     seen_dirs: set[str] = set()
@@ -95,21 +101,28 @@ def build(entry: Entry, index: RepoIndex, *, answers: AnswerFile | None = None, 
             tokens.extend(glossary.tokens(text, skip_entry=entry.slug))
 
     texts: list[tuple[str, int]] = []
+    retired: list[tuple[str, int]] = []
     for block in entry.blocks:
-        texts.append((block.prose, block.round))
-        texts.append((block.head, block.round))
-        texts.extend((option.label, block.round) for option in block.options)
+        into = retired if block.is_superseded else texts
+        into.append((block.prose, block.round))
+        into.append((block.head, block.round))
+        into.extend((option.label, block.round) for option in block.options)
     if answers is not None:
         texts.extend((answer.text, 0 if answer.tentative else answer.round) for answer in answers.answers.values())
         texts.extend((comment.text, 0 if comment.tentative else comment.round) for comment in answers.comments.values())
 
-    then_of = {r: (history(r) if history is not None and r else None) for _, r in texts}
+    then_of = {r: (history(r) if history is not None and r else None) for _, r in [*texts, *retired]}
     for text, r in texts:
         if then_of[r] is None:
             scan(text, None)
     for text, r in texts:
         if then_of[r] is not None:
             scan(text, then_of[r])
+
+    live = len(tokens)
+    for text, r in retired:
+        scan(text, then_of[r])
+    tokens[live:] = [replace(token, problem="") if token.problem else token for token in tokens[live:]]
     return tokens
 
 

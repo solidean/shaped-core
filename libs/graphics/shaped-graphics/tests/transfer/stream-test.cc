@@ -512,6 +512,7 @@ ASYNC_INVOCABLE_TEST("sg stream - a compressed texture streams whole block rows"
     desc.height = 16;
     desc.usage = sg::texture_usage::copy_src | sg::texture_usage::copy_dst;
     auto tex = c.persistent.create_raw_texture(desc);
+    nx::allow_warnings("in a layout its transfer queue cannot use"); // incidental here, and backend-dependent
     REQUIRE(tex != nullptr);
 
     isize const block_row_bytes = 4 * 8;
@@ -547,6 +548,7 @@ ASYNC_INVOCABLE_TEST("sg stream - a 3D texture streams slice by slice", (sg::con
     desc.depth = 4;
     desc.usage = sg::texture_usage::copy_src | sg::texture_usage::copy_dst;
     auto tex = c.persistent.create_raw_texture(desc);
+    nx::allow_warnings("in a layout its transfer queue cannot use"); // incidental here, and backend-dependent
     REQUIRE(tex != nullptr);
 
     auto const src = pattern(8 * 8 * 4 * 4, 73);

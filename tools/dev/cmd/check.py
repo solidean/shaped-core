@@ -124,7 +124,7 @@ def _build_checks(ctx: Context) -> list[dev.Check]:
         # miscounts its own height has no other way of being caught.
         # Not fixable and not scopable, so fix and scope are ignored.
         ok = True
-        for runner in ("profile-self-test.py", "changes-self-test.py", "ui-self-test.py"):
+        for runner in ("profile-self-test.py", "changes-self-test.py", "ui-self-test.py", "symbolize-self-test.py"):
             result = dev.run_step(
                 ["uv", "run", str(ctx.root / "tools" / "dev" / runner)],
                 step_type="selftest", name=runner.removesuffix(".py"),

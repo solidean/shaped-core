@@ -54,21 +54,37 @@ void cc::rec::impl::log_apply_policy(cc::rec::desc const& d)
         void* frames[max_captured_frames] = {};
         auto const count = cc::capture_stack(cc::span<void*>(frames, max_captured_frames), 2).count;
 
-        auto writer = rec::open_event(stacktrace_desc, 12 + count * isize(sizeof(void*)));
+        // **An address goes in as a u64, whatever a pointer is worth here.**
+        //
+        // The field says u64_array and a recording is read on a machine other than the one that wrote it, so the
+        // payload cannot be pointer-width: on wasm32 a pointer is four bytes, and writing them raw leaves every
+        // reader's bounds check short by half, which returns no frames at all rather than wrong ones.
+        // sampling.cc writes its own frames this way for the same reason.
+        constexpr auto frames_offset = isize(12);
+        auto writer = rec::open_event(stacktrace_desc, frames_offset + count * isize(sizeof(u64)));
         if (writer.is_open())
         {
             auto const out = writer.payload();
             auto const end_cycles = cc::current_cycles();
-            auto const frame_count = u32(count);
 
-            if (out.size() >= 12)
+            if (out.size() >= frames_offset)
             {
+                // The count describes what was WRITTEN rather than what was captured.
+                // A count larger than the payload holds fails the reader's bounds check, so a truncated write
+                // claiming the full capture loses every frame instead of the last few.
+                auto const room = cc::min(count, (out.size() - frames_offset) / isize(sizeof(u64)));
+                auto const frame_count = u32(room);
+
                 cc::memcpy(out.data(), &end_cycles, sizeof(end_cycles));
                 cc::memcpy(out.data() + 8, &frame_count, sizeof(frame_count));
-                auto const room = cc::min(count, (out.size() - 12) / isize(sizeof(void*)));
-                if (room > 0)
-                    cc::memcpy(out.data() + 12, frames, size_t(room) * sizeof(void*));
-                writer.commit(12 + room * isize(sizeof(void*)),
+
+                for (auto i = isize(0); i < room; ++i)
+                {
+                    auto const address = u64(reinterpret_cast<uintptr_t>(frames[i]));
+                    cc::memcpy(out.data() + frames_offset + i * isize(sizeof(u64)), &address, sizeof(address));
+                }
+
+                writer.commit(frames_offset + room * isize(sizeof(u64)),
                               rec::impl::flag_has_stacktrace | rec::impl::flag_has_end_cycles);
             }
         }

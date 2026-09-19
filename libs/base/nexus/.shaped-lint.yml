@@ -80,3 +80,13 @@ rules:
     reason: the waits run on pools the test owns under no_scheduler, and where a check lands from them is the subject
     files:
       - tests/test-threaded-check-test.cc
+
+  - kind: allow-include
+    value: [<cstdio>, <cstdlib>]
+    reason: a hang report writes through the stderr handle and ends the process with _Exit, for the same reason clean-core's crash handler does - a run too stuck to unwind cannot be left to run static destructors
+    files: src/nexus/impl/watchdog.cc
+
+  - kind: allow-include
+    value: <thread>
+    reason: the watchdog must run OUTSIDE the run it watches, which is what lets it notice a test that spins rather than waits
+    files: src/nexus/impl/watchdog.cc

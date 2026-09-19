@@ -127,6 +127,7 @@ The maintainer answers whenever, says so, and the agent runs `delta <name> --fin
   and `validate` will not let a round be handed back while one is unanswered.
 - **A block can be superseded rather than edited.**
   `supersedes:` retires an earlier block in the same entry; the page shows the replacement with the original struck beside it.
+  A retired block's references still link where they can, and never fail `validate`: nothing could fix them there, and the replacement is what is judged.
   An ask that has already been answered cannot be — that is what `follows:` is for.
 - **Every file an entry names becomes a link**, resolved three ways: the exact path, a unique suffix, a bare basename.
   Ambiguous is a validation error, and so is unresolved — mark the exceptions `new:` (a file this change will create) or `old:` (one it removes).

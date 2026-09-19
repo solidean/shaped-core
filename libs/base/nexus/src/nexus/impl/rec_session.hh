@@ -42,6 +42,14 @@ void end_run_recording(cc::string_view log_dir);
 /// shutdown that ends the run — which is the same constraint the failing-test dumps are serialized early for.
 void begin_run_capture(cc::string_view path);
 
+/// Where a fault or a blown deadline writes this run's recording.
+///
+/// Under the OS temp directory and named after the process, so two runs never collide and neither lands in the
+/// working tree.
+/// The path is printed by whatever wrote it rather than being somewhere a reader is expected to know about — a
+/// dump nobody can find the file for is a dump that was not taken.
+[[nodiscard]] cc::string run_dump_path();
+
 /// Hands the recorder over to a test that drives cc::rec::initialize itself, and takes it back afterwards.
 /// Only legal for an exclusive test: a torn-down recorder is torn down for every thread at once.
 struct recorder_handover_scope

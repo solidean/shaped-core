@@ -129,7 +129,7 @@ On a path where nothing is going to run again, that is the whole point.
 An arena too small does not fail: it truncates, and the file says so through `loaded_recording::is_truncated()`.
 A truncated dump that loads is worth more than a complete one that does not exist.
 
-`cc::rec::write_crash_dump_now()` runs the identical path on demand.
+`cc::rec::write_dump_now(cc::rec::dump_mode::constrained)` runs the identical path on demand.
 That is what makes the constrained writer testable at all, rather than something to find out about during a crash.
 
 ---

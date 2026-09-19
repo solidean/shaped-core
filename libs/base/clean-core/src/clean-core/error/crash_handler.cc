@@ -2,8 +2,10 @@
 
 #include <clean-core/common/macros.hh>
 #include <clean-core/common/utility.hh>
+#include <clean-core/error/impl/posix_thread_stacks.hh>
 #include <clean-core/platform/stacktrace.hh>
 #include <clean-core/platform/symbolize.hh> // cc::impl::with_dbghelp_if_free, so the walk never waits on a suspended thread's lock
+#include <clean-core/record/thread_scopes.hh>
 
 #include <csignal>
 #include <cstdio>
@@ -14,19 +16,6 @@
 #include <clean-core/platform/win32_sanitized.hh>
 #include <dbghelp.h>  // StackWalk64 / SymFromAddr — the only way to walk a thread that is not this one
 #include <tlhelp32.h> // CreateToolhelp32Snapshot — and the only way to enumerate this process's threads
-#endif
-
-// Sanitizers (ASan/TSan/MSan) install their own fault handlers and print far richer diagnostics, so overriding them would suppress those reports.
-// Detect an active sanitizer and make installation a no-op there, leaving the runtime's handlers in place.
-#if defined(__SANITIZE_ADDRESS__) || defined(__SANITIZE_THREAD__)
-#define CC_CRASH_HANDLER_SANITIZED 1
-#elif defined(__has_feature)
-#if __has_feature(address_sanitizer) || __has_feature(thread_sanitizer) || __has_feature(memory_sanitizer)
-#define CC_CRASH_HANDLER_SANITIZED 1
-#endif
-#endif
-#ifndef CC_CRASH_HANDLER_SANITIZED
-#define CC_CRASH_HANDLER_SANITIZED 0
 #endif
 
 namespace
@@ -232,11 +221,14 @@ void report_other_thread_stacks() noexcept
 #else
 
 // Walking a thread that is not the calling one has no portable equivalent here: backtrace() captures only the caller.
-// Reaching the others means signalling each in turn — machinery this diagnostic does not justify.
-// The faulting thread's stack is still reported, and a core dump has the rest.
+// Reaching the others means asking each to report ITSELF, through a signal — see impl/posix_thread_stacks.hh, which
+// does that on Linux and nothing anywhere else yet.
+// Where it is unavailable the faulting thread's stack is still reported, and a core dump has the rest.
 void report_other_thread_stacks() noexcept
 {
-    std::fputs("\n<other threads' stacks are Windows-only; the core dump has them>\n", stderr);
+    std::fputs("\nother threads:\n", stderr);
+    if (!cc::impl::report_posix_thread_stacks())
+        std::fputs("  <not reached on this platform; the core dump has them>\n", stderr);
 }
 
 #endif
@@ -265,6 +257,14 @@ void report_stacks(char const* banner, char const* reason) noexcept
 #endif
 
     report_other_thread_stacks();
+
+    // **A peer of the stacks above, not a fallback for them.**
+    //
+    // They answer different questions: a stack says where the program counter is, and the scope stack says which
+    // logical task a thread is inside.
+    // In a deadlock the second is usually what identifies the bug, and it is the one the machine stacks above cannot
+    // reach at all off Windows -- or, on wasm, ever.
+    cc::rec::report_thread_scopes(reason);
 
     std::fputs("=======================================================\n", stderr);
     std::fflush(stderr);
@@ -380,6 +380,10 @@ void cc::install_crash_handler()
     g_installed = true;
 #if !CC_CRASH_HANDLER_SANITIZED
     install_platform_handlers();
+
+    // Reserved now rather than when something goes wrong, which is the whole point: the collector and its handler
+    // both run in a process that is already in trouble, and neither may allocate.
+    cc::impl::install_posix_thread_stack_reporter();
 #endif
 }
 

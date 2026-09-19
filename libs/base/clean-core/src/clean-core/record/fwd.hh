@@ -208,6 +208,8 @@ struct chunk_pool;
 
 struct config;
 struct crash_dump_options;
+struct dump_sink;
+enum class dump_mode;
 struct overhead_model;
 struct system_stats;
 struct thread_info;

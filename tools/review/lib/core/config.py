@@ -94,6 +94,21 @@ class ReviewConfig:
         heads.extend([""] * (round_number - 1 - len(heads)))
         self.round_heads = [*heads, self.head]
 
+    def backfill_round_heads(self, known: dict[int, str]) -> bool:
+        """Fill every finalized round recorded as "" from `known`, and report whether anything changed.
+
+        Only a blank is filled: a head recorded when its round was finalized is the record, and outranks a recovery.
+        """
+        changed = False
+        heads = list(self.round_heads) + [""] * max(0, self.watermark - len(self.round_heads))
+        for round_number in range(1, self.watermark + 1):
+            if not heads[round_number - 1] and known.get(round_number):
+                heads[round_number - 1] = known[round_number]
+                changed = True
+        if changed:
+            self.round_heads = heads
+        return changed
+
     def require_changeset(self) -> None:
         if not self.has_changeset:
             raise ConfigError("this review has goal 'design' only, so it has no commit range and nothing to ingest")

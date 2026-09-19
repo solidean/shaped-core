@@ -11,6 +11,7 @@
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_download_async.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_texture.hh>
+#include <shaped-graphics/backends/vulkan/vulkan_texture_copy_regions.hh>
 #include <shaped-graphics/resource/pixel_format.hh>
 
 namespace sg::backend::vulkan
@@ -329,22 +330,25 @@ bool vulkan_download_async_system::run_one_window()
 
                 auto const first_row = done / job.row_bytes;
                 auto const row_count = chunk / job.row_bytes;
-                auto const copy = VkBufferImageCopy{
-                    .bufferOffset = VkDeviceSize(isize(slot) * _window_bytes),
-                    .bufferRowLength = 0,
-                    .bufferImageHeight = 0,
-                    .imageSubresource = {.aspectMask = vk_aspect_mask_from(range, texture->format()),
-                                         .mipLevel = u32(job.subresource.mip_level),
-                                         .baseArrayLayer = u32(job.subresource.array_layer),
-                                         .layerCount = 1},
-                    .imageOffset = {job.region.offset[0], job.region.offset[1] + int(first_row), job.region.offset[2]},
-                    .imageExtent = {u32(job.region.size[0]), u32(row_count), u32(job.region.size[2])},
-                };
+
+                // A row is a BLOCK row on a compressed format and rows run slice-major on a 3D one, so a run of
+                // them is not one box — see vulkan_texture_copy_regions.hh.
+                VkBufferImageCopy copies[max_copy_regions] = {};
+                auto const subresource
+                    = VkImageSubresourceLayers{.aspectMask = vk_aspect_mask_from(range, texture->format()),
+                                               .mipLevel = u32(job.subresource.mip_level),
+                                               .baseArrayLayer = u32(job.subresource.array_layer),
+                                               .layerCount = 1};
+                auto const count = build_texture_copy_regions(
+                    job.region, texture->description().format, first_row, row_count, job.row_bytes,
+                    VkDeviceSize(isize(slot) * _window_bytes), subresource, cc::span<VkBufferImageCopy>(copies));
+
                 // GENERAL rather than a transfer-optimal layout: it is what the direct queue put the image in,
                 // and one layout for both directions is what keeps a transfer of the other direction from
                 // moving it — see vulkan_context::async_ready_layout.
-                vkCmdCopyImageToBuffer(_window_buffers[slot], texture->_image, VK_IMAGE_LAYOUT_GENERAL, _staging, 1,
-                                       &copy);
+                if (count > 0)
+                    vkCmdCopyImageToBuffer(_window_buffers[slot], texture->_image, VK_IMAGE_LAYOUT_GENERAL, _staging,
+                                           u32(count), copies);
             }
             else
             {
@@ -539,7 +543,19 @@ sg::bytes_future vulkan_download_async_system::download_buffer(sg::raw_buffer_ha
     // Reverse: the readback defers behind the last list that used the buffer, so it reads what that list left.
     src->_pending_async_download_value.store(job.completion_value.value, cc::memory_order_release);
     job.wait_token = sg::submission_token(src->_last_used_submission_token.load(cc::memory_order_acquire));
-    if (auto const pending = src->_pending_async_upload_value.load(cc::memory_order_acquire); pending != 0)
+    // **Both stamps, not just the async one.**
+    //
+    // A streaming upload stamps `_pending_stream_copy_value` and an async one stamps `_pending_async_upload_value`,
+    // and a command list already waits on both (vulkan_command_list.cc).
+    // A readback waited on only the async half, so a download of a resource a stream was still filling had no edge
+    // to that stream at all — the two run on different queues, and the sync validation layer reports it as a
+    // READ_RACING_WRITE because that is what it is.
+    //
+    // One wait covers both: the two values are reservations on the same `_upload_group`, so the later of them is
+    // the only edge this needs.
+    if (auto const pending = cc::max(src->_pending_async_upload_value.load(cc::memory_order_acquire),
+                                     src->_pending_stream_copy_value.load(cc::memory_order_acquire));
+        pending != 0)
         job.upload_wait = {.group = src->_upload_group, .value = pending};
 
     job.drain = _drain.start();
@@ -678,7 +694,19 @@ sg::stream_download_handle vulkan_download_async_system::stream_to_sink_buffer(s
     // The streaming tier stamps only the LIFETIME value: a later command list waits on nothing until promoted.
     src->_pending_stream_download_value.store(value, cc::memory_order_release);
     job.wait_token = sg::submission_token(src->_last_used_submission_token.load(cc::memory_order_acquire));
-    if (auto const pending = src->_pending_async_upload_value.load(cc::memory_order_acquire); pending != 0)
+    // **Both stamps, not just the async one.**
+    //
+    // A streaming upload stamps `_pending_stream_copy_value` and an async one stamps `_pending_async_upload_value`,
+    // and a command list already waits on both (vulkan_command_list.cc).
+    // A readback waited on only the async half, so a download of a resource a stream was still filling had no edge
+    // to that stream at all — the two run on different queues, and the sync validation layer reports it as a
+    // READ_RACING_WRITE because that is what it is.
+    //
+    // One wait covers both: the two values are reservations on the same `_upload_group`, so the later of them is
+    // the only edge this needs.
+    if (auto const pending = cc::max(src->_pending_async_upload_value.load(cc::memory_order_acquire),
+                                     src->_pending_stream_copy_value.load(cc::memory_order_acquire));
+        pending != 0)
         job.upload_wait = {.group = src->_upload_group, .value = pending};
 
     job.drain = _drain.start();
@@ -755,7 +783,19 @@ sg::bytes_future vulkan_download_async_system::download_texture(sg::raw_texture_
 
     src->_pending_async_download_value.store(job.completion_value.value, cc::memory_order_release);
     job.wait_token = sg::submission_token(src->_last_used_submission_token.load(cc::memory_order_acquire));
-    if (auto const pending = src->_pending_async_upload_value.load(cc::memory_order_acquire); pending != 0)
+    // **Both stamps, not just the async one.**
+    //
+    // A streaming upload stamps `_pending_stream_copy_value` and an async one stamps `_pending_async_upload_value`,
+    // and a command list already waits on both (vulkan_command_list.cc).
+    // A readback waited on only the async half, so a download of a resource a stream was still filling had no edge
+    // to that stream at all — the two run on different queues, and the sync validation layer reports it as a
+    // READ_RACING_WRITE because that is what it is.
+    //
+    // One wait covers both: the two values are reservations on the same `_upload_group`, so the later of them is
+    // the only edge this needs.
+    if (auto const pending = cc::max(src->_pending_async_upload_value.load(cc::memory_order_acquire),
+                                     src->_pending_stream_copy_value.load(cc::memory_order_acquire));
+        pending != 0)
         job.upload_wait = {.group = src->_upload_group, .value = pending};
 
     job.drain = _drain.start();
@@ -828,7 +868,19 @@ sg::stream_download_handle vulkan_download_async_system::stream_to_sink_texture(
 
     src->_pending_stream_download_value.store(value, cc::memory_order_release);
     job.wait_token = sg::submission_token(src->_last_used_submission_token.load(cc::memory_order_acquire));
-    if (auto const pending = src->_pending_async_upload_value.load(cc::memory_order_acquire); pending != 0)
+    // **Both stamps, not just the async one.**
+    //
+    // A streaming upload stamps `_pending_stream_copy_value` and an async one stamps `_pending_async_upload_value`,
+    // and a command list already waits on both (vulkan_command_list.cc).
+    // A readback waited on only the async half, so a download of a resource a stream was still filling had no edge
+    // to that stream at all — the two run on different queues, and the sync validation layer reports it as a
+    // READ_RACING_WRITE because that is what it is.
+    //
+    // One wait covers both: the two values are reservations on the same `_upload_group`, so the later of them is
+    // the only edge this needs.
+    if (auto const pending = cc::max(src->_pending_async_upload_value.load(cc::memory_order_acquire),
+                                     src->_pending_stream_copy_value.load(cc::memory_order_acquire));
+        pending != 0)
         job.upload_wait = {.group = src->_upload_group, .value = pending};
 
     job.drain = _drain.start();

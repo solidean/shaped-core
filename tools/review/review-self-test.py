@@ -436,6 +436,40 @@ def test_a_superseded_claim_is_not_re_pointed(root: Path) -> None:
         assert ledger.get(change.id).claim.is_empty
 
 
+def test_a_bulk_absorbs_the_unread_hunks_under_it(root: Path) -> None:
+    """A bulk declared after `sync` already gave the hunks under it ids must not leave them live and asking to be read.
+
+    A hunk an entry already discharges keeps its id: someone decided about it, and the bulk does not overrule that.
+    """
+    git = git_init(root)
+    base = commit(root, "base", {"a.txt": numbered(60)})
+    head = commit(root, "two edits", {
+        "a.txt": numbered(60).replace("line 5\n", "line 5 edited\n").replace("line 50\n", "line 50 edited\n"),
+    })
+
+    net = build_net(git, base, head)
+    with tempfile.TemporaryDirectory(prefix="review-ledger-") as ledger_dir:
+        path = Path(ledger_dir) / "ledger.jsonl"
+        ledger = Ledger(path)
+        hunks = register(ledger, candidates_for(git, base, head, context=3, gap=5, net=net),
+                         round_number=1, write_body=lambda *_: None).created
+        assert len(hunks) == 2, [c.summary for c in hunks]
+        read, unread = hunks
+
+        bulk_found = bulk_candidate(net, selector="a.txt", reason="accepted wholesale", matches=lambda p: p == "a.txt")
+        bulk = register(ledger, [bulk_found], round_number=2, write_body=lambda *_: None).created[0]
+
+        absorbed = ledger.absorb_into(bulk, keep={read.id})
+        assert [c.id for c in absorbed] == [unread.id], [c.id for c in absorbed]
+
+        reloaded = Ledger.load(path)
+        live = {c.id for c in reloaded.live()}
+        assert unread.id not in live and read.id in live and bulk.id in live, live
+        assert reloaded.get(unread.id).absorbed_by == bulk.id
+        assert not reloaded.get(unread.id).superseded, "absorbed is not superseded: the content is still in the range"
+        assert net.subtract(reloaded.covered()).is_empty
+
+
 # ---- commit-local mapping ---------------------------------------------------
 
 
@@ -1451,6 +1485,46 @@ def test_a_round_head_is_recorded_and_survives_the_file(root: Path) -> None:
     loaded = load(path)
     assert loaded.round_heads == ["", "", "h3", "h4"], loaded.round_heads
     assert loaded.head_of_round(3) == "h3" and loaded.head_of_round(1) == "" and loaded.head_of_round(9) == ""
+
+
+def test_a_round_head_missing_from_the_record_is_recovered_from_the_log(root: Path) -> None:
+    """A round finalized by a tool older than `round_heads` gets its head back from the log, once.
+
+    `init` and `sync` record the head they set, and a round is finalized under whichever came last.
+    A head the record already holds outranks the recovery.
+    """
+    from tools.review.lib.core.config import ReviewConfig
+    from tools.review.lib.core.log import heads_at_finalize
+
+    log = root / "log.jsonl"
+    log.write_text("\n".join(json.dumps(e) for e in [
+        {"action": "init", "head": "h1"},
+        {"action": "finalize", "round": 1},
+        {"action": "sync", "head": "h2"},
+        {"action": "finalize", "round": 2},
+        {"action": "finalize", "round": 3},
+    ]) + "\n", encoding="utf-8")
+
+    assert heads_at_finalize(log) == {1: "h1", 2: "h2", 3: "h2"}
+
+    cfg = ReviewConfig(name="r", goals=["land-changes"], head="h2", watermark=3, round_heads=["", "", "recorded"])
+    assert cfg.backfill_round_heads(heads_at_finalize(log))
+    assert cfg.round_heads == ["h1", "h2", "recorded"], cfg.round_heads
+    assert not cfg.backfill_round_heads(heads_at_finalize(log)), "a second pass has nothing left to fill"
+
+
+def test_a_superseded_block_never_fails_validate(root: Path) -> None:
+    """Retired text the replacing block already corrected cannot be edited, so it must not be what fails."""
+    body = (
+        "\n## prose\nround: 1\n\nSee `lib/typo.py`.\n"
+        "\n## prose\nround: 2\nsupersedes: r1/prose\n\nSee `raw:lib/typo.py`, which was never a file.\n"
+    )
+    entry = parse_text(ENTRY + body, Path("entry.md"))
+    tokens = build_tokens(entry, _index_of(root, ["lib/real.py"]))
+    assert not [t for t in tokens if t.problem], [(t.text, t.problem) for t in tokens]
+
+    live = parse_text(ENTRY + "\n## prose\nround: 1\n\nSee `lib/typo.py`.\n", Path("entry.md"))
+    assert [t for t in build_tokens(live, _index_of(root, ["lib/real.py"])) if t.problem], "live text stays strict"
 
 
 def test_a_collect_that_fails_keeps_the_round_handed_back(root: Path) -> None:

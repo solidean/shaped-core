@@ -4,7 +4,10 @@
 #include <clean-core/common/utility.hh>
 #include <clean-core/container/ringbuffer.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/string/format.hh>
 #include <clean-core/thread/mutex.hh>
+
+#include <cstdio> // stderr, for the same reason every other report path here uses it
 
 using namespace cc::primitive_defines;
 
@@ -77,11 +80,64 @@ void compact(async_backlog_entries& entries, cc::vector<async_node_ptr>* pinned,
 } // namespace
 } // namespace cc::impl
 
-cc::async_backlog::async_backlog() : _state(cc::make_shared<impl::async_backlog_state>())
+namespace
 {
+/// Every live backlog, so a report can find them all.
+///
+/// A mutex rather than a lock-free list: construction and destruction are rare by construction — a backlog belongs
+/// to a component, not to a piece of work — and nothing on the tracking path touches this.
+struct backlog_registry
+{
+    cc::async_backlog* head = nullptr;
+};
+
+cc::mutex<backlog_registry>& backlogs()
+{
+    // Function-local, so a backlog constructed during dynamic initialization still finds a live registry.
+    static cc::mutex<backlog_registry> registry;
+    return registry;
+}
+} // namespace
+
+cc::async_backlog::async_backlog(cc::string_view name)
+  : _name(name), _state(cc::make_shared<impl::async_backlog_state>())
+{
+    backlogs().lock(
+        [&](backlog_registry& r)
+        {
+            _registry_next = r.head;
+            if (r.head != nullptr)
+                r.head->_registry_prev = this;
+            r.head = this;
+        });
 }
 
-cc::async_backlog::~async_backlog() = default;
+cc::async_backlog::~async_backlog()
+{
+    backlogs().lock(
+        [&](backlog_registry& r)
+        {
+            if (_registry_prev != nullptr)
+                _registry_prev->_registry_next = _registry_next;
+            else
+                r.head = _registry_next;
+
+            if (_registry_next != nullptr)
+                _registry_next->_registry_prev = _registry_prev;
+        });
+}
+
+bool cc::try_for_each_async_backlog(cc::function_ref<void(cc::async_backlog const&)> f)
+{
+    // try rather than lock: this runs from a report about a program that has already gone wrong, and a thread that
+    // died mid-construction still holds the registry.
+    return backlogs().try_lock(
+        [&](backlog_registry& r)
+        {
+            for (auto const* b = r.head; b != nullptr; b = b->_registry_next)
+                f(*b);
+        });
+}
 
 void cc::async_backlog::track_node(async_node_weak node)
 {
@@ -173,4 +229,46 @@ isize cc::async_backlog::outstanding_count() const
 isize cc::async_backlog::tracked_count() const
 {
     return _state->entries.lock([](impl::async_backlog_entries const& entries) { return entries.nodes.size(); });
+}
+
+void cc::report_async_backlogs(char const* reason) noexcept
+{
+    std::fputs("\nwork still in flight", stderr);
+    if (reason != nullptr)
+    {
+        std::fputs(" (", stderr);
+        std::fputs(reason, stderr);
+        std::fputc(')', stderr);
+    }
+    std::fputc('\n', stderr);
+
+    auto any = false;
+    auto const read = cc::try_for_each_async_backlog(
+        [&](cc::async_backlog const& b)
+        {
+            auto const outstanding = b.outstanding_count();
+            if (outstanding <= 0)
+                return;
+
+            any = true;
+            std::fputs("  backlog ", stderr);
+
+            auto const name = b.name();
+            if (name.empty())
+                std::fputs("<unnamed>", stderr);
+            else
+                std::fwrite(name.data(), 1, size_t(name.size()), stderr);
+
+            char buffer[64] = {};
+            auto const written = cc::format_to(cc::span<char>(buffer), ": {} outstanding", outstanding);
+            std::fwrite(buffer, 1, size_t(written), stderr);
+            std::fputc('\n', stderr);
+        });
+
+    if (!read)
+        std::fputs("  <not read; the backlog registry is busy>\n", stderr);
+    else if (!any)
+        std::fputs("  <no tracked work outstanding; work awaited in the ordinary way is not tracked>\n", stderr);
+
+    std::fflush(stderr);
 }

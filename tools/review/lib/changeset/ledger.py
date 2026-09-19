@@ -29,6 +29,9 @@ class Change:
     reason: str = ""
     round: int = 1
     superseded: bool = False
+    # The bulk claim this change was folded into, once one covered it before any entry spoke for it.
+    # Distinct from `superseded`, which says the content left the range — the fact a land-changes review reads as a fix.
+    absorbed_by: str = ""
     has_body: bool = False
     claim: LineSpace = field(default_factory=LineSpace.empty)
 
@@ -52,6 +55,7 @@ class Change:
             "reason": self.reason,
             "round": self.round,
             "superseded": self.superseded,
+            "absorbed_by": self.absorbed_by,
             "has_body": self.has_body,
             "claim": self.claim.to_records(),
         }
@@ -68,6 +72,7 @@ class Change:
             reason=str(raw.get("reason", "")),
             round=int(raw.get("round", 1)),
             superseded=bool(raw.get("superseded", False)),
+            absorbed_by=str(raw.get("absorbed_by", "")),
             has_body=bool(raw.get("has_body", False)),
             claim=LineSpace.from_records(raw.get("claim") or {}),
         )
@@ -102,7 +107,7 @@ class Ledger:
         return {c.digest: c.id for c in self.changes.values() if c.digest}
 
     def live(self) -> list[Change]:
-        return [c for c in self.changes.values() if not c.superseded]
+        return [c for c in self.changes.values() if not c.superseded and not c.absorbed_by]
 
     def covered(self) -> LineSpace:
         """Every atom claimed by a change that has not been superseded."""
@@ -110,6 +115,23 @@ class Ledger:
         for change in self.live():
             space = space.union(change.claim)
         return space
+
+    def absorb_into(self, bulk: Change, keep: set[str]) -> list[Change]:
+        """Fold every live change lying wholly inside `bulk` into it, except those in `keep`.
+
+        A bulk claim declared after the hunks under it were already ingested — the ordinary case after `sync` — would
+        otherwise leave each of them live, undischarged, and asking to be read.
+        `keep` is what an entry already discharges: someone decided about those, so they keep their ids.
+        """
+        absorbed: list[Change] = []
+        for change in self.live():
+            if change.id == bulk.id or change.is_bulk or change.id in keep:
+                continue
+            if change.claim.subtract(bulk.claim).is_empty:
+                change.absorbed_by = bulk.id
+                self.append(change)
+                absorbed.append(change)
+        return absorbed
 
     def get(self, change_id: str) -> Change | None:
         return self.changes.get(change_id)

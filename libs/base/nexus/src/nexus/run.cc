@@ -1,11 +1,13 @@
 #include "run.hh"
 
+#include <clean-core/common/assert.hh> // cc::impl::is_debugger_connected
 #include <clean-core/common/utility.hh>
 #include <clean-core/container/set.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/error/crash_handler.hh>
 #include <clean-core/memory/unique_ptr.hh>
 #include <clean-core/platform/process_metrics.hh>
+#include <clean-core/record/crash_dump.hh>
 #include <clean-core/record/quantity_format.hh>
 #include <clean-core/record/stat.hh>
 #include <clean-core/streams/file_stream.hh>
@@ -589,6 +591,14 @@ int nx::run(int argc, char** argv)
         // Started here rather than lazily: events already drained are gone, and the point of this file is to carry
         // what happened BEFORE the interesting sample as much as the sample itself.
         nx::impl::begin_run_capture(config.benchmark_rec_file);
+
+        // A dump the crash handler and the hang watchdog can both write.
+        //
+        // Installed rather than left to the application, because in a test run there IS no application to install
+        // it: a fault or a blown deadline is exactly when someone wants to know what every thread was doing, and
+        // that is the one moment nothing will get a chance to set it up.
+        // The arena is reserved now for the same reason the handler cannot allocate later.
+        cc::rec::install_crash_dump({.path = nx::impl::run_dump_path()});
     }
 
     // Its baseline is taken here, so the load it reports afterwards covers the tests and nothing that set them up.
@@ -598,6 +608,13 @@ int nx::run(int argc, char** argv)
                                    .benchmark_load_before = benchmark_load_before,
                                    .benchmark_pinned = benchmark_pinned,
                                    .cpu_sampler = cc::make_unique<cc::process_cpu_sampler>()};
+
+    // A test run only: an app, a command or an example is a program that may legitimately sit idle, and a benchmark times itself.
+    // Nor under a debugger, where a test paused at a breakpoint is not a hung one.
+    auto const is_test_run = !is_entry_run
+                          && (config.selected_bucket == nx::config::test_bucket::normal
+                              || config.selected_bucket == nx::config::test_bucket::manual);
+    auto const watchdog_secs = is_test_run && !cc::impl::is_debugger_connected() ? config.watchdog_secs : 0.0;
 
     // A host that owns the thread gets the run in steps, and the report once the last one finishes.
     // Its callbacks — a WebGPU readback, a timer — run only between steps, so a blocking run there would never see them.
@@ -609,26 +626,29 @@ int nx::run(int argc, char** argv)
             test_schedule_config config;
             run_reporting reporting;
             cc::unique_ptr<impl::test_run> run;
+            cc::unique_ptr<impl::run_watchdog> watchdog;
         };
         auto* const hosted
             = new hosted_run{.schedule = cc::move(schedule), .config = config, .reporting = cc::move(reporting)};
         hosted->run = cc::make_unique<impl::test_run>(hosted->schedule, hosted->config);
-        impl::run_in_host_loop([hosted] { return hosted->run->step(); },
-                               [hosted]
-                               {
-                                   auto const code
-                                       = report_run(hosted->config, hosted->reporting, hosted->run->take_result());
-                                   delete hosted;
-                                   return code;
-                               });
+        hosted->watchdog = cc::make_unique<impl::run_watchdog>(watchdog_secs);
+        impl::run_in_host_loop(
+            [hosted]
+            {
+                // Between steps is the only moment anything runs here, so this is where a quiet run is noticed.
+                hosted->watchdog->poll();
+                return hosted->run->step();
+            },
+            [hosted]
+            {
+                auto const code = report_run(hosted->config, hosted->reporting, hosted->run->take_result());
+                delete hosted;
+                return code;
+            });
         return 0; // not reached: the host loop ends the process
     }
 
-    // A test run only: an app, a command or an example is a program that may legitimately sit idle, and a benchmark times itself.
-    auto const is_test_run = !is_entry_run
-                          && (config.selected_bucket == nx::config::test_bucket::normal
-                              || config.selected_bucket == nx::config::test_bucket::manual);
-    auto const watchdog = impl::run_watchdog(is_test_run ? config.watchdog_secs : 0.0);
+    auto const watchdog = impl::run_watchdog(watchdog_secs);
 
     return report_run(config, reporting, execute_tests(schedule, config));
 }

@@ -336,6 +336,22 @@ isize cc::rec::impl::thread_state_count()
     return g_registry.lock([](registry const& r) { return r.count; });
 }
 
+bool cc::rec::impl::try_with_consumer_paused(double timeout_secs, cc::function_ref<void()> f)
+{
+    // The actor drains under exactly this lock, so holding it IS the consumer being stopped -- no pause flag, no
+    // second state to keep consistent with the first.
+    // Polled rather than blocked on, because the lock has no timed acquire and the actor sleeps between passes.
+    auto const deadline = cc::current_time_steady_secs() + timeout_secs;
+    for (;;)
+    {
+        if (g_processing.try_lock([&](processing&) { f(); }))
+            return true;
+        if (cc::current_time_steady_secs() >= deadline)
+            return false;
+        cc::this_thread_sleep_secs(0.001);
+    }
+}
+
 isize cc::rec::impl::with_nth_thread_state(isize n, cc::function_ref<void(thread_state&)> f)
 {
     return g_registry.lock(

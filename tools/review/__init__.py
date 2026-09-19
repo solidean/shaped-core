@@ -35,7 +35,7 @@ from .lib.core.config import (
     now,
     save,
 )
-from .lib.core.log import record
+from .lib.core.log import heads_at_finalize, record
 from .lib.core.paths import (
     ReviewNameError,
     ReviewPaths,
@@ -198,6 +198,7 @@ __all__ = [
     "parse_entry_text",
     "read_json",
     "read_jsonl",
+    "heads_at_finalize",
     "record",
     "register",
     "render_entry",
