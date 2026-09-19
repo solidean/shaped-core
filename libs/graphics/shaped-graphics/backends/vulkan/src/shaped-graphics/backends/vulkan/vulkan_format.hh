@@ -36,6 +36,16 @@ namespace sg::backend::vulkan
 /// How many block rows one depth slice of `region` holds.
 [[nodiscard]] isize region_block_rows(sg::pixel_format format, sg::texture_region const& region);
 
+/// How many of `row_count` block rows from `first_row` one window may copy.
+///
+/// All of them, unless a depth slice of `region` is not a multiple of 4 bytes: then the band stops at its slice's end.
+/// A copy after the first in a band starts on a slice boundary, and a queue family without graphics or compute needs a
+/// copy's buffer offset 4-aligned (VUID-vkCmdCopyBufferToImage-commandBuffer-07737 and its image-to-buffer twin).
+[[nodiscard]] isize copyable_block_rows(sg::pixel_format format,
+                                        sg::texture_region const& region,
+                                        isize first_row,
+                                        isize row_count);
+
 /// The copies that move `row_count` block rows of `region`, starting at block row `first_row`, between an image and a
 /// tightly-packed buffer range starting at `buffer_offset`.
 ///

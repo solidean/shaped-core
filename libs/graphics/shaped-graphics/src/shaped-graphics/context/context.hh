@@ -239,7 +239,7 @@ public:
     /// order rather than in GPU order.
     /// So the direct queue does it, here, as a throwaway command list holding one transition.
     /// The one exception is a fresh vulkan texture's transition out of UNDEFINED, which its first async upload claims
-    /// and runs itself, so an upload into a texture no list has used never lands here.
+    /// and submits itself; a later upload into that texture then finds it async-ready here and submits nothing.
     ///
     /// **It warns, once per texture**, because the caller could have avoided the submit entirely by recording
     /// `cmd.prepare_for_async` on a list they were already building.

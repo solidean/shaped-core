@@ -184,9 +184,10 @@ The shape is dx12's; two things differ and both concern textures.
   tracks image layouts in `vkQueueSubmit` **call** order, so it reported a mismatch a correct program could not avoid.
   A transfer that moves no layout has nothing for it to disagree with.
   See [barriers](barriers.md#the-transfer-queue-never-moves-a-layout--the-direct-queue-settles-it-first).
-- **A fresh texture's first upload takes its one-time transition out of `UNDEFINED` on the transfer queue**, ahead of its
-  first copy — the one barrier the layer cannot disagree with, since `UNDEFINED` is a valid old layout whatever it
-  believes the image is in.
+- **A fresh texture's first upload submits its one-time transition out of `UNDEFINED` on the transfer queue**, from the
+  enqueueing thread and under the submission lock, before the enqueue returns.
+  That puts it ahead, in host submit order, of every submit that trusts the layout it leaves — which is the order the
+  validation layer checks.
   So creating a texture and uploading into it costs no direct-queue submit.
   See [barriers](barriers.md#a-texture-starts-in-a-real-layout-and-gets-there-once).
 - **A texture takes the same per-resource stamps a buffer does**, in both directions, so an async texture transfer is ordered

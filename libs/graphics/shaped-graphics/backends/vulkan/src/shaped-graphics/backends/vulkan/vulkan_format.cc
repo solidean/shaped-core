@@ -213,6 +213,14 @@ isize region_block_rows(sg::pixel_format format, sg::texture_region const& regio
     return (region.size[1] + block_extent - 1) / block_extent;
 }
 
+isize copyable_block_rows(sg::pixel_format format, sg::texture_region const& region, isize first_row, isize row_count)
+{
+    isize const rows_per_slice = region_block_rows(format, region);
+    if ((rows_per_slice * region_row_bytes(format, region)) % 4 == 0)
+        return row_count;
+    return cc::min(row_count, rows_per_slice - first_row % rows_per_slice);
+}
+
 void append_block_row_copies(cc::vector<VkBufferImageCopy>& out,
                              sg::pixel_format format,
                              VkImageSubresourceLayers const& subresource,

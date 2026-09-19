@@ -281,7 +281,9 @@ bool vulkan_download_async_system::run_one_window()
         auto chunk = cc::min(_window_bytes, job.size_in_bytes - done);
         if (job.is_texture && job.row_bytes > 0)
         {
-            chunk = (chunk / job.row_bytes) * job.row_bytes;
+            auto const rows = copyable_block_rows(job.texture_source->format(), job.region, done / job.row_bytes,
+                                                  chunk / job.row_bytes);
+            chunk = rows * job.row_bytes;
             CC_ASSERT(chunk > 0, "the async download window is smaller than one texture row");
         }
 
@@ -320,9 +322,9 @@ bool vulkan_download_async_system::run_one_window()
 
             if (job.is_texture)
             {
-                // No image barrier at all: the direct queue put the texture in the layout this copy needs before the
-                // transfer was enqueued, and the semaphore wait that orders this submit after that one also makes its
-                // writes visible here.
+                // No image barrier at all: the layout this copy needs was settled before the transfer was enqueued —
+                // by the direct queue, or for a fresh texture by an upload's own transition submit — and the semaphore
+                // waits that order this submit after those also make their writes visible here.
                 // That is the whole point of settling the layout up front — a transfer that claims no layout has none
                 // for the validation layer to disagree with, and it reads submit-call order rather than GPU order.
                 auto const range = sg::subresource_range(job.subresource);

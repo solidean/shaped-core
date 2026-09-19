@@ -198,15 +198,7 @@ sg::submission_token vulkan_context::submit_vulkan_command_list(std::unique_ptr<
             for (auto const& texture : cmd->_tentative_initial_transitions)
             {
                 if (!texture->claim_initial_transition())
-                {
-                    // Someone got there first, and their transition carries it.
-                    // When that was an async upload the transition runs on the transfer queue, so this list waits on
-                    // it — the pending-transfer waits above were read before the lock and may have missed a claim made
-                    // since.
-                    if (auto const value = texture->initial_transition_upload_value(); value != 0)
-                        add_async_wait(texture->_upload_group, value);
-                    continue;
-                }
+                    continue; // someone got there first, and their transition carries it
 
                 // UNDEFINED as the source is the discard: there are no contents to keep, which is what makes this
                 // cheap.
@@ -272,6 +264,14 @@ sg::submission_token vulkan_context::submit_vulkan_command_list(std::unique_ptr<
             VkSemaphore signal_semaphores[2] = {_submission_timeline, cmd->_present_signal};
             u64 const signal_values[2] = {u64(t), 0};
             u32 const signal_count = cmd->_present_signal != VK_NULL_HANDLE ? 2u : 1u;
+
+            // A texture whose one-time transition an upload ran had it run on the transfer queue, so every list touching
+            // it waits on that submit's value — a list that lost the claim to it, and one recorded after it alike.
+            // Read here, under the lock the upload claims and submits under, so no claim is missed; once reached the
+            // wait costs nothing.
+            for (auto const& texture : cmd->_touched_textures)
+                if (auto const value = texture->initial_transition_upload_value(); value != 0)
+                    add_async_wait(texture->_upload_group, value);
 
             // Waits: the async-transfer timelines gathered above, plus — for a presenting list — the acquire
             // semaphore, which must be satisfied before any color is written.

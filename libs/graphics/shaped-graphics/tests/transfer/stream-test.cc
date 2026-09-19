@@ -276,6 +276,16 @@ namespace
 {
 /// A source that hands its payload over in fixed-size pieces, always ready.
 /// The simplest thing above the resident default, and enough to pin that chunk offsets land where they say.
+/// How many bytes of `bytes` differ from `expected`, which must be as long.
+[[nodiscard]] isize count_mismatches(cc::span<byte const> bytes, cc::span<byte const> expected)
+{
+    isize n = 0;
+    for (isize i = 0; i < expected.size(); ++i)
+        if (bytes[i] != expected[i])
+            ++n;
+    return n;
+}
+
 class chunked_source final : public sg::stream_source
 {
 public:
@@ -646,9 +656,8 @@ ASYNC_INVOCABLE_TEST("sg stream - a fresh texture resting elsewhere is streamed 
     CHECK(mismatches == 0);
 }
 
-// A stream that claims a fresh texture's one-time transition and then never copies still runs it.
-// Otherwise the texture would be recorded as async-ready while the image stayed where vkCreateImage left it, and the
-// next list's barrier would name a layout it was never in.
+// A stream that claims a fresh texture's one-time transition and then never copies leaves the texture usable, since its
+// enqueue submitted the transition before the source was ever asked for a chunk.
 ASYNC_INVOCABLE_TEST("sg stream - a failed stream into a fresh texture still leaves it usable",
                      (sg::context_handle const& handle))
 {
@@ -683,6 +692,167 @@ ASYNC_INVOCABLE_TEST("sg stream - a failed stream into a fresh texture still lea
     REQUIRE(bytes.size() == src.size());
     CHECK(bytes[0] == src[0]);
     CHECK(bytes[src.size() - 1] == src[src.size() - 1]);
+}
+
+// A BC texture whose height is not a multiple of its 4x4 blocks: its last block row covers two texel rows, and the copy
+// placing it has to stop at the texture's edge rather than at the block's.
+ASYNC_INVOCABLE_TEST("sg stream - a compressed texture with a partial last block row streams whole",
+                     (sg::context_handle const& handle))
+{
+    REQUIRE(handle != nullptr);
+    auto& c = *handle;
+
+    // 16x10 BC1 is 4x3 blocks of 8 bytes: 32 bytes per block row, three block rows, the last one half outside.
+    sg::texture_description desc;
+    desc.format = sg::pixel_format::bc1_rgba_unorm;
+    desc.dimension = sg::texture_dimension::d2;
+    desc.width = 16;
+    desc.height = 10;
+    desc.usage = sg::texture_usage::copy_src | sg::texture_usage::copy_dst;
+    auto tex = c.persistent.create_raw_texture(desc);
+    REQUIRE(tex != nullptr);
+
+    auto const src = pattern(4 * 8 * 3, 97);
+    auto stream = c.stream.bytes_to_texture(tex, cc::make_pinned_data(src));
+    REQUIRE((co_await cc::async_as_result(stream.completion())).has_value());
+
+    auto const back = c.download.bytes_from_texture(tex);
+    auto const bytes = co_await back.bytes();
+    REQUIRE(bytes.size() == src.size());
+    CHECK(count_mismatches(bytes, src) == 0);
+}
+
+// A 3D texture streamed in chunks that cut through its slices, so bands start mid-slice and cross into the next one.
+// The whole-texture tests above fit in one window, where a band always starts at row 0 of slice 0.
+ASYNC_INVOCABLE_TEST("sg stream - a 3D texture streamed in chunks that cross slices", (sg::context_handle const& handle))
+{
+    REQUIRE(handle != nullptr);
+    auto& c = *handle;
+
+    sg::texture_description desc;
+    desc.format = sg::pixel_format::rgba8_unorm;
+    desc.dimension = sg::texture_dimension::d3;
+    desc.width = 8;
+    desc.height = 8;
+    desc.depth = 4;
+    desc.usage = sg::texture_usage::copy_src | sg::texture_usage::copy_dst;
+    auto tex = c.persistent.create_raw_texture(desc);
+    REQUIRE(tex != nullptr);
+
+    // Five rows of 32 bytes per chunk against eight rows per slice.
+    auto const src = pattern(8 * 8 * 4 * 4, 101);
+    auto stream
+        = c.stream.from_source_to_texture(tex, std::make_unique<chunked_source>(cc::span<byte const>(src), 5 * 32));
+    REQUIRE((co_await cc::async_as_result(stream.completion())).has_value());
+
+    auto const back = c.download.bytes_from_texture(tex);
+    auto const bytes = co_await back.bytes();
+    REQUIRE(bytes.size() == src.size());
+    CHECK(count_mismatches(bytes, src) == 0);
+}
+
+// A 3D texture whose slice is not a multiple of 4 bytes, streamed in chunks that cross slices.
+// A copy after the first in a band starts on a slice boundary, and a transfer-only queue needs that buffer offset
+// 4-aligned, so a band may not cross a slice here; the validation layer says so if one does.
+ASYNC_INVOCABLE_TEST("sg stream - a 3D texture with unaligned slices streams across them",
+                     (sg::context_handle const& handle))
+{
+    REQUIRE(handle != nullptr);
+    auto& c = *handle;
+
+    // r8 5x5x2: 5-byte rows, 25-byte slices.
+    sg::texture_description desc;
+    desc.format = sg::pixel_format::r8_unorm;
+    desc.dimension = sg::texture_dimension::d3;
+    desc.width = 5;
+    desc.height = 5;
+    desc.depth = 2;
+    desc.usage = sg::texture_usage::copy_src | sg::texture_usage::copy_dst;
+    auto tex = c.persistent.create_raw_texture(desc);
+    REQUIRE(tex != nullptr);
+
+    // Three rows per chunk, so the second chunk runs from row 3 of slice 0 into slice 1.
+    auto const src = pattern(5 * 5 * 2, 103);
+    auto stream
+        = c.stream.from_source_to_texture(tex, std::make_unique<chunked_source>(cc::span<byte const>(src), 3 * 5));
+    REQUIRE((co_await cc::async_as_result(stream.completion())).has_value());
+
+    auto const back = c.download.bytes_from_texture(tex);
+    auto const bytes = co_await back.bytes();
+    REQUIRE(bytes.size() == src.size());
+    CHECK(count_mismatches(bytes, src) == 0);
+}
+
+// A list recorded while the texture is fresh and submitted after an upload claimed its transition.
+// Recording made it a candidate to run the transition itself; at submit it has lost that to the upload, and has to wait
+// on the upload's transition instead of running its own.
+ASYNC_INVOCABLE_TEST("sg stream - a list recorded before a fresh texture's upload and submitted after it",
+                     (sg::context_handle const& handle))
+{
+    REQUIRE(handle != nullptr);
+    auto& c = *handle;
+
+    // dx12 decides a list's transfer waits and its texture layouts while it records, so a list recorded before the
+    // upload was enqueued neither waits nor keeps the layout the copy needs — see libs/graphics/shaped-graphics/docs/TODO.md.
+    if (c.backend() == sg::backend_kind::dx12)
+        SKIP("dx12 reads pending transfers at record time rather than at submit");
+
+    sg::texture_description desc;
+    desc.format = sg::pixel_format::rgba8_unorm;
+    desc.dimension = sg::texture_dimension::d2;
+    desc.width = 16;
+    desc.height = 16;
+    desc.usage = sg::texture_usage::copy_src | sg::texture_usage::copy_dst;
+    auto tex = c.persistent.create_raw_texture(desc);
+    REQUIRE(tex != nullptr);
+
+    auto cmd = c.create_command_list();
+    REQUIRE(cmd != nullptr);
+    auto back = cmd->download.bytes_from_texture(tex);
+
+    auto const src = pattern(16 * 16 * 4, 107);
+    auto stream = c.stream.bytes_to_texture(tex, cc::make_pinned_data(src));
+    stream.promote_to_async(); // the list below waits on purpose
+    c.submit_command_list(cc::move(cmd));
+
+    auto const bytes = co_await back.bytes();
+    REQUIRE(bytes.size() == src.size());
+    CHECK(count_mismatches(bytes, src) == 0);
+    REQUIRE((co_await cc::async_as_result(stream.completion())).has_value());
+}
+
+// A stream into a fresh texture cancelled before its first window still leaves the texture usable.
+// Its enqueue already ran the texture's one-time transition, so a list after it finds the image where the tracker says.
+ASYNC_INVOCABLE_TEST("sg stream - a stream cancelled before its first window leaves a fresh texture usable",
+                     (sg::context_handle const& handle))
+{
+    REQUIRE(handle != nullptr);
+    auto& c = *handle;
+
+    sg::texture_description desc;
+    desc.format = sg::pixel_format::rgba8_unorm;
+    desc.dimension = sg::texture_dimension::d2;
+    desc.width = 16;
+    desc.height = 16;
+    desc.usage = sg::texture_usage::copy_src | sg::texture_usage::copy_dst;
+    auto tex = c.persistent.create_raw_texture(desc);
+    REQUIRE(tex != nullptr);
+
+    auto stream = c.stream.bytes_to_texture(tex, cc::make_pinned_data(pattern(16 * 16 * 4, 109)));
+    stream.cancel();
+    (void)co_await cc::async_as_result(stream.completion());
+    stream.promote_to_async(); // the list below may still wait on the cancelled transfer's value, on purpose
+
+    auto const src = pattern(16 * 16 * 4, 113);
+    auto cmd = c.create_command_list();
+    REQUIRE(cmd != nullptr);
+    cmd->upload.bytes_to_texture(tex, cc::span<byte const>(src));
+    auto back = cmd->download.bytes_from_texture(tex);
+    c.submit_command_list(cc::move(cmd));
+
+    auto const bytes = co_await back.bytes();
+    REQUIRE(bytes.size() == src.size());
+    CHECK(count_mismatches(bytes, src) == 0);
 }
 
 ASYNC_INVOCABLE_TEST("sg stream - a download sink receives every chunk in order", (sg::context_handle const& handle))

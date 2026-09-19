@@ -47,10 +47,6 @@ struct sg::backend::vulkan::vulkan_async_upload_job
     std::weak_ptr<vulkan_texture const> texture_target;
     bool is_texture = false;
 
-    /// This job claimed the texture's one-time transition out of UNDEFINED at enqueue, so its first window carries
-    /// that barrier ahead of the copy — to the async-ready layout, not the resting one; cleared once recorded.
-    bool owes_initial_transition = false;
-
     isize dst_offset = 0;              // buffer copies
     sg::subresource_index subresource; // texture copies
     sg::texture_region region;         // texture copies
@@ -286,13 +282,19 @@ private:
     /// Settles `job`'s stream control now, without waiting for a copy — for a cancelled or failed transfer.
     static void settle_now(vulkan_async_upload_job& job, bool delivered);
 
-    /// Records the one-time UNDEFINED -> async-ready transition of `texture`'s whole image into `cmd`, ahead of a copy.
-    void record_initial_transition(VkCommandBuffer cmd, vulkan_texture const& texture) const;
+    /// Claims a fresh texture's one-time transition out of UNDEFINED for an upload and, when it wins, submits that one
+    /// barrier on the upload queue before returning.
+    ///
+    /// Inside the submission lock, like a list submit: the claim is what every later submit trusts — a list's entry
+    /// barrier, the download actor's copy — so the barrier has to precede all of them in host submit order, which is
+    /// the order the validation layer checks layouts in.
+    /// It signals a value of its own on the texture's upload timeline, reserved at the claim, which is all a list that
+    /// lost the claim waits on.
+    void submit_initial_transition(vulkan_texture const& texture);
 
-    /// Runs `job`'s claimed initial transition on a window of its own, when the job leaves without ever recording one:
-    /// cancelled, failed, or given nothing to copy.
-    /// Queued ahead of the job's completion signal, since a list that lost the claim waits on that value for it.
-    void run_owed_initial_transition(vulkan_async_upload_job& job);
+    /// Frees the initial-transition command buffers whose submits have landed.
+    /// Called under the submission lock, which is what guards `_transition_pool`.
+    void reclaim_initial_transitions();
 
     /// Signals `value` with an empty submit on the upload queue.
     ///
@@ -321,6 +323,17 @@ private:
     VkCommandPool _window_pools[k_window_count] = {};
     VkCommandBuffer _window_buffers[k_window_count] = {};
     int _next_window = 0;
+
+    /// Where the initial transitions are recorded — the enqueueing thread's, so not one of `_window_pools`, which
+    /// belong to the actor thread.
+    /// Guarded by the context's submission lock, like the submits it records for.
+    struct transition_in_flight
+    {
+        VkCommandBuffer buffer = VK_NULL_HANDLE;
+        vulkan_group_value signal;
+    };
+    VkCommandPool _transition_pool = VK_NULL_HANDLE;
+    cc::vector<transition_in_flight> _transitions_in_flight;
 
     cc::atomic<isize> _desired_window_bytes = {0};
     cc::atomic<u64> _next_sequence = {0};
