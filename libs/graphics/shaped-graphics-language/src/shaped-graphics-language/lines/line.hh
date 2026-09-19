@@ -2,6 +2,7 @@
 
 #include <shaped-graphics-language/fwd.hh>
 #include <shaped-graphics-language/source/source_span.hh>
+#include <shaped-graphics-language/syntax/ids.hh>
 
 /// What a line is, which its position in the tree decides before a single token is read.
 enum class sgl::line_kind : sgl::u8
@@ -19,7 +20,7 @@ enum class sgl::line_kind : sgl::u8
 ///
 /// Lines are stored in source order, which is also pre-order, so a parent always precedes its children and a line
 /// always follows its previous sibling's whole subtree.
-/// Links are indices into `parsed_file::lines`, -1 for none.
+/// Links are `line_id`s, `line_id::none` where there is nothing to link to.
 struct sgl::line
 {
     /// The line without its terminator, indentation included.
@@ -36,11 +37,17 @@ struct sgl::line
     /// Set by the tokenizer on a line that ends in an opening quote, whose children are therefore string content.
     bool opens_string = false;
 
-    i32 parent = -1;
-    i32 first_child = -1;
-    i32 next_sibling = -1;
+    line_id parent = line_id::none;
+    line_id first_child = line_id::none;
+    line_id next_sibling = line_id::none;
 
-    /// This line's tokens in `parsed_file::tokens`; empty until tokenized, and always for a blank line.
+    /// This line's tokens, as a range of `parsed_file::tokens`; empty until tokenized, and always for a blank line.
+    /// `first_token` is a position rather than a `token_id`, because an empty range starts at a token that need not exist.
     u32 first_token = 0;
     u32 token_count = 0;
+
+    /// The same range as ids: from `tokens_begin()` up to and excluding `tokens_end()`, stepped with `next`.
+    /// Neither may be handed to `parsed_file::at` without first comparing it against the other.
+    [[nodiscard]] token_id tokens_begin() const { return token_id(i32(first_token)); }
+    [[nodiscard]] token_id tokens_end() const { return token_id(i32(first_token + token_count)); }
 };

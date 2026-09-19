@@ -2,6 +2,7 @@
 
 #include <shaped-graphics-language/fwd.hh>
 #include <shaped-graphics-language/source/source_span.hh>
+#include <shaped-graphics-language/syntax/ids.hh>
 
 /// The form tree knows literals, names, applications and operators, and nothing about `fun` or `struct`.
 /// It is what a Lisp calls the reader's output: structure before meaning, which the AST phase interprets.
@@ -54,18 +55,19 @@ enum class sgl::form_kind : sgl::u8
     sequence,
 };
 
-/// Links are indices into `parsed_file::forms`, -1 for none.
+/// Links to other forms are `form_id`s, `form_id::none` where there is nothing to link to.
 struct sgl::form
 {
     form_kind kind = form_kind::missing;
     /// From the first byte of the first token to the last byte of the last one; empty for `missing`.
     source_span where;
-    /// The token that names a leaf, a member, an operator; -1 where no single token does.
-    i32 token = -1;
+    /// The token that names a leaf, a member, an operator; `none` where no single token does.
+    token_id token = token_id::none;
 
-    i32 first_child = -1;
-    i32 next_sibling = -1;
+    form_id first_child = form_id::none;
+    form_id next_sibling = form_id::none;
     /// This form's attributes, as a range of `parsed_file::form_attributes`, in source order.
+    /// `first_attribute` is a position in that array and names no group; the entries it reaches are the `group_id`s.
     u32 first_attribute = 0;
     u32 attribute_count = 0;
 };

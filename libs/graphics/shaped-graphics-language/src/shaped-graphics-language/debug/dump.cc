@@ -24,12 +24,12 @@ cc::string_view name_of(line_kind kind)
 }
 
 template <class F>
-void walk(parsed_file const& file, i32 first, int depth, F&& visit)
+void walk(parsed_file const& file, line_id first, int depth, F&& visit)
 {
-    for (auto index = first; index >= 0; index = file.lines[index].next_sibling)
+    for (auto id = first; is_valid(id); id = file.at(id).next_sibling)
     {
-        visit(file.lines[index], depth);
-        walk(file, file.lines[index].first_child, depth + 1, visit);
+        visit(file.at(id), depth);
+        walk(file, file.at(id).first_child, depth + 1, visit);
     }
 }
 
@@ -67,10 +67,10 @@ cc::string sgl::dump_tokens(parsed_file const& file)
              begin_line(out, l, depth);
              if (l.kind != line_kind::blank)
                  out += ":";
-             for (auto i = isize(l.first_token); i < isize(l.first_token + l.token_count); ++i)
+             for (auto t = l.tokens_begin(); t < l.tokens_end(); t = next(t))
              {
-                 out += i > isize(l.first_token) && file.is_fused_left(i) ? "~" : " ";
-                 out.appendf("{}({})", to_string(file.tokens[i].kind), file.text_of(file.tokens[i].where));
+                 out += t > l.tokens_begin() && file.is_fused_left(t) ? "~" : " ";
+                 out.appendf("{}({})", to_string(file.at(t).kind), file.text_of(file.at(t).where));
              }
              out += "\n";
          });

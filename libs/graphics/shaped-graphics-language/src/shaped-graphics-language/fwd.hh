@@ -15,6 +15,11 @@ using namespace cc::primitive_defines;
 
 struct source_span;
 
+enum class line_id : i32;
+enum class token_id : i32;
+enum class group_id : i32;
+enum class form_id : i32;
+
 enum class severity : u8;
 enum class diagnostic_kind : u8;
 struct diagnostic;

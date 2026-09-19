@@ -12,54 +12,58 @@ struct tree_builder
 {
     parsed_file& file;
     /// Open ancestors, innermost last; every entry is indented less than the one after it.
-    cc::vector<i32> path;
+    cc::vector<line_id> path;
     /// The most recent child per open level, so a new sibling can be linked without walking a chain.
     /// `last_child[0]` is the top level, `last_child[i + 1]` belongs to `path[i]`.
-    cc::vector<i32> last_child;
+    cc::vector<line_id> last_child;
     /// Blank lines waiting for the next non-blank line to say where they belong.
-    cc::vector<i32> pending_blank;
+    cc::vector<line_id> pending_blank;
 
-    void link_under_innermost(i32 index)
+    void link_under_innermost(line_id id)
     {
-        auto const parent = path.empty() ? -1 : path.back();
+        auto const parent = path.empty() ? line_id::none : path.back();
         auto& previous = last_child.back();
 
-        file.lines[index].parent = parent;
-        if (previous >= 0)
-            file.lines[previous].next_sibling = index;
-        else if (parent >= 0)
-            file.lines[parent].first_child = index;
+        file.at(id).parent = parent;
+        if (is_valid(previous))
+            file.at(previous).next_sibling = id;
+        else if (is_valid(parent))
+            file.at(parent).first_child = id;
         else
-            file.first_line = index;
-        previous = index;
+            file.first_line = id;
+        previous = id;
     }
 
     void flush_blank()
     {
-        for (auto const index : pending_blank)
-            link_under_innermost(index);
+        for (auto const id : pending_blank)
+            link_under_innermost(id);
         pending_blank.clear();
     }
 
-    void add(i32 index)
+    /// Appends `added` to the file and links it into the tree.
+    void push(line const& added)
     {
-        auto const& l = file.lines[index];
+        file.lines.push_back(added);
+        auto const id = line_id(i32(file.lines.size() - 1));
+
+        auto const& l = file.at(id);
         if (l.kind == line_kind::blank)
         {
-            pending_blank.push_back(index);
+            pending_blank.push_back(id);
             return;
         }
 
-        while (!path.empty() && file.lines[path.back()].indent_columns >= l.indent_columns)
+        while (!path.empty() && file.at(path.back()).indent_columns >= l.indent_columns)
         {
             path.pop_back();
             last_child.pop_back();
         }
 
         flush_blank();
-        link_under_innermost(index);
-        path.push_back(index);
-        last_child.push_back(-1);
+        link_under_innermost(id);
+        path.push_back(id);
+        last_child.push_back(line_id::none);
     }
 
     void finish()
@@ -86,7 +90,7 @@ sgl::parsed_file sgl::build_line_tree(cc::string source)
     auto const size = text.size();
 
     auto builder = tree_builder{.file = file};
-    builder.last_child.push_back(-1);
+    builder.last_child.push_back(line_id::none);
 
     auto at = isize(0);
     while (at < size)
@@ -133,9 +137,7 @@ sgl::parsed_file sgl::build_line_tree(cc::string source)
                 }
         }
 
-        auto const index = i32(file.lines.size());
-        file.lines.push_back(l);
-        builder.add(index);
+        builder.push(l);
 
         at = end + terminator;
     }

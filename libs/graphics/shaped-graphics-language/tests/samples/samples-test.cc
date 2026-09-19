@@ -33,4 +33,6 @@ TEST("sgl samples - a whole raster shader parses, and says only what it should")
     // An anonymous return type spans element lines and closes on the line that carries the block colon.
     CHECK(forms.contains("op:-> (curly (run id:pos op:: id:hpos4){@position} (run id:normal op:: id:vec3)"));
     CHECK(forms.contains("(apply id:make_mvp (member model id:instance))"));
+    // `sampler` is a keyword, so a static sampler is a keyword form like any other declaration.
+    CHECK(forms.contains("(kw kw:sampler id:bilinear)"));
 }

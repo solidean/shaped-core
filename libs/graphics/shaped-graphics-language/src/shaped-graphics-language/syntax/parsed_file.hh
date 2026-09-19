@@ -9,11 +9,12 @@
 #include <shaped-graphics-language/groups/group.hh>
 #include <shaped-graphics-language/lines/line.hh>
 #include <shaped-graphics-language/source/diagnostic.hh>
+#include <shaped-graphics-language/syntax/ids.hh>
 #include <shaped-graphics-language/tokens/token.hh>
 
 /// Everything the syntactic phases know about one file, as one value.
 ///
-/// Every node is an index into one of these arrays and every span points into `source`, so the value copies,
+/// Every node is an id into one of these arrays and every span points into `source`, so the value copies,
 /// compares and moves as a whole and holds no pointer into itself.
 /// Each phase fills its own arrays and reads only the earlier ones.
 struct sgl::parsed_file
@@ -23,17 +24,28 @@ struct sgl::parsed_file
     cc::vector<token> tokens;
     cc::vector<group> groups;
     cc::vector<form> forms;
-    /// Indices of `attribute` groups, each form owning one contiguous range.
+    /// Ids of `attribute` groups, each form owning one contiguous range.
     /// An element's attributes may be written on several of its groups, and this is where they meet.
-    cc::vector<i32> form_attributes;
+    cc::vector<group_id> form_attributes;
     cc::vector<diagnostic> diagnostics;
 
-    /// The first top-level line, -1 for a file without lines; its `next_sibling` chain is the top level.
-    i32 first_line = -1;
-    /// The block group holding every top-level statement; -1 until grouped.
-    i32 root_block = -1;
-    /// The block form holding every top-level form; -1 until the form tree is built.
-    i32 root_form = -1;
+    /// The first top-level line, `none` for a file without lines; its `next_sibling` chain is the top level.
+    line_id first_line = line_id::none;
+    /// The block group holding every top-level statement; `none` until grouped.
+    group_id root_block = group_id::none;
+    /// The block form holding every top-level form; `none` until the form tree is built.
+    form_id root_form = form_id::none;
+
+    /// An id is the way to a node, and the id's type picks the array.
+    /// The id must be valid and must name a node that exists.
+    [[nodiscard]] line const& at(line_id id) const { return lines[index_of(id)]; }
+    [[nodiscard]] line& at(line_id id) { return lines[index_of(id)]; }
+    [[nodiscard]] token const& at(token_id id) const { return tokens[index_of(id)]; }
+    [[nodiscard]] token& at(token_id id) { return tokens[index_of(id)]; }
+    [[nodiscard]] group const& at(group_id id) const { return groups[index_of(id)]; }
+    [[nodiscard]] group& at(group_id id) { return groups[index_of(id)]; }
+    [[nodiscard]] form const& at(form_id id) const { return forms[index_of(id)]; }
+    [[nodiscard]] form& at(form_id id) { return forms[index_of(id)]; }
 
     [[nodiscard]] cc::string_view text_of(source_span where) const
     {
@@ -45,11 +57,11 @@ struct sgl::parsed_file
         return cc::span<token const>(tokens).subspan({.offset = l.first_token, .size = l.token_count});
     }
 
-    /// True if `tokens[index]` touches the token before it: same line, no whitespace between.
+    /// True if the token touches the token before it: same line, no whitespace between.
     /// The first token of a line is never fused.
-    [[nodiscard]] bool is_fused_left(isize index) const
+    [[nodiscard]] bool is_fused_left(token_id id) const
     {
-        return index > 0 && tokens[index - 1].where.end() == tokens[index].where.offset;
+        return index_of(id) > 0 && at(previous(id)).where.end() == at(id).where.offset;
     }
 };
 

@@ -12,52 +12,52 @@ void indent(cc::string& out, int depth)
         out += "  ";
 }
 
-void dump_group(parsed_file const& file, cc::string& out, i32 index, int depth);
+void dump_group(parsed_file const& file, cc::string& out, group_id id, int depth);
 
-void dump_attribute(parsed_file const& file, cc::string& out, i32 attribute)
+void dump_attribute(parsed_file const& file, cc::string& out, group_id attribute)
 {
     out += "{";
-    out += file.text_of(file.tokens[file.groups[attribute].token].where);
-    if (file.groups[attribute].first_child >= 0)
-        dump_group(file, out, file.groups[attribute].first_child, 0);
+    out += file.text_of(file.at(file.at(attribute).token).where);
+    if (is_valid(file.at(attribute).first_child))
+        dump_group(file, out, file.at(attribute).first_child, 0);
     out += "}";
 }
 
-void dump_group_run(parsed_file const& file, cc::string& out, i32 first, int depth)
+void dump_group_run(parsed_file const& file, cc::string& out, group_id first, int depth)
 {
-    for (auto index = first; index >= 0; index = file.groups[index].next_sibling)
+    for (auto id = first; is_valid(id); id = file.at(id).next_sibling)
     {
-        auto const& g = file.groups[index];
+        auto const& g = file.at(id);
         if (g.starts_line)
-            out += index == first ? "| " : " | ";
-        else if (index != first && g.kind != group_kind::block)
+            out += id == first ? "| " : " | ";
+        else if (id != first && g.kind != group_kind::block)
             out += g.is_fused_left ? "~" : " ";
-        dump_group(file, out, index, depth);
+        dump_group(file, out, id, depth);
     }
 }
 
-void dump_group(parsed_file const& file, cc::string& out, i32 index, int depth)
+void dump_group(parsed_file const& file, cc::string& out, group_id id, int depth)
 {
-    auto const& g = file.groups[index];
+    auto const& g = file.at(id);
     switch (g.kind)
     {
     case group_kind::token:
-        out += file.text_of(file.tokens[g.token].where);
+        out += file.text_of(file.at(g.token).where);
         break;
 
     case group_kind::round:
     case group_kind::square:
     case group_kind::curly:
-        out += file.text_of(file.tokens[g.token].where);
+        out += file.text_of(file.at(g.token).where);
         dump_group_run(file, out, g.first_child, depth);
-        out += g.close_token >= 0 ? file.text_of(file.tokens[g.close_token].where) : cc::string_view("<unclosed>");
+        out += is_valid(g.close_token) ? file.text_of(file.at(g.close_token).where) : cc::string_view("<unclosed>");
         break;
 
     case group_kind::quoted:
         out += "\"";
-        for (auto child = g.first_child; child >= 0; child = file.groups[child].next_sibling)
+        for (auto child = g.first_child; is_valid(child); child = file.at(child).next_sibling)
         {
-            if (child != g.first_child && file.groups[child].starts_line)
+            if (child != g.first_child && file.at(child).starts_line)
                 out += "\\n";
             dump_group(file, out, child, depth);
         }
@@ -66,13 +66,13 @@ void dump_group(parsed_file const& file, cc::string& out, i32 index, int depth)
 
     case group_kind::block:
         out += ":";
-        for (auto statement = g.first_child; statement >= 0; statement = file.groups[statement].next_sibling)
+        for (auto statement = g.first_child; is_valid(statement); statement = file.at(statement).next_sibling)
         {
-            if (file.groups[statement].first_child < 0)
+            if (!is_valid(file.at(statement).first_child))
                 continue; // a line of attributes only
             out += "\n";
             indent(out, depth + 1);
-            dump_group_run(file, out, file.groups[statement].first_child, depth + 1);
+            dump_group_run(file, out, file.at(statement).first_child, depth + 1);
         }
         break;
 
@@ -80,7 +80,7 @@ void dump_group(parsed_file const& file, cc::string& out, i32 index, int depth)
     case group_kind::attribute:
         break;
     }
-    for (auto a = g.first_attribute; a >= 0; a = file.groups[a].next_sibling)
+    for (auto a = g.first_attribute; is_valid(a); a = file.at(a).next_sibling)
         dump_attribute(file, out, a);
 }
 
@@ -156,12 +156,12 @@ bool is_leaf_kind(form_kind kind)
     }
 }
 
-void dump_form(parsed_file const& file, cc::string& out, i32 index, int depth)
+void dump_form(parsed_file const& file, cc::string& out, form_id id, int depth)
 {
-    auto const& f = file.forms[index];
+    auto const& f = file.at(id);
     if (f.kind == form_kind::block)
     {
-        for (auto child = f.first_child; child >= 0; child = file.forms[child].next_sibling)
+        for (auto child = f.first_child; is_valid(child); child = file.at(child).next_sibling)
         {
             out += "\n";
             indent(out, depth + 1);
@@ -170,13 +170,13 @@ void dump_form(parsed_file const& file, cc::string& out, i32 index, int depth)
         return;
     }
 
-    if (is_leaf_kind(f.kind) && f.first_child < 0)
+    if (is_leaf_kind(f.kind) && !is_valid(f.first_child))
     {
         out += tag_of(f.kind);
         if (f.kind != form_kind::missing)
         {
             out += ":";
-            out += file.text_of(f.kind == form_kind::leading_dot ? file.tokens[f.token].where : f.where);
+            out += file.text_of(f.kind == form_kind::leading_dot ? file.at(f.token).where : f.where);
         }
     }
     else
@@ -188,11 +188,11 @@ void dump_form(parsed_file const& file, cc::string& out, i32 index, int depth)
         if (names_its_token)
         {
             out += " ";
-            out += file.text_of(file.tokens[f.token].where);
+            out += file.text_of(file.at(f.token).where);
         }
-        for (auto child = f.first_child; child >= 0; child = file.forms[child].next_sibling)
+        for (auto child = f.first_child; is_valid(child); child = file.at(child).next_sibling)
         {
-            if (file.forms[child].kind != form_kind::block)
+            if (file.at(child).kind != form_kind::block)
                 out += " ";
             dump_form(file, out, child, depth);
         }
@@ -207,15 +207,15 @@ void dump_form(parsed_file const& file, cc::string& out, i32 index, int depth)
 cc::string sgl::dump_groups(parsed_file const& file)
 {
     auto out = cc::string();
-    if (file.root_block < 0)
+    if (!is_valid(file.root_block))
         return out;
 
-    auto const& root = file.groups[file.root_block];
-    for (auto statement = root.first_child; statement >= 0; statement = file.groups[statement].next_sibling)
+    auto const& root = file.at(file.root_block);
+    for (auto statement = root.first_child; is_valid(statement); statement = file.at(statement).next_sibling)
     {
-        if (file.groups[statement].first_child < 0)
+        if (!is_valid(file.at(statement).first_child))
             continue; // a line of attributes only
-        dump_group_run(file, out, file.groups[statement].first_child, 0);
+        dump_group_run(file, out, file.at(statement).first_child, 0);
         out += "\n";
     }
     return out;
@@ -224,10 +224,10 @@ cc::string sgl::dump_groups(parsed_file const& file)
 cc::string sgl::dump_forms(parsed_file const& file)
 {
     auto out = cc::string();
-    if (file.root_form < 0)
+    if (!is_valid(file.root_form))
         return out;
 
-    for (auto child = file.forms[file.root_form].first_child; child >= 0; child = file.forms[child].next_sibling)
+    for (auto child = file.at(file.root_form).first_child; is_valid(child); child = file.at(child).next_sibling)
     {
         dump_form(file, out, child, 0);
         out += "\n";

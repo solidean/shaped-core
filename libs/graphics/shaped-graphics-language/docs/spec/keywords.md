@@ -13,6 +13,7 @@ Definitions:
 * `struct` - defines a new structure type
 * `enum` - defines a new enum type
 * `binding` - defines a new binding group
+* `sampler` - declares a static sampler
 * `const` - real constants
 * `use` - import other modules
 * `module` - declares a module
@@ -50,7 +51,6 @@ TODO:
 
 * `in` / `out` / `inout` / `ref` - not sure if we need these yet
 * do we need `buffer` and `texture` etc as keywords? or are they simply types?
-* do we need a `sampler` keyword?
 * how do we distinguish 
 * do we need an `inline` keyword or is it a `@inline` annotation (for push/inline constants)
 

@@ -18,12 +18,13 @@ What the *user's source* did wrong is `sgl::diagnostic`, which is data a caller 
 #include <shaped-graphics-language/syntax/parsed_file.hh>
 auto const file = sgl::parse(source);      // -> sgl::parsed_file; TOTAL: any bytes in, a tree and diagnostics out
 file.source                                // cc::string, the bytes every span points into
-file.lines  file.tokens  file.groups  file.forms  file.diagnostics   // flat arrays; every node is an index, -1 for none
-file.first_line  file.root_block  file.root_form                      // where each tree starts
+file.lines  file.tokens  file.groups  file.forms  file.diagnostics   // flat arrays; a node is named by a typed id
+file.first_line  file.root_block  file.root_form                      // line_id / group_id / form_id: where each tree starts
+file.at(id)                                // -> line / token / group / form (const&, or & on a mutable file); the id's TYPE picks the array
 file.text_of(span)                         // -> cc::string_view into source
 file.tokens_of(line)                       // -> cc::span<token const>
-file.is_fused_left(token_index)            // -> bool: touches the token before it
-file.form_attributes                       // attribute group indices; each form owns a contiguous range
+file.is_fused_left(token_id)               // -> bool: touches the token before it
+file.form_attributes                       // cc::vector<group_id> of attribute groups; each form owns a contiguous range
 ```
 
 ## The phases, one at a time
@@ -43,11 +44,20 @@ sgl::parse_forms(file, sgl::default_keywords());   // -> file.root_form; the key
 ## The trees
 
 ```cpp
-sgl::line    // text, terminator_length, kind, indent_bytes/indent_columns, parent/first_child/next_sibling, first_token/token_count
+#include <shaped-graphics-language/syntax/ids.hh>
+sgl::line_id  sgl::token_id  sgl::group_id  sgl::form_id   // enum class : i32, one per array; `none` (-1) is the absent link
+sgl::is_valid(id)                          // -> bool: not `none`
+sgl::index_of(id)                          // -> isize, for a side array parallel to the id's own; explicit casts stay rare
+sgl::next(token_id)  sgl::previous(token_id)   // tokens are consecutive within a line; NO other id has arithmetic
+for (auto c = file.at(id).first_child; sgl::is_valid(c); c = file.at(c).next_sibling)   // how every tree is walked
+
+sgl::line    // text, terminator_length, kind, indent_bytes/indent_columns, parent/first_child/next_sibling (line_id),
+             // first_token/token_count (u32 range into file.tokens), tokens_begin()/tokens_end() -> token_id
 sgl::token   // kind + where; NO keyword/number/identifier kinds: `10a7`, `@range`, `let` are all token_kind::symbol
 sgl::group   // kind (token, round, square, curly, quoted, block, statement, attribute), is_fused_left, starts_line,
-             // token/close_token, first_child/next_sibling, first_attribute
-sgl::form    // kind, where, token, first_child/next_sibling, first_attribute/attribute_count
+             // token/close_token (token_id), first_child/next_sibling/first_attribute (group_id)
+sgl::form    // kind, where, token (token_id), first_child/next_sibling (form_id),
+             // first_attribute/attribute_count (u32 range into file.form_attributes)
 sgl::source_span   // { u32 offset, length }; end(), empty()
 ```
 
@@ -88,4 +98,5 @@ sgl::print_source(file)      // == file.source for EVERY input: the lossless inv
 - **Operator spacing is syntax.** Spaced on both sides is infix, fused on the right only is prefix, fused on both sides is an error — except ranges.
 - **`operator_run` is flat** for one precedence level (operands and `op` leaves alternate); assignment and `=>` hold two operands and nest right.
 - **A form's attributes are not on its groups.** Read them through `first_attribute` / `attribute_count` into `file.form_attributes`.
+- **A range start is a position, not an id.** `line::first_token` and `form::first_attribute` are `u32`, since an empty range starts at nothing.
 - **Every `sgl` fence under `docs/spec/` is a test** (`tests/spec/spec-examples-test.cc`): `sgl` must parse cleanly, `sgl error` must report the kind its lead names, `sgl sketch` is unchecked.

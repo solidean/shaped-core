@@ -144,11 +144,11 @@ bool is_well_formed_number(cc::string_view t, bool& has_underscore)
 /// A position in one run of sibling groups, which is all the parser ever looks at.
 struct cursor
 {
-    i32 at = -1;
-    /// The group the run stops before, -1 for the end of the chain.
-    i32 end = -1;
-    /// The group consumed last, -1 at the start of the run.
-    i32 previous = -1;
+    group_id at = group_id::none;
+    /// The group the run stops before, `none` for the end of the chain.
+    group_id end = group_id::none;
+    /// The group consumed last, `none` at the start of the run.
+    group_id previous = group_id::none;
 };
 
 struct form_parser
@@ -159,38 +159,38 @@ struct form_parser
     /// Above zero inside a paren list, where a comma ends an element rather than separating a keyword form's expressions.
     int list_depth = 0;
     /// Groups whose attributes a form has already taken, so hoisting leaves them alone.
-    cc::vector<i32> claimed;
+    cc::vector<group_id> claimed;
 
     // ---- groups -------------------------------------------------------------------------------------------------
 
-    [[nodiscard]] bool at_end() const { return c.at < 0 || c.at == c.end; }
-    [[nodiscard]] group const& here() const { return file.groups[c.at]; }
+    [[nodiscard]] bool at_end() const { return !is_valid(c.at) || c.at == c.end; }
+    [[nodiscard]] group const& here() const { return file.at(c.at); }
 
-    [[nodiscard]] i32 next_of(i32 g) const
+    [[nodiscard]] group_id next_of(group_id g) const
     {
-        auto const n = file.groups[g].next_sibling;
-        return n == c.end ? -1 : n;
+        auto const n = file.at(g).next_sibling;
+        return n == c.end ? group_id::none : n;
     }
 
     void advance()
     {
         c.previous = c.at;
-        c.at = file.groups[c.at].next_sibling;
+        c.at = file.at(c.at).next_sibling;
     }
 
-    [[nodiscard]] bool is_token(i32 g, token_kind kind) const
+    [[nodiscard]] bool is_token(group_id g, token_kind kind) const
     {
-        return g >= 0 && file.groups[g].kind == group_kind::token && file.tokens[file.groups[g].token].kind == kind;
+        return is_valid(g) && file.at(g).kind == group_kind::token && file.at(file.at(g).token).kind == kind;
     }
 
-    [[nodiscard]] cc::string_view text_of(i32 g) const { return file.text_of(file.tokens[file.groups[g].token].where); }
+    [[nodiscard]] cc::string_view text_of(group_id g) const { return file.text_of(file.at(file.at(g).token).where); }
 
-    [[nodiscard]] bool is_word(i32 g, cc::string_view word) const
+    [[nodiscard]] bool is_word(group_id g, cc::string_view word) const
     {
         return is_token(g, token_kind::symbol) && text_of(g) == word;
     }
 
-    [[nodiscard]] bool is_keyword(i32 g) const
+    [[nodiscard]] bool is_keyword(group_id g) const
     {
         if (!is_token(g, token_kind::symbol))
             return false;
@@ -201,35 +201,35 @@ struct form_parser
         return false;
     }
 
-    [[nodiscard]] bool is_word_operator(i32 g) const
+    [[nodiscard]] bool is_word_operator(group_id g) const
     {
         return is_word(g, "and") || is_word(g, "or") || is_word(g, "not") || is_word(g, "as") || is_word(g, "in");
     }
 
     /// True if an operand can end with this group, which is what an operator has to touch to count as fused on its left.
-    [[nodiscard]] bool ends_operand(i32 g) const
+    [[nodiscard]] bool ends_operand(group_id g) const
     {
-        if (g < 0)
+        if (!is_valid(g))
             return false;
-        auto const kind = file.groups[g].kind;
+        auto const kind = file.at(g).kind;
         if (kind != group_kind::token)
             return kind != group_kind::block && kind != group_kind::statement;
-        auto const token = file.tokens[file.groups[g].token].kind;
+        auto const token = file.at(file.at(g).token).kind;
         return token == token_kind::symbol || token == token_kind::wildcard;
     }
 
-    [[nodiscard]] bool is_tight_left(i32 g) const { return file.groups[g].is_fused_left && ends_operand(c.previous); }
-    [[nodiscard]] bool is_tight_right(i32 g) const
+    [[nodiscard]] bool is_tight_left(group_id g) const { return file.at(g).is_fused_left && ends_operand(c.previous); }
+    [[nodiscard]] bool is_tight_right(group_id g) const
     {
         auto const n = next_of(g);
-        return n >= 0 && file.groups[n].is_fused_left;
+        return is_valid(n) && file.at(n).is_fused_left;
     }
 
-    [[nodiscard]] bool is_prefix_shaped(i32 g) const
+    [[nodiscard]] bool is_prefix_shaped(group_id g) const
     {
         return is_token(g, token_kind::op) && !is_tight_left(g) && is_tight_right(g);
     }
-    [[nodiscard]] bool is_postfix_shaped(i32 g) const
+    [[nodiscard]] bool is_postfix_shaped(group_id g) const
     {
         return is_token(g, token_kind::op) && is_tight_left(g) && !is_tight_right(g);
     }
@@ -241,20 +241,20 @@ struct form_parser
 
     // ---- forms --------------------------------------------------------------------------------------------------
 
-    i32 make(form f)
+    form_id make(form f)
     {
         file.forms.push_back(f);
-        return i32(file.forms.size() - 1);
+        return form_id(i32(file.forms.size() - 1));
     }
 
-    [[nodiscard]] source_span span_of_group(i32 g) const
+    [[nodiscard]] source_span span_of_group(group_id g) const
     {
-        auto const& gr = file.groups[g];
-        auto const start = file.tokens[gr.token].where;
-        if (gr.close_token >= 0)
-            return cover(start, file.tokens[gr.close_token].where);
+        auto const& gr = file.at(g);
+        auto const start = file.at(gr.token).where;
+        if (is_valid(gr.close_token))
+            return cover(start, file.at(gr.close_token).where);
         auto result = start;
-        for (auto child = gr.first_child; child >= 0; child = file.groups[child].next_sibling)
+        for (auto child = gr.first_child; is_valid(child); child = file.at(child).next_sibling)
             result = cover(result, span_of_group(child));
         return result;
     }
@@ -271,22 +271,22 @@ struct form_parser
     }
 
     /// Appends `child` to `parent`, growing the parent's span over it.
-    void add_child(i32 parent, i32 child, i32& last)
+    void add_child(form_id parent, form_id child, form_id& last)
     {
-        if (last >= 0)
-            file.forms[last].next_sibling = child;
+        if (is_valid(last))
+            file.at(last).next_sibling = child;
         else
-            file.forms[parent].first_child = child;
+            file.at(parent).first_child = child;
         last = child;
-        file.forms[parent].where = cover(file.forms[parent].where, file.forms[child].where);
+        file.at(parent).where = cover(file.at(parent).where, file.at(child).where);
     }
 
-    i32 leaf(form_kind kind, i32 g)
+    form_id leaf(form_kind kind, group_id g)
     {
-        return make({.kind = kind, .where = span_of_group(g), .token = file.groups[g].token});
+        return make({.kind = kind, .where = span_of_group(g), .token = file.at(g).token});
     }
 
-    i32 missing(source_span near)
+    form_id missing(source_span near)
     {
         report(diagnostic_kind::expected_expression, near);
         return make({.kind = form_kind::missing, .where = {.offset = near.end(), .length = 0}});
@@ -294,30 +294,30 @@ struct form_parser
 
     /// An operand directly after `:`, `->`, `as`, `in` or `=>` keeps the attributes written before it.
     /// That is how a return value is annotated; every other attribute belongs to the whole element.
-    void claim_attributes_at_cursor(i32 form_index_after_parse, i32 group_before_parse)
+    void claim_attributes_at_cursor(form_id form_after_parse, group_id group_before_parse)
     {
-        if (group_before_parse < 0)
+        if (!is_valid(group_before_parse))
             return;
         auto leads = false;
-        for (auto a = file.groups[group_before_parse].first_attribute; a >= 0; a = file.groups[a].next_sibling)
-            leads = leads || !file.groups[a].is_trailing;
+        for (auto a = file.at(group_before_parse).first_attribute; is_valid(a); a = file.at(a).next_sibling)
+            leads = leads || !file.at(a).is_trailing;
         if (!leads)
             return;
-        auto& f = file.forms[form_index_after_parse];
+        auto& f = file.at(form_after_parse);
         f.first_attribute = u32(file.form_attributes.size());
-        for (auto a = file.groups[group_before_parse].first_attribute; a >= 0; a = file.groups[a].next_sibling)
+        for (auto a = file.at(group_before_parse).first_attribute; is_valid(a); a = file.at(a).next_sibling)
             file.form_attributes.push_back(a);
         f.attribute_count = u32(file.form_attributes.size()) - f.first_attribute;
         claimed.push_back(group_before_parse);
     }
 
     /// Gives `target` every unclaimed attribute written among `[first, end)`.
-    void hoist_attributes(i32 first, i32 end, i32 target)
+    void hoist_attributes(group_id first, group_id end, form_id target)
     {
         auto const start = u32(file.form_attributes.size());
-        for (auto g = first; g >= 0 && g != end; g = file.groups[g].next_sibling)
+        for (auto g = first; is_valid(g) && g != end; g = file.at(g).next_sibling)
         {
-            if (file.groups[g].first_attribute < 0)
+            if (!is_valid(file.at(g).first_attribute))
                 continue;
             auto is_claimed = false;
             for (auto const taken : claimed)
@@ -325,20 +325,20 @@ struct form_parser
             if (is_claimed)
                 continue;
 
-            for (auto a = file.groups[g].first_attribute; a >= 0; a = file.groups[a].next_sibling)
+            for (auto a = file.at(g).first_attribute; is_valid(a); a = file.at(a).next_sibling)
                 file.form_attributes.push_back(a);
         }
-        if (file.form_attributes.size() > start && file.forms[target].attribute_count == 0)
+        if (file.form_attributes.size() > start && file.at(target).attribute_count == 0)
         {
-            file.forms[target].first_attribute = start;
-            file.forms[target].attribute_count = u32(file.form_attributes.size()) - start;
+            file.at(target).first_attribute = start;
+            file.at(target).attribute_count = u32(file.form_attributes.size()) - start;
         }
     }
 
     // ---- statements, elements, blocks --------------------------------------------------------------------------
 
     /// Parses the run `[first, end)` as one form; whatever the grammar leaves over is kept as `error` forms beside it.
-    i32 parse_run(i32 first, i32 end)
+    form_id parse_run(group_id first, group_id end)
     {
         auto const saved = c;
         c = {.at = first, .end = end};
@@ -347,7 +347,7 @@ struct form_parser
         if (!at_end())
         {
             auto const wrapper = make({.kind = form_kind::error});
-            auto last = -1;
+            auto last = form_id::none;
             add_child(wrapper, result, last);
             while (!at_end())
             {
@@ -363,61 +363,61 @@ struct form_parser
         return result;
     }
 
-    i32 parse_block(i32 block_group)
+    form_id parse_block(group_id block_group)
     {
         auto const saved_depth = list_depth;
         list_depth = 0;
 
-        auto const& g = file.groups[block_group];
+        auto const& g = file.at(block_group);
         auto const result
-            = make({.kind = form_kind::block, .where = g.token >= 0 ? file.tokens[g.token].where : source_span{}});
-        auto last = -1;
-        for (auto statement = g.first_child; statement >= 0; statement = file.groups[statement].next_sibling)
-            if (file.groups[statement].first_child >= 0)
-                add_child(result, parse_run(file.groups[statement].first_child, -1), last);
+            = make({.kind = form_kind::block, .where = is_valid(g.token) ? file.at(g.token).where : source_span{}});
+        auto last = form_id::none;
+        for (auto statement = g.first_child; is_valid(statement); statement = file.at(statement).next_sibling)
+            if (is_valid(file.at(statement).first_child))
+                add_child(result, parse_run(file.at(statement).first_child, group_id::none), last);
 
         list_depth = saved_depth;
         return result;
     }
 
-    i32 parse_list(i32 list_group)
+    form_id parse_list(group_id list_group)
     {
-        auto const& g = file.groups[list_group];
+        auto const& g = file.at(list_group);
         auto const kind = g.kind == group_kind::round  ? form_kind::round_list
                         : g.kind == group_kind::square ? form_kind::square_list
                                                        : form_kind::curly_list;
         auto const result = make({.kind = kind, .where = span_of_group(list_group), .token = g.token});
 
         ++list_depth;
-        auto last = -1;
+        auto last = form_id::none;
         auto start = g.first_child;
-        while (start >= 0)
+        while (is_valid(start))
         {
             // An element ends at a comma, and at the first group of the next element line.
             auto end = start;
-            while (end >= 0 && !is_token(end, token_kind::comma) && (end == start || !file.groups[end].starts_line))
-                end = file.groups[end].next_sibling;
+            while (is_valid(end) && !is_token(end, token_kind::comma) && (end == start || !file.at(end).starts_line))
+                end = file.at(end).next_sibling;
 
             if (end != start)
                 add_child(result, parse_run(start, end), last);
-            start = is_token(end, token_kind::comma) ? file.groups[end].next_sibling : end;
+            start = is_token(end, token_kind::comma) ? file.at(end).next_sibling : end;
         }
         --list_depth;
 
-        file.forms[result].where = span_of_group(list_group);
+        file.at(result).where = span_of_group(list_group);
         return result;
     }
 
     // ---- the ladder --------------------------------------------------------------------------------------------
 
-    i32 parse_sequence()
+    form_id parse_sequence()
     {
         auto const first = parse_assignment();
         if (!is_token(c.at, token_kind::semicolon) || at_end())
             return first;
 
         auto const result = make({.kind = form_kind::sequence});
-        auto last = -1;
+        auto last = form_id::none;
         add_child(result, first, last);
         while (!at_end() && is_token(c.at, token_kind::semicolon))
         {
@@ -436,17 +436,17 @@ struct form_parser
             && classify(text_of(c.at)) == operator_class::assignment;
     }
 
-    i32 binary(i32 left, i32 operator_group, i32 right)
+    form_id binary(form_id left, group_id operator_group, form_id right)
     {
         auto const result = make({.kind = form_kind::operator_run});
-        auto last = -1;
+        auto last = form_id::none;
         add_child(result, left, last);
         add_child(result, leaf(form_kind::op, operator_group), last);
         add_child(result, right, last);
         return result;
     }
 
-    i32 parse_assignment()
+    form_id parse_assignment()
     {
         auto const left = parse_computes_as();
         if (!at_assignment())
@@ -459,7 +459,7 @@ struct form_parser
         return binary(left, operator_group, right);
     }
 
-    i32 parse_computes_as()
+    form_id parse_computes_as()
     {
         auto const left = parse_head();
         if (at_end() || !is_token(c.at, token_kind::double_arrow))
@@ -469,7 +469,7 @@ struct form_parser
         check_operator(operator_group);
         advance();
         auto const operand_group = c.at;
-        auto right = -1;
+        auto right = form_id::none;
         if (at_end())
             right = missing(span_of_group(operator_group));
         else if (here().kind == group_kind::block)
@@ -486,7 +486,7 @@ struct form_parser
     }
 
     /// A keyword form, or an expression — which becomes a keyword form without keywords when a block hangs off it.
-    i32 parse_head()
+    form_id parse_head()
     {
         if (!at_end() && is_keyword(c.at))
             return parse_keyword_form();
@@ -496,7 +496,7 @@ struct form_parser
             return expression;
 
         auto const result = make({.kind = form_kind::keyword_form});
-        auto last = -1;
+        auto last = form_id::none;
         add_child(result, expression, last);
         add_child(result, parse_block(c.at), last);
         advance();
@@ -511,10 +511,10 @@ struct form_parser
             || (list_depth > 0 && is_token(c.at, token_kind::comma));
     }
 
-    i32 parse_keyword_form()
+    form_id parse_keyword_form()
     {
         auto const result = make({.kind = form_kind::keyword_form});
-        auto last = -1;
+        auto last = form_id::none;
         while (!at_end() && is_keyword(c.at))
         {
             add_child(result, leaf(form_kind::keyword, c.at), last);
@@ -543,7 +543,7 @@ struct form_parser
         if (at_end() || here().kind != group_kind::token)
             return false;
 
-        switch (file.tokens[here().token].kind)
+        switch (file.at(here().token).kind)
         {
         case token_kind::colon:
         case token_kind::arrow:
@@ -577,7 +577,7 @@ struct form_parser
     }
 
     /// What an operator token owes beyond its place in the ladder: a known spelling, and spaces around it.
-    void check_operator(i32 g)
+    void check_operator(group_id g)
     {
         // `->` and `=>` are tokens of their own and owe the same spaces; `:` and the word operators owe none.
         if (is_token(g, token_kind::arrow) || is_token(g, token_kind::double_arrow))
@@ -600,7 +600,7 @@ struct form_parser
             report(diagnostic_kind::operator_needs_spaces, span_of_group(g));
     }
 
-    i32 parse_level(level l)
+    form_id parse_level(level l)
     {
         if (l == level::application)
             return parse_application();
@@ -614,7 +614,7 @@ struct form_parser
                     = make({.kind = form_kind::prefix_operator, .where = span_of_group(c.at), .token = here().token});
                 auto const word = c.at;
                 advance();
-                auto last = -1;
+                auto last = form_id::none;
                 add_child(result, at_end() ? missing(span_of_group(word)) : parse_level(tighter), last);
                 return result;
             }
@@ -626,7 +626,7 @@ struct form_parser
             return first;
 
         auto const result = make({.kind = form_kind::operator_run});
-        auto last = -1;
+        auto last = form_id::none;
         add_child(result, first, last);
         while (infix_at(l))
         {
@@ -647,32 +647,31 @@ struct form_parser
     }
 
     /// Runs parse whatever they hold; what the language forbids among equals is said here.
-    void judge_run(i32 run, level l)
+    void judge_run(form_id run, level l)
     {
         auto operators = cc::vector<cc::string_view>();
         auto operand_count = 0;
         auto index = 0;
-        for (auto child = file.forms[run].first_child; child >= 0; child = file.forms[child].next_sibling, ++index)
+        for (auto child = file.at(run).first_child; is_valid(child); child = file.at(child).next_sibling, ++index)
         {
-            auto const& f = file.forms[child];
+            auto const& f = file.at(child);
             if (f.kind == form_kind::op && index % 2 == 1)
-                operators.push_back(file.text_of(file.tokens[f.token].where));
+                operators.push_back(file.text_of(file.at(f.token).where));
             else
                 ++operand_count;
         }
 
-        auto const where = file.forms[run].where;
+        auto const where = file.at(run).where;
         if (l == level::connective)
         {
             auto seen = 0;
-            for (auto child = file.forms[run].first_child; child >= 0; child = file.forms[child].next_sibling)
+            for (auto child = file.at(run).first_child; is_valid(child); child = file.at(child).next_sibling)
             {
-                auto const& f = file.forms[child];
+                auto const& f = file.at(child);
                 if (f.kind == form_kind::op)
                     continue;
                 ++seen;
-                auto const is_not
-                    = f.kind == form_kind::prefix_operator && file.text_of(file.tokens[f.token].where) == "not";
+                auto const is_not = f.kind == form_kind::prefix_operator && file.text_of(file.at(f.token).where) == "not";
                 if (is_not && seen < operand_count)
                     report(diagnostic_kind::misplaced_not, f.where);
             }
@@ -716,7 +715,7 @@ struct form_parser
         if (g.kind != group_kind::token)
             return true;
 
-        switch (file.tokens[g.token].kind)
+        switch (file.at(g.token).kind)
         {
         case token_kind::symbol:
             return !is_word_operator(c.at);
@@ -724,7 +723,7 @@ struct form_parser
         case token_kind::error:
             return true;
         case token_kind::dot:
-            return is_token(next_of(c.at), token_kind::symbol) && file.groups[next_of(c.at)].is_fused_left;
+            return is_token(next_of(c.at), token_kind::symbol) && file.at(next_of(c.at)).is_fused_left;
         case token_kind::op:
             return is_prefix_shaped(c.at);
         default:
@@ -732,21 +731,21 @@ struct form_parser
         }
     }
 
-    i32 parse_application()
+    form_id parse_application()
     {
         auto const head = parse_prefix();
         if (!starts_operand())
             return head;
 
         auto const result = make({.kind = form_kind::application});
-        auto last = -1;
+        auto last = form_id::none;
         add_child(result, head, last);
         while (starts_operand())
             add_child(result, parse_prefix(), last);
         return result;
     }
 
-    i32 parse_prefix()
+    form_id parse_prefix()
     {
         if (at_end() || !is_prefix_shaped(c.at))
             return parse_postfix();
@@ -761,21 +760,21 @@ struct form_parser
         auto const operand = parse_prefix();
 
         // A sign directly on a number is part of the number, which is what makes `-3` a literal.
-        if ((text == "-" || text == "+") && file.forms[operand].kind == form_kind::number)
+        if ((text == "-" || text == "+") && file.at(operand).kind == form_kind::number)
         {
-            file.forms[operand].where = cover(span_of_group(operator_group), file.forms[operand].where);
+            file.at(operand).where = cover(span_of_group(operator_group), file.at(operand).where);
             return operand;
         }
 
         auto const result = make({.kind = form_kind::prefix_operator,
                                   .where = span_of_group(operator_group),
-                                  .token = file.groups[operator_group].token});
-        auto last = -1;
+                                  .token = file.at(operator_group).token});
+        auto last = form_id::none;
         add_child(result, operand, last);
         return result;
     }
 
-    i32 parse_postfix()
+    form_id parse_postfix()
     {
         auto result = parse_atom();
         while (!at_end() && is_tight_left(c.at))
@@ -784,12 +783,12 @@ struct form_parser
             // `a::b` is read as `a.b`, and says so.
             auto const is_accessor = is_token(c.at, token_kind::dot) || is_token(c.at, token_kind::double_colon);
             auto const is_member
-                = is_accessor && next_of(c.at) >= 0 && file.groups[next_of(c.at)].is_fused_left
+                = is_accessor && is_valid(next_of(c.at)) && file.at(next_of(c.at)).is_fused_left
                && (is_token(next_of(c.at), token_kind::symbol) || is_token(next_of(c.at), token_kind::wildcard));
             if (g.kind == group_kind::round || g.kind == group_kind::square || g.kind == group_kind::curly)
             {
                 auto const call = make({.kind = form_kind::call});
-                auto last = -1;
+                auto last = form_id::none;
                 add_child(call, result, last);
                 add_child(call, parse_list(c.at), last);
                 advance();
@@ -802,7 +801,7 @@ struct form_parser
                 advance();
                 auto const member
                     = make({.kind = form_kind::member, .where = span_of_group(c.at), .token = here().token});
-                auto last = -1;
+                auto last = form_id::none;
                 add_child(member, result, last);
                 advance();
                 result = member;
@@ -812,7 +811,7 @@ struct form_parser
                 report(diagnostic_kind::reserved_operator, span_of_group(c.at));
                 auto const postfix
                     = make({.kind = form_kind::postfix_operator, .where = span_of_group(c.at), .token = g.token});
-                auto last = -1;
+                auto last = form_id::none;
                 add_child(postfix, result, last);
                 advance();
                 result = postfix;
@@ -823,15 +822,15 @@ struct form_parser
         return result;
     }
 
-    [[nodiscard]] bool is_fused_symbol(i32 g) const
+    [[nodiscard]] bool is_fused_symbol(group_id g) const
     {
-        return g >= 0 && is_token(g, token_kind::symbol) && file.groups[g].is_fused_left;
+        return is_valid(g) && is_token(g, token_kind::symbol) && file.at(g).is_fused_left;
     }
 
-    [[nodiscard]] bool is_digit_led(i32 g) const { return is_digit(text_of(g)[0]); }
+    [[nodiscard]] bool is_digit_led(group_id g) const { return is_digit(text_of(g)[0]); }
 
     /// A number is assembled from fused tokens, since the tokenizer has no idea what a number is.
-    i32 parse_number()
+    form_id parse_number()
     {
         auto const first = c.at;
         auto where = span_of_group(first);
@@ -839,7 +838,7 @@ struct form_parser
         advance();
 
         auto const dot = c.at;
-        if (!at_end() && is_token(dot, token_kind::dot) && file.groups[dot].is_fused_left)
+        if (!at_end() && is_token(dot, token_kind::dot) && file.at(dot).is_fused_left)
         {
             auto const after = next_of(dot);
             if (is_fused_symbol(after) && is_digit_led(after))
@@ -853,12 +852,12 @@ struct form_parser
             {
                 // `1.` is a number; `1.max` is a member of the number `1`.
                 where = cover(where, span_of_group(dot));
-                last_symbol = -1;
+                last_symbol = group_id::none;
                 advance();
             }
         }
 
-        if (last_symbol >= 0 && !at_end())
+        if (is_valid(last_symbol) && !at_end())
         {
             auto const text = text_of(last_symbol);
             auto const is_hex = text_of(first).starts_with("0x") || text_of(first).starts_with("0X");
@@ -866,7 +865,7 @@ struct form_parser
             auto const opens_exponent = tail == 'p' || tail == 'P' || (!is_hex && (tail == 'e' || tail == 'E'));
             auto const sign = c.at;
             auto const digits = next_of(sign);
-            if (opens_exponent && is_token(sign, token_kind::op) && file.groups[sign].is_fused_left
+            if (opens_exponent && is_token(sign, token_kind::op) && file.at(sign).is_fused_left
                 && (text_of(sign) == "-" || text_of(sign) == "+") && is_fused_symbol(digits) && is_digit_led(digits))
             {
                 where = cover(where, span_of_group(digits));
@@ -878,13 +877,13 @@ struct form_parser
         auto has_underscore = false;
         if (!is_well_formed_number(file.text_of(where), has_underscore))
             report(has_underscore ? diagnostic_kind::underscore_in_number : diagnostic_kind::malformed_number, where);
-        return make({.kind = form_kind::number, .where = where, .token = file.groups[first].token});
+        return make({.kind = form_kind::number, .where = where, .token = file.at(first).token});
     }
 
-    i32 parse_atom()
+    form_id parse_atom()
     {
         if (at_end())
-            return missing(c.previous >= 0 ? span_of_group(c.previous) : source_span{});
+            return missing(is_valid(c.previous) ? span_of_group(c.previous) : source_span{});
 
         auto const g = c.at;
         auto const kind = here().kind;
@@ -897,12 +896,12 @@ struct form_parser
         if (kind == group_kind::quoted)
         {
             advance();
-            return make({.kind = form_kind::quoted, .where = span_of_group(g), .token = file.groups[g].token});
+            return make({.kind = form_kind::quoted, .where = span_of_group(g), .token = file.at(g).token});
         }
         if (kind != group_kind::token)
             return missing(span_of_group(g));
 
-        switch (file.tokens[here().token].kind)
+        switch (file.at(here().token).kind)
         {
         case token_kind::wildcard:
             advance();
@@ -923,14 +922,14 @@ struct form_parser
         }
 
         case token_kind::dot:
-            if (is_fused_symbol(next_of(g)) || (next_of(g) >= 0 && is_token(next_of(g), token_kind::wildcard)))
+            if (is_fused_symbol(next_of(g)) || (is_valid(next_of(g)) && is_token(next_of(g), token_kind::wildcard)))
             {
                 advance();
                 auto const name = c.at;
                 advance();
                 return make({.kind = form_kind::leading_dot,
                              .where = cover(span_of_group(g), span_of_group(name)),
-                             .token = file.groups[name].token});
+                             .token = file.at(name).token});
             }
             break;
 
@@ -939,13 +938,13 @@ struct form_parser
         }
 
         // Nothing an operand can start with: say so and leave the token for whoever can use it.
-        return missing(c.previous >= 0 ? span_of_group(c.previous) : span_of_group(g));
+        return missing(is_valid(c.previous) ? span_of_group(c.previous) : span_of_group(g));
     }
 };
 
 constexpr cc::string_view sgl_keywords[] = {
-    "fun",  "let", "mut",   "struct", "enum",   "binding",  "const", "use",  "module", "type",  "if",
-    "else", "for", "while", "loop",   "return", "continue", "break", "case", "assert", "print", "notation",
+    "fun",  "let", "mut",   "struct", "enum",   "binding",  "sampler", "const", "use",    "module", "type",     "if",
+    "else", "for", "while", "loop",   "return", "continue", "break",   "case",  "assert", "print",  "notation",
 };
 } // namespace
 
@@ -957,7 +956,7 @@ cc::span<cc::string_view const> sgl::default_keywords()
 void sgl::parse_forms(parsed_file& file, cc::span<cc::string_view const> keywords)
 {
     CC_ASSERT(file.forms.empty(), "a file's form tree is built once");
-    CC_ASSERT(file.root_block >= 0, "the file must be grouped first");
+    CC_ASSERT(is_valid(file.root_block), "the file must be grouped first");
 
     auto parser = form_parser{.file = file, .keywords = keywords};
     file.root_form = parser.parse_block(file.root_block);

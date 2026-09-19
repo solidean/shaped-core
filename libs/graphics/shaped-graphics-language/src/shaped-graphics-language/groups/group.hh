@@ -1,6 +1,7 @@
 #pragma once
 
 #include <shaped-graphics-language/fwd.hh>
+#include <shaped-graphics-language/syntax/ids.hh>
 
 enum class sgl::group_kind : sgl::u8
 {
@@ -25,7 +26,7 @@ enum class sgl::group_kind : sgl::u8
 ///
 /// Comments and whitespace are gone, a paren is one node with children, and lines are already folded, so a run of
 /// siblings is one short flat sequence however many source lines it came from.
-/// Links are indices into `parsed_file::groups`, -1 for none.
+/// Links to other groups are `group_id`s and links to tokens are `token_id`s, `none` where there is nothing to link to.
 struct sgl::group
 {
     group_kind kind = group_kind::token;
@@ -37,12 +38,12 @@ struct sgl::group
     /// the operand it happens to follow.
     bool is_trailing = false;
 
-    i32 token = -1;
-    /// -1 on a paren or a quoted literal that was closed by force.
-    i32 close_token = -1;
+    token_id token = token_id::none;
+    /// `none` on a paren or a quoted literal that was closed by force.
+    token_id close_token = token_id::none;
 
-    i32 first_child = -1;
-    i32 next_sibling = -1;
+    group_id first_child = group_id::none;
+    group_id next_sibling = group_id::none;
     /// A chain of `attribute` groups through `next_sibling`, in source order.
-    i32 first_attribute = -1;
+    group_id first_attribute = group_id::none;
 };

@@ -51,6 +51,7 @@ target_sources(shaped-graphics-language
     src/shaped-graphics-language/forms/form.hh
     src/shaped-graphics-language/forms/form_parser.hh
 
+    src/shaped-graphics-language/syntax/ids.hh
     src/shaped-graphics-language/syntax/parsed_file.hh
 
     src/shaped-graphics-language/debug/dump.hh

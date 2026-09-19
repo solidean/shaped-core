@@ -488,12 +488,12 @@ void sgl::tokenize(parsed_file& file)
         if (l.kind == line_kind::blank)
             continue;
 
-        auto const inherited = l.parent >= 0 ? hands_down[l.parent] : handed_down{};
+        auto const inherited = is_valid(l.parent) ? hands_down[index_of(l.parent)] : handed_down{};
         auto const content = isize(l.text.offset + l.indent_bytes);
         auto const end = isize(l.text.end());
         auto has_children = false;
-        for (auto child = l.first_child; child >= 0 && !has_children; child = file.lines[child].next_sibling)
-            has_children = file.lines[child].kind != line_kind::blank;
+        for (auto child = l.first_child; is_valid(child) && !has_children; child = file.at(child).next_sibling)
+            has_children = file.at(child).kind != line_kind::blank;
         auto tokenizer
             = line_tokenizer{.file = file, .text = text, .at = content, .end = end, .has_children = has_children};
 
@@ -532,11 +532,11 @@ void sgl::tokenize(parsed_file& file)
         };
 
         auto closer = l.next_sibling;
-        while (closer >= 0 && file.lines[closer].kind == line_kind::blank)
-            closer = file.lines[closer].next_sibling;
+        while (is_valid(closer) && file.at(closer).kind == line_kind::blank)
+            closer = file.at(closer).next_sibling;
 
-        if (closer >= 0)
-            must_close[closer] = tokenizer.opened;
+        if (is_valid(closer))
+            must_close[index_of(closer)] = tokenizer.opened;
         else
         {
             auto const kind = diagnostic_kind::missing_string_end;
