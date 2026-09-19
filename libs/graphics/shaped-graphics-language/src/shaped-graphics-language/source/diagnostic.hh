@@ -53,6 +53,41 @@ enum class sgl::diagnostic_kind : sgl::u8
     bare_range,
     malformed_number,
     underscore_in_number,
+
+    /// What follows is the AST pass's: the form tree was fine and the language has no reading for it.
+    expected_declaration,
+    expected_member,
+    expected_case_arm,
+    expected_name,
+    expected_pattern,
+    expected_parameter,
+    expected_body,
+    declaration_not_allowed_here,
+    /// A second `module`, or one that is not the first declaration of its file.
+    misplaced_module,
+    /// The owner has no such member: a method in a `binding`, a field in an `enum`, a case in a `struct`.
+    member_not_allowed_here,
+    default_not_allowed_here,
+    missing_parameter_list,
+    signature_out_of_order,
+    duplicate_signature_list,
+    stray_else,
+    mixed_struct_type,
+    misplaced_splat,
+    misplaced_attribute_on_expression,
+    /// An assignment, a `let`, an `if` or a declaration where a value was expected.
+    statement_in_expression,
+    /// Keywords that head nothing together, such as `mut` without `let`.
+    unexpected_keyword,
+    /// A keyword form holding more expressions than it takes: `return a, b`, `continue x`.
+    too_many_arguments,
+    for_takes_name_in_range,
+    assert_takes_condition_and_message,
+    print_takes_one_message,
+    /// A spelling that is reserved and has no meaning yet: `f(x){…}`, and an expression that owns a block.
+    unsupported_syntax,
+    /// An expression statement that is neither a call nor a jump; a warning, since it is legal and never meant.
+    no_effect,
 };
 
 namespace sgl
@@ -71,4 +106,6 @@ struct sgl::diagnostic
     severity level;
     /// Never empty for a kind that names a character or a token; may be empty at end of file.
     source_span where;
+
+    constexpr bool operator==(diagnostic const&) const = default;
 };

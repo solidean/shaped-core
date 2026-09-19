@@ -41,3 +41,82 @@ struct parsed_file;
 /// The domain every recording site in sgl is attributed to.
 CC_REC_DECLARE_DOMAIN(g_rec_domain);
 } // namespace sgl
+
+namespace sgl::ast
+{
+enum class expr_id : i32;
+enum class stmt_id : i32;
+enum class decl_id : i32;
+enum class field_id : i32;
+template <class T>
+struct range_of;
+
+struct attribute;
+struct argument;
+struct field;
+enum class body_kind : u8;
+struct body;
+struct case_arm;
+struct if_branch;
+
+enum class literal_kind : u8;
+enum class call_spelling : u8;
+struct invalid_expr;
+struct literal;
+struct name;
+struct self_ref;
+struct wildcard;
+struct leading_dot;
+struct member;
+struct index;
+struct call;
+struct tuple;
+struct array;
+struct object;
+struct comparison_chain;
+struct cast;
+struct membership;
+struct ascription;
+struct range;
+struct lambda;
+struct case_expr;
+struct loop_expr;
+struct return_expr;
+struct break_expr;
+struct continue_expr;
+struct struct_type;
+struct function_type;
+struct with_bindings;
+struct expr;
+
+struct invalid_stmt;
+struct let_stmt;
+struct assign_stmt;
+struct if_stmt;
+struct for_stmt;
+struct while_stmt;
+struct assert_stmt;
+struct print_stmt;
+struct decl_stmt;
+struct expr_stmt;
+struct stmt;
+
+enum class receiver_kind : u8;
+struct invalid_decl;
+struct module_decl;
+struct use_decl;
+struct fun_decl;
+struct struct_decl;
+struct enum_decl;
+struct type_decl;
+struct const_decl;
+struct binding_decl;
+struct sampler_decl;
+struct notation_decl;
+struct field_decl;
+struct property_decl;
+struct enum_case_decl;
+struct decl;
+
+struct file_ast;
+} // namespace sgl::ast

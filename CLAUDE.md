@@ -104,7 +104,9 @@ One-liner per library:
   The API is always present; without a backend (SDL3 not fetched) `window_system::try_create` fails instead of the types disappearing.
   `SR_HAS_WINDOW` (1/0) says whether a backend was compiled in.
 * **`libs/graphics/shaped-graphics-language`** — SGL, our own shading language, and its whole toolchain in one library: compiler, linter, formatter, language server.
-  Today the syntactic half: bytes → line tree → tokens → group tokens → form tree, one flat lossless `sgl::parsed_file` per file.
+  The syntactic half is bytes → line tree → tokens → group tokens → form tree, one flat lossless `sgl::parsed_file` per file.
+  On top of it sits the first AST pass, `sgl::ast::build` → `sgl::ast::file_ast`: declarations, statements and expressions, per file and name-free.
+  Name lookup, types and everything after them do not exist yet.
   **Total and local by construction**: any bytes parse to a tree plus diagnostics, and no syntax error escapes its indentation.
   Namespace `sgl`. Depends on clean-core alone, and the syntactic half must stay that way — an editor links it to parse.
   [docs/spec/](libs/graphics/shaped-graphics-language/docs/spec/_index.md) is the language: normative rules with stable ids under `syntax/`, every "why" mirrored under `syntax/why/`,

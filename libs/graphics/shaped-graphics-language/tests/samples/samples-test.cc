@@ -1,6 +1,8 @@
 #include <clean-core/streams/file_stream.hh>
 #include <clean-core/string/string.hh>
 #include <nexus/test.hh>
+#include <shaped-graphics-language/ast/build.hh>
+#include <shaped-graphics-language/ast/dump.hh>
 #include <shaped-graphics-language/debug/dump.hh>
 #include <shaped-graphics-language/syntax/parsed_file.hh>
 
@@ -36,4 +38,85 @@ TEST("sgl samples - a whole raster shader parses without a single diagnostic")
     CHECK(forms.contains("(kw kw:sampler id:bilinear)"));
     // A splat is a prefix operator; the postfix spelling stays reserved.
     CHECK(forms.contains("(round (prefix .. id:normal) num:0)"));
+}
+
+TEST("sgl samples - the raster shader builds an AST without a diagnostic and without an invalid node")
+{
+    auto const file = sgl::parse(read_sample("basic-raster.sgl"));
+    auto const ast = sgl::ast::build(file);
+
+    CHECK(sgl::ast::dump_diagnostics(ast) == "");
+    auto const dump = sgl::ast::dump(file, ast);
+    CHECK(!dump.contains("invalid"));
+    CHECK(!dump.contains("<missing>"));
+
+    CHECK(dump.starts_with("(module example)\n(binding frame\n  (field view : mat4)\n"));
+    CHECK(dump.contains("(field tex_color : (index texture2d rgba8))"));
+    // The sample's sampler has only a comment under it.
+    CHECK(dump.contains("(sampler bilinear)\n"));
+    CHECK(dump.contains("(struct{@vertex} basic_vertex\n  (field pos : pos3)\n"));
+    CHECK(dump.contains("(fun make_mvp (params (field model : mat4)) (uses frame) => "
+                        "(call:infix * (call:infix * (member frame proj) (member frame view)) model))"));
+    // An anonymous return type is a struct type, and a semantic is an attribute on its field.
+    CHECK(dump.contains("(fun{@vertex} my_vs (params (field v : basic_vertex)) (uses frame instance) -> "
+                        "(struct-type (field{@position} pos : hpos4) (field normal : vec3) (field uv : vec2))\n"
+                        "  (let mvp = (call:juxt make_mvp (member instance model)))\n"));
+    CHECK(dump.contains("normal=(call:infix * (cast mvp : mat3) (member v normal))"));
+    CHECK(dump.contains("  (use brdf_library as brdf)\n"));
+    CHECK(dump.contains("base_color=(call:paren (member (member instance tex_color) sample) bilinear uv)"));
+    CHECK(dump.contains("normal=(cast (tuple ..normal num:0) : vec4f16)"));
+}
+
+TEST("sgl samples - members and bindings parse and build without a diagnostic")
+{
+    auto const file = sgl::parse(read_sample("members-and-bindings.sgl"));
+    CHECK(sgl::dump_diagnostics(file) == "");
+    CHECK(sgl::print_source(file) == file.source);
+
+    auto const ast = sgl::ast::build(file);
+    CHECK(sgl::ast::dump_diagnostics(ast) == "");
+    auto const dump = sgl::ast::dump(file, ast);
+    CHECK(!dump.contains("invalid"));
+    CHECK(!dump.contains("<missing>"));
+
+    CHECK(dump.contains("(binding scene = (tuple frame timing))\n(binding main_pass = scene)\n"));
+    CHECK(dump.contains("  (property is_local => (call:infix != self .directional))\n"));
+    CHECK(dump.contains("    (arm _ => num:1.0)"));
+    CHECK(dump.contains("  (fun dim (params (field mut self) (field factor : float))\n"
+                        "    (assign *= (member self intensity) factor))\n"));
+    CHECK(dump.contains("      (arm .directional => (return true))\n"));
+    CHECK(dump.contains("position=(call:paren pos3 ..direction)"));
+    CHECK(dump.contains("(type radiance_sample = (tuple vec3 float))\n"));
+    // A local binding with a property that reaches a local, then a nested function and a lambda.
+    CHECK(dump.contains("  (binding timing\n    (field time : float)\n    (property phase => (call:infix * t "
+                        "num:0.5)))\n"));
+    CHECK(dump.contains("  (fun weight (params (field l : light)) -> float => "));
+    CHECK(dump.contains("  (let contribution = (lambda (params (field l)) => "));
+    CHECK(dump.contains("      (branch (call:infix >= bounce max_bounces) => (break total))"));
+    CHECK(dump.contains("(chain num:0.0 <= (call:paren (member brdf luminance) total) < num:1.0)"));
+}
+
+TEST("sgl samples - the AST pass is total: every truncation of a sample builds, and every node keeps a form")
+{
+    for (auto const name : {"basic-raster.sgl", "members-and-bindings.sgl"})
+    {
+        auto const source = read_sample(name);
+        // A prime stride cuts through every kind of token over the length of a file.
+        for (auto length = isize(0); length < source.size(); length += 13)
+        {
+            auto const file = sgl::parse(cc::string(cc::string_view(source).subview({.offset = 0, .size = length})));
+            auto const ast = sgl::ast::build(file);
+            auto const dump = sgl::ast::dump(file, ast);
+
+            auto all_have_forms = true;
+            for (auto const& e : ast.exprs)
+                all_have_forms = all_have_forms && sgl::is_valid(e.form);
+            for (auto const& s : ast.stmts)
+                all_have_forms = all_have_forms && sgl::is_valid(s.form);
+            for (auto const& d : ast.decls)
+                all_have_forms = all_have_forms && sgl::is_valid(d.form);
+            CHECK(all_have_forms);
+            CHECK(dump.empty() == ast.declarations.empty());
+        }
+    }
 }

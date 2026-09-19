@@ -64,6 +64,58 @@ cc::string_view sgl::to_string(diagnostic_kind kind)
         return "malformed-number";
     case diagnostic_kind::underscore_in_number:
         return "underscore-in-number";
+    case diagnostic_kind::expected_declaration:
+        return "expected-declaration";
+    case diagnostic_kind::expected_member:
+        return "expected-member";
+    case diagnostic_kind::expected_case_arm:
+        return "expected-case-arm";
+    case diagnostic_kind::expected_name:
+        return "expected-name";
+    case diagnostic_kind::expected_pattern:
+        return "expected-pattern";
+    case diagnostic_kind::expected_parameter:
+        return "expected-parameter";
+    case diagnostic_kind::expected_body:
+        return "expected-body";
+    case diagnostic_kind::declaration_not_allowed_here:
+        return "declaration-not-allowed-here";
+    case diagnostic_kind::misplaced_module:
+        return "misplaced-module";
+    case diagnostic_kind::member_not_allowed_here:
+        return "member-not-allowed-here";
+    case diagnostic_kind::default_not_allowed_here:
+        return "default-not-allowed-here";
+    case diagnostic_kind::missing_parameter_list:
+        return "missing-parameter-list";
+    case diagnostic_kind::signature_out_of_order:
+        return "signature-out-of-order";
+    case diagnostic_kind::duplicate_signature_list:
+        return "duplicate-signature-list";
+    case diagnostic_kind::stray_else:
+        return "stray-else";
+    case diagnostic_kind::mixed_struct_type:
+        return "mixed-struct-type";
+    case diagnostic_kind::misplaced_splat:
+        return "misplaced-splat";
+    case diagnostic_kind::misplaced_attribute_on_expression:
+        return "misplaced-attribute-on-expression";
+    case diagnostic_kind::statement_in_expression:
+        return "statement-in-expression";
+    case diagnostic_kind::unexpected_keyword:
+        return "unexpected-keyword";
+    case diagnostic_kind::too_many_arguments:
+        return "too-many-arguments";
+    case diagnostic_kind::for_takes_name_in_range:
+        return "for-takes-name-in-range";
+    case diagnostic_kind::assert_takes_condition_and_message:
+        return "assert-takes-condition-and-message";
+    case diagnostic_kind::print_takes_one_message:
+        return "print-takes-one-message";
+    case diagnostic_kind::unsupported_syntax:
+        return "unsupported-syntax";
+    case diagnostic_kind::no_effect:
+        return "no-effect";
     }
     CC_UNREACHABLE("unknown diagnostic_kind");
 }
@@ -100,8 +152,34 @@ sgl::severity sgl::default_severity_of(diagnostic_kind kind)
     case diagnostic_kind::bare_range:
     case diagnostic_kind::malformed_number:
     case diagnostic_kind::underscore_in_number:
+    case diagnostic_kind::expected_declaration:
+    case diagnostic_kind::expected_member:
+    case diagnostic_kind::expected_case_arm:
+    case diagnostic_kind::expected_name:
+    case diagnostic_kind::expected_pattern:
+    case diagnostic_kind::expected_parameter:
+    case diagnostic_kind::expected_body:
+    case diagnostic_kind::declaration_not_allowed_here:
+    case diagnostic_kind::misplaced_module:
+    case diagnostic_kind::member_not_allowed_here:
+    case diagnostic_kind::default_not_allowed_here:
+    case diagnostic_kind::missing_parameter_list:
+    case diagnostic_kind::signature_out_of_order:
+    case diagnostic_kind::duplicate_signature_list:
+    case diagnostic_kind::stray_else:
+    case diagnostic_kind::mixed_struct_type:
+    case diagnostic_kind::misplaced_splat:
+    case diagnostic_kind::misplaced_attribute_on_expression:
+    case diagnostic_kind::statement_in_expression:
+    case diagnostic_kind::unexpected_keyword:
+    case diagnostic_kind::too_many_arguments:
+    case diagnostic_kind::for_takes_name_in_range:
+    case diagnostic_kind::assert_takes_condition_and_message:
+    case diagnostic_kind::print_takes_one_message:
+    case diagnostic_kind::unsupported_syntax:
         return severity::normal_error;
     case diagnostic_kind::spaced_attribute_arguments:
+    case diagnostic_kind::no_effect:
         return severity::warning;
     }
     CC_UNREACHABLE("unknown diagnostic_kind");

@@ -1,0 +1,93 @@
+// what a shading library looks like once it has types of its own:
+// structs with computed members, an enum that can answer questions, and bindings that are put together by the caller
+module lighting
+
+use brdf_library as brdf
+
+// a binding a library asks for without dictating where it comes from
+binding timing:
+    time: float
+    // a property is a computed field: read-only, keyword-free, no parameter list
+    phase => time * 0.5
+
+binding frame:
+    view: mat4
+    proj: mat4
+
+// bindings are structural, so a bigger one is put together from smaller ones
+binding scene = (frame, timing)
+binding main_pass = scene
+
+enum light_kind:
+    point
+    spot
+    directional
+
+    // an enum has properties and methods like a struct does
+    is_local => self != .directional
+
+    fun attenuation(self, distance: float) -> float:
+        return case self:
+            .point => 1.0 / (distance * distance)
+            .spot => 1.0 / distance
+            _ => 1.0
+
+struct light:
+    kind: light_kind
+    position: pos3
+    color: vec3
+    intensity: float = 1.0
+
+    radiance => color * intensity
+
+    // without `self` a method is static: a named constructor
+    fun sun(direction: vec3) -> light => {
+        kind = .directional
+        position = pos3(..direction)
+        color = #fff4e0
+    }
+
+    fun dim(mut self, factor: float):
+        self.intensity *= factor
+
+    fun reaches(self, p: pos3) -> bool:
+        let reach = case kind:
+            .directional => return true
+            .spot => 20.0
+            _ =>:
+                let base = 10.0
+                base * intensity
+        return distance(position, p) < reach
+
+const max_bounces = 4
+type radiance_sample = (vec3, float)
+
+fun pulse(base: float){timing} -> float => base * (1.0 + sin timing.phase)
+
+fun accumulate(lights: span[light], p: pos3, t: float) -> vec3:
+    // a caller supplies a library's binding locally, and a property may reach a local variable
+    binding timing:
+        time: float
+        phase => t * 0.5
+
+    // a nested function may use the surrounding locals, since everything inlines
+    fun weight(l: light) -> float => l.kind.attenuation(distance(l.position, p))
+
+    let contribution = l => l.radiance * weight(l)
+
+    let mut total = vec3(0.0)
+    for l in lights:
+        if not l.reaches(p) => continue
+        total += contribution(l)
+
+    let mut bounce = 0
+    let settled = loop:
+        bounce += 1
+        if bounce >= max_bounces => break total
+        if 0.0 <= brdf.luminance(total) < 1.0:
+            total *= pulse(1.1)
+        else:
+            break total * 0.5
+
+    assert bounce <= max_bounces, "bounced $bounce times"
+    return settled

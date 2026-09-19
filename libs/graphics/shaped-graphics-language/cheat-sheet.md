@@ -1,6 +1,6 @@
 # shaped-graphics-language cheat sheet
 
-SGL's toolchain as a library: today the syntactic half, from bytes to the form tree.
+SGL's toolchain as a library: today the syntactic half, from bytes to the form tree, and the first AST pass on top of it.
 Namespace `sgl`.
 Depends on clean-core.
 
@@ -65,6 +65,52 @@ sgl::source_span   // { u32 offset, length }; end(), empty()
 `round_list` `square_list` `curly_list` `leading_dot` `member` `call` `application`
 `prefix_operator` `postfix_operator` `operator_run` `keyword_form` `block` `sequence`.
 
+## The AST
+
+```cpp
+#include <shaped-graphics-language/ast/build.hh>
+auto const ast = sgl::ast::build(file);    // -> sgl::ast::file_ast; TOTAL, and `file` is not modified
+ast.exprs  ast.stmts  ast.decls            // the three families; a node is { form, attributes, node (cc::variant) }
+ast.fields  ast.arguments  ast.attributes  ast.case_arms  ast.if_branches     // list elements and parts
+ast.expr_lists  ast.stmt_lists  ast.decl_lists  ast.token_lists               // child lists of ids
+ast.declarations                           // range_of<decl_id>: the file's declarations, in source order
+ast.diagnostics                            // the AST pass's own; the syntactic ones stay in file.diagnostics
+ast.at(id)                                 // -> expr / stmt / decl / field const&; the id's TYPE picks the array
+ast.at(range)                              // -> cc::span<T const>; range_of<T>'s T picks the side array
+
+#include <shaped-graphics-language/ast/ids.hh>
+sgl::ast::expr_id  stmt_id  decl_id  field_id   // enum class : i32, `none` (-1) is the absent link
+sgl::ast::is_valid(id)  sgl::ast::index_of(id)
+sgl::ast::range_of<T>                      // { u32 first, count }; empty()
+
+ast.at(id).node.is<sgl::ast::call>()       // which kind; try_as<T>() -> T const*, visit(…) for all of them
+sgl::ast::argument   // form, attributes, name (empty = positional), value, is_splat, is_shorthand
+sgl::ast::field      // form, name, is_mut, type, default_value, attributes — fields, members, EVERY parameter
+sgl::ast::body       // kind (none / block / arrow), form, statements, value
+sgl::ast::attribute  // group, name (without `@`), arguments (group_id of the round list, or none)
+
+#include <shaped-graphics-language/ast/dump.hh>
+sgl::ast::dump(file, ast)                  // (fun f (params (field x : int)) -> int => (call:infix + x num:1))
+sgl::ast::dump_diagnostics(ast)            // `stray-else @6+4`, one per line
+```
+
+Expressions: `invalid_expr` `literal` `name` `self_ref` `wildcard` `leading_dot` `member` `index` `call` `tuple` `array` `object`
+`comparison_chain` `cast` `membership` `ascription` `range` `lambda` `case_expr` `loop_expr` `return_expr` `break_expr`
+`continue_expr` `struct_type` `function_type` `with_bindings`.
+
+- `call` is every application: `spelling` is `paren` / `juxtaposition` / `infix` / `prefix`, and an operator call has `op` instead of `callee`.
+- `index` is a fused `a[…]`, subscript or type application alike.
+- `comparison_chain` is two or more comparisons; one comparison is an infix `call`.
+- `range` is `a ..< b` / `a ..= b`, a node of its own.
+- `struct_type` is a curly list of `name: type` elements only; any other curly list is an `object`.
+- `with_bindings` is `f(x){…}`, reserved and always reported.
+
+Statements: `invalid_stmt` `let_stmt` `assign_stmt` `if_stmt` (the whole chain, as `if_branch`es) `for_stmt` `while_stmt`
+`assert_stmt` `print_stmt` `decl_stmt` `expr_stmt`.
+
+Declarations: `invalid_decl` `module_decl` `use_decl` `fun_decl` `struct_decl` `enum_decl` `type_decl` `const_decl`
+`binding_decl` `sampler_decl` `notation_decl`, and the member lines `field_decl` `property_decl` `enum_case_decl`.
+
 ## Diagnostics
 
 ```cpp
@@ -99,4 +145,14 @@ sgl::print_source(file)      // == file.source for EVERY input: the lossless inv
 - **`operator_run` is flat** for one precedence level (operands and `op` leaves alternate); assignment and `=>` hold two operands and nest right.
 - **A form's attributes are not on its groups.** Read them through `first_attribute` / `attribute_count` into `file.form_attributes`.
 - **A range start is a position, not an id.** `line::first_token` and `form::first_attribute` are `u32`, since an empty range starts at nothing.
+- **The AST is name-free.** `build` never looks a name up, so `vec3` is a `name` and `texture2d[rgba8]` an `index` wherever they stand.
+- **`build` is total.** What has no reading is an `invalid_*` node that keeps its form, and `ast.diagnostics` says what was expected.
+  A `missing`, `error` or postfix form becomes `invalid` WITHOUT a second diagnostic.
+- **An AST name is a `source_span`.** Nothing is interned; read it with `file.text_of(span)`.
+- **A type is an expression in a type position.** The members called `type`, `function_type::result` and `fun_decl::return_type` are the positions.
+  Only there may an expression carry attributes.
+- **`self` is a reserved name, not a keyword.** The form tree holds an identifier and the AST a `self_ref`.
+- **`return` and `break` with a keyword value are one form.** `return case x:` is a keyword form with TWO keywords, and the AST reads the rest as the jump's value.
+- **An attribute's arguments have no forms.** `attribute::arguments` is the round *group*; nothing below it is parsed yet.
+- **`no-effect` is a warning, and the last statement of a value block is exempt.** Function, lambda, property and `case` arm blocks may end in their value.
 - **Every `sgl` fence under `docs/spec/` is a test** (`tests/spec/spec-examples-test.cc`): `sgl` must parse cleanly, `sgl error` must report the kind its lead names, `sgl sketch` is unchecked.

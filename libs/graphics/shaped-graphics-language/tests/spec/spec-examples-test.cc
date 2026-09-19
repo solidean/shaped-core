@@ -34,6 +34,7 @@ constexpr cc::string_view spec_files[] = {
     "syntax/why/forms.md",
     "syntax/why/numbers.md",
     "syntax/why/operators.md",
+    "syntax/why/ast.md",
     "incubator/structural-types.md",
     "incubator/function-model.md",
     "incubator/shader-logging.md",

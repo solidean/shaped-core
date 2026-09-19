@@ -4,7 +4,7 @@ project(shaped-graphics-language LANGUAGES CXX)
 # SGL's whole toolchain is this one library: compiler, linter, formatter and language server share the same trees.
 # A command-line compiler is a thin tool over it, not a second implementation.
 #
-# The syntactic half needs clean-core and nothing else.
+# The syntactic half and the AST pass need clean-core and nothing else.
 # It must stay that way: an editor integration links this to parse, and should not pull in a graphics API to do it.
 add_library(shaped-graphics-language
     src/shaped-graphics-language/fwd.cc
@@ -24,6 +24,12 @@ add_library(shaped-graphics-language
 
     src/shaped-graphics-language/debug/dump.cc
     src/shaped-graphics-language/debug/dump_trees.cc
+
+    src/shaped-graphics-language/ast/build.cc
+    src/shaped-graphics-language/ast/build_decl.cc
+    src/shaped-graphics-language/ast/build_expr.cc
+    src/shaped-graphics-language/ast/build_stmt.cc
+    src/shaped-graphics-language/ast/dump.cc
 )
 
 # Public headers live co-located in src/ for better editor experience.
@@ -55,6 +61,16 @@ target_sources(shaped-graphics-language
     src/shaped-graphics-language/syntax/parsed_file.hh
 
     src/shaped-graphics-language/debug/dump.hh
+
+    src/shaped-graphics-language/ast/build.hh
+    src/shaped-graphics-language/ast/decl.hh
+    src/shaped-graphics-language/ast/dump.hh
+    src/shaped-graphics-language/ast/expr.hh
+    src/shaped-graphics-language/ast/file_ast.hh
+    src/shaped-graphics-language/ast/ids.hh
+    src/shaped-graphics-language/ast/parts.hh
+    src/shaped-graphics-language/ast/stmt.hh
+    src/shaped-graphics-language/ast/impl/builder.hh
 )
 
 # Require at least C++23 for this target; the final -std is chosen by the top-level project.
@@ -80,6 +96,12 @@ if(SC_BUILD_TESTS)
         tests/groups/grouper-test.cc
 
         tests/forms/form-parser-test.cc
+
+        tests/ast/ast-test-support.hh
+        tests/ast/declaration-test.cc
+        tests/ast/expression-test.cc
+        tests/ast/member-test.cc
+        tests/ast/statement-test.cc
 
         tests/spec/spec-examples-test.cc
 
