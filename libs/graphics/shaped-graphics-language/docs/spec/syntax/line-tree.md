@@ -8,6 +8,8 @@ Back to the [phases](_index.md); the reasons are in [why/line-tree.md](why/line-
 
 * **LINE-1** A source file is a sequence of bytes, read as UTF-8.
 * **LINE-2** A UTF-8 byte order mark at the start of the file is skipped and kept.
+* **LINE-25** The byte order mark is indentation of zero columns on the first line, and it is never part of a token.
+* **LINE-26** The same bytes anywhere else in the file are an ordinary non-ASCII code point.
 * **LINE-3** A line ends at `\n`, at `\r\n`, or at a `\r` that no `\n` follows ([why](why/line-tree.md#line-3)).
 * **LINE-4** The bytes of a line end belong to the line they end, and are kept.
 * **LINE-5** The last line of a file ends at the end of the file when no line end is there.

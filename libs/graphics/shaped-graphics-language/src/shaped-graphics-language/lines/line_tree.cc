@@ -104,7 +104,10 @@ sgl::parsed_file sgl::build_line_tree(cc::string source)
             .terminator_length = u8(terminator),
         };
 
+        // A byte-order mark is indentation of no width: kept in the line, so the source prints back, and never a token.
         auto indent_end = at;
+        if (at == 0 && text.starts_with("\xEF\xBB\xBF"))
+            indent_end = 3;
         auto columns = u32(0);
         while (indent_end < end && is_indent_char(text[indent_end]))
         {

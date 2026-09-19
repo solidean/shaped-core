@@ -2,6 +2,7 @@
 #include <nexus/test.hh>
 #include <shaped-graphics-language/debug/dump.hh>
 #include <shaped-graphics-language/lines/line_tree.hh>
+#include <shaped-graphics-language/syntax/parsed_file.hh>
 
 using namespace cc::primitive_defines;
 
@@ -99,4 +100,23 @@ TEST("sgl line tree - every line ending is kept, and the source prints back byte
     CHECK(file.lines[1].terminator_length == 1);
     CHECK(file.lines[2].terminator_length == 1);
     CHECK(file.lines[3].terminator_length == 0);
+}
+
+TEST("sgl line tree - a byte-order mark is kept and never seen")
+{
+    auto const bom = cc::string("\xEF\xBB\xBF");
+
+    // It is indentation of no width, so the first line is still top level and its first token is still `let`.
+    auto const file = sgl::parse(bom + "let x = 1\nnext\n");
+    CHECK(sgl::dump_tokens(file) == "code: symbol(let) symbol(x) op(=) symbol(1)\ncode: symbol(next)\n");
+    CHECK(sgl::dump_diagnostics(file) == "");
+    CHECK(sgl::print_source(file) == file.source);
+    CHECK(file.lines[0].indent_columns == 0);
+    CHECK(file.lines[0].indent_bytes == 3);
+
+    // A file that holds nothing else is one blank line.
+    CHECK(sgl::dump_lines(sgl::parse(bom)) == "blank\n");
+
+    // Anywhere but the very start the same bytes are an ordinary symbol, as any non-ASCII code point is.
+    CHECK(sgl::dump_tokens(sgl::parse("x\n" + bom + "y\n")) == "code: symbol(x)\ncode: symbol(\xEF\xBB\xBFy)\n");
 }
