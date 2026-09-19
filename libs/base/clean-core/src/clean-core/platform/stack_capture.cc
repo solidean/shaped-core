@@ -94,23 +94,27 @@ constexpr isize own_wasm_frames = 2;
     return buffer;
 }
 
-/// Raises the engine's stack-trace limit, once.
+/// Raises the engine's stack-trace limit, once per thread.
 ///
 /// V8 defaults it to 10 and truncates silently, so without this every capture is ten frames and claims to be whole.
-/// It is a property of the JS realm rather than of a call, hence set once and left.
+/// It is a property of the JS realm, and every pthread is a Web Worker with a realm of its own — so it is set on the
+/// calling thread, by the calling thread, rather than once on the main thread, which would leave every worker at 10.
 void ensure_stack_trace_limit()
 {
-    static bool const done = []
-    {
-        MAIN_THREAD_EM_ASM({ Error.stackTraceLimit = $0; }, max_frames);
-        return true;
-    }();
-    (void)done;
+#if defined(CC_HAS_THREADS) && CC_HAS_THREADS
+    static thread_local bool done = false;
+#else
+    static bool done = false;
+#endif
+    if (done)
+        return;
+    done = true;
+    EM_ASM({ Error.stackTraceLimit = $0; }, max_frames);
 }
 
 /// The engine's account of this thread's call stack, as text, or empty.
 ///
-/// Kept out of line so the number of our own frames above the caller stays a constant — see `own_frames`.
+/// Kept out of line so the number of our own frames above the caller stays a constant — see `own_wasm_frames`.
 CC_DONT_INLINE cc::string_view capture_wasm_text()
 {
     ensure_stack_trace_limit();
@@ -174,7 +178,7 @@ cc::stack_capture_result capture_wasm(cc::span<void*> out, isize skip)
             break;
         }
 
-        // A code offset rather than a pointer, which is what an address IS here: there is nothing to dereference,
+        // A module offset rather than a pointer, which is what an address IS here: there is nothing to dereference,
         // and a symbolizer resolves it against the module it came from.
         auto const address = frame.value().address();
         out[result.count] = reinterpret_cast<void*>(uintptr_t(address));

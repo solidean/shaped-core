@@ -336,6 +336,24 @@ TEST("stack capture - works on a thread we did not start it on")
         CHECK(!broken);
 }
 
+TEST("stack capture - a deep stack on a second thread is not cut short")
+{
+    if (!cc::stack_capture_available())
+        SKIP("no stack walking on this platform");
+    if (!CC_HAS_THREADS)
+        SKIP("no threads in this build, so there is no second thread to walk");
+    if (!CC_WASM_KEEPS_FRAME_STRUCTURE)
+        SKIP("this build collapses calls the source keeps apart, so depth says nothing about frames");
+
+    // wasm is the case this pins: the engine truncates at a per-realm limit, every pthread is a realm of its own,
+    // and a limit raised only on the main thread leaves every other thread at ten frames without saying so.
+    isize count = 0;
+    std::thread t([&] { count = take_at_depth(40).result.count; });
+    t.join();
+
+    CHECK(count > 40);
+}
+
 TEST("stack capture - the available walk matches the platform")
 {
     // Exactly one mechanism per platform, and the enum reports which rather than leaving a caller to guess what a
