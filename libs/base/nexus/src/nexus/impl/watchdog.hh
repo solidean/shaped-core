@@ -24,7 +24,7 @@ void watchdog_heartbeat();
 /// The report a run that stopped making progress gets, then the exit.
 ///
 /// What tracked work is outstanding, the running tests, every thread's machine stack and open scopes, and last the
-/// recording, written with the consumer paused.
+/// recording, written with the consumer paused where it yields.
 /// A hung test cannot be unwound and no later result would be trustworthy, so this ends the process with code 4.
 [[noreturn]] void report_hung_run(double quiet_secs);
 

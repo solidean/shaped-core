@@ -3,6 +3,7 @@
 #include <clean-core/common/time.hh>
 #include <clean-core/common/utility.hh>
 #include <clean-core/error/crash_handler.hh>
+#include <clean-core/error/optional.hh>
 #include <clean-core/platform/module_table.hh>
 #include <clean-core/record/chunk.hh>
 #include <clean-core/record/impl/published_blocks.hh>
@@ -30,6 +31,7 @@ struct installed_dump
     isize path_length = 0;
     isize max_event_bytes = 0;
     bool seal_calling_thread = true;
+    double consumer_pause_timeout_secs = 1.0;
 
     /// Reserved at install time.
     /// Everything the builder needs comes out of this.
@@ -217,28 +219,13 @@ bool write_dump_to(cc::rec::dump_sink& sink)
 /// The installed destination: the caller's sink, or a file at the installed path.
 ///
 /// The file sink is a local rather than a member, so nothing holds a handle between dumps.
-bool write_dump_through_installed(cc::rec::dump_mode mode)
+cc::optional<cc::rec::dump_mode> write_dump_through_installed(cc::rec::dump_mode mode)
 {
     if (!g_dump.is_installed)
-        return false;
+        return {};
 
     auto file = file_sink(cc::string_view(g_dump.path, g_dump.path_length));
-    auto& sink = g_dump.sink != nullptr ? *g_dump.sink : static_cast<cc::rec::dump_sink&>(file);
-
-    auto ok = false;
-    if (mode == cc::rec::dump_mode::quiescent)
-    {
-        // The consumer stopped for the duration, which closes the chunk-recycling race the fault path lives with.
-        // Legal here and nowhere else: this waits on a lock.
-        cc::rec::impl::with_consumer_paused([&] { ok = write_dump_to(sink); });
-    }
-    else
-    {
-        ok = write_dump_to(sink);
-    }
-
-    sink.finish(ok);
-    return ok;
+    return cc::rec::write_dump(g_dump.sink != nullptr ? *g_dump.sink : static_cast<cc::rec::dump_sink&>(file), mode);
 }
 
 void crash_hook() noexcept
@@ -260,6 +247,7 @@ void cc::rec::install_crash_dump(cc::rec::crash_dump_options const& options)
     g_dump.sink = options.sink;
     g_dump.max_event_bytes = options.max_event_bytes;
     g_dump.seal_calling_thread = options.seal_calling_thread;
+    g_dump.consumer_pause_timeout_secs = options.consumer_pause_timeout_secs;
 
     // Reserved here, and never touched again except by the dump itself.
     g_dump.arena.resize_to_uninitialized(options.arena_bytes);
@@ -270,24 +258,38 @@ void cc::rec::install_crash_dump(cc::rec::crash_dump_options const& options)
         cc::add_crash_context_hook(&crash_hook);
 }
 
-bool cc::rec::write_dump_now(cc::rec::dump_mode mode)
+cc::optional<cc::rec::dump_mode> cc::rec::write_dump_now(cc::rec::dump_mode mode)
 {
     return write_dump_through_installed(mode);
 }
 
-bool cc::rec::write_dump(cc::rec::dump_sink& sink, cc::rec::dump_mode mode)
+cc::optional<cc::rec::dump_mode> cc::rec::write_dump(cc::rec::dump_sink& sink, cc::rec::dump_mode mode)
 {
     if (!g_dump.is_installed)
-        return false;
+        return {};
 
     auto ok = false;
+    auto taken = mode;
     if (mode == cc::rec::dump_mode::quiescent)
-        cc::rec::impl::with_consumer_paused([&] { ok = write_dump_to(sink); });
+    {
+        // The consumer stopped for the duration, which closes the chunk-recycling race the fault path lives with.
+        // One that does not yield in time gets the constrained path instead, and the result says so.
+        if (!cc::rec::impl::try_with_consumer_paused(g_dump.consumer_pause_timeout_secs,
+                                                     [&] { ok = write_dump_to(sink); }))
+        {
+            taken = cc::rec::dump_mode::constrained;
+            ok = write_dump_to(sink);
+        }
+    }
     else
+    {
         ok = write_dump_to(sink);
+    }
 
     sink.finish(ok);
-    return ok;
+    if (!ok)
+        return {};
+    return taken;
 }
 
 bool cc::rec::is_crash_dump_installed()

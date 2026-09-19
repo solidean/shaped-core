@@ -1,6 +1,7 @@
 #pragma once
 
 #include <clean-core/container/span.hh>
+#include <clean-core/error/optional.hh>
 #include <clean-core/record/fwd.hh>
 #include <clean-core/string/string_view.hh>
 
@@ -58,8 +59,9 @@ enum class cc::rec::dump_mode
 
     /// A hang: the consumer is stopped first, so that race is closed.
     ///
-    /// Legal because the process is healthy in every respect except that one thread is not moving, which is exactly
-    /// what a fault handler cannot assume.
+    /// Legal because a hang is not a fault, which is exactly what a fault handler cannot assume.
+    /// The wait for the consumer is bounded: one that cannot catch up — a thread recording in a tight loop keeps it
+    /// busy — gets a constrained dump instead, and the result says which one was written.
     quiescent,
 };
 
@@ -87,18 +89,23 @@ struct cc::rec::crash_dump_options
     /// Seal the calling thread's chunk first, so the events that led up to the crash are in the dump rather than
     /// waiting for a chunk that will never fill.
     bool seal_calling_thread = true;
+
+    /// How long a `quiescent` dump waits for the consumer before settling for a constrained one.
+    /// A drain pass is normally well under a millisecond, so this is only reached by a consumer that cannot catch up.
+    double consumer_pause_timeout_secs = 1.0;
 };
 
 namespace cc::rec
 {
-/// Writes a dump to `sink` right now, on the calling thread.
+/// Writes a dump to `sink` right now, on the calling thread, and returns the mode it was actually written under.
 ///
 /// The one writer both paths go through, told which constraints it is under rather than guessing.
 /// Requires an installed dump, since the arena and the module table it needs are reserved at install time.
+/// A `quiescent` request comes back `constrained` when the consumer did not yield in time.
 ///
-/// Returns false when nothing is installed, when the recorder is down, when the registry was busy, or when the sink
-/// refused a write.
-[[nodiscard]] bool write_dump(rec::dump_sink& sink, rec::dump_mode mode);
+/// Empty when nothing is installed, when the recorder is down, when the registry was busy, or when the sink refused
+/// a write.
+[[nodiscard]] cc::optional<rec::dump_mode> write_dump(rec::dump_sink& sink, rec::dump_mode mode);
 
 /// Installs a crash-context hook that dumps every thread's committed events.
 ///
@@ -111,10 +118,11 @@ void install_crash_dump(rec::crash_dump_options const& options);
 ///
 /// `constrained` is exactly the path the crash handler takes, which is what tests it: the fault-path writer is not
 /// something to find out about during a fault.
-/// `quiescent` is the hang path, which stops the consumer first and may therefore wait.
+/// `quiescent` is the hang path, which stops the consumer first and so may wait, for up to a second.
 ///
-/// Returns false when no dump is installed, or when the destination refused a write.
-[[nodiscard]] bool write_dump_now(rec::dump_mode mode);
+/// Returns the mode the dump was written under, as write_dump does, or empty when no dump is installed or the
+/// destination refused a write.
+[[nodiscard]] cc::optional<rec::dump_mode> write_dump_now(rec::dump_mode mode);
 
 /// The path the installed dump writes to, or empty — including when a `sink` was given instead.
 [[nodiscard]] cc::string_view crash_dump_path();

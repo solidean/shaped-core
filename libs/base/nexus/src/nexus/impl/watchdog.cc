@@ -81,13 +81,20 @@ void nx::impl::report_hung_run(double quiet_secs)
     cc::report_all_thread_stacks("[nexus watchdog] no test progress");
 
     // **The recording last**, so it replaces the constrained dump the hooks above just wrote.
-    // Quiescent, which pauses the consumer first and closes the chunk-recycling race the crash path lives with.
+    // Quiescent where the consumer yields, which closes the chunk-recycling race; a consumer that does not yield in
+    // time gets the constrained dump instead, and the line below says which one landed.
     if (cc::rec::is_crash_dump_installed())
     {
-        auto const wrote = cc::rec::write_dump_now(cc::rec::dump_mode::quiescent);
+        auto const taken = cc::rec::write_dump_now(cc::rec::dump_mode::quiescent);
         auto const path = cc::rec::crash_dump_path();
 
-        std::fputs(wrote ? "\nrecording written to " : "\nrecording could NOT be written to ", stderr);
+        if (!taken.has_value())
+            std::fputs("\nrecording could NOT be written to ", stderr);
+        else if (taken.value() == cc::rec::dump_mode::constrained)
+            std::fputs("\nrecording written without pausing the consumer, which did not yield, to ", stderr);
+        else
+            std::fputs("\nrecording written to ", stderr);
+
         if (path.empty())
             std::fputs("<the installed sink>", stderr);
         else
