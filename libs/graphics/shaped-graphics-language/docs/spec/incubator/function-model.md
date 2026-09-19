@@ -32,6 +32,7 @@ let exact = sum[float](weights)   // T given
 
 Compile-time functions exist as well, and a type may be passed through `()` like any value.
 The difference is only deduction: a `()` parameter is never deduced, a `[]` parameter may be.
+[types-as-values.md](types-as-values.md) is what makes a type an ordinary value there.
 
 **Call by juxtaposition** is part of the model's feel:
 

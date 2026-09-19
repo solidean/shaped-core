@@ -19,6 +19,14 @@ Each file has the same shape, so an idea can be picked up cold:
 |---|---|
 | [structural-types.md](structural-types.md) | paren literals build structural types, named types are nominal, and a struct synthesizes its own constructor function |
 | [function-model.md](function-model.md) | no recursion and no indirect calls, so every function inlines, nested functions need no captures, and `[]` means deducible |
+| [types-as-values.md](types-as-values.md) | everything is a value, and an expression in a type position must reduce to a normal form that reads as a type |
+| [scopes.md](scopes.md) | ordered scopes such as functions, unordered ones such as structs and the root, and nested functions that capture nothing |
+| [binding-effects.md](binding-effects.md) | each `binding` is a binding group, functions list the bindings they use, and a local `binding` rebinds for a library |
+| [members-and-properties.md](members-and-properties.md) | structs and enums carry member functions and read-only properties, `self` names the receiver, and no `self` means static |
+| [stage-interfaces.md](stage-interfaces.md) | entry points by stage attribute, stage-to-stage types that must match, and attributes as an open, additive set |
+| [host-code-generation.md](host-code-generation.md) | `@vertex` and `@pixel` structs from which the tooling exports C++ vertex setup and render target definitions |
+| [modules-and-prelude.md](modules-and-prelude.md) | an optional `module` line, export by default, and a standard prelude that is added automatically |
+| [vector-and-format-types.md](vector-and-format-types.md) | weak `float3`-style types beside strong `tg` mirrors, and format types as ordinary prelude types |
 | [shader-logging.md](shader-logging.md) | `print` and `assert` with full interpolation, drained from GPU buffers and formatted on the CPU, with exact stack traces |
 | [ranges-and-iteration.md](ranges-and-iteration.md) | `range` as a builtin type, `in` as a membership test, and custom iterators for voxel and grid tracing |
 | [user-operators.md](user-operators.md) | user-declared prefix, infix and postfix operators, placed by a small set of rules |
