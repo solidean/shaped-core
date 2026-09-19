@@ -754,7 +754,8 @@ struct form_parser
         auto const text = text_of(operator_group);
         if (text == "!" || text == "?")
             report(diagnostic_kind::reserved_operator, span_of_group(operator_group));
-        else if (text != "-" && text != "+" && text != "~")
+        // `..x` is the splat; whether it stands where a splat may stand is for the phase that knows what a list is.
+        else if (text != "-" && text != "+" && text != "~" && text != "..")
             report(diagnostic_kind::unknown_operator, span_of_group(operator_group));
         advance();
         auto const operand = parse_prefix();

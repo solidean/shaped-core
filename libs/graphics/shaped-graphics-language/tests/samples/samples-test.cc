@@ -19,12 +19,11 @@ cc::string read_sample(cc::string_view name)
 }
 } // namespace
 
-TEST("sgl samples - a whole raster shader parses, and says only what it should")
+TEST("sgl samples - a whole raster shader parses without a single diagnostic")
 {
     auto const file = sgl::parse(read_sample("basic-raster.sgl"));
 
-    // The one thing in it the syntax has not decided is the postfix `..` splat, and that is all it reports.
-    CHECK(sgl::dump_diagnostics(file) == "reserved-operator @3563+2\n");
+    CHECK(sgl::dump_diagnostics(file) == "");
     CHECK(sgl::print_source(file) == file.source);
 
     auto const forms = sgl::dump_forms(file);
@@ -35,4 +34,6 @@ TEST("sgl samples - a whole raster shader parses, and says only what it should")
     CHECK(forms.contains("(apply id:make_mvp (member model id:instance))"));
     // `sampler` is a keyword, so a static sampler is a keyword form like any other declaration.
     CHECK(forms.contains("(kw kw:sampler id:bilinear)"));
+    // A splat is a prefix operator; the postfix spelling stays reserved.
+    CHECK(forms.contains("(round (prefix .. id:normal) num:0)"));
 }

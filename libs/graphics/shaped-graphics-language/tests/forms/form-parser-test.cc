@@ -219,4 +219,8 @@ TEST("sgl forms - spellings that are kept free say what to write instead")
     CHECK(form_of("light_kind::point") == "(member point id:light_kind) !! double-colon @10+2\n");
     CHECK(form_of("f(a; b)") == "(call id:f (round (seq id:a id:b))) !! semicolon-in-parens @3+1\n");
     CHECK(form_of("*x") == "(prefix * id:x) !! unknown-operator @0+1\n");
+
+    // The splat is prefix, and the postfix spelling is kept free for a half-open range.
+    CHECK(form_of("(..n, 0)") == "(round (prefix .. id:n) num:0)");
+    CHECK(form_of("(n.., 0)") == "(round (postfix .. id:n) num:0) !! reserved-operator @2+2\n");
 }

@@ -88,5 +88,5 @@ fun make_mvp(model: mat4){frame} => frame.proj * frame.view * model
 
     return {
         color = color as rgba8 // explicit conversion preferred!
-        normal = (normal.., 0) as vec4f16 // oh, do we want postfix ".." as a splat operator?
+        normal = (..normal, 0) as vec4f16 // prefix ".." is the splat; postfix "a.." stays free for a half-open range
     }
