@@ -1,9 +1,14 @@
 #include "record-test-types.hh"
 
 #include <clean-core/record/scope.hh>
+#include <clean-core/record/system.hh>
 #include <clean-core/record/thread_scopes.hh>
+#include <clean-core/record/value.hh>
+#include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/thread.hh>
 #include <nexus/test.hh>
+
+#include <thread>
 
 using namespace cc_rec_test;
 
@@ -26,12 +31,11 @@ struct own_scopes
     cc::vector<cc::string_view> names;
 };
 
-/// This thread's entry, or nothing when the registry was busy or this thread has not recorded yet.
+/// One thread's entry, or nothing when the registry was busy or that thread has not recorded yet.
 /// Looked up by id rather than taken as the first thread, because nexus runs tests on a pool and the registry holds
 /// every thread that has ever recorded.
-[[nodiscard]] cc::optional<own_scopes> read_own_scopes()
+[[nodiscard]] cc::optional<own_scopes> read_scopes_of(cc::thread_id self)
 {
-    auto const self = cc::current_thread_id();
     auto found = cc::optional<own_scopes>();
 
     auto const read = cc::rec::try_read_thread_scopes(
@@ -50,36 +54,65 @@ struct own_scopes
         return {};
     return found;
 }
+
+[[nodiscard]] cc::optional<own_scopes> read_own_scopes()
+{
+    return read_scopes_of(cc::current_thread_id());
+}
 } // namespace
 
 REC_TEST("record/scopes - an open scope is visible to a reader that is not the thread that opened it")
 {
+    if (!threads_available())
+        SKIP("no second thread to open the scopes on");
+
     rec_fixture const fixture(deterministic_config());
 
-    // A thread is in the registry only once it has recorded, so this joins it and then leaves nothing open.
-    {
-        CC_RECORD_SCOPE("join-the-registry");
-    }
-    {
-        auto const before = read_own_scopes();
-        REQUIRE(before.has_value());
-        CHECK(before.value().depth == 0);
-        CHECK(before.value().names.empty());
-    }
+    // The worker opens two scopes and parks inside them; this thread reads them and only then lets it go.
+    // That is the hang report's situation exactly: the thread being described is not the one describing it.
+    auto opened = cc::atomic<bool>(false);
+    auto release = cc::atomic<bool>(false);
+    auto worker_id = cc::atomic<cc::thread_id>(cc::thread_id::invalid);
+
+    auto worker = std::thread(
+        [&]
+        {
+            worker_id.store(cc::current_thread_id(), cc::memory_order_release);
+            CC_RECORD_SCOPE("outer-scope-under-test");
+            {
+                CC_RECORD_SCOPE("inner-scope-under-test"); // nested, since one block holds one scope guard
+                opened.store(true, cc::memory_order_release);
+                while (!release.load(cc::memory_order_acquire))
+                    cc::this_thread_sleep_secs(0.001);
+            }
+        });
+
+    while (!opened.load(cc::memory_order_acquire))
+        cc::this_thread_sleep_secs(0.001);
+
+    auto const seen = read_scopes_of(worker_id.load(cc::memory_order_acquire));
+    release.store(true, cc::memory_order_release);
+    worker.join();
+
+    REQUIRE(seen.has_value());
+    REQUIRE(seen.value().depth == 2);
+    REQUIRE(seen.value().names.size() == 2);
+
+    // Outermost first, which is the order a reader renders.
+    CHECK(seen.value().names[0] == "outer-scope-under-test");
+    CHECK(seen.value().names[1] == "inner-scope-under-test");
+    CHECK(seen.value().complete);
+}
+
+REC_TEST("record/scopes - a scope closing is visible too")
+{
+    rec_fixture const fixture(deterministic_config());
 
     CC_RECORD_SCOPE("outer-scope-under-test");
     {
         CC_RECORD_SCOPE("inner-scope-under-test");
-
-        auto const during = read_own_scopes();
-        REQUIRE(during.has_value());
-        REQUIRE(during.value().depth == 2);
-        REQUIRE(during.value().names.size() == 2);
-
-        // Outermost first, which is the order a reader renders.
-        CHECK(during.value().names[0] == "outer-scope-under-test");
-        CHECK(during.value().names[1] == "inner-scope-under-test");
-        CHECK(during.value().complete);
+        REQUIRE(read_own_scopes().has_value());
+        CHECK(read_own_scopes().value().depth == 2);
     }
 
     // The inner one closed, and the outer one did not.
@@ -90,7 +123,26 @@ REC_TEST("record/scopes - an open scope is visible to a reader that is not the t
     CHECK(after_inner.value().names[0] == "outer-scope-under-test");
 }
 
-REC_TEST("record/scopes - the thread is never stopped, so the reader sees whatever is committed")
+REC_TEST("record/scopes - a scope opened before its chunk was drained is still named")
+{
+    rec_fixture const fixture(deterministic_config());
+
+    // A hung thread stops recording, and the consumer drains what it had; the scope it is stuck in must survive that.
+    // Enough marks to fill the chunk the scope began in, so the name can only come back through a later chunk's
+    // preamble, which restates the outermost open scopes.
+    CC_RECORD_SCOPE("opened-long-ago");
+    for (auto i = 0; i < 20'000; ++i)
+        CC_RECORD_MARK("filler");
+    cc::rec::flush_blocking();
+
+    auto const view = read_own_scopes();
+    REQUIRE(view.has_value());
+    CHECK(view.value().depth == 1);
+    REQUIRE(view.value().names.size() == 1);
+    CHECK(view.value().names[0] == "opened-long-ago");
+}
+
+REC_TEST("record/scopes - nesting deeper than the preamble names is still named from the window")
 {
     rec_fixture const fixture(deterministic_config());
 
@@ -120,7 +172,7 @@ REC_TEST("record/scopes - the thread is never stopped, so the reader sees whatev
     }
 }
 
-REC_TEST("record/scopes - a thread that has recorded nothing reports nothing rather than being absent")
+REC_TEST("record/scopes - a thread that has recorded is listed")
 {
     rec_fixture const fixture(deterministic_config());
 

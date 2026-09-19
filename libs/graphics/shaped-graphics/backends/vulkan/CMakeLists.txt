@@ -153,6 +153,7 @@ if(SC_BUILD_TESTS)
         tests/vulkan-barrier-test.cc
         tests/vulkan-buffer-access-test.cc
         tests/vulkan-concurrent-lists-test.cc
+        tests/vulkan-copy-regions-test.cc
         tests/vulkan-forward-waits-test.cc
         tests/vulkan-compute-test.cc
         tests/vulkan-entry.cc

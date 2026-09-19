@@ -14,9 +14,10 @@
 // Vulkan's `imageOffset` and `imageExtent` are texels in every dimension and address one contiguous box, so neither
 // of those maps to a row count without conversion.
 //
-// Getting it wrong is silent rather than loud, which is why this is its own seam with its own tests: handing block
-// rows over as texel rows fills a quarter of a BC texture and leaves the rest untouched, and handing slice-major
-// rows over as a height overruns a 3D texture's own height.
+// Getting it wrong is silent rather than loud, which is why this is its own seam with its own tests, in
+// vulkan-copy-regions-test.cc.
+// Handing block rows over as texel rows fills a quarter of a BC texture and leaves the rest untouched.
+// Handing slice-major rows over as a height overruns a 3D texture's own height.
 
 namespace sg::backend::vulkan
 {
