@@ -341,6 +341,21 @@ if(SC_BUILD_TESTS)
         endif()
     endif()
 
+    # The same fixture in SGL, and NOT behind the DXC gate: that is the whole point of a uniform language.
+    # A WebGPU context needs no external compiler for it, and where DXC exists the same source serves dxil and spirv.
+    if(_sg_backends)
+        target_sources(shaped-graphics-test PRIVATE tests/shaders/sgl-compute-test.cc)
+        sc_add_shader_package(
+            TARGET     shaped-graphics-test
+            NAME       sg_test_sgl_shaders
+            NAMESPACE  sg::test::sgl_shaders
+            SOURCE_DIR tests/shaders-sgl
+            LANGUAGE   sgl
+            SHADERS
+                double_values.sgl:compute:double_values
+        )
+    endif()
+
     # Browser test runner (Emscripten only); a no-op on native toolchains.
     sc_add_nexus_web_runner(shaped-graphics-test)
 endif()

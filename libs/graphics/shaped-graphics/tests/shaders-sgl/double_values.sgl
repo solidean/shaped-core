@@ -1,0 +1,9 @@
+// The tier-1 compute fixture, written once for every backend.
+// Its point is not what it computes but that ONE source reaches dxil, spirv and wgsl alike:
+// the HLSL fixture beside it needs DXC to exist at all, and on a WebGPU context this one needs nothing.
+
+binding work:
+    values: mut buffer[float]
+
+@compute(64) fun double_values(@thread_id id: int3){work}:
+    work.values[id.x] = work.values[id.x] * 2.0
