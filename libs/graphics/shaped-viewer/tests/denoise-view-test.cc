@@ -11,6 +11,7 @@
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-viewer/all.hh>
+#include <shaped-viewer/impl/capture_session.hh> // sv::impl::partial_capture_path
 #include <typed-geometry/scalar/scalar.hh>
 
 using namespace cc::primitive_defines;
@@ -238,4 +239,129 @@ ASYNC_INVOCABLE_TEST("sv - a denoised capture is smoother than the raw one", (sg
     cc::remove_file(raw_path);
     cc::remove_file(spatial_path);
     cc::remove_file(temporal_path);
+}
+
+// The curve the hand-off from the temporal denoiser to the spatial one follows.
+//
+// The two produce visibly different images of the same estimate, so the frame that switches between them is a jump in
+// an image that is otherwise only ever getting quieter — and a jump reads as a glitch rather than as convergence.
+// What makes the hand-off invisible is this curve: it reaches both ends, never goes backwards, and its largest single
+// step is bounded by the fade's length.
+// The mixing itself is `sr::mix_routine`'s and is tested there.
+TEST("sv - the denoiser hand-off crossfades rather than cutting")
+{
+    constexpr u32 window = 16;
+    constexpr u32 fade = 8;
+
+    auto const w
+        = [](u32 frame, u32 fade_frames) { return sv::view_renderer::crossfade_weight(frame, window, fade_frames); };
+
+    // Inside the window the temporal member owns the frame outright.
+    CHECK(w(0, fade) == 0.0f);
+    CHECK(w(window, fade) == 0.0f);
+
+    // Past it the fade starts at once — a frame weighted 0 after the window would be a frame the hand-off stalled on.
+    CHECK(w(window + 1, fade) > 0.0f);
+
+    // And it finishes exactly at the end of the fade, rather than approaching it.
+    CHECK(w(window + fade, fade) == 1.0f);
+    CHECK(w(window + fade + 1, fade) == 1.0f);
+    CHECK(w(4096, fade) == 1.0f);
+
+    // Monotone, with no step larger than one fade frame's worth: that bound is the whole difference between a fade and
+    // a cut, and it is what a longer fade buys.
+    auto previous = 0.0f;
+    auto largest_step = 0.0f;
+    for (auto f = u32(0); f <= window + fade + 4; ++f)
+    {
+        auto const now = w(f, fade);
+        CHECK(now >= previous);
+        largest_step = cc::max(largest_step, now - previous);
+        previous = now;
+    }
+    CHECK(largest_step <= 1.0f / f32(fade) + 1e-6f);
+
+    // A fade of zero is the cut it replaces, which is what the bound above is measured against.
+    CHECK(w(window, 0) == 0.0f);
+    CHECK(w(window + 1, 0) == 1.0f);
+}
+
+// The crossfade on a real frame loop, which the curve test above cannot reach.
+//
+// Mid-fade both members run and the mix reads AND writes the denoised image as a UAV while sampling the crossfade slot
+// beside it — the one transition in the denoise path with two views of two textures live at once.
+// A barrier missing there is a debug-layer error, which the log rule fails this test on.
+//
+// What makes it more than a smoke test is that the fade is set longer than the run, so EVERY frame the capture could
+// settle on is a mixed one.
+// A capture only settles on a frame where nothing declined, and a denoise that could not finish declines — so a mix
+// that never ran leaves the run to burn its timeout and write beside the path instead of to it.
+// A fade that merely spanned a few frames would not pin this: the capture would decline its way through the fade and
+// settle on the first frame past it, which is exactly the frame the mix does not run on.
+ASYNC_INVOCABLE_TEST("sv - a capture settles mid-crossfade", (sg::context_handle const& ctx_h))
+{
+    auto& ctx = *ctx_h;
+
+    {
+        auto probe = ctx.create_command_list();
+        auto const supported = probe->raytracing.is_supported();
+        ctx.drop_command_list(cc::move(probe));
+        if (!supported)
+            SKIP("device reports no ray tracing support");
+    }
+
+    if (!sv_test::shared_env().has_compiler)
+        SKIP("no DXC compiler to build the path-tracing shaders");
+
+    // A window of 2, so the hand-off is reached in a handful of frames rather than the 16 the default would take, and
+    // a fade as long as the accumulation can ever run — so no frame of this capture is past it.
+    constexpr u32 window = 2;
+    constexpr u32 fade = sv::accumulation_frame_cap;
+
+    auto const path = cc::format("{}/sv-crossfade.png", cc::temp_directory_path());
+    auto const partial = sv::impl::partial_capture_path(path);
+    cc::remove_file(path);
+    cc::remove_file(partial); // a leftover from an earlier run would make both checks below vacuous
+
+    auto const on = cc::scoped_environment_variable(sr::capture_request_env_var, "1");
+    auto const out = cc::scoped_environment_variable(sr::capture_output_env_var, path);
+    auto const which = cc::scoped_environment_variable(sr::capture_name_env_var, "front");
+    auto const dim = cc::scoped_environment_variable(sr::capture_size_env_var, "96x64");
+    auto const acc = cc::scoped_environment_variable(sr::capture_accumulate_env_var, "4");
+    auto const lim = cc::scoped_environment_variable(sr::capture_timeout_env_var, "20");
+
+    auto const box = sv_test::make_cornell_box();
+    auto const mesh = sv_test::as_mesh("cornell box", box.positions, box.materials);
+    auto const loop_start = cc::current_time_steady_secs();
+
+    for (auto f : sv::interactive(ctx, "sv-test/crossfade"))
+    {
+        auto view = f.window().view();
+        view.initial_orbit({.target = tg::pos3d(0, 0, 0), .distance = 6.0});
+        f.register_capture("front", [](sv::capture_context const&) {});
+
+        auto scene = view.add_scene();
+        scene.add_mesh(mesh);
+        scene.add_light({.center = tg::pos3f(0, 0.99f, 0),
+                         .half_extent_u = tg::vec3f(0.35f, 0, 0),
+                         .half_extent_v = tg::vec3f(0, 0, 0.35f),
+                         .emission = tg::vec3f(4, 4, 4)});
+        scene.settings({.samples_per_pixel = 1,
+                        .denoise = {.method = sr::denoise_method::automatic},
+                        .temporal_denoise_frames = window,
+                        .temporal_denoise_fade_frames = fade});
+
+        // The capture ends the loop itself; the deadline only turns a hang into a message.
+        REQUIRE(cc::current_time_steady_secs() - loop_start < 25.0);
+    }
+
+    co_await cc::async_settled(sv::background_work(ctx));
+
+    // At the requested path, which is what a settled run writes — and nothing beside it, which is what an unsettled
+    // one would leave instead.
+    CHECK(cc::file_read_stream_adapter::open(path).has_value());
+    CHECK(cc::file_read_stream_adapter::open(partial).has_error());
+
+    cc::remove_file(path);
+    cc::remove_file(partial);
 }

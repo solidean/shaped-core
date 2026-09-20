@@ -68,6 +68,13 @@ cc::vector<temporal_input> temporal_inputs_of(view_data const& v)
         {
             out.push_back({.id = temporal_id::frame_samples(u8(i)), .format = sg::pixel_format::rgba16_float});
             out.push_back({.id = temporal_id::motion_guide(u8(i)), .format = sg::pixel_format::rg32_float});
+
+            // Where the spatial member lands while the hand-off between the two is crossfading.
+            // Declared for the whole life of the layer rather than for the frames the fade spans: a declaration that
+            // came and went would allocate a texture mid-fade, and the first frame of a fade is the one that must not
+            // be a step.
+            if (v.layers[i].settings.temporal_denoise_fade_frames > 0)
+                out.push_back({.id = temporal_id::denoised_crossfade(u8(i)), .format = sg::pixel_format::rgba16_float});
         }
     }
 

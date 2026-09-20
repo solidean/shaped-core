@@ -44,6 +44,8 @@ struct atrous_options;               // its own options
 class svgf_denoise_routine;          // the native temporal member (svgf_denoise_routine.hh)
 struct svgf_options;                 // its own options
 
+class mix_routine; // one image faded into another, in place (mix_routine.hh)
+
 // Dear ImGui integration (see imgui_context.hh).
 struct imgui_context_description; // value type — input to imgui_context
 

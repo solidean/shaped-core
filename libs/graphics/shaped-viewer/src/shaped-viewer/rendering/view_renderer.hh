@@ -80,6 +80,17 @@ public:
                                                    gpu_resource_manager& resources,
                                                    view_store& store);
 
+    /// How far the hand-off from the temporal denoiser to the spatial one has come, as the weight the spatial image is
+    /// mixed in at: 0 while the temporal member owns the frame, 1 once the spatial one does.
+    ///
+    /// `accum_frame` is the mean's frame count, which is what decides the hand-off — the temporal member earns its keep
+    /// while the mean is young and stops earning it once the mean has converged past what history could add.
+    /// `fade_frames` of 0 hands over in one frame, which is the behaviour to compare a fade against.
+    ///
+    /// Public because it is the policy rather than the mechanism: the mixing is `sr::mix_routine`'s and is tested there,
+    /// while what makes a hand-off invisible is this curve reaching both ends and never stepping.
+    [[nodiscard]] static f32 crossfade_weight(u32 accum_frame, u32 temporal_frames, u32 fade_frames);
+
 protected:
     /// No shaders of its own; it warms the path tracer so its compiles start early.
     cc::shared_async<cc::unit> init(sg::routine_init_scope scope) override;
@@ -94,10 +105,13 @@ private:
         impl::temporal_slot* denoised = nullptr;
         impl::temporal_slot* frame = nullptr;
         impl::temporal_slot* motion = nullptr;
+
+        /// Where the spatial member lands while the hand-off crossfades, or null when the layer does not fade.
+        impl::temporal_slot* crossfade = nullptr;
     };
 
-    /// Denoises a traced layer into its denoised slot — temporally while its mean is young, spatially after — and points
-    /// `presented` at what its parent should sample.
+    /// Denoises a traced layer into its denoised slot — temporally while its mean is young, spatially after, and both
+    /// at once across the hand-off — and points `presented` at what its parent should sample.
     [[nodiscard]] static sr::denoise_status _denoise(sg::command_list& cmd,
                                                      render_settings const& settings,
                                                      impl::temporal_slot const& accumulator,

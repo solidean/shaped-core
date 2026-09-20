@@ -85,7 +85,8 @@ The denoiser attaches to it in two halves, and both are built:
 - **Moving camera: a temporal member on fresh samples.**
   While the mean is young, the tracer also writes the frame's own samples and motion vectors, and a temporal member denoises those with its history.
   Once the mean holds enough frames — a per-layer threshold — the caller switches to the spatial half.
-  The switch is a hard cut today; running both for a few frames and crossfading is the planned refinement.
+  The switch is crossfaded rather than cut, because the two produce visibly different images of the same estimate and a jump in an image that is otherwise only getting quieter reads as a glitch.
+  Both members run for the fade's length and `sr::mix_routine` blends one into the other, which is what the fade costs.
   The history survives the still period, since the camera it was taken from is the one it is now leaving.
   So the temporal member keeps a history of its own, apart from the spatial one's, or each would drop the other's on every switch.
 

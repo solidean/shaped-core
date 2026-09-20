@@ -6,6 +6,7 @@
 #include <clean-core/thread/async_coroutine.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-rendering/denoise.hh>
+#include <shaped-rendering/mix_routine.hh>
 #include <shaped-viewer/rendering/pathtrace_routine.hh>
 #include <shaped-viewer/rendering/view_renderer.hh>
 #include <shaped-viewer/resources/gpu_resource_manager.hh>
@@ -373,6 +374,10 @@ cc::shared_async<cc::unit> view_renderer::init(sg::routine_init_scope scope)
     // for themselves on every frame.
     _pathtrace = depend_on<pathtrace_routine>(ctx);
 
+    // Warmed rather than declared: a layer that never crossfades must not wait on it, and one that does reaches the
+    // fade a good many frames after the first trace — so the compile has long since finished by then.
+    sr::mix_routine::prewarm(ctx);
+
     // This runs again on every reload, which is exactly when an accumulated image stops being comparable to a fresh one.
     ++_shader_generation;
     co_return;
@@ -553,6 +558,7 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
         .denoised = slot_of(temporal_id::denoised(tr.layer)),
         .frame = slot_of(temporal_id::frame_samples(tr.layer)),
         .motion = slot_of(temporal_id::motion_guide(tr.layer)),
+        .crossfade = slot_of(temporal_id::denoised_crossfade(tr.layer)),
     };
     auto const has_guides = ds.normal != nullptr && ds.depth != nullptr && ds.albedo != nullptr && ds.denoised != nullptr;
     auto const has_temporal = has_guides && ds.frame != nullptr && ds.motion != nullptr;
@@ -651,6 +657,19 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     return sg::routine_outcome::executed;
 }
 
+f32 view_renderer::crossfade_weight(u32 accum_frame, u32 temporal_frames, u32 fade_frames)
+{
+    if (accum_frame <= temporal_frames)
+        return 0.0f;
+    if (fade_frames == 0)
+        return 1.0f;
+
+    // The first frame past the window is already one frame into the fade, so the curve leaves 0 immediately and the
+    // hand-off has no frame that is neither one thing nor the other.
+    auto const into = accum_frame - temporal_frames;
+    return cc::min(1.0f, f32(into) / f32(fade_frames));
+}
+
 sr::denoise_status view_renderer::_denoise(sg::command_list& cmd,
                                            render_settings const& settings,
                                            impl::temporal_slot const& accumulator,
@@ -668,11 +687,23 @@ sr::denoise_status view_renderer::_denoise(sg::command_list& cmd,
     // and a temporal member's history is what makes up the difference.
     // Once the mean has more frames than that, a spatial member on the mean takes over, which keeps the converged image
     // unbiased.
-    // The switch is a hard cut for now; a crossfade is in the viewer's TODO.
-    auto const temporal = ds.frame != nullptr && ds.motion != nullptr
-                       && accumulator.accum_frame <= settings.temporal_denoise_frames
-                       && sr::is_temporal(sr::resolve_denoise_method(cmd.context(), settings.denoise, true));
+    auto const may_run_temporally = ds.frame != nullptr && ds.motion != nullptr
+                                 && sr::is_temporal(sr::resolve_denoise_method(cmd.context(), settings.denoise, true));
 
+    // 0 while the temporal member owns the frame, 1 once the spatial one does, and the fade in between — so `temporal`
+    // and `spatial` below are never both false.
+    // A layer with no crossfade slot has nowhere to run both at once, so it hands over in one frame whatever it asked for.
+    auto const fade_frames = ds.crossfade != nullptr ? settings.temporal_denoise_fade_frames : 0;
+    auto const blend = may_run_temporally
+                         ? crossfade_weight(accumulator.accum_frame, settings.temporal_denoise_frames, fade_frames)
+                         : 1.0f;
+
+    auto const temporal = blend < 1.0f;
+    auto const spatial = blend > 0.0f;
+
+    // Mid-fade both members run, so the frame carries two denoises.
+    // That is the whole price of the fade, and it is why the window is counted in frames rather than seconds: it is
+    // bounded by the accumulation, which a still view leaves behind within a second of settling.
     auto outcome = sr::denoise_outcome();
     if (temporal)
     {
@@ -687,17 +718,28 @@ sr::denoise_status view_renderer::_denoise(sg::command_list& cmd,
         // the temporal one must survive a still period to be worth anything when the camera moves again.
         outcome = sr::denoise_routine::execute(cmd, inputs, ds.frame->denoise, settings.denoise, true);
     }
-    else
+
+    if (spatial)
     {
         // Spatial, on the mean: the denoiser backs off as the sample count grows, so the converged image stays close to
         // itself.
+        // Into the crossfade slot while the temporal image still holds `denoised`, and straight into `denoised` once it
+        // does not — so the fade costs a texture and the steady state costs nothing.
+        auto const& target = temporal ? ds.crossfade->texture : denoised.texture;
         auto const inputs = sr::denoise_inputs{
             .color = accumulator.texture,
             .guides = guides,
-            .output = denoised.texture,
+            .output = target,
             .sample_count = u32(cc::max(1, settings.samples_per_pixel)) * accumulator.accum_frame,
         };
-        outcome = sr::denoise_routine::execute(cmd, inputs, denoised.denoise, settings.denoise, false);
+        auto const spatial_outcome = sr::denoise_routine::execute(cmd, inputs, denoised.denoise, settings.denoise, false);
+
+        // Mid-fade the frame is only as good as its worse half: a spatial member that declined leaves the crossfade
+        // slot holding an older image, and mixing that in would be a visible jump backwards.
+        if (!temporal || !spatial_outcome.is_denoised())
+            outcome = spatial_outcome;
+        else if (!sr::mix_routine::execute(cmd, denoised.texture, ds.crossfade->texture, blend))
+            outcome.status = sr::denoise_status::pending; // the mix is still compiling, so the fade cannot be applied
     }
 
     // Presented only when this frame produced it.

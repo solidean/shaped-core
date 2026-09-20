@@ -62,7 +62,7 @@ temporal accumulation                    [in progress]  a traced layer blends in
 denoising                                [in progress]  render_settings::denoise: sr's front denoises a layer's mean after its trace, steered by normal, depth and albedo guides the raygen
                                                         blends beside it; the parent samples the denoised image. Nothing in it reaches the trace hash.
                                                         While the mean is young SVGF runs on the frame's own samples and camera motion vectors, then à-trous on the mean.
-                                                        Still to come: a crossfade at that hand-off, a camera cut, render_scale.
+                                                        The hand-off is crossfaded, and view_ref::camera_cut() drops the history on a teleport. Still to come: render_scale.
                                                         shaped-rendering's docs/denoising.md is the design
 textures + post-load work                [in progress]  texture_manager uploads and pins an element per texture; residency says how much has landed.
                                                         Follow-up steps (mip generation through whichever sr mipmap routine the format admits) are QUEUED and drained under a per-epoch dispatch budget, which is the microstutter guard.

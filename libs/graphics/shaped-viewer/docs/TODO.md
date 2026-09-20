@@ -7,11 +7,7 @@ Bigger design intent lives in [structure.md](structure.md).
   - **Measure what the albedo guide's payload growth costs.**
     `PtPayload` went from 26 to 29 lanes for it, on every ray rather than only primary ones.
   - **Specular albedo and roughness guides**, which DLSS Ray Reconstruction requires; the same pattern as albedo, when DLSS lands.
-  - **A crossfade at the hand-off.** The switch from the temporal member to the spatial one is a hard cut today.
-    Running both for a few frames and blending wants a small lerp pass, which sr has no routine for yet.
-  - **A camera cut**, `view_ref::camera_cut()`: the scene-hash signal restarts the temporal history on a scene change, but nothing lets a caller say a jump happened.
   - **A per-frame Halton jitter** while a vendor temporal member runs; SVGF does not need one, DLSS Ray Reconstruction does.
-  - **No test moves the camera.** The captures pin SVGF reaching the screen at zero motion; a readback of the motion guide under a known camera step is the missing one.
   - **Object motion vectors** need scene items with an identity that survives a frame, which they do not have; camera motion covers a static scene.
   - **`render_settings::render_scale`**, once a member upscales: the plan traces at `sr::denoise_input_extent` instead of the view's own size.
     Inert until then, which is why it is not there yet.

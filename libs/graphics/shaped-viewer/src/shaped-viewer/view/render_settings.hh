@@ -53,4 +53,14 @@ struct sv::render_settings
     /// has converged past anything that history could add, and only a spatial member keeps it unbiased.
     /// Only a layer whose `denoise.method` may run temporally reads it.
     u32 temporal_denoise_frames = 16;
+
+    /// Over how many accumulated frames the hand-off from the temporal member to the spatial one is crossfaded.
+    ///
+    /// The two produce visibly different images of the same estimate — one carries reprojected history, the other does
+    /// not — so switching between them in one frame is a jump in an image that is otherwise only ever getting quieter.
+    /// A viewer that never moves shows it once and it reads as a glitch; one being orbited shows it on every stop.
+    ///
+    /// Both members run on each frame of the fade, so its length is what it costs.
+    /// 0 turns the fade off and hands over in one frame.
+    u32 temporal_denoise_fade_frames = 8;
 };

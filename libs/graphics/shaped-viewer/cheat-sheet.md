@@ -767,6 +767,12 @@ A layer with no lights falls back to `layer::fallback_light` — `sv::default_fa
 - **Temporal while the mean is young, spatial after.** For `render_settings::temporal_denoise_frames` (16) frames after a restart, a temporal
   member (SVGF under `automatic`) denoises this frame's own samples; then à-trous takes over on the mean, backing off with its sample count.
   A named spatial member (`atrous`) never takes the temporal branch.
+- **The hand-off is crossfaded**, over `render_settings::temporal_denoise_fade_frames` (8) accumulated frames: both members run and
+  `sr::mix_routine` blends one into the other, because the two make visibly different images of the same estimate.
+  The fade adds a `temporal_id::denoised_crossfade` slot; 0 hands over in one frame.
+- **`view_ref::camera_cut()`** says the camera jumped rather than moved, so the temporal history and the motion guide's previous camera
+  are dropped — nothing reprojects across a cut.
+  It is sticky until a frame traces the view, and it restarts no accumulation of its own.
 - **Four more temporal slots per such layer**: `temporal_id::normal_guide`, `depth_guide`, `albedo_guide` (diffuse) and `denoised`, declared by `temporal_inputs_of`.
   A layer that may denoise temporally adds `frame_samples` and `motion_guide`; the first holds the temporal member's own history, the second the last camera.
 - **The temporal history restarts on a scene change, never on camera motion** — its signal is the trace hash with the camera left out.

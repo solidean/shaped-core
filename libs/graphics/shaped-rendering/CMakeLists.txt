@@ -14,6 +14,7 @@ add_library(shaped-rendering
     src/shaped-rendering/denoise.cc
     src/shaped-rendering/atrous_denoise_routine.cc
     src/shaped-rendering/svgf_denoise_routine.cc
+    src/shaped-rendering/mix_routine.cc
     src/shaped-rendering/raster_box_filter_mipmap_routine.cc
     src/shaped-rendering/imgui_context.cc
     src/shaped-rendering/imgui_routine.cc
@@ -39,6 +40,7 @@ target_sources(shaped-rendering
     src/shaped-rendering/denoise.hh
     src/shaped-rendering/atrous_denoise_routine.hh
     src/shaped-rendering/svgf_denoise_routine.hh
+    src/shaped-rendering/mix_routine.hh
     src/shaped-rendering/impl/denoise_images.hh
     src/shaped-rendering/raster_box_filter_mipmap_routine.hh
     src/shaped-rendering/window.hh
@@ -135,6 +137,9 @@ sc_add_shader_package(
         svgf_atrous.hlsl:compute:main_cs
         svgf_atrous.hlsl:binding:svgf_atrous_bindings
         svgf_atrous.hlsl:constants:gConstants
+        mix.hlsl:compute:main_cs
+        mix.hlsl:binding:mix_bindings
+        mix.hlsl:constants:gConstants
 )
 
 # Test executable.
@@ -194,6 +199,7 @@ if(SC_BUILD_TESTS)
             tests/box-filter-mipmap-test.cc
             tests/raster-box-filter-mipmap-test.cc
             tests/denoise-test.cc
+            tests/mix-test.cc
         )
         target_link_libraries(shaped-rendering-test PRIVATE shaped-graphics-dx12)
 

@@ -85,6 +85,15 @@ inline constexpr u64 caller_range_end = u64(1) << kind_shift;
     return (u64(4) << kind_shift) | u64(layer);
 }
 
+/// Where the spatial member writes while a crossfade is running, before it is mixed into `denoised`.
+///
+/// Only allocated for a layer that may denoise temporally, and only read on the handful of frames the hand-off spans:
+/// the two members produce different images of the same estimate, and fading between them needs both at once.
+[[nodiscard]] constexpr u64 denoised_crossfade(u8 layer)
+{
+    return (u64(8) << kind_shift) | u64(layer);
+}
+
 /// Whether `id` is an accumulation slot, whatever layer it belongs to.
 ///
 /// For a caller folding over every traced layer of a view rather than naming one.
