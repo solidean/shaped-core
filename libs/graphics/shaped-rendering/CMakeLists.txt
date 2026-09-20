@@ -103,7 +103,8 @@ endif()
 # No backend gate: NRD hands back a LIST of dispatches and shaped-rendering executes them through sg, so unlike DLSS
 # this member needs no native scope and runs wherever sg does.
 if(TARGET NRD)
-    target_sources(shaped-rendering PRIVATE src/shaped-rendering/impl/nrd_instance.cc)
+    target_sources(shaped-rendering PRIVATE src/shaped-rendering/impl/nrd_instance.cc
+                                        src/shaped-rendering/impl/nrd_session.cc)
     target_link_libraries(shaped-rendering PRIVATE NRD)
     target_compile_definitions(shaped-rendering PUBLIC SR_HAS_NRD=1)
 else()
@@ -214,6 +215,7 @@ if(SC_BUILD_TESTS)
             tests/raster-box-filter-mipmap-test.cc
             tests/denoise-test.cc
             tests/mix-test.cc
+            tests/nrd-test.cc
         )
         target_link_libraries(shaped-rendering-test PRIVATE shaped-graphics-dx12)
 
