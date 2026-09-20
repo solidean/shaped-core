@@ -456,7 +456,7 @@ struct scope_checker
                 declared.push_back(var->local);
             if (auto const* const loop = s.node.try_as<flat_for>())
                 declared.push_back(loop->index);
-            impl::for_each_body_of(s, [&](sgl::ast::range_of<flat_stmt_id> inner) { body(inner); });
+            impl::for_each_body_of(e, s, [&](sgl::ast::range_of<flat_stmt_id> inner) { body(inner); });
             // the index of a `for` is gone behind its loop
             if (s.node.is<flat_for>())
                 declared.remove_back();

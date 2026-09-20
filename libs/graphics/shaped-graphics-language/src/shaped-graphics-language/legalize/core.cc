@@ -44,6 +44,8 @@ struct core_checker
     struct breakable
     {
         bool is_loop = false;
+        /// A `switch` captures `break` like a `once` and lets a `continue` through, which a `once` does not (LEGAL-50).
+        bool is_switch = false;
         label_id label = label_id::none;
     };
     cc::vector<breakable> enclosing;
@@ -79,6 +81,13 @@ struct core_checker
         if (auto const* const o = x.node.try_as<flat_or>(); o != nullptr && has_effect_at(e, o->rhs, depth))
             return violation("an `or` whose right operand has an effect, which must be an `if`", id);
         for_each_operand(e, x, [&](flat_expr_id operand) { expr(operand, depth + 1); });
+    }
+
+    /// True for what a `switch` label may be: an `int` literal, or an enum case, which is one by another name.
+    [[nodiscard]] static bool is_literal(flat_entry_point const& e, flat_expr_id id)
+    {
+        auto const& x = e.at(id);
+        return x.node.is<flat_int_literal>() || x.node.is<flat_enum_value>();
     }
 
     void optional_expr(flat_expr_id id)
@@ -154,18 +163,46 @@ struct core_checker
             },
             [&](flat_continue const& s)
             {
-                if (enclosing.empty())
+                auto at = enclosing.size() - 1;
+                while (at >= 0 && enclosing[at].is_switch)
+                    --at;
+                if (at < 0)
                     violation("a continue outside every loop");
-                else if (!enclosing.back().is_loop)
+                else if (!enclosing[at].is_loop)
                     violation(cc::format("a continue of ${} that would cross a once", label_name(s.target)));
-                else if (enclosing.back().label != s.target)
+                else if (enclosing[at].label != s.target)
                     violation(cc::format("a continue of ${}, which is not the innermost loop", label_name(s.target)));
             },
-            [&](flat_once const& s) { breakable_body({.is_loop = false}, s.body, depth + 1); },
+            [&](flat_once const& s) { breakable_body({}, s.body, depth + 1); },
             [&](flat_break const&)
             {
                 if (enclosing.empty())
                     violation("a break outside every once and every loop");
+            },
+            [&](flat_case const& s)
+            {
+                violation(cc::format("a case over {} arms, which legalization takes to a switch or a chain of ifs",
+                                     is_known(e, s.arms) ? e.at(s.arms).size() : 0));
+            },
+            [&](flat_switch const& s)
+            {
+                expr(s.scrutinee, 0);
+                if (!is_known(e, s.arms))
+                    return violation("a switch whose arms reach outside the tree");
+                for (auto const& arm : e.at(s.arms))
+                {
+                    if (!is_known(e, arm.patterns))
+                        return violation("a switch arm whose patterns reach outside the tree");
+                    if (e.at(arm.patterns).empty())
+                        return violation("a switch arm without a pattern, which no target can label");
+                    for (auto const p : e.at(arm.patterns))
+                        if (!is_known(e, p) || !is_literal(e, p))
+                            return violation("a switch arm whose pattern is no literal", p);
+                    current = id;
+                    breakable_body({.is_switch = true}, arm.body, depth + 1);
+                }
+                current = id;
+                breakable_body({.is_switch = true}, s.default_body, depth + 1);
             },
             [&](flat_return const& s) { expr(s.value, 0); });
     }

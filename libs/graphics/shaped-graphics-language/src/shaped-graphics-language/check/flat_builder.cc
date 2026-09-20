@@ -261,6 +261,13 @@ ast::range_of<flat_expr_id> flat_builder::expr_list(cc::span<flat_expr_id const>
     return range;
 }
 
+ast::range_of<flat_arm> flat_builder::arm_list(cc::span<flat_arm const> list)
+{
+    auto const range = ast::range_of<flat_arm>{.first = u32(e.arms.size()), .count = u32(list.size())};
+    e.arms.push_back_range(list);
+    return range;
+}
+
 ast::range_of<flat_stmt_id> flat_builder::stmt_list(cc::span<flat_stmt_id const> list)
 {
     auto const range = ast::range_of<flat_stmt_id>{.first = u32(e.stmt_lists.size()), .count = u32(list.size())};

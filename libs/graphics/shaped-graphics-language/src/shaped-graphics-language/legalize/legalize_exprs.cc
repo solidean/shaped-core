@@ -39,7 +39,7 @@ struct leave_counter
             if (auto const* const l = s.node.try_as<flat_leave>(); l != nullptr && l->target == label)
                 ++count;
             for_each_expr_of(s, [&](flat_expr_id x) { expr(x, depth + 1); });
-            for_each_body_of(s, [&](ast::range_of<flat_stmt_id> inner) { body(inner, depth + 1); });
+            for_each_body_of(e, s, [&](ast::range_of<flat_stmt_id> inner) { body(inner, depth + 1); });
         }
     }
 };
@@ -74,7 +74,7 @@ struct assigned_locals
         auto const& s = e.at(id);
         if (auto const* const a = s.node.try_as<flat_assign>())
             place(a->place);
-        for_each_body_of(s,
+        for_each_body_of(e, s,
                          [&](ast::range_of<flat_stmt_id> inner)
                          {
                              if (is_known(e, inner))

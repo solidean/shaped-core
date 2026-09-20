@@ -376,12 +376,45 @@ struct sgl::check::flat_return
     constexpr bool operator==(flat_return const&) const = default;
 };
 
+/// One arm: the patterns that select it, and the statements it runs.
+/// In a `flat_case` a pattern is any expression; in a `flat_switch` it is a literal the target compares.
+struct sgl::check::flat_arm
+{
+    ast::range_of<flat_expr_id> patterns;
+    ast::range_of<flat_stmt_id> body;
+
+    constexpr bool operator==(flat_arm const&) const = default;
+};
+
+/// `case v { … default { … } }`: `v` is evaluated once, then the arms are tried in order and the first match runs.
+/// A pattern is evaluated only where it is reached (EVAL-68), and the `default` arm runs when no other matched.
+/// Structured form only; `legalize` takes it to a `switch` or to a chain of `if`.
+struct sgl::check::flat_case
+{
+    flat_expr_id scrutinee = flat_expr_id::none;
+    ast::range_of<flat_arm> arms;
+    ast::range_of<flat_stmt_id> default_body;
+
+    constexpr bool operator==(flat_case const&) const = default;
+};
+
+/// `switch v { [a, b] { … } … default { … } }`, whose every pattern is a literal and whose `default` is mandatory.
+/// A `break` directly inside an arm ends the switch, the way one inside a `once` ends that.
+/// Core form only.
+struct sgl::check::flat_switch
+{
+    flat_expr_id scrutinee = flat_expr_id::none;
+    ast::range_of<flat_arm> arms;
+    ast::range_of<flat_stmt_id> default_body;
+
+    constexpr bool operator==(flat_switch const&) const = default;
+};
+
 struct sgl::check::flat_stmt
 {
     origin from;
     ast::range_of<call_site> inlined_through;
 
-    // `switch` joins here with `case`; it will capture a `break` the way a loop does.
     cc::variant<flat_let,
                 flat_var,
                 flat_assign,
@@ -396,6 +429,8 @@ struct sgl::check::flat_stmt
                 flat_continue,
                 flat_once,
                 flat_break,
+                flat_case,
+                flat_switch,
                 flat_return>
         node;
 
@@ -424,6 +459,8 @@ struct sgl::check::flat_entry_point
     cc::vector<flat_stmt> stmts;
     cc::vector<flat_expr_id> expr_lists;
     cc::vector<flat_stmt_id> stmt_lists;
+    /// The arms of every `case` and `switch` of this entry point.
+    cc::vector<flat_arm> arms;
     cc::vector<call_site> call_sites;
     /// The statements of the function, in order.
     ast::range_of<flat_stmt_id> body;
@@ -443,6 +480,7 @@ struct sgl::check::flat_entry_point
     {
         return ast::impl::slice(stmt_lists, r);
     }
+    [[nodiscard]] cc::span<flat_arm const> at(ast::range_of<flat_arm> r) const { return ast::impl::slice(arms, r); }
     [[nodiscard]] cc::span<call_site const> at(ast::range_of<call_site> r) const
     {
         return ast::impl::slice(call_sites, r);
@@ -454,7 +492,8 @@ struct sgl::check::flat_entry_point
         return entry_stage == rhs.entry_stage && name == rhs.name && function == rhs.function && input == rhs.input
             && result == rhs.result && is_equal(bindings, rhs.bindings) && is_equal(locals, rhs.locals)
             && is_equal(labels, rhs.labels) && root == rhs.root && is_equal(exprs, rhs.exprs)
-            && is_equal(stmts, rhs.stmts) && is_equal(expr_lists, rhs.expr_lists) && is_equal(stmt_lists, rhs.stmt_lists)
-            && is_equal(call_sites, rhs.call_sites) && body == rhs.body && names == rhs.names;
+            && is_equal(stmts, rhs.stmts) && is_equal(expr_lists, rhs.expr_lists)
+            && is_equal(stmt_lists, rhs.stmt_lists) && is_equal(arms, rhs.arms) && is_equal(call_sites, rhs.call_sites)
+            && body == rhs.body && names == rhs.names;
     }
 };

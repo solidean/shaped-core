@@ -31,6 +31,10 @@ constexpr int k_max_depth = 200;
 {
     return isize(r.first) + isize(r.count) <= e.stmt_lists.size();
 }
+[[nodiscard]] inline bool is_known(flat_entry_point const& e, ast::range_of<flat_arm> r)
+{
+    return isize(r.first) + isize(r.count) <= e.arms.size();
+}
 
 /// Calls `fn(flat_expr_id)` for every direct operand of `x` in evaluation order; the body of a block expression is no operand.
 /// A list that reaches outside the tree has no operands here.
@@ -96,12 +100,30 @@ void for_each_expr_of(flat_stmt const& s, Fn&& fn)
                  [&](flat_continue const&) {}, //
                  [&](flat_once const&) {},     //
                  [&](flat_break const&) {},    //
+                 [&](flat_case const& n) { visit(n.scrutinee); }, [&](flat_switch const& n) { visit(n.scrutinee); },
                  [&](flat_return const& n) { visit(n.value); });
 }
 
-/// Calls `fn(ast::range_of<flat_stmt_id>)` for every statement list `s` holds directly.
+/// Calls `fn(ast::range_of<flat_expr_id>)` for the patterns of every arm of `s`, in the order they are tried.
+/// They are no operand of the statement: a pattern behind the one that matched never runs (EVAL-67).
 template <class Fn>
-void for_each_body_of(flat_stmt const& s, Fn&& fn)
+void for_each_pattern_of(flat_entry_point const& e, flat_stmt const& s, Fn&& fn)
+{
+    auto const arms_of = [&](ast::range_of<flat_arm> arms)
+    {
+        if (is_known(e, arms))
+            for (auto const& arm : e.at(arms))
+                fn(arm.patterns);
+    };
+    if (auto const* const c = s.node.try_as<flat_case>())
+        arms_of(c->arms);
+    else if (auto const* const sw = s.node.try_as<flat_switch>())
+        arms_of(sw->arms);
+}
+
+/// Calls `fn(ast::range_of<flat_stmt_id>)` for every statement list `s` holds directly, an arm's body included.
+template <class Fn>
+void for_each_body_of(flat_entry_point const& e, flat_stmt const& s, Fn&& fn)
 {
     if (auto const* const i = s.node.try_as<flat_if>())
     {
@@ -118,5 +140,19 @@ void for_each_body_of(flat_stmt const& s, Fn&& fn)
         fn(f->body);
     else if (auto const* const o = s.node.try_as<flat_once>())
         fn(o->body);
+    else if (auto const* const c = s.node.try_as<flat_case>())
+    {
+        if (is_known(e, c->arms))
+            for (auto const& arm : e.at(c->arms))
+                fn(arm.body);
+        fn(c->default_body);
+    }
+    else if (auto const* const sw = s.node.try_as<flat_switch>())
+    {
+        if (is_known(e, sw->arms))
+            for (auto const& arm : e.at(sw->arms))
+                fn(arm.body);
+        fn(sw->default_body);
+    }
 }
 } // namespace sgl::check::impl

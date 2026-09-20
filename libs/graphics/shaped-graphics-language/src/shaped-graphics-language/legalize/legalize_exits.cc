@@ -32,7 +32,7 @@ bool holds_leave(flat_entry_point const& e, flat_stmt_id id, label_id label, int
     if (auto const* const l = s.node.try_as<flat_leave>())
         return l->target == label;
     auto result = false;
-    for_each_body_of(s,
+    for_each_body_of(e, s,
                      [&](ast::range_of<flat_stmt_id> body)
                      {
                          if (is_known(e, body))
@@ -470,6 +470,15 @@ struct compactor
 
     flat_expr_id optional_expr(flat_expr_id id, int depth) { return is_valid(id) ? expr(id, depth) : id; }
 
+    ast::range_of<flat_arm> arms(ast::range_of<flat_arm> range, int depth)
+    {
+        auto list = cc::vector<flat_arm>();
+        if (is_known(in, range))
+            for (auto const& arm : in.at(range))
+                list.push_back({.patterns = exprs(arm.patterns, depth), .body = body(ids_of(in, arm.body), depth + 1)});
+        return out.arm_list(list);
+    }
+
     ast::range_of<flat_stmt_id> body(stmt_list const& list, int depth)
     {
         auto copies = stmt_list();
@@ -509,6 +518,18 @@ struct compactor
                             },
                             [&](flat_continue&) {},                                                                   //
                             [&](flat_once& n) { n.body = body(ids_of(in, n.body), depth + 1); }, [&](flat_break&) {}, //
+                            [&](flat_case& n)
+                            {
+                                n.scrutinee = expr(n.scrutinee, 0);
+                                n.arms = arms(n.arms, depth);
+                                n.default_body = body(ids_of(in, n.default_body), depth + 1);
+                            },
+                            [&](flat_switch& n)
+                            {
+                                n.scrutinee = expr(n.scrutinee, 0);
+                                n.arms = arms(n.arms, depth);
+                                n.default_body = body(ids_of(in, n.default_body), depth + 1);
+                            },
                             [&](flat_return& n) { n.value = expr(n.value, 0); });
             out.e.stmts.push_back(cc::move(copy));
             copies.push_back(flat_stmt_id(out.e.stmts.size() - 1));

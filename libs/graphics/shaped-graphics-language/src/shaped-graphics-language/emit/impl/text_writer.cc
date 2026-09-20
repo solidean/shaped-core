@@ -333,6 +333,53 @@ struct writer
         line(declaration);
     }
 
+    /// True when the arm's last statement already leaves the switch, so the C-like targets need no `break` of their own.
+    [[nodiscard]] bool ends_in_exit(ast::range_of<flat_stmt_id> range) const
+    {
+        auto const statements = p.e.at(range);
+        if (statements.empty())
+            return false;
+        auto const& last = p.e.at(statements.back());
+        return last.node.is<flat_break>() || last.node.is<flat_return>() || last.node.is<flat_continue>();
+    }
+
+    /// One arm: its labels, its body, and the `break` that stops the C-like targets falling into the next one.
+    void arm(cc::span<flat_expr_id const> patterns, ast::range_of<flat_stmt_id> range)
+    {
+        if (d.is_c_like())
+        {
+            for (auto const pattern : patterns)
+                line(cc::format("case {}:", expr(pattern).text));
+            if (patterns.empty())
+                line("default:");
+            ++depth;
+            body(range);
+            if (!ends_in_exit(range))
+                line("break;");
+            --depth;
+            return;
+        }
+        auto labels = cc::string();
+        for (auto const pattern : patterns)
+        {
+            if (!labels.empty())
+                labels += ", ";
+            labels += expr(pattern).text;
+        }
+        open(patterns.empty() ? cc::string("default:") : cc::format("case {}:", labels));
+        body(range);
+        close();
+    }
+
+    void switch_(flat_switch const& s)
+    {
+        open(condition_text("switch", expr(s.scrutinee).text));
+        for (auto const& a : p.e.at(s.arms))
+            arm(p.e.at(a.patterns), a.body);
+        arm({}, s.default_body);
+        close();
+    }
+
     void statement(flat_stmt const& s)
     {
         s.node.visit([&](flat_let const& let) { declare(let.local, let.value, p.e.at(let.local).is_mut); },
@@ -351,9 +398,10 @@ struct writer
                          line(text);
                      },
                      [&](flat_if const& i) { branch(i, false); },
-                     // neither is in a core tree
+                     // none of the three is in a core tree
                      [&](flat_block const&) {}, //
-                     [&](flat_leave const&) {},
+                     [&](flat_leave const&) {}, //
+                     [&](flat_case const&) {},
                      [&](flat_loop const& l)
                      {
                          open(d.is_c_like() ? "while (true)" : "loop");
@@ -373,7 +421,8 @@ struct writer
                      },
                      [&](flat_continue const&) { line("continue;"); }, //
                      [&](flat_once const& o) { once(o); },             //
-                     [&](flat_break const&) { line("break;"); },
+                     [&](flat_break const&) { line("break;"); },       //
+                     [&](flat_switch const& sw) { switch_(sw); },
                      [&](flat_return const& r)
                      {
                          auto const& value = p.e.at(r.value);

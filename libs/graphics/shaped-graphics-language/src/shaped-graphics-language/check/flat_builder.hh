@@ -114,5 +114,6 @@ struct sgl::check::flat_builder
 
     ast::range_of<flat_expr_id> expr_list(cc::span<flat_expr_id const> list);
     ast::range_of<flat_stmt_id> stmt_list(cc::span<flat_stmt_id const> list);
+    ast::range_of<flat_arm> arm_list(cc::span<flat_arm const> list);
     void set_body(cc::span<flat_stmt_id const> list);
 };

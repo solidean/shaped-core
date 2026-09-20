@@ -242,6 +242,33 @@ struct dumper
         out += ")";
     }
 
+    void dump_arms(flat_entry_point const& e,
+                   cc::string_view head,
+                   flat_expr_id scrutinee,
+                   ast::range_of<flat_arm> arms,
+                   ast::range_of<flat_stmt_id> default_body,
+                   int indent)
+    {
+        out.appendf("({} ", head);
+        dump_expr(e, scrutinee, indent, true);
+        for (auto const& arm : e.at(arms))
+        {
+            new_line(indent + 2);
+            out += "(arm";
+            for (auto const p : e.at(arm.patterns))
+            {
+                out += " ";
+                dump_expr(e, p, indent + 2, true);
+            }
+            dump_body(e, arm.body, indent + 4);
+            out += ")";
+        }
+        new_line(indent + 2);
+        out += "(default";
+        dump_body(e, default_body, indent + 4);
+        out += "))";
+    }
+
     void dump_stmt(flat_entry_point const& e, flat_stmt_id id, int indent)
     {
         auto const& s = e.at(id);
@@ -330,6 +357,8 @@ struct dumper
                          out += ")";
                      },
                      [&](flat_break const&) { out += "(break)"; },
+                     [&](flat_case const& c) { dump_arms(e, "case", c.scrutinee, c.arms, c.default_body, indent); },
+                     [&](flat_switch const& c) { dump_arms(e, "switch", c.scrutinee, c.arms, c.default_body, indent); },
                      [&](flat_return const& r)
                      {
                          out += "(return ";
