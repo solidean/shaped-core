@@ -1,5 +1,11 @@
 # CLAUDE.md
 
+**This file is for quick orientation, not for knowledge.**
+It says what exists, where to look, and the few rules that bind every change.
+Knowledge lives in docs and comments, where a human finds it too, and an entry here points at it rather than restating it.
+Skills follow the same rule: minimal agent-relevant steps, and a link to the doc that holds the rest.
+A library's entry below is a few lines, written for whoever *uses* the library; what its developers need belongs in its own `docs/`.
+
 ## What this repo is
 
 **shaped-core** is a collection of foundational C++ libraries by Shaped Code, powering SOLIDEAN, internal tools, customer projects, and research.
@@ -106,34 +112,14 @@ One-liner per library:
   The API is always present; without a backend (SDL3 not fetched) `window_system::try_create` fails instead of the types disappearing.
   `SR_HAS_WINDOW` (1/0) says whether a backend was compiled in.
 * **`libs/graphics/shaped-graphics-language`** — SGL, our own shading language, and its whole toolchain in one library: compiler, linter, formatter, language server.
-  The syntactic half is bytes → line tree → tokens → group tokens → form tree, one flat lossless `sgl::parsed_file` per file.
-  On top of it sits the AST pass, `sgl::ast::build` → `sgl::ast::file_ast`: declarations, statements and expressions, per file and name-free.
-  Above that is the first semantic phase, `sgl::check::check` → `sgl::check::checked_module`: name resolution, type checking and evaluation as ONE demand-driven pass.
-  It yields side tables over the untouched AST for an editor, and one flat typed tree per entry point, which is all an emitter reads.
-  **The check pass is a tracer**: it carries `tests/samples/cube.sgl` and `helpers.sgl` against `prelude/prelude.sgl`, and every other construct is the one diagnostic `unsupported-yet`, never a guess.
-  It carries helpers, guard clauses, loops, assignment, `and` / `or` and early returns; generics, methods, lambdas, `case` and enums are what it does not.
-  **A call is defined by substitution, and every call is inlined**: a block named after the callee stands where the call stood, its arguments bound at the top, each `return` a `leave`.
-  The inliner never hoists and never reorders, since evaluation order is the legalizer's job alone.
-  Each body is checked once on its own; recursion, a path without a `return` and a binding the caller does not list are ordinary errors.
-  **The flat tree has two forms.**
-  The structured one is what the language means and what the check pass writes: labeled blocks that may be expressions, and `leave` from any depth.
-  The core one is what every target prints one to one, and `sgl::check::legalize` takes the first to the second.
-  `sgl::check::interpret` runs both, and differential tests hold the legalizer to "behaves the same": a randomized one over trees, and one over programs written in SGL.
-  `sgl::check::flat_builder` writes a tree by hand, for a test that wants a shape the source does not give.
-  Behind it, `sgl::emit::emit` writes ONE entry point as readable text for `hlsl_dx12`, `hlsl_vulkan`, `wgsl` or `msl`, with exactly the types and the binding it needs.
-  **The `msl` text has met no Metal compiler yet**, and nothing builds it: slib has no metallib compiler, and sg's metal backend binds no vertex buffers or inline constants.
-  The text carries its **final addresses** — member order is the location, an `@inline binding` sits where sg expects inline constants — so slib's binding pass is not needed behind it.
-  A name that is reserved in one target gets a trailing underscore there; an entry point never changes, so one that collides anywhere is an error everywhere.
-  `sgl::compile_to_text` is the whole pipeline in one call, against the prelude the library embeds (`sgl::prelude_source`), so compiling needs no file.
-  slib's SGL compiler edge is its caller, and [examples/graphics/sgl-cube](examples/graphics/sgl-cube/shaders/cube.sgl) draws that text on dx12, vulkan and webgpu.
-  The inliner, MSL and GLSL, the generated host mirror, and every binding that is not `@inline` do not exist yet.
-  **Total and local by construction**: any bytes parse to a tree plus diagnostics, and no syntax error escapes its indentation.
-  Namespace `sgl`. Depends on clean-core alone, the emitters included, and the syntactic half must stay that way — an editor links it to parse.
-  slib links sgl, never the reverse.
-  [docs/spec/](libs/graphics/shaped-graphics-language/docs/spec/_index.md) is the language: normative rules with stable ids under `syntax/`, every "why" mirrored under `syntax/why/`,
-  `semantics/` is what the check pass, the abstract machine and the emitters do, marked as deliberately thin, and ideas that are not spec yet are under `incubator/`.
-  Its `evaluation.md` is the normative meaning of a flat tree, and `legalization.md` an informative appendix with the per-target table.
-  **Every `sgl` fence in the spec is a test**, so the spec and the parser cannot drift apart silently.
+  One `.sgl` source compiles to readable shader text for dx12, vulkan, webgpu and metal, and slib's SGL compiler edge is what calls it.
+  [examples/graphics/sgl-cube](examples/graphics/sgl-cube/shaders/cube.sgl) draws one on dx12, vulkan and webgpu; the metal text has met no Metal compiler yet.
+  **To write SGL**: [docs/spec/](libs/graphics/shaped-graphics-language/docs/spec/_index.md) is the language.
+  `uv run dev.py run sgl -- emit <file> --entry <name> --target <t>` shows what a shader becomes.
+  The compiler carries a deliberately thin slice of the language so far, and everything else is the one diagnostic `unsupported-yet`, never a guess.
+  **To work on the compiler**: [docs/architecture.md](libs/graphics/shaped-graphics-language/docs/architecture.md) is the map.
+  `prelude/builtins.sgl` is generated from the C++ builtin registry and checked by `dev.py check`, so never edit it by hand.
+  Namespace `sgl`. Depends on clean-core alone, which must stay so: an editor links it to parse.
   Early stage.
 * **`libs/graphics/shaped-viewer`** — professional, RTX-enabled visualization renderer with a dev-friendly API.
   Namespace `sv`. Depends on shaped-rendering, plus babel-serializer for the asset importer.
@@ -423,6 +409,7 @@ A stale "no cc:: equivalent yet" reason sends the next author back to the old wa
 | Chase a flaky test               | `uv run dev.py test <binary> --repeat 100` (stops at the first failure, so its logs survive for `test_diag`) |
 | Build a single target            | `uv run dev.py build -t <target>`                                 |
 | Run a non-test executable        | `uv run dev.py run <target> [args…]` (builds first, forwards args, propagates the exit code) |
+| Compile an SGL file to target text | `uv run dev.py run sgl -- emit <file.sgl> --entry <name> --target <t>` (`hlsl-dx12`, `hlsl-vulkan`, `wgsl`, `msl`) |
 | Run one example                  | `uv run dev.py example <match>` (no arg lists them all; [examples](docs/guides/examples.md)) |
 | See what a graphical example looks like | `uv run dev.py example <match> --capture` — headless, writes an image, needs no display. **Use it while writing one**: a run that neither crashes nor asserts routinely shows nothing worth looking at |
 | Refresh the committed example images | `uv run dev.py example --update-captures "<matcher>"` (capture + copy; `--refresh-captures` copies only) |
