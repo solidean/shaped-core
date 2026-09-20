@@ -71,7 +71,7 @@ f32 root_of(f32 x)
 /// What a builtin function takes: how many scalars each argument has, and of which kind they all are.
 struct call_shape
 {
-    isize counts[2] = {};
+    isize counts[3] = {};
     isize arity = 0;
     /// `none` for what is no builtin function.
     value_kind kind = value_kind::none;
@@ -84,25 +84,49 @@ call_shape shape_of(builtin b)
     case builtin::normalize:
         return {.counts = {3}, .arity = 1, .kind = value_kind::scalar_float};
     case builtin::saturate:
+    case builtin::negate:
+    case builtin::abs:
         return {.counts = {1}, .arity = 1, .kind = value_kind::scalar_float};
+    case builtin::length:
+        return {.counts = {3}, .arity = 1, .kind = value_kind::scalar_float};
+    case builtin::clamp:
+    case builtin::mix:
+        return {.counts = {1, 1, 1}, .arity = 3, .kind = value_kind::scalar_float};
+    case builtin::add_color:
+    case builtin::multiply_color:
+    case builtin::add_vec3:
+    case builtin::subtract_vec3:
+        return {.counts = {3, 3}, .arity = 2, .kind = value_kind::scalar_float};
     case builtin::dot:
         return {.counts = {3, 3}, .arity = 2, .kind = value_kind::scalar_float};
     case builtin::transform_position:
     case builtin::transform_direction:
         return {.counts = {16, 3}, .arity = 2, .kind = value_kind::scalar_float};
     case builtin::scale_color:
+    case builtin::scale_vec3:
         return {.counts = {3, 1}, .arity = 2, .kind = value_kind::scalar_float};
     case builtin::multiply:
     case builtin::add:
     case builtin::subtract:
     case builtin::less:
     case builtin::equal:
+    case builtin::divide:
+    case builtin::less_equal:
+    case builtin::greater:
+    case builtin::greater_equal:
+    case builtin::not_equal:
+    case builtin::min:
+    case builtin::max:
         return {.counts = {1, 1}, .arity = 2, .kind = value_kind::scalar_float};
     case builtin::add_int:
     case builtin::subtract_int:
     case builtin::multiply_int:
     case builtin::less_int:
     case builtin::equal_int:
+    case builtin::less_equal_int:
+    case builtin::greater_int:
+    case builtin::greater_equal_int:
+    case builtin::not_equal_int:
         return {.counts = {1, 1}, .arity = 2, .kind = value_kind::scalar_int};
     default:
         return {};
@@ -256,7 +280,69 @@ struct machine
                 floats({transformed(0, 0.0f), transformed(1, 0.0f), transformed(2, 0.0f)});
                 break;
             case builtin::scale_color:
+            case builtin::scale_vec3:
                 floats({f(0, 0) * f(1, 0), f(0, 1) * f(1, 0), f(0, 2) * f(1, 0)});
+                break;
+            case builtin::add_color:
+            case builtin::add_vec3:
+                floats({f(0, 0) + f(1, 0), f(0, 1) + f(1, 1), f(0, 2) + f(1, 2)});
+                break;
+            case builtin::subtract_vec3:
+                floats({f(0, 0) - f(1, 0), f(0, 1) - f(1, 1), f(0, 2) - f(1, 2)});
+                break;
+            case builtin::multiply_color:
+                floats({f(0, 0) * f(1, 0), f(0, 1) * f(1, 1), f(0, 2) * f(1, 2)});
+                break;
+            case builtin::length:
+                floats({root_of(f(0, 0) * f(0, 0) + f(0, 1) * f(0, 1) + f(0, 2) * f(0, 2))});
+                break;
+            case builtin::abs:
+                floats({f(0, 0) < 0.0f ? -f(0, 0) : f(0, 0)});
+                break;
+            case builtin::negate:
+                floats({-f(0, 0)});
+                break;
+            case builtin::divide:
+                floats({f(0, 0) / f(1, 0)});
+                break;
+            case builtin::min:
+                floats({f(1, 0) < f(0, 0) ? f(1, 0) : f(0, 0)});
+                break;
+            case builtin::max:
+                floats({f(0, 0) < f(1, 0) ? f(1, 0) : f(0, 0)});
+                break;
+            case builtin::clamp:
+            {
+                auto const low = f(0, 0) < f(1, 0) ? f(1, 0) : f(0, 0);
+                floats({f(2, 0) < low ? f(2, 0) : low});
+                break;
+            }
+            case builtin::mix:
+                floats({f(0, 0) * (1.0f - f(2, 0)) + f(1, 0) * f(2, 0)});
+                break;
+            case builtin::less_equal:
+                result.leaves.push_back(scalar::of(f(0, 0) <= f(1, 0)));
+                break;
+            case builtin::greater:
+                result.leaves.push_back(scalar::of(f(0, 0) > f(1, 0)));
+                break;
+            case builtin::greater_equal:
+                result.leaves.push_back(scalar::of(f(0, 0) >= f(1, 0)));
+                break;
+            case builtin::not_equal:
+                result.leaves.push_back(scalar::of(f(0, 0) != f(1, 0)));
+                break;
+            case builtin::less_equal_int:
+                result.leaves.push_back(scalar::of(i32(i(0)) <= i32(i(1))));
+                break;
+            case builtin::greater_int:
+                result.leaves.push_back(scalar::of(i32(i(0)) > i32(i(1))));
+                break;
+            case builtin::greater_equal_int:
+                result.leaves.push_back(scalar::of(i32(i(0)) >= i32(i(1))));
+                break;
+            case builtin::not_equal_int:
+                result.leaves.push_back(scalar::of(i(0) != i(1)));
                 break;
             case builtin::multiply:
                 floats({f(0, 0) * f(1, 0)});

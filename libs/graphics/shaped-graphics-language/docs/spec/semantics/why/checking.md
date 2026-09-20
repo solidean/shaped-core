@@ -66,7 +66,41 @@ The [binding effects](../../incubator/binding-effects.md) idea has the second, l
 
 Whether a local may shadow a module-level name is open in [scopes](../../incubator/scopes.md).
 Both answers are easy to give later and neither is easy to take back, so the tracer gives none.
-A second local of one name inside a function is a plain `duplicate-declaration`, since a function body is one scope today.
+A second local of one name in one block is a plain `duplicate-declaration`.
+
+## CHK-110
+
+Whether an inner block may shadow is open in [scopes](../../incubator/scopes.md), like the module-level case of CHK-54.
+Two blocks beside each other share nothing, so the same name in both is fine: that is no shadowing, and guard clauses need it.
+
+## CHK-115
+
+`..=` would be `end + 1` in the flat tree's `for`, which wraps where `end` is the last `int`.
+A rule that is wrong for one value is no rule, so the closed range waits for a flat `for` that can say it.
+
+## CHK-116
+
+A function evaluates its arguments before it runs, and `a and b` must leave `b` alone where `a` is false.
+So no `@operator` function can stand behind the two, and `not` joins them because the flat tree has a node for it.
+
+## CHK-124
+
+`while 0 < 1:` runs forever, and the rule still says that what follows it is reachable.
+A rule that looked at the condition would make a program's validity depend on what the compiler can prove constant, and that moves with every release.
+`loop:` is how a program says "forever", and the rule takes it at its word.
+
+## CHK-129
+
+The language's model is that a body is checked where it is inlined, since a generic has no types before that.
+No function is generic yet, so a body means the same at every call, and checking it once gives the same answers.
+Checking it once is also what reports an error in a function nobody calls, and what reports it one time where three calls would report it three times.
+Once generics arrive, a generic body is checked per inline and every other body stays here.
+
+## CHK-131
+
+A binding is a global of the target, so a callee reads it without being handed it.
+The list on the caller is what keeps that visible: an entry point's list names everything its shader touches, and the pipeline layout follows from that list alone.
+The check is per call and needs no walk: each caller answers for its callees, so the chain closes by induction.
 
 ## CHK-72
 

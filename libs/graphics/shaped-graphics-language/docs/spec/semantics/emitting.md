@@ -19,6 +19,7 @@ Back to the [semantics](_index.md); the reasons are in [why/emitting.md](why/emi
 * **EMIT-6** Nothing in the text of one entry point depends on the text of another ([why](why/emitting.md#emit-6)).
 * **EMIT-7** An emitter reads the flat tree, the module's types and the module's bindings, and never an AST.
 * **EMIT-65** An emitter reads a tree in the [core form](legalization.md#the-core-form), and it transforms nothing: the legalizer runs in front of it.
+* **EMIT-72** Emitting an entry point of a checked module legalizes it first, since the check pass writes the structured form; a tree handed over by itself is core, or it is EMIT-66.
 * **EMIT-8** Emitting is deterministic: one checked module, one entry point and one target give one text.
 
 ## Errors
@@ -123,9 +124,11 @@ struct pixel_input
 * **EMIT-48** An immutable local is a named constant: `const T name = value;` in HLSL and `let name: T = value;` in WGSL.
 * **EMIT-49** A float literal is the shortest decimal text that reads back as its value, always with a decimal point, and without a suffix.
 * **EMIT-50** A literal that is infinite or not a number is `non-finite-literal`.
-* **EMIT-51** `add` is `+`, and `multiply` and `scale_color` are `*`; parentheses follow the tree, and an operand of equal precedence on the right keeps them.
-* **EMIT-52** `normalize`, `dot` and `saturate` are calls of the target's function of that name.
-* **EMIT-53** A construction of a builtin type is a call of the target's type: `float3(x, y, z)`, `vec3f(x, y, z)`.
+* **EMIT-51** An `@operator` builtin is its operator: `+`, `-`, `*`, `/`, the six comparisons, and the prefix `-`.
+  Parentheses follow the tree, and an operand of equal precedence on the right keeps them.
+* **EMIT-52** Every other builtin function is a call of the target's function of that name, and `mix` is `lerp` in HLSL.
+* **EMIT-53** A construction of a builtin type is a call of the target's type, on one line: `float3(x, y, z)`, `vec3f(x, y, z)`.
+* **EMIT-73** The operand of a prefix `-` that is no name, call or member stands in parentheses, so `-(-0.4)` never reads as a decrement.
 * **EMIT-54** A construction of a struct of the program is `name(a, b)` in WGSL.
 * **EMIT-55** In HLSL it is a local that is declared and then assigned member by member; a returned one is minted from `result` ([why](why/emitting.md#emit-55)).
 * **EMIT-68** Control flow is written by [the table of the core form](legalization.md#the-table), and a nested body is one level deeper.

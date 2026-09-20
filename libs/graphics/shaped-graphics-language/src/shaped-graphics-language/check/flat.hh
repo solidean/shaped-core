@@ -17,7 +17,7 @@
 /// Every node keeps the AST node it came from and the chain of call sites it was inlined through.
 ///
 /// One data structure holds two forms.
-/// The STRUCTURED form is what inlining produces: labeled blocks that may be expressions, and `leave` from any depth.
+/// The STRUCTURED form is what the check pass writes: labeled blocks that may be expressions, and `leave` from any depth.
 /// The CORE form is the subset every target prints one to one, and `find_core_violation` (legalize/core.hh) defines it.
 /// `legalize` (legalize/legalize.hh) takes the first to the second, and `interpret` (interpret/interpret.hh) runs both.
 
@@ -66,9 +66,9 @@ enum class sgl::check::local_kind : sgl::u8
 {
     /// The entry point's own parameter, which an emitter declares in the signature.
     parameter,
-    /// Introduced by a `let`.
+    /// Introduced by a `let`, or by a parameter of an inlined call whose argument had to be bound.
     let,
-    /// Introduced by a `var`: mutable, and the only kind of the program's own that an assignment may name.
+    /// Introduced by a `let mut`: mutable, and the only kind of the program's own that an assignment may name.
     var,
     /// The counter of a `for`, which its loop declares and which no statement assigns.
     index,
@@ -349,7 +349,7 @@ struct sgl::check::flat_break
 };
 
 /// Leaves the entry point with its result, from any depth.
-/// Core form; in a structured tree it means `leave $root value`.
+/// Core form; in a structured tree it means `leave $root value`, and it is how the check pass spells the entry point's own `return`.
 struct sgl::check::flat_return
 {
     flat_expr_id value = flat_expr_id::none;

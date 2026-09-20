@@ -179,7 +179,8 @@ struct writer
         }
 
         auto const arguments = p.e.at(x.node.as<flat_construct>().arguments);
-        auto const is_split = is_broken && arguments.size() > 1;
+        // a vector stays on its line: its arguments are short, and `vec3f(0.45, 0.8, -0.4)` is how a shader reads
+        auto const is_split = is_broken && arguments.size() > 1 && !is_builtin_type(p.m, x.type);
         auto text = cc::string(type_text(p, d, x.type));
         text += "(";
         for (auto i = isize(0); i < arguments.size(); ++i)
@@ -226,19 +227,41 @@ struct writer
         case builtin::scale_color:
         case builtin::multiply:
         case builtin::multiply_int:
+        case builtin::multiply_color:
+        case builtin::scale_vec3:
             return binary("*", level::multiplicative, expr(arguments[0]), expr(arguments[1]));
+        case builtin::divide:
+            return binary("/", level::multiplicative, expr(arguments[0]), expr(arguments[1]));
         case builtin::add:
         case builtin::add_int:
+        case builtin::add_color:
+        case builtin::add_vec3:
             return binary("+", level::additive, expr(arguments[0]), expr(arguments[1]));
         case builtin::subtract:
         case builtin::subtract_int:
+        case builtin::subtract_vec3:
             return binary("-", level::additive, expr(arguments[0]), expr(arguments[1]));
+        case builtin::negate:
+            // parenthesized whenever it is no name: `--x` is a decrement in every C-like target
+            return {.text = cc::format("-{}", wrapped(expr(arguments[0]), level::primary)), .binds = level::unary};
         case builtin::less:
         case builtin::less_int:
             return binary("<", level::comparison, expr(arguments[0]), expr(arguments[1]));
+        case builtin::less_equal:
+        case builtin::less_equal_int:
+            return binary("<=", level::comparison, expr(arguments[0]), expr(arguments[1]));
+        case builtin::greater:
+        case builtin::greater_int:
+            return binary(">", level::comparison, expr(arguments[0]), expr(arguments[1]));
+        case builtin::greater_equal:
+        case builtin::greater_equal_int:
+            return binary(">=", level::comparison, expr(arguments[0]), expr(arguments[1]));
         case builtin::equal:
         case builtin::equal_int:
             return binary("==", level::comparison, expr(arguments[0]), expr(arguments[1]));
+        case builtin::not_equal:
+        case builtin::not_equal_int:
+            return binary("!=", level::comparison, expr(arguments[0]), expr(arguments[1]));
         default:
             break;
         }

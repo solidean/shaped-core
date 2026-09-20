@@ -57,7 +57,13 @@ i32 arity_of(builtin b)
     {
     case builtin::normalize:
     case builtin::saturate:
+    case builtin::negate:
+    case builtin::length:
+    case builtin::abs:
         return 1;
+    case builtin::clamp:
+    case builtin::mix:
+        return 3;
     case builtin::dot:
     case builtin::transform_position:
     case builtin::transform_direction:
@@ -72,6 +78,22 @@ i32 arity_of(builtin b)
     case builtin::multiply_int:
     case builtin::less_int:
     case builtin::equal_int:
+    case builtin::divide:
+    case builtin::less_equal:
+    case builtin::greater:
+    case builtin::greater_equal:
+    case builtin::not_equal:
+    case builtin::less_equal_int:
+    case builtin::greater_int:
+    case builtin::greater_equal_int:
+    case builtin::not_equal_int:
+    case builtin::add_color:
+    case builtin::multiply_color:
+    case builtin::add_vec3:
+    case builtin::subtract_vec3:
+    case builtin::scale_vec3:
+    case builtin::min:
+    case builtin::max:
         return 2;
     default:
         return -1;

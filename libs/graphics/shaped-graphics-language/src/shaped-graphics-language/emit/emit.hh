@@ -82,6 +82,7 @@ namespace sgl::emit
 /// The text of ONE entry point for one target: that entry point, and exactly the types and bindings it needs.
 ///
 /// `entry_point` is a position in `m.entry_points`.
+/// The check pass writes the structured form, so the tree goes through `check::legalize` first.
 /// Stages compile apart, so nothing in the text depends on the text of another entry point.
 /// An address is a position: member i of an edge struct is location i, counted over the members without `@position`.
 ///

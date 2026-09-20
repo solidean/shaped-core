@@ -14,33 +14,16 @@ TEST("sgl check - the cube checks without a diagnostic, and its whole dump is pi
 {
     auto const checked = check_sources(read_prelude(), read_cube());
     CHECK(reports_of(checked) == "");
-    CHECK(sgl::check::dump(checked.module)
-          == "(struct float builtin opaque)\n"
-             "(struct float3 builtin (x : float) (y : float) (z : float))\n"
-             "(struct float4 builtin (x : float) (y : float) (z : float) (w : float))\n"
-             "(struct vec3 builtin (x : float) (y : float) (z : float))\n"
-             "(struct pos3 builtin (x : float) (y : float) (z : float))\n"
-             "(struct hpos4 builtin (x : float) (y : float) (z : float) (w : float))\n"
-             "(struct mat4 builtin opaque)\n"
-             "(struct int builtin opaque)\n"
-             "(struct bool builtin opaque)\n"
-             "(fun normalize builtin pure (v : vec3) -> vec3)\n"
-             "(fun dot builtin pure (a : vec3) (b : vec3) -> float)\n"
-             "(fun saturate builtin pure (x : float) -> float)\n"
-             "(fun transform_position builtin pure operator:* (m : mat4) (p : pos3) -> hpos4)\n"
-             "(fun transform_direction builtin pure operator:* (m : mat4) (v : vec3) -> vec3)\n"
-             "(fun scale_color builtin pure operator:* (c : float3) (s : float) -> float3)\n"
-             "(fun multiply builtin pure operator:* (a : float) (b : float) -> float)\n"
-             "(fun add builtin pure operator:+ (a : float) (b : float) -> float)\n"
-             "(fun subtract builtin pure operator:- (a : float) (b : float) -> float)\n"
-             "(fun less builtin pure operator:< (a : float) (b : float) -> bool)\n"
-             "(fun equal builtin pure operator:== (a : float) (b : float) -> bool)\n"
-             "(fun add_int builtin pure operator:+ (a : int) (b : int) -> int)\n"
-             "(fun subtract_int builtin pure operator:- (a : int) (b : int) -> int)\n"
-             "(fun multiply_int builtin pure operator:* (a : int) (b : int) -> int)\n"
-             "(fun less_int builtin pure operator:< (a : int) (b : int) -> bool)\n"
-             "(fun equal_int builtin pure operator:== (a : int) (b : int) -> bool)\n"
-             "(binding constants inline (view_projection : mat4))\n"
+    // The prelude's symbols stand in front, and the prelude grows: what is pinned whole is the program's share.
+    auto const dump = sgl::check::dump(checked.module);
+    CHECK(dump.starts_with("(struct float builtin opaque)\n"
+                           "(struct float3 builtin (x : float) (y : float) (z : float))\n"));
+    CHECK(dump.contains("(fun dot builtin pure (a : vec3) (b : vec3) -> float)\n"));
+    CHECK(dump.contains("(fun transform_position builtin pure operator:* (m : mat4) (p : pos3) -> hpos4)\n"));
+    auto const own = dump.find("(binding constants");
+    REQUIRE(own >= 0);
+    CHECK(cc::string_view(dump).subview({.start = own, .end = dump.size()})
+          == "(binding constants inline (view_projection : mat4))\n"
              "(struct cube_vertex vertex (position : pos3) (normal : vec3) (color : float3))\n"
              "(struct target pixel (color : float4))\n"
              "(struct pixel_input (position{@position} : hpos4) (normal : vec3) (color : float3))\n"

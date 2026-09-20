@@ -69,21 +69,21 @@ TEST("sgl emit - a local that is reserved in one target gets its underscore ther
 TEST("sgl emit - a name that only MSL reserves is renamed in MSL and nowhere else")
 {
     auto const source = with_edges("struct device:\n"
-                                   "    length: float\n"
+                                   "    fract: float\n"
                                    "\n"
                                    "@pixel fun main_ps(p: pixel_input) -> frame:\n"
                                    "    let kernel = device(0.5)\n"
                                    "    return {\n"
-                                   "        color = float4(kernel.length, kernel.length, kernel.length, 1.0)\n"
+                                   "        color = float4(kernel.fract, kernel.fract, kernel.fract, 1.0)\n"
                                    "    }\n");
 
     auto const msl = text_of(source, target::msl);
-    CHECK(msl.contains("struct device_\n{\n    float length_;\n};\n"));
-    CHECK(msl.contains("    device_ kernel_;\n    kernel_.length_ = 0.5;\n"));
-    CHECK(msl.contains("float4(kernel_.length_, kernel_.length_, kernel_.length_, 1.0);\n"));
+    CHECK(msl.contains("struct device_\n{\n    float fract_;\n};\n"));
+    CHECK(msl.contains("    device_ kernel_;\n    kernel_.fract_ = 0.5;\n"));
+    CHECK(msl.contains("float4(kernel_.fract_, kernel_.fract_, kernel_.fract_, 1.0);\n"));
 
     auto const wgsl = text_of(source, target::wgsl);
-    CHECK(wgsl.contains("struct device {\n    length: f32,\n}\n"));
+    CHECK(wgsl.contains("struct device {\n    fract: f32,\n}\n"));
     CHECK(wgsl.contains("    let kernel: device = device(0.5);\n"));
 }
 

@@ -3,6 +3,7 @@
 #include <clean-core/string/format.hh>
 #include <shaped-graphics-language/emit/impl/dialect.hh>
 #include <shaped-graphics-language/emit/impl/plan.hh>
+#include <shaped-graphics-language/legalize/legalize.hh>
 
 namespace
 {
@@ -98,7 +99,7 @@ sgl::emit::emitted_text sgl::emit::emit(check::checked_module const& m, sgl::isi
         return result;
     }
 
-    return emit_entry_point(m, m.entry_points[entry_point], t);
+    return emit_entry_point(m, check::legalize(m, m.entry_points[entry_point]), t);
 }
 
 sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const& m,

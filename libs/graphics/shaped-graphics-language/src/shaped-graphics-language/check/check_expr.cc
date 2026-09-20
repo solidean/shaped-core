@@ -9,6 +9,7 @@ using namespace sgl::check::impl;
 namespace
 {
 constexpr auto error_type = checked_module::error_type;
+constexpr auto nothing_type = checked_module::nothing_type;
 
 local_name const* find_local(function_scope const& scope, cc::string_view name)
 {
@@ -19,7 +20,7 @@ local_name const* find_local(function_scope const& scope, cc::string_view name)
 }
 } // namespace
 
-// ---- bodies and statements ------------------------------------------------------------------------------------------
+// ---- bodies ---------------------------------------------------------------------------------------------------------
 
 void checker::check_body(symbol_id id)
 {
@@ -44,118 +45,20 @@ void checker::check_body(symbol_id id)
 
     auto const errors_before = error_count();
 
+    auto ending = check_statements(scope, f.body.statements);
     if (ast::is_valid(f.body.value))
-        check_return(scope, span_of(file, f.body.value), f.body.value);
-
-    auto const statements = ast.at(f.body.statements);
-    for (auto const s : statements)
-        check_stmt(scope, s);
-
-    if (!statements.empty())
     {
-        auto const* const last = ast.at(statements.back()).node.try_as<ast::expr_stmt>();
-        auto const is_return
-            = last != nullptr && ast::is_valid(last->value) && ast.at(last->value).node.is<ast::return_expr>();
-        if (!is_return && !ast.at(statements.back()).node.is<ast::invalid_stmt>())
-            unsupported(file, span_of(file, statements.back()), "a body that does not end in return");
+        check_return(scope, span_of(file, f.body.value), f.body.value);
+        ending = flow::exits;
     }
+    // a block without a statement was reported where it was parsed
+    auto const has_statements = !f.body.statements.empty() || ast::is_valid(f.body.value);
+    if (has_statements && ending == flow::falls_through && info.result != nothing_type && info.result != error_type)
+        report(diagnostic_kind::missing_return, file, f.name,
+               cc::format("{} returns {}, and a path through its body ends without a return", out.at(id).name,
+                          out.name_of(info.result)));
 
     notes[out.at(id).info].is_body_sound = error_count() == errors_before;
-}
-
-void checker::check_stmt(function_scope& scope, ast::stmt_id stmt)
-{
-    auto const file = scope.file;
-    auto const& s = ast_of(file).at(stmt);
-    auto const where = span_of(file, stmt);
-    judge_attributes(file, s.attributes, {}, "a statement");
-
-    s.node.visit([&](ast::let_stmt const& let) { check_let(scope, stmt, let); },
-                 [&](ast::expr_stmt const& e)
-                 {
-                     auto const* const r
-                         = ast::is_valid(e.value) ? ast_of(file).at(e.value).node.try_as<ast::return_expr>() : nullptr;
-                     if (r != nullptr)
-                         check_return(scope, where, r->value);
-                     else if (check_expr(scope, e.value) != error_type)
-                         unsupported(file, where, "an expression statement");
-                 },
-                 [&](ast::assign_stmt const&) { unsupported(file, where, "assignment"); }, [&](ast::if_stmt const&)
-                 { unsupported(file, where, "if"); }, [&](ast::for_stmt const&) { unsupported(file, where, "for"); },
-                 [&](ast::while_stmt const&) { unsupported(file, where, "while"); },
-                 [&](ast::assert_stmt const&) { unsupported(file, where, "assert"); },
-                 [&](ast::print_stmt const&) { unsupported(file, where, "print"); }, [&](ast::decl_stmt const&)
-                 { unsupported(file, where, "a declaration inside a function"); }, [&](ast::invalid_stmt const&) {});
-}
-
-void checker::check_let(function_scope& scope, ast::stmt_id id, ast::let_stmt const& let)
-{
-    auto const file = scope.file;
-    auto const& ast = ast_of(file);
-    auto const where = span_of(file, id);
-
-    if (let.is_mut)
-        unsupported(file, where, "let mut");
-
-    auto type = error_type;
-    if (ast::is_valid(let.value))
-        type = check_expr(scope, let.value);
-    else
-        unsupported(file, where, "a let without a value");
-
-    if (ast::is_valid(let.type))
-    {
-        auto const declared = resolve_type(file, let.type);
-        if (type != error_type && declared != error_type && type != declared)
-            report(diagnostic_kind::type_mismatch, file, span_of(file, let.value),
-                   cc::format("expected {}, got {}", out.name_of(declared), out.name_of(type)));
-        type = declared;
-    }
-
-    if (!ast::is_valid(let.pattern))
-        return;
-    auto const* const n = ast.at(let.pattern).node.try_as<ast::name>();
-    if (n == nullptr)
-    {
-        if (!ast.at(let.pattern).node.is<ast::invalid_expr>())
-            unsupported(file, span_of(file, let.pattern), "a pattern in let");
-        return;
-    }
-
-    auto const name = text_of(file, n->where);
-    if (find_local(scope, name) != nullptr)
-    {
-        report(diagnostic_kind::duplicate_declaration, file, n->where, name);
-        return;
-    }
-    if (names.contains(name))
-        unsupported(file, n->where, "a local that shadows a module-level name");
-
-    auto const self = target{.kind = target_kind::local, .index = i32(id)};
-    set_type(file, let.pattern, type);
-    set_target(file, let.pattern, self);
-    // only now: the value of `let x = x` does not see the `x` it declares
-    scope.locals.push_back({.name = name, .where = self, .type = type});
-}
-
-void checker::check_return(function_scope& scope, source_span where, ast::expr_id value)
-{
-    auto const file = scope.file;
-    if (!ast::is_valid(value))
-    {
-        unsupported(file, where, "a return without a value");
-        return;
-    }
-    if (ast_of(file).at(value).node.is<ast::object>())
-    {
-        convert_object(scope, value, scope.result);
-        return;
-    }
-
-    auto const type = check_expr(scope, value);
-    if (type != error_type && scope.result != error_type && type != scope.result)
-        report(diagnostic_kind::type_mismatch, file, span_of(file, value),
-               cc::format("expected {}, got {}", out.name_of(scope.result), out.name_of(type)));
 }
 
 void checker::convert_object(function_scope& scope, ast::expr_id object, type_id to)
@@ -247,15 +150,19 @@ type_id checker::check_expr(function_scope& scope, ast::expr_id expr)
         [&](ast::index const&) { return not_yet("a subscript or type arguments"); },
         [&](ast::tuple const&) { return not_yet("a tuple"); }, [&](ast::array const&) { return not_yet("an array"); },
         [&](ast::object const&) { return not_yet("an object with no struct to convert to"); },
-        [&](ast::comparison_chain const&) { return not_yet("a comparison chain"); }, [&](ast::cast const&)
+        [&](ast::comparison_chain const& chain) { return check_chain(scope, expr, chain); }, [&](ast::cast const&)
         { return not_yet("as"); }, [&](ast::membership const&) { return not_yet("in"); }, [&](ast::ascription const&)
         { return not_yet("a type ascription"); }, [&](ast::range const&) { return not_yet("a range"); },
         [&](ast::lambda const&) { return not_yet("a lambda"); }, [&](ast::case_expr const&) { return not_yet("case"); },
-        [&](ast::loop_expr const&) { return not_yet("loop"); }, [&](ast::return_expr const&)
-        { return not_yet("return as a value"); }, [&](ast::yield_expr const&) { return not_yet("yield"); },
-        [&](ast::break_expr const&) { return not_yet("break"); }, [&](ast::continue_expr const&)
-        { return not_yet("continue"); }, [&](ast::struct_type const&) { return not_yet("a type as a value"); },
-        [&](ast::function_type const&) { return not_yet("a type as a value"); },
+        [&](ast::loop_expr const& loop)
+        {
+            auto has_break = false;
+            return check_loop(scope, expr, loop, true, has_break);
+        },
+        [&](ast::return_expr const&) { return not_yet("return as a value"); }, [&](ast::yield_expr const&)
+        { return not_yet("yield"); }, [&](ast::break_expr const&) { return not_yet("break as a value"); },
+        [&](ast::continue_expr const&) { return not_yet("continue as a value"); }, [&](ast::struct_type const&)
+        { return not_yet("a type as a value"); }, [&](ast::function_type const&) { return not_yet("a type as a value"); },
         // reserved, and reported by the AST pass
         [&](ast::with_bindings const&) { return error_type; });
 
@@ -282,8 +189,12 @@ type_id checker::check_literal(function_scope& scope, ast::expr_id id, ast::lite
     switch (classify_number(text))
     {
     case number_class::plain_integer:
-        unsupported(file, where, "an integer literal, which the pass does not type yet");
-        return error_type;
+        if (!parse_plain_integer(text).has_value())
+        {
+            unsupported(file, where, "an integer literal that does not fit an int");
+            return error_type;
+        }
+        return type_of_builtin(builtin::scalar_int, file, where);
     case number_class::other:
         unsupported(file, where, "a number literal with a prefix, a suffix or a p exponent");
         return error_type;
@@ -474,17 +385,12 @@ type_id checker::check_call(function_scope& scope, ast::expr_id id, ast::call co
     auto const& ast = ast_of(file);
     auto const where = span_of(file, id);
 
-    if (call.is_short_circuit)
-    {
-        // An eager flat call would evaluate the second operand, which `and` and `or` must not.
-        (void)check_arguments(scope, call.arguments, false);
-        unsupported(file, where, "a short-circuit operator");
-        return error_type;
-    }
-
     if (sgl::is_valid(call.op))
     {
         auto const spelling = text_of(file, file_of(file).at(call.op).where);
+        // `and`, `or` and `not` are the language's own: no function could leave an operand unevaluated
+        if (call.is_short_circuit || spelling == "not")
+            return check_logical(scope, id, call);
         auto const arguments = check_arguments(scope, call.arguments, false);
         auto const* const found = operators.get_ptr(spelling);
         auto const none = cc::span<symbol_id const>();
@@ -635,7 +541,136 @@ type_id checker::resolve_overload(function_scope& scope,
     auto const self = target{.kind = target_kind::overload, .symbol = chosen};
     set_target(file, id, self);
     set_target(file, callee, self);
-    if (out.at(chosen).intrinsic == builtin::none)
-        unsupported(file, where, "a call of a function that is no @builtin, which needs the inliner");
+    if (out.at(chosen).intrinsic != builtin::none)
+        return out.functions[out.at(chosen).info].result;
+
+    // A call of a function of the program is inlined, so it is an edge recursion is looked for along.
+    calls.push_back({.caller = scope.function, .callee = chosen, .file = file, .where = where});
+
+    // Bindings are an effect: what the callee reads, the caller has to list, and so on up to the entry point.
+    auto const listed = out.at(out.functions[out.at(scope.function).info].bindings);
+    for (auto const needed : out.at(out.functions[out.at(chosen).info].bindings))
+    {
+        auto is_listed = false;
+        for (auto const l : listed)
+            is_listed = is_listed || l == needed;
+        if (!is_listed)
+            report(diagnostic_kind::binding_not_listed, file, where,
+                   cc::format("{} needs {}, which is not in the binding list of {}", out.at(chosen).name,
+                              out.at(needed).name, out.at(scope.function).name));
+    }
     return out.functions[out.at(chosen).info].result;
+}
+
+type_id checker::check_logical(function_scope& scope, ast::expr_id id, ast::call const& call)
+{
+    auto const file = scope.file;
+    auto const where = span_of(file, id);
+    auto const spelling = text_of(file, file_of(file).at(call.op).where);
+    auto const arguments = check_arguments(scope, call.arguments, false);
+    if (arguments.is_poisoned)
+        return error_type;
+
+    auto const bool_type = type_of_builtin(builtin::boolean, file, where);
+    auto is_match = arguments.types.size() == (spelling == "not" ? 1 : 2);
+    for (auto const type : arguments.types)
+        is_match = is_match && type == bool_type;
+    if (!is_match && bool_type != error_type)
+        report(diagnostic_kind::no_matching_overload, file, where,
+               signature_text(cc::format("operator {}", spelling), arguments.types));
+    return bool_type;
+}
+
+type_id checker::check_chain(function_scope& scope, ast::expr_id id, ast::comparison_chain const& chain)
+{
+    auto const file = scope.file;
+    auto const& ast = ast_of(file);
+    auto const where = span_of(file, id);
+    auto const operands = ast.at(chain.operands);
+    auto const operators = ast.at(chain.operators);
+
+    auto types = cc::vector<type_id>();
+    for (auto const operand : operands)
+        types.push_back(check_expr(scope, operand));
+
+    auto const bool_type = type_of_builtin(builtin::boolean, file, where);
+    for (auto i = isize(0); i < operators.size() && i + 1 < types.size(); ++i)
+    {
+        if (types[i] == error_type || types[i + 1] == error_type)
+            continue;
+        type_id const pair[] = {types[i], types[i + 1]};
+        auto const spelling = text_of(file, file_of(file).at(operators[i]).where);
+        auto const chosen = resolve_operator(file, where, spelling, pair);
+        if (is_valid(chosen) && out.functions[out.at(chosen).info].result != bool_type && bool_type != error_type)
+            report(diagnostic_kind::type_mismatch, file, where,
+                   cc::format("a comparison in a chain is a bool, and operator {} gives {}", spelling,
+                              out.name_of(out.functions[out.at(chosen).info].result)));
+    }
+    return bool_type;
+}
+
+symbol_id checker::find_operator(cc::string_view spelling, cc::span<type_id const> types) const
+{
+    auto const* const found = operators.get_ptr(spelling);
+    if (found == nullptr)
+        return symbol_id::none;
+    auto result = symbol_id::none;
+    for (auto const candidate : *found)
+    {
+        if (out.at(candidate).state != symbol_state::checked)
+            continue;
+        auto const parameters = out.at(out.functions[out.at(candidate).info].parameters);
+        auto is_match = parameters.size() == types.size();
+        for (auto i = isize(0); is_match && i < parameters.size(); ++i)
+            is_match = parameters[i].type == types[i];
+        if (is_match && is_valid(result))
+            return symbol_id::none;
+        if (is_match)
+            result = candidate;
+    }
+    return result;
+}
+
+symbol_id checker::resolve_operator(i32 file, source_span where, cc::string_view spelling, cc::span<type_id const> types)
+{
+    auto matches = 0;
+    auto is_silent = false;
+    auto chosen = symbol_id::none;
+    if (auto const* const found = operators.get_ptr(spelling))
+        for (auto const candidate : *found)
+        {
+            if (demand(candidate, file, where) != symbol_state::checked)
+            {
+                is_silent = true;
+                continue;
+            }
+            auto const parameters = out.at(out.functions[out.at(candidate).info].parameters);
+            auto is_match = parameters.size() == types.size();
+            for (auto i = isize(0); is_match && i < parameters.size(); ++i)
+                is_match = parameters[i].type == types[i];
+            if (is_match)
+            {
+                ++matches;
+                chosen = candidate;
+            }
+        }
+
+    auto const text = signature_text(cc::format("operator {}", spelling), types);
+    if (matches == 0)
+    {
+        if (!is_silent)
+            report(diagnostic_kind::no_matching_overload, file, where, text);
+        return symbol_id::none;
+    }
+    if (matches > 1)
+    {
+        report(diagnostic_kind::ambiguous_overload, file, where, cc::format("{} has {} candidates", text, matches));
+        return symbol_id::none;
+    }
+    if (out.at(chosen).intrinsic == builtin::none)
+    {
+        unsupported(file, where, "an operator of the program's own where no call is written");
+        return symbol_id::none;
+    }
+    return chosen;
 }

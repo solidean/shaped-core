@@ -68,6 +68,18 @@ cc::optional<f64> impl::parse_plain_float(cc::string_view text)
     return cc::from_string<f64>(plain);
 }
 
+cc::optional<i32> impl::parse_plain_integer(cc::string_view text)
+{
+    auto plain = cc::string();
+    for (auto const c : text)
+        if (c != '\'' && c != '+')
+            plain += c;
+    auto const value = cc::from_string<i64>(plain);
+    if (!value.has_value() || value.value() < -2147483647 - 1 || value.value() > 2147483647)
+        return cc::nullopt;
+    return i32(value.value());
+}
+
 // ---- shared helpers -------------------------------------------------------------------------------------------------
 
 source_span checker::span_of(i32 file, form_id form) const
@@ -158,6 +170,7 @@ void checker::set_target(i32 file, ast::expr_id expr, target where)
 void checker::run()
 {
     out.types.push_back({.kind = type_kind::error});
+    out.types.push_back({.kind = type_kind::nothing});
     for (auto file = i32(0); file < i32(files.size()); ++file)
     {
         auto const count = ast_of(file).exprs.size();
@@ -175,11 +188,13 @@ void checker::run()
         if (out.symbols[i].state == symbol_state::untouched)
             compile(symbol_id(i));
 
-    // Nothing demands a body yet, since no return type is inferred and no call is inlined.
-    // So bodies are checked once every signature is known, and a function may call one declared below it.
+    // Nothing demands a body, since no return type is inferred and a call needs a signature only.
+    // So each body is checked once, after every signature is known, and a function may call one declared below it.
     for (auto i = isize(0); i < out.symbols.size(); ++i)
         if (out.symbols[i].kind == symbol_kind::function && out.symbols[i].state == symbol_state::checked)
             check_body(symbol_id(i));
+
+    find_recursion();
 
     for (auto i = isize(0); i < out.symbols.size(); ++i)
         if (out.symbols[i].kind == symbol_kind::function && out.symbols[i].state == symbol_state::checked)

@@ -40,6 +40,28 @@ enum class sgl::check::builtin : sgl::u8
     multiply_int,
     less_int,
     equal_int,
+
+    divide,
+    negate,
+    less_equal,
+    greater,
+    greater_equal,
+    not_equal,
+    less_equal_int,
+    greater_int,
+    greater_equal_int,
+    not_equal_int,
+    add_color,
+    multiply_color,
+    add_vec3,
+    subtract_vec3,
+    scale_vec3,
+    min,
+    max,
+    clamp,
+    mix,
+    length,
+    abs,
 };
 
 namespace sgl::check

@@ -30,7 +30,7 @@ struct sgl::check::checked_module
 {
     /// The module-level declarations of every file, in file order and then in source order.
     cc::vector<symbol> symbols;
-    /// Canonical and deduplicated; `types[0]` is the error type.
+    /// Canonical and deduplicated; `types[0]` is the error type and `types[1]` the type of no value.
     cc::vector<type_info> types;
     /// The fields of every struct and the members of every binding.
     cc::vector<member_info> members;
@@ -50,6 +50,8 @@ struct sgl::check::checked_module
     cc::vector<located_diagnostic> diagnostics;
 
     static constexpr type_id error_type = type_id(0);
+    /// `types[1]`: what a function without a return type returns.
+    static constexpr type_id nothing_type = type_id(1);
 
     [[nodiscard]] symbol const& at(symbol_id id) const { return symbols[index_of(id)]; }
     [[nodiscard]] type_info const& at(type_id id) const { return types[index_of(id)]; }
@@ -70,6 +72,8 @@ struct sgl::check::checked_module
     [[nodiscard]] cc::string_view name_of(type_id id) const
     {
         auto const& t = at(id);
+        if (t.kind == type_kind::nothing)
+            return "nothing";
         return t.kind == type_kind::structure ? cc::string_view(at(t.symbol).name) : cc::string_view("<error>");
     }
 

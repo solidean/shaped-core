@@ -34,3 +34,10 @@ Every `once` is one more construct that a leave or a continue from inside may ha
 Guard clauses are what inlined code is made of: `if not valid => return 0` at the top of a function is a leave in tail position.
 Taking those first means the common shape costs nothing at all, and X5 is left with the exits that really are in the middle of something.
 Run the other way round, every inlined function with an early return would be a `do { … } while (false)` in the text a reader gets.
+
+## LEGAL-36
+
+`break value` is how a program writes a search, and a search is a loop inside a block: the block is the value, and the loop is what runs.
+Without the rule every such loop costs a `once` around it and a flag that crosses the loop, which is X4 and X5 for a construct the source wrote as one `break`.
+Behind a loop that ends its block nothing runs, so leaving the block from inside the loop and leaving the loop are the same exit.
+The rule says that to X3, and the text is the loop the author wrote.

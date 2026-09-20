@@ -6,7 +6,7 @@ namespace
 {
 using sgl::check::builtin;
 
-constexpr builtin last_builtin = builtin::equal_int;
+constexpr builtin last_builtin = builtin::abs;
 } // namespace
 
 cc::string_view sgl::check::to_string(builtin b)
@@ -65,6 +65,48 @@ cc::string_view sgl::check::to_string(builtin b)
         return "less_int";
     case builtin::equal_int:
         return "equal_int";
+    case builtin::divide:
+        return "divide";
+    case builtin::negate:
+        return "negate";
+    case builtin::less_equal:
+        return "less_equal";
+    case builtin::greater:
+        return "greater";
+    case builtin::greater_equal:
+        return "greater_equal";
+    case builtin::not_equal:
+        return "not_equal";
+    case builtin::less_equal_int:
+        return "less_equal_int";
+    case builtin::greater_int:
+        return "greater_int";
+    case builtin::greater_equal_int:
+        return "greater_equal_int";
+    case builtin::not_equal_int:
+        return "not_equal_int";
+    case builtin::add_color:
+        return "add_color";
+    case builtin::multiply_color:
+        return "multiply_color";
+    case builtin::add_vec3:
+        return "add_vec3";
+    case builtin::subtract_vec3:
+        return "subtract_vec3";
+    case builtin::scale_vec3:
+        return "scale_vec3";
+    case builtin::min:
+        return "min";
+    case builtin::max:
+        return "max";
+    case builtin::clamp:
+        return "clamp";
+    case builtin::mix:
+        return "mix";
+    case builtin::length:
+        return "length";
+    case builtin::abs:
+        return "abs";
     }
     CC_UNREACHABLE("unknown builtin");
 }

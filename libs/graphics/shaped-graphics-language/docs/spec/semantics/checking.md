@@ -3,7 +3,7 @@
 *Tracer: deliberately thin.*
 
 The check pass reads the ASTs of one module and resolves names, checks types and builds the flat tree of every entry point.
-It is one pass, not three, and it carries exactly what [cube.sgl](../../../tests/samples/cube.sgl) needs.
+It is one pass, not three, and it carries what [cube.sgl](../../../tests/samples/cube.sgl) and [helpers.sgl](../../../tests/samples/helpers.sgl) need.
 Back to the [semantics](_index.md); the reasons are in [why/checking.md](why/checking.md).
 
 ## The pass
@@ -111,24 +111,25 @@ struct b:
 
 ## Functions
 
-* **CHK-47** A function has typed parameters and a written return type; one without a return type is `unsupported-yet`.
+* **CHK-47** A function has typed parameters, and its return type stands behind `->`; one without returns nothing, by CHK-121.
 * **CHK-48** A function with type parameters, with `self`, or with a default argument is `unsupported-yet`, and it fails as a whole.
 * **CHK-49** A function whose signature holds the error type is failed.
 * **CHK-50** A function body is an ordered scope: a parameter is visible from the start, and a local from the statement after its `let`.
 * **CHK-51** `let name = value` introduces an immutable local of the type of `value`.
 * **CHK-52** `let name : type = value` needs `value` to be of `type`, or it is the normal error `type-mismatch`.
-* **CHK-53** A second local or parameter of one name in a function is `duplicate-declaration`.
+* **CHK-53** A second local of one name in one block is `duplicate-declaration`, and so is a local of the function's own block that has the name of a parameter.
 * **CHK-54** A local or a parameter that has the name of a module-level symbol is `unsupported-yet` ([why](why/checking.md#chk-54)).
-* **CHK-55** `let mut`, a pattern in a `let`, and a `let` without a value are `unsupported-yet`.
+* **CHK-55** A pattern in a `let` and a `let` without a value are `unsupported-yet`; `let mut` is CHK-111.
 * **CHK-56** `return value` needs `value` to be of the function's return type, or it is `type-mismatch`.
 * **CHK-57** An arrow body `=> value` is `return value`.
-* **CHK-58** A block body ends in a `return`; one that does not is `unsupported-yet`.
-* **CHK-59** Every statement other than `let` and `return` is `unsupported-yet`: assignment, `if`, `for`, `while`, `assert`, `print`, a declaration and a bare expression.
+* **CHK-58** A block body that returns a value does so on every path, by CHK-123 to CHK-125.
+* **CHK-59** `assert`, a declaration inside a function, and a call whose value nothing takes are `unsupported-yet`; every other statement is [control flow](#control-flow).
 
 ## Expressions
 
 * **CHK-60** A number literal with a DOT or an exponent, in decimal and without a suffix, is of the prelude's type `float`; a sign directly on it is part of it.
-* **CHK-61** An integer literal is `unsupported-yet`, since the pass does not type one yet, and so is a literal with a prefix, a suffix or a `p` exponent.
+* **CHK-61** A decimal literal of digits alone is of the prelude's type `int`, and a sign directly on it is part of it.
+  One that does not fit 32 bits is `unsupported-yet`, and so is a literal with a prefix, a suffix or a `p` exponent.
 * **CHK-62** A name resolves to a local or a parameter first, and to a symbol of the module after that; one that resolves to nothing is `unknown-name`.
 * **CHK-63** A name that stands for a struct, a function or a binding is no value by itself: it is `unsupported-yet`.
 * **CHK-64** `value.name` is the field `name` of the struct type of `value`; a type without that field is the normal error `unknown-member`.
@@ -144,13 +145,13 @@ struct b:
 * **CHK-71** No matching candidate is the normal error `no-matching-overload`, and its detail spells the call with its argument types.
 * **CHK-72** Two or more matching candidates are the normal error `ambiguous-overload` ([why](why/checking.md#chk-72)).
 * **CHK-73** Exactly one matching candidate is the call's target, and its return type is the call's type.
-* **CHK-74** A call of a function that is not `@builtin` resolves and has its type, and it is `unsupported-yet`, since it needs the inliner.
+* **CHK-74** A call of a function that is not `@builtin` resolves like any other, and it is inlined, by CHK-127 to CHK-132.
 * **CHK-75** A call whose callee names a struct is a call of that struct's **constructor**, which takes one argument per field, in field order.
 * **CHK-76** A constructor call always has the struct as its type; arguments that do not match the fields are `no-matching-overload`.
 * **CHK-77** A splat argument `..value` in a constructor call stands for the fields of `value`, in order; `value` is of a struct type with fields, or it is `type-mismatch`.
 * **CHK-78** A splat in any other call, a named argument, a call of a local, a method call and type arguments are `unsupported-yet`.
 * **CHK-79** A callee that names a binding is `wrong-kind-of-name`.
-* **CHK-80** `and` and `or` are `unsupported-yet`: they must not evaluate their second operand eagerly.
+* **CHK-80** `and`, `or` and `not` are no functions: CHK-116.
 
 ```sgl
 let n = normalize p.normal
@@ -183,21 +184,81 @@ let color = float4(..lit, 1.0)
 * **CHK-94** The pass has two results: side tables over the untouched ASTs, and one **flat tree** per entry point.
 * **CHK-95** The side tables give each expression its type and its **target**: a local, a parameter, a symbol, the chosen overload, a constructor, a field or a binding member.
 * **CHK-96** An expression in a type position has the type it names.
-* **CHK-97** A flat tree the pass writes holds locals, `let`, `return`, member access, binding members, constructions, literals and calls of `@builtin` functions ([why](why/checking.md#chk-97)).
-* **CHK-107** The flat tree as a data structure holds more: blocks, exits, loops, `var`, assignment and the logical operators, whose meaning is [evaluation.md](evaluation.md).
+* **CHK-97** A flat tree holds locals, structured control flow, member access, binding members, constructions, literals and calls of `@builtin` functions ([why](why/checking.md#chk-97)).
+* **CHK-107** The pass writes the **structured form**, whose meaning is [evaluation.md](evaluation.md); `once` and a bare `break` are the core form's alone.
 * **CHK-108** A flat call records whether its callee is `@pure`, so a reader of the tree needs no symbol to know whether a call has an effect.
 * **CHK-98** Every flat expression has a type, and none has the error type.
-* **CHK-99** Every flat node names the AST node it came from and the chain of call sites it was inlined through, which is empty while nothing is inlined.
-* **CHK-100** An entry point whose signature or body reported an error has no flat tree.
+* **CHK-99** Every flat node names the AST node it came from and the chain of call sites it was inlined through, outermost first.
+  The chain is empty for a node of the entry point's own body.
+* **CHK-100** An entry point whose signature or body reported an error has no flat tree, and neither has one that reaches such a function, by CHK-132.
 * **CHK-101** A flat entry point records its stage, its name, its parameter's struct, its result struct, and the bindings of its binding list in the order written.
 * **CHK-102** A returned object is a construction with one value per field, in field order.
-* **CHK-103** A splat is spread into one member access per field, and a splatted value that is no local is first bound to a temporary local, so it is evaluated once.
+* **CHK-103** A splat is spread into one member access per field.
+  A splatted value that is no local is bound to a temporary local where its first member stands, so it is evaluated once and no earlier than written.
 * **CHK-104** Every name an emitter writes comes from one **mint**, which hands out a desired name when it is free and `name_1`, `name_2`, … otherwise ([why](why/checking.md#chk-104)).
 * **CHK-105** An entry point keeps its name, and every module-level name is taken in the mint before the first local is minted.
 
+## Control flow
+
+* **CHK-109** The body of an `if` branch, of a `while`, of a `for` and of a `loop:` is a block, and a block is a scope: a local ends where its block ends.
+* **CHK-110** A local that has the name of a local of an enclosing block is `unsupported-yet` ([why](why/checking.md#chk-110)).
+* **CHK-111** `let mut name = value` introduces a mutable local; a local without `mut`, a parameter and the variable of a `for` are immutable.
+* **CHK-112** `place = value` needs `place` to be a mutable local or a member of one, at any depth, or it is the normal error `not-assignable`.
+  `value` is of the type of `place`, or it is `type-mismatch`.
+* **CHK-113** `place op= value` is `place = place op value`: the operator resolves by CHK-70 to CHK-73, and its result is of the type of `place`.
+* **CHK-114** The condition of an `if` and of a `while` is a `bool`, or it is `type-mismatch`.
+* **CHK-115** `for name in first ..< end` runs over `int`: both bounds are `int`, and `name` is an immutable `int` local of the body.
+  A type on the variable is `int`; a range that is not `..<`, and anything else behind `in`, is `unsupported-yet` ([why](why/checking.md#chk-115)).
+* **CHK-116** `and`, `or` and `not` are the language's own: their operands are `bool` and so is their value, and no function declares them ([why](why/checking.md#chk-116)).
+* **CHK-117** In a comparison chain each operator resolves over its two neighbours by CHK-70 to CHK-73 and gives a `bool`, and the chain is a `bool`.
+* **CHK-118** A `loop:` that is a statement is left by `break`, and one that is a value by `break value`.
+  The values of one loop are of one type, which is the loop's; a `break` of the other kind is `type-mismatch`.
+* **CHK-119** `break` and `continue` name the innermost loop around them.
+* **CHK-120** `return`, `break` and `continue` are statements; one that stands as a value, as in a `case` arm, is `unsupported-yet`.
+* **CHK-135** `print value` takes a value of any type; a string is `unsupported-yet`.
+
+```sgl
+fun falloff(d: float, steps: int) -> float:
+    if d <= 0.0 => return 0.0
+    let mut w = 1.0
+    for i in 0 ..< steps:
+        w *= d
+        if w < 0.125 => return 0.0
+    return w
+```
+
+## Returning
+
+* **CHK-121** A function without `-> T` returns nothing: its `return` carries no value, and a call of it is a statement.
+* **CHK-122** An arrow body has a value, so an arrow body without a written return type is `unsupported-yet`: nothing infers one yet.
+* **CHK-123** A statement list **exits** when it holds a `return`, a `break` or a `continue`, an `if` with an `else` whose every branch exits, or a `loop:` that holds no `break` of its own.
+* **CHK-124** A `while` and a `for` never make their list exit, whatever their condition is ([why](why/checking.md#chk-124)).
+* **CHK-125** The body of a function that returns a value exits, or it is the normal error `missing-return`.
+* **CHK-126** A statement that follows an exit in its list never runs: it is the warning `unreachable-code`, once per list.
+
+This one is `missing-return`: where `x` is at least 0.5, its body ends without a `return`.
+
+```sgl
+fun grade(x: float) -> float:
+    if x < 0.5 => return 0.0
+```
+
+## Calls of the program's functions
+
+* **CHK-127** A call of a function that is no `@builtin` is defined by **substitution**: it means the callee's body, with each parameter standing for its argument ([evaluation](evaluation.md#calls)).
+* **CHK-128** Every call is inlined, so no function of the program reaches a target.
+* **CHK-129** Each function body is checked once, on its own, whether or not anything calls it ([why](why/checking.md#chk-129)).
+* **CHK-130** A function that calls itself, directly or through others, is the normal error `recursive-call`.
+  It is reported once per loop, at the call that closes it, and its detail names the loop: `a -> b -> a`.
+* **CHK-131** Bindings are an effect: a call needs every binding of the callee's list in the caller's list, or it is `binding-not-listed` at the call.
+  So what a function reads is listed by whoever calls it, up to the entry point ([why](why/checking.md#chk-131)).
+* **CHK-132** An entry point has a flat tree when its own body and the body of every function it reaches checked without an error, recursion included.
+* **CHK-133** An inlined call is a block named after its callee, and two inlines of one function share no local: each gets its names from the mint.
+* **CHK-134** A `mut` parameter, a lambda, a function as a value and a nested function are `unsupported-yet`.
+
 ## Diagnostic kinds
 
-Every kind below is a normal error by [DIAG-4](../syntax/diagnostics.md#rules).
+Every kind below is a normal error by [DIAG-4](../syntax/diagnostics.md#rules), except `unreachable-code`, which is a warning.
 A diagnostic of this pass has a kind, a file, a byte span in that file, and a detail.
 
 | kind | reported by |
@@ -212,8 +273,12 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `expected-body` | CHK-32 |
 | `opaque-struct-needs-builtin` | CHK-34 |
 | `invalid-attribute-arguments` | CHK-36, CHK-39 |
-| `binding-not-listed` | CHK-45 |
-| `type-mismatch` | CHK-52, CHK-56, CHK-77, CHK-84 |
+| `binding-not-listed` | CHK-45, CHK-131 |
+| `type-mismatch` | CHK-52, CHK-56, CHK-77, CHK-84, CHK-112 to CHK-118, CHK-121 |
+| `not-assignable` | CHK-112 |
+| `missing-return` | CHK-125 |
+| `unreachable-code` | CHK-126 |
+| `recursive-call` | CHK-130 |
 | `unknown-member` | CHK-64 |
 | `no-matching-overload` | CHK-71, CHK-76 |
 | `ambiguous-overload` | CHK-72 |
@@ -224,7 +289,10 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 
 * Whether `@builtin` is allowed outside the prelude; today it is.
 * Whether a builtin's declaration is checked against what the compiler knows about it; today only its name and its kind are.
-* Whether a local may shadow a module-level name ([scopes](../incubator/scopes.md)).
+* Whether a local may shadow a module-level name, or a local of an enclosing block ([scopes](../incubator/scopes.md)).
+* Whether a body is checked once or where it is inlined, once a generic makes the two differ ([why](why/checking.md#chk-129)).
+* `true` and `false`, which are names nothing declares yet.
+* A call whose value nothing takes, which a function with an effect makes meaningful.
 * Whether a second function with the parameter types of another is an error where it is declared.
 * Whether the bindings of a flat entry point are the ones its list names or the ones its body reads.
 * How a splatted value reads in the emitted text once a target can take the vector whole.

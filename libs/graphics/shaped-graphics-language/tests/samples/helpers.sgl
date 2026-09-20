@@ -1,0 +1,59 @@
+// A lit surface drawn in bands, with a rim.
+// Helpers, guard clauses and a loop: what the check pass inlines, and what the legalizer takes to every target's control flow.
+
+@inline binding constants:
+    view_projection: mat4
+
+@vertex struct surface_vertex:
+    position: pos3
+    normal: vec3
+    color: float3
+
+@pixel struct target:
+    color: float4
+
+struct pixel_input:
+    @position position: hpos4
+    normal: vec3
+    color: float3
+
+// a binding is an effect: whoever calls this lists `constants` too
+fun to_clip(p: pos3){constants} -> hpos4 => constants.view_projection * p
+
+@vertex fun main_vs(v: surface_vertex){constants} -> pixel_input:
+    return {
+        position = to_clip v.position
+        normal = v.normal
+        color = v.color
+    }
+
+fun lambert(n: vec3, towards: vec3) -> float => saturate dot(n, normalize towards)
+
+// light in bands, as a cel shader draws it: the first band the light stays under is the one it gets
+fun banded(light: float, bands: int) -> float:
+    if light <= 0.0 => return 0.0
+    let mut edge = 0.0
+    for i in 0 ..< bands:
+        edge += 0.25
+        if light < edge => return edge
+    return 1.0
+
+// a rim where the surface turns away from the viewer, who looks along z
+fun rim(n: vec3) -> float:
+    let facing = abs n.z
+    if facing > 0.5 => return 0.0
+    return mix(0.35, 0.0, facing * 2.0)
+
+fun shade(color: float3, normal: vec3) -> float3:
+    // a normal that vanished faces no light
+    if length(normal) < 0.001 => return color * 0.1
+
+    let n = normalize normal
+    let light = banded(lambert(n, vec3(0.45, 0.8, -0.4)), 4)
+    return color * clamp(0.1 + light + rim(n), 0.0, 1.0)
+
+@pixel fun main_ps(p: pixel_input) -> target:
+    let lit = shade(p.color, p.normal)
+    return {
+        color = float4(..lit, 1.0)
+    }

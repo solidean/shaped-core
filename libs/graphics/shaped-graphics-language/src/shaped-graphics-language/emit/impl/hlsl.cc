@@ -55,7 +55,7 @@ public:
         }
     }
 
-    cc::string_view function_name(builtin b) const override { return to_string(b); }
+    cc::string_view function_name(builtin b) const override { return b == builtin::mix ? "lerp" : to_string(b); }
 
     bool has_mul_function() const override { return true; }
     bool has_struct_constructor() const override { return false; }

@@ -36,6 +36,7 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/check/check.cc
     src/shaped-graphics-language/check/check_decl.cc
     src/shaped-graphics-language/check/check_expr.cc
+    src/shaped-graphics-language/check/check_stmt.cc
     src/shaped-graphics-language/check/dump.cc
     src/shaped-graphics-language/check/flat.cc
     src/shaped-graphics-language/check/flat_builder.cc
@@ -212,9 +213,11 @@ if(SC_BUILD_TESTS)
         tests/ast/statement-test.cc
 
         tests/check/check-test-support.hh
+        tests/check/control-flow-check-test.cc
         tests/check/cube-test.cc
         tests/check/declaration-check-test.cc
         tests/check/expression-check-test.cc
+        tests/check/source-flat-test-support.hh
 
         tests/interpret/interpret-test.cc
 
@@ -230,9 +233,11 @@ if(SC_BUILD_TESTS)
         tests/emit/emit-test.cc
 
         tests/driver/compile-to-text-test.cc
+        tests/driver/source-differential-test.cc
 
         tests/spec/spec-examples-test.cc
 
+        tests/samples/helpers-sample-test.cc
         tests/samples/samples-test.cc
     )
     sc_nexus_binary(shaped-graphics-language-test KINDS tests)

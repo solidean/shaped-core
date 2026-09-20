@@ -227,6 +227,75 @@ ASYNC_TEST("slib sgl compiler - the cube becomes DXIL with its block at b0 of th
 
 #endif
 
+namespace
+{
+/// What SGL's legalizer writes where the source has helpers and exits: result variables, flags, `once`, moved conditions.
+/// Each construct is one a target's own flow analysis could refuse, which is what this source is for.
+constexpr auto k_control_flow_source
+    = cc::string_view("@pixel struct target:\n"
+                      "    color: float4\n"
+                      "\n"
+                      "struct pixel_input:\n"
+                      "    @position position: hpos4\n"
+                      "    uv: float3\n"
+                      "\n"
+                      "fun halve(x: float) -> float => x * 0.5\n"
+                      "\n"
+                      "// a return from inside two loops\n"
+                      "fun search(limit: float) -> float:\n"
+                      "    let mut total = 0.0\n"
+                      "    for i in 0 ..< 4:\n"
+                      "        for j in 0 ..< 4:\n"
+                      "            total += 0.125\n"
+                      "            if total > limit => return total\n"
+                      "    return 0.0\n"
+                      "\n"
+                      "// a loop nothing breaks out of: every exit is a return\n"
+                      "fun settle(start: float) -> float:\n"
+                      "    let mut x = start\n"
+                      "    loop:\n"
+                      "        x = halve x\n"
+                      "        if x < 0.25 => return x\n"
+                      "\n"
+                      "@pixel fun main_ps(p: pixel_input) -> target:\n"
+                      "    let a = search p.uv.x\n"
+                      "    let mut b = p.uv.y\n"
+                      "    while b > 0.0 and settle(b) > 0.125:\n"
+                      "        b -= 0.25\n"
+                      "        if b > 8.0 => continue\n"
+                      "        b -= 0.25\n"
+                      "    let c = loop:\n"
+                      "        b += 0.5\n"
+                      "        if b > 2.0 or settle(b) < 0.2 => break b\n"
+                      "    if 0.5 < a <= settle(c):\n"
+                      "        return {\n"
+                      "            color = float4(a, b, c, 1.0)\n"
+                      "        }\n"
+                      "    // the entry point itself ends in a loop that every exit of is a return\n"
+                      "    let mut d = c\n"
+                      "    loop:\n"
+                      "        d = halve d\n"
+                      "        if d < 0.125:\n"
+                      "            return {\n"
+                      "                color = float4(a, b, d, 1.0)\n"
+                      "            }\n");
+} // namespace
+
+ASYNC_TEST("slib sgl compiler - the control flow the legalizer writes is accepted by every compiler behind an edge",
+           exclusive("slib-shader-library"))
+{
+    slib::shader_library lib;
+    add_sgl_compilers(lib);
+
+    for (auto const format : lib.supported_formats(slib::shader_language::sgl))
+    {
+        auto const node = lib.compile_source(k_control_flow_source, sg::shader_stage::fragment, "main_ps", format,
+                                             {.language = slib::shader_language::sgl, .label = "control-flow.sgl"});
+        co_await cc::async_settled(node);
+        CHECK(value_of(node).bytecode.size() > 0);
+    }
+}
+
 TEST("slib sgl compiler - a broken source fails with the place, the kind and the name", exclusive("slib-shader-library"))
 {
     slib::shader_library lib;

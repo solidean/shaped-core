@@ -313,11 +313,15 @@ void checker::compile_function(symbol_id id)
         }
     }
 
-    auto result = checked_module::error_type;
+    // Without `-> T` a function returns nothing; an arrow body has a value, whose type nothing infers yet.
+    auto result = checked_module::nothing_type;
     if (ast::is_valid(f.return_type))
         result = resolve_type(file, f.return_type);
-    else
-        unsupported(file, f.name, "a function without a written return type");
+    else if (f.body.kind == ast::body_kind::arrow)
+    {
+        unsupported(file, f.name, "an arrow body without a written return type");
+        result = checked_module::error_type;
+    }
     is_failed = is_failed || result == checked_module::error_type;
 
     auto const has_body = f.body.kind != ast::body_kind::none;

@@ -1,5 +1,7 @@
 #include "check-test-support.hh"
 
+#include <shaped-graphics-language/legalize/legalize.hh>
+
 using namespace sgl_test;
 using sgl::check::target_kind;
 
@@ -68,9 +70,11 @@ TEST("sgl check - overloads resolve by exact argument types")
 TEST("sgl check - an operator is a function found through its spelling")
 {
     CHECK(body_reports("return k * k + k\n") == "");
-    CHECK(body_reports("return v * k\n") == "no-matching-overload 1:[v * k] operator *(vec3, float)\n");
-    CHECK(body_reports("return k / k\n") == "no-matching-overload 1:[k / k] operator /(float, float)\n");
-    CHECK(body_reports("return -k\n") == "no-matching-overload 1:[-k] operator -(float)\n");
+    CHECK(body_reports("return v * v\n") == "no-matching-overload 1:[v * v] operator *(vec3, vec3)\n");
+    CHECK(body_reports("return v / k\n") == "no-matching-overload 1:[v / k] operator /(vec3, float)\n");
+    CHECK(body_reports("return -v\n") == "no-matching-overload 1:[-v] operator -(vec3)\n");
+    // a prefix operator is a function of one parameter
+    CHECK(body_reports("return -k + -(k * k)\n") == "");
 
     auto const checked = check_sources(read_prelude(), "fun f(c: float3, k: float) -> float3:\n    return c * k\n");
     CHECK(reports_of(checked) == "");
@@ -92,10 +96,24 @@ TEST("sgl check - juxtaposition and parens are one call")
     CHECK(tables.type_at(find_expr(checked, "normalize v")) == tables.type_at(find_expr(checked, "normalize(v)")));
 }
 
-TEST("sgl check - a call of a function that is no builtin resolves, types, and waits for the inliner")
+TEST("sgl check - a call of a function of the program resolves like any other, overloads included")
 {
-    CHECK(reports_for("fun half(x: float) -> float => x * 0.5\nfun f(k: float) -> float:\n    return half k\n")
-          == "unsupported-yet 1:[half k] a call of a function that is no @builtin, which needs the inliner\n");
+    CHECK(reports_for("fun half(x: float) -> float => x * 0.5\nfun f(k: float) -> float:\n    return half k\n") == "");
+    CHECK(reports_for("fun half(x: float) -> float => x * 0.5\nfun f(v: vec3) -> float:\n    return half v\n")
+          == "no-matching-overload 1:[half v] half(vec3)\n");
+
+    auto const checked = check_sources(read_prelude(), "fun half(x: float) -> float => x * 0.5\n"
+                                                       "fun half(v: vec3) -> vec3 => v * 0.5\n"
+                                                       "fun f(v: vec3, k: float) -> float:\n"
+                                                       "    return dot(half(v), v) * half(k)\n");
+    CHECK(reports_of(checked) == "");
+    auto const& tables = checked.module.files[1];
+    auto const on_vec3 = tables.target_at(find_expr(checked, "half(v)"));
+    auto const on_float = tables.target_at(find_expr(checked, "half(k)"));
+    REQUIRE(on_vec3.kind == target_kind::overload);
+    REQUIRE(on_float.kind == target_kind::overload);
+    CHECK(on_vec3.symbol != on_float.symbol);
+    CHECK(checked.module.name_of(tables.type_at(find_expr(checked, "half(v)"))) == "vec3");
 }
 
 TEST("sgl check - a struct's constructor takes its fields in order, and a splat spreads a struct")
@@ -152,7 +170,10 @@ TEST("sgl check - a binding member is reachable only through the function's bind
 TEST("sgl check - a number literal with a dot or an exponent is a float, and nothing else is carried")
 {
     CHECK(body_reports("return 0.5 + -0.4 + 1e3 + 2.5e-3 + 1. + 1'000.0\n") == "");
-    CHECK(body_reports("return 1\n") == "unsupported-yet 1:[1] an integer literal, which the pass does not type yet\n");
+    CHECK(body_reports("return 1\n") == "type-mismatch 1:[1] expected float, got int\n");
+    CHECK(body_reports("let i = 1'000 + -3\nreturn k\n") == "");
+    CHECK(body_reports("let i = 3'000'000'000\nreturn k\n")
+          == "unsupported-yet 1:[3'000'000'000] an integer literal that does not fit an int\n");
     CHECK(body_reports("return 0.5f32\n")
           == "unsupported-yet 1:[0.5f32] a number literal with a prefix, a suffix or a p exponent\n");
     CHECK(body_reports("return 0xff\n")
@@ -192,20 +213,22 @@ TEST("sgl check - let introduces an immutable local, in order")
     CHECK(body_reports("let k = 1.0\nreturn k\n") == "duplicate-declaration 1:[k] k\n");
     CHECK(body_reports("let x : vec3 = k\nreturn k\n") == "type-mismatch 1:[k] expected vec3, got float\n");
     CHECK(body_reports("let dot = k\nreturn k\n") == "unsupported-yet 1:[dot] a local that shadows a module-level name\n");
-    CHECK(body_reports("let mut a = k\nreturn a\n") == "unsupported-yet 1:[let mut a = k] let mut\n");
+    CHECK(body_reports("let mut a = k\nreturn a\n") == "");
+    CHECK(body_reports("let a : float\nreturn k\n") == "unsupported-yet 1:[let a : float] a let without a value\n");
     CHECK(body_reports("let (a, b) = k\nreturn k\n") == "unsupported-yet 1:[(a, b)] a pattern in let\n");
 }
 
 TEST("sgl check - statements and expressions the tracer does not carry")
 {
-    CHECK(body_reports("if k > k => return k\nreturn k\n").contains("unsupported-yet 1:[if k > k => return k] if\n"));
-    CHECK(body_reports("let a = k\na = k\nreturn a\n") == "unsupported-yet 1:[a = k] assignment\n");
-    CHECK(body_reports("for i in v:\n    return k\nreturn k\n").starts_with("unsupported-yet 1:[for i in v:] for\n"));
+    CHECK(body_reports("for i in v:\n    return k\nreturn k\n")
+          == "unsupported-yet 1:[v] a for over anything but an int range\n");
+    CHECK(body_reports("for i in 0 ..= 3:\n    return k\nreturn k\n")
+          == "unsupported-yet 1:[0 ..= 3] a for over a range that is not `..<`\n");
+    CHECK(body_reports("assert k > 0.0, \"positive\"\nreturn k\n").contains("unsupported-yet 1:[assert"));
+    CHECK(body_reports("saturate k\nreturn k\n") == "unsupported-yet 1:[saturate k] a call whose value is dropped\n");
     CHECK(body_reports("let h = x => x\nreturn k\n") == "unsupported-yet 1:[x => x] a lambda\n");
     CHECK(body_reports("let t = (k, k)\nreturn k\n") == "unsupported-yet 1:[(k, k)] a tuple\n");
     CHECK(body_reports("let t = k as vec3\nreturn k\n") == "unsupported-yet 1:[k as vec3] as\n");
-    CHECK(body_reports("let t = k > 0.0 and k < 1.0\nreturn k\n").contains("a short-circuit operator\n"));
-    CHECK(body_reports("let a = k\n") == "unsupported-yet 1:[let a = k] a body that does not end in return\n");
     CHECK(body_reports("fun g(x: float) -> float => x\nreturn k\n")
           == "unsupported-yet 1:[fun g(x: float) -> float => x] a declaration inside a function\n");
 }
@@ -255,7 +278,21 @@ TEST("sgl check - the flat tree spreads a splat, and evaluates a splatted value 
         read_prelude(), head + "    let splat = 1.0\n    return { color = float4(..(p.color * splat), 1.0) }\n");
     CHECK(reports_of(temporary) == "");
     // The value is no local, so it gets one; its name is minted, and the program's own `splat` keeps its name.
+    // It is bound where its first member stands, so nothing is evaluated earlier than the source says.
     CHECK(sgl::check::dump_entry_points(temporary.module)
+          == "(entry pixel ps (p : pin) -> target\n"
+             "  (let splat : float = (lit 1.0 : float))\n"
+             "  (return (construct\n"
+             "    (construct (member (block $splat\n"
+             "      (let:temporary splat_1 : float3 = (call scale_color (member (local p : pin) color : float3) "
+             "(local splat : float) : float3))\n"
+             "      (leave $splat (local splat_1 : float3)) : float3) x : float) "
+             "(member (local splat_1 : float3) y : float) "
+             "(member (local splat_1 : float3) z : float) (lit 1.0 : float) : float4) : target)))\n");
+
+    // Core, it is the `let` in front that it always was.
+    auto const& m = temporary.module;
+    CHECK(sgl::check::dump_entry_point(m, sgl::check::legalize(m, m.entry_points[0]))
           == "(entry pixel ps (p : pin) -> target\n"
              "  (let splat : float = (lit 1.0 : float))\n"
              "  (let:temporary splat_1 : float3 = (call scale_color (member (local p : pin) color : float3) "

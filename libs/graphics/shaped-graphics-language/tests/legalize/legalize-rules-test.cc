@@ -570,3 +570,71 @@ TEST("sgl legalize - a once and a break of the input are a block and a leave, so
              "  (print (lit 2.0 : float))\n"
              "  (return (lit 0.0 : float))\n");
 }
+
+TEST("sgl legalize - X6: a block that ends in a loop is left by leaving the loop, so `break value` costs no once")
+{
+    auto t = rule_fixture();
+    auto const found = t.b.add_label("found");
+    auto const rows = t.b.add_label("rows");
+    auto const weight = t.b.var("weight", t.float_type(), t.f(1.0));
+    auto const shade = t.b.let(
+        "shade",
+        t.b.block_expr(found, t.float_type(),
+                       {
+                           t.b.loop(rows,
+                                    {
+                                        t.b.assign(t.b.local(weight.local),
+                                                   t.b.call(builtin::multiply, {t.b.local(weight.local), t.f(0.5)})),
+                                        t.b.if_(t.b.call(builtin::less, {t.b.local(weight.local), t.f(0.25)}),
+                                                {t.b.leave(found, t.b.local(weight.local))}),
+                                        t.b.if_(t.d(), {t.b.leave(found, t.f(0.0))}),
+                                    }),
+                       }));
+    t.finish({weight.stmt, shade.stmt, t.b.print(t.b.local(shade.local))});
+    CHECK(t.core()
+          == "  (var weight : float = (lit 1.0 : float))\n"
+             "  (var:temporary found_result : float)\n"
+             "  (loop $rows\n"
+             "    (assign (local weight : float) = (call multiply (local weight : float) (lit 0.5 : float) : float))\n"
+             "    (if (call less (local weight : float) (lit 0.25 : float) : bool)\n"
+             "      (then\n"
+             "        (assign (local found_result : float) = (local weight : float))\n"
+             "        (break)))\n"
+             "    (if (local d : bool)\n"
+             "      (then\n"
+             "        (assign (local found_result : float) = (lit 0.0 : float))\n"
+             "        (break))))\n"
+             "  (let shade : float = (local found_result : float))\n"
+             "  (print (local shade : float))\n"
+             "  (return (lit 0.0 : float))\n");
+}
+
+TEST("sgl legalize - X6 keeps away from a block that goes on behind its loop")
+{
+    auto t = rule_fixture();
+    auto const found = t.b.add_label("found");
+    auto const rows = t.b.add_label("rows");
+    t.finish({
+        t.b.block(found,
+                  {
+                      t.b.loop(rows, {t.b.if_(t.c(), {t.b.leave(found)}), t.b.leave(rows)}),
+                      t.print(1.0),
+                  }),
+        t.print(2.0),
+    });
+    CHECK(t.core()
+          == "  (var:temporary found_left : bool = (lit false : bool))\n"
+             "  (once\n"
+             "    (loop $rows\n"
+             "      (if (local c : bool)\n"
+             "        (then\n"
+             "          (assign (local found_left : bool) = (lit true : bool))\n"
+             "          (break)))\n"
+             "      (break))\n"
+             "    (if (local found_left : bool)\n"
+             "      (then\n"
+             "        (break)))\n"
+             "    (print (lit 1.0 : float)))\n"
+             "  (print (lit 2.0 : float))\n"
+             "  (return (lit 0.0 : float))\n");
+}

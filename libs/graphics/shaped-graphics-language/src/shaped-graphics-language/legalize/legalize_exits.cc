@@ -144,6 +144,55 @@ struct block_dissolver
         return true;
     }
 
+    /// The label of a loop statement; `none` for any other.
+    label_id loop_label_of(flat_stmt_id id) const
+    {
+        if (!is_known(out.e, id))
+            return label_id::none;
+        auto const& s = out.e.at(id);
+        if (auto const* const l = s.node.try_as<flat_loop>())
+            return l->label;
+        if (auto const* const w = s.node.try_as<flat_while>())
+            return w->label;
+        if (auto const* const f = s.node.try_as<flat_for>())
+            return f->label;
+        return label_id::none;
+    }
+
+    /// `id` with every `leave $from` it holds, at any depth, as `leave $to`.
+    flat_stmt_id retargeted(flat_stmt_id id, label_id from, label_id to, int depth = 0)
+    {
+        if (depth > k_max_depth || !holds_leave(out.e, id, from))
+            return id;
+        auto copy = out.e.at(id);
+        auto const remapped = [&](ast::range_of<flat_stmt_id> range)
+        {
+            auto list = ids_of(out.e, range);
+            for (auto& child : list)
+                child = retargeted(child, from, to, depth + 1);
+            return out.stmt_list(list);
+        };
+        if (auto* const leave = copy.node.try_as<flat_leave>())
+            leave->target = to;
+        else if (auto* const branch = copy.node.try_as<flat_if>())
+        {
+            branch->then_body = remapped(branch->then_body);
+            branch->else_body = remapped(branch->else_body);
+        }
+        else if (auto* const block = copy.node.try_as<flat_block>())
+            block->body = remapped(block->body);
+        else if (auto* const loop = copy.node.try_as<flat_loop>())
+            loop->body = remapped(loop->body);
+        else if (auto* const w = copy.node.try_as<flat_while>())
+            w->body = remapped(w->body);
+        else if (auto* const f = copy.node.try_as<flat_for>())
+            f->body = remapped(f->body);
+        else if (auto* const once = copy.node.try_as<flat_once>())
+            once->body = remapped(once->body);
+        out.e.stmts.push_back(cc::move(copy));
+        return flat_stmt_id(out.e.stmts.size() - 1);
+    }
+
     stmt_list dissolve(stmt_list const& list, int depth = 0)
     {
         auto result = stmt_list();
@@ -160,7 +209,10 @@ struct block_dissolver
 
             if (auto const* const block = s.node.try_as<flat_block>())
             {
-                auto const body = dissolve(ids_of(out.e, block->body), depth + 1);
+                auto body = dissolve(ids_of(out.e, block->body), depth + 1);
+                // Rule X6: behind a loop that ends the block nothing runs, so leaving the block from inside it is leaving it.
+                if (!body.empty() && is_valid(loop_label_of(body.back())))
+                    body.back() = retargeted(body.back(), block->label, loop_label_of(body.back()));
                 auto tailed = stmt_list();
                 if (tail(body, block->label, tailed))
                     result.push_back_range(tailed);

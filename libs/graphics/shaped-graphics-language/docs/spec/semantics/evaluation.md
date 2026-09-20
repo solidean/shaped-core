@@ -3,7 +3,7 @@
 *Tracer: deliberately thin.*
 
 What a flat tree means: the abstract machine that runs the **structured form** of a [flat tree](checking.md#the-flat-tree).
-The source cannot say control flow to the check pass yet, so these rules are about the tree, and the tree is what inlining will write.
+The rules are about the tree, and [Calls](#calls) and [From the source](#from-the-source) say which tree a program is.
 `sgl::check::interpret` is this machine, and the tests run every rule below through it.
 Back to the [semantics](_index.md); the reasons are in [why/evaluation.md](why/evaluation.md).
 
@@ -85,6 +85,52 @@ This prints 11: the left operand is read while `x` is 1, and the block to its ri
 * **EVAL-39** So after a `continue`, a `while` evaluates its condition again, and a `for` takes its next `int`.
 * **EVAL-40** A `leave` or a `continue` names a block or a loop that encloses it; a tree where it does not is malformed.
 
+## Calls
+
+* **EVAL-45** A call of a function of the program IS the callee's body as `block $callee { … }`, where the call stood.
+  It is an expression of the callee's return type, and a statement for a callee that returns nothing.
+* **EVAL-46** The arguments are evaluated left to right, each exactly once, before any statement of the body.
+* **EVAL-47** A parameter is a value: the callee cannot change it, and the caller's later writes do not reach it.
+* **EVAL-48** An argument that is a literal or an immutable local stands wherever its parameter is read.
+  Every other argument is bound by a `let` named after its parameter, at the top of the block, in the order of the arguments.
+* **EVAL-49** `return value` of the callee is `leave $callee value`, and its bare `return` is `leave $callee`.
+* **EVAL-50** The entry point's own `return value` is `leave $root value`, which a tree of the check pass spells `return`.
+* **EVAL-51** Inlining moves nothing: the block stands where the call stood, so EVAL-15 alone says when its statements run ([why](why/evaluation.md#eval-51)).
+* **EVAL-52** Every local of an inlined body is a local of its own by EVAL-8, so two calls of one function share none.
+* **EVAL-53** A callee that returns a value leaves its block with one on every path ([CHK-125](checking.md#returning)), so a call never meets EVAL-28.
+
+```sgl
+fun grade(x: float, limit: float) -> float:
+    if x < limit => return 0.0
+    return x * 4.0
+
+fun graded(a: float) -> float:
+    let limit = 0.5
+    return grade(a * 2.0, limit)
+```
+
+`a * 2.0` is bound, and `limit` stands for itself:
+
+```raw
+(let limit : float = (lit 0.5))
+(return (block $grade
+    (let x : float = (call multiply (local a) (lit 2.0)))
+    (if (call less (local x) (local limit))
+      (then
+        (leave $grade (lit 0.0))))
+    (leave $grade (call multiply (local x) (lit 4.0))) : float))
+```
+
+## From the source
+
+* **EVAL-54** `let` is `let`, `let mut` is `var`, and `place op= value` is `place = place op value`, whose second read of the place evaluates nothing by EVAL-14.
+* **EVAL-55** An `if` / `else if` / `else` chain is an `if` whose `else` holds the rest of the chain.
+* **EVAL-56** `while`, `for … in first ..< end` and `loop:` are the loops of the same names; `break` is `leave $loop` and `continue` is `continue $loop`, of the innermost loop.
+* **EVAL-57** A `loop:` that is a value is `block $loop_value { loop $loop { … } }`, and its `break value` is `leave $loop_value value`.
+* **EVAL-58** `a < b <= c` is `a < b and b <= c` with `b` evaluated once: each inner operand is bound to a local where it first stands, and read from it after that.
+* **EVAL-59** So a chain stops at its first comparison that is false, and evaluates no operand behind it.
+* **EVAL-60** `print value` is `print`.
+
 ## Errors of the program
 
 * **EVAL-41** A run that reads a `var` holding nothing, or ends a block expression or the root block without a value, has no behaviour.
@@ -94,7 +140,7 @@ This prints 11: the left operand is read while `x` is 1, and the block to its ri
 
 ## Open
 
-* Which of the errors of EVAL-41 the check pass will refuse once the source reaches it: definite assignment and a value on every path.
+* Definite assignment: a `let` without a value is what would let a program read a `var` that holds nothing, and the check pass carries none yet.
 * Division, and what an `int` division by zero is.
 * Whether `float` arithmetic is exact across targets; the machine computes in `f32`, and a target may fuse or reorder.
 * `switch`, which joins with `case` and captures a `break` the way a loop does.

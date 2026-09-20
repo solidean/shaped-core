@@ -166,6 +166,14 @@ cc::string_view sgl::to_string(diagnostic_kind kind)
         return "missing-type";
     case diagnostic_kind::invalid_attribute_arguments:
         return "invalid-attribute-arguments";
+    case diagnostic_kind::missing_return:
+        return "missing-return";
+    case diagnostic_kind::recursive_call:
+        return "recursive-call";
+    case diagnostic_kind::not_assignable:
+        return "not-assignable";
+    case diagnostic_kind::unreachable_code:
+        return "unreachable-code";
     }
     CC_UNREACHABLE("unknown diagnostic_kind");
 }
@@ -251,10 +259,14 @@ sgl::severity sgl::default_severity_of(diagnostic_kind kind)
     case diagnostic_kind::wrong_kind_of_name:
     case diagnostic_kind::missing_type:
     case diagnostic_kind::invalid_attribute_arguments:
+    case diagnostic_kind::missing_return:
+    case diagnostic_kind::recursive_call:
+    case diagnostic_kind::not_assignable:
         return severity::normal_error;
     case diagnostic_kind::spaced_attribute_arguments:
     case diagnostic_kind::no_effect:
     case diagnostic_kind::redundant_yield:
+    case diagnostic_kind::unreachable_code:
         return severity::warning;
     }
     CC_UNREACHABLE("unknown diagnostic_kind");

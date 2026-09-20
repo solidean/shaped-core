@@ -139,6 +139,14 @@ enum class sgl::diagnostic_kind : sgl::u8
     missing_type,
     /// An attribute the compiler knows, with arguments it does not take.
     invalid_attribute_arguments,
+    /// A function that returns a value, with a path through its body that ends without a `return`.
+    missing_return,
+    /// A function that calls itself, directly or through others; every call is inlined, so none can.
+    recursive_call,
+    /// An assignment to what is no mutable local and no member of one.
+    not_assignable,
+    /// A statement after a jump in its list, which never runs; a warning.
+    unreachable_code,
 };
 
 namespace sgl

@@ -10,7 +10,7 @@
 namespace sgl_test
 {
 /// A module that holds the prelude and the two edge structs a hand-built entry point stands between.
-/// The source cannot say control flow yet, so its one function only has to check.
+/// A rule test builds its tree by hand, so the module's one function only has to check.
 inline checked_sources flat_test_module()
 {
     auto checked = check_sources(read_prelude(), "struct frag:\n"

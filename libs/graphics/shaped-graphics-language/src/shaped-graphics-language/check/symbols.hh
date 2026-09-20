@@ -14,6 +14,8 @@ enum class sgl::check::type_kind : sgl::u8
     /// The type of whatever did not check.
     /// It equals every type for the purpose of reporting, so one error never causes a second diagnostic.
     error,
+    /// What a function without a return type returns: no value, so nothing can hold it.
+    nothing,
     /// A declared `struct`, builtin or not; two declarations are two types, whatever their fields.
     structure,
     // Tuples, function types and anonymous struct types come later, each as a kind that is deduplicated by structure.
@@ -138,7 +140,7 @@ struct sgl::check::binding_info
 enum class sgl::check::target_kind : sgl::u8
 {
     none,
-    /// `index` is the `stmt_id` of the `let`, in the expression's own file.
+    /// `index` is the `stmt_id` of the `let` or of the `for` that declares it, in the expression's own file.
     local,
     /// `index` is the `field_id` of the parameter, in the expression's own file.
     parameter,

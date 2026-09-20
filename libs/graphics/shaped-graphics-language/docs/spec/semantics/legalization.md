@@ -40,7 +40,8 @@ One row per core construct, one column per target; GLSL has no emitter yet, and 
 | `continue` | `continue;` | `continue;` | `continue;` | `continue;` |
 | `return v` | `return v;` | `return v;` | `return v;` | `return v;` |
 | `a and b`, `a or b`, `not a` | `a && b`, `a \|\| b`, `!a` | `a && b`, `a \|\| b`, `!a` | `a && b`, `a \|\| b`, `!a` | `a && b`, `a \|\| b`, `!a` |
-| `<`, `==` | `a < b`, `a == b` | `a < b`, `a == b` | `a < b`, `a == b` | `a < b`, `a == b` |
+| `<`, `<=`, `>`, `>=`, `==`, `!=` | `a < b`, … | `a < b`, … | `a < b`, … | `a < b`, … |
+| `-a` | `-a` | `-a` | `-a` | `-a` |
 | `int`, `bool` | `int`, `bool` | `i32`, `bool` | `int`, `bool` | `int`, `bool` |
 
 * **LEGAL-10** WGSL's `once` ends in a `break;` of its own, and the C-like targets' does not: `do { … } while (false)` already stops ([why](why/legalization.md#legal-10)).
@@ -128,6 +129,8 @@ loop {
   It costs one `bool` per target, one test per crossed construct.
 * **LEGAL-32** The flag of a `leave` is declared false in front of its target, and the flag of a `continue` at the top of the loop's body, so each iteration starts with it false.
 * **LEGAL-33** X2 runs before X4 ([why](why/legalization.md#legal-33)).
+* **LEGAL-36** (X6) Where a loop is the last statement of block `$b`, a `leave $b` inside that loop is a leave of the loop: nothing of the block runs behind it.
+  It costs nothing, and it runs before X2, which then finds a block without a leave ([why](why/legalization.md#legal-36)).
 * **LEGAL-34** What follows an exit in its list never runs and is dropped, and so is a `break` that ends the body of a `once`.
 * **LEGAL-35** Every name a rule introduces comes from the entry point's mint: `pick_result`, `x_before`, `and_result`, `search_left`, `rows_continued`.
 
@@ -154,6 +157,29 @@ if d {
     pick_result = 3.0;
 }
 let shade: f32 = pick_result;
+```
+
+A `loop:` that is a value, which X6 leaves with a plain `break`:
+
+```raw
+(let steps : float = (block $loop_value
+    (loop $loop
+      (assign (local w) = (call multiply (local w) (lit 2.0)))
+      (if (call greater (local w) (lit 4.0))
+        (then
+          (leave $loop_value (local w))))) : float))
+```
+
+```wgsl
+var loop_value_result: f32;
+loop {
+    w = w * 2.0;
+    if w > 4.0 {
+        loop_value_result = w;
+        break;
+    }
+}
+let steps: f32 = loop_value_result;
 ```
 
 A search that leaves a block from inside a loop, which is X4 and X5 with one crossed construct:
@@ -215,9 +241,23 @@ for (var i: i32 = 0; i < 2; i++) {
 }
 ```
 
+## What a target's own analysis sees
+
+Each target's compiler analyses flow by its own rules, and it refuses text that is fine by SGL's.
+These rules say why the text passes, and DXC (to DXIL and to SPIR-V) and Dawn have compiled every construct they name.
+
+* **LEGAL-37** The text of an entry point ends in a `return`, in a loop that no `break` leaves, or in an `if` whose every branch ends so.
+  [CHK-125](checking.md#returning) says so of the source, X1 writes a leave of the root as `return` where it stands, and no rule moves one.
+* **LEGAL-38** So no flag test is the last thing a function can reach: a flag belongs to a block or a loop inside the body, and the body goes on behind it.
+* **LEGAL-39** A loop that no `break` leaves is `while (true) { … }` and `loop { … }` with nothing behind it, which every target takes as the end of the function.
+* **LEGAL-40** A result `var` has no value where it is declared, and every path to its one read assigns it.
+  HLSL and MSL leave it undefined until then and WGSL zeroes it, and no target refuses the read.
+* **LEGAL-41** WGSL's `once` is `loop { … break; }`, whose behaviour WGSL's analysis derives from the `break`s: it needs no `continuing` and no condition.
+
 ## Open
 
-* A target's own rule that a function ends in a `return` on every path it can see: a flag's test is such a path, though no run takes it.
+* An inlined body that another inlined body takes as an argument is bound at the top of the inner block, so its statements stand inside that block's `once`.
+  That is right and reads worse than binding it in front would.
 * Whether X2 should write statements twice where they are few, and take the `once` away.
 * Whether a `continue` in tail position of its loop's body should disappear the way a leave does.
 * `switch`, which will capture `break` like a loop, so an exit that crosses one takes a flag too.

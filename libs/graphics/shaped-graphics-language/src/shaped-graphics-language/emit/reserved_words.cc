@@ -184,7 +184,13 @@ constexpr cc::string_view k_hlsl[] = {
 
     // the intrinsics the text calls: a function is an ordinary name in HLSL, so a local of that name would hide it
     // Only those, since a program may well call a local `lit` or `step`, and the hand-written shaders do.
+    "abs",
+    "clamp",
     "dot",
+    "length",
+    "lerp",
+    "max",
+    "min",
     "mul",
     "normalize",
     "saturate",
@@ -414,7 +420,13 @@ constexpr cc::string_view k_wgsl[] = {
     SGL_WGSL_ALIASES(mat4x4),
 
     // the predeclared functions the text calls, for the same reason, and only those
+    "abs",
+    "clamp",
     "dot",
+    "length",
+    "max",
+    "min",
+    "mix",
     "normalize",
     "saturate",
 };

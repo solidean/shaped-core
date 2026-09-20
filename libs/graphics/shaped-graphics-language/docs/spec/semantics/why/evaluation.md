@@ -42,6 +42,13 @@ That is invisible while the end is a constant, and it is a different loop when t
 A range is a value in SGL ([ranges](../../incubator/ranges-and-iteration.md)), and a value is evaluated once, so the language takes that side.
 The legalizer pays with one `let` in front of the loop, and only when the end could change.
 
+## EVAL-51
+
+An inliner that hoisted an argument or a body in front of the statement would have to know what else that statement evaluates, and in which order.
+That knowledge is the legalizer's: pinning, the `var` of a block's value and the `if` of a short circuit all exist to keep EVAL-15 true when statements move.
+So the inliner writes the one construct that needs no such knowledge, a block expression where the call stood, and there is one place where order can go wrong.
+A literal and an immutable local are the exception that costs nothing: neither can change, so reading one late is reading it on time.
+
 ## EVAL-42
 
 A target gives a `var` without a value whatever it likes: WGSL zeroes it, and HLSL leaves it undefined.

@@ -140,22 +140,27 @@ Statements: `invalid_stmt` `let_stmt` `assign_stmt` `if_stmt` (the whole chain, 
 Declarations: `invalid_decl` `module_decl` `use_decl` `fun_decl` `struct_decl` `enum_decl` `type_decl` `const_decl`
 `binding_decl` `sampler_decl` `notation_decl`, and the member lines `field_decl` `property_decl` `enum_case_decl`.
 
-## The check pass (a tracer: it carries `tests/samples/cube.sgl`, everything else is `unsupported-yet`)
+## The check pass (a tracer: it carries `tests/samples/cube.sgl` and `helpers.sgl`, everything else is `unsupported-yet`)
 
 ```cpp
 #include <shaped-graphics-language/check/check.hh>
 auto const m = sgl::check::check({.file = prelude, .ast = prelude_ast}, {.file = user, .ast = user_ast});
                                            // -> sgl::check::checked_module; TOTAL; a module_file is two REFERENCES
                                            // file 0 is the prelude (prelude/prelude.sgl), file 1 the program; never concatenated
+                                           // carried: let / let mut, assignment and `op=`, if chains, while, for over `a ..< b`, loop with
+                                           // break / break value / continue, and / or / not, comparison chains, int literals, print,
+                                           // and calls of the program's own functions, overloads included, which are INLINED
 m.symbols                                  // every top-level fun / struct / binding: file, declaration, kind, state, name,
                                            // intrinsic (check::builtin), operator_spelling, type, info
-m.types  m.members                         // canonical types, types[0] is the error type; fields and binding members
+m.types  m.members                         // canonical types; types[0] is the error type, types[1] (nothing_type) what a fun without
+                                           // `-> T` returns; fields and binding members
 m.functions  m.parameters  m.binding_lists // signatures; symbol::info is the position in functions / bindings
 m.bindings                                 // binding_info { symbol, is_inline, members }
 m.files[f].type_at(expr_id)                // side table: type_id, none for what nothing checked
 m.files[f].target_at(expr_id)              // side table: { kind, symbol, index } — local / parameter / symbol / overload /
                                            // constructor / field / binding_member
-m.entry_points                             // flat_entry_point per SOUND entry point; what an emitter reads, never the AST
+m.entry_points                             // flat_entry_point per SOUND entry point, in the STRUCTURED form; what an emitter reads
+                                           // sound means: its body and the body of every function it reaches reported no error
 m.diagnostics                              // located_diagnostic { what, file, detail }, in the order they were found
 m.at(symbol_id)  m.at(type_id)  m.at(range)  m.name_of(type_id)   // name_of gives "<error>" for the error type
 
@@ -166,6 +171,9 @@ sgl::check::flat_expr                      // { type, from (origin), inlined_thr
                                            // flat_bool_literal, flat_local_ref, flat_binding_member, flat_member, flat_construct,
                                            // flat_call { callee, intrinsic, is_pure, arguments }, flat_not, flat_and, flat_or,
                                            // flat_block (a block EXPRESSION: structured form only)
+                                           // a call of the program's function is a flat_block named after the callee: arguments bound by
+                                           // `let`s at its top (a literal or an immutable local stands for its parameter), return = leave
+x.from  x.inlined_through                  // the AST node it came from, and e.at(range) -> the call sites it came through, outermost first
 sgl::check::flat_stmt                      // flat_let, flat_var, flat_assign, flat_print, flat_if, flat_loop, flat_while, flat_for,
                                            // flat_continue, flat_return; structured only: flat_block, flat_leave;
                                            // core only: flat_once, flat_break
@@ -184,7 +192,7 @@ sgl::check::dump_diagnostics(m)            // `unknown-name @1:120+4 foo`: kind,
 ## The two forms of a flat tree
 
 ```cpp
-// STRUCTURED: what the language means and what inlining will write. `block $b` is a statement or an EXPRESSION,
+// STRUCTURED: what the language means and what the check pass writes. `block $b` is a statement or an EXPRESSION,
 //   `leave $b [value]` exits it from any depth, `continue $l` any enclosing loop; and / or short-circuit.
 // CORE: what a target prints 1:1. No block, no leave: `once`, `break` (innermost once or loop), `continue`
 //   (innermost loop, NO once in between), `return` at any depth, `&&` / `||` only over a right side without effect.
@@ -212,7 +220,8 @@ sgl::check::has_effect(e, expr_id)         // a call that is not pure, or a bloc
 
 #include <shaped-graphics-language/legalize/legalize.hh>
 auto const core = sgl::check::legalize(m, e);   // structured -> core, same behaviour; a core tree comes back UNCHANGED
-                                           // E1-E4 (block expressions, pins, and/or, loop conditions), X1-X5 (exits)
+                                           // E1-E4 (block expressions, pins, and/or, loop conditions), X1-X6 (exits)
+                                           // X6: a block that ends in a loop is left by leaving the loop, so `break value` is a `break`
                                            // every name it adds is minted: pick_result, x_before, search_left, rows_continued
 sgl::check::legalize_options               // { skip_pinning, skip_flag_tests }: break a rule on purpose, for the tests' teeth
 
@@ -235,6 +244,7 @@ sgl::emit::target                          // hlsl_dx12, hlsl_vulkan, wgsl, msl:
                                            // msl is written and pinned, and has met NO Metal compiler yet
 sgl::emit::all_targets()                   // -> cc::span<target const>
 auto const r = sgl::emit::emit(m, 0, sgl::emit::target::wgsl);   // -> emitted_text; the isize is a position in m.entry_points
+                                           // LEGALIZES that entry point first, since the check pass writes the structured form
                                            // ONE entry point per call: it, and exactly the structs and the binding it needs
                                            // TOTAL and deterministic; the text carries FINAL addresses, no pass numbers it later
 sgl::emit::emit_entry_point(m, e, t)       // the same for a tree that is no entry point of m: a legalized one, a hand-built one
@@ -315,13 +325,26 @@ sgl::print_source(file)      // == file.source for EVERY input: the lossless inv
 - **`true` and `false` are ordinary names** to every phase here.
 - **The check pass is one demand-driven pass.** A symbol is untouched, in compilation, checked or failed, and reaching one in compilation is `dependency-cycle`.
   Compiling a function means its signature; bodies are checked after every signature is known.
+- **Every body is checked ONCE, on its own**, so a broken function nobody calls still reports, and one called three times reports once.
+  Inlining happens afterwards, from the side tables, and only for an entry point whose every reachable body is sound.
+- **Recursion is `recursive-call`**, once per loop of calls, at the call that closes it: `a -> b -> a`.
+- **Bindings are an effect.** A call needs the callee's `{…}` list inside the caller's, or it is `binding-not-listed` at the call; so an entry point lists what its shader reads.
+- **Every path of a function that returns a value ends in a `return`**, or it is `missing-return`.
+  A `loop:` without a `break` never ends; a `while` always may, whatever its condition.
+  What follows a jump in its list is the WARNING `unreachable-code`.
+- **A block is a scope.** A local ends with its block, two blocks beside each other may reuse a name, and shadowing an enclosing block's local is `unsupported-yet`.
+- **`and`, `or` and `not` are no functions**, and a comparison chain evaluates each inner operand once: it is bound where it first stands.
+- **Still `unsupported-yet`:** generics, `self` and methods, `mut` parameters, lambdas and function values, nested functions, `case`, enums, `const`, `use`,
+  a `for` over anything but `a ..< b`, a `let` without a value, an arrow body without `-> T`, a call whose value is dropped, `assert`.
 - **The error type is silent.** What did not check has `checked_module::error_type`, and nothing that meets it reports again.
 - **`unsupported-yet` is never a guess.** Its detail names the construct, and the construct's type is the error type.
 - **A `@builtin` is keyed by its NAME** (`check::builtin_of`), and an `@operator` function is found through its operator alone: no lookup sees its name.
 - **An entry point with any error has no flat tree.** `m.entry_points` holds only what an emitter may read.
-- **The check pass writes `let` and `return` only**, which is core already; every other flat statement comes from `flat_builder` until the source reaches them.
-  `compile_to_text` legalizes anyway, so the pass is in the pipeline before anything needs it.
-- **`emit` does not legalize.** It refuses a structured tree with `not-core`; call `check::legalize` first.
+- **The check pass writes the structured form**, and only `once` and a bare `break` never come from it.
+  The entry point's own `return` stays `flat_return`, which means `leave $root`, and `e.root` is `none` on its trees.
+- **`emit(m, index, t)` legalizes, `emit_entry_point` does not.** The second refuses a structured tree with `not-core`; call `check::legalize` first.
+- **The inliner never hoists.** A call's block stands where the call stood, and a value read twice (a splat, the middle of a chain) is bound where it FIRST stands.
+  So a local may be declared inside a block expression and read behind it; the legalizer moves both in front together.
 - **A `continue` must not cross a `once`.** In C-like text it would end the `do … while (false)`, and in WGSL's `loop { … break; }` it would spin.
   The legalizer sets a flag and breaks instead, and `find_core_violation` refuses a tree that tries.
 - **Purity is declared, never inferred.** `@pure` on a prelude function lands in `function_info::is_pure` and on every `flat_call`.
