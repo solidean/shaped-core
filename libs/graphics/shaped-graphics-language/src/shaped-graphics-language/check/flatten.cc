@@ -56,9 +56,44 @@ struct flattener
     };
     cc::vector<frame> frames;
 
+    /// The innermost frame, as a handle rather than a reference.
+    ///
+    /// Inlining a call pushes a frame, which can move the stack, so a reference into it goes stale the moment
+    /// anything is flattened through it — and a stale read here decides whether a `return` leaves the callee's
+    /// block or the entry point, which is a miscompilation and not a crash.
+    /// Outside a release build this checks that the stack has not moved since the handle was made.
+    struct frame_ref
+    {
+        cc::vector<frame>* owner = nullptr;
+#if CC_ASSERT_ENABLED
+        frame const* base = nullptr;
+#endif
+        isize at = 0;
+
+        [[nodiscard]] frame* operator->() const
+        {
+#if CC_ASSERT_ENABLED
+            CC_ASSERT(owner->data() == base, "a frame handle outlived a push: inlining a call moves the stack, so read "
+                                             "what you need first");
+#endif
+            return owner->data() + at;
+        }
+        [[nodiscard]] frame& operator*() const { return *operator->(); }
+    };
+
+    [[nodiscard]] frame_ref current()
+    {
+        auto ref = frame_ref{.owner = &frames, .at = frames.size() - 1};
+#if CC_ASSERT_ENABLED
+        ref.base = frames.data();
+#endif
+        return ref;
+    }
+
     /// The statements of the list being written.
     cc::vector<flat_stmt_id> block;
 
+    /// Read inside ONE expression, which no push can come between; everything else goes through `current`.
     [[nodiscard]] i32 file() const { return frames.back().file; }
     [[nodiscard]] ast::file_ast const& ast() const { return c.ast_of(file()); }
     [[nodiscard]] file_tables const& tables() const { return c.out.files[file()]; }
@@ -102,7 +137,7 @@ struct flattener
         is_failed = is_failed || !c.is_sound(type);
         entry.exprs.push_back({.type = type,
                                .from = {.file = file(), .expr = from},
-                               .inlined_through = frames.back().chain,
+                               .inlined_through = current()->chain,
                                .node = cc::move(node)});
         return flat_expr_id(entry.exprs.size() - 1);
     }
@@ -110,7 +145,7 @@ struct flattener
     template <class Node>
     flat_stmt_id make_stmt(origin from, Node node)
     {
-        entry.stmts.push_back({.from = from, .inlined_through = frames.back().chain, .node = cc::move(node)});
+        entry.stmts.push_back({.from = from, .inlined_through = current()->chain, .node = cc::move(node)});
         return flat_stmt_id(entry.stmts.size() - 1);
     }
 
@@ -225,7 +260,7 @@ struct flattener
         }
         if (e.node.is<ast::name>())
         {
-            for (auto const& b : frames.back().bound)
+            for (auto const& b : current()->bound)
                 if (b.where == where)
                     return is_valid(b.literal) ? again(b.literal, id) : local_ref(b.local, id);
             return fail();
@@ -380,9 +415,9 @@ struct flattener
     {
         auto const value_block = add_label("loop_value");
         auto const label = add_label("loop");
-        frames.back().loops.push_back({.loop = label, .value_block = value_block});
+        current()->loops.push_back({.loop = label, .value_block = value_block});
         auto const body = flatten_body(loop.body);
-        frames.back().loops.remove_back();
+        current()->loops.remove_back();
 
         auto const where = origin{.file = file(), .expr = id};
         flat_stmt_id const statements[] = {make_stmt(where, flat_loop{.label = label, .body = body})};
@@ -472,7 +507,7 @@ struct flattener
         auto const outer = cc::move(block);
         block = {};
         if (is_valid(value_block))
-            frames.back().value_blocks.push_back(value_block);
+            current()->value_blocks.push_back(value_block);
 
         if (arm.result.kind == ast::body_kind::arrow && ast::is_valid(arm.result.value))
         {
@@ -495,7 +530,7 @@ struct flattener
                 flatten_stmt(stmt);
 
         if (is_valid(value_block))
-            frames.back().value_blocks.remove_back();
+            current()->value_blocks.remove_back();
         auto const range = add_list(block);
         block = cc::move(outer);
         return range;
@@ -563,7 +598,7 @@ struct flattener
 
         // The chain is copied first, since `call_sites` grows under the span that names it.
         auto chain = cc::vector<call_site>();
-        chain.push_back_range(entry.at(frames.back().chain));
+        chain.push_back_range(entry.at(current()->chain));
         chain.push_back({.file = file(), .call = call});
         auto const chain_range
             = ast::range_of<call_site>{.first = u32(entry.call_sites.size()), .count = u32(chain.size())};
@@ -631,8 +666,8 @@ struct flattener
     void flatten_return(origin from, ast::expr_id value)
     {
         // by value: flattening the value may inline a call, whose frame moves the vector this frame lives in
-        auto const return_label = frames.back().return_label;
-        auto const result_type = frames.back().result;
+        auto const return_label = current()->return_label;
+        auto const result_type = current()->result;
         auto result = flat_expr_id::none;
         if (ast::is_valid(value))
         {
@@ -714,12 +749,12 @@ struct flattener
         auto const int_type = is_valid(first) ? entry.at(first).type : type_id::none;
         auto const index
             = add_local(local_kind::index, n != nullptr ? c.text_of(file(), n->where) : cc::string_view("i"), int_type);
-        frames.back().bound.push_back({.where = {.kind = target_kind::local, .index = i32(id)}, .local = index});
+        current()->bound.push_back({.where = {.kind = target_kind::local, .index = i32(id)}, .local = index});
 
         auto const label = add_label("for");
-        frames.back().loops.push_back({.loop = label});
+        current()->loops.push_back({.loop = label});
         auto const body = flatten_body(loop.body);
-        frames.back().loops.remove_back();
+        current()->loops.remove_back();
         add_stmt(from, flat_for{.label = label, .index = index, .first = first, .end = end, .body = body});
     }
 
@@ -739,7 +774,7 @@ struct flattener
             auto const value = flatten_expr(let->value);
             auto const local = add_local(let->is_mut ? local_kind::var : local_kind::let,
                                          c.text_of(file(), name->where), tables().type_at(let->pattern));
-            frames.back().bound.push_back({.where = {.kind = target_kind::local, .index = i32(id)}, .local = local});
+            current()->bound.push_back({.where = {.kind = target_kind::local, .index = i32(id)}, .local = local});
             if (let->is_mut)
                 add_stmt(from, flat_var{.local = local, .value = value});
             else
@@ -756,9 +791,9 @@ struct flattener
         {
             auto const label = add_label("while");
             auto const condition = flatten_expr(loop->condition);
-            frames.back().loops.push_back({.loop = label});
+            current()->loops.push_back({.loop = label});
             auto const body = flatten_body(loop->body);
-            frames.back().loops.remove_back();
+            current()->loops.remove_back();
             return add_stmt(from, flat_while{.label = label, .condition = condition, .body = body});
         }
         if (auto const* const print = s.node.try_as<ast::print_stmt>())
@@ -776,7 +811,7 @@ struct flattener
     void flatten_expr_stmt(origin from, ast::expr_id value)
     {
         auto const& x = ast().at(value);
-        auto const& loops = frames.back().loops;
+        auto const& loops = current()->loops;
         if (auto const* const r = x.node.try_as<ast::return_expr>())
             return flatten_return(from, r->value);
         if (auto const* const b = x.node.try_as<ast::break_expr>())
@@ -805,14 +840,14 @@ struct flattener
         if (auto const* const loop = x.node.try_as<ast::loop_expr>())
         {
             auto const label = add_label("loop");
-            frames.back().loops.push_back({.loop = label});
+            current()->loops.push_back({.loop = label});
             auto const body = flatten_body(loop->body);
-            frames.back().loops.remove_back();
+            current()->loops.remove_back();
             return add_stmt(from, flat_loop{.label = label, .body = body});
         }
         if (auto const* const y = x.node.try_as<ast::yield_expr>())
         {
-            auto const& blocks = frames.back().value_blocks;
+            auto const& blocks = current()->value_blocks;
             if (blocks.empty())
             {
                 is_failed = true;
@@ -888,7 +923,7 @@ void checker::flatten_entry_point(symbol_id id)
 
     f.frames.push_back({.function = id, .file = s.file, .result = info.result});
     auto const local = f.add_local(local_kind::parameter, parameter.name, parameter.type);
-    f.frames.back().bound.push_back(
+    f.current()->bound.push_back(
         {.where = {.kind = target_kind::parameter, .index = i32(parameter.field)}, .local = local});
 
     auto const& body = ast_of(s.file).at(s.declaration).node.as<ast::fun_decl>().body;
