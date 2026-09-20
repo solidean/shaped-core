@@ -107,7 +107,12 @@ One with arguments is formatted directly into the chunk's remaining space by `cc
 The format string doubles as the site's name, so every message from one site groups under one string whatever it formatted to.
 That is what makes "how often does this fire" answerable at all.
 
-A message too long for what is left of a chunk is **truncated and flagged, never dropped** — a truncated message is still evidence.
+**Where a chunk happens to end never decides where a message ends.**
+A message that does not fit the space left is formatted again into a fresh chunk, because a cut at an offset that moves with the log volume is invisible to whoever reads the message back.
+That is how an allowlisted warning turns into an undeclared one under load.
+An uncommitted writer leaves its chunk untouched, so the first attempt costs the formatting and nothing else.
+
+A message past `log_max_payload` (4 KiB) is **truncated and flagged, never dropped** — a truncated message is still evidence, and that cut is one the cap explains rather than one the traffic did.
 
 Levels are `trace`, `debug`, `info`, `warning`, `error`, and each gates on its own bit in the domain's mask.
 `trace` and `debug` are off by default, because a build that records them by default teaches everyone to turn logging off.

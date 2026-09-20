@@ -274,7 +274,7 @@ void cc::rec::impl::writer_account_drop(isize bytes, u64 cycles)
     w.state->dropped_bytes += u64(bytes);
 }
 
-cc::rec::event_writer cc::rec::open_event(cc::rec::desc const& d, isize max_payload)
+cc::rec::event_writer cc::rec::open_event(cc::rec::desc const& d, isize max_payload, isize min_payload)
 {
     rec::event_writer e;
     if (!rec::is_recording(d))
@@ -285,11 +285,17 @@ cc::rec::event_writer cc::rec::open_event(cc::rec::desc const& d, isize max_payl
         impl::flush_ambient_reset();
     auto const header_bytes = isize(sizeof(impl::event_header));
 
-    // A rotation is worth it only when the current chunk cannot hold a useful payload at all.
-    // Otherwise a long message is better truncated than allowed to abandon most of a megabyte.
-    if (header_bytes + impl::padded_payload(1) > w.end - w.cur)
+    // A rotation is worth it only when the current chunk cannot hold what the caller refuses to be cut below.
+    // The default of one byte is the old behaviour: a long payload is better truncated than allowed to abandon most of
+    // a megabyte, and a caller who cannot live with that cut says so.
+    auto const cap = max_payload < 1 ? isize(1) : max_payload;
+    auto const wanted = cc::clamp(min_payload, isize(1), cap);
+    if (header_bytes + impl::padded_payload(wanted) > w.end - w.cur)
     {
-        if (!impl::writer_rotate(header_bytes + impl::padded_payload(1)))
+        // A rotation reports failure when it could not make room for `wanted`, which a fresh chunk it DID take may
+        // still fall short of — so what matters here is whether anything at all can be written now.
+        (void)impl::writer_rotate(header_bytes + impl::padded_payload(wanted));
+        if (header_bytes + impl::padded_payload(1) > w.end - w.cur)
         {
             impl::writer_account_drop(header_bytes, cc::current_cycles());
             return e;

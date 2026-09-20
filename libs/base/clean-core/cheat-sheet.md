@@ -1176,6 +1176,7 @@ CC_RECORD_EVENT_WITH(cc::rec::event_kind::value, cc::rec::category::values, "upl
 cc::rec::is_recording(desc);               // -> bool; the gate on its own
 cc::rec::record_event(desc, payload);      // POD payload, cc::span<byte const>, or nothing
 auto w = cc::rec::open_event(desc, 256);   // reserve, fill w.payload() in place, then w.commit(n) — no temp buffer
+auto w = cc::rec::open_event(desc, 256, 256); // 3rd arg: what it refuses to be cut below, taking a fresh chunk instead
 cc::rec::set_current_thread_record_name("worker");
 cc::rec::seal_current_thread_chunk();      // hand this thread's tail over without waiting for the chunk to fill
 ```

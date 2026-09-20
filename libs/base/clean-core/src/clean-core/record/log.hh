@@ -37,7 +37,12 @@ CC_COLD_FUNC void log_apply_policy(rec::desc const& d);
 }
 
 /// Formats a message into the chunk and publishes it.
-/// A message longer than what the chunk can take is truncated and flagged, never dropped.
+/// A message longer than `log_max_payload` is truncated and flagged, never dropped.
+///
+/// **The tail of a chunk never decides where a message ends.**
+/// A message that does not fit the space left is formatted again into a fresh chunk, so what a reader matches against
+/// is the whole message or a cut the cap explains — never a cut at an offset that moves with the log volume.
+/// An uncommitted writer leaves its chunk untouched, so the first attempt costs nothing but the formatting.
 template <class... Args>
     requires(sizeof...(Args) > 0)
 void log_write(rec::desc const& d, cc::format_string<std::type_identity_t<Args>...> fmt, Args&&... args)
@@ -45,10 +50,23 @@ void log_write(rec::desc const& d, cc::format_string<std::type_identity_t<Args>.
     auto writer = rec::open_event(d, log_max_payload);
     if (writer.is_open())
     {
-        auto const out = writer.payload();
-        auto const written = cc::format_to(cc::span<char>(reinterpret_cast<char*>(out.data()), out.size()), fmt,
-                                           cc::forward<Args>(args)...);
-        writer.commit(written);
+        auto out = writer.payload();
+        auto written = cc::format_to(cc::span<char>(reinterpret_cast<char*>(out.data()), out.size()), fmt,
+                                     cc::forward<Args>(args)...);
+
+        if (written > out.size() && out.size() < log_max_payload) [[unlikely]]
+        {
+            writer = rec::open_event(d, log_max_payload, cc::min(written, log_max_payload));
+            if (writer.is_open())
+            {
+                out = writer.payload();
+                written = cc::format_to(cc::span<char>(reinterpret_cast<char*>(out.data()), out.size()), fmt,
+                                        cc::forward<Args>(args)...);
+            }
+        }
+
+        if (writer.is_open())
+            writer.commit(written);
     }
 
     if (log_needs_policy(d)) [[unlikely]]

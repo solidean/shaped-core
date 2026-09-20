@@ -193,8 +193,16 @@ CC_FORCE_INLINE void record_event(rec::desc const& d, PayloadT const& payload)
 }
 
 /// Reserves an event of up to `max_payload` bytes, to be filled and committed by the caller.
+///
+/// **`min_payload` is what the caller refuses to be cut below**, and a chunk whose tail is shorter is left behind for a
+/// fresh one.
+/// The default of one byte takes whatever tail there is, which is right for a payload that stays useful cut short — a
+/// stack sample, a stamp — and wrong for one a consumer matches as a whole, since the cut is invisible to it.
+/// Asking for more than the tail costs the rest of that chunk, so a caller states what it needs rather than the most it
+/// might use.
+///
 /// Returns a closed writer when the site is disabled or the stream could not take the event.
-[[nodiscard]] rec::event_writer open_event(rec::desc const& d, isize max_payload);
+[[nodiscard]] rec::event_writer open_event(rec::desc const& d, isize max_payload, isize min_payload = 1);
 } // namespace cc::rec
 
 /// A reserved but unpublished event whose payload the caller fills in place.
@@ -243,7 +251,7 @@ struct cc::rec::event_writer
     void commit(isize payload_size, u16 extra_flags = rec::impl::flag_none);
 
 private:
-    friend rec::event_writer rec::open_event(rec::desc const&, isize);
+    friend rec::event_writer rec::open_event(rec::desc const&, isize, isize);
 
     byte* _base = nullptr;
     isize _capacity = 0;
