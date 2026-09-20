@@ -63,12 +63,14 @@ using phases_routine = counting_routine<0>;
 using evict_routine = counting_routine<1>;
 
 // Like counting_routine, but counted atomically so racing acquires can be checked.
-// The counters are static so the test can read them after the race without a handle to the per-context instance.
+// Per (type, context) like every other counter here, and deliberately NOT static: a routine of this type in another
+// context runs its own phases, and a reload signalled between two backends' runs re-runs that instance's `init`.
+// Static counters made that other instance's work land in this test's count.
 class racing_routine : public sg::render_routine<racing_routine>
 {
 public:
-    static inline cc::atomic<int> once = 0;
-    static inline cc::atomic<int> inits = 0;
+    cc::atomic<int> once = 0;
+    cc::atomic<int> inits = 0;
 
 protected:
     cc::shared_async<cc::unit> init_once(sg::routine_init_scope) override
@@ -370,11 +372,8 @@ ASYNC_INVOCABLE_TEST("sg - concurrent first acquires register one instance, and 
     // sg::reload_generation() is process-global, and a concurrent sg::signal_reload() elsewhere would legitimately re-run the phases here.
     // The tag is honoured because the drivers' async invocation takes it around this test's run.
     //
-    // racing_routine's counters are static (see there), so clear them before the race — a prior run against another
-    // backend in the same process would otherwise carry in.
+    // The counters are per instance, so this test reads its OWN context's, and the eviction is what makes them start at zero.
     racing_routine::evict(*ctx);
-    racing_routine::once = 0;
-    racing_routine::inits = 0;
 
     constexpr auto thread_count = 8;
     auto threads = cc::vector<std::thread>::create_with_capacity(thread_count);
@@ -399,10 +398,16 @@ ASYNC_INVOCABLE_TEST("sg - concurrent first acquires register one instance, and 
         t.join();
 
     // Eight racing registrations, one instance, and the phases run over it exactly once.
-    CHECK(racing_routine::once.load() == 0); // nothing has ticked yet
+    auto cmd = ctx->create_command_list();
+    CHECK(!racing_routine::try_acquire(*cmd).is_ready()); // registered, and nothing has ticked yet
+
     (void)co_await ctx->routines.idle_completion();
-    CHECK(racing_routine::once.load() == 1);
-    CHECK(racing_routine::inits.load() == 1);
+
+    auto const self = racing_routine::try_acquire(*cmd);
+    REQUIRE(self.is_ready());
+    CHECK(self->once.load() == 1);
+    CHECK(self->inits.load() == 1);
+    ctx->drop_command_list(cc::move(cmd));
 }
 
 // Holds sg-reload-generation too: a reload another test signals re-runs this routine's init and resets the count.
