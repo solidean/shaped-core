@@ -1,5 +1,7 @@
 #pragma once
 
+#include <clean-core/common/assert.hh>
+#include <clean-core/common/macros.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/variant.hh>
 #include <clean-core/container/vector.hh>
@@ -20,6 +22,89 @@
 /// The STRUCTURED form is what the check pass writes: labeled blocks that may be expressions, and `leave` from any depth.
 /// The CORE form is the subset every target prints one to one, and `find_core_violation` (legalize/core.hh) defines it.
 /// `legalize` (legalize/legalize.hh) takes the first to the second, and `interpret` (interpret/interpret.hh) runs both.
+
+namespace sgl::check
+{
+template <class T>
+struct tree_view;
+}
+
+/// A view of one of the flat tree's side arrays.
+///
+/// Every pass reads the tree and appends to it at the same time, so an id stays valid and a VIEW does not:
+/// the array behind it can move, and what was a span then points at memory nobody owns.
+/// Outside a release build a view remembers the array it was made from and checks, on every element it hands out,
+/// that the array has not moved since — so one held across an append fails loudly instead of reading freed memory.
+///
+/// The fix at a call site is always the same: copy the list into a `cc::vector` before writing into the tree.
+template <class T>
+struct sgl::check::tree_view
+{
+    T const* items = nullptr;
+    isize count = 0;
+#if CC_ASSERT_ENABLED
+    /// The array this view was made from, and where it kept its elements then.
+    cc::vector<T> const* owner = nullptr;
+    T const* base = nullptr;
+#endif
+
+    void verify() const
+    {
+#if CC_ASSERT_ENABLED
+        CC_ASSERT(owner == nullptr || owner->data() == base, "a view of the flat tree outlived an append to it: copy "
+                                                             "the list before writing into the tree");
+#endif
+    }
+
+    /// Indexed rather than a pointer, so every element goes through `verify`.
+    struct iterator
+    {
+        tree_view const* view = nullptr;
+        isize at = 0;
+
+        [[nodiscard]] T const& operator*() const { return (*view)[at]; }
+        iterator& operator++()
+        {
+            ++at;
+            return *this;
+        }
+        [[nodiscard]] bool operator!=(iterator const& rhs) const { return at != rhs.at; }
+    };
+
+    [[nodiscard]] isize size() const { return count; }
+    [[nodiscard]] bool empty() const { return count == 0; }
+    [[nodiscard]] T const* data() const
+    {
+        verify();
+        return items;
+    }
+    [[nodiscard]] T const& operator[](isize i) const
+    {
+        verify();
+        return items[i];
+    }
+    [[nodiscard]] T const& front() const { return (*this)[0]; }
+    [[nodiscard]] T const& back() const { return (*this)[count - 1]; }
+    [[nodiscard]] iterator begin() const { return {this, 0}; }
+    [[nodiscard]] iterator end() const { return {this, count}; }
+    operator cc::span<T const>() const { return {data(), count}; }
+};
+
+namespace sgl::check
+{
+/// `r` of `owner`, as a view that notices the array moving under it.
+template <class T>
+[[nodiscard]] tree_view<T> viewed(cc::vector<T> const& owner, ast::range_of<T> r)
+{
+    CC_ASSERT(isize(r.first) + isize(r.count) <= owner.size(), "a range that reaches outside the tree");
+    auto view = tree_view<T>{.items = owner.data() + isize(r.first), .count = isize(r.count)};
+#if CC_ASSERT_ENABLED
+    view.owner = &owner;
+    view.base = owner.data();
+#endif
+    return view;
+}
+} // namespace sgl::check
 
 /// The one place a name an emitter writes comes from.
 /// A minted name is free, so a collision is impossible by construction; the check pass mints the locals and an
@@ -476,19 +561,10 @@ struct sgl::check::flat_entry_point
     [[nodiscard]] flat_label const& at(label_id id) const { return labels[index_of(id)]; }
     [[nodiscard]] flat_expr const& at(flat_expr_id id) const { return exprs[index_of(id)]; }
     [[nodiscard]] flat_stmt const& at(flat_stmt_id id) const { return stmts[index_of(id)]; }
-    [[nodiscard]] cc::span<flat_expr_id const> at(ast::range_of<flat_expr_id> r) const
-    {
-        return ast::impl::slice(expr_lists, r);
-    }
-    [[nodiscard]] cc::span<flat_stmt_id const> at(ast::range_of<flat_stmt_id> r) const
-    {
-        return ast::impl::slice(stmt_lists, r);
-    }
-    [[nodiscard]] cc::span<flat_arm const> at(ast::range_of<flat_arm> r) const { return ast::impl::slice(arms, r); }
-    [[nodiscard]] cc::span<call_site const> at(ast::range_of<call_site> r) const
-    {
-        return ast::impl::slice(call_sites, r);
-    }
+    [[nodiscard]] tree_view<flat_expr_id> at(ast::range_of<flat_expr_id> r) const { return viewed(expr_lists, r); }
+    [[nodiscard]] tree_view<flat_stmt_id> at(ast::range_of<flat_stmt_id> r) const { return viewed(stmt_lists, r); }
+    [[nodiscard]] tree_view<flat_arm> at(ast::range_of<flat_arm> r) const { return viewed(arms, r); }
+    [[nodiscard]] tree_view<call_site> at(ast::range_of<call_site> r) const { return viewed(call_sites, r); }
 
     [[nodiscard]] bool operator==(flat_entry_point const& rhs) const
     {
