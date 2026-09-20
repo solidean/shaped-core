@@ -109,11 +109,14 @@ One-liner per library:
   Above that is the first semantic phase, `sgl::check::check` → `sgl::check::checked_module`: name resolution, type checking and evaluation as ONE demand-driven pass.
   It yields side tables over the untouched AST for an editor, and one flat typed tree per entry point, which is all an emitter reads.
   **The check pass is a tracer**: it carries `tests/samples/cube.sgl` against `prelude/prelude.sgl`, and every other construct is the one diagnostic `unsupported-yet`, never a guess.
-  The inliner, the emitters and everything after them do not exist yet.
+  Behind it, `sgl::emit::emit` writes ONE entry point as readable text for `hlsl_dx12`, `hlsl_vulkan` or `wgsl`, with exactly the types and the binding it needs.
+  The text carries its **final addresses** — member order is the location, an `@inline binding` sits where sg expects inline constants — so slib's binding pass is not needed behind it.
+  A name that is reserved in one target gets a trailing underscore there; an entry point never changes, so one that collides anywhere is an error everywhere.
+  The inliner, MSL and GLSL, and every binding that is not `@inline` do not exist yet.
   **Total and local by construction**: any bytes parse to a tree plus diagnostics, and no syntax error escapes its indentation.
-  Namespace `sgl`. Depends on clean-core alone, and the syntactic half must stay that way — an editor links it to parse.
+  Namespace `sgl`. Depends on clean-core alone, the emitters included, and the syntactic half must stay that way — an editor links it to parse.
   [docs/spec/](libs/graphics/shaped-graphics-language/docs/spec/_index.md) is the language: normative rules with stable ids under `syntax/`, every "why" mirrored under `syntax/why/`,
-  `semantics/` is what the check pass does, marked as deliberately thin, and ideas that are not spec yet are under `incubator/`.
+  `semantics/` is what the check pass and the emitters do, marked as deliberately thin, and ideas that are not spec yet are under `incubator/`.
   **Every `sgl` fence in the spec is a test**, so the spec and the parser cannot drift apart silently.
   Early stage.
 * **`libs/graphics/shaped-viewer`** — professional, RTX-enabled visualization renderer with a dev-friendly API.

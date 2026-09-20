@@ -4,7 +4,7 @@ project(shaped-graphics-language LANGUAGES CXX)
 # SGL's whole toolchain is this one library: compiler, linter, formatter and language server share the same trees.
 # A command-line compiler is a thin tool over it, not a second implementation.
 #
-# The syntactic half, the AST pass and the check pass need clean-core and nothing else.
+# The syntactic half, the AST pass, the check pass and the emitters need clean-core and nothing else.
 # It must stay that way: an editor integration links this to parse, and should not pull in a graphics API to do it.
 add_library(shaped-graphics-language
     src/shaped-graphics-language/fwd.cc
@@ -38,6 +38,13 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/check/dump.cc
     src/shaped-graphics-language/check/flat.cc
     src/shaped-graphics-language/check/flatten.cc
+
+    src/shaped-graphics-language/emit/emit.cc
+    src/shaped-graphics-language/emit/reserved_words.cc
+    src/shaped-graphics-language/emit/impl/hlsl.cc
+    src/shaped-graphics-language/emit/impl/plan.cc
+    src/shaped-graphics-language/emit/impl/text_writer.cc
+    src/shaped-graphics-language/emit/impl/wgsl.cc
 )
 
 # Public headers live co-located in src/ for better editor experience.
@@ -88,6 +95,11 @@ target_sources(shaped-graphics-language
     src/shaped-graphics-language/check/ids.hh
     src/shaped-graphics-language/check/symbols.hh
     src/shaped-graphics-language/check/impl/checker.hh
+
+    src/shaped-graphics-language/emit/emit.hh
+    src/shaped-graphics-language/emit/reserved_words.hh
+    src/shaped-graphics-language/emit/impl/dialect.hh
+    src/shaped-graphics-language/emit/impl/plan.hh
 )
 
 # Require at least C++23 for this target; the final -std is chosen by the top-level project.
@@ -124,6 +136,10 @@ if(SC_BUILD_TESTS)
         tests/check/cube-test.cc
         tests/check/declaration-check-test.cc
         tests/check/expression-check-test.cc
+
+        tests/emit/emit-test-support.hh
+        tests/emit/cube-emit-test.cc
+        tests/emit/emit-test.cc
 
         tests/spec/spec-examples-test.cc
 

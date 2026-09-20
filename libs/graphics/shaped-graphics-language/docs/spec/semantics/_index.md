@@ -12,7 +12,7 @@ The ideas the tracer follows are in the [incubator](../incubator/_index.md), and
 
 ```text
 ASTs of one module -> check -> side tables over the ASTs
-                            -> one flat typed tree per entry point -> emitters
+                            -> one flat typed tree per entry point -> emit -> HLSL for dx12, HLSL for vulkan, WGSL
 ```
 
 ## The files
@@ -21,6 +21,8 @@ ASTs of one module -> check -> side tables over the ASTs
 |---|---|---|
 | [checking.md](checking.md) | the check pass: symbols, types, overloads, bodies, entry points, the flat tree, and its diagnostic kinds | `CHK` |
 | [why/checking.md](why/checking.md) | the reasons behind the rules of the check pass | |
+| [emitting.md](emitting.md) | the emitters: targets, names, addresses, the inline binding, matrices, and the shape of the text | `EMIT` |
+| [why/emitting.md](why/emitting.md) | the reasons behind the rules of the emitters | |
 
 ## What is not here yet
 
@@ -29,4 +31,4 @@ ASTs of one module -> check -> side tables over the ASTs
 * Control flow, assignment and `mut`.
 * Literal types, integers, conversions and `as`.
 * Resources, samplers, enums, constants and type aliases.
-* The emitters, under `targets/`.
+* Emitters for MSL and GLSL, and a binding that is not `@inline`.

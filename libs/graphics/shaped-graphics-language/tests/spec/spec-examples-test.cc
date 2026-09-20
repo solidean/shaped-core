@@ -38,6 +38,8 @@ constexpr cc::string_view spec_files[] = {
     "semantics/_index.md",
     "semantics/checking.md",
     "semantics/why/checking.md",
+    "semantics/emitting.md",
+    "semantics/why/emitting.md",
     "incubator/structural-types.md",
     "incubator/function-model.md",
     "incubator/shader-logging.md",

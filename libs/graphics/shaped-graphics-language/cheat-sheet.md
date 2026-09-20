@@ -1,6 +1,6 @@
 # shaped-graphics-language cheat sheet
 
-SGL's toolchain as a library: the syntactic half, from bytes to the form tree, the AST pass on top of it, and a tracer of the check pass.
+SGL's toolchain as a library: the syntactic half, from bytes to the form tree, the AST pass on top of it, and a tracer of the check pass and the emitters.
 Namespace `sgl`.
 Depends on clean-core.
 
@@ -150,6 +150,25 @@ sgl::check::dump_entry_points(m)
 sgl::check::dump_diagnostics(m)            // `unknown-name @1:120+4 foo`: kind, file, span, detail
 ```
 
+## Emitting
+
+```cpp
+#include <shaped-graphics-language/emit/emit.hh>
+sgl::emit::target                          // hlsl_dx12, hlsl_vulkan, wgsl: a text format PLUS a backend's addressing rules
+sgl::emit::all_targets()                   // -> cc::span<target const>
+auto const r = sgl::emit::emit(m, 0, sgl::emit::target::wgsl);   // -> emitted_text; the isize is a position in m.entry_points
+                                           // ONE entry point per call: it, and exactly the structs and the binding it needs
+                                           // TOTAL and deterministic; the text carries FINAL addresses, no pass numbers it later
+r.has_text()  r.text                       // text is empty when there are errors
+r.errors                                   // emit::error { kind, symbol, detail }; the SAME for every target
+sgl::emit::to_string(target)  sgl::emit::to_string(error_kind)   // "hlsl-vulkan", "reserved-entry-point-name"
+sgl::emit::dump_errors(r)                  // `unsupported a binding that is not @inline: 'scene'`, one per line
+
+#include <shaped-graphics-language/emit/reserved_words.hh>
+sgl::emit::reserved_words(t)               // -> cc::span<cc::string_view const>: keywords, predeclared types, the functions the text calls
+sgl::emit::is_reserved(t, "target")        // true for wgsl only
+```
+
 ## Diagnostics
 
 ```cpp
@@ -223,4 +242,11 @@ sgl::print_source(file)      // == file.source for EVERY input: the lossless inv
 - **A flat tree has no splat and no object.** A splat is one `flat_member` per field, over a temporary local when its value is no local.
   A returned object is a `flat_construct` in FIELD order.
 - **A check diagnostic is not an `sgl::diagnostic`.** It is a `located_diagnostic`: a module has several files, so it names one, and it carries a detail.
+- **An emit error is no diagnostic.** It is an `emit::error`: a kind, the symbol it is about, and a detail; it has no span yet.
+- **Addresses are positions.** Member i of an edge struct is location i, counted over the members without `@position`.
+  What a struct is — vertex input, stage link, render targets — comes from where it stands in the signature, not from its attribute.
+- **A name is renamed per target, an entry point never.** `target` is `target_` in WGSL only; an entry point named `filter` is an error in EVERY target.
+- **Only an `@inline binding` is emitted**: `register(b0, space9)`, `[[vk::push_constant]]`, `@group(3) @binding(0)`.
+  Its members must land on the same offsets in HLSL and in WGSL, so `{float; float3}` is `layout-mismatch` and `{float3; float}` is fine.
+- **A new target is a `dialect`**: one file under `emit/impl/` and one case in `dialect_of`; the walk over the flat tree is shared (`impl/text_writer.cc`).
 - **Every `sgl` fence under `docs/spec/` is a test** (`tests/spec/spec-examples-test.cc`): `sgl` must parse cleanly, `sgl error` must report the kind its lead names, `sgl sketch` is unchecked.

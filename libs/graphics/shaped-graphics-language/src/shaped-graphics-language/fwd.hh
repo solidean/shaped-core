@@ -169,3 +169,11 @@ struct located_diagnostic;
 struct checked_module;
 struct module_file;
 } // namespace sgl::check
+
+namespace sgl::emit
+{
+enum class target : u8;
+enum class error_kind : u8;
+struct error;
+struct emitted_text;
+} // namespace sgl::emit
