@@ -71,7 +71,45 @@ constexpr auto k_broken_source = cc::string_view("@pixel struct target:\n"
                                                  "    return {\n"
                                                  "        color = float4(missing, 0.0, 0.0, 1.0)\n"
                                                  "    }\n");
+/// Stands in for the MSL -> metallib compiler slib does not have; only its format is ever asked for.
+class no_metal_compiler final : public slib::shader_compiler
+{
+public:
+    [[nodiscard]] slib::shader_language source_language() const override { return slib::shader_language::hlsl; }
+    [[nodiscard]] sg::shader_format target_format() const override { return sg::shader_format::metal_lib; }
+    [[nodiscard]] cc::result<cc::string> preprocess(slib::shader_source_description const&,
+                                                    slib::include_resolver) const override
+    {
+        return cc::error("never called");
+    }
+    [[nodiscard]] sg::async_compiled_shader compile(slib::shader_source_description const&) const override
+    {
+        return nullptr;
+    }
+};
 } // namespace
+
+TEST("slib sgl compiler - over a metal_lib compiler the flattened source is MSL")
+{
+    auto const compiler = slib::create_sgl_compiler(std::make_unique<no_metal_compiler>());
+    CHECK(compiler->target_format() == sg::shader_format::metal_lib);
+    auto resolve = [](cc::string_view) -> cc::optional<cc::string> { return cc::nullopt; };
+
+    auto const text = compiler->preprocess({.source = "@pixel struct frame:\n"
+                                                      "    color: float4\n"
+                                                      "struct pixel_input:\n"
+                                                      "    @position position: hpos4\n"
+                                                      "@pixel fun main_ps(p: pixel_input) -> frame:\n"
+                                                      "    return {\n"
+                                                      "        color = float4(1.0, 0.0, 0.0, 1.0)\n"
+                                                      "    }\n",
+                                            .entry_point = "main_ps",
+                                            .stage = sg::shader_stage::fragment},
+                                           resolve);
+    REQUIRE(text.has_value());
+    CHECK(text.value().contains("using namespace metal;"));
+    CHECK(text.value().contains("fragment frame main_ps(pixel_input p [[stage_in]])"));
+}
 
 TEST("slib sgl compiler - the edge is sgl to whatever the inner compiler builds")
 {

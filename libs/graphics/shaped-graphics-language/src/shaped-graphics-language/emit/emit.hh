@@ -15,6 +15,7 @@ enum class sgl::emit::target : sgl::u8
     hlsl_dx12,
     hlsl_vulkan,
     wgsl,
+    msl,
 };
 
 /// What keeps an entry point from being written, as a closed set with stable kebab-case names.
@@ -30,7 +31,7 @@ enum class sgl::emit::error_kind : sgl::u8
     unsupported,
     /// A vertex input member whose semantic would start with `SV_`, which dx12 reads as a system value.
     system_value_semantic,
-    /// The members of an inline binding land on different offsets in HLSL and in WGSL.
+    /// The members of an inline binding land on different offsets in HLSL, in WGSL and in MSL.
     layout_mismatch,
     /// A literal that is infinite or not a number, which no target can spell.
     non_finite_literal,
@@ -69,7 +70,7 @@ namespace sgl::emit
 /// Every target there is, in the order of the enum.
 [[nodiscard]] cc::span<target const> all_targets();
 
-/// `hlsl-dx12`, `hlsl-vulkan`, `wgsl`.
+/// `hlsl-dx12`, `hlsl-vulkan`, `wgsl`, `msl`.
 [[nodiscard]] cc::string_view to_string(target t);
 
 /// The stable kebab-case name of a kind, e.g. "reserved-entry-point-name".

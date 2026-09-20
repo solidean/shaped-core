@@ -11,6 +11,7 @@ namespace sgl::emit
 /// That is more than the keywords of the target language.
 /// It also holds the predeclared types and the functions an emitter writes, since a local named `mul` would hide the one it calls.
 /// The two HLSL targets share one list.
+/// MSL's list holds its standard library as well: `using namespace metal;` puts it where the program's structs are declared.
 [[nodiscard]] cc::span<cc::string_view const> reserved_words(target t);
 
 [[nodiscard]] bool is_reserved(target t, cc::string_view name);

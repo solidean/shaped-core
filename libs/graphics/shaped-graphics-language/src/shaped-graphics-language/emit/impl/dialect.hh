@@ -71,4 +71,5 @@ protected:
 [[nodiscard]] dialect const& hlsl_dx12_dialect();
 [[nodiscard]] dialect const& hlsl_vulkan_dialect();
 [[nodiscard]] dialect const& wgsl_dialect();
+[[nodiscard]] dialect const& msl_dialect();
 } // namespace sgl::emit::impl

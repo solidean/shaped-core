@@ -178,7 +178,8 @@ sgl::check::dump_diagnostics(m)            // `unknown-name @1:120+4 foo`: kind,
 
 ```cpp
 #include <shaped-graphics-language/emit/emit.hh>
-sgl::emit::target                          // hlsl_dx12, hlsl_vulkan, wgsl: a text format PLUS a backend's addressing rules
+sgl::emit::target                          // hlsl_dx12, hlsl_vulkan, wgsl, msl: a text format PLUS a backend's addressing rules
+                                           // msl is written and pinned, and has met NO Metal compiler yet
 sgl::emit::all_targets()                   // -> cc::span<target const>
 auto const r = sgl::emit::emit(m, 0, sgl::emit::target::wgsl);   // -> emitted_text; the isize is a position in m.entry_points
                                            // ONE entry point per call: it, and exactly the structs and the binding it needs
@@ -190,7 +191,7 @@ sgl::emit::dump_errors(r)                  // `unsupported a binding that is not
 
 #include <shaped-graphics-language/emit/reserved_words.hh>
 sgl::emit::reserved_words(t)               // -> cc::span<cc::string_view const>: keywords, predeclared types, the functions the text calls
-sgl::emit::is_reserved(t, "target")        // true for wgsl only
+sgl::emit::is_reserved(t, "target")        // true for wgsl only; msl also reserves its whole standard library, and `main`
 ```
 
 ## Diagnostics
@@ -269,9 +270,11 @@ sgl::print_source(file)      // == file.source for EVERY input: the lossless inv
 - **An emit error is no diagnostic.** It is an `emit::error`: a kind, the symbol it is about, and a detail; it has no span yet.
 - **Addresses are positions.** Member i of an edge struct is location i, counted over the members without `@position`.
   What a struct is — vertex input, stage link, render targets — comes from where it stands in the signature, not from its attribute.
-- **A name is renamed per target, an entry point never.** `target` is `target_` in WGSL only; an entry point named `filter` is an error in EVERY target.
+- **A name is renamed per target, an entry point never.** `target` is `target_` in WGSL only; an entry point named `filter` or `main` is an error in EVERY target.
 - **Only an `@inline binding` is emitted**: `register(b0, space9)`, `[[vk::push_constant]]`, `@group(3) @binding(0)`.
-  Its members must land on the same offsets in HLSL and in WGSL, so `{float; float3}` is `layout-mismatch` and `{float3; float}` is fine.
+  MSL has no globals, so there it is the entry point's parameter `constant T& name [[buffer(4)]]`.
+  Its members must land on the same offsets in HLSL, WGSL and MSL, so `{float; float3}` is `layout-mismatch`.
+  **So is `{float3; float}`**: MSL's `float3` is 16 bytes, so nothing fits into its tail, and `{float3; mat4; float}` is fine.
 - **`compile_to_text` drops warnings.** It gives the text or the errors; a caller that wants warnings runs the phases itself.
 - **The prelude is embedded at CONFIGURE time.** Editing `prelude/prelude.sgl` re-runs CMake, and a test pins the embedded text to the file.
 - **A new target is a `dialect`**: one file under `emit/impl/` and one case in `dialect_of`; the walk over the flat tree is shared (`impl/text_writer.cc`).

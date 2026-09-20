@@ -4,6 +4,15 @@
 # backend's format, and a cross-compile CI leg builds every target.
 
 sc_resolve_example_backend(_sgl_cube_backend _sgl_cube_mode SUPPORTS dx12 vulkan webgpu)
+
+# A build whose only backend is metal gets a target that says what is missing, rather than no target at all.
+# SGL writes MSL already; what does not exist is a compiler from MSL to a metallib, and the metal backend binds
+# neither vertex buffers nor inline constants yet -- see libs/graphics/shaped-shader-library/docs/structure.md.
+if(_sgl_cube_mode STREQUAL "none" AND TARGET shaped-graphics-metal)
+    sc_add_example_backend_stub(graphics-sgl-cube-example "metal" SUPPORTS dx12 vulkan webgpu
+        REASON "metal is the only backend of this build: SGL writes MSL, but nothing compiles MSL to a metallib yet.")
+    return()
+endif()
 if(_sgl_cube_mode STREQUAL "none")
     return()
 endif()

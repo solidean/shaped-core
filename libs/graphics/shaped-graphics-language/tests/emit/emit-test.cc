@@ -58,6 +58,33 @@ TEST("sgl emit - a local that is reserved in one target gets its underscore ther
     CHECK(wgsl.contains("    let filter_: vec3f = normalize(p.normal);\n"));
     CHECK(wgsl.contains("    let mul: f32 = saturate(dot(filter_, filter_));\n"));
     CHECK(wgsl.contains("    return frame(vec4f(filter_.x, filter_.y, filter_.z, mul));\n"));
+
+    // `filter` is an enum of the metal namespace, and `mul` is nothing there
+    auto const msl = text_of(source, target::msl);
+    CHECK(msl.contains("    const float3 filter_ = normalize(p.normal);\n"));
+    CHECK(msl.contains("    const float mul = saturate(dot(filter_, filter_));\n"));
+    CHECK(msl.contains("    result.color = float4(filter_.x, filter_.y, filter_.z, mul);\n"));
+}
+
+TEST("sgl emit - a name that only MSL reserves is renamed in MSL and nowhere else")
+{
+    auto const source = with_edges("struct device:\n"
+                                   "    length: float\n"
+                                   "\n"
+                                   "@pixel fun main_ps(p: pixel_input) -> frame:\n"
+                                   "    let kernel = device(0.5)\n"
+                                   "    return {\n"
+                                   "        color = float4(kernel.length, kernel.length, kernel.length, 1.0)\n"
+                                   "    }\n");
+
+    auto const msl = text_of(source, target::msl);
+    CHECK(msl.contains("struct device_\n{\n    float length_;\n};\n"));
+    CHECK(msl.contains("    device_ kernel_;\n    kernel_.length_ = 0.5;\n"));
+    CHECK(msl.contains("float4(kernel_.length_, kernel_.length_, kernel_.length_, 1.0);\n"));
+
+    auto const wgsl = text_of(source, target::wgsl);
+    CHECK(wgsl.contains("struct device {\n    length: f32,\n}\n"));
+    CHECK(wgsl.contains("    let kernel: device = device(0.5);\n"));
 }
 
 TEST("sgl emit - a reserved member is renamed, and its dx12 semantic still comes from the name as written")
@@ -111,13 +138,27 @@ TEST("sgl emit - an entry point name that is reserved in any target is an error 
                                "    return {\n"
                                "        color = float4(..p.normal, 1.0)\n"
                                "    }\n"))
-          == "reserved-entry-point-name 'filter' is reserved in wgsl\n");
+          == "reserved-entry-point-name 'filter' is reserved in wgsl, msl\n");
 
     CHECK(errors_of(with_edges("@pixel fun mul(p: pixel_input) -> frame:\n"
                                "    return {\n"
                                "        color = float4(..p.normal, 1.0)\n"
                                "    }\n"))
           == "reserved-entry-point-name 'mul' is reserved in hlsl-dx12, hlsl-vulkan\n");
+
+    // MSL forbids a function called `main`, so no target gets one
+    CHECK(errors_of(with_edges("@pixel fun main(p: pixel_input) -> frame:\n"
+                               "    return {\n"
+                               "        color = float4(..p.normal, 1.0)\n"
+                               "    }\n"))
+          == "reserved-entry-point-name 'main' is reserved in msl\n");
+
+    // and the names the cube uses stay free everywhere
+    for (auto const t : sgl::emit::all_targets())
+    {
+        CHECK(!sgl::emit::is_reserved(t, "main_vs"));
+        CHECK(!sgl::emit::is_reserved(t, "main_ps"));
+    }
 }
 
 TEST("sgl emit - a binding that is not @inline is an error and never a guessed address")
@@ -137,7 +178,7 @@ TEST("sgl emit - a binding that is not @inline is an error and never a guessed a
     CHECK(sgl::check::is_valid(e.errors[0].symbol));
 }
 
-TEST("sgl emit - an inline block whose members would sit elsewhere in WGSL than in HLSL is an error")
+TEST("sgl emit - an inline block whose members would sit elsewhere in one target than in another is an error")
 {
     CHECK(errors_of(with_edges("@inline binding look:\n"
                                "    scale: float\n"
@@ -147,13 +188,24 @@ TEST("sgl emit - an inline block whose members would sit elsewhere in WGSL than 
                                "    return {\n"
                                "        color = float4(..look.tint, look.scale)\n"
                                "    }\n"))
-          == "layout-mismatch 'look.tint' is at byte 4 in HLSL and at byte 16 in WGSL\n");
+          == "layout-mismatch 'look.tint' is at byte 4 in HLSL, at byte 16 in WGSL and at byte 16 in MSL\n");
 
-    // The other order packs alike everywhere, and vulkan states each offset since a push-constant block packs tight.
+    // MSL alone disagrees here: its float3 is 16 bytes, so nothing fits into the tail HLSL and WGSL both fill.
+    CHECK(errors_of(with_edges("@inline binding look:\n"
+                               "    tint: float3\n"
+                               "    scale: float\n"
+                               "\n"
+                               "@pixel fun main_ps(p: pixel_input){look} -> frame:\n"
+                               "    return {\n"
+                               "        color = float4(..look.tint, look.scale)\n"
+                               "    }\n"))
+          == "layout-mismatch 'look.scale' is at byte 12 in HLSL, at byte 12 in WGSL and at byte 16 in MSL\n");
+
+    // A block of full rows packs alike everywhere, and vulkan states each offset since a push-constant block packs tight.
     auto const hlsl = text_of(with_edges("@inline binding look:\n"
                                          "    tint: float3\n"
-                                         "    scale: float\n"
                                          "    to_world: mat4\n"
+                                         "    scale: float\n"
                                          "\n"
                                          "@pixel fun main_ps(p: pixel_input){look} -> frame:\n"
                                          "    let n = look.to_world * p.normal\n"
@@ -162,8 +214,8 @@ TEST("sgl emit - an inline block whose members would sit elsewhere in WGSL than 
                                          "    }\n"),
                               target::hlsl_vulkan);
     CHECK(hlsl.contains("    [[vk::offset(0)]] float3 tint;\n"));
-    CHECK(hlsl.contains("    [[vk::offset(12)]] float scale;\n"));
     CHECK(hlsl.contains("    [[vk::offset(16)]] column_major float4x4 to_world;\n"));
+    CHECK(hlsl.contains("    [[vk::offset(80)]] float scale;\n"));
     CHECK(hlsl.contains("    const float3 n = mul(look.to_world, float4(p.normal, 0.0)).xyz;\n"));
 }
 
@@ -290,9 +342,15 @@ TEST("sgl emit - the reserved words differ by target and hold no word twice")
     CHECK(sgl::emit::is_reserved(target::hlsl_vulkan, "float4x4"));
     CHECK(sgl::emit::is_reserved(target::hlsl_dx12, "mul"));
     CHECK(!sgl::emit::is_reserved(target::wgsl, "mul"));
+    CHECK(sgl::emit::is_reserved(target::msl, "main"));
+    CHECK(sgl::emit::is_reserved(target::msl, "fragment"));
+    CHECK(sgl::emit::is_reserved(target::msl, "packed_float3"));
+    CHECK(!sgl::emit::is_reserved(target::msl, "target"));
+    CHECK(!sgl::emit::is_reserved(target::hlsl_dx12, "main"));
     // what the hand-written cube shaders call their locals stays free
     CHECK(!sgl::emit::is_reserved(target::hlsl_dx12, "lit"));
     CHECK(!sgl::emit::is_reserved(target::wgsl, "input"));
+    CHECK(!sgl::emit::is_reserved(target::msl, "lit"));
 
     for (auto const t : sgl::emit::all_targets())
     {

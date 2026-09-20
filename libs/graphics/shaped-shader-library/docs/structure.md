@@ -102,7 +102,12 @@ The shape the seam is built for, and what is still `[planned]`:
   It is what reaches the backends [portable HLSL](portable-hlsl.md) does not, without DXC, Tint or naga on wasm; hand-written WGSL is the interim.
   **A tracer of it has landed**: `create_sgl_compiler(inner)` is one edge per format, SGL's pipeline in front of the compiler that was there already.
   It is not a chain in the sense below, since the hop is inside one edge: `preprocess` writes the target's text, and that text is what is cached, hashed and compiled.
-  It carries what [examples/graphics/sgl-cube](../../../../examples/graphics/sgl-cube/shaders/cube.sgl) needs and nothing more; MSL, and the generated host mirror, are still `[planned]`.
+  It carries what [examples/graphics/sgl-cube](../../../../examples/graphics/sgl-cube/shaders/cube.sgl) needs and nothing more; the generated host mirror is still `[planned]`.
+  **SGL writes MSL too, and nothing here can build it**: `create_sgl_compiler` maps a `metal_lib` inner compiler to the `msl` target, and slib has no such compiler.
+  What a Mac run still needs is an MSL-to-`metal_lib` compiler over Apple's `metal` tool or a runtime `newLibraryWithSource`, which also has to reflect the MSL.
+  sg's metal backend has to bind vertex buffers through a vertex descriptor, and inline constants at buffer index 4, since both are unimplemented there.
+  So are the index buffer and the indexed draw, which the cube uses as well.
+  Until then `sgl-cube` on a metal-only build is a stub target that says so.
 - **chains** — a shader is authored in one language but consumed as several backend formats, and the path may need an intermediate hop (`slang -> hlsl -> dxil`).
   That needs a language→language transpile edge and a graph search to replace the direct lookup.
   Call sites do not change: `acquire(ctx)` already asks "reach a format this context accepts", which is a path query either way.

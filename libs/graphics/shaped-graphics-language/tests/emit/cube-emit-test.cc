@@ -14,6 +14,7 @@ cc::string emit_cube(isize index, target t)
 } // namespace
 
 // The six texts below are the twins of examples/graphics/rotating-cube/shaders/cube.hlsl, cube_vs.wgsl and cube_fs.wgsl.
+// The two MSL texts have no twin and have met no Metal compiler: they pin what is written, not that it compiles.
 // Each is pinned whole: an emitter's output is read by people, so a changed blank line is a change worth seeing.
 
 TEST("sgl emit - the cube's vertex stage as HLSL for dx12")
@@ -207,6 +208,78 @@ TEST("sgl emit - the cube's pixel stage as WGSL, where `target` is reserved")
              "    let fill: f32 = saturate(dot(n, normalize(vec3f(-0.7, 0.15, 0.6))));\n"
              "    let lit: vec3f = p.color * (0.25 + 0.8 * key + 0.25 * fill);\n"
              "    return target_(vec4f(lit.x, lit.y, lit.z, 1.0));\n"
+             "}\n");
+}
+
+TEST("sgl emit - the cube's vertex stage as MSL, where the inline constants are a parameter")
+{
+    CHECK(emit_cube(0, target::msl)
+          == "// SGL vertex entry point 'main_vs', written as MSL.\n"
+             "// Generated: the SGL source is what to edit.\n"
+             "\n"
+             "#include <metal_stdlib>\n"
+             "using namespace metal;\n"
+             "\n"
+             "struct cube_vertex\n"
+             "{\n"
+             "    float3 position [[attribute(0)]];\n"
+             "    float3 normal [[attribute(1)]];\n"
+             "    float3 color [[attribute(2)]];\n"
+             "};\n"
+             "\n"
+             "struct pixel_input\n"
+             "{\n"
+             "    float4 position [[position]];\n"
+             "    float3 normal [[user(sgl0)]];\n"
+             "    float3 color [[user(sgl1)]];\n"
+             "};\n"
+             "\n"
+             "struct constants_data\n"
+             "{\n"
+             "    float4x4 view_projection;\n"
+             "};\n"
+             "\n"
+             "vertex pixel_input main_vs(cube_vertex v [[stage_in]], constant constants_data& constants "
+             "[[buffer(4)]])\n"
+             "{\n"
+             "    pixel_input result;\n"
+             "    result.position = constants.view_projection * float4(v.position, 1.0);\n"
+             "    result.normal = v.normal;\n"
+             "    result.color = v.color;\n"
+             "    return result;\n"
+             "}\n");
+}
+
+TEST("sgl emit - the cube's pixel stage as MSL")
+{
+    CHECK(emit_cube(1, target::msl)
+          == "// SGL pixel entry point 'main_ps', written as MSL.\n"
+             "// Generated: the SGL source is what to edit.\n"
+             "\n"
+             "#include <metal_stdlib>\n"
+             "using namespace metal;\n"
+             "\n"
+             "struct pixel_input\n"
+             "{\n"
+             "    float4 position [[position]];\n"
+             "    float3 normal [[user(sgl0)]];\n"
+             "    float3 color [[user(sgl1)]];\n"
+             "};\n"
+             "\n"
+             "struct target\n"
+             "{\n"
+             "    float4 color [[color(0)]];\n"
+             "};\n"
+             "\n"
+             "fragment target main_ps(pixel_input p [[stage_in]])\n"
+             "{\n"
+             "    const float3 n = normalize(p.normal);\n"
+             "    const float key = saturate(dot(n, normalize(float3(0.45, 0.8, -0.4))));\n"
+             "    const float fill = saturate(dot(n, normalize(float3(-0.7, 0.15, 0.6))));\n"
+             "    const float3 lit = p.color * (0.25 + 0.8 * key + 0.25 * fill);\n"
+             "    target result;\n"
+             "    result.color = float4(lit.x, lit.y, lit.z, 1.0);\n"
+             "    return result;\n"
              "}\n");
 }
 

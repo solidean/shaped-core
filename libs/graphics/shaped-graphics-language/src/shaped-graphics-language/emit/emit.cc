@@ -10,6 +10,7 @@ constexpr sgl::emit::target k_all_targets[] = {
     sgl::emit::target::hlsl_dx12,
     sgl::emit::target::hlsl_vulkan,
     sgl::emit::target::wgsl,
+    sgl::emit::target::msl,
 };
 } // namespace
 
@@ -28,6 +29,8 @@ cc::string_view sgl::emit::to_string(target t)
         return "hlsl-vulkan";
     case target::wgsl:
         return "wgsl";
+    case target::msl:
+        return "msl";
     }
     return "";
 }
@@ -67,6 +70,8 @@ sgl::emit::impl::dialect const& sgl::emit::impl::dialect_of(target t)
         return hlsl_vulkan_dialect();
     case target::wgsl:
         return wgsl_dialect();
+    case target::msl:
+        return msl_dialect();
     }
     return hlsl_dx12_dialect();
 }

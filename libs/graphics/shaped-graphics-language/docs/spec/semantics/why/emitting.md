@@ -15,6 +15,9 @@ The two differ in little: where the inline constants live, and that SPIR-V has l
 That little is exactly what a reader of a capture wants to see, so each target says it in the text.
 Both share one dialect in the implementation, and a fourth target is one more file.
 
+MSL came as that one file: a dialect, a reserved-word list and a case, and the walk over the tree did not change.
+What it did change is a rule every target shares, since MSL's block layout joined the comparison of EMIT-41.
+
 ## EMIT-4
 
 A matrix's orientation in HLSL can come from `-Zpr` or from a `#pragma pack_matrix` that the text cannot see.
@@ -57,3 +60,38 @@ A minified text would be a little smaller and would make every such session star
 HLSL has no expression that builds a struct of the program, so a local is the only spelling.
 Assigning member by member keeps the field names in the text, which a positional constructor would lose.
 Every flat expression is pure, so building a struct ahead of the statement that uses it changes nothing.
+
+## EMIT-57
+
+`using namespace metal;` makes every name of the standard library visible in the global scope, where the program's structs are declared.
+A struct called `filter` or `length` would then be ambiguous at its first use, and the compiler would name a header nobody wrote.
+A local only hides such a name, so reserving it there costs an underscore and nothing else.
+`main` is no keyword, and MSL refuses a function of that name, so by EMIT-21 no target has an entry point called `main`.
+
+## EMIT-58
+
+MSL has no global resources: whatever a stage reads is a parameter of its entry point.
+The body still reads `constants.view_projection`, since a reference parameter is used like the global the other targets declare.
+sg's metal backend binds group N at buffer index N and keeps four such slots, so 4 is the first index no group can take.
+That backend sets no inline constants yet, so the number is a proposal it has to adopt, and the text is where it is written down.
+A vertex buffer has no index in the text at all: `[[stage_in]]` reads through the pipeline's vertex descriptor.
+
+## EMIT-62
+
+MSL's `float3` is sixteen bytes, so the `float` that HLSL and WGSL put into its tail starts a new row in MSL.
+`packed_float3` is twelve bytes and would agree, but it is another type, and every read of it would want a conversion.
+Refusing the block keeps one host struct for every backend, which is what EMIT-13 asks for.
+The layout of a vertex input is not the struct's: `[[attribute(i)]]` reads through the vertex descriptor, so EMIT-62 is about blocks only.
+
+## EMIT-63
+
+MSL is column-major with the vector on the right, as WGSL is, so there is no `mul` and nothing to state about orientation.
+It could build a struct with braces, `pixel_input{a, b, c}`, which drops the member names just as a positional constructor would.
+`const` stands in front of the type because the hand-written MSL in this repo writes it there.
+
+## EMIT-64
+
+An unsuffixed literal is a `double` in C++, and MSL has no `double`, so the question is fair.
+The hand-written MSL in this repo and the MSL SPIRV-Cross generates both write `0.5` for a `float`.
+So the unsuffixed form stays until a Metal compiler says otherwise.
+A suffix would be the only place where one literal is spelled differently per target.

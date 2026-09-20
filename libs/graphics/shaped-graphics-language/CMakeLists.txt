@@ -43,6 +43,7 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/emit/emit.cc
     src/shaped-graphics-language/emit/reserved_words.cc
     src/shaped-graphics-language/emit/impl/hlsl.cc
+    src/shaped-graphics-language/emit/impl/msl.cc
     src/shaped-graphics-language/emit/impl/plan.cc
     src/shaped-graphics-language/emit/impl/text_writer.cc
     src/shaped-graphics-language/emit/impl/wgsl.cc

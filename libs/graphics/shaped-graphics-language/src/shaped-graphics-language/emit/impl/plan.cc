@@ -17,6 +17,9 @@ struct block_layout
     /// HLSL starts a matrix on a fresh 16-byte row, and anything else wherever it still fits into the current one.
     bool hlsl_takes_new_row = false;
     i32 wgsl_alignment = 0;
+    /// MSL aligns a three-vector like WGSL and, unlike it, also sizes it 16: nothing fits into its tail.
+    i32 msl_size = 0;
+    i32 msl_alignment = 0;
 };
 
 /// A size of 0 means the type has no place in a block or on an edge.
@@ -25,16 +28,16 @@ block_layout layout_of(builtin b)
     switch (b)
     {
     case builtin::scalar_float:
-        return {.size = 4, .wgsl_alignment = 4};
+        return {.size = 4, .wgsl_alignment = 4, .msl_size = 4, .msl_alignment = 4};
     case builtin::float3:
     case builtin::vec3:
     case builtin::pos3:
-        return {.size = 12, .wgsl_alignment = 16};
+        return {.size = 12, .wgsl_alignment = 16, .msl_size = 16, .msl_alignment = 16};
     case builtin::float4:
     case builtin::hpos4:
-        return {.size = 16, .wgsl_alignment = 16};
+        return {.size = 16, .wgsl_alignment = 16, .msl_size = 16, .msl_alignment = 16};
     case builtin::mat4:
-        return {.size = 64, .hlsl_takes_new_row = true, .wgsl_alignment = 16};
+        return {.size = 64, .hlsl_takes_new_row = true, .wgsl_alignment = 16, .msl_size = 64, .msl_alignment = 16};
     default:
         return {};
     }
@@ -175,21 +178,24 @@ struct validator
 
             auto hlsl = 0;
             auto wgsl = 0;
+            auto msl = 0;
             for (auto const& member : m.at(b.members))
             {
                 auto const l = layout_of(builtin_of_type(m, member.type));
                 if (l.hlsl_takes_new_row || hlsl % 16 + l.size > 16)
                     hlsl = round_up(hlsl, 16);
                 wgsl = round_up(wgsl, l.wgsl_alignment);
-                if (hlsl != wgsl)
+                msl = round_up(msl, l.msl_alignment);
+                if (hlsl != wgsl || hlsl != msl)
                 {
                     report(error_kind::layout_mismatch, id,
-                           cc::format("'{}.{}' is at byte {} in HLSL and at byte {} in WGSL", s.name, member.name, hlsl,
-                                      wgsl));
+                           cc::format("'{}.{}' is at byte {} in HLSL, at byte {} in WGSL and at byte {} in MSL", s.name,
+                                      member.name, hlsl, wgsl, msl));
                     break;
                 }
                 hlsl += l.size;
                 wgsl += l.size;
+                msl += l.msl_size;
             }
         }
     }

@@ -16,8 +16,10 @@ namespace
         return sgl::emit::target::hlsl_vulkan;
     case sg::shader_format::wgsl:
         return sgl::emit::target::wgsl;
+    case sg::shader_format::metal_lib:
+        return sgl::emit::target::msl;
     default:
-        CC_UNREACHABLE("SGL is written for dxil, spirv and wgsl compilers only");
+        CC_UNREACHABLE("SGL is written for dxil, spirv, wgsl and metal_lib compilers only");
     }
 }
 

@@ -6,12 +6,13 @@ An emitter writes the text a graphics API compiles, from one flat tree of a [che
 It carries exactly what [cube.sgl](../../../tests/samples/cube.sgl) needs, like the pass in front of it.
 The cube's text has met its readers: DXC compiles both HLSL targets, and WebGPU compiles the WGSL.
 [sgl-cube](../../../../../../examples/graphics/sgl-cube/sgl_cube.cc) draws the same picture on all three, and no rule below had to change for it.
+**The MSL text has not been through a Metal compiler yet**: its rules are pinned as text, and nothing has compiled or drawn with it.
 Back to the [semantics](_index.md); the reasons are in [why/emitting.md](why/emitting.md).
 
 ## Targets
 
 * **EMIT-1** A **target** is a text format together with the addressing rules of the backend that reads it.
-* **EMIT-2** The targets are `hlsl-dx12`, `hlsl-vulkan` and `wgsl` ([why](why/emitting.md#emit-2)).
+* **EMIT-2** The targets are `hlsl-dx12`, `hlsl-vulkan`, `wgsl` and `msl` ([why](why/emitting.md#emit-2)).
 * **EMIT-3** The text of a target carries its final addresses: no later pass numbers a binding, a location or an offset.
 * **EMIT-4** No target depends on a flag of the compiler that reads its text ([why](why/emitting.md#emit-4)).
 * **EMIT-5** One emission writes one entry point: that entry point, and exactly the structs and the binding it needs.
@@ -51,12 +52,12 @@ struct target_ {
 * **EMIT-22** A struct of the program keeps its name, and a builtin type is spelled by the table below.
 * **EMIT-23** A struct is declared after every struct it holds.
 
-| SGL | HLSL | WGSL |
-|---|---|---|
-| `float` | `float` | `f32` |
-| `float3`, `vec3`, `pos3` | `float3` | `vec3f` |
-| `float4`, `hpos4` | `float4` | `vec4f` |
-| `mat4` | `float4x4` | `mat4x4f` |
+| SGL | HLSL | WGSL | MSL |
+|---|---|---|---|
+| `float` | `float` | `f32` | `float` |
+| `float3`, `vec3`, `pos3` | `float3` | `vec3f` | `float3` |
+| `float4`, `hpos4` | `float4` | `vec4f` | `float4` |
+| `mat4` | `float4x4` | `mat4x4f` | `float4x4` |
 
 ## Addresses
 
@@ -94,13 +95,14 @@ struct pixel_input
 * **EMIT-38** A binding that is not `@inline`, and a second `@inline` binding, are `unsupported`.
 * **EMIT-39** A member of an `@inline` binding is of a builtin type, or it is `unsupported`.
 * **EMIT-40** A member's offset follows HLSL's packing of a constant buffer, and `hlsl-vulkan` states it on every member ([why](why/emitting.md#emit-40)).
-* **EMIT-41** A member that WGSL's layout places at another offset is `layout-mismatch`.
+* **EMIT-41** A member that WGSL's layout or MSL's places at another offset is `layout-mismatch`, and its detail gives the offset in each.
 
 | target | the global |
 |---|---|
 | `hlsl-dx12` | `ConstantBuffer<T> name : register(b0, space9);` |
 | `hlsl-vulkan` | `[[vk::push_constant]] ConstantBuffer<T> name;` |
 | `wgsl` | `@group(3) @binding(0) var<uniform> name: T;` |
+| `msl` | no global: the parameter `constant T& name [[buffer(4)]]` (EMIT-58) |
 
 ## Matrices
 
@@ -144,6 +146,33 @@ fn main_ps(p: pixel_input) -> target_ {
 }
 ```
 
+## MSL
+
+The rules above say HLSL and WGSL by name; these say what `msl` writes in the same places.
+
+* **EMIT-56** After the comment of EMIT-47, the text is `#include <metal_stdlib>`, `using namespace metal;` and an empty line.
+* **EMIT-57** MSL's reserved words also hold the types and the functions of its standard library, and `main` ([why](why/emitting.md#emit-57)).
+* **EMIT-58** An `@inline binding` is a struct of its members and the parameter `constant T& name [[buffer(4)]]` of the entry point ([why](why/emitting.md#emit-58)).
+* **EMIT-59** The entry point is a `vertex` or a `fragment` function, and its SGL parameter carries `[[stage_in]]`.
+* **EMIT-60** A member with `@position` is `[[position]]`.
+* **EMIT-61** A member at location i is `[[attribute(i)]]` in a vertex input, `[[user(sgli)]]` in a stage link, and `[[color(i)]]` in a render target struct.
+* **EMIT-62** In a block, MSL places `float3` at a multiple of 16 and gives it 16 bytes, and everything else as WGSL does ([why](why/emitting.md#emit-62)).
+* **EMIT-63** The product is `m * v`, an immutable local is `const T name = value;`, and a struct is built as EMIT-55 builds it ([why](why/emitting.md#emit-63)).
+* **EMIT-64** A float literal has no suffix in MSL either ([why](why/emitting.md#emit-64)).
+
+```cpp
+vertex pixel_input main_vs(cube_vertex v [[stage_in]], constant constants_data& constants [[buffer(4)]])
+{
+    pixel_input result;
+    result.position = constants.view_projection * float4(v.position, 1.0);
+    result.normal = v.normal;
+    result.color = v.color;
+    return result;
+}
+```
+
+So `{float3; float}` is `layout-mismatch`: the `float` is at byte 12 in HLSL and in WGSL, and at byte 16 in MSL.
+
 ## Error kinds
 
 | kind | reported by |
@@ -159,7 +188,9 @@ fn main_ps(p: pixel_input) -> target_ {
 
 ## Open
 
-* MSL and GLSL, which come through the same seam.
+* GLSL, which comes through the same seam.
+* A Metal compiler for the MSL text, and the buffer index of EMIT-58, which sg's metal backend has yet to adopt.
+* Whether a block member becomes `packed_float3` in MSL, which would let `{float3; float}` through at the price of a conversion on every read.
 * Whether an emit error becomes a diagnostic with a span; today it names a symbol and carries a detail.
 * Whether the size of an inline block has to agree between targets as its offsets do; WGSL rounds it up to 16 bytes.
 * How a vertex input's dx12 semantic is chosen once a member wants one that is not its name.

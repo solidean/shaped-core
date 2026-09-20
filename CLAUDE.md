@@ -111,7 +111,8 @@ One-liner per library:
   Above that is the first semantic phase, `sgl::check::check` → `sgl::check::checked_module`: name resolution, type checking and evaluation as ONE demand-driven pass.
   It yields side tables over the untouched AST for an editor, and one flat typed tree per entry point, which is all an emitter reads.
   **The check pass is a tracer**: it carries `tests/samples/cube.sgl` against `prelude/prelude.sgl`, and every other construct is the one diagnostic `unsupported-yet`, never a guess.
-  Behind it, `sgl::emit::emit` writes ONE entry point as readable text for `hlsl_dx12`, `hlsl_vulkan` or `wgsl`, with exactly the types and the binding it needs.
+  Behind it, `sgl::emit::emit` writes ONE entry point as readable text for `hlsl_dx12`, `hlsl_vulkan`, `wgsl` or `msl`, with exactly the types and the binding it needs.
+  **The `msl` text has met no Metal compiler yet**, and nothing builds it: slib has no metallib compiler, and sg's metal backend binds no vertex buffers or inline constants.
   The text carries its **final addresses** — member order is the location, an `@inline binding` sits where sg expects inline constants — so slib's binding pass is not needed behind it.
   A name that is reserved in one target gets a trailing underscore there; an entry point never changes, so one that collides anywhere is an error everywhere.
   `sgl::compile_to_text` is the whole pipeline in one call, against the prelude the library embeds (`sgl::prelude_source`), so compiling needs no file.
