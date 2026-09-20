@@ -20,6 +20,16 @@ That is the property worth protecting: a file parses the same whether or not the
 
 Operators already resolve to calls with special function names, so a declared operator is an ordinary function with an unusual name.
 
+**A first step needs no new syntax: the `@operator` attribute.**
+
+```sgl sketch
+@builtin @operator("*") fun transform_position(m: mat4, p: pos3) -> hpos4
+```
+
+Such a function is hidden from symbol resolution: its own name is documentation only, and lookup finds it through the operator.
+Operator overloading and function overloading are then one mechanism.
+It is easy to change later, and the prelude uses it from the start.
+
 ## What it touches
 
 * Name resolution: operator spellings become names that can be declared, imported and looked up.

@@ -37,6 +37,27 @@ They cannot be separated: overloading is by type, so even an unqualified name ne
 * On-demand is either recursion, or the pass is asynchronous and awaits the other symbol, which lets one module go wide internally.
 * Reaching a symbol that is already in compilation is a dependency cycle, and it is an error that names the loop.
 
+**Inlining happens inside that pass, and it is mandatory.**
+Lambdas, nested functions that reference the variables around them, and delegating bindings all need it before valid target text exists.
+It cannot be a separate later pass either: type parameters and compile-time arguments are duck typed, as C++ templates are, and only really checked once instantiated.
+So an emitted entry point is one flat function ([function-model.md](function-model.md)).
+
+**A binding list is never passed.**
+A binding is either a global of the target, or, for a delegating binding, a local function that is inlined.
+
+**The emitted text is meant to be read.**
+A shader debugger or a capture tool shows the target text, so names, structure and semantics stay recognizable there.
+Somebody outside the SGL ecosystem should not find it opaque.
+A minify mode may come later, and it is a mode.
+
+**SGL follows the rules of `sg` and `tg`** unless there are very good reasons against it, with as few gotchas as is reasonable.
+Matrix layout is the first case: column-major, the vector on the right, and a `tg::mat4f` uploads as its bytes.
+A very good reason looks like the transformation matrix of a ray tracing instance, whose layout and meaning the APIs give.
+
+**Reflection should come from SGL itself, sooner rather than later.**
+It can be more precise and more consistent than what each target's compiler reports.
+The first path takes it from the downstream compilers.
+
 **The prelude is a file on disk**, written in SGL, that the compiler reads and places in front of the program.
 That needs no multi-file compilation.
 
@@ -63,4 +84,5 @@ That needs no multi-file compilation.
 * Whether on-demand compilation is recursive or asynchronous.
 * How a dependency cycle is reported when its loop passes through a type expression.
 * Whether a file without a `module` line is a module of its own.
-* Which target decides a question the targets disagree on, such as matrix layout or the depth range.
+* How an inlined early `return` is written in targets that have no `goto`.
+* How much of an inlined program's source structure the readable text can keep.

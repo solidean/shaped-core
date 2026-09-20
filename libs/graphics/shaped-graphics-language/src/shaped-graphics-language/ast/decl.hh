@@ -56,6 +56,8 @@ struct sgl::ast::struct_decl
 {
     source_span name;
     range_of<decl_id> members;
+    /// No block at all: the type has no members one could name, which differs from a block that declares none.
+    bool is_opaque = false;
 
     constexpr bool operator==(struct_decl const&) const = default;
 };

@@ -13,28 +13,26 @@
 @pixel struct target:
     color: rgba8
 
-@vertex fun main_vs(v: cube_vertex){constants} -> {
+// what the vertex stage hands to the pixel stage
+struct pixel_input:
     @position position: hpos4
     normal: vec3
     color: float3
-}:
+
+@vertex fun main_vs(v: cube_vertex){constants} -> pixel_input:
     return {
         position = constants.view_projection * v.position
         normal = v.normal
         color = v.color
     }
 
-@pixel fun main_ps(
-    position: hpos4
-    normal: vec3
-    color: float3
-) -> target:
+@pixel fun main_ps(p: pixel_input) -> target:
     // A key light, a fill light and an ambient floor: enough that a face's orientation reads at a glance.
-    let n = normalize normal
+    let n = normalize p.normal
     let key = saturate dot(n, normalize vec3(0.45, 0.8, -0.4))
     let fill = saturate dot(n, normalize vec3(-0.7, 0.15, 0.6))
 
-    let lit = color * (0.25 + 0.8 * key + 0.25 * fill)
+    let lit = p.color * (0.25 + 0.8 * key + 0.25 * fill)
     return {
         color = (..lit, 1.0) as rgba8
     }

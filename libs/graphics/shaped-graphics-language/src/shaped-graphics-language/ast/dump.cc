@@ -547,7 +547,7 @@ struct dumper
             },
             [&](struct_decl const& n)
             {
-                open("struct");
+                open(n.is_opaque ? "struct:opaque" : "struct");
                 name_or_missing(n.name);
                 dump_members(n.members, depth);
             },

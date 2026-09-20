@@ -622,6 +622,8 @@ fun shade_sky(v: basic_vertex){frame} -> vec3:
 | `struct_type` | yes | yes | no | no | no | no |
 
 * **AST-86** A member that its owner does not allow is a normal error, and it is still read.
+* **AST-125** A `struct` line without a block is an **opaque struct**: it has no member that can be named, which a block without members does not say ([why](why/ast.md#ast-125)).
+* **AST-126** The AST accepts an opaque struct wherever a `struct` stands, and a later phase allows it for a small set of `@builtin` types only.
 * **AST-115** A case may carry a value, which is an expression: `red = 1`.
 * **AST-116** The default of a field may name the fields that stand before it, and the AST checks nothing about it ([why](why/ast.md#ast-116)).
 

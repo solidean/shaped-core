@@ -332,7 +332,8 @@ decl_id builder::type_body_declaration(statement_head const& head, keyword_parts
 
     reject_assignment(head);
     if (body_scope == scope_kind::struct_body)
-        return make_decl(head.whole, attributes, struct_decl{.name = declared, .members = members});
+        return make_decl(head.whole, attributes,
+                         struct_decl{.name = declared, .members = members, .is_opaque = !is_valid(parts.block)});
     return make_decl(head.whole, attributes, enum_decl{.name = declared, .members = members});
 }
 

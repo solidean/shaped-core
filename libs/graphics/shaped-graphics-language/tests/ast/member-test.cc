@@ -158,11 +158,13 @@ TEST("sgl ast - a line that is no member")
 
 TEST("sgl ast - struct, enum and binding are declared by one name")
 {
-    CHECK(ast_of("@builtin struct bool\n") == "(struct{@builtin} bool)");
+    // No block at all is opaque, which a block without a member is not.
+    CHECK(ast_of("@builtin struct bool\n") == "(struct:opaque{@builtin} bool)");
+    CHECK(ast_of("struct unit:\n    // no members\n") == "(struct unit)");
     CHECK(ast_of("struct:\n    x: int\n") == "(struct <missing>\n  (field x : int)) !! expected-name @0+6\n");
     CHECK(ast_of("enum 5:\n    a\n") == "(enum <missing>\n  (case a)) !! expected-name @5+1\n");
-    CHECK(ast_of("struct a, b\n") == "(struct a) !! too-many-arguments @10+1\n");
-    CHECK(ast_of("struct a = b\n") == "(struct a) !! unexpected-token @9+1\n");
+    CHECK(ast_of("struct a, b\n") == "(struct:opaque a) !! too-many-arguments @10+1\n");
+    CHECK(ast_of("struct a = b\n") == "(struct:opaque a) !! unexpected-token @9+1\n");
     CHECK(body_of("struct local:\n    x: int\nenum e:\n    a\n")
           == "(struct local\n  (field x : int))\n(enum e\n  (case a))");
 }

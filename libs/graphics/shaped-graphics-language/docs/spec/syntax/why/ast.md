@@ -212,3 +212,9 @@ Default arguments are evaluated left to right, so a default may use every parame
 The order of the fields gives the constraint, and no separate rule about initialization order is needed.
 The AST looks no name up, so it has nothing to check here.
 The idea is in [structural types](../../incubator/structural-types.md).
+
+## AST-125
+
+A `float` has no member to name, and a unit type has no member at all, and those are two statements.
+The first is a type whose inside the language cannot show, which only the floor of the language may be; the second is an ordinary struct.
+A function signature without a body already reads as "declared here, provided elsewhere", and a struct line without a block says the same.
