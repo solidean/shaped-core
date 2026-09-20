@@ -59,7 +59,19 @@ cc::vector<cc::loaded_module> cc::enumerate_loaded_modules()
     cc::vector<cc::loaded_module> out;
 
 #if defined(_WIN32) && !defined(__EMSCRIPTEN__)
-    auto* const snap = ::CreateToolhelp32Snapshot(TH32CS_SNAPMODULE, ::GetCurrentProcessId());
+    // The snapshot fails with ERROR_BAD_LENGTH while this process is loading or unloading a module, and the documented
+    // remedy is to ask again.
+    // It is not rare: about one call in thirty under steady module churn, and an unretried one hands back an EMPTY
+    // table, which a crash dump then carries instead of the one that would have symbolized it.
+    auto* snap = INVALID_HANDLE_VALUE;
+    for (auto attempt = 0; attempt < 64; ++attempt)
+    {
+        snap = ::CreateToolhelp32Snapshot(TH32CS_SNAPMODULE, ::GetCurrentProcessId());
+        if (snap != INVALID_HANDLE_VALUE)
+            break;
+        if (::GetLastError() != ERROR_BAD_LENGTH)
+            return out;
+    }
     if (snap == INVALID_HANDLE_VALUE)
         return out;
 
