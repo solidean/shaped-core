@@ -86,6 +86,12 @@ option(SC_USE_VENDORED_SDL3 "Build the fetched SDL3 in extern/sdl3/.install (OFF
 # babel-serializer keeps its sqlite API always available and reports an unfetched backend at runtime.
 option(SC_USE_VENDORED_SQLITE "Build the fetched SQLite in extern/sqlite/.install (OFF expects an external `sqlite` target)" ON)
 
+# DLSS is fetched ON REQUEST rather than on demand: no configure step fetches it, because its license is NVIDIA's own
+# and accepting one is a person's decision rather than a build's.
+# So the normal state of this directory is absent, and that is not a failure — shaped-rendering gates its Ray
+# Reconstruction member on the `dlss` target existing and reports `unsupported` without it.
+option(SC_USE_VENDORED_DLSS "Wrap the fetched NVIDIA DLSS SDK in extern/dlss/.install (OFF expects an external `dlss` target)" ON)
+
 # Also gated on SC_MIMALLOC: with the default resource on operator new nothing links mimalloc, so building it would be
 # dead weight in exactly the sanitizer builds that are already the slowest.
 if(SC_USE_VENDORED_MIMALLOC AND SC_MIMALLOC)
@@ -166,4 +172,8 @@ endif()
 
 if(_sc_host_side_deps AND SC_USE_VENDORED_SQLITE AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/sqlite/.install/pin.txt")
     add_subdirectory(sqlite)
+endif()
+
+if(_sc_host_side_deps AND SC_USE_VENDORED_DLSS AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/dlss/.install/pin.txt")
+    add_subdirectory(dlss)
 endif()

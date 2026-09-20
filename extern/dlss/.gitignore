@@ -1,0 +1,4 @@
+# The DLSS SDK is fetched on request (fetch-dlss.py), never committed.
+# Its runtime alone is 48 MB, and its license is not one this repository redistributes on anyone's behalf.
+/.install/
+/.install.staging/

@@ -188,10 +188,19 @@ class sr::denoise_history
 {
 public:
     denoise_history() = default;
-    denoise_history(denoise_history&&) noexcept = default;
-    denoise_history& operator=(denoise_history&&) noexcept = default;
+    denoise_history(denoise_history&&) noexcept;
+    denoise_history& operator=(denoise_history&&) noexcept;
     denoise_history(denoise_history const&) = delete;
     denoise_history& operator=(denoise_history const&) = delete;
+
+    /// Releases whatever a vendor member is holding for this stream.
+    ///
+    /// **The GPU must be done with this history**, which for a member holding device memory is a real requirement
+    /// rather than good manners: a vendor feature released while a frame that used it is still in flight is a
+    /// use-after-free with no diagnostic.
+    /// A caller dropping a history mid-frame drains first; sv drops one only when its view goes, which is after the
+    /// store has let the epoch complete.
+    ~denoise_history();
 
     /// Makes the next call start from no history, as on a camera cut.
     /// The textures are kept and overwritten, since a cut does not change their size.
@@ -206,6 +215,7 @@ public:
 private:
     friend class atrous_denoise_routine;
     friend class svgf_denoise_routine;
+    friend class dlss_rr_routine;
 
     /// Brings this to `method` at `extent`, dropping everything if either changed.
     /// Returns whether the call starts from no history.
@@ -221,6 +231,17 @@ private:
     /// The images a member keeps from call to call — its history and its scratch — so a steady stream allocates nothing.
     /// Which slot holds what is the member's own business.
     sg::texture_2d _state[8];
+
+    /// A vendor member's own per-stream object — for DLSS, the NGX feature.
+    ///
+    /// Opaque, with the release function beside it, so this header names no vendor type and a history still frees what
+    /// it holds without knowing what that is.
+    /// `_prepare` releases it whenever it drops the rest, since a feature is built for one extent.
+    void* _vendor_state = nullptr;
+    void (*_release_vendor_state)(void*) = nullptr;
+
+    /// Drops `_vendor_state` through `_release_vendor_state`, and forgets both.
+    void _release_vendor();
 };
 
 /// Which members this context can run.

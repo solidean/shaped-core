@@ -1,12 +1,14 @@
 #include "shader_fixtures.hh"
 
 #include <clean-core/common/utility.hh>
+#include <clean-core/string/format.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-rendering/atrous_denoise_routine.hh>
 #include <shaped-rendering/denoise.hh>
+#include <shaped-rendering/dlss_rr_routine.hh>
 #include <shaped-rendering/shaders.hh>
 #include <shaped-rendering/svgf_denoise_routine.hh>
 #include <shaped-shader-library/compiler/dxc_compiler.hh>
@@ -182,7 +184,14 @@ ASYNC_INVOCABLE_TEST("sr - denoise automatic resolves to a supported member", (s
     auto const automatic = sr::denoise_settings{.method = sr::denoise_method::automatic};
     CHECK(support.svgf);
     CHECK(sr::resolve_denoise_method(ctx, automatic, false) == sr::denoise_method::atrous);
-    CHECK(sr::resolve_denoise_method(ctx, automatic, true) == sr::denoise_method::svgf);
+
+    // WHICH temporal member depends on the machine, which is the whole point of `automatic`: a vendor member outranks
+    // the native one where its SDK was fetched and the adapter carries it, and svgf is what everything else gets.
+    // Asserting `svgf` outright would have been a test that passes only where DLSS is absent.
+    auto const temporal = sr::resolve_denoise_method(ctx, automatic, true);
+    CHECK(temporal == (support.dlss_rr ? sr::denoise_method::dlss_rr : sr::denoise_method::svgf))
+        .context(cc::format("dlss_rr supported: {}", support.dlss_rr));
+    CHECK(sr::is_temporal(temporal));
 
     // A named member resolves to itself whether or not it is supported: refusing it is execute's job, and it must
     // not be quietly exchanged for another.
@@ -474,4 +483,101 @@ ASYNC_INVOCABLE_TEST("sr - denoise refuses svgf without a motion guide", (sg::co
     CHECK(run.outcome.status == sr::denoise_status::unsupported);
     CHECK(run.outcome.method == sr::denoise_method::svgf);
     CHECK(run.output[0][0] == -7.0f);
+}
+
+// DLSS Ray Reconstruction, where it can run at all.
+//
+// A vendor member's test is gated on its hardware and SKIPs elsewhere rather than passing, because a green result on a
+// machine that cannot run it says nothing — which is the rule libs/graphics/shaped-rendering/docs/denoising.md sets for every vendor member.
+// So this runs on an RTX adapter with the SDK fetched, and reports "not run" on everything else.
+//
+// What it pins is the contract the front depends on, not the picture: a call carrying every required guide denoises,
+// and one missing a required guide refuses rather than running degraded.
+// The image itself is the driver's and changes with it, which is why no reference is committed.
+ASYNC_INVOCABLE_TEST("sr - dlss ray reconstruction denoises, and refuses a call without its guides",
+                     (sg::context_handle const& ctx_h),
+                     exclusive("slib-shader-library"))
+{
+    REQUIRE(ctx_h != nullptr);
+    sg::context& ctx = *ctx_h;
+
+    if (!sr::query_denoise_support(ctx).dlss_rr)
+        SKIP("no DLSS Ray Reconstruction here — the SDK is fetched on request, and it needs an RTX adapter on dx12");
+
+    // Every guide it requires, all at the input extent.
+    // The values are a plausible surface rather than a rendered one: what is under test is that NGX accepts the set
+    // and writes the output, and a network's opinion of a synthetic image is not something to assert on.
+    auto const color = make_image(ctx);
+    auto const albedo = make_image(ctx);
+    auto const specular_albedo = make_image(ctx);
+    auto const normal = make_image(ctx);
+    auto const roughness = make_image(ctx);
+    auto const depth = make_image(ctx);
+    auto const motion = make_image(ctx);
+    auto const output = make_image(ctx);
+
+    auto const flat = cc::vector<tg::vec4f>::create_filled(k_size * k_size, tg::vec4f(0.5f, 0.5f, 0.5f, 1));
+    auto const zero = cc::vector<tg::vec4f>::create_filled(k_size * k_size, tg::vec4f(0, 0, 0, 0));
+    auto const ones = cc::vector<tg::vec4f>::create_filled(k_size * k_size, tg::vec4f(1, 1, 1, 1));
+    auto const sentinel = cc::vector<tg::vec4f>::create_filled(k_size * k_size, tg::vec4f(-7, -7, -7, -7));
+
+    auto const guides = sr::denoise_guides{.albedo = albedo,
+                                           .specular_albedo = specular_albedo,
+                                           .normal = normal,
+                                           .roughness = roughness,
+                                           .depth = depth,
+                                           .motion = motion};
+
+    {
+        auto cmd = ctx.create_command_list();
+        upload(*cmd, color, noisy_halves(0.5f));
+        upload(*cmd, albedo, flat);
+        upload(*cmd, specular_albedo, zero);
+        upload(*cmd, normal, ones);
+        upload(*cmd, roughness, ones);
+        upload(*cmd, depth, ones);
+        upload(*cmd, motion, zero);
+        upload(*cmd, output, sentinel);
+
+        auto history = sr::denoise_history();
+        auto const out
+            = sr::dlss_rr_routine::execute(*cmd, {.color = color, .guides = guides, .output = output}, history);
+        ctx.submit_command_list(cc::move(cmd));
+        ctx.advance_epoch();
+
+        CHECK(out.method == sr::denoise_method::dlss_rr);
+        CHECK(out.status == sr::denoise_status::denoised).context(cc::format("status {}", int(out.status)));
+
+        // The first call of a stream starts from no history, which is what tells a caller its result is the weakest
+        // one the stream will produce.
+        CHECK(out.restarted);
+
+        // The history now owns an NGX feature, and dropping it has to release that feature rather than leak it.
+        // Drained above, which is what makes the release legal — see sr::denoise_history's destructor.
+        (void)co_await ctx.idle_completion();
+    }
+
+    // A call without the specular guides is refused, not run degraded: NGX reads every one of them, and a member that
+    // quietly dropped to a subset would be a different denoiser wearing this one's name.
+    {
+        auto cmd = ctx.create_command_list();
+        upload(*cmd, output, sentinel);
+
+        auto thin = guides;
+        thin.specular_albedo = {};
+        thin.roughness = {};
+
+        auto history = sr::denoise_history();
+        auto const out = sr::dlss_rr_routine::execute(*cmd, {.color = color, .guides = thin, .output = output}, history);
+        auto const readback = sg::data_future<tg::vec4f>(cmd->download.bytes_from_texture(output.raw()));
+        ctx.submit_command_list(cc::move(cmd));
+        ctx.advance_epoch();
+
+        CHECK(out.status == sr::denoise_status::unsupported);
+
+        // And it wrote nothing, which is what lets a caller composite the raw image instead.
+        auto const pixels = co_await readback.data();
+        REQUIRE(pixels.size() == k_size * k_size);
+        CHECK(pixels[0][0] == -7.0f);
+    }
 }

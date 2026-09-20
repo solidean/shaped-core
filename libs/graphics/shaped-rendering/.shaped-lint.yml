@@ -7,3 +7,15 @@ rules:
   - kind: allow-include
     value: <memory>
     reason: sg's handles ARE std::shared_ptr, so anything holding one names it — see shaped-graphics/docs/coding-guidelines.md
+
+  # NVIDIA's NGX headers, reached by exactly one TU.
+  #
+  # impl/dlss_ngx.cc is the whole of the SDK's reach into sr: the seam above it (impl/dlss_ngx.hh) names none of these
+  # types, so no public header of ours — and no consumer — ever sees them.
+  # Blessed here rather than repo-wide, since only this library links the SDK at all.
+  - kind: allow-include
+    value: <nvsdk_ngx_helpers.h>
+    reason: NGX, confined to impl/dlss_ngx.cc — the seam it implements names no NVIDIA type
+  - kind: allow-include
+    value: <nvsdk_ngx_helpers_dlssd_d3d.h>
+    reason: NGX's DLSS-D (Ray Reconstruction) helpers, same confinement

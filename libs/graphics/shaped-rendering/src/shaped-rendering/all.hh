@@ -10,6 +10,7 @@
 #include <shaped-rendering/box_filter_mipmap_routine.hh>
 #include <shaped-rendering/capture.hh>
 #include <shaped-rendering/denoise.hh>
+#include <shaped-rendering/dlss_rr_routine.hh>
 #include <shaped-rendering/fwd.hh>
 #include <shaped-rendering/gpu_types.hh>
 #include <shaped-rendering/imgui_context.hh>

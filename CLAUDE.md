@@ -111,6 +111,8 @@ One-liner per library:
   sr is also home to the **window abstraction** (`sr::window_system` / `sr::window`) — SDL3-backed, leaking no SDL into its API, feeding `sg::swapchain_description` a native handle.
   The API is always present; without a backend (SDL3 not fetched) `window_system::try_create` fails instead of the types disappearing.
   `SR_HAS_WINDOW` (1/0) says whether a backend was compiled in.
+  sr also hosts the **denoise members**, the vendor ones included: `SR_HAS_DLSS` (1/0) says whether NVIDIA's SDK was fetched.
+  **That fetch is on request and nothing performs it for you** — `uv run extern/dlss/fetch-dlss.py` — because its license is NVIDIA's rather than one a build accepts on anyone's behalf.
 * **`libs/graphics/shaped-graphics-language`** — SGL, our own shading language, and its whole toolchain in one library: compiler, linter, formatter, language server.
   One `.sgl` source compiles to readable shader text for dx12, vulkan, webgpu and metal, and slib's SGL compiler edge is what calls it.
   [examples/graphics/sgl-cube](examples/graphics/sgl-cube/shaders/cube.sgl) draws one on dx12, vulkan and webgpu; the metal text has met no Metal compiler yet.

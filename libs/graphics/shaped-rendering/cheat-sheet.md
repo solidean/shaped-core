@@ -356,6 +356,8 @@ sr::required_guides(m) / sr::optional_guides(m)        // -> sr::denoise_guide_s
 
 sr::atrous_denoise_routine::execute(cmd, inputs, history, {.iterations = 5, .luminance_sigma = 2.0f})  // the member, directly
 sr::svgf_denoise_routine::execute(cmd, inputs, history, {.max_history = 32.0f})  // temporal: FRESH samples, normal+depth+motion REQUIRED
+sr::dlss_rr_routine::execute(cmd, inputs, history, {.quality = 2})  // NVIDIA Ray Reconstruction; temporal, upscales; needs EVERY required guide
+sr::dlss_rr_routine::is_available(ctx)                 // -> bool; SDK fetched (extern/dlss/fetch-dlss.py) + dx12 + RTX adapter. SR_HAS_DLSS
 sr::mix_routine::execute(cmd, dst, src, w)             // -> bool; dst = lerp(dst, src, w) IN PLACE, w in [0,1]; false while compiling
 ```
 

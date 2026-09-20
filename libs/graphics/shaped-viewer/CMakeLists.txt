@@ -271,6 +271,12 @@ if(SC_BUILD_TESTS)
         # Stage the runtime DLLs (DXC's dxcompiler/dxil, the dx12 backend, SDL3 for the window) next to the
         # binary so it starts. $<TARGET_RUNTIME_DLLS> reaches them through the link chain; empty off Windows.
         sc_stage_runtime_dlls(shaped-viewer-test DLLS "$<TARGET_RUNTIME_DLLS:shaped-viewer-test>")
+
+        # NGX loads its network runtime from the directory of the binary that initialized it, and it arrives through an
+        # IMPORTED target that $<TARGET_RUNTIME_DLLS> cannot see — so it is staged by the path sr published.
+        if(SC_DLSS_RUNTIME)
+            sc_stage_runtime_dlls(shaped-viewer-test DLLS "${SC_DLSS_RUNTIME}" TAG dlss)
+        endif()
     endif()
 
     # Browser test runner (Emscripten only); a no-op on native toolchains.

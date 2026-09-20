@@ -24,12 +24,15 @@ MANIFEST_NAME = "dependency.yml"
 
 # `source` says how we obtain the upstream; `track` says how "what is current" is defined.
 # They are separate because stb, ImPlot and ImGuizmo are ordinary git clones whose newest version is a branch head, not a tag.
-SOURCES = {"git", "github-release", "url"}
+SOURCES = {"git", "github-release", "github-files", "url"}
 TRACKS = {"tags", "default-branch", "github-releases", "sqlite", "none"}
 DIGEST_ALGOS = {"git-commit", "sha256", "sha3-256"}
 # `vendored` is committed in-tree; `fetched` hydrates a gitignored .install/ on demand, so it can be absent or stale on a given checkout.
 # `bundled` arrives inside another upstream in the same directory — Zycore, which the Zydis amalgamation folds in — so it has no install state of its own.
-INSTALLS = {"vendored", "fetched", "bundled"}
+# `on-request` hydrates the same way `fetched` does and is NEVER run for you: no configure step fetches it, because its
+# license is one a person accepts rather than one the build accepts on their behalf.
+# So it is normally ABSENT, and everything reading a manifest has to cope with that — a license collector above all.
+INSTALLS = {"vendored", "fetched", "bundled", "on-request"}
 
 
 @dataclass(frozen=True)
@@ -61,6 +64,9 @@ class Upstream:
     license_text: str = ""
     used_by: str = ""
     notes: str = ""
+    # For `source: github-files`: the individual files fetched, each with its own digest.
+    # A whole repository is the wrong unit when what is wanted is three files out of several hundred megabytes.
+    files: list[dict] = field(default_factory=list)
 
     @property
     def url(self) -> str:
@@ -78,7 +84,22 @@ class Upstream:
 
     @property
     def is_fetched(self) -> bool:
-        return self.install == "fetched"
+        """Whether this upstream hydrates a gitignored `.install/` rather than being committed.
+
+        True for `on-request` too: it installs exactly the same way, and every pin and path rule below is the same.
+        What differs is who runs the fetch, which is `is_on_request`.
+        """
+        return self.install in ("fetched", "on-request")
+
+    @property
+    def is_on_request(self) -> bool:
+        """Whether a person has to fetch this by hand, so an absent install is the normal state rather than a failure."""
+        return self.install == "on-request"
+
+    @property
+    def is_installed(self) -> bool:
+        """Whether the install is actually on disk, which for an `on-request` upstream is usually false."""
+        return not self.is_fetched or self.pin_file.is_file()
 
     @property
     def is_available(self) -> bool:
@@ -223,6 +244,7 @@ def _build(path: Path, directory: Path, entry: object) -> Upstream:
         license_text=entry.get("license_text", ""),
         used_by=entry.get("used_by", ""),
         notes=entry.get("notes", ""),
+        files=[dict(f) for f in entry.get("files", [])],
     )
 
     if up.source not in SOURCES:
@@ -235,5 +257,7 @@ def _build(path: Path, directory: Path, entry: object) -> Upstream:
         raise ValueError(f"{path}: {up.name}: `digest_algo` must be one of {sorted(DIGEST_ALGOS)}, got {up.digest_algo!r}")
     if not up.license_files and not up.license_text:
         raise ValueError(f"{path}: {up.name}: needs `license_files` or `license_text`")
+    if up.source == "github-files" and not up.files:
+        raise ValueError(f"{path}: {up.name}: `source: github-files` needs a `files` list")
 
     return up

@@ -15,6 +15,7 @@ add_library(shaped-rendering
     src/shaped-rendering/atrous_denoise_routine.cc
     src/shaped-rendering/svgf_denoise_routine.cc
     src/shaped-rendering/mix_routine.cc
+    src/shaped-rendering/dlss_rr_routine.cc
     src/shaped-rendering/raster_box_filter_mipmap_routine.cc
     src/shaped-rendering/imgui_context.cc
     src/shaped-rendering/imgui_routine.cc
@@ -41,6 +42,7 @@ target_sources(shaped-rendering
     src/shaped-rendering/atrous_denoise_routine.hh
     src/shaped-rendering/svgf_denoise_routine.hh
     src/shaped-rendering/mix_routine.hh
+    src/shaped-rendering/dlss_rr_routine.hh
     src/shaped-rendering/impl/denoise_images.hh
     src/shaped-rendering/raster_box_filter_mipmap_routine.hh
     src/shaped-rendering/window.hh
@@ -95,6 +97,29 @@ if(SC_HAS_SDL3)
 else()
     target_sources(shaped-rendering PRIVATE src/shaped-rendering/impl/window_null.cc)
     target_compile_definitions(shaped-rendering PUBLIC SR_HAS_WINDOW=0)
+endif()
+
+# NVIDIA DLSS Ray Reconstruction, when somebody has fetched the SDK (extern/dlss/fetch-dlss.py).
+#
+# It needs a dx12 native scope to hand NGX a command list, so it is built only where that backend is, and it links
+# PRIVATE: nvsdk_ngx.h reaches impl/ and no public header of ours.
+# Without it the member's routine still EXISTS — every symbol a caller names is always there — and reports
+# `unsupported`, which is the same shape `sr::window_system` takes without SDL3.
+if(TARGET dlss AND TARGET shaped-graphics-dx12)
+    target_sources(shaped-rendering PRIVATE src/shaped-rendering/impl/dlss_ngx.cc)
+    target_link_libraries(shaped-rendering PRIVATE dlss shaped-graphics-dx12)
+    target_compile_definitions(shaped-rendering PUBLIC SR_HAS_DLSS=1)
+
+    # The runtime has to sit next to whatever loads it, and it is an IMPORTED target so $<TARGET_RUNTIME_DLLS> cannot
+    # see it — the path travels on the target instead.
+    #
+    # Cached rather than local, so a consumer's own CMakeLists can stage it beside its binary: NGX searches the
+    # executable's directory, and a test or an example is a different directory from this library's.
+    get_target_property(_dlss_runtime dlss SC_DLSS_RUNTIME)
+    set(SC_DLSS_RUNTIME "${_dlss_runtime}" CACHE INTERNAL "nvngx_dlssd.dll, to stage beside anything that loads NGX")
+else()
+    target_sources(shaped-rendering PRIVATE src/shaped-rendering/impl/dlss_null.cc)
+    target_compile_definitions(shaped-rendering PUBLIC SR_HAS_DLSS=0)
 endif()
 
 # sr's own shader package.
@@ -206,6 +231,12 @@ if(SC_BUILD_TESTS)
         # These import dxcompiler.dll, so the binary does not start without it, and dxil.dll signs what it emits.
         # Staged here rather than left to the SDL3 block's $<TARGET_RUNTIME_DLLS>, which a build without SDL3 never runs.
         sc_stage_runtime_dlls(shaped-rendering-test TAG shaped-rendering-test-dxc DLLS ${DXC_RUNTIME_DLLS})
+    endif()
+
+    # NGX loads its network runtime from the directory of the binary that initialized it, so the DLL has to be here
+    # rather than beside the library.
+    if(SC_DLSS_RUNTIME)
+        sc_stage_runtime_dlls(shaped-rendering-test DLLS "${SC_DLSS_RUNTIME}" TAG dlss)
     endif()
 
     # The one test that crosses sr's window into metal's windowed presentation, which nothing else covers.

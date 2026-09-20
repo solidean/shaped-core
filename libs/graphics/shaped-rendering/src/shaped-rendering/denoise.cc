@@ -8,6 +8,7 @@
 #include <shaped-graphics/context/context.hh>
 #include <shaped-rendering/atrous_denoise_routine.hh>
 #include <shaped-rendering/denoise.hh>
+#include <shaped-rendering/dlss_rr_routine.hh>
 #include <shaped-rendering/svgf_denoise_routine.hh>
 
 namespace sr
@@ -96,6 +97,58 @@ denoise_guide_set denoise_inputs::present_guides() const
     return set;
 }
 
+denoise_history::denoise_history(denoise_history&& other) noexcept
+  : _method(other._method),
+    _extent(other._extent),
+    _reset_requested(other._reset_requested),
+    _frame(other._frame),
+    _vendor_state(other._vendor_state),
+    _release_vendor_state(other._release_vendor_state)
+{
+    for (auto i = 0; i < 8; ++i)
+        _state[i] = cc::move(other._state[i]);
+
+    // Moved FROM rather than shared: two histories releasing one vendor feature is the double free this exists to
+    // prevent, and the type is move-only precisely so there is one owner.
+    other._vendor_state = nullptr;
+    other._release_vendor_state = nullptr;
+}
+
+denoise_history& denoise_history::operator=(denoise_history&& other) noexcept
+{
+    if (this == &other)
+        return *this;
+
+    // Whatever this held is going away, so it owes its release before it is overwritten.
+    _release_vendor();
+
+    _method = other._method;
+    _extent = other._extent;
+    _reset_requested = other._reset_requested;
+    _frame = other._frame;
+    for (auto i = 0; i < 8; ++i)
+        _state[i] = cc::move(other._state[i]);
+
+    _vendor_state = other._vendor_state;
+    _release_vendor_state = other._release_vendor_state;
+    other._vendor_state = nullptr;
+    other._release_vendor_state = nullptr;
+    return *this;
+}
+
+denoise_history::~denoise_history()
+{
+    _release_vendor();
+}
+
+void denoise_history::_release_vendor()
+{
+    if (_vendor_state != nullptr && _release_vendor_state != nullptr)
+        _release_vendor_state(_vendor_state);
+    _vendor_state = nullptr;
+    _release_vendor_state = nullptr;
+}
+
 bool denoise_history::_prepare(denoise_method method, tg::vec2i extent)
 {
     auto const changed = _method != method || _extent != extent;
@@ -105,9 +158,18 @@ bool denoise_history::_prepare(denoise_method method, tg::vec2i extent)
         // Built for another member or size, so nothing in it can be reused.
         for (auto& t : _state)
             t = {};
+
+        // A vendor feature is built for one extent and one member, so it goes with them.
+        _release_vendor();
+
         _method = method;
         _extent = extent;
         _frame = 0;
+    }
+    else if (_reset_requested)
+    {
+        // A reset keeps the feature — it is still the right size — and tells the member to start its history over,
+        // which for NGX is a per-call flag rather than a rebuild.
     }
     _reset_requested = false;
     return restarted;
@@ -137,12 +199,12 @@ bool denoise_support::supports(denoise_method m) const
 
 denoise_support query_denoise_support(sg::context const& ctx)
 {
-    (void)ctx; // every member so far is native compute; the vendor members will read the adapter here
-
     // The native members are plain compute, which every backend has.
-    // The others are not implemented yet, and saying so here is what makes `automatic` skip them and a named request
-    // report `unsupported` rather than silently running something else.
-    return {.atrous = true, .svgf = true};
+    // A vendor member answers for itself: whether its SDK was compiled in, whether this is a backend it can record on,
+    // and whether the adapter and driver carry the feature.
+    // The ones still unimplemented stay false, which is what makes `automatic` skip them and a named request report
+    // `unsupported` rather than silently running something else.
+    return {.atrous = true, .svgf = true, .dlss_rr = dlss_rr_routine::is_available(ctx)};
 }
 
 bool is_temporal(denoise_method m)
@@ -237,6 +299,8 @@ cc::shared_async<cc::unit> denoise_routine::init(sg::routine_init_scope scope)
         atrous_denoise_routine::prewarm(ctx);
     if (support.svgf)
         svgf_denoise_routine::prewarm(ctx);
+    if (support.dlss_rr)
+        dlss_rr_routine::prewarm(ctx); // nothing to compile, but the member is a routine like the others
     co_return;
 }
 
@@ -272,8 +336,9 @@ denoise_outcome denoise_routine::execute(sg::command_list& cmd,
         return atrous_denoise_routine::execute(cmd, in, history, atrous_denoise_routine::options_for(settings));
     case denoise_method::svgf:
         return svgf_denoise_routine::execute(cmd, in, history, svgf_denoise_routine::options_for(settings));
-    case denoise_method::oidn:
     case denoise_method::dlss_rr:
+        return dlss_rr_routine::execute(cmd, in, history, dlss_rr_routine::options_for(settings));
+    case denoise_method::oidn:
     case denoise_method::fsr_rr:
     case denoise_method::none:
     case denoise_method::automatic:
