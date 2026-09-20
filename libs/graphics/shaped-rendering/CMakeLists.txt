@@ -169,6 +169,7 @@ if(SC_BUILD_TESTS)
     if(WIN32 AND SC_HAS_DXC_COMPILER AND TARGET shaped-graphics-dx12)
         target_sources(shaped-rendering-test PRIVATE
             tests/dx12-entry.cc
+            tests/shader_fixtures.cc
             tests/imgui-routine-test.cc
             tests/imgui-manual-test.cc
             tests/box-filter-mipmap-test.cc

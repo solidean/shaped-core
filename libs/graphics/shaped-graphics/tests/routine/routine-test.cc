@@ -1,3 +1,5 @@
+#include "../shaders/shader_fixtures.hh"
+
 #include <clean-core/common/macros.hh> // CC_HAS_THREADS
 #include <clean-core/container/vector.hh>
 #include <clean-core/thread/async.hh>
@@ -6,9 +8,7 @@
 #include <clean-core/thread/thread.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
-#include <shaped-shader-library/compiler/dxc_compiler.hh>
 #include <shaped-shader-library/shader_asset.hh>
-#include <shaped-shader-library/shader_library.hh>
 
 #include <thread>
 #include <type_traits>
@@ -305,50 +305,32 @@ ASYNC_INVOCABLE_TEST("sg - evicting a routine drops its instance (the acquire ca
     ctx->drop_command_list(cc::move(cmd));
 }
 
-ASYNC_INVOCABLE_TEST("sg - a routine compiles a shader and dispatches it end to end",
-                     (sg::context_handle const& ctx),
-                     exclusive("slib-shader-library"))
+ASYNC_INVOCABLE_TEST("sg - a routine compiles a shader and dispatches it end to end", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
-
-    // Both compilers are registered and the asset picks between them by asking the context what it accepts, which is
-    // what makes this test say nothing about which backend it is running on.
-    slib::shader_library shader_lib;
-    auto dxil = slib::create_dxc_compiler();
-    if (dxil.has_value())
-        shader_lib.add_compiler(cc::move(dxil.value()));
-    auto spirv = slib::create_dxc_spirv_compiler();
-    if (spirv.has_value())
-        shader_lib.add_compiler(cc::move(spirv.value()));
-    shader_lib.add_package(sg::test::shaders::package());
+    (void)sg_test::shader_fixtures(); // the library the generated globals resolve through
 
     constexpr int count = 256; // a multiple of the shader's 64-thread workgroup
     auto const out
         = ctx->persistent.create_buffer<u32>(count, sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
     REQUIRE(out.raw() != nullptr);
 
-    auto disp = ctx->create_command_list();
-    if (!pattern_fill_routine::is_usable(*disp))
+    // Dispatch and read back in ONE list: sg infers the barrier between them.
+    auto cmd = ctx->create_command_list();
+    if (!pattern_fill_routine::is_usable(*cmd))
     {
-        ctx->drop_command_list(cc::move(disp));
-        SKIP("no compiler reaches a shader format this context accepts");
+        ctx->drop_command_list(cc::move(cmd));
+        SKIP("no HLSL compiler reaches a format this context accepts");
     }
 
-    pattern_fill_routine::execute(*disp, out);
-    ctx->submit_command_list(cc::move(disp));
-
-    // Read the result back in a second list (the buffer decays to COMMON between submits).
-    auto down = ctx->create_command_list();
-    auto const future = down->download.data_from_buffer<u32>(out.raw(), 0, count);
-    ctx->submit_command_list(cc::move(down));
+    pattern_fill_routine::execute(*cmd, out);
+    auto const future = cmd->download.data_from_buffer(out);
+    ctx->submit_command_list(cc::move(cmd));
 
     auto const data = co_await future.data();
     REQUIRE(data.size() == isize(count));
-    bool ok = true;
     for (int i = 0; i < count; ++i)
-        if (data[i] != u32(i) * 3u + 7u)
-            ok = false;
-    CHECK(ok);
+        CHECK(data[i] == u32(i) * 3u + 7u);
 }
 
 // Gated on CC_HAS_THREADS: a single-threaded build (SC_THREADS=OFF, the WASM/no-threads mode) compiles cc::mutex with no mutex member and no locking at all,

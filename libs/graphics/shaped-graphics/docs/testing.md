@@ -61,8 +61,11 @@ It becomes runnable against each backend by two pieces working together:
 - **Entry drivers** — [`tests/backends/<backend>-entry.cc`](../tests/backends/) create a concrete context and `co_await nx::async_invoke_tests_in_sequence("<backend>", ctx)` over every invocable.
   The dx12 ones follow [Devices and adapters](#devices-and-adapters): the hardware adapter by default, WARP where there is none or under `--thorough`.
   A backend that cannot come up `SKIP`s.
-  A driver holds no exclusion tags: the async invocation takes each child's own (`slib-shader-library`, `sg-reload-generation`) around its run.
-  So a test that stands up a `slib::shader_library` or counts routine init runs carries the tag itself, and a driver that also held it would be refused.
+  A driver holds no exclusion tags: the async invocation takes each child's own (`sg-reload-generation`) around its run.
+  So a test that counts routine init runs carries the tag itself, and a driver that also held it would be refused.
+  **Shaders are not one of those tests.**
+  This binary has exactly one `slib::shader_library`, created on first use in [`tests/shaders/shader_fixtures.cc`](../tests/shaders/shader_fixtures.cc) with every compiler the build has.
+  A test asks for it and acquires through the generated package globals, so nothing needs excluding and a shader compiles once for the whole run rather than once per test.
   **A test awaits the GPU rather than blocking on it.**
   A readback awaits its own result: `auto const data = co_await future.data();`.
   `co_await ctx->idle_completion()` is for a test that needs the whole GPU and every actor drained.

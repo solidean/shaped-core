@@ -1,11 +1,11 @@
+#include "shader_fixtures.hh"
+
 #include <clean-core/thread/async_coroutine.hh>
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-rendering/box_filter_mipmap_routine.hh>
 #include <shaped-rendering/shaders.hh>
-#include <shaped-shader-library/compiler/dxc_compiler.hh>
-#include <shaped-shader-library/shader_library.hh>
 
 using namespace cc::primitive_defines;
 
@@ -41,22 +41,12 @@ cc::shared_async<cc::unit> prewarm_every_variant(sg::context& ctx)
 }
 } // namespace
 
-ASYNC_INVOCABLE_TEST("sr - box filter mipmap generates every shape's chain",
-                     (sg::context_handle const& ctx_h),
-                     exclusive("slib-shader-library"))
+ASYNC_INVOCABLE_TEST("sr - box filter mipmap generates every shape's chain", (sg::context_handle const& ctx_h))
 {
     REQUIRE(ctx_h != nullptr);
     sg::context& ctx = *ctx_h;
 
-    // The routine acquires its shaders through the library, so without a registered package there is nothing to
-    // compile and `acquire` has no library to ask.
-    auto compiler = slib::create_dxc_compiler();
-    if (!compiler.has_value())
-        SKIP("no DXC compiler to build the mipmap shaders");
-
-    auto shader_lib = slib::shader_library();
-    shader_lib.add_compiler(cc::move(compiler.value()));
-    shader_lib.add_package(sr::shader_package());
+    (void)sr_test::shader_fixtures(); // the library the routines acquire their shaders through
 
     auto const tex_1d = ctx.persistent.create_texture_1d(
         {.format = sg::pixel_format::rgba8_unorm, .width = 16, .mip_levels = 5, .usage = mip_usage});
@@ -145,20 +135,12 @@ constexpr auto readback_usage = mip_usage | sg::texture_usage::copy_src;
 
 // The shapes rather than the sizes are what this covers: a cube and a 1D array both index their slice on an axis a
 // 2D-only test never exercises, and getting that axis wrong writes one slice and leaves the rest untouched.
-ASYNC_INVOCABLE_TEST("sr - box filter mipmap writes every slice of every shape",
-                     (sg::context_handle const& ctx_h),
-                     exclusive("slib-shader-library"))
+ASYNC_INVOCABLE_TEST("sr - box filter mipmap writes every slice of every shape", (sg::context_handle const& ctx_h))
 {
     REQUIRE(ctx_h != nullptr);
     sg::context& ctx = *ctx_h;
 
-    auto compiler = slib::create_dxc_compiler();
-    if (!compiler.has_value())
-        SKIP("no DXC compiler to build the mipmap shaders");
-
-    auto shader_lib = slib::shader_library();
-    shader_lib.add_compiler(cc::move(compiler.value()));
-    shader_lib.add_package(sr::shader_package());
+    (void)sr_test::shader_fixtures(); // the library the routines acquire their shaders through
 
     // 4x4 faces and a 4-wide array, both three levels deep, so a level's own value is checkable by eye.
     auto const tex_cube = ctx.persistent.create_texture_cube(
@@ -229,20 +211,12 @@ ASYNC_INVOCABLE_TEST("sr - box filter mipmap writes every slice of every shape",
 
 // An odd extent is where the halving rule stops being obvious: the second tap clamps to the level's edge rather
 // than running past it, and the level below is the floor of the halved size rather than the ceiling.
-ASYNC_INVOCABLE_TEST("sr - box filter mipmap halves an odd extent by averaging pairs",
-                     (sg::context_handle const& ctx_h),
-                     exclusive("slib-shader-library"))
+ASYNC_INVOCABLE_TEST("sr - box filter mipmap halves an odd extent by averaging pairs", (sg::context_handle const& ctx_h))
 {
     REQUIRE(ctx_h != nullptr);
     sg::context& ctx = *ctx_h;
 
-    auto compiler = slib::create_dxc_compiler();
-    if (!compiler.has_value())
-        SKIP("no DXC compiler to build the mipmap shaders");
-
-    auto shader_lib = slib::shader_library();
-    shader_lib.add_compiler(cc::move(compiler.value()));
-    shader_lib.add_package(sr::shader_package());
+    (void)sr_test::shader_fixtures(); // the library the routines acquire their shaders through
 
     // 6x1 halves to 3x1 and then to 1x1, and the values are multiples of 8 so every average is an exact byte.
     auto const tex = ctx.persistent.create_texture_2d(

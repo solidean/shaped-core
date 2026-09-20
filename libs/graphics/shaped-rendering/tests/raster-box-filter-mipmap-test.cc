@@ -1,11 +1,11 @@
+#include "shader_fixtures.hh"
+
 #include <clean-core/thread/async_coroutine.hh>
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-rendering/raster_box_filter_mipmap_routine.hh>
 #include <shaped-rendering/shaders.hh>
-#include <shaped-shader-library/compiler/dxc_compiler.hh>
-#include <shaped-shader-library/shader_library.hh>
 
 using namespace cc::primitive_defines;
 
@@ -55,19 +55,12 @@ constexpr auto raster_mip_usage = sg::texture_usage::readonly_texture | sg::text
 } // namespace
 
 ASYNC_INVOCABLE_TEST("sr - raster box filter mipmap fills an sRGB chain in linear space",
-                     (sg::context_handle const& ctx_h),
-                     exclusive("slib-shader-library"))
+                     (sg::context_handle const& ctx_h))
 {
     REQUIRE(ctx_h != nullptr);
     sg::context& ctx = *ctx_h;
 
-    auto compiler = slib::create_dxc_compiler();
-    if (!compiler.has_value())
-        SKIP("no DXC compiler to build the mipmap shaders");
-
-    auto shader_lib = slib::shader_library();
-    shader_lib.add_compiler(cc::move(compiler.value()));
-    shader_lib.add_package(sr::shader_package());
+    (void)sr_test::shader_fixtures(); // the library the routines acquire their shaders through
 
     // 2x2 down to 1x1: the whole filter in one pass, and one texel to read back.
     auto const tex_srgb = ctx.persistent.create_texture_2d(
@@ -130,20 +123,12 @@ ASYNC_INVOCABLE_TEST("sr - raster box filter mipmap fills an sRGB chain in linea
 
 // A chain deeper than one level, and one generated from partway down.
 // The streaming case is exactly this: the file supplied the first levels and only the tail needs filling.
-ASYNC_INVOCABLE_TEST("sr - raster box filter mipmap fills a tail of the chain",
-                     (sg::context_handle const& ctx_h),
-                     exclusive("slib-shader-library"))
+ASYNC_INVOCABLE_TEST("sr - raster box filter mipmap fills a tail of the chain", (sg::context_handle const& ctx_h))
 {
     REQUIRE(ctx_h != nullptr);
     sg::context& ctx = *ctx_h;
 
-    auto compiler = slib::create_dxc_compiler();
-    if (!compiler.has_value())
-        SKIP("no DXC compiler to build the mipmap shaders");
-
-    auto shader_lib = slib::shader_library();
-    shader_lib.add_compiler(cc::move(compiler.value()));
-    shader_lib.add_package(sr::shader_package());
+    (void)sr_test::shader_fixtures(); // the library the routines acquire their shaders through
 
     // 8x8 down to 1x1.
     auto const tex = ctx.persistent.create_texture_2d(

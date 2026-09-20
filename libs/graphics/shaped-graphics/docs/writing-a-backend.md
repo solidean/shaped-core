@@ -311,11 +311,14 @@ Recorded as each is met, because this is what the next backend most wants to kno
 ## Where the tier-2 suite carries the whole weight
 
 [testing](testing.md) puts backend-specific behaviour in tier 2 and API invariants in tier 1.
-One consequence is easy to miss until you go looking for a dispatch test: **the tier-1 suite has no compute, raster or
-ray-tracing execution test at all**, because none of them can be written without shader bytecode, and bytecode is
-per-backend by construction.
+One consequence is easy to miss until you go looking for a dispatch test: **an execution test needs shader bytecode,
+and bytecode is per-backend by construction**.
 
-So the reference backend's tier-2 suite is the specification for those, and yours is written beside it:
+Tier 1 has one compute dispatch that escapes this, in [tests/compute/](../tests/compute/), because SGL is one source
+for every backend and reaches a WebGPU context with no external compiler at all.
+Raster and ray tracing have no tier-1 execution test yet, and neither does any shape SGL does not cover.
+
+So for those the reference backend's tier-2 suite is the specification, and yours is written beside it:
 
 - **Embed a compiled blob rather than building one.** dx12 checks in `double_compute.dxil.h` next to its `.hlsl`, with
   the compiler command line in the source's comment; vulkan does the same with `double_compute.spirv.h`.

@@ -318,13 +318,15 @@ if(SC_BUILD_TESTS)
             TARGET     shaped-graphics-test
             NAME       sg_test_shaders
             NAMESPACE  sg::test::shaders
-            SOURCE_DIR tests/shaders
+            SOURCE_DIR tests/shaders/hlsl
             LANGUAGE   hlsl
             SHADERS
                 double_values.hlsl:compute:main
                 pattern_fill.hlsl:compute:main
                 ping_pong.hlsl:compute:main
         )
+        # What tests/shaders/shader_fixtures.cc keys on: the SGL package is always there, this one is not.
+        target_compile_definitions(shaped-graphics-test PRIVATE SG_TEST_HAS_HLSL_SHADERS=1)
 
         # Frame-shaped: what creating render targets every frame costs against keeping them, per backend.
         target_sources(shaped-graphics-test PRIVATE tests/transient/transient-benchmark.cc)
@@ -343,13 +345,19 @@ if(SC_BUILD_TESTS)
 
     # The same fixture in SGL, and NOT behind the DXC gate: that is the whole point of a uniform language.
     # A WebGPU context needs no external compiler for it, and where DXC exists the same source serves dxil and spirv.
+    #
+    # shader_fixtures.cc is the one slib::shader_library this binary has, so it lands here rather than in the DXC
+    # block above: a build without DXC still has the SGL package to serve.
     if(_sg_backends)
-        target_sources(shaped-graphics-test PRIVATE tests/shaders/sgl-compute-test.cc)
+        target_sources(shaped-graphics-test PRIVATE
+            tests/shaders/shader_fixtures.cc
+            tests/compute/sgl-compute-test.cc
+        )
         sc_add_shader_package(
             TARGET     shaped-graphics-test
             NAME       sg_test_sgl_shaders
             NAMESPACE  sg::test::sgl_shaders
-            SOURCE_DIR tests/shaders-sgl
+            SOURCE_DIR tests/shaders/sgl
             LANGUAGE   sgl
             SHADERS
                 double_values.sgl:compute:main
