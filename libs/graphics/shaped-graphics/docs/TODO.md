@@ -3,6 +3,17 @@
 Running list of known follow-ups — what is **open**.
 What is already implemented is [structure.md](structure.md)'s tagged tree, and the design behind each area is its concept doc.
 
+- **The native scope is dx12 only.**
+  `dx12_native_scope` is the declared escape hatch foreign code records through (see [barriers](concepts/barriers.md)).
+  Vulkan has no equivalent, so a vendor denoiser can only run on dx12; the vulkan shape is the same declaration plus
+  `vkCmdPipelineBarrier2`, and it wants writing when a member needs it.
+  Two smaller gaps in the dx12 one: it declares whole textures rather than subresource ranges, and a resource the
+  foreign code touches without declaring is caught only by the debug layer.
+- **Exportable memory and shared fences.**
+  OIDN's GPU devices run on their own API (CUDA, HIP, SYCL, Metal) and share memory with ours through an OS handle.
+  That wants an "exportable" usage on buffer and texture creation, a way to read the handle, and a fence shared both ways.
+  Not needed for OIDN on the CPU, which goes through the existing download and upload; built with the OIDN member.
+
 - **The metal backend serializes no pipeline blob.**
   `compute_pipeline::cached_pipeline_data()` returns empty there and `used_cached_pipeline()` is always false, so a
   caller persisting a blob across runs gets nothing to persist and every build is a cold one.

@@ -169,6 +169,16 @@ void dx12_command_list::track_texture_access(dx12_texture_handle const& texture,
         _touched_textures.push_back(texture);
 }
 
+void dx12_command_list::forget_bind_state()
+{
+    _bound_pipeline_layout = nullptr;
+    _bound_groups.clear();
+    _bound_raster_layout = nullptr;
+    _bound_raster_groups.clear();
+    _bound_vertex_buffers.clear();
+    _bound_index_buffer = nullptr;
+}
+
 void dx12_command_list::flush_barriers()
 {
     // Flush every resource whose access was declared since the last flush.

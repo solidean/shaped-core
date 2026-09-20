@@ -4,7 +4,7 @@ sg tracks how each resource is accessed and inserts the GPU barriers that order 
 The goal is **correct, minimal** barriers with **no explicit barrier API** for the caller.
 Access is inferred from the operation, and the concurrency model lets several command lists record at once.
 
-## Access is inferred, never declared (with one exception)
+## Access is inferred, never declared (with two exceptions)
 
 There is no public `declare_access`. What a resource is used as follows from the operation:
 
@@ -14,7 +14,9 @@ There is no public `declare_access`. What a resource is used as follows from the
 
 The mapping lives in [access_inference.hh](../../src/shaped-graphics/barrier/access_inference.hh), so every backend agrees on the semantics.
 
-**The one exception — arrays / bindless.**
+Both exceptions are the same shape: code sg cannot see into, so the caller says what it will do.
+
+**The first — arrays / bindless.**
 Element usage of a resource *array* bound to a shader cannot be inferred: the shader may index only some elements, or use them differently.
 So the caller declares it explicitly, split by resource family since buffers carry no layout.
 `declare_array_buffer_access` takes `array_buffer_access` `{index, stages, access}`; `declare_array_texture_access` takes `array_texture_access`, which also names the required `layout`.
@@ -22,6 +24,20 @@ A declaration applies to the next dispatch only, resolved by binding name agains
 Declarations are **accounted for**: the dispatch asserts that every bound array binding was declared — an empty element span declares "unused", a missing declaration is a bug.
 Declaring a vacant (null-handle) or out-of-range element asserts too.
 See [bindings — array bindings](bindings.md#array-bindings).
+
+**The second — foreign code, through a native scope.**
+A vendor SDK (DLSS Ray Reconstruction, FSR Ray Regeneration) records onto the native command list with native
+resources, and assumes they are already in the state it needs.
+`sg::backend::dx12::dx12_native_scope::open(cmd, textures, buffers)` is how that is done without sg losing track: each
+entry names its `access_flags`, the scope transitions the resource into it and records that as its state, and closing
+the scope forgets the list's bind state, since foreign code may have set its own descriptor heaps, root signature and
+pipeline.
+A texture's layout follows from the access through `native_layout_for`, rather than being named separately.
+
+Under-declaring corrupts the tracker — sg then believes a state the GPU is not in — so the scope hands out a native
+resource only for a handle it declared, and the debug layer catches the rest.
+dx12 today; vulkan when a member needs it.
+See [shaped-rendering's denoising doc](../../../shaped-rendering/docs/denoising.md), which is what asked for it.
 
 ## The vocabulary is backend-neutral
 
