@@ -1,0 +1,40 @@
+// One cube, six colored faces, two fixed lights.
+// The SGL twin of examples/graphics/rotating-cube/shaders/cube.hlsl, and the first shader the whole toolchain carries.
+
+// one matrix, and small enough to ride as inline constants
+@inline binding constants:
+    view_projection: mat4
+
+@vertex struct cube_vertex:
+    position: pos3
+    normal: vec3
+    color: float3
+
+@pixel struct target:
+    color: rgba8
+
+@vertex fun main_vs(v: cube_vertex){constants} -> {
+    @position position: hpos4
+    normal: vec3
+    color: float3
+}:
+    return {
+        position = constants.view_projection * v.position
+        normal = v.normal
+        color = v.color
+    }
+
+@pixel fun main_ps(
+    position: hpos4
+    normal: vec3
+    color: float3
+) -> target:
+    // A key light, a fill light and an ambient floor: enough that a face's orientation reads at a glance.
+    let n = normalize normal
+    let key = saturate dot(n, normalize vec3(0.45, 0.8, -0.4))
+    let fill = saturate dot(n, normalize vec3(-0.7, 0.15, 0.6))
+
+    let lit = color * (0.25 + 0.8 * key + 0.25 * fill)
+    return {
+        color = (..lit, 1.0) as rgba8
+    }

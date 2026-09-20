@@ -1,0 +1,47 @@
+// A draft of the tiny prelude the cube needs, and nothing the cube does not need.
+// Every declaration is @builtin: the compiler and each emitter know what stands behind the name.
+
+@builtin struct float:
+    // a scalar has no members
+
+@builtin struct float3:
+    x: float
+    y: float
+    z: float
+
+@builtin struct float4:
+    x: float
+    y: float
+    z: float
+    w: float
+
+/// A direction: it has a length, and a translation leaves it alone.
+@builtin struct vec3:
+    x: float
+    y: float
+    z: float
+
+/// A position: a translation moves it.
+@builtin struct pos3:
+    x: float
+    y: float
+    z: float
+
+/// A position in clip space, before the divide.
+@builtin struct hpos4:
+    x: float
+    y: float
+    z: float
+    w: float
+
+/// Column-major, and a vector stands to its right.
+@builtin struct mat4:
+    // columns are not nameable yet
+
+/// Four channels of eight bits, read and written as a float4 in [0, 1].
+@builtin struct rgba8:
+    // a format type has no members of its own
+
+@builtin fun normalize(v: vec3) -> vec3
+@builtin fun dot(a: vec3, b: vec3) -> float
+@builtin fun saturate(x: float) -> float

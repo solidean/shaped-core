@@ -31,4 +31,5 @@ Each file has the same shape, so an idea can be picked up cold:
 | [ranges-and-iteration.md](ranges-and-iteration.md) | `range` as a builtin type, `in` as a membership test, and custom iterators for voxel and grid tracing |
 | [user-operators.md](user-operators.md) | user-declared prefix, infix and postfix operators, placed by a small set of rules |
 | [string-family.md](string-family.md) | raw `"""` strings and language-tagged strings such as `"json` |
+| [compilation-model.md](compilation-model.md) | shader text as the target, modules compiled in parallel against interfaces, and one demand-driven pass for names, types and evaluation |
 | [beyond-shaders.md](beyond-shaders.md) | SGL as a test run for a general-purpose language, and what that asks of today's decisions |

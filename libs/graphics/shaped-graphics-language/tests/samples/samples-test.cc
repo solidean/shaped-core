@@ -138,9 +138,26 @@ TEST("sgl samples - control flow parses and builds without a diagnostic")
                         "        (yield (call:paren safe (index color i))))"));
 }
 
+TEST("sgl samples - the cube and its prelude parse and build without a diagnostic")
+{
+    for (auto const name : {"cube.sgl", "tracer-prelude.sgl"})
+    {
+        auto const file = sgl::parse(read_sample(name));
+        CHECK(sgl::dump_diagnostics(file) == "");
+        CHECK(sgl::print_source(file) == file.source);
+
+        auto const ast = sgl::ast::build(file);
+        CHECK(sgl::ast::dump_diagnostics(ast) == "");
+        auto const dump = sgl::ast::dump(file, ast);
+        CHECK(!dump.contains("invalid"));
+        CHECK(!dump.contains("<missing>"));
+    }
+}
+
 TEST("sgl samples - the AST pass is total: every truncation of a sample builds, and every node keeps a form")
 {
-    for (auto const name : {"basic-raster.sgl", "members-and-bindings.sgl", "control-flow.sgl"})
+    for (auto const name :
+         {"basic-raster.sgl", "members-and-bindings.sgl", "control-flow.sgl", "cube.sgl", "tracer-prelude.sgl"})
     {
         auto const source = read_sample(name);
         // A prime stride cuts through every kind of token over the length of a file.
