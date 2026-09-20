@@ -1,5 +1,3 @@
-#include "shader_fixtures.hh"
-
 #include <clean-core/container/pinned_data.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <imgui/imgui.h>
@@ -87,8 +85,6 @@ std::unique_ptr<imgui_fixture> make_fixture(sg::context_handle const& ctx)
 {
     if (ctx == nullptr || !ctx->accepts_shader_format(sg::shader_format::dxil))
         return nullptr;
-
-    (void)sr_test::shader_fixtures(); // the library the routine acquires its shaders through
 
     auto fixture = std::make_unique<imgui_fixture>();
     fixture->ctx = ctx;

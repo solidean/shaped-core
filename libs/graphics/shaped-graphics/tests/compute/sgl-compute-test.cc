@@ -1,5 +1,3 @@
-#include "../shaders/shader_fixtures.hh"
-
 #include <clean-core/container/vector.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <nexus/async-test.hh>
@@ -22,7 +20,6 @@ using namespace cc::primitive_defines;
 ASYNC_INVOCABLE_TEST("sg - an SGL compute shader dispatches and doubles a buffer", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
-    (void)sg_test::shader_fixtures(); // the library the generated globals resolve through
 
     // The asset picks the format by asking the context what it accepts, so this test names no backend.
     // Every backend has an SGL edge, so a failure here is a failure — awaiting it reports whichever one it was.

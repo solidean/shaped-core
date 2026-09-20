@@ -1,3 +1,4 @@
+#include "../shaders/shader_fixtures.hh"
 #include "sg_backends.hh"
 
 #include <clean-core/string/format.hh>
@@ -33,6 +34,7 @@ ASYNC_TEST("sg vulkan backend")
         SKIP("no vulkan device");
     else
     {
+        (void)sg_test::shader_fixtures(); // alive before any child acquires through it
         co_await nx::async_invoke_tests_in_sequence("vulkan", ctx.value());
 
         // A device loss during our own tests is a defect, not an environment quirk to tolerate.

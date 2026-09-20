@@ -1,3 +1,4 @@
+#include "../shaders/shader_fixtures.hh"
 #include "sg_backends.hh"
 
 #include <clean-core/string/format.hh>
@@ -11,7 +12,8 @@
 // Each creates a dx12 context and invokes every sg::context_handle API test against it.
 // Compiled only where the dx12 backend builds, so Windows.
 // They hold no exclusion tags: an async invocation takes each child's own tags around its run, and a driver holding
-// them too would be refused — so the invocables that stand up a slib::shader_library or count routine init runs say so.
+// them too would be refused — so the invocables that count routine init runs say so.
+// Each brings the binary's shader library up before invoking, so a child acquires through it rather than standing up its own.
 // Two adapters are covered, both with the debug layer on:
 //   - hardware: the real GPU; SKIPs when none is available (e.g. headless CI), and FAILs when one is and creation still fails.
 //   - WARP (software): the sweep on a host with no GPU, and a second pass under --thorough on one that has it.
@@ -38,6 +40,7 @@ ASYNC_TEST("sg dx12 warp backend")
         SKIP("no dx12 WARP device");
     else
     {
+        (void)sg_test::shader_fixtures(); // alive before any child acquires through it
         co_await nx::async_invoke_tests_in_sequence("dx12-warp", ctx.value());
 
         // A device reset during our own tests is a defect, not an environment quirk to tolerate.
@@ -62,6 +65,7 @@ ASYNC_TEST("sg dx12 hardware backend")
         SKIP("no dx12 hardware device");
     else
     {
+        (void)sg_test::shader_fixtures();
         co_await nx::async_invoke_tests_in_sequence("dx12-hw", ctx.value());
 
         // A device reset during our own tests is a defect, not an environment quirk to tolerate.
@@ -89,6 +93,7 @@ ASYNC_TEST("sg dx12 never-block backend")
         SKIP("no dx12 device");
     else
     {
+        (void)sg_test::shader_fixtures();
         co_await nx::async_invoke_tests_in_sequence("dx12-never-block", ctx.value());
 
         // Nothing here can wait, so what the tests left running is awaited before the context goes.

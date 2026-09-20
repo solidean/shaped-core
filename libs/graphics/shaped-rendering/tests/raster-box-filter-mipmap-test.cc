@@ -1,5 +1,3 @@
-#include "shader_fixtures.hh"
-
 #include <clean-core/thread/async_coroutine.hh>
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
@@ -60,7 +58,6 @@ ASYNC_INVOCABLE_TEST("sr - raster box filter mipmap fills an sRGB chain in linea
     REQUIRE(ctx_h != nullptr);
     sg::context& ctx = *ctx_h;
 
-    (void)sr_test::shader_fixtures(); // the library the routines acquire their shaders through
 
     // 2x2 down to 1x1: the whole filter in one pass, and one texel to read back.
     auto const tex_srgb = ctx.persistent.create_texture_2d(
@@ -128,7 +125,6 @@ ASYNC_INVOCABLE_TEST("sr - raster box filter mipmap fills a tail of the chain", 
     REQUIRE(ctx_h != nullptr);
     sg::context& ctx = *ctx_h;
 
-    (void)sr_test::shader_fixtures(); // the library the routines acquire their shaders through
 
     // 8x8 down to 1x1.
     auto const tex = ctx.persistent.create_texture_2d(

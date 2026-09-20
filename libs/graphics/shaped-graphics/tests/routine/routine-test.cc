@@ -1,5 +1,3 @@
-#include "../shaders/shader_fixtures.hh"
-
 #include <clean-core/common/macros.hh> // CC_HAS_THREADS
 #include <clean-core/container/vector.hh>
 #include <clean-core/thread/async.hh>
@@ -308,7 +306,6 @@ ASYNC_INVOCABLE_TEST("sg - evicting a routine drops its instance (the acquire ca
 ASYNC_INVOCABLE_TEST("sg - a routine compiles a shader and dispatches it end to end", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
-    (void)sg_test::shader_fixtures(); // the library the generated globals resolve through
 
     constexpr int count = 256; // a multiple of the shader's 64-thread workgroup
     auto const out

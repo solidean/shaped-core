@@ -33,7 +33,6 @@ ASYNC_INVOCABLE_TEST("sg - a consumer's shader compiles for the context it is ac
                      (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
-    (void)sg_test::shader_fixtures();
 
     // HLSL genuinely reaches only DXC's two formats, so a WGSL context has nothing here — that is the gap the SGL
     // fixture beside this one exists to close, rather than something this test can assert its way around.

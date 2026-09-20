@@ -64,8 +64,9 @@ It becomes runnable against each backend by two pieces working together:
   A driver holds no exclusion tags: the async invocation takes each child's own (`sg-reload-generation`) around its run.
   So a test that counts routine init runs carries the tag itself, and a driver that also held it would be refused.
   **Shaders are not one of those tests.**
-  This binary has exactly one `slib::shader_library`, created on first use in [`tests/shaders/shader_fixtures.cc`](../tests/shaders/shader_fixtures.cc) with every compiler the build has.
-  A test asks for it and acquires through the generated package globals, so nothing needs excluding and a shader compiles once for the whole run rather than once per test.
+  This binary has exactly one `slib::shader_library`, in [`tests/shaders/shader_fixtures.cc`](../tests/shaders/shader_fixtures.cc), holding every compiler the build has.
+  **A driver brings it up before it invokes**, so an invocable simply acquires through the generated package globals and says nothing about where the library came from.
+  Nothing needs excluding, and a shader compiles once for the whole run rather than once per test.
   **A test awaits the GPU rather than blocking on it.**
   A readback awaits its own result: `auto const data = co_await future.data();`.
   `co_await ctx->idle_completion()` is for a test that needs the whole GPU and every actor drained.
