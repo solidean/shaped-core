@@ -50,6 +50,7 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/check/flatten.cc
 
     src/shaped-graphics-language/legalize/core.cc
+    src/shaped-graphics-language/legalize/legalize_cases.cc
     src/shaped-graphics-language/legalize/legalize_exits.cc
     src/shaped-graphics-language/legalize/legalize_exprs.cc
 
@@ -267,6 +268,7 @@ if(SC_BUILD_TESTS)
         tests/emit/core-emit-test.cc
         tests/emit/cube-emit-test.cc
         tests/emit/emit-test.cc
+        tests/emit/case-emit-test.cc
         tests/emit/enum-emit-test.cc
 
         tests/driver/compile-to-text-test.cc

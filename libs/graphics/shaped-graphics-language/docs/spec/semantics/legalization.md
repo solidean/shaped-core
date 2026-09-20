@@ -54,8 +54,10 @@ One row per core construct, one column per target; GLSL has no emitter yet, and 
 
 ## Case
 
-* **LEGAL-44** The core form has `switch v { [a, b] { … } … default { … } }`, whose arm values are `int` literals and whose `default` is mandatory.
-* **LEGAL-45** A `case` becomes a `switch` when every pattern of every arm is an `int` literal, and a chain of `if` otherwise ([why](why/legalization.md#legal-45)).
+* **LEGAL-44** The core form has `switch v { [a, b] { … } … default { … } }`, whose `default` is mandatory.
+  An arm's values are literals a target can write as a label: an `int` literal, or an enum case, which is one under a name.
+* **LEGAL-45** A `case` becomes a `switch` when every pattern of every arm is such a literal, and a chain of `if` otherwise ([why](why/legalization.md#legal-45)).
+  It runs after the expression rules, which are what take a `case` out of the block expression that held it.
 * **LEGAL-46** (C1) The chain binds the scrutinee to a `let`, and each arm is an `if` whose condition is its patterns compared with `==` and joined by `or`; the `default` arm is the last `else`.
   It costs one `let`.
 * **LEGAL-47** A pattern that has an effect needs no rule of its own: it stands where C1 puts it, and E3 is what takes the `or` that then holds it to an `if` over a `var`.

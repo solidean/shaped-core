@@ -17,6 +17,10 @@ using stmt_list = cc::vector<flat_stmt_id>;
 /// `not x`, or `y` when `x` is `not y`.
 [[nodiscard]] flat_expr_id negated(flat_builder& out, flat_expr_id x);
 
+/// Rule C1: the body of `out.e` with every `case` written as a `switch` or as a chain of `if` over `==`.
+/// It runs after the expression rules, which are what take a `case` out of the block expression that held it.
+[[nodiscard]] stmt_list lower_cases(flat_builder& out);
+
 /// Rules E1 to E4: the body of `out.e` without a block expression, with `and` / `or` only over operands without effects.
 /// Also reads a `once` as a block and a `break` as a leave, so the exit pass meets one kind of exit.
 [[nodiscard]] stmt_list lower_expressions(flat_builder& out, legalize_options const& options);

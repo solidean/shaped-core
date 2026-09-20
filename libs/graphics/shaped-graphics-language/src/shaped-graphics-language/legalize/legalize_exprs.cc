@@ -443,6 +443,20 @@ struct expr_lowering
             auto const value = lower_expr(r->value, into);
             into.push_back(attributed().return_(value));
         }
+        else if (auto const* const c = s.node.try_as<flat_case>())
+        {
+            auto copy = *c;
+            copy.scrutinee = lower_expr(c->scrutinee, into);
+            // The arms are copied first: lowering a body may write arms of its own, which moves the array.
+            auto original = cc::vector<flat_arm>();
+            original.push_back_range(out.e.at(c->arms));
+            auto arms = cc::vector<flat_arm>();
+            for (auto const& a : original)
+                arms.push_back({.patterns = a.patterns, .body = out.stmt_list(lower_body(a.body))});
+            copy.arms = out.arm_list(arms);
+            copy.default_body = out.stmt_list(lower_body(c->default_body));
+            into.push_back(attributed().add_stmt(cc::move(copy)));
+        }
         else
         {
             // A statement this pass does not lower goes through untouched; `find_core_violation` is what judges it.

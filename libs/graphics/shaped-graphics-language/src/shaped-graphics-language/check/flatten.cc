@@ -392,7 +392,10 @@ struct flattener
     /// The scrutinee, the arms and the default of a `case`; `value_block` is the block an arm's value leaves.
     flat_case flatten_case_parts(ast::case_expr const& node, label_id value_block)
     {
-        auto result = flat_case{.scrutinee = flatten_expr(node.value)};
+        auto const scrutinee = flatten_expr(node.value);
+        auto result = flat_case{.scrutinee = scrutinee, .equality = equality_for(scrutinee)};
+        if (is_valid(result.equality))
+            result.equality_intrinsic = c.out.at(result.equality).intrinsic;
         auto arms = cc::vector<flat_arm>();
         auto has_default = false;
 
@@ -420,6 +423,31 @@ struct flattener
         }
         result.arms = add_arms(arms);
         return result;
+    }
+
+    /// The `==` that compares the scrutinee with a pattern; an enum compares as the `int` its cases are.
+    symbol_id equality_for(flat_expr_id scrutinee) const
+    {
+        if (!is_valid(scrutinee))
+            return symbol_id::none;
+        auto const type = entry.at(scrutinee).type;
+        if (!is_valid(type))
+            return symbol_id::none;
+        // An enum compares as the `int` its cases are (EVAL-64).
+        auto const compared = c.out.at(type).kind == type_kind::enumeration ? int_type() : type;
+        if (!is_valid(compared))
+            return symbol_id::none;
+        type_id const both[] = {compared, compared};
+        return c.find_operator("==", both);
+    }
+
+    /// The prelude's `int`, which an enum's comparison runs on.
+    type_id int_type() const
+    {
+        for (auto const& s : c.out.symbols)
+            if (s.name == builtins::k_int && s.kind == symbol_kind::structure)
+                return s.type;
+        return type_id::none;
     }
 
     /// `a or b` is a list of patterns rather than the `or` of the language (CHK-157).

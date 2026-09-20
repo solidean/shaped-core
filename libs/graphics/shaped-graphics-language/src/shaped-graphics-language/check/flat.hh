@@ -392,6 +392,10 @@ struct sgl::check::flat_arm
 struct sgl::check::flat_case
 {
     flat_expr_id scrutinee = flat_expr_id::none;
+    /// The `==` an arm matches by, which the chain form of LEGAL-46 calls; only the check pass can resolve it.
+    /// An enum's is the `int` overload, since the cases' `int`s are what EVAL-64 compares.
+    symbol_id equality = symbol_id::none;
+    builtin_id equality_intrinsic = builtin_id::none;
     ast::range_of<flat_arm> arms;
     ast::range_of<flat_stmt_id> default_body;
 

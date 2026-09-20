@@ -88,6 +88,40 @@ constexpr auto quiet_drops = cc::string_view("fun half(v: float) => v * 0.5\n"
                                              "fun graded(v: float) -> float:\n"
                                              "    if v < 0.25 => return 0.0\n"
                                              "    return half v\n");
+/// A `case` in each of its shapes: a switch over an enum, a chain-free `int` switch, and an arm that leaves.
+constexpr auto cases = cc::string_view("enum mode:\n"
+                                       "    low\n"
+                                       "    mid\n"
+                                       "    high\n"
+                                       "\n"
+                                       "fun mode_of(v: float) -> mode:\n"
+                                       "    if v < 0.25 => return mode.low\n"
+                                       "    if v < 0.75 => return mode.mid\n"
+                                       "    return mode.high\n"
+                                       "\n"
+                                       "fun weight(m: mode) -> float:\n"
+                                       "    return case m:\n"
+                                       "        .low => 0.25\n"
+                                       "        .mid => 0.5\n"
+                                       "        .high => 1.0\n"
+                                       "\n"
+                                       "fun stepped(n: int) -> float:\n"
+                                       "    return case n:\n"
+                                       "        0 => 0.0\n"
+                                       "        1 or 2 => 0.5\n"
+                                       "        _ => 1.0\n"
+                                       "\n"
+                                       "fun guarded(m: mode, base: float) -> float:\n"
+                                       "    let w = case m:\n"
+                                       "        .low => return 0.0\n"
+                                       "        _ => 1.0\n"
+                                       "    return base * w\n");
+constexpr auto cases_body = cc::string_view("let m = mode_of p.a\n"
+                                            "let w = weight m\n"
+                                            "let y = stepped 1\n"
+                                            "let z = guarded(m, p.b)\n"
+                                            "let x = w + y + z\n");
+
 constexpr auto quiet_drops_body = cc::string_view("let x = half p.a\n"
                                                   "graded p.b\n"
                                                   "saturate(x + graded(p.a))\n");
@@ -109,6 +143,7 @@ constexpr program programs[] = {
     {.name = "break value", .helpers = guard_clauses, .body = break_value_body},
     {.name = "dropped values", .helpers = dropped_values, .body = dropped_values_body},
     {.name = "quiet drops", .helpers = quiet_drops, .body = quiet_drops_body},
+    {.name = "cases", .helpers = cases, .body = cases_body},
 };
 
 run_inputs inputs_of(checked_module const& m, f32 a, f32 b)

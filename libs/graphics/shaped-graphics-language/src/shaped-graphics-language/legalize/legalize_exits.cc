@@ -113,6 +113,32 @@ struct block_dissolver
                     return true;
                 continue;
             }
+            // LEGAL-49: where the switch ends the block, leaving an arm IS leaving the block, so both labels go.
+            if (auto const* const sw = s.node.try_as<flat_switch>())
+            {
+                if (i + 1 < list.size())
+                    return false;
+                auto original = cc::vector<flat_arm>();
+                original.push_back_range(out.e.at(sw->arms));
+                auto arms = cc::vector<flat_arm>();
+                for (auto const& a : original)
+                {
+                    auto body = stmt_list();
+                    if (!tail(ids_of(out.e, a.body), label, body, depth + 1))
+                        return false;
+                    arms.push_back({.patterns = a.patterns, .body = out.stmt_list(body)});
+                }
+                auto default_body = stmt_list();
+                if (!tail(ids_of(out.e, sw->default_body), label, default_body, depth + 1))
+                    return false;
+                out.from = s.from;
+                out.inlined_through = s.inlined_through;
+                result.push_back(out.add_stmt(flat_switch{.scrutinee = sw->scrutinee,
+                                                          .arms = out.arm_list(arms),
+                                                          .default_body = out.stmt_list(default_body)}));
+                return true;
+            }
+
             auto const* const branch = s.node.try_as<flat_if>();
             if (branch == nullptr)
                 return false;
@@ -247,6 +273,20 @@ struct block_dissolver
                 out.from = s.from;
                 result.push_back(out.for_(f->label, f->index, f->first, f->end, body));
             }
+            else if (auto const* const sw = s.node.try_as<flat_switch>())
+            {
+                auto original = cc::vector<flat_arm>();
+                original.push_back_range(out.e.at(sw->arms));
+                auto arms = cc::vector<flat_arm>();
+                for (auto const& a : original)
+                    arms.push_back(
+                        {.patterns = a.patterns, .body = out.stmt_list(dissolve(ids_of(out.e, a.body), depth + 1))});
+                auto const default_body = out.stmt_list(dissolve(ids_of(out.e, sw->default_body), depth + 1));
+                out.from = s.from;
+                out.inlined_through = s.inlined_through;
+                result.push_back(out.add_stmt(
+                    flat_switch{.scrutinee = sw->scrutinee, .arms = out.arm_list(arms), .default_body = default_body}));
+            }
             else
                 result.push_back(id);
         }
@@ -356,6 +396,35 @@ struct exit_lowering
         }
     }
 
+    /// A `switch`: one frame for the whole construct, since a `break` in any arm ends it (LEGAL-3).
+    void lower_switch(flat_stmt const& s, flat_switch const& sw, stmt_list& into, int depth)
+    {
+        frames.push_back({.label = label_id::none, .is_loop = false});
+        auto original = cc::vector<flat_arm>();
+        original.push_back_range(out.e.at(sw.arms));
+        auto arms = cc::vector<flat_arm>();
+        for (auto const& a : original)
+            arms.push_back({.patterns = a.patterns, .body = out.stmt_list(lower(ids_of(out.e, a.body), depth + 1))});
+        auto const default_body = out.stmt_list(lower(ids_of(out.e, sw.default_body), depth + 1));
+        auto const done = frames.pop_back();
+
+        out.from = s.from;
+        out.inlined_through = s.inlined_through;
+        if (is_valid(done.leave_flag))
+            into.push_back(declared_false(done.leave_flag));
+        into.push_back(out.add_stmt(
+            flat_switch{.scrutinee = sw.scrutinee, .arms = out.arm_list(arms), .default_body = default_body}));
+
+        for (auto const& p : done.pending)
+        {
+            if (options.skip_flag_tests)
+                break;
+            auto const is_arrived = !frames.empty() && frames.back().label == p.target;
+            auto const exit = is_arrived && p.is_continue ? out.continue_(p.target) : out.break_();
+            into.push_back(out.if_(out.local(p.flag), {exit}));
+        }
+    }
+
     stmt_list lower(stmt_list const& list, int depth = 0)
     {
         auto result = stmt_list();
@@ -417,6 +486,8 @@ struct exit_lowering
                 out.from = s.from;
                 result.push_back(out.if_(branch->condition, then_body, else_body));
             }
+            else if (auto const* const sw = s.node.try_as<flat_switch>())
+                lower_switch(s, *sw, result, depth);
             else
                 result.push_back(id);
         }
@@ -572,6 +643,8 @@ flat_entry_point sgl::check::legalize(checked_module const& m, flat_entry_point 
         return e;
     auto out = flat_builder::extend(m, e);
     auto const without_blocks = lower_expressions(out, options);
-    auto const without_leaves = lower_exits(out, without_blocks, options);
+    out.set_body(without_blocks);
+    auto const with_switches = lower_cases(out);
+    auto const without_leaves = lower_exits(out, with_switches, options);
     return compacted(m, out.e, without_leaves);
 }

@@ -392,6 +392,50 @@ struct machine
         return result;
     }
 
+    /// EVAL-65 to EVAL-70: the scrutinee once, then the arms in order, and the patterns only where they are reached.
+    /// `captures_break` is the `switch`, which a `break` directly inside ends the way one inside a `once` ends that.
+    flow run_arms(flat_expr_id scrutinee,
+                  ast::range_of<flat_arm> arms,
+                  ast::range_of<flat_stmt_id> default_body,
+                  bool captures_break)
+    {
+        auto chosen = value();
+        if (auto const f = eval(scrutinee, chosen); !f.is_normal())
+            return f;
+        if (!is_known(e, arms))
+            return type_error("a case whose arms reach outside the tree");
+
+        auto selected = default_body;
+        auto is_selected = false;
+        for (auto const& arm : e.at(arms))
+        {
+            if (is_selected)
+                break;
+            if (!is_known(e, arm.patterns))
+                return type_error("a case arm whose patterns reach outside the tree");
+            for (auto const id : e.at(arm.patterns))
+            {
+                auto pattern = value();
+                if (auto const f = eval(id, pattern); !f.is_normal())
+                    return f;
+                if (pattern.leaves.size() != chosen.leaves.size())
+                    return type_error("a case pattern of another type than its scrutinee");
+                auto is_equal = true;
+                for (auto i = isize(0); i < pattern.leaves.size(); ++i)
+                    is_equal = is_equal && pattern.leaves[i] == chosen.leaves[i];
+                if (is_equal)
+                {
+                    selected = arm.body;
+                    is_selected = true;
+                    break;
+                }
+            }
+        }
+
+        auto const f = run_body(selected);
+        return captures_break && f.kind == flow_kind::break_ ? flow() : f;
+    }
+
     /// What one iteration's end means for its loop: go on, stop, or hand the exit further out.
     enum class after : u8
     {
@@ -554,6 +598,10 @@ struct machine
         }
         if (s.node.is<flat_break>())
             return {.kind = flow_kind::break_};
+        if (auto const* const c = s.node.try_as<flat_case>())
+            return run_arms(c->scrutinee, c->arms, c->default_body, false);
+        if (auto const* const sw = s.node.try_as<flat_switch>())
+            return run_arms(sw->scrutinee, sw->arms, sw->default_body, true);
         if (auto const* const r = s.node.try_as<flat_return>())
         {
             auto v = value();
