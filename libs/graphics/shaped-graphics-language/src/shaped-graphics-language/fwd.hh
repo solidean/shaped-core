@@ -23,6 +23,9 @@ enum class form_id : i32;
 enum class severity : u8;
 enum class diagnostic_kind : u8;
 struct diagnostic;
+struct line_column;
+
+struct text_request;
 
 enum class line_kind : u8;
 struct line;

@@ -297,8 +297,10 @@ void slib::shader_library::_compile_text(compile_outcome& outcome,
         return text;
     };
 
-    shader_source_description desc
-        = {.source = cc::move(source), .entry_point = cc::string::create_copy_of(entry_point), .stage = stage};
+    shader_source_description desc = {.source = cc::move(source),
+                                      .entry_point = cc::string::create_copy_of(entry_point),
+                                      .stage = stage,
+                                      .label = cc::string::create_copy_of(label)};
 
     auto preprocessed = compiler->preprocess(desc, resolve);
     if (preprocessed.has_error())
@@ -315,6 +317,7 @@ void slib::shader_library::_compile_text(compile_outcome& outcome,
     // It also keeps the compiler's cache key honest: everything the rewrite depends on is folded into the source
     // it hashes.
     // The pass reads HLSL's binding attributes, so a WGSL module, which states its own addresses, never goes through it.
+    // Neither does SGL, whatever text it was written as: an emitter's HLSL carries its final addresses already.
     if (compiler->source_language() == shader_language::hlsl)
     {
         auto rewritten = rewrite_binding_groups(desc.source, format);

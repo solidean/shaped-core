@@ -10,6 +10,7 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/fwd.cc
 
     src/shaped-graphics-language/source/diagnostic.cc
+    src/shaped-graphics-language/source/format_diagnostic.cc
 
     src/shaped-graphics-language/lines/line_tree.cc
 
@@ -45,7 +46,65 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/emit/impl/plan.cc
     src/shaped-graphics-language/emit/impl/text_writer.cc
     src/shaped-graphics-language/emit/impl/wgsl.cc
+
+    src/shaped-graphics-language/driver/compile_to_text.cc
 )
+
+# The prelude is a file, and the library carries its text: a page has no filesystem and a shipped binary no source tree.
+# Baked in at configure time, and CMAKE_CONFIGURE_DEPENDS is what makes an edit of the file re-run this.
+#
+# MSVC caps ONE string literal at 16380 bytes, and adjacent literals are joined only after that limit applies.
+# So the text goes out as a run of chunks that end at a newline, which also keeps a UTF-8 sequence in one piece.
+set(_sgl_prelude_source "${CMAKE_CURRENT_SOURCE_DIR}/prelude/prelude.sgl")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_sgl_prelude_source}")
+file(READ "${_sgl_prelude_source}" _sgl_prelude_text)
+
+set(_sgl_prelude_chunk_bytes 8000)
+string(LENGTH "${_sgl_prelude_text}" _sgl_prelude_length)
+set(_sgl_prelude_literals "")
+set(_sgl_prelude_at 0)
+while(_sgl_prelude_at LESS _sgl_prelude_length)
+    math(EXPR _sgl_prelude_remaining "${_sgl_prelude_length} - ${_sgl_prelude_at}")
+    set(_sgl_prelude_take ${_sgl_prelude_chunk_bytes})
+    if(NOT _sgl_prelude_remaining GREATER _sgl_prelude_take)
+        set(_sgl_prelude_take ${_sgl_prelude_remaining})
+    else()
+        string(SUBSTRING "${_sgl_prelude_text}" ${_sgl_prelude_at} ${_sgl_prelude_take} _sgl_prelude_chunk)
+        string(FIND "${_sgl_prelude_chunk}" "\n" _sgl_prelude_newline REVERSE)
+        if(_sgl_prelude_newline GREATER -1)
+            math(EXPR _sgl_prelude_take "${_sgl_prelude_newline} + 1")
+        endif()
+    endif()
+
+    string(SUBSTRING "${_sgl_prelude_text}" ${_sgl_prelude_at} ${_sgl_prelude_take} _sgl_prelude_chunk)
+    string(APPEND _sgl_prelude_literals "\n    R\"sglprelude(${_sgl_prelude_chunk})sglprelude\"")
+    math(EXPR _sgl_prelude_at "${_sgl_prelude_at} + ${_sgl_prelude_take}")
+endwhile()
+
+# Written only when it differs, so a configure that changes nothing recompiles nothing.
+# Not file(CONFIGURE): SGL spells an attribute `@name`, and two of them on one line would read as a CMake variable.
+set(_sgl_prelude_generated "${CMAKE_CURRENT_BINARY_DIR}/generated/prelude.generated.cc")
+set(_sgl_prelude_cc
+"// Generated from prelude/prelude.sgl by shaped-graphics-language's CMakeLists. Do not edit.
+#include <shaped-graphics-language/driver/prelude.hh>
+
+namespace
+{
+constexpr char const* k_prelude =${_sgl_prelude_literals};
+} // namespace
+
+cc::string_view sgl::prelude_source() { return k_prelude; }
+
+cc::string_view sgl::prelude_name() { return \"prelude.sgl\"; }
+")
+set(_sgl_prelude_existing "")
+if(EXISTS "${_sgl_prelude_generated}")
+    file(READ "${_sgl_prelude_generated}" _sgl_prelude_existing)
+endif()
+if(NOT _sgl_prelude_existing STREQUAL _sgl_prelude_cc)
+    file(WRITE "${_sgl_prelude_generated}" "${_sgl_prelude_cc}")
+endif()
+target_sources(shaped-graphics-language PRIVATE "${_sgl_prelude_generated}")
 
 # Public headers live co-located in src/ for better editor experience.
 # FILE_SET models the public API explicitly (install/export, IDEs, etc.).
@@ -58,6 +117,7 @@ target_sources(shaped-graphics-language
     src/shaped-graphics-language/fwd.hh
 
     src/shaped-graphics-language/source/diagnostic.hh
+    src/shaped-graphics-language/source/format_diagnostic.hh
     src/shaped-graphics-language/source/source_span.hh
 
     src/shaped-graphics-language/lines/line.hh
@@ -100,6 +160,9 @@ target_sources(shaped-graphics-language
     src/shaped-graphics-language/emit/reserved_words.hh
     src/shaped-graphics-language/emit/impl/dialect.hh
     src/shaped-graphics-language/emit/impl/plan.hh
+
+    src/shaped-graphics-language/driver/compile_to_text.hh
+    src/shaped-graphics-language/driver/prelude.hh
 )
 
 # Require at least C++23 for this target; the final -std is chosen by the top-level project.
@@ -140,6 +203,8 @@ if(SC_BUILD_TESTS)
         tests/emit/emit-test-support.hh
         tests/emit/cube-emit-test.cc
         tests/emit/emit-test.cc
+
+        tests/driver/compile-to-text-test.cc
 
         tests/spec/spec-examples-test.cc
 

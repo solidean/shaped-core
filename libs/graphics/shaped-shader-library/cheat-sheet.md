@@ -1,7 +1,7 @@
 # shaped-shader-library cheat sheet
 
 Shader packages + hot reload.
-Namespace `slib`, depending on shaped-graphics.
+Namespace `slib`, depending on shaped-graphics, plus shaped-graphics-language privately for the SGL compiler edge.
 Headers are included by full path from `src/`: `#include <shaped-shader-library/<topic>/<name>.hh>`.
 
 > **Start at [shaders.md](../shaped-graphics/docs/shaders.md)** for how the whole shader system fits together.
@@ -22,7 +22,7 @@ sc_add_shader_package(
     NAME       my_shaders       # package id -> header name <my_shaders.hh>, and the mount point
     NAMESPACE  my::shaders      # where the generated symbols live
     SOURCE_DIR shaders          # relative to the calling CMakeLists (must define TARGET)
-    LANGUAGE   hlsl             # optional; hlsl is the default and the only one today
+    LANGUAGE   hlsl             # optional, hlsl by default; also wgsl and sgl
     SHADERS
         vignette.hlsl:compute:main          # path:stage:entry_point
         blit.hlsl:vertex:main_vs            # same file, two entry points -> two assets
@@ -33,6 +33,10 @@ sc_add_shader_package(
         shade.hlsl:constants:gConstants)    # path:constants:name -> a C++ mirror with HLSL's padding
 # stages are spelled as sg::shader_stage: compute vertex fragment tessellation_control
 #   tessellation_evaluation geometry raygen closest_hit any_hit miss intersection callable
+# an SGL package spells its stages as SGL does: `cube.sgl:vertex:main_vs`, `cube.sgl:pixel:main_ps`.
+#   `pixel` is the symbol too (cube.pixel.main_ps) and reaches sg as shader_stage::fragment.
+#   ONE file holds both stages, and ONE package serves dx12, vulkan and webgpu.
+#   binding / vertex_input / payload / constants entries are HLSL's alone: an SGL or WGSL package naming one is an error.
 # generated at BUILD time into the binary dir; PRIVATE to TARGET. Editing a shader (or an .hlsli it
 #   includes) regenerates; a reconfigure that changes nothing rebuilds nothing.
 # a binding entry generates from the NAMED FILE and never from its includes, so an .hlsli that declares a
@@ -110,9 +114,10 @@ asset->dependencies()               // -> vector<string>; source + resolved incl
 
 ```cpp
 #include <shaped-shader-library/compiler/shader_compiler.hh>
-slib::shader_language              // hlsl | wgsl   (slang/glsl planned)
+slib::shader_language              // hlsl | wgsl | sgl   (slang/glsl planned)
 slib::include_resolver             // cc::function_ref<cc::optional<cc::string>(cc::string_view path)>
-slib::shader_source_description    // { cc::string source; cc::string entry_point; sg::shader_stage stage; }
+slib::shader_source_description    // { cc::string source; cc::string entry_point; sg::shader_stage stage; cc::string label; }
+                                   //   label = what a diagnostic calls the source; never opened, may be empty
 slib::shader_compiler              // ONE edge: source_language() -> target_format()
                                    //   preprocess(desc, resolve) -> cc::result<cc::string>  (flattens #includes)
                                    //   compile(desc) -> sg::async_compiled_shader  (errors on the node, no throw)
@@ -128,6 +133,16 @@ slib::create_dxc_spirv_compiler()  // the same, hlsl -> spirv; works everywhere 
 #include <shaped-shader-library/compiler/wgsl_compiler.hh>  // every platform, WebAssembly included
 slib::create_wgsl_compiler()       // -> std::unique_ptr<shader_compiler>; wgsl -> wgsl, the source IS the bytecode
                                    //   reflection only: a stage or entry point other than the package's is an async error
+
+#include <shaped-shader-library/compiler/sgl_compiler.hh>   // wherever the inner compiler exists
+slib::create_sgl_compiler(std::unique_ptr<shader_compiler> inner)
+                                   // -> std::unique_ptr<shader_compiler>; sgl -> inner->target_format()
+                                   //   dxil -> HLSL for dx12, spirv -> HLSL for vulkan, wgsl -> WGSL
+                                   //   preprocess IS SGL's pipeline, so the flattened source is the EMITTED TEXT;
+                                   //   compile and reflection are the inner compiler's
+                                   //   an SGL error is a preprocess error: `pkg/cube.sgl:12:5: error: unknown-name: foo`
+                                   //   the binding pass is skipped: emitted HLSL carries its final addresses
+lib.add_compiler(slib::create_sgl_compiler(slib::create_wgsl_compiler()));   // one edge per format you can build
 
 #include <shaped-shader-library/binding/wgsl_declarations.hh>
 slib::parse_wgsl_declarations(src) // -> cc::result<wgsl_declarations>; { stage; entry_point; workgroup_size; bindings }

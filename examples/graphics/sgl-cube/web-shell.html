@@ -1,0 +1,53 @@
+<!doctype html>
+<!--
+  The page the standalone web build is wrapped in: one canvas, one status line, and nothing else.
+  emcc substitutes the module's script at {{{ SCRIPT }}}; the canvas id is what the example's swapchain selector names.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>sg — SGL cube (WebGPU)</title>
+<style>
+    :root { color-scheme: dark; }
+    body {
+        margin: 0;
+        background: #14151c;
+        color: #c9ccd6;
+        font: 14px/1.5 ui-sans-serif, system-ui, sans-serif;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        min-height: 100vh;
+        gap: 12px;
+    }
+    canvas { width: min(100vw - 32px, 100vh * 16 / 9 - 32px, 1280px); height: auto; aspect-ratio: 16 / 9; display: block; }
+    #status { min-height: 1.5em; font-variant-numeric: tabular-nums; }
+    #status.error { color: #e2705f; }
+    a { color: #7fb3e8; }
+</style>
+</head>
+<body>
+<canvas id="canvas" width="1280" height="720" tabindex="-1"></canvas>
+<div id="status">starting …</div>
+
+<script>
+    var statusElement = document.getElementById('status');
+    var Module = {
+        canvas: document.getElementById('canvas'),
+        setStatus: function (text) { if (text) statusElement.textContent = text; },
+        print: function (text) { statusElement.textContent = text; },
+        printErr: function (text) { console.error(text); },
+    };
+    if (!navigator.gpu)
+    {
+        statusElement.className = 'error';
+        statusElement.textContent = 'this browser has no WebGPU — try Chrome or Edge 113+, or Safari 26+';
+    }
+    else
+        statusElement.textContent = 'an SGL shader on WebGPU — the cube spins on its own';
+</script>
+{{{ SCRIPT }}}
+</body>
+</html>

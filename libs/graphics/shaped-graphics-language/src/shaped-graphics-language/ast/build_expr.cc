@@ -171,7 +171,7 @@ expr_id builder::call_expression(form_id form)
     case form_kind::square_list:
     {
         auto const arguments = list_elements(list);
-        return make_expr(form, index{.object = target, .arguments = arguments});
+        return make_expr(form, ast::index{.object = target, .arguments = arguments});
     }
     case form_kind::curly_list:
     {

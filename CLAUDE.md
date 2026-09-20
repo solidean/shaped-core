@@ -96,7 +96,9 @@ One-liner per library:
   Windows-only, and built only once `extern/dxc` has fetched DXC.
 * **`libs/graphics/shaped-shader-library`** — shader packages + hot reloading:
   any target declares its shaders via `sc_add_shader_package` and gets typed C++ symbols; `acquire(ctx)` returns bytecode in a format that context accepts.
-  Namespace `slib`. Depends on shaped-graphics, plus shaped-shader-compiler-dxc where DXC exists — **sg does not depend on it**.
+  A package is written in HLSL, WGSL or **SGL**, and an SGL package is one source for dx12, vulkan and webgpu.
+  `slib::create_sgl_compiler(inner)` is that edge: sgl's pipeline as `preprocess`, then the DXC or WGSL compiler that was there already.
+  Namespace `slib`. Depends on shaped-graphics, plus shaped-graphics-language privately and shaped-shader-compiler-dxc where DXC exists — **sg does not depend on it**.
 * **`libs/graphics/shaped-rendering`** — concrete render routines on top of sg's routine framework (mipmap gen, tonemapping, texture compression, …).
   Namespace `sr`. Depends on shaped-graphics + shaped-shader-library (routines acquire their shaders through it), plus the vendored `imgui` bundle (Dear ImGui + ImPlot + ImGuizmo).
   Hosts the **Dear ImGui renderer** (`sr::imgui_context` + `sr::imgui_routine`), drawn entirely through sg — see [docs/imgui.md](libs/graphics/shaped-rendering/docs/imgui.md).
@@ -112,9 +114,12 @@ One-liner per library:
   Behind it, `sgl::emit::emit` writes ONE entry point as readable text for `hlsl_dx12`, `hlsl_vulkan` or `wgsl`, with exactly the types and the binding it needs.
   The text carries its **final addresses** — member order is the location, an `@inline binding` sits where sg expects inline constants — so slib's binding pass is not needed behind it.
   A name that is reserved in one target gets a trailing underscore there; an entry point never changes, so one that collides anywhere is an error everywhere.
-  The inliner, MSL and GLSL, and every binding that is not `@inline` do not exist yet.
+  `sgl::compile_to_text` is the whole pipeline in one call, against the prelude the library embeds (`sgl::prelude_source`), so compiling needs no file.
+  slib's SGL compiler edge is its caller, and [examples/graphics/sgl-cube](examples/graphics/sgl-cube/shaders/cube.sgl) draws that text on dx12, vulkan and webgpu.
+  The inliner, MSL and GLSL, the generated host mirror, and every binding that is not `@inline` do not exist yet.
   **Total and local by construction**: any bytes parse to a tree plus diagnostics, and no syntax error escapes its indentation.
   Namespace `sgl`. Depends on clean-core alone, the emitters included, and the syntactic half must stay that way — an editor links it to parse.
+  slib links sgl, never the reverse.
   [docs/spec/](libs/graphics/shaped-graphics-language/docs/spec/_index.md) is the language: normative rules with stable ids under `syntax/`, every "why" mirrored under `syntax/why/`,
   `semantics/` is what the check pass and the emitters do, marked as deliberately thin, and ideas that are not spec yet are under `incubator/`.
   **Every `sgl` fence in the spec is a test**, so the spec and the parser cannot drift apart silently.
@@ -228,8 +233,9 @@ The loop is **run `dev.py`, then diagnose with `repo_tools`** — `build_diag` a
   A bigger tier is not automatically better — pick one with `uv run dev.py compile-time pch`, never by eye.
   [docs/guides/precompiled-headers.md](docs/guides/precompiled-headers.md) is what to read before changing one.
   The `nopch-*` / `debug-nopch-*` presets set `CMAKE_DISABLE_PRECOMPILE_HEADERS=ON`; `check`'s debug leg and CI both run one, because a PCH's `/FI` otherwise hides a missing include.
-* `SC_EXAMPLE_BACKEND` (default `auto`) picks the graphics backend the `*-example` binaries build against: `auto`, `dx12` or `vulkan`.
+* `SC_EXAMPLE_BACKEND` (default `auto`) picks the graphics backend the `*-example` binaries build against: `auto`, `dx12`, `vulkan` or `webgpu`.
   `auto` takes dx12 wherever there is one, so the setting exists to reach the vulkan arm — building `rotating-cube` both ways is how one HLSL source is shown to serve both.
+  `sgl-cube` is the same cube from one SGL source, on every backend.
   **Every graphical example reads it**: a backend that was not built is a configure error, and one an example does not support gives a stub target that says so and exits non-zero.
   See [docs/platforms.md](docs/platforms.md#example-backend-sc_example_backend).
 * `SC_BUILD_TESTS` / `SC_BUILD_TOOLS` / `SC_BUILD_EXAMPLES` gate the `*-test` binaries, `tools/` and the `*-example` binaries.

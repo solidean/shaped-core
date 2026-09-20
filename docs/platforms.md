@@ -171,6 +171,17 @@ So `try_resize_bytes_in_place` returning -1 is a normal outcome rather than a pl
 
 `auto` takes the first backend an example lists that this build has, which on Windows means dx12 and on a wasm build means webgpu.
 So the setting exists to reach the others: building `rotating-cube` every way is how one example is shown to really serve all three, HLSL through DXC for the first two and WGSL for the last.
+`sgl-cube` supports all three as well, from one SGL source.
+
+No preset and no `dev.py` flag sets it, so reaching another backend is a build directory of its own, configured once by hand:
+
+```bash
+cmake --preset x64-windows-clang-ninja-relwithdebinfo -B build/x64-windows-clang-ninja-relwithdebinfo-vulkan -DSC_EXAMPLE_BACKEND=vulkan
+uv run dev.py example sgl-cube --capture --build-suffix vulkan --target graphics-sgl-cube-example
+```
+
+The cache keeps the setting, so every later `dev.py` run with that `--build-suffix` stays on it, and the default build directory is never touched.
+`--target` keeps the run from building every other example into the new directory just to resolve a name.
 
 **Every graphical example reads it**, not only the one that supports every backend — a setting the rest ignore is a setting that lies.
 Three outcomes, and which one an example gets depends on what it supports:

@@ -6,7 +6,8 @@ The design for a blessed way to write one `.hlsl` that compiles correctly for ev
 Its targets are dx12 (DXIL) and vulkan (SPIR-V), both through DXC, and there it is enough.
 Reaching Metal and WebGPU through it would mean DXC plus metal-shaderconverter or Tint / naga at runtime, large dependencies that cannot be shipped to wasm.
 It would also mean non-trivial HLSL rewrites to emulate what those targets lack.
-Those backends are served by sgl instead, the shading language of our own that slib's [structure](structure.md) roadmap carries; until it lands, WebGPU shaders are WGSL written by hand.
+Those backends are served by sgl instead, the shading language of our own that slib's [structure](structure.md) roadmap carries.
+A tracer of it has landed and draws one cube on all three backends; until it carries more than that cube, WebGPU shaders are WGSL written by hand.
 
 Three things diverge between the targets, and each has an answer of its own:
 

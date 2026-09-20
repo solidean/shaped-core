@@ -45,6 +45,11 @@
 #
 # Stages are spelled exactly as sg::shader_stage (compute / vertex / fragment / raygen / ...), so the
 # generator emits the enumerator instead of a string for C++ to parse back.
+#
+# LANGUAGE is hlsl (the default), wgsl or sgl.
+# An SGL package spells its stages as SGL does -- `cube.sgl:vertex:main_vs`, `cube.sgl:pixel:main_ps` -- and
+# `pixel` is sg's fragment stage.
+# The four generating kinds above read HLSL, so a WGSL or an SGL package that names one is a generator error.
 
 set(SC_SHADER_PACKAGE_SCRIPT "${CMAKE_CURRENT_LIST_DIR}/generate_shader_package.py"
     CACHE INTERNAL "Generator script backing sc_add_shader_package")
@@ -146,10 +151,14 @@ function(sc_add_shader_package)
     # without it beside the exe the process does not start at all.
     # dxil.dll is not the imported target, so $<TARGET_RUNTIME_DLLS> alone would miss it
     # (same reasoning as shaped-shader-compiler-dxc/CMakeLists.txt).
+    #
+    # Once per target, not once per package: the staging step is named after the target, and a second package would declare it again.
     if(SC_HAS_DXC_COMPILER AND DXC_RUNTIME_DLLS)
         get_target_property(_type ${PKG_TARGET} TYPE)
-        if(_type STREQUAL "EXECUTABLE")
+        get_target_property(_staged ${PKG_TARGET} SC_SHADER_PACKAGE_DXC_STAGED)
+        if(_type STREQUAL "EXECUTABLE" AND NOT _staged)
             sc_stage_runtime_dlls(${PKG_TARGET} TAG ${PKG_TARGET}-dxc DLLS ${DXC_RUNTIME_DLLS})
+            set_target_properties(${PKG_TARGET} PROPERTIES SC_SHADER_PACKAGE_DXC_STAGED ON)
         endif()
     endif()
 

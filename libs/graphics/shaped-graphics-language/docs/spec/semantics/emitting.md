@@ -4,6 +4,8 @@
 
 An emitter writes the text a graphics API compiles, from one flat tree of a [checked module](checking.md#the-flat-tree).
 It carries exactly what [cube.sgl](../../../tests/samples/cube.sgl) needs, like the pass in front of it.
+The cube's text has met its readers: DXC compiles both HLSL targets, and WebGPU compiles the WGSL.
+[sgl-cube](../../../../../../examples/graphics/sgl-cube/sgl_cube.cc) draws the same picture on all three, and no rule below had to change for it.
 Back to the [semantics](_index.md); the reasons are in [why/emitting.md](why/emitting.md).
 
 ## Targets

@@ -223,7 +223,7 @@ struct dumper
                 out += file.text_of(n.name);
                 out += ")";
             },
-            [&](index const& n)
+            [&](ast::index const& n) // qualified: POSIX declares a global `index`
             {
                 out += "(index ";
                 dump_expr(n.object, depth);

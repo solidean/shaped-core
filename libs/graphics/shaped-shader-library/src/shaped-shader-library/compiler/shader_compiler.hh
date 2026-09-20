@@ -15,6 +15,7 @@ enum class slib::shader_language
 {
     hlsl,
     wgsl, ///< WebGPU's own language: handed on as source, reflected by slib (see compiler/wgsl_compiler.hh)
+    sgl, ///< our own: written as the text of the target's language, then compiled as that (see compiler/sgl_compiler.hh)
 };
 
 namespace slib
@@ -33,6 +34,9 @@ struct slib::shader_source_description
     cc::string source;
     cc::string entry_point;
     sg::shader_stage stage = sg::shader_stage::compute;
+    /// What a diagnostic calls the source: a virtual path, or the label of an ad-hoc compile; may be empty.
+    /// Never opened, and no part of what a compile depends on.
+    cc::string label;
 };
 
 /// One compilation edge: `source_language` -> `target_format`.

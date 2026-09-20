@@ -1,6 +1,7 @@
 # shaped-graphics-language cheat sheet
 
 SGL's toolchain as a library: the syntactic half, from bytes to the form tree, the AST pass on top of it, and a tracer of the check pass and the emitters.
+One call runs all of it, from a source to the text a graphics API compiles.
 Namespace `sgl`.
 Depends on clean-core.
 
@@ -11,6 +12,29 @@ Format conventions live in [docs/guides/cheat-sheets.md](../../../docs/guides/ch
 
 **Recording domain:** `sgl`, for what the *library* has to say about itself.
 What the *user's source* did wrong is `sgl::diagnostic`, which is data a caller receives and never a log line.
+
+## Source in, text out
+
+```cpp
+#include <shaped-graphics-language/driver/compile_to_text.hh>
+auto const r = sgl::compile_to_text({.source = text, .source_name = "cube.sgl", .entry_point = "main_ps",
+                                     .stage = sgl::check::stage::pixel, .target = sgl::emit::target::wgsl});
+                                           // -> cc::result<cc::string, cc::string>: the text, or what a reader is told
+                                           // parse + ast::build + check against the EMBEDDED prelude + emit, in one call
+r.value()                                  // the emitter's text, unchanged
+r.error()                                  // one line per diagnostic: `cube.sgl:12:5: error: unknown-name: foo`
+                                           // a missing entry point names the ones the source holds; a wrong stage says both
+sgl::text_request                          // source, source_name ("<sgl>"), entry_point, stage (none = any), target
+                                           // the entry point is found by NAME; source_name is never opened
+
+#include <shaped-graphics-language/driver/prelude.hh>
+sgl::prelude_source()                      // -> cc::string_view: prelude/prelude.sgl as it was when the library was built
+sgl::prelude_name()                        // "prelude.sgl", what a diagnostic in file 0 is called
+
+#include <shaped-graphics-language/source/format_diagnostic.hh>
+sgl::line_column_of(source, offset)        // -> sgl::line_column { line, column }, both 1-based, columns in bytes
+sgl::format_diagnostic(name, source, d, detail = {})   // `a.sgl:2:2: error: unknown-name: foo`; warning / error from d.level
+```
 
 ## Parsing a file
 
@@ -248,5 +272,7 @@ sgl::print_source(file)      // == file.source for EVERY input: the lossless inv
 - **A name is renamed per target, an entry point never.** `target` is `target_` in WGSL only; an entry point named `filter` is an error in EVERY target.
 - **Only an `@inline binding` is emitted**: `register(b0, space9)`, `[[vk::push_constant]]`, `@group(3) @binding(0)`.
   Its members must land on the same offsets in HLSL and in WGSL, so `{float; float3}` is `layout-mismatch` and `{float3; float}` is fine.
+- **`compile_to_text` drops warnings.** It gives the text or the errors; a caller that wants warnings runs the phases itself.
+- **The prelude is embedded at CONFIGURE time.** Editing `prelude/prelude.sgl` re-runs CMake, and a test pins the embedded text to the file.
 - **A new target is a `dialect`**: one file under `emit/impl/` and one case in `dialect_of`; the walk over the flat tree is shared (`impl/text_writer.cc`).
 - **Every `sgl` fence under `docs/spec/` is a test** (`tests/spec/spec-examples-test.cc`): `sgl` must parse cleanly, `sgl error` must report the kind its lead names, `sgl sketch` is unchecked.

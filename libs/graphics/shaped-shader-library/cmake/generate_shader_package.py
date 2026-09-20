@@ -69,7 +69,11 @@ VALID_STAGES = (
     "raygen", "closest_hit", "any_hit", "miss", "intersection", "callable",
 )
 
-VALID_LANGUAGES = ("hlsl", "wgsl")
+VALID_LANGUAGES = ("hlsl", "wgsl", "sgl")
+
+# SGL calls the fragment stage `pixel`, and an SGL package spells it as its source does.
+# The word is the package's and the generated symbol's; sg has one stage, so the enumerator stays `fragment`.
+SGL_STAGES = {"vertex": "vertex", "pixel": "fragment"}
 
 # The stage words that declare something other than an entry point.
 BINDING_STAGE = "binding"
@@ -222,8 +226,26 @@ def parse_entries(manifest: Manifest) -> Entries:
                 f"path:{PAYLOAD_STAGE}:struct or path:{CONSTANTS_STAGE}:name")
 
         path, stage, tail = parts
+
+        # Before the stage check, so an SGL package that names a mirror is told that, not that its stage is unknown.
+        # SGL's host mirror is not generated yet: the vertex layout and the constants are written by hand.
+        if manifest.language == "sgl" and stage in (BINDING_STAGE, VERTEX_INPUT_STAGE, PAYLOAD_STAGE, CONSTANTS_STAGE):
+            raise GeneratorError(
+                f"shader package '{name}': entry '{entry}' is a '{stage}' entry, which an SGL package does not "
+                f"have yet: write the vertex layout and the constants struct by hand")
+
+        if manifest.language == "sgl" and stage not in SGL_STAGES:
+            raise GeneratorError(
+                f"shader package '{name}': entry '{entry}' has stage '{stage}'. "
+                f"An SGL package spells its stages as SGL does: {' '.join(SGL_STAGES)}")
+
+        if manifest.language != "sgl" and stage == "pixel":
+            raise GeneratorError(
+                f"shader package '{name}': entry '{entry}' has stage 'pixel', which only an SGL package spells "
+                f"that way; here it is 'fragment'")
+
         if (stage not in (BINDING_STAGE, VERTEX_INPUT_STAGE, PAYLOAD_STAGE, CONSTANTS_STAGE)
-                and stage not in VALID_STAGES):
+                and stage not in VALID_STAGES and manifest.language != "sgl"):
             raise GeneratorError(
                 f"shader package '{name}': entry '{entry}' has unknown stage '{stage}'. "
                 f"Stages are spelled as sg::shader_stage: {' '.join(VALID_STAGES)}")
@@ -750,7 +772,8 @@ def emit_source(manifest: Manifest, files: list[ShaderFile], bindings: list[Bind
         for stage, points in file.stages.items():
             for point in points:
                 out.append(f'    {{.path = "{file.path}",\n')
-                out.append(f"     .stage = sg::shader_stage::{stage},\n")
+                enumerator = SGL_STAGES[stage] if manifest.language == "sgl" else stage
+                out.append(f"     .stage = sg::shader_stage::{enumerator},\n")
                 out.append(f'     .entry_point = "{point}",\n')
                 out.append(f"     .asset = &{manifest.namespace}::{file.stem}.{stage}.{point}}},\n")
     out.append("};\n")
