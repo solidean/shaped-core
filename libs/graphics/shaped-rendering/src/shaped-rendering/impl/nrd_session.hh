@@ -20,6 +20,17 @@
 /// what owns one.
 namespace sr::impl
 {
+/// REBLUR's hit-distance normalization curve, as `(A, B, C)`.
+///
+/// The repack pass and the denoiser must use the SAME three numbers: the shader divides a hit distance by this curve
+/// and REBLUR multiplies it back out, so a mismatch is a wrong reprojection radius rather than an error.
+/// These are NRD's own defaults, which is what a session that sets no REBLUR settings gets.
+[[nodiscard]] tg::vec3f nrd_hit_distance_parameters();
+
+/// The view depth a primary ray that hit nothing writes.
+/// Sky is not a surface NRD can reproject, and it recognizes one by an out-of-range depth rather than by a flag.
+[[nodiscard]] f32 nrd_sky_view_z();
+
 /// Which NRD denoiser a session runs.
 ///
 /// One member rather than the whole catalogue: REBLUR is the recurrent-blur denoiser for diffuse and specular
@@ -33,8 +44,8 @@ enum class nrd_denoiser
 
 /// What one frame hands NRD, beside the resources.
 ///
-/// Every matrix is row-major with row vectors, which is what NRD documents and what `tg` produces transposed —
-/// `nrd_session` does that transpose, so a caller passes its own convention unchanged.
+/// Every matrix is `tg`'s own convention, which is also NRD's: column-major, vectors are columns.
+/// They are non-jittered, which is what NRD's settings require — the jitter rides beside them.
 struct nrd_frame
 {
     tg::mat4f world_to_view = tg::mat4f::identity;
@@ -60,7 +71,9 @@ struct nrd_frame
 /// `sr::nrd_denoise_routine` is what packs them; this only binds what it is given.
 struct nrd_resources
 {
-    sg::texture_2d motion;           ///< IN_MV, non-jittered, previous minus current
+    /// IN_MV, in OUR convention — screen-space pixels, current minus previous.
+    /// `nrd_session` carries the sign and the pixels-to-UV scale on NRD's settings rather than making a caller repack.
+    sg::texture_2d motion;
     sg::texture_2d normal_roughness; ///< IN_NORMAL_ROUGHNESS, in NRD's own encoding
     sg::texture_2d view_z;           ///< IN_VIEWZ, linear view depth
 

@@ -29,6 +29,7 @@ enum class sr::denoise_method : sg::u8
     oidn,    ///< Intel Open Image Denoise; spatial
     dlss_rr, ///< NVIDIA DLSS Ray Reconstruction; temporal
     fsr_rr,  ///< AMD FSR Ray Regeneration; temporal
+    nrd,     ///< NVIDIA Real-Time Denoisers (REBLUR); temporal, and runs on any adapter
 
     count_
 };
@@ -124,9 +125,15 @@ struct sr::denoise_guides
 
     /// This frame's sub-pixel offset of the primary rays, in input pixels, in [-0.5, 0.5].
     tg::vec2f jitter = tg::vec2f(0, 0);
+    tg::vec2f previous_jitter = tg::vec2f(0, 0);
 
     tg::mat4f view_to_clip = tg::mat4f::identity;
     tg::mat4f previous_view_to_clip = tg::mat4f::identity;
+
+    /// The camera itself, which a member reprojecting in world space needs beside the projection.
+    /// nrd only; the other members work from the motion guide alone.
+    tg::mat4f world_to_view = tg::mat4f::identity;
+    tg::mat4f previous_world_to_view = tg::mat4f::identity;
 };
 
 /// One denoise call's images.
@@ -206,6 +213,7 @@ public:
 private:
     friend class atrous_denoise_routine;
     friend class svgf_denoise_routine;
+    friend class nrd_denoise_routine;
 
     /// Brings this to `method` at `extent`, dropping everything if either changed.
     /// Returns whether the call starts from no history.
@@ -231,6 +239,7 @@ struct sr::denoise_support
     bool oidn = false;
     bool dlss_rr = false;
     bool fsr_rr = false;
+    bool nrd = false;
 
     [[nodiscard]] bool supports(denoise_method m) const;
 };

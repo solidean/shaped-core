@@ -15,6 +15,7 @@ add_library(shaped-rendering
     src/shaped-rendering/atrous_denoise_routine.cc
     src/shaped-rendering/svgf_denoise_routine.cc
     src/shaped-rendering/mix_routine.cc
+    src/shaped-rendering/nrd_denoise_routine.cc
     src/shaped-rendering/raster_box_filter_mipmap_routine.cc
     src/shaped-rendering/imgui_context.cc
     src/shaped-rendering/imgui_routine.cc
@@ -41,6 +42,7 @@ target_sources(shaped-rendering
     src/shaped-rendering/atrous_denoise_routine.hh
     src/shaped-rendering/svgf_denoise_routine.hh
     src/shaped-rendering/mix_routine.hh
+    src/shaped-rendering/nrd_denoise_routine.hh
     src/shaped-rendering/impl/denoise_images.hh
     src/shaped-rendering/raster_box_filter_mipmap_routine.hh
     src/shaped-rendering/window.hh
@@ -120,6 +122,20 @@ endif()
 # Package generation needs none — it emits C++ descriptors and embeds the sources;
 # compilation happens at runtime through slib.
 # Without a compiler the routine simply acquires no shader and draws nothing, which is the same graceful path a broken shader edit takes.
+#
+# The NRD repack pass is the one conditional entry.
+# It includes NRD's own packing header, which only exists once somebody has fetched the SDK, so listing it
+# unconditionally would turn a missing optional dependency into a configure error.
+set(_sr_nrd_shaders)
+if(TARGET NRD)
+    set(_sr_nrd_shaders
+        nrd_repack.hlsl:compute:main_cs
+        nrd_repack.hlsl:binding:nrd_repack_bindings
+        nrd_repack.hlsl:constants:gConstants
+        nrd_resolve.hlsl:compute:main_cs
+        nrd_resolve.hlsl:binding:nrd_resolve_bindings)
+endif()
+
 sc_add_shader_package(
     TARGET     shaped-rendering
     NAME       sr_shaders
@@ -155,6 +171,7 @@ sc_add_shader_package(
         mix.hlsl:compute:main_cs
         mix.hlsl:binding:mix_bindings
         mix.hlsl:constants:gConstants
+        ${_sr_nrd_shaders}
 )
 
 # Test executable.

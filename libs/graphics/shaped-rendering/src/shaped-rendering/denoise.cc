@@ -8,6 +8,7 @@
 #include <shaped-graphics/context/context.hh>
 #include <shaped-rendering/atrous_denoise_routine.hh>
 #include <shaped-rendering/denoise.hh>
+#include <shaped-rendering/nrd_denoise_routine.hh>
 #include <shaped-rendering/svgf_denoise_routine.hh>
 
 namespace sr
@@ -39,7 +40,8 @@ namespace
 
 /// The members `automatic` walks, best first.
 constexpr denoise_method temporal_preference[] = {
-    denoise_method::dlss_rr, denoise_method::fsr_rr, denoise_method::svgf, denoise_method::oidn, denoise_method::atrous,
+    denoise_method::dlss_rr, denoise_method::fsr_rr, denoise_method::nrd,
+    denoise_method::svgf,    denoise_method::oidn,   denoise_method::atrous,
 };
 constexpr denoise_method spatial_preference[] = {denoise_method::oidn, denoise_method::atrous};
 
@@ -61,6 +63,8 @@ constexpr denoise_method spatial_preference[] = {denoise_method::oidn, denoise_m
         return "dlss_rr";
     case denoise_method::fsr_rr:
         return "fsr_rr";
+    case denoise_method::nrd:
+        return "nrd";
     case denoise_method::count_:
         break;
     }
@@ -127,6 +131,8 @@ bool denoise_support::supports(denoise_method m) const
         return dlss_rr;
     case denoise_method::fsr_rr:
         return fsr_rr;
+    case denoise_method::nrd:
+        return nrd;
     case denoise_method::none:
     case denoise_method::automatic:
     case denoise_method::count_:
@@ -140,14 +146,17 @@ denoise_support query_denoise_support(sg::context const& ctx)
     (void)ctx; // every member so far is native compute; the vendor members will read the adapter here
 
     // The native members are plain compute, which every backend has.
-    // The others are not implemented yet, and saying so here is what makes `automatic` skip them and a named request
-    // report `unsupported` rather than silently running something else.
-    return {.atrous = true, .svgf = true};
+    // A member answers for itself: whether its SDK was compiled in, whether this is a backend it can record on,
+    // and whether the adapter and driver carry the feature.
+    // The ones still unimplemented stay false, which is what makes `automatic` skip them and a named request report
+    // `unsupported` rather than silently running something else.
+    return {.atrous = true, .svgf = true, .nrd = nrd_denoise_routine::is_available(ctx)};
 }
 
 bool is_temporal(denoise_method m)
 {
-    return m == denoise_method::svgf || m == denoise_method::dlss_rr || m == denoise_method::fsr_rr;
+    return m == denoise_method::svgf || m == denoise_method::dlss_rr || m == denoise_method::fsr_rr
+        || m == denoise_method::nrd;
 }
 
 denoise_guide_set required_guides(denoise_method m)
@@ -161,6 +170,8 @@ denoise_guide_set required_guides(denoise_method m)
         return g::albedo | g::specular_albedo | g::normal | g::roughness | g::depth | g::motion;
     case denoise_method::fsr_rr:
         return g::albedo | g::normal | g::roughness | g::depth | g::motion;
+    case denoise_method::nrd:
+        return g::normal | g::roughness | g::depth | g::motion | g::hit_distance | g::split_diffuse_specular;
     case denoise_method::atrous:
     case denoise_method::oidn:
     case denoise_method::none:
@@ -186,6 +197,8 @@ denoise_guide_set optional_guides(denoise_method m)
         return g::hit_distance;
     case denoise_method::fsr_rr:
         return g::specular_albedo | g::hit_distance;
+    case denoise_method::nrd:
+        return {};
     case denoise_method::none:
     case denoise_method::automatic:
     case denoise_method::count_:
@@ -237,6 +250,8 @@ cc::shared_async<cc::unit> denoise_routine::init(sg::routine_init_scope scope)
         atrous_denoise_routine::prewarm(ctx);
     if (support.svgf)
         svgf_denoise_routine::prewarm(ctx);
+    if (support.nrd)
+        nrd_denoise_routine::prewarm(ctx);
     co_return;
 }
 
@@ -272,6 +287,8 @@ denoise_outcome denoise_routine::execute(sg::command_list& cmd,
         return atrous_denoise_routine::execute(cmd, in, history, atrous_denoise_routine::options_for(settings));
     case denoise_method::svgf:
         return svgf_denoise_routine::execute(cmd, in, history, svgf_denoise_routine::options_for(settings));
+    case denoise_method::nrd:
+        return nrd_denoise_routine::execute(cmd, in, history, nrd_denoise_routine::options_for(settings));
     case denoise_method::oidn:
     case denoise_method::dlss_rr:
     case denoise_method::fsr_rr:

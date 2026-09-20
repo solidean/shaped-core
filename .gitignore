@@ -84,3 +84,6 @@ imgui.ini
 
 # Worktrees Claude Code creates for isolated agents; never part of the tree, and a change scope must not see them.
 .claude/worktrees/
+
+# NRD's packing header, copied into sr's shader directory at configure time (extern/nrd/CMakeLists.txt).
+/libs/graphics/shaped-rendering/shaders/nrd/

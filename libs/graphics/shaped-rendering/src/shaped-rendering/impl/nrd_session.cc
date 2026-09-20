@@ -246,11 +246,36 @@ void nrd_session::_destroy()
     _transient.clear();
 }
 
+tg::vec3f nrd_hit_distance_parameters()
+{
+    auto const defaults = nrd::ReblurHitDistanceParameters{};
+    return tg::vec3f(defaults.A, defaults.B, defaults.C);
+}
+
+f32 nrd_sky_view_z()
+{
+    // NRD's own ceiling for a half-float payload, which is how far away "not a surface" has to be to stay one.
+    return 65504.0f;
+}
+
 bool nrd_session::create(sg::context& ctx, nrd_denoiser denoiser, tg::vec2i extent)
 {
     _destroy();
     _ctx = &ctx;
     _extent = extent;
+
+    // The encodings are a BUILD-time choice of NRD's, and the repack shader and the texture it writes both assume one.
+    // Nothing downstream would complain about the wrong one: the image would simply be denoised against normals that
+    // decode to something else, so a mismatched library is refused here instead.
+    auto const& library = *nrd::GetLibraryDesc();
+    if (library.normalEncoding != nrd::NormalEncoding::R10_G10_B10_A2_UNORM
+        || library.roughnessEncoding != nrd::RoughnessEncoding::LINEAR)
+    {
+        CC_LOG_WARNING("nrd: it was built with normal encoding {} and roughness encoding {}, which nrd_repack.hlsl and "
+                       "its rgb10a2_unorm target do not match",
+                       u32(library.normalEncoding), u32(library.roughnessEncoding));
+        return false;
+    }
 
     // One denoiser per session, under a fixed identifier: the identifier only has to be unique within an instance,
     // and an instance is one stream's history.
@@ -361,15 +386,16 @@ bool nrd_session::is_ready() const
 
 namespace
 {
-/// `tg`'s column-major matrix written into NRD's row-major-with-row-vectors layout.
+/// `tg`'s matrix written into NRD's `float[16]`, which is the same convention — column-major, vectors are columns.
 ///
-/// The two conventions are transposes of one another, and a matrix handed over untransposed denoises against a camera
-/// that never existed — which shows up as ghosting rather than as an error, so it is worth being explicit.
+/// Read `InstanceImpl.cpp` rather than the settings comment: it builds its `float4x4` from elements 0-3, 4-7, 8-11 and
+/// 12-15 as the four COLUMNS, so a straight copy is what NRD means.
+/// A transpose here denoises against a camera that never existed, and shows up as ghosting rather than as an error.
 void write_matrix(float (&out)[16], tg::mat4f const& m)
 {
-    for (auto r = 0; r < 4; ++r)
-        for (auto c = 0; c < 4; ++c)
-            out[r * 4 + c] = m[c, r];
+    for (auto c = 0; c < 4; ++c)
+        for (auto r = 0; r < 4; ++r)
+            out[c * 4 + r] = m[c, r];
 }
 
 /// The user resource one `ResourceDesc` names, or an empty texture for a pool entry.
@@ -431,9 +457,14 @@ bool nrd_session::execute(sg::command_list& cmd, nrd_frame const& frame, nrd_res
     // start over rather than to reproject into it.
     settings.accumulationMode = frame.reset ? nrd::AccumulationMode::CLEAR_AND_RESTART : nrd::AccumulationMode::CONTINUE;
 
-    // Our motion guide is screen-space pixels; NRD wants the scale that takes it to its own units, and a 2D motion
-    // vector in pixels is what `motionVectorScale` of 1 means once `isMotionVectorInWorldSpace` is false.
+    // NRD reads a 2D motion vector as `pixelUvPrev = pixelUv + IN_MV.xy * motionVectorScale.xy`, so its units are UV
+    // and its direction is previous minus current.
+    // Ours is the other way round in both respects — pixels, and current minus previous — so the scale carries the
+    // reciprocal extent AND the sign, and the guide itself is handed over untouched.
     settings.isMotionVectorInWorldSpace = false;
+    settings.motionVectorScale[0] = -1.0f / float(_extent[0]);
+    settings.motionVectorScale[1] = -1.0f / float(_extent[1]);
+    settings.motionVectorScale[2] = 0.0f;
 
     if (nrd::SetCommonSettings(instance, settings) != nrd::Result::SUCCESS)
     {

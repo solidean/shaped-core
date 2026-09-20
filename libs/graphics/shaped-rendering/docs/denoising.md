@@ -15,7 +15,8 @@ This is the design, including the parts not built yet.
 | `svgf` | temporal | every sg backend | done |
 | `oidn` | spatial | CPU; NVIDIA, AMD, Intel and Apple GPUs | planned |
 | `dlss_rr` | temporal, upscales | NVIDIA RTX; dx12, vulkan | planned |
-| `fsr_rr` | temporal, upscales | AMD RDNA 4; dx12 | planned |
+| `fsr_rr` | temporal, split-signal | dx12 | planned — see below |
+| `nrd` | temporal, split-signal | every sg backend, WARP included | done, sources fetched on request |
 
 **A spatial member reads one image; a temporal one also reads history reprojected by motion vectors.**
 The temporal ones work from about one sample per pixel, but only if every pixel's motion is known.
@@ -24,10 +25,27 @@ The temporal ones work from about one sample per pixel, but only if every pixel'
 DLSS Super Resolution, FSR 3.1 and FSR 4 are temporal upscalers, and on path-tracing noise they smear it rather than remove it.
 The vendor products that denoise are Ray Reconstruction and Ray Regeneration, and both upscale as part of it.
 
-**The native members are what CI tests.**
+**The native members are what CI tests, and `nrd` joins them.**
 à-trous and SVGF are our own HLSL, so they run on WARP, and the front's policy is tested through them.
-NRD — vendor-neutral, real-time, compute shaders — stays on the roadmap, and what it waits for is the tracer rather than the denoiser.
-It wants radiance split into diffuse and specular, with hit distances.
+
+**NRD is a planner rather than a renderer, which is why it runs everywhere.**
+It compiles nothing at run time, owns no device memory and records nothing.
+What it answers is "which compute dispatches would denoise this frame, against which resources, with which constants", and sr executes that answer through sg.
+So it needs no native scope and no vendor runtime, and it is the only split-signal member that can be tested without the hardware that shipped it.
+That makes it the reference the `fsr_rr` member will be judged against, since the two want the same guides.
+
+**Its encodings are exact formulas, not conventions, and we never reimplement them.**
+NRD does not take a normal, a roughness and a hit distance as such.
+It takes one normal-roughness texture in an encoding its own build chose, and radiance in YCoCg whose alpha carries a hit distance normalized against a curve of view depth and roughness.
+So `nrd_repack.hlsl` and `nrd_resolve.hlsl` include NRD's own `NRD.hlsli`.
+[extern/nrd/CMakeLists.txt](../../../../extern/nrd/CMakeLists.txt) copies it into sr's shader directory at configure time, because a shader package resolves every include under one source directory.
+A reimplementation that drifted would be a worse image rather than a build error.
+`nrd_session::create` refuses outright a library whose reported encodings are not the ones the repack target's format assumes.
+
+**Two conventions run the other way round from ours, and both are carried in settings rather than in a repack.**
+NRD reads a motion vector as `pixelUvPrev = pixelUv + mv`, so its units are UV and its direction is previous minus current, where ours is pixels and current minus previous.
+`motionVectorScale` carries the reciprocal extent and the sign, so the guide itself is handed over untouched.
+Its matrices, despite what `NRDSettings.h` says in prose, are built column by column from the `float[16]`, which is `tg`'s own convention, so they are copied rather than transposed.
 
 ## The contract
 
@@ -56,7 +74,7 @@ A member's own options — the full vendor surface — live on the member, never
 **Explicit means explicit.**
 Naming a member this build or device cannot run reports `unsupported`, logs once per process on sr's domain, and writes nothing.
 Only `automatic` chooses, walking the members best first:
-`dlss_rr`, `fsr_rr`, `svgf`, then the spatial ones for a caller feeding fresh frames; `oidn`, then `atrous` for a caller denoising a converging mean.
+`dlss_rr`, `fsr_rr`, `nrd`, `svgf`, then the spatial ones for a caller feeding fresh frames; `oidn`, then `atrous` for a caller denoising a converging mean.
 
 A silent fallback would make a comparison between two named members compare one with itself, which is the failure the framework's three-state readiness exists to prevent.
 

@@ -349,13 +349,15 @@ out.status                                             // denoised | pending | u
 out.method / out.restarted                             // the member that ran; whether it started from no history
 history.reset()                                        // a camera cut: the next call restarts
 
-sr::query_denoise_support(ctx)                         // -> sr::denoise_support {atrous, svgf, oidn, dlss_rr, fsr_rr}
+sr::query_denoise_support(ctx)                         // -> sr::denoise_support {atrous, svgf, oidn, dlss_rr, fsr_rr, nrd}
 sr::resolve_denoise_method(ctx, settings, temporal)    // -> the member `automatic` (or a named method) means here
 sr::denoise_input_extent(ctx, settings, out_extent, temporal)  // -> tg::vec2i to trace; ALWAYS ask, never scale by hand
 sr::required_guides(m) / sr::optional_guides(m)        // -> sr::denoise_guide_set (cc::flags<sr::denoise_guide>)
 
 sr::atrous_denoise_routine::execute(cmd, inputs, history, {.iterations = 5, .luminance_sigma = 2.0f})  // the member, directly
 sr::svgf_denoise_routine::execute(cmd, inputs, history, {.max_history = 32.0f})  // temporal: FRESH samples, normal+depth+motion REQUIRED
+sr::nrd_denoise_routine::execute(cmd, inputs, history)  // NRD/REBLUR; temporal, split-signal, NO upscaling; needs hit_distance + specular
+sr::nrd_denoise_routine::is_available(ctx)             // -> bool; sources fetched (extern/nrd/fetch-nrd.py). No device requirement at all. SR_HAS_NRD
 sr::mix_routine::execute(cmd, dst, src, w)             // -> bool; dst = lerp(dst, src, w) IN PLACE, w in [0,1]; false while compiling
 ```
 

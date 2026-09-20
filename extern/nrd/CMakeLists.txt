@@ -63,6 +63,20 @@ set(SHADERMAKE_TOOL ON CACHE BOOL "" FORCE)
 
 add_subdirectory("${NRD_INSTALL}/NRD" "${CMAKE_CURRENT_BINARY_DIR}/nrd" EXCLUDE_FROM_ALL)
 
+# NRD's packing header, copied where shaped-rendering's shader package can include it.
+#
+# The repack pass has to produce EXACTLY the encoding this build of NRD was compiled to read — the normal packing, the
+# YCoCg radiance transform and the hit-distance normalization curve — and a reimplementation that drifts is a worse
+# image rather than a build error.
+# So our shader includes NRD's own header instead, and NRDConfig.hlsli comes with it because that is where the two
+# encoding choices above land.
+#
+# It is copied rather than included in place because sc_add_shader_package resolves every #include under one
+# SOURCE_DIR: the package embeds its sources, so an include reaching outside that directory has nothing to embed.
+# The copy is gitignored, and configure refreshes it, so the header can never be staler than the library it describes.
+file(COPY "${NRD_INSTALL}/NRD/Shaders/NRD.hlsli" "${NRD_INSTALL}/NRD/Shaders/NRDConfig.hlsli"
+     DESTINATION "${CMAKE_SOURCE_DIR}/libs/graphics/shaped-rendering/shaders/nrd")
+
 # NRD's warnings are NRD's business, and it builds with -Werror of its own.
 # A consumer's stricter settings must not turn an upstream's clean build into a broken one.
 if(TARGET NRD)
