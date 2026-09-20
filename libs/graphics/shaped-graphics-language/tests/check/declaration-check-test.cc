@@ -98,7 +98,6 @@ TEST("sgl check - a type is canonical: one id per struct, and the error type is 
 
 TEST("sgl check - what the tracer does not carry is unsupported-yet, and names the construct")
 {
-    CHECK(reports_for("enum mode:\n    a\n    b\n") == "unsupported-yet user:[enum mode:] enum\n");
     CHECK(reports_for("const k = 1.0\n") == "unsupported-yet user:[const k = 1.0] const\n");
     CHECK(reports_for("type color = float3\n") == "unsupported-yet user:[type color = float3] type alias\n");
     CHECK(reports_for("use brdf\n") == "unsupported-yet user:[use brdf] use\n");

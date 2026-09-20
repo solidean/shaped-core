@@ -310,7 +310,11 @@ void checker::declare(i32 file, ast::decl_id decl)
         // one unnamed module: the line is accepted and names nothing
         [&](ast::module_decl const&) {}, //
         [&](ast::use_decl const&) { unsupported(file, span_of(file, decl), "use"); },
-        [&](ast::enum_decl const& e) { unsupported_symbol(e.name, "enum"); },
+        [&](ast::enum_decl const& e)
+        {
+            if (!e.name.empty())
+                add_symbol(named(symbol_kind::enumeration, e.name), e.name);
+        },
         [&](ast::type_decl const& t) { unsupported_symbol(t.name, "type alias"); },
         [&](ast::const_decl const& c) { unsupported_symbol(c.name, "const"); },
         [&](ast::sampler_decl const& s) { unsupported_symbol(s.name, "sampler"); },
@@ -354,6 +358,9 @@ void checker::compile(symbol_id id)
     {
     case symbol_kind::structure:
         compile_struct(id);
+        break;
+    case symbol_kind::enumeration:
+        compile_enum(id);
         break;
     case symbol_kind::binding:
         compile_binding(id);

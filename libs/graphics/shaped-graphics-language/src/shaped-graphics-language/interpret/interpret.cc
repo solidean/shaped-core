@@ -32,6 +32,11 @@ void append_zero(checked_module const& m, type_id type, cc::vector<scalar>& leav
             leaves.push_back({.kind = record->leaf_kind, .bits = 0});
         return;
     }
+    if (is_valid(type) && m.at(type).kind == type_kind::enumeration)
+    {
+        leaves.push_back({.kind = value_kind::scalar_int, .bits = 0});
+        return;
+    }
     for (auto const& member : members_of(m, type))
         append_zero(m, member.type, leaves, depth + 1);
 }
@@ -206,6 +211,14 @@ struct machine
         if (auto const* const l = x.node.try_as<flat_bool_literal>())
         {
             result.leaves.push_back(scalar::of(l->value));
+            return {};
+        }
+        if (auto const* const v = x.node.try_as<flat_enum_value>())
+        {
+            auto const cases = m.at(m.at(x.type).cases);
+            if (v->case_index < 0 || v->case_index >= cases.size())
+                return type_error("an enum value whose case its type does not have");
+            result.leaves.push_back(scalar::of(cases[v->case_index].value));
             return {};
         }
         if (auto const* const ref = x.node.try_as<flat_local_ref>())

@@ -18,6 +18,8 @@ enum class sgl::check::type_kind : sgl::u8
     nothing,
     /// A declared `struct`, builtin or not; two declarations are two types, whatever their fields.
     structure,
+    /// A declared `enum`: a closed set of named `int` values that converts to nothing (CHK-142, CHK-150).
+    enumeration,
     // Tuples, function types and anonymous struct types come later, each as a kind that is deduplicated by structure.
 };
 
@@ -37,6 +39,8 @@ struct sgl::check::type_info
     symbol_id symbol = symbol_id::none;
     /// The fields in declaration order, which is the order of the synthesized constructor's parameters.
     ast::range_of<member_info> members;
+    /// The cases of an `enumeration`, in declaration order; empty for every other kind.
+    ast::range_of<enum_case_info> cases;
     /// Declared without a block: no member can be named and no constructor exists.
     bool is_opaque = false;
     /// `@vertex struct` is a vertex input and `@pixel struct` a set of render targets.
@@ -59,12 +63,25 @@ struct sgl::check::member_info
     bool operator==(member_info const&) const = default;
 };
 
+/// One case of an `enum`: a name and the `int` value a target compares.
+/// Two cases may hold one value, so a value does not name a case (CHK-145).
+struct sgl::check::enum_case_info
+{
+    cc::string name;
+    i32 value = 0;
+    /// In the file of the owning symbol.
+    ast::decl_id declaration = ast::decl_id::none;
+
+    bool operator==(enum_case_info const&) const = default;
+};
+
 enum class sgl::check::symbol_kind : sgl::u8
 {
     structure,
+    enumeration,
     function,
     binding,
-    /// A named declaration this phase has no meaning for yet: `enum`, `const`, `type`, `sampler`.
+    /// A named declaration this phase has no meaning for yet: `const`, `type`, `sampler`.
     /// It is always `failed`, and it exists so its name resolves to the error type and not to `unknown-name`.
     unsupported,
 };
@@ -156,6 +173,8 @@ enum class sgl::check::target_kind : sgl::u8
     field,
     /// On a `member`: member `index` of the binding `symbol`.
     binding_member,
+    /// On a `member` or a `leading_dot`: case `index` of the enum `symbol`.
+    enum_case,
 };
 
 /// What an expression refers to, for an editor: go to definition, hover, rename.

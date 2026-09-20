@@ -53,6 +53,9 @@ struct dumper
         case symbol_kind::structure:
             out += "(struct ";
             break;
+        case symbol_kind::enumeration:
+            out += "(enum ";
+            break;
         case symbol_kind::function:
             out += "(fun ";
             break;
@@ -85,6 +88,11 @@ struct dumper
             if (type.is_opaque)
                 out += " opaque";
             members(type.members);
+        }
+        else if (s.kind == symbol_kind::enumeration)
+        {
+            for (auto const& c : m.at(m.at(s.type).cases))
+                out.appendf(" ({} = {})", c.name, c.value);
         }
         else if (s.kind == symbol_kind::binding)
         {
@@ -159,6 +167,14 @@ struct dumper
                      },
                      [&](flat_int_literal const& l) { out.appendf("(lit {}", l.value); },
                      [&](flat_bool_literal const& l) { out.appendf("(lit {}", l.value ? "true" : "false"); },
+                     [&](flat_enum_value const& v)
+                     {
+                         auto const cases = m.at(m.at(x.type).cases);
+                         auto const name = v.case_index >= 0 && v.case_index < cases.size()
+                                             ? cc::string_view(cases[v.case_index].name)
+                                             : cc::string_view("?");
+                         out.appendf("(case .{}", name);
+                     },
                      [&](flat_local_ref const& l) { out.appendf("(local {}", local_name(e, l.local)); },
                      [&](flat_binding_member const& b)
                      {

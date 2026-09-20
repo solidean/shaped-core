@@ -53,6 +53,9 @@ public:
     virtual void write_for_head(cc::string& out, cc::string_view index, cc::string_view first, cc::string_view end) const
         = 0;
 
+    /// One constant of an enum, without indentation and with its line break: `static const int light_kind_point = 0;`.
+    virtual void write_enum_constant(cc::string& out, cc::string_view name, i32 value) const = 0;
+
     /// The structs of `p.structs` and the constant block, each followed by an empty line.
     virtual void write_declarations(cc::string& out, plan const& p) const = 0;
 
@@ -70,6 +73,9 @@ protected:
 
 /// "vertex" or "pixel", as SGL names the stage.
 [[nodiscard]] cc::string_view stage_name(check::stage s);
+
+/// The constants of every enum of `p`, each set followed by an empty line; a dialect calls it from its declarations.
+void write_enum_constants(cc::string& out, plan const& p, dialect const& d);
 
 /// The whole text of the planned entry point: a header comment, the declarations, and the function.
 /// Mints what the body still needs from `p.names`.

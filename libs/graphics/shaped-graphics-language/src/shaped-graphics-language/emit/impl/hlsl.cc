@@ -89,8 +89,15 @@ public:
         out += ";\n";
     }
 
+    void write_enum_constant(cc::string& out, cc::string_view name, i32 value) const override
+    {
+        out.appendf("static const int {} = {};\n", name, value);
+    }
+
     void write_declarations(cc::string& out, plan const& p) const override
     {
+        write_enum_constants(out, p, *this);
+
         for (auto const& s : p.structs)
         {
             out.appendf("struct {}\n{{\n", s.name);

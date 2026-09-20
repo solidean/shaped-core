@@ -71,9 +71,15 @@ public:
         out += ";\n";
     }
 
+    void write_enum_constant(cc::string& out, cc::string_view name, i32 value) const override
+    {
+        out.appendf("constant int {} = {};\n", name, value);
+    }
+
     void write_declarations(cc::string& out, plan const& p) const override
     {
         out += "#include <metal_stdlib>\nusing namespace metal;\n\n";
+        write_enum_constants(out, p, *this);
 
         for (auto const& s : p.structs)
         {

@@ -143,7 +143,8 @@ struct flattener
         if (!is_valid(id))
             return false;
         auto const& x = entry.at(id);
-        if (x.node.is<flat_literal>() || x.node.is<flat_int_literal>() || x.node.is<flat_bool_literal>())
+        if (x.node.is<flat_literal>() || x.node.is<flat_int_literal>() || x.node.is<flat_bool_literal>()
+            || x.node.is<flat_enum_value>())
             return true;
         auto const* const ref = x.node.try_as<flat_local_ref>();
         return ref != nullptr && !entry.at(ref->local).is_mut;
@@ -161,6 +162,8 @@ struct flattener
             return add_expr(x.type, from, *l);
         if (auto const* const l = x.node.try_as<flat_bool_literal>())
             return add_expr(x.type, from, *l);
+        if (auto const* const v = x.node.try_as<flat_enum_value>())
+            return add_expr(x.type, from, *v);
         return fail();
     }
 
@@ -215,6 +218,8 @@ struct flattener
         }
         if (auto const* const m = e.node.try_as<ast::member>())
         {
+            if (where.kind == target_kind::enum_case)
+                return add_expr(type, id, flat_enum_value{.case_index = where.index});
             if (where.kind == target_kind::binding_member)
                 return add_expr(type, id, flat_binding_member{.binding = where.symbol, .member = where.index});
             if (where.kind != target_kind::field)

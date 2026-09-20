@@ -157,6 +157,7 @@ enum class label_id : i32;
 enum class type_kind : u8;
 struct type_info;
 struct member_info;
+struct enum_case_info;
 
 enum class stage : u8;
 enum class symbol_kind : u8;
@@ -179,6 +180,7 @@ struct flat_invalid;
 struct flat_literal;
 struct flat_int_literal;
 struct flat_bool_literal;
+struct flat_enum_value;
 struct flat_local_ref;
 struct flat_binding_member;
 struct flat_member;

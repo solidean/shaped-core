@@ -167,6 +167,7 @@ struct checker
     symbol_state demand(symbol_id id, i32 file, source_span where);
     void compile(symbol_id id);
     void compile_struct(symbol_id id);
+    void compile_enum(symbol_id id);
     void compile_binding(symbol_id id);
     void compile_function(symbol_id id);
     void judge_entry_point(symbol_id id);

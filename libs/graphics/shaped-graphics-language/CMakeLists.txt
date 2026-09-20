@@ -249,6 +249,7 @@ if(SC_BUILD_TESTS)
         tests/check/control-flow-check-test.cc
         tests/check/cube-test.cc
         tests/check/declaration-check-test.cc
+        tests/check/enum-check-test.cc
         tests/check/expression-check-test.cc
         tests/check/source-flat-test-support.hh
 
@@ -264,6 +265,7 @@ if(SC_BUILD_TESTS)
         tests/emit/core-emit-test.cc
         tests/emit/cube-emit-test.cc
         tests/emit/emit-test.cc
+        tests/emit/enum-emit-test.cc
 
         tests/driver/compile-to-text-test.cc
         tests/driver/source-differential-test.cc

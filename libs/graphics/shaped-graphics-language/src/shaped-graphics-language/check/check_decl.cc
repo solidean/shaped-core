@@ -41,7 +41,7 @@ type_id checker::resolve_type(i32 file, ast::expr_id expr)
             auto const id = found->front();
             auto const kind = out.at(id).kind;
             set_target(file, expr, {.kind = target_kind::symbol, .symbol = id});
-            if (kind == symbol_kind::structure)
+            if (kind == symbol_kind::structure || kind == symbol_kind::enumeration)
             {
                 if (demand(id, file, where) == symbol_state::checked)
                     result = out.at(id).type;
@@ -188,6 +188,81 @@ void checker::compile_struct(symbol_id id)
         .is_opaque = s.is_opaque,
         .edge = stage_of(is_vertex, is_pixel),
     });
+    out.symbols[index_of(id)].type = type;
+}
+
+void checker::compile_enum(symbol_id id)
+{
+    auto const file = out.at(id).file;
+    auto const decl = out.at(id).declaration;
+    auto const& ast = ast_of(file);
+    auto const& e = ast.at(decl).node.as<ast::enum_decl>();
+
+    judge_attributes(file, ast.at(decl).attributes, {}, "an enum");
+
+    auto collected = cc::vector<enum_case_info>();
+    auto next_value = 0;
+
+    for (auto const member : ast.at(e.members))
+    {
+        auto const& d = ast.at(member);
+        auto const where = span_of(file, member);
+
+        auto const* const c = d.node.try_as<ast::enum_case_decl>();
+        if (c == nullptr)
+        {
+            // A field in an `enum` is a normal error the AST pass already reported (AST-86).
+            if (d.node.is<ast::property_decl>())
+                unsupported(file, where, "a property");
+            else if (d.node.is<ast::fun_decl>())
+                unsupported(file, where, "a method");
+            else if (!d.node.is<ast::field_decl>() && !d.node.is<ast::invalid_decl>())
+                unsupported(file, where, "a declaration in an enum");
+            continue;
+        }
+
+        judge_attributes(file, d.attributes, {}, "an enum case");
+        if (c->name.empty())
+            continue;
+        auto const name = text_of(file, c->name);
+
+        auto is_duplicate = false;
+        for (auto const& other : collected)
+            is_duplicate = is_duplicate || other.name == name;
+        if (is_duplicate)
+        {
+            report(diagnostic_kind::duplicate_declaration, file, c->name, name);
+            continue;
+        }
+
+        auto value = next_value;
+        if (ast::is_valid(c->value))
+        {
+            auto const where_value = span_of(file, c->value);
+            auto const text = text_of(file, where_value);
+            auto const written
+                = ast.at(c->value).node.is<ast::literal>() && classify_number(text) == number_class::plain_integer
+                    ? parse_plain_integer(text)
+                    : cc::optional<i32>();
+            if (written.has_value())
+                value = written.value();
+            else
+                unsupported(file, where_value, "a case value that is no int literal");
+        }
+        next_value = value + 1;
+
+        collected.push_back({.name = cc::string(name), .value = value, .declaration = member});
+    }
+
+    auto const cases = ast::range_of<enum_case_info>{
+        .first = u32(out.enum_cases.size()),
+        .count = u32(collected.size()),
+    };
+    for (auto& c : collected)
+        out.enum_cases.push_back(cc::move(c));
+
+    auto const type = type_id(out.types.size());
+    out.types.push_back({.kind = type_kind::enumeration, .symbol = id, .cases = cases});
     out.symbols[index_of(id)].type = type;
 }
 

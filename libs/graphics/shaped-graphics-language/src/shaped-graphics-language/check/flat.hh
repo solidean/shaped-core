@@ -126,6 +126,16 @@ struct sgl::check::flat_bool_literal
     constexpr bool operator==(flat_bool_literal const&) const = default;
 };
 
+/// One case of an enum, whose type is the enum: a value a target writes as the constant of EMIT-76.
+/// The case rather than the value, since two cases may hold one value and only the case names a constant.
+struct sgl::check::flat_enum_value
+{
+    /// A position in the `cases` of the node's enum type.
+    i32 case_index = -1;
+
+    constexpr bool operator==(flat_enum_value const&) const = default;
+};
+
 struct sgl::check::flat_local_ref
 {
     local_id local = local_id::none;
@@ -221,6 +231,7 @@ struct sgl::check::flat_expr
                 flat_literal,
                 flat_int_literal,
                 flat_bool_literal,
+                flat_enum_value,
                 flat_local_ref,
                 flat_binding_member,
                 flat_member,

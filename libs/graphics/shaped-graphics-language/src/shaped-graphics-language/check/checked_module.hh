@@ -35,6 +35,8 @@ struct sgl::check::checked_module
     cc::vector<type_info> types;
     /// The fields of every struct and the members of every binding.
     cc::vector<member_info> members;
+    /// The cases of every enum.
+    cc::vector<enum_case_info> enum_cases;
     cc::vector<function_info> functions;
     cc::vector<parameter> parameters;
     cc::vector<binding_info> bindings;
@@ -63,6 +65,10 @@ struct sgl::check::checked_module
     [[nodiscard]] cc::span<member_info const> at(ast::range_of<member_info> r) const
     {
         return ast::impl::slice(members, r);
+    }
+    [[nodiscard]] cc::span<enum_case_info const> at(ast::range_of<enum_case_info> r) const
+    {
+        return ast::impl::slice(enum_cases, r);
     }
     [[nodiscard]] cc::span<parameter const> at(ast::range_of<parameter> r) const
     {
@@ -97,16 +103,19 @@ struct sgl::check::checked_module
         auto const& t = at(id);
         if (t.kind == type_kind::nothing)
             return "nothing";
-        return t.kind == type_kind::structure ? cc::string_view(at(t.symbol).name) : cc::string_view("<error>");
+        if (t.kind == type_kind::structure || t.kind == type_kind::enumeration)
+            return at(t.symbol).name;
+        return "<error>";
     }
 
     [[nodiscard]] bool operator==(checked_module const& rhs) const
     {
         using ast::impl::is_equal;
         return is_equal(symbols, rhs.symbols) && is_equal(types, rhs.types) && is_equal(members, rhs.members)
-            && is_equal(functions, rhs.functions) && is_equal(parameters, rhs.parameters)
-            && is_equal(bindings, rhs.bindings) && is_equal(binding_lists, rhs.binding_lists)
-            && is_equal(files, rhs.files) && is_equal(entry_points, rhs.entry_points)
-            && is_equal(diagnostics, rhs.diagnostics) && builtins == rhs.builtins;
+            && is_equal(enum_cases, rhs.enum_cases) && is_equal(functions, rhs.functions)
+            && is_equal(parameters, rhs.parameters) && is_equal(bindings, rhs.bindings)
+            && is_equal(binding_lists, rhs.binding_lists) && is_equal(files, rhs.files)
+            && is_equal(entry_points, rhs.entry_points) && is_equal(diagnostics, rhs.diagnostics)
+            && builtins == rhs.builtins;
     }
 };

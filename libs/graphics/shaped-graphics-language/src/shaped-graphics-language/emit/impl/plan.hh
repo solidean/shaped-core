@@ -47,6 +47,14 @@ struct planned_struct
     cc::vector<planned_member> members;
 };
 
+/// An enum the entry point mentions, whose every case is declared whether or not an arm names it (EMIT-77).
+struct planned_enum
+{
+    check::type_id type = check::type_id::none;
+    /// Parallel to the type's cases: the constant each is written as, minted from `<enum>_<case>`.
+    cc::vector<cc::string> case_names;
+};
+
 /// The one `@inline binding` of the entry point.
 struct planned_constants
 {
@@ -68,6 +76,10 @@ struct plan
     cc::vector<planned_struct> structs;
     /// Parallel to `m.types`: a position in `structs`, or -1 for a builtin type and for a type nothing here needs.
     cc::vector<i32> struct_of_type;
+    /// The enums the entry point mentions, in the order they were first needed.
+    cc::vector<planned_enum> enums;
+    /// Parallel to `m.types`: a position in `enums`, or -1 for a type that is no enum this entry point needs.
+    cc::vector<i32> enum_of_type;
     cc::optional<planned_constants> constants;
     /// Parallel to `e.locals`.
     cc::vector<cc::string> locals;

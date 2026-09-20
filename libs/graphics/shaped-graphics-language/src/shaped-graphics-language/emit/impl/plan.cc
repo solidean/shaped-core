@@ -299,6 +299,24 @@ struct planner
         });
     }
 
+    /// Every case of it, in declaration order, since a reader wants the set and not the subset an arm named.
+    void need_enum(type_id type)
+    {
+        if (!is_valid(type) || p.m.at(type).kind != type_kind::enumeration)
+            return;
+        if (p.enum_of_type[index_of(type)] != -1)
+            return;
+
+        auto const& info = p.m.at(type);
+        auto const name = p.m.at(info.symbol).name;
+        auto planned = planned_enum{.type = type};
+        for (auto const& c : p.m.at(info.cases))
+            planned.case_names.push_back(spell(cc::format("{}_{}", name, c.name)));
+
+        p.enum_of_type[index_of(type)] = i32(p.enums.size());
+        p.enums.push_back(cc::move(planned));
+    }
+
     void constants()
     {
         for (auto const id : p.e.bindings)
@@ -370,14 +388,21 @@ sgl::emit::impl::plan sgl::emit::impl::make_plan(check::checked_module const& m,
             if (f.write.kind == builtins::spelling_kind::call)
                 result.names.taken.push_back(f.called_in(language_of(t)));
     result.struct_of_type.resize_to_filled(m.types.size(), -1);
+    result.enum_of_type.resize_to_filled(m.types.size(), -1);
 
     auto p = planner{.p = result};
     p.need(e.input, input_role(e));
     p.need(e.result, result_role(e));
     for (auto const& local : e.locals)
+    {
         p.need(local.type, struct_role::plain);
+        p.need_enum(local.type);
+    }
     for (auto const& x : e.exprs)
+    {
         p.need(x.type, struct_role::plain);
+        p.need_enum(x.type);
+    }
     p.constants();
     for (auto const& local : e.locals)
         result.locals.push_back(p.spell(local.name));

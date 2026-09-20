@@ -223,6 +223,8 @@ struct writer
                           .binds = l.value < 0 && !is_wrapped ? level::unary : level::primary};
             },
             [&](flat_bool_literal const& l) { result = {.text = l.value ? "true" : "false"}; },
+            [&](flat_enum_value const& v)
+            { result = {.text = p.enums[p.enum_of_type[index_of(x.type)]].case_names[v.case_index]}; },
             [&](flat_local_ref const& l) { result = {.text = p.locals[index_of(l.local)]}; },
             [&](flat_binding_member const& b)
             {
@@ -388,10 +390,29 @@ struct writer
 };
 } // namespace
 
+void sgl::emit::impl::write_enum_constants(cc::string& out, plan const& p, dialect const& d)
+{
+    for (auto const& e : p.enums)
+    {
+        auto const cases = p.m.at(p.m.at(e.type).cases);
+        for (auto i = isize(0); i < cases.size(); ++i)
+            d.write_enum_constant(out, e.case_names[i], cases[i].value);
+        if (!cases.empty())
+            out += "\n";
+    }
+}
+
 cc::string_view sgl::emit::impl::type_text(plan const& p, dialect const& d, check::type_id type)
 {
     if (auto const* const record = p.m.builtin_type_of(type))
         return record->spelled_in(d.language());
+    // An enum is its cases' `int` on every target (EVAL-64); the constants of EMIT-76 are what its values read as.
+    if (is_valid(type) && p.m.at(type).kind == check::type_kind::enumeration && p.m.builtins != nullptr)
+    {
+        auto const id = p.m.builtins->find_type(builtins::k_int);
+        if (p.m.builtins->is_known(id))
+            return p.m.builtins->at(id).spelled_in(d.language());
+    }
     return p.structs[p.struct_of_type[index_of(type)]].name;
 }
 

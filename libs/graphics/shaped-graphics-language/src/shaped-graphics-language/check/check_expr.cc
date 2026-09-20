@@ -248,6 +248,7 @@ type_id checker::check_name(function_scope& scope, ast::expr_id id, ast::name co
     switch (out.at(symbol).kind)
     {
     case symbol_kind::structure:
+    case symbol_kind::enumeration:
         unsupported(file, where, "a type as a value");
         break;
     case symbol_kind::function:
@@ -309,6 +310,32 @@ type_id checker::check_member(function_scope& scope, ast::expr_id id, ast::membe
             }
             set_target(file, id, {.kind = target_kind::binding_member, .symbol = binding, .index = i32(index)});
             return out.at(out.bindings[out.at(binding).info].members)[index].type;
+        }
+
+        // `light_kind.point`: an enum is no value either (CHK-148), so its name never reaches `check_expr`
+        if (found != nullptr && !found->empty() && out.at(found->front()).kind == symbol_kind::enumeration)
+        {
+            auto const enumeration = found->front();
+            auto const object_where = span_of(file, member.object);
+            set_target(file, member.object, {.kind = target_kind::symbol, .symbol = enumeration});
+            if (demand(enumeration, file, object_where) != symbol_state::checked)
+                return error_type;
+
+            auto const type = out.at(enumeration).type;
+            auto const cases = out.at(out.at(type).cases);
+            auto index = isize(-1);
+            for (auto i = isize(0); i < cases.size(); ++i)
+                if (cases[i].name == name)
+                    index = i;
+            if (index < 0)
+            {
+                if (!member.name.empty())
+                    report(diagnostic_kind::unknown_member, file, member.name,
+                           cc::format("the enum {} has no case {}", out.at(enumeration).name, name));
+                return error_type;
+            }
+            set_target(file, id, {.kind = target_kind::enum_case, .symbol = enumeration, .index = i32(index)});
+            return type;
         }
     }
 
@@ -406,7 +433,16 @@ type_id checker::check_call(function_scope& scope, ast::expr_id id, ast::call co
         // `and`, `or` and `not` are the language's own: no function could leave an operand unevaluated
         if (call.is_short_circuit || spelling == "not")
             return check_logical(scope, id, call);
-        auto const arguments = check_arguments(scope, call.arguments, false);
+        auto arguments = check_arguments(scope, call.arguments, false);
+        // `==` and `!=` over one enum are the language's own (CHK-149), and what they compare is the cases'
+        // `int`s (EVAL-64) — so they resolve to the `int` overload, and no later pass needs an enum rule.
+        if ((spelling == "==" || spelling == "!=") && arguments.types.size() == 2
+            && arguments.types[0] == arguments.types[1] && out.at(arguments.types[0]).kind == type_kind::enumeration)
+        {
+            auto const as_int = type_of_builtin(builtins::k_int, file, where);
+            arguments.types[0] = as_int;
+            arguments.types[1] = as_int;
+        }
         auto const* const found = operators.get_ptr(spelling);
         auto const none = cc::span<symbol_id const>();
         return resolve_overload(scope, id, ast::expr_id::none,
