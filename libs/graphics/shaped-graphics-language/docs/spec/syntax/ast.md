@@ -50,6 +50,7 @@ Back to the [phases](_index.md); the reasons are in [why/ast.md](why/ast.md).
 | `return`, `break`, `continue`, `yield` | the keyword forms of those names |
 | `struct_type` | a curly paren literal whose elements are all `name: type` |
 | `function_type` | `(a, b) -> c` |
+| `qualified_type` | `mut` or `out` in a type position: `mut buffer[float]` |
 | `with_bindings` | a curly group applied to an expression; reserved |
 | `invalid` | a form with no reading in its place |
 
@@ -158,6 +159,10 @@ let v = {1 + 2}
 * **AST-99** The AST reads an `->` as the form tree groups it, and it regroups nothing ([OP-32](operators.md#the-precedence-ladder)).
 * **AST-100** `x : (int) -> int` is an `ascription` whose type is a `function_type`, and `a -> b -> c` is a `function_type` whose result is the `function_type` `b -> c`.
 * **AST-33** A curly group applied to an expression reads as `with_bindings`, which is reserved: the node is kept, and it is a normal error that says the construct is not supported yet.
+* **AST-128** `mut` and `out` in a type position read as `qualified_type`, which records the word and the type it qualifies: `mut buffer[float]`, `out texture2d[rgba8unorm]`.
+* **AST-129** A `qualified_type` says what a shader does with a resource, and [bindings.md](../bindings.md) is what the words mean.
+  The AST checks neither the word against the type nor the type against anything.
+* **AST-130** `mut` or `out` outside a type position is read as it is elsewhere, so `mut` keeps AST-45 and `out` in an expression is a normal error.
 
 ```sgl
 type blend = (vec3, vec3) -> vec3

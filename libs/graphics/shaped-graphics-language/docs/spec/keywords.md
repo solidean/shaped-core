@@ -10,7 +10,8 @@ Definitions:
 * `fun` - declares a function; mandatory on a method too, and only a property is keyword-free ([AST-82](syntax/ast.md#members))
 * `fun` without a name - an anonymous function in expression position, `fun (x) => x + 1` ([AST-101](syntax/ast.md#lambdas-case-and-loop))
 * `let` - declares a variable (TODO: or `var`?)
-* `mut` - marks a variable as mutable
+* `mut` - marks a variable as mutable, and a binding member as read-write: `dst: mut buffer[float]` ([AST-128](syntax/ast.md#types))
+* `out` - marks a binding member as write-only, which only a storage texture is ([bindings](bindings.md#access))
 * `struct` - defines a new structure type
 * `enum` - defines a new enum type
 * `binding` - defines a new binding group
@@ -60,12 +61,15 @@ It never starts a keyword form, so `self.x = 0` is an assignment.
 
 * Whether `true` and `false` are keywords or constants of the prelude; until that is decided the AST reads them as ordinary names, and they are not reserved.
 
+Settled:
+
+* `out` is a keyword and `in` / `inout` / `ref` are not: the only access a resource needs beyond read and `mut` is write-only.
+* `buffer`, `bytes`, `constants` and the texture types are types rather than keywords, since they take type arguments like any other type.
+* `@inline` stays an annotation: it says where a binding lives rather than what it is.
+
 TODO:
 
-* `in` / `out` / `inout` / `ref` - not sure if we need these yet
-* do we need `buffer` and `texture` etc as keywords? or are they simply types?
-* how do we distinguish 
-* do we need an `inline` keyword or is it a `@inline` annotation (for push/inline constants)
+* A dynamic `sampler` as a binding member collides with the `sampler` keyword ([bindings](bindings.md#open)).
 
 Notes:
 
