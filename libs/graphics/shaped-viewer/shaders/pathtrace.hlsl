@@ -35,6 +35,18 @@ void PathTraceRayGen()
     // The primary hits' motion, summed over this frame's samples: where each landed on the previous frame's screen.
     float2 motion = float2(0, 0);
 
+    // The specular SHARE of the radiance, and how far the first secondary hit of each kind of path sat.
+    //
+    // The share rather than both halves: the diffuse one is `accum - accum_specular`, so whatever the classification
+    // does the two provably add back to the image the tracer would have produced unsplit.
+    // A split-signal denoiser filters them apart and sums them again, and that only stays honest if the sum is the
+    // same picture.
+    float3 accum_specular = float3(0, 0, 0);
+    float hit_dist_diffuse = 0.0;
+    float hit_dist_specular = 0.0;
+    float hit_dist_diffuse_n = 0.0;
+    float hit_dist_specular_n = 0.0;
+
     for (int s = 0; s < spp; ++s)
     {
         // jittered pinhole primary ray
@@ -45,6 +57,11 @@ void PathTraceRayGen()
 
         float3 throughput = float3(1, 1, 1);
         float3 radiance = float3(0, 0, 0);
+
+        // Which signal this path belongs to, decided once at the primary hit by the lobe its continuation was drawn
+        // from: everything a path carries after its first bounce describes that bounce.
+        float3 radiance_specular = float3(0, 0, 0);
+        bool path_is_specular = false;
         float prev_pdf = 0.0; // pdf of the direction the last hit sampled, for the escaped-environment MIS
 
         // Whether the vertex this segment left ran next-event estimation, which a surface hit does and a medium scatter
@@ -100,7 +117,9 @@ void PathTraceRayGen()
             float next_g = p.medium_g;
             uint next_channel = p.channel;
             float hit_t = p.hit_t;
-            float3 direct = p.direct;
+            float3 direct_diffuse = p.direct_diffuse;
+            float3 direct_specular = p.direct_specular;
+            uint lobe = p.lobe;
             float3 emission = p.emission;
             float3 weight = p.throughput;
             float3 next_dir = p.direction;
@@ -127,15 +146,28 @@ void PathTraceRayGen()
                 Camera prev = pt_bindings::frame.previous_camera;
                 float3 offset = hit_t >= 0.0 ? origin + dir * hit_t - prev.position : dir;
                 motion += (float2(px) + jitter) - camera_project(prev, offset, float2(dim));
+
+                // The lobe the continuation was drawn from is what this path IS, for the denoiser's purposes.
+                path_is_specular = sv::bsdf_lobe_is_specular(lobe);
                 primary = false;
             }
-
-            // The BSDF strategy for the area light: the continuation this ray came from may have aimed at the rect.
-            //
-            // Only from b >= 1, because that is what pairs with a next-event estimate — the primary ray has none to
-            // balance against, and weighting it here would make the light visible to the camera, which it is not.
-            // The rect is analytic and absent from the TLAS, so `hit_t` is the whole occlusion test: geometry nearer
-            // than the light blocks it, and nothing else can.
+            else if (b == 1)
+            {
+                // The first SECONDARY hit's distance, which is what a split-signal denoiser sizes its reprojection
+                // and its blur radius from: a reflection of something near travels differently from one of the sky.
+                // A ray that escaped reports 0, the same "nothing there" the depth guide uses.
+                float const d = hit_t >= 0.0 ? hit_t : 0.0;
+                if (path_is_specular)
+                {
+                    hit_dist_specular += d;
+                    hit_dist_specular_n += 1.0;
+                }
+                else
+                {
+                    hit_dist_diffuse += d;
+                    hit_dist_diffuse_n += 1.0;
+                }
+            }
             bool const inside = any(medium_sigma_t > float3(0, 0, 0));
             bool const scattering = inside && any(medium_albedo > float3(0, 0, 0));
 
@@ -262,6 +294,8 @@ void PathTraceRayGen()
                     float3 const arriving = light.emission * sv::light_cone(light, cos_light);
                     if (b == 0)
                     {
+                        // Seen directly, so it describes no bounce and goes to the diffuse signal — the same choice
+                        // the escaped primary ray and a surface's own emission make below.
                         if (in_front && sv::light_visible_to_camera(light))
                             radiance += throughput * arriving;
                     }
@@ -269,7 +303,10 @@ void PathTraceRayGen()
                     {
                         float w = prev_did_nee ? pt_mis_weight(prev_pdf, pt_light_pdf(light, t_light * t_light, cos_light))
                                                : 1.0;
-                        radiance += throughput * arriving * w;
+                        float3 const c = throughput * arriving * w;
+                        radiance += c;
+                        if (path_is_specular)
+                            radiance_specular += c;
                     }
                 }
             }
@@ -292,7 +329,10 @@ void PathTraceRayGen()
                     else if (hit_t < 0.0 || !sv::light_casts_shadows(light))
                     {
                         float w = prev_did_nee ? pt_mis_weight(prev_pdf, pt_disc_pdf(light)) : 1.0;
-                        radiance += throughput * light.emission * w;
+                        float3 const c = throughput * light.emission * w;
+                        radiance += c;
+                        if (path_is_specular)
+                            radiance_specular += c;
                     }
                 }
             }
@@ -306,7 +346,13 @@ void PathTraceRayGen()
                 // sees the sky directly, at full weight; a bounce ray is the BSDF strategy of the hit's own
                 // environment estimate, so weight it against that sampler's uniform-hemisphere pdf.
                 float w = (b == 0) ? 1.0 : pt_mis_weight(prev_pdf, PT_ENV_PDF);
-                radiance += throughput * emission * w;
+                float3 const c = throughput * emission * w;
+                radiance += c;
+
+                // The sky seen by the PRIMARY ray belongs to neither lobe — no surface was hit, so there is no bounce
+                // to describe. It goes to the diffuse signal, which is where the guides already report "no surface".
+                if (path_is_specular && b > 0)
+                    radiance_specular += c;
                 break;
             }
 
@@ -316,11 +362,20 @@ void PathTraceRayGen()
             // MESH is never picked as a light and a deeper bounce has nothing to double-count against.
             // Emissive geometry lighting a scene needs light sampling over emissive triangles, which is a feature
             // this tracer does not have — see the viewer TODO.
+            // Emission belongs to the surface rather than to a lobe, so it goes to the diffuse signal — the same
+            // choice the escaped primary ray above makes, and for the same reason.
             if (b == 0)
                 radiance += throughput * emission;
 
             // What the hit already estimated toward its picked light and the environment, through its own BSDF.
-            radiance += throughput * direct;
+            //
+            // At the PRIMARY hit the two halves are known exactly, because the hit split its own BSDF to produce them.
+            // Deeper in, the whole estimate describes the bounce this path already took.
+            radiance += throughput * (direct_diffuse + direct_specular);
+            if (b == 0)
+                radiance_specular += throughput * direct_specular;
+            else if (path_is_specular)
+                radiance_specular += throughput * (direct_diffuse + direct_specular);
 
             // A closure that sampled nothing — fully absorbed, or a lobe that collapsed — ends the path here.
             if (all(weight <= float3(0, 0, 0)))
@@ -345,7 +400,15 @@ void PathTraceRayGen()
         // the target keeps reproducing itself and no later frame can wash it out.
         // Dropping the path costs one sample out of `spp`; keeping it costs the pixel.
         if (pt_is_finite(radiance))
+        {
             accum += radiance;
+
+            // Clamped to the total, because the two are summed back together downstream and a specular share larger
+            // than the whole would make the diffuse half negative.
+            // It cannot happen by construction; the clamp is what keeps a future classification bug from producing an
+            // image with holes in it rather than a wrong one.
+            accum_specular += clamp(radiance_specular, float3(0, 0, 0), max(radiance, float3(0, 0, 0)));
+        }
     }
 
     float3 color = accum / float(spp);
@@ -354,6 +417,22 @@ void PathTraceRayGen()
     {
         pt_bindings::FrameOutput[px] = float4(color, 1.0);
         pt_bindings::GuideMotion[px] = motion / float(spp);
+    }
+
+    if (pt_bindings::frame.write_split != 0)
+    {
+        // The specular share was clamped to the total per sample, so the difference is never negative — which is what
+        // lets a split-signal denoiser add the two halves back and get exactly this frame's image.
+        float3 specular = accum_specular / float(spp);
+        pt_bindings::FrameSpecular[px] = float4(specular, 1.0);
+        pt_bindings::FrameDiffuse[px] = float4(color - specular, 1.0);
+
+        // A mean over the paths of each kind rather than over all samples: a pixel whose paths were all diffuse has no
+        // specular hit distance to report, and averaging its absence in as zero would read as a reflection of
+        // something touching the surface.
+        pt_bindings::GuideHitDistance[px]
+            = float2(hit_dist_diffuse_n > 0.0 ? hit_dist_diffuse / hit_dist_diffuse_n : 0.0,
+                     hit_dist_specular_n > 0.0 ? hit_dist_specular / hit_dist_specular_n : 0.0);
     }
 
     // Progressive accumulation: this frame's estimate folded into the running mean already in the target.

@@ -55,6 +55,7 @@ struct sv::pt_frame_constants_gpu
     /// How many frames the guide textures already average; the same 0-overwrites rule as `accum_frame`, on a count of
     /// its own.
     u32 guide_frame = 0;
+
     /// Whether the raygen writes this frame's own samples and the motion vectors, for a temporal denoiser — nonzero
     /// exactly when `pt_trace_desc` carries `frame_output` and `guide_motion`.
     u32 write_temporal = 0;
@@ -64,12 +65,17 @@ struct sv::pt_frame_constants_gpu
     /// Its own flag rather than riding on `write_guides`, because only some denoise members read them.
     u32 write_specular_guides = 0;
 
+    /// Whether the raygen writes the split-signal targets — nonzero exactly when `pt_trace_desc` carries
+    /// `frame_diffuse`, `frame_specular` and `guide_hit_distance`.
+    u32 write_split = 0;
+    u32 _split_pad[3] = {};
+
     /// The camera this layer's previous frame was traced from, which the motion vectors reproject into.
     /// The current camera when there was none, which reads as no motion.
     camera_gpu previous_camera = {};
 
     // Pad the block to a full 256-byte CBV range (see frame_constants.hh).
-    f32 _reserved[12] = {};
+    f32 _reserved[8] = {};
 };
 
 namespace sv
@@ -139,6 +145,16 @@ struct sv::pt_trace_desc
     /// Both or neither, at `output`'s extent, and set exactly when the frame block's `write_temporal` is.
     sg::texture_2d frame_output;
     sg::texture_2d guide_motion;
+
+    /// This frame's samples split the way a split-signal denoiser filters them, plus the first secondary hit distance
+    /// of each kind (rg16_float: diffuse in r, specular in g).
+    ///
+    /// All three or none, at `output`'s extent, and set exactly when the frame block's `write_split` is.
+    /// `frame_diffuse` and `frame_specular` sum to `frame_output` exactly, which is what lets a member filter them
+    /// apart and add them back without changing the picture.
+    sg::texture_2d frame_diffuse;
+    sg::texture_2d frame_specular;
+    sg::texture_2d guide_hit_distance;
 
     /// One `sv::instance_gpu` per entry of `instances`, in that same order — the closest-hit's `Instances`, read by `InstanceID()`.
     /// Everything a hit needs is reached from here, which is what lets one view hold any number of meshes and materials.
@@ -231,6 +247,9 @@ private:
     sg::texture_2d _guide_specular_albedo_stand_in;
     sg::texture_2d _guide_roughness_stand_in;
     sg::texture_2d _frame_output_stand_in;
+    sg::texture_2d _frame_diffuse_stand_in;
+    sg::texture_2d _frame_specular_stand_in;
+    sg::texture_2d _guide_hit_distance_stand_in;
     sg::texture_2d _guide_motion_stand_in;
 
     /// One pipeline, built over one ordered set of hit groups.

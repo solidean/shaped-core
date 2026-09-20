@@ -371,6 +371,7 @@ ASYNC_INVOCABLE_TEST("sv - light ids are scoped like view ids, and a duplicate i
     }
 
     co_await cc::async_settled(sv::background_work(ctx));
+}
 
 // A frame loop makes streaming progress even when nothing ever blocks on it.
 //

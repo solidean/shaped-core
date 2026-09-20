@@ -359,6 +359,169 @@ ASYNC_INVOCABLE_TEST("sv - a path-traced textured material builds its sampler gr
     co_await cc::async_settled(sv::background_work(ctx));
 }
 
+// The split signals add back to the frame they were split from.
+//
+// A split-signal denoiser filters the diffuse and specular halves with different kernels and sums them again, so the
+// sum has to be the picture the tracer would have produced unsplit.
+// If it is not, every image the denoiser produces is wrong by whatever the split lost — a bias that looks like the
+// denoiser being slightly off and that no amount of convergence removes.
+//
+// The raygen keeps the total exact and tracks only the specular SHARE, writing the diffuse half as the difference, so
+// this holds by construction rather than by two accumulations happening to agree.
+// The test is what stops that construction being quietly replaced by two.
+ASYNC_INVOCABLE_TEST("sv::pathtrace_routine - the split signals sum to the frame", (sg::context_handle const& ctx_h))
+{
+    auto& ctx = *ctx_h;
+    {
+        auto probe = ctx.create_command_list();
+        auto const supported = probe->raytracing.is_supported();
+        ctx.drop_command_list(cc::move(probe));
+        if (!supported)
+            SKIP("device reports no ray tracing support");
+    }
+    if (!sv_test::shared_env().has_compiler)
+        SKIP("no DXC compiler to build the path-tracing shaders");
+
+    auto const box = sv_test::make_cornell_box();
+    auto resources = sv::gpu_resource_manager::create(ctx);
+    auto const item = resources.acquire_scene_item(sv_test::as_mesh("cornell box", box.positions, box.materials));
+    resources.wait_for_pending_uploads();
+
+    auto const* const mesh_rec = resources.meshes.get_ptr(item.mesh);
+    REQUIRE(mesh_rec != nullptr);
+    auto const* const permutation = resources.shaders.find(item.shader_key);
+    REQUIRE(permutation != nullptr);
+
+    auto instances = cc::vector<sg::tlas_instance>();
+    instances.push_back(sg::tlas_instance{.blas = mesh_rec->blas, .instance_id = 0, .hit_group_offset = 0});
+    auto hit_groups = cc::vector<sv::material_permutation const*>();
+    hit_groups.push_back(permutation);
+
+    auto const size = tg::vec2i(48, 48);
+    auto cam = sv::camera{.position = tg::pos3d(0, 0, -3.4)};
+    cam.projection.vertical_fov = tg::angle_d::make_from_degree(45.0);
+
+    auto fc = sv::pt_frame_constants_gpu{};
+    fc.camera = sv::camera_gpu::from(cam);
+    auto const lights = sv_test::light_table_of(box.light);
+    lights.describe_in(fc);
+    fc.samples_per_pixel = 4;
+    fc.max_bounces = 4;
+    fc.seed = 1u;
+    fc.write_temporal = 1;
+    fc.write_split = 1;
+
+    auto const make = [&](sg::pixel_format format)
+    {
+        return ctx.persistent.create_texture_2d({.format = format,
+                                                 .width = size[0],
+                                                 .height = size[1],
+                                                 .usage = sg::texture_usage::readonly_texture
+                                                        | sg::texture_usage::readwrite_texture
+                                                        | sg::texture_usage::copy_src});
+    };
+
+    // rgba32_float throughout, so the sum is compared at the precision the raygen computed it in rather than at
+    // half-float's — the property is about the split, not about what a 16-bit target can hold.
+    auto const total = make(sg::pixel_format::rgba32_float);
+    auto const diffuse = make(sg::pixel_format::rgba32_float);
+    auto const specular = make(sg::pixel_format::rgba32_float);
+    auto const motion = make(sg::pixel_format::rg32_float);
+    auto const hit_distance = make(sg::pixel_format::rg32_float);
+    auto const accumulator = make(sg::pixel_format::rgba32_float);
+
+    auto records = cc::vector<sv::instance_gpu>();
+    REQUIRE(sv_test::frames_until_executed(
+        ctx,
+        [&](sg::command_list& cmd)
+        {
+            records.clear();
+            records.push_back(resources.describe_instance(cmd, item.mesh, item.instance));
+
+            auto const frame = ctx.transient.create_buffer<sv::pt_frame_constants_gpu>(
+                1, sg::buffer_usage::uniform_buffer | sg::buffer_usage::copy_dst);
+            cmd.upload.pod_to_buffer(frame, fc);
+
+            auto const background = ctx.transient.create_buffer<sv::background_gpu>(
+                1, sg::buffer_usage::uniform_buffer | sg::buffer_usage::copy_dst);
+            cmd.upload.pod_to_buffer(background, sv::background_gpu::from(sv::background{}));
+
+            auto const instance_table = ctx.transient.create_buffer<sv::instance_gpu>(
+                records.size(), sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);
+            cmd.upload.data_to_buffer(instance_table, records);
+            auto const light_buffer = sv_test::upload_lights(cmd, lights);
+
+            auto const bindless = resources.freeze();
+            return sv::pathtrace_routine::execute(cmd, {.frame = frame,
+                                                        .background = background,
+                                                        .instances = instances,
+                                                        .output = accumulator,
+                                                        .frame_output = total,
+                                                        .guide_motion = motion,
+                                                        .frame_diffuse = diffuse,
+                                                        .frame_specular = specular,
+                                                        .guide_hit_distance = hit_distance,
+                                                        .instance_table = instance_table,
+                                                        .lights = light_buffer,
+                                                        .hit_groups = hit_groups,
+                                                        .bindless = &bindless});
+        }));
+
+    auto cmd = ctx.create_command_list();
+    auto total_back = sg::data_future<tg::vec4f>(cmd->download.bytes_from_texture(total.raw()));
+    auto diffuse_back = sg::data_future<tg::vec4f>(cmd->download.bytes_from_texture(diffuse.raw()));
+    auto specular_back = sg::data_future<tg::vec4f>(cmd->download.bytes_from_texture(specular.raw()));
+    auto hit_back = sg::data_future<tg::vec2f>(cmd->download.bytes_from_texture(hit_distance.raw()));
+    ctx.submit_command_list(cc::move(cmd));
+    ctx.advance_epoch();
+
+    auto const t = co_await total_back.data();
+    auto const d = co_await diffuse_back.data();
+    auto const s = co_await specular_back.data();
+    auto const h = co_await hit_back.data();
+    REQUIRE(t.size() == size[0] * size[1]);
+    REQUIRE(h.size() == t.size());
+
+    auto worst = 0.0f;
+    auto any_specular = false;
+    auto any_diffuse = false;
+    auto negative = false;
+    for (auto i = isize(0); i < t.size(); ++i)
+        for (auto c = 0; c < 3; ++c)
+        {
+            worst = cc::max(worst, tg::abs((d[i][c] + s[i][c]) - t[i][c]));
+            any_specular |= s[i][c] > 1e-4f;
+            any_diffuse |= d[i][c] > 1e-4f;
+
+            // Neither half may go negative: they are radiance, and a denoiser handed a negative signal produces holes.
+            negative |= d[i][c] < -1e-5f || s[i][c] < -1e-5f;
+        }
+
+    CHECK(worst < 1e-5f).context(cc::format("worst |diffuse + specular - total| was {}", worst));
+    CHECK(!negative);
+
+    // And the split is doing something: a Cornell box lit through a specular-and-diffuse closure has both.
+    // Without this the sum check passes trivially on an all-diffuse image.
+    CHECK(any_diffuse);
+    CHECK(any_specular);
+
+    // The hit distances are what pin the path CLASSIFICATION, which the two checks above do not.
+    // A specular highlight reaches the specular half through direct lighting alone, so forcing every path to be
+    // classified diffuse still leaves `any_specular` true — it was the first version of this test, and it passed.
+    // Only a path that continued through a specular lobe writes a specular hit distance.
+    auto diffuse_bounced = false;
+    auto specular_bounced = false;
+    for (auto const& p : h)
+    {
+        diffuse_bounced |= p[0] > 1e-4f;
+        specular_bounced |= p[1] > 1e-4f;
+    }
+    CHECK(diffuse_bounced).context("no path was classified diffuse and went on to hit something");
+    CHECK(specular_bounced).context("no path was classified specular and went on to hit something");
+
+    co_await cc::async_settled(sv::background_work(ctx));
+}
+
 namespace
 {
 /// One mesh at identity, seen by one camera — what the light tests below trace under different lights.

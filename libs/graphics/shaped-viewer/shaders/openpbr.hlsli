@@ -1,5 +1,7 @@
 #pragma once
 
+#include "bsdf_lobe.hlsli"
+
 // The OpenPBR Surface BSDF: the layered model `sv::surface` describes, prepared into lobes and then evaluated or sampled.
 //
 // The layer stack, top to bottom, is fuzz over coat over the base, and the base is the metal BSDF mixed against a dielectric
@@ -475,6 +477,10 @@ struct bsdf_sample
     float3 value;     ///< the BSDF at (wo, direction), cosine NOT folded in
     float pdf;
     bool valid; ///< false when the direction grazed the surface, total internal reflection ended it, or the pdf collapsed
+
+    /// Which lobe drew it — one of the `bsdf_lobe_*` constants above.
+    /// Meaningful only when `valid`; an invalid sample reports the diffuse lobe and carries nothing.
+    uint lobe;
 
     /// Which interior the direction crossed into: `medium_none`, `medium_transmission` or `medium_subsurface`.
     ///
@@ -1245,6 +1251,7 @@ bsdf_sample bsdf_sample_direction(bsdf b, float3 wo, float3 u)
     r.pdf = 0.0;
     r.valid = false;
     r.medium = medium_none;
+    r.lobe = bsdf_lobe_diffuse;
 
     if (wo.z <= 0.0)
         return r;
@@ -1265,12 +1272,14 @@ bsdf_sample bsdf_sample_direction(bsdf b, float3 wo, float3 u)
     // downstream can tell the two apart.
     if (pick < p.fuzz)
     {
+        r.lobe = bsdf_lobe_fuzz;
         wi = sample_cosine_local(u.yz);
         if (wi.z <= 0.0)
             return r;
     }
     else if (pick < p.fuzz + p.coat)
     {
+        r.lobe = bsdf_lobe_coat;
         // Drawn in the coat's frame and brought back, so a tilted coat reflects where its own normal says rather than
         // where the base's does.
         float3 wo_c = to_coat(b, wo);
@@ -1286,6 +1295,7 @@ bsdf_sample bsdf_sample_direction(bsdf b, float3 wo, float3 u)
     }
     else if (pick < p.fuzz + p.coat + p.metal)
     {
+        r.lobe = bsdf_lobe_metal;
         float3 h = ggx_sample_vndf(wo, b.metal_alpha, u.yz);
         wi = reflect(-wo, h);
         if (wi.z <= 0.0)
@@ -1293,6 +1303,7 @@ bsdf_sample bsdf_sample_direction(bsdf b, float3 wo, float3 u)
     }
     else if (pick < p.fuzz + p.coat + p.metal + p.spec)
     {
+        r.lobe = bsdf_lobe_spec;
         float3 h = ggx_sample_vndf(wo, b.spec_alpha, u.yz);
         wi = reflect(-wo, h);
         if (wi.z <= 0.0)
@@ -1300,12 +1311,15 @@ bsdf_sample bsdf_sample_direction(bsdf b, float3 wo, float3 u)
     }
     else if (pick < p.fuzz + p.coat + p.metal + p.spec + p.diffuse)
     {
+        r.lobe = bsdf_lobe_diffuse;
         wi = sample_cosine_local(u.yz);
         if (wi.z <= 0.0)
             return r;
     }
     else
     {
+        r.lobe = bsdf_lobe_transmission;
+
         // A refracting base. Which of the two is decided here, in proportion to what each contributes — the direction is
         // the same either way, so the pick costs no extra distribution and changes only the interior reported.
         float w_trans = b.trans_weight * luminance(b.trans_tint);

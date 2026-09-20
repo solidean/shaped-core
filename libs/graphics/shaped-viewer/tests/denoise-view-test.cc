@@ -342,10 +342,7 @@ ASYNC_INVOCABLE_TEST("sv - a capture settles mid-crossfade", (sg::context_handle
 
         auto scene = view.add_scene();
         scene.add_mesh(mesh);
-        scene.add_light({.center = tg::pos3f(0, 0.99f, 0),
-                         .half_extent_u = tg::vec3f(0.35f, 0, 0),
-                         .half_extent_v = tg::vec3f(0, 0, 0.35f),
-                         .emission = tg::vec3f(4, 4, 4)});
+        scene.add_rect_light("key", tg::pos3f(0, 0.99f, 0), tg::vec3f(0.35f, 0, 0), tg::vec3f(0, 0, 0.35f)).nits(4);
         scene.settings({.samples_per_pixel = 1,
                         .denoise = {.method = sr::denoise_method::automatic},
                         .temporal_denoise_frames = window,

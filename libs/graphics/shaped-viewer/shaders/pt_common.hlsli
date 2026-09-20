@@ -1,6 +1,7 @@
 #pragma once
 
-#include "background.hlsli" // Background + the SH evaluation the miss and the hits use
+#include "background.hlsli"
+#include "bsdf_lobe.hlsli" // sv::bsdf_lobe_* — the raygen classifies a path by the lobe its first bounce took // Background + the SH evaluation the miss and the hits use
 #include "camera.hlsli"
 #include "instance.hlsli" // sv::instance — the per-item table the group below declares
 #include "light.hlsli" // sv::light — the per-light record the group below declares
@@ -47,6 +48,9 @@ struct FrameConstants
     // write_temporal: whether to write FrameOutput and GuideMotion, for a temporal denoiser
     // write_specular_guides: whether to write GuideSpecularAlbedo / GuideRoughness, which only some members read
     uint write_guides;  uint guide_frame;  uint write_temporal;  uint write_specular_guides;
+
+    // write_split: whether to write FrameDiffuse / FrameSpecular / GuideHitDistance, for a split-signal member
+    uint write_split;  uint _split_pad0;  uint _split_pad1;  uint _split_pad2;
 
     // The camera the previous frame of this layer was traced from, which motion vectors reproject into.
     Camera previous_camera;
@@ -107,6 +111,16 @@ namespace pt_bindings
     // Written only while `frame.write_temporal` is set; otherwise bound to 1x1 stand-ins nothing writes.
     RWTexture2D<float4> FrameOutput;
     RWTexture2D<float2> GuideMotion;
+
+    // This frame's samples again, split the way a split-signal denoiser filters them: the diffuse half and the
+    // specular one, which sum to `FrameOutput` exactly.
+    // Their first secondary hit distances ride together in `GuideHitDistance` — diffuse in r, specular in g — which is
+    // what such a denoiser sizes its reprojection from.
+    // Written only while `frame.write_split` is set.
+    RWTexture2D<float4> FrameDiffuse;
+    RWTexture2D<float4> FrameSpecular;
+    RWTexture2D<float2> GuideHitDistance;
+
     /// Every light the trace samples, grouped by path — mirrors what sv::pt_light_table builds.
     /// Appended last for the same reason `frame` was.
     StructuredBuffer<sv::light> Lights;
@@ -151,7 +165,11 @@ struct [raypayload] PtPayload
     // and sky by the share it left to a ray that never flew.
     uint last_bounce : read(closesthit) : write(caller);
 
-    float3 direct     : read(caller) : write(closesthit, miss); // next-event estimate at this hit, BSDF folded in
+    // The next-event estimate at this hit, BSDF folded in, split the way `bsdf_eval_split` splits the closure.
+    // Two fields rather than one because only the hit knows which half of its BSDF each contribution came through, and
+    // a split recovered afterwards from a ratio would be a second opinion about a number this already has exactly.
+    float3 direct_diffuse  : read(caller) : write(closesthit, miss);
+    float3 direct_specular : read(caller) : write(closesthit, miss);
     float3 emission   : read(caller) : write(closesthit, miss); // the surface's own emission, or the sky on a miss
     float3 throughput : read(caller) : write(closesthit, miss); // f * cos / pdf for the sampled continuation
     float3 direction  : read(caller) : write(closesthit, miss); // where the path goes next
@@ -163,6 +181,10 @@ struct [raypayload] PtPayload
     // Every ray pays for them, which is what libs/graphics/shaped-viewer/docs/TODO.md asks to be measured.
     float3 specular_albedo : read(caller) : write(closesthit, miss); // normal-incidence specular reflectance (F0)
     float  roughness       : read(caller) : write(closesthit, miss); // perceptual roughness of the sharpest specular lobe
+
+    /// Which lobe the continuation was drawn from — one of `sv::bsdf_lobe_*`.
+    /// The raygen reads it at the PRIMARY hit to decide which signal the rest of the path belongs to.
+    uint lobe : read(caller) : write(closesthit, miss);
 
     float bsdf_pdf : read(caller) : write(closesthit, miss); // pdf of `direction`, for the escaped-environment MIS weight
     float hit_t    : read(caller) : write(closesthit, miss); // < 0 => the ray escaped (miss)

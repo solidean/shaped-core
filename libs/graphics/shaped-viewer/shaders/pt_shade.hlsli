@@ -56,17 +56,22 @@ bool pt_occluded(float3 origin, float3 dir, float dist)
 /// Without it, light sampling alone has to carry the whole GGX peak: `bsdf_eval` at a uniformly picked point on the rect is
 /// ~1/(pi*alpha^2) where the half-vector lines up and near zero everywhere else, so a mirror lit by a small light produces a
 /// huge value at a tiny probability — one bright pixel per few thousand samples, which is what a firefly is.
-float3 pt_estimate_light(sv::bsdf bsdf,
-                         sv::frame frame,
-                         float3 wo_local,
-                         float3 p,
-                         float3 n_geom,
-                         bool last_bounce,
-                         inout uint rng)
+void pt_estimate_light(sv::bsdf bsdf,
+                       sv::frame frame,
+                       float3 wo_local,
+                       float3 p,
+                       float3 n_geom,
+                       bool last_bounce,
+                       inout uint rng,
+                       out float3 out_diffuse,
+                       out float3 out_specular)
 {
+    out_diffuse = float3(0, 0, 0);
+    out_specular = float3(0, 0, 0);
+
     uint const count = pt_bindings::frame.light_count;
     if (count == 0u)
-        return float3(0, 0, 0);
+        return;
 
     // No draw when there is nothing to choose between, so a one-light scene keeps the sample sequence it always had.
     uint const index = count == 1u ? 0u : min(uint(pt_rand(rng) * float(count)), count - 1u);
@@ -93,7 +98,7 @@ float3 pt_estimate_light(sv::bsdf bsdf,
         float cos_face = dot(light.normal, -wi);
         float cos_light = (light.flags & sv::light_flag_two_sided) != 0u ? abs(cos_face) : cos_face;
         if (cos_light <= 0.0)
-            return float3(0, 0, 0); // the light's emitting face is turned away
+            return; // the light's emitting face is turned away
 
         // Stop just short of the light surface, so the light's own geometry does not count as an occluder.
         shadow_dist = dist - 2e-3;
@@ -131,38 +136,50 @@ float3 pt_estimate_light(sv::bsdf bsdf,
     }
 
     if (all(incoming <= float3(0, 0, 0)))
-        return float3(0, 0, 0);
+        return;
 
     float3 wi_local = sv::to_local(frame, wi);
     if (wi_local.z <= 0.0)
-        return float3(0, 0, 0); // below the surface, so the BSDF is zero there anyway
+        return; // below the surface, so the BSDF is zero there anyway
 
-    float3 f = sv::bsdf_eval(bsdf, wo_local, wi_local);
+    // Split at the evaluation rather than after it: the two halves reach different denoiser signals, and dividing a
+    // summed estimate by a ratio computed afterwards would be a second opinion about a number we already have exactly.
+    float3 f_diffuse;
+    float3 f_specular;
+    sv::bsdf_eval_split(bsdf, wo_local, wi_local, f_diffuse, f_specular);
+    float3 f = f_diffuse + f_specular;
     if (all(f <= float3(0, 0, 0)))
-        return float3(0, 0, 0);
+        return;
 
     if (sv::light_casts_shadows(light) && pt_occluded(p + n_geom * 1e-3, wi, shadow_dist))
-        return float3(0, 0, 0);
+        return;
 
     // The other strategy for this direction is the BSDF sample the raygen may take, so balance the two — except for a
     // delta light, which that sample can never reach, and on the last bounce, where the raygen takes none.
     float w = delta || last_bounce ? 1.0 : pt_mis_weight(pdf, sv::bsdf_pdf(bsdf, wo_local, wi_local));
 
-    return incoming * f * (wi_local.z / pdf) * w;
+    float3 scale = incoming * (wi_local.z / pdf) * w;
+    out_diffuse = f_diffuse * scale;
+    out_specular = f_specular * scale;
 }
 
 /// Direct light from the SH environment, with the BSDF folded in and weighted against the BSDF sampler.
 ///
 /// One uniform-hemisphere sample: the probe has no sharp features, so a radiance-proportional sampler is not worth its cost,
 /// and the multiple-importance weight already cuts the variance a bright, non-uniform sky would add.
-float3 pt_estimate_environment(sv::bsdf bsdf,
-                               sv::frame frame,
-                               float3 wo_local,
-                               float3 p,
-                               float3 n_geom,
-                               bool last_bounce,
-                               inout uint rng)
+void pt_estimate_environment(sv::bsdf bsdf,
+                             sv::frame frame,
+                             float3 wo_local,
+                             float3 p,
+                             float3 n_geom,
+                             bool last_bounce,
+                             inout uint rng,
+                             out float3 out_diffuse,
+                             out float3 out_specular)
 {
+    out_diffuse = float3(0, 0, 0);
+    out_specular = float3(0, 0, 0);
+
     // cos(theta) = u1 uniform in [0, 1] gives a uniform solid-angle pick about the normal.
     float u1 = pt_rand(rng);
     float u2 = pt_rand(rng);
@@ -172,17 +189,22 @@ float3 pt_estimate_environment(sv::bsdf bsdf,
     float3 wi_local = float3(r * cos(phi), r * sin(phi), u1);
     float3 wi = sv::to_world(frame, wi_local);
 
-    float3 f = sv::bsdf_eval(bsdf, wo_local, wi_local);
-    if (all(f <= float3(0, 0, 0)))
-        return float3(0, 0, 0);
+    float3 f_diffuse;
+    float3 f_specular;
+    sv::bsdf_eval_split(bsdf, wo_local, wi_local, f_diffuse, f_specular);
+    if (all(f_diffuse + f_specular <= float3(0, 0, 0)))
+        return;
 
     if (pt_occluded(p + n_geom * 1e-3, wi, 1e4))
-        return float3(0, 0, 0);
+        return;
 
     // The other strategy for this direction is the BSDF sample the raygen may take, so balance the two.
     // No bounce ray follows the last hit, so there is nothing to balance against there.
     float w = last_bounce ? 1.0 : pt_mis_weight(PT_ENV_PDF, sv::bsdf_pdf(bsdf, wo_local, wi_local));
-    return background_radiance(pt_bindings::background.sh, wi) * f * (wi_local.z / PT_ENV_PDF) * w;
+
+    float3 scale = background_radiance(pt_bindings::background.sh, wi) * (wi_local.z / PT_ENV_PDF) * w;
+    out_diffuse = f_diffuse * scale;
+    out_specular = f_specular * scale;
 }
 
 /// Shades a located hit and writes the whole payload.
@@ -280,9 +302,11 @@ void pt_shade(inout PtPayload payload, sv::shading_context ctx, float3 N, float3
     // A grazing hit whose shading frame turned away has no hemisphere to integrate over.
     if (wo_local.z <= 0.0)
     {
-        payload.direct = float3(0, 0, 0);
+        payload.direct_diffuse = float3(0, 0, 0);
+        payload.direct_specular = float3(0, 0, 0);
         payload.throughput = float3(0, 0, 0);
         payload.direction = float3(0, 0, 0);
+        payload.lobe = sv::bsdf_lobe_diffuse;
         payload.bsdf_pdf = 0.0;
         payload.rng = rng;
         payload.medium_sigma_t = in_sigma_t;
@@ -291,9 +315,20 @@ void pt_shade(inout PtPayload payload, sv::shading_context ctx, float3 N, float3
         return;
     }
 
-    bool const last_bounce = payload.last_bounce != 0u;
-    payload.direct = pt_estimate_light(bsdf, frame, wo_local, p, N, last_bounce, rng)
-                   + pt_estimate_environment(bsdf, frame, wo_local, p, N, last_bounce, rng);
+    {
+        bool const last_bounce = payload.last_bounce != 0u;
+
+        float3 light_diffuse;
+        float3 light_specular;
+        pt_estimate_light(bsdf, frame, wo_local, p, N, last_bounce, rng, light_diffuse, light_specular);
+
+        float3 env_diffuse;
+        float3 env_specular;
+        pt_estimate_environment(bsdf, frame, wo_local, p, N, last_bounce, rng, env_diffuse, env_specular);
+
+        payload.direct_diffuse = light_diffuse + env_diffuse;
+        payload.direct_specular = light_specular + env_specular;
+    }
 
     // The continuation, importance-sampled from the closure the material just described.
     float3 u = float3(pt_rand(rng), pt_rand(rng), pt_rand(rng));
@@ -316,6 +351,7 @@ void pt_shade(inout PtPayload payload, sv::shading_context ctx, float3 N, float3
         payload.throughput = weight;
         payload.direction = sv::to_world(frame, s.direction);
         payload.bsdf_pdf = s.pdf;
+        payload.lobe = s.lobe;
         payload.channel = channel;
 
         // A continuation that crossed the surface changes which medium it travels in: into the interior the closure says it
@@ -350,6 +386,7 @@ void pt_shade(inout PtPayload payload, sv::shading_context ctx, float3 N, float3
     {
         payload.throughput = float3(0, 0, 0);
         payload.direction = float3(0, 0, 0);
+        payload.lobe = sv::bsdf_lobe_diffuse; // nothing continues, so the classification is never read
         payload.bsdf_pdf = 0.0;
         payload.medium_sigma_t = in_sigma_t;
         payload.medium_albedo = in_albedo;
