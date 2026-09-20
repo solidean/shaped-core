@@ -229,7 +229,7 @@ void checker::compile_function(symbol_id id)
     auto const& f = d.node.as<ast::fun_decl>();
     auto is_failed = false;
 
-    cc::string_view const known[] = {"builtin", "operator", "vertex", "pixel"};
+    cc::string_view const known[] = {"builtin", "pure", "operator", "vertex", "pixel"};
     judge_attributes(file, d.attributes, known, "a function");
 
     if (!f.type_parameters.empty())
@@ -350,6 +350,7 @@ void checker::compile_function(symbol_id id)
         .result = result,
         .bindings = {.first = u32(out.binding_lists.size()), .count = u32(bindings.size())},
         .entry_stage = stage_of(is_vertex, is_pixel),
+        .is_pure = find_attribute(file, d.attributes, "pure") != nullptr,
     });
     out.parameters.push_back_range(parameters);
     out.binding_lists.push_back_range(bindings);

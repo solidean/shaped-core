@@ -133,6 +133,7 @@ enum class symbol_id : i32;
 enum class flat_expr_id : i32;
 enum class flat_stmt_id : i32;
 enum class local_id : i32;
+enum class label_id : i32;
 
 enum class builtin : u8;
 enum class type_kind : u8;
@@ -155,18 +156,49 @@ struct call_site;
 struct name_mint;
 enum class local_kind : u8;
 struct flat_local;
+struct flat_label;
 struct flat_invalid;
 struct flat_literal;
+struct flat_int_literal;
+struct flat_bool_literal;
 struct flat_local_ref;
 struct flat_binding_member;
 struct flat_member;
 struct flat_construct;
 struct flat_call;
+struct flat_not;
+struct flat_and;
+struct flat_or;
+struct flat_block;
 struct flat_expr;
 struct flat_let;
+struct flat_var;
+struct flat_assign;
+struct flat_print;
+struct flat_if;
+struct flat_leave;
+struct flat_loop;
+struct flat_while;
+struct flat_for;
+struct flat_continue;
+struct flat_once;
+struct flat_break;
 struct flat_return;
 struct flat_stmt;
 struct flat_entry_point;
+struct flat_builder;
+
+struct core_violation;
+
+enum class value_kind : u8;
+struct scalar;
+struct value;
+enum class run_status : u8;
+struct run_inputs;
+struct run_limits;
+struct outcome;
+
+struct legalize_options;
 
 struct located_diagnostic;
 struct checked_module;

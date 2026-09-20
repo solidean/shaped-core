@@ -69,7 +69,7 @@ TEST("sgl check - an operator is a function found through its spelling")
 {
     CHECK(body_reports("return k * k + k\n") == "");
     CHECK(body_reports("return v * k\n") == "no-matching-overload 1:[v * k] operator *(vec3, float)\n");
-    CHECK(body_reports("return k - k\n") == "no-matching-overload 1:[k - k] operator -(float, float)\n");
+    CHECK(body_reports("return k / k\n") == "no-matching-overload 1:[k / k] operator /(float, float)\n");
     CHECK(body_reports("return -k\n") == "no-matching-overload 1:[-k] operator -(float)\n");
 
     auto const checked = check_sources(read_prelude(), "fun f(c: float3, k: float) -> float3:\n    return c * k\n");
@@ -152,7 +152,7 @@ TEST("sgl check - a binding member is reachable only through the function's bind
 TEST("sgl check - a number literal with a dot or an exponent is a float, and nothing else is carried")
 {
     CHECK(body_reports("return 0.5 + -0.4 + 1e3 + 2.5e-3 + 1. + 1'000.0\n") == "");
-    CHECK(body_reports("return 1\n") == "unsupported-yet 1:[1] an integer literal, since the prelude has no int\n");
+    CHECK(body_reports("return 1\n") == "unsupported-yet 1:[1] an integer literal, which the pass does not type yet\n");
     CHECK(body_reports("return 0.5f32\n")
           == "unsupported-yet 1:[0.5f32] a number literal with a prefix, a suffix or a p exponent\n");
     CHECK(body_reports("return 0xff\n")

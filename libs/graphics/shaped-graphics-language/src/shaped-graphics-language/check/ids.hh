@@ -35,6 +35,12 @@ enum class sgl::check::local_id : sgl::i32
     none = -1
 };
 
+/// A position in `flat_entry_point::labels`.
+enum class sgl::check::label_id : sgl::i32
+{
+    none = -1
+};
+
 namespace sgl::check
 {
 
@@ -58,6 +64,10 @@ namespace sgl::check
 {
     return i32(id) >= 0;
 }
+[[nodiscard]] constexpr bool is_valid(label_id id)
+{
+    return i32(id) >= 0;
+}
 
 /// The position an id names.
 /// `id` must be valid.
@@ -78,6 +88,10 @@ namespace sgl::check
     return isize(id);
 }
 [[nodiscard]] constexpr isize index_of(local_id id)
+{
+    return isize(id);
+}
+[[nodiscard]] constexpr isize index_of(label_id id)
 {
     return isize(id);
 }

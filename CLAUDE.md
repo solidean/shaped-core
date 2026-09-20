@@ -111,6 +111,11 @@ One-liner per library:
   Above that is the first semantic phase, `sgl::check::check` → `sgl::check::checked_module`: name resolution, type checking and evaluation as ONE demand-driven pass.
   It yields side tables over the untouched AST for an editor, and one flat typed tree per entry point, which is all an emitter reads.
   **The check pass is a tracer**: it carries `tests/samples/cube.sgl` against `prelude/prelude.sgl`, and every other construct is the one diagnostic `unsupported-yet`, never a guess.
+  **The flat tree has two forms.**
+  The structured one is what the language means and what inlining will write: labeled blocks that may be expressions, and `leave` from any depth.
+  The core one is what every target prints one to one, and `sgl::check::legalize` takes the first to the second.
+  `sgl::check::interpret` runs both, and a randomized differential test holds the legalizer to "behaves the same".
+  The source reaches `let` and `return` only so far, so control flow is built through `sgl::check::flat_builder`.
   Behind it, `sgl::emit::emit` writes ONE entry point as readable text for `hlsl_dx12`, `hlsl_vulkan`, `wgsl` or `msl`, with exactly the types and the binding it needs.
   **The `msl` text has met no Metal compiler yet**, and nothing builds it: slib has no metallib compiler, and sg's metal backend binds no vertex buffers or inline constants.
   The text carries its **final addresses** — member order is the location, an `@inline binding` sits where sg expects inline constants — so slib's binding pass is not needed behind it.
@@ -122,7 +127,8 @@ One-liner per library:
   Namespace `sgl`. Depends on clean-core alone, the emitters included, and the syntactic half must stay that way — an editor links it to parse.
   slib links sgl, never the reverse.
   [docs/spec/](libs/graphics/shaped-graphics-language/docs/spec/_index.md) is the language: normative rules with stable ids under `syntax/`, every "why" mirrored under `syntax/why/`,
-  `semantics/` is what the check pass and the emitters do, marked as deliberately thin, and ideas that are not spec yet are under `incubator/`.
+  `semantics/` is what the check pass, the abstract machine and the emitters do, marked as deliberately thin, and ideas that are not spec yet are under `incubator/`.
+  Its `evaluation.md` is the normative meaning of a flat tree, and `legalization.md` an informative appendix with the per-target table.
   **Every `sgl` fence in the spec is a test**, so the spec and the parser cannot drift apart silently.
   Early stage.
 * **`libs/graphics/shaped-viewer`** — professional, RTX-enabled visualization renderer with a dev-friendly API.

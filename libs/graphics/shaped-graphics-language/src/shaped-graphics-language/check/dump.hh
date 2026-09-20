@@ -26,6 +26,18 @@ namespace sgl::check
 /// Only the flat entry points, in the same format.
 [[nodiscard]] cc::string dump_entry_points(checked_module const& m);
 
+/// One flat tree that stands in `m` without being one of its entry points: a hand-built one, or a legalized one.
+/// Both forms dump: a nested statement is indented under the one that holds it, and a label is written `$name`.
+///
+///     (block $b
+///       (if (local c : bool)
+///         (then
+///           (leave $b)))
+///       (print (lit 1.0 : float)))
+///
+/// Total: an id that names nothing is written `?` or `<none>`.
+[[nodiscard]] cc::string dump_entry_point(checked_module const& m, flat_entry_point const& e);
+
 /// One line per diagnostic, in the order they were reported: `unknown-name @1:120+4 foo`.
 /// The number before the colon is the file, 0 for the prelude; the detail follows when there is one.
 [[nodiscard]] cc::string dump_diagnostics(checked_module const& m);

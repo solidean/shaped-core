@@ -37,6 +37,9 @@ enum class sgl::emit::error_kind : sgl::u8
     non_finite_literal,
     /// A flat tree the check pass does not produce: an unfilled node, or a call of something that is no builtin function.
     malformed_tree,
+    /// A flat tree in the structured form, which `check::legalize` has to take to the core form first.
+    /// The detail is the first violation `check::find_core_violation` names.
+    not_core,
 };
 
 struct sgl::emit::error
@@ -86,6 +89,10 @@ namespace sgl::emit
 /// No error depends on `t`, so an entry point that is written for one target is written for all of them.
 /// Deterministic: equal arguments give equal text.
 [[nodiscard]] emitted_text emit(check::checked_module const& m, isize entry_point, target t);
+
+/// The same for a flat tree that stands in `m` without being one of its entry points, such as a legalized one.
+/// `e` must be in the core form, or the result is the error `not-core`.
+[[nodiscard]] emitted_text emit_entry_point(check::checked_module const& m, check::flat_entry_point const& e, target t);
 
 /// One line per error, for tests and for reading by eye: `unsupported a binding that is not @inline: 'scene'`.
 [[nodiscard]] cc::string dump_errors(emitted_text const& e);

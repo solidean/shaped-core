@@ -162,16 +162,69 @@ m.at(symbol_id)  m.at(type_id)  m.at(range)  m.name_of(type_id)   // name_of giv
 #include <shaped-graphics-language/check/flat.hh>
 e.entry_stage  e.name  e.input  e.result  e.bindings   // stage, the name as written, edge structs, the LISTED bindings
 e.locals  e.exprs  e.stmts  e.body         // locals[0] is the parameter; at(id) / at(range) like the AST
-sgl::check::flat_expr                      // { type, from (origin), inlined_through, node }: flat_literal, flat_local_ref,
-                                           // flat_binding_member, flat_member, flat_construct, flat_call
-sgl::check::flat_stmt                      // flat_let, flat_return
+sgl::check::flat_expr                      // { type, from (origin), inlined_through, node }: flat_literal (float), flat_int_literal,
+                                           // flat_bool_literal, flat_local_ref, flat_binding_member, flat_member, flat_construct,
+                                           // flat_call { callee, intrinsic, is_pure, arguments }, flat_not, flat_and, flat_or,
+                                           // flat_block (a block EXPRESSION: structured form only)
+sgl::check::flat_stmt                      // flat_let, flat_var, flat_assign, flat_print, flat_if, flat_loop, flat_while, flat_for,
+                                           // flat_continue, flat_return; structured only: flat_block, flat_leave;
+                                           // core only: flat_once, flat_break
+e.labels  e.root                           // flat_label { name } per block / loop; label_id is a typed id like every other
+                                           // root is what `leave` names to return; none on a tree the check pass wrote
 e.names.mint("n")                          // -> "n", then "n_1", …; EVERY name an emitter writes comes from here
 e.names.reserve("main_ps")                 // -> false when taken; for a name that must not change
 
 #include <shaped-graphics-language/check/dump.hh>
 sgl::check::dump(m)                        // symbols, then entry points: (let n : vec3 = (call normalize … : vec3))
 sgl::check::dump_entry_points(m)
+sgl::check::dump_entry_point(m, e)         // one tree, either form: nested statements indented, labels as `$name`
 sgl::check::dump_diagnostics(m)            // `unknown-name @1:120+4 foo`: kind, file, span, detail
+```
+
+## The two forms of a flat tree
+
+```cpp
+// STRUCTURED: what the language means and what inlining will write. `block $b` is a statement or an EXPRESSION,
+//   `leave $b [value]` exits it from any depth, `continue $l` any enclosing loop; and / or short-circuit.
+// CORE: what a target prints 1:1. No block, no leave: `once`, `break` (innermost once or loop), `continue`
+//   (innermost loop, NO once in between), `return` at any depth, `&&` / `||` only over a right side without effect.
+// docs/spec/semantics/evaluation.md is the meaning (normative), legalization.md the rules and the per-target table.
+
+#include <shaped-graphics-language/check/flat_builder.hh>
+auto b = sgl::check::flat_builder::create(m, {.name = "main", .input = frag, .result = float_type});
+                                           // locals[0] is the parameter, e.root a label, every module name taken in the mint
+b.type_of(builtin::scalar_int)  b.type_named("frag")                 // -> type_id, none when the module has none
+b.literal(0.5)  b.int_literal(3)  b.bool_literal(true)  b.local(id)  b.member(object, "x")  b.construct(type, {…})
+b.call(builtin::add, {x, y})               // result type and purity from the prelude's declaration
+b.call_with_effect(builtin::saturate, {x}) // the same call as one that has an effect; the prelude declares none yet
+b.not_(x)  b.and_(x, y)  b.or_(x, y)  b.block_expr(label, type, {stmts…})
+auto const x = b.var("x", type, value);    // -> { local, stmt }; without a value it holds nothing. b.let("x", value) alike
+b.assign(place, value)  b.print(v)  b.if_(c, {then…}, {else…})  b.block(label, {…})  b.leave(label, value)
+b.loop(label, {…})  b.while_(label, c, {…})  b.for_(label, index_local, first, end, {…})  b.continue_(label)
+b.once({…})  b.break_()  b.return_(v)      // the core-only statements
+b.set_body({…});  b.e                      // a statement joins no list until a body names it; NOTHING is type checked
+                                           // a span given to a method must not alias the tree (it grows while read)
+
+#include <shaped-graphics-language/legalize/core.hh>
+sgl::check::is_core(e)                     // the definition of the core form
+sgl::check::find_core_violation(e)         // -> cc::optional<core_violation { reason, stmt, expr }>: the FIRST offending node
+sgl::check::has_effect(e, expr_id)         // a call that is not pure, or a block
+
+#include <shaped-graphics-language/legalize/legalize.hh>
+auto const core = sgl::check::legalize(m, e);   // structured -> core, same behaviour; a core tree comes back UNCHANGED
+                                           // E1-E4 (block expressions, pins, and/or, loop conditions), X1-X5 (exits)
+                                           // every name it adds is minted: pick_result, x_before, search_left, rows_continued
+sgl::check::legalize_options               // { skip_pinning, skip_flag_tests }: break a rule on purpose, for the tests' teeth
+
+#include <shaped-graphics-language/interpret/interpret.hh>
+auto const o = sgl::check::interpret(m, e, {.parameter = value, .bindings = {…}}, {.fuel = 1'000'000});
+                                           // runs BOTH forms; left to right, each operand once; f32 and wrapping i32
+o.status                                   // ok, out_of_fuel, fell_off_the_end, type_error, uninitialized_read: never asserts
+o.result  o.trace  o.detail                // value { type, leaves }; trace = every print, and every call with an effect
+o == other                                 // status, result and trace; NOT the detail
+sgl::check::zero_value(m, type)  sgl::check::leaf_count_of(m, type)   // a value is its scalars in field order; mat4 is 16
+sgl::check::scalar::of(0.5f)  .as_float()  .as_int()  .as_bool()      // equality is on the BITS
+sgl::check::dump(o)                        // `ok 1.5 | print 1 | print true`
 ```
 
 ## Emitting
@@ -184,6 +237,8 @@ sgl::emit::all_targets()                   // -> cc::span<target const>
 auto const r = sgl::emit::emit(m, 0, sgl::emit::target::wgsl);   // -> emitted_text; the isize is a position in m.entry_points
                                            // ONE entry point per call: it, and exactly the structs and the binding it needs
                                            // TOTAL and deterministic; the text carries FINAL addresses, no pass numbers it later
+sgl::emit::emit_entry_point(m, e, t)       // the same for a tree that is no entry point of m: a legalized one, a hand-built one
+                                           // e must be CORE, or the result is the error `not-core` with the first violation
 r.has_text()  r.text                       // text is empty when there are errors
 r.errors                                   // emit::error { kind, symbol, detail }; the SAME for every target
 sgl::emit::to_string(target)  sgl::emit::to_string(error_kind)   // "hlsl-vulkan", "reserved-entry-point-name"
@@ -264,6 +319,14 @@ sgl::print_source(file)      // == file.source for EVERY input: the lossless inv
 - **`unsupported-yet` is never a guess.** Its detail names the construct, and the construct's type is the error type.
 - **A `@builtin` is keyed by its NAME** (`check::builtin_of`), and an `@operator` function is found through its operator alone: no lookup sees its name.
 - **An entry point with any error has no flat tree.** `m.entry_points` holds only what an emitter may read.
+- **The check pass writes `let` and `return` only**, which is core already; every other flat statement comes from `flat_builder` until the source reaches them.
+  `compile_to_text` legalizes anyway, so the pass is in the pipeline before anything needs it.
+- **`emit` does not legalize.** It refuses a structured tree with `not-core`; call `check::legalize` first.
+- **A `continue` must not cross a `once`.** In C-like text it would end the `do … while (false)`, and in WGSL's `loop { … break; }` it would spin.
+  The legalizer sets a flag and breaks instead, and `find_core_violation` refuses a tree that tries.
+- **Purity is declared, never inferred.** `@pure` on a prelude function lands in `function_info::is_pure` and on every `flat_call`.
+  An unmarked `@builtin` is assumed to have an effect, which costs a pin and never a wrong result.
+- **The interpreter's arithmetic is not a target's.** It is exact about ORDER, which is what it is for; `normalize` takes its root by iteration.
 - **A flat tree has no splat and no object.** A splat is one `flat_member` per field, over a temporary local when its value is no local.
   A returned object is a `flat_construct` in FIELD order.
 - **A check diagnostic is not an `sgl::diagnostic`.** It is a `located_diagnostic`: a module has several files, so it names one, and it carries a detail.

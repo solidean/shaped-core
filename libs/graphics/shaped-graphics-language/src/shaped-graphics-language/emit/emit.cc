@@ -55,6 +55,8 @@ cc::string_view sgl::emit::to_string(error_kind kind)
         return "non-finite-literal";
     case error_kind::malformed_tree:
         return "malformed-tree";
+    case error_kind::not_core:
+        return "not-core";
     }
     return "";
 }
@@ -96,7 +98,14 @@ sgl::emit::emitted_text sgl::emit::emit(check::checked_module const& m, sgl::isi
         return result;
     }
 
-    auto const& e = m.entry_points[entry_point];
+    return emit_entry_point(m, m.entry_points[entry_point], t);
+}
+
+sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const& m,
+                                                    check::flat_entry_point const& e,
+                                                    target t)
+{
+    auto result = emitted_text();
     impl::validate(m, e, result.errors);
     if (!result.errors.empty())
         return result;

@@ -113,7 +113,11 @@ struct flattener
             auto const intrinsic = c.out.at(where.symbol).intrinsic;
             if (intrinsic == builtin::none)
                 return fail();
-            return add_expr(type, id, flat_call{.callee = where.symbol, .intrinsic = intrinsic, .arguments = arguments});
+            return add_expr(type, id,
+                            flat_call{.callee = where.symbol,
+                                      .intrinsic = intrinsic,
+                                      .is_pure = c.out.functions[c.out.at(where.symbol).info].is_pure,
+                                      .arguments = arguments});
         }
         return fail();
     }

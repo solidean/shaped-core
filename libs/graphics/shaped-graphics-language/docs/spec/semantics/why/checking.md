@@ -75,6 +75,12 @@ That could be reported where the second one is declared.
 It is reported at the call because a declaration's parameter types are only known once it is compiled, which a call demands and a declaration does not.
 Once conversions exist, ambiguity at the call is the rule that is needed anyway.
 
+## CHK-106
+
+Whether a call has an effect decides what the compiler may leave out around it, and only the declaration can know.
+A builtin is a name the compiler maps to something in each target, so its purity is a fact about the target's function, and the prelude is where such facts stand.
+The default is the safe side: a builtin nobody marked keeps its place among its neighbours, which costs a local and never a wrong result.
+
 ## CHK-97
 
 Full inlining is the language's model, so a target never sees a function of the program, a generic or a lambda.

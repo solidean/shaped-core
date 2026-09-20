@@ -5,6 +5,7 @@
 #include <shaped-graphics-language/check/check.hh>
 #include <shaped-graphics-language/driver/prelude.hh>
 #include <shaped-graphics-language/emit/impl/dialect.hh>
+#include <shaped-graphics-language/legalize/legalize.hh>
 #include <shaped-graphics-language/source/format_diagnostic.hh>
 #include <shaped-graphics-language/syntax/parsed_file.hh>
 
@@ -77,7 +78,8 @@ cc::result<cc::string, cc::string> sgl::compile_to_text(text_request const& requ
                                     request.source_name, e.name, emit::impl::stage_name(e.entry_stage),
                                     emit::impl::stage_name(request.stage)));
 
-    auto emitted = emit::emit(m, index, request.target);
+    // The check pass writes the structured form, and a target prints the core form.
+    auto emitted = emit::emit_entry_point(m, check::legalize(m, e), request.target);
     if (!emitted.has_text())
     {
         auto text = cc::string();

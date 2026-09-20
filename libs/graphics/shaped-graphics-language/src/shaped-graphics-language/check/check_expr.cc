@@ -282,7 +282,7 @@ type_id checker::check_literal(function_scope& scope, ast::expr_id id, ast::lite
     switch (classify_number(text))
     {
     case number_class::plain_integer:
-        unsupported(file, where, "an integer literal, since the prelude has no int");
+        unsupported(file, where, "an integer literal, which the pass does not type yet");
         return error_type;
     case number_class::other:
         unsupported(file, where, "a number literal with a prefix, a suffix or a p exponent");

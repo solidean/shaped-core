@@ -43,7 +43,17 @@ public:
     [[nodiscard]] virtual bool has_struct_constructor() const = 0;
 
     /// One line without indentation and without a line break: `let n: vec3f = normalize(p.normal);`.
+    /// A mutable local without a value is declared and nothing else: `float x;`, and `var x: f32;`, which WGSL zeroes.
     virtual void write_local(cc::string& out, local_declaration const& local) const = 0;
+
+    /// True for a target with C's control flow: `if (c)` with the brace on a line of its own, `while (true)`, and
+    /// `do { … } while (false);` for a `once`.
+    /// False for WGSL: `if c {`, `loop {`, and a `once` that is `loop { … break; }`.
+    [[nodiscard]] virtual bool is_c_like() const = 0;
+
+    /// The head of a `for` over an int range, without the brace: `for (int i = 0; i < n; ++i)`.
+    virtual void write_for_head(cc::string& out, cc::string_view index, cc::string_view first, cc::string_view end) const
+        = 0;
 
     /// The structs of `p.structs` and the constant block, each followed by an empty line.
     virtual void write_declarations(cc::string& out, plan const& p) const = 0;

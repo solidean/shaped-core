@@ -2,6 +2,7 @@
 
 #include <clean-core/string/format.hh>
 #include <shaped-graphics-language/emit/reserved_words.hh>
+#include <shaped-graphics-language/legalize/core.hh>
 
 namespace
 {
@@ -28,6 +29,7 @@ block_layout layout_of(builtin b)
     switch (b)
     {
     case builtin::scalar_float:
+    case builtin::scalar_int:
         return {.size = 4, .wgsl_alignment = 4, .msl_size = 4, .msl_alignment = 4};
     case builtin::float3:
     case builtin::vec3:
@@ -62,6 +64,14 @@ i32 arity_of(builtin b)
     case builtin::scale_color:
     case builtin::multiply:
     case builtin::add:
+    case builtin::subtract:
+    case builtin::less:
+    case builtin::equal:
+    case builtin::add_int:
+    case builtin::subtract_int:
+    case builtin::multiply_int:
+    case builtin::less_int:
+    case builtin::equal_int:
         return 2;
     default:
         return -1;
@@ -123,7 +133,9 @@ struct validator
         auto positions = 0;
         for (auto const& member : m.at(info.members))
         {
-            if (!is_builtin_type(m, member.type) || builtin_of_type(m, member.type) == builtin::mat4)
+            auto const b = builtin_of_type(m, member.type);
+            // A bool crosses no edge in WGSL, and an int would need a flat interpolation nothing states yet.
+            if (b == builtin::none || b == builtin::mat4 || b == builtin::scalar_int || b == builtin::boolean)
                 report(error_kind::unsupported, info.symbol,
                        cc::format("a member of type '{}' in a {}: '{}.{}'", m.name_of(member.type), role_name(role),
                                   name, member.name));
@@ -166,7 +178,7 @@ struct validator
 
             auto is_placed = true;
             for (auto const& member : m.at(b.members))
-                if (!is_builtin_type(m, member.type))
+                if (layout_of(builtin_of_type(m, member.type)).size == 0)
                 {
                     is_placed = false;
                     report(error_kind::unsupported, id,
@@ -202,6 +214,15 @@ struct validator
 
     void tree()
     {
+        if (auto const violation = find_core_violation(e); violation.has_value())
+            report(error_kind::not_core, e.function, violation.value().reason);
+        for (auto const& s : e.stmts)
+            if (s.node.is<flat_print>())
+            {
+                report(error_kind::unsupported, e.function, "a print, which no target writes yet");
+                break;
+            }
+
         for (auto const& x : e.exprs)
         {
             if (x.node.is<flat_invalid>())

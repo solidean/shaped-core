@@ -1,5 +1,5 @@
 // The prelude: the file the compiler places in front of every program.
-// A tracer: it holds what tests/samples/cube.sgl needs, and nothing the cube does not need.
+// A tracer: it holds what tests/samples/cube.sgl needs, and what the tests of the flat tree's two forms need.
 // Every declaration is @builtin: the compiler and each emitter know what stands behind the name.
 
 // a struct line without a block is opaque: there is no member to name
@@ -38,13 +38,29 @@
 /// Column-major, and a vector stands to its right.
 @builtin struct mat4
 
-@builtin fun normalize(v: vec3) -> vec3
-@builtin fun dot(a: vec3, b: vec3) -> float
-@builtin fun saturate(x: float) -> float
+/// 32 bits, signed; its arithmetic wraps.
+@builtin struct int
+
+@builtin struct bool
+
+// @pure: a call has no effect, so nobody can tell whether or when it ran.
+// A @builtin without it is assumed to have one, and the compiler then keeps its place among its neighbours.
+@builtin @pure fun normalize(v: vec3) -> vec3
+@builtin @pure fun dot(a: vec3, b: vec3) -> float
+@builtin @pure fun saturate(x: float) -> float
 
 // An @operator function is found through its operator alone: its name is documentation, and no lookup sees it.
-@builtin @operator("*") fun transform_position(m: mat4, p: pos3) -> hpos4
-@builtin @operator("*") fun transform_direction(m: mat4, v: vec3) -> vec3
-@builtin @operator("*") fun scale_color(c: float3, s: float) -> float3
-@builtin @operator("*") fun multiply(a: float, b: float) -> float
-@builtin @operator("+") fun add(a: float, b: float) -> float
+@builtin @pure @operator("*") fun transform_position(m: mat4, p: pos3) -> hpos4
+@builtin @pure @operator("*") fun transform_direction(m: mat4, v: vec3) -> vec3
+@builtin @pure @operator("*") fun scale_color(c: float3, s: float) -> float3
+@builtin @pure @operator("*") fun multiply(a: float, b: float) -> float
+@builtin @pure @operator("+") fun add(a: float, b: float) -> float
+@builtin @pure @operator("-") fun subtract(a: float, b: float) -> float
+@builtin @pure @operator("<") fun less(a: float, b: float) -> bool
+@builtin @pure @operator("==") fun equal(a: float, b: float) -> bool
+
+@builtin @pure @operator("+") fun add_int(a: int, b: int) -> int
+@builtin @pure @operator("-") fun subtract_int(a: int, b: int) -> int
+@builtin @pure @operator("*") fun multiply_int(a: int, b: int) -> int
+@builtin @pure @operator("<") fun less_int(a: int, b: int) -> bool
+@builtin @pure @operator("==") fun equal_int(a: int, b: int) -> bool

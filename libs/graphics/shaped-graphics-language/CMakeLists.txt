@@ -38,7 +38,14 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/check/check_expr.cc
     src/shaped-graphics-language/check/dump.cc
     src/shaped-graphics-language/check/flat.cc
+    src/shaped-graphics-language/check/flat_builder.cc
     src/shaped-graphics-language/check/flatten.cc
+
+    src/shaped-graphics-language/legalize/core.cc
+    src/shaped-graphics-language/legalize/legalize_exits.cc
+    src/shaped-graphics-language/legalize/legalize_exprs.cc
+
+    src/shaped-graphics-language/interpret/interpret.cc
 
     src/shaped-graphics-language/emit/emit.cc
     src/shaped-graphics-language/emit/reserved_words.cc
@@ -153,9 +160,17 @@ target_sources(shaped-graphics-language
     src/shaped-graphics-language/check/checked_module.hh
     src/shaped-graphics-language/check/dump.hh
     src/shaped-graphics-language/check/flat.hh
+    src/shaped-graphics-language/check/flat_builder.hh
     src/shaped-graphics-language/check/ids.hh
     src/shaped-graphics-language/check/symbols.hh
     src/shaped-graphics-language/check/impl/checker.hh
+
+    src/shaped-graphics-language/legalize/core.hh
+    src/shaped-graphics-language/legalize/legalize.hh
+    src/shaped-graphics-language/legalize/impl/legalizer.hh
+    src/shaped-graphics-language/legalize/impl/walk.hh
+
+    src/shaped-graphics-language/interpret/interpret.hh
 
     src/shaped-graphics-language/emit/emit.hh
     src/shaped-graphics-language/emit/reserved_words.hh
@@ -201,7 +216,16 @@ if(SC_BUILD_TESTS)
         tests/check/declaration-check-test.cc
         tests/check/expression-check-test.cc
 
+        tests/interpret/interpret-test.cc
+
+        tests/legalize/flat-test-support.hh
+        tests/legalize/random-program.hh
+        tests/legalize/random-program.cc
+        tests/legalize/differential-test.cc
+        tests/legalize/legalize-rules-test.cc
+
         tests/emit/emit-test-support.hh
+        tests/emit/core-emit-test.cc
         tests/emit/cube-emit-test.cc
         tests/emit/emit-test.cc
 

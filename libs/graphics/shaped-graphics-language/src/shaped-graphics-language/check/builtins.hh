@@ -19,6 +19,10 @@ enum class sgl::check::builtin : sgl::u8
     pos3,
     hpos4,
     mat4,
+    /// `int`: 32 bits, signed, and its arithmetic wraps.
+    scalar_int,
+    /// `bool`.
+    boolean,
 
     normalize,
     dot,
@@ -28,6 +32,14 @@ enum class sgl::check::builtin : sgl::u8
     scale_color,
     multiply,
     add,
+    subtract,
+    less,
+    equal,
+    add_int,
+    subtract_int,
+    multiply_int,
+    less_int,
+    equal_int,
 };
 
 namespace sgl::check

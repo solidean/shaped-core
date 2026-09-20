@@ -18,6 +18,7 @@ Back to the [semantics](_index.md); the reasons are in [why/emitting.md](why/emi
 * **EMIT-5** One emission writes one entry point: that entry point, and exactly the structs and the binding it needs.
 * **EMIT-6** Nothing in the text of one entry point depends on the text of another ([why](why/emitting.md#emit-6)).
 * **EMIT-7** An emitter reads the flat tree, the module's types and the module's bindings, and never an AST.
+* **EMIT-65** An emitter reads a tree in the [core form](legalization.md#the-core-form), and it transforms nothing: the legalizer runs in front of it.
 * **EMIT-8** Emitting is deterministic: one checked module, one entry point and one target give one text.
 
 ## Errors
@@ -27,6 +28,8 @@ Back to the [semantics](_index.md); the reasons are in [why/emitting.md](why/emi
 * **EMIT-11** An entry point the module does not hold is `unknown-entry-point`.
 * **EMIT-12** A construct that no emitter carries yet is `unsupported`, and its detail names the construct; an emitter never guesses an address.
 * **EMIT-13** No error depends on the target: an entry point is written for every target or for none ([why](why/emitting.md#emit-13)).
+* **EMIT-66** A tree that is not core is the error `not-core`, and its detail names the first node that offends.
+* **EMIT-67** A `print` is `unsupported`: no target writes one yet.
 
 ## Names
 
@@ -58,6 +61,8 @@ struct target_ {
 | `float3`, `vec3`, `pos3` | `float3` | `vec3f` | `float3` |
 | `float4`, `hpos4` | `float4` | `vec4f` | `float4` |
 | `mat4` | `float4x4` | `mat4x4f` | `float4x4` |
+| `int` | `int` | `i32` | `int` |
+| `bool` | `bool` | `bool` | `bool` |
 
 ## Addresses
 
@@ -70,7 +75,7 @@ struct target_ {
 * **EMIT-30** A member of a render target struct at location i is `SV_Targeti` in HLSL and `@location(i)` in WGSL.
 * **EMIT-31** A semantic is made from the name as the program writes it, whatever EMIT-18 made of the member.
 * **EMIT-32** A vertex input member whose semantic would start with `SV_` is `system-value-semantic`.
-* **EMIT-33** A member of an edge struct is of a builtin type other than `mat4`, or it is `unsupported`.
+* **EMIT-33** A member of an edge struct is of a builtin type other than `mat4`, `int` and `bool`, or it is `unsupported`.
 * **EMIT-34** `@position` anywhere but in a stage link, a second `@position`, and one struct as both edges are `unsupported`.
 
 | stage | parameter | result |
@@ -93,7 +98,7 @@ struct pixel_input
 * **EMIT-36** An `@inline binding` is a struct of its members and one global of that struct, which has the binding's name.
 * **EMIT-37** The global is where `sg` expects inline constants, by the table below.
 * **EMIT-38** A binding that is not `@inline`, and a second `@inline` binding, are `unsupported`.
-* **EMIT-39** A member of an `@inline` binding is of a builtin type, or it is `unsupported`.
+* **EMIT-39** A member of an `@inline` binding is of a builtin type other than `bool`, or it is `unsupported`.
 * **EMIT-40** A member's offset follows HLSL's packing of a constant buffer, and `hlsl-vulkan` states it on every member ([why](why/emitting.md#emit-40)).
 * **EMIT-41** A member that WGSL's layout or MSL's places at another offset is `layout-mismatch`, and its detail gives the offset in each.
 
@@ -123,6 +128,10 @@ struct pixel_input
 * **EMIT-53** A construction of a builtin type is a call of the target's type: `float3(x, y, z)`, `vec3f(x, y, z)`.
 * **EMIT-54** A construction of a struct of the program is `name(a, b)` in WGSL.
 * **EMIT-55** In HLSL it is a local that is declared and then assigned member by member; a returned one is minted from `result` ([why](why/emitting.md#emit-55)).
+* **EMIT-68** Control flow is written by [the table of the core form](legalization.md#the-table), and a nested body is one level deeper.
+* **EMIT-69** The C-like targets put a brace on a line of its own and a condition in parentheses; WGSL puts the brace behind the head and writes the condition bare.
+* **EMIT-70** An `int` literal is its decimal text, and the one that does not fit behind a minus is `(-2147483647 - 1)`.
+* **EMIT-71** A `while` whose condition builds a struct member by member is written as a loop that tests at its top, so the struct is built before every test.
 
 ```hlsl
 pixel_input main_vs(cube_vertex v)
@@ -179,12 +188,13 @@ So `{float3; float}` is `layout-mismatch`: the `float` is at byte 12 in HLSL and
 |---|---|
 | `module-has-errors` | EMIT-10 |
 | `unknown-entry-point` | EMIT-11 |
-| `unsupported` | EMIT-12, EMIT-33, EMIT-34, EMIT-38, EMIT-39 |
+| `unsupported` | EMIT-12, EMIT-33, EMIT-34, EMIT-38, EMIT-39, EMIT-67 |
 | `reserved-entry-point-name` | EMIT-21 |
 | `system-value-semantic` | EMIT-32 |
 | `layout-mismatch` | EMIT-41 |
 | `non-finite-literal` | EMIT-50 |
 | `malformed-tree` | a flat tree the check pass does not produce |
+| `not-core` | EMIT-66 |
 
 ## Open
 

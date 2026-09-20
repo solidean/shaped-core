@@ -66,10 +66,11 @@ struct b:
 * **CHK-37** An `@operator` function is found through its operator alone: its own name is in no scope ([why](why/checking.md#chk-37)).
 * **CHK-38** The pass knows the attributes of the table below, each on the node kind the table names.
 * **CHK-39** Any other attribute, anywhere, is `unsupported-yet`, and arguments on a known attribute that takes none are `invalid-attribute-arguments`.
+* **CHK-106** `@pure` on a function says that a call of it has no [effect](evaluation.md#effects); a `@builtin` without it is assumed to have one ([why](why/checking.md#chk-106)).
 
 | on | the known attributes |
 |---|---|
-| a function | `@builtin`, `@operator`, `@vertex`, `@pixel` |
+| a function | `@builtin`, `@pure`, `@operator`, `@vertex`, `@pixel` |
 | a struct | `@builtin`, `@vertex`, `@pixel` |
 | a binding | `@inline` |
 | a struct field | `@position` |
@@ -82,8 +83,8 @@ struct b:
     y: float
     z: float
 
-@builtin fun dot(a: vec3, b: vec3) -> float
-@builtin @operator("+") fun add(a: float, b: float) -> float
+@builtin @pure fun dot(a: vec3, b: vec3) -> float
+@builtin @pure @operator("+") fun add(a: float, b: float) -> float
 ```
 
 ## Bindings
@@ -127,7 +128,7 @@ struct b:
 ## Expressions
 
 * **CHK-60** A number literal with a DOT or an exponent, in decimal and without a suffix, is of the prelude's type `float`; a sign directly on it is part of it.
-* **CHK-61** An integer literal is `unsupported-yet`, since the prelude has no `int`, and so is a literal with a prefix, a suffix or a `p` exponent.
+* **CHK-61** An integer literal is `unsupported-yet`, since the pass does not type one yet, and so is a literal with a prefix, a suffix or a `p` exponent.
 * **CHK-62** A name resolves to a local or a parameter first, and to a symbol of the module after that; one that resolves to nothing is `unknown-name`.
 * **CHK-63** A name that stands for a struct, a function or a binding is no value by itself: it is `unsupported-yet`.
 * **CHK-64** `value.name` is the field `name` of the struct type of `value`; a type without that field is the normal error `unknown-member`.
@@ -182,7 +183,9 @@ let color = float4(..lit, 1.0)
 * **CHK-94** The pass has two results: side tables over the untouched ASTs, and one **flat tree** per entry point.
 * **CHK-95** The side tables give each expression its type and its **target**: a local, a parameter, a symbol, the chosen overload, a constructor, a field or a binding member.
 * **CHK-96** An expression in a type position has the type it names.
-* **CHK-97** A flat tree holds locals, `let`, `return`, member access, binding members, constructions, literals and calls of `@builtin` functions, and nothing else ([why](why/checking.md#chk-97)).
+* **CHK-97** A flat tree the pass writes holds locals, `let`, `return`, member access, binding members, constructions, literals and calls of `@builtin` functions ([why](why/checking.md#chk-97)).
+* **CHK-107** The flat tree as a data structure holds more: blocks, exits, loops, `var`, assignment and the logical operators, whose meaning is [evaluation.md](evaluation.md).
+* **CHK-108** A flat call records whether its callee is `@pure`, so a reader of the tree needs no symbol to know whether a call has an effect.
 * **CHK-98** Every flat expression has a type, and none has the error type.
 * **CHK-99** Every flat node names the AST node it came from and the chain of call sites it was inlined through, which is empty while nothing is inlined.
 * **CHK-100** An entry point whose signature or body reported an error has no flat tree.

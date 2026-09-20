@@ -118,6 +118,9 @@ struct sgl::check::function_info
     ast::range_of<symbol_id> bindings;
     /// `@vertex` or `@pixel` makes the function an entry point.
     stage entry_stage = stage::none;
+    /// Carries `@pure`: a call of it has no effect, so nobody can tell whether or when it ran.
+    /// A `@builtin` without it is assumed to have one.
+    bool is_pure = false;
 
     constexpr bool operator==(function_info const&) const = default;
 };

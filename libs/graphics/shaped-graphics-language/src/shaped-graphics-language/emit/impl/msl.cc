@@ -36,6 +36,10 @@ public:
             return "float4";
         case builtin::mat4:
             return "float4x4";
+        case builtin::scalar_int:
+            return "int";
+        case builtin::boolean:
+            return "bool";
         default:
             return "";
         }
@@ -47,6 +51,13 @@ public:
 
     // MSL could brace-initialize, which would drop the member names from the text.
     bool has_struct_constructor() const override { return false; }
+
+    bool is_c_like() const override { return true; }
+
+    void write_for_head(cc::string& out, cc::string_view index, cc::string_view first, cc::string_view end) const override
+    {
+        out.appendf("for (int {} = {}; {} < {}; ++{})", index, first, index, end, index);
+    }
 
     void write_local(cc::string& out, local_declaration const& local) const override
     {

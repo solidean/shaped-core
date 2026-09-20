@@ -2,6 +2,7 @@
 
 #include <clean-core/string/format.hh>
 #include <clean-core/string/to_string.hh>
+#include <shaped-graphics-language/legalize/impl/walk.hh>
 
 namespace
 {
@@ -13,6 +14,10 @@ using namespace sgl::emit::impl;
 /// How tightly an expression holds together, loosest first; the same ladder in every target so far.
 enum class level : u8
 {
+    logical_or,
+    logical_and,
+    /// `<` and `==`, which no target chains.
+    comparison,
     additive,
     multiplicative,
     /// A negative literal.
@@ -42,17 +47,72 @@ cc::string literal_text(f64 value)
     return text;
 }
 
+/// `-2147483648` is no literal anywhere: it is a minus in front of a number that does not fit.
+cc::string int_literal_text(i32 value)
+{
+    if (value == -2147483647 - 1)
+        return "(-2147483647 - 1)";
+    return cc::to_string(value);
+}
+
 struct writer
 {
     plan& p;
     dialect const& d;
     cc::string out;
+    /// How many levels the next line is indented by; the body of the function is level 1.
+    int depth = 1;
+
+    static void indent(cc::string& text, int levels)
+    {
+        for (auto i = 0; i < levels; ++i)
+            text += k_indent;
+    }
 
     void line(cc::string_view text)
     {
-        out += k_indent;
+        indent(out, depth);
         out += text;
         out += "\n";
+    }
+
+    /// `head` and the brace that opens its body, where the target puts it.
+    void open(cc::string_view head)
+    {
+        if (d.is_c_like())
+        {
+            line(head);
+            line("{");
+        }
+        else
+            line(cc::format("{} {{", head));
+        ++depth;
+    }
+
+    /// Closes one body and opens the next under `head`: an `else`.
+    void reopen(cc::string_view head)
+    {
+        --depth;
+        if (d.is_c_like())
+        {
+            line("}");
+            line(head);
+            line("{");
+        }
+        else
+            line(cc::format("}} {} {{", head));
+        ++depth;
+    }
+
+    void close(cc::string_view tail = "")
+    {
+        --depth;
+        line(cc::format("}}{}", tail));
+    }
+
+    cc::string condition_text(cc::string_view keyword, cc::string_view condition) const
+    {
+        return d.is_c_like() ? cc::format("{} ({})", keyword, condition) : cc::format("{} {}", keyword, condition);
     }
 
     static cc::string wrapped(rendered r, level needed)
@@ -66,6 +126,27 @@ struct writer
         auto const tighter = level(u8(own) + 1);
         return {.text = cc::format("{} {} {}", wrapped(cc::move(lhs), own), op, wrapped(cc::move(rhs), tighter)),
                 .binds = own};
+    }
+
+    /// `&&` and `||` never stand bare inside each other: WGSL refuses the mix, and no reader should need the ladder.
+    static rendered logical(cc::string_view op, level own, rendered lhs, rendered rhs)
+    {
+        auto const needed_left = lhs.binds == own ? own : level::comparison;
+        return {.text = cc::format("{} {} {}", wrapped(cc::move(lhs), needed_left), op,
+                                   wrapped(cc::move(rhs), level::comparison)),
+                .binds = own};
+    }
+
+    /// True when writing `id` puts lines in front of the statement that holds it: a struct built member by member.
+    /// Such an expression cannot stand where it is evaluated more than once, or behind an `else`.
+    bool writes_lines(flat_expr_id id) const
+    {
+        auto const& x = p.e.at(id);
+        if (needs_member_assignment(x))
+            return true;
+        auto result = false;
+        check::impl::for_each_operand(p.e, x, [&](flat_expr_id operand) { result = result || writes_lines(operand); });
+        return result;
     }
 
     bool needs_member_assignment(flat_expr const& x) const
@@ -104,13 +185,19 @@ struct writer
         for (auto i = isize(0); i < arguments.size(); ++i)
         {
             if (is_split)
-                text.appendf("{}\n{}{}", i == 0 ? "" : ",", k_indent, k_indent);
+            {
+                text += i == 0 ? "\n" : ",\n";
+                indent(text, depth + 1);
+            }
             else if (i != 0)
                 text += ", ";
             text += expr(arguments[i]).text;
         }
         if (is_split)
-            text.appendf("\n{}", k_indent);
+        {
+            text += "\n";
+            indent(text, depth);
+        }
         text += ")";
         return {.text = cc::move(text)};
     }
@@ -138,9 +225,20 @@ struct writer
             return {.text = cc::format("{}.xyz", wrapped(transformed(c, 0.0), level::primary))};
         case builtin::scale_color:
         case builtin::multiply:
+        case builtin::multiply_int:
             return binary("*", level::multiplicative, expr(arguments[0]), expr(arguments[1]));
         case builtin::add:
+        case builtin::add_int:
             return binary("+", level::additive, expr(arguments[0]), expr(arguments[1]));
+        case builtin::subtract:
+        case builtin::subtract_int:
+            return binary("-", level::additive, expr(arguments[0]), expr(arguments[1]));
+        case builtin::less:
+        case builtin::less_int:
+            return binary("<", level::comparison, expr(arguments[0]), expr(arguments[1]));
+        case builtin::equal:
+        case builtin::equal_int:
+            return binary("==", level::comparison, expr(arguments[0]), expr(arguments[1]));
         default:
             break;
         }
@@ -161,62 +259,171 @@ struct writer
     {
         auto const& x = p.e.at(id);
         auto result = rendered();
-        x.node.visit([&](flat_invalid const&) {}, [&](flat_literal const& l)
-                     { result = {.text = literal_text(l.value), .binds = l.value < 0 ? level::unary : level::primary}; },
-                     [&](flat_local_ref const& l) { result = {.text = p.locals[index_of(l.local)]}; },
-                     [&](flat_binding_member const& b)
-                     {
-                         auto const& constants = p.constants.value();
-                         result = {.text = cc::format("{}.{}", constants.name, constants.members[b.member].name)};
-                     },
-                     [&](flat_member const& member)
-                     {
-                         auto const object_type = p.e.at(member.object).type;
-                         auto object = wrapped(expr(member.object), level::primary);
-                         // A builtin's fields are spelled alike everywhere: x, y, z, w.
-                         auto const name
-                             = is_builtin_type(p.m, object_type)
-                                 ? cc::string_view(p.m.at(p.m.at(object_type).members)[member.member].name)
-                                 : cc::string_view(
-                                       p.structs[p.struct_of_type[index_of(object_type)]].members[member.member].name);
-                         result = {.text = cc::format("{}.{}", object, name)};
-                     },
-                     [&](flat_construct const&) { result = construct(x, is_broken); },
-                     [&](flat_call const& c) { result = call(c); });
+        x.node.visit(
+            [&](flat_invalid const&) {}, [&](flat_literal const& l)
+            { result = {.text = literal_text(l.value), .binds = l.value < 0 ? level::unary : level::primary}; },
+            [&](flat_int_literal const& l)
+            {
+                auto const is_wrapped = l.value == -2147483647 - 1;
+                result = {.text = int_literal_text(l.value),
+                          .binds = l.value < 0 && !is_wrapped ? level::unary : level::primary};
+            },
+            [&](flat_bool_literal const& l) { result = {.text = l.value ? "true" : "false"}; },
+            [&](flat_local_ref const& l) { result = {.text = p.locals[index_of(l.local)]}; },
+            [&](flat_binding_member const& b)
+            {
+                auto const& constants = p.constants.value();
+                result = {.text = cc::format("{}.{}", constants.name, constants.members[b.member].name)};
+            },
+            [&](flat_member const& member)
+            {
+                auto const object_type = p.e.at(member.object).type;
+                auto object = wrapped(expr(member.object), level::primary);
+                // A builtin's fields are spelled alike everywhere: x, y, z, w.
+                auto const name
+                    = is_builtin_type(p.m, object_type)
+                        ? cc::string_view(p.m.at(p.m.at(object_type).members)[member.member].name)
+                        : cc::string_view(p.structs[p.struct_of_type[index_of(object_type)]].members[member.member].name);
+                result = {.text = cc::format("{}.{}", object, name)};
+            },
+            [&](flat_construct const&) { result = construct(x, is_broken); },
+            [&](flat_call const& c) { result = call(c); }, [&](flat_not const& n)
+            { result = {.text = cc::format("!{}", wrapped(expr(n.operand), level::primary)), .binds = level::unary}; },
+            [&](flat_and const& a) { result = logical("&&", level::logical_and, expr(a.lhs), expr(a.rhs)); },
+            [&](flat_or const& o) { result = logical("||", level::logical_or, expr(o.lhs), expr(o.rhs)); },
+            // never in a core tree, which is all that reaches a writer
+            [&](flat_block const&) {});
         return result;
+    }
+
+    void body(ast::range_of<flat_stmt_id> range)
+    {
+        for (auto const id : p.e.at(range))
+            statement(p.e.at(id));
+    }
+
+    /// `is_chained` writes `else if` onto the `if` before it.
+    void branch(flat_if const& s, bool is_chained)
+    {
+        auto const head = condition_text(is_chained ? "else if" : "if", expr(s.condition).text);
+        if (is_chained)
+            reopen(head);
+        else
+            open(head);
+        body(s.then_body);
+
+        auto const else_body = p.e.at(s.else_body);
+        if (else_body.empty())
+            return close();
+        // `else if` reads better than an `if` nested in an `else`, as long as the condition writes no line of its own
+        auto const* const nested = else_body.size() == 1 ? p.e.at(else_body[0]).node.try_as<flat_if>() : nullptr;
+        if (nested != nullptr && !writes_lines(nested->condition))
+            return branch(*nested, true);
+        reopen("else");
+        body(s.else_body);
+        close();
+    }
+
+    void loop_while(flat_while const& s)
+    {
+        if (!writes_lines(s.condition))
+        {
+            open(condition_text("while", expr(s.condition).text));
+            body(s.body);
+            return close();
+        }
+        // The lines the condition writes must run before every test, so the test moves into the loop.
+        open(d.is_c_like() ? "while (true)" : "loop");
+        auto const condition = cc::format("!{}", wrapped(expr(s.condition), level::primary));
+        open(condition_text("if", condition));
+        line("break;");
+        close();
+        body(s.body);
+        close();
+    }
+
+    void once(flat_once const& s)
+    {
+        if (d.is_c_like())
+        {
+            open("do");
+            body(s.body);
+            return close(" while (false);");
+        }
+        // WGSL has no `do`: a loop that ends in a `break` runs once, and the `break` is left out where no path reaches it
+        open("loop");
+        body(s.body);
+        auto const statements = p.e.at(s.body);
+        auto const ends_in_exit
+            = !statements.empty()
+           && (p.e.at(statements.back()).node.is<flat_break>() || p.e.at(statements.back()).node.is<flat_return>());
+        if (!ends_in_exit)
+            line("break;");
+        close();
+    }
+
+    void declare(local_id id, flat_expr_id value, bool is_mut)
+    {
+        auto const& local = p.e.at(id);
+        auto const name = cc::string_view(p.locals[index_of(id)]);
+        if (is_valid(value) && needs_member_assignment(p.e.at(value)))
+        {
+            build_struct(p.e.at(value), name);
+            return;
+        }
+        auto const text = is_valid(value) ? expr(value, true).text : cc::string();
+        auto declaration = cc::string();
+        d.write_local(declaration, {.name = name, .type = type_text(p, d, local.type), .value = text, .is_mut = is_mut});
+        line(declaration);
     }
 
     void statement(flat_stmt const& s)
     {
-        s.node.visit(
-            [&](flat_let const& let)
-            {
-                auto const& local = p.e.at(let.local);
-                auto const name = cc::string_view(p.locals[index_of(let.local)]);
-                auto const& value = p.e.at(let.value);
-                if (needs_member_assignment(value))
-                {
-                    build_struct(value, name);
-                    return;
-                }
-                auto const text = expr(let.value, true).text;
-                auto declaration = cc::string();
-                d.write_local(declaration,
-                              {.name = name, .type = type_text(p, d, local.type), .value = text, .is_mut = local.is_mut});
-                line(declaration);
-            },
-            [&](flat_return const& r)
-            {
-                auto const& value = p.e.at(r.value);
-                if (needs_member_assignment(value))
-                {
-                    auto const name = p.names.mint("result");
-                    build_struct(value, name);
-                    line(cc::format("return {};", name));
-                    return;
-                }
-                line(cc::format("return {};", expr(r.value, true).text));
-            });
+        s.node.visit([&](flat_let const& let) { declare(let.local, let.value, p.e.at(let.local).is_mut); },
+                     [&](flat_var const& var) { declare(var.local, var.value, true); },
+                     [&](flat_assign const& a)
+                     {
+                         auto const value = expr(a.value, true).text;
+                         line(cc::format("{} = {};", expr(a.place).text, value));
+                     },
+                     // `validate` refuses a tree that holds one
+                     [&](flat_print const&) {}, //
+                     [&](flat_if const& i) { branch(i, false); },
+                     // neither is in a core tree
+                     [&](flat_block const&) {}, //
+                     [&](flat_leave const&) {},
+                     [&](flat_loop const& l)
+                     {
+                         open(d.is_c_like() ? "while (true)" : "loop");
+                         body(l.body);
+                         close();
+                     },
+                     [&](flat_while const& w) { loop_while(w); },
+                     [&](flat_for const& f)
+                     {
+                         auto const first = expr(f.first).text;
+                         auto const end = wrapped(expr(f.end), level::additive);
+                         auto head = cc::string();
+                         d.write_for_head(head, p.locals[index_of(f.index)], first, end);
+                         open(head);
+                         body(f.body);
+                         close();
+                     },
+                     [&](flat_continue const&) { line("continue;"); }, //
+                     [&](flat_once const& o) { once(o); },             //
+                     [&](flat_break const&) { line("break;"); },
+                     [&](flat_return const& r)
+                     {
+                         auto const& value = p.e.at(r.value);
+                         if (needs_member_assignment(value))
+                         {
+                             auto const name = p.names.mint("result");
+                             build_struct(value, name);
+                             line(cc::format("return {};", name));
+                             return;
+                         }
+                         line(cc::format("return {};", expr(r.value, true).text));
+                     });
     }
 };
 } // namespace
