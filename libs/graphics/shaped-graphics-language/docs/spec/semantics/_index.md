@@ -36,7 +36,7 @@ A call of a function of the program is inlined into the structured form, so no l
 
 * Modules beyond the one unnamed module, interfaces, and `use`.
 * Generics, lambdas, function values, nested functions, methods and `mut` parameters, each of which the inliner has yet to carry.
-* `case`, a `for` over anything but an `int` range, a `let` without a value, and return type inference.
+* A `for` over anything but an `int` range, a `let` without a value, and return type inference.
 * Literal types, conversions and `as`, and `true` and `false`.
-* Resources, samplers, enums, constants and type aliases.
+* Resources, samplers, constants and type aliases.
 * An emitter for GLSL, a Metal compiler for the MSL text, and a binding that is not `@inline`.

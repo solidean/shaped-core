@@ -41,3 +41,18 @@ Run the other way round, every inlined function with an early return would be a 
 Without the rule every such loop costs a `once` around it and a flag that crosses the loop, which is X4 and X5 for a construct the source wrote as one `break`.
 Behind a loop that ends its block nothing runs, so leaving the block from inside the loop and leaving the loop are the same exit.
 The rule says that to X3, and the text is the loop the author wrote.
+
+## LEGAL-45
+
+A `switch` is what a reader expects and what a target's compiler turns into a jump table, and it is available only when every label is a constant the target can write.
+An if-else chain is what the language actually means — CHK-154 defines an arm by `scrutinee == pattern` — and it works for every pattern there is.
+Taking the chain as the definition and the `switch` as the optimization means the compiler never has to recover intent it threw away: the tree holds the `case`, and this pass reads it.
+The chain is also the cheaper form for exits, by LEGAL-48, which inverts the usual expectation and is worth knowing.
+
+## LEGAL-50
+
+This one is measured rather than argued.
+A `continue` inside a `switch` inside a loop was put through Dawn in all three shapes it can take, and accepted in each.
+They are: inside a `for`, inside a plain `loop`, and inside a `loop` that has a `continuing` block.
+The C-like targets have always taken it as the enclosing loop's.
+That is what separates a `switch` from a `once`: LEGAL-4 forbids the crossing because a `once` IS a loop in every target, and a `switch` is not.

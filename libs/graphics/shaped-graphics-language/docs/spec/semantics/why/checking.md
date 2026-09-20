@@ -156,3 +156,30 @@ The generated file is committed all the same, since the prelude is the documenta
 `core.sgl` is what needs no C++: ordinary SGL that is checked and inlined like a program's own functions.
 Until SGL has generics, an overload family cannot be written once in SGL, so the registry's C++ loops write the families out and `core.sgl` holds next to nothing.
 
+## CHK-150
+
+An enum that converts to `int` is an `int` with a nicer spelling, and the conversion is what makes it one.
+Once `light_kind` can be added to 1, every guarantee the type was declared for is a convention rather than a rule.
+The compiler stops being able to tell a case from a number that happens to be in range.
+So the first version converts in neither direction, which is the position it is possible to relax from.
+The relaxation is already named: `value as int` and `n as light_kind`, both unchecked, because a bounds test on every conversion is not worth its cost in a shader.
+[enum futures](../../incubator/enum-futures.md) is where it waits.
+Starting strict costs a cast somebody has to write; starting loose costs the type.
+
+## CHK-154
+
+A pattern language is the obvious thing to build here and the wrong thing to build first.
+`scrutinee == pattern` is one sentence, it needs no new node family, and it subsumes everything the first version wanted.
+A leading dot is an expression, a literal is an expression, and `_` is the one shape that is not.
+It also decides the `int` scrutinee for free, which a pattern language would have had to decide separately.
+What it gives up is exhaustiveness, which equality can derive only over a closed set — hence CHK-159's narrow rule.
+[patterns](../../incubator/patterns.md) is the step after, where an arm destructures and binds, and where exhaustiveness becomes a real analysis rather than set membership.
+
+## CHK-160
+
+Two reasons, and they point the same way from different ends.
+
+A `case` that is a value must produce one on every path, which is the property CHK-125 already asks of a function body; a scrutinee that matched no arm would leave it with nothing.
+And WGSL refuses a `switch` without a `default` outright, so an emitter has to invent one whatever the language says.
+Inventing one silently means a value the program never wrote, in the one place a reader would not look.
+Asking the source for it costs a `_` and makes the missing case a diagnostic instead of a zero.

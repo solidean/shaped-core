@@ -62,3 +62,10 @@ A value is its scalars in field order, so an evaluator sees one run of scalars p
 That is what lets one evaluator serve a family: a componentwise sum reads its width off the number of scalars it was given, and is the same function for `float`, `float3`, `float4` and `vec3`.
 The check that the scalars fit stands in front of every evaluator, in the machine, so no evaluator repeats it and none can forget it.
 
+## EVAL-68
+
+A pattern is an expression, so it can hold a call, and a call can have an effect.
+That makes "which patterns ran" observable, and a rule that left it open would let the two legalized forms disagree.
+A chain of `if` evaluates patterns as it reaches them, and a `switch` evaluates none at all.
+The two only agree where a pattern has no effect, which is every pattern a `switch` is allowed to hold — an `int` literal by LEGAL-45.
+So the order the machine promises is the chain's, and the `switch` form is licensed by having nothing to observe rather than by a second rule.

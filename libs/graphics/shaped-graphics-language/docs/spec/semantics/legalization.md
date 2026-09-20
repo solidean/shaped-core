@@ -13,8 +13,9 @@ The worked examples are WGSL, since it is the strictest target: no `do … while
 
 * **LEGAL-1** The core form is the flat trees that hold no block and no `leave`: an expression holds no statement, and every exit is `break`, `continue` or `return`.
 * **LEGAL-2** `once { … }` runs its statements once, and a `break` directly inside it ends it.
-* **LEGAL-3** `break` ends the innermost enclosing `once` or loop.
+* **LEGAL-3** `break` ends the innermost enclosing `once`, loop or `switch`.
 * **LEGAL-4** `continue` names the innermost enclosing loop, and no `once` stands between the two ([why](why/legalization.md#legal-4)).
+* **LEGAL-50** A `switch` may stand between them: every target takes a `continue` inside one as the enclosing loop's, WGSL included ([why](why/legalization.md#legal-50)).
 * **LEGAL-5** `return` is legal at any depth: it is the exit of the root block.
 * **LEGAL-6** The right operand of `and` / `or` has no effect ([why](why/legalization.md#legal-6)).
 * **LEGAL-7** The `end` of a `for` has no effect and reads no mutable local, since a target evaluates it before every iteration.
@@ -31,6 +32,7 @@ One row per core construct, one column per target; GLSL has no emitter yet, and 
 | `loop { … }` | `while (true) { … }` | `loop { … }` | `while (true) { … }` | `while (true) { … }` |
 | `while c { … }` | `while (c) { … }` | `while c { … }` | `while (c) { … }` | `while (c) { … }` |
 | `for i in a ..< b { … }` | `for (int i = a; i < b; ++i) { … }` | `for (var i: i32 = a; i < b; i++) { … }` | `for (int i = a; i < b; ++i) { … }` | `for (int i = a; i < b; ++i) { … }` |
+| `switch v { [a, b] { … } … default { … } }` | `switch (v) { case a: case b: … break; default: … break; }` | `switch v { case a, b: { … } default: { … } }` | as HLSL | as HLSL |
 | `if c { … } else { … }` | `if (c) { … } else { … }` | `if c { … } else { … }` | `if (c) { … } else { … }` | `if (c) { … } else { … }` |
 | `let x : T = v` | `const T x = v;` | `let x: T = v;` | `const T x = v;` | `const T x = v;` |
 | `var x : T = v` | `T x = v;` | `var x: T = v;` | `T x = v;` | `T x = v;` |
@@ -49,6 +51,41 @@ One row per core construct, one column per target; GLSL has no emitter yet, and 
 * **LEGAL-12** `&&` and `||` never stand bare inside each other: the inner one is parenthesized, since WGSL refuses the mix.
 * **LEGAL-13** A `print` has no row: no target writes one yet, and an entry point that holds one is `unsupported`.
 * **LEGAL-42** `eval v` is core when `v` is: it is `v;` in the C-like targets and `_ = v;` in WGSL ([EMIT-75](emitting.md#the-text)).
+
+## Case
+
+* **LEGAL-44** The core form has `switch v { [a, b] { … } … default { … } }`, whose arm values are `int` literals and whose `default` is mandatory.
+* **LEGAL-45** A `case` becomes a `switch` when every pattern of every arm is an `int` literal, and a chain of `if` otherwise ([why](why/legalization.md#legal-45)).
+* **LEGAL-46** (C1) The chain binds the scrutinee to a `let`, and each arm is an `if` whose condition is its patterns compared with `==` and joined by `or`; the `default` arm is the last `else`.
+  It costs one `let`.
+* **LEGAL-47** A pattern that has an effect needs no rule of its own: it stands where C1 puts it, and E3 is what takes the `or` that then holds it to an `if` over a `var`.
+* **LEGAL-48** The chain captures no `break`, so an exit that crosses a `case` in that form costs nothing, and only the `switch` form is a construct X5 crosses.
+* **LEGAL-49** X6 extends to a `switch` that is the last statement of its block: a `leave` of that block, directly inside an arm, is that arm's `break`.
+  So a `case` expression costs the one `var` of E1 and nothing else.
+
+A `case` over an enum, which LEGAL-45 takes to a `switch` and LEGAL-49 leaves without a flag:
+
+```raw
+(let weight : float = (block $case
+    (case (local kind)
+      (arm ((lit 0))
+        (leave $case (lit 1.0)))
+      (default
+        (leave $case (lit 0.0)))) : float))
+```
+
+```wgsl
+var case_result: f32;
+switch kind {
+    case light_kind_point: {
+        case_result = 1.0;
+    }
+    default: {
+        case_result = 0.0;
+    }
+}
+let weight: f32 = case_result;
+```
 
 ## Expressions
 
@@ -264,5 +301,5 @@ These rules say why the text passes, and DXC (to DXIL and to SPIR-V) and Dawn ha
   That is right and reads worse than binding it in front would.
 * Whether X2 should write statements twice where they are few, and take the `once` away.
 * Whether a `continue` in tail position of its loop's body should disappear the way a leave does.
-* `switch`, which will capture `break` like a loop, so an exit that crosses one takes a flag too.
+* Whether a chain of `==` over a small set of `int`s is worth turning into a `switch` where the patterns are constant but not literals, which needs folding this pass does not do.
 * GLSL, whose column above has met no emitter.

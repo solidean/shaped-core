@@ -137,6 +137,6 @@ Every "why" is mirrored in a `why/` folder beside its rules, and ideas that are 
 
 ## What does not exist yet
 
-Generics, methods, lambdas, `case` and enums.
+Generics, methods and lambdas.
 GLSL, a Metal toolchain, the generated host mirror, and every binding that is not `@inline`.
 Modules, interfaces and the parallel driver of [the compilation model](spec/incubator/compilation-model.md).

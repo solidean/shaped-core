@@ -65,6 +65,24 @@ struct target_ {
 | `int` | `int` | `i32` | `int` |
 | `bool` | `bool` | `bool` | `bool` |
 
+## Enums
+
+* **EMIT-76** An enum is one named constant per case, minted as `<enum>_<case>`, of the target's `int`, and the constants stand in front of the structs.
+* **EMIT-77** An entry point writes the whole constant set of every enum it mentions, in declaration order ([why](why/emitting.md#emit-77)).
+* **EMIT-81** An enum member of an edge struct or of an `@inline` binding is `unsupported`, as `int` and `bool` are by EMIT-33 and EMIT-39.
+
+```hlsl
+static const int light_kind_point = 0;
+static const int light_kind_spot = 1;
+static const int light_kind_sun = 2;
+```
+
+```wgsl
+const light_kind_point: i32 = 0;
+const light_kind_spot: i32 = 1;
+const light_kind_sun: i32 = 2;
+```
+
 ## Addresses
 
 * **EMIT-24** The struct of an entry point's parameter and the struct of its result are its **edge structs**.
@@ -138,6 +156,9 @@ struct pixel_input
 * **EMIT-69** The C-like targets put a brace on a line of its own and a condition in parentheses; WGSL puts the brace behind the head and writes the condition bare.
 * **EMIT-70** An `int` literal is its decimal text, and the one that does not fit behind a minus is `(-2147483647 - 1)`.
 * **EMIT-71** A `while` whose condition builds a struct member by member is written as a loop that tests at its top, so the struct is built before every test.
+* **EMIT-78** A `switch` is the target's own, by the table of the core form, and a label is the constant of EMIT-76 where its value is a case and its decimal text otherwise.
+* **EMIT-79** In the C-like targets the emitter ends each arm with `break;`, and writes none after a body that already exits.
+* **EMIT-80** WGSL writes an arm's values as one comma list, and the C-like targets as one label per value.
 
 ```hlsl
 pixel_input main_vs(cube_vertex v)
@@ -194,7 +215,7 @@ So `{float3; float}` is `layout-mismatch`: the `float` is at byte 12 in HLSL and
 |---|---|
 | `module-has-errors` | EMIT-10 |
 | `unknown-entry-point` | EMIT-11 |
-| `unsupported` | EMIT-12, EMIT-33, EMIT-34, EMIT-38, EMIT-39, EMIT-67 |
+| `unsupported` | EMIT-12, EMIT-33, EMIT-34, EMIT-38, EMIT-39, EMIT-67, EMIT-81 |
 | `reserved-entry-point-name` | EMIT-21 |
 | `system-value-semantic` | EMIT-32 |
 | `layout-mismatch` | EMIT-41 |

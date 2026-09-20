@@ -110,3 +110,9 @@ WGSL refuses a bare call of a function whose value must be used, and every funct
 The phony assignment `_ = value;` is what the language offers for it.
 HLSL takes the bare statement, and MSL, which is C++, would warn about an unused value without the cast.
 
+## EMIT-77
+
+EMIT-5 writes exactly the structs and the binding an entry point needs, so writing every case of an enum rather than the ones some arm names looks like a contradiction.
+It is not: the unit that is needed is the enum, and a reader comparing the text against the source wants its set rather than the subset this entry point happened to match on.
+An enum is small and closed, so the cost is bounded by the declaration; a struct's members are written whole for the same reason.
+A `default` arm also stands for the cases nobody named, and a reader who cannot see them cannot tell what it covers.

@@ -21,11 +21,12 @@ Back to the [semantics](_index.md); the reasons are in [why/checking.md](why/che
 
 ## Symbols
 
-* **CHK-10** A **symbol** is a `fun`, a `struct` or a `binding` declared at the top level of a file, named by its file and its declaration.
+* **CHK-10** A **symbol** is a `fun`, a `struct`, an `enum` or a `binding` declared at the top level of a file, named by its file and its declaration.
 * **CHK-11** The module scope is unordered: a symbol may be used above its declaration.
 * **CHK-12** A name is declared once in the module scope, unless every declaration of it is a function; a later declaration is the normal error `duplicate-declaration`.
 * **CHK-13** Several functions of one name are an **overload set**.
-* **CHK-14** An `enum`, a `const`, a `type` alias and a `sampler` are `unsupported-yet`, and each still owns its name, so a use of it is silent.
+* **CHK-14** A `const`, a `type` alias and a `sampler` are `unsupported-yet`, and each still owns its name, so a use of it is silent.
+  An `enum` is a symbol of its own, by CHK-142.
 * **CHK-15** `use` and `notation` are `unsupported-yet`.
 * **CHK-16** A symbol is in one of four states: untouched, in compilation, checked, or failed.
 * **CHK-17** Compilation is on demand: needing a symbol that is untouched compiles it first ([why](why/checking.md#chk-17)).
@@ -53,6 +54,26 @@ struct b:
 * **CHK-26** A field, a binding member and a parameter have a type; one without is the normal error `missing-type`.
 * **CHK-27** A default value, a `mut` member, a property and a method are `unsupported-yet`.
 * **CHK-28** Two fields of one struct, two members of one binding and two parameters of one function differ in name, or the later one is `duplicate-declaration`.
+
+## Enums
+
+* **CHK-142** An `enum` declaration is a symbol and one type, whose kind is `enumeration`; two declarations are two types, as CHK-22 says of a `struct`.
+* **CHK-143** A member of an `enum` block that is a case gives the type one **case**, named by that member, in the order written.
+* **CHK-144** A case has an `int` value: the one it writes, or one more than the case before it, and 0 for the first.
+* **CHK-145** Two cases of one enum may hold one value, so `all = 7` beside `red = 1` is a legal alias; two that hold one name is `duplicate-declaration` by CHK-28.
+* **CHK-146** The written value of a case is an `int` literal, by CHK-61; any other expression there is `unsupported-yet`.
+* **CHK-147** `enum.case` is an expression of the enum's type, and a name the enum has no case of is `unknown-member`.
+* **CHK-148** An enum's own name is no value, by CHK-63.
+* **CHK-149** `==` and `!=` over two values of one enum are the language's own, as `and` is by CHK-116: no function declares them, and each gives a `bool`.
+* **CHK-150** An enum converts to no type and no type converts to it, `int` included, and it has no other operator ([why](why/checking.md#chk-150)).
+* **CHK-151** A property, a method or a nested declaration in an `enum` block is `unsupported-yet`, as CHK-27 makes each on a `struct`.
+
+```sgl
+enum light_kind:
+    point
+    spot
+    sun
+```
 
 ## Builtins and the prelude
 
@@ -137,6 +158,8 @@ struct b:
 * **CHK-63** A name that stands for a struct, a function or a binding is no value by itself: it is `unsupported-yet`.
 * **CHK-64** `value.name` is the field `name` of the struct type of `value`; a type without that field is the normal error `unknown-member`.
 * **CHK-65** `(x)` is `x`.
+* **CHK-152** `.name` is the case `name` of the enum the context expects, which today is the scrutinee of a `case` and nothing else.
+  A leading dot where no type is expected is `unsupported-yet`, and one whose expected type is no enum, or has no such case, is `unknown-member`.
 * **CHK-66** Every expression kind not named in this section is `unsupported-yet`.
 
 ## Calls and overloads
@@ -217,7 +240,8 @@ let color = float4(..lit, 1.0)
 * **CHK-118** A `loop:` that is a statement is left by `break`, and one that is a value by `break value`.
   The values of one loop are of one type, which is the loop's; a `break` of the other kind is `type-mismatch`.
 * **CHK-119** `break` and `continue` name the innermost loop around them.
-* **CHK-120** `return`, `break` and `continue` are statements; one that stands as a value, as in a `case` arm, is `unsupported-yet`.
+* **CHK-120** `return`, `break` and `continue` are statements; one that stands as the result of a `case` arm leaves as it says, and that arm produces no value (CHK-165).
+  One that stands as a value anywhere else is `unsupported-yet`.
 * **CHK-135** `print value` takes a value of any type; a string is `unsupported-yet`.
 
 ```sgl
@@ -228,6 +252,38 @@ fun falloff(d: float, steps: int) -> float:
         w *= d
         if w < 0.125 => return 0.0
     return w
+```
+
+## Case
+
+* **CHK-153** `case value:` evaluates `value`, the **scrutinee**, and runs the first arm whose pattern matches it.
+* **CHK-154** A pattern is an expression of the scrutinee's type, and it **matches** when `scrutinee == pattern` ([why](why/checking.md#chk-154)).
+* **CHK-155** The scrutinee is of a type whose `==` resolves by CHK-70 to CHK-73, which an enum's does by CHK-149; one that does not is `no-matching-overload` at the arm.
+* **CHK-156** `_` is a pattern that matches anything, and the arm that carries it is the **default**.
+* **CHK-157** `a or b` in a pattern is a list of patterns, and the arm matches when any of them does; the `or` of CHK-116 is not involved and its operands are no `bool`s.
+* **CHK-158** A pattern is evaluated only where it is reached, so a pattern behind the one that matched is never evaluated ([evaluation](evaluation.md#case)).
+* **CHK-159** A `case` is **exhaustive** when it carries a `_`, or when its scrutinee is an enum and its patterns are constant cases that together name every case of it.
+* **CHK-160** A `case` that is not exhaustive is the normal error `non-exhaustive-case`; its detail names the cases nobody matched, or says that a `_` is needed ([why](why/checking.md#chk-160)).
+* **CHK-161** Two constant patterns of one `case` that name one case is the normal error `duplicate-case-pattern`, at the later arm.
+  Two patterns that are equal expressions are not compared: what they hold is known at run time and not here.
+* **CHK-162** An arm behind a `_` never runs: it is the warning `unreachable-code`, once per `case`.
+* **CHK-163** A `case` that stands as a statement has arms that produce no value.
+* **CHK-164** A `case` that stands as an expression has one type, and every arm produces a value of it or exits.
+* **CHK-165** An arm **exits** when its body exits by CHK-123, which is what lets `_ => return black` stand where a value is expected.
+* **CHK-166** The type of a `case` expression is the one the context expects where there is one, and the type of the first arm that produces a value otherwise.
+* **CHK-167** An arm whose value is of another type is `type-mismatch`, reported at the arm.
+* **CHK-168** An arm of a `case` expression that neither produces a value nor exits is the normal error `missing-value-in-arm`.
+* **CHK-169** A `case` statement whose every arm exits makes its own statement list exit, by CHK-123.
+* **CHK-170** An arm's body is a block named after the `case`, as CHK-133 names the block of an inlined call.
+  `=> value` leaves it with that value, a `=>:` block leaves it with its `yield`, and the block is EVAL-29's construct in both.
+
+```sgl
+fun shade(kind: light_kind, base: float) -> float:
+    let weight = case kind:
+        .point => 1.0
+        .spot or .sun => 0.5
+        _ => return 0.0
+    return base * weight
 ```
 
 ## Returning
@@ -298,13 +354,16 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `opaque-struct-needs-builtin` | CHK-34 |
 | `invalid-attribute-arguments` | CHK-36, CHK-39 |
 | `binding-not-listed` | CHK-45, CHK-131 |
-| `type-mismatch` | CHK-52, CHK-56, CHK-77, CHK-84, CHK-112 to CHK-118, CHK-121, CHK-139 |
+| `type-mismatch` | CHK-52, CHK-56, CHK-77, CHK-84, CHK-112 to CHK-118, CHK-121, CHK-139, CHK-167 |
 | `not-assignable` | CHK-112 |
 | `missing-return` | CHK-125 |
-| `unreachable-code` | CHK-126 |
+| `unreachable-code` | CHK-126, CHK-162 |
 | `recursive-call` | CHK-130 |
-| `unknown-member` | CHK-64 |
-| `no-matching-overload` | CHK-71, CHK-76 |
+| `unknown-member` | CHK-64, CHK-147, CHK-152 |
+| `no-matching-overload` | CHK-71, CHK-76, CHK-155 |
+| `non-exhaustive-case` | CHK-160 |
+| `duplicate-case-pattern` | CHK-161 |
+| `missing-value-in-arm` | CHK-168 |
 | `ambiguous-overload` | CHK-72 |
 | `missing-field`, `unknown-field`, `duplicate-field` | CHK-84 |
 | `invalid-entry-point` | CHK-87, CHK-93 |
@@ -317,5 +376,8 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 * Whether a body is checked once or where it is inlined, once a generic makes the two differ ([why](why/checking.md#chk-129)).
 * `true` and `false`, which are names nothing declares yet.
 * Whether a second function with the parameter types of another is an error where it is declared.
+* Whether a pattern may bind a name, which is the pattern language of [patterns](../incubator/patterns.md) and the thing that would make exhaustiveness a real analysis.
+* Whether an enum reaches `int` through a cast, and what an `int` that names no case then is ([enum futures](../incubator/enum-futures.md)).
+* Where a leading dot is resolved beyond a `case` scrutinee: a parameter, a field and a return type each expect a type too.
 * Whether the bindings of a flat entry point are the ones its list names or the ones its body reads.
 * How a splatted value reads in the emitted text once a target can take the vector whole.

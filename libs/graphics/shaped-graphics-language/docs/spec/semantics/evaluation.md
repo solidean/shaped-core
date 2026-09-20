@@ -18,6 +18,7 @@ A listing here is the dump of a flat tree, shortened: a label is `$name`, and a 
 * **EVAL-5** An implementation may produce anything that behaves the same as the structured form: this is the **as-if rule** ([why](why/evaluation.md#eval-5)).
 * **EVAL-6** A `float` is a 32-bit IEEE number, an `int` is 32 bits, signed, and its arithmetic wraps, and a `bool` is true or false.
 * **EVAL-7** A struct value is one value per field, in field order.
+* **EVAL-64** An enum value is the `int` value of one of its type's cases, and `==` and `!=` over two of them compare those `int`s.
 
 ## Locals and places
 
@@ -85,6 +86,26 @@ This prints 11: the left operand is read while `x` is 1, and the block to its ri
 * **EVAL-39** So after a `continue`, a `while` evaluates its condition again, and a `for` takes its next `int`.
 * **EVAL-40** A `leave` or a `continue` names a block or a loop that encloses it; a tree where it does not is malformed.
 
+## Case
+
+* **EVAL-65** `case v { … default { … } }` evaluates `v` once and holds it, then tries its arms in order.
+* **EVAL-66** An arm is tried by evaluating its patterns in order and comparing each with the held value; the arm is selected at the first that is equal.
+* **EVAL-67** A pattern behind the one that selected an arm is not evaluated, and neither is any pattern of an arm behind that one.
+* **EVAL-68** So the patterns that run are exactly those up to and including the one that matched, in the order written.
+  A pattern with an effect has it where it is reached ([why](why/evaluation.md#eval-68)).
+* **EVAL-69** The `default` arm is selected when no other was, and every `case` of the machine has one.
+* **EVAL-70** The statements of the selected arm run, and those of every other arm do not.
+* **EVAL-71** A `case` is a statement, and a `case` of the source that is a value is the block of EVAL-73.
+
+```raw
+(let weight : float = (block $case
+    (case (local kind)
+      (arm ((lit 0))
+        (leave $case (lit 1.0)))
+      (default
+        (leave $case (lit 0.0)))) : float))
+```
+
 ## Calls
 
 * **EVAL-45** A call of a function of the program IS the callee's body as `block $callee { … }`, where the call stood.
@@ -129,6 +150,9 @@ fun graded(a: float) -> float:
 * **EVAL-57** A `loop:` that is a value is `block $loop_value { loop $loop { … } }`, and its `break value` is `leave $loop_value value`.
 * **EVAL-58** `a < b <= c` is `a < b and b <= c` with `b` evaluated once: each inner operand is bound to a local where it first stands, and read from it after that.
 * **EVAL-59** So a chain stops at its first comparison that is false, and evaluates no operand behind it.
+* **EVAL-72** A `.name` pattern is the `int` value of its case, an arm with several patterns holds them in the order written, and the `_` arm is the `default`.
+* **EVAL-73** A `case` of the source that is a value is `block $case { case … }`, whose arms leave it with their values, as EVAL-57 does for a `loop:`.
+  An arm that exits instead leaves nothing, and the block is EVAL-29's construct either way.
 * **EVAL-60** `print value` is `print`.
 * **EVAL-61** `eval value` evaluates `value` and drops it: what the evaluation prints and records happens, in its place, and the value goes nowhere.
 * **EVAL-62** A call that stands as a statement is `eval` of the call ([CHK-137](checking.md#inferred-results-and-dropped-values)).
@@ -149,5 +173,5 @@ fun graded(a: float) -> float:
 * Definite assignment: a `let` without a value is what would let a program read a `var` that holds nothing, and the check pass carries none yet.
 * What an `int` division by zero is, which is why `int` has no `/` yet.
 * Whether `float` arithmetic is exact across targets; the machine computes in `f32`, and a target may fuse or reorder.
-* `switch`, which joins with `case` and captures a `break` the way a loop does.
+* Whether a pattern that has an effect is worth the ordering EVAL-68 has to promise, which a pattern language would make sharper ([patterns](../incubator/patterns.md)).
 * A place that holds an index, whose index expression EVAL-14 then has to order.
