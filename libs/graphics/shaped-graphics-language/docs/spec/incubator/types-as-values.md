@@ -8,7 +8,7 @@ This is almost a kind of bet.
 The hope is that SGL never needs to distinguish a "type" kind from a "value" kind.
 **Everything is a value, and there are type positions.**
 
-A type position is the right-hand side of `->`, of `:` or of `as`.
+A type position is the right-hand side of `->`, of `:` or of `as`, and the right-hand side of a `type` alias.
 An expression that stands there is an ordinary expression, written and parsed like any other.
 
 The semantic phase does partial evaluation.

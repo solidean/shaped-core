@@ -8,6 +8,7 @@ Back to the [specification](_index.md).
 Definitions:
 
 * `fun` - declares a function; mandatory on a method too, and only a property is keyword-free ([AST-82](syntax/ast.md#members))
+* `fun` without a name - an anonymous function in expression position, `fun (x) => x + 1` ([AST-101](syntax/ast.md#lambdas-case-and-loop))
 * `let` - declares a variable (TODO: or `var`?)
 * `mut` - marks a variable as mutable
 * `struct` - defines a new structure type
@@ -26,7 +27,8 @@ Control flow and expressions:
 * `for` - looping
 * `while` - looping
 * `loop` - looping
-* `return` - returns from a function
+* `return` - leaves the nearest enclosing `fun`, named or anonymous ([AST-112](syntax/ast.md#jumps))
+* `yield` - gives a value block its value: `yield expression` ([AST-108](syntax/ast.md#value-blocks-and-yield))
 * `continue` - continue next loop iteration
 * `break` - breaks from loop iteration
 * `case` - generalized if expression
@@ -53,7 +55,10 @@ A reserved name is no keyword: the form parser reads it as an identifier, and it
 It never starts a keyword form, so `self.x = 0` is an assignment.
 
 * `self` - the receiver of a method or a property; the AST reads it as `self_ref` ([AST-13](syntax/ast.md#atoms))
-* `true` / `false` - the two values of `bool`; the AST reads them as names, and name lookup gives them their meaning
+
+## Open
+
+* Whether `true` and `false` are keywords or constants of the prelude; until that is decided the AST reads them as ordinary names, and they are not reserved.
 
 TODO:
 

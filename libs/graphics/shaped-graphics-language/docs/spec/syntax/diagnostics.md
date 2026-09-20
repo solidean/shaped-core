@@ -1,7 +1,7 @@
 # Diagnostics
 
 Every phase is total: any input gives a tree, and what is wrong with the input is a list of diagnostics beside it.
-This file defines what a diagnostic is and lists every kind the syntax phases report.
+This file defines what a diagnostic is and lists every kind the syntax phases report, the AST phase among them.
 Back to the [phases](_index.md).
 
 ## Rules
@@ -18,6 +18,7 @@ Back to the [phases](_index.md).
 
 ## Catalogue
 
+The kinds of the phases up to the form tree.
 Each kind names the rule that reports it, and has one example below the table.
 
 | kind | reported by | the reading that is kept |
@@ -249,6 +250,106 @@ let d = a-b
 
 ```sgl error
 let f = a->b
+```
+
+## The kinds of the AST phase
+
+The [AST phase](ast.md) reports these kinds: the form tree is fine, and the language has no reading for the form in its place.
+Each is a normal error unless its line says otherwise, and the node is kept as [AST-5](ast.md#the-phase) says.
+An example of an AST kind is an `sgl sketch`, since examples are checked through the form tree only.
+
+| kind | what it means |
+|---|---|
+| `expected-declaration` | a form at file level or in a function body position that is no declaration and no statement |
+| `expected-member` | a line of a `struct`, `enum`, `binding` or `sampler` block, or an element of a `struct_type`, that is no member |
+| `expected-case-arm` | a statement of a `case` block that is no `pattern => result` |
+| `expected-name` | a declaration, an import or a named argument that has no identifier where its name stands |
+| `expected-pattern` | a `let` whose target is no name, no `_` and no round list of patterns |
+| `expected-parameter` | an element of a parameter list, or the left side of an arrow lambda, that is no parameter |
+| `expected-body` | a construct that needs a body and has none, or has `=` where `=>` or a block stands |
+| `declaration-not-allowed-here` | a declaration in a place its row does not allow: a `let` at file level, a `sampler` in a function body |
+| `misplaced-module` | a second `module`, or one that is not the first declaration of its file |
+| `member-not-allowed-here` | a member its owner does not allow: a method in a `binding`, a field in an `enum`, a case in a `struct` |
+| `default-not-allowed-here` | a default on a field whose owner allows none: a member of a `binding` |
+| `missing-parameter-list` | a signature without `()` |
+| `signature-out-of-order` | the lists of a signature in another order than `[…]`, `(…)`, `{…}` |
+| `duplicate-signature-list` | a list of a signature that stands twice |
+| `stray-else` | an `else` or an `else if` that pairs with no `if` |
+| `mixed-struct-type` | a curly paren literal that holds both `name: type` and `name = value` elements |
+| `misplaced-splat` | a splat that is not a whole element of a paren group |
+| `misplaced-attribute-on-expression` | an attribute on an expression that stands in no type position |
+| `statement-in-expression` | an assignment, a `let`, an `if` or a declaration where a value is expected |
+| `unexpected-keyword` | keywords that head nothing together, such as `mut` without `let` |
+| `too-many-arguments` | a keyword form that holds more expressions than it takes: `return a, b`, `continue x` |
+| `for-takes-name-in-range` | a `for` that is not `for name in expression` |
+| `assert-takes-condition-and-message` | an `assert` that is not one condition, or one condition and one message |
+| `print-takes-one-message` | a `print` that is not exactly one message |
+| `unsupported-syntax` | a spelling that is reserved and has no meaning yet: `f(x){…}`, and an expression that owns a block |
+| `yield-in-function` | a `yield` whose nearest enclosing body is a `fun` body; it is written `return` |
+| `return-in-lambda` | a `return` whose nearest enclosing function or lambda is an arrow lambda; it is written `yield` |
+| `expected-object-element` | an element of an object literal that is no name, no `name = value` and no splat |
+| `no-effect`, a warning | an expression statement that has no effect by [AST-60](ast.md#expression-statements) |
+
+`expected-case-arm`: the second line of the block is no arm.
+
+```sgl sketch
+let area = case shape:
+    .square => 1.0
+    finish()
+```
+
+`missing-parameter-list`: written `fun half_pi() => 1.5708`.
+
+```sgl sketch
+fun half_pi => 1.5708
+```
+
+`signature-out-of-order`: the bindings stand before the parameters.
+
+```sgl sketch
+fun shade{frame}(n: vec3) -> vec3
+```
+
+`stray-else`: the `else` follows a `let`.
+
+```sgl sketch
+let x = 1
+else:
+    fail()
+```
+
+`member-not-allowed-here`: a `binding` allows no method.
+
+```sgl sketch
+binding frame:
+    view: mat4
+    fun inverse_view() => inverse view
+```
+
+`misplaced-splat`: the splat is an operand of `+`.
+
+```sgl sketch
+let sum = 1 + ..rest
+```
+
+`statement-in-expression`: a `let` where an argument is expected.
+
+```sgl sketch
+let total = sum(let x, 2)
+```
+
+`too-many-arguments`: `return` takes at most one value.
+
+```sgl sketch
+fun pair() -> (int, int):
+    return 1, 2
+```
+
+`no-effect`: the sum is computed and dropped.
+
+```sgl sketch
+fun update(state: particle):
+    state.age + 1
 ```
 
 ## Open

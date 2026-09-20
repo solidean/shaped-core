@@ -25,7 +25,7 @@ Back to the [phases](_index.md); the reasons are in [why/ast.md](why/ast.md).
 ## Expressions
 
 * **AST-9** There is one family of expressions, and a type is written as an expression of that family ([why](why/ast.md#ast-9)).
-* **AST-10** A **type position** is the right side of `:`, of `->` or of `as`.
+* **AST-10** A **type position** is the right side of `:`, of `->` or of `as`, and the right side of the `=` of a `type` alias.
 * **AST-11** The AST records that an expression stands in a type position, and it reads that expression like any other.
 
 | node | is read from |
@@ -44,10 +44,10 @@ Back to the [phases](_index.md); the reasons are in [why/ast.md](why/ast.md).
 | `membership` | `x in r` |
 | `ascription` | `x : t` |
 | `range` | `a ..< b`, `a ..= b` |
-| `lambda` | `parameters => body` |
+| `lambda` | `parameters => body`, and a `fun` without a name |
 | `case` | `case value:` and a block of arms |
 | `loop` | `loop:` and a block |
-| `return`, `break`, `continue` | the keyword forms of those names |
+| `return`, `break`, `continue`, `yield` | the keyword forms of those names |
 | `struct_type` | a curly paren literal whose elements are all `name: type` |
 | `function_type` | `(a, b) -> c` |
 | `with_bindings` | a curly group applied to an expression; reserved |
@@ -108,10 +108,12 @@ let k = x in 0..<1
 * **AST-23** An element of a paren group reads as an **argument**: an optional name, a value, and whether it is a splat.
 * **AST-24** An assignment directly inside a paren group is a named argument, and its left side, an identifier or a leading-dot form, is the name.
 * **AST-25** A paren literal reads as `tuple` when it is round, `array` when it is square and `object` when it is curly.
-* **AST-26** `(x)` is `x` and no tuple, `(x,)` is a tuple of one element, and `()` is the empty tuple.
+* **AST-26** `(x)` is `x` and no tuple, `()` is the empty tuple, and `(x,)`, `(a = 1)` and `(..v)` are each a tuple of one element.
 * **AST-27** An element of an `object` that is one bare identifier is the **object shorthand** for `a = a`, and the AST records the shorthand without expanding it.
 * **AST-28** The **splat** is the prefix operator `..`, and it must be a whole element of a paren group: `(..normal, 0)` ([why](why/ast.md#ast-28)).
 * **AST-29** A splat is recorded on its argument, and a splat that is not a whole element of a paren group is a normal error.
+* **AST-97** An element of an `object` is the object shorthand, a named argument or a splat.
+* **AST-98** Any other element of an `object` is a normal error, and it is kept as a positional argument.
 
 ```sgl
 let unit = ()
@@ -130,6 +132,7 @@ let all = max(..values)
 |---|---|
 | `(x)` | `x` |
 | `(x,)` | `tuple` of one argument |
+| `(a = 1)` | `tuple` of one argument with the name `a` |
 | `(x = 1, y = 2)` | `tuple` of two arguments with the names `x` and `y` |
 | `{albedo, roughness = 0.5}` | `object` of the shorthand `albedo` and the argument `roughness` |
 | `(..normal, 0)` | `tuple` of the splat of `normal` and `0` |
@@ -141,15 +144,25 @@ The splat below is an operand of `+` and no whole element, so the AST reports a 
 let sum = 1 + ..rest
 ```
 
+`1 + 2` is no shorthand, no named argument and no splat, so the AST reports a normal error and keeps it as a positional argument.
+
+```sgl sketch
+let v = {1 + 2}
+```
+
 ### Types
 
-* **AST-30** A curly paren literal whose elements are all of the shape `name: type` reads as `struct_type`, and its elements are [fields](#members).
+* **AST-30** A curly paren literal whose elements are all of the shape `name: type`, each with an optional `= default`, reads as `struct_type`, and its elements are [fields](#members).
 * **AST-31** A curly paren literal that holds both `name: type` and `name = value` elements is a normal error.
 * **AST-32** An `->` that is not the return type of a [signature](#functions) reads as `function_type`: the parameter types on its left and the result type on its right.
+* **AST-99** The AST reads an `->` as the form tree groups it, and it regroups nothing ([OP-32](operators.md#the-precedence-ladder)).
+* **AST-100** `x : (int) -> int` is an `ascription` whose type is a `function_type`, and `a -> b -> c` is a `function_type` whose result is the `function_type` `b -> c`.
 * **AST-33** A curly group applied to an expression reads as `with_bindings`, which is reserved: the node is kept, and it is a normal error that says the construct is not supported yet.
 
 ```sgl
 type blend = (vec3, vec3) -> vec3
+type curried = (float) -> (float) -> float
+let ease : (float) -> float = smooth_step
 
 fun project(v: basic_vertex) -> {@position pos: hpos4, uv: vec2}:
     return {pos = mvp * v.pos, uv = v.uv}
@@ -175,12 +188,17 @@ let color = sample_sky(dir){sky = frame_sky}
 
 ### Lambdas, `case` and `loop`
 
-* **AST-34** An `=>` in expression position reads as `lambda`: its parameters on the left and its body on the right.
-* **AST-35** The parameters of a `lambda` are one name, `_`, or a round list of [parameters](#functions) whose types may be left out.
+* **AST-34** An `=>` in expression position reads as `lambda`, the **arrow lambda**: its parameters on the left and its body on the right.
+* **AST-35** The parameters of an arrow lambda are one name, `_`, or a round list of [parameters](#functions) whose types may be left out.
+* **AST-101** A `fun` whose [signature](#functions) has no name, in expression position, reads as `lambda` too, the **anonymous function**: `fun (x) => x + 1` ([why](why/ast.md#ast-101)).
+* **AST-102** The signature of an anonymous function follows AST-66 to AST-71 without the name: its parameters are mandatory, and its lists stand in the same order.
+* **AST-103** An anonymous function may take type parameters, bindings and a return type, and it may be left by `return`; an arrow lambda allows none of these.
+* **AST-104** A `lambda` records which of the two spellings it has.
+* **AST-105** A `fun` with a name in expression position is a normal error, by AST-5.
 * **AST-36** `case value:` reads as `case`, and each statement of its block is an **arm**: `pattern => result`.
 * **AST-37** The pattern of an arm is an expression, and its result is a [body](#statements).
 * **AST-38** A statement of a `case` block that is no arm is a normal error.
-* **AST-39** `loop:` reads as `loop`, an expression that yields the value of the `break` that leaves it.
+* **AST-39** `loop:` reads as `loop`, an expression whose value is that of the `break` that leaves it.
 
 ```sgl
 let twice = x => x * 2
@@ -192,12 +210,71 @@ let area = case shape:
 let root = loop:
     guess = refine guess
     if converged guess => break guess
+let clamped = fun (x: float) -> float:
+    if x < 0 => return 0.0
+    return min(x, 1.0)
+let first = fun [T](values: span[T]) => values[0]
+let lit = fun (n: vec3){frame} => dot(n, frame.sun_dir)
+```
+
+| source | reads as |
+|---|---|
+| `x => x * 2` | `lambda`, arrow, the parameter `x` |
+| `(a, b) => a + b` | `lambda`, arrow, two parameters without types |
+| `fun (x: float) -> float:` | `lambda`, anonymous function, one parameter, the return type `float`, a block |
+| `fun [T](values: span[T]) => values[0]` | `lambda`, anonymous function, the type parameter `T` |
+| `fun (n: vec3){frame} => …` | `lambda`, anonymous function, the binding entry `frame` |
+
+### Value blocks and `yield`
+
+* **AST-106** A block has no implicit value: its last expression is a statement like every other ([why](why/ast.md#ast-106)).
+* **AST-107** A **value block** is a block that is the body of a `case` arm, of an arrow lambda or of a property: `=>:` and a block.
+* **AST-108** `yield expression` gives its value to the nearest enclosing value block, and it leaves that block.
+* **AST-109** The blocks of `if`, `for` and `while` between a `yield` and its value block are transparent, as they are between a `break` and its loop.
+* **AST-110** A `yield` whose nearest enclosing body is the body of a `fun`, named or anonymous, is a normal error; it is written `return`.
+* **AST-111** The right side of an `=>` that is an expression is the value of that body, and it takes no `yield`.
+
+```sgl
+let area = case shape:
+    .square => shape.side * shape.side
+    .circle =>:
+        let r = shape.radius
+        yield r * r * pi
+    _ => 0.0
+
+let bright = map(colors, c =>:
+    let l = luminance c
+    if l > 1 => yield c / l
+    yield c
+)
+
+struct ray:
+    origin: pos3
+    dir: vec3
+    inv_dir =>:
+        let d = self.dir
+        yield vec3(1 / d.x, 1 / d.y, 1 / d.z)
+```
+
+| source | the value block it belongs to |
+|---|---|
+| `yield r * r * pi` | the body of the arm `.circle` |
+| `yield c / l` | the body of the arrow lambda, through the `if` |
+| `yield vec3(…)` | the body of the property `inv_dir` |
+
+The body below is that of a `fun`, so the AST reports a normal error for the `yield`; it is written `return x * x`.
+
+```sgl sketch
+fun square(x: float) -> float:
+    yield x * x
 ```
 
 ### Jumps
 
-* **AST-40** `return`, `break` and `continue` are expressions ([why](why/ast.md#ast-40)).
-* **AST-41** `return` and `break` take at most one value, and `continue` takes none.
+* **AST-40** `return`, `break`, `continue` and `yield` are expressions, the **jumps** ([why](why/ast.md#ast-40)).
+* **AST-41** `return` and `break` take at most one value, `yield` takes one, and `continue` takes none.
+* **AST-112** `return` leaves the nearest enclosing `fun`, named or anonymous, through every value block between ([why](why/ast.md#ast-112)).
+* **AST-113** A `return` whose nearest enclosing function or lambda is an arrow lambda is a normal error; it is written `yield`.
 
 ```sgl
 fun shade(hit: hit_info) -> vec3:
@@ -209,9 +286,20 @@ fun shade(hit: hit_info) -> vec3:
     return hit.color * weight
 ```
 
+The `return` of the arm `_` stands in a `case` inside a `fun`, so it leaves `shade`.
+The one below stands in an arrow lambda, so the AST reports a normal error; it is written `yield 0.0`, or the lambda is written `fun (x):`.
+
+```sgl sketch
+let safe = map(values, x =>:
+    if x < 0 => return 0.0
+    yield sqrt x
+)
+```
+
 ## Statements
 
 * **AST-42** A **body** is a block, or the right side of an `=>`: `if done => return`, `fun f() => x`.
+* **AST-117** The right side of an `=>` is an expression, or a block after `=>:`, and AST-107 says which of those blocks are value blocks.
 * **AST-43** A statement is one row of the table below.
 
 | statement | source |
@@ -219,7 +307,7 @@ fun shade(hit: hit_info) -> vec3:
 | `let` | `let pattern`, `let pattern : type`, each with an optional `= expression`; and the same after `let mut` |
 | assignment | `target = expression`, and `target op= expression` for every assignment operator |
 | `if` | `if condition` with a body, then any number of `else if condition`, then at most one `else`, each with a body |
-| `for` | `for name in expression` with a body |
+| `for` | `for name in expression` or `for _ in expression`, with a body |
 | `while` | `while condition` with a body |
 | `assert` | `assert condition` or `assert condition, message` |
 | `print` | `print message` |
@@ -275,13 +363,16 @@ else:
 
 ### Loops
 
-* **AST-54** A `for` takes exactly one argument, a `membership` whose left side is a name, and a body.
-* **AST-55** No other shape of `for` exists, and one is a normal error.
+* **AST-54** A `for` takes exactly one argument, a `membership` whose left side is one name or `_`, and a body.
+* **AST-55** No other shape of `for` exists, a pattern on the left side among them, and one is a normal error.
 * **AST-56** A `while` takes exactly one condition and a body.
 
 ```sgl
 for i in 0..<count:
     total += weight i
+
+for _ in 0..<bounces:
+    trace_next()
 
 while not done => step()
 
@@ -310,8 +401,9 @@ print "total:", total
 
 ### Expression statements
 
-* **AST-60** An expression statement must be a `call`, a jump, a `case` or a `loop`.
-* **AST-61** Any other expression as a statement is reported as having no effect, and it is still read.
+* **AST-60** An expression statement has an effect when it is a paren or a juxtaposition `call`, a jump, a `case`, a `loop`, a `with_bindings` or an `invalid`.
+* **AST-61** Any other expression statement is the warning `no-effect`, and it is still read: an infix or a prefix `call`, a name, a literal, a `member`, a `tuple`.
+* **AST-114** The last statement of a block is no exception to AST-61, since a block has no implicit value ([AST-106](#value-blocks-and-yield)).
 
 ```sgl
 fun update(state: particle):
@@ -322,11 +414,12 @@ fun update(state: particle):
         _ => emit state
 ```
 
-The line `state.age` below reads a value and drops it, so the AST reports that it has no effect.
+The lines `state.age` and `state.age + 1` below compute a value and drop it, so the AST reports `no-effect` for each, the last line of the block too.
 
 ```sgl sketch
 fun update(state: particle):
     state.age
+    state.age + 1
 ```
 
 ## Declarations
@@ -341,7 +434,7 @@ fun update(state: particle):
 | function | `fun` and a [signature](#functions) | yes | yes |
 | struct | `struct name:` and a block of [members](#members) | yes | yes |
 | enum | `enum name:` and a block of members | yes | yes |
-| alias | `type name = expression` | yes | yes |
+| alias | `type name = expression`, with the expression in a type position | yes | yes |
 | constant | `const name = expression`, `const name : type = expression` | yes | yes |
 | binding | `binding name:` and a block of members | yes | yes |
 | binding composition | `binding name = other`, `binding name = (a, b)` | yes | yes |
@@ -450,12 +543,12 @@ fun shade_sky(v: basic_vertex){frame} -> vec3:
 | `name: type`, with an optional `= default` | a **field** |
 | `name => expression` | a **property** |
 | `fun` and a signature | a **method** |
-| one bare name, inside an `enum` | a **case** |
+| one bare name, or `name = value`, inside an `enum` | a **case** |
 | any other declaration, with its keyword | a nested declaration |
 
 * **AST-79** A field is one kind of node for struct fields, binding members, parameters and the members of a `struct_type`: a name, a type, an optional default and attributes.
 * **AST-80** The type of a field stands in a type position.
-* **AST-81** A property is read-only and has no parameter list.
+* **AST-81** A property is read-only and has no parameter list, and its body is an expression or, after `=>:`, a value block.
 * **AST-82** A method starts with `fun`, and a property does not ([why](why/ast.md#ast-82)).
 * **AST-83** A method whose first parameter is `self` or `mut self`, written without a type, is an instance method, and that parameter is its **receiver**.
 * **AST-84** A method without a receiver is static.
@@ -466,16 +559,22 @@ fun shade_sky(v: basic_vertex){frame} -> vec3:
 | `struct` | yes | yes | yes | yes | no | yes |
 | `enum` | no | | yes | yes | yes | yes |
 | `binding` | yes | no | yes | no | no | no |
-| `struct_type` | yes | | no | no | no | no |
+| `struct_type` | yes | yes | no | no | no | no |
 
 * **AST-86** A member that its owner does not allow is a normal error, and it is still read.
+* **AST-115** A case may carry a value, which is an expression: `red = 1`.
+* **AST-116** The default of a field may name the fields that stand before it, and the AST checks nothing about it ([why](why/ast.md#ast-116)).
 
 ```sgl
 struct particle:
     pos: pos3
     velocity: vec3
     age: float = 0.0
+    lifetime: float = age + 10.0
     speed => self.velocity.length
+    energy =>:
+        let v = self.speed
+        yield 0.5 * v * v
     fun advanced(self, dt: float) => particle(self.pos + self.velocity * dt, self.velocity, self.age + dt)
     fun reset(mut self):
         self.velocity = vec3(0, 0, 0)
@@ -488,16 +587,25 @@ enum light_kind:
     sun
     is_local => self != .sun
     fun fallback() => light_kind.point
+
+enum channel_mask:
+    red = 1
+    green = 2
+    blue = 4
+    all = 7
 ```
 
 | source | reads as |
 |---|---|
 | `age: float = 0.0` | a field with a default |
+| `lifetime: float = age + 10.0` | a field whose default names the field `age` before it |
+| `energy =>:` | a property whose body is a value block |
 | `speed => self.velocity.length` | a property |
 | `fun advanced(self, dt: float) => …` | an instance method whose receiver is read-only |
 | `fun reset(mut self):` | an instance method whose receiver is mutable |
 | `fun at_rest(pos: pos3) => …` | a static method |
 | `sun` | a case |
+| `blue = 4` | a case with the value `4` |
 
 A `binding` allows no method, so the AST reports a normal error for `fun inverse_view`.
 
@@ -510,7 +618,7 @@ binding frame:
 ## Attributes
 
 * **AST-87** The set of attributes is open: the AST keeps every attribute on the node it is written on, and it judges none by its name ([why](why/ast.md#ast-87)).
-* **AST-88** An attribute in the AST is the span of its name and its arguments, each read as an argument.
+* **AST-88** An attribute in the AST is the span of its name and its arguments, each read as an argument by AST-23: positional, named or a splat.
 * **AST-89** An attribute may stand on a declaration, a member, a parameter, a binding entry, a statement and an expression in a type position.
 * **AST-90** An attribute on any other expression is a normal error, and the attribute is kept.
 * **AST-91** A later phase validates every attribute against its name and the kind of its node, and an attribute it does not know is a warning.
@@ -520,6 +628,7 @@ binding frame:
 @vertex struct basic_vertex:
     pos: pos3
     @range(0, 1) weight: float
+    @slider(min = 0, max = 4, ..ui_defaults) gain: float
 
 @vertex fun my_vs(@builtin id: uint, v: basic_vertex){@slot(0) frame} -> @position hpos4:
     @unroll
@@ -531,7 +640,8 @@ binding frame:
 | attribute | stands on |
 |---|---|
 | `@vertex`, first | the declaration `struct basic_vertex` |
-| `@range(0, 1)` | the member `weight` |
+| `@range(0, 1)` | the member `weight`, with two positional arguments |
+| `@slider(…)` | the member `gain`, with two named arguments and a splat |
 | `@vertex`, second | the declaration `fun my_vs` |
 | `@builtin` | the parameter `id` |
 | `@slot(0)` | the binding entry `frame` |
@@ -559,13 +669,7 @@ The ideas these records serve are in the [incubator](../incubator/_index.md):
 * The half-open range `a..`, as in `for i in 1..:`; the postfix `..` is reserved for it ([OP-31](operators.md#the-operator-table)).
 * What a binding entry other than a bare name means: `name as other` and `name = other` are kept and have no meaning yet.
 * Whether members are in scope unqualified inside a property or a method, so that `length` reads `x` and not `self.x`.
-* Whether "no effect" is a warning or a normal error.
-* Whether an infix or a prefix call as a statement, `a + b`, has an effect.
-* The names of the diagnostic kinds of the AST; [diagnostics.md](diagnostics.md) lists them once they exist.
-* Whether a `fun` without a name in expression position, `fun (x) => x + 1`, is a `lambda`.
-* Whether a round paren literal of one named argument, `(a = 1)`, is a tuple.
-* Whether a parameter and a field of a `struct_type` may carry a default, and whether a case of an `enum` may carry a value.
-* A function type to the right of `:` needs parentheses, since level 7 associates to the left; whether that stays.
-* Whether the left side of the `in` of a `for` may be `_` or a pattern.
+* Whether `true` and `false` are keywords or constants of the prelude; until then the AST reads them as ordinary `name` nodes.
+* A pattern as the variable of a `for`, which waits for custom iterators.
 * Whether single-quoted and backquoted literals are reported until their semantics exist.
 * Partial assignment, `x .= {.1 = 8}`, is an idea only.

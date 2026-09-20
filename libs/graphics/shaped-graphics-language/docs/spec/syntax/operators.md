@@ -5,7 +5,7 @@ Back to the [phases](_index.md); the reasons are in [why/operators.md](why/opera
 
 ## The precedence ladder
 
-* **OP-1** A run of group tokens is read by this ladder, where level 1 binds loosest and level 15 binds tightest.
+* **OP-1** A run of group tokens is read by this ladder, where level 1 binds loosest and level 16 binds tightest.
 
 | level | construct | associates | example |
 |---|---|---|---|
@@ -15,19 +15,22 @@ Back to the [phases](_index.md); the reasons are in [why/operators.md](why/opera
 | 4 | [keyword form](forms.md#keyword-forms) | | `assert a == b, "msg"` |
 | 5 | `and` `or` `not` | left | `a and not b` |
 | 6 | comparisons `<` `<=` `==` `!=` `>=` `>` | chained | `0 <= i < n` |
-| 7 | `:` `->` `as` `in` | left | `x as int in bounds : bool` |
-| 8 | ranges `..<` `..=` | none | `0..<n + 1` |
-| 9 | bit-like `&` `\|` `^` `<<` `>>` | left | `(x >> 16) ^ x` |
-| 10 | add-like `+` `-` | left | `a + b - c` |
-| 11 | mul-like `*` `/` `%` | left | `a * b / c` |
-| 12 | [application](forms.md#application) | | `cross a b` |
-| 13 | prefix and postfix operators | | `-x`, `~x`, `..x` |
-| 14 | [postfix forms](forms.md#postfix-forms): calls and member access | | `f(x).y[i]` |
-| 15 | atoms | | `x`, `1.5`, `(a, b)` |
+| 7 | `:` `as` `in` | left | `x as int in bounds : bool` |
+| 8 | function arrow `->` | right | `(float) -> (float) -> float` |
+| 9 | ranges `..<` `..=` | none | `0..<n + 1` |
+| 10 | bit-like `&` `\|` `^` `<<` `>>` | left | `(x >> 16) ^ x` |
+| 11 | add-like `+` `-` | left | `a + b - c` |
+| 12 | mul-like `*` `/` `%` | left | `a * b / c` |
+| 13 | [application](forms.md#application) | | `cross a b` |
+| 14 | prefix and postfix operators | | `-x`, `~x`, `..x` |
+| 15 | [postfix forms](forms.md#postfix-forms): calls and member access | | `f(x).y[i]` |
+| 16 | atoms | | `x`, `1.5`, `(a, b)` |
 
-* **OP-2** `and`, `or` and `not` share one level, `:` `->` `as` `in` share one level, and the bit-like operators share one level ([why](why/operators.md#op-2)).
+* **OP-2** `and`, `or` and `not` share one level, `:` `as` `in` share one level, and the bit-like operators share one level ([why](why/operators.md#op-2)).
 * **OP-3** `=>` binds looser than a keyword form and tighter than assignment ([why](why/operators.md#op-3)).
 * **OP-4** The bit-like operators bind tighter than comparisons ([why](why/operators.md#op-4)).
+* **OP-32** `->` has a level of its own, tighter than `:` `as` `in` and looser than the ranges, and it associates to the right ([why](why/operators.md#op-32)).
+* **OP-33** A right-associative level reads as operator runs of two operands, nested to the right: `a -> b -> c` is the run of `a` and of the run `b -> c`.
 
 | source | reads as |
 |---|---|
@@ -36,7 +39,16 @@ Back to the [phases](_index.md); the reasons are in [why/operators.md](why/opera
 | `a + b as float` | `(a + b) as float` |
 | `not a == b` | `not (a == b)` |
 | `-f(x).y` | `-((f(x)).y)` |
+| `x : (int) -> int` | `x : ((int) -> int)` |
+| `a -> b -> c` | `a -> (b -> c)` |
+| `x as int in 0..=10 : bool` | `((x as int) in (0..=10)) : bool` |
 | `let g = fun (x) => x + 1` | `let g = ((fun (x)) => (x + 1))` |
+
+```sgl
+let ease : (float) -> float = smooth_step
+type curried = (float) -> (float) -> float
+fun scaled(a: float) -> float => a * 2
+```
 
 ## The operator table
 
@@ -44,11 +56,11 @@ Back to the [phases](_index.md); the reasons are in [why/operators.md](why/opera
 
 | first character | level |
 |---|---|
-| `*` `/` `%` | 11, mul-like |
-| `+` `-` | 10, add-like |
-| `&` `\|` `^` | 9, bit-like |
-| `<` `>` | 9, bit-like, unless the operator is a comparison |
-| `..` | 8, range |
+| `*` `/` `%` | 12, mul-like |
+| `+` `-` | 11, add-like |
+| `&` `\|` `^` | 10, bit-like |
+| `<` `>` | 10, bit-like, unless the operator is a comparison |
+| `..` | 9, range |
 
 * **OP-6** The comparisons are exactly `<`, `<=`, `==`, `!=`, `>=` and `>`.
 * **OP-7** An operator that ends in `=` and is not a comparison is an assignment operator, whatever its first character.
@@ -86,7 +98,7 @@ let wide = (normal.., 0)
 
 ## Mixing
 
-* **OP-15** Two different operators of level 5, or of level 9, in one run without parentheses are the normal error `mixed-operators`, and the run reads left to right ([why](why/operators.md#op-15)).
+* **OP-15** Two different operators of level 5, or of level 10, in one run without parentheses are the normal error `mixed-operators`, and the run reads left to right ([why](why/operators.md#op-15)).
 * **OP-16** A `not` is allowed on the last operand of a run of `and` or `or`, and on an operand that stands alone; any other `not` is the normal error `misplaced-not`.
 * **OP-17** A comparison chain reads as the pairwise comparisons joined by `and`, with each operand evaluated once.
 * **OP-18** A comparison chain must be monotone: only `<`, `<=` and `==`, or only `>`, `>=` and `==`.

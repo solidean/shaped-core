@@ -9,7 +9,8 @@ Few people know whether `and` binds tighter than `or`, or how `&`, `^` and `|` r
 A precedence nobody remembers is a source of bugs and not a convenience.
 So each of these families is one level, and mixing inside a level is an error ([OP-15](#op-15)).
 The ladder has fewer steps to learn, and the parentheses that careful authors write anyway become the rule.
-`:`, `->`, `as` and `in` are one level because they all say something *about* a value, its type, its conversion, its membership, and they chain left to right.
+`:`, `as` and `in` are one level because they all say something *about* a value, its type, its conversion, its membership, and they chain left to right.
+`->` is not of that family, since it builds a type and says nothing about a value ([OP-32](#op-32)).
 
 ## OP-3
 
@@ -85,3 +86,14 @@ Why it is a prefix, and why it must be a whole element, is in [AST-28](ast.md#as
 A half-open range wants the spelling `a..`: `for i in 1..:` with a `break` inside reads like the ranges that have an end.
 A postfix splat would have taken exactly that spelling.
 So the postfix `..` stays reserved, and it reports `reserved-operator` like every other postfix operator until the range is decided.
+
+## OP-32
+
+`x : (int) -> int` has to read as a name with a function type, since that is the only thing anyone means by it.
+On a shared left-associative level it read as `(x : (int)) -> int`, a function type whose parameter is an ascription, and every function type to the right of a `:` needed parentheses.
+A level of its own, one step tighter than `:`, makes the form tree group it the way it is read, so no later phase has to regroup a run.
+It associates to the right because `a -> b -> c` is a curried function type: a function that takes `a` and returns the function `b -> c`.
+That is also how `=>` nests, so a curried lambda and its type have the same shape.
+Nothing else relied on `->` and `:` being equals.
+`fun f(a: float) -> float => a` has its `:` inside the parentheses, and `x as int in 0..=10 : bool` holds no `->` at all.
+An attribute directly after `->` still attaches to that operand ([GRP-32](../groups.md#attributes)).

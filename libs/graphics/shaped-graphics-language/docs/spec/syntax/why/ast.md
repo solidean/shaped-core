@@ -24,7 +24,7 @@ That is also all a formatter or a rename tool wants from it.
 ## AST-9
 
 This is the designer's bet: SGL never needs a "type" kind beside the "value" kind.
-Everything is a value, and some positions, the right side of `:`, `->` and `as`, ask for a value that reads as a type.
+Everything is a value, and some positions, the right side of `:`, `->` and `as` and of a `type` alias, ask for a value that reads as a type.
 `(int, int)` is a tuple of two types, and in a type position it reads as the type of a pair.
 A function may return a type, since every function inlines and the call has reduced to a plain type before any code survives.
 For the AST this removes a whole grammar: there is no type syntax to parse, no place where `a[b]` must be decided early, and no second set of nodes.
@@ -85,6 +85,7 @@ fun shade(hit: hit_info) -> vec3:
 
 With jumps as statements the arm would need a block, and the `case` could not be the right side of a `let`.
 `loop` yields through `break value` for the same reason, and a `loop` without a `break` is of the bottom type too.
+`yield` is the fourth jump, and it is one for the same reason: `if l > 1 => yield c / l` leaves a value block early, in one expression.
 
 ## AST-48
 
@@ -139,3 +140,45 @@ So the AST keeps them all, and the phase that owns the table of known attributes
 An unknown one is a warning, since a typo should be seen and a foreign tool's attribute should not stop the build.
 Keying that table by name *and* node kind lets one word serve twice: `@vertex struct` is a vertex layout and `@vertex fun` is the vertex stage.
 The set of places an attribute may stand is kept additive for the same reason, and `@unroll` on a loop is the first attribute that needs a statement.
+
+## AST-101
+
+The arrow lambda is the short one, and it is deliberately not a function: a `return` inside it would have no obvious target.
+The anonymous function is the lambda one can jump out of.
+It starts with `fun`, so `return` means in it what it means in every `fun`, and an early exit from a callback needs no flag and no nesting.
+
+```sgl
+let safe_sqrt = fun (x: float) -> float:
+    if x < 0 => return 0.0
+    return sqrt x
+```
+
+It is also the lambda that a templated lambda needs.
+Type parameters and bindings are lists of a signature, fused to what stands before them, and an arrow lambda has no signature to carry them.
+`fun [T](x: T) => x` reuses the one a named function has, minus the name, so there is nothing new to learn and no second set of rules.
+
+## AST-106
+
+Many expression languages make the last expression of a block its value.
+With that rule nothing in the syntax says where a value comes from, and a reader has to read carefully to see that one line of a block is not like the others.
+It is worse while writing.
+While a function is being written, the line being typed is always, syntactically, the last statement of its block.
+So an editor that checks on every keystroke would flag everything all the time.
+An explicit `yield` fixes both: the value of a block is where the keyword is, and "no effect" needs no exemption ([AST-114](../ast.md#expression-statements)).
+One-line bodies keep their short form, since in `x => x + 1` the `=>` already says where the value is.
+
+## AST-112
+
+A jump is readable when its target is.
+`break` and `continue` name the nearest loop, `yield` names the nearest value block, and `return` names the nearest `fun`, always.
+A `return` inside a `case` arm or a property block therefore leaves the function around it, which is what `_ => return false` relies on.
+An arrow lambda is no `fun`, so a `return` in it would leave either the lambda or the function that holds it, and readers would disagree on which.
+It is an error there, and the two honest spellings remain: `yield` for the value of the lambda, or an anonymous function, where `return` is unambiguous again.
+
+## AST-116
+
+A struct has no user-written constructor: its fields become the parameters of a synthesized function, and the defaults of the fields become its default arguments.
+Default arguments are evaluated left to right, so a default may use every parameter before it, and `b: float = a * 2` is that and nothing more.
+The order of the fields gives the constraint, and no separate rule about initialization order is needed.
+The AST looks no name up, so it has nothing to check here.
+The idea is in [structural types](../../incubator/structural-types.md).

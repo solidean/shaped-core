@@ -23,7 +23,7 @@ An assignment directly inside a paren group has no other use, so it is free to m
 
 ## FORM-20
 
-Member access needs the dot fused on both sides, which separates it from a leading-dot form and keeps `a.b` tight at level 14.
+Member access needs the dot fused on both sides, which separates it from a leading-dot form and keeps `a.b` tight at level 15.
 Because it is decided by spans, `1.max(2)`, `t.0` and `scene.lights[2].color` need no special cases.
 
 ## FORM-22

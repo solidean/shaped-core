@@ -68,7 +68,7 @@ Each term links to the rule that defines it.
 | **block** | the children of a line that ends in the block colon, each a statement of its own |
 | **element line** | a child line of an open paren group: a run of elements, or the continuation of the element above (GRP-14, GRP-40) |
 | **continuation line** | a child line whose group tokens are appended to the run of its parent (GRP-24) |
-| **attribute** | a symbol that starts with `@`, with optional arguments in a fused round group (GRP-27) |
+| **attribute** | a symbol that starts with `@`, with optional arguments in a fused round group, read like any paren list (GRP-27, FORM-42) |
 | **form** | a node of the form tree |
 | **keyword** | a symbol that the keyword table lists (FORM-5) |
 | **identifier** | a symbol that is no keyword, number, hash literal, attribute or wildcard (FORM-8) |
@@ -87,16 +87,21 @@ Each term links to the rule that defines it.
 | **computes-as** | the operator `=>` |
 | **number literal** | a number assembled from fused tokens by the form phase (NUM-2) |
 | **name-free** | the AST phase never looks a name up, and keeps a neutral node where only lookup can decide (AST-2) |
-| **type position** | the right side of `:`, of `->` or of `as`; the expression there is ordinary, and the AST records the position (AST-10) |
+| **type position** | the right side of `:`, of `->`, of `as` or of a `type` alias; the expression there is ordinary, and the AST records the position (AST-10) |
 | **reserved name** | an identifier whose meaning is fixed, such as `self`; it is no keyword ([keywords.md](keywords.md#reserved-names)) |
 | **call spelling** | how a `call` node is written: paren, juxtaposition, infix or prefix (AST-15) |
 | **argument** | an element of a paren group in the AST: an optional name, a value, and whether it is a splat (AST-23) |
-| **object shorthand** | a bare name as an element of a curly paren literal, short for `a = a` (AST-27) |
+| **object shorthand** | a bare name as an element of a curly paren literal, short for `a = a`; the other elements are named arguments and splats (AST-27, AST-97) |
 | **splat** | the prefix operator `..` on a whole element of a paren group: `(..normal, 0)` (AST-28) |
+| **arrow lambda** | the lambda `parameters => body`; it takes no type parameters and no bindings, and no `return` leaves it (AST-34) |
+| **anonymous function** | the lambda that is a `fun` without a name, in expression position: `fun (x) => x + 1` (AST-101) |
+| **value block** | a block after `=>:` that is the body of a `case` arm, an arrow lambda or a property; it has a value only through `yield` (AST-107) |
+| **yield** | the jump `yield expression`, which gives the nearest enclosing value block its value (AST-108) |
+| **jump** | `return`, `break`, `continue` or `yield`; each is an expression (AST-40) |
 | **arm** | one `pattern => result` statement of a `case` block (AST-36) |
 | **body** | a block, or the right side of an `=>` (AST-42) |
 | **pattern** | what a `let` declares: a name, `_`, or a round list of patterns (AST-44) |
-| **signature** | what follows `fun`: a name, then `[type parameters]`, `(parameters)` and `{bindings}` in this order (AST-66) |
+| **signature** | what follows `fun`: a name, which an anonymous function leaves out, then `[type parameters]`, `(parameters)` and `{bindings}` in this order (AST-66) |
 | **parameter** | a field in the parameters of a signature (AST-68) |
 | **binding entry** | an element of the bindings of a signature (AST-69) |
 | **signature-only** | a function without a body (AST-72) |
@@ -104,10 +109,10 @@ Each term links to the rule that defines it.
 | **setting** | one `name = value` line of a `sampler` block (AST-76) |
 | **member** | a statement of a `struct`, `enum` or `binding` block, or an element of a `struct_type` (AST-77) |
 | **field** | the member `name: type`, with an optional default; also what a parameter is (AST-79) |
-| **property** | the member `name => expression`: read-only, no parameter list, no keyword (AST-81) |
+| **property** | the member `name => expression`, or `name =>:` and a value block: read-only, no parameter list, no keyword (AST-81) |
 | **method** | the member `fun` and a signature; an instance method when it has a receiver, and static otherwise (AST-82) |
 | **receiver** | the first parameter of a method when it is `self` or `mut self` (AST-83) |
-| **case** | a bare name as a member of an `enum`; not the keyword `case` (AST-78) |
+| **case** | a bare name, or `name = value`, as a member of an `enum`; not the keyword `case` (AST-78, AST-115) |
 | **owner** | the declaration or `struct_type` a member stands in; it decides which members are allowed (AST-85) |
 | **diagnostic** | a kind, a byte span and a message (DIAG-1) |
 | **normal error** | a forbidden construct with one reasonable reading, which the tree carries (DIAG-4) |

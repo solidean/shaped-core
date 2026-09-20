@@ -185,7 +185,7 @@ print 10
 * **GRP-27** An **attribute** is a symbol that starts with `@`.
 * **GRP-28** An attribute takes arguments only as a fused round group: `@range(0, 1)`.
 * **GRP-29** A round group after whitespace is not the arguments of the attribute, and it is the warning `spaced-attribute-arguments`.
-* **GRP-30** The arguments are grouped like any paren group, and they are parsed into forms only when the attribute is used.
+* **GRP-30** The arguments are grouped like any paren group, and the form parser reads them like any paren list ([FORM-42](forms.md#the-parser)).
 * **GRP-31** Where an attribute attaches is decided by its position, by the first rule below that applies ([why](why/groups.md#grp-31)).
 
 | rule | position | attaches to |

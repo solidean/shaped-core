@@ -87,4 +87,4 @@ The positions are the ones people write: a line above a declaration, the end of 
 The last of these is the way to annotate a return value, such as `-> @position vec4`.
 An attribute in the middle of a line still attaches, to the whole line, and is reported, because the formatter moves it to the front.
 So `fun @vertex main` and `@vertex fun main` mean the same, and only the second is kept.
-Arguments are parsed lazily because most tools that read a file never look at them.
+The form parser never sees the attribute, and it does read its arguments, as the paren list they are ([FORM-42](../forms.md#the-parser)).

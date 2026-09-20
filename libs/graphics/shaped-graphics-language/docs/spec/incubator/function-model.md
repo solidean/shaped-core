@@ -17,8 +17,30 @@ Functions are therefore second-class-ish, and that has pleasant consequences:
   There is no closure object, no capture list, no lifetime question.
 * **Lambdas cost nothing.**
   `x => x + 1` passed to a function is substituted, not called through.
+* **There are two lambda spellings, and `return` tells them apart.**
+  The arrow lambda, `x => x + 1`, is the short one: a longer one takes a block after `=>:` and gives its value with `yield`.
+  The anonymous function, `fun (x) => x + 1`, is a `fun` without a name: it may be left by `return`, and it alone takes type parameters and bindings.
+* **`return` always leaves the nearest enclosing `fun`**, named or anonymous ([AST-112](../syntax/ast.md#jumps)).
+  In an arrow lambda it is an error, since a reader could not tell which function it leaves.
 * **Exact stack traces are possible after the fact**, because every call site is static: a fixed source id identifies it.
   [shader-logging.md](shader-logging.md) builds on this.
+
+```sgl sketch
+let halved = map(values, x => x / 2)
+
+let bright = map(colors, c =>:
+    let l = luminance c
+    if l > 1 => yield c / l
+    yield c
+)
+
+let first_hit = find(hits, fun (h: hit_info) -> bool:
+    if not h.is_valid => return false
+    return h.distance < limit
+)
+
+let larger = fun [T](a: T, b: T) => max(a, b)
+```
 
 **Type arguments.**
 `[]` after a name signals arguments that a caller may omit and have deduced:
@@ -57,7 +79,8 @@ This is an experiment that may be built back if it turns out to cost more than i
 * Application by juxtaposition binds tighter than every binary operator: `foo a + bar b` is `foo(a) + bar(b)`.
 * Type arguments are a fused square list, the same form as a subscript.
 * `=>` is its own loose, right-associative level, so `x => y => x + y` nests as a curried lambda would.
-* `->` is used for function types and return types only.
+* `->` is used for function types and return types only, at a right-associative level of its own: `a -> b -> c` is a curried function type, and `x : (int) -> int` needs no parentheses.
+* `fun (x) => e` is `=>` over a `fun` keyword form without a name, and `yield` heads a keyword form like `return`.
 
 ## Open
 

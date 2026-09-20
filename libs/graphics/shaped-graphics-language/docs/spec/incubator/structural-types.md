@@ -36,6 +36,22 @@ declares the type and synthesizes a function of the same name:
 fun A(a: float, b: float = 2) -> A
 ```
 
+**A field's default may use the fields before it.**
+The defaults become the default arguments of the synthesized function, and default arguments are evaluated left to right.
+
+```sgl sketch
+struct falloff:
+    radius: float
+    inner: float = radius * 0.5
+    sharpness: float = 1 / (radius - inner)
+```
+
+```sgl sketch
+fun falloff(radius: float, inner: float = radius * 0.5, sharpness: float = 1 / (radius - inner)) -> falloff
+```
+
+Field order is the only rule this needs, and the AST checks none of it ([AST-116](../syntax/ast.md#members)).
+
 Writing `A(2)` names that function rather than the type.
 So construction is an ordinary function call with ordinary rules for defaults and named arguments.
 Objects are always complete: the only partially initialized state exists inside the synthesized function, which is not user code.
@@ -65,6 +81,7 @@ It is pointless for one member and pays off for several.
 * The type system: structural equality up to member order for named members, positional for unnamed ones.
 * Conversion rules between structural values, and from structural values to nominal types at a call.
 * Overload and default-argument resolution, since struct construction is a call.
+* Name resolution: a field default sees the fields declared before it, the way a default argument sees the parameters before it.
 
 ## Already fixed by the syntax
 

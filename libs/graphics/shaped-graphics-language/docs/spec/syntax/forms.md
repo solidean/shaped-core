@@ -10,6 +10,7 @@ Back to the [phases](_index.md); the reasons are in [why/forms.md](why/forms.md)
 * **FORM-2** The keyword table is data handed to the form parser, and it is the only thing the parser knows about the language ([why](why/forms.md#form-2)).
 * **FORM-3** How tightly each construct binds is the precedence ladder in [operators.md](operators.md#the-precedence-ladder).
 * **FORM-4** Every form may carry attributes, attached by the [grouping phase](groups.md#attributes).
+* **FORM-42** The fused round group of an attribute is read like any paren group: its elements are forms, and `name = value` is a named argument, as in `@slider(min = 0)`.
 
 | form | is |
 |---|---|
@@ -149,17 +150,20 @@ else if count < 0:
 | `assert count == 0, "zero"` | keyword form `assert` with two arguments |
 | `fun f(x: int) -> int => x + 1` | `=>` of: keyword form `fun` with `f(x: int) -> int`, and: `x + 1` |
 | `if done => return` | `=>` of: keyword form `if` with `done`, and: keyword form `return` |
+| `yield r * r * pi` | keyword form `yield` with `r * r * pi` |
+| `let g = fun (x) => x + 1` | assignment to `let g` of: `=>` of: keyword form `fun` with `(x)`, and: `x + 1` |
+| `x : (int) -> int` | `:` of `x` and: `->` of `(int)` and `int` |
 | `let k = case kind:` | assignment to `let k` of: keyword form `case` with `kind` and the block |
 | `for i in range:` | keyword form `for` with the one argument `i in range`, and the block |
 
-A block as the right side of `=>`.
+A block as the right side of `=>`, which yields its value with `yield` ([AST-107](ast.md#value-blocks-and-yield)).
 
-```sgl sketch
+```sgl
 let area = case shape:
     .square => shape.side * shape.side
     .circle =>:
         let r = shape.radius
-        r * r * pi
+        yield r * r * pi
 ```
 
 ## Composites and sequences

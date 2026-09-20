@@ -50,8 +50,8 @@ Because functions inline completely ([function-model.md](function-model.md)), an
 
 ## Already fixed by the syntax
 
-* `..<` and `..=` are single operator tokens, at their own non-associative level between the bit-like operators and the ascription-like operators.
-* `in` is a word operator sharing one left-associative level with `:`, `->` and `as`, so `x as int in 0..=10 : bool` reads left to right.
+* `..<` and `..=` are single operator tokens, at their own non-associative level between the bit-like operators and `->`.
+* `in` is a word operator sharing one left-associative level with `:` and `as`, so `x as int in 0..=10 : bool` reads left to right.
 * A keyword form takes whole expressions, so `for i in 0..<n:` is `for` plus the single expression `i in 0..<n`.
 * A range operator is exempt from the rule that infix operators need spaces, so `0..<4` and `0 ..< 4` are both accepted.
 * The postfix `..` is reserved, and it reports `reserved-operator` today.
