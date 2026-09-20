@@ -167,6 +167,19 @@ So an editor that checks on every keystroke would flag everything all the time.
 An explicit `yield` fixes both: the value of a block is where the keyword is, and "no effect" needs no exemption ([AST-114](../ast.md#expression-statements)).
 One-line bodies keep their short form, since in `x => x + 1` the `=>` already says where the value is.
 
+`yield` is experimental all the same.
+It does not yet feel as coherent as the features around it, and that is accepted for now.
+What is unsettled is named here and nothing more.
+It adds a third jump keyword that carries a value, with target rules of its own beside those of `return` and `break`.
+Its interplay with `loop` and `break` needed a special case ([AST-118](../ast.md#value-blocks-and-yield)).
+The alternative, an implicit last expression, stays rejected for the reasons above.
+
+## AST-111
+
+`_ => yield 1` says the same thing twice: the `=>` hands the expression on, and so does the keyword.
+It is legal and has one reading, so it is a warning and the value is what the line would be without the keyword.
+It is not silent, since a reader who sees `yield` there looks for a block that is not there.
+
 ## AST-112
 
 A jump is readable when its target is.
@@ -174,6 +187,23 @@ A jump is readable when its target is.
 A `return` inside a `case` arm or a property block therefore leaves the function around it, which is what `_ => return false` relies on.
 An arrow lambda is no `fun`, so a `return` in it would leave either the lambda or the function that holds it, and readers would disagree on which.
 It is an error there, and the two honest spellings remain: `yield` for the value of the lambda, or an anonymous function, where `return` is unambiguous again.
+
+## AST-118
+
+A `loop` is a value construct with a keyword of its own: its value is that of the `break` that leaves it ([AST-39](../ast.md#lambdas-case-and-loop)).
+A `yield` that crossed it would leave the loop and the value block in one step, and the loop would end without ever getting its value.
+Inside a `loop` the way out is `break value`, and the value block around it takes the value of the `loop` from there.
+`for` and `while` have no value, so nothing is skipped when a `yield` passes through them.
+
+## AST-120
+
+The fix for `x => return x` is to drop the keyword, and the fix for a `return` in a lambda block is to write `yield`.
+One kind for both would have to name both fixes, and `return-in-lambda` would send the author of the one-liner to `x => yield x`, which is a warning of its own.
+
+## AST-122
+
+A jump in the wrong kind of body has a fix that names the right keyword, and a jump with no target at all has none: the line is in the wrong place.
+A kind of its own says so, where borrowing `yield-in-function` for `const k = yield 1` would recommend a `return` that has no `fun` to leave either.
 
 ## AST-116
 

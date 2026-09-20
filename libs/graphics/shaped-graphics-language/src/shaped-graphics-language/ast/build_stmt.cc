@@ -175,14 +175,19 @@ stmt_id builder::for_statement(statement_head const& head, keyword_parts const& 
 
     auto const header = parts.arguments.size() == 1 ? parts.arguments[0] : form_id::none;
     auto const header_parts = is_kind(header, form_kind::operator_run) ? run_parts_of(header) : run_parts();
-    auto const is_name_in_range = header_parts.operands.size() == 2 && header_parts.operators.size() == 1
-                               && token_text_of(header_parts.operators[0]) == "in"
+    // `:` and `in` share a level, so `i : int in r` is one run of three operands.
+    auto const& operators = header_parts.operators;
+    auto const is_typed = operators.size() == 2 && token_text_of(operators[0]) == ":";
+    auto const is_name_in_range = header_parts.operands.size() == operators.size() + 1
+                               && (operators.size() == 1 || is_typed) && token_text_of(operators.back()) == "in"
                                && (is_kind(header_parts.operands[0], form_kind::identifier)
                                    || is_kind(header_parts.operands[0], form_kind::wildcard));
     if (is_name_in_range)
     {
         result.variable = expression(header_parts.operands[0]);
-        result.iterable = expression(header_parts.operands[1]);
+        if (is_typed)
+            result.type = type_expression(header_parts.operands[1]);
+        result.iterable = expression(header_parts.operands.back());
     }
     else
     {
@@ -192,7 +197,7 @@ stmt_id builder::for_statement(statement_head const& head, keyword_parts const& 
             result.iterable = expression(argument_form);
     }
 
-    result.body = statement_body(head, parts);
+    result.body = loop_statement_body(head, parts);
     return make_stmt(head.whole, attributes, result);
 }
 
@@ -207,7 +212,7 @@ stmt_id builder::while_statement(statement_head const& head, keyword_parts const
     if (parts.arguments.size() > 1)
         report(diagnostic_kind::too_many_arguments, parts.arguments[1]);
 
-    result.body = statement_body(head, parts);
+    result.body = loop_statement_body(head, parts);
     return make_stmt(head.whole, attributes, result);
 }
 
@@ -288,15 +293,24 @@ body builder::block_body(form_id block)
 
 body builder::value_body(form_id right_of_arrow, body_owner owner)
 {
-    owners.push_back(owner);
+    auto const is_block = is_kind(right_of_arrow, form_kind::block);
+    owners.push_back({.owner = owner, .one_line = is_block ? form_id::none : right_of_arrow});
     auto result = body();
-    if (is_kind(right_of_arrow, form_kind::block))
+    if (is_block)
         result = block_body(right_of_arrow);
     else
     {
         auto const value = expression(right_of_arrow);
         result = {.kind = body_kind::arrow, .form = right_of_arrow, .value = value};
     }
+    owners.remove_back();
+    return result;
+}
+
+body builder::loop_statement_body(statement_head const& head, keyword_parts const& parts)
+{
+    owners.push_back({.owner = body_owner::statement_loop});
+    auto const result = statement_body(head, parts);
     owners.remove_back();
     return result;
 }

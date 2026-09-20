@@ -134,6 +134,18 @@ TEST("sgl ast - for takes exactly name in range")
     CHECK(body_of("for i in r\n") == "(for i in r) !! expected-body @13+3\n");
 }
 
+TEST("sgl ast - a loop variable may carry its type")
+{
+    CHECK(body_of("for i : int in 0 ..< n:\n    total += i\n")
+          == "(for i : int in (range ..< num:0 n)\n"
+             "  (assign += total i))");
+    CHECK(body_of("for _ : int in items => f()\n") == "(for _ : int in items => (call:paren f))");
+
+    // The type belongs to one name, and a pattern is still no loop variable.
+    CHECK(body_of("for (a, b) : t in ps:\n    f()\n").contains("for-takes-name-in-range"));
+    CHECK(body_of("for i : int:\n    f()\n").contains("for-takes-name-in-range"));
+}
+
 TEST("sgl ast - while")
 {
     CHECK(body_of("while i < n:\n    i += 1\n") == "(while (call:infix < i n)\n  (assign += i num:1))");
@@ -203,11 +215,11 @@ TEST("sgl ast - yield hands a value on from the nearest value block")
              "    (yield num:1.0))\n"
              "  (arm _ => num:0.0)))");
 
-    // The block of an arrow lambda, through a `for` and a `loop`.
-    CHECK(body_of("let g = x =>:\n    for i in r:\n        loop:\n            yield i\n    yield x\n")
+    // The block of an arrow lambda, through a `for` and a `while`.
+    CHECK(body_of("let g = x =>:\n    for i in r:\n        while c:\n            yield i\n    yield x\n")
           == "(let g = (lambda (params (field x))\n"
              "  (for i in r\n"
-             "    (loop\n"
+             "    (while c\n"
              "      (yield i)))\n"
              "  (yield x)))");
 
@@ -226,8 +238,8 @@ TEST("sgl ast - a yield directly in a function body is an error that keeps its n
 
     // A function nested in a value block is a function again.
     CHECK(body_of("let g = x =>:\n    fun h():\n        yield 1\n    yield h()\n").contains("yield-in-function @56+5"));
-    // No body at all is no value block either.
-    CHECK(ast_of("const k = yield 1\n") == "(const k = (yield num:1)) !! yield-in-function @10+5\n");
+    // A `loop:` in between changes nothing: there is still no value block to reach.
+    CHECK(body_of("loop:\n    yield 1\n") == "(loop\n  (yield num:1)) !! yield-in-function @27+5\n");
 
     CHECK(body_of("let g = x =>:\n    yield\n")
           == "(let g = (lambda (params (field x))\n  (yield (invalid \"yield\")))) !! expected-expression @35+5\n");
@@ -240,12 +252,103 @@ TEST("sgl ast - a yield directly in a function body is an error that keeps its n
     CHECK(ast.diagnostics[0].level == sgl::severity::normal_error);
 }
 
-TEST("sgl ast - a return leaves the nearest fun, so an arrow lambda has nothing to return from")
+TEST("sgl ast - a yield does not look through a loop, which is left with break")
+{
+    CHECK(body_of("let g = x =>:\n    loop:\n        yield x\n")
+          == "(let g = (lambda (params (field x))\n"
+             "  (loop\n"
+             "    (yield x)))) !! yield-in-loop @53+5\n");
+    // The `if` and the `for` on the way are transparent, and the `loop:` between them is what is reported.
+    CHECK(body_of("let k = case kind:\n    _ =>:\n        loop:\n            for i in r:\n                "
+                  "if c => yield i\n")
+              .contains("yield-in-loop @120+5"));
+
+    // What it is written as: `break` gives the `loop` its value, and the block hands that on.
+    CHECK(body_of("let k = case kind:\n    _ =>:\n        yield loop:\n            break 1\n")
+          == "(let k = (case kind\n"
+             "  (arm _\n"
+             "    (yield (loop\n"
+             "      (break num:1))))))");
+    // A value block inside the loop is reached without crossing it.
+    CHECK(body_of("let r = loop:\n    let k = case kind:\n        _ =>:\n            yield 1\n    break k\n").contains("!!")
+          == false);
+
+    auto const file = sgl::parse("const g = x =>:\n    loop:\n        yield x\n");
+    auto const ast = sgl::ast::build(file);
+    REQUIRE(ast.diagnostics.size() == 1);
+    CHECK(ast.diagnostics[0].kind == sgl::diagnostic_kind::yield_in_loop);
+    CHECK(ast.diagnostics[0].level == sgl::severity::normal_error);
+}
+
+TEST("sgl ast - a yield that is a whole one-line body is redundant, and its node is kept")
+{
+    CHECK(body_of("let k = case kind:\n    _ => yield 1\n")
+          == "(let k = (case kind\n  (arm _ => (yield num:1)))) !! redundant-yield @45+5\n");
+    CHECK(body_of("let g = x => yield x\n")
+          == "(let g = (lambda (params (field x)) => (yield x))) !! redundant-yield @26+5\n");
+    CHECK(ast_of("struct s:\n    length => yield w\n")
+          == "(struct s\n  (property length => (yield w))) !! redundant-yield @24+5\n");
+    // The keyword forms it takes as its value change nothing.
+    CHECK(body_of("let g = x => yield case x:\n    _ => 1\n").contains("redundant-yield @26+5"));
+
+    // A `yield` that is only part of the line is no body, and the statement right of `if … =>` is none either.
+    CHECK(body_of("let g = x =>:\n    if c => yield 1\n    yield 2\n").contains("!!") == false);
+
+    auto const file = sgl::parse("const g = x => yield x\n");
+    auto const ast = sgl::ast::build(file);
+    REQUIRE(ast.diagnostics.size() == 1);
+    CHECK(ast.diagnostics[0].kind == sgl::diagnostic_kind::redundant_yield);
+    CHECK(ast.diagnostics[0].level == sgl::severity::warning);
+}
+
+TEST("sgl ast - a jump with nothing around it to leave")
+{
+    // A `yield` with neither a value block nor a `fun` around it.
+    CHECK(ast_of("const k = yield 1\n") == "(const k = (yield num:1)) !! jump-without-target @10+5\n");
+    CHECK(ast_of("const k = loop:\n    yield 1\n").contains("jump-without-target @20+5"));
+    // A `return` looks through the property block, and a struct at file level has no `fun` around it.
+    CHECK(ast_of("struct s:\n    area =>:\n        return 1\n")
+          == "(struct s\n"
+             "  (property area\n"
+             "    (return num:1))) !! jump-without-target @31+6\n");
+    CHECK(ast_of("const k = return 1\n") == "(const k = (return num:1)) !! jump-without-target @10+6\n");
+
+    // `break` and `continue` look for a loop inside their function, through a `case` arm and an `if`.
+    CHECK(body_of("break\n") == "(break) !! jump-without-target @13+5\n");
+    CHECK(body_of("if c => continue\n") == "(if\n  (branch c => (continue))) !! jump-without-target @21+8\n");
+    CHECK(body_of("for i in r:\n    case i:\n        0 => continue\n        _ => break\n").contains("!!") == false);
+    CHECK(body_of("while c:\n    if d => break\n").contains("!!") == false);
+    // A lambda is a function of its own, so the loop around it is out of reach.
+    CHECK(body_of("for i in r:\n    let g = x =>:\n        break\n").contains("jump-without-target @59+5"));
+    CHECK(body_of("loop:\n    let g = fun (x):\n        break\n").contains("jump-without-target @56+5"));
+
+    auto const file = sgl::parse("const k = yield 1\n");
+    auto const ast = sgl::ast::build(file);
+    REQUIRE(ast.diagnostics.size() == 1);
+    CHECK(ast.diagnostics[0].kind == sgl::diagnostic_kind::jump_without_target);
+    CHECK(ast.diagnostics[0].level == sgl::severity::normal_error);
+}
+
+TEST("sgl ast - a return that is a whole one-line arrow lambda body is redundant")
+{
+    CHECK(body_of("let g = x => return x\n")
+          == "(let g = (lambda (params (field x)) => (return x))) !! redundant-return @26+6\n");
+    CHECK(body_of("let g = x => return case x:\n    _ => 1\n").contains("redundant-return @26+6"));
+    // A one-line arm is no lambda, and a `fun` is left with `return` however short it is.
+    CHECK(body_of("let k = case kind:\n    _ => return 1\n").contains("!!") == false);
+    CHECK(body_of("let g = fun (x) => return x\n").contains("!!") == false);
+
+    auto const file = sgl::parse("const g = x => return x\n");
+    auto const ast = sgl::ast::build(file);
+    REQUIRE(ast.diagnostics.size() == 1);
+    CHECK(ast.diagnostics[0].kind == sgl::diagnostic_kind::redundant_return);
+    CHECK(ast.diagnostics[0].level == sgl::severity::normal_error);
+}
+
+TEST("sgl ast - a return leaves the nearest fun, so the block of an arrow lambda has nothing to return from")
 {
     CHECK(body_of("let g = x =>:\n    return x\n")
           == "(let g = (lambda (params (field x))\n  (return x))) !! return-in-lambda @35+6\n");
-    CHECK(body_of("let g = x => return x\n")
-          == "(let g = (lambda (params (field x)) => (return x))) !! return-in-lambda @26+6\n");
     // A `case` arm is looked through, and what it finds is the lambda.
     CHECK(body_of("let g = x => case x:\n    _ => return 1\n").contains("return-in-lambda @47+6"));
 
@@ -259,7 +362,7 @@ TEST("sgl ast - a return leaves the nearest fun, so an arrow lambda has nothing 
           == "(let g = (lambda (params (field x)) => (lambda:fun (params (field y))\n"
              "  (return y))))");
 
-    auto const file = sgl::parse("const g = x => return x\n");
+    auto const file = sgl::parse("const g = x =>:\n    return x\n");
     auto const ast = sgl::ast::build(file);
     REQUIRE(ast.diagnostics.size() == 1);
     CHECK(ast.diagnostics[0].kind == sgl::diagnostic_kind::return_in_lambda);

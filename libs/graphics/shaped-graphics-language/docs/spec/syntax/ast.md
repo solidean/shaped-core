@@ -227,12 +227,16 @@ let lit = fun (n: vec3){frame} => dot(n, frame.sun_dir)
 
 ### Value blocks and `yield`
 
+**`yield` is experimental**: the rules of this section that name it may change ([why](why/ast.md#ast-106)).
+
 * **AST-106** A block has no implicit value: its last expression is a statement like every other ([why](why/ast.md#ast-106)).
 * **AST-107** A **value block** is a block that is the body of a `case` arm, of an arrow lambda or of a property: `=>:` and a block.
 * **AST-108** `yield expression` gives its value to the nearest enclosing value block, and it leaves that block.
 * **AST-109** The blocks of `if`, `for` and `while` between a `yield` and its value block are transparent, as they are between a `break` and its loop.
-* **AST-110** A `yield` whose nearest enclosing body is the body of a `fun`, named or anonymous, is a normal error; it is written `return`.
-* **AST-111** The right side of an `=>` that is an expression is the value of that body, and it takes no `yield`.
+* **AST-118** A `yield` with a `loop` between it and its value block is the normal error `yield-in-loop`; it is written `break value` ([why](why/ast.md#ast-118)).
+* **AST-110** A `yield` that finds the body of a `fun`, named or anonymous, before any value block is the normal error `yield-in-function`; it is written `return`.
+* **AST-111** The right side of an `=>` that is an expression is the value of that body, and a `yield` that is this whole expression is the warning `redundant-yield` ([why](why/ast.md#ast-111)).
+* **AST-119** A redundant `yield` keeps its node, and its value is read as if the keyword were not there.
 
 ```sgl
 let area = case shape:
@@ -262,19 +266,47 @@ struct ray:
 | `yield c / l` | the body of the arrow lambda, through the `if` |
 | `yield vec3(…)` | the body of the property `inv_dir` |
 
-The body below is that of a `fun`, so the AST reports a normal error for the `yield`; it is written `return x * x`.
+The body below is that of a `fun`, so the AST reports `yield-in-function`; it is written `return x * x`.
 
 ```sgl sketch
 fun square(x: float) -> float:
     yield x * x
 ```
 
+The `yield` below has a `loop` between it and the arm, so the AST reports `yield-in-loop`; it is written `break guess`, and the arm hands the value of the `loop` on with `yield loop:`.
+
+```sgl sketch
+let root = case method:
+    .newton =>:
+        loop:
+            guess = refine guess
+            if converged guess => yield guess
+    _ => 0.0
+```
+
+Each `=>` below already says where the value is, so the AST reports `redundant-yield` three times and reads `0.0`, `x * 2` and `w * h`.
+
+```sgl sketch
+let area = case shape:
+    _ => yield 0.0
+let twice = x => yield x * 2
+
+struct rect:
+    w: float
+    h: float
+    area => yield w * h
+```
+
 ### Jumps
 
 * **AST-40** `return`, `break`, `continue` and `yield` are expressions, the **jumps** ([why](why/ast.md#ast-40)).
-* **AST-41** `return` and `break` take at most one value, `yield` takes one, and `continue` takes none.
-* **AST-112** `return` leaves the nearest enclosing `fun`, named or anonymous, through every value block between ([why](why/ast.md#ast-112)).
-* **AST-113** A `return` whose nearest enclosing function or lambda is an arrow lambda is a normal error; it is written `yield`.
+* **AST-41** `return` and `break` take at most one value, `yield` takes exactly one, and `continue` takes none; a `yield` without a value is the normal error `expected-expression`.
+* **AST-112** `return` leaves the nearest enclosing `fun`, named or anonymous, through every value block and every loop between ([why](why/ast.md#ast-112)).
+* **AST-113** A `return` in the block of an arrow lambda, or in a `case` arm inside one, is the normal error `return-in-lambda`; it is written `yield`.
+* **AST-120** A `return` that is the whole one-line body of an arrow lambda, `x => return x`, is the normal error `redundant-return`; it is written `x => x` ([why](why/ast.md#ast-120)).
+* **AST-121** `break` and `continue` name the nearest enclosing `loop`, `for` or `while` of their function, through every `if` block and every `case` arm between, and never through a lambda.
+* **AST-122** A jump with no target is the normal error `jump-without-target`, and it keeps its node ([why](why/ast.md#ast-122)).
+* **AST-123** A jump has no target when it is a `yield` with neither a value block nor a `fun` around it, a `return` with no `fun` around it, or a `break` or a `continue` with no loop by AST-121.
 
 ```sgl
 fun shade(hit: hit_info) -> vec3:
@@ -287,13 +319,37 @@ fun shade(hit: hit_info) -> vec3:
 ```
 
 The `return` of the arm `_` stands in a `case` inside a `fun`, so it leaves `shade`.
-The one below stands in an arrow lambda, so the AST reports a normal error; it is written `yield 0.0`, or the lambda is written `fun (x):`.
+The one below stands in the block of an arrow lambda, so the AST reports `return-in-lambda`; it is written `yield 0.0`, or the lambda is written `fun (x):`.
 
 ```sgl sketch
 let safe = map(values, x =>:
     if x < 0 => return 0.0
     yield sqrt x
 )
+```
+
+The `return` below is the whole body of an arrow lambda, so the AST reports `redundant-return`; it is written `x => x * 2`.
+
+```sgl sketch
+let twice = x => return x * 2
+```
+
+None of the jumps below has a target, so the AST reports `jump-without-target` for each.
+The `yield` and the `return` stand at file level, where no `fun` is around them, and the `break` stands in a lambda, which the `for` around it does not reach into.
+
+```sgl sketch
+const k = yield 1
+
+struct ray:
+    dir: vec3
+    inv_dir =>:
+        return 1 / dir
+
+fun first_hit(rays: span[ray]):
+    for r in rays:
+        visit(r, h =>:
+            break
+        )
 ```
 
 ## Statements
@@ -307,7 +363,7 @@ let safe = map(values, x =>:
 | `let` | `let pattern`, `let pattern : type`, each with an optional `= expression`; and the same after `let mut` |
 | assignment | `target = expression`, and `target op= expression` for every assignment operator |
 | `if` | `if condition` with a body, then any number of `else if condition`, then at most one `else`, each with a body |
-| `for` | `for name in expression` or `for _ in expression`, with a body |
+| `for` | `for name in expression` or `for _ in expression`, each with an optional `: type` after the variable, with a body |
 | `while` | `while condition` with a body |
 | `assert` | `assert condition` or `assert condition, message` |
 | `print` | `print message` |
@@ -364,11 +420,15 @@ else:
 ### Loops
 
 * **AST-54** A `for` takes exactly one argument, a `membership` whose left side is one name or `_`, and a body.
+* **AST-124** The variable of a `for` may carry a type, which stands in a type position: `for i : int in 0..<n:`.
 * **AST-55** No other shape of `for` exists, a pattern on the left side among them, and one is a normal error.
 * **AST-56** A `while` takes exactly one condition and a body.
 
 ```sgl
 for i in 0..<count:
+    total += weight i
+
+for i : int in 0..<count:
     total += weight i
 
 for _ in 0..<bounces:
@@ -666,6 +726,7 @@ The ideas these records serve are in the [incubator](../incubator/_index.md):
 
 ## Open
 
+* `yield` is experimental: its rules, the target rules above all, may change ([why](why/ast.md#ast-106)).
 * The half-open range `a..`, as in `for i in 1..:`; the postfix `..` is reserved for it ([OP-31](operators.md#the-operator-table)).
 * What a binding entry other than a bare name means: `name as other` and `name = other` are kept and have no meaning yet.
 * Whether members are in scope unqualified inside a property or a method, so that `length` reads `x` and not `self.x`.

@@ -328,7 +328,7 @@ TEST("sgl ast - loop yields through break, and the jumps are expressions")
     CHECK(body_of("return\n") == "(return)");
     CHECK(body_of("return {a = 1}\n") == "(return (object a=num:1))");
     CHECK(body_of("return a, b\n") == "(return a) !! too-many-arguments @23+1\n");
-    CHECK(body_of("continue x\n") == "(continue) !! too-many-arguments @22+1\n");
+    CHECK(body_of("loop:\n    continue x\n") == "(loop\n  (continue)) !! too-many-arguments @36+1\n");
     CHECK(body_of("loop\n") == "(loop) !! expected-body @13+4\n");
 }
 

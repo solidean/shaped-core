@@ -42,15 +42,28 @@ enum class operator_level : u8
     arithmetic,
 };
 
-/// What a `yield` or a `return` found around it, innermost last.
+/// What a jump found around it, innermost last.
 enum class body_owner : u8
 {
-    /// A `fun`, named or anonymous: `return` leaves it, and `yield` has nothing to hand a value to.
+    /// A `fun`, named or anonymous: `return` leaves it, and no other jump looks past it.
     function,
-    /// `x => …`: `yield` hands its value on, and `return` has no `fun` to leave.
+    /// `x => …`: `yield` hands its value on, and no jump looks past it.
     arrow_lambda,
-    /// A `case` arm or a property: `yield` hands its value on, and `return` looks through it.
+    /// A `case` arm or a property: `yield` hands its value on, and every other jump looks through it.
     value_block,
+    /// `loop:`: `break` and `continue` stop here, `return` looks through it, and `yield` must not cross it.
+    value_loop,
+    /// `for` or `while`: `break` and `continue` stop here, and `return` and `yield` look through it.
+    statement_loop,
+};
+
+/// One body being read.
+struct body_frame
+{
+    body_owner owner;
+    /// The expression right of `=>` when the body is that one expression, `none` for a block.
+    /// A `yield` or a `return` that is this very form is a keyword the `=>` already made redundant.
+    form_id one_line = form_id::none;
 };
 
 /// What stands between `fun` and the body.
@@ -103,7 +116,7 @@ struct builder
     parsed_file const& file;
     file_ast ast;
     /// The bodies being read, which is all a jump needs to know where it goes.
-    cc::vector<body_owner> owners;
+    cc::vector<body_frame> owners;
 
     // ---- forms (build.cc) ------------------------------------------------------------------------------------
 
@@ -191,8 +204,10 @@ struct builder
     expr_id fun_lambda_expression(form_id form, form_id keyword_form, keyword_parts const& parts, form_id right_of_arrow);
     expr_id case_expression(form_id form, keyword_parts const& parts);
     expr_id jump_expression(form_id form, keyword_parts const& parts, cc::string_view keyword);
-    /// The node of `return`, `break` or `yield`, after saying whether the jump has somewhere to go.
+    /// The node of a jump, after saying whether the jump has somewhere to go; `continue` takes no `value`.
     expr_id make_jump(form_id form, cc::string_view keyword, expr_id value);
+    /// Reports what `owners` has against the jump `keyword` written as `form`, which is nothing when it has a target.
+    void report_jump_target(form_id form, cc::string_view keyword);
     [[nodiscard]] static bool is_value_jump(cc::string_view keyword)
     {
         return keyword == "return" || keyword == "break" || keyword == "yield";
@@ -239,6 +254,8 @@ struct builder
     [[nodiscard]] body value_body(form_id right_of_arrow, body_owner owner);
     /// The body of a control statement: its block, or the one statement right of `=>`.
     [[nodiscard]] body statement_body(statement_head const& head, keyword_parts const& parts);
+    /// The body of a `for` or a `while`, which is where a `break` and a `continue` inside it go.
+    [[nodiscard]] body loop_statement_body(statement_head const& head, keyword_parts const& parts);
 
     // ---- declarations (build_decl.cc) ------------------------------------------------------------------------
 

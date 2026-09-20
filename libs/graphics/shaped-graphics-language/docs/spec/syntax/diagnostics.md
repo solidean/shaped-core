@@ -281,13 +281,17 @@ An example of an AST kind is an `sgl sketch`, since examples are checked through
 | `statement-in-expression` | an assignment, a `let`, an `if` or a declaration where a value is expected |
 | `unexpected-keyword` | keywords that head nothing together, such as `mut` without `let` |
 | `too-many-arguments` | a keyword form that holds more expressions than it takes: `return a, b`, `continue x` |
-| `for-takes-name-in-range` | a `for` that is not `for name in expression` |
+| `for-takes-name-in-range` | a `for` that is not `for name in expression` or `for name : type in expression` |
 | `assert-takes-condition-and-message` | an `assert` that is not one condition, or one condition and one message |
 | `print-takes-one-message` | a `print` that is not exactly one message |
 | `unsupported-syntax` | a spelling that is reserved and has no meaning yet: `f(x){…}`, and an expression that owns a block |
-| `yield-in-function` | a `yield` whose nearest enclosing body is a `fun` body; it is written `return` |
-| `return-in-lambda` | a `return` whose nearest enclosing function or lambda is an arrow lambda; it is written `yield` |
+| `yield-in-function` | a `yield` that finds a `fun` body before any value block; it is written `return` |
+| `yield-in-loop` | a `yield` with a `loop` between it and its value block; it is written `break value` |
+| `return-in-lambda` | a `return` in the block of an arrow lambda; it is written `yield` |
+| `redundant-return` | a `return` that is the whole one-line body of an arrow lambda; `x => return x` is written `x => x` |
+| `jump-without-target` | a `yield` with neither a value block nor a `fun` around it, a `return` with no `fun` around it, a `break` or a `continue` with no loop around it |
 | `expected-object-element` | an element of an object literal that is no name, no `name = value` and no splat |
+| `redundant-yield`, a warning | a `yield` that is the whole one-line body of an arm, an arrow lambda or a property; the `=>` already hands the value on |
 | `no-effect`, a warning | an expression statement that has no effect by [AST-60](ast.md#expression-statements) |
 
 `expected-case-arm`: the second line of the block is no arm.
@@ -343,6 +347,28 @@ let total = sum(let x, 2)
 ```sgl sketch
 fun pair() -> (int, int):
     return 1, 2
+```
+
+`yield-in-loop`: the `loop` stands between the `yield` and the lambda block, and it is left with `break guess`.
+
+```sgl sketch
+let solve = start =>:
+    let mut guess = start
+    loop:
+        guess = refine guess
+        if converged guess => yield guess
+```
+
+`jump-without-target`: no `fun` is around the `return`, and no loop is around the `break`.
+
+```sgl sketch
+struct ray:
+    dir: vec3
+    inv_dir =>:
+        return 1 / dir
+
+fun finish():
+    break
 ```
 
 `no-effect`: the sum is computed and dropped.

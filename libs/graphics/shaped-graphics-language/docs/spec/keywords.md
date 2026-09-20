@@ -28,7 +28,7 @@ Control flow and expressions:
 * `while` - looping
 * `loop` - looping
 * `return` - leaves the nearest enclosing `fun`, named or anonymous ([AST-112](syntax/ast.md#jumps))
-* `yield` - gives a value block its value: `yield expression` ([AST-108](syntax/ast.md#value-blocks-and-yield))
+* `yield` - **experimental**; gives a value block its value: `yield expression` ([AST-108](syntax/ast.md#value-blocks-and-yield))
 * `continue` - continue next loop iteration
 * `break` - breaks from loop iteration
 * `case` - generalized if expression

@@ -89,12 +89,23 @@ enum class sgl::diagnostic_kind : sgl::u8
     /// An expression statement that is neither a call nor a jump; a warning, since it is legal and never meant.
     /// No statement is exempt: a block hands a value on through `yield`, `return` or `break`, never by ending in it.
     no_effect,
-    /// A `yield` whose nearest enclosing body is that of a `fun`, or that stands in no body at all; a `fun` is left with `return`.
+    /// A `yield` whose nearest enclosing body is that of a `fun`, which is left with `return`.
     yield_in_function,
-    /// A `return` whose nearest enclosing function is an arrow lambda, which hands its value on with `yield`.
+    /// A `return` in the block of an arrow lambda, which hands its value on with `yield`.
     return_in_lambda,
     /// An object element that is not `name`, `name = value` or `..splat`.
     expected_object_element,
+    /// A `yield` with a `loop:` between it and its value block; a `loop` is left with `break value`.
+    yield_in_loop,
+    /// A `yield` that is the whole one-line body of an arm, an arrow lambda or a property; a warning.
+    /// The `=>` already says where the value is, so the value is read as if the keyword were not there.
+    redundant_yield,
+    /// A jump with nothing to leave.
+    /// A `yield` with neither a value block nor a `fun` around it, a `return` with no `fun` around it,
+    /// and a `break` or a `continue` with no loop around it inside its function.
+    jump_without_target,
+    /// A `return` that is the whole one-line body of an arrow lambda: `x => return x` is written `x => x`.
+    redundant_return,
 };
 
 namespace sgl

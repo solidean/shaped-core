@@ -433,6 +433,11 @@ struct dumper
                 open("for");
                 out += " ";
                 dump_expr(n.variable, depth);
+                if (is_valid(n.type))
+                {
+                    out += " : ";
+                    dump_expr(n.type, depth);
+                }
                 out += " in ";
                 dump_expr(n.iterable, depth);
                 dump_body(n.body, depth);

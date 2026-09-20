@@ -164,9 +164,16 @@ sgl::print_source(file)      // == file.source for EVERY input: the lossless inv
 - **`return`, `break` and `yield` with a keyword value are one form.** `return case x:` is a keyword form with TWO keywords, and the AST reads the rest as the jump's value.
   A lambda as the value arrives the other way round, `(yield x) => body`, since `=>` is looser than a keyword form; the AST puts it back together.
 - **A block never yields by ending in a value.** `yield value` hands it on from the nearest value block: the body of a `case` arm, an arrow lambda or a property.
-  The blocks of `if`, `for`, `while` and `loop` in between are looked through, and a one-line `=> value` body needs no `yield`.
-- **`yield-in-function` and `return-in-lambda` are the two ways a jump has nowhere to go.**
-  A `yield` whose nearest body is a `fun`'s (or that stands in no body) is the first; a `return` whose nearest function is an arrow lambda is the second.
+  The blocks of `if`, `for` and `while` in between are looked through.
+  A `loop:` is not: `yield-in-loop`, since a `loop` is left with `break value`.
+  `yield` is experimental in the spec, so expect its rules to move.
+- **A one-line `=> value` body takes no jump keyword.** `_ => yield 1` is the warning `redundant-yield`, and `x => return x` is the error `redundant-return`.
+  Both keep their `yield_expr` / `return_expr` node, so the dump shows what was written; a later phase reads the value through it.
+- **A jump in the wrong body names the right keyword, a jump with no target names nothing.**
+  `yield-in-function` is a `yield` that finds a `fun` body first, and `return-in-lambda` is a `return` in an arrow lambda's block.
+  `jump-without-target` is a `yield` or a `return` with no `fun` around it at all, and a `break` or a `continue` with no loop inside its function.
+  A lambda is a function of its own there: a `break` in a lambda block does not reach the `for` around the lambda.
+- **The variable of a `for` may carry a type.** `for i : int in r:` fills `for_stmt::type`, and a pattern on the left is still `for-takes-name-in-range`.
   A `return` looks through `case` arms and properties, so `_ => return false` leaves the function around the `case`.
 - **An attribute's arguments are list elements like any other.** `@slider(0, max = 1)` holds a positional and a named `argument`; `@name()` has a `list` and no arguments.
 - **`no-effect` is a warning, and no statement is exempt.** A paren or juxtaposition call, a jump, a `case`, a `loop` and `invalid` have an effect; nothing else does.

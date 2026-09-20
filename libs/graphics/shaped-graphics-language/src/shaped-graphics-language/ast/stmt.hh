@@ -38,11 +38,13 @@ struct sgl::ast::if_stmt
     constexpr bool operator==(if_stmt const&) const = default;
 };
 
-/// `for name in range`
+/// `for name in range` and `for name : type in range`
 struct sgl::ast::for_stmt
 {
     /// A `name` or a `wildcard`.
     expr_id variable = expr_id::none;
+    /// `none` when the variable carries no type.
+    expr_id type = expr_id::none;
     /// What stands right of `in`.
     expr_id iterable = expr_id::none;
     sgl::ast::body body;

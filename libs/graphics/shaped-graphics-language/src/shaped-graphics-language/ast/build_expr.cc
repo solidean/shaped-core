@@ -445,7 +445,9 @@ expr_id builder::keyword_expression_from(form_id form, keyword_parts const& part
             report(diagnostic_kind::too_many_arguments, parts.arguments[0]);
         if (!is_valid(parts.block))
             report(diagnostic_kind::expected_body, form);
+        owners.push_back({.owner = body_owner::value_loop});
         auto const result = is_valid(parts.block) ? block_body(parts.block) : body();
+        owners.remove_back();
         return make_expr(form, loop_expr{.body = result});
     }
     return invalid_expression(
@@ -500,7 +502,7 @@ expr_id builder::jump_expression(form_id form, keyword_parts const& parts, cc::s
 
     auto value = takes_value && !parts.arguments.empty() ? expression(parts.arguments[0]) : expr_id::none;
     if (!takes_value)
-        return make_expr(form, continue_expr{});
+        return make_jump(form, keyword, expr_id::none);
     // A `yield` without a value hands nothing on, which is what leaving the block out would have said.
     if (keyword == "yield" && !is_valid(value))
         value = invalid_expression(form, diagnostic_kind::expected_expression);
@@ -509,24 +511,57 @@ expr_id builder::jump_expression(form_id form, keyword_parts const& parts, cc::s
 
 expr_id builder::make_jump(form_id form, cc::string_view keyword, expr_id value)
 {
+    report_jump_target(form, keyword);
+    if (keyword == "continue")
+        return make_expr(form, continue_expr{});
     if (keyword == "break")
         return make_expr(form, break_expr{.value = value});
-
     if (keyword == "yield")
-    {
-        if (owners.empty() || owners.back() == body_owner::function)
-            report(diagnostic_kind::yield_in_function, form);
         return make_expr(form, yield_expr{.value = value});
-    }
+    return make_expr(form, return_expr{.value = value});
+}
 
-    // A `case` arm and a property are looked through: `_ => return false` leaves the function around the `case`.
+void builder::report_jump_target(form_id form, cc::string_view keyword)
+{
+    auto const is_loop_jump = keyword == "break" || keyword == "continue";
+    auto crosses_value_loop = false;
     for (auto i = owners.size() - 1; i >= 0; --i)
     {
-        if (owners[i] == body_owner::value_block)
+        auto const owner = owners[i].owner;
+        auto const is_loop = owner == body_owner::value_loop || owner == body_owner::statement_loop;
+        auto const is_one_line = owners[i].one_line == form;
+
+        if (is_loop_jump)
+        {
+            if (is_loop)
+                return;
+            // A `case` arm is looked through: `_ => break` leaves the loop around the `case`.
+            if (owner == body_owner::value_block)
+                continue;
+            break;
+        }
+        if (is_loop)
+        {
+            crosses_value_loop |= owner == body_owner::value_loop;
             continue;
-        if (owners[i] == body_owner::arrow_lambda)
-            report(diagnostic_kind::return_in_lambda, form);
-        break;
+        }
+        if (keyword == "yield")
+        {
+            if (owner == body_owner::function)
+                report(diagnostic_kind::yield_in_function, form);
+            else if (crosses_value_loop)
+                report(diagnostic_kind::yield_in_loop, form);
+            else if (is_one_line)
+                report(diagnostic_kind::redundant_yield, form);
+            return;
+        }
+
+        // A `case` arm and a property are looked through: `_ => return false` leaves the function around the `case`.
+        if (owner == body_owner::value_block)
+            continue;
+        if (owner == body_owner::arrow_lambda)
+            report(is_one_line ? diagnostic_kind::redundant_return : diagnostic_kind::return_in_lambda, form);
+        return;
     }
-    return make_expr(form, return_expr{.value = value});
+    report(diagnostic_kind::jump_without_target, form);
 }

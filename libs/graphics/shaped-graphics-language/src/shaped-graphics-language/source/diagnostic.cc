@@ -122,6 +122,14 @@ cc::string_view sgl::to_string(diagnostic_kind kind)
         return "return-in-lambda";
     case diagnostic_kind::expected_object_element:
         return "expected-object-element";
+    case diagnostic_kind::yield_in_loop:
+        return "yield-in-loop";
+    case diagnostic_kind::redundant_yield:
+        return "redundant-yield";
+    case diagnostic_kind::jump_without_target:
+        return "jump-without-target";
+    case diagnostic_kind::redundant_return:
+        return "redundant-return";
     }
     CC_UNREACHABLE("unknown diagnostic_kind");
 }
@@ -186,9 +194,13 @@ sgl::severity sgl::default_severity_of(diagnostic_kind kind)
     case diagnostic_kind::yield_in_function:
     case diagnostic_kind::return_in_lambda:
     case diagnostic_kind::expected_object_element:
+    case diagnostic_kind::yield_in_loop:
+    case diagnostic_kind::jump_without_target:
+    case diagnostic_kind::redundant_return:
         return severity::normal_error;
     case diagnostic_kind::spaced_attribute_arguments:
     case diagnostic_kind::no_effect:
+    case diagnostic_kind::redundant_yield:
         return severity::warning;
     }
     CC_UNREACHABLE("unknown diagnostic_kind");
