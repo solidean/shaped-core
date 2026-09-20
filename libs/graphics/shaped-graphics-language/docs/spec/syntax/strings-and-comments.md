@@ -147,7 +147,7 @@ log("
 * **STR-26** `$(expr)` interpolates an expression: the content of the parentheses is tokenized as code, and the `)` must be on the same line.
 * **STR-27** `$$` is a literal dollar.
 * **STR-28** A `$` followed by anything else is the normal error `stray-dollar`, and it stands for itself.
-* **STR-29** The token phase and the form phase accept interpolation; the AST rejects it until its semantics exist.
+* **STR-29** Every syntax phase accepts interpolation, the AST among them: a quoted literal keeps its pieces and its interpolations.
 * **STR-38** A name in an interpolation is letters, digits, `_` and non-ASCII code points, and it does not start with a digit: `'`, `@`, `#` and `\` end it.
 * **STR-39** A string is a sequence of tokens: the opening quote, string bodies and interpolations in source order, and the closing quote.
 * **STR-40** An interpolation is a `$` token followed by symbol and DOT tokens, or by the tokens of its parentheses.

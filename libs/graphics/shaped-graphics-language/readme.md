@@ -55,8 +55,13 @@ To uninstall, delete the link and reload.
 * The grammar is [syntaxes/sgl.tmLanguage.json](tools/vscode-extension/syntaxes/sgl.tmLanguage.json); a change shows up after **Developer: Reload Window**.
 * To try a change without installing, open `tools/vscode-extension/` as the workspace folder and press F5 — that starts an Extension Development Host with it loaded.
 * **Developer: Inspect Editor Tokens and Scopes** shows which scope a token received, which is how to tell a grammar bug from a theme that does not color that scope.
-* The grammar mirrors the [line tree](docs/spec/syntax/line-tree.md) of the [syntax specification](docs/spec/syntax/_index.md).
-  A line that is only a `//` comment, or that ends in an open `"`, owns every deeper-indented line below it ([strings and comments](docs/spec/syntax/strings-and-comments.md)).
+* The grammar mirrors the [line tree](docs/spec/syntax/line-tree.md) of the [syntax specification](docs/spec/syntax/_index.md), which is the authority.
+  A line that is only a `//` or `///` comment, or that ends in an open `"`, owns every deeper-indented line below it ([strings and comments](docs/spec/syntax/strings-and-comments.md)).
   Nothing escapes its indentation.
   A comment trailing code ends with its line.
-* Keywords come from [docs/spec/keywords.md](docs/spec/keywords.md) — a keyword added there needs adding to the grammar too.
+* Inside a line it follows [tokens](docs/spec/syntax/tokens.md): `-` is an operator and never part of a name, and `'` continues a symbol but never starts one.
+  A number is several fused tokens there, so the grammar assembles it by the rules of [numbers](docs/spec/syntax/numbers.md).
+* TextMate JSON has no variables, so the symbol character class and the keyword lookahead repeat in many patterns — change every copy.
+* Keywords come from [docs/spec/keywords.md](docs/spec/keywords.md) — a keyword added there needs adding to the grammar too, in `#keywords` and in that lookahead.
+* [examples/sample.sgl](tools/vscode-extension/examples/sample.sgl) exercises every construct the grammar knows; extend it with the grammar.
+  Its last section holds the spellings the compiler reports, so everything above it stays valid SGL.
