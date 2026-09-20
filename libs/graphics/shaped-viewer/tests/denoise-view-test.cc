@@ -63,6 +63,9 @@ ASYNC_INVOCABLE_TEST("sv - denoising a layer never restarts its accumulation", (
 
     // WORKAROUND, and the same one sv_test::tick_until carries: a trace declines until its permutations and the
     // denoiser's shader have compiled, and those compile on the ambient scheduler, so the guard is a deadline.
+    //
+    // It must stay well under dev.py's per-binary timeout: a deadline above it turns a stall into a killed process
+    // whose only evidence is a stack, where this reports which phase it was in and what was still streaming.
     auto const loop_start = cc::current_time_steady_secs();
 
     for (auto f : viewer.frames())
@@ -78,7 +81,9 @@ ASYNC_INVOCABLE_TEST("sv - denoising a layer never restarts its accumulation", (
         scene.settings({.samples_per_pixel = 1, .denoise = {.method = method}});
 
         auto const accumulated = view.accumulated_frames();
-        history += cc::format(" {}:{}", phase, accumulated);
+        // Bounded: a loop that never converges runs thousands of frames, and the first few hundred say what went wrong.
+        if (history.size() < 2000)
+            history += cc::format(" {}:{}", phase, accumulated);
         if (accumulated < last_accumulated && never_dropped)
         {
             never_dropped = false;
@@ -96,7 +101,8 @@ ASYNC_INVOCABLE_TEST("sv - denoising a layer never restarts its accumulation", (
         {
             last_accumulated = 0;
             phase_start = 0;
-            history += " (streaming)";
+            if (history.size() < 2000)
+                history += " (streaming)";
         }
 
         // A phase advances on frames that traced, not on frames: before the first trace lands nothing is being tested.
@@ -107,7 +113,9 @@ ASYNC_INVOCABLE_TEST("sv - denoising a layer never restarts its accumulation", (
             if (phase == phase_methods.size())
                 viewer.request_close();
         }
-        REQUIRE(cc::current_time_steady_secs() - loop_start < 90.0);
+        REQUIRE(cc::current_time_steady_secs() - loop_start < 25.0)
+            .context(cc::format("phase {}, accumulated {}, streaming {}, pending {}; frames (phase:count):{}", phase,
+                                accumulated, f.streaming_resources(), f.pending_resource_work(), history));
     }
 
     co_await cc::async_settled(sv::background_work(ctx));
@@ -128,7 +136,7 @@ cc::shared_async<cc::unit> capture_box(sg::context& ctx, sr::denoise_method meth
     auto const which = cc::scoped_environment_variable(sr::capture_name_env_var, "front");
     auto const dim = cc::scoped_environment_variable(sr::capture_size_env_var, "96x64");
     auto const acc = cc::scoped_environment_variable(sr::capture_accumulate_env_var, "2");
-    auto const lim = cc::scoped_environment_variable(sr::capture_timeout_env_var, "120");
+    auto const lim = cc::scoped_environment_variable(sr::capture_timeout_env_var, "20");
 
     auto const box = sv_test::make_cornell_box();
     auto const mesh = sv_test::as_mesh("cornell box", box.positions, box.materials);
@@ -149,7 +157,8 @@ cc::shared_async<cc::unit> capture_box(sg::context& ctx, sr::denoise_method meth
         scene.settings({.samples_per_pixel = 1, .denoise = {.method = method}});
 
         // The capture ends the loop itself; the deadline only turns a hang into a message.
-        REQUIRE(cc::current_time_steady_secs() - loop_start < 90.0);
+        // Under dev.py's per-binary timeout, so a stall reports rather than being killed — as is the capture's own above.
+        REQUIRE(cc::current_time_steady_secs() - loop_start < 25.0);
     }
     co_await cc::async_settled(sv::background_work(ctx));
 }

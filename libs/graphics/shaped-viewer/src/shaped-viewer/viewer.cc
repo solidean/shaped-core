@@ -8,6 +8,7 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/thread/async.hh> // cc::ambient_async_scheduler
 #include <clean-core/thread/async_coroutine.hh>
+#include <clean-core/thread/thread_pump.hh> // cc::thread_pump_all
 #include <shaped-graphics/all.hh>
 #include <shaped-graphics/context/context.hh>
 #include <shaped-rendering/input.hh>
@@ -922,6 +923,17 @@ void viewer::finish_frame(frame& f)
 
     im.current_cmd = nullptr;
     im.current_backbuffer = sg::render_target_view{};
+
+    // Every unthreaded system in the process gets one turn per frame, streaming above all.
+    //
+    // Without threads a semantic thread runs only while somebody sweeps the pump registry, and the epoch wait above
+    // sweeps only while it actually blocks — which at a steady frame rate it usually does not, since the completion
+    // it asks for has already landed.
+    // A viewer that never blocks therefore never runs the copy actor, and a mesh handed to `ctx.stream` stays in
+    // flight forever: the scene traces its placeholder box, `streaming_resources` never reaches zero, and a caller
+    // waiting for residency waits for the life of the process.
+    // With threads this is a no-op beyond the sweep itself.
+    (void)cc::thread_pump_all();
 
     if (im.capture != nullptr)
         advance_capture(plan, traces_ran);

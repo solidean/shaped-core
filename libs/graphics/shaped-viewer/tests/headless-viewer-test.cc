@@ -371,4 +371,50 @@ ASYNC_INVOCABLE_TEST("sv - light ids are scoped like view ids, and a duplicate i
     }
 
     co_await cc::async_settled(sv::background_work(ctx));
+
+// A frame loop makes streaming progress even when nothing ever blocks on it.
+//
+// Without threads a semantic thread runs only while somebody sweeps the pump registry, and the epoch wait a frame
+// ends on sweeps only while it actually blocks — which at a steady frame rate it usually does not.
+// A viewer that never blocks then never runs the copy actor: the mesh handed to `ctx.stream` stays in flight for the
+// life of the process, the scene traces its placeholder box, and a caller waiting for residency waits forever.
+// With threads the actor has a thread of its own and this passes whatever the loop does, so the singlethreaded leg
+// of `check` is the one that fails when the sweep goes.
+INVOCABLE_TEST("sv - a frame loop lands its streamed payloads", (sg::context_handle const& ctx_h))
+{
+    auto& ctx = *ctx_h;
+
+    {
+        auto probe = ctx.create_command_list();
+        auto const supported = probe->raytracing.is_supported();
+        ctx.drop_command_list(cc::move(probe));
+        if (!supported)
+            SKIP("device reports no ray tracing support");
+    }
+
+    auto v_r = sv::viewer::try_create(ctx, "sv-test/streaming", {.width = 64, .height = 48, .headless = true});
+    REQUIRE(v_r.has_value());
+    auto viewer = cc::move(v_r.value());
+
+    auto const box = sv_test::make_cornell_box();
+    auto const mesh = sv_test::as_mesh("cornell box", box.positions, box.materials);
+
+    auto resident = false;
+    auto frames = 0;
+    for (auto f : viewer.frames())
+    {
+        f.window().view().add_scene().add_mesh(mesh);
+
+        // Residency is the whole question, so the loop ends on it rather than on a frame count.
+        resident = f.streaming_resources() == 0 && f.pending_resource_work() == 0;
+        if (resident)
+            viewer.request_close();
+
+        // Generous, because a trace declines until its material permutations have compiled — and still finite, since
+        // the failure this pins is a loop that would otherwise run for the life of the process.
+        ++frames;
+        REQUIRE(frames < 600);
+    }
+
+    CHECK(resident).context(cc::format("the payloads were still in flight after {} frames", frames));
 }
