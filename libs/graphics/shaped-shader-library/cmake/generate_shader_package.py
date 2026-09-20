@@ -73,7 +73,7 @@ VALID_LANGUAGES = ("hlsl", "wgsl", "sgl")
 
 # SGL calls the fragment stage `pixel`, and an SGL package spells it as its source does.
 # The word is the package's and the generated symbol's; sg has one stage, so the enumerator stays `fragment`.
-SGL_STAGES = {"vertex": "vertex", "pixel": "fragment"}
+SGL_STAGES = {"vertex": "vertex", "pixel": "fragment", "compute": "compute"}
 
 # The stage words that declare something other than an entry point.
 BINDING_STAGE = "binding"

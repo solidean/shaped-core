@@ -44,8 +44,11 @@ public:
             stage = sgl::check::stage::vertex;
         else if (desc.stage == sg::shader_stage::fragment)
             stage = sgl::check::stage::pixel;
+        else if (desc.stage == sg::shader_stage::compute)
+            stage = sgl::check::stage::compute;
         else
-            return cc::error(cc::format("SGL has vertex and pixel entry points only, and '{}' is declared as neither",
+            return cc::error(cc::format("SGL has vertex, pixel and compute entry points only, and '{}' is declared as "
+                                        "none of them",
                                         desc.entry_point));
 
         auto text = sgl::compile_to_text(

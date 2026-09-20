@@ -1,0 +1,8 @@
+// A compute shader in SGL: one source for dxil, spirv and wgsl.
+// Its point is the stage rather than what it computes — an SGL package with a compute entry point.
+
+binding work:
+    values: mut buffer[float]
+
+@compute(64) fun double_values(@thread_id id: int3){work}:
+    work.values[id.x] = work.values[id.x] * 2.0

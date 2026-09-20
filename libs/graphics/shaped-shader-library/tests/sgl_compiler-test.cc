@@ -168,6 +168,30 @@ TEST("slib sgl compiler - the cube becomes WGSL that slib's own reader reflects"
     CHECK(text.contains("@location(2) color: vec3f"));
 }
 
+TEST("slib sgl compiler - a compute entry point reaches WGSL with its buffer reflected", exclusive("slib-shader-library"))
+{
+    slib::shader_library lib;
+    add_sgl_compilers(lib);
+    lib.add_package(slib_test::sgl_shaders::package());
+
+    auto const& cs
+        = value_of(slib_test::sgl_shaders::double_values.compute.double_values->acquire(sg::shader_format::wgsl));
+
+    CHECK(cs.stage == sg::shader_stage::compute);
+    CHECK(cs.entry_point == "double_values");
+    REQUIRE(cs.workgroup_size.has_value());
+    CHECK(cs.workgroup_size.value().x == 64);
+
+    // The buffer is a group of its own, unlike the inline constants, so it carries a group index.
+    REQUIRE(cs.bindings.size() == 1);
+    CHECK(cs.bindings[0].type == sg::binding_type::readwrite_structured_buffer);
+    REQUIRE(cs.bindings[0].group_index.has_value());
+    CHECK(cs.bindings[0].group_index.value() == 0);
+
+    auto const text = cc::string_view(reinterpret_cast<char const*>(cs.bytecode.data()), cs.bytecode.size());
+    CHECK(text.contains("@compute @workgroup_size(64, 1, 1)"));
+}
+
 #if SLIB_HAS_DXC
 
 ASYNC_TEST("slib sgl compiler - the cube becomes SPIR-V with a push-constant block", exclusive("slib-shader-library"))
@@ -337,6 +361,11 @@ TEST("slib sgl compiler - an entry point of the wrong stage, and a stage SGL doe
     auto const missing = error_of(lib.compile_source(source, sg::shader_stage::fragment, "main_fs", wgsl, options));
     CHECK(missing.contains("no entry point named 'main_fs' (the source holds: pixel 'main_ps')"));
 
-    auto const no_stage = error_of(lib.compile_source(source, sg::shader_stage::compute, "main_ps", wgsl, options));
-    CHECK(no_stage.contains("SGL has vertex and pixel entry points only"));
+    // Compute is a stage SGL has now, so asking for it here is the wrong stage rather than an unknown one.
+    auto const wrong_kind = error_of(lib.compile_source(source, sg::shader_stage::compute, "main_ps", wgsl, options));
+    CHECK(wrong_kind.contains("entry point 'main_ps' is a pixel entry point"));
+
+    // A stage SGL still has none of.
+    auto const no_stage = error_of(lib.compile_source(source, sg::shader_stage::geometry, "main_ps", wgsl, options));
+    CHECK(no_stage.contains("SGL has vertex, pixel and compute entry points only"));
 }
