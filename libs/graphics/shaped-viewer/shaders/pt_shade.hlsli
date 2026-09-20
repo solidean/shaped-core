@@ -1,6 +1,7 @@
 #pragma once
 
 #include "pt_common.hlsli"
+#include "pt_guides.hlsli"
 
 // The path tracer's SHADING, once a hit has been located — shared by every geometry kind.
 //
@@ -184,17 +185,6 @@ float3 pt_estimate_environment(sv::bsdf bsdf,
     return background_radiance(pt_bindings::background.sh, wi) * f * (wi_local.z / PT_ENV_PDF) * w;
 }
 
-/// The reflectance a denoiser divides out before it filters, so texture detail is not averaged away with the noise.
-///
-/// DIFFUSE reflectance, which is what the vendor denoisers take as their albedo guide; the specular half is theirs to
-/// ask for separately.
-/// So it is what the base and subsurface lobes reflect: nothing where the surface is metal or transmits.
-float3 pt_diffuse_albedo(sv::surface s)
-{
-    float3 const diffuse = lerp(s.base_color, s.subsurface_color, saturate(s.subsurface_weight));
-    return saturate(s.base_weight * diffuse * (1.0 - saturate(s.base_metalness)) * (1.0 - saturate(s.transmission_weight)));
-}
-
 /// Shades a located hit and writes the whole payload.
 ///
 /// `ctx` is what the material reads its attributes through, `N` is the GEOMETRIC normal already turned to face the ray, `V` is
@@ -211,7 +201,10 @@ void pt_shade(inout PtPayload payload, sv::shading_context ctx, float3 N, float3
     uint rng = payload.rng;
 
     sv::surface surface = sv_evaluate_material(ctx);
-    payload.albedo = pt_diffuse_albedo(surface); // before any early return below: every path out must have written it
+    // Before any early return below: every path out must have written all three.
+    payload.albedo = pt_diffuse_albedo(surface);
+    payload.specular_albedo = pt_specular_albedo(surface);
+    payload.roughness = pt_roughness(surface);
 
     // A dispersive interface collapses the path onto ONE wavelength, because three channels bent through three different
     // angles are no longer one ray and nothing downstream may treat them as one.

@@ -1,4 +1,5 @@
 #include "openpbr.hlsli"
+#include "pt_guides.hlsli"
 
 // A Monte-Carlo probe over the OpenPBR closure, so a test can assert on NUMBERS rather than on an image.
 //
@@ -29,6 +30,12 @@ static const uint probe_reciprocity = 2;
 static const uint probe_echo = 3;
 static const uint probe_medium = 4;
 static const uint probe_transmitted = 5;
+
+/// The denoiser guides for the case's surface, which are pure functions of it rather than estimators.
+/// One mode per guide, each returning its value in `xyz` and a sample count of 1 in `w`.
+static const uint probe_guides_diffuse = 6;
+static const uint probe_guides_specular = 7;
+static const uint probe_guides_roughness = 8;
 
 /// One measurement to make — mirrors `sv_test::probe_case` lane-for-lane, so keep the two in lockstep.
 ///
@@ -106,6 +113,17 @@ float4 probe_run(probe_case c, uint item)
 
     if (c.mode == probe_echo)
         return float4(c.s.base_color.x, c.s.specular_roughness, c.s.geometry_tangent_frame.w, float(c.samples));
+
+    // The guides are read straight off the surface rather than estimated, so each contributes one "sample" and the
+    // CPU's divide by `w` hands back the value itself.
+    // One mode per value, so every one of them divides the same way — packing the roughness into a colour's alpha
+    // would make it the one result that does not.
+    if (c.mode == probe_guides_diffuse)
+        return float4(pt_diffuse_albedo(c.s), 1.0);
+    if (c.mode == probe_guides_specular)
+        return float4(pt_specular_albedo(c.s), 1.0);
+    if (c.mode == probe_guides_roughness)
+        return float4(pt_roughness(c.s), 0.0, 0.0, 1.0);
 
     float3 wo = normalize(c.wo);
     float3 sum = float3(0, 0, 0);

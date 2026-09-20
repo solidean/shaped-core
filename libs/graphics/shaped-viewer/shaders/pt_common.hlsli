@@ -45,7 +45,8 @@ struct FrameConstants
 
     // denoiser guides: whether to write GuideNormal / GuideDepth, and how many frames they already average
     // write_temporal: whether to write FrameOutput and GuideMotion, for a temporal denoiser
-    uint write_guides;  uint guide_frame;  uint write_temporal;  uint _guide_pad1;
+    // write_specular_guides: whether to write GuideSpecularAlbedo / GuideRoughness, which only some members read
+    uint write_guides;  uint guide_frame;  uint write_temporal;  uint write_specular_guides;
 
     // The camera the previous frame of this layer was traced from, which motion vectors reproject into.
     Camera previous_camera;
@@ -92,6 +93,14 @@ namespace pt_bindings
     RWTexture2D<float4> GuideNormal;
     RWTexture2D<float> GuideDepth;
     RWTexture2D<float4> GuideAlbedo;
+
+    // The specular half of the same story, which the vendor denoisers ask for separately: normal-incidence specular
+    // reflectance, and how sharp the reflection off this surface is.
+    // Together they are what sizes a reflection filter — a mirror must not be blurred like a matte surface.
+    // Written under `frame.write_specular_guides`, which is its own flag: a member that wants only the diffuse albedo
+    // must not pay for these.
+    RWTexture2D<float4> GuideSpecularAlbedo;
+    RWTexture2D<float> GuideRoughness;
 
     // What a temporal denoiser reads instead of the running mean: this frame's samples alone, and where each pixel's
     // primary hit sat on the previous frame's screen, as this pixel minus that one.
@@ -148,6 +157,12 @@ struct [raypayload] PtPayload
     float3 direction  : read(caller) : write(closesthit, miss); // where the path goes next
     float3 normal     : read(caller) : write(closesthit, miss); // shading normal, for the ray offset off the surface
     float3 albedo     : read(caller) : write(closesthit, miss); // diffuse reflectance here, for the denoiser's guide
+
+    // The specular guides' share of the payload, and the reason it is four lanes rather than none: the guides describe
+    // the PRIMARY hit, and only the hit shader knows the surface.
+    // Every ray pays for them, which is what libs/graphics/shaped-viewer/docs/TODO.md asks to be measured.
+    float3 specular_albedo : read(caller) : write(closesthit, miss); // normal-incidence specular reflectance (F0)
+    float  roughness       : read(caller) : write(closesthit, miss); // perceptual roughness of the sharpest specular lobe
 
     float bsdf_pdf : read(caller) : write(closesthit, miss); // pdf of `direction`, for the escaped-environment MIS weight
     float hit_t    : read(caller) : write(closesthit, miss); // < 0 => the ray escaped (miss)

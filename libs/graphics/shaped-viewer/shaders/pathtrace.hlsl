@@ -29,6 +29,8 @@ void PathTraceRayGen()
     float3 guide_normal = float3(0, 0, 0);
     float guide_depth = 0.0;
     float3 guide_albedo = float3(0, 0, 0);
+    float3 guide_specular_albedo = float3(0, 0, 0);
+    float guide_roughness = 0.0;
 
     // The primary hits' motion, summed over this frame's samples: where each landed on the previous frame's screen.
     float2 motion = float2(0, 0);
@@ -104,6 +106,8 @@ void PathTraceRayGen()
             float3 next_dir = p.direction;
             float3 N = p.normal;
             float3 albedo = p.albedo;
+            float3 specular_albedo = p.specular_albedo;
+            float roughness = p.roughness;
             float pdf = p.bsdf_pdf;
 
             if (primary)
@@ -115,6 +119,8 @@ void PathTraceRayGen()
                     guide_normal += N;
                     guide_depth += hit_t * dot(dir, normalize(cam.forward));
                     guide_albedo += albedo;
+                    guide_specular_albedo += specular_albedo;
+                    guide_roughness += roughness;
                 }
 
                 // An escaped ray reprojects as a point at infinity, so the sky moves with rotation and not with translation.
@@ -385,5 +391,21 @@ void PathTraceRayGen()
         pt_bindings::GuideNormal[px] = float4(n_mean, 0.0);
         pt_bindings::GuideDepth[px] = d_mean;
         pt_bindings::GuideAlbedo[px] = float4(a_mean, 0.0);
+
+        // The specular pair rides the same guide_frame, since it describes the same image — but behind its own flag,
+        // so a member that reads only the diffuse albedo does not pay for two more textures.
+        if (pt_bindings::frame.write_specular_guides != 0)
+        {
+            float3 s_mean = guide_specular_albedo / float(spp);
+            float r_mean = guide_roughness / float(spp);
+            if (pt_bindings::frame.guide_frame > 0)
+            {
+                float g = float(pt_bindings::frame.guide_frame);
+                s_mean = (pt_bindings::GuideSpecularAlbedo[px].rgb * g + s_mean) / (g + 1.0);
+                r_mean = (pt_bindings::GuideRoughness[px] * g + r_mean) / (g + 1.0);
+            }
+            pt_bindings::GuideSpecularAlbedo[px] = float4(s_mean, 0.0);
+            pt_bindings::GuideRoughness[px] = r_mean;
+        }
     }
 }

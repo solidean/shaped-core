@@ -773,6 +773,9 @@ A layer with no lights falls back to `layer::fallback_light` — `sv::default_fa
 - **`view_ref::camera_cut()`** says the camera jumped rather than moved, so the temporal history and the motion guide's previous camera
   are dropped — nothing reprojects across a cut.
   It is sticky until a frame traces the view, and it restarts no accumulation of its own.
+- **The specular guides** `temporal_id::specular_albedo_guide` (F0, blended to the base colour by metalness) and `roughness_guide` (the coat's where a coat covers the base).
+  Declared for a named member that reads them and for `automatic`; written under the frame block's own `write_specular_guides`, so a diffuse-only member pays for neither.
+  `pt_guides.hlsli` holds all three guide functions apart from the tracer's bindings, which is what lets `bsdf_probe.hlsl` assert on them.
 - **Four more temporal slots per such layer**: `temporal_id::normal_guide`, `depth_guide`, `albedo_guide` (diffuse) and `denoised`, declared by `temporal_inputs_of`.
   A layer that may denoise temporally adds `frame_samples` and `motion_guide`; the first holds the temporal member's own history, the second the last camera.
 - **The temporal history restarts on a scene change, never on camera motion** — its signal is the trace hash with the camera left out.

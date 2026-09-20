@@ -102,6 +102,11 @@ private:
         impl::temporal_slot* normal = nullptr;
         impl::temporal_slot* depth = nullptr;
         impl::temporal_slot* albedo = nullptr;
+
+        /// The specular pair, null unless the layer's method may read it.
+        impl::temporal_slot* specular_albedo = nullptr;
+        impl::temporal_slot* roughness = nullptr;
+
         impl::temporal_slot* denoised = nullptr;
         impl::temporal_slot* frame = nullptr;
         impl::temporal_slot* motion = nullptr;

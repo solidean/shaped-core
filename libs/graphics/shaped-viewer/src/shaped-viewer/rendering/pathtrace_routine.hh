@@ -58,7 +58,11 @@ struct sv::pt_frame_constants_gpu
     /// Whether the raygen writes this frame's own samples and the motion vectors, for a temporal denoiser — nonzero
     /// exactly when `pt_trace_desc` carries `frame_output` and `guide_motion`.
     u32 write_temporal = 0;
-    u32 _guide_pad = 0;
+
+    /// Whether the raygen writes the specular guides — nonzero exactly when `pt_trace_desc` carries
+    /// `guide_specular_albedo` and `guide_roughness`.
+    /// Its own flag rather than riding on `write_guides`, because only some denoise members read them.
+    u32 write_specular_guides = 0;
 
     /// The camera this layer's previous frame was traced from, which the motion vectors reproject into.
     /// The current camera when there was none, which reads as no motion.
@@ -120,6 +124,14 @@ struct sv::pt_trace_desc
     sg::texture_2d guide_normal;
     sg::texture_2d guide_depth;
     sg::texture_2d guide_albedo;
+
+    /// The specular half, which the vendor members ask for separately: normal-incidence specular reflectance
+    /// (rgba16_float, rgb) and the sharpest specular lobe's perceptual roughness (r16_float).
+    ///
+    /// Both or neither, at `output`'s extent, and set exactly when the frame block's `write_specular_guides` is.
+    /// They blend on `guide_frame` like the three above, since they describe the same image.
+    sg::texture_2d guide_specular_albedo;
+    sg::texture_2d guide_roughness;
 
     /// What a temporal denoiser reads: this frame's samples alone (rgba16_float), and each pixel's motion since the previous
     /// frame, as this pixel minus that one in pixels (rg32_float).
@@ -216,6 +228,8 @@ private:
     sg::texture_2d _guide_normal_stand_in;
     sg::texture_2d _guide_depth_stand_in;
     sg::texture_2d _guide_albedo_stand_in;
+    sg::texture_2d _guide_specular_albedo_stand_in;
+    sg::texture_2d _guide_roughness_stand_in;
     sg::texture_2d _frame_output_stand_in;
     sg::texture_2d _guide_motion_stand_in;
 

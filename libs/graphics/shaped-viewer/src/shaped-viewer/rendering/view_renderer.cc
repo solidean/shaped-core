@@ -555,12 +555,15 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
         .normal = slot_of(temporal_id::normal_guide(tr.layer)),
         .depth = slot_of(temporal_id::depth_guide(tr.layer)),
         .albedo = slot_of(temporal_id::albedo_guide(tr.layer)),
+        .specular_albedo = slot_of(temporal_id::specular_albedo_guide(tr.layer)),
+        .roughness = slot_of(temporal_id::roughness_guide(tr.layer)),
         .denoised = slot_of(temporal_id::denoised(tr.layer)),
         .frame = slot_of(temporal_id::frame_samples(tr.layer)),
         .motion = slot_of(temporal_id::motion_guide(tr.layer)),
         .crossfade = slot_of(temporal_id::denoised_crossfade(tr.layer)),
     };
     auto const has_guides = ds.normal != nullptr && ds.depth != nullptr && ds.albedo != nullptr && ds.denoised != nullptr;
+    auto const has_specular_guides = has_guides && ds.specular_albedo != nullptr && ds.roughness != nullptr;
     auto const has_temporal = has_guides && ds.frame != nullptr && ds.motion != nullptr;
 
     // Set after the hash, like accum_frame, so none of it can restart the accumulation.
@@ -572,6 +575,7 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
             ds.normal->accum_frame = 0;
         fc.write_guides = 1;
         fc.guide_frame = ds.normal->accum_frame;
+        fc.write_specular_guides = has_specular_guides ? 1 : 0;
     }
 
     if (has_temporal)
@@ -615,6 +619,8 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
               .guide_normal = has_guides ? ds.normal->texture : sg::texture_2d(),
               .guide_depth = has_guides ? ds.depth->texture : sg::texture_2d(),
               .guide_albedo = has_guides ? ds.albedo->texture : sg::texture_2d(),
+              .guide_specular_albedo = has_specular_guides ? ds.specular_albedo->texture : sg::texture_2d(),
+              .guide_roughness = has_specular_guides ? ds.roughness->texture : sg::texture_2d(),
               .frame_output = has_temporal ? ds.frame->texture : sg::texture_2d(),
               .guide_motion = has_temporal ? ds.motion->texture : sg::texture_2d(),
               .instance_table = instance_table,
@@ -679,7 +685,9 @@ sr::denoise_status view_renderer::_denoise(sg::command_list& cmd,
     auto& denoised = *ds.denoised;
     auto const guides = sr::denoise_guides{
         .albedo = ds.albedo->texture,
+        .specular_albedo = ds.specular_albedo != nullptr ? ds.specular_albedo->texture : sg::texture_2d(),
         .normal = ds.normal->texture,
+        .roughness = ds.roughness != nullptr ? ds.roughness->texture : sg::texture_2d(),
         .depth = ds.depth->texture,
     };
 

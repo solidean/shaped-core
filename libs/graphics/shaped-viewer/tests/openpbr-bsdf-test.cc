@@ -99,6 +99,9 @@ enum class probe_mode : u32
     echo = 3,
     medium = 4,
     transmitted = 5,
+    guides_diffuse = 6,
+    guides_specular = 7,
+    guides_roughness = 8,
 };
 
 /// `sv::probe_case` from shaders/bsdf_probe.hlsl, lane-for-lane.
@@ -616,4 +619,93 @@ ASYNC_INVOCABLE_TEST("sv - OpenPBR closure, measured", (sg::context_handle const
             }
         }
     }
+}
+
+// The denoiser guides, which are read off the surface rather than estimated from it.
+//
+// They are the one part of the shading a denoiser consumes directly: the albedo it divides out before filtering, the
+// specular reflectance that says what a reflection is worth, and the roughness that sizes the filter over it.
+// A wrong guide does not make an image wrong, it makes a denoised image subtly worse — texture averaged away, or a
+// mirror blurred like a matte surface — which is exactly the failure no rendered comparison catches.
+//
+// `pt_guides.hlsli` holds them apart from the path tracer's bindings so this probe can call the real functions.
+ASYNC_INVOCABLE_TEST("sv - the denoiser guides describe the surface they are read from",
+                     (sg::context_handle const& ctx_h))
+{
+#if defined(CC_ARCH_ARM64) && defined(_WIN32)
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
+         "libs/graphics/shaped-viewer/docs/TODO.md");
+#endif
+    auto& ctx = *ctx_h;
+
+    auto const& env = sv_test::shared_env();
+    if (!env.has_compiler)
+        SKIP("no DXC compiler to build the probe shader");
+
+    // One case per (surface, guide), so a surface's three guides come back from one dispatch.
+    auto const guide_of = [&](probe_surface const& s, probe_mode mode)
+    {
+        auto c = probe_case{.mode = mode, .samples = 1};
+        c.s = s;
+        return c;
+    };
+
+    auto plain = probe_surface{};
+    plain.base_weight = 1.0f;
+    plain.base_color = tg::vec3f(0.8f, 0.2f, 0.1f);
+    plain.specular_weight = 1.0f;
+    plain.specular_color = tg::vec3f(1, 1, 1);
+    plain.specular_ior = 1.5f;
+    plain.specular_roughness = 0.4f;
+
+    auto metal = plain;
+    metal.base_metalness = 1.0f;
+
+    auto glass = plain;
+    glass.transmission_weight = 1.0f;
+
+    auto coated = plain;
+    coated.coat_weight = 1.0f;
+    coated.coat_roughness = 0.05f;
+
+    auto cases = cc::vector<probe_case>();
+    for (auto const* s : {&plain, &metal, &glass, &coated})
+        for (auto const mode : {probe_mode::guides_diffuse, probe_mode::guides_specular, probe_mode::guides_roughness})
+            cases.push_back(guide_of(*s, mode));
+
+    auto const r = co_await run_probe(ctx, cases);
+    REQUIRE(r.size() == cases.size());
+
+    auto const diffuse = [&](isize surface) { return r[surface * 3 + 0].mean; };
+    auto const specular = [&](isize surface) { return r[surface * 3 + 1].mean; };
+    auto const roughness = [&](isize surface) { return r[surface * 3 + 2].mean[0]; };
+
+    enum : isize
+    {
+        s_plain = 0,
+        s_metal,
+        s_glass,
+        s_coated,
+    };
+
+    // A dielectric's diffuse albedo is its base colour, which is what a denoiser divides out and multiplies back.
+    CHECK(tg::abs(diffuse(s_plain)[0] - 0.8f) < 1e-3f);
+    CHECK(tg::abs(diffuse(s_plain)[1] - 0.2f) < 1e-3f);
+
+    // A metal has no diffuse lobe at all, and neither has glass: dividing a denoised image by either surface's
+    // "albedo" would be dividing by something that reflects nothing.
+    CHECK(diffuse(s_metal)[0] < 1e-3f).context("a metal's diffuse albedo must be zero");
+    CHECK(diffuse(s_glass)[0] < 1e-3f).context("a transmissive surface's diffuse albedo must be zero");
+
+    // The specular guide is the other way round: a metal reflects its base colour, and the dielectric reflects the
+    // few percent its IOR implies.
+    // At ior 1.5 that is ((1.5-1)/(1.5+1))^2 = 0.04.
+    CHECK(tg::abs(specular(s_metal)[0] - 0.8f) < 1e-3f).context("a metal's F0 is its base colour");
+    CHECK(tg::abs(specular(s_metal)[1] - 0.2f) < 1e-3f);
+    CHECK(tg::abs(specular(s_plain)[0] - 0.04f) < 2e-3f).context("a dielectric's F0 comes from its IOR");
+
+    // Roughness is the surface's own, until a coat covers it — the coat is outermost, so its reflection is the sharp
+    // one, and filtering it at the base's roughness would smear the only feature the coat adds.
+    CHECK(tg::abs(roughness(s_plain) - 0.4f) < 1e-3f);
+    CHECK(tg::abs(roughness(s_coated) - 0.05f) < 1e-3f).context("a coat takes over the roughness guide");
 }

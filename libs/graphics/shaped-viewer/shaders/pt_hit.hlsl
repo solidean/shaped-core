@@ -18,6 +18,8 @@ void PtMiss(inout PtPayload payload)
     payload.direction = float3(0, 0, 0);
     payload.normal = float3(0, 0, 0);
     payload.albedo = float3(0, 0, 0);
+    payload.specular_albedo = float3(0, 0, 0);
+    payload.roughness = 0.0;
     payload.bsdf_pdf = 0.0;
     payload.hit_t = -1.0;
 }

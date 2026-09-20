@@ -85,6 +85,19 @@ inline constexpr u64 caller_range_end = u64(1) << kind_shift;
     return (u64(4) << kind_shift) | u64(layer);
 }
 
+/// The specular reflectance guide for a traced layer, which the vendor members require.
+/// Declared only for a layer whose method may read it, since it costs a texture and the native members ignore it.
+[[nodiscard]] constexpr u64 specular_albedo_guide(u8 layer)
+{
+    return (u64(9) << kind_shift) | u64(layer);
+}
+
+/// The roughness guide for a traced layer, which travels with the specular albedo.
+[[nodiscard]] constexpr u64 roughness_guide(u8 layer)
+{
+    return (u64(10) << kind_shift) | u64(layer);
+}
+
 /// Where the spatial member writes while a crossfade is running, before it is mixed into `denoised`.
 ///
 /// Only allocated for a layer that may denoise temporally, and only read on the handful of frames the hand-off spans:
