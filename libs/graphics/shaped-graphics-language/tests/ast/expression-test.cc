@@ -132,6 +132,15 @@ TEST("sgl ast - objects, and the shorthand is recorded and not expanded")
     CHECK(expr_of("{a, b = 2}") == "(object a=<shorthand> b=num:2)");
     CHECK(expr_of("{..defaults, roughness = 0.5}") == "(object ..defaults roughness=num:0.5)");
 
+    // Nothing else is an element; what was written is kept, positional.
+    CHECK(expr_of("{1 + 2}") == "(object (call:infix + num:1 num:2)) !! expected-object-element @11+5\n");
+    CHECK(expr_of("{a, f(x), b = 1}")
+          == "(object a=<shorthand> (call:paren f x) b=num:1) !! expected-object-element @14+4\n");
+    CHECK(expr_of("{a.b}") == "(object (member a b)) !! expected-object-element @11+3\n");
+
+    // `true` and `false` are names like any other.
+    CHECK(expr_of("{enabled = true}") == "(object enabled=true)");
+
     auto const file = sgl::parse("const r = {a}");
     auto const ast = sgl::ast::build(file);
     REQUIRE(ast.arguments.size() == 1);
@@ -193,8 +202,14 @@ TEST("sgl ast - a function type binds tighter than the ascription around it")
     CHECK(expr_of("f : (x: int) -> int") == "(ascribe f : (function-type (params (field x : int)) -> int))");
     CHECK(expr_of("f : int -> int") == "(ascribe f : (function-type (params (field : int)) -> int))");
     CHECK(expr_of("f : () -> int") == "(ascribe f : (function-type (params) -> int))");
+    // `->` nests to the right: a function returning a function.
     CHECK(expr_of("f : a -> b -> c")
-          == "(ascribe f : (function-type (params (field : (function-type (params (field : a)) -> b))) -> c))");
+          == "(ascribe f : (function-type (params (field : a)) -> (function-type (params (field : b)) -> c)))");
+    CHECK(expr_of("f : ((int) -> int) -> int")
+          == "(ascribe f : (function-type (params (field : (function-type (params (field : int)) -> int))) -> int))");
+    CHECK(expr_of("x as int in 0..=10 : bool") == "(ascribe (in (cast x : int) (range ..= num:0 num:10)) : bool)");
+    CHECK(expr_of("(int) -> int") == "(function-type (params (field : int)) -> int)");
+    CHECK(expr_of("f : (int) -> @unorm vec4") == "(ascribe f : (function-type (params (field : int)) -> vec4{@unorm}))");
 }
 
 TEST("sgl ast - a fused curly list on an expression is reserved")
@@ -215,6 +230,64 @@ TEST("sgl ast - lambdas")
     CHECK(ast_of("const r = on_click(handler = e =>:\n    print e\n)\n")
           == "(const r = (call:paren on_click handler=(lambda (params (field e))\n"
              "  (print e))))");
+
+    // `=>` is looser than a keyword form, so the forms hold `(return x) => x + 1`; a jump takes the lambda as its value.
+    CHECK(body_of("return x => x + 1\n") == "(return (lambda (params (field x)) => (call:infix + x num:1)))");
+    CHECK(body_of("return (a, b) =>:\n    yield a\n") == "(return (lambda (params (field a) (field b))\n  (yield a)))");
+    CHECK(expr_of("f(let x => y)").contains("statement-in-expression"));
+
+    auto const file = sgl::parse("const r = x => x");
+    auto const ast = sgl::ast::build(file);
+    for (auto const& e : ast.exprs)
+        if (auto const* l = e.node.try_as<sgl::ast::lambda>())
+            CHECK(l->spelling == sgl::ast::lambda_spelling::arrow);
+}
+
+TEST("sgl ast - an anonymous fun is a lambda one can return from")
+{
+    CHECK(expr_of("fun (x) => x + 1") == "(lambda:fun (params (field x)) => (call:infix + x num:1))");
+    CHECK(expr_of("fun () => 1") == "(lambda:fun (params) => num:1)");
+    CHECK(expr_of("fun [T](x: T){frame} -> T => x")
+          == "(lambda:fun (type-params (field T)) (params (field x : T)) (uses frame) -> T => x)");
+    CHECK(expr_of("map(xs, fun (x) => x * 2)")
+          == "(call:paren map xs (lambda:fun (params (field x)) => (call:infix * x num:2)))");
+
+    CHECK(body_of("let clamp01 = fun (x: float) -> float:\n    if x < 0.0 => return 0.0\n    return x\n")
+          == "(let clamp01 = (lambda:fun (params (field x : float)) -> float\n"
+             "  (if\n"
+             "    (branch (call:infix < x num:0.0) => (return num:0.0)))\n"
+             "  (return x)))");
+    // A jump takes it as its value, in both of its shapes.
+    CHECK(body_of("return fun (x) => x\n") == "(return (lambda:fun (params (field x)) => x))");
+    CHECK(body_of("return fun (x):\n    return x\n") == "(return (lambda:fun (params (field x))\n  (return x)))");
+
+    auto const file = sgl::parse("const r = fun (x) => x");
+    auto const ast = sgl::ast::build(file);
+    auto count = 0;
+    for (auto const& e : ast.exprs)
+        if (auto const* l = e.node.try_as<sgl::ast::lambda>())
+        {
+            ++count;
+            CHECK(l->spelling == sgl::ast::lambda_spelling::fun);
+        }
+    CHECK(count == 1);
+}
+
+TEST("sgl ast - what an anonymous fun owes, and what is no lambda")
+{
+    // It is a `fun`: a `yield` directly in its body has nothing to hand a value to.
+    CHECK(expr_of("fun (x) => yield x") == "(lambda:fun (params (field x)) => (yield x)) !! yield-in-function @21+5\n");
+    // The signature rules are those of a named function.
+    CHECK(expr_of("fun [T] => 1")
+          == "(lambda:fun (type-params (field T)) (params) => num:1) !! missing-parameter-list @10+3\n");
+    CHECK(expr_of("fun => 1") == "(lambda:fun (params) => num:1) !! missing-parameter-list @10+3\n");
+    CHECK(expr_of("fun (x)[T] => x").contains("signature-out-of-order"));
+    CHECK(expr_of("fun (x)") == "(lambda:fun (params (field x))) !! expected-body @10+3\n");
+
+    // With a name it is a declaration, which is a statement.
+    CHECK(expr_of("fun g(x) => x") == "(invalid \"fun g(x) => x\") !! statement-in-expression @10+3\n");
+    // As a statement it is a function that lost its name.
+    CHECK(body_of("fun (x) => x\n") == "(fun <missing> (params (field x)) => x) !! expected-name @17+3\n");
 }
 
 TEST("sgl ast - case with expression arms, block arms and a jump as an arm")
@@ -225,11 +298,11 @@ TEST("sgl ast - case with expression arms, block arms and a jump as an arm")
              "  (arm (call:infix:short-circuit or .spot .area) => num:2.0)\n"
              "  (arm _ => (return false))))");
 
-    CHECK(body_of("let k = case kind:\n    .point =>:\n        let a = 1\n        a\n    _ => 0\n")
+    CHECK(body_of("let k = case kind:\n    .point =>:\n        let a = 1\n        yield a\n    _ => 0\n")
           == "(let k = (case kind\n"
              "  (arm .point\n"
              "    (let a = num:1)\n"
-             "    a)\n"
+             "    (yield a))\n"
              "  (arm _ => num:0)))");
 }
 
@@ -285,7 +358,7 @@ TEST("sgl ast - an attribute on a sub-expression is rejected and kept")
 
     // A type position takes them.
     CHECK(expr_of("x as @unorm vec4") == "(cast x : vec4{@unorm})");
-    CHECK(expr_of("x : @a(1, 2) t") == "(ascribe x : t{@a(1, 2)})");
+    CHECK(expr_of("x : @a(1, 2) t") == "(ascribe x : t{@a(num:1 num:2)})");
 }
 
 TEST("sgl ast - consecutive keywords head one form, and a jump takes the rest as its value")

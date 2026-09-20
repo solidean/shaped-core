@@ -2,6 +2,7 @@
 
 #include <nexus/test.hh>
 
+using sgl_test::ast_of;
 using sgl_test::body_of;
 
 // `body_of` reads its lines as the body of `fun f():`, so a diagnostic offset counts that line (9 bytes) and the
@@ -175,12 +176,94 @@ TEST("sgl ast - an expression statement is a call or a jump, anything else has n
     CHECK(ast.diagnostics[0].level == sgl::severity::warning);
 }
 
-TEST("sgl ast - the last statement of a block that yields a value is what it computes")
+TEST("sgl ast - no statement is exempt from no-effect, the last one of a block included")
 {
-    CHECK(body_of("let a = 1\na + 1\n") == "(let a = num:1)\n(call:infix + a num:1)");
-
-    // A control statement's block yields nothing.
+    CHECK(body_of("let a = 1\na + 1\n") == "(let a = num:1)\n(call:infix + a num:1) !! no-effect @27+5\n");
     CHECK(body_of("if c:\n    a + 1\nf()\n").contains("no-effect"));
+
+    // What has an effect: a paren or juxtaposition call, a jump, a `case`, a `loop`.
+    CHECK(body_of("f(x)\nemit x\ncase k:\n    _ => g()\nloop:\n    break\nreturn a\n").contains("!!") == false);
+    // What has none, whatever it is made of.
+    CHECK(body_of("x.y\n") == "(member x y) !! no-effect @13+3\n");
+    CHECK(body_of("(a, b)\n") == "(tuple a b) !! no-effect @13+6\n");
+    CHECK(body_of("-x\n") == "(call:prefix - x) !! no-effect @13+2\n");
+    CHECK(body_of("1.5\n") == "num:1.5 !! no-effect @13+3\n");
+}
+
+TEST("sgl ast - yield hands a value on from the nearest value block")
+{
+    // The block of a `case` arm, and the statement blocks in between are looked through.
+    CHECK(body_of("let k = case kind:\n    .point =>:\n        if near:\n            yield 2.0\n        yield 1.0\n    "
+                  "_ => 0.0\n")
+          == "(let k = (case kind\n"
+             "  (arm .point\n"
+             "    (if\n"
+             "      (branch near\n"
+             "        (yield num:2.0)))\n"
+             "    (yield num:1.0))\n"
+             "  (arm _ => num:0.0)))");
+
+    // The block of an arrow lambda, through a `for` and a `loop`.
+    CHECK(body_of("let g = x =>:\n    for i in r:\n        loop:\n            yield i\n    yield x\n")
+          == "(let g = (lambda (params (field x))\n"
+             "  (for i in r\n"
+             "    (loop\n"
+             "      (yield i)))\n"
+             "  (yield x)))");
+
+    // A `yield` takes the rest of a keyword form as its value, like `return`.
+    CHECK(body_of("let g = x =>:\n    yield case x:\n        _ => 1\n")
+          == "(let g = (lambda (params (field x))\n"
+             "  (yield (case x\n"
+             "    (arm _ => num:1)))))");
+}
+
+TEST("sgl ast - a yield directly in a function body is an error that keeps its node")
+{
+    CHECK(body_of("yield 1\n") == "(yield num:1) !! yield-in-function @13+5\n");
+    CHECK(body_of("if c:\n    yield 1\n") == "(if\n  (branch c\n    (yield num:1))) !! yield-in-function @27+5\n");
+    CHECK(ast_of("fun f() => yield 1\n") == "(fun f (params) => (yield num:1)) !! yield-in-function @11+5\n");
+
+    // A function nested in a value block is a function again.
+    CHECK(body_of("let g = x =>:\n    fun h():\n        yield 1\n    yield h()\n").contains("yield-in-function @56+5"));
+    // No body at all is no value block either.
+    CHECK(ast_of("const k = yield 1\n") == "(const k = (yield num:1)) !! yield-in-function @10+5\n");
+
+    CHECK(body_of("let g = x =>:\n    yield\n")
+          == "(let g = (lambda (params (field x))\n  (yield (invalid \"yield\")))) !! expected-expression @35+5\n");
+    CHECK(body_of("let g = x =>:\n    yield a, b\n").contains("too-many-arguments"));
+
+    auto const file = sgl::parse("fun f():\n    yield 1\n");
+    auto const ast = sgl::ast::build(file);
+    REQUIRE(ast.diagnostics.size() == 1);
+    CHECK(ast.diagnostics[0].kind == sgl::diagnostic_kind::yield_in_function);
+    CHECK(ast.diagnostics[0].level == sgl::severity::normal_error);
+}
+
+TEST("sgl ast - a return leaves the nearest fun, so an arrow lambda has nothing to return from")
+{
+    CHECK(body_of("let g = x =>:\n    return x\n")
+          == "(let g = (lambda (params (field x))\n  (return x))) !! return-in-lambda @35+6\n");
+    CHECK(body_of("let g = x => return x\n")
+          == "(let g = (lambda (params (field x)) => (return x))) !! return-in-lambda @26+6\n");
+    // A `case` arm is looked through, and what it finds is the lambda.
+    CHECK(body_of("let g = x => case x:\n    _ => return 1\n").contains("return-in-lambda @47+6"));
+
+    // Through a `case` arm to the function around it.
+    CHECK(body_of("let k = case kind:\n    _ =>:\n        return false\n")
+          == "(let k = (case kind\n"
+             "  (arm _\n"
+             "    (return false))))");
+    // An anonymous `fun` inside an arrow lambda is a `fun` to return from.
+    CHECK(body_of("let g = x => fun (y):\n    return y\n")
+          == "(let g = (lambda (params (field x)) => (lambda:fun (params (field y))\n"
+             "  (return y))))");
+
+    auto const file = sgl::parse("const g = x => return x\n");
+    auto const ast = sgl::ast::build(file);
+    REQUIRE(ast.diagnostics.size() == 1);
+    CHECK(ast.diagnostics[0].kind == sgl::diagnostic_kind::return_in_lambda);
+    CHECK(ast.diagnostics[0].level == sgl::severity::normal_error);
 }
 
 TEST("sgl ast - statements separated by a semicolon are statements of their own")
@@ -193,7 +276,7 @@ TEST("sgl ast - an attribute on a statement is kept on it")
     CHECK(body_of("@unroll\nfor i in 0 ..< 4:\n    f(i)\n")
           == "(for{@unroll} i in (range ..< num:0 num:4)\n  (call:paren f i))");
     CHECK(body_of("@hot f(x)\ng()\n") == "(call:paren f x){@hot}\n(call:paren g)");
-    CHECK(body_of("let x = 5 @range(0, 9)\n") == "(let{@range(0, 9)} x = num:5)");
+    CHECK(body_of("let x = 5 @range(0, 9)\n") == "(let{@range(num:0 num:9)} x = num:5)");
     CHECK(body_of("@a\nif c:\n    f()\n@b\nelse:\n    g()\n").contains("misplaced-attribute-on-expression"));
 }
 

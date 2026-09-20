@@ -24,10 +24,14 @@ namespace sgl::ast
 /// - A call says how it was spelled: `call:paren`, `call:juxt`, `call:infix`, `call:prefix`, and `and` / `or` are
 ///   `call:infix:short-circuit`; an operator call leads with its operator.
 /// - An element of a paren list is its value, `name=value`, `..value` for a splat, or `name=<shorthand>`.
-/// - `:` and `->` stand before exactly the expressions in a type position: `(cast x : mat3)`, `(field n : vec3)`.
+/// - `:` and `->` stand before exactly the expressions in a type position: `(cast x : mat3)`, `(field n : vec3)`,
+///   and `(type color : vec4)` for `type color = vec4`.
 /// - A body is ` => ` and one expression or statement, or a block of lines.
+/// - A lambda says how it was spelled: `(lambda (params …) …)` for `x => …`, `(lambda:fun …)` for an anonymous `fun`,
+///   which alone may show `(type-params …)`, `(uses …)` and ` -> type`.
 /// - Attributes follow the kind of a declaration, statement or field, and follow a whole expression or element:
 ///   `(struct{@vertex} v`, `vec4{@c}`.
+///   An attribute's arguments are list elements like any other: `{@slider(num:0 max=num:1)}`.
 /// - `(invalid "…")`, `(invalid-stmt "…")` and `(invalid-decl "…")` quote the first line of what did not fit,
 ///   and `<missing>` stands for a name nobody wrote.
 ///

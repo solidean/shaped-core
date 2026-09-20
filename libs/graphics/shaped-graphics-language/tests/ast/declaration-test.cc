@@ -61,7 +61,7 @@ TEST("sgl ast - a function without a body is a valid signature")
 TEST("sgl ast - a binding entry keeps its whole element")
 {
     CHECK(ast_of("fun f(){frame as f, lights = scene_lights, @slot(2) extra}\n")
-          == "(fun f (params) (uses (cast frame : f) lights=scene_lights extra{@slot(2)}))");
+          == "(fun f (params) (uses (cast frame : f) lights=scene_lights extra{@slot(num:2)}))");
 }
 
 TEST("sgl ast - the signature lists come in one order, each at most once")
@@ -84,7 +84,8 @@ TEST("sgl ast - the parameter list is mandatory")
 
 TEST("sgl ast - a function that lost its name or its shape still has its body read")
 {
-    CHECK(ast_of("fun (x) => x\n") == "(fun <missing> (params) => x) !! expected-name @4+3\n");
+    // Without a name the first list stands where the name belongs, and it is still the parameter list.
+    CHECK(ast_of("fun (x) => x\n") == "(fun <missing> (params (field x)) => x) !! expected-name @4+3\n");
     CHECK(ast_of("fun:\n    return 1\n") == "(fun <missing> (params)\n  (return num:1)) !! expected-name @0+3\n");
     CHECK(ast_of("fun f(1 + 2) => 0\n")
           == "(fun f (params (field : (invalid \"1 + 2\"))) => num:0) !! expected-parameter @6+5\n");
@@ -102,6 +103,11 @@ TEST("sgl ast - a return type is a type position and takes attributes")
           == "(fun vs (params (field v : vertex)) -> (struct-type (field{@position} pos : hpos4) (field uv : vec2))\n"
              "  (return (object pos=(member v pos) uv=(member v uv))))");
     CHECK(ast_of("fun f() -> (int) -> int\n") == "(fun f (params) -> (function-type (params (field : int)) -> int))");
+    // Only the first arrow of a signature is the return arrow; every other one makes a function type.
+    CHECK(ast_of("fun apply(f: (float) -> float, x: float) => f x\n")
+          == "(fun apply (params (field f : (function-type (params (field : float)) -> float)) (field x : float)) => "
+             "(call:juxt f x))");
+    CHECK(ast_of("fun f() : int\n") == "(fun f (params) -> int) !! unexpected-token @8+1\n");
 
     // The value right of `=>` is no type position.
     CHECK(ast_of("fun f() => @a x\n") == "(fun f (params) => x{@a}) !! misplaced-attribute-on-expression @14+1\n");
@@ -119,20 +125,27 @@ TEST("sgl ast - functions nest, and a body reads its declarations in source orde
 
 TEST("sgl ast - type, const and notation")
 {
-    CHECK(ast_of("type color = vec4\n") == "(type color = vec4)");
-    CHECK(ast_of("type grid = array[float, 16]\n") == "(type grid = (index array float num:16))");
-    CHECK(ast_of("const bias = 0.5 @range(0, 1)\n") == "(const{@range(0, 1)} bias = num:0.5)");
+    CHECK(ast_of("type color = vec4\n") == "(type color : vec4)");
+    CHECK(ast_of("type grid = array[float, 16]\n") == "(type grid : (index array float num:16))");
+    CHECK(ast_of("const bias = 0.5 @range(0, 1)\n") == "(const{@range(num:0 num:1)} bias = num:0.5)");
     CHECK(ast_of("const limit : int = 10\n") == "(const limit : int = num:10)");
     CHECK(ast_of("notation a dot b => dot(a, b)\n") == "(notation (call:juxt a dot b) => (call:paren dot a b))");
     CHECK(body_of("type t = int\nconst c = 1\nnotation a x b => cross(a, b)\n")
-          == "(type t = int)\n(const c = num:1)\n(notation (call:juxt a x b) => (call:paren cross a b))");
+          == "(type t : int)\n(const c = num:1)\n(notation (call:juxt a x b) => (call:paren cross a b))");
 
-    CHECK(ast_of("type color\n") == "(type color = (invalid \"type color\")) !! expected-expression @0+4\n");
-    CHECK(ast_of("type = vec4\n") == "(type <missing> = vec4) !! expected-name @0+4\n");
+    CHECK(ast_of("type color\n") == "(type color : (invalid \"type color\")) !! expected-expression @0+4\n");
+    CHECK(ast_of("type = vec4\n") == "(type <missing> : vec4) !! expected-name @0+4\n");
     CHECK(ast_of("const x\n") == "(const x = (invalid \"const x\")) !! expected-expression @0+5\n");
     CHECK(ast_of("const 5 = 1\n") == "(const <missing> = num:1) !! expected-name @6+1\n");
     CHECK(ast_of("notation a\n") == "(notation a => (invalid \"notation a\")) !! expected-expression @0+8\n");
     CHECK(ast_of("type t => int\n").contains("unexpected-token"));
+}
+
+TEST("sgl ast - the right side of a type declaration is a type position")
+{
+    CHECK(ast_of("type callback = (float) -> float\n")
+          == "(type callback : (function-type (params (field : float)) -> float))");
+    CHECK(ast_of("type radiance_sample = (vec3, float)\n") == "(type radiance_sample : (tuple vec3 float))");
 }
 
 TEST("sgl ast - binding as a block and as a composition")
@@ -190,14 +203,32 @@ TEST("sgl ast - attributes on declarations are an open set")
 {
     CHECK(ast_of("@vertex struct v:\n    pos: pos3\n") == "(struct{@vertex} v\n  (field pos : pos3))");
     CHECK(ast_of("@vertex\n@inline fun vs()\n") == "(fun{@vertex @inline} vs (params))");
-    CHECK(ast_of("@nobody_knows_this(1, \"two\") const k = 1\n") == "(const{@nobody_knows_this(1, \"two\")} k = num:1)");
+    CHECK(ast_of("@nobody_knows_this(1, \"two\") const k = 1\n")
+          == "(const{@nobody_knows_this(num:1 str:\"two\")} k = num:1)");
+}
 
-    auto const file = sgl::parse("@range(0, 1) const k = 1\n");
+TEST("sgl ast - the arguments of an attribute are list elements like any other")
+{
+    CHECK(ast_of("@slider(0, max = 1, step = 1 / 8) const k = 1\n")
+          == "(const{@slider(num:0 max=num:1 step=(call:infix / num:1 num:8))} k = num:1)");
+    CHECK(ast_of("@flags(..defaults, .srgb) const k = 1\n") == "(const{@flags(..defaults .srgb)} k = num:1)");
+    CHECK(ast_of("@empty() const k = 1\n") == "(const{@empty()} k = num:1)");
+    CHECK(ast_of("@a(f(x)) @b const k = 1\n") == "(const{@a((call:paren f x)) @b} k = num:1)");
+
+    // What is wrong inside an argument is found like anywhere else.
+    CHECK(ast_of("@a(x.y = 1) const k = 1\n") == "(const{@a((invalid \"x.y = 1\"))} k = num:1) !! expected-name @3+7\n");
+
+    auto const file = sgl::parse("@range(0, hi = 1) const k = 1\n@bare const j = 2\n");
     auto const ast = sgl::ast::build(file);
-    REQUIRE(ast.attributes.size() == 1);
+    REQUIRE(ast.attributes.size() == 2);
     CHECK(file.text_of(ast.attributes[0].name) == "range");
-    CHECK(sgl::is_valid(ast.attributes[0].arguments));
-    CHECK(file.at(ast.attributes[0].arguments).kind == sgl::group_kind::round);
+    CHECK(file.at(ast.attributes[0].list).kind == sgl::form_kind::round_list);
+    auto const arguments = ast.at(ast.attributes[0].arguments);
+    REQUIRE(arguments.size() == 2);
+    CHECK(arguments[0].name.empty());
+    CHECK(file.text_of(arguments[1].name) == "hi");
+    CHECK(!sgl::is_valid(ast.attributes[1].list));
+    CHECK(ast.attributes[1].arguments.empty());
 }
 
 TEST("sgl ast - the value copies and compares whole, and the parsed file is left alone")

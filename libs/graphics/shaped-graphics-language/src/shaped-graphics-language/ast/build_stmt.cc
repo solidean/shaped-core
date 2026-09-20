@@ -4,7 +4,7 @@ using namespace sgl;
 using namespace sgl::ast;
 using namespace sgl::ast::impl;
 
-range_of<stmt_id> builder::statements(form_id block, bool yields_value)
+range_of<stmt_id> builder::statements(form_id block)
 {
     auto const lines = lines_of(block);
     auto const starts_with
@@ -16,8 +16,7 @@ range_of<stmt_id> builder::statements(form_id block, bool yields_value)
     {
         if (!starts_with(lines[i], "if") && !starts_with(lines[i], "else"))
         {
-            auto const is_last = i + 1 == lines.size();
-            collected.push_back(statement(head_of(lines[i]), yields_value && is_last));
+            collected.push_back(statement(head_of(lines[i])));
             ++i;
             continue;
         }
@@ -37,7 +36,7 @@ range_of<stmt_id> builder::statements(form_id block, bool yields_value)
     return append(ast.stmt_lists, cc::span<stmt_id const>(collected));
 }
 
-stmt_id builder::statement(statement_head const& head, bool is_exempt_from_no_effect)
+stmt_id builder::statement(statement_head const& head)
 {
     auto const form = head.whole;
     if (!is_valid(head.keyword_form))
@@ -50,7 +49,7 @@ stmt_id builder::statement(statement_head const& head, bool is_exempt_from_no_ef
             if (is_assignment)
                 return assignment(form, parts.operands[0], parts.operators[0], parts.operands[1], true);
         }
-        return expression_statement(form, is_exempt_from_no_effect);
+        return expression_statement(form);
     }
 
     auto const parts = keyword_parts_of(head.keyword_form);
@@ -64,8 +63,7 @@ stmt_id builder::statement(statement_head const& head, bool is_exempt_from_no_ef
     }
     if (keyword == "let" && (second.empty() || (second == "mut" && parts.keywords.size() == 2)))
         return let_statement(head, parts);
-    auto const is_jump = keyword == "return" || keyword == "break";
-    if (parts.keywords.size() > 1 && !is_jump)
+    if (parts.keywords.size() > 1 && !is_value_jump(keyword))
     {
         report(diagnostic_kind::unexpected_keyword, parts.keywords[1]);
         return make_stmt(form, attributes_of(form), invalid_stmt{});
@@ -90,7 +88,7 @@ stmt_id builder::statement(statement_head const& head, bool is_exempt_from_no_ef
         return make_stmt(form, attributes_of(form), invalid_stmt{});
     }
     // `case`, `loop` and the jumps are expressions.
-    return expression_statement(form, is_exempt_from_no_effect);
+    return expression_statement(form);
 }
 
 stmt_id builder::assignment(form_id whole, form_id target, form_id op, form_id value, bool takes_attributes)
@@ -101,7 +99,7 @@ stmt_id builder::assignment(form_id whole, form_id target, form_id op, form_id v
     return make_stmt(whole, attributes, assign_stmt{.target = target_id, .op = at(op).token, .value = value_id});
 }
 
-stmt_id builder::expression_statement(form_id form, bool is_exempt_from_no_effect)
+stmt_id builder::expression_statement(form_id form)
 {
     auto const attributes = attributes_of(form);
     auto const value = expression(form, attribute_mode::taken);
@@ -111,10 +109,10 @@ stmt_id builder::expression_statement(form_id form, bool is_exempt_from_no_effec
     auto const is_application
         = as_call != nullptr
        && (as_call->spelling == call_spelling::paren || as_call->spelling == call_spelling::juxtaposition);
-    auto const has_effect = is_application || node.is<return_expr>() || node.is<break_expr>()
+    auto const has_effect = is_application || node.is<return_expr>() || node.is<yield_expr>() || node.is<break_expr>()
                          || node.is<continue_expr>() || node.is<case_expr>() || node.is<loop_expr>()
                          || node.is<with_bindings>() || node.is<invalid_expr>();
-    if (!has_effect && !is_exempt_from_no_effect)
+    if (!has_effect)
         report(diagnostic_kind::no_effect, form);
     return make_stmt(form, attributes, expr_stmt{.value = value});
 }
@@ -282,18 +280,25 @@ stmt_id builder::if_chain(cc::span<form_id const> chain)
     return make_stmt(chain[0], attributes, if_stmt{.branches = branches});
 }
 
-body builder::block_body(form_id block, bool yields_value)
+body builder::block_body(form_id block)
 {
-    auto const list = statements(block, yields_value);
+    auto const list = statements(block);
     return {.kind = body_kind::block, .form = block, .statements = list};
 }
 
-body builder::value_body(form_id right_of_arrow)
+body builder::value_body(form_id right_of_arrow, body_owner owner)
 {
+    owners.push_back(owner);
+    auto result = body();
     if (is_kind(right_of_arrow, form_kind::block))
-        return block_body(right_of_arrow, true);
-    auto const value = expression(right_of_arrow);
-    return {.kind = body_kind::arrow, .form = right_of_arrow, .value = value};
+        result = block_body(right_of_arrow);
+    else
+    {
+        auto const value = expression(right_of_arrow);
+        result = {.kind = body_kind::arrow, .form = right_of_arrow, .value = value};
+    }
+    owners.remove_back();
+    return result;
 }
 
 body builder::statement_body(statement_head const& head, keyword_parts const& parts)
@@ -303,12 +308,12 @@ body builder::statement_body(statement_head const& head, keyword_parts const& pa
         if (is_valid(parts.block))
             report(diagnostic_kind::too_many_arguments, parts.block);
         if (is_kind(head.arrow, form_kind::block))
-            return block_body(head.arrow, false);
+            return block_body(head.arrow);
 
         // `if done => total = 0`: the assignment is the statement right of the arrow.
         auto const only = is_valid(head.assign_value)
                             ? assignment(head.whole, head.arrow, head.assign_operator, head.assign_value, false)
-                            : statement(head_of(head.arrow), false);
+                            : statement(head_of(head.arrow));
         auto const list = append_one(ast.stmt_lists, only);
         return {.kind = body_kind::arrow, .form = head.arrow, .statements = list};
     }
@@ -316,7 +321,7 @@ body builder::statement_body(statement_head const& head, keyword_parts const& pa
     if (is_valid(head.assign_value))
         report(diagnostic_kind::unexpected_token, head.assign_operator);
     if (is_valid(parts.block))
-        return block_body(parts.block, false);
+        return block_body(parts.block);
     report(diagnostic_kind::expected_body, head.keyword_form);
     return {};
 }

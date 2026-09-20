@@ -148,7 +148,14 @@ expr_id builder::curly_list_expression(form_id form)
     // In a mixed list only the mix is reported: an attribute on a `name: type` element was written on a field.
     auto collected = cc::vector<argument>();
     for (auto element = at(form).first_child; is_valid(element); element = at(element).next_sibling)
-        collected.push_back(list_element(element, true, is_field_like(element, true)));
+    {
+        auto const is_field = is_field_like(element, true);
+        auto const is_splat = is_kind(element, form_kind::prefix_operator) && token_text_of(element) == "..";
+        // Anything else is kept as a positional element, so nothing written is lost.
+        if (!is_field && !is_splat && !is_kind(element, form_kind::identifier) && !is_binary_run(element, "="))
+            report(diagnostic_kind::expected_object_element, element);
+        collected.push_back(list_element(element, true, is_field));
+    }
     auto const elements = append(ast.arguments, cc::span<argument const>(collected));
     return make_expr(form, object{.elements = elements});
 }
@@ -238,6 +245,10 @@ expr_id builder::run_expression(form_id form)
         return lambda_expression(form, parts);
     case operator_level::ascription:
         return ascription_fold(form, parts.operands, parts.operators, attribute_mode::reject);
+    case operator_level::arrow:
+        if (parts.operands.size() != 2)
+            return invalid_expression(form, diagnostic_kind::expected_expression);
+        return function_type_expression(form, parts.operands[0], parts.operands[1]);
 
     case operator_level::comparison:
         if (parts.operators.size() > 1)
@@ -276,71 +287,46 @@ expr_id builder::ascription_fold(form_id run,
                                  cc::span<form_id const> operators,
                                  attribute_mode first_mode)
 {
-    // An item is an operand still to be read, or a function type already made of two of them.
-    struct item
-    {
-        form_id form = form_id::none;
-        expr_id built = expr_id::none;
-        /// The operator before the item; `none` for the first.
-        form_id op = form_id::none;
-    };
-
-    auto items = cc::vector<item>();
-    items.push_back({.form = operands[0]});
+    auto result = expression(operands[0], first_mode);
     for (auto i = isize(0); i < operators.size(); ++i)
     {
-        auto const op = operators[i];
-        if (token_text_of(op) != "->")
-        {
-            items.push_back({.form = operands[i + 1], .op = op});
-            continue;
-        }
-
-        // `x : (int) -> int` ascribes a function type; read strictly left to right it would be `(x : (int)) -> int`.
-        auto& left = items.back();
-        auto parameters = range_of<field>();
-        if (is_valid(left.built))
-            parameters = append_one(ast.fields, field{.form = ast.at(left.built).form, .type = left.built});
-        else if (is_kind(left.form, form_kind::round_list))
-        {
-            auto collected = cc::vector<field>();
-            for (auto e = at(left.form).first_child; is_valid(e); e = at(e).next_sibling)
-            {
-                if (is_field_like(e, true))
-                    collected.push_back(make_field(e, diagnostic_kind::expected_parameter));
-                else
-                {
-                    auto const attributes = attributes_of(e);
-                    auto const type = expression(e, attribute_mode::taken);
-                    collected.push_back({.form = e, .type = type, .attributes = attributes});
-                }
-            }
-            parameters = append(ast.fields, cc::span<field const>(collected));
-        }
-        else
-        {
-            auto const type = type_expression(left.form);
-            parameters = append_one(ast.fields, field{.form = left.form, .type = type});
-        }
-        auto const result = type_expression(operands[i + 1]);
-        left.built = make_expr(run, function_type{.parameters = parameters, .result = result});
-    }
-
-    auto const read = [&](item const& it, attribute_mode mode)
-    { return is_valid(it.built) ? it.built : expression(it.form, mode); };
-
-    auto result = read(items[0], first_mode);
-    for (auto i = isize(1); i < items.size(); ++i)
-    {
-        auto const op = token_text_of(items[i].op);
+        auto const op = token_text_of(operators[i]);
         if (op == "in")
-            result = make_expr(run, membership{.value = result, .container = read(items[i], attribute_mode::reject)});
+            result = make_expr(run, membership{.value = result, .container = expression(operands[i + 1])});
         else if (op == "as")
-            result = make_expr(run, cast{.value = result, .type = read(items[i], attribute_mode::keep)});
+            result = make_expr(run, cast{.value = result, .type = type_expression(operands[i + 1])});
         else
-            result = make_expr(run, ascription{.value = result, .type = read(items[i], attribute_mode::keep)});
+            result = make_expr(run, ascription{.value = result, .type = type_expression(operands[i + 1])});
     }
     return result;
+}
+
+expr_id builder::function_type_expression(form_id run, form_id left, form_id right)
+{
+    auto parameters = range_of<field>();
+    if (is_kind(left, form_kind::round_list))
+    {
+        auto collected = cc::vector<field>();
+        for (auto e = at(left).first_child; is_valid(e); e = at(e).next_sibling)
+        {
+            if (is_field_like(e, true))
+                collected.push_back(make_field(e, diagnostic_kind::expected_parameter));
+            else
+            {
+                auto const attributes = attributes_of(e);
+                auto const type = expression(e, attribute_mode::taken);
+                collected.push_back({.form = e, .type = type, .attributes = attributes});
+            }
+        }
+        parameters = append(ast.fields, cc::span<field const>(collected));
+    }
+    else
+    {
+        auto const type = type_expression(left);
+        parameters = append_one(ast.fields, field{.form = left, .type = type});
+    }
+    auto const result = type_expression(right);
+    return make_expr(run, function_type{.parameters = parameters, .result = result});
 }
 
 expr_id builder::type_after_first_operator(form_id run, run_parts const& parts)
@@ -358,8 +344,36 @@ expr_id builder::lambda_expression(form_id form, run_parts const& parts)
     auto const left = parts.operands[0];
     auto const right = parts.operands[1];
     if (is_keyword_led(left))
-        return invalid_expression(form, diagnostic_kind::statement_in_expression);
+    {
+        // `=>` is looser than a keyword form, so `yield x => x` arrives as `(yield x) => x`, and
+        // `return fun (x) => x` as `(return fun (x)) => x`: the jumps take the lambda as their value.
+        auto const left_parts = keyword_parts_of(left);
+        auto jump_count = isize(0);
+        while (jump_count < left_parts.keywords.size() && is_value_jump(token_text_of(left_parts.keywords[jump_count])))
+            ++jump_count;
 
+        auto result = expr_id::none;
+        auto const is_arrow_lambda = jump_count == left_parts.keywords.size() && left_parts.arguments.size() == 1
+                                  && !is_valid(left_parts.block);
+        auto const is_fun_lambda = jump_count + 1 == left_parts.keywords.size()
+                                && token_text_of(left_parts.keywords[jump_count]) == "fun"
+                                && is_anonymous_fun(left_parts);
+        if (is_arrow_lambda)
+            result = arrow_lambda_expression(form, left_parts.arguments[0], right);
+        else if (is_fun_lambda)
+            result = fun_lambda_expression(form, left, left_parts, right);
+        else
+            return invalid_expression(form, diagnostic_kind::statement_in_expression);
+
+        for (auto i = jump_count - 1; i >= 0; --i)
+            result = make_jump(form, token_text_of(left_parts.keywords[i]), result);
+        return result;
+    }
+    return arrow_lambda_expression(form, left, right);
+}
+
+expr_id builder::arrow_lambda_expression(form_id form, form_id left, form_id right)
+{
     auto parameters = range_of<field>();
     if (is_kind(left, form_kind::round_list))
         parameters = fields_of(left, diagnostic_kind::expected_parameter);
@@ -368,8 +382,32 @@ expr_id builder::lambda_expression(form_id form, run_parts const& parts)
     else
         return invalid_expression(form, diagnostic_kind::expected_parameter);
 
-    auto const result = value_body(right);
+    auto const result = value_body(right, body_owner::arrow_lambda);
     return make_expr(form, lambda{.parameters = parameters, .body = result});
+}
+
+expr_id builder::fun_lambda_expression(form_id form, form_id keyword_form, keyword_parts const& parts, form_id right_of_arrow)
+{
+    auto const signature = signature_of(parts);
+    if (!signature.has_parameter_list)
+        report(diagnostic_kind::missing_parameter_list, keyword_form);
+
+    auto result = lambda{.spelling = lambda_spelling::fun,
+                         .type_parameters = signature.type_parameters,
+                         .parameters = signature.parameters,
+                         .bindings = signature.bindings,
+                         .return_type = signature.return_type};
+    if (is_valid(right_of_arrow))
+    {
+        if (is_valid(parts.block))
+            report(diagnostic_kind::too_many_arguments, parts.block);
+        result.body = value_body(right_of_arrow, body_owner::function);
+    }
+    else if (is_valid(parts.block))
+        result.body = value_body(parts.block, body_owner::function);
+    else
+        report(diagnostic_kind::expected_body, keyword_form);
+    return make_expr(form, result);
 }
 
 expr_id builder::keyword_expression(form_id form)
@@ -386,12 +424,10 @@ expr_id builder::keyword_expression_from(form_id form, keyword_parts const& part
 
     // Consecutive keywords head ONE keyword form, so `return case x:` arrives as a form with two keywords.
     // A jump takes the rest as its value, and the arguments and the block are the inner expression's.
-    if ((keyword == "return" || keyword == "break") && has_more)
+    if (is_value_jump(keyword) && has_more)
     {
         auto const value = keyword_expression_from(form, parts, first_keyword + 1);
-        if (keyword == "return")
-            return make_expr(form, return_expr{.value = value});
-        return make_expr(form, break_expr{.value = value});
+        return make_jump(form, keyword, value);
     }
     if (has_more)
         return invalid_expression(form, keyword == "let" || keyword == "else" ? diagnostic_kind::statement_in_expression
@@ -399,15 +435,17 @@ expr_id builder::keyword_expression_from(form_id form, keyword_parts const& part
 
     if (keyword == "case")
         return case_expression(form, parts);
-    if (keyword == "return" || keyword == "break" || keyword == "continue")
+    if (is_value_jump(keyword) || keyword == "continue")
         return jump_expression(form, parts, keyword);
+    if (keyword == "fun" && is_anonymous_fun(parts))
+        return fun_lambda_expression(form, form, parts, form_id::none);
     if (keyword == "loop")
     {
         if (!parts.arguments.empty())
             report(diagnostic_kind::too_many_arguments, parts.arguments[0]);
         if (!is_valid(parts.block))
             report(diagnostic_kind::expected_body, form);
-        auto const result = is_valid(parts.block) ? block_body(parts.block, false) : body();
+        auto const result = is_valid(parts.block) ? block_body(parts.block) : body();
         return make_expr(form, loop_expr{.body = result});
     }
     return invalid_expression(
@@ -444,7 +482,7 @@ expr_id builder::case_expression(form_id form, keyword_parts const& parts)
             continue;
         }
         auto const pattern = expression(arm_parts.operands[0]);
-        auto const result = value_body(arm_parts.operands[1]);
+        auto const result = value_body(arm_parts.operands[1], body_owner::value_block);
         collected.push_back({.form = line, .pattern = pattern, .result = result});
     }
     auto const arms = append(ast.case_arms, cc::span<case_arm const>(collected));
@@ -460,10 +498,35 @@ expr_id builder::jump_expression(form_id form, keyword_parts const& parts, cc::s
     if (is_valid(parts.block))
         report(diagnostic_kind::too_many_arguments, parts.block);
 
-    auto const value = takes_value && !parts.arguments.empty() ? expression(parts.arguments[0]) : expr_id::none;
-    if (keyword == "return")
-        return make_expr(form, return_expr{.value = value});
+    auto value = takes_value && !parts.arguments.empty() ? expression(parts.arguments[0]) : expr_id::none;
+    if (!takes_value)
+        return make_expr(form, continue_expr{});
+    // A `yield` without a value hands nothing on, which is what leaving the block out would have said.
+    if (keyword == "yield" && !is_valid(value))
+        value = invalid_expression(form, diagnostic_kind::expected_expression);
+    return make_jump(form, keyword, value);
+}
+
+expr_id builder::make_jump(form_id form, cc::string_view keyword, expr_id value)
+{
     if (keyword == "break")
         return make_expr(form, break_expr{.value = value});
-    return make_expr(form, continue_expr{});
+
+    if (keyword == "yield")
+    {
+        if (owners.empty() || owners.back() == body_owner::function)
+            report(diagnostic_kind::yield_in_function, form);
+        return make_expr(form, yield_expr{.value = value});
+    }
+
+    // A `case` arm and a property are looked through: `_ => return false` leaves the function around the `case`.
+    for (auto i = owners.size() - 1; i >= 0; --i)
+    {
+        if (owners[i] == body_owner::value_block)
+            continue;
+        if (owners[i] == body_owner::arrow_lambda)
+            report(diagnostic_kind::return_in_lambda, form);
+        break;
+    }
+    return make_expr(form, return_expr{.value = value});
 }

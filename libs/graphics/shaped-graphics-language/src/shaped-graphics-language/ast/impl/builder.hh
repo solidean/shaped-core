@@ -37,8 +37,34 @@ enum class operator_level : u8
     connective,
     comparison,
     ascription,
+    arrow,
     range,
     arithmetic,
+};
+
+/// What a `yield` or a `return` found around it, innermost last.
+enum class body_owner : u8
+{
+    /// A `fun`, named or anonymous: `return` leaves it, and `yield` has nothing to hand a value to.
+    function,
+    /// `x => …`: `yield` hands its value on, and `return` has no `fun` to leave.
+    arrow_lambda,
+    /// A `case` arm or a property: `yield` hands its value on, and `return` looks through it.
+    value_block,
+};
+
+/// What stands between `fun` and the body.
+struct fun_signature
+{
+    /// The identifier, `none` when nothing or a list stands where the name belongs.
+    form_id name_form = form_id::none;
+    /// Where a missing name is reported: the first list, or `none` for a `fun` that has no signature at all.
+    form_id first_list = form_id::none;
+    range_of<field> type_parameters;
+    range_of<field> parameters;
+    range_of<argument> bindings;
+    expr_id return_type = expr_id::none;
+    bool has_parameter_list = false;
 };
 
 /// A keyword form taken apart.
@@ -76,6 +102,8 @@ struct builder
 {
     parsed_file const& file;
     file_ast ast;
+    /// The bodies being read, which is all a jump needs to know where it goes.
+    cc::vector<body_owner> owners;
 
     // ---- forms (build.cc) ------------------------------------------------------------------------------------
 
@@ -158,11 +186,22 @@ struct builder
     /// Reads the keywords from `first_keyword` on, which is how the value of `return case x:` is reached.
     expr_id keyword_expression_from(form_id form, keyword_parts const& parts, isize first_keyword);
     expr_id lambda_expression(form_id form, run_parts const& parts);
+    expr_id arrow_lambda_expression(form_id form, form_id left, form_id right);
+    /// `fun` without a name; `right_of_arrow` is `none` when the body is the keyword form's block.
+    expr_id fun_lambda_expression(form_id form, form_id keyword_form, keyword_parts const& parts, form_id right_of_arrow);
     expr_id case_expression(form_id form, keyword_parts const& parts);
     expr_id jump_expression(form_id form, keyword_parts const& parts, cc::string_view keyword);
+    /// The node of `return`, `break` or `yield`, after saying whether the jump has somewhere to go.
+    expr_id make_jump(form_id form, cc::string_view keyword, expr_id value);
+    [[nodiscard]] static bool is_value_jump(cc::string_view keyword)
+    {
+        return keyword == "return" || keyword == "break" || keyword == "yield";
+    }
 
     expr_id infix_call(form_id run, expr_id left, form_id op, expr_id right, bool is_short_circuit);
-    /// Reads `operands` joined by `: -> as in` left to right, `->` binding tighter than the other three.
+    /// `left -> right`, wherever it is not the return arrow of a signature.
+    expr_id function_type_expression(form_id run, form_id left, form_id right);
+    /// Reads `operands` joined by `: as in` left to right.
     /// `first_mode` is how the first operand is read: `keep` when the whole run stands in a type position.
     expr_id ascription_fold(form_id run,
                             cc::span<form_id const> operands,
@@ -181,23 +220,23 @@ struct builder
         return stmt_id(i32(ast.stmts.size() - 1));
     }
 
-    /// `yields_value` exempts the last statement from `no-effect`: it is what the block computes.
-    [[nodiscard]] range_of<stmt_id> statements(form_id block, bool yields_value);
-    stmt_id statement(statement_head const& head, bool is_exempt_from_no_effect);
-    /// `takes_attributes` is false for the assignment right of `if � =>`, whose form is the whole `if`.
+    [[nodiscard]] range_of<stmt_id> statements(form_id block);
+    stmt_id statement(statement_head const& head);
+    /// `takes_attributes` is false for the assignment right of `if … =>`, whose form is the whole `if`.
     stmt_id assignment(form_id whole, form_id target, form_id op, form_id value, bool takes_attributes);
     stmt_id let_statement(statement_head const& head, keyword_parts const& parts);
     stmt_id for_statement(statement_head const& head, keyword_parts const& parts);
     stmt_id while_statement(statement_head const& head, keyword_parts const& parts);
     stmt_id assert_statement(statement_head const& head, keyword_parts const& parts);
     stmt_id print_statement(statement_head const& head, keyword_parts const& parts);
-    stmt_id expression_statement(form_id form, bool is_exempt_from_no_effect);
+    stmt_id expression_statement(form_id form);
     /// `chain` is an `if` or a stray `else`, then the `else` forms that follow it directly.
     stmt_id if_chain(cc::span<form_id const> chain);
 
-    [[nodiscard]] body block_body(form_id block, bool yields_value);
+    [[nodiscard]] body block_body(form_id block);
     /// The body of something that yields a value: a block, or the expression right of `=>`.
-    [[nodiscard]] body value_body(form_id right_of_arrow);
+    /// `owner` is what the jumps inside it find around them.
+    [[nodiscard]] body value_body(form_id right_of_arrow, body_owner owner);
     /// The body of a control statement: its block, or the one statement right of `=>`.
     [[nodiscard]] body statement_body(statement_head const& head, keyword_parts const& parts);
 
@@ -225,6 +264,10 @@ struct builder
     decl_id module_declaration(statement_head const& head, keyword_parts const& parts);
     decl_id use_declaration(statement_head const& head, keyword_parts const& parts);
     decl_id fun_declaration(statement_head const& head, keyword_parts const& parts);
+    /// True when no identifier stands where the name of a `fun` belongs, which in expression position is a lambda.
+    [[nodiscard]] bool is_anonymous_fun(keyword_parts const& parts) const;
+    /// Reads the lists and the return type, and leaves a missing name or parameter list to the caller to report.
+    [[nodiscard]] fun_signature signature_of(keyword_parts const& parts);
     decl_id type_body_declaration(statement_head const& head, keyword_parts const& parts, scope_kind body);
     decl_id type_declaration(statement_head const& head, keyword_parts const& parts);
     decl_id const_declaration(statement_head const& head, keyword_parts const& parts);

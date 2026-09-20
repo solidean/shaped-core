@@ -84,10 +84,17 @@ enum class sgl::diagnostic_kind : sgl::u8
     for_takes_name_in_range,
     assert_takes_condition_and_message,
     print_takes_one_message,
-    /// A spelling that is reserved and has no meaning yet: `f(x){…}`, and an expression that owns a block.
+    /// A spelling that is reserved and has no meaning yet: `f(x){â€¦}`, and an expression that owns a block.
     unsupported_syntax,
     /// An expression statement that is neither a call nor a jump; a warning, since it is legal and never meant.
+    /// No statement is exempt: a block hands a value on through `yield`, `return` or `break`, never by ending in it.
     no_effect,
+    /// A `yield` whose nearest enclosing body is that of a `fun`, or that stands in no body at all; a `fun` is left with `return`.
+    yield_in_function,
+    /// A `return` whose nearest enclosing function is an arrow lambda, which hands its value on with `yield`.
+    return_in_lambda,
+    /// An object element that is not `name`, `name = value` or `..splat`.
+    expected_object_element,
 };
 
 namespace sgl

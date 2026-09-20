@@ -36,7 +36,7 @@ namespace sgl
 ///     (kw kw:if id:x
 ///       (kw kw:return))
 ///
-/// A leaf is `kind:text`, and a form's attributes follow it as `{@…}`.
+/// A leaf is `kind:text`, and a form's attributes follow it as `{@name}`, or `{@name (round …)}` with its arguments.
 [[nodiscard]] cc::string dump_forms(parsed_file const& file);
 
 /// One line per diagnostic, in the order they were reported: `undelimited-string @6+1`.

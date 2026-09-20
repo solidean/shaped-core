@@ -124,7 +124,7 @@
                 { "name": "punctuation.separator.namespace.sgl", "match": "::" },
                 {
                     "comment": "'denotes': a name right after a single colon is a type.",
-                    "match": "(:)[ \\t]*(?!(?:if|else|for|while|in|return|continue|break|case|assert|print|let|const|mut|fun|as|use|module)(?![\\w\\-@\\\\']))([\\p{L}_](?:[\\w@\\\\']|-(?!>))*)",
+                    "match": "(:)[ \\t]*(?!(?:if|else|for|while|loop|in|return|yield|continue|break|case|assert|print|let|const|mut|fun|as|use|module)(?![\\w\\-@\\\\']))([\\p{L}_](?:[\\w@\\\\']|-(?!>))*)",
                     "captures": {
                         "1": { "name": "punctuation.separator.annotation.sgl" },
                         "2": { "name": "entity.name.type.sgl" }
@@ -149,7 +149,7 @@
                     }
                 },
                 {
-                    "match": "(?<![\\w\\-@\\\\'])(struct|enum|binding)[ \\t]+([\\p{L}_](?:[\\w@\\\\']|-(?!>))*)",
+                    "match": "(?<![\\w\\-@\\\\'])(struct|enum|binding|sampler|type)[ \\t]+([\\p{L}_](?:[\\w@\\\\']|-(?!>))*)",
                     "captures": {
                         "1": { "name": "storage.type.$1.sgl" },
                         "2": { "name": "entity.name.type.sgl" }
@@ -161,11 +161,11 @@
             "patterns": [
                 {
                     "name": "keyword.control.sgl",
-                    "match": "(?<![\\w\\-@\\\\'])(?:if|else|for|while|in|return|continue|break|case|as|use)(?![\\w\\-@\\\\'])"
+                    "match": "(?<![\\w\\-@\\\\'])(?:if|else|for|while|loop|in|return|yield|continue|break|case|as|use)(?![\\w\\-@\\\\'])"
                 },
                 {
                     "name": "storage.type.sgl",
-                    "match": "(?<![\\w\\-@\\\\'])(?:fun|let|const|struct|enum|binding|module)(?![\\w\\-@\\\\'])"
+                    "match": "(?<![\\w\\-@\\\\'])(?:fun|let|const|struct|enum|binding|sampler|type|notation|module)(?![\\w\\-@\\\\'])"
                 },
                 { "name": "storage.modifier.sgl", "match": "(?<![\\w\\-@\\\\'])mut(?![\\w\\-@\\\\'])" },
                 {

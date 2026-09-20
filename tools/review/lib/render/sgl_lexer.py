@@ -18,7 +18,7 @@ from pygments.token import Comment, Error, Keyword, Name, Number, Operator, Punc
 _DECLARATION_KEYWORDS = frozenset({
     "fun", "let", "mut", "struct", "enum", "binding", "sampler", "const", "use", "module", "type", "notation", "assert", "print",
 })
-_CONTROL_KEYWORDS = frozenset({"if", "else", "for", "while", "loop", "return", "continue", "break", "case"})
+_CONTROL_KEYWORDS = frozenset({"if", "else", "for", "while", "loop", "return", "yield", "continue", "break", "case"})
 _WORD_OPERATORS = frozenset({"and", "or", "not", "in", "as"})
 _CONSTANTS = frozenset({"true", "false"})
 # A symbol directly after one of these names a function or a type.

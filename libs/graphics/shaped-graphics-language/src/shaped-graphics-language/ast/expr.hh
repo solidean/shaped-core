@@ -4,7 +4,8 @@
 #include <shaped-graphics-language/ast/parts.hh>
 
 /// Expressions are ONE family: a type is an ordinary expression standing in a type position.
-/// The type positions are the members named `type`, `result` of a `function_type` and `return_type` of a function.
+/// The type positions are the members named `type`, `result` of a `function_type`, `return_type` of a function or
+/// a lambda, and `value` of a `type_decl`.
 /// The builder looks no name up, so `vec3` is a `name` and `buffer[float]` an `index` wherever they stand.
 
 enum class sgl::ast::literal_kind : sgl::u8
@@ -164,10 +165,22 @@ struct sgl::ast::range
     constexpr bool operator==(range const&) const = default;
 };
 
-/// `x => body`, `_ => body`, `(a, b: int) => body`
+enum class sgl::ast::lambda_spelling : sgl::u8
+{
+    /// `x => body`, `_ => body`, `(a, b: int) => body`; its block hands a value on with `yield`.
+    arrow,
+    /// `fun (x) => body`, `fun [T](x: T){frame} -> T:` and a block: a `fun` without a name, left with `return`.
+    fun,
+};
+
 struct sgl::ast::lambda
 {
+    lambda_spelling spelling = lambda_spelling::arrow;
+    /// Only the `fun` spelling can write type parameters, bindings and a return type.
+    range_of<field> type_parameters;
     range_of<field> parameters;
+    range_of<argument> bindings;
+    expr_id return_type = expr_id::none;
     sgl::ast::body body;
 
     constexpr bool operator==(lambda const&) const = default;
@@ -195,6 +208,15 @@ struct sgl::ast::return_expr
     expr_id value = expr_id::none;
 
     constexpr bool operator==(return_expr const&) const = default;
+};
+
+/// `yield value` hands `value` on from the nearest value block: the body of a `case` arm, an arrow lambda or a property.
+/// The blocks of `if`, `for`, `while` and `loop` in between are looked through, the way `break` looks through an `if`.
+struct sgl::ast::yield_expr
+{
+    expr_id value = expr_id::none;
+
+    constexpr bool operator==(yield_expr const&) const = default;
 };
 
 struct sgl::ast::break_expr
@@ -268,6 +290,7 @@ struct sgl::ast::expr
                 case_expr,
                 loop_expr,
                 return_expr,
+                yield_expr,
                 break_expr,
                 continue_expr,
                 struct_type,

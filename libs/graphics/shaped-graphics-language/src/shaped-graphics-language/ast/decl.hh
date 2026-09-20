@@ -72,6 +72,7 @@ struct sgl::ast::enum_decl
 struct sgl::ast::type_decl
 {
     source_span name;
+    /// A type position, like the right side of `:`, `->` and `as`.
     expr_id value = expr_id::none;
 
     constexpr bool operator==(type_decl const&) const = default;
@@ -133,10 +134,12 @@ struct sgl::ast::property_decl
     constexpr bool operator==(property_decl const&) const = default;
 };
 
-/// A bare name in an `enum` body.
+/// A bare name in an `enum` body, or `name = value`.
 struct sgl::ast::enum_case_decl
 {
     source_span name;
+    /// `none` for a bare name.
+    expr_id value = expr_id::none;
 
     constexpr bool operator==(enum_case_decl const&) const = default;
 };

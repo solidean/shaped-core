@@ -86,7 +86,9 @@ TEST("sgl samples - members and bindings parse and build without a diagnostic")
                         "    (assign *= (member self intensity) factor))\n"));
     CHECK(dump.contains("      (arm .directional => (return true))\n"));
     CHECK(dump.contains("position=(call:paren pos3 ..direction)"));
-    CHECK(dump.contains("(type radiance_sample = (tuple vec3 float))\n"));
+    CHECK(dump.contains("(type radiance_sample : (tuple vec3 float))\n"));
+    // An arm block says what it hands on.
+    CHECK(dump.contains("        (let base = num:10.0)\n        (yield (call:infix * base intensity)))"));
     // A local binding with a property that reaches a local, then a nested function and a lambda.
     CHECK(dump.contains("  (binding timing\n    (field time : float)\n    (property phase => (call:infix * t "
                         "num:0.5)))\n"));
@@ -96,9 +98,49 @@ TEST("sgl samples - members and bindings parse and build without a diagnostic")
     CHECK(dump.contains("(chain num:0.0 <= (call:paren (member brdf luminance) total) < num:1.0)"));
 }
 
+TEST("sgl samples - control flow parses and builds without a diagnostic")
+{
+    auto const file = sgl::parse(read_sample("control-flow.sgl"));
+    CHECK(sgl::dump_diagnostics(file) == "");
+    CHECK(sgl::print_source(file) == file.source);
+
+    auto const ast = sgl::ast::build(file);
+    CHECK(sgl::ast::dump_diagnostics(ast) == "");
+    auto const dump = sgl::ast::dump(file, ast);
+    CHECK(!dump.contains("invalid"));
+    CHECK(!dump.contains("<missing>"));
+
+    CHECK(dump.contains("  (case linear = num:0)\n  (case reinhard = num:1)\n  (case filmic = num:2)\n  (case "
+                        "custom)\n"));
+    CHECK(dump.contains("(const{@slider(num:0.0 max=num:16.0 step=num:0.25)} exposure = num:1.0)\n"));
+    CHECK(dump.contains("(type curve : (function-type (params (field : float)) -> float))\n"));
+    CHECK(dump.contains("  (field apply_to : (function-type (params (field : float)) -> float))\n"));
+    CHECK(dump.contains("  (property shoulder\n"
+                        "    (let w = (call:infix * white_point white_point))\n"
+                        "    (yield (call:infix / num:1.0 w)))\n"));
+    // A `yield` whose value is an arrow lambda, whose block yields in turn.
+    CHECK(dump.contains("      (arm .filmic\n"
+                        "        (let s = shoulder)\n"
+                        "        (yield (lambda (params (field x))\n"
+                        "          (let scaled = "));
+    CHECK(dump.contains("          (yield (call:infix / scaled (call:infix + num:1.0 x))))))\n"));
+    CHECK(dump.contains("(fun apply (params (field f : (function-type (params (field : float)) -> float)) (field x : "
+                        "float)) => (call:juxt f x))\n"));
+    CHECK(dump.contains("  (let safe = (lambda:fun (params (field x : float)) -> float\n"
+                        "    (if\n"
+                        "      (branch (call:infix <= x num:0.0) => (return num:0.0)))\n"));
+    CHECK(dump.contains("  (let twice = (lambda:fun (type-params (field T)) (params (field g : (function-type (params "
+                        "(field : T)) -> T)) (field x : T)) => (call:paren g (call:paren g x))))\n"));
+    // A statement block between a `yield` and its arm is looked through.
+    CHECK(dump.contains("        (if\n"
+                        "          (branch (call:infix > (index color i) (member t white_point))\n"
+                        "            (yield num:1.0)))\n"
+                        "        (yield (call:paren safe (index color i))))"));
+}
+
 TEST("sgl samples - the AST pass is total: every truncation of a sample builds, and every node keeps a form")
 {
-    for (auto const name : {"basic-raster.sgl", "members-and-bindings.sgl"})
+    for (auto const name : {"basic-raster.sgl", "members-and-bindings.sgl", "control-flow.sgl"})
     {
         auto const source = read_sample(name);
         // A prime stride cuts through every kind of token over the length of a file.

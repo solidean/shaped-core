@@ -56,7 +56,7 @@ struct light:
             .spot => 20.0
             _ =>:
                 let base = 10.0
-                base * intensity
+                yield base * intensity
         return distance(position, p) < reach
 
 const max_bounces = 4

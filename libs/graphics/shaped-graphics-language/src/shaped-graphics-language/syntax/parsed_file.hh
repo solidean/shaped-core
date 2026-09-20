@@ -27,6 +27,9 @@ struct sgl::parsed_file
     /// Ids of `attribute` groups, each form owning one contiguous range.
     /// An element's attributes may be written on several of its groups, and this is where they meet.
     cc::vector<group_id> form_attributes;
+    /// Parallel to `form_attributes`: the round list form holding that attribute's arguments, `none` for a bare `@name`.
+    /// The elements are read like those of any paren list, so `@slider(min = 0)` holds an assignment run.
+    cc::vector<form_id> form_attribute_arguments;
     cc::vector<diagnostic> diagnostics;
 
     /// The first top-level line, `none` for a file without lines; its `next_sibling` chain is the top level.

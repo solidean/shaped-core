@@ -58,12 +58,18 @@ struct dumper
             is_first = false;
             out += "@";
             out += file.text_of(a.name);
-            if (!is_valid(a.arguments))
+            if (!is_valid(a.list))
                 continue;
-            auto const& list = file.at(a.arguments);
-            auto const open = file.at(list.token).where;
-            auto const end = is_valid(list.close_token) ? file.at(list.close_token).where.end() : open.end();
-            out += file.text_of({.offset = open.offset, .length = end - open.offset});
+            out += "(";
+            auto is_first_argument = true;
+            for (auto const& argument : ast.at(a.arguments))
+            {
+                if (!is_first_argument)
+                    out += " ";
+                is_first_argument = false;
+                dump_argument(argument, 0);
+            }
+            out += ")";
         }
         out += "}";
     }
@@ -289,8 +295,24 @@ struct dumper
             },
             [&](lambda const& n)
             {
-                out += "(lambda ";
+                out += n.spelling == lambda_spelling::fun ? "(lambda:fun " : "(lambda ";
+                if (!n.type_parameters.empty())
+                {
+                    dump_fields("type-params", n.type_parameters, depth);
+                    out += " ";
+                }
                 dump_fields("params", n.parameters, depth);
+                if (!n.bindings.empty())
+                {
+                    out += " (uses";
+                    dump_arguments(n.bindings, depth);
+                    out += ")";
+                }
+                if (is_valid(n.return_type))
+                {
+                    out += " -> ";
+                    dump_expr(n.return_type, depth);
+                }
                 dump_body(n.body, depth);
                 out += ")";
             },
@@ -317,9 +339,9 @@ struct dumper
                 dump_body(n.body, depth);
                 out += ")";
             },
-            [&](return_expr const& n) { unary("return", n.value); },
-            [&](break_expr const& n) { unary("break", n.value); }, [&](continue_expr const&) { out += "(continue)"; },
-            [&](struct_type const& n) { dump_fields("struct-type", n.fields, depth); },
+            [&](return_expr const& n) { unary("return", n.value); }, [&](yield_expr const& n)
+            { unary("yield", n.value); }, [&](break_expr const& n) { unary("break", n.value); }, [&](continue_expr const&)
+            { out += "(continue)"; }, [&](struct_type const& n) { dump_fields("struct-type", n.fields, depth); },
             [&](function_type const& n)
             {
                 out += "(function-type ";
@@ -534,7 +556,7 @@ struct dumper
             {
                 open("type");
                 name_or_missing(n.name);
-                out += " = ";
+                out += " : ";
                 dump_expr(n.value, depth);
             },
             [&](const_decl const& n)
@@ -592,6 +614,11 @@ struct dumper
             {
                 open("case");
                 name_or_missing(n.name);
+                if (is_valid(n.value))
+                {
+                    out += " = ";
+                    dump_expr(n.value, depth);
+                }
             });
         if (!d.node.is<field_decl>())
             out += ")";

@@ -72,21 +72,60 @@ TEST("sgl ast - an enum holds cases, properties, methods and nested declarations
              "  (const count = num:3))");
 }
 
-TEST("sgl ast - a property may compute its value in a block")
+TEST("sgl ast - an enum case may carry a value")
 {
+    CHECK(ast_of("enum channel:\n    red = 1\n    green = red << 1\n    @legacy alpha = 8\n    none\n")
+          == "(enum channel\n"
+             "  (case red = num:1)\n"
+             "  (case green = (call:infix << red num:1))\n"
+             "  (case{@legacy} alpha = num:8)\n"
+             "  (case none))");
+
+    // Only an enum has cases, and only `=` gives one a value.
+    CHECK(ast_of("struct s:\n    red = 1\n") == "(struct s\n  (invalid-decl \"red = 1\")) !! expected-member @14+7\n");
+    CHECK(ast_of("enum e:\n    red += 1\n") == "(enum e\n  (invalid-decl \"red += 1\")) !! expected-member @12+8\n");
+
+    auto const file = sgl::parse("enum e:\n    a = 1\n    b\n");
+    auto const ast = sgl::ast::build(file);
+    auto values = cc::vector<bool>();
+    for (auto const& d : ast.decls)
+        if (auto const* c = d.node.try_as<sgl::ast::enum_case_decl>())
+            values.push_back(sgl::ast::is_valid(c->value));
+    REQUIRE(values.size() == 2);
+    CHECK(values[0]);
+    CHECK(!values[1]);
+}
+
+TEST("sgl ast - a property block hands its value on with yield")
+{
+    CHECK(ast_of("struct s:\n    area =>:\n        let w = size.x\n        yield w * size.y\n")
+          == "(struct s\n"
+             "  (property area\n"
+             "    (let w = (member size x))\n"
+             "    (yield (call:infix * w (member size y)))))");
+
+    // Ending in a value says nothing: the last statement is judged like every other.
     CHECK(ast_of("struct s:\n    area =>:\n        let w = size.x\n        w * size.y\n")
           == "(struct s\n"
              "  (property area\n"
              "    (let w = (member size x))\n"
-             "    (call:infix * w (member size y))))");
+             "    (call:infix * w (member size y)))) !! no-effect @54+10\n");
+
+    // Inside a function a property is looked through by `return`, which leaves that function.
+    CHECK(body_of("binding timing:\n    time =>:\n        if paused => return 0.0\n        yield t\n")
+          == "(binding timing\n"
+             "  (property time\n"
+             "    (if\n"
+             "      (branch paused => (return num:0.0)))\n"
+             "    (yield t)))");
 }
 
 TEST("sgl ast - a field carries its attributes")
 {
     CHECK(ast_of("struct v:\n    @location(0) pos: pos3\n    uv: vec2 @location(1)\n")
           == "(struct v\n"
-             "  (field{@location(0)} pos : pos3)\n"
-             "  (field{@location(1)} uv : vec2))");
+             "  (field{@location(num:0)} pos : pos3)\n"
+             "  (field{@location(num:1)} uv : vec2))");
 }
 
 TEST("sgl ast - what each owner refuses")

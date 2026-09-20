@@ -43,7 +43,7 @@ enum class sgl::form_kind : sgl::u8
     prefix_operator,
     postfix_operator,
     /// Operands and `op` leaves alternating, all of one precedence level, kept flat so a chain can be judged whole.
-    /// Assignment and `=>` hold exactly two operands and nest to the right instead.
+    /// Assignment, `=>` and `->` hold exactly two operands and nest to the right instead.
     operator_run,
 
     /// `keyword` leaves, then the comma-separated expressions, then a `block` when the line had one.
@@ -67,6 +67,7 @@ struct sgl::form
     form_id first_child = form_id::none;
     form_id next_sibling = form_id::none;
     /// This form's attributes, as a range of `parsed_file::form_attributes`, in source order.
+    /// `parsed_file::form_attribute_arguments` holds each one's argument list at the same position.
     /// `first_attribute` is a position in that array and names no group; the entries it reaches are the `group_id`s.
     u32 first_attribute = 0;
     u32 attribute_count = 0;

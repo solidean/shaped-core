@@ -116,6 +116,12 @@ cc::string_view sgl::to_string(diagnostic_kind kind)
         return "unsupported-syntax";
     case diagnostic_kind::no_effect:
         return "no-effect";
+    case diagnostic_kind::yield_in_function:
+        return "yield-in-function";
+    case diagnostic_kind::return_in_lambda:
+        return "return-in-lambda";
+    case diagnostic_kind::expected_object_element:
+        return "expected-object-element";
     }
     CC_UNREACHABLE("unknown diagnostic_kind");
 }
@@ -177,6 +183,9 @@ sgl::severity sgl::default_severity_of(diagnostic_kind kind)
     case diagnostic_kind::assert_takes_condition_and_message:
     case diagnostic_kind::print_takes_one_message:
     case diagnostic_kind::unsupported_syntax:
+    case diagnostic_kind::yield_in_function:
+    case diagnostic_kind::return_in_lambda:
+    case diagnostic_kind::expected_object_element:
         return severity::normal_error;
     case diagnostic_kind::spaced_attribute_arguments:
     case diagnostic_kind::no_effect:

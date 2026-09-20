@@ -85,7 +85,26 @@ TEST("sgl forms - the binary levels")
     CHECK(form_of("x as int in 0..=10 : bool") == "(run id:x op:as id:int op:in (run num:0 op:..= num:10) op:: id:bool)");
     CHECK(form_of("x as int < 5") == "(run (run id:x op:as id:int) op:< num:5)");
     CHECK(form_of("x as float * 2") == "(run id:x op:as (run id:float op:* num:2))");
-    CHECK(form_of("(f : (int) -> int)") == "(round (run id:f op:: (round id:int) op:-> id:int))");
+}
+
+TEST("sgl forms - the arrow binds tighter than the ascription level and nests to the right")
+{
+    CHECK(form_of("x : (int) -> int") == "(run id:x op:: (run (round id:int) op:-> id:int))");
+    CHECK(form_of("(f : (int) -> int)") == "(round (run id:f op:: (run (round id:int) op:-> id:int)))");
+    CHECK(form_of("a -> b -> c") == "(run id:a op:-> (run id:b op:-> id:c))");
+    CHECK(form_of("x as a -> b in s") == "(run id:x op:as (run id:a op:-> id:b) op:in id:s)");
+    CHECK(form_of("a -> 0 ..< n") == "(run id:a op:-> (run num:0 op:..< id:n))");
+
+    // The `:` of a parameter is inside the parens, so the return arrow is the signature's only operator.
+    CHECK(form_of("fun f(a: float) -> float => a")
+          == "(run (kw kw:fun (run (call id:f (round (run id:a op:: id:float))) op:-> id:float)) op:=> id:a)");
+    CHECK(form_of("for i : int in 0..<n:\n    f(i)\n")
+          == "(kw kw:for (run id:i op:: id:int op:in (run num:0 op:..< id:n))\n"
+             "  (call id:f (round id:i)))");
+
+    // An attribute directly after `->` is the operand's, however far the operand then runs.
+    CHECK(form_of("f : (int) -> @a int") == "(run id:f op:: (run (round id:int) op:-> id:int{@a}))");
+    CHECK(form_of("a -> @x b -> c") == "(run id:a op:-> (run id:b op:-> id:c){@x})");
 }
 
 TEST("sgl forms - assignment and computes-as nest to the right, loosest of all")
@@ -117,6 +136,35 @@ TEST("sgl forms - a keyword form takes whole comma-separated expressions")
 
     // Inside a paren a comma ends the element, so a keyword form there takes one expression.
     CHECK(form_of("f(return a, b)") == "(call id:f (round (kw kw:return id:a) id:b))");
+}
+
+TEST("sgl forms - yield is a keyword, and heads a keyword form like return")
+{
+    CHECK(form_of("yield a + 2") == "(kw kw:yield (run id:a op:+ num:2))");
+    CHECK(form_of("yield") == "(kw kw:yield)");
+    // `=>` is looser than a keyword form, so the AST puts a yielded lambda back together.
+    CHECK(form_of("yield x => x") == "(run (kw kw:yield id:x) op:=> id:x)");
+    CHECK(form_of("_ =>:\n    yield 1\n") == "(run wildcard:_ op:=>\n  (kw kw:yield num:1))");
+    CHECK(form_of("let k = case kind:\n    .point =>:\n        let a = 1\n        yield a\n    _ => 0\n")
+          == "(run (kw kw:let id:k) op:= (kw kw:case id:kind\n"
+             "  (run dot:point op:=>\n"
+             "    (run (kw kw:let id:a) op:= num:1)\n"
+             "    (kw kw:yield id:a))\n"
+             "  (run wildcard:_ op:=> num:0)))");
+}
+
+TEST("sgl forms - a fun without a name is a keyword form over its lists")
+{
+    CHECK(form_of("fun (x) => x + 1") == "(run (kw kw:fun (round id:x)) op:=> (run id:x op:+ num:1))");
+    CHECK(form_of("fun [T](x: T) => x")
+          == "(run (kw kw:fun (call (square id:T) (round (run id:x op:: id:T)))) op:=> id:x)");
+    CHECK(form_of("fun (x: float) -> float:\n    return x\n")
+          == "(kw kw:fun (run (round (run id:x op:: id:float)) op:-> id:float)\n"
+             "  (kw kw:return id:x))");
+    CHECK(form_of("fun apply(f: (float) -> float, x: float) => f x")
+          == "(run (kw kw:fun (call id:apply (round (run id:f op:: (run (round id:float) op:-> id:float)) (run id:x "
+             "op:: "
+             "id:float)))) op:=> (apply id:f id:x))");
 }
 
 TEST("sgl forms - a block belongs to the rightmost form of its line")
@@ -179,10 +227,29 @@ TEST("sgl forms - operator spacing is syntax")
 TEST("sgl forms - attributes belong to their element, except directly after a marker")
 {
     CHECK(form_of("@builtin\nstruct bool\n") == "(kw kw:struct id:bool){@builtin}");
-    CHECK(form_of("const bias = 0.5 @range(0, 1)") == "(run (kw kw:const id:bias) op:= num:0.5){@range(0~, 1)}");
+    CHECK(form_of("const bias = 0.5 @range(0, 1)")
+          == "(run (kw kw:const id:bias) op:= num:0.5){@range (round num:0 num:1)}");
     CHECK(form_of("fun f(@a x: int, y: float @b) -> @c vec4")
           == "(kw kw:fun (run (call id:f (round (run id:x op:: id:int){@a} (run id:y op:: id:float){@b})) op:-> "
              "id:vec4{@c}))");
+}
+
+TEST("sgl forms - the arguments of an attribute are a paren list like any other")
+{
+    CHECK(form_of("@slider(min = 0, max = 2 * k)\nconst bias = 1")
+          == "(run (kw kw:const id:bias) op:= num:1){@slider (round (run id:min op:= num:0) (run id:max op:= (run "
+             "num:2 "
+             "op:* id:k)))}");
+    CHECK(form_of("@empty() @bare\nconst k = 1") == "(run (kw kw:const id:k) op:= num:1){@empty (round)}{@bare}");
+    CHECK(form_of("x : @a(1) @b(f(2)) t")
+          == "(run id:x op:: id:t{@a (round num:1)}{@b (round (call id:f (round num:2)))})");
+
+    // Each attribute has its list at the same position of the parallel array.
+    auto const file = sgl::parse("@a @b(1)\nconst k = 1");
+    REQUIRE(file.form_attributes.size() == 2);
+    REQUIRE(file.form_attribute_arguments.size() == 2);
+    CHECK(!sgl::is_valid(file.form_attribute_arguments[0]));
+    CHECK(file.at(file.form_attribute_arguments[1]).kind == sgl::form_kind::round_list);
 }
 
 TEST("sgl forms - broken source still yields a tree, and the damage stays where it is")

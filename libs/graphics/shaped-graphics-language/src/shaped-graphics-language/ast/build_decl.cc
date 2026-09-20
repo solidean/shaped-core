@@ -85,6 +85,16 @@ decl_id builder::member_declaration(form_id line, scope_kind owner)
         return make_decl(line, attributes_of(line), enum_case_decl{.name = at(line).where});
     }
 
+    auto const is_valued_case = owner == scope_kind::enum_body && is_binary_run(line, "=")
+                             && is_kind(at(line).first_child, form_kind::identifier);
+    if (is_valued_case)
+    {
+        auto const attributes = attributes_of(line);
+        auto const case_parts = run_parts_of(line);
+        auto const value = expression(case_parts.operands[1]);
+        return make_decl(line, attributes, enum_case_decl{.name = at(case_parts.operands[0]).where, .value = value});
+    }
+
     auto const line_parts = is_kind(line, form_kind::operator_run) ? run_parts_of(line) : run_parts();
     auto const is_property = line_parts.operands.size() == 2 && line_parts.operators.size() == 1
                           && level_of(line_parts.operators[0]) == operator_level::computes_as
@@ -92,7 +102,7 @@ decl_id builder::member_declaration(form_id line, scope_kind owner)
     if (is_property)
     {
         auto const attributes = attributes_of(line);
-        auto const value = value_body(line_parts.operands[1]);
+        auto const value = value_body(line_parts.operands[1], body_owner::value_block);
         return make_decl(line, attributes, property_decl{.name = at(line_parts.operands[0]).where, .body = value});
     }
 
@@ -178,25 +188,38 @@ decl_id builder::use_declaration(statement_head const& head, keyword_parts const
     return make_decl(head.whole, attributes, result);
 }
 
-decl_id builder::fun_declaration(statement_head const& head, keyword_parts const& parts)
+bool builder::is_anonymous_fun(keyword_parts const& parts) const
 {
-    auto const attributes = attributes_of(head.whole);
-    auto result = fun_decl();
+    auto base = parts.arguments.empty() ? form_id::none : parts.arguments[0];
+    if (is_kind(base, form_kind::operator_run) && is_valid(at(base).first_child))
+        base = at(base).first_child;
+    while (is_kind(base, form_kind::call))
+        base = at(base).first_child;
+    return !is_valid(base) || is_kind(base, form_kind::round_list) || is_kind(base, form_kind::square_list)
+        || is_kind(base, form_kind::curly_list);
+}
+
+fun_signature builder::signature_of(keyword_parts const& parts)
+{
+    auto result = fun_signature();
     if (parts.arguments.size() > 1)
         report(diagnostic_kind::too_many_arguments, parts.arguments[1]);
 
     auto signature = parts.arguments.empty() ? form_id::none : parts.arguments[0];
     auto const signature_parts = is_kind(signature, form_kind::operator_run) ? run_parts_of(signature) : run_parts();
-    if (!signature_parts.operators.empty() && level_of(signature_parts.operators[0]) == operator_level::ascription)
+    auto const marker_level
+        = signature_parts.operators.empty() ? operator_level::arithmetic : level_of(signature_parts.operators[0]);
+    if (marker_level == operator_level::arrow || marker_level == operator_level::ascription)
     {
         // Only `->` introduces a return type; after any other marker the type is still read as one.
-        if (token_text_of(signature_parts.operators[0]) != "->")
+        if (marker_level != operator_level::arrow)
             report(diagnostic_kind::unexpected_token, signature_parts.operators[0]);
         result.return_type = type_after_first_operator(signature, signature_parts);
         signature = signature_parts.operands[0];
     }
 
     // The lists are fused to the name, so the signature is a call of a call; the outermost list was written last.
+    // Without a name the first list stands where the name would, and the rest are fused to it.
     auto lists = cc::vector<form_id>();
     auto name_form = signature;
     while (is_kind(name_form, form_kind::call))
@@ -204,10 +227,15 @@ decl_id builder::fun_declaration(statement_head const& head, keyword_parts const
         lists.push_back(at(at(name_form).first_child).next_sibling);
         name_form = at(name_form).first_child;
     }
-    if (is_kind(name_form, form_kind::identifier))
-        result.name = at(name_form).where;
+    auto const is_list = is_kind(name_form, form_kind::round_list) || is_kind(name_form, form_kind::square_list)
+                      || is_kind(name_form, form_kind::curly_list);
+    if (is_list)
+    {
+        lists.push_back(name_form);
+        result.first_list = name_form;
+    }
     else
-        report(diagnostic_kind::expected_name, is_valid(name_form) ? name_form : head.keyword_form);
+        result.name_form = name_form;
 
     // `[type parameters]`, `(parameters)`, `{bindings}`: each at most once, in this order.
     auto const rank_of = [&](form_id list)
@@ -237,8 +265,30 @@ decl_id builder::fun_declaration(statement_head const& head, keyword_parts const
         else
             result.bindings = list_elements(list, false, true);
     }
-    if (!seen[1] && is_kind(name_form, form_kind::identifier))
-        report(diagnostic_kind::missing_parameter_list, name_form);
+    result.has_parameter_list = seen[1];
+    return result;
+}
+
+decl_id builder::fun_declaration(statement_head const& head, keyword_parts const& parts)
+{
+    auto const attributes = attributes_of(head.whole);
+    auto const signature = signature_of(parts);
+    auto result = fun_decl{.type_parameters = signature.type_parameters,
+                           .parameters = signature.parameters,
+                           .bindings = signature.bindings,
+                           .return_type = signature.return_type};
+
+    if (!is_kind(signature.name_form, form_kind::identifier))
+    {
+        auto const nameless = is_valid(signature.name_form) ? signature.name_form : signature.first_list;
+        report(diagnostic_kind::expected_name, is_valid(nameless) ? nameless : head.keyword_form);
+    }
+    else
+    {
+        result.name = at(signature.name_form).where;
+        if (!signature.has_parameter_list)
+            report(diagnostic_kind::missing_parameter_list, signature.name_form);
+    }
 
     auto const parameters = ast.at(result.parameters);
     if (!parameters.empty() && file.text_of(parameters[0].name) == "self" && !is_valid(parameters[0].type))
@@ -254,10 +304,10 @@ decl_id builder::fun_declaration(statement_head const& head, keyword_parts const
     {
         if (is_valid(parts.block))
             report(diagnostic_kind::too_many_arguments, parts.block);
-        result.body = value_body(head.arrow);
+        result.body = value_body(head.arrow, body_owner::function);
     }
     else if (is_valid(parts.block))
-        result.body = block_body(parts.block, true);
+        result.body = value_body(parts.block, body_owner::function);
     return make_decl(head.whole, attributes, result);
 }
 
@@ -295,7 +345,7 @@ decl_id builder::type_declaration(statement_head const& head, keyword_parts cons
 
     auto result = type_decl{.name = declared_name(head.keyword_form, parts)};
     if (is_valid(head.assign_value) && token_text_of(head.assign_operator) == "=")
-        result.value = expression(head.assign_value);
+        result.value = type_expression(head.assign_value);
     else
         result.value = invalid_expression(head.whole, diagnostic_kind::expected_expression);
     return make_decl(head.whole, attributes, result);

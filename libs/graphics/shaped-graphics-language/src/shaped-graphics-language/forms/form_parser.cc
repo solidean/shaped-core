@@ -6,12 +6,14 @@ namespace
 {
 using namespace sgl;
 
-/// The binary levels that share one loop, loosest first.
+/// The binary levels below the keyword form, loosest first.
+/// All of them are flat runs of one loop but `arrow`, which nests to the right.
 enum class level : u8
 {
     connective,
     comparison,
     ascription,
+    arrow,
     range,
     bit_like,
     add_like,
@@ -303,18 +305,42 @@ struct form_parser
             leads = leads || !file.at(a).is_trailing;
         if (!leads)
             return;
-        auto& f = file.at(form_after_parse);
-        f.first_attribute = u32(file.form_attributes.size());
+        auto taken = cc::vector<group_id>();
         for (auto a = file.at(group_before_parse).first_attribute; is_valid(a); a = file.at(a).next_sibling)
-            file.form_attributes.push_back(a);
-        f.attribute_count = u32(file.form_attributes.size()) - f.first_attribute;
+            taken.push_back(a);
+        auto const range = append_attributes(cc::span<group_id const>(taken));
+        file.at(form_after_parse).first_attribute = range.first;
+        file.at(form_after_parse).attribute_count = range.count;
         claimed.push_back(group_before_parse);
+    }
+
+    struct attribute_range
+    {
+        u32 first = 0;
+        u32 count = 0;
+    };
+
+    /// The argument lists are parsed before anything is appended: a form's range must stay contiguous, and an
+    /// argument may be a form with attributes of its own.
+    attribute_range append_attributes(cc::span<group_id const> attributes)
+    {
+        auto lists = cc::vector<form_id>();
+        for (auto const a : attributes)
+        {
+            auto const list = file.at(a).first_child;
+            lists.push_back(is_valid(list) ? parse_list(list) : form_id::none);
+        }
+
+        auto const first = u32(file.form_attributes.size());
+        file.form_attributes.push_back_range(attributes);
+        file.form_attribute_arguments.push_back_range(cc::span<form_id const>(lists));
+        return {.first = first, .count = u32(attributes.size())};
     }
 
     /// Gives `target` every unclaimed attribute written among `[first, end)`.
     void hoist_attributes(group_id first, group_id end, form_id target)
     {
-        auto const start = u32(file.form_attributes.size());
+        auto found = cc::vector<group_id>();
         for (auto g = first; is_valid(g) && g != end; g = file.at(g).next_sibling)
         {
             if (!is_valid(file.at(g).first_attribute))
@@ -326,12 +352,16 @@ struct form_parser
                 continue;
 
             for (auto a = file.at(g).first_attribute; is_valid(a); a = file.at(a).next_sibling)
-                file.form_attributes.push_back(a);
+                found.push_back(a);
         }
-        if (file.form_attributes.size() > start && file.at(target).attribute_count == 0)
+        if (found.empty())
+            return;
+
+        auto const range = append_attributes(cc::span<group_id const>(found));
+        if (file.at(target).attribute_count == 0)
         {
-            file.at(target).first_attribute = start;
-            file.at(target).attribute_count = u32(file.form_attributes.size()) - start;
+            file.at(target).first_attribute = range.first;
+            file.at(target).attribute_count = range.count;
         }
     }
 
@@ -546,8 +576,9 @@ struct form_parser
         switch (file.at(here().token).kind)
         {
         case token_kind::colon:
-        case token_kind::arrow:
             return wanted == level::ascription;
+        case token_kind::arrow:
+            return wanted == level::arrow;
         case token_kind::symbol:
             if (is_word(c.at, "and") || is_word(c.at, "or"))
                 return wanted == level::connective;
@@ -604,6 +635,8 @@ struct form_parser
     {
         if (l == level::application)
             return parse_application();
+        if (l == level::arrow)
+            return parse_arrow();
 
         auto const tighter = level(u8(l) + 1);
         auto const operand = [&]
@@ -644,6 +677,22 @@ struct form_parser
 
         judge_run(result, l);
         return result;
+    }
+
+    /// `->` nests to the right, so `a -> b -> c` is a function returning a function.
+    form_id parse_arrow()
+    {
+        auto const left = parse_level(level::range);
+        if (!infix_at(level::arrow))
+            return left;
+
+        auto const operator_group = c.at;
+        check_operator(operator_group);
+        advance();
+        auto const operand_group = c.at;
+        auto const right = at_end() ? missing(span_of_group(operator_group)) : parse_arrow();
+        claim_attributes_at_cursor(right, operand_group);
+        return binary(left, operator_group, right);
     }
 
     /// Runs parse whatever they hold; what the language forbids among equals is said here.
@@ -945,7 +994,7 @@ struct form_parser
 
 constexpr cc::string_view sgl_keywords[] = {
     "fun",  "let", "mut",   "struct", "enum",   "binding",  "sampler", "const", "use",    "module", "type",     "if",
-    "else", "for", "while", "loop",   "return", "continue", "break",   "case",  "assert", "print",  "notation",
+    "else", "for", "while", "loop",   "return", "continue", "break",   "case",  "assert", "print",  "notation", "yield",
 };
 } // namespace
 

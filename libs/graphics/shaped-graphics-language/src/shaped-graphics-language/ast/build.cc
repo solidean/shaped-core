@@ -57,8 +57,9 @@ operator_level builder::level_of(form_id op) const
     switch (file.at(at(op).token).kind)
     {
     case token_kind::colon:
-    case token_kind::arrow:
         return operator_level::ascription;
+    case token_kind::arrow:
+        return operator_level::arrow;
     case token_kind::double_arrow:
         return operator_level::computes_as;
     case token_kind::symbol:
@@ -190,7 +191,9 @@ range_of<attribute> builder::attributes_of(form_id id)
         auto const where = file.at(file.at(group).token).where;
         // The token is `@name`.
         auto const name = where.length > 0 ? source_span{.offset = where.offset + 1, .length = where.length - 1} : where;
-        collected.push_back({.group = group, .name = name, .arguments = file.at(group).first_child});
+        auto const list = file.form_attribute_arguments[i];
+        auto const arguments = is_valid(list) ? list_elements(list) : range_of<argument>();
+        collected.push_back({.group = group, .name = name, .list = list, .arguments = arguments});
     }
     return append(ast.attributes, cc::span<attribute const>(collected));
 }

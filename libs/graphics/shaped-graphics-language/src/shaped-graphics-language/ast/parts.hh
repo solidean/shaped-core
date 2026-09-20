@@ -10,12 +10,13 @@
 /// `@name` or `@name(arguments)`, kept on what it was written on and never judged by name.
 struct sgl::ast::attribute
 {
-    /// The `attribute` group, which is all the syntactic trees hold of it: attribute arguments have no forms.
+    /// The `attribute` group, which is where the `@name` token is found.
     group_id group = group_id::none;
     /// Without the `@`.
     source_span name;
-    /// The fused round group holding the arguments, `none` for a bare `@name`.
-    group_id arguments = group_id::none;
+    /// The round list form the arguments came from, `none` for a bare `@name`; `@name()` has a list and no arguments.
+    form_id list = form_id::none;
+    range_of<argument> arguments;
 
     constexpr bool operator==(attribute const&) const = default;
 };
@@ -70,6 +71,7 @@ enum class sgl::ast::body_kind : sgl::u8
 /// What a function, a lambda, a property, a `case` arm or a control statement runs.
 /// An arrow body holds a value where the owner yields one, and a single statement where it does not:
 /// `fun f() => x` has a `value`, `if done => return` has one entry in `statements`.
+/// A block body never has a `value`: what it hands on is said by a `yield`, a `return` or a `break` inside it.
 struct sgl::ast::body
 {
     body_kind kind = body_kind::none;

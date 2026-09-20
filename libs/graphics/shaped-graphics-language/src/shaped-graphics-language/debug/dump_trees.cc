@@ -200,7 +200,16 @@ void dump_form(parsed_file const& file, cc::string& out, form_id id, int depth)
     }
 
     for (auto i = f.first_attribute; i < f.first_attribute + f.attribute_count; ++i)
-        dump_attribute(file, out, file.form_attributes[i]);
+    {
+        out += "{";
+        out += file.text_of(file.at(file.at(file.form_attributes[i]).token).where);
+        if (auto const arguments = file.form_attribute_arguments[i]; is_valid(arguments))
+        {
+            out += " ";
+            dump_form(file, out, arguments, depth);
+        }
+        out += "}";
+    }
 }
 } // namespace
 

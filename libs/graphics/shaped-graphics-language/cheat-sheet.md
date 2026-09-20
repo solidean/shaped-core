@@ -25,6 +25,7 @@ file.text_of(span)                         // -> cc::string_view into source
 file.tokens_of(line)                       // -> cc::span<token const>
 file.is_fused_left(token_id)               // -> bool: touches the token before it
 file.form_attributes                       // cc::vector<group_id> of attribute groups; each form owns a contiguous range
+file.form_attribute_arguments              // cc::vector<form_id>, PARALLEL to it: the round list of `@name(…)`, none for a bare `@name`
 ```
 
 ## The phases, one at a time
@@ -87,7 +88,7 @@ ast.at(id).node.is<sgl::ast::call>()       // which kind; try_as<T>() -> T const
 sgl::ast::argument   // form, attributes, name (empty = positional), value, is_splat, is_shorthand
 sgl::ast::field      // form, name, is_mut, type, default_value, attributes — fields, members, EVERY parameter
 sgl::ast::body       // kind (none / block / arrow), form, statements, value
-sgl::ast::attribute  // group, name (without `@`), arguments (group_id of the round list, or none)
+sgl::ast::attribute  // group, name (without `@`), list (the round list form, or none), arguments (range_of<argument>)
 
 #include <shaped-graphics-language/ast/dump.hh>
 sgl::ast::dump(file, ast)                  // (fun f (params (field x : int)) -> int => (call:infix + x num:1))
@@ -95,14 +96,18 @@ sgl::ast::dump_diagnostics(ast)            // `stray-else @6+4`, one per line
 ```
 
 Expressions: `invalid_expr` `literal` `name` `self_ref` `wildcard` `leading_dot` `member` `index` `call` `tuple` `array` `object`
-`comparison_chain` `cast` `membership` `ascription` `range` `lambda` `case_expr` `loop_expr` `return_expr` `break_expr`
-`continue_expr` `struct_type` `function_type` `with_bindings`.
+`comparison_chain` `cast` `membership` `ascription` `range` `lambda` `case_expr` `loop_expr` `return_expr` `yield_expr`
+`break_expr` `continue_expr` `struct_type` `function_type` `with_bindings`.
 
 - `call` is every application: `spelling` is `paren` / `juxtaposition` / `infix` / `prefix`, and an operator call has `op` instead of `callee`.
 - `index` is a fused `a[…]`, subscript or type application alike.
 - `comparison_chain` is two or more comparisons; one comparison is an infix `call`.
 - `range` is `a ..< b` / `a ..= b`, a node of its own.
 - `struct_type` is a curly list of `name: type` elements only; any other curly list is an `object`.
+- An `object` element is `name`, `name = value` or `..splat`; anything else is kept positional and reports `expected-object-element`.
+- `lambda` has two spellings, recorded in `spelling`: `arrow` for `x => …`, and `fun` for the anonymous `fun (x) => …`.
+  Only the `fun` spelling has `type_parameters`, `bindings` and a `return_type`, and only it can be left with `return`.
+- `function_type` is every `a -> b` that is not the return arrow of a signature; its form is a two-operand run.
 - `with_bindings` is `f(x){…}`, reserved and always reported.
 
 Statements: `invalid_stmt` `let_stmt` `assign_stmt` `if_stmt` (the whole chain, as `if_branch`es) `for_stmt` `while_stmt`
@@ -142,7 +147,11 @@ sgl::print_source(file)      // == file.source for EVERY input: the lossless inv
 - **`line::opens_string`** says a line ends in an opening quote, so its children are string content and its next sibling owes the closer.
 - **A number is not a token.** `1.5e-3` is five tokens that the form parser assembles; a sign directly on it is part of the literal.
 - **Operator spacing is syntax.** Spaced on both sides is infix, fused on the right only is prefix, fused on both sides is an error — except ranges.
-- **`operator_run` is flat** for one precedence level (operands and `op` leaves alternate); assignment and `=>` hold two operands and nest right.
+- **`operator_run` is flat** for one precedence level (operands and `op` leaves alternate); assignment, `=>` and `->` hold two operands and nest right.
+- **`->` is a level of its own**, tighter than `: as in` and looser than ranges.
+  So `x : (int) -> int` is `x : ((int) -> int)` in the form tree already, and `a -> b -> c` is `a -> (b -> c)`.
+  The ladder, loosest first: `;`, assignment, `=>`, keyword form, `and or not`, comparisons, `: as in`, `->`, ranges, bit-like, add-like, mul-like,
+  application, prefix and postfix, fused lists and members.
 - **A form's attributes are not on its groups.** Read them through `first_attribute` / `attribute_count` into `file.form_attributes`.
 - **A range start is a position, not an id.** `line::first_token` and `form::first_attribute` are `u32`, since an empty range starts at nothing.
 - **The AST is name-free.** `build` never looks a name up, so `vec3` is a `name` and `texture2d[rgba8]` an `index` wherever they stand.
@@ -152,7 +161,16 @@ sgl::print_source(file)      // == file.source for EVERY input: the lossless inv
 - **A type is an expression in a type position.** The members called `type`, `function_type::result` and `fun_decl::return_type` are the positions.
   Only there may an expression carry attributes.
 - **`self` is a reserved name, not a keyword.** The form tree holds an identifier and the AST a `self_ref`.
-- **`return` and `break` with a keyword value are one form.** `return case x:` is a keyword form with TWO keywords, and the AST reads the rest as the jump's value.
-- **An attribute's arguments have no forms.** `attribute::arguments` is the round *group*; nothing below it is parsed yet.
-- **`no-effect` is a warning, and the last statement of a value block is exempt.** Function, lambda, property and `case` arm blocks may end in their value.
+- **`return`, `break` and `yield` with a keyword value are one form.** `return case x:` is a keyword form with TWO keywords, and the AST reads the rest as the jump's value.
+  A lambda as the value arrives the other way round, `(yield x) => body`, since `=>` is looser than a keyword form; the AST puts it back together.
+- **A block never yields by ending in a value.** `yield value` hands it on from the nearest value block: the body of a `case` arm, an arrow lambda or a property.
+  The blocks of `if`, `for`, `while` and `loop` in between are looked through, and a one-line `=> value` body needs no `yield`.
+- **`yield-in-function` and `return-in-lambda` are the two ways a jump has nowhere to go.**
+  A `yield` whose nearest body is a `fun`'s (or that stands in no body) is the first; a `return` whose nearest function is an arrow lambda is the second.
+  A `return` looks through `case` arms and properties, so `_ => return false` leaves the function around the `case`.
+- **An attribute's arguments are list elements like any other.** `@slider(0, max = 1)` holds a positional and a named `argument`; `@name()` has a `list` and no arguments.
+- **`no-effect` is a warning, and no statement is exempt.** A paren or juxtaposition call, a jump, a `case`, a `loop` and `invalid` have an effect; nothing else does.
+- **An anonymous `fun` is a lambda only in expression position.** As a statement it is a function that lost its name and reports `expected-name`.
+- **`type name = …` is a type position**, like the right sides of `:`, `->` and `as`; the AST dump writes it `(type name : …)`.
+- **`true` and `false` are ordinary names** to every phase here.
 - **Every `sgl` fence under `docs/spec/` is a test** (`tests/spec/spec-examples-test.cc`): `sgl` must parse cleanly, `sgl error` must report the kind its lead names, `sgl sketch` is unchecked.
