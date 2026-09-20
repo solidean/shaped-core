@@ -511,6 +511,21 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     auto const scene_hash = trace_hash(scene_fc, bg, lights, resolved, tr.resolution, self->_shader_generation);
 
     auto& rec = store.get_or_create(v.id);
+
+    // A cut teleports the camera, so nothing from the last frame reprojects: the temporal history describes another
+    // part of the scene, and the motion guide would reproject into a camera nothing connects it to.
+    // Every slot of the view at once rather than this layer's, so a view carrying two traced layers cuts as one.
+    if (rec.camera_cut_pending)
+    {
+        for (auto&& [slot_id, s] : rec.temporal)
+        {
+            (void)slot_id;
+            s.denoise.reset();
+            s.has_last_camera = false;
+        }
+        rec.camera_cut_pending = false;
+    }
+
     auto* const slot = rec.temporal.get_ptr(temporal_id::accumulation(tr.layer));
     if (slot == nullptr)
         return sg::routine_outcome::executed; // resolve() refused it; there was nothing to accumulate

@@ -476,6 +476,11 @@ void view_ref::camera_style(sv::camera_style style)
     _frame->state_of(_view).style_this_frame = style;
 }
 
+void view_ref::camera_cut()
+{
+    _frame->state_of(_view).camera_cut_pending = true;
+}
+
 void view_ref::display_name(cc::string_view name)
 {
     _frame->state_of(_view).display_name = name;

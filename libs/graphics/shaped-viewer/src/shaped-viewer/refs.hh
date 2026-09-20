@@ -256,6 +256,20 @@ public:
     /// camera round-trips them through a basis, and a straight-down pitch has no unique yaw to recover.
     void initial_fps(fps_state const& pose);
 
+    /// Tells this view that its camera jumped rather than moved, so nothing from the last frame reprojects.
+    ///
+    /// A temporal denoiser carries its history ACROSS camera motion — that is what it is for — and reprojects it
+    /// through the motion guide.
+    /// A cut breaks that: the previous frame shows a different part of the scene, so every reprojection lands on
+    /// unrelated pixels and the history smears across the new image for as long as it takes to age out.
+    /// Call this on a teleport, a camera switch, or a jump to a bookmarked pose; ordinary orbiting and flying need it
+    /// no more than a scene edit does.
+    ///
+    /// It costs nothing but the history: the progressive mean already restarts on any camera change, so a cut that
+    /// does not move the camera does nothing at all.
+    /// The request survives until a frame actually traces this view, so cutting a throttled view is not lost.
+    void camera_cut();
+
     /// Pins this view to a fixed pixel resolution instead of taking the rect it lands in.
     void resolution(tg::vec2i r);
 
@@ -450,6 +464,7 @@ struct sv::view_api
     void initial_orbit(orbit_state const& o) { self().default_view().initial_orbit(o); }
     void initial_fps(fps_state const& pose) { self().default_view().initial_fps(pose); }
     void camera_style(sv::camera_style style) { self().default_view().camera_style(style); }
+    void camera_cut() { self().default_view().camera_cut(); }
     void refresh_rate(float rate) { self().default_view().refresh_rate(rate); }
 
 private:

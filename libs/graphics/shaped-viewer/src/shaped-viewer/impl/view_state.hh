@@ -100,6 +100,12 @@ struct view_state
     bool camera_owned_this_frame = false;
     bool camera_owned_last_frame = false;
 
+    /// Whether the caller declared a camera cut that no frame has traced yet.
+    ///
+    /// Sticky rather than per-frame: a throttled view may be several frames from its next trace, and dropping the
+    /// request in between would leave the very history the cut exists to throw away.
+    bool camera_cut_pending = false;
+
     /// Whether the caller offered this view for dragging, re-asserted every frame like `camera_owned_this_frame`.
     ///
     /// Routing runs before authoring, so a drag starting this frame has to consult the *previous* frame's answer —
