@@ -196,7 +196,7 @@ let color = sample_sky(dir){sky = frame_sky}
 * **AST-104** A `lambda` records which of the two spellings it has.
 * **AST-105** A `fun` with a name in expression position is a normal error, by AST-5.
 * **AST-36** `case value:` reads as `case`, and each statement of its block is an **arm**: `pattern => result`.
-* **AST-37** The pattern of an arm is an expression, and its result is a [body](#statements).
+* **AST-37** The pattern of an arm is an expression, and its result is a [body](#statements), AST-127 among them.
 * **AST-38** A statement of a `case` block that is no arm is a normal error.
 * **AST-39** `loop:` reads as `loop`, an expression whose value is that of the `break` that leaves it.
 
@@ -356,6 +356,19 @@ fun first_hit(rays: span[ray]):
 
 * **AST-42** A **body** is a block, or the right side of an `=>`: `if done => return`, `fun f() => x`.
 * **AST-117** The right side of an `=>` is an expression, or a block after `=>:`, and AST-107 says which of those blocks are value blocks.
+* **AST-127** `=>` binds tighter than assignment ([OP-3](operators.md#the-precedence-ladder)), so a one-line body that assigns arrives as an assignment whose left side is the `=>`.
+  It reads as that body being the assignment, in a statement and in a `case` arm alike.
+
+```sgl
+fun tally(kind: light_kind, hits: int) -> float:
+    let mut total = 0.0
+    if hits > 0 => total = 1.0
+    case kind:
+        .point => total += 1.0
+        _ => total *= 0.5
+    return total
+```
+
 * **AST-43** A statement is one row of the table below.
 
 | statement | source |

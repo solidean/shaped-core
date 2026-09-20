@@ -306,6 +306,18 @@ TEST("sgl ast - case with expression arms, block arms and a jump as an arm")
              "  (arm _ => num:0)))");
 }
 
+TEST("sgl ast - an arm whose result is an assignment")
+{
+    // `=` is looser than `=>`, so the forms hold `((.point => total) += 1.0)`; the AST puts it back together (AST-127).
+    CHECK(body_of("case k:\n    .point => total += 1.0\n    _ => total = 0.0\n")
+          == "(case k\n"
+             "  (arm .point => (assign += total num:1.0))\n"
+             "  (arm _ => (assign = total num:0.0)))");
+
+    // A line that assigns and holds no `=>` is still no arm.
+    CHECK(body_of("case k:\n    total = 1.0\n").contains("expected-case-arm"));
+}
+
 TEST("sgl ast - what is no arm in a case block, and a case without its parts")
 {
     CHECK(body_of("case k:\n    .a => 1\n    f(x)\n")

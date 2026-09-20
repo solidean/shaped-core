@@ -473,18 +473,31 @@ expr_id builder::case_expression(form_id form, keyword_parts const& parts)
     for (auto line = at(parts.block).first_child; is_valid(line); line = at(line).next_sibling)
     {
         reject_attributes(line);
-        auto const arm_parts = is_kind(line, form_kind::operator_run) ? run_parts_of(line) : run_parts();
-        auto const is_arm = arm_parts.operands.size() == 2 && arm_parts.operators.size() == 1
-                         && level_of(arm_parts.operators[0]) == operator_level::computes_as
-                         && !is_keyword_led(arm_parts.operands[0]);
-        if (!is_arm)
+        auto arm_parts = is_kind(line, form_kind::operator_run) ? run_parts_of(line) : run_parts();
+        auto assign_operator = form_id::none;
+        auto assign_value = form_id::none;
+        // `.point => total += 1.0`: an assignment binds looser than the `=>`, so the arm arrives inside it,
+        // the shape `head_of` reads for `if done => total = 0`.
+        if (is_assignment_run(arm_parts) && is_kind(arm_parts.operands[0], form_kind::operator_run))
+        {
+            auto inner = run_parts_of(arm_parts.operands[0]);
+            if (is_arm_run(inner))
+            {
+                assign_operator = arm_parts.operators[0];
+                assign_value = arm_parts.operands[1];
+                arm_parts = cc::move(inner);
+            }
+        }
+        if (!is_arm_run(arm_parts))
         {
             auto const result = invalid_expression(line, diagnostic_kind::expected_case_arm);
             collected.push_back({.form = line, .result = {.kind = body_kind::arrow, .form = line, .value = result}});
             continue;
         }
         auto const pattern = expression(arm_parts.operands[0]);
-        auto const result = value_body(arm_parts.operands[1], body_owner::value_block);
+        auto const result = is_valid(assign_value)
+                              ? arm_assignment_body(line, arm_parts.operands[1], assign_operator, assign_value)
+                              : value_body(arm_parts.operands[1], body_owner::value_block);
         collected.push_back({.form = line, .pattern = pattern, .result = result});
     }
     auto const arms = append(ast.case_arms, cc::span<case_arm const>(collected));

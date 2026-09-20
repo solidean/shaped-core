@@ -75,6 +75,26 @@ TEST("sgl emit - an arm with several patterns is one comma list in WGSL and one 
     CHECK(hlsl.contains("    case 2:\n"));
 }
 
+TEST("sgl emit - an arm whose result is an assignment")
+{
+    // AST-127: `=` is looser than `=>`, so the arm arrives inside the assignment and its result is that statement.
+    constexpr auto source = "enum k:\n"
+                            "    a\n"
+                            "    b\n"
+                            "\n"
+                            "@pixel fun main_ps(p: pixel_input) -> frame:\n"
+                            "    let mut total = 0.0\n"
+                            "    case k.b:\n"
+                            "        .a => total += 1.0\n"
+                            "        _ => total = 0.5\n"
+                            "    return {color = float4(total, total, total, 1.0)}\n";
+    auto const wgsl = text_of(source, target::wgsl);
+    CHECK(wgsl.contains("        case k_a: {\n            total = total + 1.0;\n        }\n"));
+    CHECK(wgsl.contains("        default: {\n            total = 0.5;\n        }\n"));
+    // The case is a statement, so it needs no variable to carry a value out of the switch.
+    CHECK(!wgsl.contains("case_result"));
+}
+
 TEST("sgl emit - an exit out of an arm crosses the switch and takes a flag")
 {
     constexpr auto source = "enum k:\n"

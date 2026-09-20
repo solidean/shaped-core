@@ -127,6 +127,10 @@ struct builder
     [[nodiscard]] bool is_kind(form_id id, form_kind kind) const { return is_valid(id) && at(id).kind == kind; }
     [[nodiscard]] keyword_parts keyword_parts_of(form_id keyword_form) const;
     [[nodiscard]] run_parts run_parts_of(form_id run) const;
+    /// `pattern => result`, the shape of a `case` arm; a keyword left of the `=>` heads a statement instead.
+    [[nodiscard]] bool is_arm_run(run_parts const& parts) const;
+    /// `place = value`, for every assignment operator.
+    [[nodiscard]] bool is_assignment_run(run_parts const& parts) const;
     [[nodiscard]] operator_level level_of(form_id op) const;
     /// True for a keyword form that has at least one keyword; one without is an expression that owns a block.
     [[nodiscard]] bool is_keyword_led(form_id id) const;
@@ -252,6 +256,8 @@ struct builder
     /// The body of something that yields a value: a block, or the expression right of `=>`.
     /// `owner` is what the jumps inside it find around them.
     [[nodiscard]] body value_body(form_id right_of_arrow, body_owner owner);
+    /// The body of a `case` arm whose result is one assignment: `.point => total += 1.0`.
+    [[nodiscard]] body arm_assignment_body(form_id whole, form_id place, form_id op, form_id value);
     /// The body of a control statement: its block, or the one statement right of `=>`.
     [[nodiscard]] body statement_body(statement_head const& head, keyword_parts const& parts);
     /// The body of a `for` or a `while`, which is where a `break` and a `continue` inside it go.

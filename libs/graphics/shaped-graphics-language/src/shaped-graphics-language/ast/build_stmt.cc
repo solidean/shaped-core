@@ -307,6 +307,14 @@ body builder::value_body(form_id right_of_arrow, body_owner owner)
     return result;
 }
 
+body builder::arm_assignment_body(form_id whole, form_id place, form_id op, form_id value)
+{
+    owners.push_back({.owner = body_owner::value_block, .one_line = place});
+    auto const only = assignment(whole, place, op, value, false);
+    owners.remove_back();
+    return {.kind = body_kind::arrow, .form = place, .statements = append_one(ast.stmt_lists, only)};
+}
+
 body builder::loop_statement_body(statement_head const& head, keyword_parts const& parts)
 {
     owners.push_back({.owner = body_owner::statement_loop});

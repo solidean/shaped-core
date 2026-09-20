@@ -96,6 +96,18 @@ bool builder::is_binary_run(form_id id, cc::string_view spelling) const
     return parts.operands.size() == 2 && parts.operators.size() == 1 && token_text_of(parts.operators[0]) == spelling;
 }
 
+bool builder::is_arm_run(run_parts const& parts) const
+{
+    return parts.operands.size() == 2 && parts.operators.size() == 1
+        && level_of(parts.operators[0]) == operator_level::computes_as && !is_keyword_led(parts.operands[0]);
+}
+
+bool builder::is_assignment_run(run_parts const& parts) const
+{
+    return parts.operands.size() == 2 && parts.operators.size() == 1
+        && level_of(parts.operators[0]) == operator_level::assignment;
+}
+
 statement_head builder::head_of(form_id statement) const
 {
     auto head = statement_head{.whole = statement};
