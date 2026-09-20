@@ -60,7 +60,8 @@ One row per core construct, one column per target; GLSL has no emitter yet, and 
   It runs after the expression rules, which are what take a `case` out of the block expression that held it.
 * **LEGAL-46** (C1) The chain binds the scrutinee to a `let`, and each arm is an `if` whose condition is its patterns compared with `==` and joined by `or`; the `default` arm is the last `else`.
   It costs one `let`.
-* **LEGAL-47** A pattern that has an effect needs no rule of its own: it stands where C1 puts it, and E3 is what takes the `or` that then holds it to an `if` over a `var`.
+* **LEGAL-47** A pattern that has an effect is not carried: C1 runs behind the expression rules, so nothing is left to take the `or` that would hold it to an `if`.
+  Such a pattern reaches the core check as a block expression and the tree is refused, which is a report and never a wrong shader.
 * **LEGAL-48** The chain captures no `break`, so an exit that crosses a `case` in that form costs nothing, and only the `switch` form is a construct X5 crosses.
 * **LEGAL-49** X6 extends to a `switch` that is the last statement of its block: a `leave` of that block, directly inside an arm, is that arm's `break`.
   So a `case` expression costs the one `var` of E1 and nothing else.
@@ -304,4 +305,6 @@ These rules say why the text passes, and DXC (to DXIL and to SPIR-V) and Dawn ha
 * Whether X2 should write statements twice where they are few, and take the `once` away.
 * Whether a `continue` in tail position of its loop's body should disappear the way a leave does.
 * Whether a chain of `==` over a small set of `int`s is worth turning into a `switch` where the patterns are constant but not literals, which needs folding this pass does not do.
+* A pattern that has an effect, which LEGAL-47 refuses.
+  It wants either a second expression pass behind C1, or C1 in front of the expression rules with a way to reach a `case` inside a block expression.
 * GLSL, whose column above has met no emitter.

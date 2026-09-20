@@ -322,6 +322,58 @@ struct generator
     }
 
     /// True when the statement added last always exits.
+    /// A `case` over an `int`, whose arms leave, continue and print like any other list.
+    /// Its patterns are literals most of the time, which is the switch form, and effect-free leaves otherwise,
+    /// which is the chain: a pattern with an effect is not carried, since C1 runs behind the expression rules.
+    void generate_case(int depth, cc::vector<flat_stmt_id>& list)
+    {
+        auto const scrutinee = expr(int_type, 2);
+        auto const wants_chain = chance(30);
+
+        auto arms = cc::vector<flat_arm>();
+        auto used = cc::vector<int>();
+        auto const count = rng.uniform(1, 3);
+        for (auto i = 0; i < count; ++i)
+        {
+            auto patterns = cc::vector<flat_expr_id>();
+            auto const values = rng.uniform(1, 2);
+            for (auto k = 0; k < values; ++k)
+            {
+                // A value twice would be two labels of one switch, which every target refuses.
+                auto const value = pick(5);
+                auto is_used = false;
+                for (auto const u : used)
+                    is_used = is_used || u == value;
+                if (is_used)
+                    continue;
+                used.push_back(value);
+                patterns.push_back(wants_chain && chance(50) ? leaf(int_type) : b.int_literal(value));
+            }
+            if (patterns.empty())
+                continue;
+            auto const list_of_patterns = b.expr_list(patterns);
+            auto const body = statements(depth - 1);
+            arms.push_back({.patterns = list_of_patterns, .body = b.stmt_list(body)});
+        }
+        auto const default_body = statements(depth - 1);
+        if (arms.empty())
+        {
+            list.push_back_range(default_body);
+            return;
+        }
+
+        auto node
+            = flat_case{.scrutinee = scrutinee, .arms = b.arm_list(arms), .default_body = b.stmt_list(default_body)};
+        // The `==` the chain form calls; the builder resolves the overload, so a probe call hands over the record.
+        auto const probe = b.call("equal_int", {b.int_literal(0), b.int_literal(0)});
+        if (auto const* const c = b.e.at(probe).node.try_as<flat_call>())
+        {
+            node.equality = c->callee;
+            node.equality_intrinsic = c->intrinsic;
+        }
+        list.push_back(b.add_stmt(cc::move(node)));
+    }
+
     bool statement(int depth, cc::vector<flat_stmt_id>& list)
     {
         --nodes_left;
@@ -397,13 +449,18 @@ struct generator
             list.push_back(b.if_(condition, then_body, else_body));
             return false;
         }
-        if (r < 75)
+        if (r < 71)
         {
             auto const label = b.add_label("b");
             targets.push_back({.label = label});
             auto const body = statements(depth - 1);
             targets.remove_back();
             list.push_back(b.block(label, body));
+            return false;
+        }
+        if (r < 79)
+        {
+            generate_case(depth, list);
             return false;
         }
         if (r < 87)

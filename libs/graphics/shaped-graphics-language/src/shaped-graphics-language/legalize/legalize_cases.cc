@@ -59,7 +59,9 @@ struct case_lowering
         {
             if (!is_known(out.e, a.patterns))
                 continue;
-            for (auto const p : out.e.at(a.patterns))
+            auto patterns = cc::vector<flat_expr_id>();
+            patterns.push_back_range(out.e.at(a.patterns));
+            for (auto const p : patterns)
                 is_all_literal = is_all_literal && is_literal(p);
             arms.push_back({.patterns = a.patterns, .body = lower_body(a.body, depth)});
         }
@@ -98,8 +100,12 @@ struct case_lowering
         auto chain = ids_of(out.e, default_body);
         for (auto i = arms.size() - 1; i >= 0; --i)
         {
+            // Copied first: writing a condition appends to the expression lists, which moves this span.
+            auto patterns = cc::vector<flat_expr_id>();
+            patterns.push_back_range(out.e.at(arms[i].patterns));
+
             auto condition = flat_expr_id::none;
-            for (auto const p : out.e.at(arms[i].patterns))
+            for (auto const p : patterns)
             {
                 out.from = s.from;
                 auto const one = equals(c, out.local(bound.local), p);
