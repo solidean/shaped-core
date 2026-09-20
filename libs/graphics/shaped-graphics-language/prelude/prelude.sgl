@@ -1,4 +1,5 @@
-// A draft of the tiny prelude the cube needs, and nothing the cube does not need.
+// The prelude: the file the compiler places in front of every program.
+// A tracer: it holds what tests/samples/cube.sgl needs, and nothing the cube does not need.
 // Every declaration is @builtin: the compiler and each emitter know what stands behind the name.
 
 // a struct line without a block is opaque: there is no member to name
@@ -36,9 +37,6 @@
 
 /// Column-major, and a vector stands to its right.
 @builtin struct mat4
-
-/// Four channels of eight bits, read and written as a float4 in [0, 1].
-@builtin struct rgba8
 
 @builtin fun normalize(v: vec3) -> vec3
 @builtin fun dot(a: vec3, b: vec3) -> float

@@ -49,6 +49,14 @@ A binding is either a global of the target, or, for a delegating binding, a loca
 A shader debugger or a capture tool shows the target text, so names, structure and semantics stay recognizable there.
 Somebody outside the SGL ecosystem should not find it opaque.
 A minify mode may come later, and it is a mode.
+Every name an emitter writes goes through one minting helper that takes the desired name and returns one that is free.
+So names can be chosen for the reader, and a collision is impossible by construction.
+A name that is reserved in one target gets a trailing underscore in that target only.
+An entry point keeps its name, since the host asks for it, and one that collides in any target is an SGL error.
+
+**The stages compile apart.**
+A vertex and a pixel entry point share only the type they pass, and nothing in one stage's text depends on the other.
+On Metal that means bindings take the first buffer indices and vertex buffers come after them.
 
 **SGL follows the rules of `sg` and `tg`** unless there are very good reasons against it, with as few gotchas as is reasonable.
 Matrix layout is the first case: column-major, the vector on the right, and a `tg::mat4f` uploads as its bytes.

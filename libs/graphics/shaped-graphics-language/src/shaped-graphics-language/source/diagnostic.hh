@@ -106,6 +106,39 @@ enum class sgl::diagnostic_kind : sgl::u8
     jump_without_target,
     /// A `return` that is the whole one-line body of an arrow lambda: `x => return x` is written `x => x`.
     redundant_return,
+
+    /// What follows is the check pass's: the AST was fine, and names and types are not.
+    /// A construct the language has and this compiler does not carry yet; never a guess at its meaning.
+    unsupported_yet,
+    unknown_name,
+    /// A struct without such a field, a binding without such a member, or a type that has no members at all.
+    unknown_member,
+    no_matching_overload,
+    /// Two candidates take exactly these argument types.
+    ambiguous_overload,
+    type_mismatch,
+    /// A symbol that needs itself to be compiled.
+    dependency_cycle,
+    /// A `@builtin` declaration whose name the compiler does not know, or knows as the other kind of declaration.
+    unknown_builtin,
+    opaque_struct_needs_builtin,
+    /// A member of a binding, read in a function whose `{...}` list does not name that binding.
+    binding_not_listed,
+    /// An object that leaves a field of the struct it converts to unnamed.
+    missing_field,
+    /// An object that names a field the struct it converts to does not have.
+    unknown_field,
+    /// An object that names one field twice.
+    duplicate_field,
+    /// A name declared twice in one scope, unless every declaration of it is a function.
+    duplicate_declaration,
+    invalid_entry_point,
+    /// A name that stands for something its position does not take: a function where a type is expected.
+    wrong_kind_of_name,
+    /// A field, a binding member or a parameter without a type.
+    missing_type,
+    /// An attribute the compiler knows, with arguments it does not take.
+    invalid_attribute_arguments,
 };
 
 namespace sgl

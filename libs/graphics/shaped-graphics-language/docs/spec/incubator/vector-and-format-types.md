@@ -42,6 +42,23 @@ binding instance:
     normal: vec4f16
 ```
 
+**A later reading, and the current one: a format is not a type yet.**
+`rgba8` will be a type of four `u8` in `tg`, and it should not mean something else in SGL.
+No target language returns a format either: a pixel shader returns floats, and the API converts on write.
+That makes a shader polymorphic over its output format within limits, which is why a raster pipeline states the format it wants.
+`rgba8`, `rgba16f` and `rgba32f` targets are all compatible with one shader, and SGL should not lose that, at least not without an escape hatch.
+
+So a render target member has the type the shader computes, and the format is an optional attribute:
+
+```sgl sketch
+@pixel struct target:
+    color: float4                     // any float target
+    @format(rgba16f) normal: float4   // this one is pinned
+```
+
+In `texture2d[rgba8]` the argument is a format and not a type.
+This is the spelling that is simplest to change later, and the sketches above predate it.
+
 The same holds further down.
 `int` and `float` are not keywords either: they are types with a `@builtin` annotation ([keywords.md](../keywords.md)).
 

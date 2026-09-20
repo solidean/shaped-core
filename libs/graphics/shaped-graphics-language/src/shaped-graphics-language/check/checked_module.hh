@@ -1,0 +1,85 @@
+#pragma once
+
+#include <clean-core/container/span.hh>
+#include <clean-core/container/vector.hh>
+#include <clean-core/string/string.hh>
+#include <shaped-graphics-language/check/flat.hh>
+#include <shaped-graphics-language/check/symbols.hh>
+#include <shaped-graphics-language/source/diagnostic.hh>
+
+/// A diagnostic of the check pass.
+/// A module has several files, so the span alone does not say where it points.
+struct sgl::check::located_diagnostic
+{
+    diagnostic what;
+    /// The file `what.where` points into, as a position in the files `check` was given.
+    i32 file = 0;
+    /// What the kind alone cannot say: the construct that is unsupported, the name that is unknown, the loop of a cycle.
+    /// For a reader; the kind and the span are what a tool keys on.
+    cc::string detail;
+
+    bool operator==(located_diagnostic const&) const = default;
+};
+
+/// One module after name resolution, type checking and evaluation, as one value beside the ASTs it was checked from.
+///
+/// It has two readers.
+/// An editor reads `files`, the side tables over the untouched AST, and `symbols`.
+/// An emitter reads `entry_points` with `types`, `members` and `bindings`, and never the AST.
+struct sgl::check::checked_module
+{
+    /// The module-level declarations of every file, in file order and then in source order.
+    cc::vector<symbol> symbols;
+    /// Canonical and deduplicated; `types[0]` is the error type.
+    cc::vector<type_info> types;
+    /// The fields of every struct and the members of every binding.
+    cc::vector<member_info> members;
+    cc::vector<function_info> functions;
+    cc::vector<parameter> parameters;
+    cc::vector<binding_info> bindings;
+    /// The binding lists of the functions.
+    cc::vector<symbol_id> binding_lists;
+
+    /// One entry per file `check` was given, in that order.
+    cc::vector<file_tables> files;
+
+    /// Only the entry points that checked without an error; a broken one has diagnostics and no flat tree.
+    cc::vector<flat_entry_point> entry_points;
+
+    /// In the order the demand-driven pass found them, which is deterministic and not source order.
+    cc::vector<located_diagnostic> diagnostics;
+
+    static constexpr type_id error_type = type_id(0);
+
+    [[nodiscard]] symbol const& at(symbol_id id) const { return symbols[index_of(id)]; }
+    [[nodiscard]] type_info const& at(type_id id) const { return types[index_of(id)]; }
+    [[nodiscard]] cc::span<member_info const> at(ast::range_of<member_info> r) const
+    {
+        return ast::impl::slice(members, r);
+    }
+    [[nodiscard]] cc::span<parameter const> at(ast::range_of<parameter> r) const
+    {
+        return ast::impl::slice(parameters, r);
+    }
+    [[nodiscard]] cc::span<symbol_id const> at(ast::range_of<symbol_id> r) const
+    {
+        return ast::impl::slice(binding_lists, r);
+    }
+
+    /// The name a type is written with; `<error>` for the error type.
+    [[nodiscard]] cc::string_view name_of(type_id id) const
+    {
+        auto const& t = at(id);
+        return t.kind == type_kind::structure ? cc::string_view(at(t.symbol).name) : cc::string_view("<error>");
+    }
+
+    [[nodiscard]] bool operator==(checked_module const& rhs) const
+    {
+        using ast::impl::is_equal;
+        return is_equal(symbols, rhs.symbols) && is_equal(types, rhs.types) && is_equal(members, rhs.members)
+            && is_equal(functions, rhs.functions) && is_equal(parameters, rhs.parameters)
+            && is_equal(bindings, rhs.bindings) && is_equal(binding_lists, rhs.binding_lists)
+            && is_equal(files, rhs.files) && is_equal(entry_points, rhs.entry_points)
+            && is_equal(diagnostics, rhs.diagnostics);
+    }
+};

@@ -11,6 +11,8 @@ Back to the [library readme](../../readme.md).
 | [syntax/_index.md](syntax/_index.md) | the syntax, phase by phase: line tree, tokens, group tokens, form tree, AST |
 | [syntax/diagnostics.md](syntax/diagnostics.md) | normal and fatal errors, and every diagnostic kind of the syntax |
 | [syntax/why/](syntax/why/line-tree.md) | the reasons behind the syntax rules, one file per normative file, starting at the line tree |
+| [semantics/_index.md](semantics/_index.md) | the semantics, as a tracer that is deliberately thin: the check pass that carries one program |
+| [semantics/why/](semantics/why/checking.md) | the reasons behind the semantics rules |
 | [keywords.md](keywords.md) | the keyword table |
 | [notation.md](notation.md) | symbol replacements, `notation \phi => φ` |
 | [terminology.md](terminology.md) | the glossary: each term has one meaning |
@@ -18,7 +20,7 @@ Back to the [library readme](../../readme.md).
 | [incubator/_index.md](incubator/_index.md) | ideas recorded so they are not lost; nothing in it is normative |
 | [archive/syntax-draft.md](archive/syntax-draft.md) | the first draft of the syntax, kept unchanged; the files above replace it |
 
-`semantics/`, `targets/` and `extensions/` will sit beside `syntax/`; they do not exist yet.
+`targets/` and `extensions/` will sit beside `syntax/` and `semantics/`; they do not exist yet.
 
 ## Principles
 

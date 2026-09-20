@@ -10,8 +10,9 @@
     normal: vec3
     color: float3
 
+// no @format here: the shader is compatible with every float target, and the pipeline says which one it is
 @pixel struct target:
-    color: rgba8
+    color: float4
 
 // what the vertex stage hands to the pixel stage
 struct pixel_input:
@@ -34,5 +35,5 @@ struct pixel_input:
 
     let lit = p.color * (0.25 + 0.8 * key + 0.25 * fill)
     return {
-        color = (..lit, 1.0) as rgba8
+        color = float4(..lit, 1.0)
     }

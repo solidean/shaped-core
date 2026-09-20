@@ -1,6 +1,6 @@
 # shaped-graphics-language cheat sheet
 
-SGL's toolchain as a library: today the syntactic half, from bytes to the form tree, and the first AST pass on top of it.
+SGL's toolchain as a library: the syntactic half, from bytes to the form tree, the AST pass on top of it, and a tracer of the check pass.
 Namespace `sgl`.
 Depends on clean-core.
 
@@ -116,6 +116,40 @@ Statements: `invalid_stmt` `let_stmt` `assign_stmt` `if_stmt` (the whole chain, 
 Declarations: `invalid_decl` `module_decl` `use_decl` `fun_decl` `struct_decl` `enum_decl` `type_decl` `const_decl`
 `binding_decl` `sampler_decl` `notation_decl`, and the member lines `field_decl` `property_decl` `enum_case_decl`.
 
+## The check pass (a tracer: it carries `tests/samples/cube.sgl`, everything else is `unsupported-yet`)
+
+```cpp
+#include <shaped-graphics-language/check/check.hh>
+auto const m = sgl::check::check({.file = prelude, .ast = prelude_ast}, {.file = user, .ast = user_ast});
+                                           // -> sgl::check::checked_module; TOTAL; a module_file is two REFERENCES
+                                           // file 0 is the prelude (prelude/prelude.sgl), file 1 the program; never concatenated
+m.symbols                                  // every top-level fun / struct / binding: file, declaration, kind, state, name,
+                                           // intrinsic (check::builtin), operator_spelling, type, info
+m.types  m.members                         // canonical types, types[0] is the error type; fields and binding members
+m.functions  m.parameters  m.binding_lists // signatures; symbol::info is the position in functions / bindings
+m.bindings                                 // binding_info { symbol, is_inline, members }
+m.files[f].type_at(expr_id)                // side table: type_id, none for what nothing checked
+m.files[f].target_at(expr_id)              // side table: { kind, symbol, index } — local / parameter / symbol / overload /
+                                           // constructor / field / binding_member
+m.entry_points                             // flat_entry_point per SOUND entry point; what an emitter reads, never the AST
+m.diagnostics                              // located_diagnostic { what, file, detail }, in the order they were found
+m.at(symbol_id)  m.at(type_id)  m.at(range)  m.name_of(type_id)   // name_of gives "<error>" for the error type
+
+#include <shaped-graphics-language/check/flat.hh>
+e.entry_stage  e.name  e.input  e.result  e.bindings   // stage, the name as written, edge structs, the LISTED bindings
+e.locals  e.exprs  e.stmts  e.body         // locals[0] is the parameter; at(id) / at(range) like the AST
+sgl::check::flat_expr                      // { type, from (origin), inlined_through, node }: flat_literal, flat_local_ref,
+                                           // flat_binding_member, flat_member, flat_construct, flat_call
+sgl::check::flat_stmt                      // flat_let, flat_return
+e.names.mint("n")                          // -> "n", then "n_1", …; EVERY name an emitter writes comes from here
+e.names.reserve("main_ps")                 // -> false when taken; for a name that must not change
+
+#include <shaped-graphics-language/check/dump.hh>
+sgl::check::dump(m)                        // symbols, then entry points: (let n : vec3 = (call normalize … : vec3))
+sgl::check::dump_entry_points(m)
+sgl::check::dump_diagnostics(m)            // `unknown-name @1:120+4 foo`: kind, file, span, detail
+```
+
 ## Diagnostics
 
 ```cpp
@@ -180,4 +214,13 @@ sgl::print_source(file)      // == file.source for EVERY input: the lossless inv
 - **An anonymous `fun` is a lambda only in expression position.** As a statement it is a function that lost its name and reports `expected-name`.
 - **`type name = …` is a type position**, like the right sides of `:`, `->` and `as`; the AST dump writes it `(type name : …)`.
 - **`true` and `false` are ordinary names** to every phase here.
+- **The check pass is one demand-driven pass.** A symbol is untouched, in compilation, checked or failed, and reaching one in compilation is `dependency-cycle`.
+  Compiling a function means its signature; bodies are checked after every signature is known.
+- **The error type is silent.** What did not check has `checked_module::error_type`, and nothing that meets it reports again.
+- **`unsupported-yet` is never a guess.** Its detail names the construct, and the construct's type is the error type.
+- **A `@builtin` is keyed by its NAME** (`check::builtin_of`), and an `@operator` function is found through its operator alone: no lookup sees its name.
+- **An entry point with any error has no flat tree.** `m.entry_points` holds only what an emitter may read.
+- **A flat tree has no splat and no object.** A splat is one `flat_member` per field, over a temporary local when its value is no local.
+  A returned object is a `flat_construct` in FIELD order.
+- **A check diagnostic is not an `sgl::diagnostic`.** It is a `located_diagnostic`: a module has several files, so it names one, and it carries a detail.
 - **Every `sgl` fence under `docs/spec/` is a test** (`tests/spec/spec-examples-test.cc`): `sgl` must parse cleanly, `sgl error` must report the kind its lead names, `sgl sketch` is unchecked.

@@ -130,6 +130,42 @@ cc::string_view sgl::to_string(diagnostic_kind kind)
         return "jump-without-target";
     case diagnostic_kind::redundant_return:
         return "redundant-return";
+    case diagnostic_kind::unsupported_yet:
+        return "unsupported-yet";
+    case diagnostic_kind::unknown_name:
+        return "unknown-name";
+    case diagnostic_kind::unknown_member:
+        return "unknown-member";
+    case diagnostic_kind::no_matching_overload:
+        return "no-matching-overload";
+    case diagnostic_kind::ambiguous_overload:
+        return "ambiguous-overload";
+    case diagnostic_kind::type_mismatch:
+        return "type-mismatch";
+    case diagnostic_kind::dependency_cycle:
+        return "dependency-cycle";
+    case diagnostic_kind::unknown_builtin:
+        return "unknown-builtin";
+    case diagnostic_kind::opaque_struct_needs_builtin:
+        return "opaque-struct-needs-builtin";
+    case diagnostic_kind::binding_not_listed:
+        return "binding-not-listed";
+    case diagnostic_kind::missing_field:
+        return "missing-field";
+    case diagnostic_kind::unknown_field:
+        return "unknown-field";
+    case diagnostic_kind::duplicate_field:
+        return "duplicate-field";
+    case diagnostic_kind::duplicate_declaration:
+        return "duplicate-declaration";
+    case diagnostic_kind::invalid_entry_point:
+        return "invalid-entry-point";
+    case diagnostic_kind::wrong_kind_of_name:
+        return "wrong-kind-of-name";
+    case diagnostic_kind::missing_type:
+        return "missing-type";
+    case diagnostic_kind::invalid_attribute_arguments:
+        return "invalid-attribute-arguments";
     }
     CC_UNREACHABLE("unknown diagnostic_kind");
 }
@@ -197,6 +233,24 @@ sgl::severity sgl::default_severity_of(diagnostic_kind kind)
     case diagnostic_kind::yield_in_loop:
     case diagnostic_kind::jump_without_target:
     case diagnostic_kind::redundant_return:
+    case diagnostic_kind::unsupported_yet:
+    case diagnostic_kind::unknown_name:
+    case diagnostic_kind::unknown_member:
+    case diagnostic_kind::no_matching_overload:
+    case diagnostic_kind::ambiguous_overload:
+    case diagnostic_kind::type_mismatch:
+    case diagnostic_kind::dependency_cycle:
+    case diagnostic_kind::unknown_builtin:
+    case diagnostic_kind::opaque_struct_needs_builtin:
+    case diagnostic_kind::binding_not_listed:
+    case diagnostic_kind::missing_field:
+    case diagnostic_kind::unknown_field:
+    case diagnostic_kind::duplicate_field:
+    case diagnostic_kind::duplicate_declaration:
+    case diagnostic_kind::invalid_entry_point:
+    case diagnostic_kind::wrong_kind_of_name:
+    case diagnostic_kind::missing_type:
+    case diagnostic_kind::invalid_attribute_arguments:
         return severity::normal_error;
     case diagnostic_kind::spaced_attribute_arguments:
     case diagnostic_kind::no_effect:

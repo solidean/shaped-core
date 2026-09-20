@@ -122,3 +122,50 @@ struct decl;
 
 struct file_ast;
 } // namespace sgl::ast
+
+namespace sgl::check
+{
+enum class type_id : i32;
+enum class symbol_id : i32;
+enum class flat_expr_id : i32;
+enum class flat_stmt_id : i32;
+enum class local_id : i32;
+
+enum class builtin : u8;
+enum class type_kind : u8;
+struct type_info;
+struct member_info;
+
+enum class stage : u8;
+enum class symbol_kind : u8;
+enum class symbol_state : u8;
+struct symbol;
+struct parameter;
+struct function_info;
+struct binding_info;
+enum class target_kind : u8;
+struct target;
+struct file_tables;
+
+struct origin;
+struct call_site;
+struct name_mint;
+enum class local_kind : u8;
+struct flat_local;
+struct flat_invalid;
+struct flat_literal;
+struct flat_local_ref;
+struct flat_binding_member;
+struct flat_member;
+struct flat_construct;
+struct flat_call;
+struct flat_expr;
+struct flat_let;
+struct flat_return;
+struct flat_stmt;
+struct flat_entry_point;
+
+struct located_diagnostic;
+struct checked_module;
+struct module_file;
+} // namespace sgl::check

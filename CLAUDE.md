@@ -105,12 +105,15 @@ One-liner per library:
   `SR_HAS_WINDOW` (1/0) says whether a backend was compiled in.
 * **`libs/graphics/shaped-graphics-language`** — SGL, our own shading language, and its whole toolchain in one library: compiler, linter, formatter, language server.
   The syntactic half is bytes → line tree → tokens → group tokens → form tree, one flat lossless `sgl::parsed_file` per file.
-  On top of it sits the first AST pass, `sgl::ast::build` → `sgl::ast::file_ast`: declarations, statements and expressions, per file and name-free.
-  Name lookup, types and everything after them do not exist yet.
+  On top of it sits the AST pass, `sgl::ast::build` → `sgl::ast::file_ast`: declarations, statements and expressions, per file and name-free.
+  Above that is the first semantic phase, `sgl::check::check` → `sgl::check::checked_module`: name resolution, type checking and evaluation as ONE demand-driven pass.
+  It yields side tables over the untouched AST for an editor, and one flat typed tree per entry point, which is all an emitter reads.
+  **The check pass is a tracer**: it carries `tests/samples/cube.sgl` against `prelude/prelude.sgl`, and every other construct is the one diagnostic `unsupported-yet`, never a guess.
+  The inliner, the emitters and everything after them do not exist yet.
   **Total and local by construction**: any bytes parse to a tree plus diagnostics, and no syntax error escapes its indentation.
   Namespace `sgl`. Depends on clean-core alone, and the syntactic half must stay that way — an editor links it to parse.
   [docs/spec/](libs/graphics/shaped-graphics-language/docs/spec/_index.md) is the language: normative rules with stable ids under `syntax/`, every "why" mirrored under `syntax/why/`,
-  and ideas that are not spec yet under `incubator/`.
+  `semantics/` is what the check pass does, marked as deliberately thin, and ideas that are not spec yet are under `incubator/`.
   **Every `sgl` fence in the spec is a test**, so the spec and the parser cannot drift apart silently.
   Early stage.
 * **`libs/graphics/shaped-viewer`** — professional, RTX-enabled visualization renderer with a dev-friendly API.

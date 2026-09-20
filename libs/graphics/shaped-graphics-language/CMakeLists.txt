@@ -4,7 +4,7 @@ project(shaped-graphics-language LANGUAGES CXX)
 # SGL's whole toolchain is this one library: compiler, linter, formatter and language server share the same trees.
 # A command-line compiler is a thin tool over it, not a second implementation.
 #
-# The syntactic half and the AST pass need clean-core and nothing else.
+# The syntactic half, the AST pass and the check pass need clean-core and nothing else.
 # It must stay that way: an editor integration links this to parse, and should not pull in a graphics API to do it.
 add_library(shaped-graphics-language
     src/shaped-graphics-language/fwd.cc
@@ -30,6 +30,14 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/ast/build_expr.cc
     src/shaped-graphics-language/ast/build_stmt.cc
     src/shaped-graphics-language/ast/dump.cc
+
+    src/shaped-graphics-language/check/builtins.cc
+    src/shaped-graphics-language/check/check.cc
+    src/shaped-graphics-language/check/check_decl.cc
+    src/shaped-graphics-language/check/check_expr.cc
+    src/shaped-graphics-language/check/dump.cc
+    src/shaped-graphics-language/check/flat.cc
+    src/shaped-graphics-language/check/flatten.cc
 )
 
 # Public headers live co-located in src/ for better editor experience.
@@ -71,6 +79,15 @@ target_sources(shaped-graphics-language
     src/shaped-graphics-language/ast/parts.hh
     src/shaped-graphics-language/ast/stmt.hh
     src/shaped-graphics-language/ast/impl/builder.hh
+
+    src/shaped-graphics-language/check/builtins.hh
+    src/shaped-graphics-language/check/check.hh
+    src/shaped-graphics-language/check/checked_module.hh
+    src/shaped-graphics-language/check/dump.hh
+    src/shaped-graphics-language/check/flat.hh
+    src/shaped-graphics-language/check/ids.hh
+    src/shaped-graphics-language/check/symbols.hh
+    src/shaped-graphics-language/check/impl/checker.hh
 )
 
 # Require at least C++23 for this target; the final -std is chosen by the top-level project.
@@ -103,6 +120,11 @@ if(SC_BUILD_TESTS)
         tests/ast/member-test.cc
         tests/ast/statement-test.cc
 
+        tests/check/check-test-support.hh
+        tests/check/cube-test.cc
+        tests/check/declaration-check-test.cc
+        tests/check/expression-check-test.cc
+
         tests/spec/spec-examples-test.cc
 
         tests/samples/samples-test.cc
@@ -113,7 +135,8 @@ if(SC_BUILD_TESTS)
     target_compile_definitions(shaped-graphics-language-test
         PRIVATE
         SGL_SPEC_DIR="${CMAKE_CURRENT_SOURCE_DIR}/docs/spec"
-        SGL_SAMPLES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/samples")
+        SGL_SAMPLES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/samples"
+        SGL_PRELUDE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/prelude")
 
     target_link_libraries(shaped-graphics-language-test
         PRIVATE
