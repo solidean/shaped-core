@@ -52,6 +52,14 @@ struct loop_scope
     bool has_break = false;
 };
 
+/// A value block around the statement being checked: the body of a `case` arm, which `yield` hands its value to.
+struct value_block_scope
+{
+    /// The type of the first `yield`; `none` before one was seen.
+    type_id value = type_id::none;
+    bool has_yield = false;
+};
+
 /// How a statement list ends.
 enum class flow : u8
 {
@@ -73,6 +81,8 @@ struct function_scope
     int depth = 0;
     /// Innermost last.
     cc::vector<loop_scope> loops;
+    /// The value blocks a `yield` can name, innermost last; a `case` arm that is a value pushes one.
+    cc::vector<value_block_scope> value_blocks;
 };
 
 /// One call of a function of the program, which is an edge of the graph recursion is looked for in.
@@ -207,6 +217,15 @@ struct checker
                                      ast::loop_expr const& loop,
                                      bool yields_value,
                                      bool& has_break);
+    /// A `case`; the result is the type of its arms, and `nothing` for one that is a statement.
+    [[nodiscard]] type_id check_case(function_scope& scope, ast::expr_id id, ast::case_expr const& node, bool yields_value);
+    /// One arm's pattern, against the scrutinee's type; appends the enum cases it names, and says whether all were cases.
+    void check_pattern(function_scope& scope,
+                       ast::expr_id pattern,
+                       type_id scrutinee,
+                       cc::vector<i32>& named_cases,
+                       bool& is_all_constant);
+    void check_yield(function_scope& scope, source_span where, ast::expr_id value);
     /// Reports every loop of calls once, and marks the functions on it.
     void find_recursion();
     [[nodiscard]] bool inlines_whole(symbol_id function);

@@ -443,6 +443,12 @@ struct expr_lowering
             auto const value = lower_expr(r->value, into);
             into.push_back(attributed().return_(value));
         }
+        else
+        {
+            // A statement this pass does not lower goes through untouched; `find_core_violation` is what judges it.
+            // Dropping it instead would write a shader that quietly does less than its source says.
+            into.push_back(id);
+        }
     }
 
     /// Rule E4.

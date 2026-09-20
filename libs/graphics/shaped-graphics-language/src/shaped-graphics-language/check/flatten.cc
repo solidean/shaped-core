@@ -51,6 +51,8 @@ struct flattener
         ast::range_of<call_site> chain;
         cc::vector<bound_name> bound;
         cc::vector<loop_target> loops;
+        /// The value blocks of the `case` arms being written, innermost last; a `yield` leaves the last.
+        cc::vector<label_id> value_blocks;
     };
     cc::vector<frame> frames;
 
@@ -132,6 +134,13 @@ struct flattener
         return range;
     }
 
+    ast::range_of<flat_arm> add_arms(cc::span<flat_arm const> list)
+    {
+        auto const range = ast::range_of<flat_arm>{.first = u32(entry.arms.size()), .count = u32(list.size())};
+        entry.arms.push_back_range(list);
+        return range;
+    }
+
     flat_expr_id local_ref(local_id local, ast::expr_id from)
     {
         return add_expr(entry.at(local).type, from, flat_local_ref{.local = local});
@@ -209,6 +218,11 @@ struct flattener
 
         if (e.node.is<ast::literal>())
             return flatten_number(id, type);
+        if (e.node.is<ast::leading_dot>())
+        {
+            return where.kind == target_kind::enum_case ? add_expr(type, id, flat_enum_value{.case_index = where.index})
+                                                        : fail();
+        }
         if (e.node.is<ast::name>())
         {
             for (auto const& b : frames.back().bound)
@@ -233,6 +247,8 @@ struct flattener
             return flatten_chain(id, type, *chain);
         if (auto const* const loop = e.node.try_as<ast::loop_expr>())
             return flatten_value_loop(id, type, *loop);
+        if (auto const* const c = e.node.try_as<ast::case_expr>())
+            return flatten_value_case(id, type, *c);
         return fail();
     }
 
@@ -370,6 +386,100 @@ struct flattener
 
         auto const where = origin{.file = file(), .expr = id};
         flat_stmt_id const statements[] = {make_stmt(where, flat_loop{.label = label, .body = body})};
+        return add_expr(type, id, flat_block{.label = value_block, .body = add_list(statements)});
+    }
+
+    /// The scrutinee, the arms and the default of a `case`; `value_block` is the block an arm's value leaves.
+    flat_case flatten_case_parts(ast::case_expr const& node, label_id value_block)
+    {
+        auto result = flat_case{.scrutinee = flatten_expr(node.value)};
+        auto arms = cc::vector<flat_arm>();
+        auto has_default = false;
+
+        for (auto const& arm : ast().at(node.arms))
+        {
+            auto const is_wildcard = ast::is_valid(arm.pattern) && ast().at(arm.pattern).node.is<ast::wildcard>();
+            auto patterns = cc::vector<flat_expr_id>();
+            if (!is_wildcard)
+                collect_patterns(arm.pattern, patterns);
+            auto const body = flatten_arm_body(arm, value_block);
+            if (is_wildcard)
+            {
+                result.default_body = body;
+                has_default = true;
+            }
+            else
+                arms.push_back({.patterns = add_list(patterns), .body = body});
+        }
+
+        // Every tree has a default: without a `_` the source was exhaustive by its cases, and the last arm is it.
+        if (!has_default && !arms.empty())
+        {
+            result.default_body = arms.back().body;
+            arms.remove_back();
+        }
+        result.arms = add_arms(arms);
+        return result;
+    }
+
+    /// `a or b` is a list of patterns rather than the `or` of the language (CHK-157).
+    void collect_patterns(ast::expr_id id, cc::vector<flat_expr_id>& into)
+    {
+        if (!ast::is_valid(id))
+            return;
+        auto const& e = ast().at(id);
+        if (auto const* const call = e.node.try_as<ast::call>();
+            call != nullptr && call->is_short_circuit && sgl::is_valid(call->op)
+            && c.text_of(file(), c.file_of(file()).at(call->op).where) == "or")
+        {
+            for (auto const& argument : ast().at(call->arguments))
+                collect_patterns(argument.value, into);
+            return;
+        }
+        into.push_back(flatten_expr(id));
+    }
+
+    ast::range_of<flat_stmt_id> flatten_arm_body(ast::case_arm const& arm, label_id value_block)
+    {
+        auto const outer = cc::move(block);
+        block = {};
+        if (is_valid(value_block))
+            frames.back().value_blocks.push_back(value_block);
+
+        if (arm.result.kind == ast::body_kind::arrow && ast::is_valid(arm.result.value))
+        {
+            auto const where = origin{.file = file(), .expr = arm.result.value};
+            auto const& e = ast().at(arm.result.value);
+            auto const is_jump = e.node.is<ast::return_expr>() || e.node.is<ast::break_expr>()
+                              || e.node.is<ast::continue_expr>() || e.node.is<ast::yield_expr>();
+            if (is_jump)
+                flatten_expr_stmt(where, arm.result.value);
+            else if (is_valid(value_block))
+            {
+                auto const value = flatten_expr(arm.result.value);
+                add_stmt(where, flat_leave{.target = value_block, .value = value});
+            }
+            else
+                flatten_expr_stmt(where, arm.result.value);
+        }
+        else
+            for (auto const stmt : ast().at(arm.result.statements))
+                flatten_stmt(stmt);
+
+        if (is_valid(value_block))
+            frames.back().value_blocks.remove_back();
+        auto const range = add_list(block);
+        block = cc::move(outer);
+        return range;
+    }
+
+    /// A `case` somebody reads the value of: a block around it, which every arm leaves.
+    flat_expr_id flatten_value_case(ast::expr_id id, type_id type, ast::case_expr const& node)
+    {
+        auto const value_block = add_label("case");
+        auto const parts = flatten_case_parts(node, value_block);
+        auto const where = origin{.file = file(), .expr = id};
+        flat_stmt_id const statements[] = {make_stmt(where, parts)};
         return add_expr(type, id, flat_block{.label = value_block, .body = add_list(statements)});
     }
 
@@ -672,6 +782,21 @@ struct flattener
             frames.back().loops.remove_back();
             return add_stmt(from, flat_loop{.label = label, .body = body});
         }
+        if (auto const* const y = x.node.try_as<ast::yield_expr>())
+        {
+            auto const& blocks = frames.back().value_blocks;
+            if (blocks.empty())
+            {
+                is_failed = true;
+                return;
+            }
+            // by value: flattening the value may open a value block of its own
+            auto const target = blocks.back();
+            auto const value = flatten_expr(y->value);
+            return add_stmt(from, flat_leave{.target = target, .value = value});
+        }
+        if (auto const* const c = x.node.try_as<ast::case_expr>())
+            return add_stmt(from, flatten_case_parts(*c, label_id::none));
 
         // What is left is a call, and one that returns nothing is a block that is a statement.
         auto const* const call = x.node.try_as<ast::call>();

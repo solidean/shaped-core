@@ -161,21 +161,23 @@ type_id checker::check_expr(function_scope& scope, ast::expr_id expr)
         [&](ast::member const& m) { return check_member(scope, expr, m); }, [&](ast::call const& c)
         { return check_call(scope, expr, c); }, [&](ast::self_ref const&) { return not_yet("self"); },
         [&](ast::wildcard const&) { return not_yet("a wildcard as a value"); },
-        [&](ast::leading_dot const&) { return not_yet("a leading-dot name"); },
+        // CHK-152: a leading dot needs a type the context expects, which today only a `case` pattern gives it
+        [&](ast::leading_dot const&) { return not_yet("a leading-dot name outside a case pattern"); },
         [&](ast::index const&) { return not_yet("a subscript or type arguments"); },
         [&](ast::tuple const&) { return not_yet("a tuple"); }, [&](ast::array const&) { return not_yet("an array"); },
         [&](ast::object const&) { return not_yet("an object with no struct to convert to"); },
-        [&](ast::comparison_chain const& chain) { return check_chain(scope, expr, chain); }, [&](ast::cast const&)
-        { return not_yet("as"); }, [&](ast::membership const&) { return not_yet("in"); }, [&](ast::ascription const&)
-        { return not_yet("a type ascription"); }, [&](ast::range const&) { return not_yet("a range"); },
-        [&](ast::lambda const&) { return not_yet("a lambda"); }, [&](ast::case_expr const&) { return not_yet("case"); },
+        [&](ast::comparison_chain const& chain) { return check_chain(scope, expr, chain); },
+        [&](ast::cast const&) { return not_yet("as"); }, [&](ast::membership const&) { return not_yet("in"); },
+        [&](ast::ascription const&) { return not_yet("a type ascription"); },
+        [&](ast::range const&) { return not_yet("a range"); }, [&](ast::lambda const&) { return not_yet("a lambda"); },
+        [&](ast::case_expr const& c) { return check_case(scope, expr, c, true); },
         [&](ast::loop_expr const& loop)
         {
             auto has_break = false;
             return check_loop(scope, expr, loop, true, has_break);
         },
         [&](ast::return_expr const&) { return not_yet("return as a value"); }, [&](ast::yield_expr const&)
-        { return not_yet("yield"); }, [&](ast::break_expr const&) { return not_yet("break as a value"); },
+        { return not_yet("yield as a value"); }, [&](ast::break_expr const&) { return not_yet("break as a value"); },
         [&](ast::continue_expr const&) { return not_yet("continue as a value"); }, [&](ast::struct_type const&)
         { return not_yet("a type as a value"); }, [&](ast::function_type const&) { return not_yet("a type as a value"); },
         // reserved, and reported by the AST pass

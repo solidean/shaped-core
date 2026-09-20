@@ -147,6 +147,12 @@ enum class sgl::diagnostic_kind : sgl::u8
     not_assignable,
     /// A statement after a jump in its list, which never runs; a warning.
     unreachable_code,
+    /// A `case` that neither names every case of its enum nor carries a `_`.
+    non_exhaustive_case,
+    /// Two arms of one `case` that name one case of the enum.
+    duplicate_case_pattern,
+    /// An arm of a `case` that is a value and that neither produces one nor exits.
+    missing_value_in_arm,
 };
 
 namespace sgl

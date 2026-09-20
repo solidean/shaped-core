@@ -40,6 +40,7 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/builtins/registry.cc
 
     src/shaped-graphics-language/check/check.cc
+    src/shaped-graphics-language/check/check_case.cc
     src/shaped-graphics-language/check/check_decl.cc
     src/shaped-graphics-language/check/check_expr.cc
     src/shaped-graphics-language/check/check_stmt.cc
@@ -246,6 +247,7 @@ if(SC_BUILD_TESTS)
         tests/builtins/registry-test.cc
 
         tests/check/check-test-support.hh
+        tests/check/case-check-test.cc
         tests/check/control-flow-check-test.cc
         tests/check/cube-test.cc
         tests/check/declaration-check-test.cc

@@ -174,6 +174,12 @@ cc::string_view sgl::to_string(diagnostic_kind kind)
         return "not-assignable";
     case diagnostic_kind::unreachable_code:
         return "unreachable-code";
+    case diagnostic_kind::non_exhaustive_case:
+        return "non-exhaustive-case";
+    case diagnostic_kind::duplicate_case_pattern:
+        return "duplicate-case-pattern";
+    case diagnostic_kind::missing_value_in_arm:
+        return "missing-value-in-arm";
     }
     CC_UNREACHABLE("unknown diagnostic_kind");
 }
@@ -262,6 +268,9 @@ sgl::severity sgl::default_severity_of(diagnostic_kind kind)
     case diagnostic_kind::missing_return:
     case diagnostic_kind::recursive_call:
     case diagnostic_kind::not_assignable:
+    case diagnostic_kind::non_exhaustive_case:
+    case diagnostic_kind::duplicate_case_pattern:
+    case diagnostic_kind::missing_value_in_arm:
         return severity::normal_error;
     case diagnostic_kind::spaced_attribute_arguments:
     case diagnostic_kind::no_effect:
