@@ -37,6 +37,14 @@ static const uint probe_guides_diffuse = 6;
 static const uint probe_guides_specular = 7;
 static const uint probe_guides_roughness = 8;
 
+/// The directional albedo of ONE half of the split, integrated against the whole closure's sampler.
+///
+/// Comparing `diffuse + specular` against `bsdf_eval` would prove nothing, since `bsdf_eval` IS their sum — so what
+/// the halves are held to is physics instead: a metal has no diffuse half, a Lambertian has no specular one, and a
+/// lossless furnace's half integrates to exactly what that half reflects.
+static const uint probe_albedo_diffuse = 9;
+static const uint probe_albedo_specular = 10;
+
 /// One measurement to make — mirrors `sv_test::probe_case` lane-for-lane, so keep the two in lockstep.
 ///
 /// `surface` sits last and at a 16-byte offset deliberately: it is the one member whose packing this file does not control,
@@ -130,6 +138,23 @@ float4 probe_run(probe_case c, uint item)
 
     for (uint i = 0u; i < c.samples; ++i)
     {
+        if (c.mode == probe_albedo_diffuse || c.mode == probe_albedo_specular)
+        {
+            // The same estimator `probe_albedo` runs — `f * cos / pdf` against the closure's own sampler — with one
+            // half of `f` in place of the whole, which integrates that half's share of the directional albedo.
+            float3 u = float3(probe_rand(rng), probe_rand(rng), probe_rand(rng));
+            bsdf_sample s = bsdf_sample_direction(b, wo, u);
+            if (s.valid && s.pdf > 0.0)
+            {
+                float3 d;
+                float3 sp;
+                bsdf_eval_split(b, wo, s.direction, d, sp);
+                float3 half_f = c.mode == probe_albedo_diffuse ? d : sp;
+                sum += half_f * (abs(s.direction.z) / s.pdf);
+            }
+            continue;
+        }
+
         if (c.mode == probe_albedo)
         {
             // The closure's own sampler, so the estimator is `f * cos / pdf` and its mean is the directional albedo.

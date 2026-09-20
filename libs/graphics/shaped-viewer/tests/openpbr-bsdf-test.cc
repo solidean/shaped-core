@@ -102,6 +102,8 @@ enum class probe_mode : u32
     guides_diffuse = 6,
     guides_specular = 7,
     guides_roughness = 8,
+    albedo_diffuse = 9,
+    albedo_specular = 10,
 };
 
 /// `sv::probe_case` from shaders/bsdf_probe.hlsl, lane-for-lane.
@@ -708,4 +710,65 @@ ASYNC_INVOCABLE_TEST("sv - the denoiser guides describe the surface they are rea
     // one, and filtering it at the base's roughness would smear the only feature the coat adds.
     CHECK(tg::abs(roughness(s_plain) - 0.4f) < 1e-3f);
     CHECK(tg::abs(roughness(s_coated) - 0.05f) < 1e-3f).context("a coat takes over the roughness guide");
+}
+
+// What the diffuse and specular halves of the split each reflect.
+//
+// Comparing their sum against `bsdf_eval` would prove nothing: `bsdf_eval` IS their sum, so the residual is zero
+// however wrong the division is — a first version of this test scaled one half by 0.9 and still passed.
+// So each half is held to physics instead, on surfaces where the right answer is known exactly.
+//
+// This is what a split-signal denoiser rests on.
+// It filters the two apart with different kernels, so a specular lobe leaking into the diffuse half is a sharp
+// reflection filtered as if it were matte — which reads as the denoiser being soft rather than as the split being wrong.
+ASYNC_INVOCABLE_TEST("sv - the diffuse and specular halves each reflect what they should",
+                     (sg::context_handle const& ctx_h))
+{
+#if defined(CC_ARCH_ARM64) && defined(_WIN32)
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
+         "libs/graphics/shaped-viewer/docs/TODO.md");
+#endif
+    auto& ctx = *ctx_h;
+
+    auto const& env = sv_test::shared_env();
+    if (!env.has_compiler)
+        SKIP("no DXC compiler to build the probe shader");
+
+    // A white Lambertian with its specular layer off: everything it reflects is diffuse, and being lossless it
+    // reflects all of it.
+    auto lambert = probe_surface{};
+    lambert.base_weight = 1.0f;
+    lambert.base_color = tg::vec3f(1, 1, 1);
+    lambert.specular_weight = 0.0f;
+
+    // A white metal: no diffuse substrate exists under it at all.
+    auto metal = lambert;
+    metal.base_metalness = 1.0f;
+    metal.specular_weight = 1.0f;
+    metal.specular_color = tg::vec3f(1, 1, 1);
+    metal.specular_roughness = 0.3f;
+
+    auto const wo = tg::vec3f(0.6f, 0, 0.8f);
+    auto const case_of = [&](probe_surface const& s, probe_mode mode)
+    { return probe_case{.wo = wo, .mode = mode, .samples = 4096, .seed = 11, .s = s}; };
+
+    auto const cases = cc::vector<probe_case>{
+        case_of(lambert, probe_mode::albedo_diffuse),
+        case_of(lambert, probe_mode::albedo_specular),
+        case_of(metal, probe_mode::albedo_diffuse),
+        case_of(metal, probe_mode::albedo_specular),
+    };
+
+    auto const r = co_await run_probe(ctx, cases);
+    REQUIRE(r.size() == 4);
+
+    // A lossless white Lambertian reflects all of it, and every bit of that is the diffuse half.
+    CHECK(tg::abs(r[0].mean[0] - 1.0f) < 0.02f)
+        .context(cc::format("a white Lambertian's diffuse half reflected {}", r[0].mean[0]));
+    CHECK(r[1].mean[0] < 0.01f)
+        .context(cc::format("a Lambertian with no specular layer reflected {} specularly", r[1].mean[0]));
+
+    // And a metal is the mirror image: no diffuse substrate under it, so the diffuse half is empty.
+    CHECK(r[2].mean[0] < 0.01f).context(cc::format("a metal's diffuse half reflected {}", r[2].mean[0]));
+    CHECK(r[3].mean[0] > 0.8f).context(cc::format("a white metal's specular half reflected only {}", r[3].mean[0]));
 }
