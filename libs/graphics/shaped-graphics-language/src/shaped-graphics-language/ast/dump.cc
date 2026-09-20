@@ -356,6 +356,12 @@ struct dumper
                 dump_expr(n.target, depth);
                 dump_arguments(n.bindings, depth);
                 out += ")";
+            },
+            [&](qualified_type const& n)
+            {
+                out += n.access == type_access::read_write ? "(mut " : "(out ";
+                dump_expr(n.type, depth);
+                out += ")";
             });
         attributes(e.attributes);
     }

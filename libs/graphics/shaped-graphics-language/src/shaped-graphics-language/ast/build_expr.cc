@@ -18,6 +18,29 @@ expr_id builder::expression(form_id form, attribute_mode mode)
     return result;
 }
 
+expr_id builder::type_expression(form_id form)
+{
+    // AST-128: only the top of a type position may be qualified, so this is read here and not in `expression_node`.
+    auto const is_mut = is_keyword_led(form, "mut");
+    if (is_mut || is_keyword_led(form, "out"))
+    {
+        auto const parts = keyword_parts_of(form);
+        auto const is_simple = parts.keywords.size() == 1 && parts.arguments.size() == 1 && !is_valid(parts.block);
+        if (is_simple)
+        {
+            auto const access = is_mut ? type_access::read_write : type_access::write_only;
+            auto const inner = expression(parts.arguments[0], attribute_mode::keep);
+            auto const result = make_expr(form, qualified_type{.access = access, .type = inner});
+            auto const attributes = attributes_of(form);
+            auto& node = ast.exprs[index_of(result)];
+            if (!attributes.empty() && node.attributes.empty())
+                node.attributes = attributes;
+            return result;
+        }
+    }
+    return expression(form, attribute_mode::keep);
+}
+
 expr_id builder::expression_node(form_id form)
 {
     auto const& f = at(form);
@@ -287,7 +310,8 @@ expr_id builder::ascription_fold(form_id run,
                                  cc::span<form_id const> operators,
                                  attribute_mode first_mode)
 {
-    auto result = expression(operands[0], first_mode);
+    // `keep` is what marks a type position here, and only there may the first operand be qualified (AST-128).
+    auto result = first_mode == attribute_mode::keep ? type_expression(operands[0]) : expression(operands[0], first_mode);
     for (auto i = isize(0); i < operators.size(); ++i)
     {
         auto const op = token_text_of(operators[i]);

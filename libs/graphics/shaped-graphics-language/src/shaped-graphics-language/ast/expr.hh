@@ -257,6 +257,23 @@ struct sgl::ast::with_bindings
     constexpr bool operator==(with_bindings const&) const = default;
 };
 
+/// What `mut` or `out` in a type position says a shader may do with a resource (AST-128).
+enum class sgl::ast::type_access : sgl::u8
+{
+    read_write, ///< `mut`
+    write_only, ///< `out`
+};
+
+/// `mut buffer[float]`, `out texture2d[rgba8unorm]`: an access word and the type it qualifies (AST-128).
+/// Only the top of a type position may carry one, so `buffer[mut float]` is no qualified type.
+struct sgl::ast::qualified_type
+{
+    type_access access = type_access::read_write;
+    expr_id type = expr_id::none;
+
+    constexpr bool operator==(qualified_type const&) const = default;
+};
+
 /// What did not fit; `expr::form` keeps what was written, and a diagnostic says what was expected.
 struct sgl::ast::invalid_expr
 {
@@ -295,7 +312,8 @@ struct sgl::ast::expr
                 continue_expr,
                 struct_type,
                 function_type,
-                with_bindings>
+                with_bindings,
+                qualified_type>
         node;
 
     bool operator==(expr const&) const = default;

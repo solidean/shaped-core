@@ -168,3 +168,28 @@ TEST("sgl ast - struct, enum and binding are declared by one name")
     CHECK(body_of("struct local:\n    x: int\nenum e:\n    a\n")
           == "(struct local\n  (field x : int))\n(enum e\n  (case a))");
 }
+
+TEST("sgl ast - a binding member's type may be qualified by mut or out")
+{
+    // AST-128: the access word stands at the top of a type position, and the type under it reads as any other.
+    CHECK(ast_of("binding work:\n"
+                 "    scale: float\n"
+                 "    src: buffer[float]\n"
+                 "    dst: mut buffer[float]\n"
+                 "    result: out texture2d[rgba8unorm]\n")
+          == "(binding work\n"
+             "  (field scale : float)\n"
+             "  (field src : (index buffer float))\n"
+             "  (field dst : (mut (index buffer float)))\n"
+             "  (field result : (out (index texture2d rgba8unorm))))");
+}
+
+TEST("sgl ast - mut and out qualify a type only at the top of a type position")
+{
+    // Inside the type arguments it is an ordinary expression again, and `mut` there is the error it is elsewhere.
+    CHECK(body_of("let a : mut buffer[float] = x\n").contains("(mut (index buffer float))"));
+    CHECK(body_of("let b : buffer[mut float] = x\n").contains("unexpected-keyword"));
+
+    // AST-130: `out` outside a type position is no qualifier.
+    CHECK(body_of("out = 1\n").contains("!!"));
+}

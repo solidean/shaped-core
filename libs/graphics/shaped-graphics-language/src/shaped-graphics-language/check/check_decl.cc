@@ -62,6 +62,9 @@ type_id checker::resolve_type(i32 file, ast::expr_id expr)
         unsupported(file, where, "a tuple type");
     else if (e.node.is<ast::member>())
         unsupported(file, where, "a qualified type name");
+    // The binding model these belong to is written down and unbuilt; the spec's bindings file is what they will mean.
+    else if (auto const* const q = e.node.try_as<ast::qualified_type>())
+        unsupported(file, where, q->access == ast::type_access::read_write ? "a `mut` resource" : "an `out` resource");
     else if (!e.node.is<ast::invalid_expr>())
         unsupported(file, where, "this expression as a type");
 

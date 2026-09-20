@@ -190,7 +190,8 @@ struct builder
     }
 
     expr_id expression(form_id form, attribute_mode mode = attribute_mode::reject);
-    expr_id type_expression(form_id form) { return expression(form, attribute_mode::keep); }
+    /// An expression in a type position, which is the only place `mut` and `out` qualify one (AST-128).
+    expr_id type_expression(form_id form);
 
     expr_id expression_node(form_id form);
     expr_id round_list_expression(form_id form);

@@ -164,6 +164,8 @@ type_id checker::check_expr(function_scope& scope, ast::expr_id expr)
         // CHK-152: a leading dot needs a type the context expects, which today only a `case` pattern gives it
         [&](ast::leading_dot const&) { return not_yet("a leading-dot name outside a case pattern"); },
         [&](ast::index const&) { return not_yet("a subscript or type arguments"); },
+        // AST-128: `mut buffer[float]` and its neighbours parse, and the binding model they belong to is unbuilt.
+        [&](ast::qualified_type const&) { return not_yet("a resource type"); },
         [&](ast::tuple const&) { return not_yet("a tuple"); }, [&](ast::array const&) { return not_yet("an array"); },
         [&](ast::object const&) { return not_yet("an object with no struct to convert to"); },
         [&](ast::comparison_chain const& chain) { return check_chain(scope, expr, chain); },

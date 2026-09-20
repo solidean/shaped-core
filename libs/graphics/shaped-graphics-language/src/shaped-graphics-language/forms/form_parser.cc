@@ -993,8 +993,9 @@ struct form_parser
 };
 
 constexpr cc::string_view sgl_keywords[] = {
-    "fun",  "let", "mut",   "struct", "enum",   "binding",  "sampler", "const", "use",    "module", "type",     "if",
-    "else", "for", "while", "loop",   "return", "continue", "break",   "case",  "assert", "print",  "notation", "yield",
+    "fun",      "let",    "mut",  "out",    "struct", "enum",     "binding", "sampler", "const",
+    "use",      "module", "type", "if",     "else",   "for",      "while",   "loop",    "return",
+    "continue", "break",  "case", "assert", "print",  "notation", "yield",
 };
 } // namespace
 

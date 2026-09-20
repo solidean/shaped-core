@@ -96,6 +96,8 @@ struct continue_expr;
 struct struct_type;
 struct function_type;
 struct with_bindings;
+struct qualified_type;
+enum class type_access : u8;
 struct expr;
 
 struct invalid_stmt;

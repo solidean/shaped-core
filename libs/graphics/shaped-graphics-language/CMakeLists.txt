@@ -248,6 +248,7 @@ if(SC_BUILD_TESTS)
         tests/builtins/registry-test.cc
 
         tests/check/check-test-support.hh
+        tests/check/binding-check-test.cc
         tests/check/case-check-test.cc
         tests/check/control-flow-check-test.cc
         tests/check/cube-test.cc
