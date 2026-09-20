@@ -482,6 +482,39 @@ TEST("sgl source - break value through a helper: the text")
              "}\n");
 }
 
+TEST("sgl source - a return whose value inlines a call leaves its own block, however deep the nesting")
+{
+    // Each helper returns a call, so flattening a `return` value pushes a frame while that return's frame is live.
+    // A frame held by reference across that push is a dangling read, and it showed only where the vector moved.
+    constexpr auto chain = cc::string_view("fun f1(v: float) -> float => v * 0.5\n"
+                                           "fun f2(v: float) -> float:\n"
+                                           "    return f1 v\n"
+                                           "fun f3(v: float) -> float:\n"
+                                           "    return f2 v\n"
+                                           "fun f4(v: float) -> float:\n"
+                                           "    return f3 v\n"
+                                           "fun f5(v: float) -> float:\n"
+                                           "    return f4 v\n"
+                                           "fun f6(v: float) -> float:\n"
+                                           "    return f5 v\n"
+                                           "fun f7(v: float) -> float:\n"
+                                           "    return f6 v\n"
+                                           "fun f8(v: float) -> float:\n"
+                                           "    return f7 v\n");
+    constexpr auto body = cc::string_view("let x = f8 p.a\n");
+
+    // Every inlined `return` is a `leave` of its own block; the entry point owns the only `return` in the tree.
+    auto const dump = structured_dump(chain, body);
+    CHECK(!dump.contains("(return (block"));
+    CHECK(dump.contains("(leave $f1 "));
+    CHECK(dump.contains("(leave $f8 "));
+
+    // And eight blocks that all dissolved leave two lines: the bound argument and the one computation.
+    auto const text = function_text(chain, body, sgl::emit::target::wgsl);
+    CHECK(text.contains("    let v: f32 = p.a;\n    let x: f32 = v * 0.5;\n"));
+    CHECK(!text.contains("_result"));
+}
+
 TEST("sgl source - a dropped value: the call's statements stay, and a rest that is only a local is gone")
 {
     // `graded p.b` leaves nothing behind its statements, and `saturate(...)` stays a statement of its own.

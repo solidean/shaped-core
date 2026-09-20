@@ -492,15 +492,17 @@ struct flattener
 
     void flatten_return(origin from, ast::expr_id value)
     {
-        auto const& f = frames.back();
+        // by value: flattening the value may inline a call, whose frame moves the vector this frame lives in
+        auto const return_label = frames.back().return_label;
+        auto const result_type = frames.back().result;
         auto result = flat_expr_id::none;
         if (ast::is_valid(value))
         {
             auto const is_object = ast().at(value).node.is<ast::object>();
-            result = is_object ? flatten_object(value, f.result) : flatten_expr(value);
+            result = is_object ? flatten_object(value, result_type) : flatten_expr(value);
         }
-        if (is_valid(f.return_label))
-            add_stmt(from, flat_leave{.target = f.return_label, .value = result});
+        if (is_valid(return_label))
+            add_stmt(from, flat_leave{.target = return_label, .value = result});
         else
             add_stmt(from, flat_return{.value = result});
     }
