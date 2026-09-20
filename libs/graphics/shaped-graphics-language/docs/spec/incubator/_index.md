@@ -34,4 +34,5 @@ Each file has the same shape, so an idea can be picked up cold:
 | [compilation-model.md](compilation-model.md) | shader text as the target, modules compiled in parallel against interfaces, and one demand-driven pass for names, types and evaluation |
 | [feature-levels.md](feature-levels.md) | a function declares the non-portable features it needs, and checking refuses every undeclared use |
 | [literal-types.md](literal-types.md) | a literal keeps a literal type throughout an expression, and coerces only where another type is asked of it |
+| [inferred-comptime.md](inferred-comptime.md) | a function value is a compile-time entity, and a parameter that must be constant is inferred from the body, as Zig's `comptime` without the keyword |
 | [beyond-shaders.md](beyond-shaders.md) | SGL as a test run for a general-purpose language, and what that asks of today's decisions |

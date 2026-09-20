@@ -42,6 +42,15 @@ let first_hit = find(hits, fun (h: hit_info) -> bool:
 let larger = fun [T](a: T, b: T) => max(a, b)
 ```
 
+**A parameter is a value, and `mut` makes it a place.**
+A plain argument is evaluated once and the callee cannot change it.
+`mut self` is the caller's place: `x.dim 0.5` changes `x`, with the index expressions of the place evaluated once.
+`mut` on an ordinary parameter is the caller's place as well, and the call site must mark the argument, so an effect on a variable is visible where it happens.
+The spelling of that mark is not decided.
+
+**Operands and arguments are evaluated left to right, each exactly once.**
+So a shader with two calls that have effects in one expression means the same on every target.
+
 **Type arguments.**
 `[]` after a name signals arguments that a caller may omit and have deduced:
 
@@ -84,7 +93,7 @@ This is an experiment that may be built back if it turns out to cost more than i
 
 ## Open
 
-* What exactly a function value is, given that it cannot be called indirectly: a compile-time-only entity, or a type of its own.
-* Whether a nested function may be returned or stored, or only passed downwards.
+* How the call site marks an argument passed to a `mut` parameter.
+* What a function value is as a type; that it is a compile-time entity is settled in [inferred-comptime.md](inferred-comptime.md).
 * The rules for ray tracing function tables.
 * Whether compile-time functions and `[]` parameters are one mechanism or two.
