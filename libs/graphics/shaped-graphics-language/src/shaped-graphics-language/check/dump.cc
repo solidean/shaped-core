@@ -70,7 +70,7 @@ struct dumper
             out += s.state == symbol_state::failed ? " failed)\n" : " unfinished)\n";
             return;
         }
-        if (s.intrinsic != builtin::none)
+        if (is_valid(s.intrinsic) || is_valid(s.intrinsic_type))
             out += " builtin";
         if (s.kind == symbol_kind::function && m.functions[s.info].is_pure)
             out += " pure";
@@ -243,6 +243,12 @@ struct dumper
                      {
                          out += "(print ";
                          dump_expr(e, p.value, indent);
+                         out += ")";
+                     },
+                     [&](flat_eval const& v)
+                     {
+                         out += "(eval ";
+                         dump_expr(e, v.value, indent);
                          out += ")";
                      },
                      [&](flat_if const& i)

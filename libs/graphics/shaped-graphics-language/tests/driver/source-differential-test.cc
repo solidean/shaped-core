@@ -67,6 +67,31 @@ constexpr auto break_value_body = cc::string_view("let mut w = p.a\n"
                                                   "    if grade(w) > 0.5 => break w\n"
                                                   "    if w > 100.0 or w < -100.0 => break 0.0\n");
 
+/// Calls whose value is dropped, and a helper whose return type is inferred from its arrow body.
+constexpr auto dropped_values = cc::string_view("fun noisy(x: float) -> float:\n"
+                                                "    print x\n"
+                                                "    return x * 2.0\n"
+                                                "fun twice(v: float) => noisy(v) + noisy(v * 0.5)\n"
+                                                "fun careful(v: float) -> float:\n"
+                                                "    if v < 0.25 => return 0.0\n"
+                                                "    noisy v\n"
+                                                "    return v\n");
+constexpr auto dropped_values_body = cc::string_view("let mut x = p.a\n"
+                                                     "noisy x\n"
+                                                     "if p.a < p.b => twice(p.b)\n"
+                                                     "careful(p.a)\n"
+                                                     "saturate x\n"
+                                                     "x += twice(careful p.b)\n");
+
+/// The same without a print, so every target writes it.
+constexpr auto quiet_drops = cc::string_view("fun half(v: float) => v * 0.5\n"
+                                             "fun graded(v: float) -> float:\n"
+                                             "    if v < 0.25 => return 0.0\n"
+                                             "    return half v\n");
+constexpr auto quiet_drops_body = cc::string_view("let x = half p.a\n"
+                                                  "graded p.b\n"
+                                                  "saturate(x + graded(p.a))\n");
+
 struct program
 {
     cc::string_view name;
@@ -82,6 +107,8 @@ constexpr program programs[] = {
     {.name = "short circuit", .helpers = noisy, .body = short_circuit_body},
     {.name = "while with a call", .helpers = noisy, .body = while_call_body},
     {.name = "break value", .helpers = guard_clauses, .body = break_value_body},
+    {.name = "dropped values", .helpers = dropped_values, .body = dropped_values_body},
+    {.name = "quiet drops", .helpers = quiet_drops, .body = quiet_drops_body},
 };
 
 run_inputs inputs_of(checked_module const& m, f32 a, f32 b)
@@ -453,6 +480,37 @@ TEST("sgl source - break value through a helper: the text")
              "    result.color = float4(x_1, x_1, x_1, 1.0);\n"
              "    return result;\n"
              "}\n");
+}
+
+TEST("sgl source - a dropped value: the call's statements stay, and a rest that is only a local is gone")
+{
+    // `graded p.b` leaves nothing behind its statements, and `saturate(...)` stays a statement of its own.
+    CHECK(function_text(quiet_drops, quiet_drops_body, sgl::emit::target::wgsl)
+          == "@fragment\n"
+             "fn main_ps(p: frag) -> target_ {\n"
+             "    let v: f32 = p.a;\n"
+             "    let x: f32 = v * 0.5;\n"
+             "    var graded_result: f32;\n"
+             "    let v_1: f32 = p.b;\n"
+             "    if v_1 < 0.25 {\n"
+             "        graded_result = 0.0;\n"
+             "    } else {\n"
+             "        graded_result = v_1 * 0.5;\n"
+             "    }\n"
+             "    var graded_1_result: f32;\n"
+             "    let v_2: f32 = p.a;\n"
+             "    if v_2 < 0.25 {\n"
+             "        graded_1_result = 0.0;\n"
+             "    } else {\n"
+             "        graded_1_result = v_2 * 0.5;\n"
+             "    }\n"
+             "    _ = saturate(x + graded_1_result);\n"
+             "    return target_(vec4f(x, x, x, 1.0));\n"
+             "}\n");
+    CHECK(function_text(quiet_drops, quiet_drops_body, sgl::emit::target::hlsl_dx12)
+              .contains("    saturate(x + graded_1_result);\n"));
+    CHECK(function_text(quiet_drops, quiet_drops_body, sgl::emit::target::msl)
+              .contains("    (void)(saturate(x + graded_1_result));\n"));
 }
 
 TEST("sgl source - every program without a print is written for every target")

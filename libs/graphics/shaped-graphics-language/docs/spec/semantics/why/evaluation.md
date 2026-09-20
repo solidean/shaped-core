@@ -55,3 +55,10 @@ A target gives a `var` without a value whatever it likes: WGSL zeroes it, and HL
 Promising either would mean initializing every such `var`, which the legalizer writes by the dozen and always assigns before it reads.
 So such a run has no behaviour, and the check pass is what will keep a program from having one.
 The machine still says which of the errors it met, since a legalizer that reads its own result `var` too early is a bug a status finds at once.
+
+## EVAL-63
+
+A value is its scalars in field order, so an evaluator sees one run of scalars per call and needs no type.
+That is what lets one evaluator serve a family: a componentwise sum reads its width off the number of scalars it was given, and is the same function for `float`, `float3`, `float4` and `vec3`.
+The check that the scalars fit stands in front of every evaluator, in the machine, so no evaluator repeats it and none can forget it.
+

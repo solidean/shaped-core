@@ -30,14 +30,8 @@ public:
     /// As the header comment names the target: "HLSL for dx12".
     [[nodiscard]] virtual cc::string_view description() const = 0;
 
-    /// `b` must be a builtin type.
-    [[nodiscard]] virtual cc::string_view type_name(check::builtin b) const = 0;
-
-    /// `b` must be a builtin function that every target writes as a plain call: `normalize`, `dot`, `saturate`.
-    [[nodiscard]] virtual cc::string_view function_name(check::builtin b) const = 0;
-
-    /// True when a matrix times a vector is `mul(m, v)`; false when it is `m * v`.
-    [[nodiscard]] virtual bool has_mul_function() const = 0;
+    /// Which column of a builtin's record this target reads: how a type is named and how a call is written.
+    [[nodiscard]] virtual builtins::language language() const = 0;
 
     /// True when `name(a, b)` builds a value of a struct; false when a local must be declared and its members assigned.
     [[nodiscard]] virtual bool has_struct_constructor() const = 0;
@@ -45,6 +39,10 @@ public:
     /// One line without indentation and without a line break: `let n: vec3f = normalize(p.normal);`.
     /// A mutable local without a value is declared and nothing else: `float x;`, and `var x: f32;`, which WGSL zeroes.
     virtual void write_local(cc::string& out, local_declaration const& local) const = 0;
+
+    /// One line without indentation and without a line break, for a value that is evaluated and dropped: `saturate(x);`.
+    /// WGSL refuses a bare call of a function whose value must be used, so there it is `_ = saturate(x);`.
+    virtual void write_eval(cc::string& out, cc::string_view value) const = 0;
 
     /// True for a target with C's control flow: `if (c)` with the brace on a line of its own, `while (true)`, and
     /// `do { … } while (false);` for a `once`.

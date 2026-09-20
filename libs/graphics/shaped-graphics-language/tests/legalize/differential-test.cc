@@ -62,6 +62,8 @@ TEST("sgl legalize - the random programs exercise every rule")
     auto with_pin = 0;
     auto with_result = 0;
     auto with_prints = 0;
+    auto with_eval = 0;
+    auto with_dropped_eval = 0;
     for (auto seed = u64(0); seed < 200; ++seed)
     {
         auto const structured = random_program(m, seed, shape_of(seed));
@@ -71,6 +73,10 @@ TEST("sgl legalize - the random programs exercise every rule")
         with_pin += text.contains("_before :") ? 1 : 0;
         with_result += text.contains("_result :") ? 1 : 0;
         with_prints += interpret(m, structured, test_inputs(m)).trace.size() >= 2 ? 1 : 0;
+        // an eval the legalizer kept, and one whose value was a block, so that nothing but its statements is left
+        auto const before = dump_entry_point(m, structured);
+        with_eval += text.contains("(eval ") ? 1 : 0;
+        with_dropped_eval += before.contains("(eval (block ") ? 1 : 0;
     }
     // A generator that stopped producing one of these would leave its rule untested without a single red test.
     CHECK(with_once >= 20);
@@ -78,6 +84,8 @@ TEST("sgl legalize - the random programs exercise every rule")
     CHECK(with_pin >= 10);
     CHECK(with_result >= 40);
     CHECK(with_prints >= 100);
+    CHECK(with_eval >= 20);
+    CHECK(with_dropped_eval >= 10);
 }
 
 TEST("sgl legalize - the differential test has teeth: without pinning some seed fails")

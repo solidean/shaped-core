@@ -377,6 +377,7 @@ Registered checks, **in the order they run**:
 | `shaped-lint`| shaped-linter's own rules on `.cc`/`.hh`/`.md`/`.py`. Scoped to the branch by default; `--dirty-only`, `--commit` or `--all` to rescope. | yes (applies its suggested fixes) |
 | `format`     | clang-format our C++ sources. Scoped to the branch by default; `--dirty-only`, `--commit` or `--all` to rescope. | yes (rewrites in place) |
 | `crossrefs`  | Validate doc↔code cross-references repo-wide (always full-repo).                 | no (report only) |
+| `sgl-prelude`| SGL's committed `prelude/builtins.sgl` is what the C++ builtin registry generates. Builds the `sgl` tool. | yes (rewrites the file) |
 | `test`       | Build + run the full suite on the debug, default, release, single-threaded **and** (Linux/macOS) sanitizer presets. | no (report only) |
 
 ### What it prints about its own cost
@@ -427,6 +428,14 @@ The binding pass exists twice — in C++ for the runtime rewriter, in Python for
 Running only the Python half would let a divergence through to the suite, which is the thing this gate runs ahead of.
 So it builds `shaped-shader-library-test` and runs the corpus case, `--no-test` or not.
 It also fails when that case runs zero times: it selects one test by name, and a runner given a name that matches nothing exits 0.
+
+**`sgl-prelude` builds a target too, and it is the one fixer that stands behind `format`.**
+SGL's builtins live in a C++ registry, and `libs/graphics/shaped-graphics-language/prelude/builtins.sgl` is that registry written out and committed.
+The step builds the `sgl` tool and runs `sgl prelude --check` on the file; under `--fix` it runs `--write` instead.
+Standing behind `format` breaks nothing: what it writes is SGL, which no other gate reads, so the ordering argument above does not reach it.
+It sits with `shader-grammar` for the reason that one does — it needs a build, so every static gate runs first.
+Where the tool cannot be built — `SC_BUILD_TOOLS` off, or an emscripten preset — the step says so and passes, and the library's own test still compares the two texts.
+[adding-a-builtin.md](../../libs/graphics/shaped-graphics-language/docs/adding-a-builtin.md) is what the registry is.
 
 `test` is the slow tail and runs **only after the static checks pass** — no point building a tree that already fails a cheap lint — and `--no-test` skips it.
 It builds and runs the suite across five build variants:

@@ -3,7 +3,7 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/string/string.hh>
 #include <shaped-graphics-language/ast/file_ast.hh>
-#include <shaped-graphics-language/check/builtins.hh>
+#include <shaped-graphics-language/builtins/ids.hh>
 #include <shaped-graphics-language/check/ids.hh>
 
 /// What the check pass knows about the declarations of a module: its types, its symbols and the per-file side tables.
@@ -89,8 +89,10 @@ struct sgl::check::symbol
     symbol_kind kind = symbol_kind::unsupported;
     symbol_state state = symbol_state::untouched;
     cc::string name;
-    /// What a `@builtin` declaration stands for; `none` for a declaration of the program's own.
-    builtin intrinsic = builtin::none;
+    /// The registry record a `@builtin fun` stands for; `none` for a struct and for a declaration of the program's own.
+    builtin_id intrinsic = builtin_id::none;
+    /// The registry record a `@builtin struct` stands for; `none` for everything else.
+    builtin_type_id intrinsic_type = builtin_type_id::none;
     /// The operator of an `@operator` function, which lookup finds through this spelling and never through `name`.
     cc::string operator_spelling;
     /// A struct's type.

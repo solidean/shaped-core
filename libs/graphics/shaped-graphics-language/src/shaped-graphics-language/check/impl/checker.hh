@@ -87,6 +87,11 @@ struct call_edge
 /// What the pass knows about a function beyond its public `function_info`, parallel to `checked_module::functions`.
 struct function_notes
 {
+    /// An arrow body without `-> T`: the result is the type of the body's expression.
+    /// Its body is checked as part of compiling the symbol, and for every other function after all signatures are known.
+    bool infers_result = false;
+    /// `check_body` ran, so it does not run again.
+    bool is_body_checked = false;
     /// An entry point whose signature passed every rule of its stage.
     bool is_valid_entry = false;
     /// The body checked without a single error, so its side tables are complete.
@@ -110,6 +115,7 @@ struct call_arguments
 struct checker
 {
     cc::span<module_file const> files;
+    builtins::registry const& builtins;
     checked_module out;
 
     /// Module scope: every name but those of `@operator` functions.
@@ -169,8 +175,8 @@ struct checker
     [[nodiscard]] ast::range_of<member_info> compile_members(i32 file, ast::range_of<ast::decl_id> members, bool is_struct);
     /// The type an expression in a type position names; the error type when it names none.
     [[nodiscard]] type_id resolve_type(i32 file, ast::expr_id expr);
-    /// The type of the prelude's `@builtin struct` of that name; without one it reports at `where` and is the error type.
-    [[nodiscard]] type_id type_of_builtin(builtin b, i32 file, source_span where);
+    /// The type of the prelude's `@builtin struct` named `name`; without one it reports at `where` and is the error type.
+    [[nodiscard]] type_id type_of_builtin(cc::string_view name, i32 file, source_span where);
 
     // ---- bodies and expressions (check_expr.cc) ---------------------------------------------------------------------
 
@@ -217,6 +223,10 @@ struct checker
                                              source_span where,
                                              cc::string_view spelling,
                                              cc::span<type_id const> types);
+    /// True for a function whose inferred result is being compiled right now and whose parameters do not take `types`.
+    /// Its parameters are known by then, so a call that could never choose it does not need its result.
+    /// That keeps an overload set usable from inside one of its own inferred members, where demanding it would be a cycle.
+    [[nodiscard]] bool is_out_of_the_running(symbol_id candidate, cc::span<type_id const> types) const;
     /// The candidates of `spelling` that take exactly `types`, without a report; what the flat tree is written from.
     [[nodiscard]] symbol_id find_operator(cc::string_view spelling, cc::span<type_id const> types) const;
     [[nodiscard]] call_arguments check_arguments(function_scope& scope,

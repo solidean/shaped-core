@@ -20,7 +20,7 @@ struct rule_fixture
     {
         auto const declare = [&](cc::string_view name, f64 limit)
         {
-            auto const value = b.call(builtin::less, {b.member(b.local(local_id(0)), "a"), b.literal(limit)});
+            auto const value = b.call("less", {b.member(b.local(local_id(0)), "a"), b.literal(limit)});
             auto const declared = b.let(name, value);
             head.push_back(declared.stmt);
             return declared.local;
@@ -36,8 +36,8 @@ struct rule_fixture
     flat_expr_id e() { return b.local(e_local); }
     flat_expr_id f(f64 value) { return b.literal(value); }
     flat_stmt_id print(f64 value) { return b.print(b.literal(value)); }
-    type_id float_type() { return b.type_of(builtin::scalar_float); }
-    type_id bool_type() { return b.type_of(builtin::boolean); }
+    type_id float_type() { return b.type_named("float"); }
+    type_id bool_type() { return b.type_named("bool"); }
 
     /// Ends the body in `leave $root 0.0`.
     void finish(cc::span<flat_stmt_id const> body)
@@ -157,7 +157,7 @@ TEST("sgl legalize - X2: a block with a single exit at its end is its expression
     auto const value = t.b.block_expr(block, t.float_type(), {t.print(1.0), t.b.leave(block, t.f(2.0))});
     auto const bare = t.b.add_label("w");
     auto const bare_value = t.b.block_expr(bare, t.float_type(), {t.b.leave(bare, t.f(5.0))});
-    t.finish({t.b.print(t.b.call(builtin::add, {value, bare_value}))});
+    t.finish({t.b.print(t.b.call("add", {value, bare_value}))});
     CHECK(t.structured()
           == "  (print (call add (block $v\n"
              "      (print (lit 1.0 : float))\n"
@@ -317,7 +317,7 @@ TEST("sgl legalize - X5: a continue never crosses a once")
     auto t = rule_fixture();
     auto const loop = t.b.add_label("l");
     auto const block = t.b.add_label("b");
-    auto const index = t.b.add_local(local_kind::index, "i", t.b.type_of(builtin::scalar_int));
+    auto const index = t.b.add_local(local_kind::index, "i", t.b.type_named("int"));
     t.finish({t.b.for_(loop, index, t.b.int_literal(0), t.b.int_literal(2),
                        {
                            t.b.block(block,
@@ -383,14 +383,13 @@ TEST("sgl legalize - E2: an operand is pinned only when the block to its right c
                                   t.b.leave(block, t.f(30.0)),
                               });
     };
-    auto const float4 = t.b.type_of(builtin::float4);
+    auto const float4 = t.b.type_named("float4");
     // free: a literal, an immutable local, and a var the block leaves alone
     auto const free_operands
         = t.b.construct(float4, {t.f(0.5), t.b.local(fixed.local), t.b.local(untouched.local), assigning_block("v")});
     // pinned: a var the block assigns, and a call with an effect; the literal between them stays
-    auto const pinned_operands
-        = t.b.construct(float4, {t.b.local(touched.local), t.b.call_with_effect(builtin::saturate, {t.f(4.0)}),
-                                 t.f(0.5), assigning_block("w")});
+    auto const pinned_operands = t.b.construct(
+        float4, {t.b.local(touched.local), t.b.call_with_effect("saturate", {t.f(4.0)}), t.f(0.5), assigning_block("w")});
     t.finish({touched.stmt, untouched.stmt, fixed.stmt, t.b.print(free_operands), t.b.print(pinned_operands)});
     CHECK(t.structured()
           == "  (var touched : float = (lit 1.0 : float))\n"
@@ -445,7 +444,7 @@ TEST("sgl legalize - E3: and / or stay operators over a right side without effec
     t.finish({
         t.b.print(t.b.and_(t.c(), t.b.not_(t.d()))),
         t.b.print(t.b.and_(t.c(), noisy)),
-        t.b.print(t.b.or_(t.d(), t.b.call_with_effect(builtin::less, {t.f(1.0), t.f(2.0)}))),
+        t.b.print(t.b.or_(t.d(), t.b.call_with_effect("less", {t.f(1.0), t.f(2.0)}))),
     });
     CHECK(t.structured()
           == "  (print (and (local c : bool) (not (local d : bool) : bool) : bool))\n"
@@ -474,7 +473,7 @@ TEST("sgl legalize - E3: and / or stay operators over a right side without effec
 TEST("sgl legalize - E4: a condition with statements moves to the top of the loop, where a continue still meets it")
 {
     auto t = rule_fixture();
-    auto const int_type = t.b.type_of(builtin::scalar_int);
+    auto const int_type = t.b.type_named("int");
     auto const n = t.b.var("n", int_type, t.b.int_literal(0));
     auto const loop = t.b.add_label("l");
     auto const block = t.b.add_label("v");
@@ -483,15 +482,15 @@ TEST("sgl legalize - E4: a condition with statements moves to the top of the loo
                          {
                              t.b.print(t.b.local(n.local)),
                              t.b.if_(t.d(), {t.b.leave(block, t.b.bool_literal(false))}),
-                             t.b.leave(block, t.b.call(builtin::less_int, {t.b.local(n.local), t.b.int_literal(2)})),
+                             t.b.leave(block, t.b.call("less_int", {t.b.local(n.local), t.b.int_literal(2)})),
                          });
-    t.finish({n.stmt, t.b.while_(loop, condition,
-                                 {
-                                     t.b.assign(t.b.local(n.local),
-                                                t.b.call(builtin::add_int, {t.b.local(n.local), t.b.int_literal(1)})),
-                                     t.b.if_(t.c(), {t.b.continue_(loop)}),
-                                     t.print(9.0),
-                                 })});
+    t.finish({n.stmt,
+              t.b.while_(loop, condition,
+                         {
+                             t.b.assign(t.b.local(n.local), t.b.call("add_int", {t.b.local(n.local), t.b.int_literal(1)})),
+                             t.b.if_(t.c(), {t.b.continue_(loop)}),
+                             t.print(9.0),
+                         })});
     CHECK(t.structured()
           == "  (var n : int = (lit 0 : int))\n"
              "  (while $l (block $v\n"
@@ -530,7 +529,7 @@ TEST("sgl legalize - E4: a condition with statements moves to the top of the loo
 TEST("sgl legalize - the end of a for is pinned when the body could change it")
 {
     auto t = rule_fixture();
-    auto const int_type = t.b.type_of(builtin::scalar_int);
+    auto const int_type = t.b.type_named("int");
     auto const count = t.b.var("count", int_type, t.b.int_literal(2));
     auto const loop = t.b.add_label("l");
     auto const index = t.b.add_local(local_kind::index, "i", int_type);
@@ -578,18 +577,17 @@ TEST("sgl legalize - X6: a block that ends in a loop is left by leaving the loop
     auto const rows = t.b.add_label("rows");
     auto const weight = t.b.var("weight", t.float_type(), t.f(1.0));
     auto const shade = t.b.let(
-        "shade",
-        t.b.block_expr(found, t.float_type(),
-                       {
-                           t.b.loop(rows,
-                                    {
-                                        t.b.assign(t.b.local(weight.local),
-                                                   t.b.call(builtin::multiply, {t.b.local(weight.local), t.f(0.5)})),
-                                        t.b.if_(t.b.call(builtin::less, {t.b.local(weight.local), t.f(0.25)}),
-                                                {t.b.leave(found, t.b.local(weight.local))}),
-                                        t.b.if_(t.d(), {t.b.leave(found, t.f(0.0))}),
-                                    }),
-                       }));
+        "shade", t.b.block_expr(found, t.float_type(),
+                                {
+                                    t.b.loop(rows,
+                                             {
+                                                 t.b.assign(t.b.local(weight.local),
+                                                            t.b.call("multiply", {t.b.local(weight.local), t.f(0.5)})),
+                                                 t.b.if_(t.b.call("less", {t.b.local(weight.local), t.f(0.25)}),
+                                                         {t.b.leave(found, t.b.local(weight.local))}),
+                                                 t.b.if_(t.d(), {t.b.leave(found, t.f(0.0))}),
+                                             }),
+                                }));
     t.finish({weight.stmt, shade.stmt, t.b.print(t.b.local(shade.local))});
     CHECK(t.core()
           == "  (var weight : float = (lit 1.0 : float))\n"
@@ -636,5 +634,49 @@ TEST("sgl legalize - X6 keeps away from a block that goes on behind its loop")
              "        (break)))\n"
              "    (print (lit 1.0 : float)))\n"
              "  (print (lit 2.0 : float))\n"
+             "  (return (lit 0.0 : float))\n");
+}
+
+TEST("sgl legalize - an eval is a statement like any other: its blocks move in front, and a call stays where it stood")
+{
+    auto t = rule_fixture();
+    auto const block = t.b.add_label("v");
+    auto const noisy = t.b.block_expr(block, t.float_type(), {t.print(1.0), t.b.leave(block, t.f(2.0))});
+    auto const guarded = t.b.add_label("g");
+    auto const two_exits
+        = t.b.block_expr(guarded, t.float_type(),
+                         {t.b.if_(t.c(), {t.print(3.0), t.b.leave(guarded, t.f(4.0))}), t.b.leave(guarded, t.f(5.0))});
+    t.finish({
+        // nothing is left of a block but its statements
+        t.b.eval(noisy),
+        // an operand with an effect pins what stands to its left, as in any other statement
+        t.b.eval(t.b.call("add", {t.b.call_with_effect("saturate", {t.f(7.0)}), two_exits})),
+        // a call stays, pure or not: the tree says it is evaluated, and no rule is asked whether anybody could tell
+        t.b.eval(t.b.call("saturate", {t.f(9.0)})),
+    });
+    CHECK(t.structured()
+          == "  (eval (block $v\n"
+             "      (print (lit 1.0 : float))\n"
+             "      (leave $v (lit 2.0 : float)) : float))\n"
+             "  (eval (call add (call:effect saturate (lit 7.0 : float) : float) (block $g\n"
+             "      (if (local c : bool)\n"
+             "        (then\n"
+             "          (print (lit 3.0 : float))\n"
+             "          (leave $g (lit 4.0 : float))))\n"
+             "      (leave $g (lit 5.0 : float)) : float) : float))\n"
+             "  (eval (call saturate (lit 9.0 : float) : float))\n"
+             "  (leave $root (lit 0.0 : float))\n");
+    CHECK(t.core()
+          == "  (print (lit 1.0 : float))\n"
+             "  (let:temporary saturate_value : float = (call:effect saturate (lit 7.0 : float) : float))\n"
+             "  (var:temporary g_result : float)\n"
+             "  (if (local c : bool)\n"
+             "    (then\n"
+             "      (print (lit 3.0 : float))\n"
+             "      (assign (local g_result : float) = (lit 4.0 : float)))\n"
+             "    (else\n"
+             "      (assign (local g_result : float) = (lit 5.0 : float))))\n"
+             "  (eval (call add (local saturate_value : float) (local g_result : float) : float))\n"
+             "  (eval (call saturate (lit 9.0 : float) : float))\n"
              "  (return (lit 0.0 : float))\n");
 }

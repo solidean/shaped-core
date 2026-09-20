@@ -11,26 +11,8 @@ using namespace sgl::check;
 using namespace sgl::emit;
 using namespace sgl::emit::impl;
 
-/// How tightly an expression holds together, loosest first; the same ladder in every target so far.
-enum class level : u8
-{
-    logical_or,
-    logical_and,
-    /// `<` and `==`, which no target chains.
-    comparison,
-    additive,
-    multiplicative,
-    /// A negative literal.
-    unary,
-    /// A name, a call, a construction, a member access: whatever needs no parentheses anywhere.
-    primary,
-};
-
-struct rendered
-{
-    cc::string text;
-    level binds = level::primary;
-};
+using level = builtins::precedence;
+using rendered = builtins::written;
 
 /// Shortest text that reads back as `value`, always with a decimal point: `1.0`, `0.45`, `1.0e+20`.
 /// `value` must be finite.
@@ -115,18 +97,7 @@ struct writer
         return d.is_c_like() ? cc::format("{} ({})", keyword, condition) : cc::format("{} {}", keyword, condition);
     }
 
-    static cc::string wrapped(rendered r, level needed)
-    {
-        return r.binds < needed ? cc::format("({})", r.text) : cc::move(r.text);
-    }
-
-    /// Left-associative, so an equal level on the right keeps its parentheses: `a + (b + c)` is not `a + b + c` in floats.
-    static rendered binary(cc::string_view op, level own, rendered lhs, rendered rhs)
-    {
-        auto const tighter = level(u8(own) + 1);
-        return {.text = cc::format("{} {} {}", wrapped(cc::move(lhs), own), op, wrapped(cc::move(rhs), tighter)),
-                .binds = own};
-    }
+    static cc::string wrapped(rendered r, level needed) { return builtins::wrapped(cc::move(r), needed); }
 
     /// `&&` and `||` never stand bare inside each other: WGSL refuses the mix, and no reader should need the ladder.
     static rendered logical(cc::string_view op, level own, rendered lhs, rendered rhs)
@@ -203,76 +174,36 @@ struct writer
         return {.text = cc::move(text)};
     }
 
-    /// `m * (v, w)`, where a target has either an operator or a function for it.
-    rendered transformed(flat_call const& c, f64 w)
-    {
-        auto const arguments = p.e.at(c.arguments);
-        auto vector = rendered{
-            .text = cc::format("{}({}, {})", d.type_name(builtin::float4), expr(arguments[1]).text, literal_text(w))};
-        auto matrix = expr(arguments[0]);
-        if (d.has_mul_function())
-            return {.text = cc::format("mul({}, {})", matrix.text, vector.text)};
-        return binary("*", level::multiplicative, cc::move(matrix), cc::move(vector));
-    }
-
+    /// Every call is written from its registry record; nothing here knows one builtin from another.
     rendered call(flat_call const& c)
     {
-        auto const arguments = p.e.at(c.arguments);
-        switch (c.intrinsic)
+        auto const& record = *p.m.builtin_function(c.intrinsic);
+        auto arguments = cc::vector<rendered>();
+        for (auto const id : p.e.at(c.arguments))
+            arguments.push_back(expr(id));
+
+        auto const& how = record.write;
+        switch (how.kind)
         {
-        case builtin::transform_position:
-            return transformed(c, 1.0);
-        case builtin::transform_direction:
-            return {.text = cc::format("{}.xyz", wrapped(transformed(c, 0.0), level::primary))};
-        case builtin::scale_color:
-        case builtin::multiply:
-        case builtin::multiply_int:
-        case builtin::multiply_color:
-        case builtin::scale_vec3:
-            return binary("*", level::multiplicative, expr(arguments[0]), expr(arguments[1]));
-        case builtin::divide:
-            return binary("/", level::multiplicative, expr(arguments[0]), expr(arguments[1]));
-        case builtin::add:
-        case builtin::add_int:
-        case builtin::add_color:
-        case builtin::add_vec3:
-            return binary("+", level::additive, expr(arguments[0]), expr(arguments[1]));
-        case builtin::subtract:
-        case builtin::subtract_int:
-        case builtin::subtract_vec3:
-            return binary("-", level::additive, expr(arguments[0]), expr(arguments[1]));
-        case builtin::negate:
+        case builtins::spelling_kind::infix:
+            return builtins::write_infix(how.text, how.binds, cc::move(arguments[0]), cc::move(arguments[1]));
+        case builtins::spelling_kind::prefix:
             // parenthesized whenever it is no name: `--x` is a decrement in every C-like target
-            return {.text = cc::format("-{}", wrapped(expr(arguments[0]), level::primary)), .binds = level::unary};
-        case builtin::less:
-        case builtin::less_int:
-            return binary("<", level::comparison, expr(arguments[0]), expr(arguments[1]));
-        case builtin::less_equal:
-        case builtin::less_equal_int:
-            return binary("<=", level::comparison, expr(arguments[0]), expr(arguments[1]));
-        case builtin::greater:
-        case builtin::greater_int:
-            return binary(">", level::comparison, expr(arguments[0]), expr(arguments[1]));
-        case builtin::greater_equal:
-        case builtin::greater_equal_int:
-            return binary(">=", level::comparison, expr(arguments[0]), expr(arguments[1]));
-        case builtin::equal:
-        case builtin::equal_int:
-            return binary("==", level::comparison, expr(arguments[0]), expr(arguments[1]));
-        case builtin::not_equal:
-        case builtin::not_equal_int:
-            return binary("!=", level::comparison, expr(arguments[0]), expr(arguments[1]));
-        default:
+            return {.text = cc::format("{}{}", how.text, wrapped(cc::move(arguments[0]), level::primary)),
+                    .binds = level::unary};
+        case builtins::spelling_kind::custom:
+            return how.custom({.target = d.language(), .arguments = arguments, .builtins = *p.m.builtins});
+        case builtins::spelling_kind::call:
             break;
         }
 
-        auto text = cc::string(d.function_name(c.intrinsic));
+        auto text = cc::string(record.called_in(d.language()));
         text += "(";
         for (auto i = isize(0); i < arguments.size(); ++i)
         {
             if (i != 0)
                 text += ", ";
-            text += expr(arguments[i]).text;
+            text += arguments[i].text;
         }
         text += ")";
         return {.text = cc::move(text)};
@@ -411,6 +342,12 @@ struct writer
                      },
                      // `validate` refuses a tree that holds one
                      [&](flat_print const&) {}, //
+                     [&](flat_eval const& v)
+                     {
+                         auto text = cc::string();
+                         d.write_eval(text, expr(v.value).text);
+                         line(text);
+                     },
                      [&](flat_if const& i) { branch(i, false); },
                      // neither is in a core tree
                      [&](flat_block const&) {}, //
@@ -453,8 +390,8 @@ struct writer
 
 cc::string_view sgl::emit::impl::type_text(plan const& p, dialect const& d, check::type_id type)
 {
-    if (is_builtin_type(p.m, type))
-        return d.type_name(builtin_of_type(p.m, type));
+    if (auto const* const record = p.m.builtin_type_of(type))
+        return record->spelled_in(d.language());
     return p.structs[p.struct_of_type[index_of(type)]].name;
 }
 

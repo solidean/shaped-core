@@ -35,11 +35,11 @@ Back to the [semantics](_index.md); the reasons are in [why/emitting.md](why/emi
 ## Names
 
 * **EMIT-14** Every name an emitter writes comes from the entry point's mint ([CHK-104](checking.md#the-flat-tree)).
-* **EMIT-15** Each target has a list of **reserved words**: its keywords, its predeclared types, and the functions an emitter of that target calls.
+* **EMIT-15** Each target has a list of **reserved words**: its keywords and its predeclared types, together with every function name a builtin is written as in that target (EMIT-74).
 * **EMIT-16** The reserved words of the target are taken in the mint before anything else is minted.
 * **EMIT-17** A struct, a binding or a local whose name is reserved in a target is minted from that name and a trailing underscore, in that target only.
 * **EMIT-18** A member whose name is reserved gets trailing underscores until it is free among its siblings, in that target only.
-* **EMIT-19** A `@builtin` declaration is never written by its name: each target spells it in its own way.
+* **EMIT-19** A `@builtin` declaration is never written by its name: each target spells it as its record in the builtin registry says (EMIT-74).
 * **EMIT-20** An entry point keeps its name in every target.
 * **EMIT-21** An entry point whose name is reserved in any target is `reserved-entry-point-name`, in every target ([why](why/emitting.md#emit-21)).
 
@@ -53,7 +53,7 @@ struct target_ {
 
 ## Types
 
-* **EMIT-22** A struct of the program keeps its name, and a builtin type is spelled by the table below.
+* **EMIT-22** A struct of the program keeps its name, and a builtin type is spelled as its record says, which today is the table below.
 * **EMIT-23** A struct is declared after every struct it holds.
 
 | SGL | HLSL | WGSL | MSL |
@@ -76,7 +76,7 @@ struct target_ {
 * **EMIT-30** A member of a render target struct at location i is `SV_Targeti` in HLSL and `@location(i)` in WGSL.
 * **EMIT-31** A semantic is made from the name as the program writes it, whatever EMIT-18 made of the member.
 * **EMIT-32** A vertex input member whose semantic would start with `SV_` is `system-value-semantic`.
-* **EMIT-33** A member of an edge struct is of a builtin type other than `mat4`, `int` and `bool`, or it is `unsupported`.
+* **EMIT-33** A member of an edge struct is of a builtin type whose record says it crosses an edge, which `mat4`, `int` and `bool` do not, or it is `unsupported`.
 * **EMIT-34** `@position` anywhere but in a stage link, a second `@position`, and one struct as both edges are `unsupported`.
 
 | stage | parameter | result |
@@ -99,7 +99,7 @@ struct pixel_input
 * **EMIT-36** An `@inline binding` is a struct of its members and one global of that struct, which has the binding's name.
 * **EMIT-37** The global is where `sg` expects inline constants, by the table below.
 * **EMIT-38** A binding that is not `@inline`, and a second `@inline` binding, are `unsupported`.
-* **EMIT-39** A member of an `@inline` binding is of a builtin type other than `bool`, or it is `unsupported`.
+* **EMIT-39** A member of an `@inline` binding is of a builtin type whose record has a size in a block, which `bool` has not, or it is `unsupported`.
 * **EMIT-40** A member's offset follows HLSL's packing of a constant buffer, and `hlsl-vulkan` states it on every member ([why](why/emitting.md#emit-40)).
 * **EMIT-41** A member that WGSL's layout or MSL's places at another offset is `layout-mismatch`, and its detail gives the offset in each.
 
@@ -113,7 +113,7 @@ struct pixel_input
 ## Matrices
 
 * **EMIT-42** A matrix is column-major, and a vector stands to its right.
-* **EMIT-43** HLSL declares every matrix member `column_major` and writes the product `mul(m, v)`; WGSL writes `m * v`.
+* **EMIT-43** HLSL declares every matrix member `column_major` and writes a product `mul(a, b)`; WGSL writes `a * b`, for a matrix times a vector and for a matrix times a matrix.
 * **EMIT-44** `transform_position(m, p)` is the product of `m` and the four-vector `(p, 1.0)`.
 * **EMIT-45** `transform_direction(m, v)` is the `xyz` of the product of `m` and `(v, 0.0)`.
 
@@ -124,11 +124,14 @@ struct pixel_input
 * **EMIT-48** An immutable local is a named constant: `const T name = value;` in HLSL and `let name: T = value;` in WGSL.
 * **EMIT-49** A float literal is the shortest decimal text that reads back as its value, always with a decimal point, and without a suffix.
 * **EMIT-50** A literal that is infinite or not a number is `non-finite-literal`.
-* **EMIT-51** An `@operator` builtin is its operator: `+`, `-`, `*`, `/`, the six comparisons, and the prefix `-`.
+* **EMIT-51** An `@operator` builtin is its operator: `+`, `-`, `*`, `/`, the six comparisons, and the prefix `-`; the products of a matrix are EMIT-43.
   Parentheses follow the tree, and an operand of equal precedence on the right keeps them.
 * **EMIT-52** Every other builtin function is a call of the target's function of that name, and `mix` is `lerp` in HLSL.
 * **EMIT-53** A construction of a builtin type is a call of the target's type, on one line: `float3(x, y, z)`, `vec3f(x, y, z)`.
 * **EMIT-73** The operand of a prefix `-` that is no name, call or member stands in parentheses, so `-(-0.4)` never reads as a decrement.
+* **EMIT-74** How a builtin is written is a field of its registry record: a call under a name per target, an infix or a prefix operator, or a writer of its own ([why](why/emitting.md#emit-74)).
+  No emitter holds a list of builtins, and the size and alignment EMIT-40, EMIT-41 and EMIT-62 place a member by are fields of the type's record.
+* **EMIT-75** A value that is evaluated and dropped is a statement of its own: `value;` in HLSL, `_ = value;` in WGSL, and `(void)(value);` in MSL ([why](why/emitting.md#emit-75)).
 * **EMIT-54** A construction of a struct of the program is `name(a, b)` in WGSL.
 * **EMIT-55** In HLSL it is a local that is declared and then assigned member by member; a returned one is minted from `result` ([why](why/emitting.md#emit-55)).
 * **EMIT-68** Control flow is written by [the table of the core form](legalization.md#the-table), and a nested body is one level deeper.
@@ -208,4 +211,5 @@ So `{float3; float}` is `layout-mismatch`: the `float` is at byte 12 in HLSL and
 * Whether the size of an inline block has to agree between targets as its offsets do; WGSL rounds it up to 16 bytes.
 * How a vertex input's dx12 semantic is chosen once a member wants one that is not its name.
 * How a splatted value reads once a target can take the vector whole ([checking](checking.md#open)).
-* Whether the reserved words of a target hold every function of that target, or only the ones an emitter calls.
+* Whether the reserved words of a target hold every function of that target, or only the ones a builtin is written as.
+* A function that a custom writer of EMIT-74 calls, such as HLSL's `mul`, which is reserved by the target's list and not by the record.

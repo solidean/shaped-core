@@ -32,7 +32,13 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/ast/build_stmt.cc
     src/shaped-graphics-language/ast/dump.cc
 
-    src/shaped-graphics-language/check/builtins.cc
+    src/shaped-graphics-language/builtins/register.cc
+    src/shaped-graphics-language/builtins/register_scalar_math.cc
+    src/shaped-graphics-language/builtins/register_transforms.cc
+    src/shaped-graphics-language/builtins/register_types.cc
+    src/shaped-graphics-language/builtins/register_vector_math.cc
+    src/shaped-graphics-language/builtins/registry.cc
+
     src/shaped-graphics-language/check/check.cc
     src/shaped-graphics-language/check/check_decl.cc
     src/shaped-graphics-language/check/check_expr.cc
@@ -57,14 +63,18 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/emit/impl/wgsl.cc
 
     src/shaped-graphics-language/driver/compile_to_text.cc
+    src/shaped-graphics-language/driver/prelude.cc
 )
 
-# The prelude is a file, and the library carries its text: a page has no filesystem and a shipped binary no source tree.
+# The prelude is two files, and only one of them is embedded.
+# prelude/builtins.sgl is GENERATED from the C++ builtin registry and committed.
+# The library produces the same text in memory, so it never reads that file.
+# prelude/core.sgl is hand-written SGL, and the library carries its text: a page has no filesystem and a shipped binary no source tree.
 # Baked in at configure time, and CMAKE_CONFIGURE_DEPENDS is what makes an edit of the file re-run this.
 #
 # MSVC caps ONE string literal at 16380 bytes, and adjacent literals are joined only after that limit applies.
 # So the text goes out as a run of chunks that end at a newline, which also keeps a UTF-8 sequence in one piece.
-set(_sgl_prelude_source "${CMAKE_CURRENT_SOURCE_DIR}/prelude/prelude.sgl")
+set(_sgl_prelude_source "${CMAKE_CURRENT_SOURCE_DIR}/prelude/core.sgl")
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_sgl_prelude_source}")
 file(READ "${_sgl_prelude_source}" _sgl_prelude_text)
 
@@ -89,12 +99,16 @@ while(_sgl_prelude_at LESS _sgl_prelude_length)
     string(APPEND _sgl_prelude_literals "\n    R\"sglprelude(${_sgl_prelude_chunk})sglprelude\"")
     math(EXPR _sgl_prelude_at "${_sgl_prelude_at} + ${_sgl_prelude_take}")
 endwhile()
+# An empty core.sgl is a valid prelude, and no literal at all is not valid C++.
+if(_sgl_prelude_literals STREQUAL "")
+    set(_sgl_prelude_literals " \"\"")
+endif()
 
 # Written only when it differs, so a configure that changes nothing recompiles nothing.
 # Not file(CONFIGURE): SGL spells an attribute `@name`, and two of them on one line would read as a CMake variable.
 set(_sgl_prelude_generated "${CMAKE_CURRENT_BINARY_DIR}/generated/prelude.generated.cc")
 set(_sgl_prelude_cc
-"// Generated from prelude/prelude.sgl by shaped-graphics-language's CMakeLists. Do not edit.
+"// Generated from prelude/core.sgl by shaped-graphics-language's CMakeLists. Do not edit.
 #include <shaped-graphics-language/driver/prelude.hh>
 
 namespace
@@ -102,9 +116,7 @@ namespace
 constexpr char const* k_prelude =${_sgl_prelude_literals};
 } // namespace
 
-cc::string_view sgl::prelude_source() { return k_prelude; }
-
-cc::string_view sgl::prelude_name() { return \"prelude.sgl\"; }
+cc::string_view sgl::impl::embedded_core_prelude() { return k_prelude; }
 ")
 set(_sgl_prelude_existing "")
 if(EXISTS "${_sgl_prelude_generated}")
@@ -156,7 +168,10 @@ target_sources(shaped-graphics-language
     src/shaped-graphics-language/ast/stmt.hh
     src/shaped-graphics-language/ast/impl/builder.hh
 
-    src/shaped-graphics-language/check/builtins.hh
+    src/shaped-graphics-language/builtins/ids.hh
+    src/shaped-graphics-language/builtins/register.hh
+    src/shaped-graphics-language/builtins/registry.hh
+
     src/shaped-graphics-language/check/check.hh
     src/shaped-graphics-language/check/checked_module.hh
     src/shaped-graphics-language/check/dump.hh
@@ -172,6 +187,7 @@ target_sources(shaped-graphics-language
     src/shaped-graphics-language/legalize/impl/walk.hh
 
     src/shaped-graphics-language/interpret/interpret.hh
+    src/shaped-graphics-language/interpret/scalar.hh
 
     src/shaped-graphics-language/emit/emit.hh
     src/shaped-graphics-language/emit/reserved_words.hh
@@ -193,6 +209,21 @@ target_link_libraries(shaped-graphics-language PUBLIC clean-core)
 # Enable conforming preprocessor for MSVC
 target_compile_options(shaped-graphics-language PUBLIC $<$<CXX_COMPILER_ID:MSVC>:/Zc:preprocessor>)
 
+# `sgl`, the command line of the toolchain: a nexus binary whose jobs are COMMANDs, `sgl prelude` and `sgl emit` so far.
+# It lives with the library because it is nothing but the library behind an argument parser.
+# Run it through `uv run dev.py run sgl -- <command> …`; `dev.py check`'s `sgl-prelude` step does.
+# Gated like tools/: a dependent that adds shaped-core as a subdirectory wants the library and not our binaries.
+if(SC_BUILD_TOOLS)
+    add_executable(sgl
+        tools/sgl/main.cc
+        tools/sgl/files.hh
+        tools/sgl/emit_command.cc
+        tools/sgl/prelude_command.cc
+    )
+    sc_nexus_binary(sgl KINDS tool)
+    target_link_libraries(sgl PRIVATE shaped-graphics-language nexus)
+endif()
+
 # Test executable
 if(SC_BUILD_TESTS)
     add_executable(shaped-graphics-language-test
@@ -211,6 +242,8 @@ if(SC_BUILD_TESTS)
         tests/ast/expression-test.cc
         tests/ast/member-test.cc
         tests/ast/statement-test.cc
+
+        tests/builtins/registry-test.cc
 
         tests/check/check-test-support.hh
         tests/check/control-flow-check-test.cc
@@ -238,6 +271,7 @@ if(SC_BUILD_TESTS)
         tests/spec/spec-examples-test.cc
 
         tests/samples/helpers-sample-test.cc
+        tests/samples/matrices-sample-test.cc
         tests/samples/samples-test.cc
     )
     sc_nexus_binary(shaped-graphics-language-test KINDS tests)

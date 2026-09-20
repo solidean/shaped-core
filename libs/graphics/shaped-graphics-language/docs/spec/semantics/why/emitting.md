@@ -95,3 +95,18 @@ An unsuffixed literal is a `double` in C++, and MSL has no `double`, so the ques
 The hand-written MSL in this repo and the MSL SPIRV-Cross generates both write `0.5` for a `float`.
 So the unsuffixed form stays until a Metal compiler says otherwise.
 A suffix would be the only place where one literal is spelled differently per target.
+
+## EMIT-74
+
+An emitter that switches over the builtins is a second list of them, and there were five such lists: one per target, the arity for the validator, and the layouts.
+Each had to agree with the prelude and with the interpreter, and nothing but a failing test said when one did not.
+A record holds all of it, so adding a builtin touches one place, and a target that spells a function differently is one field of that record.
+The few calls that are no call and no operator - a matrix product, a position that gains its `w` - write themselves through a function of the record.
+That function is given the arguments already written and nothing else of the emitter, so it cannot reach into a target's state.
+
+## EMIT-75
+
+WGSL refuses a bare call of a function whose value must be used, and every function of its library is such a function.
+The phony assignment `_ = value;` is what the language offers for it.
+HLSL takes the bare statement, and MSL, which is C++, would warn about an unused value without the cast.
+

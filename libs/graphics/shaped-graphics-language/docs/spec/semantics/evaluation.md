@@ -50,7 +50,7 @@ This prints 11: the left operand is read while `x` is 1, and the block to its ri
 ## Effects
 
 * **EVAL-21** An expression **has an effect** when it holds a call of a function that is not `@pure`, or a block that holds a write or a `print`.
-* **EVAL-22** The only statement with an effect on the behaviour of a run is `print`, which appends its value to the trace.
+* **EVAL-22** The only statement with an effect on the behaviour of a run is `print`, which appends its value to the trace; an `eval` has the effects of its expression and none of its own (EVAL-61).
 * **EVAL-23** A call of a function that is not `@pure` appends its result to the trace at the step it runs, which makes its place among the prints observable.
 * **EVAL-24** "Has no effect" licenses nothing but skipping work nobody could observe; it never changes what a program means ([why](why/evaluation.md#eval-24)).
 
@@ -130,6 +130,12 @@ fun graded(a: float) -> float:
 * **EVAL-58** `a < b <= c` is `a < b and b <= c` with `b` evaluated once: each inner operand is bound to a local where it first stands, and read from it after that.
 * **EVAL-59** So a chain stops at its first comparison that is false, and evaluates no operand behind it.
 * **EVAL-60** `print value` is `print`.
+* **EVAL-61** `eval value` evaluates `value` and drops it: what the evaluation prints and records happens, in its place, and the value goes nowhere.
+* **EVAL-62** A call that stands as a statement is `eval` of the call ([CHK-137](checking.md#inferred-results-and-dropped-values)).
+  A call of a function that returns nothing is its block as a statement.
+* **EVAL-63** What a builtin function computes is the evaluator of its registry record ([why](why/evaluation.md#eval-63)).
+  An evaluator is given the scalars of its arguments and gives the scalars of its result.
+  The machine checks the number and the kind of both against the record's parameter and result types, so an ill-typed call is a type error by EVAL-43 and never reaches an evaluator.
 
 ## Errors of the program
 
@@ -141,7 +147,7 @@ fun graded(a: float) -> float:
 ## Open
 
 * Definite assignment: a `let` without a value is what would let a program read a `var` that holds nothing, and the check pass carries none yet.
-* Division, and what an `int` division by zero is.
+* What an `int` division by zero is, which is why `int` has no `/` yet.
 * Whether `float` arithmetic is exact across targets; the machine computes in `f32`, and a target may fuse or reorder.
 * `switch`, which joins with `case` and captures a `break` the way a loop does.
 * A place that holds an index, whose index expression EVAL-14 then has to order.

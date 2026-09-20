@@ -69,15 +69,14 @@ type_id checker::resolve_type(i32 file, ast::expr_id expr)
     return result;
 }
 
-type_id checker::type_of_builtin(builtin b, i32 file, source_span where)
+type_id checker::type_of_builtin(cc::string_view name, i32 file, source_span where)
 {
-    auto const name = to_string(b);
     auto const* const found = names.get_ptr(name);
     if (found != nullptr && !found->empty())
     {
         auto const id = found->front();
         if (out.at(id).kind == symbol_kind::structure && demand(id, file, where) == symbol_state::checked
-            && out.at(id).intrinsic == b)
+            && is_valid(out.at(id).intrinsic_type))
             return out.at(id).type;
     }
     report(diagnostic_kind::unknown_name, file, where, cc::format("{}, which the prelude must declare @builtin", name));
@@ -164,9 +163,9 @@ void checker::compile_struct(symbol_id id)
     auto const is_builtin = find_attribute(file, d.attributes, "builtin") != nullptr;
     if (is_builtin)
     {
-        auto const intrinsic = builtin_of(out.at(id).name);
-        if (intrinsic != builtin::none && is_type(intrinsic))
-            out.symbols[index_of(id)].intrinsic = intrinsic;
+        auto const intrinsic = builtins.find_type(out.at(id).name);
+        if (is_valid(intrinsic))
+            out.symbols[index_of(id)].intrinsic_type = intrinsic;
         else
             report(diagnostic_kind::unknown_builtin, file, s.name, out.at(id).name);
     }
@@ -313,26 +312,42 @@ void checker::compile_function(symbol_id id)
         }
     }
 
-    // Without `-> T` a function returns nothing; an arrow body has a value, whose type nothing infers yet.
+    // Without `-> T` a block body returns nothing, and an arrow body returns what its expression is.
     auto result = checked_module::nothing_type;
+    auto const infers_result = !ast::is_valid(f.return_type) && f.body.kind == ast::body_kind::arrow;
     if (ast::is_valid(f.return_type))
         result = resolve_type(file, f.return_type);
-    else if (f.body.kind == ast::body_kind::arrow)
-    {
-        unsupported(file, f.name, "an arrow body without a written return type");
+    else if (infers_result)
         result = checked_module::error_type;
-    }
-    is_failed = is_failed || result == checked_module::error_type;
+    is_failed = is_failed || (result == checked_module::error_type && !infers_result);
 
     auto const has_body = f.body.kind != ast::body_kind::none;
     if (find_attribute(file, d.attributes, "builtin") != nullptr)
     {
-        auto const intrinsic = builtin_of(out.at(id).name);
-        if (intrinsic != builtin::none && !is_type(intrinsic))
+        // The record is the overload: the name and the parameter types together, as the registry read them from its own text.
+        auto types = cc::vector<builtin_type_id>();
+        auto is_silent = false;
+        for (auto const& p : parameters)
+        {
+            is_silent = is_silent || p.type == checked_module::error_type;
+            auto const& type = out.at(p.type);
+            types.push_back(is_valid(type.symbol) ? out.at(type.symbol).intrinsic_type : builtin_type_id::none);
+        }
+        auto const intrinsic = builtins.find_function(out.at(id).name, types);
+        if (is_valid(intrinsic))
             out.symbols[index_of(id)].intrinsic = intrinsic;
         else
         {
-            report(diagnostic_kind::unknown_builtin, file, f.name, out.at(id).name);
+            // a parameter type that did not resolve was reported, and it is why no record fits
+            if (!is_silent)
+            {
+                auto text = cc::vector<type_id>();
+                for (auto const& p : parameters)
+                    text.push_back(p.type);
+                report(diagnostic_kind::unknown_builtin, file, f.name,
+                       builtins.has_function_named(out.at(id).name) ? signature_text(out.at(id).name, text)
+                                                                    : cc::string(out.at(id).name));
+            }
             is_failed = true;
         }
         if (has_body)
@@ -358,7 +373,17 @@ void checker::compile_function(symbol_id id)
     });
     out.parameters.push_back_range(parameters);
     out.binding_lists.push_back_range(bindings);
-    notes.push_back({});
+    notes.push_back({.infers_result = infers_result});
+
+    // The body is part of what a caller needs here, so it is checked now, while the symbol is still in compilation.
+    // Whoever demands this function from inside that body meets `in_compilation`, which is the dependency cycle.
+    // A signature that failed has no body check at all, like every other failed function.
+    if (infers_result)
+    {
+        if (!is_failed)
+            check_body(id);
+        is_failed = is_failed || out.functions[out.at(id).info].result == checked_module::error_type;
+    }
 
     if (is_vertex && is_pixel)
         report(diagnostic_kind::invalid_entry_point, file, f.name, "an entry point has one stage");
@@ -384,7 +409,7 @@ void checker::judge_entry_point(symbol_id id)
         is_valid = false;
     };
 
-    if (s.intrinsic != builtin::none)
+    if (sgl::is_valid(s.intrinsic))
         invalid("an entry point is no @builtin");
     if (!s.operator_spelling.empty())
         invalid("an entry point is no @operator");
@@ -410,8 +435,9 @@ void checker::judge_entry_point(symbol_id id)
             {
                 ++positions;
                 auto const& type = out.at(m.type);
-                is_hpos4
-                    = is_hpos4 && type.kind == type_kind::structure && out.at(type.symbol).intrinsic == builtin::hpos4;
+                auto const* const record = out.builtin_type_of(m.type);
+                is_hpos4 = is_hpos4 && type.kind == type_kind::structure && record != nullptr
+                        && record->name == builtins::k_hpos4;
             }
         if (positions != 1)
             invalid("a @vertex fun returns a struct with exactly one @position field");

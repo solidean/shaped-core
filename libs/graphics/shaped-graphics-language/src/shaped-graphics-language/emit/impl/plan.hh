@@ -75,9 +75,11 @@ struct plan
     check::name_mint names;
 };
 
+/// The column of a builtin's record `t` reads; the two HLSL targets share one.
+[[nodiscard]] builtins::language language_of(target t);
+
 /// True for a type the prelude declares `@builtin`, which a target spells in its own way and never declares.
 [[nodiscard]] bool is_builtin_type(check::checked_module const& m, check::type_id type);
-[[nodiscard]] check::builtin builtin_of_type(check::checked_module const& m, check::type_id type);
 
 /// Appends what keeps `e` from being written, which is the same for every target.
 void validate(check::checked_module const& m, check::flat_entry_point const& e, cc::vector<error>& errors);

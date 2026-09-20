@@ -31,7 +31,7 @@ inline checked_sources flat_test_module()
 /// A builder for `fun main(p: frag) -> float`, which is what the interpreter's tests run.
 inline sgl::check::flat_builder float_function(sgl::check::checked_module const& m)
 {
-    auto const float_type = sgl::check::flat_builder{.m = m}.type_of(sgl::check::builtin::scalar_float);
+    auto const float_type = sgl::check::flat_builder{.m = m}.type_named("float");
     auto const frag = sgl::check::flat_builder{.m = m}.type_named("frag");
     return sgl::check::flat_builder::create(m, {.input = frag, .result = float_type});
 }

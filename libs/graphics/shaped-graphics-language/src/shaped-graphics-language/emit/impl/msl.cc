@@ -21,33 +21,7 @@ class msl_dialect_t final : public dialect
 public:
     cc::string_view description() const override { return "MSL"; }
 
-    cc::string_view type_name(builtin b) const override
-    {
-        switch (b)
-        {
-        case builtin::scalar_float:
-            return "float";
-        case builtin::float3:
-        case builtin::vec3:
-        case builtin::pos3:
-            return "float3";
-        case builtin::float4:
-        case builtin::hpos4:
-            return "float4";
-        case builtin::mat4:
-            return "float4x4";
-        case builtin::scalar_int:
-            return "int";
-        case builtin::boolean:
-            return "bool";
-        default:
-            return "";
-        }
-    }
-
-    cc::string_view function_name(builtin b) const override { return to_string(b); }
-
-    bool has_mul_function() const override { return false; }
+    builtins::language language() const override { return builtins::language::msl; }
 
     // MSL could brace-initialize, which would drop the member names from the text.
     bool has_struct_constructor() const override { return false; }
@@ -58,6 +32,8 @@ public:
     {
         out.appendf("for (int {} = {}; {} < {}; ++{})", index, first, index, end, index);
     }
+
+    void write_eval(cc::string& out, cc::string_view value) const override { out.appendf("(void)({});", value); }
 
     void write_local(cc::string& out, local_declaration const& local) const override
     {

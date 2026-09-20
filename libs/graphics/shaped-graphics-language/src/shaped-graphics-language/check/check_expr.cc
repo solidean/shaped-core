@@ -27,10 +27,13 @@ void checker::check_body(symbol_id id)
     auto const file = out.at(id).file;
     auto const& ast = ast_of(file);
     auto const& f = ast.at(out.at(id).declaration).node.as<ast::fun_decl>();
-    if (f.body.kind == ast::body_kind::none)
+    auto const index = out.at(id).info;
+    if (f.body.kind == ast::body_kind::none || notes[index].is_body_checked)
         return;
+    notes[index].is_body_checked = true;
 
-    auto const info = out.functions[out.at(id).info];
+    // by value: checking the body may compile another function, and `functions` then moves
+    auto const info = out.functions[index];
     auto scope = function_scope{.function = id, .file = file, .result = info.result};
     for (auto const& p : out.at(info.parameters))
     {
@@ -46,7 +49,19 @@ void checker::check_body(symbol_id id)
     auto const errors_before = error_count();
 
     auto ending = check_statements(scope, f.body.statements);
-    if (ast::is_valid(f.body.value))
+    if (ast::is_valid(f.body.value) && notes[index].infers_result)
+    {
+        auto type = check_expr(scope, f.body.value);
+        if (type == nothing_type)
+        {
+            report(diagnostic_kind::type_mismatch, file, span_of(file, f.body.value),
+                   cc::format("the body of {} is its result, and this is nothing", out.at(id).name));
+            type = error_type;
+        }
+        out.functions[index].result = type;
+        ending = flow::exits;
+    }
+    else if (ast::is_valid(f.body.value))
     {
         check_return(scope, span_of(file, f.body.value), f.body.value);
         ending = flow::exits;
@@ -58,7 +73,7 @@ void checker::check_body(symbol_id id)
                cc::format("{} returns {}, and a path through its body ends without a return", out.at(id).name,
                           out.name_of(info.result)));
 
-    notes[out.at(id).info].is_body_sound = error_count() == errors_before;
+    notes[index].is_body_sound = error_count() == errors_before;
 }
 
 void checker::convert_object(function_scope& scope, ast::expr_id object, type_id to)
@@ -194,7 +209,7 @@ type_id checker::check_literal(function_scope& scope, ast::expr_id id, ast::lite
             unsupported(file, where, "an integer literal that does not fit an int");
             return error_type;
         }
-        return type_of_builtin(builtin::scalar_int, file, where);
+        return type_of_builtin(builtins::k_int, file, where);
     case number_class::other:
         unsupported(file, where, "a number literal with a prefix, a suffix or a p exponent");
         return error_type;
@@ -206,7 +221,7 @@ type_id checker::check_literal(function_scope& scope, ast::expr_id id, ast::lite
         unsupported(file, where, "a float literal this large");
         return error_type;
     }
-    return type_of_builtin(builtin::scalar_float, file, where);
+    return type_of_builtin(builtins::k_float, file, where);
 }
 
 type_id checker::check_name(function_scope& scope, ast::expr_id id, ast::name const& name)
@@ -511,6 +526,8 @@ type_id checker::resolve_overload(function_scope& scope,
     auto matches = cc::vector<symbol_id>();
     for (auto const candidate : candidates)
     {
+        if (is_out_of_the_running(candidate, arguments.types))
+            continue;
         if (demand(candidate, file, where) != symbol_state::checked)
         {
             is_silent = true;
@@ -541,7 +558,7 @@ type_id checker::resolve_overload(function_scope& scope,
     auto const self = target{.kind = target_kind::overload, .symbol = chosen};
     set_target(file, id, self);
     set_target(file, callee, self);
-    if (out.at(chosen).intrinsic != builtin::none)
+    if (is_valid(out.at(chosen).intrinsic))
         return out.functions[out.at(chosen).info].result;
 
     // A call of a function of the program is inlined, so it is an edge recursion is looked for along.
@@ -571,7 +588,7 @@ type_id checker::check_logical(function_scope& scope, ast::expr_id id, ast::call
     if (arguments.is_poisoned)
         return error_type;
 
-    auto const bool_type = type_of_builtin(builtin::boolean, file, where);
+    auto const bool_type = type_of_builtin(builtins::k_bool, file, where);
     auto is_match = arguments.types.size() == (spelling == "not" ? 1 : 2);
     for (auto const type : arguments.types)
         is_match = is_match && type == bool_type;
@@ -593,7 +610,7 @@ type_id checker::check_chain(function_scope& scope, ast::expr_id id, ast::compar
     for (auto const operand : operands)
         types.push_back(check_expr(scope, operand));
 
-    auto const bool_type = type_of_builtin(builtin::boolean, file, where);
+    auto const bool_type = type_of_builtin(builtins::k_bool, file, where);
     for (auto i = isize(0); i < operators.size() && i + 1 < types.size(); ++i)
     {
         if (types[i] == error_type || types[i + 1] == error_type)
@@ -607,6 +624,18 @@ type_id checker::check_chain(function_scope& scope, ast::expr_id id, ast::compar
                               out.name_of(out.functions[out.at(chosen).info].result)));
     }
     return bool_type;
+}
+
+bool checker::is_out_of_the_running(symbol_id candidate, cc::span<type_id const> types) const
+{
+    auto const& s = out.at(candidate);
+    if (s.kind != symbol_kind::function || s.state != symbol_state::in_compilation || s.info < 0)
+        return false;
+    auto const parameters = out.at(out.functions[s.info].parameters);
+    auto is_match = parameters.size() == types.size();
+    for (auto i = isize(0); is_match && i < parameters.size(); ++i)
+        is_match = parameters[i].type == types[i];
+    return !is_match;
 }
 
 symbol_id checker::find_operator(cc::string_view spelling, cc::span<type_id const> types) const
@@ -639,6 +668,8 @@ symbol_id checker::resolve_operator(i32 file, source_span where, cc::string_view
     if (auto const* const found = operators.get_ptr(spelling))
         for (auto const candidate : *found)
         {
+            if (is_out_of_the_running(candidate, types))
+                continue;
             if (demand(candidate, file, where) != symbol_state::checked)
             {
                 is_silent = true;
@@ -667,7 +698,7 @@ symbol_id checker::resolve_operator(i32 file, source_span where, cc::string_view
         report(diagnostic_kind::ambiguous_overload, file, where, cc::format("{} has {} candidates", text, matches));
         return symbol_id::none;
     }
-    if (out.at(chosen).intrinsic == builtin::none)
+    if (!is_valid(out.at(chosen).intrinsic))
     {
         unsupported(file, where, "an operator of the program's own where no call is written");
         return symbol_id::none;

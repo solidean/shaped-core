@@ -1,0 +1,12 @@
+// The hand-written half of the prelude: SGL that every program sees and that needs no C++ behind it.
+//
+// The prelude is two files, and the compiler places both in front of every program, in this order:
+//     builtins.sgl   GENERATED from the C++ builtin registry; every declaration in it is @builtin. Never edit it.
+//     core.sgl       this file: ordinary SGL, checked and inlined like a program's own functions.
+//
+// What belongs here is whatever can be said in terms of builtins.sgl: a helper with a body, a struct with fields.
+// What cannot - a new opaque type, a function some target spells in its own way - is a record in the registry.
+//
+// Nothing stands here yet.
+// Every overload family needs generics to be written once, and until SGL has them the registry's C++ loops write them out.
+// A function written here is inlined like any other, so it costs an emitter nothing and an editor can jump into it.

@@ -11,16 +11,6 @@ using namespace sgl::check::impl;
 
 namespace
 {
-builtin builtin_of_type(checked_module const& m, type_id type)
-{
-    if (!is_valid(type) || index_of(type) >= m.types.size())
-        return builtin::none;
-    auto const& t = m.at(type);
-    if (t.kind != type_kind::structure || !is_valid(t.symbol) || index_of(t.symbol) >= m.symbols.size())
-        return builtin::none;
-    return m.at(t.symbol).intrinsic;
-}
-
 cc::span<member_info const> members_of(checked_module const& m, type_id type)
 {
     if (!is_valid(type) || index_of(type) >= m.types.size())
@@ -35,102 +25,15 @@ void append_zero(checked_module const& m, type_id type, cc::vector<scalar>& leav
 {
     if (depth > k_max_depth)
         return;
-    switch (builtin_of_type(m, type))
+    // A builtin type says what it is made of, whether or not the prelude gives it fields.
+    if (auto const* const record = m.builtin_type_of(type))
     {
-    case builtin::scalar_float:
-        leaves.push_back(scalar::of(0.0f));
+        for (auto i = 0; i < record->leaf_count; ++i)
+            leaves.push_back({.kind = record->leaf_kind, .bits = 0});
         return;
-    case builtin::scalar_int:
-        leaves.push_back(scalar::of(i32(0)));
-        return;
-    case builtin::boolean:
-        leaves.push_back(scalar::of(false));
-        return;
-    case builtin::mat4:
-        for (auto i = 0; i < 16; ++i)
-            leaves.push_back(scalar::of(0.0f));
-        return;
-    default:
-        break;
     }
     for (auto const& member : members_of(m, type))
         append_zero(m, member.type, leaves, depth + 1);
-}
-
-/// By iteration, since the library links no math; two runs of one tree meet the same bits either way.
-f32 root_of(f32 x)
-{
-    if (!(x > 0.0f) || x - x != 0.0f)
-        return x == 0.0f ? 0.0f : x - x;
-    auto guess = x < 1.0f ? 1.0f : x;
-    for (auto i = 0; i < 48; ++i)
-        guess = 0.5f * (guess + x / guess);
-    return guess;
-}
-
-/// What a builtin function takes: how many scalars each argument has, and of which kind they all are.
-struct call_shape
-{
-    isize counts[3] = {};
-    isize arity = 0;
-    /// `none` for what is no builtin function.
-    value_kind kind = value_kind::none;
-};
-
-call_shape shape_of(builtin b)
-{
-    switch (b)
-    {
-    case builtin::normalize:
-        return {.counts = {3}, .arity = 1, .kind = value_kind::scalar_float};
-    case builtin::saturate:
-    case builtin::negate:
-    case builtin::abs:
-        return {.counts = {1}, .arity = 1, .kind = value_kind::scalar_float};
-    case builtin::length:
-        return {.counts = {3}, .arity = 1, .kind = value_kind::scalar_float};
-    case builtin::clamp:
-    case builtin::mix:
-        return {.counts = {1, 1, 1}, .arity = 3, .kind = value_kind::scalar_float};
-    case builtin::add_color:
-    case builtin::multiply_color:
-    case builtin::add_vec3:
-    case builtin::subtract_vec3:
-        return {.counts = {3, 3}, .arity = 2, .kind = value_kind::scalar_float};
-    case builtin::dot:
-        return {.counts = {3, 3}, .arity = 2, .kind = value_kind::scalar_float};
-    case builtin::transform_position:
-    case builtin::transform_direction:
-        return {.counts = {16, 3}, .arity = 2, .kind = value_kind::scalar_float};
-    case builtin::scale_color:
-    case builtin::scale_vec3:
-        return {.counts = {3, 1}, .arity = 2, .kind = value_kind::scalar_float};
-    case builtin::multiply:
-    case builtin::add:
-    case builtin::subtract:
-    case builtin::less:
-    case builtin::equal:
-    case builtin::divide:
-    case builtin::less_equal:
-    case builtin::greater:
-    case builtin::greater_equal:
-    case builtin::not_equal:
-    case builtin::min:
-    case builtin::max:
-        return {.counts = {1, 1}, .arity = 2, .kind = value_kind::scalar_float};
-    case builtin::add_int:
-    case builtin::subtract_int:
-    case builtin::multiply_int:
-    case builtin::less_int:
-    case builtin::equal_int:
-    case builtin::less_equal_int:
-    case builtin::greater_int:
-    case builtin::greater_equal_int:
-    case builtin::not_equal_int:
-        return {.counts = {1, 1}, .arity = 2, .kind = value_kind::scalar_int};
-    default:
-        return {};
-    }
 }
 
 enum class flow_kind : u8
@@ -226,161 +129,32 @@ struct machine
         if (auto const f = eval_all(c.arguments, args); !f.is_normal())
             return f;
 
-        auto const expect = [&](cc::span<isize const> counts, value_kind kind)
-        {
-            if (args.size() != counts.size())
-                return false;
-            for (auto i = isize(0); i < counts.size(); ++i)
-            {
-                if (args[i].leaves.size() != counts[i])
-                    return false;
-                for (auto const& leaf : args[i].leaves)
-                    if (leaf.kind != kind)
-                        return false;
-            }
-            return true;
-        };
-        auto const f = [&](isize arg, isize leaf) { return args[arg].leaves[leaf].as_float(); };
-        auto const i = [&](isize arg) { return u32(args[arg].leaves[0].bits); };
-        auto const floats = [&](cc::span<f32 const> values)
-        {
-            for (auto const v : values)
-                result.leaves.push_back(scalar::of(v));
-        };
-        // column-major: element (row r, column c) is leaf c * 4 + r
-        auto const transformed = [&](isize row, f32 w)
-        { return f(0, row) * f(1, 0) + f(0, 4 + row) * f(1, 1) + f(0, 8 + row) * f(1, 2) + f(0, 12 + row) * w; };
-
         result.type = x.type;
         result.leaves.clear();
-        auto const shape = shape_of(c.intrinsic);
-        if (shape.kind == value_kind::none)
+        auto const* const record = m.builtin_function(c.intrinsic);
+        if (record == nullptr || record->evaluate == nullptr)
             return type_error("a call of something that is no builtin function");
-        auto const is_typed
-            = expect(cc::span<isize const>(shape.counts).subspan({.offset = 0, .size = shape.arity}), shape.kind);
+
+        // Every argument is the scalars its parameter type says, which is all an evaluator relies on.
+        auto in = cc::vector<scalar>();
+        auto is_typed = args.size() == record->parameters.size();
+        for (auto k = isize(0); is_typed && k < args.size(); ++k)
+        {
+            auto const& parameter = m.builtins->at(record->parameters[k]);
+            is_typed = args[k].leaves.size() == parameter.leaf_count;
+            for (auto const& leaf : args[k].leaves)
+                is_typed = is_typed && leaf.kind == parameter.leaf_kind;
+            in.push_back_range(args[k].leaves);
+        }
         if (is_typed)
-            switch (c.intrinsic)
-            {
-            case builtin::normalize:
-            {
-                auto const length = root_of(f(0, 0) * f(0, 0) + f(0, 1) * f(0, 1) + f(0, 2) * f(0, 2));
-                floats({f(0, 0) / length, f(0, 1) / length, f(0, 2) / length});
-                break;
-            }
-            case builtin::dot:
-                floats({f(0, 0) * f(1, 0) + f(0, 1) * f(1, 1) + f(0, 2) * f(1, 2)});
-                break;
-            case builtin::saturate:
-                floats({f(0, 0) < 0.0f ? 0.0f : (f(0, 0) > 1.0f ? 1.0f : f(0, 0))});
-                break;
-            case builtin::transform_position:
-                floats({transformed(0, 1.0f), transformed(1, 1.0f), transformed(2, 1.0f), transformed(3, 1.0f)});
-                break;
-            case builtin::transform_direction:
-                floats({transformed(0, 0.0f), transformed(1, 0.0f), transformed(2, 0.0f)});
-                break;
-            case builtin::scale_color:
-            case builtin::scale_vec3:
-                floats({f(0, 0) * f(1, 0), f(0, 1) * f(1, 0), f(0, 2) * f(1, 0)});
-                break;
-            case builtin::add_color:
-            case builtin::add_vec3:
-                floats({f(0, 0) + f(1, 0), f(0, 1) + f(1, 1), f(0, 2) + f(1, 2)});
-                break;
-            case builtin::subtract_vec3:
-                floats({f(0, 0) - f(1, 0), f(0, 1) - f(1, 1), f(0, 2) - f(1, 2)});
-                break;
-            case builtin::multiply_color:
-                floats({f(0, 0) * f(1, 0), f(0, 1) * f(1, 1), f(0, 2) * f(1, 2)});
-                break;
-            case builtin::length:
-                floats({root_of(f(0, 0) * f(0, 0) + f(0, 1) * f(0, 1) + f(0, 2) * f(0, 2))});
-                break;
-            case builtin::abs:
-                floats({f(0, 0) < 0.0f ? -f(0, 0) : f(0, 0)});
-                break;
-            case builtin::negate:
-                floats({-f(0, 0)});
-                break;
-            case builtin::divide:
-                floats({f(0, 0) / f(1, 0)});
-                break;
-            case builtin::min:
-                floats({f(1, 0) < f(0, 0) ? f(1, 0) : f(0, 0)});
-                break;
-            case builtin::max:
-                floats({f(0, 0) < f(1, 0) ? f(1, 0) : f(0, 0)});
-                break;
-            case builtin::clamp:
-            {
-                auto const low = f(0, 0) < f(1, 0) ? f(1, 0) : f(0, 0);
-                floats({f(2, 0) < low ? f(2, 0) : low});
-                break;
-            }
-            case builtin::mix:
-                floats({f(0, 0) * (1.0f - f(2, 0)) + f(1, 0) * f(2, 0)});
-                break;
-            case builtin::less_equal:
-                result.leaves.push_back(scalar::of(f(0, 0) <= f(1, 0)));
-                break;
-            case builtin::greater:
-                result.leaves.push_back(scalar::of(f(0, 0) > f(1, 0)));
-                break;
-            case builtin::greater_equal:
-                result.leaves.push_back(scalar::of(f(0, 0) >= f(1, 0)));
-                break;
-            case builtin::not_equal:
-                result.leaves.push_back(scalar::of(f(0, 0) != f(1, 0)));
-                break;
-            case builtin::less_equal_int:
-                result.leaves.push_back(scalar::of(i32(i(0)) <= i32(i(1))));
-                break;
-            case builtin::greater_int:
-                result.leaves.push_back(scalar::of(i32(i(0)) > i32(i(1))));
-                break;
-            case builtin::greater_equal_int:
-                result.leaves.push_back(scalar::of(i32(i(0)) >= i32(i(1))));
-                break;
-            case builtin::not_equal_int:
-                result.leaves.push_back(scalar::of(i(0) != i(1)));
-                break;
-            case builtin::multiply:
-                floats({f(0, 0) * f(1, 0)});
-                break;
-            case builtin::add:
-                floats({f(0, 0) + f(1, 0)});
-                break;
-            case builtin::subtract:
-                floats({f(0, 0) - f(1, 0)});
-                break;
-            case builtin::less:
-                result.leaves.push_back(scalar::of(f(0, 0) < f(1, 0)));
-                break;
-            case builtin::equal:
-                result.leaves.push_back(scalar::of(f(0, 0) == f(1, 0)));
-                break;
-            // unsigned, so that an overflow wraps and is no undefined behaviour of this interpreter
-            case builtin::add_int:
-                result.leaves.push_back(scalar::of(i32(i(0) + i(1))));
-                break;
-            case builtin::subtract_int:
-                result.leaves.push_back(scalar::of(i32(i(0) - i(1))));
-                break;
-            case builtin::multiply_int:
-                result.leaves.push_back(scalar::of(i32(i(0) * i(1))));
-                break;
-            case builtin::less_int:
-                result.leaves.push_back(scalar::of(i32(i(0)) < i32(i(1))));
-                break;
-            case builtin::equal_int:
-                result.leaves.push_back(scalar::of(i(0) == i(1)));
-                break;
-            default:
-                break;
-            }
-        if (!is_typed || result.leaves.size() != leaf_count_of(m, x.type))
-            return type_error(
-                cc::format("a call of '{}' with arguments or a result of the wrong type", to_string(c.intrinsic)));
+            record->evaluate(in, result.leaves);
+
+        auto const& returned = m.builtins->at(record->result);
+        auto is_result_typed = result.leaves.size() == returned.leaf_count;
+        for (auto const& leaf : result.leaves)
+            is_result_typed = is_result_typed && leaf.kind == returned.leaf_kind;
+        if (!is_typed || !is_result_typed || result.leaves.size() != leaf_count_of(m, x.type))
+            return type_error(cc::format("a call of '{}' with arguments or a result of the wrong type", record->name));
         // The one way to see WHEN a call with an effect ran: its value joins the trace where the call happened.
         if (!c.is_pure)
             out.trace.push_back(result);
@@ -666,6 +440,11 @@ struct machine
                 return f;
             out.trace.push_back(cc::move(v));
             return {};
+        }
+        if (auto const* const dropped = s.node.try_as<flat_eval>())
+        {
+            auto v = value();
+            return eval(dropped->value, v);
         }
         if (auto const* const branch = s.node.try_as<flat_if>())
         {

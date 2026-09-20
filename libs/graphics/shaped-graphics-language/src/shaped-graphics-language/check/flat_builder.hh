@@ -39,9 +39,7 @@ struct sgl::check::flat_builder
     /// Goes on writing into `e`, which keeps everything it holds.
     [[nodiscard]] static flat_builder extend(checked_module const& m, flat_entry_point e);
 
-    /// The type the prelude declares for `b`; `none` when the module has no such declaration.
-    [[nodiscard]] type_id type_of(builtin b) const;
-    /// The type of the struct named `name`; `none` when there is none.
+    /// The type of the struct named `name`, builtin or not: `"float"`, `"frag"`; `none` when there is none.
     [[nodiscard]] type_id type_named(cc::string_view name) const;
 
     /// `desired` goes through the mint; a `var` is mutable and nothing else is.
@@ -66,11 +64,12 @@ struct sgl::check::flat_builder
     /// `name` must be a field of the object's type.
     flat_expr_id member(flat_expr_id object, cc::string_view name);
     flat_expr_id construct(type_id type, cc::span<flat_expr_id const> arguments);
-    /// A call of the prelude's function for `b`, with its result type and its purity.
+    /// A call of the prelude's `@builtin` function `name`, with its result type and its purity: `call("add_int", {a, b})`.
+    /// Among overloads, the one whose parameter types are the arguments' types; an operator function is named by its own name.
     /// The module must declare it.
-    flat_expr_id call(builtin b, cc::span<flat_expr_id const> arguments);
+    flat_expr_id call(cc::string_view name, cc::span<flat_expr_id const> arguments);
     /// The same call as one that has an effect, which no function of the prelude is yet.
-    flat_expr_id call_with_effect(builtin b, cc::span<flat_expr_id const> arguments);
+    flat_expr_id call_with_effect(cc::string_view name, cc::span<flat_expr_id const> arguments);
     flat_expr_id not_(flat_expr_id operand);
     flat_expr_id and_(flat_expr_id lhs, flat_expr_id rhs);
     flat_expr_id or_(flat_expr_id lhs, flat_expr_id rhs);
@@ -93,6 +92,8 @@ struct sgl::check::flat_builder
     flat_stmt_id var(local_id local, flat_expr_id value = flat_expr_id::none);
     flat_stmt_id assign(flat_expr_id place, flat_expr_id value);
     flat_stmt_id print(flat_expr_id value);
+    /// Evaluates `value` and drops it.
+    flat_stmt_id eval(flat_expr_id value);
     flat_stmt_id if_(flat_expr_id condition,
                      cc::span<flat_stmt_id const> then_body,
                      cc::span<flat_stmt_id const> else_body = {});

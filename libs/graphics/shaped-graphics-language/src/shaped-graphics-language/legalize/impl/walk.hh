@@ -82,6 +82,7 @@ void for_each_expr_of(flat_stmt const& s, Fn&& fn)
                      visit(n.value);
                  },
                  [&](flat_print const& n) { visit(n.value); },  //
+                 [&](flat_eval const& n) { visit(n.value); },   //
                  [&](flat_if const& n) { visit(n.condition); }, //
                  [&](flat_block const&) {},                     //
                  [&](flat_leave const& n) { visit(n.value); },  //

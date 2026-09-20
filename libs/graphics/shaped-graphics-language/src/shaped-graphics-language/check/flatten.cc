@@ -267,7 +267,7 @@ struct flattener
             return add_expr(type, id, flat_construct{.arguments = add_list(arguments)});
         if (where.kind != target_kind::overload)
             return fail();
-        if (c.out.at(where.symbol).intrinsic == builtin::none)
+        if (!is_valid(c.out.at(where.symbol).intrinsic))
         {
             auto const inlined = inline_call(id, where.symbol, arguments);
             return add_expr(type, id, flat_block{.label = inlined.label, .body = inlined.body});
@@ -278,7 +278,7 @@ struct flattener
     flat_expr_id builtin_call(ast::expr_id id, symbol_id callee, cc::span<flat_expr_id const> arguments)
     {
         auto const& s = c.out.at(callee);
-        if (s.intrinsic == builtin::none || s.info < 0)
+        if (!is_valid(s.intrinsic) || s.info < 0)
             return fail();
         auto const& info = c.out.functions[s.info];
         return add_expr(info.result, id,
@@ -666,18 +666,23 @@ struct flattener
             return add_stmt(from, flat_loop{.label = label, .body = body});
         }
 
-        // What is left is a call of a function that returns nothing: its block is a statement.
+        // What is left is a call, and one that returns nothing is a block that is a statement.
         auto const* const call = x.node.try_as<ast::call>();
-        auto const& where = tables().target_at(value);
-        if (call == nullptr || where.kind != target_kind::overload || c.out.at(where.symbol).intrinsic != builtin::none
-            || tables().type_at(value) != checked_module::nothing_type)
+        if (call == nullptr)
         {
             is_failed = true;
             return;
         }
-        auto const arguments = flatten_arguments(call->arguments);
-        auto const inlined = inline_call(value, where.symbol, arguments);
-        add_stmt(from, flat_block{.label = inlined.label, .body = inlined.body});
+        auto const& where = tables().target_at(value);
+        if (where.kind == target_kind::overload && !is_valid(c.out.at(where.symbol).intrinsic)
+            && tables().type_at(value) == checked_module::nothing_type)
+        {
+            auto const arguments = flatten_arguments(call->arguments);
+            auto const inlined = inline_call(value, where.symbol, arguments);
+            return add_stmt(from, flat_block{.label = inlined.label, .body = inlined.body});
+        }
+        // Any other call has a value, which is evaluated where it stands and dropped.
+        add_stmt(from, flat_eval{.value = flatten_expr(value)});
     }
 
     /// Far beyond any program; it bounds the work on a tree the check pass should never have let through.

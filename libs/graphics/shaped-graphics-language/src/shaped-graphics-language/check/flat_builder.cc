@@ -8,17 +8,23 @@ using namespace sgl::check;
 
 namespace
 {
-flat_expr_id add_call(flat_builder& b, builtin which, cc::span<flat_expr_id const> arguments, bool is_forced_effect)
+flat_expr_id add_call(flat_builder& b, cc::string_view name, cc::span<flat_expr_id const> arguments, bool is_forced_effect)
 {
     auto const list = b.expr_list(arguments);
     for (auto i = isize(0); i < b.m.symbols.size(); ++i)
     {
         auto const& s = b.m.symbols[i];
-        if (s.kind != symbol_kind::function || s.intrinsic != which || s.info < 0)
+        if (s.kind != symbol_kind::function || !is_valid(s.intrinsic) || s.info < 0 || s.name != name)
             continue;
         auto const& f = b.m.functions[s.info];
+        auto const parameters = b.m.at(f.parameters);
+        auto is_match = parameters.size() == arguments.size();
+        for (auto k = isize(0); is_match && k < parameters.size(); ++k)
+            is_match = parameters[k].type == b.e.at(arguments[k]).type;
+        if (!is_match)
+            continue;
         return b.add_expr(f.result, flat_call{.callee = symbol_id(i),
-                                              .intrinsic = which,
+                                              .intrinsic = s.intrinsic,
                                               .is_pure = f.is_pure && !is_forced_effect,
                                               .arguments = list});
     }
@@ -46,14 +52,6 @@ flat_builder flat_builder::create(checked_module const& m, signature const& s)
 flat_builder flat_builder::extend(checked_module const& m, flat_entry_point e)
 {
     return flat_builder{.m = m, .e = cc::move(e)};
-}
-
-type_id flat_builder::type_of(builtin b) const
-{
-    for (auto const& s : m.symbols)
-        if (s.kind == symbol_kind::structure && s.intrinsic == b)
-            return s.type;
-    return type_id::none;
 }
 
 type_id flat_builder::type_named(cc::string_view name) const
@@ -90,17 +88,17 @@ label_id flat_builder::add_label(cc::string_view desired)
 
 flat_expr_id flat_builder::literal(f64 value)
 {
-    return add_expr(type_of(builtin::scalar_float), flat_literal{.value = value});
+    return add_expr(type_named(builtins::k_float), flat_literal{.value = value});
 }
 
 flat_expr_id flat_builder::int_literal(i32 value)
 {
-    return add_expr(type_of(builtin::scalar_int), flat_int_literal{.value = value});
+    return add_expr(type_named(builtins::k_int), flat_int_literal{.value = value});
 }
 
 flat_expr_id flat_builder::bool_literal(bool value)
 {
-    return add_expr(type_of(builtin::boolean), flat_bool_literal{.value = value});
+    return add_expr(type_named(builtins::k_bool), flat_bool_literal{.value = value});
 }
 
 flat_expr_id flat_builder::local(local_id id)
@@ -129,29 +127,29 @@ flat_expr_id flat_builder::construct(type_id type, cc::span<flat_expr_id const> 
     return add_expr(type, flat_construct{.arguments = expr_list(arguments)});
 }
 
-flat_expr_id flat_builder::call(builtin b, cc::span<flat_expr_id const> arguments)
+flat_expr_id flat_builder::call(cc::string_view name, cc::span<flat_expr_id const> arguments)
 {
-    return add_call(*this, b, arguments, false);
+    return add_call(*this, name, arguments, false);
 }
 
-flat_expr_id flat_builder::call_with_effect(builtin b, cc::span<flat_expr_id const> arguments)
+flat_expr_id flat_builder::call_with_effect(cc::string_view name, cc::span<flat_expr_id const> arguments)
 {
-    return add_call(*this, b, arguments, true);
+    return add_call(*this, name, arguments, true);
 }
 
 flat_expr_id flat_builder::not_(flat_expr_id operand)
 {
-    return add_expr(type_of(builtin::boolean), flat_not{.operand = operand});
+    return add_expr(type_named(builtins::k_bool), flat_not{.operand = operand});
 }
 
 flat_expr_id flat_builder::and_(flat_expr_id lhs, flat_expr_id rhs)
 {
-    return add_expr(type_of(builtin::boolean), flat_and{.lhs = lhs, .rhs = rhs});
+    return add_expr(type_named(builtins::k_bool), flat_and{.lhs = lhs, .rhs = rhs});
 }
 
 flat_expr_id flat_builder::or_(flat_expr_id lhs, flat_expr_id rhs)
 {
-    return add_expr(type_of(builtin::boolean), flat_or{.lhs = lhs, .rhs = rhs});
+    return add_expr(type_named(builtins::k_bool), flat_or{.lhs = lhs, .rhs = rhs});
 }
 
 flat_expr_id flat_builder::block_expr(label_id label, type_id type, cc::span<flat_stmt_id const> body)
@@ -191,6 +189,11 @@ flat_stmt_id flat_builder::assign(flat_expr_id place, flat_expr_id value)
 flat_stmt_id flat_builder::print(flat_expr_id value)
 {
     return add_stmt(flat_print{.value = value});
+}
+
+flat_stmt_id flat_builder::eval(flat_expr_id value)
+{
+    return add_stmt(flat_eval{.value = value});
 }
 
 flat_stmt_id flat_builder::if_(flat_expr_id condition,

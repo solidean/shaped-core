@@ -372,6 +372,18 @@ struct expr_lowering
             auto const value = lower_expr(print->value, into);
             into.push_back(attributed().print(value));
         }
+        else if (auto const* const eval = s.node.try_as<flat_eval>())
+        {
+            // A block that was the value has moved in front, and what is left of it is the local that holds its result.
+            // Reading a local or a literal is nothing to evaluate, so such a rest is dropped; a call stays, pure or not.
+            auto const value = lower_expr(eval->value, into);
+            auto const is_leaf
+                = is_known(out.e, value)
+               && (out.e.at(value).node.is<flat_local_ref>() || out.e.at(value).node.is<flat_literal>()
+                   || out.e.at(value).node.is<flat_int_literal>() || out.e.at(value).node.is<flat_bool_literal>());
+            if (!is_leaf || value == eval->value)
+                into.push_back(attributed().eval(value));
+        }
         else if (auto const* const branch = s.node.try_as<flat_if>())
         {
             auto const condition = lower_expr(branch->condition, into);

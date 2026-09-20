@@ -36,7 +36,7 @@ TEST("sgl interpret - the cube's entry points run: a pixel is lit, and a vertex 
     vertex.parameter.leaves[1] = scalar::of(3.0f);
     vertex.parameter.leaves[2] = scalar::of(4.0f);
     // the identity, with a translation of 10 along x in its last column
-    auto constants = zero_value(m, flat_builder{.m = m}.type_of(builtin::mat4));
+    auto constants = zero_value(m, flat_builder{.m = m}.type_named("mat4"));
     for (auto const diagonal : {0, 5, 10, 15})
         constants.leaves[diagonal] = scalar::of(1.0f);
     constants.leaves[12] = scalar::of(10.0f);
@@ -52,15 +52,14 @@ TEST("sgl interpret - operands run left to right, each once, and a block hands i
 {
     auto const checked = flat_test_module();
     auto b = float_function(checked.module);
-    auto const float_type = b.type_of(builtin::scalar_float);
+    auto const float_type = b.type_named("float");
     auto const left = b.add_label("left");
     auto const right = b.add_label("right");
-    auto const sum
-        = b.call(builtin::subtract,
-                 {
-                     b.block_expr(left, float_type, {b.print(b.literal(1.0)), b.leave(left, b.literal(10.0))}),
-                     b.block_expr(right, float_type, {b.print(b.literal(2.0)), b.leave(right, b.literal(4.0))}),
-                 });
+    auto const sum = b.call(
+        "subtract", {
+                        b.block_expr(left, float_type, {b.print(b.literal(1.0)), b.leave(left, b.literal(10.0))}),
+                        b.block_expr(right, float_type, {b.print(b.literal(2.0)), b.leave(right, b.literal(4.0))}),
+                    });
     b.set_body({b.leave(b.e.root, sum)});
     CHECK(run(b) == "ok 6 | print 1 | print 2");
 }
@@ -69,7 +68,7 @@ TEST("sgl interpret - and / or skip their right operand, and a call with an effe
 {
     auto const checked = flat_test_module();
     auto b = float_function(checked.module);
-    auto const bool_type = b.type_of(builtin::boolean);
+    auto const bool_type = b.type_named("bool");
     auto const noisy = [&](f64 tag, bool value)
     {
         auto const label = b.add_label("noisy");
@@ -80,7 +79,7 @@ TEST("sgl interpret - and / or skip their right operand, and a call with an effe
         b.print(b.and_(b.bool_literal(true), noisy(2.0, true))),
         b.print(b.or_(b.bool_literal(true), noisy(3.0, false))),
         b.print(b.or_(b.bool_literal(false), noisy(4.0, false))),
-        b.print(b.call_with_effect(builtin::saturate, {b.literal(7.0)})),
+        b.print(b.call_with_effect("saturate", {b.literal(7.0)})),
         b.leave(b.e.root, b.literal(0.0)),
     });
     CHECK(run(b) == "ok 0 | print false | print 2 | print true | print true | print 4 | print false | print 1 | print 1");
@@ -90,7 +89,7 @@ TEST("sgl interpret - a for evaluates its bounds once, and a while meets its con
 {
     auto const checked = flat_test_module();
     auto b = float_function(checked.module);
-    auto const int_type = b.type_of(builtin::scalar_int);
+    auto const int_type = b.type_named("int");
     auto const end = b.var("end", int_type, b.int_literal(2));
     auto const index = b.add_local(local_kind::index, "i", int_type);
     auto const rows = b.add_label("rows");
@@ -101,10 +100,10 @@ TEST("sgl interpret - a for evaluates its bounds once, and a while meets its con
         b.for_(rows, index, b.int_literal(0), b.local(end.local),
                {b.assign(b.local(end.local), b.int_literal(100)), b.print(b.local(index))}),
         n.stmt,
-        b.while_(counting, b.call(builtin::less_int, {b.local(n.local), b.int_literal(3)}),
+        b.while_(counting, b.call("less_int", {b.local(n.local), b.int_literal(3)}),
                  {
-                     b.assign(b.local(n.local), b.call(builtin::add_int, {b.local(n.local), b.int_literal(1)})),
-                     b.if_(b.call(builtin::equal_int, {b.local(n.local), b.int_literal(2)}), {b.continue_(counting)}),
+                     b.assign(b.local(n.local), b.call("add_int", {b.local(n.local), b.int_literal(1)})),
+                     b.if_(b.call("equal_int", {b.local(n.local), b.int_literal(2)}), {b.continue_(counting)}),
                      b.print(b.local(n.local)),
                  }),
         b.leave(b.e.root, b.literal(0.0)),
@@ -116,13 +115,13 @@ TEST("sgl interpret - a member of a var is assigned in place, and int arithmetic
 {
     auto const checked = flat_test_module();
     auto b = float_function(checked.module);
-    auto const float3 = b.type_of(builtin::float3);
+    auto const float3 = b.type_named("float3");
     auto const s = b.var("s", float3, b.construct(float3, {b.literal(1.0), b.literal(2.0), b.literal(3.0)}));
     b.set_body({
         s.stmt,
         b.assign(b.member(b.local(s.local), "y"), b.literal(20.0)),
         b.print(b.local(s.local)),
-        b.print(b.call(builtin::add_int, {b.int_literal(2147483647), b.int_literal(1)})),
+        b.print(b.call("add_int", {b.int_literal(2147483647), b.int_literal(1)})),
         b.leave(b.e.root, b.member(b.local(s.local), "y")),
     });
     CHECK(run(b) == "ok 20 | print 1 20 3 | print -2147483648");
@@ -131,7 +130,7 @@ TEST("sgl interpret - a member of a var is assigned in place, and int arithmetic
 TEST("sgl interpret - every way a run ends without a result is a status")
 {
     auto const checked = flat_test_module();
-    auto const float_type = flat_builder{.m = checked.module}.type_of(builtin::scalar_float);
+    auto const float_type = flat_builder{.m = checked.module}.type_named("float");
 
     SECTION("a loop nothing leaves runs out of fuel, and keeps what it printed")
     {
@@ -199,7 +198,7 @@ TEST("sgl core - the first violation says why a tree is not core")
         auto const violation = find_core_violation(b.e);
         return violation.has_value() ? violation.value().reason : cc::string("core");
     };
-    auto const bool_type = flat_builder{.m = checked.module}.type_of(builtin::boolean);
+    auto const bool_type = flat_builder{.m = checked.module}.type_named("bool");
 
     auto a = float_function(checked.module);
     a.set_body({a.block(a.add_label("b"), {}), a.return_(a.literal(0.0))});
@@ -211,7 +210,7 @@ TEST("sgl core - the first violation says why a tree is not core")
 
     auto c = float_function(checked.module);
     auto const v = c.add_label("v");
-    c.set_body({c.return_(c.block_expr(v, c.type_of(builtin::scalar_float), {c.leave(v, c.literal(1.0))}))});
+    c.set_body({c.return_(c.block_expr(v, c.type_named("float"), {c.leave(v, c.literal(1.0))}))});
     CHECK(reason_of(c) == "the block expression $v, since a core expression holds no statement");
 
     auto d = float_function(checked.module);
@@ -226,7 +225,7 @@ TEST("sgl core - the first violation says why a tree is not core")
     CHECK(reason_of(e) == "a continue of $outer, which is not the innermost loop");
 
     auto f = float_function(checked.module);
-    f.set_body({f.print(f.and_(f.bool_literal(true), f.call_with_effect(builtin::less, {f.literal(1.0), f.literal(2.0)}))),
+    f.set_body({f.print(f.and_(f.bool_literal(true), f.call_with_effect("less", {f.literal(1.0), f.literal(2.0)}))),
                 f.return_(f.literal(0.0))});
     CHECK(reason_of(f) == "an `and` whose right operand has an effect, which must be an `if`");
 

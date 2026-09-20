@@ -11,38 +11,20 @@ using namespace sgl::check;
 using namespace sgl::emit;
 using namespace sgl::emit::impl;
 
-/// How many bytes a builtin type takes in a constant block, and how each target places it.
-struct block_layout
+/// Where a member lands in each target's constant block; a size of 0 means the type has no place in one.
+struct member_layout
 {
-    i32 size = 0;
-    /// HLSL starts a matrix on a fresh 16-byte row, and anything else wherever it still fits into the current one.
-    bool hlsl_takes_new_row = false;
-    i32 wgsl_alignment = 0;
-    /// MSL aligns a three-vector like WGSL and, unlike it, also sizes it 16: nothing fits into its tail.
-    i32 msl_size = 0;
-    i32 msl_alignment = 0;
+    builtins::block_layout hlsl;
+    builtins::block_layout wgsl;
+    builtins::block_layout msl;
 };
 
-/// A size of 0 means the type has no place in a block or on an edge.
-block_layout layout_of(builtin b)
+member_layout layout_of(checked_module const& m, type_id type)
 {
-    switch (b)
-    {
-    case builtin::scalar_float:
-    case builtin::scalar_int:
-        return {.size = 4, .wgsl_alignment = 4, .msl_size = 4, .msl_alignment = 4};
-    case builtin::float3:
-    case builtin::vec3:
-    case builtin::pos3:
-        return {.size = 12, .wgsl_alignment = 16, .msl_size = 16, .msl_alignment = 16};
-    case builtin::float4:
-    case builtin::hpos4:
-        return {.size = 16, .wgsl_alignment = 16, .msl_size = 16, .msl_alignment = 16};
-    case builtin::mat4:
-        return {.size = 64, .hlsl_takes_new_row = true, .wgsl_alignment = 16, .msl_size = 64, .msl_alignment = 16};
-    default:
+    auto const* const record = m.builtin_type_of(type);
+    if (record == nullptr)
         return {};
-    }
+    return {.hlsl = record->hlsl_layout, .wgsl = record->wgsl_layout, .msl = record->msl_layout};
 }
 
 i32 round_up(i32 value, i32 alignment)
@@ -50,54 +32,10 @@ i32 round_up(i32 value, i32 alignment)
     return (value + alignment - 1) / alignment * alignment;
 }
 
-/// How many arguments a builtin function takes; -1 for what is no builtin function.
-i32 arity_of(builtin b)
+/// HLSL packs by rows of 16: a value starts a fresh row when it is aligned to one, or when it does not fit the rest of this one.
+i32 hlsl_offset(i32 at, builtins::block_layout l)
 {
-    switch (b)
-    {
-    case builtin::normalize:
-    case builtin::saturate:
-    case builtin::negate:
-    case builtin::length:
-    case builtin::abs:
-        return 1;
-    case builtin::clamp:
-    case builtin::mix:
-        return 3;
-    case builtin::dot:
-    case builtin::transform_position:
-    case builtin::transform_direction:
-    case builtin::scale_color:
-    case builtin::multiply:
-    case builtin::add:
-    case builtin::subtract:
-    case builtin::less:
-    case builtin::equal:
-    case builtin::add_int:
-    case builtin::subtract_int:
-    case builtin::multiply_int:
-    case builtin::less_int:
-    case builtin::equal_int:
-    case builtin::divide:
-    case builtin::less_equal:
-    case builtin::greater:
-    case builtin::greater_equal:
-    case builtin::not_equal:
-    case builtin::less_equal_int:
-    case builtin::greater_int:
-    case builtin::greater_equal_int:
-    case builtin::not_equal_int:
-    case builtin::add_color:
-    case builtin::multiply_color:
-    case builtin::add_vec3:
-    case builtin::subtract_vec3:
-    case builtin::scale_vec3:
-    case builtin::min:
-    case builtin::max:
-        return 2;
-    default:
-        return -1;
-    }
+    return l.alignment >= 16 || at % 16 + l.size > 16 ? round_up(at, 16) : at;
 }
 
 cc::string_view role_name(struct_role role)
@@ -114,6 +52,18 @@ cc::string_view role_name(struct_role role)
         return "render target struct";
     }
     return "";
+}
+
+/// True for a function name some builtin is written as in this target: a local of that name would hide it.
+/// Read from the registry, so a new builtin needs no entry in a target's list of reserved words.
+bool is_called_by_a_builtin(checked_module const& m, emit::target t, cc::string_view name)
+{
+    if (m.builtins == nullptr)
+        return false;
+    for (auto const& f : m.builtins->functions)
+        if (f.write.kind == builtins::spelling_kind::call && f.called_in(language_of(t)) == name)
+            return true;
+    return false;
 }
 
 struct_role input_role(flat_entry_point const& e)
@@ -155,9 +105,8 @@ struct validator
         auto positions = 0;
         for (auto const& member : m.at(info.members))
         {
-            auto const b = builtin_of_type(m, member.type);
-            // A bool crosses no edge in WGSL, and an int would need a flat interpolation nothing states yet.
-            if (b == builtin::none || b == builtin::mat4 || b == builtin::scalar_int || b == builtin::boolean)
+            auto const* const record = m.builtin_type_of(member.type);
+            if (record == nullptr || !record->crosses_edges)
                 report(error_kind::unsupported, info.symbol,
                        cc::format("a member of type '{}' in a {}: '{}.{}'", m.name_of(member.type), role_name(role),
                                   name, member.name));
@@ -200,7 +149,7 @@ struct validator
 
             auto is_placed = true;
             for (auto const& member : m.at(b.members))
-                if (layout_of(builtin_of_type(m, member.type)).size == 0)
+                if (layout_of(m, member.type).hlsl.size == 0)
                 {
                     is_placed = false;
                     report(error_kind::unsupported, id,
@@ -215,11 +164,10 @@ struct validator
             auto msl = 0;
             for (auto const& member : m.at(b.members))
             {
-                auto const l = layout_of(builtin_of_type(m, member.type));
-                if (l.hlsl_takes_new_row || hlsl % 16 + l.size > 16)
-                    hlsl = round_up(hlsl, 16);
-                wgsl = round_up(wgsl, l.wgsl_alignment);
-                msl = round_up(msl, l.msl_alignment);
+                auto const l = layout_of(m, member.type);
+                hlsl = hlsl_offset(hlsl, l.hlsl);
+                wgsl = round_up(wgsl, l.wgsl.alignment);
+                msl = round_up(msl, l.msl.alignment);
                 if (hlsl != wgsl || hlsl != msl)
                 {
                     report(error_kind::layout_mismatch, id,
@@ -227,9 +175,9 @@ struct validator
                                       member.name, hlsl, wgsl, msl));
                     break;
                 }
-                hlsl += l.size;
-                wgsl += l.size;
-                msl += l.msl_size;
+                hlsl += l.hlsl.size;
+                wgsl += l.wgsl.size;
+                msl += l.msl.size;
             }
         }
     }
@@ -267,7 +215,8 @@ struct validator
             }
             else if (auto const* c = x.node.try_as<flat_call>())
             {
-                if (arity_of(c->intrinsic) != i32(e.at(c->arguments).size()))
+                auto const* const record = m.builtin_function(c->intrinsic);
+                if (record == nullptr || record->parameters.size() != e.at(c->arguments).size())
                     report(
                         error_kind::malformed_tree, e.function,
                         cc::format("a call of '{}' with {} arguments", m.at(c->callee).name, e.at(c->arguments).size()));
@@ -286,7 +235,7 @@ struct planner
     /// A name of the program as this target may spell it: itself, or with a trailing underscore where it is reserved.
     cc::string spell(cc::string_view name)
     {
-        if (!is_reserved(p.which, name))
+        if (!is_reserved(p.which, name) && !is_called_by_a_builtin(p.m, p.which, name))
             return name;
         return p.names.mint(cc::format("{}_", name));
     }
@@ -365,9 +314,8 @@ struct planner
             auto offset = 0;
             for (auto& member : planned.members)
             {
-                auto const l = layout_of(builtin_of_type(p.m, member.type));
-                if (l.hlsl_takes_new_row || offset % 16 + l.size > 16)
-                    offset = round_up(offset, 16);
+                auto const l = layout_of(p.m, member.type).hlsl;
+                offset = hlsl_offset(offset, l);
                 member.offset = offset;
                 offset += l.size;
             }
@@ -377,15 +325,24 @@ struct planner
 };
 } // namespace
 
-bool sgl::emit::impl::is_builtin_type(check::checked_module const& m, check::type_id type)
+sgl::builtins::language sgl::emit::impl::language_of(target t)
 {
-    return builtin_of_type(m, type) != check::builtin::none;
+    switch (t)
+    {
+    case target::hlsl_dx12:
+    case target::hlsl_vulkan:
+        return builtins::language::hlsl;
+    case target::wgsl:
+        return builtins::language::wgsl;
+    case target::msl:
+        return builtins::language::msl;
+    }
+    return builtins::language::hlsl;
 }
 
-check::builtin sgl::emit::impl::builtin_of_type(check::checked_module const& m, check::type_id type)
+bool sgl::emit::impl::is_builtin_type(check::checked_module const& m, check::type_id type)
 {
-    auto const& t = m.at(type);
-    return t.kind == check::type_kind::structure ? m.at(t.symbol).intrinsic : check::builtin::none;
+    return m.builtin_type_of(type) != nullptr;
 }
 
 void sgl::emit::impl::validate(check::checked_module const& m, check::flat_entry_point const& e, cc::vector<error>& errors)
@@ -408,6 +365,10 @@ sgl::emit::impl::plan sgl::emit::impl::make_plan(check::checked_module const& m,
     // Reserved first, so nothing minted below can be one of them.
     for (auto const word : reserved_words(t))
         result.names.taken.push_back(word);
+    if (m.builtins != nullptr)
+        for (auto const& f : m.builtins->functions)
+            if (f.write.kind == builtins::spelling_kind::call)
+                result.names.taken.push_back(f.called_in(language_of(t)));
     result.struct_of_type.resize_to_filled(m.types.size(), -1);
 
     auto p = planner{.p = result};

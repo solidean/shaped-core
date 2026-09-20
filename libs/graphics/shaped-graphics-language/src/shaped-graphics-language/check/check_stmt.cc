@@ -127,10 +127,11 @@ flow checker::check_stmt(function_scope& scope, ast::stmt_id stmt)
             }
             else
             {
+                // A call is evaluated and its value dropped: it may have been written for its effect.
+                // Whether a PURE one is worth a statement is the AST pass's `no-effect` warning, and no business of this pass.
                 auto const type = check_expr(scope, e.value);
-                if (type != error_type && type != nothing_type)
-                    unsupported(file, where,
-                                value.node.is<ast::call>() ? "a call whose value is dropped" : "an expression statement");
+                if (type != error_type && type != nothing_type && !value.node.is<ast::call>())
+                    unsupported(file, where, "an expression statement");
             }
         },
         [&](ast::assert_stmt const&) { unsupported(file, where, "assert"); },
@@ -247,7 +248,7 @@ void checker::check_assign(function_scope& scope, ast::stmt_id id, ast::assign_s
 void checker::check_condition(function_scope& scope, ast::expr_id condition)
 {
     auto const type = check_expr(scope, condition);
-    auto const expected = type == error_type ? error_type : type_of_builtin(builtin::boolean, scope.file, {});
+    auto const expected = type == error_type ? error_type : type_of_builtin(builtins::k_bool, scope.file, {});
     if (type != error_type && expected != error_type && type != expected)
         report(diagnostic_kind::type_mismatch, scope.file, span_of(scope.file, condition),
                cc::format("a condition is a bool, got {}", out.name_of(type)));
@@ -274,7 +275,7 @@ void checker::check_for(function_scope& scope, ast::stmt_id id, ast::for_stmt co
 {
     auto const file = scope.file;
     auto const& ast = ast_of(file);
-    auto const int_type = type_of_builtin(builtin::scalar_int, file, span_of(file, id));
+    auto const int_type = type_of_builtin(builtins::k_int, file, span_of(file, id));
 
     auto const* const r = ast::is_valid(loop.iterable) ? ast.at(loop.iterable).node.try_as<ast::range>() : nullptr;
     if (r == nullptr)

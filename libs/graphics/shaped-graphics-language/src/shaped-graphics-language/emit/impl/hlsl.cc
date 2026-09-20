@@ -31,33 +31,8 @@ public:
 
     cc::string_view description() const override { return _is_vulkan ? "HLSL for vulkan" : "HLSL for dx12"; }
 
-    cc::string_view type_name(builtin b) const override
-    {
-        switch (b)
-        {
-        case builtin::scalar_float:
-            return "float";
-        case builtin::float3:
-        case builtin::vec3:
-        case builtin::pos3:
-            return "float3";
-        case builtin::float4:
-        case builtin::hpos4:
-            return "float4";
-        case builtin::mat4:
-            return "float4x4";
-        case builtin::scalar_int:
-            return "int";
-        case builtin::boolean:
-            return "bool";
-        default:
-            return "";
-        }
-    }
+    builtins::language language() const override { return builtins::language::hlsl; }
 
-    cc::string_view function_name(builtin b) const override { return b == builtin::mix ? "lerp" : to_string(b); }
-
-    bool has_mul_function() const override { return true; }
     bool has_struct_constructor() const override { return false; }
 
     bool is_c_like() const override { return true; }
@@ -74,6 +49,8 @@ public:
         else
             out.appendf("{}{} {} = {};", local.is_mut ? "" : "const ", local.type, local.name, local.value);
     }
+
+    void write_eval(cc::string& out, cc::string_view value) const override { out.appendf("{};", value); }
 
     /// SPIR-V has no semantics, so vulkan takes the location as an attribute and keeps the semantic HLSL's grammar asks for.
     cc::string semantic_of(planned_struct const& s, planned_member const& member) const
@@ -103,7 +80,7 @@ public:
         if (_is_vulkan && member.offset >= 0)
             out.appendf("[[vk::offset({})]] ", member.offset);
         // Stated on every matrix, so no `-Zpr` and no `#pragma pack_matrix` can turn one around.
-        if (builtin_of_type(p.m, member.type) == builtin::mat4)
+        if (type_text(p, *this, member.type) == "float4x4")
             out += "column_major ";
         out.appendf("{} {}", type_text(p, *this, member.type), member.name);
         if (owner != nullptr)

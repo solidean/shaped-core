@@ -10,10 +10,11 @@ using namespace cc::primitive_defines;
 
 namespace
 {
-/// `prelude.sgl` is the library's own file; every other name is a sample beside this test.
+/// `builtins.sgl` and `core.sgl` are the library's own prelude; every other name is a sample beside this test.
 cc::string read_sample(cc::string_view name)
 {
-    auto const directory = name == "prelude.sgl" ? cc::string_view(SGL_PRELUDE_DIR) : cc::string_view(SGL_SAMPLES_DIR);
+    auto const is_prelude = name == "builtins.sgl" || name == "core.sgl";
+    auto const directory = is_prelude ? cc::string_view(SGL_PRELUDE_DIR) : cc::string_view(SGL_SAMPLES_DIR);
     auto adapter = cc::file_read_stream_adapter::open(cc::string(directory) + "/" + name);
     REQUIRE(adapter.has_value());
     auto stream = adapter.value().stream();
@@ -142,7 +143,7 @@ TEST("sgl samples - control flow parses and builds without a diagnostic")
 
 TEST("sgl samples - the cube, the helpers and the prelude parse and build without a diagnostic")
 {
-    for (auto const name : {"cube.sgl", "helpers.sgl", "prelude.sgl"})
+    for (auto const name : {"cube.sgl", "helpers.sgl", "matrices.sgl", "builtins.sgl", "core.sgl"})
     {
         auto const file = sgl::parse(read_sample(name));
         CHECK(sgl::dump_diagnostics(file) == "");
@@ -158,8 +159,8 @@ TEST("sgl samples - the cube, the helpers and the prelude parse and build withou
 
 TEST("sgl samples - the AST pass is total: every truncation of a sample builds, and every node keeps a form")
 {
-    for (auto const name :
-         {"basic-raster.sgl", "members-and-bindings.sgl", "control-flow.sgl", "cube.sgl", "helpers.sgl", "prelude.sgl"})
+    for (auto const name : {"basic-raster.sgl", "members-and-bindings.sgl", "control-flow.sgl", "cube.sgl",
+                            "helpers.sgl", "matrices.sgl", "builtins.sgl", "core.sgl"})
     {
         auto const source = read_sample(name);
         // A prime stride cuts through every kind of token over the length of a file.

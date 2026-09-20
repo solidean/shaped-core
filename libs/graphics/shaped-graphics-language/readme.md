@@ -19,6 +19,28 @@ Supports:
 
 This will also later form the basis of our shader node editing
 
+## Where to look
+
+* **To write SGL**: [docs/spec/](docs/spec/_index.md) is the language, and [sgl-cube](../../../examples/graphics/sgl-cube/shaders/cube.sgl) is a shader that draws.
+* **To work on the compiler**: [docs/architecture.md](docs/architecture.md) is the map of the pipeline, and [cheat-sheet.md](cheat-sheet.md) the API.
+
+## The `sgl` command line
+
+[tools/sgl/](tools/sgl/) is the command line of the toolchain: one nexus binary whose jobs are `COMMAND`s, so the formatter, the linter and the language server join it as further commands.
+It is built with the library wherever `SC_BUILD_TOOLS` is on, and run through `dev.py`, which builds it first:
+
+```bash
+uv run dev.py run sgl                                   # what the binary holds
+uv run dev.py run sgl -- emit shader.sgl --entry main_ps --target wgsl
+                                                        # the target text, or the diagnostics; hlsl-dx12, hlsl-vulkan, wgsl, msl
+uv run dev.py run sgl -- prelude                        # prelude/builtins.sgl as the builtin registry generates it
+uv run dev.py run sgl -- prelude --check <path>         # exit 2, and where the texts part, when the file differs
+uv run dev.py run sgl -- prelude --write <path>         # what `uv run dev.py check sgl-prelude --fix` runs
+```
+
+SGL's builtins live in a C++ registry, and `prelude/builtins.sgl` is generated from it and committed.
+[docs/adding-a-builtin.md](docs/adding-a-builtin.md) is how one is added.
+
 ## Editor support (VS Code)
 
 [tools/vscode-extension/](tools/vscode-extension/) is a VS Code extension for `.sgl` files.

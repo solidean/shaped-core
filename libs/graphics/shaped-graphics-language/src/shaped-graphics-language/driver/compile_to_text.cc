@@ -41,19 +41,29 @@ struct report
 
 cc::result<cc::string, cc::string> sgl::compile_to_text(text_request const& request)
 {
-    auto const prelude = parse(prelude_source());
-    auto const prelude_ast = ast::build(prelude);
-    auto const user = parse(request.source);
-    auto const user_ast = ast::build(user);
+    // Both vectors are complete before a `module_file` refers into them.
+    auto const prelude = prelude_files();
+    auto files = cc::vector<parsed_file>();
+    auto asts = cc::vector<ast::file_ast>();
+    for (auto const& p : prelude)
+        files.push_back(parse(p.source));
+    files.push_back(parse(request.source));
+    for (auto const& f : files)
+        asts.push_back(ast::build(f));
+
+    // A file of the module is named by its position: the prelude's files, then the program.
+    auto const name_of = [&](isize file) { return file < prelude.size() ? prelude[file].name : request.source_name; };
 
     auto found = report();
-    found.add_all(prelude_name(), prelude, prelude_ast);
-    found.add_all(request.source_name, user, user_ast);
+    for (auto i = isize(0); i < files.size(); ++i)
+        found.add_all(name_of(i), files[i], asts[i]);
 
-    auto const m = check::check({.file = prelude, .ast = prelude_ast}, {.file = user, .ast = user_ast});
+    auto modules = cc::vector<check::module_file>();
+    for (auto i = isize(0); i < prelude.size(); ++i)
+        modules.push_back({.file = files[i], .ast = asts[i]});
+    auto const m = check::check(modules, {.file = files.back(), .ast = asts.back()});
     for (auto const& d : m.diagnostics)
-        found.add(d.file == 0 ? prelude_name() : request.source_name, d.file == 0 ? prelude.source : user.source,
-                  d.what, d.detail);
+        found.add(name_of(d.file), files[d.file].source, d.what, d.detail);
 
     if (found.has_error)
         return cc::error(cc::move(found.text));

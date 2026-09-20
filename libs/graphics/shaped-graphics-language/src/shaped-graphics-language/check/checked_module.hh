@@ -3,6 +3,7 @@
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/string/string.hh>
+#include <shaped-graphics-language/builtins/registry.hh>
 #include <shaped-graphics-language/check/flat.hh>
 #include <shaped-graphics-language/check/symbols.hh>
 #include <shaped-graphics-language/source/diagnostic.hh>
@@ -49,6 +50,10 @@ struct sgl::check::checked_module
     /// In the order the demand-driven pass found them, which is deterministic and not source order.
     cc::vector<located_diagnostic> diagnostics;
 
+    /// The registry every `builtin_id` and `builtin_type_id` in here is a position in.
+    /// It must outlive the module; `builtins::default_registry()` lives as long as the process.
+    builtins::registry const* builtins = nullptr;
+
     static constexpr type_id error_type = type_id(0);
     /// `types[1]`: what a function without a return type returns.
     static constexpr type_id nothing_type = type_id(1);
@@ -68,6 +73,24 @@ struct sgl::check::checked_module
         return ast::impl::slice(binding_lists, r);
     }
 
+    /// The registry record behind a type the prelude declares `@builtin`; null for every other type and for an id that names none.
+    [[nodiscard]] builtins::type_record const* builtin_type_of(type_id id) const
+    {
+        if (builtins == nullptr || !is_valid(id) || index_of(id) >= types.size())
+            return nullptr;
+        auto const& t = at(id);
+        if (t.kind != type_kind::structure || !is_valid(t.symbol) || index_of(t.symbol) >= symbols.size())
+            return nullptr;
+        auto const record = at(t.symbol).intrinsic_type;
+        return builtins->is_known(record) ? &builtins->at(record) : nullptr;
+    }
+
+    /// The registry record behind a call; null when `id` names none.
+    [[nodiscard]] builtins::function_record const* builtin_function(builtin_id id) const
+    {
+        return builtins != nullptr && builtins->is_known(id) ? &builtins->at(id) : nullptr;
+    }
+
     /// The name a type is written with; `<error>` for the error type.
     [[nodiscard]] cc::string_view name_of(type_id id) const
     {
@@ -84,6 +107,6 @@ struct sgl::check::checked_module
             && is_equal(functions, rhs.functions) && is_equal(parameters, rhs.parameters)
             && is_equal(bindings, rhs.bindings) && is_equal(binding_lists, rhs.binding_lists)
             && is_equal(files, rhs.files) && is_equal(entry_points, rhs.entry_points)
-            && is_equal(diagnostics, rhs.diagnostics);
+            && is_equal(diagnostics, rhs.diagnostics) && builtins == rhs.builtins;
     }
 };

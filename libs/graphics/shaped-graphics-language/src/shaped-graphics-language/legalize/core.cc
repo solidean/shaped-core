@@ -120,7 +120,8 @@ struct core_checker
                 expr(s.place, 0);
                 expr(s.value, 0);
             },
-            [&](flat_print const& s) { expr(s.value, 0); },
+            [&](flat_print const& s) { expr(s.value, 0); }, //
+            [&](flat_eval const& s) { expr(s.value, 0); },
             [&](flat_if const& s)
             {
                 expr(s.condition, 0);

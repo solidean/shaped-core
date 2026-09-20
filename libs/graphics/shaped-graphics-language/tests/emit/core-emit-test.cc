@@ -34,9 +34,9 @@ cc::string function_text(checked_module const& m, flat_entry_point const& e, sgl
 flat_entry_point every_core_construct(checked_module const& m)
 {
     auto b = pixel_function(m);
-    auto const float_type = b.type_of(builtin::scalar_float);
-    auto const int_type = b.type_of(builtin::scalar_int);
-    auto const bool_type = b.type_of(builtin::boolean);
+    auto const float_type = b.type_named("float");
+    auto const int_type = b.type_named("int");
+    auto const bool_type = b.type_named("bool");
     auto const a = [&] { return b.member(b.local(local_id(0)), "a"); };
 
     auto const acc = b.var("acc", float_type, b.literal(0.0));
@@ -48,35 +48,34 @@ flat_entry_point every_core_construct(checked_module const& m)
     auto const found = b.var("found", bool_type);
     auto const get = [&](flat_builder::declared const& d) { return b.local(d.local); };
     auto const color = [&](flat_expr_id value)
-    { return b.construct(b.e.result, {b.construct(b.type_of(builtin::float4), {value, value, value, b.literal(1.0)})}); };
+    { return b.construct(b.e.result, {b.construct(b.type_named("float4"), {value, value, value, b.literal(1.0)})}); };
 
     b.set_body({
         acc.stmt,
         b.for_(rows, index, b.int_literal(0), b.int_literal(4),
                {
-                   b.if_(b.call(builtin::equal_int, {b.local(index), b.int_literal(2)}), {b.continue_(rows)}),
-                   b.assign(get(acc), b.call(builtin::add, {get(acc), a()})),
+                   b.if_(b.call("equal_int", {b.local(index), b.int_literal(2)}), {b.continue_(rows)}),
+                   b.assign(get(acc), b.call("add", {get(acc), a()})),
                }),
         n.stmt,
-        b.while_(counting, b.call(builtin::less_int, {get(n), b.int_literal(3)}),
-                 {b.assign(get(n), b.call(builtin::add_int, {get(n), b.int_literal(1)}))}),
+        b.while_(counting, b.call("less_int", {get(n), b.int_literal(3)}),
+                 {b.assign(get(n), b.call("add_int", {get(n), b.int_literal(1)}))}),
         b.loop(doubling,
                {
-                   b.if_(b.or_(b.and_(b.call(builtin::less, {b.literal(10.0), get(acc)}),
-                                      b.not_(b.call(builtin::equal_int, {get(n), b.int_literal(7)}))),
-                               b.call(builtin::less, {a(), b.literal(0.0)})),
+                   b.if_(b.or_(b.and_(b.call("less", {b.literal(10.0), get(acc)}),
+                                      b.not_(b.call("equal_int", {get(n), b.int_literal(7)}))),
+                               b.call("less", {a(), b.literal(0.0)})),
                          {b.break_()}),
-                   b.assign(get(acc),
-                            b.call(builtin::multiply, {get(acc), b.call(builtin::subtract, {b.literal(3.0), a()})})),
+                   b.assign(get(acc), b.call("multiply", {get(acc), b.call("subtract", {b.literal(3.0), a()})})),
                }),
         found.stmt,
         b.assign(get(found), b.bool_literal(false)),
         b.once({
-            b.if_(b.call(builtin::less, {a(), b.literal(0.5)}), {b.assign(get(found), b.bool_literal(true)), b.break_()}),
-            b.assign(get(acc), b.call(builtin::subtract, {get(acc), b.literal(1.0)})),
+            b.if_(b.call("less", {a(), b.literal(0.5)}), {b.assign(get(found), b.bool_literal(true)), b.break_()}),
+            b.assign(get(acc), b.call("subtract", {get(acc), b.literal(1.0)})),
         }),
         b.if_(get(found), {b.return_(color(get(acc)))},
-              {b.if_(b.call(builtin::less_int, {get(n), b.int_literal(0)}), {b.return_(color(b.literal(0.0)))},
+              {b.if_(b.call("less_int", {get(n), b.int_literal(0)}), {b.return_(color(b.literal(0.0)))},
                      {b.assign(get(acc), b.literal(0.5))})}),
         b.return_(color(get(acc))),
     });
@@ -87,32 +86,32 @@ flat_entry_point every_core_construct(checked_module const& m)
 flat_entry_point structured_search(checked_module const& m)
 {
     auto b = pixel_function(m);
-    auto const float_type = b.type_of(builtin::scalar_float);
-    auto const int_type = b.type_of(builtin::scalar_int);
+    auto const float_type = b.type_named("float");
+    auto const int_type = b.type_named("int");
     auto const search = b.add_label("search");
     auto const rows = b.add_label("rows");
     auto const index = b.add_local(local_kind::index, "i", int_type);
     auto const weight = b.var("weight", float_type, b.literal(1.0));
     auto const a = [&] { return b.member(b.local(local_id(0)), "a"); };
 
-    auto const value = b.block_expr(
-        search, float_type,
-        {
-            b.for_(rows, index, b.int_literal(0), b.int_literal(8),
-                   {
-                       b.assign(b.local(weight.local), b.call(builtin::multiply, {b.local(weight.local), a()})),
-                       b.if_(b.call(builtin::less, {b.local(weight.local), b.literal(0.125)}),
-                             {b.leave(search, b.local(weight.local))}),
-                   }),
-            b.leave(search, b.literal(0.0)),
-        });
+    auto const value
+        = b.block_expr(search, float_type,
+                       {
+                           b.for_(rows, index, b.int_literal(0), b.int_literal(8),
+                                  {
+                                      b.assign(b.local(weight.local), b.call("multiply", {b.local(weight.local), a()})),
+                                      b.if_(b.call("less", {b.local(weight.local), b.literal(0.125)}),
+                                            {b.leave(search, b.local(weight.local))}),
+                                  }),
+                           b.leave(search, b.literal(0.0)),
+                       });
     auto const shade = b.let("shade", value);
     b.set_body({
         weight.stmt,
         shade.stmt,
-        b.leave(b.e.root, b.construct(b.e.result, {b.construct(b.type_of(builtin::float4),
-                                                               {b.local(shade.local), b.local(shade.local),
-                                                                b.local(shade.local), b.literal(1.0)})})),
+        b.leave(b.e.root,
+                b.construct(b.e.result, {b.construct(b.type_named("float4"), {b.local(shade.local), b.local(shade.local),
+                                                                              b.local(shade.local), b.literal(1.0)})})),
     });
     return cc::move(b.e);
 }
@@ -353,10 +352,10 @@ TEST("sgl emit - a print is unsupported in every target, and the error does not 
 {
     auto const checked = flat_test_module();
     auto b = pixel_function(checked.module);
-    b.set_body({b.print(b.literal(1.0)),
-                b.return_(b.construct(
-                    b.e.result, {b.construct(b.type_of(builtin::float4),
-                                             {b.literal(0.0), b.literal(0.0), b.literal(0.0), b.literal(1.0)})}))});
+    b.set_body(
+        {b.print(b.literal(1.0)),
+         b.return_(b.construct(b.e.result, {b.construct(b.type_named("float4"), {b.literal(0.0), b.literal(0.0),
+                                                                                 b.literal(0.0), b.literal(1.0)})}))});
     for (auto const t : sgl::emit::all_targets())
         CHECK(sgl::emit::dump_errors(sgl::emit::emit_entry_point(checked.module, b.e, t))
               == "unsupported a print, which no target writes yet\n");
@@ -367,11 +366,11 @@ TEST("sgl emit - an int that does not fit behind a minus is written as an expres
     auto const checked = flat_test_module();
     auto b = pixel_function(checked.module);
     auto const lowest = b.let("lowest", b.int_literal(-2147483647 - 1));
-    auto const negative = b.let("negative", b.call(builtin::subtract_int, {b.int_literal(1), b.int_literal(-2)}));
-    b.set_body({lowest.stmt, negative.stmt,
-                b.return_(b.construct(
-                    b.e.result, {b.construct(b.type_of(builtin::float4),
-                                             {b.literal(0.0), b.literal(0.0), b.literal(0.0), b.literal(1.0)})}))});
+    auto const negative = b.let("negative", b.call("subtract_int", {b.int_literal(1), b.int_literal(-2)}));
+    b.set_body(
+        {lowest.stmt, negative.stmt,
+         b.return_(b.construct(b.e.result, {b.construct(b.type_named("float4"), {b.literal(0.0), b.literal(0.0),
+                                                                                 b.literal(0.0), b.literal(1.0)})}))});
     auto const text = function_text(checked.module, b.e, sgl::emit::target::wgsl);
     CHECK(text.contains("let lowest: i32 = (-2147483647 - 1);"));
     CHECK(text.contains("let negative: i32 = 1 - -2;"));

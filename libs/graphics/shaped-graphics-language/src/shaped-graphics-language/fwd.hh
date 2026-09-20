@@ -26,6 +26,7 @@ struct diagnostic;
 struct line_column;
 
 struct text_request;
+struct prelude_file;
 
 enum class line_kind : u8;
 struct line;
@@ -40,6 +41,9 @@ enum class form_kind : u8;
 struct form;
 
 struct parsed_file;
+
+enum class builtin_id : i32;
+enum class builtin_type_id : i32;
 
 /// The domain every recording site in sgl is attributed to.
 CC_REC_DECLARE_DOMAIN(g_rec_domain);
@@ -126,6 +130,21 @@ struct decl;
 struct file_ast;
 } // namespace sgl::ast
 
+namespace sgl::builtins
+{
+enum class language : u8;
+enum class precedence : u8;
+struct written;
+struct call_context;
+enum class spelling_kind : u8;
+struct spelling;
+struct block_layout;
+struct type_record;
+struct function_record;
+struct registry_item;
+struct registry;
+} // namespace sgl::builtins
+
 namespace sgl::check
 {
 enum class type_id : i32;
@@ -135,7 +154,6 @@ enum class flat_stmt_id : i32;
 enum class local_id : i32;
 enum class label_id : i32;
 
-enum class builtin : u8;
 enum class type_kind : u8;
 struct type_info;
 struct member_info;
@@ -175,6 +193,7 @@ struct flat_let;
 struct flat_var;
 struct flat_assign;
 struct flat_print;
+struct flat_eval;
 struct flat_if;
 struct flat_leave;
 struct flat_loop;

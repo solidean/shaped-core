@@ -20,16 +20,18 @@ What the *user's source* did wrong is `sgl::diagnostic`, which is data a caller 
 auto const r = sgl::compile_to_text({.source = text, .source_name = "cube.sgl", .entry_point = "main_ps",
                                      .stage = sgl::check::stage::pixel, .target = sgl::emit::target::wgsl});
                                            // -> cc::result<cc::string, cc::string>: the text, or what a reader is told
-                                           // parse + ast::build + check against the EMBEDDED prelude + emit, in one call
+                                           // parse + ast::build + check against the library's prelude + emit, in one call
 r.value()                                  // the emitter's text, unchanged
 r.error()                                  // one line per diagnostic: `cube.sgl:12:5: error: unknown-name: foo`
+                                           // one inside the prelude names `builtins.sgl` or `core.sgl`
                                            // a missing entry point names the ones the source holds; a wrong stage says both
 sgl::text_request                          // source, source_name ("<sgl>"), entry_point, stage (none = any), target
                                            // the entry point is found by NAME; source_name is never opened
 
 #include <shaped-graphics-language/driver/prelude.hh>
-sgl::prelude_source()                      // -> cc::string_view: prelude/prelude.sgl as it was when the library was built
-sgl::prelude_name()                        // "prelude.sgl", what a diagnostic in file 0 is called
+sgl::prelude_files()                       // -> cc::span<prelude_file const> { name, source }, in module order:
+                                           // "builtins.sgl": GENERATED in memory from the builtin registry, never read from disk
+                                           // "core.sgl": the hand-written prelude/core.sgl as it was when the library was built
 
 #include <shaped-graphics-language/source/format_diagnostic.hh>
 sgl::line_column_of(source, offset)        // -> sgl::line_column { line, column }, both 1-based, columns in bytes
@@ -140,18 +142,52 @@ Statements: `invalid_stmt` `let_stmt` `assign_stmt` `if_stmt` (the whole chain, 
 Declarations: `invalid_decl` `module_decl` `use_decl` `fun_decl` `struct_decl` `enum_decl` `type_decl` `const_decl`
 `binding_decl` `sampler_decl` `notation_decl`, and the member lines `field_decl` `property_decl` `enum_case_decl`.
 
-## The check pass (a tracer: it carries `tests/samples/cube.sgl` and `helpers.sgl`, everything else is `unsupported-yet`)
+## The builtin registry (the ONE place a builtin lives; [docs/adding-a-builtin.md](docs/adding-a-builtin.md))
+
+```cpp
+#include <shaped-graphics-language/builtins/registry.hh>
+auto const& r = sgl::builtins::default_registry();   // make_registry(), built once per process and immutable: the one cached value
+sgl::builtins::make_registry()             // -> registry: register_builtins(r) + r.finalize(); a VALUE, nothing registers itself
+r.types  r.functions                       // type_record / function_record, named by builtin_type_id / builtin_id (enum class : i32)
+r.prelude_text()                           // -> cc::string: prelude/builtins.sgl byte for byte, in registration order
+r.find_type("float3")                      // -> builtin_type_id, none for an unknown name
+r.find_function("dot", {vec3, vec3})       // -> builtin_id: ONE OVERLOAD is one record; the key is name + parameter types
+r.at(id)  r.is_known(id)  sgl::is_valid(id)  sgl::index_of(id)
+
+sgl::builtins::function_record             // signature (SGL SOURCE TEXT, without @builtin), doc (`///` lines), evaluate, write;
+                                           // name / parameters / result are READ BACK from the parsed signature by finalize()
+sgl::builtins::spelling                    // kind: call (text or .hlsl/.wgsl/.msl rename it; empty = the SGL name), infix, prefix, custom
+sgl::builtins::infix("+")                  // an operator at the level it has in every target
+f.called_in(language::hlsl)                // "lerp" for mix
+sgl::builtins::evaluator                   // void(span<scalar const> in, vector<scalar>& out): every argument's scalars, back to back;
+                                           // the interpreter checks counts and kinds, so ONE evaluator serves a whole family
+sgl::builtins::custom_writer               // written(call_context const&): arguments already written, the target language, the registry
+sgl::builtins::type_record                 // declaration (SGL text), doc, hlsl / wgsl / msl names, *_layout { size, alignment } per target
+                                           // (size 0 = no place in a block), leaf_kind + leaf_count, crosses_edges
+sgl::builtins::written { text, binds }  wrapped(w, needed)  write_infix(op, level, lhs, rhs)   // text plus its precedence
+
+#include <shaped-graphics-language/builtins/register.hh>
+sgl::builtins::register_builtins(r)        // register_types, _scalar_math, _vector_math, _transforms, in that FIXED order
+impl::add_infix(r, "+", "add_vec3", "vec3", "vec3", "vec3", eval)   impl::add_negate(…)
+impl::add_function(r, "mix", {"a", t, "b", t, "t", "float"}, t, eval, {.hlsl = "lerp"}, "/// doc")
+                                           // a FAMILY is a C++ loop over type names that formats one signature each
+```
+
+## The check pass (a tracer: it carries `tests/samples/*.sgl` but basic-raster, everything else is `unsupported-yet`)
 
 ```cpp
 #include <shaped-graphics-language/check/check.hh>
-auto const m = sgl::check::check({.file = prelude, .ast = prelude_ast}, {.file = user, .ast = user_ast});
+auto const m = sgl::check::check(prelude_files, {.file = user, .ast = user_ast});   // + a registry; default_registry() without
                                            // -> sgl::check::checked_module; TOTAL; a module_file is two REFERENCES
-                                           // file 0 is the prelude (prelude/prelude.sgl), file 1 the program; never concatenated
+                                           // prelude_files: cc::span<module_file const>, parsed from sgl::prelude_files() or a test's own
+                                           // file i is prelude file i, and the program is the LAST file; never concatenated
                                            // carried: let / let mut, assignment and `op=`, if chains, while, for over `a ..< b`, loop with
                                            // break / break value / continue, and / or / not, comparison chains, int literals, print,
                                            // and calls of the program's own functions, overloads included, which are INLINED
 m.symbols                                  // every top-level fun / struct / binding: file, declaration, kind, state, name,
-                                           // intrinsic (check::builtin), operator_spelling, type, info
+                                           // intrinsic (builtin_id) / intrinsic_type (builtin_type_id), operator_spelling, type, info
+m.builtins                                 // the registry those ids are positions in; m.builtin_type_of(type_id) / m.builtin_function(id)
+                                           // -> the record, or null
 m.types  m.members                         // canonical types; types[0] is the error type, types[1] (nothing_type) what a fun without
                                            // `-> T` returns; fields and binding members
 m.functions  m.parameters  m.binding_lists // signatures; symbol::info is the position in functions / bindings
@@ -174,7 +210,8 @@ sgl::check::flat_expr                      // { type, from (origin), inlined_thr
                                            // a call of the program's function is a flat_block named after the callee: arguments bound by
                                            // `let`s at its top (a literal or an immutable local stands for its parameter), return = leave
 x.from  x.inlined_through                  // the AST node it came from, and e.at(range) -> the call sites it came through, outermost first
-sgl::check::flat_stmt                      // flat_let, flat_var, flat_assign, flat_print, flat_if, flat_loop, flat_while, flat_for,
+sgl::check::flat_stmt                      // flat_let, flat_var, flat_assign, flat_print, flat_eval (evaluate and drop), flat_if, flat_loop,
+                                           // flat_while, flat_for,
                                            // flat_continue, flat_return; structured only: flat_block, flat_leave;
                                            // core only: flat_once, flat_break
 e.labels  e.root                           // flat_label { name } per block / loop; label_id is a typed id like every other
@@ -201,13 +238,14 @@ sgl::check::dump_diagnostics(m)            // `unknown-name @1:120+4 foo`: kind,
 #include <shaped-graphics-language/check/flat_builder.hh>
 auto b = sgl::check::flat_builder::create(m, {.name = "main", .input = frag, .result = float_type});
                                            // locals[0] is the parameter, e.root a label, every module name taken in the mint
-b.type_of(builtin::scalar_int)  b.type_named("frag")                 // -> type_id, none when the module has none
+b.type_named("int")  b.type_named("frag")  // -> type_id of a struct, builtin or not; none when the module has none
 b.literal(0.5)  b.int_literal(3)  b.bool_literal(true)  b.local(id)  b.member(object, "x")  b.construct(type, {…})
-b.call(builtin::add, {x, y})               // result type and purity from the prelude's declaration
-b.call_with_effect(builtin::saturate, {x}) // the same call as one that has an effect; the prelude declares none yet
+b.call("add", {x, y})                      // by NAME, an operator function by its own; among overloads the argument types choose
+                                           // result type and purity from the prelude's declaration
+b.call_with_effect("saturate", {x})        // the same call as one that has an effect; the prelude declares none yet
 b.not_(x)  b.and_(x, y)  b.or_(x, y)  b.block_expr(label, type, {stmts…})
 auto const x = b.var("x", type, value);    // -> { local, stmt }; without a value it holds nothing. b.let("x", value) alike
-b.assign(place, value)  b.print(v)  b.if_(c, {then…}, {else…})  b.block(label, {…})  b.leave(label, value)
+b.assign(place, value)  b.print(v)  b.eval(v)  b.if_(c, {then…}, {else…})  b.block(label, {…})  b.leave(label, value)
 b.loop(label, {…})  b.while_(label, c, {…})  b.for_(label, index_local, first, end, {…})  b.continue_(label)
 b.once({…})  b.break_()  b.return_(v)      // the core-only statements
 b.set_body({…});  b.e                      // a statement joins no list until a body names it; NOTHING is type checked
@@ -234,6 +272,14 @@ o == other                                 // status, result and trace; NOT the 
 sgl::check::zero_value(m, type)  sgl::check::leaf_count_of(m, type)   // a value is its scalars in field order; mat4 is 16
 sgl::check::scalar::of(0.5f)  .as_float()  .as_int()  .as_bool()      // equality is on the BITS
 sgl::check::dump(o)                        // `ok 1.5 | print 1 | print true`
+```
+
+## The `sgl` tool (`tools/sgl/`, a nexus binary of COMMANDs; built under `SC_BUILD_TOOLS`)
+
+```bash
+uv run dev.py run sgl -- emit shader.sgl --entry main_ps --target wgsl   # the text, or the diagnostics and exit 2
+uv run dev.py run sgl -- prelude [--check <path> | --write <path>]       # the generated builtins.sgl; --check exits 2 on a difference
+uv run dev.py check sgl-prelude [--fix]                                  # the gate over prelude/builtins.sgl
 ```
 
 ## Emitting
@@ -335,10 +381,19 @@ sgl::print_source(file)      // == file.source for EVERY input: the lossless inv
 - **A block is a scope.** A local ends with its block, two blocks beside each other may reuse a name, and shadowing an enclosing block's local is `unsupported-yet`.
 - **`and`, `or` and `not` are no functions**, and a comparison chain evaluates each inner operand once: it is bound where it first stands.
 - **Still `unsupported-yet`:** generics, `self` and methods, `mut` parameters, lambdas and function values, nested functions, `case`, enums, `const`, `use`,
-  a `for` over anything but `a ..< b`, a `let` without a value, an arrow body without `-> T`, a call whose value is dropped, `assert`.
+  a `for` over anything but `a ..< b`, a `let` without a value, an expression statement that is no call, `assert`.
+- **An arrow body without `-> T` infers its result**, and a BLOCK body without one still returns nothing.
+  Its body is checked as part of compiling it, so two such functions that need each other are `dependency-cycle`, not `recursive-call`.
+  An overload whose parameters cannot take a call is not demanded by it, so an overload set works from inside one of its inferred members.
+- **A call as a statement is `flat_eval`**: evaluated, its value dropped.
+  `value;` in HLSL, `_ = value;` in WGSL, `(void)(value);` in MSL; the legalizer drops one whose value was a block, once the block has moved.
 - **The error type is silent.** What did not check has `checked_module::error_type`, and nothing that meets it reports again.
 - **`unsupported-yet` is never a guess.** Its detail names the construct, and the construct's type is the error type.
-- **A `@builtin` is keyed by its NAME** (`check::builtin_of`), and an `@operator` function is found through its operator alone: no lookup sees its name.
+- **A `@builtin struct` is keyed by its name, a `@builtin fun` by its name AND its parameter types**, against the registry.
+  An `@operator` function is found through its operator alone: no lookup sees its name, which is documentation and what a dump shows.
+- **Adding a builtin touches ONE record**, then `uv run dev.py check sgl-prelude --fix` regenerates `prelude/builtins.sgl`.
+  No emitter, interpreter or layout switch exists to extend, and a test adds `fract` to a registry of its own to keep that true.
+- **The user file is the LAST file, not file 1.** Behind the library's prelude it is file 2; a test with one prelude file of its own still has it at 1.
 - **An entry point with any error has no flat tree.** `m.entry_points` holds only what an emitter may read.
 - **The check pass writes the structured form**, and only `once` and a bare `break` never come from it.
   The entry point's own `return` stays `flat_return`, which means `leave $root`, and `e.root` is `none` on its trees.
@@ -362,6 +417,8 @@ sgl::print_source(file)      // == file.source for EVERY input: the lossless inv
   Its members must land on the same offsets in HLSL, WGSL and MSL, so `{float; float3}` is `layout-mismatch`.
   **So is `{float3; float}`**: MSL's `float3` is 16 bytes, so nothing fits into its tail, and `{float3; mat4; float}` is fine.
 - **`compile_to_text` drops warnings.** It gives the text or the errors; a caller that wants warnings runs the phases itself.
-- **The prelude is embedded at CONFIGURE time.** Editing `prelude/prelude.sgl` re-runs CMake, and a test pins the embedded text to the file.
+- **`prelude/builtins.sgl` is GENERATED and committed; never edit it.** A hand edit fails `dev.py check` (`sgl-prelude`) and a library test.
+  `prelude/core.sgl` is the hand-written half, embedded at CONFIGURE time: editing it re-runs CMake, and a test pins the embedded text to the file.
+- **`*.sgl` is `eol=lf` in `.gitattributes`.** The generated text is compared byte for byte, and a diagnostic is a byte offset.
 - **A new target is a `dialect`**: one file under `emit/impl/` and one case in `dialect_of`; the walk over the flat tree is shared (`impl/text_writer.cc`).
 - **Every `sgl` fence under `docs/spec/` is a test** (`tests/spec/spec-examples-test.cc`): `sgl` must parse cleanly, `sgl error` must report the kind its lead names, `sgl sketch` is unchecked.

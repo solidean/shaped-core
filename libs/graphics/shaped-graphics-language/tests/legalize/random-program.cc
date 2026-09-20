@@ -120,7 +120,7 @@ struct generator
                 body.push_back(b.assign(b.member(b.local(s), pick(3)), expr(type, 0)));
                 body.push_back(b.leave(label, leaf(type)));
                 auto const block = b.block_expr(label, type, body);
-                return b.call(builtin::multiply, {read, block});
+                return b.call("multiply", {read, block});
             }
 
         auto const var = candidates[pick(int(candidates.size()))];
@@ -132,7 +132,7 @@ struct generator
             body.push_back(b.print(b.local(var)));
         body.push_back(b.leave(label, leaf(type)));
         auto const block = b.block_expr(label, type, body);
-        return b.call(type == float_type ? builtin::add : builtin::add_int, {read, block});
+        return b.call(type == float_type ? "add" : "add_int", {read, block});
     }
 
     flat_expr_id expr(type_id type, int depth)
@@ -148,15 +148,15 @@ struct generator
                 return leaf(type);
             if (r <= 5)
             {
-                builtin const operators[] = {builtin::add, builtin::subtract, builtin::multiply};
+                cc::string_view const operators[] = {"add", "subtract", "multiply"};
                 auto const lhs = expr(type, depth - 1);
                 auto const rhs = expr(type, depth - 1);
                 return b.call(operators[r - 3], {lhs, rhs});
             }
             // now and then as a call with an effect, which the machine records: its place among the prints is observable
             if (r == 6)
-                return chance(40) ? b.call_with_effect(builtin::saturate, {expr(type, depth - 1)})
-                                  : b.call(builtin::saturate, {expr(type, depth - 1)});
+                return chance(40) ? b.call_with_effect("saturate", {expr(type, depth - 1)})
+                                  : b.call("saturate", {expr(type, depth - 1)});
             return r == 9 ? racy(type, depth) : block_expr(type, depth);
         }
         if (type == int_type)
@@ -165,7 +165,7 @@ struct generator
                 return leaf(type);
             if (r <= 6)
             {
-                builtin const operators[] = {builtin::add_int, builtin::subtract_int, builtin::multiply_int};
+                cc::string_view const operators[] = {"add_int", "subtract_int", "multiply_int"};
                 auto const lhs = expr(type, depth - 1);
                 auto const rhs = expr(type, depth - 1);
                 return b.call(operators[r - 4], {lhs, rhs});
@@ -179,15 +179,15 @@ struct generator
         {
             auto const lhs = expr(float_type, depth - 1);
             auto const rhs = expr(float_type, depth - 1);
-            return b.call(builtin::less, {lhs, rhs});
+            return b.call("less", {lhs, rhs});
         }
         if (r <= 4)
         {
             auto const lhs = expr(int_type, depth - 1);
             auto const rhs = expr(int_type, depth - 1);
             if (chance(25))
-                return b.call_with_effect(builtin::less_int, {lhs, rhs});
-            return b.call(r == 3 ? builtin::less_int : builtin::equal_int, {lhs, rhs});
+                return b.call_with_effect("less_int", {lhs, rhs});
+            return b.call(r == 3 ? "less_int" : "equal_int", {lhs, rhs});
         }
         if (r == 5)
             return b.not_(expr(type, depth - 1));
@@ -289,9 +289,9 @@ struct generator
         auto const n = b.var("n", int_type, b.int_literal(0));
         list.push_back(n.stmt);
         scope.push_back({.local = n.local, .type = int_type});
-        auto const in_range = [&] { return b.call(builtin::less_int, {b.local(n.local), b.int_literal(limit)}); };
-        auto const advance = [&]
-        { return b.assign(b.local(n.local), b.call(builtin::add_int, {b.local(n.local), b.int_literal(1)})); };
+        auto const in_range = [&] { return b.call("less_int", {b.local(n.local), b.int_literal(limit)}); };
+        auto const advance
+            = [&] { return b.assign(b.local(n.local), b.call("add_int", {b.local(n.local), b.int_literal(1)})); };
 
         if (form == 0)
         {
@@ -330,7 +330,9 @@ struct generator
 
         if (r < 25 || (is_flat && r >= 57 && r < 87))
         {
-            list.push_back(b.print(expr(any_type(), 2)));
+            // Now and then evaluated and dropped: what the value prints and records on its way still happens, in its place.
+            auto const value = expr(any_type(), 2);
+            list.push_back(chance(25) ? b.eval(value) : b.print(value));
             return false;
         }
         if (r < 35)
@@ -475,10 +477,10 @@ cc::string scope_violation(flat_entry_point const& e)
 flat_entry_point sgl_test::random_program(checked_module const& m, u64 seed, program_shape const& shape)
 {
     auto g = generator{.b = float_function(m), .rng = cc::random(seed), .shape = shape, .nodes_left = shape.max_nodes};
-    g.float_type = g.b.type_of(builtin::scalar_float);
-    g.int_type = g.b.type_of(builtin::scalar_int);
-    g.bool_type = g.b.type_of(builtin::boolean);
-    g.float3_type = g.b.type_of(builtin::float3);
+    g.float_type = g.b.type_named("float");
+    g.int_type = g.b.type_named("int");
+    g.bool_type = g.b.type_named("bool");
+    g.float3_type = g.b.type_named("float3");
     g.targets.push_back({.label = g.b.e.root, .value_type = g.float_type});
 
     auto body = g.statements(shape.max_depth);

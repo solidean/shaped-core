@@ -85,8 +85,8 @@ TEST("sgl check - the pass is total: every truncation of the cube checks, settle
             all_settled = all_settled
                        && (s.state == sgl::check::symbol_state::checked || s.state == sgl::check::symbol_state::failed);
         CHECK(all_settled);
-        CHECK(m.files.size() == 2);
-        CHECK(m.files[1].type_of.size() == checked.user_ast.exprs.size());
+        CHECK(m.files.size() == 3);
+        CHECK(checked.tables().type_of.size() == checked.user_ast.exprs.size());
         CHECK(m.entry_points.size() <= 2);
         // the dumps walk every id the module holds
         CHECK(!sgl::check::dump(m).empty());
@@ -96,7 +96,7 @@ TEST("sgl check - the pass is total: every truncation of the cube checks, settle
 
 TEST("sgl check - a truncated prelude checks too")
 {
-    auto const prelude = read_prelude();
+    auto const prelude = builtins_text();
     auto const cube = read_cube();
     for (auto length = isize(0); length < prelude.size(); length += 13)
     {

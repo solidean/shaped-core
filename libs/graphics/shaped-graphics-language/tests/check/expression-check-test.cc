@@ -45,40 +45,44 @@ TEST("sgl check - a body of lets and a return checks clean")
 
 TEST("sgl check - overloads resolve by exact argument types")
 {
-    CHECK(body_reports("return dot(k, k)\n") == "no-matching-overload 1:[dot(k, k)] dot(float, float)\n");
-    CHECK(body_reports("return dot(v)\n") == "no-matching-overload 1:[dot(v)] dot(vec3)\n");
-    CHECK(body_reports("return saturate()\n") == "no-matching-overload 1:[saturate()] saturate()\n");
+    CHECK(body_reports("return dot(k, k)\n") == "no-matching-overload user:[dot(k, k)] dot(float, float)\n");
+    CHECK(body_reports("return dot(v)\n") == "no-matching-overload user:[dot(v)] dot(vec3)\n");
+    CHECK(body_reports("return saturate()\n") == "no-matching-overload user:[saturate()] saturate()\n");
 
     // A second declaration with the same parameter types is no error by itself; the call cannot choose.
     CHECK(reports_for("@builtin fun dot(x: vec3, y: vec3) -> float\nfun f(v: vec3) -> float:\n    return dot(v, v)\n")
-          == "ambiguous-overload 1:[dot(v, v)] dot(vec3, vec3) has 2 candidates\n");
+          == "ambiguous-overload user:[dot(v, v)] dot(vec3, vec3) has 2 candidates\n");
 
     // An overload on other types takes nothing away, and each call records the one it chose.
-    auto const checked = check_sources(read_prelude(), "@builtin fun dot(a: float3, b: float3) -> float\n"
-                                                       "fun f(v: vec3, c: float3) -> float:\n"
+    auto const checked = check_sources(read_prelude(), "fun dot(a: pos3, b: pos3) -> float => a.x * b.x\n"
+                                                       "fun f(v: vec3, c: pos3) -> float:\n"
                                                        "    return dot(v, v) + dot(c, c)\n");
     CHECK(reports_of(checked) == "");
-    auto const& tables = checked.module.files[1];
+    auto const& tables = checked.tables();
     auto const on_vec3 = tables.target_at(find_expr(checked, "dot(v, v)"));
-    auto const on_float3 = tables.target_at(find_expr(checked, "dot(c, c)"));
+    auto const on_pos3 = tables.target_at(find_expr(checked, "dot(c, c)"));
     CHECK(on_vec3.kind == target_kind::overload);
-    CHECK(on_float3.kind == target_kind::overload);
+    CHECK(on_pos3.kind == target_kind::overload);
     CHECK(checked.module.at(on_vec3.symbol).file == 0);
-    CHECK(checked.module.at(on_float3.symbol).file == 1);
+    CHECK(checked.module.at(on_pos3.symbol).file == checked.user_file());
 }
 
 TEST("sgl check - an operator is a function found through its spelling")
 {
     CHECK(body_reports("return k * k + k\n") == "");
-    CHECK(body_reports("return v * v\n") == "no-matching-overload 1:[v * v] operator *(vec3, vec3)\n");
-    CHECK(body_reports("return v / k\n") == "no-matching-overload 1:[v / k] operator /(vec3, float)\n");
-    CHECK(body_reports("return -v\n") == "no-matching-overload 1:[-v] operator -(vec3)\n");
+    CHECK(body_reports("return v * v\n") == "no-matching-overload user:[v * v] operator *(vec3, vec3)\n");
+    CHECK(body_reports("return k / v\n") == "no-matching-overload user:[k / v] operator /(float, vec3)\n");
+    CHECK(body_reports("let p = pos3(k, k, k)\nreturn -p\n") == "no-matching-overload user:[-p] operator -(pos3)\n");
+    // a position plus a position means nothing, and the prelude says so by leaving it out
+    CHECK(body_reports("let p = pos3(k, k, k)\nreturn length(p + p)\n")
+          == "no-matching-overload user:[p + p] operator +(pos3, pos3)\n");
+    CHECK(body_reports("let p = pos3(k, k, k)\nreturn length((p + v) - p)\n") == "");
     // a prefix operator is a function of one parameter
     CHECK(body_reports("return -k + -(k * k)\n") == "");
 
     auto const checked = check_sources(read_prelude(), "fun f(c: float3, k: float) -> float3:\n    return c * k\n");
     CHECK(reports_of(checked) == "");
-    auto const chosen = checked.module.files[1].target_at(find_expr(checked, "c * k"));
+    auto const chosen = checked.tables().target_at(find_expr(checked, "c * k"));
     REQUIRE(chosen.kind == target_kind::overload);
     CHECK(checked.module.at(chosen.symbol).name == "scale_color");
     CHECK(checked.module.at(chosen.symbol).operator_spelling == "*");
@@ -91,7 +95,7 @@ TEST("sgl check - juxtaposition and parens are one call")
                                                        "    let b = normalize(v)\n"
                                                        "    return a\n");
     CHECK(reports_of(checked) == "");
-    auto const& tables = checked.module.files[1];
+    auto const& tables = checked.tables();
     CHECK(tables.target_at(find_expr(checked, "normalize v")) == tables.target_at(find_expr(checked, "normalize(v)")));
     CHECK(tables.type_at(find_expr(checked, "normalize v")) == tables.type_at(find_expr(checked, "normalize(v)")));
 }
@@ -100,14 +104,14 @@ TEST("sgl check - a call of a function of the program resolves like any other, o
 {
     CHECK(reports_for("fun half(x: float) -> float => x * 0.5\nfun f(k: float) -> float:\n    return half k\n") == "");
     CHECK(reports_for("fun half(x: float) -> float => x * 0.5\nfun f(v: vec3) -> float:\n    return half v\n")
-          == "no-matching-overload 1:[half v] half(vec3)\n");
+          == "no-matching-overload user:[half v] half(vec3)\n");
 
     auto const checked = check_sources(read_prelude(), "fun half(x: float) -> float => x * 0.5\n"
                                                        "fun half(v: vec3) -> vec3 => v * 0.5\n"
                                                        "fun f(v: vec3, k: float) -> float:\n"
                                                        "    return dot(half(v), v) * half(k)\n");
     CHECK(reports_of(checked) == "");
-    auto const& tables = checked.module.files[1];
+    auto const& tables = checked.tables();
     auto const on_vec3 = tables.target_at(find_expr(checked, "half(v)"));
     auto const on_float = tables.target_at(find_expr(checked, "half(k)"));
     REQUIRE(on_vec3.kind == target_kind::overload);
@@ -124,35 +128,36 @@ TEST("sgl check - a struct's constructor takes its fields in order, and a splat 
     CHECK(body_reports("let a = vec3(..c)\nreturn k\n") == "");
 
     CHECK(body_reports("let a = vec3(k, k)\nreturn k\n")
-          == "no-matching-overload 1:[vec3(k, k)] vec3(float, float), and the constructor is vec3(float, float, "
+          == "no-matching-overload user:[vec3(k, k)] vec3(float, float), and the constructor is vec3(float, float, "
              "float)\n");
     CHECK(body_reports("let a = float4(..c)\nreturn k\n")
-          == "no-matching-overload 1:[float4(..c)] float4(float, float, float), and the constructor is float4(float, "
+          == "no-matching-overload user:[float4(..c)] float4(float, float, float), and the constructor is "
+             "float4(float, "
              "float, float, float)\n");
     CHECK(body_reports("let a = float(k)\nreturn k\n")
-          == "no-matching-overload 1:[float(k)] float is opaque and has no constructor\n");
+          == "no-matching-overload user:[float(k)] float is opaque and has no constructor\n");
     CHECK(body_reports("let a = vec3(..k, k, k)\nreturn k\n")
-          == "type-mismatch 1:[..k] float has no fields a splat could spread\n");
-    CHECK(body_reports("return dot(..v, v)\n") == "unsupported-yet 1:[..v] a splat outside a constructor call\n");
+          == "type-mismatch user:[..k] float has no fields a splat could spread\n");
+    CHECK(body_reports("return dot(..v, v)\n") == "unsupported-yet user:[..v] a splat outside a constructor call\n");
 }
 
 TEST("sgl check - names, members and what stands for the wrong thing")
 {
-    CHECK(body_reports("return nope\n") == "unknown-name 1:[nope] nope\n");
-    CHECK(body_reports("return nope(k)\n") == "unknown-name 1:[nope] nope\n");
-    CHECK(body_reports("return v.w\n") == "unknown-member 1:[w] vec3 has no member w\n");
-    CHECK(body_reports("return k.x\n") == "unknown-member 1:[x] float has no member x\n");
+    CHECK(body_reports("return nope\n") == "unknown-name user:[nope] nope\n");
+    CHECK(body_reports("return nope(k)\n") == "unknown-name user:[nope] nope\n");
+    CHECK(body_reports("return v.w\n") == "unknown-member user:[w] vec3 has no member w\n");
+    CHECK(body_reports("return k.x\n") == "unknown-member user:[x] float has no member x\n");
     CHECK(reports_for("binding constants:\n    m: mat4\nfun f(k: float) -> float:\n    return constants(k)\n")
-          == "wrong-kind-of-name 1:[constants] constants is a binding, and a call needs a function or a struct\n");
-    CHECK(body_reports("let t = vec3\nreturn k\n") == "unsupported-yet 1:[vec3] a type as a value\n");
-    CHECK(body_reports("let t = dot\nreturn k\n") == "unsupported-yet 1:[dot] a function as a value\n");
+          == "wrong-kind-of-name user:[constants] constants is a binding, and a call needs a function or a struct\n");
+    CHECK(body_reports("let t = vec3\nreturn k\n") == "unsupported-yet user:[vec3] a type as a value\n");
+    CHECK(body_reports("let t = dot\nreturn k\n") == "unsupported-yet user:[dot] a function as a value\n");
 }
 
 TEST("sgl check - the error type is silent: one mistake, one diagnostic")
 {
     CHECK(body_reports("let a = nope\nlet b = normalize a\nlet e = dot(b, v) * k\nreturn e\n")
-          == "unknown-name 1:[nope] nope\n");
-    CHECK(body_reports("return vec3(nope, k, k).x\n") == "unknown-name 1:[nope] nope\n");
+          == "unknown-name user:[nope] nope\n");
+    CHECK(body_reports("return vec3(nope, k, k).x\n") == "unknown-name user:[nope] nope\n");
 }
 
 TEST("sgl check - a binding member is reachable only through the function's binding list")
@@ -160,30 +165,30 @@ TEST("sgl check - a binding member is reachable only through the function's bind
     auto const binding = cc::string("binding frame:\n    exposure: float\n");
     CHECK(reports_for(binding + "fun f(k: float){frame} -> float:\n    return frame.exposure * k\n") == "");
     CHECK(reports_for(binding + "fun f(k: float) -> float:\n    return frame.exposure * k\n")
-          == "binding-not-listed 1:[frame] frame is not in the binding list of f\n");
+          == "binding-not-listed user:[frame] frame is not in the binding list of f\n");
     CHECK(reports_for(binding + "fun f(k: float){frame} -> float:\n    return frame.gamma\n")
-          == "unknown-member 1:[gamma] the binding frame has no member gamma\n");
+          == "unknown-member user:[gamma] the binding frame has no member gamma\n");
     CHECK(reports_for(binding + "fun f(k: float){frame} -> float:\n    let g = frame\n    return k\n")
-          == "unsupported-yet 1:[frame] a binding as a value\n");
+          == "unsupported-yet user:[frame] a binding as a value\n");
 }
 
 TEST("sgl check - a number literal with a dot or an exponent is a float, and nothing else is carried")
 {
     CHECK(body_reports("return 0.5 + -0.4 + 1e3 + 2.5e-3 + 1. + 1'000.0\n") == "");
-    CHECK(body_reports("return 1\n") == "type-mismatch 1:[1] expected float, got int\n");
+    CHECK(body_reports("return 1\n") == "type-mismatch user:[1] expected float, got int\n");
     CHECK(body_reports("let i = 1'000 + -3\nreturn k\n") == "");
     CHECK(body_reports("let i = 3'000'000'000\nreturn k\n")
-          == "unsupported-yet 1:[3'000'000'000] an integer literal that does not fit an int\n");
+          == "unsupported-yet user:[3'000'000'000] an integer literal that does not fit an int\n");
     CHECK(body_reports("return 0.5f32\n")
-          == "unsupported-yet 1:[0.5f32] a number literal with a prefix, a suffix or a p exponent\n");
+          == "unsupported-yet user:[0.5f32] a number literal with a prefix, a suffix or a p exponent\n");
     CHECK(body_reports("return 0xff\n")
-          == "unsupported-yet 1:[0xff] a number literal with a prefix, a suffix or a p exponent\n");
-    CHECK(body_reports("let s = \"text\"\nreturn k\n") == "unsupported-yet 1:[\"text\"] a string literal\n");
+          == "unsupported-yet user:[0xff] a number literal with a prefix, a suffix or a p exponent\n");
+    CHECK(body_reports("let s = \"text\"\nreturn k\n") == "unsupported-yet user:[\"text\"] a string literal\n");
 
     // The literal's type is the prelude's `float`, so a module without one says so.
     CHECK(reports_of(check_sources("", "@builtin struct mat4\nfun f(m: mat4) -> mat4:\n    let a = 1.0\n    return "
                                        "m\n"))
-          == "unknown-name 1:[1.0] float, which the prelude must declare @builtin\n");
+          == "unknown-name user:[1.0] float, which the prelude must declare @builtin\n");
 }
 
 TEST("sgl check - a returned object converts structurally: every field once, types equal")
@@ -191,13 +196,13 @@ TEST("sgl check - a returned object converts structurally: every field once, typ
     auto const head = cc::string("struct pair:\n    a: float\n    b: vec3\nfun f(k: float, v: vec3) -> pair:\n");
     CHECK(reports_for(head + "    return { a = k, b = v }\n") == "");
     CHECK(reports_for(head + "    return { b = v, a = k }\n") == "");
-    CHECK(reports_for(head + "    return { a = k }\n") == "missing-field 1:[{ a = k }] b\n");
-    CHECK(reports_for(head + "    return { a = k, b = v, c = k }\n") == "unknown-field 1:[c] pair has no field c\n");
-    CHECK(reports_for(head + "    return { a = k, a = k, b = v }\n") == "duplicate-field 1:[a] a\n");
-    CHECK(reports_for(head + "    return { a = v, b = v }\n") == "type-mismatch 1:[v] a is float, got vec3\n");
-    CHECK(reports_for(head + "    return k\n") == "type-mismatch 1:[k] expected pair, got float\n");
+    CHECK(reports_for(head + "    return { a = k }\n") == "missing-field user:[{ a = k }] b\n");
+    CHECK(reports_for(head + "    return { a = k, b = v, c = k }\n") == "unknown-field user:[c] pair has no field c\n");
+    CHECK(reports_for(head + "    return { a = k, a = k, b = v }\n") == "duplicate-field user:[a] a\n");
+    CHECK(reports_for(head + "    return { a = v, b = v }\n") == "type-mismatch user:[v] a is float, got vec3\n");
+    CHECK(reports_for(head + "    return k\n") == "type-mismatch user:[k] expected pair, got float\n");
     CHECK(reports_for(head + "    let p = { a = k, b = v }\n    return p\n")
-          == "unsupported-yet 1:[{ a = k, b = v }] an object with no struct to convert to\n");
+          == "unsupported-yet user:[{ a = k, b = v }] an object with no struct to convert to\n");
 
     // an object inside an object converts to the field's struct
     CHECK(reports_for(head
@@ -208,29 +213,32 @@ TEST("sgl check - a returned object converts structurally: every field once, typ
 
 TEST("sgl check - let introduces an immutable local, in order")
 {
-    CHECK(body_reports("let a = b\nlet b = k\nreturn k\n") == "unknown-name 1:[b] b\n");
-    CHECK(body_reports("let a = k\nlet a = k\nreturn k\n") == "duplicate-declaration 1:[a] a\n");
-    CHECK(body_reports("let k = 1.0\nreturn k\n") == "duplicate-declaration 1:[k] k\n");
-    CHECK(body_reports("let x : vec3 = k\nreturn k\n") == "type-mismatch 1:[k] expected vec3, got float\n");
-    CHECK(body_reports("let dot = k\nreturn k\n") == "unsupported-yet 1:[dot] a local that shadows a module-level name\n");
+    CHECK(body_reports("let a = b\nlet b = k\nreturn k\n") == "unknown-name user:[b] b\n");
+    CHECK(body_reports("let a = k\nlet a = k\nreturn k\n") == "duplicate-declaration user:[a] a\n");
+    CHECK(body_reports("let k = 1.0\nreturn k\n") == "duplicate-declaration user:[k] k\n");
+    CHECK(body_reports("let x : vec3 = k\nreturn k\n") == "type-mismatch user:[k] expected vec3, got float\n");
+    CHECK(body_reports("let dot = k\nreturn k\n")
+          == "unsupported-yet user:[dot] a local that shadows a module-level name\n");
     CHECK(body_reports("let mut a = k\nreturn a\n") == "");
-    CHECK(body_reports("let a : float\nreturn k\n") == "unsupported-yet 1:[let a : float] a let without a value\n");
-    CHECK(body_reports("let (a, b) = k\nreturn k\n") == "unsupported-yet 1:[(a, b)] a pattern in let\n");
+    CHECK(body_reports("let a : float\nreturn k\n") == "unsupported-yet user:[let a : float] a let without a value\n");
+    CHECK(body_reports("let (a, b) = k\nreturn k\n") == "unsupported-yet user:[(a, b)] a pattern in let\n");
 }
 
 TEST("sgl check - statements and expressions the tracer does not carry")
 {
     CHECK(body_reports("for i in v:\n    return k\nreturn k\n")
-          == "unsupported-yet 1:[v] a for over anything but an int range\n");
+          == "unsupported-yet user:[v] a for over anything but an int range\n");
     CHECK(body_reports("for i in 0 ..= 3:\n    return k\nreturn k\n")
-          == "unsupported-yet 1:[0 ..= 3] a for over a range that is not `..<`\n");
-    CHECK(body_reports("assert k > 0.0, \"positive\"\nreturn k\n").contains("unsupported-yet 1:[assert"));
-    CHECK(body_reports("saturate k\nreturn k\n") == "unsupported-yet 1:[saturate k] a call whose value is dropped\n");
-    CHECK(body_reports("let h = x => x\nreturn k\n") == "unsupported-yet 1:[x => x] a lambda\n");
-    CHECK(body_reports("let t = (k, k)\nreturn k\n") == "unsupported-yet 1:[(k, k)] a tuple\n");
-    CHECK(body_reports("let t = k as vec3\nreturn k\n") == "unsupported-yet 1:[k as vec3] as\n");
+          == "unsupported-yet user:[0 ..= 3] a for over a range that is not `..<`\n");
+    CHECK(body_reports("assert k > 0.0, \"positive\"\nreturn k\n").contains("unsupported-yet user:[assert"));
+    // a call may be written for its effect, so its value may be dropped; any other expression has none to be written for
+    CHECK(body_reports("saturate k\nreturn k\n") == "");
+    CHECK(body_reports("k\nreturn k\n") == "unsupported-yet user:[k] an expression statement\n");
+    CHECK(body_reports("let h = x => x\nreturn k\n") == "unsupported-yet user:[x => x] a lambda\n");
+    CHECK(body_reports("let t = (k, k)\nreturn k\n") == "unsupported-yet user:[(k, k)] a tuple\n");
+    CHECK(body_reports("let t = k as vec3\nreturn k\n") == "unsupported-yet user:[k as vec3] as\n");
     CHECK(body_reports("fun g(x: float) -> float => x\nreturn k\n")
-          == "unsupported-yet 1:[fun g(x: float) -> float => x] a declaration inside a function\n");
+          == "unsupported-yet user:[fun g(x: float) -> float => x] a declaration inside a function\n");
 }
 
 TEST("sgl check - the side tables name what an editor asks for")
@@ -241,7 +249,7 @@ TEST("sgl check - the side tables name what an editor asks for")
                                                              "    return { color = float4(..lit, 1.0) }\n");
     CHECK(reports_of(checked) == "");
     auto const& m = checked.module;
-    auto const& tables = m.files[1];
+    auto const& tables = checked.tables();
 
     auto const member = find_expr(checked, "p.color");
     CHECK(m.name_of(tables.type_at(member)) == "float3");
@@ -311,7 +319,7 @@ TEST("sgl check - a flat node keeps its AST node, and no call site while nothing
     auto const& e = checked.module.entry_points[0];
     for (auto const& x : e.exprs)
     {
-        CHECK(x.from.file == 1);
+        CHECK(x.from.file == checked.user_file());
         CHECK(sgl::ast::is_valid(x.from.expr));
         CHECK(x.inlined_through.empty());
         CHECK(!x.node.is<sgl::check::flat_invalid>());

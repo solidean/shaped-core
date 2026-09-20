@@ -9,12 +9,20 @@ using namespace sgl;
 using namespace sgl::check;
 using namespace sgl::check::impl;
 
-checked_module sgl::check::check(module_file prelude, module_file user)
+checked_module sgl::check::check(cc::span<module_file const> prelude, module_file user, builtins::registry const& builtins)
 {
-    module_file const both[] = {prelude, user};
-    auto c = checker{.files = cc::span<module_file const>(both)};
+    auto files = cc::vector<module_file>();
+    files.push_back_range(prelude);
+    files.push_back(user);
+    auto c = checker{.files = files, .builtins = builtins};
+    c.out.builtins = &builtins;
     c.run();
     return cc::move(c.out);
+}
+
+checked_module sgl::check::check(cc::span<module_file const> prelude, module_file user)
+{
+    return check(prelude, user, builtins::default_registry());
 }
 
 // ---- number literals ------------------------------------------------------------------------------------------------
@@ -188,8 +196,9 @@ void checker::run()
         if (out.symbols[i].state == symbol_state::untouched)
             compile(symbol_id(i));
 
-    // Nothing demands a body, since no return type is inferred and a call needs a signature only.
-    // So each body is checked once, after every signature is known, and a function may call one declared below it.
+    // A call needs a signature only, so each body is checked once, after every signature is known.
+    // That is what lets a function call one declared below it.
+    // The exception checked its body already: an arrow body without `-> T`, whose signature is not known before.
     for (auto i = isize(0); i < out.symbols.size(); ++i)
         if (out.symbols[i].kind == symbol_kind::function && out.symbols[i].state == symbol_state::checked)
             check_body(symbol_id(i));

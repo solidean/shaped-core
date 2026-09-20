@@ -44,7 +44,7 @@ TEST("sgl samples - helpers checks without a diagnostic, and every call is gone 
     {
         for (auto const& x : e.exprs)
             if (auto const* const call = x.node.try_as<flat_call>())
-                CHECK(call->intrinsic != builtin::none);
+                CHECK(sgl::is_valid(call->intrinsic));
         auto const core = legalize(m, e);
         CHECK(!find_core_violation(core).has_value());
     }

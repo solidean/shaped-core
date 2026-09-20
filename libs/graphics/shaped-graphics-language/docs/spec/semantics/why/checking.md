@@ -11,9 +11,10 @@ So there is no resolver that runs first and no tree of resolved names: there is 
 
 ## CHK-2
 
-The prelude is a file on disk, and placing it in front needs no multi-file compilation.
-One unnamed module is the smallest thing that holds two files, and it is what a module will be once several files declare one.
-Concatenating the two texts would have been less code, and every span of the program's file would then be off by the length of the prelude.
+Placing the prelude in front needs no multi-file compilation.
+One unnamed module is the smallest thing that holds several files, and it is what a module will be once several files declare one.
+Concatenating the texts would have been less code, and every span of the program's file would then be off by the length of the prelude.
+A position is the whole name of a file, since nothing else about it is known to the pass: a caller keeps the names, and the program's file is always the last one.
 
 ## CHK-7
 
@@ -38,17 +39,19 @@ With plain recursion, as today, the same state can only mean a cycle.
 
 ## CHK-20
 
-Nothing demands a body yet.
-A body is needed by a caller for two reasons only: to infer a return type and to inline the call, and the tracer does neither.
-Checking bodies after the signatures also keeps an overload set usable from inside one of its own members.
+A body is needed by a caller for two reasons only: to infer a return type and to inline the call.
+Inlining reads the side tables of a body that was checked on its own, so it demands nothing.
+Inference does demand the body, and only of a function that asks for it, by CHK-135.
+Checking every other body after the signatures keeps an overload set usable from inside one of its own members.
 With a demanded body that would be a cycle, since resolving the name asks for every candidate.
-This moves once the inliner exists: recursion is then found where a function in compilation is inlined into itself.
 
 ## CHK-30
 
 The alternative to a name is an id in the attribute, `@builtin(normalize_vec3)`, and it says everything twice.
 A name keeps the prelude readable as the documentation of the builtin functions, which is its second job.
-The parameter types then pick among the builtins of one name, as they do for any overload set.
+The parameter types are part of the key because an overload is what differs: `dot` on `vec3` and `dot` on `float3` evaluate alike and are still two records.
+Keying by name alone made every overload need a name of its own somewhere in C++, and that second list is what the registry removed.
+The registry reads its keys back from its own text, through the parser, so a record states its signature once.
 
 ## CHK-37
 
@@ -128,3 +131,28 @@ The emitted text is meant to be read, so a local keeps its name wherever it can.
 Inlining puts the locals of many functions into one, and two of them called `n` must not meet.
 A mint that every name passes through makes a collision impossible by construction, where a check after the fact could only find one.
 The module-level names are taken first because a target has one namespace where SGL has two: a local `normalize` would hide the builtin it is about to call.
+
+## CHK-135
+
+A caller needs a signature, and the signature of such a function is not known before its body is.
+So the body joins the demand, for these functions only.
+Every other body is still checked after all signatures are known, which is what keeps an overload set usable from inside one of its own members (CHK-20).
+The price is the one CHK-136 names, and it is the honest one.
+Two functions that infer their results from each other have no result, and nothing short of a written type can give them one.
+
+## CHK-137
+
+A call may have been written for its effect, and a function with a value is no less callable for it.
+Whether a PURE call is worth a statement is a question about the program, and the AST pass already asks it, as the warning `no-effect`.
+Refusing here what the AST pass only warns about would make the two disagree.
+Any other expression as a statement has nothing it could be for, so it stays refused until something gives it a meaning.
+
+## CHK-138
+
+The split is by who writes the file, which is also what each needs.
+A builtin needs C++ behind it: an evaluator, a spelling per target, a layout.
+So C++ is the source of truth, and the file is generated from it: one record per builtin, and nothing that has to agree with it.
+The generated file is committed all the same, since the prelude is the documentation of the builtins and a diff of it is how a change to them is reviewed.
+`core.sgl` is what needs no C++: ordinary SGL that is checked and inlined like a program's own functions.
+Until SGL has generics, an overload family cannot be written once in SGL, so the registry's C++ loops write the families out and `core.sgl` holds next to nothing.
+

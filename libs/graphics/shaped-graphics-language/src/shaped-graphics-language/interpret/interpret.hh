@@ -5,37 +5,13 @@
 #include <clean-core/string/string.hh>
 #include <shaped-graphics-language/check/checked_module.hh>
 #include <shaped-graphics-language/check/flat.hh>
+#include <shaped-graphics-language/interpret/scalar.hh>
 
 /// The abstract machine of the flat tree, run directly: what a tree MEANS, in either form.
 ///
 /// Operands and arguments are evaluated left to right, each exactly once, and a `print` is the one effect besides the result.
 /// It exists to compare two trees, so it is exact about order and indifferent to speed.
 /// Its arithmetic is `f32` and wrapping `i32`; a target's own rounding is not modelled, and `normalize` takes its root by iteration.
-
-enum class sgl::check::value_kind : sgl::u8
-{
-    none,
-    scalar_float,
-    scalar_int,
-    boolean,
-};
-
-/// One leaf of a value, held as its bits so that equality is exact: a NaN equals itself and 0.0 differs from -0.0.
-struct sgl::check::scalar
-{
-    value_kind kind = value_kind::none;
-    u32 bits = 0;
-
-    [[nodiscard]] static scalar of(f32 v);
-    [[nodiscard]] static scalar of(i32 v);
-    [[nodiscard]] static scalar of(bool v);
-
-    [[nodiscard]] f32 as_float() const;
-    [[nodiscard]] i32 as_int() const { return i32(bits); }
-    [[nodiscard]] bool as_bool() const { return bits != 0; }
-
-    constexpr bool operator==(scalar const&) const = default;
-};
 
 /// A value of any type as its scalars in field order, nested structs included; a `mat4` is 16 of them, column by column.
 struct sgl::check::value

@@ -6,7 +6,7 @@
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
 #include <shaped-graphics-language/ast/file_ast.hh>
-#include <shaped-graphics-language/check/builtins.hh>
+#include <shaped-graphics-language/builtins/ids.hh>
 #include <shaped-graphics-language/check/ids.hh>
 #include <shaped-graphics-language/check/symbols.hh>
 
@@ -165,8 +165,8 @@ struct sgl::check::flat_construct
 struct sgl::check::flat_call
 {
     symbol_id callee = symbol_id::none;
-    /// The callee's `symbol::intrinsic`, repeated so an emitter switches without a lookup.
-    builtin intrinsic = builtin::none;
+    /// The callee's `symbol::intrinsic`: the registry record an emitter and the interpreter look up.
+    builtin_id intrinsic = builtin_id::none;
     /// The callee's `function_info::is_pure`, repeated for the same reason; a call that is not pure has an effect.
     bool is_pure = false;
     ast::range_of<flat_expr_id> arguments;
@@ -271,6 +271,14 @@ struct sgl::check::flat_print
     constexpr bool operator==(flat_print const&) const = default;
 };
 
+/// Evaluates `value` and drops it: a call somebody wrote for its effect alone.
+struct sgl::check::flat_eval
+{
+    flat_expr_id value = flat_expr_id::none;
+
+    constexpr bool operator==(flat_eval const&) const = default;
+};
+
 struct sgl::check::flat_if
 {
     flat_expr_id condition = flat_expr_id::none;
@@ -363,7 +371,21 @@ struct sgl::check::flat_stmt
     ast::range_of<call_site> inlined_through;
 
     // `switch` joins here with `case`; it will capture a `break` the way a loop does.
-    cc::variant<flat_let, flat_var, flat_assign, flat_print, flat_if, flat_block, flat_leave, flat_loop, flat_while, flat_for, flat_continue, flat_once, flat_break, flat_return>
+    cc::variant<flat_let,
+                flat_var,
+                flat_assign,
+                flat_print,
+                flat_eval,
+                flat_if,
+                flat_block,
+                flat_leave,
+                flat_loop,
+                flat_while,
+                flat_for,
+                flat_continue,
+                flat_once,
+                flat_break,
+                flat_return>
         node;
 
     bool operator==(flat_stmt const&) const = default;

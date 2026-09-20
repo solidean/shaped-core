@@ -48,6 +48,7 @@ One row per core construct, one column per target; GLSL has no emitter yet, and 
 * **LEGAL-11** An `if` that is the whole `else` of another is written `else if`.
 * **LEGAL-12** `&&` and `||` never stand bare inside each other: the inner one is parenthesized, since WGSL refuses the mix.
 * **LEGAL-13** A `print` has no row: no target writes one yet, and an entry point that holds one is `unsupported`.
+* **LEGAL-42** `eval v` is core when `v` is: it is `v;` in the C-like targets and `_ = v;` in WGSL ([EMIT-75](emitting.md#the-text)).
 
 ## Expressions
 
@@ -67,6 +68,9 @@ The rules run cheapest first, and each costs what its line says.
   It costs one `if`.
 * **LEGAL-21** The test stands at the top of the body, so a `continue` still meets the condition before the next iteration.
 * **LEGAL-22** The `end` of a `for` that LEGAL-7 refuses is pinned in front of the loop, and then `first` is pinned too when it has an effect, so the two keep their order.
+* **LEGAL-43** The value of an `eval` is lowered like the value of any statement, by E1 to E3.
+  An `eval` whose value was a block is dropped once the block has moved: what is left of it is a read of a local or a literal, and evaluating that is nothing.
+  It costs nothing.
 
 A read of `x` to the left of a block that assigns `x`:
 

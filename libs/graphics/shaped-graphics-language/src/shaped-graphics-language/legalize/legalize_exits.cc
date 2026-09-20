@@ -485,7 +485,8 @@ struct compactor
                                 n.place = expr(n.place, 0);
                                 n.value = expr(n.value, 0);
                             },
-                            [&](flat_print& n) { n.value = expr(n.value, 0); },
+                            [&](flat_print& n) { n.value = expr(n.value, 0); }, //
+                            [&](flat_eval& n) { n.value = expr(n.value, 0); },
                             [&](flat_if& n)
                             {
                                 n.condition = expr(n.condition, 0);
@@ -520,7 +521,7 @@ struct compactor
 stmt_list sgl::check::impl::lower_exits(flat_builder& out, stmt_list const& body, legalize_options const& options)
 {
     auto const dissolved = block_dissolver{.out = out}.dissolve(body);
-    auto lowering = exit_lowering{.out = out, .options = options, .bool_type = out.type_of(builtin::boolean)};
+    auto lowering = exit_lowering{.out = out, .options = options, .bool_type = out.type_named(builtins::k_bool)};
     return lowering.lower(dissolved);
 }
 

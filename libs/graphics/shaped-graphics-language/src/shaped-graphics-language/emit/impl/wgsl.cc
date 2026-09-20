@@ -18,33 +18,8 @@ class wgsl_dialect_t final : public dialect
 public:
     cc::string_view description() const override { return "WGSL"; }
 
-    cc::string_view type_name(builtin b) const override
-    {
-        switch (b)
-        {
-        case builtin::scalar_float:
-            return "f32";
-        case builtin::float3:
-        case builtin::vec3:
-        case builtin::pos3:
-            return "vec3f";
-        case builtin::float4:
-        case builtin::hpos4:
-            return "vec4f";
-        case builtin::mat4:
-            return "mat4x4f";
-        case builtin::scalar_int:
-            return "i32";
-        case builtin::boolean:
-            return "bool";
-        default:
-            return "";
-        }
-    }
+    builtins::language language() const override { return builtins::language::wgsl; }
 
-    cc::string_view function_name(builtin b) const override { return to_string(b); }
-
-    bool has_mul_function() const override { return false; }
     bool has_struct_constructor() const override { return true; }
 
     bool is_c_like() const override { return false; }
@@ -53,6 +28,8 @@ public:
     {
         out.appendf("for (var {}: i32 = {}; {} < {}; {}++)", index, first, index, end, index);
     }
+
+    void write_eval(cc::string& out, cc::string_view value) const override { out.appendf("_ = {};", value); }
 
     void write_local(cc::string& out, local_declaration const& local) const override
     {

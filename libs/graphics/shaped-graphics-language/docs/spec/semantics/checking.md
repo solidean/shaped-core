@@ -3,13 +3,14 @@
 *Tracer: deliberately thin.*
 
 The check pass reads the ASTs of one module and resolves names, checks types and builds the flat tree of every entry point.
-It is one pass, not three, and it carries what [cube.sgl](../../../tests/samples/cube.sgl) and [helpers.sgl](../../../tests/samples/helpers.sgl) need.
+It is one pass, not three, and it carries what three samples need.
+They are [cube.sgl](../../../tests/samples/cube.sgl), [helpers.sgl](../../../tests/samples/helpers.sgl) and [matrices.sgl](../../../tests/samples/matrices.sgl).
 Back to the [semantics](_index.md); the reasons are in [why/checking.md](why/checking.md).
 
 ## The pass
 
 * **CHK-1** The check pass reads the [ASTs](../syntax/ast.md) of the files of one module, and it changes none of them.
-* **CHK-2** The module is unnamed and has two files: the prelude in front, then the program's file ([why](why/checking.md#chk-2)).
+* **CHK-2** The module is unnamed: the files of the prelude stand in front, then the program's file, and a file is named by its position in that order ([why](why/checking.md#chk-2)).
 * **CHK-3** A `module` line is accepted and names nothing.
 * **CHK-4** The files stay separate, so a span points into the source of its own file, and a diagnostic names its file.
 * **CHK-5** The check pass is total: any ASTs give a checked module and a list of diagnostics, `invalid` nodes and earlier diagnostics included.
@@ -30,7 +31,7 @@ Back to the [semantics](_index.md); the reasons are in [why/checking.md](why/che
 * **CHK-17** Compilation is on demand: needing a symbol that is untouched compiles it first ([why](why/checking.md#chk-17)).
 * **CHK-18** Needing a symbol that is in compilation is the normal error `dependency-cycle`, its detail names the loop, and what needed it gets the error type.
 * **CHK-19** A failed symbol gives whatever needs it the error type, without a diagnostic.
-* **CHK-20** Compiling a function means its signature; a body is checked after every signature is known ([why](why/checking.md#chk-20)).
+* **CHK-20** Compiling a function means its signature; a body is checked after every signature is known, except by CHK-135 ([why](why/checking.md#chk-20)).
 
 Two structs that hold each other report `dependency-cycle` with the detail `a -> b -> a`.
 
@@ -55,9 +56,11 @@ struct b:
 
 ## Builtins and the prelude
 
-* **CHK-29** The prelude is a file of SGL source, and it is checked like the program's file.
-* **CHK-30** A declaration that carries `@builtin` stands for something the compiler and every emitter know, and its **name** is the key ([why](why/checking.md#chk-30)).
-* **CHK-31** A `@builtin` name the compiler does not know, or knows as the other kind of declaration, is the normal error `unknown-builtin`.
+* **CHK-29** The prelude is SGL source, and each of its files is checked like the program's file; CHK-138 says which files it has.
+* **CHK-30** A declaration that carries `@builtin` stands for one record of the compiler's **builtin registry**.
+  The key of a `struct` is its **name**, and the key of a `fun` is its name together with its parameter types, so every overload is a record of its own ([why](why/checking.md#chk-30)).
+* **CHK-31** A `@builtin` declaration no record has the key of is the normal error `unknown-builtin`.
+  That is a name the registry does not hold, a name it holds as the other kind of declaration, or parameter types no overload of the name takes.
 * **CHK-32** A `@builtin fun` has no body, and every other `fun` has one, or it is the normal error `expected-body`.
 * **CHK-33** A `struct` without a block is **opaque**: it has no fields and no constructor.
 * **CHK-34** An opaque struct carries `@builtin`, or it is the normal error `opaque-struct-needs-builtin`.
@@ -123,7 +126,7 @@ struct b:
 * **CHK-56** `return value` needs `value` to be of the function's return type, or it is `type-mismatch`.
 * **CHK-57** An arrow body `=> value` is `return value`.
 * **CHK-58** A block body that returns a value does so on every path, by CHK-123 to CHK-125.
-* **CHK-59** `assert`, a declaration inside a function, and a call whose value nothing takes are `unsupported-yet`; every other statement is [control flow](#control-flow).
+* **CHK-59** `assert` and a declaration inside a function are `unsupported-yet`; a call is a statement by CHK-137, and every other statement is [control flow](#control-flow).
 
 ## Expressions
 
@@ -230,7 +233,8 @@ fun falloff(d: float, steps: int) -> float:
 ## Returning
 
 * **CHK-121** A function without `-> T` returns nothing: its `return` carries no value, and a call of it is a statement.
-* **CHK-122** An arrow body has a value, so an arrow body without a written return type is `unsupported-yet`: nothing infers one yet.
+* **CHK-122** An arrow body without a written return type returns what its expression is: the function's return type is the type of that expression.
+  A block body without `-> T` still returns nothing, by CHK-121.
 * **CHK-123** A statement list **exits** when it holds a `return`, a `break` or a `continue`, an `if` with an `else` whose every branch exits, or a `loop:` that holds no `break` of its own.
 * **CHK-124** A `while` and a `for` never make their list exit, whatever their condition is ([why](why/checking.md#chk-124)).
 * **CHK-125** The body of a function that returns a value exits, or it is the normal error `missing-return`.
@@ -256,6 +260,26 @@ fun grade(x: float) -> float:
 * **CHK-133** An inlined call is a block named after its callee, and two inlines of one function share no local: each gets its names from the mint.
 * **CHK-134** A `mut` parameter, a lambda, a function as a value and a nested function are `unsupported-yet`.
 
+## Inferred results and dropped values
+
+* **CHK-135** A function whose return type is inferred by CHK-122 has its body checked as part of compiling it: for such a function the body belongs to the signature ([why](why/checking.md#chk-135)).
+* **CHK-136** So needing such a function from inside its own body, directly or through other inferred functions, is `dependency-cycle` by CHK-18.
+  One written return type on the loop makes it the `recursive-call` of CHK-130.
+  A call does not need an overload whose parameter types cannot take it, since parameters are known before a result is: an overload set stays usable from inside one of its inferred members.
+* **CHK-139** An arrow body whose expression is nothing, which is a call of a function that returns nothing, is `type-mismatch`: the body of such a function is its result.
+* **CHK-137** A call that stands as a statement is evaluated and its value dropped, whatever it calls; any other expression as a statement is `unsupported-yet` ([why](why/checking.md#chk-137)).
+  In the flat tree it is an `eval` of the call, and a call of a function that returns nothing is the block of CHK-133 as a statement.
+
+```sgl
+fun make_mvp(model: mat4){frame} => frame.proj * frame.view * model
+```
+
+## The two files of the prelude
+
+* **CHK-138** The prelude has two files, in this order: `builtins.sgl`, which the builtin registry generates, and `core.sgl`, which is written by hand ([why](why/checking.md#chk-138)).
+* **CHK-140** The text of `builtins.sgl` that is checked is generated in memory, and the committed file is byte for byte the same, so a diagnostic's line and column are right in it.
+* **CHK-141** Every record of the registry carries its declaration as SGL source, and that text goes through the same parser as any other: the registry has no second signature language.
+
 ## Diagnostic kinds
 
 Every kind below is a normal error by [DIAG-4](../syntax/diagnostics.md#rules), except `unreachable-code`, which is a warning.
@@ -265,7 +289,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 |---|---|
 | `unsupported-yet` | CHK-8 |
 | `duplicate-declaration` | CHK-12, CHK-28, CHK-53 |
-| `dependency-cycle` | CHK-18 |
+| `dependency-cycle` | CHK-18, CHK-136 |
 | `unknown-name` | CHK-24, CHK-62 |
 | `wrong-kind-of-name` | CHK-24, CHK-79 |
 | `missing-type` | CHK-26 |
@@ -274,7 +298,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `opaque-struct-needs-builtin` | CHK-34 |
 | `invalid-attribute-arguments` | CHK-36, CHK-39 |
 | `binding-not-listed` | CHK-45, CHK-131 |
-| `type-mismatch` | CHK-52, CHK-56, CHK-77, CHK-84, CHK-112 to CHK-118, CHK-121 |
+| `type-mismatch` | CHK-52, CHK-56, CHK-77, CHK-84, CHK-112 to CHK-118, CHK-121, CHK-139 |
 | `not-assignable` | CHK-112 |
 | `missing-return` | CHK-125 |
 | `unreachable-code` | CHK-126 |
@@ -288,11 +312,10 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 ## Open
 
 * Whether `@builtin` is allowed outside the prelude; today it is.
-* Whether a builtin's declaration is checked against what the compiler knows about it; today only its name and its kind are.
+* Whether a builtin's declaration is checked against its record beyond the key; today its result type and its attributes are not.
 * Whether a local may shadow a module-level name, or a local of an enclosing block ([scopes](../incubator/scopes.md)).
 * Whether a body is checked once or where it is inlined, once a generic makes the two differ ([why](why/checking.md#chk-129)).
 * `true` and `false`, which are names nothing declares yet.
-* A call whose value nothing takes, which a function with an effect makes meaningful.
 * Whether a second function with the parameter types of another is an error where it is declared.
 * Whether the bindings of a flat entry point are the ones its list names or the ones its body reads.
 * How a splatted value reads in the emitted text once a target can take the vector whole.
