@@ -132,28 +132,44 @@ TEST("sgl emit - an underscore that is taken already is minted past")
     CHECK(wgsl.contains("fn main_ps(p: pixel_input) -> target__1 {\n"));
 }
 
-TEST("sgl emit - an entry point name that is reserved in any target is an error in every target")
+TEST("sgl emit - an entry point a target reserves is renamed there, and the text says what it is called")
 {
-    CHECK(errors_of(with_edges("@pixel fun filter(p: pixel_input) -> frame:\n"
-                               "    return {\n"
-                               "        color = float4(..p.normal, 1.0)\n"
-                               "    }\n"))
-          == "reserved-entry-point-name 'filter' is reserved in wgsl, msl\n");
+    // `main` is the canonical name for a shader, and MSL is the only target that forbids it.
+    // So it is renamed there and kept everywhere else.
+    // Whoever compiles the text asks for `entry_point`, never for the name they wrote.
+    constexpr auto source = "@pixel fun main(p: pixel_input) -> frame:\n"
+                            "    return {\n"
+                            "        color = float4(..p.normal, 1.0)\n"
+                            "    }\n";
 
-    CHECK(errors_of(with_edges("@pixel fun mul(p: pixel_input) -> frame:\n"
-                               "    return {\n"
-                               "        color = float4(..p.normal, 1.0)\n"
-                               "    }\n"))
-          == "reserved-entry-point-name 'mul' is reserved in hlsl-dx12, hlsl-vulkan\n");
+    auto const msl = emit_source(with_edges(source), 0, target::msl);
+    CHECK(sgl::emit::dump_errors(msl) == "");
+    CHECK(msl.entry_point == "main_");
+    CHECK(msl.text.contains("fragment frame main_(pixel_input p [[stage_in]])"));
 
-    // MSL forbids a function called `main`, so no target gets one
-    CHECK(errors_of(with_edges("@pixel fun main(p: pixel_input) -> frame:\n"
-                               "    return {\n"
-                               "        color = float4(..p.normal, 1.0)\n"
-                               "    }\n"))
-          == "reserved-entry-point-name 'main' is reserved in msl\n");
+    for (auto const t : {target::wgsl, target::hlsl_dx12, target::hlsl_vulkan})
+    {
+        auto const kept = emit_source(with_edges(source), 0, t);
+        CHECK(sgl::emit::dump_errors(kept) == "");
+        CHECK(kept.entry_point == "main");
+    }
 
-    // and the names the cube uses stay free everywhere
+    // `filter` is WGSL's and MSL's, `mul` is HLSL's: each is renamed where it is taken and kept where it is free.
+    auto const filtered = emit_source(with_edges("@pixel fun filter(p: pixel_input) -> frame:\n"
+                                                 "    return {\n"
+                                                 "        color = float4(..p.normal, 1.0)\n"
+                                                 "    }\n"),
+                                      0, target::wgsl);
+    CHECK(filtered.entry_point == "filter_");
+
+    auto const multiplied = emit_source(with_edges("@pixel fun mul(p: pixel_input) -> frame:\n"
+                                                   "    return {\n"
+                                                   "        color = float4(..p.normal, 1.0)\n"
+                                                   "    }\n"),
+                                        0, target::hlsl_dx12);
+    CHECK(multiplied.entry_point == "mul_");
+
+    // and the names the cube uses stay free everywhere, so nothing is renamed for it
     for (auto const t : sgl::emit::all_targets())
     {
         CHECK(!sgl::emit::is_reserved(t, "main_vs"));

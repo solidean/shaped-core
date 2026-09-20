@@ -218,7 +218,7 @@ if(SC_BUILD_TESTS)
         SHADERS
             cube.sgl:vertex:main_vs
             cube.sgl:pixel:main_ps
-            double_values.sgl:compute:double_values
+            double_values.sgl:compute:main
     )
 
     # Browser test runner (Emscripten only); a no-op on native toolchains.

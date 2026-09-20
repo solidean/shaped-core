@@ -26,6 +26,7 @@ struct diagnostic;
 struct line_column;
 
 struct text_request;
+struct emitted_source;
 struct prelude_file;
 
 enum class line_kind : u8;

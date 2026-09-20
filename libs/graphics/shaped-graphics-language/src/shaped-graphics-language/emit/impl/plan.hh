@@ -97,6 +97,8 @@ struct plan
     cc::vector<planned_enum> enums;
     /// Parallel to `m.types`: a position in `enums`, or -1 for a type that is no enum this entry point needs.
     cc::vector<i32> enum_of_type;
+    /// What this target declares the entry point as: the source's name, or a minted one where the target reserves it.
+    cc::string entry_name;
     cc::optional<planned_constants> constants;
     /// The buffers the entry point's bindings declare, in group then slot order.
     cc::vector<planned_buffer> buffers;

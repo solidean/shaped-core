@@ -39,7 +39,7 @@ struct report
 };
 } // namespace
 
-cc::result<cc::string, cc::string> sgl::compile_to_text(text_request const& request)
+cc::result<sgl::emitted_source, cc::string> sgl::compile_to_text(text_request const& request)
 {
     // Both vectors are complete before a `module_file` refers into them.
     auto const prelude = prelude_files();
@@ -97,5 +97,5 @@ cc::result<cc::string, cc::string> sgl::compile_to_text(text_request const& requ
             text.appendf("{}: error: {}: {}\n", request.source_name, emit::to_string(error.kind), error.detail);
         return cc::error(cc::move(text));
     }
-    return cc::move(emitted.text);
+    return sgl::emitted_source{.text = cc::move(emitted.text), .entry_point = cc::move(emitted.entry_point)};
 }

@@ -25,7 +25,7 @@ enum class sgl::emit::error_kind : sgl::u8
     module_has_errors,
     /// Not a position in `checked_module::entry_points`.
     unknown_entry_point,
-    /// The entry point's name is a reserved word of some target, and an entry point is never renamed.
+    /// Unused since an entry point is renamed per target; kept so the ids of the kinds around it do not move.
     reserved_entry_point_name,
     /// A construct the emitters do not carry yet; never a guess at its address or its meaning.
     unsupported,
@@ -58,13 +58,16 @@ struct sgl::emit::emitted_text
 {
     /// Empty when `errors` is not.
     cc::string text;
+    /// The name the text actually declares the entry point under, which is the source's unless this target reserves it.
+    /// A caller compiling the text has to ask for THIS name, not the one it requested.
+    cc::string entry_point;
     cc::vector<error> errors;
 
     [[nodiscard]] bool has_text() const { return errors.empty(); }
 
     [[nodiscard]] bool operator==(emitted_text const& rhs) const
     {
-        return text == rhs.text && ast::impl::is_equal(errors, rhs.errors);
+        return text == rhs.text && entry_point == rhs.entry_point && ast::impl::is_equal(errors, rhs.errors);
     }
 };
 

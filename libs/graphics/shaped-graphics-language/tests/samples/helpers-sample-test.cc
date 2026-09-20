@@ -23,13 +23,14 @@ cc::string pixel_function(sgl::emit::target t)
                                             .target = t});
     if (!text.has_value())
         return text.error();
-    auto at
-        = text.value().find(t == sgl::emit::target::wgsl ? cc::string_view("@fragment") : cc::string_view("main_ps("));
+    auto at = text.value().text.find(t == sgl::emit::target::wgsl ? cc::string_view("@fragment")
+                                                                  : cc::string_view("main_ps("));
     // the C-like targets put the result type in front of the name, on the same line
-    while (at > 0 && text.value()[at - 1] != '\n')
+    while (at > 0 && text.value().text[at - 1] != '\n')
         --at;
-    return at < 0 ? text.value()
-                  : cc::string(cc::string_view(text.value()).subview({.start = at, .end = text.value().size()}));
+    return at < 0
+             ? text.value().text
+             : cc::string(cc::string_view(text.value().text).subview({.start = at, .end = text.value().text.size()}));
 }
 } // namespace
 

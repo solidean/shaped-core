@@ -90,17 +90,6 @@ struct validator
         errors.push_back({.kind = kind, .symbol = symbol, .detail = cc::move(detail)});
     }
 
-    void entry_point_name()
-    {
-        auto where = cc::string();
-        for (auto const t : all_targets())
-            if (is_reserved(t, e.name))
-                where.appendf("{}{}", where.empty() ? "" : ", ", to_string(t));
-        if (!where.empty())
-            report(error_kind::reserved_entry_point_name, e.function,
-                   cc::format("'{}' is reserved in {}", e.name, where));
-    }
-
     void edge_struct(type_id type, struct_role role)
     {
         auto const& info = m.at(type);
@@ -418,7 +407,6 @@ bool sgl::emit::impl::is_builtin_type(check::checked_module const& m, check::typ
 void sgl::emit::impl::validate(check::checked_module const& m, check::flat_entry_point const& e, cc::vector<error>& errors)
 {
     auto v = validator{.m = m, .e = e, .errors = errors};
-    v.entry_point_name();
     if (e.input == e.result && e.entry_stage != stage::compute)
         v.report(error_kind::unsupported, e.function,
                  cc::format("one struct as both the parameter and the result: '{}'", m.name_of(e.input)));
@@ -464,6 +452,8 @@ sgl::emit::impl::plan sgl::emit::impl::make_plan(check::checked_module const& m,
         p.need(x.type, struct_role::plain);
         p.need_enum(x.type);
     }
+    // `spell` is what mints `<name>_` where the target reserves the name or a builtin is called by it.
+    result.entry_name = p.spell(e.name);
     p.constants();
     p.buffers();
     for (auto const& local : e.locals)

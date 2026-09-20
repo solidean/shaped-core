@@ -509,7 +509,8 @@ cc::string_view sgl::emit::impl::stage_name(check::stage s)
 cc::string sgl::emit::impl::write_text(plan& p, dialect const& d)
 {
     auto w = writer{.p = p, .d = d};
-    w.out.appendf("// SGL {} entry point '{}', written as {}.\n", stage_name(p.e.entry_stage), p.e.name, d.description());
+    w.out.appendf("// SGL {} entry point '{}', written as {}.\n", stage_name(p.e.entry_stage), p.entry_name,
+                  d.description());
     w.out += "// Generated: the SGL source is what to edit.\n\n";
     d.write_declarations(w.out, p);
     d.write_function_head(w.out, p);

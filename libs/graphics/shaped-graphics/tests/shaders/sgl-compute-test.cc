@@ -53,7 +53,7 @@ ASYNC_INVOCABLE_TEST("sg - an SGL compute shader dispatches and doubles a buffer
     lib.add_package(sg::test::sgl_shaders::package());
 
     // The asset picks the format by asking the context what it accepts, so this test names no backend.
-    auto const shader = sg::test::sgl_shaders::double_values.compute.double_values->acquire(*ctx);
+    auto const shader = sg::test::sgl_shaders::double_values.compute.main->acquire(*ctx);
     REQUIRE(shader != nullptr);
     co_await cc::async_settled(shader);
     auto const* const compiled = shader->try_value();

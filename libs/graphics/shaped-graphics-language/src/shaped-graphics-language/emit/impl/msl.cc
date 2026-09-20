@@ -107,7 +107,7 @@ public:
     void write_function_head(cc::string& out, plan const& p) const override
     {
         out.appendf("{} {} {}({} {} [[stage_in]]", p.e.entry_stage == stage::vertex ? "vertex" : "fragment",
-                    type_text(p, *this, p.e.result), p.e.name, type_text(p, *this, p.e.input), p.locals[0]);
+                    type_text(p, *this, p.e.result), p.entry_name, type_text(p, *this, p.e.input), p.locals[0]);
         if (p.constants.has_value())
         {
             auto const& c = p.constants.value();

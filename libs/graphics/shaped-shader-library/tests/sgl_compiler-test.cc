@@ -77,8 +77,8 @@ class no_metal_compiler final : public slib::shader_compiler
 public:
     [[nodiscard]] slib::shader_language source_language() const override { return slib::shader_language::hlsl; }
     [[nodiscard]] sg::shader_format target_format() const override { return sg::shader_format::metal_lib; }
-    [[nodiscard]] cc::result<cc::string> preprocess(slib::shader_source_description const&,
-                                                    slib::include_resolver) const override
+    [[nodiscard]] cc::result<slib::preprocessed_source> preprocess(slib::shader_source_description const&,
+                                                                   slib::include_resolver) const override
     {
         return cc::error("never called");
     }
@@ -107,8 +107,8 @@ TEST("slib sgl compiler - over a metal_lib compiler the flattened source is MSL"
                                             .stage = sg::shader_stage::fragment},
                                            resolve);
     REQUIRE(text.has_value());
-    CHECK(text.value().contains("using namespace metal;"));
-    CHECK(text.value().contains("fragment frame main_ps(pixel_input p [[stage_in]])"));
+    CHECK(text.value().source.contains("using namespace metal;"));
+    CHECK(text.value().source.contains("fragment frame main_ps(pixel_input p [[stage_in]])"));
 }
 
 TEST("slib sgl compiler - the edge is sgl to whatever the inner compiler builds")
@@ -137,8 +137,8 @@ TEST("slib sgl compiler - the flattened source is the emitted text, with its fin
                                             .stage = sg::shader_stage::vertex},
                                            resolve);
     REQUIRE(text.has_value());
-    CHECK(text.value().contains("@group(3) @binding(0) var<uniform> constants: constants_data;"));
-    CHECK(text.value().contains("fn main_vs(v: cube_vertex) -> pixel_input"));
+    CHECK(text.value().source.contains("@group(3) @binding(0) var<uniform> constants: constants_data;"));
+    CHECK(text.value().source.contains("fn main_vs(v: cube_vertex) -> pixel_input"));
 }
 
 TEST("slib sgl compiler - the cube becomes WGSL that slib's own reader reflects", exclusive("slib-shader-library"))
@@ -174,11 +174,10 @@ TEST("slib sgl compiler - a compute entry point reaches WGSL with its buffer ref
     add_sgl_compilers(lib);
     lib.add_package(slib_test::sgl_shaders::package());
 
-    auto const& cs
-        = value_of(slib_test::sgl_shaders::double_values.compute.double_values->acquire(sg::shader_format::wgsl));
+    auto const& cs = value_of(slib_test::sgl_shaders::double_values.compute.main->acquire(sg::shader_format::wgsl));
 
     CHECK(cs.stage == sg::shader_stage::compute);
-    CHECK(cs.entry_point == "double_values");
+    CHECK(cs.entry_point == "main");
     REQUIRE(cs.workgroup_size.has_value());
     CHECK(cs.workgroup_size.value().x == 64);
 

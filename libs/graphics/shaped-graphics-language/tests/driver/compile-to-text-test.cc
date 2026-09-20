@@ -68,8 +68,8 @@ TEST("sgl driver - an entry point is found by its name, and the text is the emit
             {.source = source, .entry_point = "main_ps", .stage = sgl::check::stage::pixel, .target = t});
         REQUIRE(vs.has_value());
         REQUIRE(ps.has_value());
-        CHECK(vs.value() == sgl::emit::emit(checked.module, 0, t).text);
-        CHECK(ps.value() == sgl::emit::emit(checked.module, 1, t).text);
+        CHECK(vs.value().text == sgl::emit::emit(checked.module, 0, t).text);
+        CHECK(ps.value().text == sgl::emit::emit(checked.module, 1, t).text);
     }
 }
 

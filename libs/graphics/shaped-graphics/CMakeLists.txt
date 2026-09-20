@@ -352,7 +352,7 @@ if(SC_BUILD_TESTS)
             SOURCE_DIR tests/shaders-sgl
             LANGUAGE   sgl
             SHADERS
-                double_values.sgl:compute:double_values
+                double_values.sgl:compute:main
         )
     endif()
 

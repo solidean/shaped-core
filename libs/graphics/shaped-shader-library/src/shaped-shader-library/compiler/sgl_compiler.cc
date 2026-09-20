@@ -34,8 +34,8 @@ public:
     [[nodiscard]] slib::shader_language source_language() const override { return slib::shader_language::sgl; }
     [[nodiscard]] sg::shader_format target_format() const override { return _inner->target_format(); }
 
-    [[nodiscard]] cc::result<cc::string> preprocess(slib::shader_source_description const& desc,
-                                                    slib::include_resolver resolve) const override
+    [[nodiscard]] cc::result<slib::preprocessed_source> preprocess(slib::shader_source_description const& desc,
+                                                                   slib::include_resolver resolve) const override
     {
         (void)resolve; // SGL has no include directive
 
@@ -59,7 +59,9 @@ public:
              .target = _target});
         if (text.has_error())
             return cc::error(cc::format("SGL reported errors:\n{}", text.error()));
-        return cc::move(text.value());
+        // The name the text declares, which is the source's unless this target reserves it.
+        return slib::preprocessed_source{.source = cc::move(text.value().text),
+                                         .entry_point = cc::move(text.value().entry_point)};
     }
 
     [[nodiscard]] sg::async_compiled_shader compile(slib::shader_source_description const& desc) const override

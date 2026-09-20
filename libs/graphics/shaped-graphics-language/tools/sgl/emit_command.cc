@@ -61,7 +61,7 @@ COMMAND("emit")
         cc::flush();
         return exit_errors;
     }
-    cc::print(text.value());
+    cc::print(text.value().text);
     cc::flush();
     return exit_ok;
 }

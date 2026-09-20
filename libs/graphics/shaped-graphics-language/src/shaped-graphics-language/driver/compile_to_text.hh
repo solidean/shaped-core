@@ -19,6 +19,15 @@ struct sgl::text_request
     emit::target target = emit::target::hlsl_dx12;
 };
 
+/// The text of one entry point, and the name that text declares it under.
+struct sgl::emitted_source
+{
+    cc::string text;
+    /// The source's name, unless the target reserves it: HLSL and MSL both reserve words an SGL author may pick.
+    /// A caller compiling the text asks for THIS name.
+    cc::string entry_point;
+};
+
 namespace sgl
 {
 /// The whole pipeline in one call: parse, build the AST, check against the embedded prelude, and emit one entry point.
@@ -29,5 +38,5 @@ namespace sgl
 /// Warnings alone do not fail, and are dropped: a caller that wants them runs the phases itself.
 ///
 /// Deterministic, and it reads nothing but its arguments, so the text may be cached under the source and the request.
-[[nodiscard]] cc::result<cc::string, cc::string> compile_to_text(text_request const& request);
+[[nodiscard]] cc::result<emitted_source, cc::string> compile_to_text(text_request const& request);
 } // namespace sgl

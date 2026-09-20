@@ -27,6 +27,15 @@ using include_resolver = cc::function_ref<cc::optional<cc::string>(cc::string_vi
 
 } // namespace slib
 
+/// What `preprocess` hands back.
+/// `entry_point` is empty where preprocessing kept the name it was given, which is every compiler but SGL's:
+/// SGL renames an entry point the target reserves, and the compile has to ask for the name the text declares.
+struct slib::preprocessed_source
+{
+    cc::string source;
+    cc::string entry_point;
+};
+
 /// One shader to compile.
 /// `source` is the shader text — flattened once preprocess has run.
 struct slib::shader_source_description
@@ -56,8 +65,8 @@ public:
     /// Per target, not once for all of them: a compiler targeting SPIR-V flattens with its own macros defined, so a
     /// source may fork on the target it is being built for.
     /// That is why `shader_asset` keeps a flattened source and its dependencies per format entry.
-    [[nodiscard]] virtual cc::result<cc::string> preprocess(shader_source_description const& desc,
-                                                            include_resolver resolve) const = 0;
+    [[nodiscard]] virtual cc::result<preprocessed_source> preprocess(shader_source_description const& desc,
+                                                                     include_resolver resolve) const = 0;
 
     /// Already-flattened source -> bytecode.
     /// A compile failure arrives as an error on the returned node rather than a throw: a broken shader edit must not take down a running app.

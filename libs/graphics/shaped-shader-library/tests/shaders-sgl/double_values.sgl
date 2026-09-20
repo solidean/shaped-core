@@ -4,5 +4,5 @@
 binding work:
     values: mut buffer[float]
 
-@compute(64) fun double_values(@thread_id id: int3){work}:
+@compute(64) fun main(@thread_id id: int3){work}:
     work.values[id.x] = work.values[id.x] * 2.0

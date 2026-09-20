@@ -20,11 +20,12 @@ cc::string function_text(cc::string_view entry, sgl::emit::target t)
         {.source = read_matrices(), .source_name = "matrices.sgl", .entry_point = entry, .target = t});
     if (!text.has_value())
         return text.error();
-    auto at = text.value().find(cc::string(entry) + "(");
-    while (at > 0 && text.value()[at - 1] != '\n')
+    auto at = text.value().text.find(cc::string(entry) + "(");
+    while (at > 0 && text.value().text[at - 1] != '\n')
         --at;
-    return at < 0 ? text.value()
-                  : cc::string(cc::string_view(text.value()).subview({.start = at, .end = text.value().size()}));
+    return at < 0
+             ? text.value().text
+             : cc::string(cc::string_view(text.value().text).subview({.start = at, .end = text.value().text.size()}));
 }
 
 /// Column-major, so a translation stands in leaves 12 to 14.

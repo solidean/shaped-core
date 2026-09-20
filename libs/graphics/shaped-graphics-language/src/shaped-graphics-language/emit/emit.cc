@@ -121,6 +121,7 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
         return result;
     }
     result.text = impl::write_text(plan, impl::dialect_of(t));
+    result.entry_point = plan.entry_name;
     return result;
 }
 
