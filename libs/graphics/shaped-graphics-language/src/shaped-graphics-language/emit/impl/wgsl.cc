@@ -91,6 +91,14 @@ public:
 
     void write_function_head(cc::string& out, plan const& p) const override
     {
+        if (p.e.entry_stage == stage::compute)
+        {
+            out.appendf("@compute @workgroup_size({}, {}, {})\n", p.e.workgroup[0], p.e.workgroup[1], p.e.workgroup[2]);
+            out.appendf("fn {}(@builtin(global_invocation_id) {}_in: vec3u) {{\n", p.e.name, p.locals[0]);
+            // WebGPU reports the id unsigned and SGL has one integer type, so the conversion stands at the top.
+            out.appendf("    let {}: vec3i = vec3i({}_in);\n", p.locals[0], p.locals[0]);
+            return;
+        }
         out.appendf("@{}\nfn {}({}: {}) -> {} {{\n", p.e.entry_stage == stage::vertex ? "vertex" : "fragment", p.e.name,
                     p.locals[0], type_text(p, *this, p.e.input), type_text(p, *this, p.e.result));
     }

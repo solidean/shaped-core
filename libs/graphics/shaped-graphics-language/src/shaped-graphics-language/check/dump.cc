@@ -17,6 +17,8 @@ cc::string_view stage_name(stage s)
         return "vertex";
     case stage::pixel:
         return "pixel";
+    case stage::compute:
+        return "compute";
     }
     return "";
 }

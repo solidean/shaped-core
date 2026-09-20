@@ -914,7 +914,9 @@ void checker::flatten_entry_point(symbol_id id)
         return;
 
     auto const parameter = out.at(info.parameters)[0];
-    if (!is_sound(parameter.type) || !is_sound(info.result))
+    // A compute entry point hands nothing back, so `nothing` is its result and not a hole.
+    auto const wants_result = info.entry_stage != stage::compute;
+    if (!is_sound(parameter.type) || (wants_result && !is_sound(info.result)))
         return;
 
     auto f = flattener{.c = *this};
@@ -923,6 +925,10 @@ void checker::flatten_entry_point(symbol_id id)
     f.entry.function = id;
     f.entry.input = parameter.type;
     f.entry.result = info.result;
+    f.entry.workgroup[0] = info.workgroup[0];
+    f.entry.workgroup[1] = info.workgroup[1];
+    f.entry.workgroup[2] = info.workgroup[2];
+    f.entry.takes_thread_id = parameter.is_thread_id;
     for (auto const binding : out.at(info.bindings))
         f.entry.bindings.push_back(binding);
 

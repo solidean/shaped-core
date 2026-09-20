@@ -68,6 +68,9 @@ bool is_called_by_a_builtin(checked_module const& m, emit::target t, cc::string_
 
 struct_role input_role(flat_entry_point const& e)
 {
+    // A compute parameter crosses no edge: it is a system value, or a struct of them.
+    if (e.entry_stage == stage::compute)
+        return struct_role::plain;
     return e.entry_stage == stage::vertex ? struct_role::vertex_input : struct_role::stage_link;
 }
 
@@ -416,12 +419,21 @@ void sgl::emit::impl::validate(check::checked_module const& m, check::flat_entry
 {
     auto v = validator{.m = m, .e = e, .errors = errors};
     v.entry_point_name();
-    if (e.input == e.result)
+    if (e.input == e.result && e.entry_stage != stage::compute)
         v.report(error_kind::unsupported, e.function,
                  cc::format("one struct as both the parameter and the result: '{}'", m.name_of(e.input)));
-    v.edge_struct(e.input, input_role(e));
-    if (e.input != e.result)
-        v.edge_struct(e.result, result_role(e));
+    // The struct spelling of the thread id needs the signedness question settled first (the spec's bindings file).
+    if (e.entry_stage == stage::compute && !e.takes_thread_id)
+        v.report(error_kind::unsupported, e.function,
+                 "a @compute fun whose parameter is a struct; write `@thread_id id: int3` for now");
+
+    // A compute entry point has no pipeline edge at either end, so neither struct is judged as one.
+    if (e.entry_stage != stage::compute)
+    {
+        v.edge_struct(e.input, input_role(e));
+        if (e.input != e.result)
+            v.edge_struct(e.result, result_role(e));
+    }
     v.bindings();
     v.tree();
 }

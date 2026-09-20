@@ -32,6 +32,29 @@ type_record float_vector(cc::string_view name, i32 width, cc::string_view doc)
         .crosses_edges = true,
     };
 }
+/// A vector of ints with the fields `x y z`, which is what a dispatch reports and what a buffer is indexed by.
+type_record int_vector(cc::string_view name, i32 width, cc::string_view doc)
+{
+    auto declaration = cc::format("struct {}:", name);
+    cc::string_view const fields[] = {"x", "y", "z", "w"};
+    for (auto i = 0; i < width; ++i)
+        declaration.appendf("\n    {}: int", fields[i]);
+
+    auto const is_three = width == 3;
+    return {
+        .declaration = cc::move(declaration),
+        .doc = doc,
+        .hlsl = is_three ? "int3" : "int4",
+        .wgsl = is_three ? "vec3i" : "vec4i",
+        .msl = is_three ? "int3" : "int4",
+        .hlsl_layout = {.size = width * 4, .alignment = 4},
+        .wgsl_layout = {.size = width * 4, .alignment = 16},
+        // MSL aligns and sizes a three-vector at 16, as it does a float3.
+        .msl_layout = {.size = 16, .alignment = 16},
+        .leaf_kind = value_kind::scalar_int,
+        .leaf_count = width,
+    };
+}
 } // namespace
 
 void sgl::builtins::register_types(registry& r)
@@ -82,6 +105,8 @@ void sgl::builtins::register_types(registry& r)
         .leaf_kind = value_kind::scalar_int,
         .leaf_count = 1,
     });
+
+    r.add(int_vector("int3", 3, "/// Three ints; what a compute dispatch reports as the thread's own id."));
 
     // No layout: a bool has a different size in every target's block, so it has no place in one.
     r.add(type_record{

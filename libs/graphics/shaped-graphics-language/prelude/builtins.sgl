@@ -53,6 +53,12 @@
 /// 32 bits, signed; its arithmetic wraps.
 @builtin struct int
 
+/// Three ints; what a compute dispatch reports as the thread's own id.
+@builtin struct int3:
+    x: int
+    y: int
+    z: int
+
 @builtin struct bool
 
 // @pure: a call has no effect, so nobody can tell whether or when it ran.

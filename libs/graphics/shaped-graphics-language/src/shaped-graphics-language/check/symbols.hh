@@ -32,6 +32,8 @@ enum class sgl::check::stage : sgl::u8
     none,
     vertex,
     pixel,
+    /// A `@compute(x, y, z)` fun: it is dispatched over a grid, returns nothing, and reads which thread it is.
+    compute,
 };
 
 /// One canonical type: equal types have equal ids, so type equality is id equality.
@@ -66,6 +68,8 @@ struct sgl::check::member_info
     ast::field_id field = ast::field_id::none;
     /// Carries `@position`.
     bool is_position = false;
+    /// Carries `@thread_id`: which thread of the dispatch is running, as an `int3`.
+    bool is_thread_id = false;
 
     bool operator==(member_info const&) const = default;
 };
@@ -132,6 +136,8 @@ struct sgl::check::parameter
     cc::string name;
     type_id type = type_id::none;
     ast::field_id field = ast::field_id::none;
+    /// Carries `@thread_id`, which a compute entry point may write instead of a struct.
+    bool is_thread_id = false;
 
     bool operator==(parameter const&) const = default;
 };
@@ -144,8 +150,10 @@ struct sgl::check::function_info
     type_id result = type_id::none;
     /// The bindings of the `{...}` list, in the order written; a range of `checked_module::binding_lists`.
     ast::range_of<symbol_id> bindings;
-    /// `@vertex` or `@pixel` makes the function an entry point.
+    /// `@vertex`, `@pixel` or `@compute` makes the function an entry point.
     stage entry_stage = stage::none;
+    /// The grid a `@compute` entry point is dispatched in, from `@compute(x, y, z)`; 1 for an axis nobody wrote.
+    i32 workgroup[3] = {1, 1, 1};
     /// Carries `@pure`: a call of it has no effect, so nobody can tell whether or when it ran.
     /// A `@builtin` without it is assumed to have one.
     bool is_pure = false;

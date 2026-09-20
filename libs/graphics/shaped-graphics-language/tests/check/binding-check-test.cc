@@ -68,3 +68,40 @@ TEST("sgl check - a buffer element is read by subscript and written where the bu
     // Everything else a subscript could mean is still unbuilt, and says so rather than guessing.
     CHECK(reports_for(listing(members, "    let v = p.position[0]\n")).contains("a subscript on anything but a buffer"));
 }
+
+TEST("sgl check - a compute entry point takes the thread id and returns nothing")
+{
+    constexpr auto work = "binding work:\n    values: mut buffer[float]\n\n";
+
+    CHECK(reports_for(cc::string(work)
+                      + "@compute(64) fun go(@thread_id id: int3){work}:\n"
+                        "    work.values[id.x] = 1.0\n")
+          == "");
+
+    // The struct spelling checks too; only the emitter has not caught up.
+    CHECK(reports_for(cc::string(work)
+                      + "struct dispatch:\n    @thread_id id: int3\n\n"
+                        "@compute(64) fun go(d: dispatch){work}:\n"
+                        "    work.values[d.id.x] = 1.0\n")
+          == "");
+
+    CHECK(reports_for(cc::string(work)
+                      + "@compute(64) fun go(@thread_id id: float3){work}:\n"
+                        "    work.values[0] = 1.0\n")
+              .contains("a @thread_id parameter is an int3"));
+
+    CHECK(reports_for(cc::string(work)
+                      + "@compute(64) fun go(@thread_id id: int3){work} -> int:\n"
+                        "    return 1\n")
+              .contains("a @compute fun returns nothing"));
+
+    CHECK(reports_for(cc::string(work)
+                      + "@compute fun go(@thread_id id: int3){work}:\n"
+                        "    work.values[0] = 1.0\n")
+              .contains("@compute takes one to three workgroup sizes"));
+
+    CHECK(reports_for(cc::string(work)
+                      + "@compute(0) fun go(@thread_id id: int3){work}:\n"
+                        "    work.values[0] = 1.0\n")
+              .contains("a workgroup size is a positive int literal"));
+}

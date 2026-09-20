@@ -550,6 +550,10 @@ struct sgl::check::flat_entry_point
     type_id result = type_id::none;
     /// The bindings of the function's `{...}` list in the order written, which is what decides the pipeline layout.
     cc::vector<symbol_id> bindings;
+    /// The grid a `compute` entry point is dispatched in; `{1, 1, 1}` for every other stage.
+    i32 workgroup[3] = {1, 1, 1};
+    /// The parameter carries `@thread_id` itself rather than being a struct that holds one.
+    bool takes_thread_id = false;
 
     cc::vector<flat_local> locals;
     cc::vector<flat_label> labels;

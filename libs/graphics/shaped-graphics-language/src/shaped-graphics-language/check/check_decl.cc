@@ -8,13 +8,56 @@ using namespace sgl::check::impl;
 
 namespace
 {
-stage stage_of(bool is_vertex, bool is_pixel)
+stage stage_of(bool is_vertex, bool is_pixel, bool is_compute)
 {
     if (is_vertex)
         return stage::vertex;
-    return is_pixel ? stage::pixel : stage::none;
+    if (is_pixel)
+        return stage::pixel;
+    return is_compute ? stage::compute : stage::none;
 }
 } // namespace
+
+/// True for the prelude's `int3`, which is what a dispatch reports a thread's id as.
+bool checker::is_int3(type_id type) const
+{
+    auto const* const record = out.builtin_type_of(type);
+    return record != nullptr && record->name == "int3";
+}
+
+/// `@compute(64)` or `@compute(8, 8, 1)`: the axes nobody wrote are 1, and a bad argument reports and stays 1.
+cc::fixed_array<sgl::i32, 3> checker::workgroup_of(i32 file, ast::attribute const* a)
+{
+    auto result = cc::fixed_array<i32, 3>{1, 1, 1};
+    if (a == nullptr)
+        return result;
+
+    auto const arguments = ast_of(file).at(a->arguments);
+    if (arguments.empty() || arguments.size() > 3)
+    {
+        report(diagnostic_kind::invalid_attribute_arguments, file, a->name,
+               "@compute takes one to three workgroup sizes: `@compute(64)`, `@compute(8, 8)`");
+        return result;
+    }
+    for (auto i = isize(0); i < arguments.size(); ++i)
+    {
+        auto const& argument = arguments[i];
+        auto const text
+            = ast::is_valid(argument.value) ? text_of(file, span_of(file, argument.value)) : cc::string_view();
+        auto const value = ast::is_valid(argument.value) && ast_of(file).at(argument.value).node.is<ast::literal>()
+                                && classify_number(text) == number_class::plain_integer
+                             ? parse_plain_integer(text)
+                             : cc::optional<i32>();
+        if (!argument.name.empty() || argument.is_splat || !value.has_value() || value.value() < 1)
+        {
+            report(diagnostic_kind::invalid_attribute_arguments, file, a->name,
+                   "a workgroup size is a positive int literal");
+            return {1, 1, 1};
+        }
+        result[i] = value.value();
+    }
+    return result;
+}
 
 // ---- types ----------------------------------------------------------------------------------------------------------
 
@@ -175,7 +218,7 @@ ast::range_of<member_info> checker::compile_members(i32 file, ast::range_of<ast:
             continue;
         auto const name = text_of(file, f.name);
 
-        cc::string_view const known_on_field[] = {"position"};
+        cc::string_view const known_on_field[] = {"position", "thread_id"};
         judge_attributes(file, f.attributes,
                          is_struct ? cc::span<cc::string_view const>(known_on_field) : cc::span<cc::string_view const>(),
                          owner);
@@ -205,6 +248,7 @@ ast::range_of<member_info> checker::compile_members(i32 file, ast::range_of<ast:
             .type = type,
             .field = line->field,
             .is_position = find_attribute(file, f.attributes, "position") != nullptr,
+            .is_thread_id = find_attribute(file, f.attributes, "thread_id") != nullptr,
         });
     }
 
@@ -249,7 +293,8 @@ void checker::compile_struct(symbol_id id)
         .symbol = id,
         .members = members,
         .is_opaque = s.is_opaque,
-        .edge = stage_of(is_vertex, is_pixel),
+        // A struct has no compute edge: a compute entry point has no stage struct at all.
+        .edge = stage_of(is_vertex, is_pixel, false),
     });
     out.symbols[index_of(id)].type = type;
 }
@@ -366,7 +411,7 @@ void checker::compile_function(symbol_id id)
     auto const& f = d.node.as<ast::fun_decl>();
     auto is_failed = false;
 
-    cc::string_view const known[] = {"builtin", "pure", "operator", "vertex", "pixel"};
+    cc::string_view const known[] = {"builtin", "pure", "operator", "vertex", "pixel", "compute"};
     judge_attributes(file, d.attributes, known, "a function");
 
     if (!f.type_parameters.empty())
@@ -384,7 +429,8 @@ void checker::compile_function(symbol_id id)
     for (auto const& p : ast.at(f.parameters))
     {
         auto const name = text_of(file, p.name);
-        judge_attributes(file, p.attributes, {}, "a parameter");
+        cc::string_view const known_on_parameter[] = {"thread_id"};
+        judge_attributes(file, p.attributes, known_on_parameter, "a parameter");
         if (p.is_mut)
             unsupported(file, p.name, "a mut parameter");
         if (ast::is_valid(p.default_value))
@@ -408,7 +454,10 @@ void checker::compile_function(symbol_id id)
         is_failed = is_failed || type == checked_module::error_type;
 
         auto const index = isize(&p - ast.fields.data());
-        parameters.push_back({.name = name, .type = type, .field = ast::field_id(index)});
+        parameters.push_back({.name = name,
+                              .type = type,
+                              .field = ast::field_id(index),
+                              .is_thread_id = find_attribute(file, p.attributes, "thread_id") != nullptr});
     }
 
     auto bindings = cc::vector<symbol_id>();
@@ -499,6 +548,8 @@ void checker::compile_function(symbol_id id)
 
     auto const is_vertex = find_attribute(file, d.attributes, "vertex") != nullptr;
     auto const is_pixel = find_attribute(file, d.attributes, "pixel") != nullptr;
+    auto const* const compute = find_attribute(file, d.attributes, "compute");
+    auto const workgroup = workgroup_of(file, compute);
 
     out.symbols[index_of(id)].info = i32(out.functions.size());
     out.functions.push_back({
@@ -506,7 +557,8 @@ void checker::compile_function(symbol_id id)
         .parameters = {.first = u32(out.parameters.size()), .count = u32(parameters.size())},
         .result = result,
         .bindings = {.first = u32(out.binding_lists.size()), .count = u32(bindings.size())},
-        .entry_stage = stage_of(is_vertex, is_pixel),
+        .entry_stage = stage_of(is_vertex, is_pixel, compute != nullptr),
+        .workgroup = {workgroup[0], workgroup[1], workgroup[2]},
         .is_pure = find_attribute(file, d.attributes, "pure") != nullptr,
     });
     out.parameters.push_back_range(parameters);
@@ -523,9 +575,10 @@ void checker::compile_function(symbol_id id)
         is_failed = is_failed || out.functions[out.at(id).info].result == checked_module::error_type;
     }
 
-    if (is_vertex && is_pixel)
+    auto const stages = i32(is_vertex) + i32(is_pixel) + i32(compute != nullptr);
+    if (stages > 1)
         report(diagnostic_kind::invalid_entry_point, file, f.name, "an entry point has one stage");
-    else if (!is_failed && (is_vertex || is_pixel))
+    else if (!is_failed && stages == 1)
         judge_entry_point(id);
 
     if (is_failed)
@@ -551,6 +604,40 @@ void checker::judge_entry_point(symbol_id id)
         invalid("an entry point is no @builtin");
     if (!s.operator_spelling.empty())
         invalid("an entry point is no @operator");
+
+    if (info.entry_stage == stage::compute)
+    {
+        // A compute entry point is dispatched over a grid and hands nothing back.
+        if (info.result != checked_module::nothing_type)
+            invalid("a @compute fun returns nothing");
+
+        // Its one parameter is the thread id itself, or a struct whose fields are system values.
+        if (parameters.size() != 1)
+            invalid("a @compute fun takes one parameter: the thread id, or a struct of system values");
+        else if (parameters[0].is_thread_id)
+        {
+            if (!is_int3(parameters[0].type))
+                invalid("a @thread_id parameter is an int3");
+        }
+        else
+        {
+            auto ids = 0;
+            for (auto const& m : out.at(out.at(parameters[0].type).members))
+                if (m.is_thread_id)
+                {
+                    ++ids;
+                    if (!is_int3(m.type))
+                        invalid("a @thread_id field is an int3");
+                }
+            if (out.at(parameters[0].type).kind != type_kind::structure || out.at(parameters[0].type).is_opaque)
+                invalid("the parameter of a @compute fun is a struct with fields, or carries @thread_id itself");
+            else if (ids != 1)
+                invalid("the struct of a @compute fun has exactly one @thread_id field");
+        }
+
+        notes[s.info].is_valid_entry = is_valid;
+        return;
+    }
 
     if (parameters.size() != 1)
         invalid("an entry point takes one struct parameter");

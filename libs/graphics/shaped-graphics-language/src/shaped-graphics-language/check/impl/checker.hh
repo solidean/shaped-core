@@ -1,5 +1,6 @@
 #pragma once
 
+#include <clean-core/container/fixed_array.hh>
 #include <clean-core/container/map.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
@@ -182,6 +183,10 @@ struct checker
     void compile_function(symbol_id id);
     void judge_entry_point(symbol_id id);
 
+    /// True for the prelude's `int3`, the type a dispatch reports a thread's id as.
+    [[nodiscard]] bool is_int3(type_id type) const;
+    /// The grid of a `@compute` attribute; `{1, 1, 1}` without one, and after a bad argument it reports.
+    [[nodiscard]] cc::fixed_array<i32, 3> workgroup_of(i32 file, ast::attribute const* a);
     /// The members of a struct or a binding, collected locally and appended whole so the range stays contiguous.
     [[nodiscard]] ast::range_of<member_info> compile_members(i32 file, ast::range_of<ast::decl_id> members, bool is_struct);
     /// The type an expression in a type position names; the error type when it names none.

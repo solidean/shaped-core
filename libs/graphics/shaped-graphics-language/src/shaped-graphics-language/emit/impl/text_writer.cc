@@ -500,6 +500,8 @@ cc::string_view sgl::emit::impl::stage_name(check::stage s)
         return "vertex";
     case check::stage::pixel:
         return "pixel";
+    case check::stage::compute:
+        return "compute";
     }
     return "";
 }
