@@ -20,6 +20,9 @@ enum class sgl::check::type_kind : sgl::u8
     structure,
     /// A declared `enum`: a closed set of named `int` values that converts to nothing (CHK-142, CHK-150).
     enumeration,
+    /// A `buffer[T]`: an array of `element` a shader indexes, and `mut` where it may be written (the spec's bindings file).
+    /// It is a resource rather than a value: it stands in a binding, and nothing loads or copies one.
+    buffer,
     // Tuples, function types and anonymous struct types come later, each as a kind that is deduplicated by structure.
 };
 
@@ -45,6 +48,10 @@ struct sgl::check::type_info
     bool is_opaque = false;
     /// `@vertex struct` is a vertex input and `@pixel struct` a set of render targets.
     stage edge = stage::none;
+    /// The element of a `buffer`; `none` for every other kind.
+    type_id element = type_id::none;
+    /// Whether a `buffer` may be written: `mut buffer[T]` against `buffer[T]`.
+    bool is_mut = false;
 
     constexpr bool operator==(type_info const&) const = default;
 };

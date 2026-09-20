@@ -66,6 +66,23 @@ struct planned_constants
     cc::vector<planned_member> members;
 };
 
+/// A `buffer[T]` member of a binding, which is a resource of its own rather than a field of a block.
+/// Its address is the group its binding is listed at and the slot it takes among that binding's resources.
+struct planned_buffer
+{
+    check::symbol_id binding = check::symbol_id::none;
+    /// A position in the binding's `members`.
+    i32 member = -1;
+    /// The global the shader reads and writes through.
+    cc::string name;
+    check::type_id element = check::type_id::none;
+    bool is_mut = false;
+    i32 group = 0;
+    i32 slot = 0;
+    /// What HLSL declares the group as, which is what slib's binding pass reads: `<binding>_bindings`.
+    cc::string group_name;
+};
+
 struct plan
 {
     check::checked_module const& m;
@@ -81,11 +98,16 @@ struct plan
     /// Parallel to `m.types`: a position in `enums`, or -1 for a type that is no enum this entry point needs.
     cc::vector<i32> enum_of_type;
     cc::optional<planned_constants> constants;
+    /// The buffers the entry point's bindings declare, in group then slot order.
+    cc::vector<planned_buffer> buffers;
     /// Parallel to `e.locals`.
     cc::vector<cc::string> locals;
     /// Holds every name above and every reserved word of the target; a writer mints what it still needs from here.
     check::name_mint names;
 };
+
+/// The position in `buffers` of the buffer `binding.member` names, or -1 where that member is no buffer.
+[[nodiscard]] i32 buffer_of(plan const& p, check::symbol_id binding, i32 member);
 
 /// The column of a builtin's record `t` reads; the two HLSL targets share one.
 [[nodiscard]] builtins::language language_of(target t);

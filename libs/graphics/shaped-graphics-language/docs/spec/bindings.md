@@ -96,6 +96,10 @@ Everything not named here is the diagnostic `unsupported-yet`, never a guess.
 * A subscript on a buffer, as a value and as the place of an assignment.
 * The positional group numbering, and `@inline` last.
 
+Three targets write a buffer, and the fourth declines rather than guessing.
+WGSL gives each its own `@group`/`@binding`, and HLSL writes `#pragma sc group n` and a namespace, so that every register stays slib's binding pass's to assign.
+MSL takes a buffer as an argument of the entry point rather than as a global, which this writer does not build yet, so it reports `unsupported`.
+
 A struct element type, `bytes`, `constants[T]`, every texture form and a `sampler` member all parse and are then reported.
 That is deliberate.
 The shape is decided, so it is written down here and the AST constructs it.

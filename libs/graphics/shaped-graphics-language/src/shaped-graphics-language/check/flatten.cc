@@ -276,6 +276,16 @@ struct flattener
             auto const object = flatten_expr(m->object);
             return add_expr(type, id, flat_member{.object = object, .member = where.index});
         }
+        if (auto const* const indexed = e.node.try_as<ast::index>())
+        {
+            // The check pass let only a buffer element through, so the object is a resource and the index an int.
+            auto const arguments = ast().at(indexed->arguments);
+            if (arguments.size() != 1)
+                return fail();
+            auto const buffer = flatten_expr(indexed->object);
+            auto const index = flatten_expr(arguments[0].value);
+            return add_expr(type, id, flat_buffer_element{.buffer = buffer, .index = index});
+        }
         if (auto const* const call = e.node.try_as<ast::call>())
             return flatten_call(id, type, where, *call);
         if (auto const* const chain = e.node.try_as<ast::comparison_chain>())

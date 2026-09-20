@@ -112,6 +112,14 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
         return result;
 
     auto plan = impl::make_plan(m, e, t);
+    // A Metal buffer is an argument of the kernel rather than a global, which this writer does not build yet.
+    if (t == target::msl && !plan.buffers.empty())
+    {
+        result.errors.push_back({.kind = error_kind::unsupported,
+                                 .symbol = e.function,
+                                 .detail = "a buffer binding, which MSL takes as an entry-point argument"});
+        return result;
+    }
     result.text = impl::write_text(plan, impl::dialect_of(t));
     return result;
 }

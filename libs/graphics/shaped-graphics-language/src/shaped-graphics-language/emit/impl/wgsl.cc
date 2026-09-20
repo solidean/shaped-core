@@ -58,9 +58,19 @@ public:
         out.appendf("const {}: i32 = {};\n", name, value);
     }
 
+    void write_buffer_group(cc::string& out, plan const& p, cc::span<planned_buffer const> group) const override
+    {
+        for (auto const& b : group)
+            out.appendf("@group({}) @binding({}) var<storage, {}> {}: array<{}>;\n", b.group, b.slot,
+                        b.is_mut ? "read_write" : "read", b.name, type_text(p, *this, b.element));
+        if (!group.empty())
+            out += "\n";
+    }
+
     void write_declarations(cc::string& out, plan const& p) const override
     {
         write_enum_constants(out, p, *this);
+        write_buffers(out, p, *this);
 
         for (auto const& s : p.structs)
         {

@@ -18,6 +18,52 @@ stage stage_of(bool is_vertex, bool is_pixel)
 
 // ---- types ----------------------------------------------------------------------------------------------------------
 
+bool checker::is_named(i32 file, ast::expr_id expr, cc::string_view name) const
+{
+    if (!ast::is_valid(expr))
+        return false;
+    auto const* const n = ast_of(file).at(expr).node.try_as<ast::name>();
+    return n != nullptr && text_of(file, n->where) == name;
+}
+
+type_id checker::buffer_type(type_id element, bool is_mut)
+{
+    // Interned, because type equality is id equality: two mentions of `buffer[float]` are one type.
+    for (auto i = isize(0); i < out.types.size(); ++i)
+    {
+        auto const& t = out.types[i];
+        if (t.kind == type_kind::buffer && t.element == element && t.is_mut == is_mut)
+            return type_id(i);
+    }
+    auto const id = type_id(out.types.size());
+    out.types.push_back({.kind = type_kind::buffer, .element = element, .is_mut = is_mut});
+    return id;
+}
+
+type_id checker::resolve_buffer(i32 file, ast::expr_id expr, ast::index const& node)
+{
+    auto const where = span_of(file, expr);
+    auto const arguments = ast_of(file).at(node.arguments);
+    if (arguments.size() != 1 || !arguments[0].name.empty() || arguments[0].is_splat)
+    {
+        report(diagnostic_kind::wrong_kind_of_name, file, where, "a buffer takes one element type: `buffer[float]`");
+        return checked_module::error_type;
+    }
+
+    auto const element = resolve_type(file, arguments[0].value);
+    if (element == checked_module::error_type)
+        return checked_module::error_type;
+
+    // A struct element needs a layout rule the four targets agree on, which the spec's bindings file leaves open.
+    auto const& info = out.at(element);
+    if (info.kind != type_kind::structure || !sgl::is_valid(out.at(info.symbol).intrinsic_type))
+    {
+        unsupported(file, span_of(file, arguments[0].value), "a buffer of anything but a scalar or a vector");
+        return checked_module::error_type;
+    }
+    return buffer_type(element, false);
+}
+
 type_id checker::resolve_type(i32 file, ast::expr_id expr)
 {
     if (!ast::is_valid(expr))
@@ -52,8 +98,13 @@ type_id checker::resolve_type(i32 file, ast::expr_id expr)
                                   kind == symbol_kind::function ? "function" : "binding"));
         }
     }
-    else if (e.node.is<ast::index>())
-        unsupported(file, where, "type arguments");
+    else if (auto const* const applied = e.node.try_as<ast::index>())
+    {
+        if (is_named(file, applied->object, "buffer"))
+            result = resolve_buffer(file, expr, *applied);
+        else
+            unsupported(file, where, "type arguments");
+    }
     else if (e.node.is<ast::struct_type>())
         unsupported(file, where, "an anonymous struct type");
     else if (e.node.is<ast::function_type>())
@@ -62,9 +113,18 @@ type_id checker::resolve_type(i32 file, ast::expr_id expr)
         unsupported(file, where, "a tuple type");
     else if (e.node.is<ast::member>())
         unsupported(file, where, "a qualified type name");
-    // The binding model these belong to is written down and unbuilt; the spec's bindings file is what they will mean.
     else if (auto const* const q = e.node.try_as<ast::qualified_type>())
-        unsupported(file, where, q->access == ast::type_access::read_write ? "a `mut` resource" : "an `out` resource");
+    {
+        auto const inner = resolve_type(file, q->type);
+        auto const is_buffer = inner != checked_module::error_type && out.at(inner).kind == type_kind::buffer;
+        if (q->access == ast::type_access::write_only)
+            // No target has a write-only buffer, and only a storage texture needs one, which is unbuilt.
+            unsupported(file, where, "an `out` resource");
+        else if (is_buffer)
+            result = buffer_type(out.at(inner).element, true);
+        else if (inner != checked_module::error_type)
+            report(diagnostic_kind::wrong_kind_of_name, file, where, "only a resource may be `mut`, and this is a value");
+    }
     else if (!e.node.is<ast::invalid_expr>())
         unsupported(file, where, "this expression as a type");
 

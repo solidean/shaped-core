@@ -76,6 +76,35 @@ void checker::check_body(symbol_id id)
     notes[index].is_body_sound = error_count() == errors_before;
 }
 
+type_id checker::check_index(function_scope& scope, ast::expr_id id, ast::index const& node)
+{
+    auto const file = scope.file;
+    auto const where = span_of(file, id);
+
+    auto const object = check_expr(scope, node.object);
+    if (object == error_type)
+        return error_type;
+    if (out.at(object).kind != type_kind::buffer)
+    {
+        unsupported(file, where, "a subscript on anything but a buffer");
+        return error_type;
+    }
+
+    auto const arguments = ast_of(file).at(node.arguments);
+    if (arguments.size() != 1 || !arguments[0].name.empty() || arguments[0].is_splat)
+    {
+        report(diagnostic_kind::wrong_kind_of_name, file, where, "a buffer takes one index: `values[i]`");
+        return error_type;
+    }
+
+    auto const index = check_expr(scope, arguments[0].value);
+    auto const int_type = type_of_builtin(builtins::k_int, file, where);
+    if (index != error_type && index != int_type)
+        report(diagnostic_kind::type_mismatch, file, span_of(file, arguments[0].value),
+               cc::format("a buffer is indexed by an int, and this is a {}", out.name_of(index)));
+    return out.at(object).element;
+}
+
 void checker::convert_object(function_scope& scope, ast::expr_id object, type_id to)
 {
     auto const file = scope.file;
@@ -163,7 +192,7 @@ type_id checker::check_expr(function_scope& scope, ast::expr_id expr)
         [&](ast::wildcard const&) { return not_yet("a wildcard as a value"); },
         // CHK-152: a leading dot needs a type the context expects, which today only a `case` pattern gives it
         [&](ast::leading_dot const&) { return not_yet("a leading-dot name outside a case pattern"); },
-        [&](ast::index const&) { return not_yet("a subscript or type arguments"); },
+        [&](ast::index const& node) { return check_index(scope, expr, node); },
         // AST-128: `mut buffer[float]` and its neighbours parse, and the binding model they belong to is unbuilt.
         [&](ast::qualified_type const&) { return not_yet("a resource type"); },
         [&](ast::tuple const&) { return not_yet("a tuple"); }, [&](ast::array const&) { return not_yet("an array"); },

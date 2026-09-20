@@ -228,8 +228,19 @@ struct writer
             [&](flat_local_ref const& l) { result = {.text = p.locals[index_of(l.local)]}; },
             [&](flat_binding_member const& b)
             {
+                // A buffer is a global of its own; every other member is a field of the inline constants block.
+                if (auto const found = buffer_of(p, b.binding, b.member); found >= 0)
+                {
+                    result = {.text = d.buffer_reference(p.buffers[found])};
+                    return;
+                }
                 auto const& constants = p.constants.value();
                 result = {.text = cc::format("{}.{}", constants.name, constants.members[b.member].name)};
+            },
+            [&](flat_buffer_element const& b)
+            {
+                auto const buffer = wrapped(expr(b.buffer), level::primary);
+                result = {.text = cc::format("{}[{}]", buffer, expr(b.index).text), .binds = level::primary};
             },
             [&](flat_member const& member)
             {
@@ -448,6 +459,20 @@ void sgl::emit::impl::write_enum_constants(cc::string& out, plan const& p, diale
             d.write_enum_constant(out, e.case_names[i], cases[i].value);
         if (!cases.empty())
             out += "\n";
+    }
+}
+
+void sgl::emit::impl::write_buffers(cc::string& out, plan const& p, dialect const& d)
+{
+    // `p.buffers` is in group then slot order, so one binding's buffers are one run.
+    for (auto first = isize(0); first < p.buffers.size();)
+    {
+        auto last = first;
+        while (last < p.buffers.size() && p.buffers[last].binding == p.buffers[first].binding)
+            ++last;
+        d.write_buffer_group(
+            out, p, cc::span<planned_buffer const>(p.buffers).subspan({.offset = first, .size = last - first}));
+        first = last;
     }
 }
 

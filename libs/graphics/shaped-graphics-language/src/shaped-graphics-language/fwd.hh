@@ -189,6 +189,7 @@ struct flat_switch;
 struct flat_local_ref;
 struct flat_binding_member;
 struct flat_member;
+struct flat_buffer_element;
 struct flat_construct;
 struct flat_call;
 struct flat_not;

@@ -201,11 +201,22 @@ void checker::check_assign(function_scope& scope, ast::stmt_id id, ast::assign_s
     auto const place = check_expr(scope, assign.target);
     auto const value = check_expr(scope, assign.value);
 
-    // The place is a mutable local, or a member of one at any depth.
+    // A buffer element is a place of its own: `work.dst[i] = v`, and only where the buffer is `mut`.
+    auto const* const indexed = ast::is_valid(assign.target) ? ast.at(assign.target).node.try_as<ast::index>() : nullptr;
+    if (indexed != nullptr)
+    {
+        auto const object = out.files[file].type_at(indexed->object);
+        // What it is when it is no buffer at all was reported by `check_index`.
+        if (object != type_id::none && out.at(object).kind == type_kind::buffer && !out.at(object).is_mut)
+            report(diagnostic_kind::not_assignable, file, span_of(file, assign.target),
+                   "this buffer is read-only; `mut buffer[T]` declares one a shader writes");
+    }
+
+    // The place is otherwise a mutable local, or a member of one at any depth.
     auto root = assign.target;
     while (ast::is_valid(root) && ast.at(root).node.is<ast::member>())
         root = ast.at(root).node.as<ast::member>().object;
-    if (place != error_type && ast::is_valid(root))
+    if (indexed == nullptr && place != error_type && ast::is_valid(root))
     {
         auto const* const n = ast.at(root).node.try_as<ast::name>();
         auto const& named = out.files[file].target_at(root);

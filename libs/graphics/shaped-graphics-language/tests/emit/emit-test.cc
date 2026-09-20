@@ -161,8 +161,9 @@ TEST("sgl emit - an entry point name that is reserved in any target is an error 
     }
 }
 
-TEST("sgl emit - a binding that is not @inline is an error and never a guessed address")
+TEST("sgl emit - a binding member that is no buffer has no address to give it")
 {
+    // A plain member belongs in the group's own constant buffer, which the spec decides and nothing builds yet.
     auto const source = with_edges("binding scene:\n"
                                    "    tint: float3\n"
                                    "\n"
@@ -170,7 +171,7 @@ TEST("sgl emit - a binding that is not @inline is an error and never a guessed a
                                    "    return {\n"
                                    "        color = float4(..scene.tint, 1.0)\n"
                                    "    }\n");
-    CHECK(errors_of(source) == "unsupported a binding that is not @inline: 'scene'\n");
+    CHECK(errors_of(source) == "unsupported a binding member that is no buffer: 'scene.tint'\n");
 
     auto const e = emit_source(source, 0, target::wgsl);
     REQUIRE(e.errors.size() == 1);

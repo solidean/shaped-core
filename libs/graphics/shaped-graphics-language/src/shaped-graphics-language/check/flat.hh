@@ -249,6 +249,16 @@ struct sgl::check::flat_member
 
 /// A value of the node's struct type from one value per field, in field order.
 /// A splat is gone: its fields stand here one by one.
+/// `values[i]` on a `buffer`: the element a shader loads, and the place it stores to.
+/// `buffer` is what names the resource, which today is always a `flat_binding_member`.
+struct sgl::check::flat_buffer_element
+{
+    flat_expr_id buffer = flat_expr_id::none;
+    flat_expr_id index = flat_expr_id::none;
+
+    constexpr bool operator==(flat_buffer_element const&) const = default;
+};
+
 struct sgl::check::flat_construct
 {
     ast::range_of<flat_expr_id> arguments;
@@ -320,6 +330,7 @@ struct sgl::check::flat_expr
                 flat_local_ref,
                 flat_binding_member,
                 flat_member,
+                flat_buffer_element,
                 flat_construct,
                 flat_call,
                 flat_not,

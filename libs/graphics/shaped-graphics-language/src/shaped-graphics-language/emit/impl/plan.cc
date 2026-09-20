@@ -135,15 +135,25 @@ struct validator
     void bindings()
     {
         auto inline_count = 0;
+        auto listed = 0;
         for (auto const id : e.bindings)
         {
+            ++listed;
             auto const& s = m.at(id);
             auto const& b = m.bindings[s.info];
             if (!b.is_inline)
             {
-                report(error_kind::unsupported, id, cc::format("a binding that is not @inline: '{}'", s.name));
+                // A resource group: every member is a buffer, since nothing else is built (the spec's bindings file).
+                for (auto const& member : m.at(b.members))
+                    if (m.at(member.type).kind != check::type_kind::buffer)
+                        report(error_kind::unsupported, id,
+                               cc::format("a binding member that is no buffer: '{}.{}'", s.name, member.name));
                 continue;
             }
+            // Listed and skipped when numbering, so it has to stand last or a group would move under the host.
+            if (listed != e.bindings.size())
+                report(error_kind::unsupported, id,
+                       cc::format("an @inline binding that is not the last of the list: '{}'", s.name));
             if (++inline_count == 2)
                 report(error_kind::unsupported, id, cc::format("a second @inline binding: '{}'", s.name));
 
@@ -317,12 +327,43 @@ struct planner
         p.enums.push_back(cc::move(planned));
     }
 
+    void buffers()
+    {
+        auto group = 0;
+        for (auto const id : p.e.bindings)
+        {
+            auto const& s = p.m.at(id);
+            auto const& b = p.m.bindings[s.info];
+            if (b.is_inline)
+                continue; // sg addresses the inline constants itself, so they take no group of their own
+            auto slot = 0;
+            auto const members = p.m.at(b.members);
+            for (auto i = isize(0); i < members.size(); ++i)
+            {
+                auto const& t = p.m.at(members[i].type);
+                if (t.kind != check::type_kind::buffer)
+                    continue;
+                p.buffers.push_back({.binding = id,
+                                     .member = i32(i),
+                                     .name = p.names.mint(cc::format("{}_{}", s.name, members[i].name)),
+                                     .element = t.element,
+                                     .is_mut = t.is_mut,
+                                     .group = group,
+                                     .slot = slot++,
+                                     .group_name = cc::format("{}_bindings", s.name)});
+            }
+            ++group;
+        }
+    }
+
     void constants()
     {
         for (auto const id : p.e.bindings)
         {
             auto const& s = p.m.at(id);
             auto const& b = p.m.bindings[s.info];
+            if (!b.is_inline)
+                continue;
             auto planned = planned_constants{
                 .symbol = id,
                 .name = spell(s.name),
@@ -356,6 +397,14 @@ sgl::builtins::language sgl::emit::impl::language_of(target t)
         return builtins::language::msl;
     }
     return builtins::language::hlsl;
+}
+
+sgl::i32 sgl::emit::impl::buffer_of(plan const& p, check::symbol_id binding, i32 member)
+{
+    for (auto i = isize(0); i < p.buffers.size(); ++i)
+        if (p.buffers[i].binding == binding && p.buffers[i].member == member)
+            return i32(i);
+    return -1;
 }
 
 bool sgl::emit::impl::is_builtin_type(check::checked_module const& m, check::type_id type)
@@ -404,6 +453,7 @@ sgl::emit::impl::plan sgl::emit::impl::make_plan(check::checked_module const& m,
         p.need_enum(x.type);
     }
     p.constants();
+    p.buffers();
     for (auto const& local : e.locals)
         result.locals.push_back(p.spell(local.name));
     return result;

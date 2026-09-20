@@ -269,6 +269,7 @@ if(SC_BUILD_TESTS)
         tests/emit/core-emit-test.cc
         tests/emit/cube-emit-test.cc
         tests/emit/emit-test.cc
+        tests/emit/buffer-emit-test.cc
         tests/emit/case-emit-test.cc
         tests/emit/enum-emit-test.cc
 

@@ -188,11 +188,19 @@ struct checker
     [[nodiscard]] type_id resolve_type(i32 file, ast::expr_id expr);
     /// The type of the prelude's `@builtin struct` named `name`; without one it reports at `where` and is the error type.
     [[nodiscard]] type_id type_of_builtin(cc::string_view name, i32 file, source_span where);
+    /// `buffer[element]`, or its `mut` form, interned: two mentions of one buffer type share an id.
+    [[nodiscard]] type_id buffer_type(type_id element, bool is_mut);
+    /// `buffer[T]` in a type position, which is the `index` node `buffer` heads.
+    [[nodiscard]] type_id resolve_buffer(i32 file, ast::expr_id expr, ast::index const& node);
+    /// True where `expr` is the bare name `name`, which is how a resource type is recognized before lookup.
+    [[nodiscard]] bool is_named(i32 file, ast::expr_id expr, cc::string_view name) const;
 
     // ---- bodies and expressions (check_expr.cc) ---------------------------------------------------------------------
 
     void check_body(symbol_id id);
     void convert_object(function_scope& scope, ast::expr_id object, type_id to);
+    /// `values[i]`, which today is a buffer element and nothing else; the error type where it is not one.
+    [[nodiscard]] type_id check_index(function_scope& scope, ast::expr_id id, ast::index const& node);
 
     // ---- statements and control flow (check_stmt.cc) ----------------------------------------------------------------
 

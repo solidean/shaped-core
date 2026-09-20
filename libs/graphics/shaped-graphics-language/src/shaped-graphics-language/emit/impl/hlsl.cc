@@ -94,9 +94,27 @@ public:
         out.appendf("static const int {} = {};\n", name, value);
     }
 
+    /// slib's binding pass owns every address in the text it reads, and this pragma is the one thing we write.
+    void write_buffer_group(cc::string& out, plan const& p, cc::span<planned_buffer const> group) const override
+    {
+        if (group.empty())
+            return;
+        out.appendf("#pragma sc group {}\n", group[0].group);
+        out.appendf("namespace {}\n{{\n", group[0].group_name);
+        for (auto const& b : group)
+            out.appendf("    {}StructuredBuffer<{}> {};\n", b.is_mut ? "RW" : "", type_text(p, *this, b.element), b.name);
+        out += "}\n\n";
+    }
+
+    [[nodiscard]] cc::string buffer_reference(planned_buffer const& b) const override
+    {
+        return cc::format("{}::{}", b.group_name, b.name);
+    }
+
     void write_declarations(cc::string& out, plan const& p) const override
     {
         write_enum_constants(out, p, *this);
+        write_buffers(out, p, *this);
 
         for (auto const& s : p.structs)
         {

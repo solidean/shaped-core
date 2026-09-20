@@ -59,6 +59,12 @@ public:
     /// The structs of `p.structs` and the constant block, each followed by an empty line.
     virtual void write_declarations(cc::string& out, plan const& p) const = 0;
 
+    /// How the body names a buffer, which is the bare global everywhere but HLSL, where it stands in a namespace.
+    [[nodiscard]] virtual cc::string buffer_reference(planned_buffer const& b) const { return b.name; }
+
+    /// The buffers of one binding, which is one group: HLSL wraps them, and WGSL writes each with its own address.
+    virtual void write_buffer_group(cc::string& out, plan const& p, cc::span<planned_buffer const> group) const = 0;
+
     /// Everything of the function up to and including the line that opens its body.
     virtual void write_function_head(cc::string& out, plan const& p) const = 0;
 
@@ -76,6 +82,8 @@ protected:
 
 /// The constants of every enum of `p`, each set followed by an empty line; a dialect calls it from its declarations.
 void write_enum_constants(cc::string& out, plan const& p, dialect const& d);
+/// Every buffer of the entry point, handed to the dialect one binding at a time.
+void write_buffers(cc::string& out, plan const& p, dialect const& d);
 
 /// The whole text of the planned entry point: a header comment, the declarations, and the function.
 /// Mints what the body still needs from `p.names`.
