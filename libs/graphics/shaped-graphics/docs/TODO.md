@@ -3,6 +3,20 @@
 Running list of known follow-ups — what is **open**.
 What is already implemented is [structure.md](structure.md)'s tagged tree, and the design behind each area is its concept doc.
 
+- **A declared native scope, so foreign code can record onto an sg command list.**
+  Vendor SDKs (DLSS Ray Reconstruction, FSR Ray Regeneration) take the native device, list and resources, and assume the resources are already in the state they need.
+  Nothing public reaches a native handle today, and reaching into a backend's privates would bypass the barrier tracker silently.
+  The shape: `sg::dx12::native_scope::open(cmd, accesses)` names every resource the foreign code touches and how, in the neutral `access_flags` vocabulary, and emits their barriers.
+  It then hands out the native list, device and resources, asserting on one that was not declared.
+  Closing it records the declared states as current and invalidates the list's cached pipeline, heap and root bindings.
+  It is a second member of "access is inferred, never declared (with one exception)", for the same reason the bindless declaration is the first.
+  dx12 first, vulkan when a member needs it; sr's [denoising.md](../../shaped-rendering/docs/denoising.md) is the consumer.
+  Pin it with a test that clears through the scope and checks sg's next inferred barrier.
+- **Exportable memory and shared fences.**
+  OIDN's GPU devices run on their own API (CUDA, HIP, SYCL, Metal) and share memory with ours through an OS handle.
+  That wants an "exportable" usage on buffer and texture creation, a way to read the handle, and a fence shared both ways.
+  Not needed for OIDN on the CPU, which goes through the existing download and upload; built with the OIDN member.
+
 - **The metal backend serializes no pipeline blob.**
   `compute_pipeline::cached_pipeline_data()` returns empty there and `used_cached_pipeline()` is always false, so a
   caller persisting a blob across runs gets nothing to persist and every build is a cold one.

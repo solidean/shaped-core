@@ -26,6 +26,24 @@ class raster_box_filter_mipmap_routine; // the same, through the raster pipeline
 enum class mipmap_variant : u8;         // which entry point a texture shape mips through (the routine's parameter)
 struct mipmap_program;                  // one mipmap variant's group layout + compute pipeline
 
+// Denoising (see denoise.hh): one front routine over several members.
+enum class denoise_method : u8;      // which member runs, or automatic
+enum class denoise_quality : u8;     // the coarse knob every member maps
+enum class render_scale_preset : u8; // how much smaller than the output the caller traces
+enum class denoise_guide : u8;       // one guide buffer beside the noisy color
+enum class denoise_status : u8;      // what one call did
+struct denoise_settings;             // the knobs shared by every member
+struct denoise_guides;               // the guide textures and camera values of one call
+struct denoise_inputs;               // one call's images
+struct denoise_outcome;              // status + which member + whether history restarted
+struct denoise_support;              // which members a context can run
+class denoise_history;               // the caller-owned state of one image stream
+class denoise_routine;               // the front: resolves the method and forwards
+class atrous_denoise_routine;        // the native spatial member (atrous_denoise_routine.hh)
+struct atrous_options;               // its own options
+class svgf_denoise_routine;          // the native temporal member (svgf_denoise_routine.hh)
+struct svgf_options;                 // its own options
+
 // Dear ImGui integration (see imgui_context.hh).
 struct imgui_context_description; // value type — input to imgui_context
 

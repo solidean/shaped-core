@@ -68,7 +68,7 @@ Still open beyond those: `ImDrawCmd::UserCallback` dispatch and an Alpha8 atlas 
 
 ```text
 sr::blit_routine          [done]     fullscreen-triangle blit of a texture across an open raster scope
-mipmap generation         [planned]
+mipmap generation         [done]     sr::box_filter_mipmap_routine (compute) and sr::raster_box_filter_mipmap_routine
 texture compression       [planned]
 tonemapping               [planned]
 render passes / helpers   [planned]
@@ -76,3 +76,19 @@ common shader utilities   [planned]
 ```
 
 The exact module layout settles as more routines land; keep this roadmap updated as it does.
+
+## Denoising **[in progress]**
+
+One front routine over several members; [denoising.md](denoising.md) is the design.
+
+```text
+sr::denoise_routine          [done]     the front: resolves automatic, refuses what it cannot run, forwards
+sr::denoise_history          [done]     caller-owned, move-only, one per image stream
+sr::atrous_denoise_routine   [done]     spatial, native; backs off with the input's sample count
+sr::svgf_denoise_routine     [done]     temporal, native; temporal, variance and à-trous passes, history in the caller's
+                                        denoise_history; the member that proves the moving-camera path in CI
+oidn                         [planned]  spatial; CPU, and GPU through exportable memory in sg
+dlss_rr                      [planned]  needs sg's declared native scope
+fsr_rr                       [planned]  the same seams as dlss_rr
+nrd                          [planned]  waits for a tracer that splits diffuse from specular
+```
