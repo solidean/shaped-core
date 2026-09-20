@@ -37,10 +37,9 @@ void PathTraceRayGen()
     {
         // jittered pinhole primary ray
         float2 jitter = float2(pt_rand(rng), pt_rand(rng));
-        float2 ndc = (float2(px) + jitter) / float2(dim) * 2.0 - 1.0; // [-1, 1], y down
         Camera cam = pt_bindings::frame.camera;
         float3 origin = cam.position;
-        float3 dir = normalize(cam.forward + cam.right_scaled * ndc.x - cam.up_scaled * ndc.y);
+        float3 dir = normalize(camera_ray_offset(cam, float2(px) + jitter, float2(dim)));
 
         float3 throughput = float3(1, 1, 1);
         float3 radiance = float3(0, 0, 0);
@@ -121,7 +120,7 @@ void PathTraceRayGen()
                 // An escaped ray reprojects as a point at infinity, so the sky moves with rotation and not with translation.
                 Camera prev = pt_bindings::frame.previous_camera;
                 float3 offset = hit_t >= 0.0 ? origin + dir * hit_t - prev.position : dir;
-                motion += (float2(px) + jitter) - pt_project(prev, offset, float2(dim));
+                motion += (float2(px) + jitter) - camera_project(prev, offset, float2(dim));
                 primary = false;
             }
 

@@ -103,20 +103,6 @@ namespace pt_bindings
     StructuredBuffer<sv::light> Lights;
 }
 
-// Where `offset` — a point relative to the camera's position, or a direction for a point at infinity — lands on `cam`'s
-// image, as a continuous pixel position over `dim`: the inverse of the raygen's primary ray.
-// Behind the camera is reported far off the image, which a reprojection reads as "not visible last frame".
-float2 pt_project(Camera cam, float3 offset, float2 dim)
-{
-    float z = dot(offset, normalize(cam.forward));
-    if (z <= 1e-6)
-        return float2(-1e6, -1e6);
-    float2 ndc = float2(dot(offset, cam.right_scaled) / dot(cam.right_scaled, cam.right_scaled),
-                        -dot(offset, cam.up_scaled) / dot(cam.up_scaled, cam.up_scaled))
-               / z;
-    return (ndc + 1.0) * 0.5 * dim;
-}
-
 // One path segment, in and out.
 //
 // The closest-hit does the shading: it evaluates the material's BSDF, estimates direct light from it, and samples the

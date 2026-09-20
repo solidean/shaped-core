@@ -234,6 +234,7 @@ if(SC_BUILD_TESTS)
             tests/denoise-view-test.cc
             tests/pathtraced-view-test.cc
             tests/openpbr-bsdf-test.cc
+            tests/motion-vector-test.cc
             tests/volumetric-furnace-test.cc
             tests/view-renderer-test.cc
             tests/view-accumulation-test.cc
@@ -249,8 +250,9 @@ if(SC_BUILD_TESTS)
         )
         target_link_libraries(shaped-viewer-test PRIVATE shaped-graphics-dx12)
 
-        # The BSDF probe: a compute shader over shaders/openpbr.hlsli, so a test can measure what the closure returns.
-        # Its own package rather than an entry in sv_shaders, because nothing a viewer runs dispatches it — and a package
+        # The probes: compute shaders over shaders/openpbr.hlsli and shaders/camera.hlsli, so a test can measure what the
+        # closure returns and where the camera projects.
+        # Their own package rather than entries in sv_shaders, because nothing a viewer runs dispatches them — and a package
         # is per target, so the two mount side by side over the same source directory.
         sc_add_shader_package(
             TARGET     shaped-viewer-test
@@ -261,6 +263,8 @@ if(SC_BUILD_TESTS)
             SHADERS
                 bsdf_probe.hlsl:compute:BsdfProbe
                 bsdf_probe.hlsl:binding:probe_bindings
+                camera_probe.hlsl:compute:CameraProbe
+                camera_probe.hlsl:binding:camera_probe_bindings
         )
         target_compile_definitions(shaped-viewer-test PRIVATE SV_TEST_HAS_PROBE_SHADERS=1)
 
