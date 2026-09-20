@@ -86,6 +86,10 @@ option(SC_USE_VENDORED_SDL3 "Build the fetched SDL3 in extern/sdl3/.install (OFF
 # babel-serializer keeps its sqlite API always available and reports an unfetched backend at runtime.
 option(SC_USE_VENDORED_SQLITE "Build the fetched SQLite in extern/sqlite/.install (OFF expects an external `sqlite` target)" ON)
 
+# NRD is fetched ON REQUEST like DLSS, and for the same reason: the NVIDIA RTX SDKs license names the NRD SDK too.
+# Unlike DLSS it is SOURCE, and its build compiles its own shaders with the dxc.exe extern/dxc pins.
+option(SC_USE_VENDORED_NRD "Build the fetched NRD in extern/nrd/.install (OFF expects an external `NRD` target)" ON)
+
 # Also gated on SC_MIMALLOC: with the default resource on operator new nothing links mimalloc, so building it would be
 # dead weight in exactly the sanitizer builds that are already the slowest.
 if(SC_USE_VENDORED_MIMALLOC AND SC_MIMALLOC)
@@ -166,4 +170,9 @@ endif()
 
 if(_sc_host_side_deps AND SC_USE_VENDORED_SQLITE AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/sqlite/.install/pin.txt")
     add_subdirectory(sqlite)
+endif()
+
+# After dxc, whose .install supplies the compiler NRD's shader build runs.
+if(_sc_host_side_deps AND SC_USE_VENDORED_NRD AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/nrd/.install/pin.txt")
+    add_subdirectory(nrd)
 endif()

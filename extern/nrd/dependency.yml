@@ -1,0 +1,76 @@
+# Pins and licenses for the upstreams fetched here.
+# fetch-nrd.py reads them from this file.
+# tools/dev/lib/pipeline/prereqs.py scans a `pin_hash:` line to decide whether .install/ is current — this dependency
+# is NOT in that list, and the key below is what the same staleness check compares when it is run by hand.
+#
+# Three archives rather than one, because NRD's own CMake fetches two of them over the network at configure time.
+# Pinning them here and pre-seeding FetchContent is what makes our configure offline and reproducible; see
+# extern/nrd/CMakeLists.txt.
+
+upstreams:
+  - name: NRD
+    homepage: https://github.com/NVIDIA-RTX/NRD
+    install: on-request
+    source: github-release
+    repo: https://github.com/NVIDIA-RTX/NRD
+    track: github-releases
+    version: 4.17.3
+    tag: v4.17.3
+    asset: v4.17.3.zip
+    digest_algo: sha256
+    pin_hash: c3a71eb0c3577f664f6f8bf3be7c585a39911fbf2895c144af10c58b861ad6ba
+    license: LicenseRef-NVIDIA-RTX-SDK
+    license_files: [.install/NRD/LICENSE.txt]
+    used_by: shaped-rendering — sr::nrd_denoise_routine (the vendor-neutral split-signal member)
+    notes: |
+      Source rather than a binary, and the reason this one is built rather than merely unpacked.
+      It ships no prebuilt package: its CMake compiles 31 HLSL entry points into embedded DXIL and produces a static
+      library, which takes about ten seconds.
+
+      Fetched on request for the same reason DLSS is: the license is NVIDIA's own, and the RTX SDKs license names the
+      NRD SDK alongside the DLSS one, so the policy entry already covers both.
+
+      Unlike DLSS this needs no native scope and no vendor runtime.
+      NRD computes a LIST of dispatches and hands it back; we execute them ourselves through sg, which is what makes it
+      the one vendor member that runs on any adapter — WARP included.
+
+  - name: ShaderMake
+    homepage: https://github.com/NVIDIA-RTX/ShaderMake
+    install: on-request
+    source: github-release
+    repo: https://github.com/NVIDIA-RTX/ShaderMake
+    track: default-branch
+    version: 18f5a344
+    tag: 18f5a344e7ca8fa65daaf079d07bc8ce38453e05
+    asset: 18f5a344e7ca8fa65daaf079d07bc8ce38453e05.zip
+    digest_algo: sha256
+    pin_hash: 35de2547e28cf10f18a0e2782cf154a3d1610212d00d829fa8e73a18210623b6
+    license: MIT
+    license_files: [.install/ShaderMake/LICENSE.txt]
+    used_by: extern/nrd — the tool NRD's build compiles its shaders with
+    notes: |
+      NRD's CMake fetches this commit by URL at configure time.
+      We fetch the same archive at the same commit and pre-seed FETCHCONTENT_SOURCE_DIR_SHADERMAKE with it, so the
+      configure does no network and the version cannot drift under us.
+
+      It is built as a host tool and never linked into anything we ship.
+      Its own CMake wants to download DXC and to find FXC; both are turned off in extern/nrd/CMakeLists.txt, which
+      points it at the dxc.exe extern/dxc already pins.
+
+  - name: MathLib
+    homepage: https://github.com/NVIDIA-RTX/MathLib
+    install: on-request
+    source: github-release
+    repo: https://github.com/NVIDIA-RTX/MathLib
+    track: github-releases
+    version: 11
+    tag: v11
+    asset: v11.zip
+    digest_algo: sha256
+    pin_hash: d3a592e0df176da3b19088f553ff1cd7711211c00594ba1c1e6512f66bb315bd
+    license: MIT
+    license_files: [.install/MathLib/LICENSE.txt]
+    used_by: extern/nrd — the header-only math NRD's sources are written against
+    notes: |
+      Header-only, and fetched by NRD's CMake exactly as ShaderMake is.
+      Pinned and pre-seeded for the same reason.

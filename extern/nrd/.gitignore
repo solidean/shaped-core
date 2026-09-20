@@ -1,0 +1,4 @@
+# The NRD sources are fetched on request (fetch-nrd.py), never committed.
+# Three archives and a build of its shaders, none of which belongs in the history.
+/.install/
+/.install.staging/

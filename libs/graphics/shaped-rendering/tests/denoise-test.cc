@@ -7,6 +7,7 @@
 #include <shaped-graphics/all.hh>
 #include <shaped-rendering/atrous_denoise_routine.hh>
 #include <shaped-rendering/denoise.hh>
+#include <shaped-rendering/impl/nrd_instance.hh>
 #include <shaped-rendering/shaders.hh>
 #include <shaped-rendering/svgf_denoise_routine.hh>
 #include <shaped-shader-library/compiler/dxc_compiler.hh>

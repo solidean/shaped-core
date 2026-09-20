@@ -18,6 +18,9 @@ Our own license is in [shaped-core.txt](shaped-core.txt), so this directory is a
 | [mbedtls](https://www.trustedfirmware.org/projects/mbed-tls) | v3.6.7 | `Apache-2.0` | clean-net — the TLS handshake and record layer behind cnet's TLS connections | [mbedtls.txt](mbedtls.txt) |
 | [metal-cpp](https://developer.apple.com/metal/cpp/) | release/metal-cpp_macOS26.4_iOS26.4 | `Apache-2.0` | shaped-graphics-metal — the whole backend, which speaks Metal through this rather than through Objective-C++ | [metal-cpp.txt](metal-cpp.txt) |
 | [mimalloc](https://github.com/microsoft/mimalloc) | v3.3.2 | `MIT` | clean-core — the default general memory resource | [mimalloc.txt](mimalloc.txt) |
+| [NRD](https://github.com/NVIDIA-RTX/NRD) | v4.17.3 | `LicenseRef-NVIDIA-RTX-SDK` | shaped-rendering — sr::nrd_denoise_routine (the vendor-neutral split-signal member) | [nrd.txt](nrd.txt) |
+| [ShaderMake](https://github.com/NVIDIA-RTX/ShaderMake) | 18f5a344e7ca8fa65daaf079d07bc8ce38453e05 | `MIT` | extern/nrd — the tool NRD's build compiles its shaders with | [shadermake.txt](shadermake.txt) |
+| [MathLib](https://github.com/NVIDIA-RTX/MathLib) | v11 | `MIT` | extern/nrd — the header-only math NRD's sources are written against | [mathlib.txt](mathlib.txt) |
 | [SDL3](https://github.com/libsdl-org/SDL) | release-3.4.12 | `Zlib` | shaped-rendering — sr::window_system and sr::window | [sdl3.txt](sdl3.txt) |
 | [SPIRV-Reflect](https://github.com/KhronosGroup/SPIRV-Reflect) | vulkan-sdk-1.4.321.0 | `Apache-2.0` | shaped-shader-compiler-dxc — reflecting the bindings out of an emitted SPIR-V module | [spirv-reflect.txt](spirv-reflect.txt) |
 | [SQLite](https://sqlite.org) | 3.53.3 | `blessing` | babel-serializer — the babel::sqlite engine wrapper | [sqlite.txt](sqlite.txt) |

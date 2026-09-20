@@ -97,6 +97,20 @@ else()
     target_compile_definitions(shaped-rendering PUBLIC SR_HAS_WINDOW=0)
 endif()
 
+# NRD, when somebody has fetched its sources (extern/nrd/fetch-nrd.py).
+#
+# It links PRIVATE and reaches impl/ alone, like every other vendor SDK here.
+# No backend gate: NRD hands back a LIST of dispatches and shaped-rendering executes them through sg, so unlike DLSS
+# this member needs no native scope and runs wherever sg does.
+if(TARGET NRD)
+    target_sources(shaped-rendering PRIVATE src/shaped-rendering/impl/nrd_instance.cc)
+    target_link_libraries(shaped-rendering PRIVATE NRD)
+    target_compile_definitions(shaped-rendering PUBLIC SR_HAS_NRD=1)
+else()
+    target_sources(shaped-rendering PRIVATE src/shaped-rendering/impl/nrd_null.cc)
+    target_compile_definitions(shaped-rendering PUBLIC SR_HAS_NRD=0)
+endif()
+
 # sr's own shader package.
 # Must be declared here, in the CMakeLists that defines the target: the generated sources are added as PRIVATE sources and add_custom_command(OUTPUT) is directory-scoped.
 # Routines that need shaders add their entry points to this one package.

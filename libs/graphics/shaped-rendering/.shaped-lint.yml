@@ -7,3 +7,7 @@ rules:
   - kind: allow-include
     value: <memory>
     reason: sg's handles ARE std::shared_ptr, so anything holding one names it — see shaped-graphics/docs/coding-guidelines.md
+
+  - kind: allow-include
+    value: <NRD.h>
+    reason: NVIDIA's denoiser library, confined to impl/nrd_instance.cc — the seam it implements names no NRD type
