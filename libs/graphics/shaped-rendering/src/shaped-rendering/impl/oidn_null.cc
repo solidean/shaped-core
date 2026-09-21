@@ -22,4 +22,13 @@ bool oidn_has_device()
 {
     return false;
 }
+
+bool oidn_filter_reference(cc::span<tg::vec3f const>,
+                           cc::span<tg::vec3f const>,
+                           cc::span<tg::vec3f const>,
+                           tg::vec2i,
+                           cc::span<tg::vec3f>)
+{
+    return false;
+}
 } // namespace sr::impl

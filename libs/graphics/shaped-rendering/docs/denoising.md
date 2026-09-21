@@ -29,6 +29,36 @@ The vendor products that denoise are Ray Reconstruction and Ray Regeneration, an
 NRD — vendor-neutral, real-time, compute shaders — stays on the roadmap, and what it waits for is the tracer rather than the denoiser.
 It wants radiance split into diffuse and specular, with hit distances.
 
+**OIDN's network is ours to run, and it is run rather than called.**
+Intel's own GPU kernels are CUDA, HIP, SYCL and Metal built on vendor GEMM libraries, and its CPU device would mean a download and an upload every frame.
+The weights are a separate Apache-2.0 repository, and the network they describe is sixteen 3x3 convolutions with a bias and a ReLU, four 2x2 max pools and four nearest upsamples with a skip concat.
+So shaped-rendering runs it in its own compute shaders, on every backend sg has, with no exportable memory and no round trip.
+
+The topology is a table in `impl/oidn_network.cc` and the layer widths come out of the weights file.
+That split is what keeps a weights bump honest: a changed layer count fails to find its tensor, and a changed width fails the shape test beside it.
+
+**That it computes what Intel computes is measured, not assumed.**
+`oidn_filter_reference` runs OIDN's own filter over the same input, and the test compares the two.
+The difference is a mean of 1.0e-05 and a worst of 7.5e-05 across a 64x64 image, which is what sixteen layers of fp32 on the GPU against their CPU inference costs.
+Reading the weights in the wrong source layout moves that mean to 0.29, four orders of magnitude out, which is the margin the bound is set against.
+It is the only test that can ask the question: every other one checks a piece against its own definition, and a self-consistent mistake passes all of them.
+
+**The radiance handed over is de-modulated, which is what keeps a surface's texture from being filtered as noise.**
+NRD's input contract asks that radiance carry no material information, and `NRD_MaterialFactors` is the helper it ships for the purpose.
+So that is what the repack divides by and the resolve multiplies back.
+The factors are written to scratch by the repack rather than recomputed by the resolve, because NRD requires both directions to use the same ones.
+Storing them makes that structural, instead of two passes independently agreeing on a camera, a normal and a roughness.
+That is why `albedo` and `specular_albedo` are REQUIRED guides for this member rather than optional ones.
+
+It is partial by construction, because NRD floors both factors well above zero and calls the specular half a biased solution.
+On a checkerboard albedo under one flat normal, the case where nothing but the albedo says there is an edge, the member keeps about nine tenths of the contrast.
+Feeding radiance straight through keeps under one tenth of it.
+
+**Two conventions run the other way round from ours, and both are carried in settings rather than in a repack.**
+NRD reads a motion vector as `pixelUvPrev = pixelUv + mv`, so its units are UV and its direction is previous minus current, where ours is pixels and current minus previous.
+`motionVectorScale` carries the reciprocal extent and the sign, so the guide itself is handed over untouched.
+Its matrices, despite what `NRDSettings.h` says in prose, are built column by column from the `float[16]`, which is `tg`'s own convention, so they are copied rather than transposed.
+
 ## The contract
 
 **Reconstruction from day one, named for what it does today.**
