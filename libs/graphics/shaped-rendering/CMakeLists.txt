@@ -159,6 +159,9 @@ sc_add_shader_package(
         svgf_atrous.hlsl:compute:main_cs
         svgf_atrous.hlsl:binding:svgf_atrous_bindings
         svgf_atrous.hlsl:constants:gConstants
+        nn_conv.hlsl:compute:main_cs
+        nn_conv.hlsl:binding:nn_conv_bindings
+        nn_conv.hlsl:constants:gConstants
 )
 
 # Test executable.
@@ -220,6 +223,7 @@ if(SC_BUILD_TESTS)
             tests/denoise-test.cc
         tests/oidn-test.cc
         tests/tza-test.cc
+        tests/nn-conv-test.cc
         )
         target_link_libraries(shaped-rendering-test PRIVATE shaped-graphics-dx12)
 
