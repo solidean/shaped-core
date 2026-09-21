@@ -126,6 +126,13 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
     The vulkan backend currently numbers a SPIR-V location by an attribute's index in `vertex_input_layout::attributes`.
     That makes the shader's `[[vk::location(N)]]` annotations part of the contract — see `vulkan_raster_pipeline.cc`.
 - **Acceleration structures.** See [concepts/acceleration-structures.md](concepts/acceleration-structures.md).
+- **A group's implicit constant buffer is one upload each.**
+  `create_binding_group` allocates a buffer for a generated group's plain members and fills it through `ctx.upload`, one allocation and one copy per group.
+  A per-frame group wants a transient constant-buffer writer instead: a ring in host-visible device memory (ReBAR where there is some), suballocated per epoch and written in place.
+- **Nothing validates a shader's reflection against the layout its pipeline is built with.**
+  The agreed direction is that layouts come from generated types, and sg only checks the compiled shader against them.
+  Today a mismatch surfaces as a backend error at pipeline creation, or as a wrong binding at draw time.
+  For an SGL package, the generated `check_reflection(ctx)` covers it in the owning target's test, which is the check to move into pipeline creation.
   The abstract types already carry the stats a refit needs — build and update scratch sizes, and the flags.
   Still open:
   - the **transient (single-epoch) AS variant** for per-frame rebuilds — a property of the build call's result, not a new scope;

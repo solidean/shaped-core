@@ -38,6 +38,7 @@ struct shader_source_description;
 struct preprocessed_source;
 struct shader_definition;
 struct shader_package;
+struct listed_group; // one group an entry point lists, for reflection_mismatch
 class shader_compiler;
 class shader_asset;
 class shader_library;

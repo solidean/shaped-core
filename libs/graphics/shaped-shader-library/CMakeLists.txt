@@ -118,6 +118,7 @@ if(SC_BUILD_TESTS)
         tests/compile_source-test.cc
         tests/hot_reload-test.cc
         tests/shader_package-test.cc
+        tests/reflection_mismatch-test.cc
         tests/dxc_compiler-test.cc
         tests/wgsl_compiler-test.cc
         tests/sgl_compiler-test.cc

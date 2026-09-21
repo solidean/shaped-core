@@ -657,7 +657,8 @@ def emit_header(manifest: Manifest, entries: Entries) -> str:
     stems = {f.path: f.stem for f in files}
     wrappers = sgl_host_code.entry_wrappers(entries.sgl, stems)
     if wrappers:
-        sgl_includes += ["<shaped-graphics/context/context.hh>", "<cstddef> // std::nullptr_t"]
+        sgl_includes += ["<shaped-graphics/context/context.hh>", "<cstddef> // std::nullptr_t",
+                         "<clean-core/string/string.hh>", "<clean-core/thread/async.hh>"]
     if sgl_includes:
         out.append("\n")
         out.extend(f"#include {header}\n" for header in dict.fromkeys(sgl_includes))
@@ -690,6 +691,7 @@ def emit_header(manifest: Manifest, entries: Entries) -> str:
 
     out.append("/// Pass to slib::shader_library::add_package. The handles above are null until you do.\n")
     out.append("slib::shader_package const& package();\n")
+    out.append(sgl_host_code.emit_check_reflection_decl(entries.sgl, stems))
     if bindings:
         out.append("\n/// Empty while every generated binding table still describes the shader it came from.\n")
         out.append("///\n")
@@ -786,6 +788,9 @@ def emit_source(manifest: Manifest, files: list[ShaderFile], bindings: list[Bind
         out.append("#include <shaped-shader-library/binding/binding_groups.hh> // slib::inline_constants_space\n")
     if sgl.vertex_inputs:
         out.append("#include <cstddef> // offsetof\n")
+    if sgl_host_code.entry_wrappers(sgl, {f.path: f.stem for f in files}):
+        out.append("#include <clean-core/thread/async_coroutine.hh>\n")
+        out.append("#include <shaped-shader-library/shader_asset.hh> // slib::reflection_mismatch\n")
     out.append("\n")
 
     for file in files:
@@ -841,6 +846,7 @@ def emit_source(manifest: Manifest, files: list[ShaderFile], bindings: list[Bind
     for entry in bindings:
         out.append(emit_binding_group_impl(manifest, entry, embedded))
     out.append(sgl_host_code.emit_source(manifest.name, manifest.namespace, sgl))
+    out.append(sgl_host_code.emit_check_reflection(manifest.namespace, sgl, {f.path: f.stem for f in files}))
 
     if bindings:
         out.append(f"\ncc::string {manifest.namespace}::self_check()\n{{\n")

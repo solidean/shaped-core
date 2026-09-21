@@ -1,6 +1,7 @@
 #pragma once
 
 #include <clean-core/container/small_vector.hh>
+#include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/optional.hh>
 #include <clean-core/string/string.hh>
@@ -99,6 +100,13 @@ private:
     mutable cc::mutex<state> _state;
 };
 
+/// One group an entry point lists: the position that numbers it, and the bindings its generated type declares.
+struct slib::listed_group
+{
+    int position = 0;
+    cc::span<sg::binding const> bindings;
+};
+
 namespace slib
 {
 /// The compute pipeline of `asset` over `layout`, once the shader has compiled for `ctx`.
@@ -110,4 +118,15 @@ namespace slib
 [[nodiscard]] sg::async_compute_pipeline acquire_compute_pipeline(sg::context* ctx,
                                                                   shader_asset_handle asset,
                                                                   sg::pipeline_layout_handle layout);
+
+/// What keeps `compiled`'s reflection from fitting the groups `entry` lists, one line each; empty where it fits.
+///
+/// Every reflected binding must be declared by the group listed at its position, at the same index, count and kind.
+/// A declared binding the shader never reads may be missing from the reflection, since compilers strip those.
+/// A binding's position is its descriptor set, or its register space on a target that has spaces instead.
+/// `inline_block` is the listed `@inline` binding, which a target reflects as a uniform buffer or not at all.
+[[nodiscard]] cc::string reflection_mismatch(cc::string_view entry,
+                                             sg::compiled_shader const& compiled,
+                                             cc::span<listed_group const> listed,
+                                             cc::optional<sg::binding> const& inline_block);
 } // namespace slib

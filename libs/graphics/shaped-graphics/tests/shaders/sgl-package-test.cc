@@ -54,3 +54,13 @@ ASYNC_INVOCABLE_TEST("sg - an SGL package's generated group is what its compiled
         CHECK(compiled.bindings[i].type == declared[i].type); // `mut buffer[float]` is read-write
     }
 }
+
+ASYNC_INVOCABLE_TEST("sg - every entry point of the SGL package reflects what the groups it lists declare",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+
+    // Generated for the whole package, so a shader added to it is checked here without this test changing.
+    auto const mismatch = co_await shaders::check_reflection(*ctx);
+    CHECK(mismatch == "");
+}

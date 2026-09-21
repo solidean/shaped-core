@@ -491,3 +491,42 @@ def emit_render_target_impl(namespace: str, struct: dict) -> str:
     out.append("    return {" + ", ".join(names) + "};\n}\n")
     return "".join(out)
 
+
+# ---- the reflection check ----------------------------------------------------------------------------------------------
+
+
+def emit_check_reflection_decl(entries: SglEntries, stems: dict[str, str]) -> str:
+    if not entry_wrappers(entries, stems):
+        return ""
+    return ("\n/// What keeps any wrapped entry point's compiled reflection from fitting the groups it lists; empty where all fit.\n"
+            "/// Compiles every such entry point for `ctx`, so it belongs in the owning target's test, never on a render path.\n"
+            "[[nodiscard]] cc::shared_async<cc::string> check_reflection(sg::context& ctx);\n")
+
+
+def emit_check_reflection(namespace: str, entries: SglEntries, stems: dict[str, str]) -> str:
+    wrappers = entry_wrappers(entries, stems)
+    if not wrappers:
+        return ""
+    inline = {b["name"] for _, b in entries.bindings if b["inline"]}
+    out = [f"\ncc::shared_async<cc::string> {namespace}::check_reflection(sg::context& ctx)\n{{\n"]
+    out.append("    auto out = cc::string();\n")
+    for (path, name) in wrappers:
+        described = entries.described_entry_points[(path, name)]
+        listed = described["bindings"]
+        groups = [b for b in listed if b not in inline]
+        inline_block = next((b for b in listed if b in inline), None)
+        out.append("    {\n")
+        out.append(f"        auto const& compiled = co_await {stems[path]}.{described['stage']}.{name}->acquire(ctx);\n")
+        if groups:
+            out.append("        slib::listed_group const listed[] = {\n")
+            for position, group in enumerate(groups):
+                out.append(f"            {{.position = {position}, .bindings = {group}::declared_bindings()}},\n")
+            out.append("        };\n")
+        else:
+            out.append("        auto const listed = cc::span<slib::listed_group const>();\n")
+        inline_arg = f"{inline_block}::inline_binding()" if inline_block else "cc::nullopt"
+        out.append(f'        out += slib::reflection_mismatch("{path}:{name}", compiled, listed, {inline_arg});\n')
+        out.append("    }\n")
+    out.append("    co_return out;\n}\n")
+    return "".join(out)
+

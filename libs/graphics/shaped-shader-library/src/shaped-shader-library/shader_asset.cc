@@ -192,3 +192,43 @@ sg::async_compute_pipeline slib::acquire_compute_pipeline(sg::context* ctx,
     auto const shader = co_await asset->acquire(*ctx);
     co_return co_await ctx->cached.acquire_compute_pipeline({.shader = shader, .layout = layout});
 }
+
+cc::string slib::reflection_mismatch(cc::string_view entry,
+                                     sg::compiled_shader const& compiled,
+                                     cc::span<listed_group const> listed,
+                                     cc::optional<sg::binding> const& inline_block)
+{
+    auto out = cc::string();
+    for (auto const& reflected : compiled.bindings)
+    {
+        if (inline_block.has_value() && reflected.type == sg::binding_type::uniform_buffer
+            && (reflected.name == inline_block.value().name
+                || (reflected.space.has_value() && reflected.space == inline_block.value().space)))
+            continue;
+
+        sg::binding const* declared = nullptr;
+        auto position = 0;
+        for (auto const& group : listed)
+            for (auto const& b : group.bindings)
+                if (b.name == reflected.name)
+                {
+                    declared = &b;
+                    position = group.position;
+                }
+        if (declared == nullptr)
+        {
+            out += cc::format("{}: reflects '{}', which no group it lists declares\n", entry, reflected.name);
+            continue;
+        }
+
+        auto const reflected_position = reflected.group_index.has_value() ? reflected.group_index : reflected.space;
+        if (reflected_position.has_value() && reflected_position.value() != u32(position))
+            out += cc::format("{}: '{}' is at position {}, and its group is listed at {}\n", entry, reflected.name,
+                              reflected_position.value(), position);
+        if (reflected.index != declared->index || reflected.count != declared->count || reflected.type != declared->type)
+            out += cc::format("{}: '{}' reflects as index {}, count {}, kind {}, and its group declares {}, {}, {}\n",
+                              entry, reflected.name, reflected.index, reflected.count, int(reflected.type),
+                              declared->index, declared->count, int(declared->type));
+    }
+    return out;
+}

@@ -157,4 +157,6 @@ The notification wakes the actor's mailbox, so a watched watcher has no interval
   `shader_source_description` carries only source / entry point / stage today; the DSL has nowhere to put a define.
 - **Package-level include paths.** A package cannot declare extra search roots beyond the three slib already searches.
 - **A shared-include package.** A mount with no `SHADERS` entries already works via `lib.mount`, but there is no CMake-level way to declare "this target publishes an include-only shader library".
+- **Typed fields for HLSL groups.** An SGL group's fields are typed views, so a view of the wrong element or access fails to compile; an HLSL group's are still untyped.
+- **`@bindless` members of an SGL group**, which generate no field and bind through a bindless array instead.
 - **Promoting the VFS to clean-core.** This library's `filesystem` is the deliberate trial run for a future `cc` virtual filesystem; `real_filesystem` is the only piece that would have to move.
