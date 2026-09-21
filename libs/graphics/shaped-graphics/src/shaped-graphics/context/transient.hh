@@ -134,6 +134,12 @@ public:
         cc::vector<slotted_view> views;
         cc::vector<named_sampler> samplers;
         group.gather(views, samplers);
+        if constexpr (impl::has_implicit_constants<G>)
+        {
+            auto block = cc::vector<byte>::create_filled(G::constants_size, byte(0));
+            group.write_constants(block);
+            views.push_back({.slot = binding_slot(G::constants_slot), .view = implicit_constants(cc::move(block))});
+        }
         impl::drop_static_samplers(*layout, samplers);
         return create_binding_group(layout, views, samplers);
     }
@@ -191,6 +197,10 @@ private:
     // A backend whose device is not reference counted, such as vulkan, leaks the allocation instead, and its
     // validation layer reports it at vkDestroyDevice.
     void release_heap_at_shutdown();
+
+    /// A generated group's constant block, in a transient buffer of its own that expires with the group's epoch.
+    /// Filled through `ctx.upload`, which a later command list reading it waits for.
+    [[nodiscard]] raw_view implicit_constants(cc::vector<byte> block);
 
     context& _ctx;
 

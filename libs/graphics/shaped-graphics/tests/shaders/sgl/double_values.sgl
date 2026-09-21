@@ -14,3 +14,12 @@ binding factor:
 // The same `work`, listed second: here it is group 1, and nothing about its declaration changed.
 @compute(64) fun scaled(@thread_id id: int3){factor, work}:
     work.values[id.x] = work.values[id.x] * factor.by[0]
+
+// Plain members beside a buffer: the group's own constant buffer, which the host fills as plain fields.
+binding affine:
+    scale: float
+    bias: float
+    values: mut buffer[float]
+
+@compute(64) fun affine_map(@thread_id id: int3){affine}:
+    affine.values[id.x] = affine.values[id.x] * affine.scale + affine.bias

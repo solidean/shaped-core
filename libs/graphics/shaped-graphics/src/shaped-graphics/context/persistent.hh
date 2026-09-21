@@ -167,6 +167,12 @@ public:
         cc::vector<slotted_view> views;
         cc::vector<named_sampler> samplers;
         group.gather(views, samplers);
+        if constexpr (impl::has_implicit_constants<G>)
+        {
+            auto block = cc::vector<byte>::create_filled(G::constants_size, byte(0));
+            group.write_constants(block);
+            views.push_back({.slot = binding_slot(G::constants_slot), .view = implicit_constants(cc::move(block))});
+        }
         impl::drop_static_samplers(*layout, samplers);
         return create_binding_group(layout, views, samplers);
     }
@@ -207,6 +213,10 @@ private:
 
     [[nodiscard]] cc::result<staging_binding_group_handle> try_create_staging_binding_group(
         binding_group_layout_handle layout);
+
+    /// A generated group's constant block, in a persistent buffer the group keeps alive through its view.
+    /// Filled through `ctx.upload`, which a later command list reading it waits for.
+    [[nodiscard]] raw_view implicit_constants(cc::vector<byte> block);
 
     // Only a context constructs its own scope; the scope in turn reaches the context's protected backend virtuals (mutual friendship).
     friend class context;

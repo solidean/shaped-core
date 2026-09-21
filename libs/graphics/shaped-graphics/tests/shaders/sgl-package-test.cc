@@ -23,6 +23,12 @@ namespace shaders = sg::test::sgl_shaders;
 static_assert(sg::declared_binding_set<shaders::work>);
 static_assert(!sg::declared_binding_group<shaders::work>);
 
+// A field is the view its member's access and element take, so a wrong buffer fails to compile rather than to bind.
+static_assert(std::is_assignable_v<decltype(shaders::work::values)&, sg::readwrite_buffer_view<float>>);
+static_assert(!std::is_assignable_v<decltype(shaders::work::values)&, sg::readonly_buffer_view<float>>); // `mut`
+static_assert(!std::is_assignable_v<decltype(shaders::work::values)&, sg::readwrite_buffer_view<int>>);  // `[float]`
+static_assert(std::is_assignable_v<decltype(shaders::factor::by)&, sg::readonly_buffer_view<float>>);
+
 ASYNC_INVOCABLE_TEST("sg - an SGL package's generated group is what its compiled shader reflects",
                      (sg::context_handle const& ctx))
 {

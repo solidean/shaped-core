@@ -283,11 +283,14 @@ scope.bind<shaders::frame_bindings>(*g);   // binds at G::group_index, on raster
 ### an SGL package's generated types
 
 ```cpp
-// `binding work` -> shaders::work: one sg::bound_view per buffer member, declared_bindings(), gather().
+// `binding work` -> shaders::work: one field per member, in the shader's order, plus declared_bindings(), gather().
+//   a buffer member is a TYPED view: `mut buffer[float]` -> sg::readwrite_buffer_view<float>, so a read-only view or
+//   a buffer<int> does not compile. A plain member is a plain field (`scale: float` -> float): the group's own
+//   constant buffer, which create_binding_group allocates with the scope's lifetime and fills via ctx.upload.
 //   sg::declared_binding_set, NOT declared_binding_group: no group_index, because SGL numbers a group by its
 //   position in each entry point's list. Bind it at the index the pipeline has it at:
 auto const layout = ctx.cached.acquire_binding_group_layout<shaders::work>();
-auto const group = ctx.transient.create_binding_group(layout, shaders::work{.values = buf.as_readwrite_buffer()});
+auto const group = ctx.transient.create_binding_group(layout, shaders::work{.scale = 2.0f, .values = buf.as_readwrite_buffer()});
 cmd.compute.bind_group(0, *group);        // group 0 of `main`, group 1 of an entry point listing {factor, work}
 // `@inline binding constants` -> shaders::constants: plain fields in C++'s layout, and the block the shader reads:
 pass.set_inline_constants(shaders::constants{.view_projection = vp}.to_block());

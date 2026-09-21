@@ -90,3 +90,43 @@ ASYNC_INVOCABLE_TEST("sg - one group binds at whichever slot the entry point lis
     for (auto i = 0; i < count; ++i)
         CHECK(data[i] == float(i) * 3.0f);
 }
+
+ASYNC_INVOCABLE_TEST("sg - a group's plain members reach the shader through the constant buffer it owns",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+
+    auto const& shader = co_await shaders::double_values.compute.affine_map->acquire(*ctx);
+    auto const group_layout = ctx->cached.acquire_binding_group_layout<shaders::affine>();
+    auto const layout = ctx->cached.acquire_pipeline_layout(sg::pipeline_layout_description{.groups = {group_layout}});
+    auto const pipeline = co_await ctx->cached.acquire_compute_pipeline(
+        sg::compute_pipeline_description{.shader = shader, .layout = layout});
+
+    constexpr auto count = 64;
+    auto const values = ctx->persistent.create_buffer<float>(
+        count, sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
+    auto initial = cc::vector<float>::create_defaulted(count);
+    for (auto i = 0; i < count; ++i)
+        initial[i] = float(i);
+
+    // Both scopes, since each owns the constant buffer for its own lifetime: one frame, or as long as the group.
+    auto const transient = ctx->transient.create_binding_group(
+        group_layout, shaders::affine{.scale = 3.0f, .bias = 1.0f, .values = values.as_readwrite_buffer()});
+    auto const persistent = ctx->persistent.create_binding_group(
+        group_layout, shaders::affine{.scale = 0.5f, .bias = -2.0f, .values = values.as_readwrite_buffer()});
+
+    auto cmd = ctx->create_command_list();
+    cmd->upload.data_to_buffer<float>(values, initial);
+    cmd->compute.bind_pipeline(*pipeline);
+    cmd->compute.bind_group(0, *transient);
+    cmd->compute.dispatch_threads(count);
+    cmd->compute.bind_group(0, *persistent);
+    cmd->compute.dispatch_threads(count);
+    auto const future = cmd->download.data_from_buffer(values);
+    ctx->submit_command_list(cc::move(cmd));
+
+    auto const data = co_await future.data();
+    REQUIRE(data.size() == isize(count));
+    for (auto i = 0; i < count; ++i)
+        CHECK(data[i] == (float(i) * 3.0f + 1.0f) * 0.5f - 2.0f);
+}

@@ -772,7 +772,8 @@ def emit_source(manifest: Manifest, files: list[ShaderFile], bindings: list[Bind
         out.append("#include <clean-core/container/vector.hh>\n")
         out.append("#include <clean-core/string/format.hh>\n")
         out.append("#include <shaped-shader-library/binding/binding_groups.hh>\n")
-    if any(b["inline"] for _, b in sgl.bindings):
+    if any(b["inline"] or sgl_host_code.has_block(b) for _, b in sgl.bindings):
+        out.append("#include <clean-core/common/assert.hh>\n")
         out.append("#include <clean-core/common/utility.hh> // cc::memcpy\n")
     out.append("\n")
 

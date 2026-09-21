@@ -123,3 +123,17 @@ cc::result<staging_binding_group_handle> context_persistent_scope::try_create_st
     return _ctx.try_create_staging_binding_group(cc::move(layout), lifetime_scope::persistent);
 }
 } // namespace sg
+
+sg::raw_view sg::context_persistent_scope::implicit_constants(cc::vector<byte> block)
+{
+    // A uniform block is read in rows of 16 bytes, and a buffer holding one is sized in 256-byte units on dx12.
+    auto const view_size = cc::align_up(block.size(), isize(16));
+    auto const raw = create_raw_buffer(cc::align_up(view_size, uniform_buffer_offset_alignment),
+                                       buffer_usage::uniform_buffer | buffer_usage::copy_dst);
+    _ctx.upload.bytes_to_buffer(raw, cc::make_pinned_data(cc::move(block)));
+    return raw_buffer_view{.access = view_class::uniform,
+                           .shape = view_shape::uniform_block,
+                           .buffer = raw,
+                           .offset_in_bytes = 0,
+                           .size_in_bytes = view_size};
+}

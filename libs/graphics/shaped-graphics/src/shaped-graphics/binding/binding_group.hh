@@ -124,6 +124,21 @@ concept declared_binding_group
 
 namespace sg::impl
 {
+/// A generated group whose plain members are a constant buffer the group owns rather than a view the caller supplies.
+///
+/// Creating one allocates that buffer with the scope's lifetime, has `write_constants` fill a block of
+/// `constants_size` bytes, uploads it, and binds it at `constants_slot` beside the views `gather` supplies.
+/// The caller never sees the buffer: it fills plain fields, and the group is what keeps the buffer alive.
+template <class G>
+concept has_implicit_constants = requires(G const& g, cc::span<byte> block) {
+    requires std::is_convertible_v<decltype(G::constants_size), isize>;
+    requires std::is_convertible_v<decltype(G::constants_slot), int>;
+    g.write_constants(block);
+};
+} // namespace sg::impl
+
+namespace sg::impl
+{
 /// `declared` first, then only those of `supplied` naming a sampler `declared` does not — so the shader wins.
 ///
 /// Supplying a sampler the shader already declared `static` is a mistake rather than an override: a static
