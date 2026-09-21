@@ -1,3 +1,5 @@
+#include <blob-cache/blob_cache.hh>
+#include <blob-cache/default_cache.hh>
 #include <clean-core/common/asserts.hh>
 #include <clean-core/common/log.hh>
 #include <clean-core/common/macros.hh> // CC_HAS_THREADS
@@ -7,12 +9,14 @@
 #include <clean-core/container/map.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/thread/async.hh> // cc::ambient_async_scheduler
+#include <clean-core/thread/async_backlog.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-graphics/context/context.hh>
 #include <shaped-rendering/input.hh>
 #include <shaped-rendering/shaders.hh> // sr::shader_package (blit)
 #include <shaped-rendering/window.hh>
+#include <shaped-shader-library/shader_library.hh>
 #include <shaped-viewer/context.hh>
 #include <shaped-viewer/frame.hh>
 #include <shaped-viewer/fwd.hh> // std::unique_ptr, for the sg::command_list held across a frame
@@ -322,6 +326,14 @@ viewer::~viewer()
 
         _impl->ctx->advance_epoch();
         (void)block_on(*_impl->ctx, _impl->ctx->idle_completion());
+
+        // What the viewer started and nobody awaits still carries its caller's context: a shader compile, and the
+        // store a cold one queues into the blob cache once it resolves — so the compiles come first.
+        if (auto const lib = acquire_shader_library(); lib.has_value())
+        {
+            cc::async_backlog const* const backlogs[] = {&lib.value()->backlog(), &bcache::default_cache().backlog()};
+            (void)block_on(*_impl->ctx, cc::async_backlog::settled(backlogs));
+        }
     }
     catch (sg::device_lost_exception const&)
     {
