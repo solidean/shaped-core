@@ -42,6 +42,12 @@ So `nrd_repack.hlsl` and `nrd_resolve.hlsl` include NRD's own `NRD.hlsli`.
 A reimplementation that drifted would be a worse image rather than a build error.
 `nrd_session::create` refuses outright a library whose reported encodings are not the ones the repack target's format assumes.
 
+**What it is not given yet is de-modulated radiance, and that is a known quality gap.**
+NRD's input contract asks that radiance carry no material information: that albedo be divided out before denoising and multiplied back after.
+That is what keeps texture detail from being filtered as though it were noise.
+The member hands it the radiance the tracer produced instead, which is correct but blurs texture along with the noise.
+Everything needed to close it already reaches the member: `albedo` and `specular_albedo` are guides the call carries, and the two passes that would divide and multiply are the repack and the resolve.
+
 **Two conventions run the other way round from ours, and both are carried in settings rather than in a repack.**
 NRD reads a motion vector as `pixelUvPrev = pixelUv + mv`, so its units are UV and its direction is previous minus current, where ours is pixels and current minus previous.
 `motionVectorScale` carries the reciprocal extent and the sign, so the guide itself is handed over untouched.

@@ -6,11 +6,16 @@
 #include <shaped-rendering/fwd.hh>
 
 /// Options only the NRD member has.
+///
+/// No exposure among them, unlike `dlss_rr`: NRD's own input contract says radiance must NOT be premultiplied by one,
+/// so a knob here would be a promise to do something the library forbids.
 struct sr::nrd_options
 {
-    /// How bright the image will be made before it is looked at.
-    /// REBLUR judges a firefly by its displayed brightness, so a caller tone-mapping afterwards says so here.
-    f32 exposure = 1.0f;
+    /// How long REBLUR's two histories may grow, in frames.
+    /// Longer is smoother and slower to react; `options_for` maps `denoise_quality` onto the pair, and these are NRD's
+    /// own defaults.
+    u32 max_accumulated_frames = 30;
+    u32 max_fast_accumulated_frames = 6;
 };
 
 /// NVIDIA Real-Time Denoisers (REBLUR): a temporal denoiser for a split diffuse and specular signal.

@@ -60,6 +60,11 @@ struct nrd_frame
     /// How many frames this stream has produced, which is what NRD ages its history by.
     u32 frame_index = 0;
 
+    /// How long REBLUR's two histories may grow, which is what the shared quality knob maps onto.
+    /// Longer is smoother and slower to react; NRD's own defaults are 30 and 6.
+    u32 max_accumulated_frames = 30;
+    u32 max_fast_accumulated_frames = 6;
+
     /// Whether the history is meaningless this frame — a first call, a resize, or a camera cut.
     bool reset = false;
 };

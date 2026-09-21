@@ -89,6 +89,7 @@ struct sr::denoise_settings
 
     /// Every member reads this.
     /// atrous and svgf: the number of wavelet passes (3, 4, 5).
+    /// nrd: how long REBLUR's two histories may grow.
     denoise_quality quality = denoise_quality::balanced;
 
     /// In [0, 1]; higher keeps more detail and removes less noise.
@@ -105,7 +106,10 @@ struct sr::denoise_settings
     bool noisy_guides = false;
 
     /// A multiplier the caller will apply to the image before display.
-    /// The vendor members judge noise by how bright a pixel ends up on screen, and assume 1 without it.
+    /// dlss_rr only, which judges noise by how bright a pixel ends up on screen and assumes 1 without it.
+    ///
+    /// NRD is the member this does NOT reach, and deliberately: its input contract says radiance must not be
+    /// premultiplied by an exposure, so it is handed the radiance the tracer produced.
     f32 exposure = 1.0f;
 };
 

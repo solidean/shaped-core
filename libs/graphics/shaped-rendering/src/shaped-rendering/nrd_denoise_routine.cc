@@ -22,7 +22,18 @@ using impl::is_set;
 
 nrd_options nrd_denoise_routine::options_for(denoise_settings const& settings)
 {
-    return {.exposure = settings.exposure};
+    // Quality is how long a history may grow: a fast preset reacts sooner and stays noisier, a best one averages more
+    // frames and smears a moving highlight further.
+    switch (settings.quality)
+    {
+    case denoise_quality::fast:
+        return {.max_accumulated_frames = 15, .max_fast_accumulated_frames = 4};
+    case denoise_quality::balanced:
+        return {.max_accumulated_frames = 30, .max_fast_accumulated_frames = 6};
+    case denoise_quality::best:
+        return {.max_accumulated_frames = 63, .max_fast_accumulated_frames = 8};
+    }
+    return {};
 }
 
 bool nrd_denoise_routine::is_available(sg::context const& ctx)
@@ -121,8 +132,6 @@ denoise_outcome nrd_denoise_routine::execute(sg::command_list& cmd,
                                              denoise_history& history,
                                              nrd_options const& options)
 {
-    (void)options;
-
     CC_ASSERT(is_set(in.color), "a denoise call needs a colour texture");
     CC_ASSERT(is_set(in.output), "a denoise call needs an output texture");
     CC_ASSERT(extent_of(in.output) == extent_of(in.color), "NRD does not upscale: output and input extents differ");
@@ -211,6 +220,8 @@ denoise_outcome nrd_denoise_routine::execute(sg::command_list& cmd,
         .jitter = in.guides.jitter,
         .previous_jitter = in.guides.previous_jitter,
         .frame_index = history._frame,
+        .max_accumulated_frames = options.max_accumulated_frames,
+        .max_fast_accumulated_frames = options.max_fast_accumulated_frames,
         .reset = restarted,
     };
 

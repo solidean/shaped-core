@@ -472,6 +472,17 @@ bool nrd_session::execute(sg::command_list& cmd, nrd_frame const& frame, nrd_res
         return false;
     }
 
+    // Everything else stays at NRD's own defaults, `hitDistanceParameters` above all: the repack shader divides by the
+    // same curve, and the two have to be the same three numbers.
+    auto reblur = nrd::ReblurSettings{};
+    reblur.maxAccumulatedFrameNum = frame.max_accumulated_frames;
+    reblur.maxFastAccumulatedFrameNum = frame.max_fast_accumulated_frames;
+    if (nrd::SetDenoiserSettings(instance, 0, &reblur) != nrd::Result::SUCCESS)
+    {
+        CC_LOG_WARNING("nrd: the REBLUR settings were refused");
+        return false;
+    }
+
     nrd::Identifier const identifiers[] = {0};
     nrd::DispatchDesc const* dispatches = nullptr;
     uint32_t dispatch_count = 0;

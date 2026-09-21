@@ -89,6 +89,28 @@ ASYNC_INVOCABLE_TEST("sr - an NRD frame's dispatches build and run", (sg::contex
     (void)co_await ctx.idle_completion();
 }
 
+// The shared quality knob reaches REBLUR, rather than being accepted and dropped.
+//
+// `denoise_settings::quality` says every member reads it, and a member that quietly ignores it is a setting that
+// looks live and does nothing — which is how `nrd_options::exposure` got written before NRD's own contract turned out
+// to forbid it.
+// Checked at the mapping rather than on an image: how long a history may grow is not visible in two frames of a
+// constant field, and a test that ran the denoiser here would pass whatever the numbers were.
+TEST("sr - NRD's quality preset picks how long its history may grow")
+{
+    auto const fast = sr::nrd_denoise_routine::options_for({.quality = sr::denoise_quality::fast});
+    auto const balanced = sr::nrd_denoise_routine::options_for({.quality = sr::denoise_quality::balanced});
+    auto const best = sr::nrd_denoise_routine::options_for({.quality = sr::denoise_quality::best});
+
+    CHECK(fast.max_accumulated_frames < balanced.max_accumulated_frames);
+    CHECK(balanced.max_accumulated_frames < best.max_accumulated_frames);
+    CHECK(fast.max_fast_accumulated_frames < balanced.max_fast_accumulated_frames);
+    CHECK(balanced.max_fast_accumulated_frames < best.max_fast_accumulated_frames);
+
+    // REBLUR refuses a history longer than its own ceiling, which would fail the whole frame rather than clamp.
+    CHECK(best.max_accumulated_frames <= 63);
+}
+
 // A session that was never created runs nothing, rather than dispatching against a null instance.
 TEST("sr - an uncreated NRD session is inert")
 {
