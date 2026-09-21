@@ -11,6 +11,8 @@
 #include <nexus/tests/registry.hh>
 #include <nexus/tests/schedule.hh>
 
+#include <thread>
+
 using namespace cc::primitive_defines;
 
 // What --jobs must preserve, and what it must actually deliver.
@@ -385,7 +387,10 @@ TEST("parallel - main_thread and own_pool cannot be combined", no_scheduler)
 }
 
 #if CC_HAS_THREADS
-TEST("parallel - a failing check names what ran beside it", no_scheduler)
+namespace
+{
+/// Runs a test that fails while a partner is provably running, and returns whether the failure named that partner.
+bool failure_names_its_partner()
 {
     // A -jN failure is usually about what it ran BESIDE, and the report otherwise names only the test that failed.
     // The overlap is forced rather than hoped for: the failing test waits for a partner to be LIVE, and the partner stays live until it has failed.
@@ -444,7 +449,29 @@ TEST("parallel - a failing check names what ran beside it", no_scheduler)
     for (auto const& line : failing.root.errors[0].extra_lines)
         if (line.contains("partner"))
             beside = true;
-    CHECK(beside);
+    return beside;
+}
+} // namespace
+
+TEST("parallel - a failing check names what ran beside it", no_scheduler)
+{
+    CHECK(failure_names_its_partner());
+}
+
+TEST("parallel - a thread's running-test slot is freed when the thread ends", no_scheduler)
+{
+    // A thread claims a slot the first time it runs a test, and each run below runs one on a thread that then ends.
+    // Together they are more threads than the table has slots, so a slot claimed for good would leave none free.
+    auto reg = nx::test_registry();
+    reg.add_declaration("trivial", {}, [] { CHECK(true); });
+    auto const schedule = nx::test_schedule::create({}, reg);
+    for (auto i = 0; i < 100; ++i)
+    {
+        std::thread t([&] { (void)nx::execute_tests(schedule, with_jobs(1)); });
+        t.join();
+    }
+
+    CHECK(failure_names_its_partner());
 }
 
 TEST("parallel - tests under -jN really do overlap", no_scheduler)

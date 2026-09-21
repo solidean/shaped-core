@@ -336,8 +336,10 @@ bool is_own_test_body(test_context const* ctx)
 // What each thread is running right now: read by the crash-context hook report_running_test, and by a failing check to name what it ran beside.
 //
 // One slot per thread rather than one global: with tests in parallel a single slot names whichever test wrote last, which is exactly the wrong one to blame.
-// A crash context may not allocate and may not lock, so the slots are a fixed array, claimed once per thread and never freed.
-// A thread past the slot count is simply not reported — losing a name in a crash report beats growing a table inside one.
+// A crash context may not allocate and may not lock, so the slots are a fixed array.
+// A thread claims a free slot the first time it runs a test and frees it when it exits, so the table bounds the threads
+// alive at once, not the threads a binary ever starts — a binary that stands up a pool per test starts hundreds.
+// A thread that finds no free slot is simply not reported — losing a name in a crash report beats growing a table inside one.
 //
 // The slot holds the DECLARATION rather than a (pointer, length) pair, because the check reader runs while other threads are still writing.
 // One word cannot tear, and a declaration's name outlives the run, so a racing reader sees the previous test or the next one — never a pointer with the wrong length.
@@ -347,11 +349,31 @@ struct running_test_slot
 {
     cc::atomic<nx::test_declaration const*> declaration = {nullptr};
     cc::atomic<int> section = {0};
+    cc::atomic<bool> is_claimed = {false};
 };
 
 running_test_slot g_running_tests[max_running_test_slots];
-cc::atomic<int> g_running_slots_claimed = {0};
-thread_local int g_running_slot = -1;
+
+/// This thread's slot, released when the thread exits.
+struct running_slot_claim
+{
+    /// -1 before the first claim, max_running_test_slots when every slot was taken.
+    int index = -1;
+
+    running_slot_claim() = default;
+    running_slot_claim(running_slot_claim const&) = delete;
+    running_slot_claim& operator=(running_slot_claim const&) = delete;
+    ~running_slot_claim()
+    {
+        if (index < 0 || index >= max_running_test_slots)
+            return;
+        auto& slot = g_running_tests[index];
+        slot.declaration.store(nullptr, cc::memory_order_relaxed);
+        slot.section.store(0, cc::memory_order_relaxed);
+        slot.is_claimed.store(false, cc::memory_order_release);
+    }
+};
+thread_local running_slot_claim g_running_slot;
 
 /// Every test that has begun and not yet ended, whether or not a thread is running it right now.
 ///
@@ -377,12 +399,22 @@ int claim_in_flight(nx::test_declaration const& decl)
 /// This thread's crash-context slot, or null once the table is full.
 running_test_slot* running_test_slot_for_this_thread()
 {
-    if (g_running_slot < 0)
-        g_running_slot = g_running_slots_claimed.fetch_add(
-            1, cc::memory_order_relaxed); // may land past the end, which is the "no slot" answer below
-    if (g_running_slot >= max_running_test_slots)
+    if (g_running_slot.index < 0)
+    {
+        g_running_slot.index = max_running_test_slots; // the "no slot" answer, unless a free one turns up below
+        for (auto i = 0; i < max_running_test_slots; ++i)
+        {
+            auto expected = false;
+            if (g_running_tests[i].is_claimed.compare_exchange_strong(expected, true, cc::memory_order_acquire))
+            {
+                g_running_slot.index = i;
+                break;
+            }
+        }
+    }
+    if (g_running_slot.index >= max_running_test_slots)
         return nullptr;
-    return &g_running_tests[g_running_slot];
+    return &g_running_tests[g_running_slot.index];
 }
 
 /// Publishes what this thread is running, restoring the enclosing test's entry on the way out.
@@ -431,12 +463,10 @@ void publish_running_test(running_test_slot* slot, nx::test_declaration const& d
 /// That is the right resolution for the question it answers — which pair collided — and no lock could do better without changing what it measures.
 cc::string other_running_tests()
 {
-    auto const claimed = cc::min(g_running_slots_claimed.load(cc::memory_order_relaxed), max_running_test_slots);
-
     cc::string line;
-    for (auto i = 0; i < claimed; ++i)
+    for (auto i = 0; i < max_running_test_slots; ++i)
     {
-        if (i == g_running_slot)
+        if (i == g_running_slot.index)
             continue; // this thread's own slot names the failing test itself
 
         auto const* const decl = g_running_tests[i].declaration.load(cc::memory_order_relaxed);
@@ -1636,9 +1666,8 @@ cc::span<cc::vector<cc::string> const> nx::impl::current_section_scopes()
 void nx::impl::report_running_test() noexcept
 {
     // Every running test, not just this thread's: under -jN the faulting thread is often not the interesting one.
-    auto const claimed = cc::min(g_running_slots_claimed.load(cc::memory_order_relaxed), max_running_test_slots);
     auto reported = 0;
-    for (auto i = 0; i < claimed; ++i)
+    for (auto i = 0; i < max_running_test_slots; ++i)
     {
         auto const* const decl = g_running_tests[i].declaration.load(cc::memory_order_relaxed);
         if (decl == nullptr || decl->name.empty())
@@ -1672,7 +1701,7 @@ void nx::impl::report_running_test() noexcept
             continue;
 
         auto on_a_thread = false;
-        for (auto i = 0; i < claimed && !on_a_thread; ++i)
+        for (auto i = 0; i < max_running_test_slots && !on_a_thread; ++i)
             on_a_thread = g_running_tests[i].declaration.load(cc::memory_order_relaxed) == decl;
         if (on_a_thread)
             continue;
