@@ -774,13 +774,18 @@ A layer with no lights falls back to `layer::fallback_light` — `sv::default_fa
   are dropped — nothing reprojects across a cut.
   It is sticky until a frame traces the view, and it restarts no accumulation of its own.
 - **The specular guides** `temporal_id::specular_albedo_guide` (F0, blended to the base colour by metalness) and `roughness_guide` (the coat's where a coat covers the base).
-  Declared for a named member that reads them and for `automatic`; written under the frame block's own `write_specular_guides`, so a diffuse-only member pays for neither.
+  Declared for a named member that reads EITHER of them and for `automatic`; written under the frame block's own `write_specular_guides`, so a diffuse-only member pays for neither.
+  Either rather than both, because NRD requires roughness and never reads a specular albedo.
   `pt_guides.hlsli` holds all three guide functions apart from the tracer's bindings, which is what lets `bsdf_probe.hlsl` assert on them.
 - **Four more temporal slots per such layer**: `temporal_id::normal_guide`, `depth_guide`, `albedo_guide` (diffuse) and `denoised`, declared by `temporal_inputs_of`.
   A layer that may denoise temporally adds `frame_samples` and `motion_guide`; the first holds the temporal member's own history, the second the last camera.
 - **A split-signal member adds three more**: `temporal_id::frame_diffuse`, `frame_specular` and `hit_distance_guide`, all three or none.
   The two radiance halves sum to `frame_samples` exactly, so a member reading them sees the same frame the others do rather than a second trace.
   Declared like the specular pair, but WRITTEN only when the member that actually resolves on this device reads them — `automatic` declares them everywhere and splits nowhere it would go unread.
+- **`sv::matrices_of(camera_gpu, near_plane)`** turns the raygen's pinhole basis into the `world_to_view` / `view_to_clip` pair `sr::denoise_guides` asks for.
+  sv rasterizes nothing, so these exist for a denoiser that reprojects in world space; `right_scaled` and `up_scaled` carry `tan(fov / 2)` in their lengths, which is the projection's diagonal.
+  `denoise_guides::jitter` stays zero: the raygen offsets every primary ray randomly WITHIN its pixel, so the samples' mean is the centre.
+  The per-frame offset a temporal upscaler reconstructs from is the other kind, and sv has none.
 - **The temporal history restarts on a scene change, never on camera motion** — its signal is the trace hash with the camera left out.
   The raygen blends the guides beside the mean on a count of their own, so turning denoising on mid-estimate restarts nothing.
 - **A denoiser still compiling declines the frame**, so a capture never saves the raw mean where a denoised image was asked for.

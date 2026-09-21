@@ -1,6 +1,7 @@
 #pragma once
 
 #include <shaped-viewer/fwd.hh>
+#include <typed-geometry/linalg/mat.hh>
 #include <typed-geometry/linalg/pos.hh>
 #include <typed-geometry/linalg/quat.hh>
 #include <typed-geometry/linalg/vec.hh>
@@ -25,6 +26,27 @@ struct sv::camera_gpu
     /// Bakes the pinhole basis from a camera; the aspect ratio is taken from `cam.projection.aspect_ratio`.
     [[nodiscard]] static camera_gpu from(camera const& cam);
 };
+
+/// A camera's two matrices, in `tg`'s convention — column-major, and a vector is a column.
+///
+/// sv traces rays rather than rasterizing, so nothing in the viewer needs these; they exist for a denoiser that
+/// reprojects in world space, which is what `sr::denoise_guides` asks for.
+struct sv::camera_matrices
+{
+    tg::mat4f world_to_view = tg::mat4f::identity;
+    tg::mat4f view_to_clip = tg::mat4f::identity;
+};
+
+/// The matrices `cam`'s pinhole basis amounts to, with an infinite far plane.
+///
+/// Derived from the SAME basis `camera_ray_offset` and `camera_project` form their rays from, so all three describe
+/// one pinhole: `right_scaled` and `up_scaled` carry `tan(fov / 2)` in their lengths, which is the projection's
+/// diagonal, and `forward` is its third view axis.
+/// A camera whose basis is degenerate — a zero `right_scaled` or `forward` — yields identities rather than NaNs.
+namespace sv
+{
+[[nodiscard]] camera_matrices matrices_of(camera_gpu const& cam, f32 near_plane);
+}
 
 /// A perspective projection: vertical field of view, aspect ratio (width / height), and near plane.
 ///

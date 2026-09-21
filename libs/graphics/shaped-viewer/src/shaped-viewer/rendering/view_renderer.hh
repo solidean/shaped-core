@@ -7,6 +7,7 @@
 #include <shaped-viewer/fwd.hh>
 #include <shaped-viewer/rendering/layout_routine.hh> // plan_textures
 #include <shaped-viewer/stable_id.hh>
+#include <shaped-viewer/view/camera.hh>
 
 /// The textures a render plan resolved to, owned for the length of the frame that recorded it.
 ///
@@ -96,6 +97,14 @@ protected:
     cc::shared_async<cc::unit> init(sg::routine_init_scope scope) override;
 
 private:
+    /// This frame's camera and the one before it, as the matrices a denoiser reprojects with.
+    /// Both are the same on a layer's first frame, which reads as a camera that did not move.
+    struct denoise_cameras
+    {
+        camera_matrices current;
+        camera_matrices previous;
+    };
+
     /// One traced layer's denoiser slots; the last two are null unless the layer may denoise temporally.
     struct denoise_slots
     {
@@ -113,14 +122,24 @@ private:
 
         /// Where the spatial member lands while the hand-off crossfades, or null when the layer does not fade.
         impl::temporal_slot* crossfade = nullptr;
+
+        /// This frame's radiance split into its two lobes, with their hit distances — all three or none, and null
+        /// unless the layer's method may filter the lobes apart.
+        impl::temporal_slot* frame_diffuse = nullptr;
+        impl::temporal_slot* frame_specular = nullptr;
+        impl::temporal_slot* hit_distance = nullptr;
     };
 
     /// Denoises a traced layer into its denoised slot — temporally while its mean is young, spatially after, and both
     /// at once across the hand-off — and points `presented` at what its parent should sample.
+    ///
+    /// `cameras` is this frame's view and projection and the previous frame's, which a member reprojecting in world
+    /// space reads instead of the motion guide alone.
     [[nodiscard]] static sr::denoise_status _denoise(sg::command_list& cmd,
                                                      render_settings const& settings,
                                                      impl::temporal_slot const& accumulator,
                                                      denoise_slots const& ds,
+                                                     denoise_cameras const& cameras,
                                                      sg::texture_2d& presented);
 
     /// Bumped every time the routine initializes, which is once per shader reload.

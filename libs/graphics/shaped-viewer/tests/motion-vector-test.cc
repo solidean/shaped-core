@@ -247,3 +247,75 @@ ASYNC_INVOCABLE_TEST("sv - a point behind the previous camera reprojects off the
     // rather than reject the pixel.
     CHECK(r[0].motion[0] > dim[0]).context(cc::format("a point behind the camera reprojected to {}", r[0].motion[0]));
 }
+
+// The matrices `sv::matrices_of` hands a denoiser, against the frustum the raygen actually traces.
+//
+// sv rasterizes nothing, so these two matrices have no other use and nothing else would notice them being wrong.
+// A denoiser reprojecting through a transposed or mis-scaled projection ghosts rather than fails, which is the same
+// failure mode the probe above exists for.
+//
+// Checked as properties of the frustum rather than by recomputing the formula: `forward`, `right_scaled` and
+// `up_scaled` ARE the frustum's axes — a point one `right_scaled` off the axis sits exactly on its right edge — so a
+// folded aspect ratio, a swapped axis or a flipped sign each move one of these numbers and none of them survives.
+TEST("sv - a camera's matrices describe the frustum its rays sweep")
+{
+    // Off every axis, with a rolled-up vector, and not square.
+    // Each of those hides a different mistake: an axis-aligned camera's rotation is symmetric, so a transposed
+    // world-to-view passes; a level one has no roll to lose; and a 1:1 image cancels a misplaced aspect ratio.
+    auto camera = sv::camera::looking_at(tg::pos3d(3.0, 2.0, -4.0), tg::pos3d(0.5, -0.3, 1.0), tg::vec3d(0.2, 0.9, 0.1));
+    camera.projection.aspect_ratio = 16.0 / 9.0;
+    auto const cam = sv::camera_gpu::from(camera);
+
+    auto const near_plane = 0.25f;
+    auto const m = sv::matrices_of(cam, near_plane);
+
+    /// A world point through both matrices, as (ndc_x, ndc_y, view_depth).
+    auto const project = [&](tg::vec3f world)
+    {
+        auto const view = m.world_to_view * tg::vec4f(world[0], world[1], world[2], 1.0f);
+        auto const clip = m.view_to_clip * view;
+        return tg::vec3f(clip[0] / clip[3], clip[1] / clip[3], clip[3]);
+    };
+
+    auto const eye = cam.position;
+    auto const forward = cam.forward / cam.forward.length();
+
+    // The camera sits at the view origin, and one unit along its forward axis is one unit of view depth.
+    auto const at_eye = m.world_to_view * tg::vec4f(eye[0], eye[1], eye[2], 1.0f);
+    for (auto axis = 0; axis < 3; ++axis)
+        CHECK(tg::abs(at_eye[axis]) < 1e-4f).context(cc::format("the eye is not the view origin on axis {}", axis));
+
+    // The forward axis is the image centre, whatever the aspect ratio.
+    auto const centre = project(eye + forward);
+    CHECK(tg::abs(centre[0]) < 1e-4f).context(cc::format("centre ndc x is {}", centre[0]));
+    CHECK(tg::abs(centre[1]) < 1e-4f).context(cc::format("centre ndc y is {}", centre[1]));
+    CHECK(tg::abs(centre[2] - 1.0f) < 1e-4f).context(cc::format("view depth at one unit ahead is {}", centre[2]));
+
+    // One `right_scaled` off the axis is the right edge, and one `up_scaled` the top — which is what those vectors
+    // mean to `camera_ray_offset`.
+    // y is up here where the raygen's pixel space is y down, so the top edge is +1 rather than -1.
+    auto const right_edge = project(eye + forward + cam.right_scaled);
+    CHECK(tg::abs(right_edge[0] - 1.0f) < 1e-4f).context(cc::format("right edge ndc x is {}", right_edge[0]));
+    CHECK(tg::abs(right_edge[1]) < 1e-4f).context(cc::format("right edge ndc y is {}", right_edge[1]));
+
+    auto const top_edge = project(eye + forward + cam.up_scaled);
+    CHECK(tg::abs(top_edge[0]) < 1e-4f).context(cc::format("top edge ndc x is {}", top_edge[0]));
+    CHECK(tg::abs(top_edge[1] - 1.0f) < 1e-4f).context(cc::format("top edge ndc y is {}", top_edge[1]));
+
+    // The two edges sit at different distances from the axis, which is the aspect ratio riding on exactly one of them.
+    // Equal lengths here would mean it was folded into both, or into neither.
+    CHECK(cam.right_scaled.length() > cam.up_scaled.length() * 1.5f);
+
+    // Depth is the view depth rather than a distance, so a point off the axis is no further away than its z.
+    auto const off_axis = project(eye + forward * 3.0f + cam.right_scaled * 0.5f);
+    CHECK(tg::abs(off_axis[2] - 3.0f) < 1e-3f).context(cc::format("off-axis view depth is {}", off_axis[2]));
+
+    // Clip depth is z / w, so the near plane is where it reaches zero.
+    auto const near_point = project(eye + forward * near_plane);
+    auto const near_clip = m.view_to_clip
+                         * (m.world_to_view
+                            * tg::vec4f((eye + forward * near_plane)[0], (eye + forward * near_plane)[1],
+                                        (eye + forward * near_plane)[2], 1.0f));
+    CHECK(tg::abs(near_clip[2]) < 1e-4f).context(cc::format("clip z at the near plane is {}", near_clip[2]));
+    CHECK(tg::abs(near_point[2] - near_plane) < 1e-4f);
+}

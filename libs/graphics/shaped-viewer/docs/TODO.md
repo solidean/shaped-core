@@ -6,8 +6,9 @@ Bigger design intent lives in [structure.md](structure.md).
 - **Denoising: both halves run; what is left**, in order — shaped-rendering's [denoising.md](../../shaped-rendering/docs/denoising.md) is the design:
   - **Measure what the guides' payload growth costs.**
     `PtPayload` went from 26 to 29 lanes for the albedo and to 33 for the specular pair, on every ray rather than only primary ones.
-  - **The specular guides are declared for `automatic` whatever the device supports**, because `build_render_plan` is a pure function with no context to ask.
-    That is two textures per denoising layer on a machine no vendor member can run, which is the price of the declaration being made before the choice is.
+  - **The specular and split guides are declared for `automatic` whatever the device supports**, because `build_render_plan` is a pure function with no context to ask.
+    That is five textures per denoising layer on a machine no vendor member can run, which is the price of the declaration being made before the choice is.
+    Only the declaration, though: the tracer writes the split lobes only when the member that resolves on this device reads them.
   - **A per-frame Halton jitter** while a vendor temporal member runs; SVGF does not need one, DLSS Ray Reconstruction does.
   - **Object motion vectors** need scene items with an identity that survives a frame, which they do not have; camera motion covers a static scene.
   - **`render_settings::render_scale`**, once a member upscales: the plan traces at `sr::denoise_input_extent` instead of the view's own size.

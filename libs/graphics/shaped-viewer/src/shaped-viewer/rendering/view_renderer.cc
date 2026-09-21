@@ -551,6 +551,19 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     // temporal ones only when the layer may denoise temporally.
     auto const denoising = l.settings.denoise.method != sr::denoise_method::none;
     auto const slot_of = [&](u64 id) { return denoising ? rec.temporal.get_ptr(id) : nullptr; };
+
+    // Whether the member that will actually run reads the two lobes apart.
+    // Resolved against the device here rather than taken from the slots existing: `automatic` DECLARES them, because
+    // that declaration is made before any device is consulted, and on a machine whose best member ignores them the
+    // tracer would otherwise split every frame's radiance for nobody.
+    auto const split_slot_of = [&](u64 id)
+    {
+        if (!denoising)
+            return static_cast<impl::temporal_slot*>(nullptr);
+        auto const resolved = sr::resolve_denoise_method(ctx, l.settings.denoise, true);
+        return sr::required_guides(resolved).has(sr::denoise_guide::split_diffuse_specular) ? rec.temporal.get_ptr(id)
+                                                                                            : nullptr;
+    };
     auto const ds = denoise_slots{
         .normal = slot_of(temporal_id::normal_guide(tr.layer)),
         .depth = slot_of(temporal_id::depth_guide(tr.layer)),
@@ -561,10 +574,18 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
         .frame = slot_of(temporal_id::frame_samples(tr.layer)),
         .motion = slot_of(temporal_id::motion_guide(tr.layer)),
         .crossfade = slot_of(temporal_id::denoised_crossfade(tr.layer)),
+        .frame_diffuse = split_slot_of(temporal_id::frame_diffuse(tr.layer)),
+        .frame_specular = split_slot_of(temporal_id::frame_specular(tr.layer)),
+        .hit_distance = split_slot_of(temporal_id::hit_distance_guide(tr.layer)),
     };
     auto const has_guides = ds.normal != nullptr && ds.depth != nullptr && ds.albedo != nullptr && ds.denoised != nullptr;
     auto const has_specular_guides = has_guides && ds.specular_albedo != nullptr && ds.roughness != nullptr;
     auto const has_temporal = has_guides && ds.frame != nullptr && ds.motion != nullptr;
+
+    // All three or none: a member filtering the lobes apart needs both halves AND the distances, and two of the three
+    // would let it run against a hit distance that describes something else.
+    auto const has_split = has_temporal && has_specular_guides && ds.frame_diffuse != nullptr
+                        && ds.frame_specular != nullptr && ds.hit_distance != nullptr;
 
     // Set after the hash, like accum_frame, so none of it can restart the accumulation.
     // The guides count on the normal slot's own frames, since they may have started after the mean did.
@@ -588,6 +609,7 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
 
         fc.write_temporal = 1;
         fc.previous_camera = ds.motion->has_last_camera ? ds.motion->last_camera : fc.camera;
+        fc.write_split = has_split ? 1 : 0;
     }
 
     auto const frame = ctx.transient.create_buffer<pt_frame_constants_gpu>(
@@ -623,6 +645,9 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
               .guide_roughness = has_specular_guides ? ds.roughness->texture : sg::texture_2d(),
               .frame_output = has_temporal ? ds.frame->texture : sg::texture_2d(),
               .guide_motion = has_temporal ? ds.motion->texture : sg::texture_2d(),
+              .frame_diffuse = has_split ? ds.frame_diffuse->texture : sg::texture_2d(),
+              .frame_specular = has_split ? ds.frame_specular->texture : sg::texture_2d(),
+              .guide_hit_distance = has_split ? ds.hit_distance->texture : sg::texture_2d(),
               .instance_table = instance_table,
               .lights = light_buffer,
               .hit_groups = resolved.hit_groups,
@@ -657,7 +682,16 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
         // A denoiser still compiling declines the frame, as a tracer still compiling does: a capture that saved it
         // would hold the raw mean where the caller asked for a denoised image.
         // The trace itself landed, so the accumulation above stands.
-        if (_denoise(cmd, l.settings, *slot, ds, res.traces[trace_index]) == sr::denoise_status::pending)
+        // Built from the same `camera_gpu` the motion guide was, so the matrices and the vectors describe one
+        // camera; a first frame has no previous one and reads as a camera that did not move.
+        auto const near_plane = f32(v.camera.projection.near_plane);
+        auto const cameras = denoise_cameras{
+            .current = matrices_of(fc.camera, near_plane),
+            .previous
+            = matrices_of(has_temporal && ds.motion->has_last_camera ? ds.motion->last_camera : fc.camera, near_plane),
+        };
+
+        if (_denoise(cmd, l.settings, *slot, ds, cameras, res.traces[trace_index]) == sr::denoise_status::pending)
             return sg::routine_outcome::declined;
     }
     return sg::routine_outcome::executed;
@@ -680,6 +714,7 @@ sr::denoise_status view_renderer::_denoise(sg::command_list& cmd,
                                            render_settings const& settings,
                                            impl::temporal_slot const& accumulator,
                                            denoise_slots const& ds,
+                                           denoise_cameras const& cameras,
                                            sg::texture_2d& presented)
 {
     auto& denoised = *ds.denoised;
@@ -689,6 +724,14 @@ sr::denoise_status view_renderer::_denoise(sg::command_list& cmd,
         .normal = ds.normal->texture,
         .roughness = ds.roughness != nullptr ? ds.roughness->texture : sg::texture_2d(),
         .depth = ds.depth->texture,
+
+        // sv traces one sample per pixel centre, so there is no jitter to declare.
+        // Left at zero deliberately rather than forgotten: a member told the rays were jittered when they were not
+        // reprojects against half a pixel that never existed.
+        .view_to_clip = cameras.current.view_to_clip,
+        .previous_view_to_clip = cameras.previous.view_to_clip,
+        .world_to_view = cameras.current.world_to_view,
+        .previous_world_to_view = cameras.previous.world_to_view,
     };
 
     // Temporal while the mean is young, on this frame's own samples: a young mean is barely less noisy than one frame,
@@ -717,8 +760,16 @@ sr::denoise_status view_renderer::_denoise(sg::command_list& cmd,
     {
         auto temporal_guides = guides;
         temporal_guides.motion = ds.motion->texture;
+
+        // A split-signal member reads the two lobes as its colour pair; everything else reads their sum, which is
+        // what `frame` already holds.
+        auto const split = ds.frame_diffuse != nullptr && ds.frame_specular != nullptr && ds.hit_distance != nullptr;
+        if (split)
+            temporal_guides.hit_distance = ds.hit_distance->texture;
+
         auto const inputs = sr::denoise_inputs{
-            .color = ds.frame->texture,
+            .color = split ? ds.frame_diffuse->texture : ds.frame->texture,
+            .specular = split ? ds.frame_specular->texture : sg::texture_2d(),
             .guides = temporal_guides,
             .output = denoised.texture,
         };

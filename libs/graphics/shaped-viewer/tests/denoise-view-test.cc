@@ -241,6 +241,44 @@ ASYNC_INVOCABLE_TEST("sv - a denoised capture is smoother than the raw one", (sg
     cc::remove_file(temporal_path);
 }
 
+// The split-signal path, end to end: NRD reading the two lobes the tracer writes.
+//
+// The assertion is the same smoothness one, and it is what makes this worth having.
+// Every guide NRD requires has to reach it — the split radiance, the hit distances, the specular pair, the matrices —
+// and a call missing one reports `unsupported`, which sv answers by presenting the raw mean.
+// So a viewer that declares a slot but never fills it comes back at the raw image's roughness rather than failing
+// anywhere, and this check is what turns that into a red test.
+ASYNC_INVOCABLE_TEST("sv - the viewer drives the split-signal denoiser", (sg::context_handle const& ctx_h))
+{
+    auto& ctx = *ctx_h;
+
+    {
+        auto probe = ctx.create_command_list();
+        auto const supported = probe->raytracing.is_supported();
+        ctx.drop_command_list(cc::move(probe));
+        if (!supported)
+            SKIP("device reports no ray tracing support");
+    }
+
+    if (!sv_test::shared_env().has_compiler)
+        SKIP("no DXC compiler to build the path-tracing shaders");
+    if (!sr::query_denoise_support(ctx).nrd)
+        SKIP("NRD was not fetched into this build (extern/nrd/fetch-nrd.py)");
+
+    auto const raw_path = cc::format("{}/sv-denoise-split-raw.png", cc::temp_directory_path());
+    auto const nrd_path = cc::format("{}/sv-denoise-nrd.png", cc::temp_directory_path());
+
+    co_await capture_box(ctx, sr::denoise_method::none, raw_path);
+    co_await capture_box(ctx, sr::denoise_method::nrd, nrd_path);
+
+    auto const raw = roughness_of(raw_path);
+    auto const nrd = roughness_of(nrd_path);
+    CHECK(nrd < 0.7 * raw).context(cc::format("roughness raw {} nrd {}", raw, nrd));
+
+    cc::remove_file(raw_path);
+    cc::remove_file(nrd_path);
+}
+
 // The curve the hand-off from the temporal denoiser to the spatial one follows.
 //
 // The two produce visibly different images of the same estimate, so the frame that switches between them is a jump in

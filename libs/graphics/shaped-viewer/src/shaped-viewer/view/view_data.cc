@@ -61,15 +61,20 @@ cc::vector<temporal_input> temporal_inputs_of(view_data const& v)
         out.push_back({.id = temporal_id::albedo_guide(u8(i)), .format = sg::pixel_format::rgba16_float});
         out.push_back({.id = temporal_id::denoised(u8(i)), .format = sg::pixel_format::rgba16_float});
 
-        // The specular pair, for a layer whose method may read it.
+        // The specular pair, for a layer whose method may read EITHER of them.
         // `automatic` counts for the same reason it counts below: what it resolves to depends on the device, and this
         // declaration is made before any device is consulted.
         // The guides are what a vendor member cannot run without, so a layer that might pick one has to have written
         // them by the time it does.
+        //
+        // Either rather than both, because the two are not the same question: NRD requires roughness and never reads a
+        // specular albedo, so a pair gated on the albedo alone leaves it without a guide it cannot run without.
+        // They are still declared together, since one tracer flag writes both.
+        auto const readable = sr::required_guides(v.layers[i].settings.denoise.method)
+                            | sr::optional_guides(v.layers[i].settings.denoise.method);
         auto const may_read_specular = v.layers[i].settings.denoise.method == sr::denoise_method::automatic
-                                    || (sr::required_guides(v.layers[i].settings.denoise.method)
-                                        | sr::optional_guides(v.layers[i].settings.denoise.method))
-                                           .has(sr::denoise_guide::specular_albedo);
+                                    || readable.has(sr::denoise_guide::specular_albedo)
+                                    || readable.has(sr::denoise_guide::roughness);
         if (may_read_specular)
         {
             out.push_back({.id = temporal_id::specular_albedo_guide(u8(i)), .format = sg::pixel_format::rgba16_float});
@@ -90,6 +95,22 @@ cc::vector<temporal_input> temporal_inputs_of(view_data const& v)
             // be a step.
             if (v.layers[i].settings.temporal_denoise_fade_frames > 0)
                 out.push_back({.id = temporal_id::denoised_crossfade(u8(i)), .format = sg::pixel_format::rgba16_float});
+
+            // The split signal, for a method that filters the two lobes apart.
+            // `automatic` counts for the reason it counts above: what it resolves to depends on the device, and this
+            // declaration is made before any device is consulted.
+            auto const may_read_split
+                = method == sr::denoise_method::automatic
+               || (sr::required_guides(method) | sr::optional_guides(method)).has(sr::denoise_guide::split_diffuse_specular);
+            if (may_read_split)
+            {
+                out.push_back({.id = temporal_id::frame_diffuse(u8(i)), .format = sg::pixel_format::rgba16_float});
+                out.push_back({.id = temporal_id::frame_specular(u8(i)), .format = sg::pixel_format::rgba16_float});
+
+                // Full floats: a hit distance is a world-space length rather than a colour, and a half loses metres
+                // of it at the far end of a scene the denoiser still reprojects across.
+                out.push_back({.id = temporal_id::hit_distance_guide(u8(i)), .format = sg::pixel_format::rg32_float});
+            }
         }
     }
 
