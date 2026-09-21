@@ -434,6 +434,23 @@ The maintainer's own first shape was a snapshot of the test's check state, resto
 A restore cannot take back the log line each failure writes, nor the throws the per-test failure cap has already made.
 A divert read before either happens has nothing to undo.
 
+### A backend finding is shown as the library code that breaks
+
+**When a backend violates its library's contract, the finding opens with the caller's code that goes wrong, not with the backend's internals.**
+A few lines of `sg` calls, the sentence of the contract they rely on, and what each backend does between them.
+The internals — the clamp, the stage mask, the declare — come after, as the reason.
+
+pr-185 is the worked case.
+Metal cut a fragment-stage barrier down to the vertex stage inside a render pass, and the first entry explained it in stage masks, encoder scopes and hazard-tracking modes.
+The maintainer's answer, verbatim:
+
+```raw
+sorry i dont understand anything the way this entry is written. please make a sg code example where you think our metal backend does not adhere to the sg contract
+```
+
+The rewrite was seven lines — two draws sharing a read-write buffer — plus `concepts/barriers.md`'s promise that sg orders them, plus one bullet each for dx12, vulkan and metal.
+The same shape also made the fix clearer, because the contract being broken is what the fix has to restore.
+
 ### The `#ifdef` arm this machine does not compile is where the defect is
 
 A platform-guarded helper has two arms and only one is ever parsed.
@@ -709,6 +726,13 @@ There is none: a driver calls `nx::invoke_tests` at runtime, and which invocable
 The maintainer's answer was a runtime assert at dispatch instead — a child's flags must be held by whichever test invokes it.
 The finding was right and the fix was unbuildable, and the review had even written "I have not checked how a driver's dispatched parameter type is known to the scheduler" beside it.
 A sentence like that is the check, left undone; do it before recommending, not after.
+
+**A proposed assert is checked against what the code declares today, not against what it should declare.**
+pr-185 found metal leaving a fragment-stage write unordered against a later draw in the same pass, and first prescribed asserting when a resource "declared with a fragment-stage write" was read again.
+`declare_bound_groups` declares every bound group resource as `shader_read | shader_write`, whatever its binding allows.
+So every resource shared by two draws already looked like that write, and the assert would have fired on imgui's font texture in every frame.
+The finding survived; the fix had to start with declaring real per-binding access, the way dx12's `hazard_views` do.
+Before prescribing a check on a declared property, read the one function that declares it.
 
 **A member of the right type is not the mechanism wired.**
 A helper that notifies, retires or releases usually needs a call that connects it, and holding the helper proves nothing about that call.
