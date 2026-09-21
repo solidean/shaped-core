@@ -73,7 +73,7 @@ def _probe_vulkan_wait_before_signal() -> ProbeResult | None:
     return ProbeResult(
         True,
         f"SDK {shown}'s validation layer mishandles a submit that waits on a timeline value not yet signalled, "
-        f"and reports hazards our transfers never produce — install SDK {wanted} or newer "
+        f"and reports hazards and image layouts our transfers never produce — install SDK {wanted} or newer "
         f"and point VULKAN_SDK at it",
     )
 
