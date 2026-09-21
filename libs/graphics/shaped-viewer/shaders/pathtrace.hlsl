@@ -4,14 +4,15 @@
 // integrates global illumination by following the continuation each hit hands back.
 //
 // The SHADING is not here. Each closest-hit evaluates its material's OpenPBR BSDF, estimates direct light through
-// it toward both sources — the rectangular area light and the SH environment — and importance-samples the next
-// direction from it; see pt_material_hit.hlsli. What is left for this file is the loop: accumulate what a hit
+// it toward both sources — one of the trace's lights, picked uniformly, and the SH environment — and importance-samples
+// the next direction from it; see pt_material_hit.hlsli. What is left for this file is the loop: accumulate what a hit
 // reports, carry the throughput, and decide when a path ends.
 //
-// Both light sources are gathered by two strategies combined with balance-heuristic multiple importance sampling: the
-// hit's own next-event ray, and the BSDF-sampled bounce ray when it reaches the same source.
+// Every source a sampled ray can reach is gathered by two strategies combined with balance-heuristic multiple importance
+// sampling: the hit's own next-event ray, and the BSDF-sampled bounce ray when it reaches the same source.
 // The weight for the second is applied here, because only the caller knows where the bounce went — escaping to the
-// environment, or crossing the area light's rect, which is analytic and so is intersected rather than traced.
+// environment or into a sun's disc, or crossing a rect, which is analytic and so is intersected rather than traced.
+// Point and parallel lights are deltas that no sampled ray reaches, so they have only the first strategy.
 
 [shader("raygeneration")]
 void PathTraceRayGen()
@@ -36,6 +37,12 @@ void PathTraceRayGen()
         float3 throughput = float3(1, 1, 1);
         float3 radiance = float3(0, 0, 0);
         float prev_pdf = 0.0; // pdf of the direction the last hit sampled, for the escaped-environment MIS
+
+        // Whether the vertex this segment left ran next-event estimation, which a surface hit does and a medium scatter
+        // does not.
+        // A light the segment then reaches is weighted against that estimate only when it exists; after a scatter the
+        // phase-sampled ray is the only strategy there is and takes the full weight.
+        bool prev_did_nee = true;
 
         // What the next segment travels through: vacuum until the path refracts into a solid.
         // Tracked here rather than in the hit because what a medium does is a property of the DISTANCE travelled, and the
@@ -63,6 +70,7 @@ void PathTraceRayGen()
             p.medium_albedo = medium_albedo;
             p.medium_g = medium_g;
             p.channel = channel;
+            p.last_bounce = b + 1 >= pt_bindings::frame.max_bounces ? 1u : 0u;
 
             RayDesc ray;
             ray.Origin = origin;
@@ -86,12 +94,6 @@ void PathTraceRayGen()
             float3 N = p.normal;
             float pdf = p.bsdf_pdf;
 
-            // The BSDF strategy for the area light: the continuation this ray came from may have aimed at the rect.
-            //
-            // Only from b >= 1, because that is what pairs with a next-event estimate — the primary ray has none to
-            // balance against, and weighting it here would make the light visible to the camera, which it is not.
-            // The rect is analytic and absent from the TLAS, so `hit_t` is the whole occlusion test: geometry nearer
-            // than the light blocks it, and nothing else can.
             bool const inside = any(medium_sigma_t > float3(0, 0, 0));
             bool const scattering = inside && any(medium_albedo > float3(0, 0, 0));
 
@@ -129,10 +131,11 @@ void PathTraceRayGen()
                     float3 const scattered = pt_sample_hg(dir, medium_g, pt_rand(rng), pt_rand(rng));
 
                     // The phase function is its own pdf, so this is the density at the direction ACTUALLY drawn — which is
-                    // what the area light's other strategy has to be balanced against.
+                    // what a light's other strategy has to be balanced against.
                     // Reading it at forward scattering instead would be right only for an isotropic medium, and silently
                     // wrong for every anisotropic one.
                     prev_pdf = pt_hg_phase(dot(dir, scattered), medium_g);
+                    prev_did_nee = false;
                     dir = scattered;
 
                     ++scatters;
@@ -178,24 +181,83 @@ void PathTraceRayGen()
                 throughput *= exp(-medium_sigma_t * hit_t);
             }
 
-            if (b > 0)
+            // A ray that escapes while still inside a solid travelled an unbounded distance through it, so nothing
+            // survives — no light it would cross, and no sky. It means the transmissive geometry is not closed, which
+            // is an authoring fact rather than a case worth estimating.
+            //
+            // Both light loops are skipped for it and the path ends below, rather than breaking here: with a `break` ahead
+            // of the two loops, WARP traces views black where they should be lit, though the logic is the same.
+            bool const escaped_inside = inside && hit_t < 0.0;
+
+            // The BSDF strategy for every light a sampled ray can reach, and the camera's view of the ones it may see.
+            //
+            // Every rect this segment crosses counts, not only the nearest: lights are analytic and occlude nothing — a
+            // shadow ray toward one passes straight through another — so the BSDF strategy has to treat them as
+            // transparent too, or it stops covering what next-event estimation leaves to it.
+            // A sun counts when the segment runs into its disc: on escaping, or past the surface for one casting no shadow.
+            //
+            // A rect is analytic and absent from the TLAS, so `hit_t` is the whole occlusion test: geometry nearer than the
+            // light blocks it, and nothing else can.
+            // A light that casts no shadow is credited past the surface as well, because next-event estimation ignores
+            // what stands in front of it and the two strategies have to agree on what they integrate.
+            //
+            // The primary ray has no next-event estimate to balance against, so it counts a light at full weight — and only
+            // one the camera is meant to see, and only in front of the surface, since a camera does not see through walls.
+            if (!escaped_inside)
             {
-                float t_light = 0.0;
-                float cos_light = 0.0;
-                if (pt_light_intersect(origin, dir, t_light, cos_light) && (hit_t < 0.0 || t_light < hit_t))
+                uint const begin = pt_bindings::frame.path_offset[sv::light_path_area];
+                uint const end = begin + pt_bindings::frame.path_count[sv::light_path_area];
+                for (uint i = begin; i < end; ++i)
                 {
+                    sv::light light = pt_bindings::Lights[i];
+                    float t_light = 0.0;
+                    float cos_light = 0.0;
+                    if (!pt_rect_intersect(light, origin, dir, t_light, cos_light))
+                        continue;
+
                     // `dir` is unit, so the distance along it is the distance to the rect.
-                    float w = pt_mis_weight(prev_pdf, pt_light_pdf(t_light * t_light, cos_light));
-                    radiance += throughput * pt_bindings::frame.light.emission * w;
+                    bool const in_front = hit_t < 0.0 || t_light < hit_t;
+                    float3 const arriving = light.emission * sv::light_cone(light, cos_light);
+                    if (b == 0)
+                    {
+                        if (in_front && sv::light_visible_to_camera(light))
+                            radiance += throughput * arriving;
+                    }
+                    else if (in_front || !sv::light_casts_shadows(light))
+                    {
+                        float w = prev_did_nee ? pt_mis_weight(prev_pdf, pt_light_pdf(light, t_light * t_light, cos_light))
+                                               : 1.0;
+                        radiance += throughput * arriving * w;
+                    }
+                }
+            }
+
+            if (!escaped_inside)
+            {
+                uint const begin = pt_bindings::frame.path_offset[sv::light_path_distant_disc];
+                uint const end = begin + pt_bindings::frame.path_count[sv::light_path_distant_disc];
+                for (uint i = begin; i < end; ++i)
+                {
+                    sv::light light = pt_bindings::Lights[i];
+                    if (!pt_in_disc(light, dir))
+                        continue;
+
+                    if (b == 0)
+                    {
+                        if (hit_t < 0.0 && sv::light_visible_to_camera(light))
+                            radiance += throughput * light.emission;
+                    }
+                    else if (hit_t < 0.0 || !sv::light_casts_shadows(light))
+                    {
+                        float w = prev_did_nee ? pt_mis_weight(prev_pdf, pt_disc_pdf(light)) : 1.0;
+                        radiance += throughput * light.emission * w;
+                    }
                 }
             }
 
             if (hit_t < 0.0)
             {
-                // A ray that escapes while still inside a solid travelled an unbounded distance through it, so nothing
-                // survives. It means the transmissive geometry is not closed, which is an authoring fact rather than a
-                // case worth estimating.
-                if (inside)
+                if (escaped_inside)
                     break;
 
                 // Escaped to the SH environment (PtMiss wrote its radiance back in `emission`). The primary ray
@@ -208,14 +270,14 @@ void PathTraceRayGen()
 
             // A surface's own emission reaches the camera directly and contributes nothing indirectly.
             //
-            // Not a double-count guard: next-event estimation samples the analytic area light alone, so an emissive
+            // Not a double-count guard: next-event estimation samples the analytic lights alone, so an emissive
             // MESH is never picked as a light and a deeper bounce has nothing to double-count against.
             // Emissive geometry lighting a scene needs light sampling over emissive triangles, which is a feature
             // this tracer does not have — see the viewer TODO.
             if (b == 0)
                 radiance += throughput * emission;
 
-            // What the hit already estimated toward the area light and the environment, through its own BSDF.
+            // What the hit already estimated toward its picked light and the environment, through its own BSDF.
             radiance += throughput * direct;
 
             // A closure that sampled nothing — fully absorbed, or a lobe that collapsed — ends the path here.
@@ -224,6 +286,7 @@ void PathTraceRayGen()
 
             throughput *= weight;
             prev_pdf = pdf;
+            prev_did_nee = true;
 
             // The offset follows the direction rather than the normal: a refracted continuation leaves on the far side, and
             // pushing it along +N would start it back inside the surface it just crossed.

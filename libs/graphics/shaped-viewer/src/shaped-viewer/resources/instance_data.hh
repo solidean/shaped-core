@@ -31,7 +31,11 @@ struct sv::instance_gpu
     /// Per instance rather than per frame, which is the point: geometry layout is a property of the mesh, and it rode in the frame constants only because the trace bound one mesh.
     u32 is_indexed = 0;
 
-    u32 _padding[3] = {};
+    /// RESERVED for light linking, and read by nothing yet: a light will affect this instance when the two masks share
+    /// a bit — see `sv::light_gpu::link_mask`. All ones is "every light", which is what every instance sees today.
+    u32 link_mask = ~0u;
+
+    u32 _padding[2] = {};
 };
 
 namespace sv

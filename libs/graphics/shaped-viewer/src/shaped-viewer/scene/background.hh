@@ -1,17 +1,19 @@
 #pragma once
 
 #include <shaped-viewer/fwd.hh>
+#include <shaped-viewer/scene/light.hh>
 #include <typed-geometry/linalg/vec.hh>
 
 /// The view's background / environment: the radiance a primary ray sees when it misses all geometry.
 ///
 /// For now it is an order-3 RGB spherical-harmonics probe — 16 coefficients, each an RGB radiance, in the standard real-SH basis with index 0 the constant (DC) term.
-/// Order 3 captures a sky gradient plus some directional structure (a soft sun disc, horizon banding), which is all a background needs.
+/// Order 3 captures a sky gradient plus some soft directional structure, which is all a background needs.
+/// A sun is not one of those: it is a light (`sv::light::sun`), and `sv::daylight()` hands the two back as a pair.
 /// A miss shader reconstructs the radiance along a ray direction from these coefficients.
 ///
 /// All-zero is a black background.
 /// The coefficients are raw SH, so writing one by hand means knowing the basis — the factories below are the way in.
-/// They compose, because SH is linear: `gradient(...).combined_with(sun(...))` reconstructs the sky plus the sun.
+/// They compose, because SH is linear: `gradient(...).combined_with(lobe(...))` reconstructs the sky plus the lobe.
 struct sv::background
 {
     static constexpr int sh_coefficient_count = 16; // order 3: (3 + 1)^2 real-SH coefficients
@@ -25,18 +27,16 @@ struct sv::background
     /// Exact rather than fitted — a radiance linear in the up component lives entirely in bands 0 and 1.
     [[nodiscard]] static background gradient(tg::vec3f zenith, tg::vec3f nadir);
 
-    /// A soft directional lobe peaking at exactly `radiance` along `direction`, which must not be zero (it is normalized here) and points from the scene toward the light.
+    /// A soft directional lobe peaking at exactly `radiance` along `direction`, which must not be zero (it is normalized here) and points from the scene toward the lobe.
     ///
     /// The shape is the clamped cosine `max(0, dot(d, direction))` truncated to bands 0..2 and rescaled to that peak.
-    /// So it is a half-sphere falloff rather than a disc: a soft key light, never a sharp sun.
-    /// A hard sun needs an `area_light` — no order-3 probe can carry one.
+    /// So it is a half-sphere falloff rather than a disc: a soft key or fill, and **never a sun** — it casts no shadow and
+    /// reflects as a smear.
+    /// A sun is a light, `sv::light::sun`, since no order-3 probe can carry one.
     ///
     /// Truncation leaves a floor the clamp would have removed: 3/34 of the peak across the lobe, 1/17 behind it.
-    /// So a `sun` also lifts the whole environment a little, and it dips a few percent below zero in the ring between — which the miss's clamp hides rather than fixes.
-    [[nodiscard]] static background sun(tg::vec3f direction, tg::vec3f radiance);
-
-    /// A cool blue sky over a dim warm ground bounce, with a soft sun high in the +x/+y quadrant.
-    [[nodiscard]] static background daylight();
+    /// So a `lobe` also lifts the whole environment a little, and it dips a few percent below zero in the ring between — which the miss's clamp hides rather than fixes.
+    [[nodiscard]] static background lobe(tg::vec3f direction, tg::vec3f radiance);
 
     /// Neutral gray, brighter overhead: reads shape and material without tinting either.
     [[nodiscard]] static background studio();
@@ -48,6 +48,23 @@ struct sv::background
     /// This environment at `factor` times the radiance — an exposure knob on a preset.
     [[nodiscard]] background scaled(f32 factor) const;
 };
+
+/// A sky and the sun that lights it, authored as a pair — what `sv::daylight()` hands back.
+///
+/// **The sky holds no sun**, so the two are never counted twice: the sun's light comes from `sun` alone, sharp and sampled,
+/// and the sky is only what surrounds it.
+/// Set both — `scene.background(d.sky)` and `scene.add_light("sun", d.sun)` — since half of the pair is not daylight.
+struct sv::sky_and_sun
+{
+    background sky;
+    light sun;
+};
+
+namespace sv
+{
+/// A cool blue sky over a dim warm ground bounce, with a warm sun high in the +x/+y quadrant.
+[[nodiscard]] sky_and_sun daylight();
+} // namespace sv
 
 /// GPU-side SH probe, mirroring the `Background` cbuffer in shaders/background.hlsli.
 /// Each coefficient sits in its own 16-byte lane (`.xyz` = RGB radiance, `.w` unused), because HLSL pads cbuffer array elements to a full float4 lane.

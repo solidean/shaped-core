@@ -262,10 +262,7 @@ EXAMPLE("shaped-viewer/mesh-structure-dense")
         scene.add_mesh(surface);
         scene.add_quadrics(structure);
 
-        scene.add_light({.center = tg::pos3f(0, 5, 1.5f),
-                         .half_extent_u = tg::vec3f(1.6f, 0, 0),
-                         .half_extent_v = tg::vec3f(0, 0, 1.6f),
-                         .emission = tg::vec3f(22.0f, 22.0f, 22.0f)});
+        scene.add_rect_light("key", tg::pos3f(0, 5, 1.5f), tg::vec3f(1.6f, 0, 0), tg::vec3f(0, 0, 1.6f)).nits(22.0f);
 
         scene.background(sv::background::gradient(tg::vec3f(0.30f, 0.35f, 0.46f), tg::vec3f(0.07f, 0.08f, 0.10f)));
     }

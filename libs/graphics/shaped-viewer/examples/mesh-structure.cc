@@ -170,10 +170,7 @@ EXAMPLE("shaped-viewer/mesh-structure")
         scene.add_mesh(surface);
         scene.add_quadrics(structure);
 
-        scene.add_light({.center = tg::pos3f(0, 4, 0),
-                         .half_extent_u = tg::vec3f(1.2f, 0, 0),
-                         .half_extent_v = tg::vec3f(0, 0, 1.2f),
-                         .emission = tg::vec3f(18.0f, 18.0f, 18.0f)});
+        scene.add_rect_light("key", tg::pos3f(0, 4, 0), tg::vec3f(1.2f, 0, 0), tg::vec3f(0, 0, 1.2f)).nits(18.0f);
 
         scene.background(sv::background::gradient(tg::vec3f(0.36f, 0.42f, 0.55f), tg::vec3f(0.10f, 0.11f, 0.14f)));
     }

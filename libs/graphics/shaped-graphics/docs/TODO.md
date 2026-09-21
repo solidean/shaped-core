@@ -45,6 +45,16 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
     The reverse edge there — a *stream* ordering behind an in-flight async transfer — was missing until the tier-1
     sweep read zeroes out of a texture an async upload was still filling, and `order_stream_copy` now waits on the
     transfer timeline as well.
+  - **dx12 reads a texture's pending transfers when a list records, not when it submits.**
+    `dx12_command_list::track_texture_access` folds the upload and download waits in at the op, and picks `general`
+    only if a transfer is pending then.
+    A list recorded before an async or streaming upload is enqueued and submitted after it therefore does not wait for
+    the copy, and transitions the texture out of the layout the copy queue is still using — the debug layer reports
+    it, and the list reads the texture before the upload lands.
+    That is the "a check taken during recording" defect [barriers](concepts/barriers.md#what-orders-what-the-calls-on-the-context)
+    names; vulkan gathers the waits at submit and does not have it, and neither backend yet revisits the layout there.
+    `sg stream - a list recorded before a fresh texture's upload and submitted after it` pins the vulkan side and skips
+    dx12 until this is fixed.
   - **a pure layout transition is modelled as touching nothing**, so nothing orders against it.
     `cmd.ensure_layout` — and the async fixup, which is one — declares no stage and no access, since it asks for a layout and nothing else.
     The barrier that produces therefore has an empty scope on both sides, and two things follow from that.

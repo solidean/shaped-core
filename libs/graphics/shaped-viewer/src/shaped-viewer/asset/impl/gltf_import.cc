@@ -2,6 +2,7 @@
 #include <babel-serializer/image/image.hh>
 #include <clean-core/common/utility.hh> // cc::move
 #include <clean-core/container/map.hh>
+#include <clean-core/container/set.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/string/format.hh>
 #include <shaped-viewer/asset/asset_loader.hh>
@@ -9,6 +10,7 @@
 #include <shaped-viewer/material/material.hh>
 #include <shaped-viewer/material/material_library.hh>
 #include <shaped-viewer/material/material_type.hh>
+#include <shaped-viewer/scene/light.hh>
 #include <shaped-viewer/scene/mesh.hh>
 #include <typed-geometry/geometry/primitives/aabb.hh>
 #include <typed-geometry/linalg/mat.hh>
@@ -253,7 +255,11 @@ struct gltf_importer
 
         // `emission_luminance` multiplies the color, and its OpenPBR default is 0 — so an emissive glTF material has to
         // bind it or it emits nothing.
-        // KHR_materials_emissive_strength would scale this; babel does not interpret it yet.
+        //
+        // glTF gives `emissiveFactor` no physical unit, so the mapping is the format's own: factor times
+        // KHR_materials_emissive_strength, read one-to-one as nits — the unit sv's area lights and OpenPBR share.
+        // The strength defaults to 1 and babel does not interpret the extension yet, so 1 is what it is until it does;
+        // reading it is the same babel extension KHR_lights_punctual needs.
         if (m.emissive_factor != tg::vec3f::zero)
         {
             bindings.push_back(binding::of("emission_color", m.emissive_factor));
@@ -627,6 +633,124 @@ struct gltf_importer
         }
     }
 
+    /// The file's light `index`, placed at `placement` — a position and the -Z it points down, and nothing else of it.
+    ///
+    /// The extension says a node's scale does not affect its light, so the intensity is read from the light alone and
+    /// the direction is the placement's image of -Z, normalized.
+    /// A node's own scale keeps -Z along -Z, up to sign; a parent's non-uniform scale over a rotated child skews it, and
+    /// a negative z scale flips it — both kept as they come out, which is what three.js does too.
+    /// What the extension permits and sv cannot mean — a negative intensity or color, a cone out of order — is clamped
+    /// and noted, and a light of a type sv does not know is skipped and noted.
+    void emit_light(bg::light_index index, tg::affine_transform3f const& placement)
+    {
+        auto const* const found = doc.find(index);
+        if (found == nullptr)
+            return;
+        auto const& l = *found;
+        auto const where = placement.transform(tg::pos3f::zero);
+        auto const direction = placement.transform(tg::vec3f(0, 0, -1));
+        auto const label = l.name.empty() ? cc::format("light {}", int(index)) : cc::format("light '{}'", l.name);
+
+        if (direction.length() <= 1e-12f)
+        {
+            note(cc::format("gltf: {} is placed by a node that collapses its direction, so it was not imported", label));
+            return;
+        }
+
+        auto intensity = l.intensity;
+        if (!(intensity >= 0.0f))
+        {
+            note(cc::format("gltf: {} has intensity {}, imported as 0", label, l.intensity));
+            intensity = 0.0f;
+        }
+
+        // Each channel held to >= 0, a NaN included, since a light emits no negative light.
+        auto color = l.color;
+        for (auto c = 0; c < 3; ++c)
+            if (!(color[c] >= 0.0f))
+                color[c] = 0.0f;
+        if (color != l.color)
+            note(cc::format("gltf: {} has color ({}, {}, {}), imported as ({}, {}, {})", label, l.color[0], l.color[1],
+                            l.color[2], color[0], color[1], color[2]));
+
+        auto light = sv::light::point(where);
+        switch (l.type)
+        {
+        case bg::light_type::unknown:
+            // babel kept it only so node indices hold; a guess at what the file meant would be a real light nobody
+            // authored.
+            note(cc::format("gltf: {} is of a type the extension does not define, so it was not imported", label));
+            return;
+        case bg::light_type::directional:
+            light = sv::light::directional(direction).lux(intensity);
+            break;
+        case bg::light_type::point:
+            light = sv::light::point(where).candela(intensity);
+            break;
+        case bg::light_type::spot:
+        {
+            // The extension requires 0 <= inner < outer <= pi / 2; a file that breaks it is held to it rather than refused.
+            auto const outer
+                = l.outer_cone_angle < 0.0f ? 0.0f : (l.outer_cone_angle > 1.5707964f ? 1.5707964f : l.outer_cone_angle);
+            auto const inner
+                = l.inner_cone_angle < 0.0f ? 0.0f : (l.inner_cone_angle > outer ? outer : l.inner_cone_angle);
+            if (outer != l.outer_cone_angle || inner != l.inner_cone_angle)
+                note(cc::format("gltf: {} has a cone of {} to {} rad, imported as {} to {}", label, l.inner_cone_angle,
+                                l.outer_cone_angle, inner, outer));
+
+            light = sv::light::spot(where, direction, tg::angle_f::make_from_radians(outer),
+                                    tg::angle_f::make_from_radians(inner))
+                        .candela(intensity);
+            break;
+        }
+        }
+        light.color(color);
+
+        if (l.range.has_value())
+            note(cc::format("gltf: {} has a range of {}, kept on the light but not honoured by the tracer", label,
+                            l.range.value()));
+
+        out.lights.push_back({.id = l.name, .light = light, .range = l.range});
+    }
+
+    /// Makes every light id unique within the asset: a name that is empty or shared becomes `name##i`, or `light##i`
+    /// for an empty one, with `i` its index in `lights` — which keeps what a human reads while giving each its own
+    /// identity.
+    ///
+    /// Which names are shared is settled before any is renamed, since renaming the first of two would otherwise leave the
+    /// second looking unique.
+    /// A generated id can still meet a name the file already uses — `a##1` beside two `a`s — so every final id goes
+    /// into a set, and a taken one bumps its suffix until it is new.
+    void disambiguate_light_ids()
+    {
+        auto shared = cc::vector<u8>::create_filled(out.lights.size(), u8(0));
+        for (auto i = isize(0); i < out.lights.size(); ++i)
+            for (auto j = isize(0); j < out.lights.size(); ++j)
+                if (j != i && out.lights[j].id == out.lights[i].id)
+                    shared[i] = 1;
+
+        // The names that stay as they are claim their ids first, so a generated one never takes a name the file chose.
+        auto taken = cc::set<cc::string>();
+        for (auto i = isize(0); i < out.lights.size(); ++i)
+            if (!out.lights[i].id.empty() && shared[i] == 0)
+                taken.insert(out.lights[i].id);
+
+        for (auto i = isize(0); i < out.lights.size(); ++i)
+        {
+            auto& id = out.lights[i].id;
+            if (!id.empty() && shared[i] == 0)
+                continue;
+
+            auto const base = id.empty() ? cc::string("light") : cc::string(id);
+            auto suffix = i;
+            auto candidate = cc::format("{}##{}", base, suffix);
+            while (taken.contains(candidate))
+                candidate = cc::format("{}##{}", base, ++suffix);
+            taken.insert(candidate);
+            id = cc::move(candidate);
+        }
+    }
+
     void visit(bg::node_index index, i32 parent, tg::affine_transform3f const& parent_world, int depth)
     {
         auto const raw = isize(int(index));
@@ -650,14 +774,23 @@ struct gltf_importer
         auto const world = tg::compose(parent_world, local);
 
         auto const slot = i32(out.nodes.size());
-        out.nodes.push_back(
-            {.name = n->name, .parent = parent, .transform = local, .first_mesh = i32(out.meshes.size()), .mesh_count = 0});
+        out.nodes.push_back({.name = n->name,
+                             .parent = parent,
+                             .transform = local,
+                             .first_mesh = i32(out.meshes.size()),
+                             .mesh_count = 0,
+                             .first_light = i32(out.lights.size()),
+                             .light_count = 0});
 
         if (n->mesh != bg::mesh_index::invalid)
             emit_mesh(n->mesh, cfg.flatten_hierarchy ? world : local);
 
-        // Counted before the children run, since their meshes belong to them and not to this node.
+        if (n->light != bg::light_index::invalid)
+            emit_light(n->light, cfg.flatten_hierarchy ? world : local);
+
+        // Counted before the children run, since their meshes and lights belong to them and not to this node.
         out.nodes[slot].mesh_count = i32(out.meshes.size()) - out.nodes[slot].first_mesh;
+        out.nodes[slot].light_count = i32(out.lights.size()) - out.nodes[slot].first_light;
 
         for (auto const child : doc.children_of(*n))
             visit(child, slot, world, depth + 1);
@@ -717,8 +850,9 @@ cc::result<asset_data> impl::import_gltf(babel::gltf::data const& doc,
 
     importer.build_materials();
     importer.walk_nodes();
+    importer.disambiguate_light_ids();
 
-    if (importer.out.meshes.empty())
+    if (importer.out.is_empty())
         return cc::error(cc::format("shaped-viewer: nothing to import from '{}'", importer.out.name));
 
     definitions = cc::move(importer.definitions);

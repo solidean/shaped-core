@@ -19,7 +19,7 @@ if(_sv_mode STREQUAL "none")
     return()
 endif()
 if(_sv_mode STREQUAL "stub")
-    foreach(_stem hello-cube load-asset openpbr-spheres mesh-structure mesh-structure-dense quadric-gallery quadric-arrows)
+    foreach(_stem hello-cube load-asset openpbr-spheres mesh-structure mesh-structure-dense quadric-gallery quadric-arrows lights light-stage)
         sc_add_example_backend_stub(shaped-viewer-${_stem}-example "${SC_EXAMPLE_BACKEND}" SUPPORTS dx12)
     endforeach()
     return()
@@ -34,6 +34,8 @@ sc_add_single_file_examples(shaped-viewer
     mesh-structure-dense.cc
     quadric-gallery.cc
     quadric-arrows.cc
+    lights.cc
+    light-stage.cc
     LINK shaped-viewer
     PCH SG NEXUS
 )

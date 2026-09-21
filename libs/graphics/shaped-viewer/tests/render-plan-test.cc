@@ -761,10 +761,9 @@ TEST("sv - a scene layer with no geometry plans no trace")
 
     auto v = sv::view_data{};
     v.id = sv::view_id::from_string("lit-but-empty");
-    sv::ensure_scene_3d(v).area_lights.push_back({.center = tg::pos3f(0, 3, 0),
-                                                  .half_extent_u = tg::vec3f(0.75f, 0, 0),
-                                                  .half_extent_v = tg::vec3f(0, 0, 0.75f),
-                                                  .emission = tg::vec3f(12, 12, 12)});
+    sv::ensure_scene_3d(v).lights.push_back(
+        {.id = sv::light_id::from_string("key"),
+         .light = sv::light::rect(tg::pos3f(0, 3, 0), tg::vec3f(0.75f, 0, 0), tg::vec3f(0, 0, 0.75f)).nits(12)});
     auto const empty = sv::view_index(def.views.size());
     def.views.push_back(cc::move(v));
 

@@ -234,10 +234,12 @@ public:
     /// Settle `range` of `texture` into the layout an async or streaming transfer of `direction` needs, and return the
     /// token of the submit that did it — nullopt when the texture was already there and nothing was submitted.
     ///
-    /// A transfer queue cannot settle a layout for itself: a D3D12 copy queue runs no layout barriers at all, and a
+    /// A transfer queue cannot move a layout for itself: a D3D12 copy queue runs no layout barriers at all, and a
     /// vulkan transfer queue that runs them puts a claim on a timeline the validation layer reads in submit-call
     /// order rather than in GPU order.
     /// So the direct queue does it, here, as a throwaway command list holding one transition.
+    /// The one exception is a fresh vulkan texture's transition out of UNDEFINED, which its first async upload claims
+    /// and submits itself; a later upload into that texture then finds it async-ready here and submits nothing.
     ///
     /// **It warns, once per texture**, because the caller could have avoided the submit entirely by recording
     /// `cmd.prepare_for_async` on a list they were already building.

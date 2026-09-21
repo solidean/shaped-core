@@ -131,10 +131,7 @@ EXAMPLE("shaped-viewer/quadric-arrows")
         // what makes drawing one arrow one line instead of a set a caller has to build and keep.
         scene.add_arrow(tg::segment3f(tg::pos3f(-2.6f, 0.02f, 2.6f), tg::pos3f(4.4f, 1.6f, 2.6f)), 0.05f);
 
-        scene.add_light({.center = tg::pos3f(-2.0f, 8.5f, -1.0f),
-                         .half_extent_u = tg::vec3f(3.0f, 0, 0),
-                         .half_extent_v = tg::vec3f(0, 0, 3.0f),
-                         .emission = tg::vec3f(9.0f, 9.0f, 9.0f)});
+        scene.add_rect_light("key", tg::pos3f(-2.0f, 8.5f, -1.0f), tg::vec3f(3.0f, 0, 0), tg::vec3f(0, 0, 3.0f)).nits(9.0f);
 
         scene.background(sv::background::gradient(tg::vec3f(0.38f, 0.44f, 0.58f), tg::vec3f(0.10f, 0.11f, 0.14f)));
     }

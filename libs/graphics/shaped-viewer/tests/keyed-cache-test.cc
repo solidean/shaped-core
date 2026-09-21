@@ -1,7 +1,7 @@
 #include <clean-core/container/vector.hh>
 #include <nexus/test.hh>
 #include <shaped-viewer/impl/keyed_cache.hh>
-#include <shaped-viewer/view/view_id.hh>
+#include <shaped-viewer/stable_id.hh>
 
 using namespace cc::primitive_defines;
 

@@ -4,8 +4,8 @@
 #include <shaped-viewer/fwd.hh>
 #include <shaped-viewer/impl/keyed_cache.hh>
 #include <shaped-viewer/impl/view_state.hh>
+#include <shaped-viewer/stable_id.hh>
 #include <shaped-viewer/view/view_data.hh> // temporal_id::accumulation, for the default argument
-#include <shaped-viewer/view/view_id.hh>
 
 /// Everything one viewer's views keep across frames, keyed by view_id.
 ///

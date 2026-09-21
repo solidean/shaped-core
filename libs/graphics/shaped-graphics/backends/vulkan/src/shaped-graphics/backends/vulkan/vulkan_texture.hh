@@ -100,6 +100,52 @@ public:
         return _access.lock([&](vulkan_texture_access& a) { return a.claim_initial_transition(); });
     }
 
+    /// Claims the one-time transition for an upload, which submits it on the transfer queue straight to `layout`, and
+    /// returns the value on `_upload_group` that submit signals — or 0 when someone already claimed it.
+    /// The value is reserved only on a win, under the same lock as the claim, so it precedes every upload value
+    /// reserved after it.
+    /// Thread-safe.
+    [[nodiscard]] u64 claim_initial_transition_for_upload(sg::texture_layout layout) const
+    {
+        return _access.lock(
+            [&](vulkan_texture_access& a) -> u64
+            {
+                if (!a.needs_initial_transition())
+                    return 0;
+                auto const value = _upload_group->reserve();
+                [[maybe_unused]] bool const won = a.claim_initial_transition_for_upload(layout, value);
+                CC_ASSERT(won, "the claim was checked under this lock");
+                return value;
+            });
+    }
+
+    /// An upload's completion value and scheduling sequence, taken together.
+    struct upload_ticket
+    {
+        u64 value = 0;
+        u64 sequence = 0;
+    };
+
+    /// Reserves an upload's completion value on `_upload_group` and draws its sequence from `next_sequence`, under the
+    /// texture's lock, so two uploads into this texture get values in the same order as their sequences.
+    /// The actor retires a family in sequence order, and a timeline rejects a signal that would move it backwards.
+    [[nodiscard]] upload_ticket reserve_upload(cc::atomic<u64>& next_sequence) const
+    {
+        return _access.lock(
+            [&](vulkan_texture_access&)
+            {
+                auto const value = _upload_group->reserve();
+                return upload_ticket{.value = value, .sequence = next_sequence.fetch_add(1, cc::memory_order_relaxed)};
+            });
+    }
+
+    /// The value on `_upload_group` whose submit ran the initial transition, or 0 when a command list ran it.
+    /// Every list touching the texture waits on it, since that barrier ran on the transfer queue.
+    [[nodiscard]] u64 initial_transition_upload_value() const
+    {
+        return _access.lock([&](vulkan_texture_access& a) { return a.initial_transition_upload_value(); });
+    }
+
     /// Whether the image is still in the layout vkCreateImage left it in.
     /// A hint at record time: another list may claim the transition before this one submits, which is why the set it
     /// feeds is tentative and claim_initial_transition is what decides.

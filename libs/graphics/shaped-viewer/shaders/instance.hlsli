@@ -18,6 +18,7 @@ struct instance
     uint vertices;
     uint indices;
     uint is_indexed;
-    uint3 _padding;
+    uint link_mask; // RESERVED for light linking, read by nothing yet
+    uint2 _padding;
 };
 } // namespace sv

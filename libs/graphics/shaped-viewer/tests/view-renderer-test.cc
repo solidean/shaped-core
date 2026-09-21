@@ -44,12 +44,11 @@ ASYNC_INVOCABLE_TEST("sv - view renderer end to end (headless)", (sg::context_ha
     v.resolution = size;
     v.camera = sv::camera{.position = tg::pos3d(2.4, 1.8, -3.2)}; // default orientation frames the origin
     sv::ensure_scene_3d(v).items.push_back(item);
-    // Lights are a typed list on the view — an overhead rect facing down (cross(+x, +z) is -y).
-    // Exercises the area_light -> area_light_gpu derivation the view_renderer does.
-    sv::ensure_scene_3d(v).area_lights.push_back({.center = tg::pos3f(0, 3, 0),
-                                                  .half_extent_u = tg::vec3f(0.75f, 0, 0),
-                                                  .half_extent_v = tg::vec3f(0, 0, 0.75f),
-                                                  .emission = tg::vec3f(18.0f, 18.0f, 18.0f)});
+    // An overhead rect facing down (cross(+x, +z) is -y).
+    // Exercises the light -> light_gpu derivation the view_renderer does.
+    sv::ensure_scene_3d(v).lights.push_back(
+        {.id = sv::light_id::from_string("key"),
+         .light = sv::light::rect(tg::pos3f(0, 3, 0), tg::vec3f(0.75f, 0, 0), tg::vec3f(0, 0, 0.75f)).nits(18.0f)});
 
     auto store = sv::view_store{}; // what the view keeps across frames
     auto traced = sg::texture_2d();
@@ -121,10 +120,9 @@ ASYNC_INVOCABLE_TEST("sv - view renderer renders indexed geometry (headless)", (
     v.resolution = size;
     v.camera = sv::camera{.position = tg::pos3d(0, 0, -3.4)};
     sv::ensure_scene_3d(v).items.push_back(item);
-    sv::ensure_scene_3d(v).area_lights.push_back({.center = tg::pos3f(0, 3, 0),
-                                                  .half_extent_u = tg::vec3f(0.75f, 0, 0),
-                                                  .half_extent_v = tg::vec3f(0, 0, 0.75f),
-                                                  .emission = tg::vec3f(15.0f, 15.0f, 15.0f)});
+    sv::ensure_scene_3d(v).lights.push_back(
+        {.id = sv::light_id::from_string("key"),
+         .light = sv::light::rect(tg::pos3f(0, 3, 0), tg::vec3f(0.75f, 0, 0), tg::vec3f(0, 0, 0.75f)).nits(15.0f)});
 
     // Driven rather than fired once, for the same reason as the test above: a declined trace starts the compiles it
     // was missing, and those settle on the ambient scheduler.

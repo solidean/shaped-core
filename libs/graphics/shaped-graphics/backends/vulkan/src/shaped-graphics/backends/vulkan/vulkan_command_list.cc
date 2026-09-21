@@ -267,6 +267,14 @@ sg::submission_token vulkan_context::submit_vulkan_command_list(std::unique_ptr<
             u64 const signal_values[2] = {u64(t), 0};
             u32 const signal_count = cmd->_present_signal != VK_NULL_HANDLE ? 2u : 1u;
 
+            // A texture whose one-time transition an upload ran had it run on the transfer queue, so every list touching
+            // it waits on that submit's value — a list that lost the claim to it, and one recorded after it alike.
+            // Read here, under the lock the upload claims and submits under, so no claim is missed; once reached the
+            // wait costs nothing.
+            for (auto const& texture : cmd->_touched_textures)
+                if (auto const value = texture->initial_transition_upload_value(); value != 0)
+                    add_async_wait(texture->_upload_group, value);
+
             // Waits: the async-transfer timelines gathered above, plus — for a presenting list — the acquire
             // semaphore, which must be satisfied before any color is written.
             cc::vector<VkSemaphore> waits = async_waits;

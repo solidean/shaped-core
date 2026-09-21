@@ -6,6 +6,7 @@
 #include <clean-core/container/span.hh>
 #include <clean-core/container/strided_span.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/error/optional.hh>
 #include <clean-core/error/result.hh>
 #include <clean-core/function/function_ref.hh>
 #include <clean-core/streams/stream.hh> // cc::read_stream
@@ -98,6 +99,10 @@ enum class babel::gltf::sampler_index : int
 {
     invalid = -1
 };
+enum class babel::gltf::light_index : int
+{
+    invalid = -1
+};
 
 // value enums
 // -------------------------------------------------------------------------------------------------
@@ -183,6 +188,17 @@ enum class babel::gltf::wrap_mode : babel::u16
     repeat = 10497,
     clamp_to_edge = 33071,
     mirrored_repeat = 33648,
+};
+
+/// A KHR_lights_punctual light's `type`.
+/// `unknown` is a type the extension does not define, or none at all; the light keeps its slot so node indices stay the
+/// file's own, and the reader records it as malformed.
+enum class babel::gltf::light_type : babel::u8
+{
+    unknown,
+    directional,
+    point,
+    spot,
 };
 
 namespace babel::gltf
@@ -361,6 +377,9 @@ struct babel::gltf::node
     tg::quat_f rotation = tg::quat_f::identity;
     tg::vec3f scale = tg::vec3f(1, 1, 1);
 
+    /// KHR_lights_punctual: the light this node places, pointing down the node's -Z.
+    light_index light = light_index::invalid;
+
     cc::string name;
 };
 
@@ -432,6 +451,29 @@ struct babel::gltf::sampler
     filter min_filter = filter::none;
     wrap_mode wrap_s = wrap_mode::repeat;
     wrap_mode wrap_t = wrap_mode::repeat;
+    cc::string name;
+};
+
+/// One KHR_lights_punctual light, as the file wrote it — the extension's defaults filled in, nothing validated.
+///
+/// A light has no transform of its own: the node that names it places it, pointing down that node's -Z.
+/// The extension says the node's scale does not affect the light, so what a node gives it is a position and a direction.
+/// `intensity` is in candela for a point or spot and in lux for a directional light, as the extension specifies.
+struct babel::gltf::light
+{
+    light_type type = light_type::unknown;
+
+    /// linear RGB
+    tg::vec3f color = tg::vec3f(1, 1, 1);
+    f32 intensity = 1;
+
+    /// A hint that the light may be treated as zero beyond this distance; absent means it reaches everywhere.
+    cc::optional<f32> range;
+
+    /// spot only: half-angles from the -Z axis in radians, which the extension requires to satisfy 0 <= inner < outer <= pi / 2
+    f32 inner_cone_angle = 0;
+    f32 outer_cone_angle = 0.78539816f; // pi / 4, the extension's default
+
     cc::string name;
 };
 
@@ -562,8 +604,9 @@ struct babel::gltf::data
     cc::vector<issue> issues;
 
     /// `extensionsUsed` / `extensionsRequired`, recorded verbatim.
-    /// A non-empty extensions_required never reaches a caller: read fails on it, because the spec says a
-    /// client that cannot support a required extension must refuse the file.
+    /// KHR_lights_punctual is the one extension this reader interprets.
+    /// Any other required one never reaches a caller: read fails on it, because the spec says a client that cannot
+    /// support a required extension must refuse the file.
     cc::vector<cc::string> extensions_used;
     cc::vector<cc::string> extensions_required;
 
@@ -587,6 +630,9 @@ struct babel::gltf::data
     cc::vector<texture> textures;
     cc::vector<image> images;
     cc::vector<sampler> samplers;
+
+    /// KHR_lights_punctual's lights, from the document's own `extensions`; a node places one by `node::light`.
+    cc::vector<light> lights;
 
     // import issues
 public:
@@ -613,6 +659,7 @@ public:
     [[nodiscard]] texture const* find(texture_index i) const { return impl_find(textures, i); }
     [[nodiscard]] image const* find(image_index i) const { return impl_find(images, i); }
     [[nodiscard]] sampler const* find(sampler_index i) const { return impl_find(samplers, i); }
+    [[nodiscard]] light const* find(light_index i) const { return impl_find(lights, i); }
 
     // flattened runs
 public:

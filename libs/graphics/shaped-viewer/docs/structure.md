@@ -111,7 +111,8 @@ quadric primitives                       [done]         a second scene_item_kind
                                                         One record is a surface quadric and a clipping quadric about a per-primitive origin, batched one BLAS and one TLAS instance per sv::quadric_set.
                                                         Materials reach it as a second SPELLING of the same generator — a quadric runtime and epilogue, which material_shader_key already distinguishes — over ONE frequency set, of which a batch admits per_instance and per_triangle.
                                                         Still open: a per-end frequency blended along the clip slab's axis, which would give an edge a gradient for no extra bytes. See quadrics.md
-lighting                                 [planned]      a scene layer holds typed light lists + an SH background; more light kinds next
+lighting                                 [in progress]  one sv::light record tagged by the integrator's path, placed by a similarity transform, with explicit units and a stable light_id (docs/lights.md).
+                                                        Every path is traced — points and spots, rects, parallel light, suns — and a layer with no lights falls back to a sun it can turn off
 scene_2d layer                           [planned]      typed and validated, draws nothing: shaped-core has no 2D renderer at all, so this needs one built first
 ui layer                                 [planned]      Dear ImGui into a view's own target, through sr::imgui_context / sr::imgui_routine
 multi-window                             [planned]      the plan and the layout routine are window-aware already; sv::viewer still owns exactly one window
