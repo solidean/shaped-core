@@ -122,6 +122,15 @@ def load_nexus_kinds(build_dir: Path) -> dict[str, tuple[str, ...]] | None:
     return {name: tuple(kinds) for name, kinds in data.get("binaries", {}).items()}
 
 
+def load_nexus_timeouts(build_dir: Path) -> dict[str, float]:
+    """The timeouts nexus binaries declared, from the same manifest; empty when there is none."""
+    try:
+        data = json.loads((build_dir / "nexus-binaries.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return {name: float(secs) for name, secs in data.get("timeouts", {}).items()}
+
+
 def carries_tests(target: Target) -> bool:
     """A nexus binary with tests in it; by the `*-test` name only when the build predates the manifest."""
     if target.kind != "EXECUTABLE":
@@ -154,12 +163,14 @@ def discover_targets(build_dir: Path, build_type: str) -> list[Target]:
     """Enumerate all CMake targets for the given build, with artifact paths and what each nexus binary carries."""
     with profile.span(build_dir.name, type="discover"):
         kinds = load_nexus_kinds(build_dir)
+        timeouts = load_nexus_timeouts(build_dir)
         targets = [
             Target(
                 name=name,
                 kind=data.get("type", "UNKNOWN"),
                 artifact=_primary_artifact(data, build_dir),
                 nexus_kinds=None if kinds is None else kinds.get(name, ()),
+                timeout_secs=timeouts.get(name),
             )
             for name, data in load_target_models(build_dir, build_type).items()
         ]

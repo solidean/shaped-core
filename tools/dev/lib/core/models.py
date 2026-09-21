@@ -81,6 +81,8 @@ class Target:
     # What a nexus binary carries — "tests", "examples", "tool" — from the build's nexus-binaries.json.
     # None when the build has no manifest, which is a build configured before it existed; empty for a non-nexus target.
     nexus_kinds: tuple[str, ...] | None = None
+    # How long a test run of it may take, from sc_nexus_binary's TIMEOUT; None for dev.py's default.
+    timeout_secs: float | None = None
 
 
 @dataclass(frozen=True)

@@ -35,6 +35,8 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     p.add_argument("--timeout", type=float, default=None, metavar="SECS",
                    help=f"Per-binary timeout in seconds (default: {DEFAULT_TIMEOUT_S:g}, or "
                         f"{DEFAULT_TIMEOUT_S * THOROUGH_TIMEOUT_FACTOR:g} under --thorough; 0 disables). "
+                        "A binary that declares a longer one (sc_nexus_binary TIMEOUT) gets that instead, unless "
+                        "this is given, which holds for every binary. "
                         "The binary is killed and reported as failed if it exceeds it.")
     p.add_argument("--jobs", "-j", type=int, metavar="N",
                    help="Upper bound on how many tests run at once, forwarded to the runner (nexus understands it); "
@@ -109,10 +111,11 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
         runner_args = ["--seed", str(args.seed), *runner_args]
 
     # The runner's own default is 60 s, which the default timeout would kill it before reaching.
-    watchdog = args.watchdog
-    if watchdog is None:
-        watchdog = timeout / 2 if timeout > 0 else 0
-    runner_args = ["--watchdog", f"{watchdog:g}", *runner_args]
+    # Without --watchdog each binary gets half of ITS timeout, since a binary may declare a longer one than the default.
+    if args.watchdog is not None:
+        runner_args = ["--watchdog", f"{args.watchdog:g}", *runner_args]
+    elif timeout <= 0:
+        runner_args = ["--watchdog", "0", *runner_args]
 
     # One string, deliberately: the runner tokenizes it, so the test's own flags never have to survive
     # dev.py's argument handling — which strips a leading `--` and would otherwise eat the separator.
@@ -183,6 +186,8 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
             test_name=test_name,
             extra_args=runner_args,
             timeout=timeout if timeout else None,
+            timeout_is_explicit=args.timeout is not None,
+            watchdog_fraction=0.5 if args.watchdog is None and timeout > 0 else None,
             write_xml=not args.no_xml_reports,
             mirror=args.mirror_output,
             verbose=args.verbose,

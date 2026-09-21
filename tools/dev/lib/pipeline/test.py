@@ -19,7 +19,7 @@ from pathlib import Path
 
 from ..core import console, profile, ui
 from ..core.logs import parse_junit, step_fields, write_sidecar, write_step_junit
-from ..core.models import Preset
+from ..core.models import Preset, Target
 from ..core.process import emsdk_env, run_step
 from ..toolchain import jsruntime as jsr
 from ..project import targets as targets_mod
@@ -130,6 +130,13 @@ def _test_extra(xml_path: Path) -> str:
     return f" ({summary.tests} tests, {summary.assertions} checks)"
 
 
+def _binary_timeout(target: Target, timeout: float | None, explicit: bool) -> float | None:
+    """The timeout one binary runs under: the default, raised to what the binary declared unless the caller was explicit."""
+    if explicit or not timeout or target.timeout_secs is None:
+        return timeout
+    return max(timeout, target.timeout_secs)
+
+
 def test(
     presets: list[Preset],
     binary_names: list[str],
@@ -140,6 +147,8 @@ def test(
     env: dict[str, str] | None = None,
     extra_env_for: Callable[[str], dict[str, str]] | None = None,
     timeout: float | None = None,
+    timeout_is_explicit: bool = False,
+    watchdog_fraction: float | None = None,
     write_xml: bool = True,
     mirror: bool = False,
     verbose: bool = False,
@@ -153,6 +162,11 @@ def test(
     With `test_name` set, a binary that reports no matching tests is skipped rather than counted as a failure.
     Each binary gets a JUnit XML next to it unless `write_xml` is False, plus one test.json sidecar per preset.
     Returns one record per executed binary.
+
+    `timeout` is the default a binary's declared timeout (sc_nexus_binary TIMEOUT) raises, unless `timeout_is_explicit`,
+    in which case it holds for every binary; None or 0 runs without one.
+    `watchdog_fraction` passes each binary a `--watchdog` of that fraction of its own timeout, so the hang report still
+    lands before the kill however long a binary was given.
 
     `extra_env_for(name)` injects per-binary environment variables, merged on top of the inherited process env and `env` rather than replacing them.
     The coverage runner uses it to point each binary's LLVM_PROFILE_FILE at a distinct file; None leaves the child env untouched.
@@ -225,6 +239,10 @@ def test(
                 if profile.enabled():
                     timings_path.unlink(missing_ok=True)
                     cmd += ["--timings-json", str(timings_path)]
+                binary_timeout = _binary_timeout(target, timeout, timeout_is_explicit)
+                # Before extra_args, so a --watchdog the caller passed through to the runner still wins.
+                if watchdog_fraction is not None and binary_timeout:
+                    cmd += ["--watchdog", f"{binary_timeout * watchdog_fraction:g}"]
                 cmd += extra_args
 
                 # Per-binary and per-preset env layer onto the inherited environment, so PATH and the MSVC vars the child needs are never dropped.
@@ -240,7 +258,7 @@ def test(
                     build_dir=preset.build_dir,
                     cwd=root,
                     env=run_env,
-                    timeout=timeout,
+                    timeout=binary_timeout or None,
                     mirror=mirror,
                     verbose=verbose,
                     summary_extra=(lambda r, xp=xml_path: _test_extra(xp)) if write_xml else None,
