@@ -776,6 +776,19 @@ def test_every_block_type_renders(root: Path) -> None:
         assert needle in html, f"{needle!r} missing from the rendered entry"
 
 
+def test_changes_path_takes_several_prefixes_globs_and_excludes(root: Path) -> None:
+    """An entry that spans folders asks for its ids in one query, the way `repo_search` selects paths."""
+    from tools.review.cmd.changes import path_filter
+
+    keeps = path_filter("lib/legalize/, lib/check/flat*, !lib/legalize/old.cc")
+    assert keeps("lib/legalize/core.cc")
+    assert keeps("lib/check/flat.hh") and keeps("lib/check/flatten.cc")
+    assert not keeps("lib/check/check.cc")
+    assert not keeps("lib/legalize/old.cc"), "an exclude wins"
+    assert path_filter("")("anything"), "no selector keeps everything"
+    assert path_filter("!docs/")("lib/a.cc") and not path_filter("!docs/")("docs/a.md")
+
+
 def test_a_round_that_asks_is_owed_an_intro(root: Path) -> None:
     """A round opening on facts makes its reader reconstruct the question before weighing anything.
 
