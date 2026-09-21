@@ -140,6 +140,9 @@ struct plan
 /// Appends what keeps `e` from being written, which is the same for every target.
 void validate(check::checked_module const& m, check::flat_entry_point const& e, cc::vector<error>& errors);
 
+/// The buffer a vertex input member is read from (EMIT-92): its `@stream`, else `per_instance` or `per_vertex`.
+[[nodiscard]] cc::string stream_of(check::member_info const& member);
+
 /// Appends what keeps a struct from standing at one edge of the pipeline in `role`, whichever entry point uses it.
 void validate_edge_struct(check::checked_module const& m, check::type_id type, struct_role role, cc::vector<error>& errors);
 

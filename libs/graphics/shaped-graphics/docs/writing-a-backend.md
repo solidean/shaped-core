@@ -314,9 +314,10 @@ Recorded as each is met, because this is what the next backend most wants to kno
 One consequence is easy to miss until you go looking for a dispatch test: **an execution test needs shader bytecode,
 and bytecode is per-backend by construction**.
 
-Tier 1 has one compute dispatch that escapes this, in [tests/compute/](../tests/compute/), because SGL is one source
-for every backend and reaches a WebGPU context with no external compiler at all.
-Raster and ray tracing have no tier-1 execution test yet, and neither does any shape SGL does not cover.
+Tier 1 has compute dispatches and an instanced raster draw that escape this, in [tests/compute/](../tests/compute/) and
+[tests/raster/](../tests/raster/), because SGL is one source for every backend and reaches a WebGPU context with no
+external compiler at all.
+Ray tracing has no tier-1 execution test yet, and neither does any shape SGL does not cover.
 
 So for those the reference backend's tier-2 suite is the specification, and yours is written beside it:
 

@@ -59,6 +59,9 @@ struct sgl::described_struct_member
     cc::string type;
     /// Vertex attribute i of a `@vertex struct`, render target i of a `@pixel struct`.
     i32 location = -1;
+    /// The buffer a vertex input member is read from, and whether it steps per instance; empty on a `@pixel struct`.
+    cc::string stream;
+    bool is_per_instance = false;
 };
 
 /// A `@vertex struct` or a `@pixel struct`.

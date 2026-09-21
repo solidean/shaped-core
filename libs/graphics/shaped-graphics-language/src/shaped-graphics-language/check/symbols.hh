@@ -70,6 +70,10 @@ struct sgl::check::member_info
     bool is_position = false;
     /// Carries `@thread_id`: which thread of the dispatch is running, as an `int3`.
     bool is_thread_id = false;
+    /// Carries `@per_instance`: in a vertex input, the member steps once per instance.
+    bool is_per_instance = false;
+    /// The name `@stream(name)` gives; empty without one.
+    cc::string stream;
 
     bool operator==(member_info const&) const = default;
 };

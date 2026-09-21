@@ -59,6 +59,24 @@ cc::fixed_array<sgl::i32, 3> checker::workgroup_of(i32 file, ast::attribute cons
     return result;
 }
 
+/// `@stream(normals)`: one bare name, which is the buffer a vertex input member is read from.
+cc::string checker::stream_of(i32 file, ast::attribute const* a)
+{
+    if (a == nullptr)
+        return {};
+    auto const arguments = ast_of(file).at(a->arguments);
+    auto const* const name = arguments.size() == 1 && arguments[0].name.empty() && !arguments[0].is_splat
+                                  && ast::is_valid(arguments[0].value)
+                               ? ast_of(file).at(arguments[0].value).node.try_as<ast::name>()
+                               : nullptr;
+    if (name == nullptr)
+    {
+        report(diagnostic_kind::invalid_attribute_arguments, file, a->name, "@stream takes one name: `@stream(normals)`");
+        return {};
+    }
+    return cc::string(text_of(file, name->where));
+}
+
 // ---- types ----------------------------------------------------------------------------------------------------------
 
 bool checker::is_named(i32 file, ast::expr_id expr, cc::string_view name) const
@@ -218,7 +236,7 @@ ast::range_of<member_info> checker::compile_members(i32 file, ast::range_of<ast:
             continue;
         auto const name = text_of(file, f.name);
 
-        cc::string_view const known_on_field[] = {"position", "thread_id"};
+        cc::string_view const known_on_field[] = {"position", "thread_id", "per_instance", "stream"};
         judge_attributes(file, f.attributes,
                          is_struct ? cc::span<cc::string_view const>(known_on_field) : cc::span<cc::string_view const>(),
                          owner);
@@ -249,6 +267,8 @@ ast::range_of<member_info> checker::compile_members(i32 file, ast::range_of<ast:
             .field = line->field,
             .is_position = find_attribute(file, f.attributes, "position") != nullptr,
             .is_thread_id = find_attribute(file, f.attributes, "thread_id") != nullptr,
+            .is_per_instance = find_attribute(file, f.attributes, "per_instance") != nullptr,
+            .stream = stream_of(file, find_attribute(file, f.attributes, "stream")),
         });
     }
 

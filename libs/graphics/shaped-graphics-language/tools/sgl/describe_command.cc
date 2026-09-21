@@ -74,6 +74,11 @@ void write_struct(babel::json::object_writer& o, sgl::described_struct const& s)
         mo.write("name", cc::string_view(m.name));
         mo.write("type", cc::string_view(m.type));
         mo.write("location", m.location);
+        if (!m.stream.empty())
+        {
+            mo.write("stream", cc::string_view(m.stream));
+            mo.write("per_instance", m.is_per_instance);
+        }
     }
 }
 

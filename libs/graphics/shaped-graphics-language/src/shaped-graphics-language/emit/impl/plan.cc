@@ -374,6 +374,13 @@ bool sgl::emit::impl::is_builtin_type(check::checked_module const& m, check::typ
     return m.builtin_type_of(type) != nullptr;
 }
 
+cc::string sgl::emit::impl::stream_of(check::member_info const& member)
+{
+    if (!member.stream.empty())
+        return member.stream;
+    return cc::string(member.is_per_instance ? "per_instance" : "per_vertex");
+}
+
 void sgl::emit::impl::validate_edge_struct(check::checked_module const& m,
                                            check::type_id type,
                                            struct_role role,
@@ -387,6 +394,20 @@ void sgl::emit::impl::validate_edge_struct(check::checked_module const& m,
     auto positions = 0;
     for (auto const& member : m.at(info.members))
     {
+        if ((member.is_per_instance || !member.stream.empty()) && role != struct_role::vertex_input)
+            report(error_kind::unsupported, info.symbol,
+                   cc::format("@per_instance or @stream in a {}: '{}.{}'", role_name(role), name, member.name));
+        if (role == struct_role::vertex_input)
+            for (auto const& other : m.at(info.members))
+                if (&other < &member && stream_of(other) == stream_of(member)
+                    && other.is_per_instance != member.is_per_instance)
+                {
+                    report(error_kind::unsupported, info.symbol,
+                           cc::format("stream '{}' of '{}' mixes per-vertex and per-instance members",
+                                      stream_of(member), name));
+                    break;
+                }
+
         auto const* const record = m.builtin_type_of(member.type);
         if (record == nullptr || !record->crosses_edges)
             report(error_kind::unsupported, info.symbol,

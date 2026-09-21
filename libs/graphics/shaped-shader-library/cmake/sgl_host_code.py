@@ -45,28 +45,33 @@ def check_names(package: str, entries: SglEntries, taken: dict[str, str]) -> Non
 
     `taken` maps a C++ name already emitted to what emitted it, the per-file asset structs among them.
     """
-    for file, binding in entries.bindings:
-        name = binding["name"]
+    declared = [(file, b["name"], f"`binding {b['name']}`") for file, b in entries.bindings]
+    declared += [(file, v["name"], f"`@vertex struct {v['name']}`") for file, v in entries.vertex_inputs]
+    for file, name, what in declared:
         if name in taken:
             raise HostCodeError(
-                f"shader package '{package}': '{file.path}' declares `binding {name}`, and the generated C++ name "
+                f"shader package '{package}': '{file.path}' declares {what}, and the generated C++ name "
                 f"'{name}' is already {taken[name]}")
-        taken[name] = f"`binding {name}` of '{file.path}'"
+        taken[name] = f"{what} of '{file.path}'"
 
 
 def includes(entries: SglEntries) -> list[str]:
     """The headers the generated SGL types need, beyond what every package header includes."""
-    if not entries.bindings:
+    if not entries.bindings and not entries.vertex_inputs:
         return []
     out = ["<clean-core/container/span.hh>", "<clean-core/container/vector.hh>",
            "<shaped-graphics/binding/binding.hh>", "<shaped-graphics/binding/binding_group.hh>"]
+    if entries.vertex_inputs:
+        out += ["<shaped-graphics/raster/vertex_input.hh>", "<shaped-graphics/resource/buffer.hh>",
+                "<shaped-graphics/resource/vertex_buffer_view.hh>", "<clean-core/container/fixed_array.hh>"]
     if any(not b["inline"] for _, b in entries.bindings):
         out.append("<shaped-graphics/resource/views.hh>")
     if any(b["inline"] for _, b in entries.bindings):
         out += ["<clean-core/container/fixed_array.hh>", "<clean-core/fwd.hh>"]
 
-    # Every type a field names: a constant's own, and a buffer's element.
+    # Every type a field names: a constant's own, a buffer's element, and a vertex attribute's.
     types = {m["type"] for _, b in entries.bindings for m in b["members"]}
+    types |= {m["type"] for _, v in entries.vertex_inputs for m in v["members"]}
     if "int" in types:
         out.append("<clean-core/fwd.hh>")
     if types & {"float3", "vec3", "float4", "int3"}:
@@ -256,6 +261,8 @@ def emit_header(package: str, namespace: str, entries: SglEntries) -> str:
             out.append(emit_inline(package, namespace, file, binding))
         else:
             out.append(emit_group(package, namespace, file, binding))
+    for file, struct in entries.vertex_inputs:
+        out.append(emit_vertex_input(package, namespace, file, struct))
     return "".join(out)
 
 
@@ -266,6 +273,8 @@ def emit_source(package: str, namespace: str, entries: SglEntries) -> str:
             out.append(emit_inline_impl(package, namespace, file, binding))
         else:
             out.append(emit_group_impl(package, namespace, file, binding))
+    for file, struct in entries.vertex_inputs:
+        out.append(emit_vertex_input_impl(package, namespace, file, struct))
     return "".join(out)
 
 
@@ -313,5 +322,107 @@ def emit_entry_wrappers(entries: SglEntries, stems: dict[str, str]) -> str:
             out.append("    [[nodiscard]] sg::async_compute_pipeline acquire_pipeline(sg::context& ctx) const\n    {\n")
             out.append("        return slib::acquire_compute_pipeline(&ctx, asset, acquire_layout(ctx));\n    }\n")
         out.append("};\n\n")
+    return "".join(out)
+
+
+# ---- a vertex input ----------------------------------------------------------------------------------------------------
+
+
+def streams_of(struct: dict) -> list[tuple[str, bool, list[dict]]]:
+    """(stream, steps per instance, its members), in the order the streams first appear, which is their slot order."""
+    out: dict[str, tuple[bool, list[dict]]] = {}
+    for member in struct["members"]:
+        entry = out.setdefault(member["stream"], (member["per_instance"], []))
+        entry[1].append(member)
+    return [(name, per_instance, members) for name, (per_instance, members) in out.items()]
+
+
+def vertex_format(package: str, file: SglFile, struct: str, member: dict) -> str:
+    host_type(package, f"'{file.path}' `@vertex struct {struct}` member '{member['name']}'", member["type"])
+    fmt = HOST_TYPES[member["type"]][2]
+    if fmt is None:
+        raise HostCodeError(f"shader package '{package}': '{file.path}' `@vertex struct {struct}` member '{member['name']}' "
+                            f"has type '{member['type']}', which no vertex format reads")
+    return fmt
+
+
+def emit_vertex_input(package: str, namespace: str, file: SglFile, struct: dict) -> str:
+    """A `@vertex struct`: what a vertex buffer holds, and the layout a pipeline reads it with.
+
+    One stream is the struct itself.
+    Several are one nested struct each, in slot order, with `buffers` holding one typed buffer per stream, so a draw names
+    which buffer feeds which members and no slot index or byte offset is written by hand.
+    """
+    name = struct["name"]
+    streams = streams_of(struct)
+
+    def fields(members: list[dict], indent: str) -> str:
+        out = []
+        for m in members:
+            cpp = host_type(package, f"'{file.path}' `@vertex struct {name}` member '{m['name']}'", m["type"])
+            out.append(f"{indent}{cpp} {m['name']}; ///< location {m['location']}, `{m['name'].upper()}` on dx12\n")
+        return "".join(out)
+
+    out = [f"\nnamespace {namespace}\n{{\n"]
+    if len(streams) == 1:
+        out.append(f"/// `@vertex struct {name}` of {file.path}, as a vertex buffer holds it. Generated; do not edit.\n")
+        out.append(f"struct {name}\n{{\n")
+        out.append(fields(streams[0][2], "    "))
+        out.append("\n")
+        out.append("    /// The layout a pipeline reads this with: every member at its offset, in the shader's order.\n")
+        out.append("    [[nodiscard]] static sg::vertex_input_layout layout();\n")
+        out.append("};\n")
+    else:
+        names = ", ".join(f"`{stream}`" for stream, _, _ in streams)
+        out.append(f"/// `@vertex struct {name}` of {file.path}, read from {len(streams)} buffers: {names}. Generated; do not edit.\n")
+        out.append(f"struct {name}\n{{\n")
+        for slot, (stream, per_instance, members) in enumerate(streams):
+            out.append(f"    /// Slot {slot}, one element per {'instance' if per_instance else 'vertex'}.\n")
+            out.append(f"    struct {stream}\n    {{\n")
+            out.append(fields(members, "        "))
+            out.append("    };\n\n")
+        out.append("    /// One buffer per stream, in slot order; only a buffer of that stream's element fits its field.\n")
+        out.append("    struct buffers\n    {\n")
+        for stream, _, _ in streams:
+            out.append(f"        sg::buffer<{namespace}::{name}::{stream}> {stream};\n")
+        out.append("\n")
+        out.append("        /// What `bind_vertex_buffers` takes, in slot order.\n")
+        out.append(f"        [[nodiscard]] cc::fixed_array<sg::vertex_buffer_view, {len(streams)}> views() const;\n")
+        out.append("    };\n\n")
+        out.append("    /// The layout a pipeline reads these with: one slot per stream, and the attributes in the shader's order,\n")
+        out.append("    /// since vulkan and WGSL take attribute i as location i whatever buffer it comes from.\n")
+        out.append("    [[nodiscard]] static sg::vertex_input_layout layout();\n")
+        out.append("};\n")
+    out.append(f"}} // namespace {namespace}\n")
+    return "".join(out)
+
+
+def emit_vertex_input_impl(package: str, namespace: str, file: SglFile, struct: dict) -> str:
+    name = struct["name"]
+    qualified = f"{namespace}::{name}"
+    streams = streams_of(struct)
+    single = len(streams) == 1
+    slot_of = {stream: slot for slot, (stream, _, _) in enumerate(streams)}
+
+    def owner(stream: str) -> str:
+        return qualified if single else f"{qualified}::{stream}"
+
+    out = [f"\nsg::vertex_input_layout {qualified}::layout()\n{{\n"]
+    out.append("    return {.slots = {")
+    out.append(", ".join(f"{{.stride = cc::isize(sizeof({owner(stream)})){', .per_instance = true' if per_instance else ''}}}"
+                         for stream, per_instance, _ in streams))
+    out.append("},\n")
+    out.append("            .attributes = {\n")
+    for member in struct["members"]:
+        fmt = vertex_format(package, file, name, member)
+        out.append(f'                {{.semantic = "{member["name"].upper()}", '
+                   f".format = sg::vertex_attribute_format::{fmt}, "
+                   f".offset = cc::isize(offsetof({owner(member['stream'])}, {member['name']})), "
+                   f".slot = {slot_of[member['stream']]}}},\n")
+    out.append("            }};\n}\n")
+
+    if not single:
+        out.append(f"\ncc::fixed_array<sg::vertex_buffer_view, {len(streams)}> {qualified}::buffers::views() const\n{{\n")
+        out.append("    return {" + ", ".join(f"{stream}.as_vertex_buffer()" for stream, _, _ in streams) + "};\n}\n")
     return "".join(out)
 

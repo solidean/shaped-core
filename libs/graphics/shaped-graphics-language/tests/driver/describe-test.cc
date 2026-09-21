@@ -153,3 +153,62 @@ TEST("sgl describe - a group's plain members are its constant buffer, at slot 0 
     // The buffers follow the block.
     CHECK(affine.members[2].slot == 1);
 }
+
+TEST("sgl describe - a vertex input's members say which buffer they come from, and how it steps")
+{
+    auto const d = described(read_text(cc::string(SGL_SAMPLES_DIR) + "/cube.sgl"));
+    // Unmarked: one buffer, stepped per vertex.
+    CHECK(d.structs[0].members[0].stream == "per_vertex");
+    CHECK(!d.structs[0].members[0].is_per_instance);
+    // A render target struct has no streams.
+    CHECK(d.structs[1].members[0].stream.empty());
+
+    auto const edges = cc::string(R"(struct pixel_input:
+    @position position: hpos4
+
+@pixel struct target:
+    color: float4
+
+@pixel fun main_ps(p: pixel_input) -> target:
+    return {color = float4(1.0, 1.0, 1.0, 1.0)}
+)");
+    auto const split = described(cc::string(R"(@vertex struct mesh:
+    position: pos3
+    @per_instance offset: vec3
+    @stream(normals) normal: vec3
+
+)") + edges);
+    REQUIRE(split.structs.size() == 2);
+    auto const& mesh = split.structs[0];
+    CHECK(mesh.members[0].stream == "per_vertex");
+    CHECK(mesh.members[1].stream == "per_instance");
+    CHECK(mesh.members[1].is_per_instance);
+    CHECK(mesh.members[2].stream == "normals");
+    CHECK(mesh.members[2].location == 2); // a stream moves no location
+
+    // Where a stream means nothing, it is refused rather than ignored.
+    CHECK(error_of(R"(@vertex struct v:
+    position: pos3
+
+struct pixel_input:
+    @position position: hpos4
+
+@pixel struct target:
+    @per_instance color: float4
+
+@pixel fun main_ps(p: pixel_input) -> target:
+    return {color = float4(1.0, 1.0, 1.0, 1.0)}
+)")
+              .contains("@per_instance or @stream in a render target struct"));
+    CHECK(error_of(cc::string(R"(@vertex struct mixed:
+    @stream(a) x: vec3
+    @per_instance @stream(a) y: vec3
+
+)") + edges)
+              .contains("mixes per-vertex and per-instance members"));
+    CHECK(error_of(cc::string(R"(@vertex struct bad:
+    @stream(1) x: vec3
+
+)") + edges)
+              .contains("@stream takes one name"));
+}

@@ -206,6 +206,7 @@ let color = float4(..lit, 1.0)
 * **CHK-90** A `@vertex fun` returns a struct with exactly one field that carries `@position`, and that field is of the type `hpos4`.
 * **CHK-91** A `@pixel fun` returns a `@pixel struct`.
 * **CHK-92** An entry point is neither `@builtin` nor `@operator`.
+* **CHK-173** `@per_instance` and `@stream(name)` are attributes of a struct field, recorded on the member; `@stream` takes one bare name.
 * **CHK-93** Breaking one of CHK-88 to CHK-92 is `invalid-entry-point`, and its detail names the rule.
 
 ## The flat tree

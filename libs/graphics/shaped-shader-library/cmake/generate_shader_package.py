@@ -784,6 +784,8 @@ def emit_source(manifest: Manifest, files: list[ShaderFile], bindings: list[Bind
         out.append("#include <clean-core/common/utility.hh> // cc::memcpy\n")
     if any(b["inline"] for _, b in sgl.bindings):
         out.append("#include <shaped-shader-library/binding/binding_groups.hh> // slib::inline_constants_space\n")
+    if sgl.vertex_inputs:
+        out.append("#include <cstddef> // offsetof\n")
     out.append("\n")
 
     for file in files:

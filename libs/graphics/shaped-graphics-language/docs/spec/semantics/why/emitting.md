@@ -129,3 +129,9 @@ In a descriptor set, slib compiles vulkan's HLSL with `-fvk-use-dx-layout`, so a
 The push-constant block is the one that flag does not reach, which is why an `@inline` block states its offsets and a group's constant buffer does not.
 slib's pass refuses an offset written by hand in a group, since it states every layout itself.
 
+## EMIT-94
+
+Vulkan and WGSL read a vertex attribute by its location, and sg's vulkan backend gives attribute i location i, so the order of the attributes is the one contract every target shares.
+Splitting a vertex input over several buffers is a host question — which buffer holds which member, and how it steps — and the shader reads one struct either way.
+So the text ignores streams entirely, and the host layout lists its attributes in member order whatever buffer each comes from.
+

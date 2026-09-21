@@ -300,6 +300,10 @@ pass.set_inline_constants(shaders::constants{.view_projection = vp}.to_block());
 auto const layout = shaders::cube.vertex.main_vs.acquire_layout(ctx);                  // {constants}, nothing reflected
 auto const pipeline = co_await shaders::double_values.compute.main.acquire_pipeline(ctx); // compute: needs nothing else
 // a raster pipeline whose stages list different groups takes their union instead: acquire_pipeline_layout<frame, work>().
+// `@vertex struct v` -> shaders::v and v::layout(): attributes in the shader's order, no semantic or offset by hand.
+//   members marked `@per_instance` / `@stream(name)` split it over buffers: then v::<stream> per buffer, in slot order,
+//   and v::buffers{.per_vertex = verts, .per_instance = insts}.views() for bind_vertex_buffers — typed, so a
+//   buffer of the wrong stream does not compile.
 ```
 
 ## include resolution

@@ -4,7 +4,7 @@
 // Here the package is SGL, and slib's SGL compiler edge writes it as the text the backend's own compiler reads.
 // So nothing on the shader side forks: every `#if` left is about the host, which context to create and whether DXC exists.
 //
-// SGL generates no host mirror yet, so the vertex layout is written out by hand, as the WGSL arm over there does.
+// The host side is generated from cube.sgl too: the vertex struct, its layout and the inline constants are `shaders::`.
 //
 // Under `--capture` there is no window and no swapchain: the frame goes into a texture and is written out, which is
 // how the committed image is produced and how the example is verified on a machine with no display at all.
@@ -46,31 +46,7 @@ using namespace cc::primitive_defines;
 
 namespace
 {
-/// One corner of the cube, laid out as `cube_vertex` in cube.sgl states it: three vec3f in that order.
-struct cube_vertex
-{
-    tg::pos3f position;
-    tg::vec3f normal;
-    tg::vec3f color;
-};
-
-/// The layout the vertex buffer is read with, written by hand until SGL generates the mirror.
-///
-/// The ORDER is the contract: member i of cube.sgl's `@vertex struct` is location i in vulkan and in WGSL.
-/// dx12 matches by semantic instead, and an SGL vertex input's semantic is its member's name in upper case.
-[[nodiscard]] sg::vertex_input_layout cube_vertex_layout()
-{
-    return {.slots = {{.stride = sizeof(cube_vertex)}},
-            .attributes = {{.semantic = "POSITION",
-                            .format = sg::vertex_attribute_format::vec3f,
-                            .offset = offsetof(cube_vertex, position)},
-                           {.semantic = "NORMAL",
-                            .format = sg::vertex_attribute_format::vec3f,
-                            .offset = offsetof(cube_vertex, normal)},
-                           {.semantic = "COLOR",
-                            .format = sg::vertex_attribute_format::vec3f,
-                            .offset = offsetof(cube_vertex, color)}}};
-}
+using cube_vertex = shaders::cube_vertex; // generated from cube.sgl's `@vertex struct`
 
 constexpr int cube_vertex_count = 24; // four per face: a shared corner carries three different normals
 constexpr int cube_index_count = 36;
@@ -248,7 +224,7 @@ struct orbit_camera
         {.layout = layout,
          .vertex_shader = compiled_vs,
          .fragment_shader = compiled_ps,
-         .vertex_input = cube_vertex_layout(),
+         .vertex_input = cube_vertex::layout(),
          .rasterization = {.cull = sg::cull_mode::back},
          // Both default to OFF, and solid geometry needs both — a cube drawn without them shows whichever face
          // happened to be recorded last.

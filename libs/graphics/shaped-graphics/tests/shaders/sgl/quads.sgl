@@ -1,0 +1,25 @@
+// Instanced quads: the corners of one quad per vertex, and a place and a color per instance.
+// Two streams, so the host binds two buffers, and the shader still reads one struct.
+
+@vertex struct quad:
+    corner: float3
+    @per_instance offset: float3
+    @per_instance tint: float4
+
+struct pixel_input:
+    @position position: hpos4
+    color: float4
+
+@pixel struct target:
+    color: float4
+
+@vertex fun main_vs(v: quad) -> pixel_input:
+    return {
+        position = hpos4(v.corner.x + v.offset.x, v.corner.y + v.offset.y, 0.0, 1.0)
+        color = v.tint
+    }
+
+@pixel fun main_ps(p: pixel_input) -> target:
+    return {
+        color = p.color
+    }

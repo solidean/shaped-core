@@ -353,6 +353,7 @@ if(SC_BUILD_TESTS)
             tests/shaders/shader_fixtures.cc
             tests/shaders/sgl-package-test.cc
             tests/compute/compute-test.cc
+            tests/raster/raster-test.cc
         )
         sc_add_shader_package(
             TARGET     shaped-graphics-test
@@ -362,6 +363,7 @@ if(SC_BUILD_TESTS)
             LANGUAGE   sgl
             SHADERS
                 double_values.sgl:*
+                quads.sgl:*
         )
     endif()
 

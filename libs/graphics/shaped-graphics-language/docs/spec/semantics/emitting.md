@@ -96,6 +96,10 @@ const light_kind_sun: i32 = 2;
 * **EMIT-32** A vertex input member whose semantic would start with `SV_` is `system-value-semantic`.
 * **EMIT-33** A member of an edge struct is of a builtin type whose record says it crosses an edge, which `mat4`, `int` and `bool` do not, or it is `unsupported`.
 * **EMIT-34** `@position` anywhere but in a stage link, a second `@position`, and one struct as both edges are `unsupported`.
+* **EMIT-91** `@per_instance` and `@stream` on a member of anything but a vertex input are `unsupported`.
+* **EMIT-92** A vertex input member's **stream** is the name `@stream` gives it, else `per_instance` where it carries `@per_instance`, else `per_vertex`.
+* **EMIT-93** The members of one stream agree on `@per_instance`, or the struct is `unsupported`.
+* **EMIT-94** A stream changes nothing in the text: it is which buffer the host reads a member from, and a location stays the member's position ([why](why/emitting.md#emit-94)).
 
 | stage | parameter | result |
 |---|---|---|

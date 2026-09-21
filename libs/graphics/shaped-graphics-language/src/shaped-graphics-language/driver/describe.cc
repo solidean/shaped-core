@@ -72,7 +72,9 @@ described_struct describe_struct(check::checked_module const& m, check::type_inf
     for (auto const& member : m.at(t.members))
         result.members.push_back({.name = member.name,
                                   .type = cc::string(m.name_of(member.type)),
-                                  .location = member.is_position ? -1 : location++});
+                                  .location = member.is_position ? -1 : location++,
+                                  .stream = t.edge == check::stage::vertex ? emit_impl::stream_of(member) : cc::string(),
+                                  .is_per_instance = member.is_per_instance});
     return result;
 }
 
