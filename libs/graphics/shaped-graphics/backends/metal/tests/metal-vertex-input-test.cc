@@ -224,7 +224,6 @@ ASYNC_TEST("sg metal - an indexed draw reads its vertices, its indices and its b
     REQUIRE(bytes.value().size() == k_size * k_size * 4);
 
     // The quad covers the whole target with the vertex colour, untinted.
-    // The quad covers the whole target with the vertex colour, untinted.
     auto const wrong = texels_not(bytes.value(), 64, 128, 191);
     CHECK(wrong == 0)
         .context(cc::format("{} of {} texels wrong; first is {} {} {}", wrong, k_size * k_size,
@@ -380,4 +379,144 @@ ASYNC_TEST("sg metal - a draw reads the vertex buffer a dispatch in the same lis
     CHECK(wrong == 0)
         .context(cc::format("{} of {} texels wrong; first is {} {} {}", wrong, k_size * k_size,
                             int(u8(bytes.value()[0])), int(u8(bytes.value()[1])), int(u8(bytes.value()[2]))));
+}
+
+TEST("sg metal - a draw refuses a bound array binding")
+{
+    auto const ctx = mtl::test::make_context();
+    if (ctx == nullptr)
+        SKIP("no metal 4 device on this host");
+
+    // **The raster scope has no declare_array_*_access**, so a bound array binding cannot be accounted for and the
+    // draw refuses it — the contract libs/graphics/shaped-graphics/docs/concepts/bindings.md states, which dx12
+    // and vulkan assert in the same words.
+    // Routing a draw through the compute path's accounting instead would demand a declare nothing can give.
+    // libs/graphics/shaped-graphics/docs/TODO.md carries the feature that would lift this.
+    auto bindings = cc::vector<sg::binding>();
+    bindings.push_back(
+        {.name = "inputs", .space = 0, .index = 0, .count = 4, .type = sg::binding_type::readonly_structured_buffer});
+
+    auto group_layout = ctx->create_metal_binding_group_layout(bindings, {}, sg::lifetime_scope::persistent);
+    REQUIRE(group_layout.has_value());
+
+    auto desc = sg::pipeline_layout_description{};
+    desc.groups.push_back(group_layout.value());
+    desc.inline_constants = sg::binding{.space = 0,
+                                        .index = 0,
+                                        .count = 1,
+                                        .type = sg::binding_type::uniform_buffer,
+                                        .block_size = isize(sizeof(tint_constants))};
+    auto pipeline_layout = ctx->create_metal_pipeline_layout(desc, sg::lifetime_scope::persistent);
+    REQUIRE(pipeline_layout.has_value());
+
+    auto pipeline = make_mesh_pipeline(ctx, sg::pipeline_layout_handle(pipeline_layout.value()));
+    REQUIRE(pipeline.has_value()).context(pipeline.has_error() ? pipeline.error().to_string() : cc::string());
+
+    auto elements = cc::vector<sg::raw_view>();
+    auto kept = cc::vector<sg::raw_buffer_handle>();
+    for (auto e = 0; e < 4; ++e)
+    {
+        auto const buffer = ctx->persistent.create_raw_buffer(32, sg::buffer_usage::readonly_buffer);
+        elements.push_back(buffer->as_raw_readonly({.offset = 0, .size = 32}, isize(sizeof(u32))));
+        kept.push_back(buffer);
+    }
+
+    auto views = cc::vector<sg::named_view>();
+    views.push_back({.name = "inputs", .view = sg::bound_view(cc::move(elements))});
+    auto group = ctx->create_metal_binding_group(group_layout.value(), views, {}, sg::lifetime_scope::persistent);
+    REQUIRE(group.has_value()).context(group.has_error() ? group.error().to_string() : cc::string());
+
+    auto const target = make_color_target(ctx);
+    auto const vertices = quad_vertices();
+    auto const vertex_buffer
+        = ctx->persistent.create_raw_buffer(isize(vertices.size()) * isize(sizeof(mesh_vertex)),
+                                            sg::buffer_usage::vertex_buffer | sg::buffer_usage::copy_dst);
+
+    auto cmd = ctx->create_command_list();
+    {
+        auto info = sg::rendering_info{};
+        info.color_targets.push_back(target.as_render_target_view().cleared(tg::vec4f(1, 0, 0, 1)));
+        auto scope = cmd->raster.render_to(info);
+        scope.bind_pipeline(*pipeline.value());
+        scope.bind_group(0, *group.value());
+        scope.set_inline_constants(tint_constants{});
+        scope.bind_vertex_buffer({.buffer = vertex_buffer, .stride_in_bytes = isize(sizeof(mesh_vertex))});
+
+        CHECK_ASSERTS(scope.draw({.vertex_range = {.offset = 2, .size = 4}}));
+    }
+    ctx->drop_command_list(cc::move(cmd));
+}
+
+TEST("sg metal - a rendering scope leaves no bound-group state behind")
+{
+    auto const ctx = mtl::test::make_context();
+    if (ctx == nullptr)
+        SKIP("no metal 4 device on this host");
+
+    // A group bound in one scope must not still be bound in the next, or the array refusal above fires on a draw that
+    // bound nothing — which is what `_group_arrays` outliving its scope would cause.
+    auto bindings = cc::vector<sg::binding>();
+    bindings.push_back(
+        {.name = "inputs", .space = 0, .index = 0, .count = 4, .type = sg::binding_type::readonly_structured_buffer});
+
+    auto group_layout = ctx->create_metal_binding_group_layout(bindings, {}, sg::lifetime_scope::persistent);
+    REQUIRE(group_layout.has_value());
+
+    auto array_desc = sg::pipeline_layout_description{};
+    array_desc.groups.push_back(group_layout.value());
+    array_desc.inline_constants = sg::binding{.space = 0,
+                                              .index = 0,
+                                              .count = 1,
+                                              .type = sg::binding_type::uniform_buffer,
+                                              .block_size = isize(sizeof(tint_constants))};
+    auto array_layout = ctx->create_metal_pipeline_layout(array_desc, sg::lifetime_scope::persistent);
+    REQUIRE(array_layout.has_value());
+    auto array_pipeline = make_mesh_pipeline(ctx, sg::pipeline_layout_handle(array_layout.value()));
+    REQUIRE(array_pipeline.has_value());
+
+    auto elements = cc::vector<sg::raw_view>();
+    auto kept = cc::vector<sg::raw_buffer_handle>();
+    for (auto e = 0; e < 4; ++e)
+    {
+        auto const buffer = ctx->persistent.create_raw_buffer(32, sg::buffer_usage::readonly_buffer);
+        elements.push_back(buffer->as_raw_readonly({.offset = 0, .size = 32}, isize(sizeof(u32))));
+        kept.push_back(buffer);
+    }
+    auto views = cc::vector<sg::named_view>();
+    views.push_back({.name = "inputs", .view = sg::bound_view(cc::move(elements))});
+    auto group = ctx->create_metal_binding_group(group_layout.value(), views, {}, sg::lifetime_scope::persistent);
+    REQUIRE(group.has_value());
+
+    auto plain_layout = make_tint_pipeline_layout(ctx);
+    REQUIRE(plain_layout.has_value());
+    auto plain_pipeline = make_mesh_pipeline(ctx, plain_layout.value());
+    REQUIRE(plain_pipeline.has_value());
+
+    auto const target = make_color_target(ctx);
+    auto const vertices = quad_vertices();
+    auto const vertex_buffer
+        = ctx->persistent.create_raw_buffer(isize(vertices.size()) * isize(sizeof(mesh_vertex)),
+                                            sg::buffer_usage::vertex_buffer | sg::buffer_usage::copy_dst);
+
+    auto cmd = ctx->create_command_list();
+    cmd->upload.bytes_to_buffer(vertex_buffer, cc::as_bytes(cc::span<mesh_vertex const>(vertices)));
+    {
+        auto info = sg::rendering_info{};
+        info.color_targets.push_back(target.as_render_target_view().cleared(tg::vec4f(1, 0, 0, 1)));
+        auto scope = cmd->raster.render_to(info);
+        scope.bind_pipeline(*array_pipeline.value());
+        scope.bind_group(0, *group.value());
+    }
+    {
+        // A second scope binding no group at all: the draw must go through.
+        auto info = sg::rendering_info{};
+        info.color_targets.push_back(target.as_render_target_view().cleared(tg::vec4f(1, 0, 0, 1)));
+        auto scope = cmd->raster.render_to(info);
+        scope.bind_pipeline(*plain_pipeline.value());
+        scope.set_inline_constants(tint_constants{});
+        scope.bind_vertex_buffer({.buffer = vertex_buffer, .stride_in_bytes = isize(sizeof(mesh_vertex))});
+        scope.draw({.vertex_range = {.offset = 2, .size = 4}});
+    }
+    CHECK(true); // reaching here is the assertion: no stale array binding refused the second draw
+    ctx->drop_command_list(cc::move(cmd));
 }

@@ -125,7 +125,15 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
     Finer would be to notice it per window and stop mid-copy, releasing the source with it.
     Pure quality of implementation: the bytes are unobservable either way, and what it buys is releasing a large source sooner.
 - **Barriers + access tracking.** See [concepts/barriers.md](concepts/barriers.md). Still open:
-  - **array bindings in raster draws** — compute/RT dispatches resolve `declare_array_*_access` against the bound groups, but the raster scope has no declare pair and asserts on a bound array binding;
+  - **array bindings in raster draws** — the one gap here that a real renderer will hit, so it is spelled out rather than listed.
+    `declare_array_buffer_access` / `declare_array_texture_access` live on the compute scope and the raytracing scope alone.
+    `command_list_raster_scope` has neither, and there is no `raster_declare_array_*` virtual for one to dispatch to.
+    A dispatch therefore resolves its declares against the bound groups, and a draw cannot.
+    Every backend asserts `"array bindings are not supported in raster draws yet"` on a bound array binding, which [concepts/bindings.md](concepts/bindings.md#array-bindings) states as the contract.
+    **What it costs is any bindless material table on a draw.**
+    sv's tables work today only because it path-traces, declaring them through `cmd.raytracing` in `gpu_resource_manager`; the moment a raster path wants one it stops at this assert.
+    Closing it is the declare pair on the raster scope, a `raster_declare_array_*` virtual, and the resolution in all four backends — the compute path's shape, at the vertex and fragment stages.
+    Nothing subtle blocks it; it has simply never been the blocking thing.
   - a per-draw/dispatch **escape hatch** disabling automatic transitions where the caller knows its resources are already in the right layout;
   - folding the redundant `_open_command_lists` epoch-advance counter into the slot allocator's live count.
 - **Raster pipeline + draws.** See [concepts/raster-pipeline.md](concepts/raster-pipeline.md). Still open:
@@ -135,6 +143,13 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   - a **backend-neutral numeric `location`** on `sg::vertex_attribute`, replacing the HLSL `semantic` string.
     The vulkan backend currently numbers a SPIR-V location by an attribute's index in `vertex_input_layout::attributes`.
     That makes the shader's `[[vk::location(N)]]` annotations part of the contract — see `vulkan_raster_pipeline.cc`.
+  - **metal as an example backend**, which is what a runnable metal demonstration needs first.
+    `SC_EXAMPLE_BACKEND` accepts `auto`, `dx12`, `vulkan` and `webgpu`, and every graphical example's `sc_add_example_backend_stub` `SUPPORTS` list names a subset of those three.
+    So `uv run dev.py example` on macOS lists 21 examples, and not one of them is graphical.
+    Closing it means the option's accepted values and cache `STRINGS`, and `sc_add_example_backend_stub` understanding `metal`.
+    It also needs a rule for what `auto` resolves to on Apple, where the set it picks from is currently empty.
+    Then the example itself, with a committed capture sidecar so `dev.py example --update-captures` has something to refresh.
+    The tier-2 tests cover the paths; what is missing is the thing a reader can run and look at.
 - **Acceleration structures.** See [concepts/acceleration-structures.md](concepts/acceleration-structures.md).
   The abstract types already carry the stats a refit needs — build and update scratch sizes, and the flags.
   Still open:

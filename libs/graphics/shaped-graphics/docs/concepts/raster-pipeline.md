@@ -76,20 +76,37 @@ A rule left to the backend that needs it would therefore be a rule nobody develo
 A mesh importer splitting sub-meshes is the case it exists for.
 The two fixes are an even first index, or 32-bit indices — where every index is already 4 bytes wide and the rule cannot bind.
 
-## Backend split (dx12 real, vulkan stubbed)
+## Backend split
 
 The frontend is the abstract `raster_pipeline` + description + the `raster_*` command-list virtuals.
-The **dx12** backend fills a `D3D12_GRAPHICS_PIPELINE_STATE_DESC` in [`dx12_raster_pipeline`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_raster_pipeline.cc).
+All four backends implement it.
+
+**dx12** fills a `D3D12_GRAPHICS_PIPELINE_STATE_DESC` in [`dx12_raster_pipeline`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_raster_pipeline.cc).
 The state→D3D12 mappings live in `dx12_raster_state.cc`.
 It binds on the **graphics** root-signature bind point — `SetGraphicsRootSignature` / `SetGraphicsRootDescriptorTable`, distinct from compute.
 It declares vertex, index and bound-group hazards at draw time, the same rhythm as `compute_dispatch`.
 [`dx12_pipeline_layout`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_pipeline_layout.cc) sets `ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT` on every root signature.
 A graphics PSO with a vertex-input layout requires it, and it is inert for compute and ray tracing.
-**vulkan** is a `CC_UNREACHABLE` stub.
+
+**vulkan** builds a `VkGraphicsPipelineCreateInfo` in [`vulkan_raster_pipeline`](../../backends/vulkan/src/shaped-graphics/backends/vulkan/vulkan_raster_pipeline.cc).
+It records draws through `vkCmdBindIndexBuffer` / `vkCmdDrawIndexed`, declaring the same hazards at draw time.
+A vertex attribute's SPIR-V `location` is its index in `vertex_input_layout::attributes`, since sg names an input by an HLSL semantic and SPIR-V has none.
+
+**metal** splits what a D3D12 PSO folds together, across three MTL4 objects, and is the one backend with no `setVertexBuffer` and no root constants.
+Vertex buffers and inline constants therefore arrive as addresses in the command list's one `MTL4ArgumentTable`, at the buffer indices `metal_common.hh` fixes.
+Groups sit at 0 to 2, sg's reserved group at 3, inline constants at 4, and vertex-input slot `n` at 5 + `n`.
+An attribute's `[[attribute(n)]]` index is its position in `attributes`, the same workaround vulkan makes for the same missing field.
+[backends/metal/readme.md](../../backends/metal/readme.md) carries the rest, including why the index alignment above is a portable rule rather than metal's.
+
+**webgpu** records through `wgpuRenderPassEncoderSetIndexBuffer` / `wgpuRenderPassEncoderDrawIndexed`, re-binding its pass state when a pass reopens.
+
+**No backend supports an array binding on a draw.**
+The raster scope has no `declare_array_*_access` pair, so a bound array binding cannot be accounted for and every backend asserts on one.
+See [bindings](bindings.md#array-bindings) and [TODO](../TODO.md).
 
 ## Deferred
 
-**Indirect draws**, **dynamic** primitive topology and depth bias (baked into the PSO for now), **mesh / task** stages, and the **vulkan** implementation.
+**Indirect draws**, **dynamic** primitive topology and depth bias (baked into the PSO for now), **mesh / task** stages, and **array bindings in a draw**.
 Geometry and tessellation stages are **in** (dx12). See [TODO](../TODO.md).
 
 ## See also

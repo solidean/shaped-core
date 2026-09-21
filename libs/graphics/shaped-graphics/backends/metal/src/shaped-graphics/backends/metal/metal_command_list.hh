@@ -217,8 +217,16 @@ private:
     /// The render encoder of the open rendering scope; null outside one.
     [[nodiscard]] MTL4::RenderCommandEncoder* render_encoder() const { return _render_encoder; }
 
-    /// Declare access on everything the bound groups name, and flush — the shape a draw and a dispatch share.
+    /// Declare access on everything the bound groups name — the shape a draw and a dispatch share.
+    /// It does not flush: the op does, once, after adding whatever else it reads.
     void declare_bound_groups(pipeline_stage_flags stages);
+
+    /// Forget what the bound groups named, at the end of a rendering scope and of the recording.
+    ///
+    /// **`_group_arrays` is the one that must be cleared rather than merely should.**
+    /// A stale entry in the other three costs one redundant declare, which folds into a barrier already being
+    /// emitted; a stale array binding is an assertion failure at the next draw.
+    void clear_bound_groups();
 
     /// Declare what the pending `declare_array_*_access` calls named, and clear them.
     ///
@@ -308,10 +316,6 @@ private:
     MTL4::ComputeCommandEncoder* _encoder = nullptr;
     sg::command_list_slot _slot = sg::command_list_slot::invalid;
     bool _is_recording = true;
-
-    /// Whether this list recorded anything the next list may have to wait for.
-    /// Decides whether the producer half of the queue barrier pair is worth emitting at all.
-    bool _produced_queue_work = false;
 
     /// Every buffer this list declared against, held so the resource outlives the recording that names it.
     cc::vector<sg::raw_buffer_handle> _touched_buffers;

@@ -92,6 +92,26 @@ So introduce each mechanism before judging it: the situation as a concrete scena
 
 pr-173 is the worked case: a correct critique the maintainer could not follow — "nothing is properly introduced" — and a verdict they found "always hard to read" as paragraphs.
 
+#### A set named by its cardinality is a set the reader cannot check
+
+**Never write "the four backends" or "the same two asserts" without enumerating them once.**
+A count reads as precision and carries none: the writer is counting something they can see, and the reader is being told how many of something they cannot.
+
+It is the most reliable thing the cold-read check finds, because it is invisible from the inside.
+The writer re-reads "four backends" and pictures four; nothing on the page disagrees.
+
+Two failure modes, and the second is the one that costs credibility:
+
+- **The count is right and the set is never named**, so the reader cannot verify a word of the argument that rests on it.
+  "The same two asserts" three times in one entry, with the two never enumerated, leaves every duplication complaint unjudgeable — is it two lines or two invariants?
+- **The count is simply wrong**, which a reader spots instantly and the writer never does.
+
+The metal-raster-completion review is the worked case.
+Its design critique said "each of the four backends carries the same two asserts" while the entry named three — dx12, vulkan and metal — leaving the reader to invent webgpu.
+The fix was one sentence naming all four at first use, plus a short block enumerating the two conditions before the options that argue about them.
+
+The cheap habit that prevents it: **enumerate at first use, then count freely afterwards.**
+
 ### Two alternatives the maintainer wants on the table
 
 These are not preferences that decide a case.

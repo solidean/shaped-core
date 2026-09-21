@@ -257,12 +257,12 @@ See [concepts/epochs.md](concepts/epochs.md).
 ## Initial implementation order
 
 ```text
-1. core types + backend bridge stubs + dx12/vulkan stubs   [in progress]  (this bootstrap)
-2. command_list buffer inline upload / download / copy     [in progress]  dx12 real; vulkan pending
-3. real dx12 + vulkan backends for (2) (+ SDK detection)   [in progress]  dx12 done; vulkan is a TODO stub
-4. textures + views                                        [in progress]  resource, creation, views and host↔device copies done (dx12 real, vulkan minimal); texel buffer views remain
-5. pipelines + shaders                                     [in progress]  compute + raster bind paths dx12-real, DXC compiler in place (vulkan pending)
-6. presentation (swapchain/surface) + submission/sync      [in progress]  dx12 swapchain real (WARP-tested); vulkan pending
-7. tier 2 backends (metal, webgpu)                         [in progress]  webgpu real on wasm but ray tracing; metal planned
+1. core types + backend bridge stubs + dx12/vulkan stubs   [done]
+2. command_list buffer inline upload / download / copy     [done]         dx12 and vulkan both real
+3. real dx12 + vulkan backends for (2) (+ SDK detection)   [done]
+4. textures + views                                        [in progress]  resource, creation, views and host↔device copies real on dx12 and vulkan; texel buffer views remain
+5. pipelines + shaders                                     [in progress]  compute + raster bind paths real on dx12 and vulkan, DXC compiler in place
+6. presentation (swapchain/surface) + submission/sync      [done]         dx12 (WARP-tested) and vulkan
+7. tier 2 backends (metal, webgpu)                         [in progress]  metal covers the whole surface; webgpu is real but ray tracing
 8. legacy backends (opengl, webgl)                         [planned]
 ```
