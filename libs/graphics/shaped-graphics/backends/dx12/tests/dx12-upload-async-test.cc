@@ -33,7 +33,8 @@ cc::pinned_data<byte const> make_bytes(isize n, auto&& fn)
 ASYNC_TEST("sg dx12 - async upload larger than a staging window packs across windows")
 {
     auto ctx = dx12::make_test_context({.async_upload_window_bytes = 4096});
-    REQUIRE(ctx.has_value());
+    if (ctx.has_error())
+        SKIP("no dx12 adapter");
     auto& c = *ctx.value();
 
     isize const n = 20000; // several windows, non-aligned so partial windows are exercised
@@ -63,7 +64,8 @@ ASYNC_TEST("sg dx12 - async upload larger than a staging window packs across win
 ASYNC_TEST("sg dx12 - many async uploads recycle the staging windows")
 {
     auto ctx = dx12::make_test_context({.async_upload_window_bytes = 1024});
-    REQUIRE(ctx.has_value());
+    if (ctx.has_error())
+        SKIP("no dx12 adapter");
     auto& c = *ctx.value();
 
     int const count = 24;
@@ -99,7 +101,8 @@ ASYNC_TEST("sg dx12 - many async uploads recycle the staging windows")
 ASYNC_TEST("sg dx12 - uneven async uploads pack and straddle staging windows")
 {
     auto ctx = dx12::make_test_context({.async_upload_window_bytes = 1024});
-    REQUIRE(ctx.has_value());
+    if (ctx.has_error())
+        SKIP("no dx12 adapter");
     auto& c = *ctx.value();
 
     // Sizes chosen so windows carry parts of two uploads and single uploads span windows.

@@ -80,7 +80,8 @@ ASYNC_TEST("sg dx12 - async upload window resize preserves uploads")
 {
     // A 1 KiB window (packs a larger upload across windows). Resizing changes only staging memory.
     auto ctx = dx12::make_test_context({.async_upload_window_bytes = 1024});
-    REQUIRE(ctx.has_value());
+    if (ctx.has_error())
+        SKIP("no dx12 adapter");
 
     CHECK(co_await async_round_trip(ctx.value(), 4096, 1)); // spans several 1 KiB windows
 
@@ -95,7 +96,8 @@ ASYNC_TEST("sg dx12 - inline upload ring grows to fit a larger upload")
 {
     // A 4 KiB upload ring: an upload larger than this asserts (a single upload cannot exceed capacity).
     auto ctx = dx12::make_test_context({.upload_ring_bytes = 4096});
-    REQUIRE(ctx.has_value());
+    if (ctx.has_error())
+        SKIP("no dx12 adapter");
 
     CHECK(co_await inline_round_trip(ctx.value(), 2048, 1)); // fits the small ring
 
@@ -109,7 +111,8 @@ ASYNC_TEST("sg dx12 - inline download ring grows to fit a larger readback")
 {
     // A 4 KiB readback ring: a download larger than this asserts before the resize.
     auto ctx = dx12::make_test_context({.download_ring_bytes = 4096});
-    REQUIRE(ctx.has_value());
+    if (ctx.has_error())
+        SKIP("no dx12 adapter");
 
     CHECK(co_await inline_round_trip(ctx.value(), 2048, 1)); // fits the small ring
 

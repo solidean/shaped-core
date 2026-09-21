@@ -100,7 +100,8 @@ ASYNC_INVOCABLE_TEST("sg dx12 - compute dispatch writes a structured buffer", (d
 ASYNC_TEST("sg dx12 - transient binding groups + buffers recycle across epochs")
 {
     auto ctx_r = dx12::make_test_context({.descriptor_heap_capacity = 64, .descriptor_transient_fraction = 0.5f});
-    REQUIRE(ctx_r.has_value());
+    if (ctx_r.has_error())
+        SKIP("no dx12 adapter");
     auto ctx = ctx_r.value();
 
     constexpr int count = 256;
@@ -160,7 +161,8 @@ ASYNC_TEST("sg dx12 - persistent binding groups free and reuse their descriptor 
 {
     // 4 persistent slots
     auto ctx_r = dx12::make_test_context({.descriptor_heap_capacity = 8, .descriptor_transient_fraction = 0.5f});
-    REQUIRE(ctx_r.has_value());
+    if (ctx_r.has_error())
+        SKIP("no dx12 adapter");
     auto ctx = ctx_r.value();
 
     sg::compiled_shader const shader = make_double_shader();

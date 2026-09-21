@@ -19,7 +19,8 @@ namespace dx12 = sg::backend::dx12;
 ASYNC_TEST("sg dx12 - epoch advance and retire")
 {
     auto handle = dx12::make_fresh_context(); // fresh: this asserts the epoch counter's initial value
-    REQUIRE(handle != nullptr);
+    if (handle == nullptr)
+        SKIP("no dx12 adapter");
     auto& c = *handle;
 
     CHECK(c.current_epoch() == sg::epoch::first);

@@ -78,6 +78,8 @@ enum class adapter_pin : u8
     none,
     hardware,
     warp,
+    /// Both hidden: a host with no dx12 adapter at all, which is what a GPU-less CI job without WARP is.
+    nothing,
 };
 
 /// Read on every call rather than once, so a test that sets the variable sees it take effect.
@@ -91,10 +93,13 @@ adapter_pin read_adapter_pin()
         return adapter_pin::warp;
     if (value.value() == "hardware")
         return adapter_pin::hardware;
+    if (value.value() == "none")
+        return adapter_pin::nothing;
 
     static auto warned = cc::atomic_flag();
     if (!warned.test_and_set())
-        CC_LOG_WARNING("SC_DX12_ADAPTER='{}' is ignored: the accepted values are 'hardware' and 'warp'", value.value());
+        CC_LOG_WARNING("SC_DX12_ADAPTER='{}' is ignored: the accepted values are 'hardware', 'warp' and 'none'",
+                       value.value());
     return adapter_pin::none;
 }
 
@@ -310,7 +315,7 @@ void dx12_context::unregister_message_callback()
 
 bool sg::backend::dx12::has_hardware_adapter()
 {
-    if (read_adapter_pin() == adapter_pin::warp)
+    if (auto const pin = read_adapter_pin(); pin == adapter_pin::warp || pin == adapter_pin::nothing)
         return false;
 
     static bool const has = []
@@ -376,7 +381,7 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
         choice = dx12_adapter::hardware;
 
     // The warp pin hides hardware from every request, an explicit `hardware` included, not only from hardware_or_warp.
-    auto const hardware_hidden = pin == adapter_pin::warp;
+    auto const hardware_hidden = pin == adapter_pin::warp || pin == adapter_pin::nothing;
     ComPtr<IDXGIAdapter1> adapter;
     auto const search = hardware_hidden ? adapter_search_result{} : find_hardware_adapter(factory.Get(), adapter);
 
@@ -389,13 +394,18 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
     if (choice != dx12_adapter::warp && search.status != adapter_search::found)
     {
         if (choice == dx12_adapter::hardware && hardware_hidden)
-            return cc::error("no Direct3D 12 capable hardware adapter found (SC_DX12_ADAPTER=warp hides them)");
+            return cc::error(cc::format("no Direct3D 12 capable hardware adapter found (SC_DX12_ADAPTER={} hides them)",
+                                        pin == adapter_pin::warp ? "warp" : "none"));
         if (choice == dx12_adapter::hardware)
             return cc::error("no Direct3D 12 capable hardware adapter found");
         choice = dx12_adapter::warp;
     }
     if (choice == dx12_adapter::warp)
     {
+        // The hardware pin hides WARP from every request in turn, an explicit `warp` included.
+        if (pin == adapter_pin::hardware || pin == adapter_pin::nothing)
+            return cc::error(cc::format("no WARP adapter (SC_DX12_ADAPTER={} hides it)",
+                                        pin == adapter_pin::hardware ? "hardware" : "none"));
         if (HRESULT hr = factory->EnumWarpAdapter(IID_PPV_ARGS(&adapter)); FAILED(hr))
             return dx12_error(hr, "IDXGIFactory4::EnumWarpAdapter failed");
     }
