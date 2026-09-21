@@ -19,10 +19,12 @@ from __future__ import annotations
 
 import json
 import re
+import socket
 import subprocess
 import sys
 import tempfile
 import threading
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -52,9 +54,11 @@ from tools.review.lib.entry.parse import parse_text  # noqa: E402
 from tools.review.lib.goals.skeleton import thinly_discharged  # noqa: E402
 from tools.review.cmd.run import executed_command  # noqa: E402
 from tools.review.lib.entry.write import (  # noqa: E402
-    append_text, check_supersedes, compose, immutability_violations, set_block_attrs, stamp_rounds,
+    append_text, check_supersedes, compose, immutability_violations, missing_intro_rounds, set_block_attrs,
+    stamp_rounds,
 )
 from tools.review.lib.render.markdown import render as render_markdown  # noqa: E402
+from tools.review.lib.render.sgl_lexer import SglLexer  # noqa: E402
 from tools.review.lib.render.media import (  # noqa: E402
     BINARY, IMAGE, TEXT, classify, human_bytes, image_dimensions,
 )
@@ -772,6 +776,57 @@ def test_every_block_type_renders(root: Path) -> None:
         assert needle in html, f"{needle!r} missing from the rendered entry"
 
 
+def test_changes_path_takes_several_prefixes_globs_and_excludes(root: Path) -> None:
+    """An entry that spans folders asks for its ids in one query, the way `repo_search` selects paths."""
+    from tools.review.cmd.changes import path_filter
+
+    keeps = path_filter("lib/legalize/, lib/check/flat*, !lib/legalize/old.cc")
+    assert keeps("lib/legalize/core.cc")
+    assert keeps("lib/check/flat.hh") and keeps("lib/check/flatten.cc")
+    assert not keeps("lib/check/check.cc")
+    assert not keeps("lib/legalize/old.cc"), "an exclude wins"
+    assert path_filter("")("anything"), "no selector keeps everything"
+    assert path_filter("!docs/")("lib/a.cc") and not path_filter("!docs/")("docs/a.md")
+
+
+def test_a_round_that_asks_is_owed_an_intro(root: Path) -> None:
+    """A round opening on facts makes its reader reconstruct the question before weighing anything.
+
+    Only a round still waiting for an answer is owed one: a finalized round is immutable, so a warning there has no remedy.
+    """
+    def block(*rows: str) -> str:
+        return "\n".join(["", *rows, ""])
+
+    front = "---\nid: 1\ntitle: t\n---\n"
+    ask_r1 = block("## ask  first", "round: 1", "", "Which?", "", "- radio: a")
+    ask_r2 = block("## ask  second", "round: 2", "", "Which?", "", "- radio: b")
+    intro_r2 = block("## intro", "round: 2", "", "What this is about, and the options.")
+
+    bare = parse_text(front + ask_r1 + ask_r2, Path("e.md"))
+    assert missing_intro_rounds(bare, {"first", "second"}) == [1, 2]
+    assert missing_intro_rounds(bare, {"second"}) == [2], "a finalized round is not owed one"
+
+    # Written after its round's ask, and still counted for it.
+    introduced = parse_text(front + ask_r1 + ask_r2 + intro_r2, Path("e.md"))
+    assert missing_intro_rounds(introduced, {"second"}) == []
+
+
+def test_an_intro_leads_its_round_wherever_it_is_written(root: Path) -> None:
+    """The intro is what the rest of a round is read against, so the page draws it first."""
+    from tools.review.lib.core.paths import ReviewPaths
+    from tools.review.lib.render.entryview import render_entry
+
+    rows = ["---", "id: 1", "title: t", "---", "",
+            "## prose", "round: 1", "", "FACTS-FIRST", "",
+            "## intro", "round: 1", "", "INTRO-TEXT", ""]
+    body = "\n".join(rows)
+    entry = parse_text(body, root / "entries" / "010-x.md", slug="010-x")
+    html = render_entry(entry, AnswerFile(root / "a.json"), repo=root, paths=ReviewPaths(root),
+                        ledger=Ledger(root / "ledger.jsonl"), hash_of=hash_ask)
+    assert 'class="intro"' in html
+    assert html.index("INTRO-TEXT") < html.index("FACTS-FIRST"), "the intro must lead its round"
+
+
 def test_option_labels_render_but_keep_their_value(root: Path) -> None:
     """An option label is markdown for the reader and the answer key for the tool, and those must not be one string.
 
@@ -819,6 +874,44 @@ def test_option_labels_render_but_keep_their_value(root: Path) -> None:
     )
     assert "<code>sv::interactive</code>" in answered.split('class="answer-choices"')[1], \
         "an answered option's markdown must render too"
+
+
+def test_sgl_is_highlighted_by_its_line_tree(root: Path) -> None:
+    """SGL's comments and strings are decided by indentation, which no regex state machine can see.
+
+    A comment-only line owns the deeper lines below it, and a line ending in an open quote makes its children string content.
+    A lexer that tokenized those lines as code would draw a `//` inside a string as a comment.
+    """
+    source = "\n".join([
+        "// a comment",
+        "   that owns this line",
+        'print "',
+        '    content with // slashes and "quotes"',
+        '"',
+        "let x = a-b - -1e-5 // trailing",
+        "    + 0..<4",
+        "",
+    ])
+    tokens = [(str(kind), value) for _, kind, value in SglLexer(stripnl=False).get_tokens_unprocessed(source)]
+    assert "".join(value for _, value in tokens) == source, "every byte must come back out, or a diff line loses text"
+
+    kinds = {value: kind for kind, value in tokens}
+    assert kinds["that owns this line"] == "Token.Comment.Single"
+    assert kinds['content with // slashes and "quotes"'] == "Token.Literal.String"
+    assert "a-b" not in kinds and kinds["a"] == "Token.Name", "a dash is never part of a symbol"
+    assert kinds["1e-5"] == "Token.Literal.Number", "a signed exponent still reads as one number"
+    assert kinds["..<"] == "Token.Operator", "a range must not be read as the number `0.`"
+    assert kinds["+"] == "Token.Operator", "the child of a trailing comment's line is still code"
+
+    interpolated = 'print "n = $count, $p.x and $(a + b) cost $$5"\n'
+    pieces = [(str(kind), value) for _, kind, value in SglLexer(stripnl=False).get_tokens_unprocessed(interpolated)]
+    assert "".join(value for _, value in pieces) == interpolated
+    drawn = {value: kind for kind, value in pieces}
+    assert drawn["$count"] == drawn["$p.x"] == drawn["$(a + b)"] == "Token.Literal.String.Interpol"
+    assert drawn["$$"] == "Token.Literal.String.Escape", "a doubled dollar is a literal one, not an interpolation"
+
+    html = render_markdown("\n".join(["```sgl", "fun shade() -> vec3:", "```", ""]))
+    assert "pg-nf" in html, "an `sgl` fence must reach this lexer rather than fall through as plain text"
 
 
 def test_a_file_is_classified_before_anything_reads_it_as_text(root: Path) -> None:
@@ -1413,6 +1506,26 @@ def test_new_and_old_say_what_a_path_asserts(root: Path) -> None:
     assert gone.css == "ref-old" and not gone.problem
 
 
+def test_an_untracked_file_resolves_and_an_ignored_one_does_not(root: Path) -> None:
+    """A file written this session is as real to an entry as a committed one, before anyone has `git add`ed it.
+
+    The ignore rules are the boundary rather than the index.
+    They are what keep a second copy of the checkout under `.tmp/` out, which is why the list is still git's and not a walk.
+    """
+    git_init(root)
+    commit(root, "first", {"a.txt": "one\n", ".gitignore": "build/\n"})
+    for name in ("lib/fresh/written.py", "build/generated.py"):
+        (root / name).parent.mkdir(parents=True, exist_ok=True)
+        (root / name).write_text("x = 1\n", encoding="utf-8")
+
+    index = RepoIndex.build(root)
+    assert index.resolve("written.py").path == "lib/fresh/written.py", index.paths
+    assert index.resolve_dir("fresh/").path == "lib/fresh", "a folder holding only untracked files is one too"
+    assert index.absolute("lib/fresh/written.py") == root / "lib/fresh/written.py"
+    assert index.resolve("a.txt").ok, "and the tracked ones are still there"
+    assert not index.resolve("generated.py").ok and not index.resolve_dir("build/").ok, index.paths
+
+
 def test_a_missing_path_is_a_problem(root: Path) -> None:
     tokens = _tokens(root, "See `tools/review/lib/nope.py`.")
     assert "not a file in this repository" in tokens[0].problem
@@ -1427,20 +1540,27 @@ def test_a_line_reference_carries_its_line(root: Path) -> None:
 #
 # A land-changes review answers an entry and then carries out what it asked, which moves the very paths the entry named.
 # Judging answered text against the current tree would make the review's own success a validation error.
+# A design review does the same without committing, so a finalized round is lenient whether or not it has a tree to be judged at.
 
 
 _THEN = "abcdef1234567890abcdef1234567890abcdef12"
 
 
-def _history_tokens(root: Path, rounds: list[tuple[int, str]], now: list[str], then: list[str]):
+def _history_tokens(root: Path, rounds: list[tuple[int, str]], now: list[str], then: list[str] | None):
+    """Round 1 is finalized and every later one open; `then` is the tree round 1 was read at, or None for no record."""
     body = "".join(f"\n## prose\nround: {r}\n\n{text}\n" for r, text in rounds)
     entry = parse_text(ENTRY + body, Path("entry.md"))
-    history = lambda r: (_index_of(root, then), _THEN) if r == 1 else None  # noqa: E731
+    finalized = (_index_of(root, then), _THEN) if then is not None else (None, "")
+    history = lambda r: finalized if r == 1 else None  # noqa: E731
     return build_tokens(entry, _index_of(root, now), history=history)
 
 
 def test_an_answered_round_names_paths_as_they_were(root: Path) -> None:
-    """A path the fix moved is drawn as removed, not reported — and nothing else about the strictness loosens."""
+    """A path the fix moved is drawn as removed with the commit it was read at, and a created one links.
+
+    Even a path found neither then nor now is not reported.
+    It is a mistake, but one in text nobody can edit any more, and the note says what is known rather than "gone since".
+    """
     now = ["lib/moved/place.py", "lib/fresh.py"]
     then = ["lib/place.py"]
     tokens = {t.text: t for t in _history_tokens(root, [
@@ -1454,7 +1574,58 @@ def test_an_answered_round_names_paths_as_they_were(root: Path) -> None:
     created = tokens["new:lib/fresh.py"]
     assert not created.problem and created.href.endswith("lib/fresh.py"), created
 
-    assert "not a file" in tokens["lib/typo.py"].problem, "a path missing then and now is still a mistake"
+    typo = tokens["lib/typo.py"]
+    assert typo.css == "ref-old" and not typo.problem, typo
+    assert "gone since" not in typo.note and _THEN[:8] in typo.note, typo.note
+
+
+def test_an_answered_round_with_no_recorded_head_is_lenient_too(root: Path) -> None:
+    """A design review carries its decisions out uncommitted, so there is no tree to judge an answered round at.
+
+    The entry rots the moment its decision is carried out, and a finalized ask is immutable, so nothing could repair it.
+    Created-since links like any path, removed-since is drawn the way a moved file already was, and an ambiguity is a note.
+    """
+    now = ["lib/fresh.py", "lib/made/inside.py", "a/same.py", "b/same.py"]
+    tokens = {t.text: t for t in _history_tokens(root, [
+        (1, "See `new:lib/fresh.py`, `new:lib/made/`, `lib/removed.py`, `lib/emptied/` and `same.py`."),
+    ], now, None)}
+    assert not [t for t in tokens.values() if t.problem], [(t.text, t.problem) for t in tokens.values()]
+
+    created = tokens["new:lib/fresh.py"]
+    assert created.css == "ref" and created.href.endswith("lib/fresh.py") and created.label == "lib/fresh.py", created
+    assert tokens["new:lib/made/"].css == "ref-dir" and tokens["new:lib/made/"].path == "lib/made"
+
+    for literal in ("lib/removed.py", "lib/emptied/"):
+        gone = tokens[literal]
+        assert gone.css == "ref-old" and "gone since" in gone.note and not gone.href, gone
+
+    assert "names 2 files" in tokens["same.py"].note and not tokens["same.py"].href, tokens["same.py"]
+
+
+def test_the_open_round_of_a_review_with_no_recorded_head_stays_strict(root: Path) -> None:
+    """Leniency is the watermark's, so the round being written keeps every error — ambiguity included."""
+    now = ["lib/fresh.py", "a/same.py", "b/same.py"]
+    tokens = {t.text: t for t in _history_tokens(root, [
+        (2, "See `new:lib/fresh.py`, `lib/removed.py` and `same.py`."),
+    ], now, None)}
+    assert "already exists" in tokens["new:lib/fresh.py"].problem
+    assert "not a file" in tokens["lib/removed.py"].problem
+    assert "names 2 files" in tokens["same.py"].problem
+
+
+def test_round_history_answers_for_every_finalized_round(root: Path) -> None:
+    """None means "still open" and nothing else, since that is what the strict reading keys on.
+
+    A finalized round with no head on record used to answer None as well, which is how a design review's answered
+    entries came to be judged as though they were still being written.
+    """
+    from tools.review.lib.annotate.table import history_for
+    from tools.review.lib.core.config import ReviewConfig
+
+    cfg = ReviewConfig(name="d", goals=["design"], watermark=2)
+    at = history_for(root, cfg)
+    assert at(1) == (None, "") and at(2) == (None, ""), (at(1), at(2))
+    assert at(3) is None, "the round being written"
 
 
 def test_open_text_is_still_judged_against_the_current_tree(root: Path) -> None:
@@ -1934,6 +2105,56 @@ def serve_fixture(root: Path):
     server = Server(("127.0.0.1", 0), app)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     return server, f"http://127.0.0.1:{server.server_port}", app
+
+
+def _free_port() -> int:
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        return probe.getsockname()[1]
+
+
+def test_restart_returns_once_the_new_server_answers(root: Path) -> None:
+    """`restart` hands the prompt back with a live url, rather than becoming the server.
+
+    An agent runs it in the foreground, and a command that serves forever holds that shell until its timeout.
+    Through the CLI on purpose: the thing pinned is that the *process* exits while what it started keeps answering.
+    """
+    from tools.review.cmd.serve import is_up
+
+    repo = root / "repo"
+    repo.mkdir()
+    git_init(repo)
+    commit(repo, "first", {"a.txt": "one\n"})
+    cli = [sys.executable, str(REPO_ROOT / "review.py")]
+    done = subprocess.run(cli + ["init", "r", "--goal", "design"], cwd=repo, capture_output=True, text=True)
+    assert done.returncode == 0, done.stderr or done.stdout
+
+    url = ""
+    try:
+        # The timeout is the assertion: the old `restart` never returned at all.
+        done = subprocess.run(cli + ["restart", "r", "--no-open", "--port", str(_free_port())],
+                              cwd=repo, capture_output=True, text=True, timeout=60)
+        assert done.returncode == 0, done.stderr or done.stdout
+        url = next((word for word in done.stdout.split() if word.startswith("http://")), "")
+        assert url, done.stdout
+        assert is_up(url), f"{url} stopped answering once `restart` returned"
+
+        again = subprocess.run(cli + ["restart", "r", "--no-open"], cwd=repo, capture_output=True, text=True, timeout=60)
+        assert again.returncode == 0, again.stderr or again.stdout
+        assert url in again.stdout, f"a second restart moved off {url}: {again.stdout}"
+    finally:
+        subprocess.run(cli + ["stop", "r"], cwd=repo, capture_output=True, text=True, timeout=60)
+
+    # `stop` is acknowledged before the process is gone, and on Windows its open log would fail the temp dir's removal.
+    log = repo / ".tmp" / "reviews" / "r" / ".serve.log"
+    deadline = time.monotonic() + 30
+    while (is_up(url) or log.exists()) and time.monotonic() < deadline:
+        try:
+            log.unlink(missing_ok=True)
+        except OSError:
+            pass
+        time.sleep(0.1)
+    assert not is_up(url), "the fixture server outlived the test"
 
 
 def get(base: str, route: str):

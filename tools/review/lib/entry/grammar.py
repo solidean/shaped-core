@@ -33,6 +33,9 @@ from dataclasses import dataclass
 _ANY = frozenset({"round", "name", "addresses", "supersedes"})
 
 BLOCK_TYPES: dict[str, set[str]] = {
+    # What the entry is about and which options are on the table, before any fact or trade-off.
+    # Shown first in its round whatever its position in the file, because it is what the rest is read against.
+    "intro": set(_ANY),
     "context/cold": set(_ANY),
     "context/repo": set(_ANY),
     "context/delta": set(_ANY),

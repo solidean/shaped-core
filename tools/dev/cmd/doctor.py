@@ -33,8 +33,10 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
     checks = dev.doctor(ctx.root, preset=preset, emsdk_path=args.emsdk_path)
     all_ok = True
     for label, ok, detail in checks:
-        # ok is True (pass), False (fail), or None for an advisory (neither).
-        if ok is None:
+        # ok is True (pass), False (fail), None for an advisory (neither), or WARN for a known issue this machine has.
+        if ok == dev.KNOWN_ISSUE_WARN:
+            mark = console.yellow("WARN")
+        elif ok is None:
             mark = console.yellow("SKIP")
         elif ok:
             mark = console.green("OK  ")

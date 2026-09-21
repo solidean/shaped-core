@@ -1,0 +1,176 @@
+// GENERATED FILE - DO NOT EDIT.
+//
+// The builtin half of SGL's prelude, written out from the C++ builtin registry:
+//     libs/graphics/shaped-graphics-language/src/shaped-graphics-language/builtins/
+// The compiler never opens this file: it generates the same text in memory.
+// This copy is committed so that the prelude can be read, reviewed and diffed.
+//
+// A hand edit FAILS `uv run dev.py check` (the `sgl-prelude` step) and the library's own tests.
+// To change a builtin, edit its record in the registry and regenerate this file:
+//     uv run dev.py check sgl-prelude --fix
+// which runs
+//     uv run dev.py run sgl -- prelude --write libs/graphics/shaped-graphics-language/prelude/builtins.sgl
+//
+// Every declaration is @builtin: the registry record behind it says how it evaluates and how each target spells it.
+// Prelude code that needs no C++ is hand-written, next to this file in core.sgl.
+
+// A struct line without a block is opaque: there is no member to name.
+@builtin struct float
+
+@builtin struct float3:
+    x: float
+    y: float
+    z: float
+
+@builtin struct float4:
+    x: float
+    y: float
+    z: float
+    w: float
+
+/// A direction: it has a length, and a translation leaves it alone.
+@builtin struct vec3:
+    x: float
+    y: float
+    z: float
+
+/// A position: a translation moves it.
+@builtin struct pos3:
+    x: float
+    y: float
+    z: float
+
+/// A position in clip space, before the divide.
+@builtin struct hpos4:
+    x: float
+    y: float
+    z: float
+    w: float
+
+/// Column-major, and a vector stands to its right.
+@builtin struct mat4
+
+/// 32 bits, signed; its arithmetic wraps.
+@builtin struct int
+
+/// Three ints; what a compute dispatch reports as the thread's own id.
+@builtin struct int3:
+    x: int
+    y: int
+    z: int
+
+@builtin struct bool
+
+// @pure: a call has no effect, so nobody can tell whether or when it ran.
+// A @builtin without it is assumed to have one, and the compiler then keeps its place among its neighbours.
+//
+// An @operator function is found through its operator alone: its name is documentation, and no lookup sees it.
+
+// float
+@builtin @pure @operator("*") fun multiply(a: float, b: float) -> float
+@builtin @pure @operator("/") fun divide(a: float, b: float) -> float
+@builtin @pure @operator("+") fun add(a: float, b: float) -> float
+@builtin @pure @operator("-") fun subtract(a: float, b: float) -> float
+@builtin @pure @operator("-") fun negate(x: float) -> float
+
+// int: division is left out until the language says what dividing by zero is
+@builtin @pure @operator("*") fun multiply_int(a: int, b: int) -> int
+@builtin @pure @operator("+") fun add_int(a: int, b: int) -> int
+@builtin @pure @operator("-") fun subtract_int(a: int, b: int) -> int
+@builtin @pure @operator("-") fun negate_int(x: int) -> int
+@builtin @pure fun abs(x: int) -> int
+@builtin @pure fun min(a: int, b: int) -> int
+@builtin @pure fun max(a: int, b: int) -> int
+@builtin @pure fun clamp(x: int, low: int, high: int) -> int
+
+// comparisons, of float and of int
+@builtin @pure @operator("<") fun less(a: float, b: float) -> bool
+@builtin @pure @operator("<=") fun less_equal(a: float, b: float) -> bool
+@builtin @pure @operator(">") fun greater(a: float, b: float) -> bool
+@builtin @pure @operator(">=") fun greater_equal(a: float, b: float) -> bool
+@builtin @pure @operator("==") fun equal(a: float, b: float) -> bool
+@builtin @pure @operator("!=") fun not_equal(a: float, b: float) -> bool
+@builtin @pure @operator("<") fun less_int(a: int, b: int) -> bool
+@builtin @pure @operator("<=") fun less_equal_int(a: int, b: int) -> bool
+@builtin @pure @operator(">") fun greater_int(a: int, b: int) -> bool
+@builtin @pure @operator(">=") fun greater_equal_int(a: int, b: int) -> bool
+@builtin @pure @operator("==") fun equal_int(a: int, b: int) -> bool
+@builtin @pure @operator("!=") fun not_equal_int(a: int, b: int) -> bool
+
+// bool: `and`, `or` and `not` are the language's own, since no function could leave an operand unevaluated
+@builtin @pure @operator("==") fun equal_bool(a: bool, b: bool) -> bool
+@builtin @pure @operator("!=") fun not_equal_bool(a: bool, b: bool) -> bool
+
+// what a float and a plain vector of floats share, component by component
+@builtin @pure fun saturate(x: float) -> float
+@builtin @pure fun abs(x: float) -> float
+@builtin @pure fun min(a: float, b: float) -> float
+@builtin @pure fun max(a: float, b: float) -> float
+@builtin @pure fun clamp(x: float, low: float, high: float) -> float
+/// `a` where `t` is 0 and `b` where it is 1.
+@builtin @pure fun mix(a: float, b: float, t: float) -> float
+@builtin @pure fun saturate(x: float3) -> float3
+@builtin @pure fun abs(x: float3) -> float3
+@builtin @pure fun min(a: float3, b: float3) -> float3
+@builtin @pure fun max(a: float3, b: float3) -> float3
+@builtin @pure fun clamp(x: float3, low: float3, high: float3) -> float3
+/// `a` where `t` is 0 and `b` where it is 1.
+@builtin @pure fun mix(a: float3, b: float3, t: float) -> float3
+@builtin @pure fun saturate(x: float4) -> float4
+@builtin @pure fun abs(x: float4) -> float4
+@builtin @pure fun min(a: float4, b: float4) -> float4
+@builtin @pure fun max(a: float4, b: float4) -> float4
+@builtin @pure fun clamp(x: float4, low: float4, high: float4) -> float4
+/// `a` where `t` is 0 and `b` where it is 1.
+@builtin @pure fun mix(a: float4, b: float4, t: float) -> float4
+
+// float3 and float4 are plain numbers, so all of their arithmetic is componentwise
+@builtin @pure @operator("+") fun add_color(a: float3, b: float3) -> float3
+@builtin @pure @operator("-") fun subtract_color(a: float3, b: float3) -> float3
+@builtin @pure @operator("*") fun multiply_color(a: float3, b: float3) -> float3
+@builtin @pure @operator("/") fun divide_color(a: float3, b: float3) -> float3
+@builtin @pure @operator("+") fun add_float4(a: float4, b: float4) -> float4
+@builtin @pure @operator("-") fun subtract_float4(a: float4, b: float4) -> float4
+@builtin @pure @operator("*") fun multiply_float4(a: float4, b: float4) -> float4
+@builtin @pure @operator("/") fun divide_float4(a: float4, b: float4) -> float4
+
+// a direction adds to a direction; what `vec3 * vec3` would mean is a question, so it is no operator
+@builtin @pure @operator("+") fun add_vec3(a: vec3, b: vec3) -> vec3
+@builtin @pure @operator("-") fun subtract_vec3(a: vec3, b: vec3) -> vec3
+
+// scaling, from either side
+@builtin @pure @operator("*") fun scale_color(a: float3, b: float) -> float3
+@builtin @pure @operator("*") fun prescale_color(a: float, b: float3) -> float3
+@builtin @pure @operator("/") fun unscale_color(a: float3, b: float) -> float3
+@builtin @pure @operator("-") fun negate_color(x: float3) -> float3
+@builtin @pure @operator("*") fun scale_float4(a: float4, b: float) -> float4
+@builtin @pure @operator("*") fun prescale_float4(a: float, b: float4) -> float4
+@builtin @pure @operator("/") fun unscale_float4(a: float4, b: float) -> float4
+@builtin @pure @operator("-") fun negate_float4(x: float4) -> float4
+@builtin @pure @operator("*") fun scale_vec3(a: vec3, b: float) -> vec3
+@builtin @pure @operator("*") fun prescale_vec3(a: float, b: vec3) -> vec3
+@builtin @pure @operator("/") fun unscale_vec3(a: vec3, b: float) -> vec3
+@builtin @pure @operator("-") fun negate_vec3(x: vec3) -> vec3
+
+// a position moves by a direction, and two positions differ by one; `pos3 + pos3` means nothing
+@builtin @pure @operator("+") fun translate_pos3(a: pos3, b: vec3) -> pos3
+@builtin @pure @operator("-") fun translate_back_pos3(a: pos3, b: vec3) -> pos3
+@builtin @pure @operator("-") fun subtract_pos3(a: pos3, b: pos3) -> vec3
+
+// lengths and angles
+@builtin @pure fun dot(a: vec3, b: vec3) -> float
+@builtin @pure fun length(v: vec3) -> float
+@builtin @pure fun normalize(v: vec3) -> vec3
+@builtin @pure fun dot(a: float3, b: float3) -> float
+@builtin @pure fun length(v: float3) -> float
+@builtin @pure fun normalize(v: float3) -> float3
+@builtin @pure fun dot(a: float4, b: float4) -> float
+@builtin @pure fun length(v: float4) -> float
+@builtin @pure fun normalize(v: float4) -> float4
+
+// A matrix stands on the left; what it does to its right side depends on what that is:
+// a position takes the translation (w = 1) and keeps its w, a direction does not (w = 0) and drops it.
+@builtin @pure @operator("*") fun transform_position(m: mat4, p: pos3) -> hpos4
+@builtin @pure @operator("*") fun transform_direction(m: mat4, v: vec3) -> vec3
+@builtin @pure @operator("*") fun transform_float4(m: mat4, v: float4) -> float4
+@builtin @pure @operator("*") fun multiply_mat4(m: mat4, b: mat4) -> mat4

@@ -1,6 +1,7 @@
 #include "native.hh"
 
 #include <clean-core/common/macros.hh>
+#include <clean-core/platform/symbolize.hh> // cc::impl::with_dbghelp: undecorating is DbgHelp too
 #include <clean-core/string/string.hh>
 
 #include <mutex>
@@ -26,10 +27,6 @@
 
 cc::string cc::demangle_symbol(cc::string_view symbol)
 {
-    // UnDecorateSymbolName is documented as single-threaded, and __cxa_demangle makes no thread-safety guarantee either.
-    static std::mutex demangle_mutex;
-    std::lock_guard<std::mutex> lock(demangle_mutex);
-
 #ifdef CC_OS_WINDOWS
     // MSVC symbols are typically well under 4 KB.
     constexpr DWORD buffer_size = 4096;
@@ -40,11 +37,10 @@ cc::string cc::demangle_symbol(cc::string_view symbol)
     char const* nt_ptr = symbol_nt.c_str_if_terminated();
     CC_ASSERT(nt_ptr != nullptr, "should always succeed");
 
-    DWORD result = UnDecorateSymbolName(nt_ptr,          // Decorated name
-                                        buffer,          // Output buffer
-                                        buffer_size,     // Size of output buffer
-                                        UNDNAME_COMPLETE // Undecorate options
-    );
+    // UnDecorateSymbolName is DbgHelp, which is single-threaded process-wide, so it takes the lock every other DbgHelp
+    // call in clean-core takes; a lock of its own would let it run beside a symbolizer or a stacktrace being rendered.
+    DWORD result = 0;
+    cc::impl::with_dbghelp([&] { result = UnDecorateSymbolName(nt_ptr, buffer, buffer_size, UNDNAME_COMPLETE); });
 
     if (result > 0)
     {
@@ -56,6 +52,10 @@ cc::string cc::demangle_symbol(cc::string_view symbol)
     }
 
 #else
+    // __cxa_demangle makes no thread-safety guarantee.
+    static std::mutex demangle_mutex;
+    std::lock_guard<std::mutex> lock(demangle_mutex);
+
     // __cxa_demangle needs a null-terminated string.
     cc::string symbol_nt = cc::string::create_copy_c_str_materialized(symbol);
     char const* nt_ptr = symbol_nt.c_str_if_terminated();

@@ -147,8 +147,9 @@ INVOCABLE_TEST("ssc::dxc + dx12 - ctx.cached dedups raster pipelines and keys ev
                     .color = {.source = sg::blend_factor::src_alpha, .target = sg::blend_factor::one_minus_src_alpha}};
             });
     differs("a write mask", [](auto& d) { d.color_targets[0].write_mask = sg::color_channel::r; });
+    // One the shader writes nothing to, which is only legal with an empty write mask.
     differs("an extra color target",
-            [](auto& d) { d.color_targets.push_back({.format = sg::pixel_format::rgba8_unorm}); });
+            [](auto& d) { d.color_targets.push_back({.format = sg::pixel_format::rgba8_unorm, .write_mask = {}}); });
     differs("the topology", [](auto& d) { d.topology = sg::primitive_topology::triangle_strip; });
     // Ignored by the backend for a non-patch topology, so only the key can tell these two apart.
     differs("the patch control point count", [](auto& d) { d.patch_control_points = 3; });

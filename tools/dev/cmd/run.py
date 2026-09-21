@@ -44,6 +44,7 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
 def run(args: argparse.Namespace, ctx: Context) -> None:
     presets = ctx.resolve_build_presets(args)
     preset = presets[0]
+    ctx.warn_known_issues(presets)
 
     program_args = list(args.runner_args or [])
     if program_args and program_args[0] == "--":

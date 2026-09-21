@@ -24,8 +24,9 @@ public:
                            VkPipelineLayout layout,
                            cc::vector<sg::binding_group_layout_handle> groups,
                            cc::vector<VkSampler> static_samplers,
+                           cc::optional<sg::binding> inline_constants,
                            int inline_constants_bytes)
-      : sg::pipeline_layout(structural_hash),
+      : sg::pipeline_layout(structural_hash, groups, cc::move(inline_constants)),
         _ctx(ctx),
         _layout(layout),
         _groups(cc::move(groups)),

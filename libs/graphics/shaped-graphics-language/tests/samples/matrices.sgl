@@ -1,0 +1,39 @@
+// A camera kept as two matrices, and a model matrix per draw: the product is built in the shader.
+// What this sample is for: `mat4 * mat4`, a helper whose return type is inferred, and a call written for its effect alone.
+
+// three matrices land on the same offsets in every target, so they ride as inline constants
+@inline binding frame:
+    view: mat4
+    proj: mat4
+    model: mat4
+
+@vertex struct mesh_vertex:
+    position: pos3
+    normal: vec3
+
+@pixel struct target:
+    color: float4
+
+struct pixel_input:
+    @position position: hpos4
+    normal: vec3
+
+// No `-> mat4`: an arrow body returns what its expression is.
+// A helper reads a binding only when it lists it, and so does whoever calls the helper.
+fun make_mvp(model: mat4){frame} => frame.proj * frame.view * model
+
+@vertex fun main_vs(v: mesh_vertex){frame} -> pixel_input:
+    let mvp = make_mvp frame.model
+    return {
+        position = mvp * v.position
+        normal = frame.model * v.normal
+    }
+
+@pixel fun main_ps(p: pixel_input) -> target:
+    let n = normalize p.normal
+    // evaluated and dropped, which every target can say: WGSL as `_ = saturate(n.x);`
+    saturate n.x
+    let facing = saturate dot(n, vec3(0.0, 0.0, -1.0))
+    return {
+        color = float4(facing, facing, facing, 1.0)
+    }

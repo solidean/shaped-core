@@ -1,4 +1,5 @@
 #include "../backends/sg_backends.hh"
+#include "../shaders/shader_fixtures.hh"
 
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/async.hh>
@@ -14,9 +15,7 @@
 #include <shaped-graphics/compute/compute_pipeline.hh>
 #include <shaped-graphics/context/context.hh>
 #include <shaped-graphics/resource/texture.hh>
-#include <shaped-shader-library/compiler/dxc_compiler.hh>
 #include <shaped-shader-library/shader_asset.hh>
-#include <shaped-shader-library/shader_library.hh>
 
 // What it costs to create a frame's render targets instead of keeping them.
 //
@@ -108,12 +107,7 @@ char const* name_of(target_source source)
 
 ASYNC_BENCHMARK("sg transient - per-frame render targets")
 {
-    slib::shader_library lib;
-    if (auto dxil = slib::create_dxc_compiler(); dxil.has_value())
-        lib.add_compiler(cc::move(dxil.value()));
-    if (auto spirv = slib::create_dxc_spirv_compiler(); spirv.has_value())
-        lib.add_compiler(cc::move(spirv.value()));
-    lib.add_package(sg::test::shaders::package());
+    (void)sg_test::shader_fixtures(); // the library the generated globals resolve through
 
     for (auto const& factory : sg_test::context_factories())
     {
@@ -122,16 +116,11 @@ ASYNC_BENCHMARK("sg transient - per-frame render targets")
             continue; // no device for this backend on this machine
         auto const ctx = created.value();
 
-        auto const shader = sg::test::shaders::ping_pong.compute.main->acquire(*ctx);
-        co_await cc::async_settled(shader);
-        auto const* const compiled = shader->try_value();
-        CHECK(compiled != nullptr);
-        if (compiled == nullptr)
-            continue;
+        auto const& compiled = co_await sg::test::shaders::ping_pong.compute.main->acquire(*ctx);
 
-        auto const layout = ctx->cached.acquire_binding_group_layout(compiled->bindings);
+        auto const layout = ctx->cached.acquire_binding_group_layout(compiled.bindings);
         auto const pipeline = co_await ctx->cached.acquire_compute_pipeline(
-            {.shader = *compiled,
+            {.shader = compiled,
              .layout = ctx->cached.acquire_pipeline_layout(sg::pipeline_layout_description{.groups = {layout}})});
 
         for (auto const [width, height] : {cc::pair{1920, 1080}, cc::pair{256, 256}})

@@ -3,6 +3,7 @@
 #include <clean-core/container/fixed_vector.hh>
 #include <clean-core/container/pinned_data.hh>
 #include <clean-core/error/optional.hh>
+#include <clean-core/string/string.hh>
 #include <shaped-graphics/binding/compiled_shader.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/raster/blend_state.hh>
@@ -63,6 +64,10 @@ struct sg::raster_pipeline_description
     /// MSAA sample count of the targets (1 = no multisampling).
     int sample_count = 1;
 
+    /// The name of the target set these color targets are, as a generated SGL render target states it; empty for none.
+    /// A pipeline that names one refuses to bind into a rendering that names another, even where the formats agree.
+    cc::string target_set;
+
     /// Optional serialized PSO blob for accelerated creation, skipping most driver work.
     /// Platform-specific and best-effort: a backend may ignore it.
     /// Obtain one from a previously-built pipeline via `cached_pipeline_data()` and persist it across runs.
@@ -102,9 +107,17 @@ public:
     /// so a cache replaces its entry on it rather than trying to predict staleness through the key.
     [[nodiscard]] bool used_cached_pipeline() const { return _used_cached_pipeline; }
 
+    /// The description's `target_set`: the name of the targets this pipeline writes, or empty.
+    [[nodiscard]] cc::string_view target_set() const { return _target_set; }
+
 protected:
     raster_pipeline() = default;
 
     /// Set by the backend during creation; see used_cached_pipeline().
     bool _used_cached_pipeline = false;
+
+private:
+    friend void impl::set_target_set(raster_pipeline const& pipeline, cc::string_view target_set);
+
+    cc::string _target_set;
 };

@@ -28,11 +28,14 @@ body {
 }
 
 /* Code sets its own line-height. Without this it inherits the body's 1.65, which is right for prose and
-   turns a listing of short lines into a page of gaps. */
+   turns a listing of short lines into a page of gaps.
+   Ligatures are off because a review shows the characters that are there: Cascadia Code draws `..<` as centred
+   dots and `!=` as one glyph, which is a different token to a reader judging a tokenizer. */
 code, pre, kbd, .difflines {
   font-family: "Cascadia Code", "JetBrains Mono", Consolas, monospace;
   font-size: 13px;
   line-height: 1.45;
+  font-variant-ligatures: none;
 }
 
 #shell { display: flex; min-height: 100vh; }
@@ -192,6 +195,19 @@ button:hover { border-color: var(--accent); }
   letter-spacing: 0.05em;
 }
 .tier-delta-rule::before, .tier-delta-rule::after { content: ""; flex: 1; height: 2px; background: var(--accent); opacity: 0.45; }
+
+/* What the entry is about and what is on the table: the first thing read in a round, so it is drawn as a lead
+   rather than as another paragraph. */
+.intro {
+  margin: 0 0 1.3rem;
+  padding: 0.7rem 1rem;
+  background: var(--bg-raised);
+  border-left: 3px solid var(--accent);
+  border-radius: 0 5px 5px 0;
+  font-size: 1.02rem;
+}
+.intro > :first-child { margin-top: 0; }
+.intro > :last-child { margin-bottom: 0; }
 
 .recommendation {
   margin: 1.1rem 0;

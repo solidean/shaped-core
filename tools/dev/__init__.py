@@ -30,7 +30,9 @@ from .lib.pipeline.examples import drop_testless_examples
 from .lib.pipeline.test import test
 from .lib.project.compdb import find_entry, load_entries, split_command, strip_pch_flags, suggest_files
 from .lib.project.flags import extract_flags
-from .lib.project.presets import PresetError, load_presets, resolve_cache_variable, resolve_presets
+from .lib.project.presets import (
+    DEFAULT_BUILD_PRESETS, PresetError, load_presets, resolve_cache_variable, resolve_presets,
+)
 from .lib.project.targets import (
     NotConfiguredError,
     discover_targets,
@@ -65,6 +67,8 @@ from .lib.quality.format import (
 )
 from .lib.toolchain import clangd
 from .lib.toolchain.doctor import doctor
+from .lib.toolchain.known_issues import WARN as KNOWN_ISSUE_WARN
+from .lib.toolchain.known_issues import warn_active as warn_known_issues
 from .lib.toolchain.llvm_tools import resolve_tool
 from .lib.toolchain.toolset import ToolsetError, apply_overrides, list_toolsets, toolset_hint
 from .lib.perf.coverage import (
@@ -125,6 +129,8 @@ __all__ = [
     "CrossRefResult",
     "check_crossrefs",
     "doctor",
+    "KNOWN_ISSUE_WARN",
+    "warn_known_issues",
     "FormatResult",
     "FormatSetupError",
     "clang_format_version",
@@ -152,6 +158,7 @@ __all__ = [
     "StepResult",
     "TestSummary",
     "load_target_models",
+    "DEFAULT_BUILD_PRESETS",
     "load_presets",
     "resolve_presets",
     "apply_overrides",

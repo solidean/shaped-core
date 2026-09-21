@@ -52,6 +52,7 @@ Filenames are `NNN-slug.md` with gaps — `010`, `020`, `030` — so a later rou
 
 | type | takes | what it is |
 |---|---|---|
+| `intro` | — | what the entry is about and the options on the table, before any fact; always shown, and drawn first in its round |
 | `context/cold` | — | for a reader new to the change *and* the codebase; collapsed by default, ~150 words |
 | `context/repo` | — | knows the codebase, new to the change; collapsed by default, ~120 words |
 | `context/delta` | — | what this entry adds over the previous ones; always shown |
@@ -63,6 +64,14 @@ Filenames are `NNN-slug.md` with gaps — `010`, `020`, `030` — so a later rou
 | `example` | a name | an example, the command that ran it, and what it printed |
 | `recommendation` | — | the agent's opinion, visually separated from the neutral description |
 | `ask` | a name | the answerable question |
+
+**A round that asks something opens with an `intro`.**
+One line on what the entry is about, then the options as a list, and nothing about which is better.
+The context tiers are collapsed and supply what a reader lacks; the intro is what the visible part of the round is read against.
+Without it an entry opens in the middle of its argument, and the reader reconstructs the question from the facts before they can weigh any of them.
+
+The page draws an intro first in its round wherever it sits in the file, so appending one late still leads.
+`validate` warns about a round that has an open ask and no intro, and a finalized round is exempt because it cannot be edited.
 
 The word limits on the context tiers warn rather than fail.
 They exist because a collapsed tier nobody can skim is a tier nobody opens.
@@ -196,6 +205,12 @@ Only the first line of a list item is matched, and only inside a list: a paragra
 
 A backticked path becomes a link, and one that resolves to nothing is a validation error.
 That strictness is what catches a half-remembered path, and its cost is that a code span which merely *looks* like a reference has no way to say so.
+A path resolves against what git would track: the tracked files, plus the untracked ones no ignore rule covers.
+
+**The strictness binds the round being written, and no earlier one.**
+A block of a finalized round never raises a reference error, whether the path is missing, ambiguous, or a `new:` that exists by now.
+Rounds are immutable, so such an error would have no remedy, and it is the ordinary result of carrying out what the round decided.
+The page draws a created path as a plain link and a vanished one as removed.
 
 `raw:` is that escape, per span.
 
@@ -286,6 +301,7 @@ One entry can therefore carry five questions discharging five different change s
 - Option lines are `- radio:`, `- check:` or `- rank:`; a trailing `(recommended)` is recognised and shown as a badge.
 - **An option label is markdown**, rendered the way a `prose` block is, and its references resolve like any other.
   So a backticked path becomes a link, and one that resolves to nothing is a validation error — `raw:` is the escape there too.
+  That holds until the ask's round is finalized, after which its references are drawn and never reported.
   What the page renders is a display copy: the stored answer keeps the label byte for byte, since it is the answer key and the ask's immutability hash covers it.
 - A freeform text box is **always** added by the server, never authored.
   Forgetting it is not possible.

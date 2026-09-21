@@ -76,14 +76,17 @@ class Git:
         return sha
 
     def ls_files(self) -> list[str]:
-        """Every tracked path, as posix, which is the set an entry can meaningfully refer to.
+        """Every path git would track, as posix, which is the set an entry can meaningfully refer to.
 
-        Tracked rather than walked on purpose.
+        That is the tracked files plus the untracked ones no ignore rule covers.
+        A file written this session and not yet `git add`ed is as real to an entry as a committed one.
+        Asked of git rather than walked on purpose.
         A checkout can hold a whole second copy of itself — `.tmp/worktrees/<name>` is where this tool puts one —
-        and a walk would report every basename in the repository as ambiguous.
+        and a walk would report every basename in the repository as ambiguous; the ignore rules are what keep it out.
+        An untracked nested repository is listed as one `name/` entry rather than descended into, and is dropped.
         """
-        out = self.run(["ls-files", "-z"], timeout=60, check=False)
-        return [p for p in out.split("\0") if p]
+        out = self.run(["ls-files", "-z", "--cached", "--others", "--exclude-standard"], timeout=60, check=False)
+        return sorted({p for p in out.split("\0") if p and not p.endswith("/")})
 
     def ls_tree(self, rev: str) -> list[str]:
         """Every path tracked at `rev`, as posix — the set an entry written against that commit could refer to."""

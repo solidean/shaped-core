@@ -37,7 +37,8 @@ void seed(sg::context& c, sg::raw_buffer_handle const& buf, isize n, auto&& fn)
 ASYNC_TEST("sg dx12 - async download larger than a staging window packs across windows")
 {
     auto ctx = dx12::make_test_context({.async_download_window_bytes = 4096});
-    REQUIRE(ctx.has_value());
+    if (ctx.has_error())
+        SKIP("no dx12 adapter");
     auto& c = *ctx.value();
 
     isize const n = 20000; // several windows, non-aligned so partial windows are exercised
@@ -60,7 +61,8 @@ ASYNC_TEST("sg dx12 - async download larger than a staging window packs across w
 ASYNC_TEST("sg dx12 - many async downloads recycle the staging windows")
 {
     auto ctx = dx12::make_test_context({.async_download_window_bytes = 1024});
-    REQUIRE(ctx.has_value());
+    if (ctx.has_error())
+        SKIP("no dx12 adapter");
     auto& c = *ctx.value();
 
     int const count = 24;
@@ -92,7 +94,8 @@ ASYNC_TEST("sg dx12 - many async downloads recycle the staging windows")
 ASYNC_TEST("sg dx12 - uneven async downloads pack and straddle staging windows")
 {
     auto ctx = dx12::make_test_context({.async_download_window_bytes = 1024});
-    REQUIRE(ctx.has_value());
+    if (ctx.has_error())
+        SKIP("no dx12 adapter");
     auto& c = *ctx.value();
 
     isize const sizes[] = {700, 300, 900, 1500, 200, 1100, 640, 1300, 480, 760};

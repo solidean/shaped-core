@@ -238,6 +238,7 @@ Name it with `title` as usual, and hand it over the same way.
    `uv run review.py status pr-<n>` says whether a server is actually up, which round is next, and what is still open —
    it probes the port rather than trusting the marker, so a killed server reads as down.
    `restart` is for after the *tool's* code changed; entry edits need no restart, since the page reloads itself.
+   It returns once the new server answers, so run it in the foreground rather than backgrounding it like `serve`.
    Exit 0 means sent, 2 means paused, 3 means timed out.
    Do not treat a pause as an answer.
 
@@ -325,6 +326,11 @@ Name it with `title` as usual, and hand it over the same way.
 ## Writing entries that are worth answering
 
 This is the part the tool cannot do for you, and the part the previous chat workflow got wrong.
+
+**Every round that asks something opens with an `intro` block.**
+One line saying what the entry is about, then the options as bullets — no facts, no pros and cons yet.
+The rest of the round is read against it, and without it the maintainer reconstructs the question from a list of facts before they can weigh any of them.
+The page draws it first in its round wherever it sits in the file, and `validate` warns about a round with an open ask and no intro.
 
 **Every entry stands alone.**
 The maintainer does not carry the changeset in their head, and assuming they do defeats the point of asking.

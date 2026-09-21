@@ -62,7 +62,7 @@ def _referencing_text(text: str) -> list[str]:
 
 def build(entry: Entry, index: RepoIndex, *, answers: AnswerFile | None = None, confirm_shas=None,
           terms: list | None = None,
-          history: Callable[[int], tuple[RepoIndex, str] | None] | None = None) -> list[Token]:
+          history: Callable[[int], tuple[RepoIndex | None, str] | None] | None = None) -> list[Token]:
     """Every token this entry's text carries, deduplicated by literal.
 
     The maintainer's own answers are scanned too.
@@ -72,8 +72,10 @@ def build(entry: Entry, index: RepoIndex, *, answers: AnswerFile | None = None, 
     Each provider sees the regions its own kind belongs in.
     A path means the same thing in a code comment as in prose; a sha is safe everywhere; a term is not.
 
-    `history(round)` is the tree a finalized round was read at, with its sha, or None to judge it against the current one.
-    Text still open is scanned first, so where both name one literal the current tree decides it.
+    `history(round)` is None for a round still open, which is judged strictly against the current tree.
+    For a finalized round it is the tree that round was read at with its sha, or `(None, "")` where no head is recorded.
+    Either way the round's references never raise a problem — see FileProvider.
+    Text still open is scanned first, so where both name one literal the strict reading decides it.
 
     A superseded block is scanned last and never raises a problem.
     It still renders, struck, so its references still link where they can; but it is retired text that the block
@@ -85,10 +87,11 @@ def build(entry: Entry, index: RepoIndex, *, answers: AnswerFile | None = None, 
     glossary = GlossaryProvider(terms=terms) if terms else None
     tokens: list[Token] = []
 
-    def scan(text: str, then: tuple[RepoIndex, str] | None) -> None:
+    def scan(text: str, then: tuple[RepoIndex | None, str] | None) -> None:
         past, rev = then if then is not None else (None, "")
-        files = FileProvider(index=index, seen=seen_files, history=past, history_rev=rev)
-        dirs = DirProvider(index=index, seen=seen_dirs, history=past, history_rev=rev)
+        answered = then is not None
+        files = FileProvider(index=index, seen=seen_files, answered=answered, history=past, history_rev=rev)
+        dirs = DirProvider(index=index, seen=seen_dirs, answered=answered, history=past, history_rev=rev)
         for fragment in _referencing_text(text):
             # Files first: a folder token is only ever the trailing-slash form, so the two cannot claim the
             # same span, and ordering them keeps the page's longest-first sort from having to break a tie.
@@ -163,11 +166,12 @@ def index_for(repo: Path, review_root: Path | None = None) -> RepoIndex:
 
 
 def history_for(repo: Path, cfg,
-                trees: dict[str, RepoIndex] | None = None) -> Callable[[int], tuple[RepoIndex, str] | None]:
+                trees: dict[str, RepoIndex] | None = None) -> Callable[[int], tuple[RepoIndex | None, str] | None]:
     """The tree each finalized round was read at, for `build(history=...)`.
 
-    None for a round still open, one that predates the record, or one read at the current head — those are judged
-    against the tree as it is now.
+    None for a round still open, and only for that: the watermark is what makes a round's references lenient.
+    A finalized round with no recorded head gets `(None, "")` — a design review has none, and neither has a round that predates the record.
+    A round read at the current head still gets its tree, because the index also holds the working tree and that moves without a commit.
     Each commit is listed once however many entries ask about it; pass `trees` to keep that across calls, which is
     safe to keep forever since a commit's tree never changes.
     """
@@ -177,8 +181,8 @@ def history_for(repo: Path, cfg,
         if round_number > cfg.watermark:
             return None
         sha = cfg.head_of_round(round_number)
-        if not sha or sha == cfg.head:
-            return None
+        if not sha:
+            return None, ""
         if sha not in cache:
             cache[sha] = RepoIndex.build_at(repo, sha)
         return cache[sha], sha

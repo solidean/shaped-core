@@ -20,10 +20,12 @@ concurrency:
 env:
   EMSCRIPTEN_VERSION: 6.0.9
   EMSDK_CACHE: emsdk-cache
+  # The native `sgl` the shader packages are generated with, built in the host preset: the Linux clang job's compiler.
+  SC_HOST_TOOLSET: "21"
 
 jobs:
   build-and-test:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v5
 

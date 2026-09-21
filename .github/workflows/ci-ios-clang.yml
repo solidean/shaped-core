@@ -21,6 +21,10 @@ concurrency:
 jobs:
   build:
     runs-on: macos-latest
+    env:
+      # The native `sgl` the shader packages are generated with, built in the macOS host preset.
+      # Xcode's Apple Clang is on the image and already builds the tree for iOS, so it builds the host tool too.
+      SC_HOST_TOOLSET: /usr/bin/clang++
     steps:
       - uses: actions/checkout@v5
 

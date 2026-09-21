@@ -136,7 +136,7 @@ if(SC_BUILD_TESTS)
         tests/gpu-types-test.cc
         tests/shader-package-test.cc
     )
-    sc_nexus_binary(shaped-rendering-test KINDS tests)
+    sc_nexus_binary(shaped-rendering-test KINDS tests ${SG_WARP_TEST_BINARY_ARGS})
 
     target_link_libraries(shaped-rendering-test
         PRIVATE
@@ -169,12 +169,17 @@ if(SC_BUILD_TESTS)
     if(WIN32 AND SC_HAS_DXC_COMPILER AND TARGET shaped-graphics-dx12)
         target_sources(shaped-rendering-test PRIVATE
             tests/dx12-entry.cc
+            tests/shader_fixtures.cc
             tests/imgui-routine-test.cc
             tests/imgui-manual-test.cc
             tests/box-filter-mipmap-test.cc
             tests/raster-box-filter-mipmap-test.cc
         )
         target_link_libraries(shaped-rendering-test PRIVATE shaped-graphics-dx12)
+
+        # These import dxcompiler.dll, so the binary does not start without it, and dxil.dll signs what it emits.
+        # Staged here rather than left to the SDL3 block's $<TARGET_RUNTIME_DLLS>, which a build without SDL3 never runs.
+        sc_stage_runtime_dlls(shaped-rendering-test TAG shaped-rendering-test-dxc DLLS ${DXC_RUNTIME_DLLS})
     endif()
 
     # The one test that crosses sr's window into metal's windowed presentation, which nothing else covers.

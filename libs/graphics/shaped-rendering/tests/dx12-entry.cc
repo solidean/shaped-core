@@ -1,3 +1,5 @@
+#include "shader_fixtures.hh"
+
 #include <clean-core/string/format.hh>
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
@@ -12,7 +14,8 @@
 //   - WARP (software): the sweep on a host with no GPU, and a second pass under --thorough on one that has it.
 //
 // The drivers hold no exclusion tags: the async invocation takes each child's own around its run, and a driver holding them too would be refused.
-// So a child that stands up a slib::shader_library, or an sr::imgui_context, carries that tag itself.
+// So a child that stands up an sr::imgui_context carries that tag itself.
+// Each brings the binary's shader library up before invoking, so a child acquires through it rather than standing up its own.
 // Children under one driver run one after another on the same context, so each must leave it as it found it.
 
 namespace
@@ -39,6 +42,7 @@ ASYNC_TEST("sr dx12 - warp")
         SKIP("no dx12 WARP device");
     else
     {
+        (void)sr_test::shader_fixtures(); // alive before any child acquires through it
         co_await nx::async_invoke_tests_in_sequence("warp", ctx.value());
 
         // A device reset during our own tests is a defect, not an environment quirk to tolerate.
@@ -62,6 +66,7 @@ ASYNC_TEST("sr dx12 - hardware")
         SKIP("no dx12 hardware device");
     else
     {
+        (void)sr_test::shader_fixtures();
         co_await nx::async_invoke_tests_in_sequence("hardware", ctx.value());
 
         // A device reset during our own tests is a defect, not an environment quirk to tolerate.

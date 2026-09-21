@@ -70,6 +70,11 @@ struct sg::rendering_info
     cc::optional<sg::depth_stencil_target> depth_stencil_target;
     cc::optional<sg::viewport> viewport;
     cc::optional<tg::aabb2i> scissor; ///< pixel rect; unset => full target extent
+
+    /// The name of the target set these color targets are, as a generated SGL render target states it; empty for none.
+    /// Binding a pipeline built for another set is refused.
+    /// The command list copies the name, so it need not outlive the call.
+    cc::string_view target_set;
 };
 
 /// Parameters of a non-indexed draw: a `{offset = first vertex, size = vertex count}` vertex range,

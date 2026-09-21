@@ -77,6 +77,7 @@ def _binary_names(ctx: Context, preset: dev.Preset) -> list[str]:
 
 
 def run(args: argparse.Namespace, ctx: Context) -> None:
+    ctx.warn_known_issues(ctx.resolve_presets(None))
     match args.pgo_cmd:
         case "run":
             _run(args, ctx)

@@ -34,8 +34,8 @@ One workflow per platform/compiler, so each gets its own status badge in the
 | [ci-windows-arm-msvc.yml](../../.github/workflows/ci-windows-arm-msvc.yml) | `windows-11-arm` | `relwithdebinfo-arm64-windows-msvc`, `--toolset 14.44` (VS 2022, native arm64) |
 | [ci-linux-arm-clang.yml](../../.github/workflows/ci-linux-arm-clang.yml) | `ubuntu-26.04-arm` | `relwithdebinfo-arm64-linux-clang`, `--toolset 21` (native arm64) |
 | [ci-macos-clang.yml](../../.github/workflows/ci-macos-clang.yml)      | `macos-latest`   | `macos-arm-llvm-relwithdebinfo`, `--toolset 22` (assert the `llvm@22` formula) |
-| [ci-wasm-emscripten.yml](../../.github/workflows/ci-wasm-emscripten.yml) | `ubuntu-24.04`   | `emscripten-relwithdebinfo`                                 |
-| [ci-wasm-emscripten-threads-webgpu.yml](../../.github/workflows/ci-wasm-emscripten-threads-webgpu.yml) | `ubuntu-24.04` | `emscripten-threads-webgpu-relwithdebinfo`, emsdk's bundled node; GPU tests SKIP without an adapter, and the job prints how many did |
+| [ci-wasm-emscripten.yml](../../.github/workflows/ci-wasm-emscripten.yml) | `ubuntu-26.04`   | `emscripten-relwithdebinfo`                                 |
+| [ci-wasm-emscripten-threads-webgpu.yml](../../.github/workflows/ci-wasm-emscripten-threads-webgpu.yml) | `ubuntu-26.04` | `emscripten-threads-webgpu-relwithdebinfo`, emsdk's bundled node; GPU tests SKIP without an adapter, and the job prints how many did |
 | [ci-ios-clang.yml](../../.github/workflows/ci-ios-clang.yml) | `macos-latest` | `ios-arm64-relwithdebinfo` (**build-only**) |
 | [ci-android-ndk.yml](../../.github/workflows/ci-android-ndk.yml) | `ubuntu-26.04` | `android-ndk-arm64-relwithdebinfo` (**build-only**) |
 
@@ -143,6 +143,13 @@ Per-platform specifics:
   The job points that at the image's **NDK r29 (Clang 21)** rather than the default r27, whose Clang 18 is too old for our C++23 — `std::atomic_ref`, for one.
   Both presets wire the POSIX `diag_launcher.sh`, since the iOS and Android hosts are macOS and Linux, so their `ci-diag.zip` carries real per-compile sidecars that `build_diag` reads.
   Neither runs tests: the runner cannot execute the produced binaries.
+- **WARP runs on the Windows Clang job alone.**
+  No hosted Windows runner has a GPU, so WARP is what runs the dx12 GPU tests, and it compiles every shader single-threaded: tens of seconds per binary.
+  The other Windows jobs set `SC_DX12_ADAPTER=hardware`, which hides WARP, and their dx12 tests skip.
+  The binaries that bring WARP up declare a 180 s timeout; see [sg's testing doc](../../libs/graphics/shaped-graphics/docs/testing.md#devices-and-adapters).
+- **Every cross job also builds a native `sgl`**, the compiler the SGL shader packages are generated with, in the platform's default preset.
+  `--toolset` names the cross compiler there, so `SC_HOST_TOOLSET` pins the host one instead: `21` on the Linux-hosted wasm and Android jobs.
+  The iOS job points it at Xcode's `/usr/bin/clang++`, the Apple Clang that already builds its iOS target, so no job installs a compiler for this.
 
 `doctor` runs first on every job but is **informational and non-gating** (`continue-on-error`).
 It also probes clangd's compile database and `llvm-cov` / `llvm-profdata`, which a build-and-test gate does not need and which would otherwise fail a fresh runner.

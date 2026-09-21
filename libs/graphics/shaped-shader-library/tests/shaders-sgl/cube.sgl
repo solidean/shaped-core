@@ -1,0 +1,57 @@
+// The cube, as slib's tests compile it: one SGL source through every edge this build has.
+// A copy of examples/graphics/sgl-cube/shaders/cube.sgl, kept here so the package needs no path out of slib.
+// Its pixel stage has helpers, guard clauses and a loop, so every compiler behind an edge meets legalized control flow.
+
+@inline binding constants:
+    view_projection: mat4
+
+@vertex struct cube_vertex:
+    position: pos3
+    normal: vec3
+    color: float3
+
+@pixel struct target:
+    color: float4
+
+struct pixel_input:
+    @position position: hpos4
+    normal: vec3
+    color: float3
+
+@vertex fun main_vs(v: cube_vertex){constants} -> pixel_input:
+    return {
+        position = constants.view_projection * v.position
+        normal = v.normal
+        color = v.color
+    }
+
+// what a light gives a surface that faces `n`
+fun lambert(n: vec3, towards: vec3) -> float => saturate dot(n, normalize towards)
+
+// two fixed lights: a key light, and a weaker fill light from the other side
+fun towards_light(i: int) -> vec3:
+    if i == 0 => return vec3(0.45, 0.8, -0.4)
+    return vec3(-0.7, 0.15, 0.6)
+
+fun strength_of_light(i: int) -> float:
+    if i == 0 => return 0.8
+    return 0.25
+
+// An ambient floor and the lights on top: enough that a face's orientation reads at a glance.
+fun shade(color: float3, normal: vec3) -> float3:
+    // a normal that vanished faces no light, and the floor is all it gets
+    if dot(normal, normal) < 0.5 => return color * 0.25
+
+    let n = normalize normal
+    let mut light = 0.25
+    for i in 0 ..< 2:
+        light += strength_of_light(i) * lambert(n, towards_light i)
+        // fully lit, and no further light adds to that
+        if light >= 1.0 => return color
+    return color * light
+
+@pixel fun main_ps(p: pixel_input) -> target:
+    let lit = shade(p.color, p.normal)
+    return {
+        color = float4(..lit, 1.0)
+    }

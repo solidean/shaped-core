@@ -37,8 +37,9 @@ void bind_group_into(webgpu_command_list::bound_state& state,
     CC_ASSERT(wg != nullptr, "binding_group is not a webgpu binding_group");
     CC_ASSERT(!(wg->transient && wg->creation_epoch != ctx.current_epoch()), "transient binding_group used past its "
                                                                              "epoch");
-    CC_ASSERT(wg->layout == state.layout->groups()[group_index], "binding_group's layout does not match the pipeline "
-                                                                 "layout's slot");
+    CC_ASSERTF(
+        wg->layout == state.layout->groups()[group_index], "{}",
+        sg::impl::describe_layout_mismatch(group_index, state.layout->groups()[group_index].get(), wg->layout.get()));
     auto const pinned = wg->layout->group_index();
     CC_ASSERTF(!pinned.has_value() || pinned.value() == u32(group_index),
                "binding_group is pinned to group index {} by its bindings and cannot be bound at slot {}",

@@ -14,7 +14,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from . import clangd, graphics, network
+from . import clangd, graphics, known_issues, network
 from .llvm_tools import find_tool, resolve_tool
 from ..core.models import Preset
 from ..core.process import emsdk_env, emsdk_toolchain_file, find_emsdk_root, msvc_env
@@ -323,7 +323,7 @@ def _windows_pmu_check() -> tuple[str, bool | None, str]:
 
 def doctor(
     root: Path, preset: Preset | None = None, emsdk_path: str | None = None
-) -> list[tuple[str, bool | None, str]]:
+) -> list[tuple[str, bool | None | str, str]]:
     """Run sanity checks and return (label, ok, detail) for each.
 
     `ok` is True (pass), False (fail), or None for an advisory check that neither passes nor fails — an optional toolchain that simply is not configured.
@@ -381,6 +381,9 @@ def doctor(
 
     # The networking environment cnet's TLS and HTTP backends resolve to — advisory throughout, for the same reason.
     checks.extend(network.checks(root, preset is not None and preset.family == "emscripten"))
+
+    # What this machine carries that we already know misbehaves under our code — a warning, never a failure.
+    checks.extend(known_issues.doctor_rows())
 
     checks.extend(_clangd_checks(root))
 

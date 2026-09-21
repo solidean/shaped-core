@@ -22,6 +22,7 @@ add_library(shaped-graphics
     src/shaped-graphics/barrier/command_list_slot.cc
     src/shaped-graphics/binding/binding.cc
     src/shaped-graphics/binding/impl/binding_conflicts.cc
+    src/shaped-graphics/binding/layout_fit.cc
     src/shaped-graphics/binding/binding_group_layout.cc
     src/shaped-graphics/binding/pipeline_layout.cc
     src/shaped-graphics/binding/impl/layout_hash.cc
@@ -34,6 +35,7 @@ add_library(shaped-graphics
     src/shaped-graphics/binding/staging_binding_group.cc
     src/shaped-graphics/binding/bindless_array.cc
     src/shaped-graphics/context/pipeline_cache.cc
+    src/shaped-graphics/context/cold_caches.cc
     src/shaped-graphics/present/swapchain.cc
     src/shaped-graphics/routine/reload_generation.cc
     src/shaped-graphics/routine/render_routine.cc
@@ -181,6 +183,16 @@ target_compile_options(shaped-graphics
 set(_sg_backends "")
 set(_sg_test_drivers "")
 
+# The sc_nexus_binary arguments every test binary with a dx12 WARP driver passes, empty where there is no WARP.
+# On a GPU-less host WARP runs the whole GPU sweep, and it compiles each shader single-threaded on first use, which is
+# tens of seconds on a small CI runner rather than milliseconds on a GPU; the binaries that bring it up get the time it takes.
+# Cached, so the libraries above sg that carry a WARP driver of their own see it too.
+if(WIN32)
+    set(SG_WARP_TEST_BINARY_ARGS TIMEOUT 180 CACHE INTERNAL "")
+else()
+    set(SG_WARP_TEST_BINARY_ARGS "" CACHE INTERNAL "")
+endif()
+
 if(WIN32)
     add_subdirectory(backends/dx12)
     list(APPEND _sg_backends shaped-graphics-dx12)
@@ -240,7 +252,7 @@ if(SC_BUILD_TESTS)
         tests/barrier/slot-test.cc
         tests/barrier/slot-recording-test.cc
     )
-    sc_nexus_binary(shaped-graphics-test KINDS tests)
+    sc_nexus_binary(shaped-graphics-test KINDS tests ${SG_WARP_TEST_BINARY_ARGS})
 
     # Cross-backend API tests: run the sg API against each backend compiled into this binary. Each backend
     # contributes an entry-point driver under tests/backends/; the alias setup (tests/backends/backends.cc) makes
@@ -256,6 +268,7 @@ if(SC_BUILD_TESTS)
         target_sources(shaped-graphics-test PRIVATE
             tests/backends/backends.cc
             tests/context/context-test.cc
+            tests/context/cold-caches-test.cc
             tests/buffer/buffer-test.cc
             tests/texture/texture-create-test.cc
             tests/command_list/command_list-test.cc
@@ -318,13 +331,15 @@ if(SC_BUILD_TESTS)
             TARGET     shaped-graphics-test
             NAME       sg_test_shaders
             NAMESPACE  sg::test::shaders
-            SOURCE_DIR tests/shaders
+            SOURCE_DIR tests/shaders/hlsl
             LANGUAGE   hlsl
             SHADERS
                 double_values.hlsl:compute:main
                 pattern_fill.hlsl:compute:main
                 ping_pong.hlsl:compute:main
         )
+        # What tests/shaders/shader_fixtures.cc keys on: the SGL package is always there, this one is not.
+        target_compile_definitions(shaped-graphics-test PRIVATE SG_TEST_HAS_HLSL_SHADERS=1)
 
         # Frame-shaped: what creating render targets every frame costs against keeping them, per backend.
         target_sources(shaped-graphics-test PRIVATE tests/transient/transient-benchmark.cc)
@@ -339,6 +354,30 @@ if(SC_BUILD_TESTS)
         if(WIN32 AND TARGET shaped-graphics-dx12)
             target_sources(shaped-graphics-test PRIVATE tests/routine/routine-contexts-test.cc)
         endif()
+    endif()
+
+    # The same fixture in SGL, and NOT behind the DXC gate: that is the whole point of a uniform language.
+    # A WebGPU context needs no external compiler for it, and where DXC exists the same source serves dxil and spirv.
+    #
+    # shader_fixtures.cc is the one slib::shader_library this binary has, so it lands here rather than in the DXC
+    # block above: a build without DXC still has the SGL package to serve.
+    if(_sg_backends)
+        target_sources(shaped-graphics-test PRIVATE
+            tests/shaders/shader_fixtures.cc
+            tests/shaders/sgl-package-test.cc
+            tests/compute/compute-test.cc
+            tests/raster/raster-test.cc
+        )
+        sc_add_shader_package(
+            TARGET     shaped-graphics-test
+            NAME       sg_test_sgl_shaders
+            NAMESPACE  sg::test::sgl_shaders
+            SOURCE_DIR tests/shaders/sgl
+            LANGUAGE   sgl
+            SHADERS
+                double_values.sgl:*
+                quads.sgl:*
+        )
     endif()
 
     # Browser test runner (Emscripten only); a no-op on native toolchains.

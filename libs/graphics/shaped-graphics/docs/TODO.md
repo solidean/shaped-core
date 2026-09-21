@@ -142,6 +142,9 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   - **refit / update** — reuses the topology, and needs `allow_update` at build plus `PERFORM_UPDATE` and the source AS at update time;
   - **compaction** — BLAS `allow_compaction`, query the compacted size, copy into a smaller buffer;
   - **compaction** on both backends, which is the one build-time flag neither implements.
+- **A group's implicit constant buffer is one upload each.**
+  `create_binding_group` allocates a buffer for a generated group's plain members and fills it through `ctx.upload`, one allocation and one copy per group.
+  A per-frame group wants a transient constant-buffer writer instead: a ring in host-visible device memory (ReBAR where there is some), suballocated per epoch and written in place.
 - **The metal barrier clamp has outlived the premise it was written under, and needs checking on a Mac.**
   `metal_command_list::flush_barriers` clamps its stage pair to what a compute encoder accepts, above a comment saying
   nothing is lost "while every op recorded here is a copy or a dispatch — a raster dependency will need the
@@ -355,6 +358,9 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   A window submit waits on other timelines, and the layer defers checking a submission whose waited value it thinks is unreached.
   It replays that check inside a later submit, which is the path `vulkan_epoch.cc` already avoids for host signals.
   **What is in place for the next occurrence:** both async transfer systems keep their last 32 windows.
-  The sg vulkan driver appends them to an `_AFTER_WRITE` failure: slot, window value, destination, range, waits and sequence.
+  The sg vulkan driver appends to an `_AFTER_WRITE` failure the ones whose command buffer, destination or staging buffer the message names.
+  It was seen again on 2026-09-21 under the full suite, as `WRITE_AFTER_READ` and `WRITE_AFTER_WRITE` on two buffers the stream test did not own.
+  That dump was useless: it printed every upload window, all to one other buffer, and the log's size cap cut it off before the download windows.
+  A system none of whose windows match now says so, which rules its copies out: the next dump either shows the two copies or clears both systems.
   If the two copies overlap and were queued out of submission order it is a real bug; if they are disjoint or in order it is the layer.
   The experiment beside it is dropping `wait_token` and `download_wait` from a window submit once the host counter shows them reached, which the comment at that wait chose not to do.

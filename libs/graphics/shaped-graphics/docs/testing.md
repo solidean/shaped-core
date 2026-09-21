@@ -28,9 +28,16 @@ These rules bind every GPU test in the repo — sg's two tiers, and the librarie
   A test builds a context of its own only when the context itself is its subject — creation, teardown, a config knob, pristine epoch or pool state.
 - **The hardware adapter is the default.** It is what the code ships on, and it is fast.
   WARP runs where there is no hardware adapter, which is what a headless CI host is, and under `--thorough` as a second pass on a machine that has one.
+  **A default run on a machine with a GPU never touches WARP.**
+  WARP compiles each shader single-threaded on first use, seconds apiece, which a test run cannot afford twice over.
   The WARP drivers ask `dx12::has_hardware_adapter()` and `nx::is_thorough()` and skip otherwise.
   A hardware driver skips only when there is no hardware adapter; one that exists and still fails to create a device fails the test.
   `SC_DX12_ADAPTER=warp` hides every hardware adapter from a whole process, which is how to reproduce a GPU-less run locally: the hardware drivers skip and the WARP ones run.
+  `hardware` hides WARP instead, and `none` both, which is how a Windows CI job other than Windows Clang runs: no dx12 test at all, and every one skips rather than fails.
+  So a test that creates a context of its own SKIPs when creation fails, never `REQUIRE`s it.
+  WARP runs on the Windows Clang job alone, and the binaries that bring it up declare a 180 s timeout (`SG_WARP_TEST_BINARY_ARGS`).
+  `SC_SG_COLD=all` adds the other half of a CI runner, a first build of every shader and pipeline: the persistent tiers are neither read nor written.
+  `pipelines` or `shaders` turns off one of the two, and the driver's own cache is out of its reach.
 - **A test passes on any adapter.**
   Hardware and WARP differ in precision, in timing and in what a driver does with a blob, and a test is written against the contract rather than against one of them.
   Pinning a test to an adapter is reserved for a **known bug** in that adapter, named where it is pinned, and the list of those stays short.
@@ -61,8 +68,12 @@ It becomes runnable against each backend by two pieces working together:
 - **Entry drivers** — [`tests/backends/<backend>-entry.cc`](../tests/backends/) create a concrete context and `co_await nx::async_invoke_tests_in_sequence("<backend>", ctx)` over every invocable.
   The dx12 ones follow [Devices and adapters](#devices-and-adapters): the hardware adapter by default, WARP where there is none or under `--thorough`.
   A backend that cannot come up `SKIP`s.
-  A driver holds no exclusion tags: the async invocation takes each child's own (`slib-shader-library`, `sg-reload-generation`) around its run.
-  So a test that stands up a `slib::shader_library` or counts routine init runs carries the tag itself, and a driver that also held it would be refused.
+  A driver holds no exclusion tags: the async invocation takes each child's own (`sg-reload-generation`) around its run.
+  So a test that counts routine init runs carries the tag itself, and a driver that also held it would be refused.
+  **Shaders are not one of those tests.**
+  This binary has exactly one `slib::shader_library`, in [`tests/shaders/shader_fixtures.cc`](../tests/shaders/shader_fixtures.cc), holding every compiler the build has.
+  **A driver brings it up before it invokes**, so an invocable simply acquires through the generated package globals and says nothing about where the library came from.
+  Nothing needs excluding, and a shader compiles once for the whole run rather than once per test.
   **A test awaits the GPU rather than blocking on it.**
   A readback awaits its own result: `auto const data = co_await future.data();`.
   `co_await ctx->idle_completion()` is for a test that needs the whole GPU and every actor drained.
@@ -74,8 +85,9 @@ It becomes runnable against each backend by two pieces working together:
   Nexus's orphan check exempts an alias-reachable invocable for exactly this case, so the suite stays green while the backend grows.
   The disabled comes off once no seam aborts, and every backend now sweeps.
   **The whole sweep runs a second time under a browser's rules**, through a `never_block` driver per native backend: any sg call that would wait on the caller's thread asserts there.
-  The dx12 one runs on WARP in every default run, and the vulkan one only under `--thorough`.
-  So on Linux the default run exercises `never_block` only on wasm, through the webgpu driver, which is never-block by nature.
+  The dx12 one runs on WARP, so beside a GPU only under `--thorough`, and every time on a GPU-less host — the Windows Clang CI job.
+  The vulkan one runs only under `--thorough`.
+  So a default run on a machine with a GPU exercises `never_block` only on wasm, through the webgpu driver, which is never-block by nature.
 - **Alias setup** — [`tests/backends/backends.cc`](../tests/backends/backends.cc) defines, per invocable, an alias of the same name expanding to one scoped run per registered backend.
   So `dev.py test "sg - <name>"` runs it on whichever backends this binary was built with.
 

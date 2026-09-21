@@ -14,6 +14,7 @@
 #include <shaped-graphics/binding/pipeline_layout.hh> // pipeline_layout_description::groups
 #include <shaped-graphics/binding/sampler.hh>
 #include <shaped-graphics/compute/compute_pipeline.hh>
+#include <shaped-graphics/context/cold_caches.hh>
 #include <shaped-graphics/context/context.hh>
 #include <shaped-graphics/context/pipeline_cache.hh>
 #include <shaped-graphics/raster/raster_pipeline.hh>
@@ -174,6 +175,9 @@ bcache::blob_cache* pipeline_cache::resolve_blob_cache()
     // a cache may never change what a caller gets, only how fast.
     if (!cc::impl::async_can_schedule_here())
         return nullptr;
+    // Cold only instead of the default store: one set explicitly is a choice, and a test of this tier depends on it.
+    if (!_blob_cache.has_value() && cold_caches_from_environment().pipelines)
+        return nullptr;
 
     // Resolved lazily so that merely creating a context never opens a cache file.
     if (!_blob_cache.has_value())
@@ -326,6 +330,8 @@ cc::hash128 pipeline_cache::compute_raster_pipeline_key(raster_pipeline_descript
 
     b.add_pod(desc.topology);
     b.add_pod(desc.patch_control_points);
+    // A pipeline carries its target set's name, so two that differ only in it are two pipelines.
+    b.add_string(desc.target_set);
 
     // Field by field, like add_sampler: padding bytes would make the hash nondeterministic for logically-equal states.
     b.add_pod(desc.rasterization.fill);

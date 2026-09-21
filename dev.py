@@ -87,11 +87,8 @@ COMMANDS = [
 # ---------------------------------------------------------------------------
 
 # Default build preset per platform, overridable with --preset.
-DEFAULT_BUILD_PRESETS: dict[str, str] = {
-    "Windows": "relwithdebinfo-clang",
-    "Linux": "relwithdebinfo-linux-clang",
-    "Darwin": "macos-arm-llvm-relwithdebinfo",
-}
+# Defined in the lib, because it is also the preset host tools are built in (tools/dev/lib/pipeline/host_tools.py).
+DEFAULT_BUILD_PRESETS: dict[str, str] = dev.DEFAULT_BUILD_PRESETS
 
 # Debug sibling of each default preset, run by the `test` check alongside the others.
 # Deliberately the *-nopch variants: precompiled headers reach every TU through /FI, so a source that dropped an

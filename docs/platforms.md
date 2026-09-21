@@ -51,6 +51,10 @@ All four build and run their suites; only the plain one is gated in CI, which is
 They are deployment tiers rather than a performance gradient: threads mean `SharedArrayBuffer` and therefore a cross-origin-isolated page, while WebGPU alone imposes no such requirement.
 `SC_WASM_EXCEPTIONS=wasm-exceptions` is the one knob that still fails configure as not-yet-supported — [requirements.md](requirements.md#emscripten--wasm) owns all three.
 
+**A wasm binary gets a native-sized stack**: 1 MiB for the main thread and for each pthread, where emscripten's default is 64 KiB.
+Overflowing it is no trap on wasm: the stack grows into the heap, and the crash surfaces later as an out-of-bounds read inside the allocator.
+Code here bounds a recursion's depth and was sized against a native stack, so 64 KiB is a portability bug rather than a tighter budget; [Emscripten.cmake](../tools/cmake/Emscripten.cmake) sets it.
+
 ### WASM debug sidecars (`SC_WASM_DEBUG_SIDECARS`)
 
 `off` (the default), `source-map`, `dwarf` or `both` — where a wasm build's debug info goes when it is not going into the binary.
@@ -171,6 +175,17 @@ So `try_resize_bytes_in_place` returning -1 is a normal outcome rather than a pl
 
 `auto` takes the first backend an example lists that this build has, which on Windows means dx12 and on a wasm build means webgpu.
 So the setting exists to reach the others: building `rotating-cube` every way is how one example is shown to really serve all three, HLSL through DXC for the first two and WGSL for the last.
+`sgl-cube` supports all three as well, from one SGL source.
+
+No preset and no `dev.py` flag sets it, so reaching another backend is a build directory of its own, configured once by hand:
+
+```bash
+cmake --preset x64-windows-clang-ninja-relwithdebinfo -B build/x64-windows-clang-ninja-relwithdebinfo-vulkan -DSC_EXAMPLE_BACKEND=vulkan
+uv run dev.py example sgl-cube --capture --build-suffix vulkan --target graphics-sgl-cube-example
+```
+
+The cache keeps the setting, so every later `dev.py` run with that `--build-suffix` stays on it, and the default build directory is never touched.
+`--target` keeps the run from building every other example into the new directory just to resolve a name.
 
 **Every graphical example reads it**, not only the one that supports every backend — a setting the rest ignore is a setting that lies.
 Three outcomes, and which one an example gets depends on what it supports:
@@ -179,6 +194,7 @@ Three outcomes, and which one an example gets depends on what it supports:
   The setting named something this build does not have, and falling back silently would hide that.
 - **A built backend the example cannot use gives a stub** under the example's own name: it prints what was chosen and what the example supports, and exits non-zero.
   A stub rather than nothing, so `dev.py example` still resolves the name and says why it cannot run.
+  It is registered as a `stub` as well as an example, so `dev.py test` never starts it: it is no nexus binary, and would fail any run it joined.
   It links nothing graphical, because the real target would link a backend that does not exist on that leg.
 - **Otherwise the example builds against it**, `auto` resolving to the example's own first choice.
 

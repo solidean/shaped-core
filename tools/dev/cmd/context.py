@@ -16,7 +16,7 @@ from pathlib import Path
 
 from tools import dev
 from tools.dev import console
-from tools.dev.lib.project.targets import carries_examples, carries_tests, is_tool
+from tools.dev.lib.project.targets import carries_examples, carries_tests, is_stub, is_tool
 
 
 @dataclass(frozen=True)
@@ -64,6 +64,10 @@ class Context:
         """A nexus binary carrying examples, as the build's nexus-binaries.json records it."""
         return carries_examples(target)
 
+    def is_stub_target(self, target: dev.Target) -> bool:
+        """A stand-in for an example this build cannot make; it carries no tests, whatever it is registered as."""
+        return is_stub(target)
+
     def is_tool_target(self, target: dev.Target) -> bool:
         """A nexus binary that is also a program a user runs, whatever tests or examples it carries."""
         return is_tool(target)
@@ -98,6 +102,10 @@ class Context:
             )
         except dev.ToolsetError as e:
             self.die(str(e))
+
+    def warn_known_issues(self, presets: list[dev.Preset]) -> None:
+        """Warn about each known external issue that affects running our code under `presets`, once per invocation."""
+        dev.warn_known_issues(presets)
 
     def discover(self, preset: dev.Preset, emsdk_path: str | None = None) -> list[dev.Target]:
         """Discover targets for a preset, (re)configuring first when the tree is stale or unconfigured.

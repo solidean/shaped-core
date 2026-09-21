@@ -32,7 +32,8 @@ constexpr isize xfer_bytes = 128; // > seam_gap, so the transfer must cross the 
 ASYNC_TEST("sg dx12 - inline upload splits across the ring seam")
 {
     auto ctx_r = dx12::make_test_context({.upload_ring_bytes = ring_bytes});
-    REQUIRE(ctx_r.has_value());
+    if (ctx_r.has_error())
+        SKIP("no dx12 adapter");
     auto const ctx = ctx_r.value();
     auto& c = *ctx;
 
@@ -77,7 +78,8 @@ ASYNC_TEST("sg dx12 - inline upload splits across the ring seam")
 ASYNC_TEST("sg dx12 - inline download splits across the ring seam")
 {
     auto ctx_r = dx12::make_test_context({.download_ring_bytes = ring_bytes});
-    REQUIRE(ctx_r.has_value());
+    if (ctx_r.has_error())
+        SKIP("no dx12 adapter");
     auto const ctx = ctx_r.value();
     auto& c = *ctx;
 

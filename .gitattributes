@@ -3,3 +3,7 @@
 # invalid under POSIX shells, which silently breaks the diag-launcher wrapper
 # used as a CMake compiler/linker launcher on Linux/macOS.
 *.sh text eol=lf
+
+# SGL sources are compared byte for byte: prelude/builtins.sgl against the text the C++ builtin registry generates,
+# and a diagnostic names a byte offset. A CRLF checkout would break both.
+*.sgl text eol=lf

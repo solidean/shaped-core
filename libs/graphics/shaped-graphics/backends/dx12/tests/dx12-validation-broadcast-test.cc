@@ -5,6 +5,7 @@
 #include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/thread.hh>
 #include <nexus/test.hh>
+#include <nexus/tests/thorough.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
 
 // Does D3D12 hand one debug-layer message to every callback on the device that raised it, and to no other device's?
@@ -169,6 +170,9 @@ TEST("sg dx12 - a debug-layer message is logged once however many contexts are a
 TEST("sg dx12 - a debug-layer message is logged by its own device when another adapter's context is older")
 {
     // The broadcast stops at the device, so an older context on a different adapter must not be the one that logs.
+    // The other adapter is WARP, which a default run never brings up beside a GPU.
+    if (!nx::is_thorough())
+        SKIP("needs a WARP device beside the hardware one, which runs under --thorough");
     auto const warp = dx12::as_test_context(
         sg::create_dx12_context({.activate_global_debug_layer = true, .adapter = dx12::dx12_adapter::warp}));
     if (warp.has_error())

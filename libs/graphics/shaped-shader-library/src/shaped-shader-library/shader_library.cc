@@ -3,6 +3,7 @@
 #include <clean-core/record/domain.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/async.hh>
+#include <clean-core/thread/async_coroutine.hh>
 #include <clean-core/thread/thread_pump.hh>
 #include <shaped-graphics/routine/reload_generation.hh>
 #include <shaped-shader-library/binding/binding_groups.hh>
@@ -23,6 +24,53 @@ namespace
 {
 // The generated package symbols are process-wide globals, so two libraries would fight over who owns the assets they point at.
 bool g_library_alive = false;
+
+/// What a preprocessor knew that the compiler behind it does not reflect.
+struct host_facts
+{
+    cc::vector<slib::binding_rename> renames;
+    cc::optional<i32> color_output_count;
+    cc::string target_set;
+
+    [[nodiscard]] bool is_empty() const
+    {
+        return renames.empty() && !color_output_count.has_value() && target_set.empty();
+    }
+};
+
+void apply(sg::compiled_shader& shader, host_facts const& facts)
+{
+    for (auto& b : shader.bindings)
+        for (auto const& r : facts.renames)
+            if (b.name == r.reflected)
+            {
+                b.reflected_name = cc::move(b.name);
+                b.name = r.name;
+                break;
+            }
+    if (facts.color_output_count.has_value())
+        shader.color_output_count = facts.color_output_count;
+    shader.target_set = facts.target_set;
+}
+
+sg::async_compiled_shader applied_once_settled(sg::async_compiled_shader built, host_facts facts)
+{
+    auto shader = co_await built;
+    apply(shader, facts);
+    co_return shader;
+}
+
+/// `built`, with every reflected binding renamed to the name the host knows it by, and its targets stated.
+/// Applied after the compile rather than inside it, so a compiler's cache holds only what the compiler reflected.
+/// A compile that settled already stays settled, as a WGSL one does.
+sg::async_compiled_shader with_host_facts(sg::async_compiled_shader built, host_facts facts)
+{
+    if (!built->has_value())
+        return applied_once_settled(cc::move(built), cc::move(facts));
+    auto shader = *built->try_value();
+    apply(shader, facts);
+    return cc::make_async_from_value(cc::move(shader));
+}
 
 sg::async_compiled_shader make_failed_shader(cc::string message)
 {
@@ -147,7 +195,9 @@ void slib::shader_library::add_package(shader_package const& package, filesystem
     for (auto const& existing : _packages)
         CC_ASSERT(existing.name != package.name, "this shader package was already added");
 
-    _packages.push_back(package_entry{.name = cc::string::create_copy_of(package.name), .language = package.language});
+    _packages.push_back(package_entry{.name = cc::string::create_copy_of(package.name),
+                                      .host_namespace = cc::string::create_copy_of(package.host_namespace),
+                                      .language = package.language});
 
     if (fs != nullptr)
     {
@@ -229,7 +279,7 @@ slib::shader_library::compile_outcome slib::shader_library::compile_shader(cc::s
 
     // Where an `#include "..."` is looked for, most specific first: the shader's own directory, then the package's own root, then the mount root.
     _compile_text(outcome, cc::move(source.value()), virtual_path, impl::parent_path(virtual_path), package.name,
-                  package.language, stage, entry_point, format);
+                  package.host_namespace, package.language, stage, entry_point, format);
     return outcome;
 }
 
@@ -241,7 +291,7 @@ sg::async_compiled_shader slib::shader_library::compile_source(cc::string_view s
 {
     compile_outcome outcome;
     _compile_text(outcome, cc::string::create_copy_of(source), opts.label, opts.include_dir, cc::string_view(),
-                  opts.language, stage, entry_point, format);
+                  cc::string_view(), opts.language, stage, entry_point, format);
     return cc::move(outcome.shader);
 }
 
@@ -250,6 +300,7 @@ void slib::shader_library::_compile_text(compile_outcome& outcome,
                                          cc::string_view label,
                                          cc::string_view source_dir,
                                          cc::string_view package_root,
+                                         cc::string_view host_namespace,
                                          shader_language language,
                                          sg::shader_stage stage,
                                          cc::string_view entry_point,
@@ -297,8 +348,10 @@ void slib::shader_library::_compile_text(compile_outcome& outcome,
         return text;
     };
 
-    shader_source_description desc
-        = {.source = cc::move(source), .entry_point = cc::string::create_copy_of(entry_point), .stage = stage};
+    shader_source_description desc = {.source = cc::move(source),
+                                      .entry_point = cc::string::create_copy_of(entry_point),
+                                      .stage = stage,
+                                      .label = cc::string::create_copy_of(label)};
 
     auto preprocessed = compiler->preprocess(desc, resolve);
     if (preprocessed.has_error())
@@ -308,14 +361,29 @@ void slib::shader_library::_compile_text(compile_outcome& outcome,
         return;
     }
 
-    desc.source = cc::move(preprocessed.value());
+    desc.source = cc::move(preprocessed.value().source);
+    auto facts = host_facts{.renames = cc::move(preprocessed.value().renamed_bindings)};
+    if (preprocessed.value().color_targets >= 0)
+        facts.color_output_count = preprocessed.value().color_targets;
+    if (!preprocessed.value().target_struct.empty() && !host_namespace.empty())
+        facts.target_set = cc::format("{}::{}", host_namespace, preprocessed.value().target_struct);
+    // A preprocessor that renamed the entry point says so, and the compile has to ask for the name the text declares.
+    if (!preprocessed.value().entry_point.empty())
+        desc.entry_point = cc::move(preprocessed.value().entry_point);
 
     // Between the flatten and the compile, because a group's numbering is defined over one flattened translation
     // unit, and because a decorating compiler could be displaced by any later add_compiler for the same edge.
     // It also keeps the compiler's cache key honest: everything the rewrite depends on is folded into the source
     // it hashes.
     // The pass reads HLSL's binding attributes, so a WGSL module, which states its own addresses, never goes through it.
-    if (compiler->source_language() == shader_language::hlsl)
+    // SGL does whenever its text is HLSL, which is the dxil and spirv edges: the emitter writes each group as
+    // `#pragma sc group N` and leaves every register to this pass.
+    // Skipped, DXC numbers the registers itself and puts every group in space 0 and set 0, which a one-group shader
+    // cannot tell apart from the right answer.
+    auto const is_hlsl_text = compiler->source_language() == shader_language::hlsl
+                           || (compiler->source_language() == shader_language::sgl
+                               && (format == sg::shader_format::dxil || format == sg::shader_format::spirv));
+    if (is_hlsl_text)
     {
         auto rewritten = rewrite_binding_groups(desc.source, format);
         if (rewritten.has_error())
@@ -327,5 +395,7 @@ void slib::shader_library::_compile_text(compile_outcome& outcome,
         desc.source = cc::move(rewritten.value());
     }
     outcome.shader = compiler->compile(desc);
+    if (!facts.is_empty())
+        outcome.shader = with_host_facts(cc::move(outcome.shader), cc::move(facts));
     _backlog.track(outcome.shader);
 }

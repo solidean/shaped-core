@@ -1,0 +1,195 @@
+#include "ast-test-support.hh"
+
+#include <nexus/test.hh>
+
+using sgl_test::ast_of;
+using sgl_test::body_of;
+
+TEST("sgl ast - a struct holds fields, properties, methods and nested declarations")
+{
+    CHECK(ast_of("struct material:\n"
+                 "    albedo: vec3\n"
+                 "    roughness: float = 0.5\n"
+                 "    is_rough => roughness > 0.5\n"
+                 "    fun shade(self, n: vec3) -> vec3 => albedo * n\n"
+                 "    fun reset(mut self):\n"
+                 "        self.roughness = 0.5\n"
+                 "    fun matte(albedo: vec3) -> material => {albedo, roughness = 1.0}\n"
+                 "    const max_roughness = 1.0\n"
+                 "    struct inner:\n"
+                 "        x: int\n")
+          == "(struct material\n"
+             "  (field albedo : vec3)\n"
+             "  (field roughness : float = num:0.5)\n"
+             "  (property is_rough => (call:infix > roughness num:0.5))\n"
+             "  (fun shade (params (field self) (field n : vec3)) -> vec3 => (call:infix * albedo n))\n"
+             "  (fun reset (params (field mut self))\n"
+             "    (assign = (member self roughness) num:0.5))\n"
+             "  (fun matte (params (field albedo : vec3)) -> material => (object albedo=<shorthand> "
+             "roughness=num:1.0))\n"
+             "  (const max_roughness = num:1.0)\n"
+             "  (struct inner\n"
+             "    (field x : int)))");
+}
+
+TEST("sgl ast - self or mut self as the first parameter makes an instance method")
+{
+    auto const file = sgl::parse("struct s:\n"
+                                 "    fun a(self) => 1\n"
+                                 "    fun b(mut self, x: int) => 2\n"
+                                 "    fun c(x: int) => 3\n"
+                                 "    fun d(self: s) => 4\n");
+    auto const ast = sgl::ast::build(file);
+    CHECK(sgl::ast::dump_diagnostics(ast) == "");
+
+    auto receivers = cc::vector<sgl::ast::receiver_kind>();
+    for (auto const& d : ast.decls)
+        if (auto const* f = d.node.try_as<sgl::ast::fun_decl>())
+            receivers.push_back(f->receiver);
+    REQUIRE(receivers.size() == 4);
+    CHECK(receivers[0] == sgl::ast::receiver_kind::self);
+    CHECK(receivers[1] == sgl::ast::receiver_kind::mut_self);
+    // Without `self` a method is static, and a typed `self` is an ordinary parameter.
+    CHECK(receivers[2] == sgl::ast::receiver_kind::none);
+    CHECK(receivers[3] == sgl::ast::receiver_kind::none);
+}
+
+TEST("sgl ast - an enum holds cases, properties, methods and nested declarations")
+{
+    CHECK(ast_of("enum light_kind:\n"
+                 "    point\n"
+                 "    spot\n"
+                 "    @deprecated area\n"
+                 "    is_local => self != .area\n"
+                 "    fun falloff(self, d: float) -> float => 1 / d\n"
+                 "    const count = 3\n")
+          == "(enum light_kind\n"
+             "  (case point)\n"
+             "  (case spot)\n"
+             "  (case{@deprecated} area)\n"
+             "  (property is_local => (call:infix != self .area))\n"
+             "  (fun falloff (params (field self) (field d : float)) -> float => (call:infix / num:1 d))\n"
+             "  (const count = num:3))");
+}
+
+TEST("sgl ast - an enum case may carry a value")
+{
+    CHECK(ast_of("enum channel:\n    red = 1\n    green = red << 1\n    @legacy alpha = 8\n    none\n")
+          == "(enum channel\n"
+             "  (case red = num:1)\n"
+             "  (case green = (call:infix << red num:1))\n"
+             "  (case{@legacy} alpha = num:8)\n"
+             "  (case none))");
+
+    // Only an enum has cases, and only `=` gives one a value.
+    CHECK(ast_of("struct s:\n    red = 1\n") == "(struct s\n  (invalid-decl \"red = 1\")) !! expected-member @14+7\n");
+    CHECK(ast_of("enum e:\n    red += 1\n") == "(enum e\n  (invalid-decl \"red += 1\")) !! expected-member @12+8\n");
+
+    auto const file = sgl::parse("enum e:\n    a = 1\n    b\n");
+    auto const ast = sgl::ast::build(file);
+    auto values = cc::vector<bool>();
+    for (auto const& d : ast.decls)
+        if (auto const* c = d.node.try_as<sgl::ast::enum_case_decl>())
+            values.push_back(sgl::ast::is_valid(c->value));
+    REQUIRE(values.size() == 2);
+    CHECK(values[0]);
+    CHECK(!values[1]);
+}
+
+TEST("sgl ast - a property block hands its value on with yield")
+{
+    CHECK(ast_of("struct s:\n    area =>:\n        let w = size.x\n        yield w * size.y\n")
+          == "(struct s\n"
+             "  (property area\n"
+             "    (let w = (member size x))\n"
+             "    (yield (call:infix * w (member size y)))))");
+
+    // Ending in a value says nothing: the last statement is judged like every other.
+    CHECK(ast_of("struct s:\n    area =>:\n        let w = size.x\n        w * size.y\n")
+          == "(struct s\n"
+             "  (property area\n"
+             "    (let w = (member size x))\n"
+             "    (call:infix * w (member size y)))) !! no-effect @54+10\n");
+
+    // Inside a function a property is looked through by `return`, which leaves that function.
+    CHECK(body_of("binding timing:\n    time =>:\n        if paused => return 0.0\n        yield t\n")
+          == "(binding timing\n"
+             "  (property time\n"
+             "    (if\n"
+             "      (branch paused => (return num:0.0)))\n"
+             "    (yield t)))");
+}
+
+TEST("sgl ast - a field carries its attributes")
+{
+    CHECK(ast_of("struct v:\n    @location(0) pos: pos3\n    uv: vec2 @location(1)\n")
+          == "(struct v\n"
+             "  (field{@location(num:0)} pos : pos3)\n"
+             "  (field{@location(num:1)} uv : vec2))");
+}
+
+TEST("sgl ast - what each owner refuses")
+{
+    // A struct has no cases.
+    CHECK(ast_of("struct s:\n    point\n") == "(struct s\n  (case point)) !! member-not-allowed-here @14+5\n");
+    // An enum has no fields.
+    CHECK(ast_of("enum e:\n    x: int\n") == "(enum e\n  (field x : int)) !! member-not-allowed-here @12+6\n");
+    // A binding has no methods and no nested declarations.
+    CHECK(ast_of("binding b:\n    fun f(self) => 1\n")
+          == "(binding b\n  (fun f (params (field self)) => num:1)) !! member-not-allowed-here @15+3\n");
+    CHECK(ast_of("binding b:\n    const k = 1\n")
+          == "(binding b\n  (const k = num:1)) !! member-not-allowed-here @15+5\n");
+    // A binding member has no default.
+    CHECK(ast_of("binding b:\n    scale: float = 1.0\n")
+          == "(binding b\n  (field scale : float = num:1.0)) !! default-not-allowed-here @30+3\n");
+}
+
+TEST("sgl ast - a line that is no member")
+{
+    CHECK(ast_of("struct s:\n    f(x)\n    x: int\n")
+          == "(struct s\n  (invalid-decl \"f(x)\")\n  (field x : int)) !! expected-member @14+4\n");
+    CHECK(ast_of("struct s:\n    x = 5\n") == "(struct s\n  (invalid-decl \"x = 5\")) !! expected-member @14+5\n");
+    CHECK(ast_of("struct s:\n    if a => b\n") == "(struct s\n  (invalid-decl \"if a => b\")) !! expected-member @14+2\n");
+    CHECK(ast_of("struct s:\n    let x = 5\n")
+          == "(struct s\n  (invalid-decl \"let x = 5\")) !! declaration-not-allowed-here @14+3\n");
+    CHECK(ast_of("struct s:\n    module m\n").contains("misplaced-module"));
+    CHECK(ast_of("struct s:\n    sampler l\n").contains("declaration-not-allowed-here"));
+}
+
+TEST("sgl ast - struct, enum and binding are declared by one name")
+{
+    // No block at all is opaque, which a block without a member is not.
+    CHECK(ast_of("@builtin struct bool\n") == "(struct:opaque{@builtin} bool)");
+    CHECK(ast_of("struct unit:\n    // no members\n") == "(struct unit)");
+    CHECK(ast_of("struct:\n    x: int\n") == "(struct <missing>\n  (field x : int)) !! expected-name @0+6\n");
+    CHECK(ast_of("enum 5:\n    a\n") == "(enum <missing>\n  (case a)) !! expected-name @5+1\n");
+    CHECK(ast_of("struct a, b\n") == "(struct:opaque a) !! too-many-arguments @10+1\n");
+    CHECK(ast_of("struct a = b\n") == "(struct:opaque a) !! unexpected-token @9+1\n");
+    CHECK(body_of("struct local:\n    x: int\nenum e:\n    a\n")
+          == "(struct local\n  (field x : int))\n(enum e\n  (case a))");
+}
+
+TEST("sgl ast - a binding member's type may be qualified by mut or out")
+{
+    // AST-128: the access word stands at the top of a type position, and the type under it reads as any other.
+    CHECK(ast_of("binding work:\n"
+                 "    scale: float\n"
+                 "    src: buffer[float]\n"
+                 "    dst: mut buffer[float]\n"
+                 "    result: out texture2d[rgba8unorm]\n")
+          == "(binding work\n"
+             "  (field scale : float)\n"
+             "  (field src : (index buffer float))\n"
+             "  (field dst : (mut (index buffer float)))\n"
+             "  (field result : (out (index texture2d rgba8unorm))))");
+}
+
+TEST("sgl ast - mut and out qualify a type only at the top of a type position")
+{
+    // Inside the type arguments it is an ordinary expression again, and `mut` there is the error it is elsewhere.
+    CHECK(body_of("let a : mut buffer[float] = x\n").contains("(mut (index buffer float))"));
+    CHECK(body_of("let b : buffer[mut float] = x\n").contains("unexpected-keyword"));
+
+    // AST-130: `out` outside a type position is no qualifier.
+    CHECK(body_of("out = 1\n").contains("!!"));
+}

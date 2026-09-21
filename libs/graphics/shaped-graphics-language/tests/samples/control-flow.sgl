@@ -1,0 +1,66 @@
+// where a value comes from: every block says so with `yield`, `return` or `break`, and never by ending in it
+module tonemapping
+
+// an enum case may carry a value, which is what a shader packs into a constant buffer
+enum curve_kind:
+    linear = 0
+    reinhard = 1
+    filmic = 2
+    custom
+
+    is_builtin => self != .custom
+
+// an attribute takes arguments like any call: positional, named, or both
+@slider(0.0, max = 16.0, step = 0.25)
+const exposure = 1.0
+
+// the right side is a type position, and a function type is a type like any other
+type curve = (float) -> float
+
+struct tonemapper:
+    kind: curve_kind
+    white_point: float = 4.0
+    // a function-typed field; `->` binds tighter than the `:` before it
+    apply_to: (float) -> float
+
+    // a property may compute its value in a block, and hands it on with `yield`
+    shoulder =>:
+        let w = white_point * white_point
+        yield 1.0 / w
+
+    fun curve_of(self) -> curve:
+        return case kind:
+            .linear => x => x
+            .reinhard => x => x / (1.0 + x)
+            // an arm may be a block, and `yield` leaves that block, not the function
+            .filmic =>:
+                let s = shoulder
+                // an arrow lambda with a block yields too: there is no `fun` of its own to return from
+                yield x =>:
+                    let scaled = x * (1.0 + x * s)
+                    yield scaled / (1.0 + x)
+            _ => apply_to
+
+fun apply(f: (float) -> float, x: float) => f x
+
+fun tonemap(color: vec3, t: tonemapper) -> vec3:
+    let f = t.curve_of()
+
+    // the anonymous `fun` is the lambda one can `return` from, early exit included
+    let safe = fun (x: float) -> float:
+        if x <= 0.0 => return 0.0
+        return apply(f, x * exposure)
+
+    // it is also the only lambda that takes type parameters
+    let twice = fun [T](g: (T) -> T, x: T) => g(g(x))
+
+    let mut result = vec3(0.0)
+    for i in 0 ..< 3:
+        result[i] = case t.kind:
+            .custom => twice(safe, color[i])
+            _ =>:
+                // a statement block in between is looked through, the way `break` looks through an `if`
+                if color[i] > t.white_point:
+                    yield 1.0
+                yield safe(color[i])
+    return result

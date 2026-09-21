@@ -2,3 +2,4 @@
 # A per-library example lives in that library's own examples/ folder instead; docs/guides/examples.md draws the line.
 add_subdirectory(vdoc/cube-editor)
 add_subdirectory(graphics/rotating-cube)
+add_subdirectory(graphics/sgl-cube)

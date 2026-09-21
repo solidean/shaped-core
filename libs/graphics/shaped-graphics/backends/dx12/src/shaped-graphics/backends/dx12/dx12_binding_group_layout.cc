@@ -55,15 +55,17 @@ cc::result<dx12_binding_group_layout_handle> dx12_binding_group_layout::create(
     for (auto const& b : bindings)
     {
         CC_ASSERT(b.count >= 1, "unbounded / zero-count bindings are not supported yet");
-        // HLSL always has a register space, so dx12 requires one rather than defaulting it: absent and 0 are
-        // different keys in the layout hash, and bind_group compares layouts by pointer — a DXC-reflected
-        // layout would otherwise not bind against a hand-written one for the same interface.
-        CC_ASSERT(b.space.has_value(), "dx12 needs an explicit register space on every binding (absent != space 0)");
+        // A binding without a space takes its group's slot, which is only known once a pipeline layout places the group.
+        // Absent is never read as 0: absent and 0 are different keys in the layout hash, and a layout reflected from
+        // a shader states its space, so the two never meet as one layout by accident.
+        auto const space = b.space.has_value() ? UINT(b.space.value()) : space_of_slot;
 
         if (sg::is_sampler(b.type))
         {
             if (auto const* sd = find_static(b.name); sd != nullptr)
             {
+                // A static sampler is baked into the root signature from here, before any slot is known.
+                CC_ASSERT(b.space.has_value(), "a static sampler needs an explicit register space on dx12");
                 for (int i = 0; i < int(b.count); ++i)
                     layout->static_sampler_descs.push_back(to_d3d12_static_sampler_desc(
                         *sd, UINT(b.index) + UINT(i), b.space.value(), D3D12_SHADER_VISIBILITY_ALL));
@@ -78,7 +80,7 @@ cc::result<dx12_binding_group_layout_handle> dx12_binding_group_layout::create(
                 range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER;
                 range.NumDescriptors = b.count;
                 range.BaseShaderRegister = b.index;
-                range.RegisterSpace = b.space.value();
+                range.RegisterSpace = space;
                 range.OffsetInDescriptorsFromTableStart = UINT(sampler_offset);
                 layout->sampler_ranges.push_back(range);
                 layout->slot_by_binding.push_back(int(layout->sampler_slots.size()));
@@ -92,7 +94,7 @@ cc::result<dx12_binding_group_layout_handle> dx12_binding_group_layout::create(
         range.RangeType = range_type_of(b.type);
         range.NumDescriptors = b.count;
         range.BaseShaderRegister = b.index; // (space, index) -> (register space, register); register-type from the kind
-        range.RegisterSpace = b.space.value();
+        range.RegisterSpace = space;
         range.OffsetInDescriptorsFromTableStart = UINT(view_offset);
         layout->view_ranges.push_back(range);
         layout->slot_by_binding.push_back(int(layout->view_slots.size()));

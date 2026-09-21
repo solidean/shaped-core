@@ -40,8 +40,8 @@ public:
 
     /// Inlines every `#include "path"` line through `resolve`, one level deep per pass, until none are left.
     /// Enough to exercise dependency tracking without pulling in a real preprocessor.
-    [[nodiscard]] cc::result<cc::string> preprocess(slib::shader_source_description const& desc,
-                                                    slib::include_resolver resolve) const override
+    [[nodiscard]] cc::result<slib::preprocessed_source> preprocess(slib::shader_source_description const& desc,
+                                                                   slib::include_resolver resolve) const override
     {
         _preprocess_count.fetch_add(1);
 
@@ -50,7 +50,7 @@ public:
         {
             auto const at = source.find(cc::string_view("#include \""));
             if (at < 0)
-                return source;
+                return slib::preprocessed_source{.source = cc::move(source)};
 
             auto const path_begin = at + isize(cc::string_view("#include \"").size());
             auto const path_end = source.subview(path_begin).find('"');

@@ -33,8 +33,8 @@ public:
         return _target == ssc::dxc::compile_target::spirv ? sg::shader_format::spirv : sg::shader_format::dxil;
     }
 
-    [[nodiscard]] cc::result<cc::string> preprocess(slib::shader_source_description const& desc,
-                                                    slib::include_resolver resolve) const override
+    [[nodiscard]] cc::result<slib::preprocessed_source> preprocess(slib::shader_source_description const& desc,
+                                                                   slib::include_resolver resolve) const override
     {
         auto* const compiler = thread_local_compiler();
         if (compiler == nullptr)
@@ -45,7 +45,7 @@ public:
         auto result = compiler->preprocess(to_dxc(desc), resolve, {.target = _target});
         if (result.has_error())
             return cc::error(cc::move(result.error()));
-        return cc::move(result.value().source);
+        return slib::preprocessed_source{.source = cc::move(result.value().source)};
     }
 
     [[nodiscard]] sg::async_compiled_shader compile(slib::shader_source_description const& desc) const override

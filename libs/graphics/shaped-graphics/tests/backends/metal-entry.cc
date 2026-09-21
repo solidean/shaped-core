@@ -1,3 +1,4 @@
+#include "../shaders/shader_fixtures.hh"
 #include "sg_backends.hh"
 
 #include <clean-core/string/format.hh>
@@ -28,6 +29,7 @@ ASYNC_TEST("sg metal backend")
         SKIP("no metal 4 device");
     else
     {
+        (void)sg_test::shader_fixtures(); // alive before any child acquires through it
         co_await nx::async_invoke_tests_in_sequence("metal", ctx.value());
 
         // A device loss during our own tests is a defect rather than an environment quirk to tolerate.

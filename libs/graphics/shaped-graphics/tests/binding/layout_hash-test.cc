@@ -142,3 +142,19 @@ TEST("sg layout carries the hash it was created with")
 
     CHECK(layout->structural_hash() == sg::impl::binding_group_layout_hash(bindings, {}));
 }
+
+TEST("sg - a group bound at the wrong slot is refused by naming both layouts' bindings")
+{
+    // Layouts are compatible only if they are the same object, and a hash names no shader.
+    // The bindings' names do: an SGL group's are `<binding>_<member>`, so each side says which declaration it came from.
+    auto const frame_bindings = cc::vector<sg::binding>{uniform("frame_camera", 0), uniform("frame_time", 1)};
+    auto const work_bindings = cc::vector<sg::binding>{uniform("work_values", 0)};
+    auto const frame = group_of(frame_bindings);
+    auto const work = group_of(work_bindings);
+
+    auto const message = sg::impl::describe_layout_mismatch(1, frame.get(), work.get());
+    CHECK(message.contains("slot 1"));
+    CHECK(message.contains("[frame_camera, frame_time]"));
+    CHECK(message.contains("[work_values]"));
+    CHECK(sg::impl::describe_layout_mismatch(0, nullptr, work.get()).contains("no layout"));
+}

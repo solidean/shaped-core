@@ -40,6 +40,7 @@ class stream_source;                  // the lazy chunk sequence feeding a strea
 
 class context;
 struct adapter_info;          // which GPU a context runs on (see context/adapter_info.hh)
+struct cold_caches;           // which persistent caches a process runs cold (see context/cold_caches.hh)
 enum class feature;           // a capability a context has or has not (see context/capabilities.hh)
 enum class execution_model;   // whether a caller may block on this context at all (see context/capabilities.hh)
 enum class device_error_kind; // what kind of deferred error a backend reported (see context/device_error.hh)
@@ -244,7 +245,7 @@ struct named_sampler; // {name, sampler} — static sampler (group layout) / dyn
 
 // The protocol a generated binding-group struct provides, and what every `<G>` scope template is constrained on.
 // A concept cannot be forward-declared, so this is a pointer rather than a declaration:
-// `sg::declared_binding_group` lives in binding/binding_group.hh, beside sg::slotted_view.
+// `sg::declared_binding_set` and `sg::declared_binding_group` live in binding/binding_group.hh, beside sg::slotted_view.
 
 // The mutable builder above the immutable group: set descriptors one at a time, snapshot an immutable binding_group out of it.
 // See binding/staging_binding_group.hh.
@@ -296,6 +297,11 @@ struct vertex_type_layout;
 class raster_pipeline;
 struct color_target_state;          // {format, blend, write_mask} — one color target's PSO state
 struct raster_pipeline_description; // {layout, shaders, vertex_input, state, ...} — input to create_raster_pipeline
+namespace impl
+{
+// names the target set of a raster pipeline a backend just built; defined in raster/raster_pipeline.cc
+void set_target_set(raster_pipeline const& pipeline, cc::string_view target_set);
+} // namespace impl
 
 // Draw recording (see command_list/raster.hh) — vertex/index buffer views + draw parameters.
 // (index_format is defined above — shared with raytracing.)

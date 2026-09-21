@@ -1,7 +1,7 @@
 # shaped-shader-library cheat sheet
 
 Shader packages + hot reload.
-Namespace `slib`, depending on shaped-graphics.
+Namespace `slib`, depending on shaped-graphics, plus shaped-graphics-language privately for the SGL compiler edge.
 Headers are included by full path from `src/`: `#include <shaped-shader-library/<topic>/<name>.hh>`.
 
 > **Start at [shaders.md](../shaped-graphics/docs/shaders.md)** for how the whole shader system fits together.
@@ -22,7 +22,7 @@ sc_add_shader_package(
     NAME       my_shaders       # package id -> header name <my_shaders.hh>, and the mount point
     NAMESPACE  my::shaders      # where the generated symbols live
     SOURCE_DIR shaders          # relative to the calling CMakeLists (must define TARGET)
-    LANGUAGE   hlsl             # optional; hlsl is the default and the only one today
+    LANGUAGE   hlsl             # optional, hlsl by default; also wgsl and sgl
     SHADERS
         vignette.hlsl:compute:main          # path:stage:entry_point
         blit.hlsl:vertex:main_vs            # same file, two entry points -> two assets
@@ -33,6 +33,18 @@ sc_add_shader_package(
         shade.hlsl:constants:gConstants)    # path:constants:name -> a C++ mirror with HLSL's padding
 # stages are spelled as sg::shader_stage: compute vertex fragment tessellation_control
 #   tessellation_evaluation geometry raygen closest_hit any_hit miss intersection callable
+# an SGL package spells its stages as SGL does: `cube.sgl:vertex:main_vs`, `cube.sgl:pixel:main_ps`.
+#   `pixel` is the symbol too (cube.pixel.main_ps) and reaches sg as shader_stage::fragment.
+#   ONE file holds both stages, and ONE package serves dx12, vulkan and webgpu.
+#   payload / constants entries are HLSL's alone, and a WGSL package names no generating entry at all.
+#   `binding` and `vertex_input` mean an SGL declaration in an SGL package, below.
+# an SGL package has its own generating kinds, read by the COMPILER (`sgl describe`), never by a parser here:
+#   cube.sgl:*                          # every entry point, binding and @vertex / @pixel struct the file declares
+#   cube.sgl:binding:frame              # a `binding` block;  cube.sgl:vertex_input:v  a `@vertex struct`
+#   cube.sgl:render_target:target       # a `@pixel struct`; a name the file does not declare is a build error
+#   `*` needs no stage word: an SGL entry point carries its stage in the source.
+#   those need a runnable `sgl` while building: the tree's own natively, SC_SGL_TOOL otherwise (a cross build,
+#   SC_BUILD_TOOLS=OFF). dev.py builds the host one for a cross preset itself. Entry points alone need neither.
 # generated at BUILD time into the binary dir; PRIVATE to TARGET. Editing a shader (or an .hlsli it
 #   includes) regenerates; a reconfigure that changes nothing rebuilds nothing.
 # a binding entry generates from the NAMED FILE and never from its includes, so an .hlsli that declares a
@@ -110,9 +122,10 @@ asset->dependencies()               // -> vector<string>; source + resolved incl
 
 ```cpp
 #include <shaped-shader-library/compiler/shader_compiler.hh>
-slib::shader_language              // hlsl | wgsl   (slang/glsl planned)
+slib::shader_language              // hlsl | wgsl | sgl   (slang/glsl planned)
 slib::include_resolver             // cc::function_ref<cc::optional<cc::string>(cc::string_view path)>
-slib::shader_source_description    // { cc::string source; cc::string entry_point; sg::shader_stage stage; }
+slib::shader_source_description    // { cc::string source; cc::string entry_point; sg::shader_stage stage; cc::string label; }
+                                   //   label = what a diagnostic calls the source; never opened, may be empty
 slib::shader_compiler              // ONE edge: source_language() -> target_format()
                                    //   preprocess(desc, resolve) -> cc::result<cc::string>  (flattens #includes)
                                    //   compile(desc) -> sg::async_compiled_shader  (errors on the node, no throw)
@@ -128,6 +141,16 @@ slib::create_dxc_spirv_compiler()  // the same, hlsl -> spirv; works everywhere 
 #include <shaped-shader-library/compiler/wgsl_compiler.hh>  // every platform, WebAssembly included
 slib::create_wgsl_compiler()       // -> std::unique_ptr<shader_compiler>; wgsl -> wgsl, the source IS the bytecode
                                    //   reflection only: a stage or entry point other than the package's is an async error
+
+#include <shaped-shader-library/compiler/sgl_compiler.hh>   // wherever the inner compiler exists
+slib::create_sgl_compiler(std::unique_ptr<shader_compiler> inner)
+                                   // -> std::unique_ptr<shader_compiler>; sgl -> inner->target_format()
+                                   //   dxil -> HLSL for dx12, spirv -> HLSL for vulkan, wgsl -> WGSL
+                                   //   preprocess IS SGL's pipeline, so the flattened source is the EMITTED TEXT;
+                                   //   compile and reflection are the inner compiler's
+                                   //   an SGL error is a preprocess error: `pkg/cube.sgl:12:5: error: unknown-name: foo`
+                                   //   the binding pass runs behind it: the HLSL names each group, the pass writes registers
+lib.add_compiler(slib::create_sgl_compiler(slib::create_wgsl_compiler()));   // one edge per format you can build
 
 #include <shaped-shader-library/binding/wgsl_declarations.hh>
 slib::parse_wgsl_declarations(src) // -> cc::result<wgsl_declarations>; { stage; entry_point; workgroup_size; bindings }
@@ -256,6 +279,42 @@ auto const g = ctx.transient.create_binding_group(layout, shaders::frame_binding
                                     //   acquiring hashes the table and takes the pipeline cache's lock
                                     // a sampler the group gathers that `layout` declares static is dropped
 scope.bind<shaders::frame_bindings>(*g);   // binds at G::group_index, on raster / compute / raytracing
+```
+
+### an SGL package's generated types
+
+```cpp
+// `binding work` -> shaders::work: one field per member, in the shader's order, plus declared_bindings(), gather().
+//   a buffer member is a TYPED view: `mut buffer[float]` -> sg::readwrite_buffer_view<float>, so a read-only view or
+//   a buffer<int> does not compile. A plain member is a plain field (`scale: float` -> float): the group's own
+//   constant buffer, which create_binding_group allocates with the scope's lifetime and fills via ctx.upload.
+//   sg::declared_binding_set, NOT declared_binding_group: no group_index, because SGL numbers a group by its
+//   position in each entry point's list. Bind it at the index the pipeline has it at:
+auto const layout = ctx.cached.acquire_binding_group_layout<shaders::work>();
+auto const group = ctx.transient.create_binding_group(layout, shaders::work{.scale = 2.0f, .values = buf.as_readwrite_buffer()});
+cmd.compute.bind_group(0, *group);        // group 0 of `main`, group 1 of an entry point listing {factor, work}
+// `@inline binding constants` -> shaders::constants: plain fields in C++'s layout, and the block the shader reads:
+pass.set_inline_constants(shaders::constants{.view_projection = vp}.to_block());
+// every name lives in the package namespace, so two files declaring one name is a generator error.
+// sg sees an SGL binding by its path, `work.values`, and a group's constant block by the binding's name:
+//   slib renames what the target's compiler reflected, which stays on each binding as `reflected_name`.
+// `@inline binding constants` also gives constants::inline_binding(): the pipeline layout's inline block, no reflection.
+// an entry point of a `*`-declared file is a small wrapper: `->acquire(ctx)` as before, plus the layout its list states:
+auto const layout = shaders::cube.vertex.main_vs.acquire_layout(ctx);                  // {constants}, nothing reflected
+auto const pipeline = co_await shaders::double_values.compute.main.acquire_pipeline(ctx); // compute: needs nothing else
+// a raster pipeline whose stages list different groups takes their union instead: acquire_pipeline_layout<frame, work>().
+// `@vertex struct v` -> shaders::v and v::layout(): attributes in the shader's order, no semantic or offset by hand.
+//   members marked `@per_instance` / `@stream(name)` split it over buffers: then v::<stream> per buffer, in slot order,
+//   and v::buffers{.per_vertex = verts, .per_instance = insts}.views() for bind_vertex_buffers — typed, so a
+//   buffer of the wrong stream does not compile.
+// `@pixel struct target` -> shaders::target: one sg::color_target per member, by name, plus an optional depth_stencil.
+cmd.raster.render_to(shaders::target{.color = rt.cleared(c), .depth_stencil = depth.cleared(1.0f)}); // -> rendering_info
+//   the pipeline side: .color_targets = shaders::target::states{.color = {.format = f}}, .target_set = shaders::target::name
+//   sg then refuses to bind that pipeline in a rendering of another target set, even one of the same shape.
+//   .target_set may be left out: a compiled SGL pixel shader states its own (and its target count), which sg takes.
+// a package with wrapped entry points also gets check_reflection(ctx) -> shared_async<string>: empty while every
+//   entry point's compiled reflection fits the groups it lists. Compiles them all, so it belongs in a test.
+CHECK(co_await shaders::check_reflection(*ctx) == "");
 ```
 
 ## include resolution

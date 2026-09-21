@@ -82,6 +82,7 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
 def run(args: argparse.Namespace, ctx: Context) -> None:
     presets = ctx.resolve_build_presets(args)
     preset = presets[0]
+    ctx.warn_known_issues(presets)
 
     # One path cannot hold a sweep: every shot would overwrite the last, and their stdout, stderr and manifest
     # would land in one directory too.

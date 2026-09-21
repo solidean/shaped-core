@@ -77,6 +77,13 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
             if absent:
                 thin = True
                 problems.append(f"{entry.slug}: no {', '.join(absent)}")
+        open_asks = {b.name for b in entry.asks if (answers.get(b.name) is None or answers.get(b.name).tentative)}
+        if review.requires_context(entry.group):
+            for round_number in review.missing_intro_rounds(entry, open_asks):
+                warnings.append(
+                    f"{entry.slug}: round {round_number} asks something with no `intro` — open it with what the entry "
+                    f"is about and the options, before any fact or trade-off"
+                )
         # A follow-up belongs under the ask it follows, where the answer it responds to is on screen above it.
         # Naming an ask in another entry usually means a new entry was opened where a round should have been appended,
         # which splits one thread across two files and makes the second restate the first's context.

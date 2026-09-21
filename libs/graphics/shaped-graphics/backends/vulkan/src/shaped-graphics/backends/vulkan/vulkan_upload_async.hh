@@ -225,7 +225,10 @@ public:
     [[nodiscard]] isize window_bytes() const { return _window_bytes; }
 
     /// The last windows this system submitted, one line each, for a validation hazard to be read against.
-    [[nodiscard]] cc::string describe_recent_windows() { return _window_log.describe("async upload"); }
+    [[nodiscard]] cc::string describe_recent_windows(cc::string_view message)
+    {
+        return _window_log.describe("async upload", message);
+    }
 
     // --- actor-facing ------------------------------------------------------------------------------
     // Called only from the copy actor thread, so none of it needs a lock.

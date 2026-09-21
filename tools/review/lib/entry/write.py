@@ -140,6 +140,19 @@ def missing_context_tiers(entry: Entry) -> list[str]:
     return [tier for tier in CONTEXT_TIERS if tier not in present]
 
 
+def missing_intro_rounds(entry: Entry, open_asks: set[str]) -> list[int]:
+    """The rounds that ask something still open and carry no `intro` block of their own.
+
+    An entry answered out of order is read cold, and a round that opens on facts makes the reader reconstruct the
+    question before they can weigh anything.
+    Only rounds with an open ask are owed one: a finalized round is immutable, so a warning there would have no remedy.
+    """
+    latest = entry.newest_round
+    asking = {b.round or latest for b in entry.asks if b.name in open_asks}
+    introduced = {b.round or latest for b in entry.blocks if b.type == "intro"}
+    return sorted(asking - introduced)
+
+
 def word_warnings(entry: Entry) -> list[str]:
     """Context tiers past the length that keeps them worth collapsing."""
     out = []

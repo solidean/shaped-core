@@ -24,6 +24,8 @@ concurrency:
 jobs:
   build-and-test:
     runs-on: windows-latest
+    # The one job that runs the dx12 GPU tests on WARP; every other Windows job sets SC_DX12_ADAPTER=hardware to skip them.
+    # Those binaries declare a longer timeout (SG_WARP_TEST_BINARY_ARGS), which is what WARP's shader JIT costs here.
     steps:
       - uses: actions/checkout@v5
 

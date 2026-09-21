@@ -189,7 +189,7 @@ sg::create_webgpu_context(WGPUDevice, webgpu_config = {}) // -> cc::result<conte
 //   (a test body making bound calls asks for main_thread). See backends/webgpu/readme.md
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
 sg::create_dx12_context(dx12_config = {})          // -> cc::result<context_handle>
-// dx12_config { activate_global_debug_layer=false; adapter=hardware (or warp / hardware_or_warp; SC_DX12_ADAPTER=warp hides hardware process-wide, =hardware forces it for hardware_or_warp); upload_ring_bytes/download_ring_bytes/async_{upload,download}_window_bytes=16 MiB; descriptor+sampler heap sizing }
+// dx12_config { activate_global_debug_layer=false; adapter=hardware (or warp / hardware_or_warp; SC_DX12_ADAPTER=warp hides hardware process-wide, =hardware hides WARP, =none hides both); upload_ring_bytes/download_ring_bytes/async_{upload,download}_window_bytes=16 MiB; descriptor+sampler heap sizing }
 // GOTCHA: activate_global_debug_layer is PROCESS-wide and one-way, unlike vulkan's per-instance enable_validation_layers.
 //   false = 'this context does not ask for it', NOT 'this context is unvalidated' — nothing ever deactivates it.
 //   it must be activated before the process's FIRST device: a later activation is refused, because performing it
@@ -300,7 +300,8 @@ auto pass = cmd.raster.render_to({.color_targets={rtv.cleared(tg::vec4f(1,0,0,1)
 // pass.command_list() -> command_list& (for non-raster ops: .context(), .upload) | pass.render_target_size() -> tg::vec2i (targets' shared extent)
 //   pass.color_formats() -> span<pixel_format const> | pass.depth_format() -> optional<pixel_format>. The raster draw calls are also on `pass`.
 // view builders: view.cleared(color/depth[,stencil]) | view.preserved() | view.discarded() -> color_target / depth_stencil_target
-// rendering_info { fixed_vector<color_target,max_color_targets> color_targets; optional<depth_stencil_target>; optional<viewport>; optional<tg::aabb2i> scissor }
+// rendering_info { fixed_vector<color_target,max_color_targets> color_targets; optional<depth_stencil_target>; optional<viewport>; optional<tg::aabb2i> scissor; string_view target_set }
+//   target_set: a generated SGL target's name; bind_pipeline asserts a pipeline naming another set. Empty on either side is unchecked.
 //   viewport/scissor unset => full target extent. sg::viewport { tg::pos2f offset; tg::vec2f size; float min_depth=0, max_depth=1 }
 cmd.raster.manual.begin_rendering(info) / .end_rendering()   // void — same, by hand (must balance); prefer render_to
 
@@ -567,7 +568,7 @@ sg::compare_op              // never|less|equal|less_equal|greater|not_equal|gre
 #include <shaped-graphics/binding/binding.hh>
 sg::binding_type            // uniform_buffer | read{only,write}_structured_buffer | read{only,write}_raw_buffer
                             //   | read{only,write}_texture | sampler | acceleration_structure   (replaces D3D_SHADER_INPUT_TYPE)
-sg::binding                 // { cc::string name; cc::optional<u32> group_index, space; u32 index, count; binding_type type; cc::optional<isize> block_size;
+sg::binding                 // { cc::string name, reflected_name (diagnostics only; set where a compiler edge renamed it); cc::optional<u32> group_index, space; u32 index, count; binding_type type; cc::optional<isize> block_size;
                             //   cc::optional<texture_view_dimension> texture_dimension }  — reflected for texture kinds; hand-written array bindings must set it
                             //   + what a WebGPU bind group layout needs and dx12/vulkan ignore:
                             //   shader_stages visibility        — EMPTY = not known (treated as every stage), never "no stage"
@@ -637,7 +638,12 @@ ctx.persistent.create_binding_group(group_layout, span<named_view const>, span<n
 ctx.transient.create_binding_group(group_layout, span<named_view const>, span<named_sampler const> dyn={})   // -> binding_group_handle per-epoch (ring-allocated); layouts/pipeline come from ctx.uncached (+ try_ twin)
 // both scopes take span<slotted_view const> as well — same validation, no name lookup; a slot naming a sampler or past the end is an error, never a wrong bind
 // a GENERATED group struct (slib's binding pass) is taken directly, against a layout acquired from its declarations:
-sg::declared_binding_group   // concept in binding/binding_group.hh — { group_index; declared_bindings(); declared_samplers(); gather() }
+sg::declared_binding_set     // concept in binding/binding_group.hh — { declared_bindings(); declared_samplers(); gather() }
+sg::declared_binding_group   // ... and `group_index`, which only `scope.bind<G>(group)` needs; an SGL group has none
+sg::declared_inline_constants  // { static binding inline_binding(); } — a generated @inline block
+ctx.cached.acquire_pipeline_layout<frame, work, constants>(static_samplers = {})
+                             // -> pipeline_layout_handle from generated types alone: each binding set is the group at its
+                             //    position among the sets, and one inline-constants type is the inline block
 ctx.cached.acquire_binding_group_layout<G>()                    // -> binding_group_layout_handle from G's declarations alone
 ctx.cached.acquire_binding_group_layout<G>(span<named_sampler const>)  // + static samplers G left undeclared; one it DID declare asserts
 ctx.transient.create_binding_group(layout, G{...})              // -> binding_group_handle; the layout is PASSED IN, not re-acquired per call
@@ -705,7 +711,10 @@ cmd.compute.declare_array_texture_access(name, elements) // void — same for a 
 sg::raster_pipeline_description   // { pipeline_layout_handle layout; compiled_shader vertex_shader; optional<compiled_shader> fragment_shader;
                                   //   optional<compiled_shader> tessellation_control_shader/tessellation_evaluation_shader (both-or-neither, need patch_list); optional<compiled_shader> geometry_shader;
                                   //   vertex_input_layout vertex_input; primitive_topology topology=triangle_list; int patch_control_points=0 (1..32, patch_list only); rasterization_state; depth_stencil_state;
-                                  //   small_vector<color_target_state,8> color_targets; pixel_format depth_stencil_format=undefined; int sample_count=1; pinned_data cached_pipeline={} }
+                                  //   small_vector<color_target_state,8> color_targets; pixel_format depth_stencil_format=undefined; int sample_count=1; pinned_data cached_pipeline={}; string target_set }
+                                  //   depth/stencil state with no depth_stencil_format warns at creation: it would draw without either
+                                  //   creation refuses a stage whose reflection does not fit `layout` (sg::describe_layout_misfit, binding/layout_fit.hh),
+                                  //   and a fragment shader's color_output_count (at most color_targets; the rest need an empty write_mask) and target_set; an empty target_set takes the shader's
 sg::color_target_state            // { pixel_format format; optional<blend_state> blend={}; color_write_mask write_mask=color_write_mask_all }  — one color target's PSO state
 sg::vertex_input_layout           // { small_vector<vertex_input_slot,8> slots; vector<vertex_attribute> attributes }; static create<Vs...>() derives one slot per type
                                   //   via a sg::vertex_layout_of<V> specialization (static vertex_type_layout get()). vertex_attribute { string semantic; u32 semantic_index; vertex_attribute_format format; isize offset; int slot }
@@ -801,6 +810,7 @@ ctx.backlog.start(node);  ctx.backlog.settled()                //   detach work 
 // RASTER takes the layout's ADDRESS, so acquire it through the cache or two identical layouts miss each other.
 //   In-memory only today; it would have to go structural before raster PSOs could be persisted.
 ctx.cached.cache().set_blob_cache(&c)   // persistent 2nd tier: serialized PSO blobs surviving across RUNS (bcache::blob_cache*)
+// SC_SG_COLD=pipelines|shaders|all (comma-combined) runs that tier, and/or DXC's shader tier, cold: neither read nor written (context/cold_caches.hh)
                                         // defaults to bcache::default_cache(); nullptr = off. Keyed on adapter + driver too
                                         // The build PARKS on the store: with no ambient scheduler and no worker scope, the tier
                                         //   is skipped and the pipeline is built plainly

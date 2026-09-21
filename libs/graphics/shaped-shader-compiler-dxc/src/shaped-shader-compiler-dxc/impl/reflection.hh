@@ -16,6 +16,8 @@ struct reflected_shader
 {
     cc::vector<sg::binding> bindings;
     cc::optional<sg::compute_dimensions> workgroup_size; ///< populated for the compute stage
+    /// Populated for the fragment stage: one past the highest render target it writes, since targets may be sparse.
+    cc::optional<i32> color_output_count;
 };
 
 /// Extracts bindings (+ compute workgroup size) from a DXC compile result via DXC_OUT_REFLECTION.

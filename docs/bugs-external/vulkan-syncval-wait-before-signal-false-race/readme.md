@@ -1,6 +1,6 @@
 # Vulkan validation layer: false WRITE_RACING_READ after a wait on a not-yet-signalled timeline value
 
-**Status:** fixed upstream in Vulkan SDK 1.4.350; `dev.py doctor` flags anything older.
+**Status:** fixed upstream in Vulkan SDK 1.4.350; `dev.py` warns about anything older.
 **Affects:** `VK_LAYER_KHRONOS_validation` with synchronization validation, SDK 1.4.304 through 1.4.341.
 We hit it on 1.4.313 and confirmed the fix on 1.4.357.
 **Found by:** `shaped-graphics-test` failing at random with validation errors attributed to no test.
@@ -37,6 +37,21 @@ Three things made it look like our bug and were not:
 - The three recurring writer command buffers matched the async upload's three staging windows, so the writes really were ours.
 - More overlapping tests made it more frequent, which reads like a race in our code rather than in the layer's bookkeeping.
 
+### A second face: a layout the image never had
+
+The same deferral also misorders the layer's own image-layout tracking, and there it fails every run rather than one in ten.
+`sg stream - a list recorded before a fresh texture's upload and submitted after it` records a download from a fresh texture, then enqueues an async upload into it, then submits the list.
+The list waits on the upload's timeline value before the transfer thread has submitted the window that signals it.
+On 1.4.313 the layer takes the list's transition to `TRANSFER_SRC_OPTIMAL` as already done when the window arrives, and reports:
+
+```raw
+vkQueueSubmit(): pSubmits[0].pCommandBuffers[0] command buffer VkCommandBuffer 0x24ad1059250 expects VkImage 0x180000000018
+(subresource: aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, mipLevel = 0, arrayLayer = 0) to be in layout VK_IMAGE_LAYOUT_GENERAL--instead,
+current layout is VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL.
+```
+
+On the GPU the window runs first, since the list waits for it, and the image really is in `GENERAL` when the copy reads it.
+
 ## Why it is the layer and not us
 
 Same binary, same machine, only the layer swapped through `VK_LAYER_PATH`:
@@ -45,6 +60,8 @@ Same binary, same machine, only the layer swapped through `VK_LAYER_PATH`:
 |---|---|---|
 | SDK 1.4.313 | 30 | failed on iteration 9, 20 WRITE_RACING_READ lines |
 | SDK 1.4.357 | 100 | all passed |
+| SDK 1.4.313 | the layout test above, 5 | failed on iteration 1, every time |
+| SDK 1.4.357 | the layout test above, 20 | all passed |
 
 ## Where the diagnosis comes from
 
@@ -63,7 +80,9 @@ That upstream test is the standalone reproduction, which is why this entry has n
 ## What we do about it
 
 Nothing in the library.
-`dev.py doctor` reports a `VULKAN_SDK` older than 1.4.350 as a problem (`tools/dev/lib/toolchain/graphics.py`), and `vulkan-entry.cc` says why next to where it enables synchronization validation.
+A `VULKAN_SDK` older than 1.4.350 is a known issue in `tools/dev/lib/toolchain/known_issues.py`.
+`dev.py doctor` shows it as a warning, and every command that runs our binaries prints it before it starts.
+`vulkan-entry.cc` says why next to where it enables synchronization validation.
 
 ## Retiring it
 

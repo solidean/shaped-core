@@ -7,8 +7,6 @@
 #include <shaped-rendering/imgui_context.hh>
 #include <shaped-rendering/imgui_routine.hh>
 #include <shaped-rendering/shaders.hh>
-#include <shaped-shader-library/compiler/dxc_compiler.hh>
-#include <shaped-shader-library/shader_library.hh>
 
 #include <memory>
 
@@ -24,11 +22,9 @@ constexpr auto target_width = 256;
 constexpr auto target_height = 256;
 
 /// Everything one frame needs, so each test reads as the frame it is testing rather than as setup.
-/// Held by unique_ptr because the shader library is pinned to its address.
 struct imgui_fixture
 {
     sg::context_handle ctx;
-    slib::shader_library shader_lib;
     sr::imgui_context imgui;
     sg::texture_2d target;
 
@@ -90,15 +86,8 @@ std::unique_ptr<imgui_fixture> make_fixture(sg::context_handle const& ctx)
     if (ctx == nullptr || !ctx->accepts_shader_format(sg::shader_format::dxil))
         return nullptr;
 
-    auto compiler = slib::create_dxc_compiler();
-    if (!compiler.has_value())
-        return nullptr;
-
     auto fixture = std::make_unique<imgui_fixture>();
     fixture->ctx = ctx;
-    fixture->shader_lib.add_compiler(cc::move(compiler.value()));
-    fixture->shader_lib.add_package(sr::shader_package());
-
     fixture->imgui = sr::imgui_context::create();
     fixture->target = fixture->ctx->persistent.create_texture_2d(
         {.format = sg::pixel_format::rgba8_unorm,
@@ -136,7 +125,6 @@ void draw_test_window()
 
 ASYNC_INVOCABLE_TEST("sr::imgui_routine - draws a window into an offscreen target",
                      (sg::context_handle const& ctx),
-                     exclusive("slib-shader-library"),
                      exclusive("sr-imgui-context"))
 {
     auto const f = make_fixture(ctx);
@@ -159,7 +147,6 @@ ASYNC_INVOCABLE_TEST("sr::imgui_routine - draws a window into an offscreen targe
 
 ASYNC_INVOCABLE_TEST("sr::imgui_routine - a non-zero display pos shifts what lands on the target",
                      (sg::context_handle const& ctx),
-                     exclusive("slib-shader-library"),
                      exclusive("sr-imgui-context"))
 {
     // The multi-viewport path, which a single viewport at the origin never reaches:
@@ -189,7 +176,6 @@ ASYNC_INVOCABLE_TEST("sr::imgui_routine - a non-zero display pos shifts what lan
 
 ASYNC_INVOCABLE_TEST("sr::imgui_routine - a shader reload keeps drawing",
                      (sg::context_handle const& ctx),
-                     exclusive("slib-shader-library"),
                      exclusive("sr-imgui-context"),
                      exclusive("sg-reload-generation"))
 {
@@ -212,7 +198,6 @@ ASYNC_INVOCABLE_TEST("sr::imgui_routine - a shader reload keeps drawing",
 
 ASYNC_INVOCABLE_TEST("sr::imgui_routine - an empty frame records nothing and does not assert",
                      (sg::context_handle const& ctx),
-                     exclusive("slib-shader-library"),
                      exclusive("sr-imgui-context"))
 {
     auto const f = make_fixture(ctx);

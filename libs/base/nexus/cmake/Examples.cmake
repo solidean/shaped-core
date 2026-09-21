@@ -18,9 +18,10 @@
 #       <out_mode> is `ok` (build it against <out_backend>), `stub` (the chosen backend exists but this example
 #       does not support it) or `none` (nothing this example supports was built -- the caller returns).
 #
-#   sc_add_example_backend_stub(<target> <chosen> SUPPORTS <name>...)
+#   sc_add_example_backend_stub(<target> <chosen> SUPPORTS <name>... [REASON <text>])
 #       A target under the example's own name that prints what was chosen and what the example supports, and
 #       exits non-zero. Links nothing graphical, so it builds on a leg where the real target could not.
+#       REASON replaces the closing advice to reconfigure, for a stub that reconfiguring would not help.
 
 # The generated main, byte for byte what every hand-written tests/main.cc holds.
 set(SC_EXAMPLE_MAIN_CONTENT
@@ -148,8 +149,16 @@ function(sc_add_example_backend_stub target chosen)
         return()
     endif()
 
-    cmake_parse_arguments(PARSE_ARGV 2 ST "" "" "SUPPORTS")
+    cmake_parse_arguments(PARSE_ARGV 2 ST "" "REASON" "SUPPORTS")
     string(REPLACE ";" ", " _supported "${ST_SUPPORTS}")
+
+    # REASON replaces the advice to reconfigure, for a stub no setting of SC_EXAMPLE_BACKEND turns into the example.
+    # It lands inside a C string literal, so it must hold no quote and no backslash.
+    if(ST_REASON)
+        set(_advice "${ST_REASON}")
+    else()
+        set(_advice "Reconfigure with -DSC_EXAMPLE_BACKEND=auto, or with one it supports.")
+    endif()
 
     set(_stub "${CMAKE_CURRENT_BINARY_DIR}/${target}-backend-stub.cc")
 
@@ -165,7 +174,7 @@ int main()
     std::fprintf(stderr,
                  "@target@: SC_EXAMPLE_BACKEND=@chosen@, which this example does not support "
                  "(it supports: @_supported@).\n"
-                 "Reconfigure with -DSC_EXAMPLE_BACKEND=auto, or with one it supports.\n");
+                 "@_advice@\n");
     return 1;
 }
 ]])
@@ -175,5 +184,6 @@ int main()
     add_executable(${target} "${_stub}")
     set_target_properties(${target} PROPERTIES FOLDER "examples")
     # Registered under the name it stands in for, so dev.py still treats the target as an example binary.
-    sc_nexus_binary(${target} KINDS examples)
+    # And as a stub, since it is no nexus binary: a test run would start it, and it exits 1 whatever it is asked.
+    sc_nexus_binary(${target} KINDS examples stub)
 endfunction()

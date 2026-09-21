@@ -242,8 +242,10 @@ cc::span<WGPUSampler const> webgpu_binding_group_layout::slot_samplers() const
 
 // -- pipeline layout --
 
-webgpu_pipeline_layout::webgpu_pipeline_layout(webgpu_context& ctx, cc::hash128 hash)
-  : sg::pipeline_layout(hash), _ctx(ctx)
+webgpu_pipeline_layout::webgpu_pipeline_layout(webgpu_context& ctx,
+                                               cc::hash128 hash,
+                                               sg::pipeline_layout_description const& desc)
+  : sg::pipeline_layout(hash, desc.groups, desc.inline_constants), _ctx(ctx)
 {
 }
 
@@ -253,7 +255,7 @@ cc::result<webgpu_pipeline_layout_handle> webgpu_pipeline_layout::create(webgpu_
     if (int(desc.groups.size()) > sg::max_binding_groups)
         return cc::error("pipeline_layout: more group slots than max_binding_groups");
 
-    auto layout = std::make_shared<webgpu_pipeline_layout>(ctx, sg::impl::pipeline_layout_hash(desc));
+    auto layout = std::make_shared<webgpu_pipeline_layout>(ctx, sg::impl::pipeline_layout_hash(desc), desc);
     for (auto const& group : desc.groups)
     {
         CC_ASSERT(group != nullptr, "a pipeline layout's group is null");

@@ -20,12 +20,12 @@ public:
     [[nodiscard]] slib::shader_language source_language() const override { return slib::shader_language::wgsl; }
     [[nodiscard]] sg::shader_format target_format() const override { return sg::shader_format::wgsl; }
 
-    [[nodiscard]] cc::result<cc::string> preprocess(slib::shader_source_description const& desc,
-                                                    slib::include_resolver resolve) const override
+    [[nodiscard]] cc::result<slib::preprocessed_source> preprocess(slib::shader_source_description const& desc,
+                                                                   slib::include_resolver resolve) const override
     {
         // WGSL has no include directive, so there is nothing to flatten.
         (void)resolve;
-        return cc::string(desc.source);
+        return slib::preprocessed_source{.source = cc::string(desc.source)};
     }
 
     [[nodiscard]] sg::async_compiled_shader compile(slib::shader_source_description const& desc) const override

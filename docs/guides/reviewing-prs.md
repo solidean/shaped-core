@@ -672,6 +672,12 @@ pr-146 again: the acquire hooks' "setting a provider after the first acquire is 
 `material-resolution-test.cc` already carried a CHECK under the comment "Clearing the hook does not un-cache what it already answered with."
 Three of that review's nine findings turned out to be already recorded — one TODO, one doc comment, one test.
 
+**A spec rule that states a limitation counts too, and so does a comment in a test generator.**
+The SGL review filed "a `case` pattern that inlines a helper fails to emit" as a legalizer bug.
+The branch's `legalization.md` already had LEGAL-47, "A pattern that has an effect is not carried: C1 runs behind the expression rules".
+The random program generator said the same beside its pattern code.
+The maintainer chose the fix anyway, which is the second honest move below; the finding should have been raised as one.
+
 When the branch already records it, there are only two honest moves.
 **Drop it**, if the author's call stands.
 Or **raise it as a disagreement with the recorded judgement**, quoting what they wrote and saying why this branch should not ship with it.
@@ -752,6 +758,13 @@ The maintainer asked whether an async run driven by the browser loop would not s
 It would: every test is already an async node, and the blocking lives in three drivers, of which a no-threads build reaches only `drive_serially`.
 Its "no progress" branch is exactly where a return to the host goes.
 The executor had not been read when the option was priced, and the inflated price is what made the recommended option look cheap.
+
+**"Nothing has an effect" is a claim about every write the language can make.**
+The SGL review priced an evaluation-order question as invisible today, since "nothing SGL can write has an observable effect except `print`".
+The maintainer answered with three lines: a helper that stores to a buffer, called from the index of a store to that buffer.
+Buffer stores had landed on the same branch, so the claim was stale the day it was written.
+Checking it took one more step, which also found a real bug: an element read to the left of such a helper was read after the store.
+List the writes the language has, and ask of each whether a helper can make one, before calling an order unobservable.
 
 **Beware two mechanisms with similar names.**
 The same review asserted a cache key moved on an include edit, against a header saying it does not.

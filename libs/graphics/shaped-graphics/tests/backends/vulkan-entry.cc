@@ -1,3 +1,4 @@
+#include "../shaders/shader_fixtures.hh"
 #include "sg_backends.hh"
 
 #include <clean-core/string/format.hh>
@@ -33,6 +34,7 @@ ASYNC_TEST("sg vulkan backend")
         SKIP("no vulkan device");
     else
     {
+        (void)sg_test::shader_fixtures(); // alive before any child acquires through it
         co_await nx::async_invoke_tests_in_sequence("vulkan", ctx.value());
 
         // A device loss during our own tests is a defect, not an environment quirk to tolerate.
@@ -45,11 +47,11 @@ ASYNC_TEST("sg vulkan backend")
 }
 
 // The whole sweep again under a browser's rules; see the dx12 never-block driver.
-// Under --thorough only: the dx12 one already proves the property by default on a software adapter, and a vulkan device here is a hardware one.
+// Under --thorough only, like the dx12 one beside a GPU; a vulkan device here is a hardware one.
 ASYNC_TEST("sg vulkan never-block backend")
 {
     if (!nx::is_thorough())
-        SKIP("the dx12 never-block driver covers the default run on WARP; this one runs under --thorough");
+        SKIP("never-block runs under --thorough, and on a GPU-less host through the dx12 driver on WARP");
 
     auto ctx = sg::create_vulkan_context(
         {.enable_validation_layers = true, .enable_sync_validation = true, .execution = sg::execution_model::never_block});

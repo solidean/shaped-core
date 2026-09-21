@@ -4,7 +4,7 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/result.hh>
 #include <clean-core/thread/mutex.hh>
-#include <shaped-graphics/binding/binding_group.hh> // sg::declared_binding_group, sg::slotted_view
+#include <shaped-graphics/binding/binding_group.hh> // sg::declared_binding_set, sg::slotted_view
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/resource/buffer.hh>               // typed buffer<T> wrapper (returned by create_buffer below)
 #include <shaped-graphics/resource/texture_descriptions.hh> // shape-specific descriptions + the typed factories below
@@ -128,12 +128,18 @@ public:
     ///
     /// Throws sg::binding_group_exception on a layout that does not match `G`, and sg::device_lost_exception
     /// on a lost device.
-    template <declared_binding_group G>
+    template <declared_binding_set G>
     [[nodiscard]] binding_group_handle create_binding_group(binding_group_layout_handle const& layout, G const& group)
     {
         cc::vector<slotted_view> views;
         cc::vector<named_sampler> samplers;
         group.gather(views, samplers);
+        if constexpr (impl::has_implicit_constants<G>)
+        {
+            auto block = cc::vector<byte>::create_filled(G::constants_size, byte(0));
+            group.write_constants(block);
+            views.push_back({.slot = binding_slot(G::constants_slot), .view = implicit_constants(cc::move(block))});
+        }
         impl::drop_static_samplers(*layout, samplers);
         return create_binding_group(layout, views, samplers);
     }
@@ -191,6 +197,10 @@ private:
     // A backend whose device is not reference counted, such as vulkan, leaks the allocation instead, and its
     // validation layer reports it at vkDestroyDevice.
     void release_heap_at_shutdown();
+
+    /// A generated group's constant block, in a transient buffer of its own that expires with the group's epoch.
+    /// Filled through `ctx.upload`, which a later command list reading it waits for.
+    [[nodiscard]] raw_view implicit_constants(cc::vector<byte> block);
 
     context& _ctx;
 

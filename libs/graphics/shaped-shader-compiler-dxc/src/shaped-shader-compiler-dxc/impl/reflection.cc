@@ -195,6 +195,20 @@ cc::result<reflected_shader> reflect(IDxcUtils* utils, IDxcResult* result, sg::s
         out.workgroup_size = sg::compute_dimensions{.x = int(x), .y = int(y), .z = int(z)};
     }
 
+    if (stage == sg::shader_stage::fragment)
+    {
+        auto count = 0;
+        for (UINT i = 0; i < shader_desc.OutputParameters; ++i)
+        {
+            D3D12_SIGNATURE_PARAMETER_DESC parameter = {};
+            if (FAILED(reflection->GetOutputParameterDesc(i, &parameter)))
+                continue;
+            if (parameter.SystemValueType == D3D_NAME_TARGET)
+                count = cc::max(count, int(parameter.SemanticIndex) + 1);
+        }
+        out.color_output_count = count;
+    }
+
     return out;
 }
 } // namespace ssc::dxc::impl

@@ -52,6 +52,16 @@ class Preset:
         return "arm64" if "arm64" in self.configure_preset else "x64"
 
     @property
+    def is_cross_compiling(self) -> bool:
+        """Whether this preset builds for a machine other than the one building it, so its own binaries cannot run here.
+
+        What that costs is a host tool: whatever the build runs, `sgl` for one, has to come from a native preset instead.
+        Keyed off the preset naming, like `is_emscripten`.
+        """
+        cp = self.configure_preset
+        return self.is_emscripten or cp.startswith("android-") or cp.startswith("ios-")
+
+    @property
     def is_emscripten(self) -> bool:
         """Whether this preset cross-compiles to WebAssembly via Emscripten.
 
@@ -71,6 +81,8 @@ class Target:
     # What a nexus binary carries — "tests", "examples", "tool" — from the build's nexus-binaries.json.
     # None when the build has no manifest, which is a build configured before it existed; empty for a non-nexus target.
     nexus_kinds: tuple[str, ...] | None = None
+    # How long a test run of it may take, from sc_nexus_binary's TIMEOUT; None for dev.py's default.
+    timeout_secs: float | None = None
 
 
 @dataclass(frozen=True)

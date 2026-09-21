@@ -322,6 +322,9 @@ viewer::~viewer()
 
         _impl->ctx->advance_epoch();
         (void)block_on(*_impl->ctx, _impl->ctx->idle_completion());
+
+        // What the viewer started and nobody awaits still carries its caller's context.
+        (void)block_on(*_impl->ctx, sv::background_work(*_impl->ctx));
     }
     catch (sg::device_lost_exception const&)
     {

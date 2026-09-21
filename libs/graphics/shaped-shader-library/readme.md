@@ -2,6 +2,7 @@
 
 The shader package + hot-reload mechanism.
 Namespace `slib`, depending on **shaped-graphics** and transitively typed-geometry + clean-core.
+It links **shaped-graphics-language** privately, for the compiler edge of a package written in SGL.
 Part of the [graphics family](../../../docs/graphics.md).
 
 Any target — a downstream library, an app, or a **test binary** — declares its own shader package in its own CMakeLists, gets typed C++ symbols for its shaders, and gets hot reloading.
@@ -27,7 +28,10 @@ auto cs = my::shaders::vignette.compute.main->acquire(ctx);   // sg::async_compi
 ```
 
 - **You pass the context, not a format** — `acquire(ctx)` picks a compiler that reaches a format that context accepts.
-- **The compiler is a seam**; HLSL→DXIL is the only edge today, and only where DXC exists.
+- **The compiler is a seam**, one edge per language and format.
+  HLSL→DXIL and HLSL→SPIR-V exist where DXC does, WGSL→WGSL exists everywhere, and SGL wraps any of the three.
+- **A package in SGL is one source for every backend**: `create_sgl_compiler(inner)` writes it as the text `inner` compiles.
+  [examples/graphics/sgl-cube](../../../examples/graphics/sgl-cube/sgl_cube.cc) is the worked example.
 - **Dev vs shipping is not a mode flag**, and shader sources are reached only through a mounted virtual filesystem.
 
 ## File organization
@@ -38,7 +42,7 @@ Source lives in `src/shaped-shader-library/`, with `cmake/`, `docs/` and `tests/
 |---|---|
 | (root) | `fwd.hh`, `all.hh`, and the core: `shader_package`, `shader_asset`, `shader_library` |
 | `filesystem/` | the mountable VFS: the `filesystem` interface, `mount_table`, and the `memory` / `embedded` / `real` implementations |
-| `compiler/` | the `shader_compiler` seam and the concrete compilers (`dxc_compiler`) |
+| `compiler/` | the `shader_compiler` seam and the concrete compilers (`dxc_compiler`, `wgsl_compiler`, `sgl_compiler`) |
 | `impl/` | internal: the reload watcher |
 | `cmake/` | `sc_add_shader_package` + the package generator |
 
@@ -51,7 +55,7 @@ uv run dev.py test "slib"
 ```
 
 The tests run against a **fake compiler**, so the whole mechanism — packages, mounts, lazy compiles, reload, dependency tracking — is covered on every platform rather than only where DXC exists.
-Only [tests/dxc_compiler-test.cc](tests/dxc_compiler-test.cc) needs a real compiler.
+Only [tests/dxc_compiler-test.cc](tests/dxc_compiler-test.cc) and the HLSL arms of [tests/sgl_compiler-test.cc](tests/sgl_compiler-test.cc) need a real compiler.
 Reload tests need no disk and no sleeps; [docs/coding-guidelines.md](docs/coding-guidelines.md) says what that rests on.
 
 See [building-and-testing](../../../docs/guides/building-and-testing.md) for the full workflow.

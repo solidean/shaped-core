@@ -1,7 +1,8 @@
 #pragma once
 
 #include <clean-core/container/span.hh>
-#include <shaped-graphics/binding/binding_group.hh> // sg::declared_binding_group, and the sampler merge below
+#include <shaped-graphics/binding/binding_group.hh>   // sg::declared_binding_set, and the sampler merge below
+#include <shaped-graphics/binding/pipeline_layout.hh> // acquire_pipeline_layout<Ts...> fills a description
 #include <shaped-graphics/fwd.hh>
 
 /// Cache facade for a context's built-in pipeline_cache, reached as `ctx.cached`.
@@ -22,7 +23,7 @@ public:
 
     /// The cached layout the generated group `G` declares — its bindings and the samplers it marked `static`.
     /// Constant rather than reflected: the same parse that wrote the shader's addresses produced this table.
-    template <declared_binding_group G>
+    template <declared_binding_set G>
     [[nodiscard]] binding_group_layout_handle acquire_binding_group_layout()
     {
         return acquire_binding_group_layout(G::declared_bindings(), G::declared_samplers());
@@ -31,7 +32,7 @@ public:
     /// The same, plus static samplers for the ones `G` left undeclared — what a runtime-generated permutation
     /// supplies.
     /// A declared sampler wins; see sg::impl::merge_declared_samplers for why supplying one is a mistake.
-    template <declared_binding_group G>
+    template <declared_binding_set G>
     [[nodiscard]] binding_group_layout_handle acquire_binding_group_layout(cc::span<named_sampler const> samplers)
     {
         return acquire_binding_group_layout(G::declared_bindings(),
@@ -42,6 +43,21 @@ public:
     /// The key is the group layouts' structural identity, so two separately created but identical ones still dedup.
     /// Throws sg::pipeline_creation_exception on a creation failure, or sg::device_lost_exception if the device was lost.
     [[nodiscard]] pipeline_layout_handle acquire_pipeline_layout(pipeline_layout_description const& desc);
+
+    /// The pipeline layout a list of generated types states, with no reflected binding in it.
+    /// Each binding set is the group at its position among the sets, and at most one inline-constants block, wherever
+    /// it stands, is the layout's `inline_constants` — which is an SGL entry point's binding list, spelled in C++.
+    /// `static_samplers` are the ones a pipeline needs beyond what its groups declare.
+    template <class... Ts>
+        requires((declared_binding_set<Ts> || declared_inline_constants<Ts>) && ...)
+    [[nodiscard]] pipeline_layout_handle acquire_pipeline_layout(cc::span<bound_sampler const> static_samplers = {})
+    {
+        static_assert((int(declared_inline_constants<Ts>) + ... + 0) <= 1, "a pipeline layout has one inline block");
+        auto desc = pipeline_layout_description();
+        (add_to_layout<Ts>(desc), ...);
+        desc.static_samplers.push_back_range(static_samplers);
+        return acquire_pipeline_layout(desc);
+    }
 
     /// The async compute_pipeline for `desc`, built on a miss.
     /// Drive with cc::async_blocking_get, or poll .is_ready() / .try_value(); a build failure surfaces as an async error.
@@ -70,6 +86,15 @@ public:
     context_cached_scope& operator=(context_cached_scope&&) = delete;
 
 private:
+    template <class T>
+    void add_to_layout(pipeline_layout_description& desc)
+    {
+        if constexpr (declared_inline_constants<T>)
+            desc.inline_constants = T::inline_binding();
+        else
+            desc.groups.push_back(acquire_binding_group_layout<T>());
+    }
+
     friend class context;
     explicit context_cached_scope(context& ctx) : _ctx(ctx) {}
 

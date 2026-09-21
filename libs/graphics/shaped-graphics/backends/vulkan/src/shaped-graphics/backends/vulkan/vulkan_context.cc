@@ -81,8 +81,8 @@ void vulkan_context::dispatch_validation_message(vulkan_message_severity severit
     }
 
     // A hazard between two copies is only diagnosable with their ranges and order, which the message lacks.
-    auto const windows
-        = message.contains("_AFTER_WRITE") ? cc::format("\n{}", describe_recent_transfer_windows()) : cc::string();
+    auto const windows = message.contains("_AFTER_WRITE") ? cc::format("\n{}", describe_recent_transfer_windows(message))
+                                                          : cc::string();
 
     switch (severity)
     {

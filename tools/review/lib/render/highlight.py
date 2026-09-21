@@ -32,6 +32,8 @@ from pygments.token import (
 )
 from pygments.util import ClassNotFound
 
+from .sgl_lexer import SglLexer
+
 
 class DarkModern(Style):
     """VS Code's Dark Modern palette, mapped onto Pygments' token tree.
@@ -108,8 +110,11 @@ _BY_SUFFIX = {
     "hh": "cpp", "hpp": "cpp", "h": "cpp", "cc": "cpp", "cpp": "cpp", "cxx": "cpp", "inl": "cpp",
     "py": "python", "md": "markdown", "json": "json", "toml": "toml", "yml": "yaml", "yaml": "yaml",
     "cmake": "cmake", "txt": "text", "hlsl": "hlsl", "glsl": "glsl", "sh": "bash", "ps1": "powershell",
-    "js": "javascript", "css": "css", "html": "html", "sql": "sql", "rs": "rust",
+    "js": "javascript", "css": "css", "html": "html", "sql": "sql", "rs": "rust", "sgl": "sgl",
 }
+
+# Languages Pygments does not ship, keyed by the name a fence or a suffix resolves to.
+_OWN_LEXERS = {"sgl": SglLexer}
 
 
 def css() -> str:
@@ -124,6 +129,8 @@ def css() -> str:
 
 def _lexer_for(path: str, lang: str):
     name = lang or _BY_SUFFIX.get(path.rsplit(".", 1)[-1].lower() if "." in path else "", "")
+    if name in _OWN_LEXERS:
+        return _OWN_LEXERS[name](stripnl=False)
     if name:
         try:
             return get_lexer_by_name(name, stripnl=False)

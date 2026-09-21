@@ -18,7 +18,8 @@ namespace dx12 = sg::backend::dx12;
 ASYNC_TEST("sg dx12 - command allocators are recycled across epochs")
 {
     auto handle = dx12::make_fresh_context();
-    REQUIRE(handle != nullptr);
+    if (handle == nullptr)
+        SKIP("no dx12 adapter");
     auto& c = *handle;
 
     auto const free_count = [&] { return c._cmd_pool.free_allocator_count(D3D12_COMMAND_LIST_TYPE_DIRECT); };
@@ -45,7 +46,8 @@ ASYNC_TEST("sg dx12 - command allocators are recycled across epochs")
 TEST("sg dx12 - command lists are pooled and reused")
 {
     auto handle = dx12::make_fresh_context();
-    REQUIRE(handle != nullptr);
+    if (handle == nullptr)
+        SKIP("no dx12 adapter");
     auto& c = *handle;
 
     auto const free_lists = [&] { return c._cmd_pool.free_command_list_count(D3D12_COMMAND_LIST_TYPE_DIRECT); };
@@ -70,7 +72,8 @@ TEST("sg dx12 - command lists are pooled and reused")
 TEST("sg dx12 - a dropped list returns its allocator and list to the pool immediately")
 {
     auto handle = dx12::make_fresh_context();
-    REQUIRE(handle != nullptr);
+    if (handle == nullptr)
+        SKIP("no dx12 adapter");
     auto& c = *handle;
 
     auto const free_allocs = [&] { return c._cmd_pool.free_allocator_count(D3D12_COMMAND_LIST_TYPE_DIRECT); };

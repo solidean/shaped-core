@@ -187,7 +187,8 @@ TEST("sg dx12 - print the GPU metrics", nx::config::manual)
 TEST("sg dx12 - a recording is stamped with the GPU", nx::config::exclusive(), nx::config::thorough_only)
 {
     auto handle = dx12::make_fresh_context();
-    REQUIRE(handle != nullptr);
+    if (handle == nullptr)
+        SKIP("no dx12 adapter");
 
     auto listener = cc::rec::recording_listener();
     {

@@ -160,7 +160,9 @@ def ensure_node_webgpu(root: Path, preset_name: str = "", emsdk_path: str | None
     if (js / "node_modules" / "webgpu" / "package.json").is_file():
         return
     env = emsdk_env(emsdk_path) or dict(os.environ)
-    npm = shutil.which("npm", path=env.get("PATH") or env.get("Path"))
+    # `npm.cmd` by name on Windows: node ships an extensionless `npm` shell script beside it, which `which` finds first
+    # and CreateProcess cannot start.
+    npm = shutil.which("npm.cmd" if os.name == "nt" else "npm", path=env.get("PATH") or env.get("Path"))
     if npm is None:
         ui.write_line("node-webgpu: npm not found — node runs of WebGPU tests will SKIP (install emsdk or node, or use --runtime deno)")
         return

@@ -46,7 +46,9 @@ enum class sg::backend::dx12::dx12_message_severity : sg::u8
 ///
 /// The `SC_DX12_ADAPTER` environment variable overrides the host for a whole process, which is how a developer reproduces a GPU-less CI run on a machine that has a GPU.
 /// `warp` hides every hardware adapter: `hardware` then errors, `hardware_or_warp` takes WARP, and `has_hardware_adapter()` answers false.
-/// `hardware` forces `hardware_or_warp` onto a hardware GPU, so a host without one errors.
+/// `hardware` hides WARP the same way: `warp` then errors, and `hardware_or_warp` takes a hardware GPU or errors.
+/// That is how a CI job without a GPU keeps its WARP drivers from running, since they skip when WARP is missing.
+/// `none` hides both, which is that CI job reproduced on a machine that has a GPU.
 /// Any other value is ignored with a warning.
 enum class sg::backend::dx12::dx12_adapter : sg::u8
 {
@@ -709,6 +711,6 @@ namespace sg::backend::dx12
 {
 /// Whether this host has a D3D12-capable hardware adapter, answered without creating a device.
 /// The DXGI probe runs once per process: adapters do not come and go under a running test suite, and the question costs a factory.
-/// `SC_DX12_ADAPTER=warp` is read on every call and makes the answer false; see dx12_adapter.
+/// `SC_DX12_ADAPTER=warp` or `none` is read on every call and makes the answer false; see dx12_adapter.
 [[nodiscard]] bool has_hardware_adapter();
 } // namespace sg::backend::dx12

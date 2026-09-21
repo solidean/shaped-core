@@ -11,6 +11,7 @@
 #include <clean-core/thread/async_coroutine.hh> // including it is what makes compile_shader a coroutine
 #include <shaped-graphics/binding/compiled_shader.hh>
 #include <shaped-graphics/binding/impl/shader_codec.hh>
+#include <shaped-graphics/context/cold_caches.hh>
 #include <shaped-shader-compiler-dxc/compiler.hh>
 
 #include <memory>
@@ -33,9 +34,9 @@ compiler* thread_local_compiler()
     return instance.get();
 }
 
-/// Bumped when what goes into a persistent shader entry changes shape.
-/// The codec carries its own version for the bytes; this is about the entry.
-constexpr auto k_shader_blob_version = bcache::version(1);
+/// Moves with the codec, so a new codec never reads an old entry at all.
+/// With a fixed version an old entry is found on every acquire, fails to decode, and is compiled around forever.
+constexpr auto k_shader_blob_version = bcache::version(sg::impl::k_shader_codec_version);
 
 /// The DXC version this process compiles with, or empty where DXC is unusable.
 /// Reading it builds this thread's compiler if it has none, which the compile was about to do anyway.
@@ -154,6 +155,9 @@ bcache::blob_cache* shader_cache::resolve_blob_cache()
     // A compile parks on the store, so it needs somewhere to resume.
     // With nowhere to route, the tier is skipped rather than parking on a node whose completion could not wake it.
     if (!cc::impl::async_can_schedule_here())
+        return nullptr;
+    // Cold only instead of the default store: one set explicitly is a choice, and a test of this tier depends on it.
+    if (!_blob_cache.has_value() && sg::cold_caches_from_environment().shaders)
         return nullptr;
 
     if (!_blob_cache.has_value())

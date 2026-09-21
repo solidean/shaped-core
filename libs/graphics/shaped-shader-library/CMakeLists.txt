@@ -16,6 +16,7 @@ add_library(shaped-shader-library
     src/shaped-shader-library/binding/binding_groups.cc
     src/shaped-shader-library/binding/wgsl_declarations.cc
     src/shaped-shader-library/compiler/wgsl_compiler.cc
+    src/shaped-shader-library/compiler/sgl_compiler.cc
     src/shaped-shader-library/binding/impl/hlsl_binding_types.cc
     src/shaped-shader-library/binding/impl/hlsl_sampler_state.cc
     src/shaped-shader-library/binding/impl/hlsl_value_types.cc
@@ -45,6 +46,7 @@ target_sources(shaped-shader-library
     src/shaped-shader-library/binding/binding_groups.hh
     src/shaped-shader-library/binding/wgsl_declarations.hh
     src/shaped-shader-library/compiler/wgsl_compiler.hh
+    src/shaped-shader-library/compiler/sgl_compiler.hh
     src/shaped-shader-library/compiler/shader_compiler.hh
     src/shaped-shader-library/shader_package.hh
     src/shaped-shader-library/shader_asset.hh
@@ -71,6 +73,10 @@ target_include_directories(shaped-shader-library
 
 # shaped-graphics provides sg::compiled_shader / sg::shader_stage / sg::context (public API surface).
 target_link_libraries(shaped-shader-library PUBLIC shaped-graphics)
+
+# shaped-graphics-language is what the SGL compiler edge runs, and no header of slib names it.
+# It is over clean-core alone, so it costs a consumer no graphics API and no toolchain.
+target_link_libraries(shaped-shader-library PRIVATE shaped-graphics-language)
 
 sc_target_pch(shaped-shader-library SG)
 
@@ -112,8 +118,10 @@ if(SC_BUILD_TESTS)
         tests/compile_source-test.cc
         tests/hot_reload-test.cc
         tests/shader_package-test.cc
+        tests/reflection_mismatch-test.cc
         tests/dxc_compiler-test.cc
         tests/wgsl_compiler-test.cc
+        tests/sgl_compiler-test.cc
         tests/binding/binding_groups-test.cc
         tests/binding/wgsl_declarations-test.cc
     )
@@ -198,6 +206,20 @@ if(SC_BUILD_TESTS)
             mesh.hlsl:vertex_input:instance_input
             mesh.hlsl:payload:trace_payload
             shade.hlsl:constants:gConstants
+    )
+
+    # And one in SGL, which names its fragment stage `pixel` and generates no mirror yet.
+    # One source for every format: the SGL compiler edge picks the text per target.
+    sc_add_shader_package(
+        TARGET     shaped-shader-library-test
+        NAME       slib_test_sgl_shaders
+        NAMESPACE  slib_test::sgl_shaders
+        SOURCE_DIR tests/shaders-sgl
+        LANGUAGE   sgl
+        SHADERS
+            cube.sgl:vertex:main_vs
+            cube.sgl:pixel:main_ps
+            double_values.sgl:compute:main
     )
 
     # Browser test runner (Emscripten only); a no-op on native toolchains.

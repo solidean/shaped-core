@@ -311,9 +311,9 @@ public:
 
     /// The last windows both transfer systems submitted, for reading a synchronization-validation hazard against.
     /// A message names the command buffer and the resource; this adds the ranges, the slots and the order.
-    [[nodiscard]] cc::string describe_recent_transfer_windows()
+    [[nodiscard]] cc::string describe_recent_transfer_windows(cc::string_view message)
     {
-        return _upload_async.describe_recent_windows() + _download_async.describe_recent_windows();
+        return _upload_async.describe_recent_windows(message) + _download_async.describe_recent_windows(message);
     }
 
     // Delivers one validation message to the installed callback, or to the log when none is installed.

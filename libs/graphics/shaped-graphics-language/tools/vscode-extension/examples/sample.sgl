@@ -1,0 +1,139 @@
+// a highlighting sample for the VS Code grammar, not a language reference
+   a line that is only a comment owns every deeper line below it
+      whatever that line holds: let x = "
+module highlighting_sample
+
+use brdf_library as brdf
+notation \phi => φ
+
+/// A documentation comment owns its deeper lines too.
+    They stay part of the documentation: fun not_code()
+binding frame:
+    view: mat4
+    proj: mat4
+    time: float
+    // a property is keyword-free
+    phase => time * 0.5
+
+binding instance:
+    model: mat4
+    albedo_map: texture2d[rgba8]
+
+binding scene = (frame, instance)
+
+sampler bilinear:
+    filter = .linear
+    address = .clamp
+    max_anisotropy = 16
+
+enum curve_kind:
+    linear = 0
+    reinhard = 1
+    custom
+
+    is_builtin => self != .custom
+
+@slider(0.0, max = 16.0, step = 0.25)
+const exposure = 1.0
+const max_bounces : int = 0x10
+const tint = #ff00bb
+const fog_scale = 2.0 @range(0, 4)
+type curve = (float) -> float
+
+@vertex struct basic_vertex:
+    pos: pos3
+    uv: vec2
+
+struct tonemapper:
+    kind: curve_kind
+    white_point: float = 4.0
+    apply_to : (float) -> float
+
+    shoulder =>:
+        let w = white_point * white_point
+        yield 1.0 / w
+
+    fun curve_of(self) -> curve:
+        return case kind:
+            .linear => x => x
+            .reinhard => x => x / (1.0 + x)
+            .custom => apply_to
+            _ =>:
+                let s = shoulder
+                yield x => x * (1.0 + x * s) / (1.0 + x)
+
+    fun dim(mut self, factor: float):
+        self.white_point *= factor
+
+fun numbers(width: float) -> float:
+    let a = 1 + 1. + 1.5 + 1'000'000 + 100u32
+    let b = 1.5e-3f32 + 1e+5 + 2.5e-3 + 1p8
+    let c = 0x1p-3 + 0xff'ffu32 + 0b1010u8
+    let half_width = width' / 2 - a + -3
+    let pair = (1, (2, 3))
+    let d = 1.max(2) + pair.1.0
+    let wide = (..pair, \phi)
+    return half_width
+
+fun accumulate(weights: span[float], t: tonemapper) -> vec3:
+    let f = t.curve_of()
+    let safe = fun (x: float) -> float:
+        if x <= 0.0 => return 0.0
+        return f(x * exposure)
+    let twice = fun [T](g: (T) -> T, x: T) => g(g(x))
+
+    let mut total = vec3(0.0)
+    for i in 0..<4:
+        if i == 2 or not t.kind.is_builtin => continue
+        total += twice(safe, weights[i])
+    for _ in 1 ..= 3:
+        total = total
+            .scale(0.5)
+            .saturated
+
+    let mut bounce = 0
+    let done = false
+    let settled = loop:
+        bounce += 1
+        if bounce >= max_bounces => break total
+    while bounce > 0 and not done:
+        bounce -= 1
+
+    assert bounce in 0..=max_bounces, "bounced $bounce times"
+    print "total: $total.x of $(max(bounce, 1) * 2) steps, which costs $$5\t\u{1F600}"
+    print "
+        a multi-line string: $bounce interpolates, and a \ backslash escapes nothing
+        "quotes" and // slashes are content
+    "
+    return settled
+
+@vertex fun my_vs(v: basic_vertex){frame, instance} -> {
+    @position pos: hpos4
+    uv: vec2
+}:
+    let mvp = frame.proj * frame.view * instance.model
+    return {
+        pos = mvp * v.pos
+        uv = v.uv
+    }
+
+@pixel fun my_ps(@builtin pos: hpos4, uv: vec2){scene} -> vec4:
+    let lit = brdf.lighting_diffuse(
+        base_color = instance.albedo_map.sample(bilinear, uv)
+        light_dir = (..pos.xyz, 0) as vec4
+    )
+    return (..lit.rgb, 1.0) // a trailing comment ends with its line
+
+// everything below is reported by the compiler, so it stays at the very end
+// `"""` and a tagged opener are reserved spellings, and the other two quote kinds have no meaning yet
+fun reserved(width: int):
+    let raw = """
+        raw text, where $width is no interpolation
+    """
+    let config = "json
+        { "width": $width }
+    "
+    let other = 'single quoted: no $interpolation, but \n escapes' + `backquoted`
+    // and three errors the grammar flags: `::`, an unknown escape, a stray `$`
+    let c = color::red
+    print "unknown \q, and cost in $ is unknown"

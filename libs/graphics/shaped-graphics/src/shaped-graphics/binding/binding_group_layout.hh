@@ -69,3 +69,15 @@ protected:
     cc::optional<u32> _group_index;
     cc::vector<named_sampler> _static_samplers;
 };
+
+namespace sg::impl
+{
+/// Why a group cannot be bound at a slot: what the slot's layout holds and what the group's does, by their bindings' names.
+///
+/// A group fits a slot only if it was created against the very layout object the slot holds, and a hash names no shader.
+/// Names do: an SGL group's bindings are `<binding>_<member>`, so the message says which declaration each side came from.
+/// Built only when the check fails, since every backend's `bind_group` states it as a CC_ASSERTF argument.
+[[nodiscard]] cc::string describe_layout_mismatch(int slot,
+                                                  binding_group_layout const* expected,
+                                                  binding_group_layout const* bound);
+} // namespace sg::impl

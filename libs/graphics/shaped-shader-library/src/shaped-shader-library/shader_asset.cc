@@ -1,5 +1,8 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/string/format.hh>
+#include <clean-core/thread/async_coroutine.hh>
+#include <shaped-graphics/binding/layout_fit.hh>
+#include <shaped-graphics/compute/compute_pipeline.hh>
 #include <shaped-graphics/context/context.hh> // acquire(ctx) asks it which formats it accepts
 #include <shaped-shader-library/shader_asset.hh>
 #include <shaped-shader-library/shader_library.hh>
@@ -181,4 +184,28 @@ void slib::shader_asset::stage_reload()
                 }
             });
     }
+}
+
+sg::async_compute_pipeline slib::acquire_compute_pipeline(sg::context* ctx,
+                                                          shader_asset_handle asset,
+                                                          sg::pipeline_layout_handle layout)
+{
+    auto const shader = co_await asset->acquire(*ctx);
+    co_return co_await ctx->cached.acquire_compute_pipeline({.shader = shader, .layout = layout});
+}
+
+cc::string slib::reflection_mismatch(cc::string_view entry,
+                                     sg::compiled_shader const& compiled,
+                                     cc::span<listed_group const> listed,
+                                     cc::optional<sg::binding> const& inline_block)
+{
+    // The listed groups, at the slots their positions give: exactly the layout this entry point states.
+    auto groups = cc::vector<cc::span<sg::binding const>>();
+    for (auto const& group : listed)
+    {
+        while (groups.size() <= group.position)
+            groups.push_back({});
+        groups[group.position] = group.bindings;
+    }
+    return sg::describe_layout_misfit(entry, compiled.bindings, groups, inline_block);
 }

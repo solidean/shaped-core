@@ -2,7 +2,9 @@
 
 #include <clean-core/bytes/hash128.hh>
 #include <clean-core/container/small_vector.hh>
+#include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/error/optional.hh>
 #include <shaped-graphics/binding/binding.hh>
 #include <shaped-graphics/binding/sampler.hh>
 #include <shaped-graphics/fwd.hh>
@@ -75,9 +77,26 @@ public:
     /// disagree about which layouts are the same one.
     [[nodiscard]] cc::hash128 structural_hash() const { return _structural_hash; }
 
+    /// The group layout at each bind slot, as the description gave them.
+    [[nodiscard]] cc::span<binding_group_layout_handle const> groups() const { return _groups; }
+
+    /// The description's inline constants binding, if it had one.
+    [[nodiscard]] cc::optional<binding> const& inline_constants() const { return _inline_constants; }
+
 protected:
     /// `structural_hash` must come from sg::impl::pipeline_layout_hash over the creation arguments.
-    explicit pipeline_layout(cc::hash128 structural_hash) : _structural_hash(structural_hash) {}
+    pipeline_layout(cc::hash128 structural_hash,
+                    cc::span<binding_group_layout_handle const> groups,
+                    cc::optional<binding> inline_constants)
+      : _structural_hash(structural_hash), _inline_constants(cc::move(inline_constants))
+    {
+        for (auto const& group : groups)
+            _groups.push_back(group);
+    }
 
     cc::hash128 _structural_hash;
+
+private:
+    cc::small_vector<binding_group_layout_handle, max_binding_groups> _groups;
+    cc::optional<binding> _inline_constants;
 };

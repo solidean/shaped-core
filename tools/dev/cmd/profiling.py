@@ -51,6 +51,7 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
 
 def run(args: argparse.Namespace, ctx: Context) -> None:
     if args.profiling_cmd == "counters":
+        ctx.warn_known_issues(ctx.resolve_presets(None))
         _run_counters(args, ctx)
     elif args.profiling_cmd == "merge":
         _run_merge(args, ctx)

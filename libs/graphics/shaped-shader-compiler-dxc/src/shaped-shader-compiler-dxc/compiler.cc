@@ -209,6 +209,7 @@ cc::result<sg::compiled_shader> compiler::compile(shader_description const& desc
             .version = _state->version,
             .signature = impl::join_args(args.value()),
         },
+        .color_output_count = reflected.value().color_output_count,
     };
 }
 } // namespace ssc::dxc

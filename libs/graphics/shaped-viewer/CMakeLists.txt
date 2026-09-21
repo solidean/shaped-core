@@ -212,7 +212,7 @@ if(SC_BUILD_TESTS)
         tests/asset-loading-test.cc
         tests/shader-package-test.cc
     )
-    sc_nexus_binary(shaped-viewer-test KINDS tests)
+    sc_nexus_binary(shaped-viewer-test KINDS tests ${SG_WARP_TEST_BINARY_ARGS})
 
     target_link_libraries(shaped-viewer-test
         PRIVATE

@@ -42,7 +42,7 @@ class sg::backend::metal::metal_pipeline_layout final : public sg::pipeline_layo
 {
 public:
     metal_pipeline_layout(cc::hash128 structural_hash, sg::pipeline_layout_description desc)
-      : sg::pipeline_layout(structural_hash), _desc(cc::move(desc))
+      : sg::pipeline_layout(structural_hash, desc.groups, desc.inline_constants), _desc(cc::move(desc))
     {
     }
 

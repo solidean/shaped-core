@@ -1,5 +1,11 @@
 # CLAUDE.md
 
+**This file is for quick orientation, not for knowledge.**
+It says what exists, where to look, and the few rules that bind every change.
+Knowledge lives in docs and comments, where a human finds it too, and an entry here points at it rather than restating it.
+Skills follow the same rule: minimal agent-relevant steps, and a link to the doc that holds the rest.
+A library's entry below is a few lines, written for whoever *uses* the library; what its developers need belongs in its own `docs/`.
+
 ## What this repo is
 
 **shaped-core** is a collection of foundational C++ libraries by Shaped Code, powering SOLIDEAN, internal tools, customer projects, and research.
@@ -96,13 +102,25 @@ One-liner per library:
   Windows-only, and built only once `extern/dxc` has fetched DXC.
 * **`libs/graphics/shaped-shader-library`** — shader packages + hot reloading:
   any target declares its shaders via `sc_add_shader_package` and gets typed C++ symbols; `acquire(ctx)` returns bytecode in a format that context accepts.
-  Namespace `slib`. Depends on shaped-graphics, plus shaped-shader-compiler-dxc where DXC exists — **sg does not depend on it**.
+  A package is written in HLSL, WGSL or **SGL**, and an SGL package is one source for dx12, vulkan and webgpu.
+  `slib::create_sgl_compiler(inner)` is that edge: sgl's pipeline as `preprocess`, then the DXC or WGSL compiler that was there already.
+  Namespace `slib`. Depends on shaped-graphics, plus shaped-graphics-language privately and shaped-shader-compiler-dxc where DXC exists — **sg does not depend on it**.
 * **`libs/graphics/shaped-rendering`** — concrete render routines on top of sg's routine framework (mipmap gen, tonemapping, texture compression, …).
   Namespace `sr`. Depends on shaped-graphics + shaped-shader-library (routines acquire their shaders through it), plus the vendored `imgui` bundle (Dear ImGui + ImPlot + ImGuizmo).
   Hosts the **Dear ImGui renderer** (`sr::imgui_context` + `sr::imgui_routine`), drawn entirely through sg — see [docs/imgui.md](libs/graphics/shaped-rendering/docs/imgui.md).
   sr is also home to the **window abstraction** (`sr::window_system` / `sr::window`) — SDL3-backed, leaking no SDL into its API, feeding `sg::swapchain_description` a native handle.
   The API is always present; without a backend (SDL3 not fetched) `window_system::try_create` fails instead of the types disappearing.
   `SR_HAS_WINDOW` (1/0) says whether a backend was compiled in.
+* **`libs/graphics/shaped-graphics-language`** — SGL, our own shading language, and its whole toolchain in one library: compiler, linter, formatter, language server.
+  One `.sgl` source compiles to readable shader text for dx12, vulkan, webgpu and metal, and slib's SGL compiler edge is what calls it.
+  [examples/graphics/sgl-cube](examples/graphics/sgl-cube/shaders/cube.sgl) draws one on dx12, vulkan and webgpu; the metal text has met no Metal compiler yet.
+  **To write SGL**: [docs/spec/](libs/graphics/shaped-graphics-language/docs/spec/_index.md) is the language.
+  `uv run dev.py run sgl -- emit <file> --entry <name> --target <t>` shows what a shader becomes.
+  The compiler carries a deliberately thin slice of the language so far, and everything else is the one diagnostic `unsupported-yet`, never a guess.
+  **To work on the compiler**: [docs/architecture.md](libs/graphics/shaped-graphics-language/docs/architecture.md) is the map.
+  `prelude/builtins.sgl` is generated from the C++ builtin registry and checked by `dev.py check`, so never edit it by hand.
+  Namespace `sgl`. Depends on clean-core alone, which must stay so: an editor links it to parse.
+  Early stage.
 * **`libs/graphics/shaped-viewer`** — professional, RTX-enabled visualization renderer with a dev-friendly API.
   Namespace `sv`. Depends on shaped-rendering, plus babel-serializer for the asset importer.
   A first vertical slice today: path-traced views blitted into a window, dx12 + DXR.
@@ -212,8 +230,9 @@ The loop is **run `dev.py`, then diagnose with `repo_tools`** — `build_diag` a
   A bigger tier is not automatically better — pick one with `uv run dev.py compile-time pch`, never by eye.
   [docs/guides/precompiled-headers.md](docs/guides/precompiled-headers.md) is what to read before changing one.
   The `nopch-*` / `debug-nopch-*` presets set `CMAKE_DISABLE_PRECOMPILE_HEADERS=ON`; `check`'s debug leg and CI both run one, because a PCH's `/FI` otherwise hides a missing include.
-* `SC_EXAMPLE_BACKEND` (default `auto`) picks the graphics backend the `*-example` binaries build against: `auto`, `dx12` or `vulkan`.
+* `SC_EXAMPLE_BACKEND` (default `auto`) picks the graphics backend the `*-example` binaries build against: `auto`, `dx12`, `vulkan` or `webgpu`.
   `auto` takes dx12 wherever there is one, so the setting exists to reach the vulkan arm — building `rotating-cube` both ways is how one HLSL source is shown to serve both.
+  `sgl-cube` is the same cube from one SGL source, on every backend.
   **Every graphical example reads it**: a backend that was not built is a configure error, and one an example does not support gives a stub target that says so and exits non-zero.
   See [docs/platforms.md](docs/platforms.md#example-backend-sc_example_backend).
 * `SC_BUILD_TESTS` / `SC_BUILD_TOOLS` / `SC_BUILD_EXAMPLES` gate the `*-test` binaries, `tools/` and the `*-example` binaries.
@@ -390,6 +409,7 @@ A stale "no cc:: equivalent yet" reason sends the next author back to the old wa
 | Chase a flaky test               | `uv run dev.py test <binary> --repeat 100` (stops at the first failure, so its logs survive for `test_diag`) |
 | Build a single target            | `uv run dev.py build -t <target>`                                 |
 | Run a non-test executable        | `uv run dev.py run <target> [args…]` (builds first, forwards args, propagates the exit code) |
+| Compile an SGL file to target text | `uv run dev.py run sgl -- emit <file.sgl> --entry <name> --target <t>` (`hlsl-dx12`, `hlsl-vulkan`, `wgsl`, `msl`) |
 | Run one example                  | `uv run dev.py example <match>` (no arg lists them all; [examples](docs/guides/examples.md)) |
 | See what a graphical example looks like | `uv run dev.py example <match> --capture` — headless, writes an image, needs no display. **Use it while writing one**: a run that neither crashes nor asserts routinely shows nothing worth looking at |
 | Refresh the committed example images | `uv run dev.py example --update-captures "<matcher>"` (capture + copy; `--refresh-captures` copies only) |

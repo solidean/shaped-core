@@ -1,5 +1,6 @@
 #pragma once
 
+#include <clean-core/container/vector.hh>
 #include <clean-core/error/optional.hh>
 #include <clean-core/error/result.hh>
 #include <clean-core/function/function_ref.hh>
@@ -15,6 +16,7 @@ enum class slib::shader_language
 {
     hlsl,
     wgsl, ///< WebGPU's own language: handed on as source, reflected by slib (see compiler/wgsl_compiler.hh)
+    sgl, ///< our own: written as the text of the target's language, then compiled as that (see compiler/sgl_compiler.hh)
 };
 
 namespace slib
@@ -26,6 +28,29 @@ using include_resolver = cc::function_ref<cc::optional<cc::string>(cc::string_vi
 
 } // namespace slib
 
+/// A binding the compiler will reflect under one name, and the name the host knows it by.
+struct slib::binding_rename
+{
+    cc::string reflected;
+    cc::string name;
+};
+
+/// What `preprocess` hands back.
+/// `entry_point` is empty where preprocessing kept the name it was given, which is every compiler but SGL's:
+/// SGL renames an entry point the target reserves, and the compile has to ask for the name the text declares.
+/// `renamed_bindings` is empty likewise: SGL's text declares `work_values` for what the host binds as `work.values`,
+/// and the library renames the compiled shader's reflected bindings with it once the compile settles.
+struct slib::preprocessed_source
+{
+    cc::string source;
+    cc::string entry_point;
+    cc::vector<binding_rename> renamed_bindings;
+    /// A pixel entry point's render targets: how many, and the name of the struct that declares them; -1 and empty
+    /// otherwise, and for every compiler but SGL's.
+    i32 color_targets = -1;
+    cc::string target_struct;
+};
+
 /// One shader to compile.
 /// `source` is the shader text — flattened once preprocess has run.
 struct slib::shader_source_description
@@ -33,6 +58,9 @@ struct slib::shader_source_description
     cc::string source;
     cc::string entry_point;
     sg::shader_stage stage = sg::shader_stage::compute;
+    /// What a diagnostic calls the source: a virtual path, or the label of an ad-hoc compile; may be empty.
+    /// Never opened, and no part of what a compile depends on.
+    cc::string label;
 };
 
 /// One compilation edge: `source_language` -> `target_format`.
@@ -52,8 +80,8 @@ public:
     /// Per target, not once for all of them: a compiler targeting SPIR-V flattens with its own macros defined, so a
     /// source may fork on the target it is being built for.
     /// That is why `shader_asset` keeps a flattened source and its dependencies per format entry.
-    [[nodiscard]] virtual cc::result<cc::string> preprocess(shader_source_description const& desc,
-                                                            include_resolver resolve) const = 0;
+    [[nodiscard]] virtual cc::result<preprocessed_source> preprocess(shader_source_description const& desc,
+                                                                     include_resolver resolve) const = 0;
 
     /// Already-flattened source -> bytecode.
     /// A compile failure arrives as an error on the returned node rather than a throw: a broken shader edit must not take down a running app.

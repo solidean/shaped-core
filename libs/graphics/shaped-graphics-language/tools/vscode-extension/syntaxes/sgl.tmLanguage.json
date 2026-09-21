@@ -1,0 +1,667 @@
+{
+    "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+    "name": "Shaped Graphics Language",
+    "scopeName": "source.sgl",
+    "information_for_contributors": [
+        "TextMate JSON has no variables, so a few fragments repeat in many patterns; change every copy.",
+        "The symbol-continue class is [0-9A-Za-z_@#\\\\'\\x{80}-\\x{10FFFF}]: '-' is not in it, and a quote mark continues a symbol but never starts one.",
+        "(?<![…]) and (?![…]) over that class are the word boundaries; \\b would split x' and \\phi.",
+        "The keyword lists live in #keywords, and one negative lookahead that names all of them repeats wherever a plain name is expected.",
+        "Lookbehinds stay fixed-width, which is all Oniguruma promises."
+    ],
+    "patterns": [
+        { "include": "#doc-comment-block" },
+        { "include": "#comment-block" },
+        { "include": "#multiline-raw-string" },
+        { "include": "#multiline-string" },
+        { "include": "#block" }
+    ],
+    "repository": {
+        "block": {
+            "comment": "One block of the line tree: a line plus every following line indented deeper than it. Each while consumes only its own block's indent, so a nested block's indent capture is relative to its parent.",
+            "begin": "^([ \\t]*)(?=\\S)",
+            "while": "(?:^|\\G)\\1(?=[ \\t]+\\S)|(?:^|\\G)(?=[ \\t]*$)",
+            "patterns": [
+                { "include": "#doc-comment-block" },
+                { "include": "#comment-block" },
+                { "include": "#multiline-raw-string" },
+                { "include": "#multiline-string" },
+                { "include": "#block-child" },
+                { "include": "#code" }
+            ]
+        },
+        "block-child": {
+            "comment": "Needs at least one space past the parent's indent, which also keeps it from re-matching on its parent's own line.",
+            "begin": "\\G([ \\t]+)(?=\\S)",
+            "while": "(?:^|\\G)\\1(?=[ \\t]+\\S)|(?:^|\\G)(?=[ \\t]*$)",
+            "patterns": [
+                { "include": "#doc-comment-block" },
+                { "include": "#comment-block" },
+                { "include": "#multiline-raw-string" },
+                { "include": "#multiline-string" },
+                { "include": "#block-child" },
+                { "include": "#code" }
+            ]
+        },
+        "doc-comment-block": {
+            "comment": "Listed before #comment-block, which would take a '///' line too.",
+            "name": "comment.line.documentation.sgl",
+            "begin": "(?:^|\\G)([ \\t]*)(///)",
+            "beginCaptures": {
+                "2": { "name": "punctuation.definition.comment.sgl" }
+            },
+            "while": "(?:^|\\G)\\1(?=[ \\t]+\\S)|(?:^|\\G)(?=[ \\t]*$)"
+        },
+        "comment-block": {
+            "comment": "A line that is only a comment owns its children: they are comment text whatever they hold. It stands in for #block on that line, so it is listed before it.",
+            "name": "comment.line.double-slash.sgl",
+            "begin": "(?:^|\\G)([ \\t]*)(//)",
+            "beginCaptures": {
+                "2": { "name": "punctuation.definition.comment.sgl" }
+            },
+            "while": "(?:^|\\G)\\1(?=[ \\t]+\\S)|(?:^|\\G)(?=[ \\t]*$)"
+        },
+        "multiline-raw-string": {
+            "comment": "The reserved raw opener: no interpolation, closed by three quotes leading the next sibling line. Listed before #multiline-string, which would read it as an empty string and an opener.",
+            "begin": "(?:^|\\G)([ \\t]*)((?:[^\"/\\n]|/(?!/)|\"(?:[^\"\\\\\\n]|\\\\.)*\")*)(\"\"\")[ \\t]*$",
+            "beginCaptures": {
+                "2": {
+                    "patterns": [
+                        { "include": "#code" }
+                    ]
+                },
+                "3": { "name": "string.quoted.triple.sgl punctuation.definition.string.begin.sgl" }
+            },
+            "end": "(?:^|\\G)\\1(\"\"\")(.*)$|(?:^|\\G)(?!\\1[ \\t]+\\S|[ \\t]*$)",
+            "endCaptures": {
+                "1": { "name": "string.quoted.triple.sgl punctuation.definition.string.end.sgl" },
+                "2": {
+                    "patterns": [
+                        { "include": "#code" }
+                    ]
+                }
+            },
+            "contentName": "string.quoted.triple.sgl"
+        },
+        "multiline-string": {
+            "comment": "A line whose last token is an open quote, with an optional fused tag name. It stands in for #block on that line, so it is listed before it. Both delimiter lines are matched whole, so their code is tokenized through captures. The closer is a quote leading the next sibling line; a closer line that ends in an open quote again is #multiline-string-bridge, which keeps this rule open. A sibling that leads with no quote ends the string zero-width (the 'missing-string-end' case).",
+            "begin": "(?:^|\\G)([ \\t]*)((?:[^\"/\\n]|/(?!/)|\"(?:[^\"\\\\\\n]|\\\\.)*\")*)(\")([A-Za-z_\\x{80}-\\x{10FFFF}][0-9A-Za-z_\\x{80}-\\x{10FFFF}]*)?[ \\t]*$",
+            "beginCaptures": {
+                "2": {
+                    "patterns": [
+                        { "include": "#code" }
+                    ]
+                },
+                "3": { "name": "string.quoted.double.sgl punctuation.definition.string.begin.sgl" },
+                "4": { "name": "storage.modifier.string-tag.sgl" }
+            },
+            "end": "(?:^|\\G)\\1(\")(?!(?:[^\"/\\n]|/(?!/)|\"(?:[^\"\\\\\\n]|\\\\.)*\")*\"(?:[A-Za-z_\\x{80}-\\x{10FFFF}][0-9A-Za-z_\\x{80}-\\x{10FFFF}]*)?[ \\t]*$)(.*)$|(?:^|\\G)(?!\\1[ \\t]+\\S|[ \\t]*$|\\1\")",
+            "endCaptures": {
+                "1": { "name": "string.quoted.double.sgl punctuation.definition.string.end.sgl" },
+                "2": {
+                    "patterns": [
+                        { "include": "#code" }
+                    ]
+                }
+            },
+            "patterns": [
+                { "include": "#multiline-string-bridge" },
+                { "include": "#multiline-string-content" }
+            ]
+        },
+        "multiline-string-bridge": {
+            "comment": "Closes one multi-line string and opens the next on the same line. It cannot compare its indent with the opener's; #multiline-string-content owns the deeper lines before this rule sees them.",
+            "match": "(?:^|\\G)[ \\t]*(\")((?:[^\"/\\n]|/(?!/)|\"(?:[^\"\\\\\\n]|\\\\.)*\")*)(\")([A-Za-z_\\x{80}-\\x{10FFFF}][0-9A-Za-z_\\x{80}-\\x{10FFFF}]*)?[ \\t]*$",
+            "captures": {
+                "1": { "name": "string.quoted.double.sgl punctuation.definition.string.end.sgl" },
+                "2": {
+                    "patterns": [
+                        { "include": "#code" }
+                    ]
+                },
+                "3": { "name": "string.quoted.double.sgl punctuation.definition.string.begin.sgl" },
+                "4": { "name": "storage.modifier.string-tag.sgl" }
+            }
+        },
+        "multiline-string-content": {
+            "comment": "The content lines: everything at least as deep as the first one. No backslash escapes in here, only interpolation.",
+            "name": "string.quoted.double.sgl",
+            "begin": "(?:^|\\G)([ \\t]+)(?=\\S)",
+            "while": "(?:^|\\G)\\1|(?:^|\\G)(?=[ \\t]*$)",
+            "patterns": [
+                { "include": "#interpolation" }
+            ]
+        },
+        "code": {
+            "patterns": [
+                { "include": "#comment" },
+                { "include": "#strings" },
+                { "include": "#attribute" },
+                { "include": "#declarations" },
+                { "include": "#types-and-arrows" },
+                { "include": "#fields" },
+                { "include": "#prelude-type" },
+                { "include": "#application" },
+                { "include": "#keywords" },
+                { "include": "#numbers" },
+                { "include": "#symbols" },
+                { "include": "#operators" },
+                { "include": "#punctuation" }
+            ]
+        },
+        "comment": {
+            "comment": "A comment trailing code ends with its line; the children of that line stay code.",
+            "patterns": [
+                {
+                    "name": "comment.line.documentation.sgl",
+                    "match": "(///).*$",
+                    "captures": {
+                        "1": { "name": "punctuation.definition.comment.sgl" }
+                    }
+                },
+                {
+                    "name": "comment.line.double-slash.sgl",
+                    "match": "(//).*$",
+                    "captures": {
+                        "1": { "name": "punctuation.definition.comment.sgl" }
+                    }
+                }
+            ]
+        },
+        "strings": {
+            "comment": "One-line literals. Each begin looks ahead for its closer and each end also gives up at the end of the line, so none of them can leak into the next line.",
+            "patterns": [
+                {
+                    "name": "string.quoted.double.sgl",
+                    "begin": "\"(?=(?:[^\"\\\\\\n]|\\\\.)*\")",
+                    "beginCaptures": {
+                        "0": { "name": "punctuation.definition.string.begin.sgl" }
+                    },
+                    "end": "(\")|$",
+                    "endCaptures": {
+                        "1": { "name": "punctuation.definition.string.end.sgl" }
+                    },
+                    "patterns": [
+                        { "include": "#string-escape" },
+                        { "include": "#interpolation" }
+                    ]
+                },
+                {
+                    "comment": "Undelimited string: an error the compiler recovers from, so the body stays a string and the opener is flagged.",
+                    "match": "(\")((?:[^\"\\\\\\n]|\\\\.)*\\\\?)$",
+                    "captures": {
+                        "1": { "name": "invalid.illegal.unterminated-string.sgl" },
+                        "2": { "name": "string.quoted.double.sgl" }
+                    }
+                },
+                {
+                    "name": "string.quoted.single.sgl",
+                    "begin": "(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])'(?=(?:[^'\\\\\\n]|\\\\.)*')",
+                    "beginCaptures": {
+                        "0": { "name": "punctuation.definition.string.begin.sgl" }
+                    },
+                    "end": "(')|$",
+                    "endCaptures": {
+                        "1": { "name": "punctuation.definition.string.end.sgl" }
+                    },
+                    "patterns": [
+                        { "include": "#string-escape" }
+                    ]
+                },
+                {
+                    "comment": "Undelimited string: an error the compiler recovers from, so the body stays a string and the opener is flagged.",
+                    "match": "(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])(')((?:[^'\\\\\\n]|\\\\.)*\\\\?)$",
+                    "captures": {
+                        "1": { "name": "invalid.illegal.unterminated-string.sgl" },
+                        "2": { "name": "string.quoted.single.sgl" }
+                    }
+                },
+                {
+                    "name": "string.quoted.other.backtick.sgl",
+                    "begin": "`(?=(?:[^`\\\\\\n]|\\\\.)*`)",
+                    "beginCaptures": {
+                        "0": { "name": "punctuation.definition.string.begin.sgl" }
+                    },
+                    "end": "(`)|$",
+                    "endCaptures": {
+                        "1": { "name": "punctuation.definition.string.end.sgl" }
+                    },
+                    "patterns": [
+                        { "include": "#string-escape" }
+                    ]
+                },
+                {
+                    "comment": "Undelimited string: an error the compiler recovers from, so the body stays a string and the opener is flagged.",
+                    "match": "(`)((?:[^`\\\\\\n]|\\\\.)*\\\\?)$",
+                    "captures": {
+                        "1": { "name": "invalid.illegal.unterminated-string.sgl" },
+                        "2": { "name": "string.quoted.other.backtick.sgl" }
+                    }
+                }
+            ]
+        },
+        "string-escape": {
+            "patterns": [
+                {
+                    "name": "constant.character.escape.sgl",
+                    "match": "\\\\(?:[\\\\\\\"'`nrt0]|u\\{[0-9A-Fa-f]{1,6}\\})"
+                },
+                { "name": "invalid.illegal.escape.sgl", "match": "\\\\." }
+            ]
+        },
+        "interpolation": {
+            "comment": "Double-quoted strings only. '$$' is a literal dollar, and a name here is narrower than a symbol: no quote mark, '@', '#' or backslash.",
+            "patterns": [
+                { "name": "constant.character.escape.dollar.sgl", "match": "\\$\\$" },
+                {
+                    "name": "meta.interpolation.sgl",
+                    "match": "(\\$)([A-Za-z_\\x{80}-\\x{10FFFF}][0-9A-Za-z_\\x{80}-\\x{10FFFF}]*(?:\\.[A-Za-z_\\x{80}-\\x{10FFFF}][0-9A-Za-z_\\x{80}-\\x{10FFFF}]*)*)",
+                    "captures": {
+                        "1": { "name": "punctuation.section.embedded.sgl" },
+                        "2": {
+                            "patterns": [
+                                { "name": "punctuation.accessor.sgl", "match": "\\." },
+                                {
+                                    "name": "variable.other.member.sgl",
+                                    "match": "(?<=\\.)[A-Za-z_\\x{80}-\\x{10FFFF}][0-9A-Za-z_\\x{80}-\\x{10FFFF}]*"
+                                },
+                                {
+                                    "name": "variable.other.sgl",
+                                    "match": "[A-Za-z_\\x{80}-\\x{10FFFF}][0-9A-Za-z_\\x{80}-\\x{10FFFF}]*"
+                                }
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "meta.interpolation.sgl",
+                    "contentName": "meta.embedded.line.sgl",
+                    "begin": "\\$\\(",
+                    "beginCaptures": {
+                        "0": { "name": "punctuation.section.embedded.begin.sgl" }
+                    },
+                    "end": "(\\))|$",
+                    "endCaptures": {
+                        "1": { "name": "punctuation.section.embedded.end.sgl" }
+                    },
+                    "patterns": [
+                        { "include": "#nested-parens" },
+                        { "include": "#code" }
+                    ]
+                },
+                { "name": "invalid.illegal.stray-dollar.sgl", "match": "\\$" }
+            ]
+        },
+        "nested-parens": {
+            "comment": "Only used where a closing parenthesis ends an enclosing rule, so that an inner pair does not. It gives up at the end of the line like its users do.",
+            "begin": "\\(",
+            "beginCaptures": {
+                "0": { "name": "punctuation.section.parens.begin.sgl" }
+            },
+            "end": "(\\))|$",
+            "endCaptures": {
+                "1": { "name": "punctuation.section.parens.end.sgl" }
+            },
+            "patterns": [
+                { "include": "#nested-parens" },
+                { "include": "#named-argument" },
+                { "include": "#code" }
+            ]
+        },
+        "attribute": {
+            "patterns": [
+                {
+                    "comment": "Arguments are a fused round group only. They are scoped up to the end of the line; element lines below are plain code.",
+                    "name": "meta.attribute.sgl",
+                    "begin": "((?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])@[0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*)(\\()",
+                    "beginCaptures": {
+                        "1": { "name": "entity.name.function.decorator.sgl" },
+                        "2": { "name": "punctuation.section.parens.begin.sgl" }
+                    },
+                    "end": "(\\))|$",
+                    "endCaptures": {
+                        "1": { "name": "punctuation.section.parens.end.sgl" }
+                    },
+                    "patterns": [
+                        { "include": "#nested-parens" },
+                        { "include": "#named-argument" },
+                        { "include": "#code" }
+                    ]
+                },
+                { "include": "#attribute-name" }
+            ]
+        },
+        "attribute-name": {
+            "name": "entity.name.function.decorator.sgl",
+            "match": "(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])@[0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*"
+        },
+        "named-argument": {
+            "match": "(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])(?!(?:fun|let|mut|struct|enum|binding|sampler|const|use|module|type|notation|if|else|for|while|loop|return|yield|continue|break|case|assert|print|and|or|not|as|in)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))([A-Za-z_\\\\\\x{80}-\\x{10FFFF}][0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*)(?=[ \\t]*=(?![=>]))",
+            "captures": {
+                "1": { "name": "variable.other.member.sgl" }
+            }
+        },
+        "declarations": {
+            "patterns": [
+                {
+                    "comment": "An anonymous 'fun (x) => …' has no name and falls through to #keywords.",
+                    "match": "(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])(fun)[ \\t]+(?!(?:fun|let|mut|struct|enum|binding|sampler|const|use|module|type|notation|if|else|for|while|loop|return|yield|continue|break|case|assert|print|and|or|not|as|in)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))([A-Za-z_\\\\\\x{80}-\\x{10FFFF}][0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*)",
+                    "captures": {
+                        "1": { "name": "storage.type.function.sgl" },
+                        "2": { "name": "entity.name.function.sgl" }
+                    }
+                },
+                {
+                    "match": "(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])(struct|enum|binding|sampler|type)[ \\t]+(?!(?:fun|let|mut|struct|enum|binding|sampler|const|use|module|type|notation|if|else|for|while|loop|return|yield|continue|break|case|assert|print|and|or|not|as|in)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))([A-Za-z_\\\\\\x{80}-\\x{10FFFF}][0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*)",
+                    "captures": {
+                        "1": { "name": "storage.type.$1.sgl" },
+                        "2": { "name": "entity.name.type.sgl" }
+                    }
+                },
+                {
+                    "match": "(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])(module)[ \\t]+(?!(?:fun|let|mut|struct|enum|binding|sampler|const|use|module|type|notation|if|else|for|while|loop|return|yield|continue|break|case|assert|print|and|or|not|as|in)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))([A-Za-z_\\\\\\x{80}-\\x{10FFFF}][0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*)",
+                    "captures": {
+                        "1": { "name": "storage.type.module.sgl" },
+                        "2": { "name": "entity.name.namespace.sgl" }
+                    }
+                },
+                {
+                    "match": "(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])(use)[ \\t]+(?!(?:fun|let|mut|struct|enum|binding|sampler|const|use|module|type|notation|if|else|for|while|loop|return|yield|continue|break|case|assert|print|and|or|not|as|in)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))([A-Za-z_\\\\\\x{80}-\\x{10FFFF}][0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*)(?:[ \\t]+(as)[ \\t]+(?!(?:fun|let|mut|struct|enum|binding|sampler|const|use|module|type|notation|if|else|for|while|loop|return|yield|continue|break|case|assert|print|and|or|not|as|in)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))([A-Za-z_\\\\\\x{80}-\\x{10FFFF}][0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*))?",
+                    "captures": {
+                        "1": { "name": "keyword.control.import.sgl" },
+                        "2": { "name": "entity.name.namespace.sgl" },
+                        "3": { "name": "keyword.operator.wordlike.sgl" },
+                        "4": { "name": "entity.name.namespace.sgl" }
+                    }
+                },
+                {
+                    "match": "(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])(let)(?:[ \\t]+(mut))?[ \\t]+(?!(?:fun|let|mut|struct|enum|binding|sampler|const|use|module|type|notation|if|else|for|while|loop|return|yield|continue|break|case|assert|print|and|or|not|as|in)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))(?!_(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))([A-Za-z_\\\\\\x{80}-\\x{10FFFF}][0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*)",
+                    "captures": {
+                        "1": { "name": "storage.type.let.sgl" },
+                        "2": { "name": "storage.modifier.sgl" },
+                        "3": { "name": "variable.other.readwrite.sgl" }
+                    }
+                },
+                {
+                    "match": "(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])(const)[ \\t]+(?!(?:fun|let|mut|struct|enum|binding|sampler|const|use|module|type|notation|if|else|for|while|loop|return|yield|continue|break|case|assert|print|and|or|not|as|in)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))([A-Za-z_\\\\\\x{80}-\\x{10FFFF}][0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*)",
+                    "captures": {
+                        "1": { "name": "storage.type.const.sgl" },
+                        "2": { "name": "variable.other.constant.sgl" }
+                    }
+                },
+                {
+                    "match": "(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])(for)[ \\t]+(?!(?:fun|let|mut|struct|enum|binding|sampler|const|use|module|type|notation|if|else|for|while|loop|return|yield|continue|break|case|assert|print|and|or|not|as|in)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))(?!_(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))([A-Za-z_\\\\\\x{80}-\\x{10FFFF}][0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*)",
+                    "captures": {
+                        "1": { "name": "keyword.control.sgl" },
+                        "2": { "name": "variable.other.readwrite.sgl" }
+                    }
+                }
+            ]
+        },
+        "types-and-arrows": {
+            "comment": "A simple name after '->', ':' or 'as' stands in a type position; anything more complex is left to the other rules.",
+            "patterns": [
+                {
+                    "match": "(?<![!+\\-*/%=<>?&^|~])(->)(?!(?:[!+\\-*%=<>?&^|~]|/(?!/)))[ \\t]*((?:(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])@[0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*[ \\t]+)*)(?!(?:fun|let|mut|struct|enum|binding|sampler|const|use|module|type|notation|if|else|for|while|loop|return|yield|continue|break|case|assert|print|and|or|not|as|in)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))([A-Za-z_\\\\\\x{80}-\\x{10FFFF}][0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*)",
+                    "captures": {
+                        "1": { "name": "keyword.operator.arrow.sgl" },
+                        "2": {
+                            "patterns": [
+                                { "include": "#attribute-name" }
+                            ]
+                        },
+                        "3": { "name": "entity.name.type.sgl" }
+                    }
+                },
+                {
+                    "match": "(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])(as)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])[ \\t]*((?:(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])@[0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*[ \\t]+)*)(?!(?:fun|let|mut|struct|enum|binding|sampler|const|use|module|type|notation|if|else|for|while|loop|return|yield|continue|break|case|assert|print|and|or|not|as|in)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))([A-Za-z_\\\\\\x{80}-\\x{10FFFF}][0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*)",
+                    "captures": {
+                        "1": { "name": "keyword.operator.wordlike.sgl" },
+                        "2": {
+                            "patterns": [
+                                { "include": "#attribute-name" }
+                            ]
+                        },
+                        "3": { "name": "entity.name.type.sgl" }
+                    }
+                },
+                {
+                    "match": "(?<!:)(:)(?!:)[ \\t]*((?:(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])@[0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*[ \\t]+)*)(?!(?:fun|let|mut|struct|enum|binding|sampler|const|use|module|type|notation|if|else|for|while|loop|return|yield|continue|break|case|assert|print|and|or|not|as|in)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))([A-Za-z_\\\\\\x{80}-\\x{10FFFF}][0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*)",
+                    "captures": {
+                        "1": { "name": "punctuation.separator.annotation.sgl" },
+                        "2": {
+                            "patterns": [
+                                { "include": "#attribute-name" }
+                            ]
+                        },
+                        "3": { "name": "entity.name.type.sgl" }
+                    }
+                },
+                {
+                    "name": "keyword.operator.arrow.sgl",
+                    "match": "(?<![!+\\-*/%=<>?&^|~])(?:->|=>)(?!(?:[!+\\-*%=<>?&^|~]|/(?!/)))"
+                },
+                {
+                    "comment": "Not in the language: it reads as '.' and reports 'double-colon'.",
+                    "name": "invalid.illegal.double-colon.sgl",
+                    "match": "::"
+                }
+            ]
+        },
+        "fields": {
+            "comment": "'name:' before an ascription colon, never before the block colon. \\G is the first token of a line, where it is a field; anywhere else it is a parameter. A line-leading 'name =>' is a property.",
+            "patterns": [
+                {
+                    "name": "variable.other.member.sgl",
+                    "match": "\\G(?!(?:fun|let|mut|struct|enum|binding|sampler|const|use|module|type|notation|if|else|for|while|loop|return|yield|continue|break|case|assert|print|and|or|not|as|in)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))(?!(?:self|_)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))[A-Za-z_\\\\\\x{80}-\\x{10FFFF}][0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*(?=[ \\t]*:(?!:|[ \\t]*(?://.*)?$))"
+                },
+                {
+                    "name": "variable.other.property.sgl",
+                    "match": "\\G(?!(?:fun|let|mut|struct|enum|binding|sampler|const|use|module|type|notation|if|else|for|while|loop|return|yield|continue|break|case|assert|print|and|or|not|as|in)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))(?!(?:self|_)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))[A-Za-z_\\\\\\x{80}-\\x{10FFFF}][0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*(?=[ \\t]*=>(?!(?:[!+\\-*%=<>?&^|~]|/(?!/))))"
+                },
+                {
+                    "name": "variable.parameter.sgl",
+                    "match": "(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])(?!(?:fun|let|mut|struct|enum|binding|sampler|const|use|module|type|notation|if|else|for|while|loop|return|yield|continue|break|case|assert|print|and|or|not|as|in)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))(?!(?:self|_)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))[A-Za-z_\\\\\\x{80}-\\x{10FFFF}][0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*(?=[ \\t]*:(?!:|[ \\t]*(?://.*)?$))"
+                },
+                {
+                    "comment": "The left side of an assignment that leads its line: an object member, an enum case's value, a sampler setting, or a variable. A grammar cannot tell them apart, and they read alike.",
+                    "name": "variable.other.member.sgl",
+                    "match": "\\G(?!(?:fun|let|mut|struct|enum|binding|sampler|const|use|module|type|notation|if|else|for|while|loop|return|yield|continue|break|case|assert|print|and|or|not|as|in)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))(?!(?:self|_)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))[A-Za-z_\\\\\\x{80}-\\x{10FFFF}][0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*(?=[ \\t]*(?:[+\\-*%&|^]|/(?!/)|<<|>>)?=(?![=>]))"
+                }
+            ]
+        },
+        "prelude-type": {
+            "comment": "The prelude's types by name, since a grammar cannot look a type up; a constructor call such as 'vec3(…)' reads as its type. A user type in the same place needs semantic tokens.",
+            "name": "support.type.sgl",
+            "match": "(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'.])(?:bool|int|uint|float|half|double|[iu](?:8|16|32|64)|f(?:16|32|64)|(?:bool|int|uint|float|half|double)[234]|(?:float|half|double)[234]x[234]|(?:vec|pos|dir|hpos|ivec|uvec|bvec|ipos|upos)[234](?:[fiu](?:8|16|32|64))?|mat[234](?:x[234])?|quat|range|span|array|texture(?:1d|2d|3d|_cube)(?:_array)?|buffer|storage_buffer|acceleration_structure)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])"
+        },
+        "application": {
+            "comment": "A call by juxtaposition: the head of 'f x', 'f \"s\"', 'f (x)' or 'f -1'. Only the first name of a run is the head, so a name that follows an operand and one space is an argument. After a keyword the lookbehind cannot tell, so that case is matched with its keyword.",
+            "patterns": [
+                {
+                    "match": "(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])(return|yield|break|if|else|while|case|assert|print|and|or|not|in)([ \\t]+)(?!(?:bool|int|uint|float|half|double|[iu](?:8|16|32|64)|f(?:16|32|64)|(?:bool|int|uint|float|half|double)[234]|(?:float|half|double)[234]x[234]|(?:vec|pos|dir|hpos|ivec|uvec|bvec|ipos|upos)[234](?:[fiu](?:8|16|32|64))?|mat[234](?:x[234])?|quat|range|span|array|texture(?:1d|2d|3d|_cube)(?:_array)?|buffer|storage_buffer|acceleration_structure)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))(?!(?:fun|let|mut|struct|enum|binding|sampler|const|use|module|type|notation|if|else|for|while|loop|return|yield|continue|break|case|assert|print|and|or|not|as|in)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))(?!(?:self|_)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))([A-Za-z_\\\\\\x{80}-\\x{10FFFF}][0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*)(?=[ \\t]+(?!(?:and|or|not|as|in)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))(?:[0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}\\\"`(\\[{]|\\.\\.?[A-Za-z_(\\\\\\x{80}-\\x{10FFFF}]|-[0-9.A-Za-z_(]))",
+                    "captures": {
+                        "1": {
+                            "patterns": [
+                                {
+                                    "include": "#keywords"
+                                }
+                            ]
+                        },
+                        "3": {
+                            "name": "entity.name.function.call.sgl"
+                        }
+                    }
+                },
+                {
+                    "name": "entity.name.function.call.sgl",
+                    "match": "(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}')\\]}\\\"`][ \\t])(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])(?<!\\.)(?!(?:bool|int|uint|float|half|double|[iu](?:8|16|32|64)|f(?:16|32|64)|(?:bool|int|uint|float|half|double)[234]|(?:float|half|double)[234]x[234]|(?:vec|pos|dir|hpos|ivec|uvec|bvec|ipos|upos)[234](?:[fiu](?:8|16|32|64))?|mat[234](?:x[234])?|quat|range|span|array|texture(?:1d|2d|3d|_cube)(?:_array)?|buffer|storage_buffer|acceleration_structure)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))(?!(?:fun|let|mut|struct|enum|binding|sampler|const|use|module|type|notation|if|else|for|while|loop|return|yield|continue|break|case|assert|print|and|or|not|as|in)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))(?!(?:self|_)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))[A-Za-z_\\\\\\x{80}-\\x{10FFFF}][0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*(?=[ \\t]+(?!(?:and|or|not|as|in)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))(?:[0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}\\\"`(\\[{]|\\.\\.?[A-Za-z_(\\\\\\x{80}-\\x{10FFFF}]|-[0-9.A-Za-z_(]))"
+                }
+            ]
+        },
+        "keywords": {
+            "comment": "The lists follow docs/spec/keywords.md. #types-and-arrows, #fields and #named-argument repeat all of them in one negative lookahead.",
+            "patterns": [
+                {
+                    "name": "keyword.control.import.sgl",
+                    "match": "(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])(?:use)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])"
+                },
+                {
+                    "name": "keyword.control.sgl",
+                    "match": "(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])(?:if|else|for|while|loop|return|yield|continue|break|case)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])"
+                },
+                {
+                    "name": "storage.modifier.sgl",
+                    "match": "(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])(?:mut)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])"
+                },
+                {
+                    "name": "storage.type.sgl",
+                    "match": "(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])(?:fun|let|struct|enum|binding|sampler|const|module|type|notation)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])"
+                },
+                {
+                    "comment": "Compiled out of production code, so they get a scope of their own to theme.",
+                    "name": "keyword.other.diagnostic.sgl",
+                    "match": "(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])(?:assert|print)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])"
+                },
+                {
+                    "name": "keyword.operator.wordlike.sgl",
+                    "match": "(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])(?:and|or|not|as|in)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])"
+                },
+                {
+                    "comment": "Ordinary names today; whether they become keywords is open in the spec.",
+                    "name": "constant.language.boolean.sgl",
+                    "match": "(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])(?:true|false)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])"
+                },
+                {
+                    "name": "variable.language.self.sgl",
+                    "match": "(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])(?:self)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])"
+                },
+                {
+                    "name": "variable.language.wildcard.sgl",
+                    "match": "(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])(?:_)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])"
+                }
+            ]
+        },
+        "numbers": {
+            "comment": "A number is several fused tokens to the real tokenizer; a highlighter has no later phase, so it assembles them here. Two dots are an operator, and a dot before a name is member access, so neither is a fraction.",
+            "patterns": [
+                {
+                    "name": "constant.numeric.hex.sgl",
+                    "match": "(?:(?<![^\\s(\\[{,])[-+](?=[0-9])|(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}')\\]]\\.))0[xX][0-9A-Fa-f](?:'?[0-9A-Fa-f])*(?:\\.[0-9](?:'?[0-9])*)?(?:[pP][-+]?[0-9]+(f[0-9]+)?)?([iu][0-9]+)?(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])",
+                    "captures": {
+                        "1": { "name": "storage.type.numeric-suffix.sgl" },
+                        "2": { "name": "storage.type.numeric-suffix.sgl" }
+                    }
+                },
+                {
+                    "name": "constant.numeric.binary.sgl",
+                    "match": "(?:(?<![^\\s(\\[{,])[-+](?=[0-9])|(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}')\\]]\\.))0[bB][01](?:'?[01])*([iu][0-9]+)?(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])",
+                    "captures": {
+                        "1": { "name": "storage.type.numeric-suffix.sgl" }
+                    }
+                },
+                {
+                    "name": "constant.numeric.float.sgl",
+                    "match": "(?:(?<![^\\s(\\[{,])[-+](?=[0-9])|(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}')\\]]\\.))[0-9](?:'?[0-9])*(?:\\.(?:[0-9](?:'?[0-9])*|(?![.0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}]))(?:[eEpP][-+]?[0-9]+)?|[eEpP][-+]?[0-9]+)([iuf][0-9]+)?(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])",
+                    "captures": {
+                        "1": { "name": "storage.type.numeric-suffix.sgl" }
+                    }
+                },
+                {
+                    "name": "constant.numeric.integer.sgl",
+                    "match": "(?:(?<![^\\s(\\[{,])[-+](?=[0-9])|(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}')\\]]\\.))[0-9](?:'?[0-9])*([iuf][0-9]+)?(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])",
+                    "captures": {
+                        "1": { "name": "storage.type.numeric-suffix.sgl" }
+                    }
+                },
+                {
+                    "comment": "A digit-led symbol that fits no rule above is 'malformed-number', and it still reads as a number.",
+                    "name": "constant.numeric.sgl",
+                    "match": "(?:(?<![^\\s(\\[{,])[-+](?=[0-9])|(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}')\\]]\\.))[0-9][0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*(?:\\.[0-9][0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*)?(?:(?<=[eEpP])[-+][0-9][0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*)?"
+                }
+            ]
+        },
+        "symbols": {
+            "comment": "Everything here is one 'symbol' token to the real tokenizer; the split is by shape only. The last rule is unscoped and keeps a quote mark inside a symbol from opening a string.",
+            "patterns": [
+                {
+                    "name": "constant.numeric.hash.sgl",
+                    "match": "(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])#[0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*"
+                },
+                {
+                    "comment": "A leading-dot form that leads a 'case' arm: the line has an arrow outside any parentheses.",
+                    "match": "\\G(\\.)([A-Za-z_\\\\\\x{80}-\\x{10FFFF}][0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*)(?=[^(\\n]*=>)",
+                    "captures": {
+                        "1": { "name": "punctuation.accessor.sgl" },
+                        "2": { "name": "variable.other.enummember.sgl" }
+                    }
+                },
+                {
+                    "comment": "Any other dot that leads a line continues the line above, so it is member access.",
+                    "match": "\\G(\\.)(?:([A-Za-z_\\\\\\x{80}-\\x{10FFFF}][0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*)(?=\\()|([A-Za-z_\\\\\\x{80}-\\x{10FFFF}][0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*))",
+                    "captures": {
+                        "1": { "name": "punctuation.accessor.sgl" },
+                        "2": { "name": "entity.name.function.call.sgl" },
+                        "3": { "name": "variable.other.member.sgl" }
+                    }
+                },
+                {
+                    "comment": "A leading-dot form: a dot with no operand fused before it.",
+                    "match": "(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}')\\]}\\\"`.])(\\.)([A-Za-z_\\\\\\x{80}-\\x{10FFFF}][0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*)",
+                    "captures": {
+                        "1": { "name": "punctuation.accessor.sgl" },
+                        "2": { "name": "variable.other.enummember.sgl" }
+                    }
+                },
+                {
+                    "name": "entity.name.function.call.sgl",
+                    "match": "(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])[A-Za-z_\\\\\\x{80}-\\x{10FFFF}][0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*(?=\\()"
+                },
+                {
+                    "comment": "After one dot only: after two it is the operand of a range or a splat.",
+                    "name": "variable.other.member.sgl",
+                    "match": "(?<=[^.]\\.)[0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}][0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*"
+                },
+                { "match": "[0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}][0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*" }
+            ]
+        },
+        "operators": {
+            "comment": "Any run of operator characters is one operator, and it stops before '//'. A run that starts with two dots is one operator too.",
+            "patterns": [
+                {
+                    "name": "keyword.operator.spread.sgl",
+                    "match": "(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}')\\]}])\\.\\.(?=[0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}(\\[{])"
+                },
+                { "name": "keyword.operator.range.sgl", "match": "\\.\\.(?:[!+\\-*%=<>?&^|~]|/(?!/))*" },
+                {
+                    "name": "keyword.operator.comparison.sgl",
+                    "match": "(?<![!+\\-*/%=<>?&^|~])(?:<=|>=|==|!=|<|>)(?!(?:[!+\\-*%=<>?&^|~]|/(?!/)))"
+                },
+                {
+                    "name": "keyword.operator.assignment.sgl",
+                    "match": "(?<![!+\\-*/%=<>?&^|~])(?:[!+\\-*%=<>?&^|~]|/(?!/))*=(?!(?:[!+\\-*%=<>?&^|~]|/(?!/)))"
+                },
+                { "name": "keyword.operator.sgl", "match": "(?:[!+\\-*%=<>?&^|~]|/(?!/))+" }
+            ]
+        },
+        "punctuation": {
+            "patterns": [
+                { "name": "punctuation.accessor.sgl", "match": "\\." },
+                { "name": "punctuation.separator.comma.sgl", "match": "," },
+                { "name": "punctuation.terminator.sgl", "match": ";" },
+                { "name": "punctuation.separator.colon.sgl", "match": ":" },
+                { "name": "punctuation.section.parens.begin.sgl", "match": "\\(" },
+                { "name": "punctuation.section.parens.end.sgl", "match": "\\)" },
+                { "name": "punctuation.section.brackets.begin.sgl", "match": "\\[" },
+                { "name": "punctuation.section.brackets.end.sgl", "match": "\\]" },
+                { "name": "punctuation.section.braces.begin.sgl", "match": "\\{" },
+                { "name": "punctuation.section.braces.end.sgl", "match": "\\}" },
+                {
+                    "comment": "'$' means something inside a double-quoted string only.",
+                    "name": "invalid.illegal.unknown-character.sgl",
+                    "match": "\\$+"
+                }
+            ]
+        }
+    }
+}

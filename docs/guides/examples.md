@@ -323,6 +323,9 @@ Three link options carry the difference: `SINGLE_FILE=1` embeds the wasm as a da
 a `--pre-js` sets `Module['arguments']`, since nexus runs whatever its command line names and a page has none;
 and `--shell-file` supplies the page itself instead of emcc's default shell.
 
+`examples/graphics/sgl-cube` builds `graphics-sgl-cube-example-web` the same way, into `web/sgl-cube.html`.
+It is the same cube with its shader written in SGL: one `cube.sgl` where `rotating-cube` has an HLSL file and two WGSL ones.
+
 Take the pattern where an example is worth showing to someone who will not build it.
 It is not automatic: an example that needs a window system, or a backend with no web arm, has nothing to put on a page.
 

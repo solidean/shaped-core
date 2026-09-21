@@ -176,6 +176,55 @@ def _build_checks(ctx: Context) -> list[dev.Check]:
 
         return dev.report.summarize_tests(records, presets, ctx.root)
 
+    def check_sgl_prelude(*, fix: bool, scope: dev.ChangeScope | None, mirror: bool, verbose: bool) -> bool:
+        # SGL's builtins live in a C++ registry, and prelude/builtins.sgl is that registry written out and committed.
+        # The `sgl` tool compares the two, so this gate builds it -- like `shader-grammar`, and placed beside it for
+        # the same reason: after every static gate, before `test`.
+        # --fix rewrites the file instead.
+        # That fixer stands behind `format` and breaks nothing by it: what it writes is SGL, which no other gate reads,
+        # so the ordering argument about fixers and `format` does not reach it.
+        # Repo-wide by nature, so scope is ignored.
+        prelude = ctx.root / "libs" / "graphics" / "shaped-graphics-language" / "prelude" / "builtins.sgl"
+        presets = ctx.resolve_presets([ctx.default_preset_name()])
+        preset = presets[0]
+
+        # The tool is gated on SC_BUILD_TOOLS, and a wasm artifact is no program this gate can simply start.
+        # The library's own test pins the same two texts, so a tree that skips here still catches drift in `test`.
+        has_tool = any(t.name == "sgl" and t.kind == "EXECUTABLE" for t in ctx.discover(preset))
+        if not has_tool or preset.is_emscripten:
+            reason = "is an emscripten preset" if has_tool else "has no `sgl` target (SC_BUILD_TOOLS is off)"
+            dev.ui.write_line(f"sgl-prelude: skipped -- preset {preset.name!r} {reason}; "
+                              f"the shaped-graphics-language tests compare the same texts")
+            return True
+
+        builds = dev.build(presets, ["sgl"], root=ctx.root, auto_configure=True, mirror=mirror, verbose=verbose)
+        if not all(r.ok for r in builds):
+            dev.report.print_build_failure(builds, presets, ctx.root)
+            return False
+
+        artifact = next((t.artifact for t in ctx.discover(preset) if t.name == "sgl" and t.artifact), None)
+        if artifact is None:
+            dev.ui.write_line(console.red(f"sgl-prelude: target 'sgl' has no built artifact for preset {preset.name!r}"))
+            return False
+
+        result = dev.run_step(
+            [str(artifact), "prelude", "--write" if fix else "--check", str(prelude)],
+            step_type="lint", name="sgl-prelude",
+            build_dir=preset.build_dir, cwd=ctx.root, mirror=mirror, verbose=verbose,
+        )
+        if result.ok:
+            rel = prelude.relative_to(ctx.root).as_posix()
+            dev.ui.write_line(f"sgl-prelude: {rel} {'written from' if fix else 'is in sync with'} the builtin registry")
+            return True
+
+        # The tool's own message says where the texts part; it was captured to the step log, so it is repeated here.
+        for log in (result.stdout_log, result.stderr_log):
+            text = log.read_text(encoding="utf-8", errors="replace").rstrip() if log.exists() else ""
+            if text and not mirror:
+                dev.ui.write_line(text)
+        dev.ui.write_line(console.red("sgl-prelude: run `uv run dev.py check sgl-prelude --fix` to regenerate the file"))
+        return False
+
     def check_tests(*, fix: bool, scope: dev.ChangeScope | None, mirror: bool, verbose: bool) -> bool:
         # The variants come from dev.py's Policy tables, and a platform with no sibling for one of them simply contributes none.
         # Not fixable, so fix and scope are ignored.
@@ -234,6 +283,9 @@ def _build_checks(ctx: Context) -> list[dev.Check]:
         dev.Check("shader-grammar",
                   "run the shared binding corpus against both halves of the binding pass",
                   False, check_shader_grammar),
+        dev.Check("sgl-prelude",
+                  "SGL's prelude/builtins.sgl is what the C++ builtin registry generates (--fix rewrites it)",
+                  True, check_sgl_prelude),
         dev.Check("test",
                   "build + run the full suite on the debug, default, release, single-threaded "
                   "(and where supported, sanitizer) presets",
@@ -246,6 +298,8 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
     if args.list:
         dev.list_checks(checks)
         sys.exit(0)
+
+    ctx.warn_known_issues(ctx.resolve_presets(None))
 
     by_name = {c.name: c for c in checks}
     if args.names:

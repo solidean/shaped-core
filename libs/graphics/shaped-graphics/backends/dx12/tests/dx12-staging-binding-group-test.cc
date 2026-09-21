@@ -161,7 +161,8 @@ ASYNC_INVOCABLE_TEST("sg dx12 - a staging snapshot outlives the epoch that minte
 ASYNC_TEST("sg dx12 - staging snapshots free and reuse their descriptor range")
 {
     auto ctx_r = dx12::make_test_context({.descriptor_heap_capacity = 8, .descriptor_transient_fraction = 0.5f});
-    REQUIRE(ctx_r.has_value());
+    if (ctx_r.has_error())
+        SKIP("no dx12 adapter");
     auto ctx = ctx_r.value();
 
     sg::compiled_shader const shader = make_double_shader();

@@ -16,6 +16,7 @@ sg::compiled_shader make_shader()
     shader.format = sg::shader_format::dxil;
     shader.entry_point = "main";
     shader.workgroup_size = sg::compute_dimensions{.x = 64, .y = 2, .z = 1};
+    shader.color_output_count = 3; // no stage carries both, and the codec does not care
 
     byte const code[] = {byte(0xDE), byte(0xAD), byte(0xBE), byte(0xEF), byte(0x00), byte(0x7F)};
     shader.bytecode = cc::make_pinned_data(cc::span<byte const>(code));
@@ -92,6 +93,8 @@ bool same(sg::compiled_shader const& a, sg::compiled_shader const& b)
         if (x.visibility != y.visibility)
             return false;
     }
+    if (a.color_output_count != b.color_output_count)
+        return false;
     if (a.workgroup_size.has_value() != b.workgroup_size.has_value())
         return false;
     if (a.workgroup_size.has_value())
@@ -121,6 +124,7 @@ TEST("sg shader codec round-trips the absent optionals")
 {
     auto original = make_shader();
     original.workgroup_size = {};
+    original.color_output_count = {};
     original.bindings.clear();
     original.compiler = {};
     original.entry_point = {};
@@ -129,6 +133,7 @@ TEST("sg shader codec round-trips the absent optionals")
     REQUIRE(decoded.has_value());
     CHECK(same(original, decoded.value()));
     CHECK(!decoded.value().workgroup_size.has_value());
+    CHECK(!decoded.value().color_output_count.has_value());
 }
 
 TEST("sg shader codec refuses anything it did not write")

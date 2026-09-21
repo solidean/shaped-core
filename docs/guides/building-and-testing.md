@@ -31,7 +31,7 @@ uv run dev.py <command> [options]
 | `clean`        | Remove a preset's build directory (`--all` for every preset, `--dry-run`).    |
 | `diagnose clangd FILE` | Show clangd's diagnostics for a source file (see below).              |
 | `info`         | Inspect resolved compile/link flags and per-file compile commands (see below). |
-| `doctor`       | Read-only toolchain sanity check: cmake, ninja, compiler, presets, clangd, the LLVM tools coverage and PGO need, the networking environment, and the graphics environment (Vulkan, windowing, DXC). |
+| `doctor`       | Read-only toolchain sanity check: cmake, ninja, compiler, presets, clangd, the LLVM tools coverage and PGO need, the networking environment, the graphics environment (Vulkan, windowing, DXC), and any [known external issue](../bugs-external/_index.md) this machine carries, as a `WARN`. |
 | `list-presets` / `list-targets` / `list-toolsets` | What is available: build presets, a preset's CMake targets, the installed compiler toolsets. |
 
 `build` and `test` **auto-configure** when CMake inputs or the source listing change (fingerprinted); pass `--no-configure` to skip.
@@ -228,6 +228,12 @@ uv run dev.py test --preset emscripten-relwithdebinfo --emsdk-path /path/to/emsd
 ```
 
 The test binaries are `.wasm` plus a `.js` loader; dev.py runs them under emsdk's Node by default and parses the same JUnit report as native runs.
+
+**A cross preset builds a native `sgl` first.**
+A shader package's SGL entries are read by the SGL compiler while the build runs, and a wasm build's own `sgl` is wasm, which the build machine cannot run.
+So dev.py builds `sgl` in the platform's default preset, hands its path to the cross build as `SC_SGL_TOOL`, and rebuilds it before every cross build so a compiler change reaches the generated code.
+The same applies to the Android and iOS presets.
+A build driven by CMake alone sets `SC_SGL_TOOL` itself; see [ShaderPackage.cmake](../../libs/graphics/shaped-shader-library/cmake/ShaderPackage.cmake).
 `uv run dev.py doctor` validates the toolchain, and the full setup and feature knobs are [requirements.md](../requirements.md#emscripten--wasm)'s.
 
 #### Which runtime executes the artifact
@@ -377,6 +383,7 @@ Registered checks, **in the order they run**:
 | `shaped-lint`| shaped-linter's own rules on `.cc`/`.hh`/`.md`/`.py`. Scoped to the branch by default; `--dirty-only`, `--commit` or `--all` to rescope. | yes (applies its suggested fixes) |
 | `format`     | clang-format our C++ sources. Scoped to the branch by default; `--dirty-only`, `--commit` or `--all` to rescope. | yes (rewrites in place) |
 | `crossrefs`  | Validate doc↔code cross-references repo-wide (always full-repo).                 | no (report only) |
+| `sgl-prelude`| SGL's committed `prelude/builtins.sgl` is what the C++ builtin registry generates. Builds the `sgl` tool. | yes (rewrites the file) |
 | `test`       | Build + run the full suite on the debug, default, release, single-threaded **and** (Linux/macOS) sanitizer presets. | no (report only) |
 
 ### What it prints about its own cost
@@ -427,6 +434,14 @@ The binding pass exists twice — in C++ for the runtime rewriter, in Python for
 Running only the Python half would let a divergence through to the suite, which is the thing this gate runs ahead of.
 So it builds `shaped-shader-library-test` and runs the corpus case, `--no-test` or not.
 It also fails when that case runs zero times: it selects one test by name, and a runner given a name that matches nothing exits 0.
+
+**`sgl-prelude` builds a target too, and it is the one fixer that stands behind `format`.**
+SGL's builtins live in a C++ registry, and `libs/graphics/shaped-graphics-language/prelude/builtins.sgl` is that registry written out and committed.
+The step builds the `sgl` tool and runs `sgl prelude --check` on the file; under `--fix` it runs `--write` instead.
+Standing behind `format` breaks nothing: what it writes is SGL, which no other gate reads, so the ordering argument above does not reach it.
+It sits with `shader-grammar` for the reason that one does — it needs a build, so every static gate runs first.
+Where the tool cannot be built — `SC_BUILD_TOOLS` off, or an emscripten preset — the step says so and passes, and the library's own test still compares the two texts.
+[adding-a-builtin.md](../../libs/graphics/shaped-graphics-language/docs/adding-a-builtin.md) is what the registry is.
 
 `test` is the slow tail and runs **only after the static checks pass** — no point building a tree that already fails a cheap lint — and `--no-test` skips it.
 It builds and runs the suite across five build variants:
@@ -820,6 +835,9 @@ TSan starts threads through a trampoline the walker cannot get past, and rewrite
 - `--diag-archive FILE` (on `build`) — zip the build's diagnostic sidecars, **even when the build failed**.
   `build_diag` reads the archive directly, so this pairs with `--keep-going` to turn one red build into one artifact — which is what CI does.
 - `--timeout SECS` (on `test`) — per-binary timeout, default 60, or 600 under `--thorough`; `0` disables.
+  A binary whose cost the machine sets rather than the code declares a longer one, `sc_nexus_binary(... TIMEOUT <secs>)`, and the default rises to it.
+  A `--timeout` given here holds for every binary instead.
+  The dx12 GPU test binaries declare 180 s on Windows, since on a GPU-less host WARP compiles each of their shaders single-threaded.
   A binary that exceeds it is killed and reported as failed — but not before it is asked where it was.
   dev.py provokes clean-core's crash handler first and gives it two seconds to write, so the step's **stderr log** holds the running test, plus a stack for every thread in the process.
   In a hang the stack you want is under `other threads`; the faulting one is dev.py's doing and says nothing.
@@ -827,7 +845,7 @@ TSan starts threads through a trampoline the walker cannot get past, and rewrite
   A process wedged inside a driver call may never run that handler; the nexus watchdog is the in-process net for it.
 - `--watchdog SECS` (on `test`) — after SECS with no test starting or finishing, the binary reports the hung run itself and exits with code 4.
   The report names the running tests and any test that is awaiting on no thread, then outstanding tracked work, every thread's stack and open scopes, and last where the recording was written.
-  It defaults to half the timeout, so the report lands before the timeout kills the binary; `0` turns it off, and a run under a debugger never arms it.
+  It defaults to half of each binary's own timeout, so the report lands before the timeout kills the binary; `0` turns it off, and a run under a debugger never arms it.
 - `symbolize --obj FILE [input]` — resolve a wasm stack's module offsets to functions and lines, against the build's DWARF sidecar.
   The sidecar is opt-in: [SC_WASM_DEBUG_SIDECARS](../platforms.md#wasm-debug-sidecars-sc_wasm_debug_sidecars).
 - `--merged-xml-report FILE` / `--no-xml-reports` (on `test`) — merge per-binary XML into one file, or skip XML entirely.
