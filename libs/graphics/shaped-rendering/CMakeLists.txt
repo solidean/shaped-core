@@ -162,6 +162,18 @@ sc_add_shader_package(
         nn_conv.hlsl:compute:main_cs
         nn_conv.hlsl:binding:nn_conv_bindings
         nn_conv.hlsl:constants:gConstants
+        nn_input.hlsl:compute:main_cs
+        nn_input.hlsl:binding:nn_input_bindings
+        nn_input.hlsl:constants:gConstants
+        nn_output.hlsl:compute:main_cs
+        nn_output.hlsl:binding:nn_output_bindings
+        nn_output.hlsl:constants:gConstants
+        nn_pool.hlsl:compute:main_cs
+        nn_pool.hlsl:binding:nn_pool_bindings
+        nn_pool.hlsl:constants:gConstants
+        nn_upsample.hlsl:compute:main_cs
+        nn_upsample.hlsl:binding:nn_upsample_bindings
+        nn_upsample.hlsl:constants:gConstants
 )
 
 # Test executable.
@@ -224,6 +236,7 @@ if(SC_BUILD_TESTS)
         tests/oidn-test.cc
         tests/tza-test.cc
         tests/nn-conv-test.cc
+        tests/nn-ops-test.cc
         )
         target_link_libraries(shaped-rendering-test PRIVATE shaped-graphics-dx12)
 
