@@ -3,6 +3,17 @@
 For whoever works **on** the compiler.
 Whoever works **with** the language wants the [spec](spec/_index.md), the [example](../../../../examples/graphics/sgl-cube/shaders/cube.sgl) and the `sgl` tool instead.
 
+## Why a language of our own
+
+The alternatives each fail on something this repo needs, which is what the next reader of this library asks first.
+
+* **HLSL through Tint or naga** reaches WGSL and MSL, and neither translator supports ray tracing.
+  Both are large dependencies besides, and live editing in the browser would need them in the page ([portable HLSL](../../shaped-shader-library/docs/portable-hlsl.md)).
+* **Slang** reaches every target but supports no ray tracing on Metal.
+* **WGSL as the source** does not cover the feature set, so building on it means extending it anyway, which is a language of our own with someone else's grammar.
+* **The binding model is ours**: a group numbered by its place in an entry point's list, and host code generated from the one parser of the source, need a language that states both.
+* **Polyfills**, such as ray tracing on WebGPU, need a compiler that owns what it writes.
+
 ## The pipeline
 
 ```
@@ -107,12 +118,12 @@ One walker reads the flat tree, and a target is a small spelling layer over it.
 How a builtin is written comes from its record: a call under a name per target, an infix or a prefix operator, or a writer of its own for the few that are neither.
 The size and alignment the `layout-mismatch` check places a member by are fields of the type's record.
 
-* The text carries its **final addresses**: member order is the location, and an `@inline binding` sits where sg expects inline constants.
-  slib's binding pass is therefore not needed behind it.
+* WGSL and MSL carry their **final addresses**: member order is the location, and an `@inline binding` sits where sg expects inline constants.
+  HLSL carries the same locations and names each resource's group with `#pragma sc group N`, and slib's binding pass assigns its registers; final registers for both HLSL targets are open below.
 * A name that is reserved in one target gets a trailing underscore there.
   The function a builtin is called as is reserved from its record, so a local named `lerp` is renamed in HLSL without an entry in any list.
   The exception is a function only a custom writer calls, such as `mul`, which stands in `emit/reserved_words.cc`.
-  An entry point never changes, so one that collides anywhere is an error everywhere.
+  An entry point is renamed the same way, and `emitted_text::entry_point` is the name a caller compiles.
 * **The `msl` text has met no Metal compiler yet**, and nothing builds it.
   slib has no metallib compiler, and sg's metal backend binds no vertex buffers or inline constants.
 
@@ -124,6 +135,8 @@ The size and alignment the `layout-mismatch` check places a member by are fields
 
 ```bash
 uv run dev.py run sgl -- emit <file> --entry <name> --target <hlsl-dx12|hlsl-vulkan|wgsl|msl>
+uv run dev.py run sgl -- describe <file>             # what slib's generator reads: bindings, edge structs, entry points
+uv run dev.py run sgl -- describe <file>             # what slib's generator reads: bindings, edge structs, entry points
 uv run dev.py run sgl -- prelude --check <path>      # exit 2, and where the texts part, when the file differs
 uv run dev.py run sgl -- prelude --write <path>      # what `uv run dev.py check sgl-prelude --fix` runs
 ```
@@ -140,6 +153,7 @@ Every "why" is mirrored in a `why/` folder beside its rules, and ideas that are 
 ## What does not exist yet
 
 Generics, methods and lambdas.
-GLSL, a Metal toolchain, and the vertex-input and render-target halves of the generated host side.
-A binding member that is neither a buffer nor a constant of an `@inline` block, which is also what an ordinary group's implicit constant buffer waits on.
+GLSL, a Metal toolchain, and in MSL a compute entry point and a group.
+HLSL with final registers, one emission for dx12 and one for vulkan, so that SGL's text feeds no binding pass.
+A binding member that is neither a buffer nor a plain value, such as a texture or a sampler.
 Modules, interfaces and the parallel driver of [the compilation model](spec/incubator/compilation-model.md).

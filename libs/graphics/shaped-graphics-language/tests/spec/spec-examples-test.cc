@@ -5,6 +5,8 @@
 #include <clean-core/string/string.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics-language/debug/dump.hh>
+#include <shaped-graphics-language/driver/compile_to_text.hh>
+#include <shaped-graphics-language/driver/describe.hh>
 #include <shaped-graphics-language/syntax/parsed_file.hh>
 
 using namespace cc::primitive_defines;
@@ -176,4 +178,74 @@ TEST("sgl spec - every checked example in the spec parses the way its fence says
     CHECK(failures == "");
     // A spec whose examples all quietly became sketches would pass the check above.
     CHECK(checked > 40);
+}
+
+namespace
+{
+/// The names after `fun` on every line that declares an entry point, which is what `compile_to_text` is asked for.
+/// A scan rather than a parse: a source that does not check still has entry points to ask for, and each must fail cleanly.
+cc::vector<cc::string> entry_points_of(cc::string_view source)
+{
+    auto result = cc::vector<cc::string>();
+    auto at = isize(0);
+    while (true)
+    {
+        auto const found = source.find(cc::string_view("fun "), at);
+        if (found < 0)
+            break;
+        auto const line_start = source.subview({.start = 0, .end = found}).rfind('\n') + 1;
+        auto const head = source.subview({.start = line_start, .end = found});
+        auto name_end = found + 4;
+        while (name_end < source.size()
+               && (source[name_end] == '_' || (source[name_end] >= 'a' && source[name_end] <= 'z')
+                   || (source[name_end] >= 'A' && source[name_end] <= 'Z')
+                   || (source[name_end] >= '0' && source[name_end] <= '9')))
+            ++name_end;
+        if (head.contains('@') && name_end > found + 4)
+            result.push_back(cc::string(source.subview({.start = found + 4, .end = name_end})));
+        at = found + 4;
+    }
+    return result;
+}
+
+/// Every declared entry point of `source` through every target, and `describe` besides.
+/// Each call must give text or an error that says something; the assert a crash would be fails the test by itself.
+void require_total(cc::string_view source, cc::string_view where, cc::string& failures)
+{
+    auto const described = sgl::describe({.source = source, .source_name = where});
+    if (described.has_error() && described.error().empty())
+        failures.appendf("{}: describe failed without saying why\n", where);
+    for (auto const& name : entry_points_of(source))
+        for (auto const t : sgl::emit::all_targets())
+        {
+            auto const text
+                = sgl::compile_to_text({.source = source, .source_name = where, .entry_point = name, .target = t});
+            if (text.has_error() ? text.error().empty() : text.value().text.empty())
+                failures.appendf("{}: '{}' for {} gave neither text nor a reason\n", where, name,
+                                 sgl::emit::to_string(t));
+        }
+}
+} // namespace
+
+TEST("sgl spec - every example of the spec and every sample compiles for every target or says why, and nothing asserts")
+{
+    auto failures = cc::string();
+    auto sources = 0;
+    for (auto const file : spec_files)
+    {
+        auto const path = cc::string(SGL_SPEC_DIR) + "/" + file;
+        for (auto const& e : examples_of(read_text(path)))
+        {
+            ++sources;
+            require_total(e.source, cc::format("{}:{}", file, e.line), failures);
+        }
+    }
+    for (auto const sample :
+         {"basic-raster.sgl", "control-flow.sgl", "cube.sgl", "helpers.sgl", "matrices.sgl", "members-and-bindings.sgl"})
+    {
+        ++sources;
+        require_total(read_text(cc::string(SGL_SAMPLES_DIR) + "/" + sample), sample, failures);
+    }
+    CHECK(failures == "");
+    CHECK(sources > 50);
 }

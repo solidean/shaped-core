@@ -164,9 +164,9 @@ public:
         if (p.e.entry_stage == stage::compute)
         {
             out.appendf("[numthreads({}, {}, {})]\n", p.e.workgroup[0], p.e.workgroup[1], p.e.workgroup[2]);
-            out.appendf("void {}(uint3 {}_in : SV_DispatchThreadID)\n{{\n", p.entry_name, p.locals[0]);
+            out.appendf("void {}(uint3 {} : SV_DispatchThreadID)\n{{\n", p.entry_name, p.dispatch_name);
             // The dispatch reports the id unsigned and SGL has one integer type, so the conversion stands at the top.
-            out.appendf("    const int3 {} = int3({}_in);\n", p.locals[0], p.locals[0]);
+            out.appendf("    const int3 {} = int3({});\n", p.locals[0], p.dispatch_name);
             return;
         }
         out.appendf("{} {}({} {})\n{{\n", type_text(p, *this, p.e.result), p.entry_name, type_text(p, *this, p.e.input),

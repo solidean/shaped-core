@@ -19,9 +19,12 @@ What the *user's source* did wrong is `sgl::diagnostic`, which is data a caller 
 #include <shaped-graphics-language/driver/compile_to_text.hh>
 auto const r = sgl::compile_to_text({.source = text, .source_name = "cube.sgl", .entry_point = "main_ps",
                                      .stage = sgl::check::stage::pixel, .target = sgl::emit::target::wgsl});
-                                           // -> cc::result<cc::string, cc::string>: the text, or what a reader is told
+                                           // -> cc::result<emitted_source, cc::string>: the text, or what a reader is told
                                            // parse + ast::build + check against the library's prelude + emit, in one call
-r.value()                                  // the emitter's text, unchanged
+r.value().text                             // the emitter's text, unchanged
+r.value().entry_point                      // the name the text declares, which is the one to compile: `main` is `main_` in MSL
+r.value().bound_names                      // { emitted, host } per resource: `work_values` is what the host binds as `work.values`
+r.value().color_targets  .target_struct    // a pixel entry point's target count and `@pixel struct`; -1 and empty otherwise
 r.error()                                  // one line per diagnostic: `cube.sgl:12:5: error: unknown-name: foo`
                                            // one inside the prelude names `builtins.sgl` or `core.sgl`
                                            // a missing entry point names the ones the source holds; a wrong stage says both
@@ -213,7 +216,8 @@ m.at(symbol_id)  m.at(type_id)  m.at(range)  m.name_of(type_id)   // name_of giv
 e.entry_stage  e.name  e.input  e.result  e.bindings   // stage, the name as written, edge structs, the LISTED bindings
 e.locals  e.exprs  e.stmts  e.body         // locals[0] is the parameter; at(id) / at(range) like the AST
 sgl::check::flat_expr                      // { type, from (origin), inlined_through, node }: flat_literal (float), flat_int_literal,
-                                           // flat_bool_literal, flat_local_ref, flat_binding_member, flat_member, flat_construct,
+                                           // flat_bool_literal, flat_enum_value, flat_local_ref, flat_binding_member, flat_member,
+                                           // flat_buffer_element (`values[i]`, a place when stored to), flat_construct,
                                            // flat_call { callee, intrinsic, is_pure, arguments }, flat_not, flat_and, flat_or,
                                            // flat_block (a block EXPRESSION: structured form only)
                                            // a call of the program's function is a flat_block named after the callee: arguments bound by
@@ -221,8 +225,8 @@ sgl::check::flat_expr                      // { type, from (origin), inlined_thr
 x.from  x.inlined_through                  // the AST node it came from, and e.at(range) -> the call sites it came through, outermost first
 sgl::check::flat_stmt                      // flat_let, flat_var, flat_assign, flat_print, flat_eval (evaluate and drop), flat_if, flat_loop,
                                            // flat_while, flat_for,
-                                           // flat_continue, flat_return; structured only: flat_block, flat_leave;
-                                           // core only: flat_once, flat_break
+                                           // flat_continue, flat_return; structured only: flat_block, flat_leave, flat_case;
+                                           // core only: flat_once, flat_break, flat_switch
 e.labels  e.root                           // flat_label { name } per block / loop; label_id is a typed id like every other
                                            // root is what `leave` names to return; none on a tree the check pass wrote
 e.names.mint("n")                          // -> "n", then "n_1", …; EVERY name an emitter writes comes from here
@@ -288,6 +292,7 @@ sgl::check::dump(o)                        // `ok 1.5 | print 1 | print true`
 ```bash
 uv run dev.py run sgl -- emit shader.sgl --entry main_ps --target wgsl   # the text, or the diagnostics and exit 2
 uv run dev.py run sgl -- prelude [--check <path> | --write <path>]       # the generated builtins.sgl; --check exits 2 on a difference
+uv run dev.py run sgl -- describe shader.sgl                             # sgl::describe as JSON: what slib's generator reads
 uv run dev.py check sgl-prelude [--fix]                                  # the gate over prelude/builtins.sgl
 ```
 
@@ -301,13 +306,14 @@ sgl::emit::all_targets()                   // -> cc::span<target const>
 auto const r = sgl::emit::emit(m, 0, sgl::emit::target::wgsl);   // -> emitted_text; the isize is a position in m.entry_points
                                            // LEGALIZES that entry point first, since the check pass writes the structured form
                                            // ONE entry point per call: it, and exactly the structs and the binding it needs
-                                           // TOTAL and deterministic; the text carries FINAL addresses, no pass numbers it later
+                                           // TOTAL and deterministic; WGSL and MSL carry FINAL addresses, and HLSL leaves the
+                                           // registers to slib's binding pass (`#pragma sc group N`)
 sgl::emit::emit_entry_point(m, e, t)       // the same for a tree that is no entry point of m: a legalized one, a hand-built one
                                            // e must be CORE, or the result is the error `not-core` with the first violation
 r.has_text()  r.text                       // text is empty when there are errors
 r.errors                                   // emit::error { kind, symbol, detail }; the SAME for every target
-sgl::emit::to_string(target)  sgl::emit::to_string(error_kind)   // "hlsl-vulkan", "reserved-entry-point-name"
-sgl::emit::dump_errors(r)                  // `unsupported a binding that is not @inline: 'scene'`, one per line
+sgl::emit::to_string(target)  sgl::emit::to_string(error_kind)   // "hlsl-vulkan", "not-core"
+sgl::emit::dump_errors(r)                  // `unsupported a print, which no target writes yet`, one per line
 
 #include <shaped-graphics-language/emit/reserved_words.hh>
 sgl::emit::reserved_words(t)               // -> cc::span<cc::string_view const>: keywords, predeclared types, the functions the text calls
@@ -387,9 +393,12 @@ sgl::print_source(file)      // == file.source for EVERY input: the lossless inv
 - **Every path of a function that returns a value ends in a `return`**, or it is `missing-return`.
   A `loop:` without a `break` never ends; a `while` always may, whatever its condition.
   What follows a jump in its list is the WARNING `unreachable-code`.
-- **A block is a scope.** A local ends with its block, two blocks beside each other may reuse a name, and shadowing an enclosing block's local is `unsupported-yet`.
+- **A block is a scope.** A local ends with its block, and two blocks beside each other may reuse a name.
+- **A later local shadows an earlier one**, in the same block or an enclosing one, parameters included, as in Rust (CHK-53).
+  Its value still sees the one it hides; each is a local of its own, minted `x`, `x_1`, … in the text.
+  Shadowing a module-level name is `unsupported-yet`.
 - **`and`, `or` and `not` are no functions**, and a comparison chain evaluates each inner operand once: it is bound where it first stands.
-- **Still `unsupported-yet`:** generics, `self` and methods, `mut` parameters, lambdas and function values, nested functions, `case`, enums, `const`, `use`,
+- **Still `unsupported-yet`:** generics, `self` and methods, `mut` parameters, lambdas and function values, nested functions, `const`, `use`,
   a `for` over anything but `a ..< b`, a `let` without a value, an expression statement that is no call, `assert`.
 - **An arrow body without `-> T` infers its result**, and a BLOCK body without one still returns nothing.
   Its body is checked as part of compiling it, so two such functions that need each other are `dependency-cycle`, not `recursive-call`.
@@ -420,8 +429,10 @@ sgl::print_source(file)      // == file.source for EVERY input: the lossless inv
 - **An emit error is no diagnostic.** It is an `emit::error`: a kind, the symbol it is about, and a detail; it has no span yet.
 - **Addresses are positions.** Member i of an edge struct is location i, counted over the members without `@position`.
   What a struct is — vertex input, stage link, render targets — comes from where it stands in the signature, not from its attribute.
-- **A name is renamed per target, an entry point never.** `target` is `target_` in WGSL only; an entry point named `filter` or `main` is an error in EVERY target.
-- **Only an `@inline binding` is emitted**: `register(b0, space9)`, `[[vk::push_constant]]`, `@group(3) @binding(0)`.
+- **A name is renamed per target where the target reserves it**: `target` is `target_` in WGSL only, and an entry point named `main` is `main_` in MSL.
+  `emitted_text::entry_point` is the name the text declares.
+- **An `@inline binding`** is `register(b0, space9)`, `[[vk::push_constant]]`, `@group(3) @binding(0)`.
+  **Any other binding is a group**, numbered by its place in the entry point's list: `#pragma sc group N` in HLSL, `@group(N) @binding(slot)` in WGSL, refused in MSL.
   MSL has no globals, so there it is the entry point's parameter `constant T& name [[buffer(4)]]`.
   Its members must land on the same offsets in HLSL, WGSL and MSL, so `{float; float3}` is `layout-mismatch`.
   **So is `{float3; float}`**: MSL's `float3` is 16 bytes, so nothing fits into its tail, and `{float3; mat4; float}` is fine.

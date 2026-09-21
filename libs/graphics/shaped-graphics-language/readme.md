@@ -36,6 +36,7 @@ uv run dev.py run sgl -- emit shader.sgl --entry main_ps --target wgsl
 uv run dev.py run sgl -- prelude                        # prelude/builtins.sgl as the builtin registry generates it
 uv run dev.py run sgl -- prelude --check <path>         # exit 2, and where the texts part, when the file differs
 uv run dev.py run sgl -- prelude --write <path>         # what `uv run dev.py check sgl-prelude --fix` runs
+uv run dev.py run sgl -- describe shader.sgl            # what slib's package generator reads, as JSON
 ```
 
 SGL's builtins live in a C++ registry, and `prelude/builtins.sgl` is generated from it and committed.

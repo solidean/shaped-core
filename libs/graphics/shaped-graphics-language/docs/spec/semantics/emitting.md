@@ -3,7 +3,7 @@
 *Tracer: deliberately thin.*
 
 An emitter writes the text a graphics API compiles, from one flat tree of a [checked module](checking.md#the-flat-tree).
-It carries exactly what [cube.sgl](../../../tests/samples/cube.sgl) needs, like the pass in front of it.
+It carries what [cube.sgl](../../../tests/samples/cube.sgl) needs, and compute entry points, groups, buffers, enums and `case` besides; every other construct is `unsupported`.
 The cube's text has met its readers: DXC compiles both HLSL targets, and WebGPU compiles the WGSL.
 [sgl-cube](../../../../../../examples/graphics/sgl-cube/sgl_cube.cc) draws the same picture on all three, and no rule below had to change for it.
 **The MSL text has not been through a Metal compiler yet**: its rules are pinned as text, and nothing has compiled or drawn with it.
@@ -13,7 +13,8 @@ Back to the [semantics](_index.md); the reasons are in [why/emitting.md](why/emi
 
 * **EMIT-1** A **target** is a text format together with the addressing rules of the backend that reads it.
 * **EMIT-2** The targets are `hlsl-dx12`, `hlsl-vulkan`, `wgsl` and `msl` ([why](why/emitting.md#emit-2)).
-* **EMIT-3** The text of a target carries its final addresses: no later pass numbers a binding, a location or an offset.
+* **EMIT-3** The WGSL and MSL text carries its final addresses: no later pass numbers a binding, a location or an offset.
+  The HLSL text carries every location and offset and the group of each resource, and leaves the register to slib's binding pass (EMIT-86); HLSL with final registers is open.
 * **EMIT-4** No target depends on a flag of the compiler that reads its text ([why](why/emitting.md#emit-4)).
 * **EMIT-5** One emission writes one entry point: that entry point, and exactly the structs and the binding it needs.
 * **EMIT-6** Nothing in the text of one entry point depends on the text of another ([why](why/emitting.md#emit-6)).
@@ -28,7 +29,8 @@ Back to the [semantics](_index.md); the reasons are in [why/emitting.md](why/emi
 * **EMIT-10** A module that reported an error is the error `module-has-errors`, whichever entry point is asked for.
 * **EMIT-11** An entry point the module does not hold is `unknown-entry-point`.
 * **EMIT-12** A construct that no emitter carries yet is `unsupported`, and its detail names the construct; an emitter never guesses an address.
-* **EMIT-13** No error depends on the target: an entry point is written for every target or for none ([why](why/emitting.md#emit-13)).
+* **EMIT-13** No error depends on the target but EMIT-89's: an entry point is written for every target or for none ([why](why/emitting.md#emit-13)).
+  The exception is `msl`, which refuses what a Metal entry point takes as an argument.
 * **EMIT-66** A tree that is not core is the error `not-core`, and its detail names the first node that offends.
 * **EMIT-67** A `print` is `unsupported`: no target writes one yet.
 
@@ -40,8 +42,8 @@ Back to the [semantics](_index.md); the reasons are in [why/emitting.md](why/emi
 * **EMIT-17** A struct, a binding or a local whose name is reserved in a target is minted from that name and a trailing underscore, in that target only.
 * **EMIT-18** A member whose name is reserved gets trailing underscores until it is free among its siblings, in that target only.
 * **EMIT-19** A `@builtin` declaration is never written by its name: each target spells it as its record in the builtin registry says (EMIT-74).
-* **EMIT-20** An entry point keeps its name in every target.
-* **EMIT-21** An entry point whose name is reserved in any target is `reserved-entry-point-name`, in every target ([why](why/emitting.md#emit-21)).
+* **EMIT-20** An entry point keeps its name where the target allows it, and where the target reserves it, it is minted like any other name (EMIT-17); the text reports the name it declares.
+* **EMIT-21** *Retired:* `reserved-entry-point-name` is no longer reported, since EMIT-20 renames the entry point instead ([why](why/emitting.md#emit-21)).
 
 The struct `target` of the cube is reserved in WGSL and nowhere else.
 
@@ -142,7 +144,7 @@ A binding that is not `@inline` is a group.
 * **EMIT-86** HLSL writes a group as `#pragma sc group N` and a namespace `<binding>_bindings`, with no register: slib's binding pass assigns every one ([why](why/emitting.md#emit-86)).
 * **EMIT-87** The struct of a group's constant buffer stands ahead of that namespace, and `hlsl-vulkan` states no offset on its members ([why](why/emitting.md#emit-87)).
 * **EMIT-88** WGSL writes each resource of a group as `@group(N) @binding(slot)`: the constant buffer as `var<uniform>`, a buffer as a `var<storage>` array, `read` or `read_write`.
-* **EMIT-89** MSL writes no group yet, and an entry point that lists one is `unsupported`.
+* **EMIT-89** MSL writes no group and no compute entry point yet: an entry point that lists a group, or is `@compute`, is `unsupported`.
 * **EMIT-90** A group's buffers take the slots after its constant buffer, from 1, or from 0 when it has no plain member.
 
 ```sgl
@@ -216,7 +218,7 @@ The rules above say HLSL and WGSL by name; these say what `msl` writes in the sa
 * **EMIT-56** After the comment of EMIT-47, the text is `#include <metal_stdlib>`, `using namespace metal;` and an empty line.
 * **EMIT-57** MSL's reserved words also hold the types and the functions of its standard library, and `main` ([why](why/emitting.md#emit-57)).
 * **EMIT-58** An `@inline binding` is a struct of its members and the parameter `constant T& name [[buffer(4)]]` of the entry point ([why](why/emitting.md#emit-58)).
-* **EMIT-59** The entry point is a `vertex` or a `fragment` function, and its SGL parameter carries `[[stage_in]]`.
+* **EMIT-59** The entry point is a `vertex` or a `fragment` function, and its SGL parameter carries `[[stage_in]]`; a compute entry point is EMIT-89's.
 * **EMIT-60** A member with `@position` is `[[position]]`.
 * **EMIT-61** A member at location i is `[[attribute(i)]]` in a vertex input, `[[user(sgli)]]` in a stage link, and `[[color(i)]]` in a render target struct.
 * **EMIT-62** In a block, MSL places `float3` at a multiple of 16 and gives it 16 bytes, and everything else as WGSL does ([why](why/emitting.md#emit-62)).
@@ -242,8 +244,8 @@ So `{float3; float}` is `layout-mismatch`: the `float` is at byte 12 in HLSL and
 |---|---|
 | `module-has-errors` | EMIT-10 |
 | `unknown-entry-point` | EMIT-11 |
-| `unsupported` | EMIT-12, EMIT-33, EMIT-34, EMIT-38, EMIT-39, EMIT-67, EMIT-81 |
-| `reserved-entry-point-name` | EMIT-21 |
+| `unsupported` | EMIT-12, EMIT-33, EMIT-34, EMIT-38, EMIT-39, EMIT-67, EMIT-81, EMIT-89 |
+| `reserved-entry-point-name` | none: retired by EMIT-21 |
 | `system-value-semantic` | EMIT-32 |
 | `layout-mismatch` | EMIT-41 |
 | `non-finite-literal` | EMIT-50 |
@@ -253,6 +255,8 @@ So `{float3; float}` is `layout-mismatch`: the `float` is at byte 12 in HLSL and
 ## Open
 
 * GLSL, which comes through the same seam.
+* HLSL with final registers, one emission for dx12 and one for vulkan, so that no binding pass reads SGL's text and EMIT-3 holds for every target.
+* HLSL with final registers, one emission for dx12 and one for vulkan, so that no binding pass reads SGL's text and EMIT-3 holds for every target.
 * A Metal compiler for the MSL text, and the buffer index of EMIT-58, which sg's metal backend has yet to adopt.
 * Whether a block member becomes `packed_float3` in MSL, which would let `{float3; float}` through at the price of a conversion on every read.
 * Whether an emit error becomes a diagnostic with a span; today it names a symbol and carries a detail.

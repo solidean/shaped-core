@@ -9,7 +9,8 @@
 /// The text a graphics API compiles, written from one flat entry point of a checked module.
 ///
 /// A target is a text format together with the addressing rules of the backend that reads it.
-/// So the two HLSL targets are two outputs: each carries its final addresses, and no later pass numbers anything.
+/// So the two HLSL targets are two outputs: they differ in how a location and the inline constants are addressed.
+/// WGSL and MSL carry their final addresses; HLSL names each resource's group and leaves its register to slib's binding pass.
 enum class sgl::emit::target : sgl::u8
 {
     hlsl_dx12,
@@ -108,7 +109,8 @@ namespace sgl::emit
 /// An address is a position: member i of an edge struct is location i, counted over the members without `@position`.
 ///
 /// Total: a module with errors, a position out of range and a construct no target carries yet are errors in the result.
-/// No error depends on `t`, so an entry point that is written for one target is written for all of them.
+/// No error depends on `t` but two, so an entry point written for one target is written for every other: `msl`
+/// refuses a compute entry point and a group, which are both arguments of a Metal entry point and wait for a Metal compiler.
 /// Deterministic: equal arguments give equal text.
 [[nodiscard]] emitted_text emit(check::checked_module const& m, isize entry_point, target t);
 
@@ -116,6 +118,6 @@ namespace sgl::emit
 /// `e` must be in the core form, or the result is the error `not-core`.
 [[nodiscard]] emitted_text emit_entry_point(check::checked_module const& m, check::flat_entry_point const& e, target t);
 
-/// One line per error, for tests and for reading by eye: `unsupported a binding that is not @inline: 'scene'`.
+/// One line per error, for tests and for reading by eye: `unsupported a print, which no target writes yet`.
 [[nodiscard]] cc::string dump_errors(emitted_text const& e);
 } // namespace sgl::emit

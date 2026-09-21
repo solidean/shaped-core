@@ -118,6 +118,9 @@ struct plan
     cc::vector<planned_buffer> buffers;
     /// Parallel to `e.locals`.
     cc::vector<cc::string> locals;
+    /// A compute entry point's parameter as the dispatch hands it over, unsigned, ahead of the `int3` the body reads;
+    /// minted, so no local of the program can take it.
+    cc::string dispatch_name;
     /// Holds every name above and every reserved word of the target; a writer mints what it still needs from here.
     check::name_mint names;
 };

@@ -38,9 +38,9 @@ So a rule one target needs is a rule of the language: a layout WGSL cannot expre
 
 ## EMIT-21
 
-The host asks for an entry point by name, so its name cannot change per target the way a local's can.
-Were `filter` legal as an entry point, it would be `filter` on two backends and something else on the third, and the host would need the table.
-An error that names the targets is the smaller surprise.
+The host asks for an entry point by name, so it used to be an error for a name any target reserved.
+The text now reports the name it declares, and slib compiles by that name, so a rename is invisible to the host.
+An error for a name that is only a problem in one target was then the bigger surprise, and EMIT-20 renames instead.
 
 ## EMIT-40
 
@@ -66,7 +66,7 @@ Every flat expression is pure, so building a struct ahead of the statement that 
 `using namespace metal;` makes every name of the standard library visible in the global scope, where the program's structs are declared.
 A struct called `filter` or `length` would then be ambiguous at its first use, and the compiler would name a header nobody wrote.
 A local only hides such a name, so reserving it there costs an underscore and nothing else.
-`main` is no keyword, and MSL refuses a function of that name, so by EMIT-21 no target has an entry point called `main`.
+`main` is no keyword, and MSL refuses a function of that name, so by EMIT-20 an entry point called `main` is `main_` in MSL.
 
 ## EMIT-58
 

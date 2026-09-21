@@ -104,9 +104,9 @@ public:
         if (p.e.entry_stage == stage::compute)
         {
             out.appendf("@compute @workgroup_size({}, {}, {})\n", p.e.workgroup[0], p.e.workgroup[1], p.e.workgroup[2]);
-            out.appendf("fn {}(@builtin(global_invocation_id) {}_in: vec3u) {{\n", p.entry_name, p.locals[0]);
+            out.appendf("fn {}(@builtin(global_invocation_id) {}: vec3u) {{\n", p.entry_name, p.dispatch_name);
             // WebGPU reports the id unsigned and SGL has one integer type, so the conversion stands at the top.
-            out.appendf("    let {}: vec3i = vec3i({}_in);\n", p.locals[0], p.locals[0]);
+            out.appendf("    let {}: vec3i = vec3i({});\n", p.locals[0], p.dispatch_name);
             return;
         }
         out.appendf("@{}\nfn {}({}: {}) -> {} {{\n", p.e.entry_stage == stage::vertex ? "vertex" : "fragment",

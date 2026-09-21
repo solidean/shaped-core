@@ -579,5 +579,7 @@ sgl::emit::impl::plan sgl::emit::impl::make_plan(check::checked_module const& m,
     // The check pass minted the locals, so a buffer or a block minted above never took one's name.
     for (auto const& local : e.locals)
         result.locals.push_back(p.spell(local.name));
+    if (e.entry_stage == stage::compute && !result.locals.empty())
+        result.dispatch_name = result.names.mint(cc::format("{}_in", result.locals[0]));
     return result;
 }
