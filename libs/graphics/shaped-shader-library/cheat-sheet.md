@@ -36,7 +36,8 @@ sc_add_shader_package(
 # an SGL package spells its stages as SGL does: `cube.sgl:vertex:main_vs`, `cube.sgl:pixel:main_ps`.
 #   `pixel` is the symbol too (cube.pixel.main_ps) and reaches sg as shader_stage::fragment.
 #   ONE file holds both stages, and ONE package serves dx12, vulkan and webgpu.
-#   binding / vertex_input / payload / constants entries are HLSL's alone: an SGL or WGSL package naming one is an error.
+#   payload / constants entries are HLSL's alone, and a WGSL package names no generating entry at all.
+#   `binding` and `vertex_input` mean an SGL declaration in an SGL package, below.
 # an SGL package has its own generating kinds, read by the COMPILER (`sgl describe`), never by a parser here:
 #   cube.sgl:*                          # every entry point, binding and @vertex / @pixel struct the file declares
 #   cube.sgl:binding:frame              # a `binding` block;  cube.sgl:vertex_input:v  a `@vertex struct`
@@ -148,7 +149,7 @@ slib::create_sgl_compiler(std::unique_ptr<shader_compiler> inner)
                                    //   preprocess IS SGL's pipeline, so the flattened source is the EMITTED TEXT;
                                    //   compile and reflection are the inner compiler's
                                    //   an SGL error is a preprocess error: `pkg/cube.sgl:12:5: error: unknown-name: foo`
-                                   //   the binding pass is skipped: emitted HLSL carries its final addresses
+                                   //   the binding pass runs behind it: the HLSL names each group, the pass writes registers
 lib.add_compiler(slib::create_sgl_compiler(slib::create_wgsl_compiler()));   // one edge per format you can build
 
 #include <shaped-shader-library/binding/wgsl_declarations.hh>

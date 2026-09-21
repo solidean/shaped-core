@@ -469,7 +469,7 @@ def emit_render_target(package: str, namespace: str, file: SglFile, struct: dict
     out.append("    /// Every target in location order, and the name; viewport and scissor stay unset.\n")
     out.append("    [[nodiscard]] operator sg::rendering_info() const;\n\n")
     out.append("    /// The pipeline's half: one state per target, which converts to `color_targets` in location order.\n")
-    out.append("    /// Set `target_set = name` beside it, or sg cannot refuse the pipeline in a rendering of another set.\n")
+    out.append("    /// A pipeline that names no `target_set` takes the one its fragment shader writes, which is `name`.\n")
     out.append("    struct states\n    {\n")
     for m in members:
         out.append(f"        sg::color_target_state {m['name']};\n")
