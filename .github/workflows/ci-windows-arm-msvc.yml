@@ -21,6 +21,10 @@ concurrency:
 jobs:
   build-and-test:
     runs-on: windows-11-arm
+    env:
+      # WARP runs the GPU tests on the Windows Clang job alone: it is slow enough that one job is what CI can afford.
+      # Hiding it makes every dx12 driver here skip, since the runner has no GPU either.
+      SC_DX12_ADAPTER: hardware
     steps:
       - uses: actions/checkout@v5
 

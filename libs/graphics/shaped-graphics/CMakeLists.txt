@@ -183,6 +183,16 @@ target_compile_options(shaped-graphics
 set(_sg_backends "")
 set(_sg_test_drivers "")
 
+# The sc_nexus_binary arguments every test binary with a dx12 WARP driver passes, empty where there is no WARP.
+# On a GPU-less host WARP runs the whole GPU sweep, and it compiles each shader single-threaded on first use, which is
+# tens of seconds on a small CI runner rather than milliseconds on a GPU; the binaries that bring it up get the time it takes.
+# Cached, so the libraries above sg that carry a WARP driver of their own see it too.
+if(WIN32)
+    set(SG_WARP_TEST_BINARY_ARGS TIMEOUT 180 CACHE INTERNAL "")
+else()
+    set(SG_WARP_TEST_BINARY_ARGS "" CACHE INTERNAL "")
+endif()
+
 if(WIN32)
     add_subdirectory(backends/dx12)
     list(APPEND _sg_backends shaped-graphics-dx12)
@@ -242,7 +252,7 @@ if(SC_BUILD_TESTS)
         tests/barrier/slot-test.cc
         tests/barrier/slot-recording-test.cc
     )
-    sc_nexus_binary(shaped-graphics-test KINDS tests)
+    sc_nexus_binary(shaped-graphics-test KINDS tests ${SG_WARP_TEST_BINARY_ARGS})
 
     # Cross-backend API tests: run the sg API against each backend compiled into this binary. Each backend
     # contributes an entry-point driver under tests/backends/; the alias setup (tests/backends/backends.cc) makes

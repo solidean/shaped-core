@@ -28,9 +28,14 @@ These rules bind every GPU test in the repo — sg's two tiers, and the librarie
   A test builds a context of its own only when the context itself is its subject — creation, teardown, a config knob, pristine epoch or pool state.
 - **The hardware adapter is the default.** It is what the code ships on, and it is fast.
   WARP runs where there is no hardware adapter, which is what a headless CI host is, and under `--thorough` as a second pass on a machine that has one.
+  **A default run on a machine with a GPU never touches WARP.**
+  WARP compiles each shader single-threaded on first use, seconds apiece, which a test run cannot afford twice over.
   The WARP drivers ask `dx12::has_hardware_adapter()` and `nx::is_thorough()` and skip otherwise.
   A hardware driver skips only when there is no hardware adapter; one that exists and still fails to create a device fails the test.
   `SC_DX12_ADAPTER=warp` hides every hardware adapter from a whole process, which is how to reproduce a GPU-less run locally: the hardware drivers skip and the WARP ones run.
+  `hardware` hides WARP instead, and `none` both, which is how a Windows CI job other than Windows Clang runs: no dx12 test at all, and every one skips rather than fails.
+  So a test that creates a context of its own SKIPs when creation fails, never `REQUIRE`s it.
+  WARP runs on the Windows Clang job alone, and the binaries that bring it up declare a 180 s timeout (`SG_WARP_TEST_BINARY_ARGS`).
   `SC_SG_COLD=all` adds the other half of a CI runner, a first build of every shader and pipeline: the persistent tiers are neither read nor written.
   `pipelines` or `shaders` turns off one of the two, and the driver's own cache is out of its reach.
 - **A test passes on any adapter.**

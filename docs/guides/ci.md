@@ -143,6 +143,10 @@ Per-platform specifics:
   The job points that at the image's **NDK r29 (Clang 21)** rather than the default r27, whose Clang 18 is too old for our C++23 — `std::atomic_ref`, for one.
   Both presets wire the POSIX `diag_launcher.sh`, since the iOS and Android hosts are macOS and Linux, so their `ci-diag.zip` carries real per-compile sidecars that `build_diag` reads.
   Neither runs tests: the runner cannot execute the produced binaries.
+- **WARP runs on the Windows Clang job alone.**
+  No hosted Windows runner has a GPU, so WARP is what runs the dx12 GPU tests, and it compiles every shader single-threaded: tens of seconds per binary.
+  The other Windows jobs set `SC_DX12_ADAPTER=hardware`, which hides WARP, and their dx12 tests skip.
+  The binaries that bring WARP up declare a 180 s timeout; see [sg's testing doc](../../libs/graphics/shaped-graphics/docs/testing.md#devices-and-adapters).
 - **Every cross job also builds a native `sgl`**, the compiler the SGL shader packages are generated with, in the platform's default preset.
   `--toolset` names the cross compiler there, so `SC_HOST_TOOLSET` pins the host one instead: `21` on the Linux-hosted wasm and Android jobs.
   The iOS job points it at Xcode's `/usr/bin/clang++`, the Apple Clang that already builds its iOS target, so no job installs a compiler for this.
