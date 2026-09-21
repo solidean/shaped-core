@@ -14,6 +14,7 @@ add_library(shaped-rendering
     src/shaped-rendering/denoise.cc
     src/shaped-rendering/atrous_denoise_routine.cc
     src/shaped-rendering/svgf_denoise_routine.cc
+    src/shaped-rendering/impl/tza.cc
     src/shaped-rendering/raster_box_filter_mipmap_routine.cc
     src/shaped-rendering/imgui_context.cc
     src/shaped-rendering/imgui_routine.cc
@@ -100,6 +101,15 @@ endif()
 # It links PRIVATE and reaches impl/ alone, like every other denoiser SDK here.
 # No backend gate and no device gate: the member downloads, filters on the CPU and uploads, so it runs wherever sg
 # does and needs nobody's hardware — which is what makes it the one non-native member CI can exercise.
+# The trained networks, which are what the member actually runs.
+# A path rather than a target: nothing links them, and the member reads the blob at run time.
+# Empty when they were not fetched, which is what makes the member and its tests report that rather than fail to build.
+set(SR_OIDN_WEIGHTS_DIR_VALUE "")
+if(OIDN_WEIGHTS_DIR)
+    set(SR_OIDN_WEIGHTS_DIR_VALUE "${OIDN_WEIGHTS_DIR}")
+endif()
+target_compile_definitions(shaped-rendering PRIVATE SR_OIDN_WEIGHTS_DIR="${SR_OIDN_WEIGHTS_DIR_VALUE}")
+
 if(TARGET oidn)
     target_sources(shaped-rendering PRIVATE src/shaped-rendering/impl/oidn_device.cc)
     target_link_libraries(shaped-rendering PRIVATE oidn)
@@ -209,6 +219,7 @@ if(SC_BUILD_TESTS)
             tests/raster-box-filter-mipmap-test.cc
             tests/denoise-test.cc
         tests/oidn-test.cc
+        tests/tza-test.cc
         )
         target_link_libraries(shaped-rendering-test PRIVATE shaped-graphics-dx12)
 
@@ -219,6 +230,8 @@ if(SC_BUILD_TESTS)
 
     # OIDN's facade loads its core and its CPU device module by name out of its own directory, so all of them have to
     # sit beside the binary rather than only the one the link names.
+    target_compile_definitions(shaped-rendering-test PRIVATE SR_OIDN_WEIGHTS_DIR="${SR_OIDN_WEIGHTS_DIR_VALUE}")
+
     if(OIDN_RUNTIME_LIBRARIES)
         sc_stage_runtime_dlls(shaped-rendering-test DLLS ${OIDN_RUNTIME_LIBRARIES} TAG oidn)
     endif()

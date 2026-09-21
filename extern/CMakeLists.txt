@@ -91,6 +91,10 @@ option(SC_USE_VENDORED_SQLITE "Build the fetched SQLite in extern/sqlite/.instal
 # shaped-rendering gates its trained denoise member on the `oidn` target existing and reports `unsupported` without it.
 option(SC_USE_VENDORED_OIDN "Wrap the fetched Open Image Denoise in extern/oidn/.install (OFF expects an external `oidn` target)" ON)
 
+    # The trained networks, which are a dependency of their own because shaped-rendering runs them itself rather than
+    # calling Intel's inference — 1.8 MB of weights instead of 53 MB of runtime.
+    option(SC_USE_VENDORED_OIDN_WEIGHTS "Use the fetched OIDN weights in extern/oidn-weights/.install" ON)
+
 # Also gated on SC_MIMALLOC: with the default resource on operator new nothing links mimalloc, so building it would be
 # dead weight in exactly the sanitizer builds that are already the slowest.
 if(SC_USE_VENDORED_MIMALLOC AND SC_MIMALLOC)
@@ -175,4 +179,8 @@ endif()
 
 if(_sc_host_side_deps AND SC_USE_VENDORED_OIDN AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/oidn/.install/pin.txt")
     add_subdirectory(oidn)
+endif()
+
+if(_sc_host_side_deps AND SC_USE_VENDORED_OIDN_WEIGHTS AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/oidn-weights/.install/pin.txt")
+    add_subdirectory(oidn-weights)
 endif()

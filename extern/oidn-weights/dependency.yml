@@ -1,0 +1,49 @@
+# Pin and license for the upstream fetched here.
+# fetch-oidn-weights.py reads its pin from this file.
+# tools/dev/lib/pipeline/prereqs.py scans this file for the `pin_hash:` line to decide whether .install/ is current,
+# without paying to start Python — keep that key on a line of its own.
+
+upstreams:
+  - name: OIDN-Weights
+    homepage: https://github.com/RenderKit/oidn-weights
+    install: fetched
+    source: github-files
+    repo: https://github.com/RenderKit/oidn-weights
+    track: default-branch
+    version: 28883d17
+    tag: 28883d1769d5930e13cf7f1676dd852bd81ed9e7
+    digest_algo: sha256
+
+    # The pin over the whole set: the sha256 of the `path sha256` lines below, in order.
+    # One hash to compare against .install/pin.txt, while every file is still verified on its own.
+    pin_hash: ae2213b4db7202df12fa06a06d66a82553694c1dd35dd17adc535b1f274abb96
+
+    license: Apache-2.0
+    license_files: [.install/LICENSE.txt]
+    used_by: shaped-rendering — the trained network sr::denoise_method::oidn runs
+    files:
+      - path: LICENSE.txt
+        sha256: cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30
+      - path: README.md
+        sha256: 38db205281c5e1be1a4514f475ea1e41d61f5bd5c39fa98c2d00057c5193838a
+      # The one network the member runs: HDR radiance with an albedo and a normal, which is the guide set sv produces.
+      # `lfs` picks the media host: only the weights are LFS-tracked, and the two text files above are not.
+      - path: rt_hdr_alb_nrm.tza
+        sha256: e586ef2ff48d7fbb7611986405220ed8fc5c13ca79bfc40be4dc742fbf959e1a
+        lfs: true
+    notes: |
+      The trained weights of Intel Open Image Denoise, and 1.8 MB rather than the 53 MB the library they usually arrive inside weighs.
+      Apache-2.0, the same license as the code, and the repository README says so explicitly — so they are ours to redistribute and to run against an implementation of our own.
+
+      THE POINT OF FETCHING THEM SEPARATELY IS THAT WE DO NOT RUN INTEL'S INFERENCE.
+      OIDN's own GPU kernels are CUDA, HIP, SYCL and Metal sources built on NVIDIA cutlass and ROCm composable_kernel — there is no portable kernel in that release to lift, and its CPU device would mean a download and an upload every frame.
+      The network itself is small and ordinary: sixteen 3x3 convolutions with a bias and a ReLU, four 2x2 max pools, four nearest upsamples with a skip concat.
+      That is a set of compute shaders, so shaped-rendering runs it on every backend sg has.
+
+      TRACKED ON THE DEFAULT BRANCH, not a release: this repository publishes none, so the pin is a commit.
+      The .tza files are Git LFS-tracked, so they come from `media.githubusercontent.com/media/...` — `raw` serves the pointer text, which would pass no digest check here and would be a 132-byte "weights blob" if it did.
+      The LICENSE and README beside them are ordinary files that `media` 404s on, which is what the per-file `lfs` flag picks between.
+
+      ONE NETWORK, deliberately.
+      The repository carries about two dozen: LDR and HDR, with and without albedo and normal, in small, base and large sizes.
+      `rt_hdr_alb_nrm` is the one that matches what the tracer produces, and each of the others is another 1-2 MB and another set of layer widths to have tested.

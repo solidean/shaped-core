@@ -168,6 +168,25 @@ def ensure_oidn(root: Path, preset_name: str = "") -> None:
     )
 
 
+def ensure_oidn_weights(root: Path, preset_name: str = "") -> None:
+    """Download the trained OIDN networks into extern/oidn-weights/.install when they are missing or at the wrong pin.
+
+    1.8 MB, and the thing shaped-rendering's denoise member actually runs — the library beside it is a reference
+    implementation rather than the one on the render path.
+    """
+    _ensure(
+        root,
+        preset_name,
+        name="oidn-weights",
+        directory="oidn-weights",
+        script_name="fetch-oidn-weights.py",
+        skip_env="SC_SKIP_OIDN_WEIGHTS",
+        windows_only=False,
+        doing="downloading the pinned Open Image Denoise weights for sr::denoise_method::oidn",
+        dependent="shaped-rendering's OIDN denoise member",
+    )
+
+
 def ensure_node_webgpu(root: Path, preset_name: str = "", emsdk_path: str | None = None) -> None:
     """Install the pinned `webgpu` npm package into tools/dev/js when a WebGPU wasm preset needs it and it is missing.
 
