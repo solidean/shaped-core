@@ -126,6 +126,12 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
     The vulkan backend currently numbers a SPIR-V location by an attribute's index in `vertex_input_layout::attributes`.
     That makes the shader's `[[vk::location(N)]]` annotations part of the contract — see `vulkan_raster_pipeline.cc`.
 - **Acceleration structures.** See [concepts/acceleration-structures.md](concepts/acceleration-structures.md).
+  The abstract types already carry the stats a refit needs — build and update scratch sizes, and the flags.
+  Still open:
+  - the **transient (single-epoch) AS variant** for per-frame rebuilds — a property of the build call's result, not a new scope;
+  - **refit / update** — reuses the topology, and needs `allow_update` at build plus `PERFORM_UPDATE` and the source AS at update time;
+  - **compaction** — BLAS `allow_compaction`, query the compacted size, copy into a smaller buffer;
+  - **compaction** on both backends, which is the one build-time flag neither implements.
 - **A group's implicit constant buffer is one upload each.**
   `create_binding_group` allocates a buffer for a generated group's plain members and fills it through `ctx.upload`, one allocation and one copy per group.
   A per-frame group wants a transient constant-buffer writer instead: a ring in host-visible device memory (ReBAR where there is some), suballocated per epoch and written in place.
