@@ -139,8 +139,45 @@ ASYNC_INVOCABLE_TEST("sg - a pipeline whose shader does not fit its layout is re
     auto const& shader = co_await shaders::double_values.compute.main->acquire(*ctx);
     auto const misplaced = ctx->cached.acquire_pipeline_layout<shaders::factor, shaders::work>();
     CHECK(!sg::describe_layout_misfit(shader, *misplaced).empty());
-    CHECK_ASSERTS((void)ctx->uncached.create_compute_pipeline_async({.shader = shader, .layout = misplaced}));
+
+    // A shader is input, and a hot reload can hand in one that no longer fits: the build fails with why, and nothing asserts.
+    auto const refused = ctx->uncached.create_compute_pipeline_async({.shader = shader, .layout = misplaced});
+    co_await cc::async_settled(refused);
+    REQUIRE(refused->has_error());
+    CHECK(refused->try_error()->underlying().to_string().contains("does not fit its pipeline layout"));
 
     // The layout the entry point states fits, which is the check passing rather than being absent.
     CHECK(sg::describe_layout_misfit(shader, *shaders::double_values.compute.main.acquire_layout(*ctx)) == "");
+}
+
+ASYNC_INVOCABLE_TEST("sg - a compute shader that calls a helper keeps its workgroup and thread id",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+
+    // `at_most` returns early, so the entry point is legalized before it is written; its dispatch shape must survive.
+    auto const pipeline = co_await shaders::double_values.compute.clamp_values.acquire_pipeline(*ctx);
+    auto const group_layout = ctx->cached.acquire_binding_group_layout<shaders::work>();
+
+    constexpr auto count = 128; // two workgroups of 64: one thread per element only if the size reached the text
+    auto const values = ctx->persistent.create_buffer<float>(
+        count, sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
+    auto initial = cc::vector<float>::create_defaulted(count);
+    for (auto i = 0; i < count; ++i)
+        initial[i] = float(i);
+    auto const group
+        = ctx->transient.create_binding_group(group_layout, shaders::work{.values = values.as_readwrite_buffer()});
+
+    auto cmd = ctx->create_command_list();
+    cmd->upload.data_to_buffer<float>(values, initial);
+    cmd->compute.bind_pipeline(*pipeline);
+    cmd->compute.bind_group(0, *group);
+    cmd->compute.dispatch_threads(count);
+    auto const future = cmd->download.data_from_buffer(values);
+    ctx->submit_command_list(cc::move(cmd));
+
+    auto const data = co_await future.data();
+    REQUIRE(data.size() == isize(count));
+    for (auto i = 0; i < count; ++i)
+        CHECK(data[i] == cc::min(float(i), 10.0f));
 }

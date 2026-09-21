@@ -13,6 +13,17 @@ using namespace cc::primitive_defines;
 
 namespace shaders = sg::test::sgl_shaders;
 
+namespace
+{
+/// Why building `desc` failed, or empty when it built.
+cc::shared_async<cc::string> refusal_of(sg::context& ctx, sg::raster_pipeline_description desc)
+{
+    auto const built = ctx.uncached.create_raster_pipeline_async(desc);
+    co_await cc::async_settled(built);
+    co_return built->has_error() ? built->try_error()->underlying().to_string() : cc::string();
+}
+} // namespace
+
 // Tier 1's raster execution tests: a shader written once, drawn on every backend, and read back.
 
 ASYNC_INVOCABLE_TEST("sg - a raster pipeline draws instanced quads from two vertex streams",
@@ -136,12 +147,13 @@ ASYNC_INVOCABLE_TEST("sg - an SGL pixel shader states its targets, and a pipelin
                                                .target_set = target_set};
     };
 
+    // A shader is input, so each is a refusal the caller receives, and nothing asserts.
     // One target written, two declared: the second is left undefined unless its write mask is empty.
     // (An empty one differs from the first target's, which vulkan without independentBlend refuses, so it is not
     // built here; the dx12 pipeline-cache test builds one.)
-    CHECK_ASSERTS((void)ctx->uncached.create_raster_pipeline_async(described({rgba, rgba}, "")));
+    CHECK((co_await refusal_of(*ctx, described({rgba, rgba}, ""))).contains("write mask must be empty"));
     // One written, none declared: the output goes nowhere.
-    CHECK_ASSERTS((void)ctx->uncached.create_raster_pipeline_async(described({}, "")));
+    CHECK((co_await refusal_of(*ctx, described({}, ""))).contains("writes 1 color targets, and the pipeline has 0"));
     // A description that names another set than the shader writes.
-    CHECK_ASSERTS((void)ctx->uncached.create_raster_pipeline_async(described({rgba}, shaders::overlay::name)));
+    CHECK((co_await refusal_of(*ctx, described({rgba}, shaders::overlay::name))).contains("and the pipeline names"));
 }

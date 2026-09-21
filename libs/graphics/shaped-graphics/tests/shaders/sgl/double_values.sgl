@@ -23,3 +23,11 @@ binding affine:
 
 @compute(64) fun affine_map(@thread_id id: int3){affine}:
     affine.values[id.x] = affine.values[id.x] * affine.scale + affine.bias
+
+// A helper that returns early, so this entry point is one the legalizer rewrites before any target sees it.
+fun at_most(x: float, limit: float) -> float:
+    if x > limit => return limit
+    return x
+
+@compute(64) fun clamp_values(@thread_id id: int3){work}:
+    work.values[id.x] = at_most(work.values[id.x], 10.0)

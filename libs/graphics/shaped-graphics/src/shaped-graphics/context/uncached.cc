@@ -1,4 +1,4 @@
-#include <clean-core/common/assertf.hh>
+#include <clean-core/common/assert.hh>
 #include <clean-core/common/log.hh>
 #include <clean-core/common/utility.hh>
 #include <clean-core/string/format.hh> // cc::format
@@ -18,12 +18,18 @@ using namespace cc::primitive_defines;
 
 namespace
 {
-/// A shader whose reflection does not fit the layout it is built against is a caller's bug, whatever the backend makes of it.
-void assert_fits(sg::compiled_shader const& shader, sg::pipeline_layout_handle const& layout)
+// A shader is input, like a file: a hot reload hands in a new one while the program runs, and a generated layout from
+// the build no longer fits an edited one.
+// So what a shader gets wrong is a refusal the caller receives, and only what host code gets wrong asserts.
+
+/// Why `shader` cannot be built against `layout`, or nothing when it fits.
+cc::optional<cc::string> misfit_of(sg::compiled_shader const& shader, sg::pipeline_layout_handle const& layout)
 {
     CC_ASSERT(layout != nullptr, "a pipeline needs a layout");
-    auto const misfit = sg::describe_layout_misfit(shader, *layout);
-    CC_ASSERTF(misfit.empty(), "the shader does not fit its pipeline layout:\n{}", misfit);
+    auto misfit = sg::describe_layout_misfit(shader, *layout);
+    if (misfit.empty())
+        return {};
+    return cc::format("the shader '{}' does not fit its pipeline layout:\n{}", shader.entry_point, misfit);
 }
 
 // What the frontend checks of a raster description before any backend sees it.
@@ -40,7 +46,8 @@ cc::optional<cc::string> refusal_of(sg::raster_pipeline_description const& desc)
         return conflict;
     for (auto const* stage : stages)
         if (stage != nullptr)
-            assert_fits(*stage, desc.layout);
+            if (auto misfit = misfit_of(*stage, desc.layout); misfit.has_value())
+                return misfit;
     if (desc.fragment_shader.has_value())
     {
         auto const& fs = desc.fragment_shader.value();
@@ -48,18 +55,18 @@ cc::optional<cc::string> refusal_of(sg::raster_pipeline_description const& desc)
         if (fs.color_output_count.has_value())
         {
             auto const written = isize(fs.color_output_count.value());
-            CC_ASSERTF(written <= desc.color_targets.size(),
-                       "the fragment shader '{}' writes {} color targets, and the pipeline has {}", fs.entry_point,
-                       written, desc.color_targets.size());
+            if (written > desc.color_targets.size())
+                return cc::format("the fragment shader '{}' writes {} color targets, and the pipeline has {}",
+                                  fs.entry_point, written, desc.color_targets.size());
             for (auto i = written; i < desc.color_targets.size(); ++i)
-                CC_ASSERTF(desc.color_targets[i].write_mask == sg::color_write_mask{},
-                           "color target {} of the pipeline for '{}' is written by no output of the shader, so its "
-                           "write mask must be empty",
-                           i, fs.entry_point);
+                if (desc.color_targets[i].write_mask != sg::color_write_mask{})
+                    return cc::format("color target {} of the pipeline for '{}' is written by no output of the shader, "
+                                      "so its write mask must be empty",
+                                      i, fs.entry_point);
         }
-        CC_ASSERTF(fs.target_set.empty() || desc.target_set.empty() || fs.target_set == desc.target_set,
-                   "the fragment shader '{}' writes '{}', and the pipeline names '{}'", fs.entry_point, fs.target_set,
-                   desc.target_set);
+        if (!fs.target_set.empty() && !desc.target_set.empty() && fs.target_set != desc.target_set)
+            return cc::format("the fragment shader '{}' writes '{}', and the pipeline names '{}'", fs.entry_point,
+                              fs.target_set, desc.target_set);
     }
 
     // Such a pipeline still builds, and draws as if the state were off.
@@ -147,7 +154,8 @@ compute_pipeline_handle context_uncached_scope::create_compute_pipeline(compute_
 cc::result<compute_pipeline_handle> context_uncached_scope::try_create_compute_pipeline(
     compute_pipeline_description const& desc)
 {
-    assert_fits(desc.shader, desc.layout);
+    if (auto misfit = misfit_of(desc.shader, desc.layout); misfit.has_value())
+        return cc::error(cc::move(misfit.value()));
     return _ctx.try_create_compute_pipeline(desc, lifetime_scope::persistent);
 }
 
@@ -175,7 +183,9 @@ cc::result<raster_pipeline_handle> context_uncached_scope::try_create_raster_pip
 cc::shared_async<compute_pipeline_handle> context_uncached_scope::create_compute_pipeline_async(
     compute_pipeline_description const& desc)
 {
-    assert_fits(desc.shader, desc.layout);
+    if (auto misfit = misfit_of(desc.shader, desc.layout); misfit.has_value())
+        return cc::make_async_from_error<compute_pipeline_handle>(
+            cc::async_error::make_error(cc::any_error(cc::move(misfit.value()))));
     return _ctx.create_compute_pipeline_async(desc, lifetime_scope::persistent);
 }
 
