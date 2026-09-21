@@ -1,6 +1,7 @@
 #include "metal_command_list.hh"
 
 #include <clean-core/common/assert.hh>
+#include <clean-core/common/assertf.hh>
 #include <clean-core/common/utility.hh>
 #include <clean-core/record/log.hh>
 #include <shaped-graphics/backends/metal/metal_acceleration_structure.hh>
