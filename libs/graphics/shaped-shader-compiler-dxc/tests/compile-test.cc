@@ -387,8 +387,10 @@ TEST("ssc::dxc compile - a pixel shader reports one past the highest render targ
 #endif
 
     // Every other stage leaves it unset.
+    // SPIR-V, like the first half, since DXIL exists only on Windows.
     auto const cs = comp.value().compile(
-        {.source = cc::string(double_compute_hlsl), .entry_point = "main", .stage = sg::shader_stage::compute});
+        {.source = cc::string(double_compute_hlsl), .entry_point = "main", .stage = sg::shader_stage::compute},
+        {.target = ssc::dxc::compile_target::spirv});
     REQUIRE(cs.has_value());
     CHECK(!cs.value().color_output_count.has_value());
 }
