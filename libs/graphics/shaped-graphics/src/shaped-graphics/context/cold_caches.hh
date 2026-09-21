@@ -8,6 +8,7 @@
 /// `pipelines` turns off sg::pipeline_cache's persistent tier, `shaders` the compiled-shader tier the shader compilers
 /// keep, and `all` both; they combine as `pipelines,shaders`, and anything else is ignored with a warning.
 /// A cold tier is neither read nor written, so a run starts from nothing and leaves the store as it found it.
+/// Only the DEFAULT store goes cold: a store passed to `set_blob_cache` is a deliberate choice, and stays in use.
 ///
 /// For measuring a first run, and for reproducing a CI runner that has never built a pipeline.
 /// The in-memory tiers need no switch, since every process starts them empty.

@@ -175,7 +175,8 @@ bcache::blob_cache* pipeline_cache::resolve_blob_cache()
     // a cache may never change what a caller gets, only how fast.
     if (!cc::impl::async_can_schedule_here())
         return nullptr;
-    if (cold_caches_from_environment().pipelines)
+    // Cold only instead of the default store: one set explicitly is a choice, and a test of this tier depends on it.
+    if (!_blob_cache.has_value() && cold_caches_from_environment().pipelines)
         return nullptr;
 
     // Resolved lazily so that merely creating a context never opens a cache file.

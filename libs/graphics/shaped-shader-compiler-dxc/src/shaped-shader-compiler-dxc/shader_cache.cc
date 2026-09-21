@@ -156,7 +156,8 @@ bcache::blob_cache* shader_cache::resolve_blob_cache()
     // With nowhere to route, the tier is skipped rather than parking on a node whose completion could not wake it.
     if (!cc::impl::async_can_schedule_here())
         return nullptr;
-    if (sg::cold_caches_from_environment().shaders)
+    // Cold only instead of the default store: one set explicitly is a choice, and a test of this tier depends on it.
+    if (!_blob_cache.has_value() && sg::cold_caches_from_environment().shaders)
         return nullptr;
 
     if (!_blob_cache.has_value())
