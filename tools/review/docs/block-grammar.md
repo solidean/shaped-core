@@ -52,6 +52,7 @@ Filenames are `NNN-slug.md` with gaps — `010`, `020`, `030` — so a later rou
 
 | type | takes | what it is |
 |---|---|---|
+| `intro` | — | what the entry is about and the options on the table, before any fact; always shown, and drawn first in its round |
 | `context/cold` | — | for a reader new to the change *and* the codebase; collapsed by default, ~150 words |
 | `context/repo` | — | knows the codebase, new to the change; collapsed by default, ~120 words |
 | `context/delta` | — | what this entry adds over the previous ones; always shown |
@@ -63,6 +64,14 @@ Filenames are `NNN-slug.md` with gaps — `010`, `020`, `030` — so a later rou
 | `example` | a name | an example, the command that ran it, and what it printed |
 | `recommendation` | — | the agent's opinion, visually separated from the neutral description |
 | `ask` | a name | the answerable question |
+
+**A round that asks something opens with an `intro`.**
+One line on what the entry is about, then the options as a list, and nothing about which is better.
+The context tiers are collapsed and supply what a reader lacks; the intro is what the visible part of the round is read against.
+Without it an entry opens in the middle of its argument, and the reader reconstructs the question from the facts before they can weigh any of them.
+
+The page draws an intro first in its round wherever it sits in the file, so appending one late still leads.
+`validate` warns about a round that has an open ask and no intro, and a finalized round is exempt because it cannot be edited.
 
 The word limits on the context tiers warn rather than fail.
 They exist because a collapsed tier nobody can skim is a tier nobody opens.

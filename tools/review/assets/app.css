@@ -196,6 +196,19 @@ button:hover { border-color: var(--accent); }
 }
 .tier-delta-rule::before, .tier-delta-rule::after { content: ""; flex: 1; height: 2px; background: var(--accent); opacity: 0.45; }
 
+/* What the entry is about and what is on the table: the first thing read in a round, so it is drawn as a lead
+   rather than as another paragraph. */
+.intro {
+  margin: 0 0 1.3rem;
+  padding: 0.7rem 1rem;
+  background: var(--bg-raised);
+  border-left: 3px solid var(--accent);
+  border-radius: 0 5px 5px 0;
+  font-size: 1.02rem;
+}
+.intro > :first-child { margin-top: 0; }
+.intro > :last-child { margin-bottom: 0; }
+
 .recommendation {
   margin: 1.1rem 0;
   padding: 0.75rem 1rem;

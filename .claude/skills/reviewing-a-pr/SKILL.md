@@ -327,6 +327,11 @@ Name it with `title` as usual, and hand it over the same way.
 
 This is the part the tool cannot do for you, and the part the previous chat workflow got wrong.
 
+**Every round that asks something opens with an `intro` block.**
+One line saying what the entry is about, then the options as bullets — no facts, no pros and cons yet.
+The rest of the round is read against it, and without it the maintainer reconstructs the question from a list of facts before they can weigh any of them.
+The page draws it first in its round wherever it sits in the file, and `validate` warns about a round with an open ask and no intro.
+
 **Every entry stands alone.**
 The maintainer does not carry the changeset in their head, and assuming they do defeats the point of asking.
 **Every entry outside `meta`, `finalize` and `framing` carries all three context tiers, and `validate` fails without them.**

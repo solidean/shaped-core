@@ -54,7 +54,8 @@ from tools.review.lib.entry.parse import parse_text  # noqa: E402
 from tools.review.lib.goals.skeleton import thinly_discharged  # noqa: E402
 from tools.review.cmd.run import executed_command  # noqa: E402
 from tools.review.lib.entry.write import (  # noqa: E402
-    append_text, check_supersedes, compose, immutability_violations, set_block_attrs, stamp_rounds,
+    append_text, check_supersedes, compose, immutability_violations, missing_intro_rounds, set_block_attrs,
+    stamp_rounds,
 )
 from tools.review.lib.render.markdown import render as render_markdown  # noqa: E402
 from tools.review.lib.render.sgl_lexer import SglLexer  # noqa: E402
@@ -773,6 +774,44 @@ def test_every_block_type_renders(root: Path) -> None:
     )
     for needle in ("tier-delta-rule", "recommendation", "<pre class=\"pg\">", "class=\"changes\"", "ask-form"):
         assert needle in html, f"{needle!r} missing from the rendered entry"
+
+
+def test_a_round_that_asks_is_owed_an_intro(root: Path) -> None:
+    """A round opening on facts makes its reader reconstruct the question before weighing anything.
+
+    Only a round still waiting for an answer is owed one: a finalized round is immutable, so a warning there has no remedy.
+    """
+    def block(*rows: str) -> str:
+        return "\n".join(["", *rows, ""])
+
+    front = "---\nid: 1\ntitle: t\n---\n"
+    ask_r1 = block("## ask  first", "round: 1", "", "Which?", "", "- radio: a")
+    ask_r2 = block("## ask  second", "round: 2", "", "Which?", "", "- radio: b")
+    intro_r2 = block("## intro", "round: 2", "", "What this is about, and the options.")
+
+    bare = parse_text(front + ask_r1 + ask_r2, Path("e.md"))
+    assert missing_intro_rounds(bare, {"first", "second"}) == [1, 2]
+    assert missing_intro_rounds(bare, {"second"}) == [2], "a finalized round is not owed one"
+
+    # Written after its round's ask, and still counted for it.
+    introduced = parse_text(front + ask_r1 + ask_r2 + intro_r2, Path("e.md"))
+    assert missing_intro_rounds(introduced, {"second"}) == []
+
+
+def test_an_intro_leads_its_round_wherever_it_is_written(root: Path) -> None:
+    """The intro is what the rest of a round is read against, so the page draws it first."""
+    from tools.review.lib.core.paths import ReviewPaths
+    from tools.review.lib.render.entryview import render_entry
+
+    rows = ["---", "id: 1", "title: t", "---", "",
+            "## prose", "round: 1", "", "FACTS-FIRST", "",
+            "## intro", "round: 1", "", "INTRO-TEXT", ""]
+    body = "\n".join(rows)
+    entry = parse_text(body, root / "entries" / "010-x.md", slug="010-x")
+    html = render_entry(entry, AnswerFile(root / "a.json"), repo=root, paths=ReviewPaths(root),
+                        ledger=Ledger(root / "ledger.jsonl"), hash_of=hash_ask)
+    assert 'class="intro"' in html
+    assert html.index("INTRO-TEXT") < html.index("FACTS-FIRST"), "the intro must lead its round"
 
 
 def test_option_labels_render_but_keep_their_value(root: Path) -> None:

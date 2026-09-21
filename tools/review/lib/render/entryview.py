@@ -253,6 +253,9 @@ def _block_html(entry: Entry, block: Block, ctx: dict) -> str:
     if block.type == "code":
         return render_markdown(block.prose, repo=repo)
 
+    if block.type == "intro":
+        return f'<div class="intro">{render_markdown(block.prose, repo=repo)}</div>'
+
     if block.type == "auto-acknowledge":
         note = render_markdown(block.prose, repo=repo) if block.prose.strip() else ""
         return f'<div class="auto-ack">Reference — nothing to acknowledge{note}</div>'
@@ -301,7 +304,11 @@ def render_entry(entry: Entry, answers: AnswerFile, *, repo: Path, paths: Review
 
     parts = [head]
     last_round = 0
-    for block in entry.blocks:
+    # An intro leads its round wherever it sits in the file, so a round appended with its intro last still opens on it.
+    # A stable sort by round keeps every other block in file order.
+    latest = entry.newest_round
+    ordered = sorted(entry.blocks, key=lambda b: (b.round or latest, b.type != "intro"))
+    for block in ordered:
         if block.round and block.round != last_round:
             if last_round:
                 parts.append(f'<div class="round-divider"><span>round {block.round}</span></div>')
