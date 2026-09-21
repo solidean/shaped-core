@@ -170,8 +170,14 @@ ASYNC_INVOCABLE_TEST("sr - the network's transfer curve round-trips across the H
                                                      .gAlbedo = albedo.as_readonly_view(),
                                                      .gNormal = normal.as_readonly_view(),
                                                      .gTarget = packed.as_readwrite_buffer()}));
-    cmd->compute.set_inline_constants(
-        sr::shaders::nn_input_constants{.width = u32(width), .height = 1, .input_scale = 1.0f, ._pad = 0});
+    cmd->compute.set_inline_constants(sr::shaders::nn_input_constants{.width = u32(width),
+                                                                      .height = 1,
+                                                                      .source_width = u32(width),
+                                                                      .source_height = 1,
+                                                                      .input_scale = 1.0f,
+                                                                      ._pad0 = 0,
+                                                                      ._pad1 = 0,
+                                                                      ._pad2 = 0});
     cmd->compute.dispatch_threads(width, 1, 1);
 
     // The input writes nine channels and the output reads three, which in the real network is what the sixteen
@@ -200,8 +206,14 @@ ASYNC_INVOCABLE_TEST("sr - the network's transfer curve round-trips across the H
     cmd2->compute.bind<sr::shaders::nn_output_bindings>(*ctx.transient.create_binding_group(
         output_layout,
         sr::shaders::nn_output_bindings{.gSource = three.as_readonly_buffer(), .gTarget = result.as_readwrite_view()}));
-    cmd2->compute.set_inline_constants(
-        sr::shaders::nn_output_constants{.width = u32(width), .height = 1, .input_scale = 1.0f, ._pad = 0});
+    cmd2->compute.set_inline_constants(sr::shaders::nn_output_constants{.width = u32(width),
+                                                                        .height = 1,
+                                                                        .target_width = u32(width),
+                                                                        .target_height = 1,
+                                                                        .input_scale = 1.0f,
+                                                                        ._pad0 = 0,
+                                                                        ._pad1 = 0,
+                                                                        ._pad2 = 0});
     cmd2->compute.dispatch_threads(width, 1, 1);
 
     auto const readback = sg::data_future<tg::vec4f>(cmd2->download.bytes_from_texture(result.raw()));

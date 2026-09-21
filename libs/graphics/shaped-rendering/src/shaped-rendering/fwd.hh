@@ -44,6 +44,9 @@ struct atrous_options;               // its own options
 class svgf_denoise_routine;          // the native temporal member (svgf_denoise_routine.hh)
 struct svgf_options;                 // its own options
 
+class oidn_denoise_routine; // the OIDN trained member, run as our own shaders (oidn_denoise_routine.hh)
+struct oidn_options;        // its own options
+
 // Dear ImGui integration (see imgui_context.hh).
 struct imgui_context_description; // value type — input to imgui_context
 

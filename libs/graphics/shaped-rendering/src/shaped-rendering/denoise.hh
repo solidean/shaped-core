@@ -206,6 +206,7 @@ public:
 private:
     friend class atrous_denoise_routine;
     friend class svgf_denoise_routine;
+    friend class oidn_denoise_routine;
 
     /// Brings this to `method` at `extent`, dropping everything if either changed.
     /// Returns whether the call starts from no history.

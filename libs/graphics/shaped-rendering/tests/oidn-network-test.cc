@@ -8,6 +8,7 @@
 #include <shaped-graphics/all.hh>
 #include <shaped-rendering/impl/oidn_device.hh>
 #include <shaped-rendering/impl/oidn_network.hh>
+#include <shaped-rendering/oidn_denoise_routine.hh>
 #include <shaped-rendering/shaders.hh>
 #include <shaped-shader-library/compiler/dxc_compiler.hh>
 #include <shaped-shader-library/shader_library.hh>
@@ -38,11 +39,12 @@ ASYNC_INVOCABLE_TEST("sr - the denoise network runs end to end",
     lib.add_compiler(cc::move(compiler.value()));
     lib.add_package(sr::shader_package());
 
-    // Small, and a multiple of sixteen because four pools halve it four times.
-    // The naive convolution is quadratic in the channel count, so a larger image here would be a slow test rather
-    // than a better one.
-    constexpr auto k_size = 32;
-    auto const extent = tg::vec2i(k_size, k_size);
+    // Deliberately NOT a multiple of sixteen, and not square.
+    // Four pools need one, so the network pads its tensors up and repeats the image's edge into the padding — an
+    // arbitrary view size is the normal case, and an aligned one would never exercise that.
+    constexpr auto k_width = 40;
+    constexpr auto k_height = 24;
+    auto const extent = tg::vec2i(k_width, k_height);
 
     // Compiled first, and awaited on the assets themselves: a shader builds on the library's own scheduler rather
     // than on the context's backlog, so polling the latter would wait forever.
@@ -75,11 +77,15 @@ ASYNC_INVOCABLE_TEST("sr - the denoise network runs end to end",
     }
     REQUIRE(ready).context("the network's pipelines never finished building");
 
+    CHECK(network.extent() == extent);
+    CHECK(network.padded_extent() == tg::vec2i(48, 32))
+        .context(cc::format("padded to {}x{}", network.padded_extent()[0], network.padded_extent()[1]));
+
     auto const make = [&](sg::pixel_format format)
     {
         return ctx.persistent.create_texture_2d({.format = format,
-                                                 .width = k_size,
-                                                 .height = k_size,
+                                                 .width = k_width,
+                                                 .height = k_height,
                                                  .usage = sg::texture_usage::readonly_texture
                                                         | sg::texture_usage::readwrite_texture
                                                         | sg::texture_usage::copy_dst | sg::texture_usage::copy_src});
@@ -94,8 +100,8 @@ ASYNC_INVOCABLE_TEST("sr - the denoise network runs end to end",
     auto color_pixels = cc::vector<tg::vec4f>();
     auto albedo_pixels = cc::vector<tg::vec4f>();
     auto normal_pixels = cc::vector<tg::vec4f>();
-    for (auto y = 0; y < k_size; ++y)
-        for (auto x = 0; x < k_size; ++x)
+    for (auto y = 0; y < k_height; ++y)
+        for (auto x = 0; x < k_width; ++x)
         {
             auto const bright = ((x / 8 + y / 8) % 2) == 0;
             auto const a = bright ? tg::vec4f(0.8f, 0.6f, 0.3f, 0) : tg::vec4f(0.1f, 0.2f, 0.5f, 0);
@@ -120,7 +126,7 @@ ASYNC_INVOCABLE_TEST("sr - the denoise network runs end to end",
     ctx.advance_epoch();
 
     auto const got = co_await readback.data();
-    REQUIRE(got.size() == k_size * k_size);
+    REQUIRE(got.size() == k_width * k_height);
 
     // Finite and non-negative everywhere.
     //
@@ -136,7 +142,8 @@ ASYNC_INVOCABLE_TEST("sr - the denoise network runs end to end",
             if (p[c] < 0.0f)
                 ++negative;
         }
-    CHECK(finite == k_size * k_size * 3).context(cc::format("{} of {} channels are finite", finite, k_size * k_size * 3));
+    CHECK(finite == k_width * k_height * 3)
+        .context(cc::format("{} of {} channels are finite", finite, k_width * k_height * 3));
     CHECK(negative == 0).context(cc::format("{} channels are negative, which the output ReLU forbids", negative));
 
     // The result is an image rather than a constant.
@@ -309,4 +316,180 @@ ASYNC_INVOCABLE_TEST("sr - the network agrees with OIDN's own filter",
         .context(cc::format("OIDN changed the image by {} per channel, which is close enough to nothing that agreeing "
                             "with it says nothing",
                             changed / f64(k_size * k_size * 3)));
+}
+
+// The member, through the framework rather than through the network directly.
+//
+// What this adds over the tests above is everything between `sr::denoise_routine` and the shaders: that the method
+// resolves, that the guide contract is enforced, that the network lands in the caller's history and is reused, and
+// that a second call on the same history does not rebuild it.
+ASYNC_INVOCABLE_TEST("sr - the OIDN member denoises through the denoise front",
+                     (sg::context_handle const& ctx_h),
+                     exclusive("slib-shader-library"))
+{
+    REQUIRE(ctx_h != nullptr);
+    auto& ctx = *ctx_h;
+
+    auto lib = slib::shader_library();
+    auto compiler = slib::create_dxc_compiler();
+    if (!compiler.has_value())
+        SKIP("no DXC compiler to build the network's shaders");
+    lib.add_compiler(cc::move(compiler.value()));
+    lib.add_package(sr::shader_package());
+
+    if (!sr::query_denoise_support(ctx).oidn)
+        SKIP("the OIDN weights were not fetched (extern/oidn-weights/fetch-oidn-weights.py)");
+
+    // A named member resolves to itself, and it is spatial — so it is what `automatic` reaches for on a converging
+    // mean, ahead of a-trous.
+    auto const settings = sr::denoise_settings{.method = sr::denoise_method::oidn};
+    CHECK(sr::resolve_denoise_method(ctx, settings, false) == sr::denoise_method::oidn);
+    CHECK(!sr::is_temporal(sr::denoise_method::oidn));
+    CHECK(sr::resolve_denoise_method(ctx, {.method = sr::denoise_method::automatic}, false) == sr::denoise_method::oidn)
+        .context("automatic should prefer the trained spatial member over a-trous");
+
+    sr::oidn_denoise_routine::prewarm(ctx);
+    (void)co_await ctx.routines.idle_completion();
+
+    // The same wait the member's `init` performs, repeated here against THIS test's shader library.
+    // The routine initializes once per context, and every test in this binary brings its own library, so by the time
+    // this one runs the pipelines `init` built belong to a library that is gone — and the first call would otherwise
+    // sit on a compile that nothing in a frame loop drives.
+    REQUIRE(co_await sr::impl::oidn_prewarm_pipelines(ctx)).context("the network's pipelines did not build");
+
+    constexpr auto k_width = 48;
+    constexpr auto k_height = 48;
+
+    auto const make = [&]
+    {
+        return ctx.persistent.create_texture_2d({.format = sg::pixel_format::rgba32_float,
+                                                 .width = k_width,
+                                                 .height = k_height,
+                                                 .usage = sg::texture_usage::readonly_texture
+                                                        | sg::texture_usage::readwrite_texture
+                                                        | sg::texture_usage::copy_dst | sg::texture_usage::copy_src});
+    };
+
+    auto const color = make();
+    auto const albedo = make();
+    auto const normal = make();
+    auto const output = make();
+
+    auto color_pixels = cc::vector<tg::vec4f>();
+    auto albedo_pixels = cc::vector<tg::vec4f>();
+    auto normal_pixels = cc::vector<tg::vec4f>();
+    for (auto y = 0; y < k_height; ++y)
+        for (auto x = 0; x < k_width; ++x)
+        {
+            auto const a = ((x / 12 + y / 12) % 2) == 0 ? tg::vec4f(0.8f, 0.6f, 0.3f, 0) : tg::vec4f(0.1f, 0.2f, 0.5f, 0);
+            auto const speckle = 0.35f + f32((x * 7 + y * 13) % 11) / 11.0f;
+            albedo_pixels.push_back(a);
+            color_pixels.push_back(tg::vec4f(a[0] * speckle, a[1] * speckle, a[2] * speckle, 0));
+            normal_pixels.push_back(tg::vec4f(0, 0, 1, 0));
+        }
+
+    auto history = sr::denoise_history();
+
+    auto const run = [&](sg::command_list& cmd)
+    {
+        cmd.upload.bytes_to_texture(color.raw(), cc::span<tg::vec4f const>(color_pixels).as_bytes());
+        cmd.upload.bytes_to_texture(albedo.raw(), cc::span<tg::vec4f const>(albedo_pixels).as_bytes());
+        cmd.upload.bytes_to_texture(normal.raw(), cc::span<tg::vec4f const>(normal_pixels).as_bytes());
+
+        auto const in = sr::denoise_inputs{
+            .color = color,
+            .guides = {.albedo = albedo, .normal = normal},
+            .output = output,
+        };
+        return sr::denoise_routine::execute(cmd, in, history, settings, false);
+    };
+
+    auto outcome = sr::denoise_outcome{};
+    auto first_restarted = false;
+    auto attempts = 0;
+    for (auto attempt = 0; attempt < 8; ++attempt)
+    {
+        attempts = attempt + 1;
+        auto cmd = ctx.create_command_list();
+        outcome = run(*cmd);
+        if (attempt == 0)
+            first_restarted = outcome.restarted;
+        REQUIRE(outcome.status != sr::denoise_status::unsupported);
+        REQUIRE(outcome.status != sr::denoise_status::failed);
+        ctx.submit_command_list(cc::move(cmd));
+
+        if (outcome.is_denoised())
+        {
+            ctx.advance_epoch();
+            break;
+        }
+
+        // The member's `init` built the network's pipelines, but against whichever shader library was live when this
+        // context first prewarmed it — and every test in this binary brings its own — so on the first call here they
+        // may still be compiling, on slib's queue rather than on anything an epoch advance drains.
+        cc::async_backlog const* const backlogs[] = {&ctx.backlog};
+        co_await cc::async_settled(cc::async_backlog::settled(backlogs));
+        ctx.advance_epoch();
+    }
+
+    REQUIRE(outcome.is_denoised())
+        .context(cc::format("the member never produced a denoised frame; last status {}, first_restarted {}, attempts "
+                            "{}",
+                            int(outcome.status), first_restarted, attempts));
+    CHECK(outcome.method == sr::denoise_method::oidn);
+    CHECK(first_restarted).context("the first call on a fresh history starts from nothing");
+    CHECK(history.method() == sr::denoise_method::oidn);
+    CHECK(history.extent() == tg::vec2i(k_width, k_height));
+
+    // A second call reuses what the first built, which is the whole reason the network lives in the history.
+    auto cmd2 = ctx.create_command_list();
+    auto const second = run(*cmd2);
+    auto const readback = sg::data_future<tg::vec4f>(cmd2->download.bytes_from_texture(output.raw()));
+    ctx.submit_command_list(cc::move(cmd2));
+    ctx.advance_epoch();
+
+    CHECK(second.is_denoised());
+    CHECK(!second.restarted).context("the second call rebuilt the network, which it should have reused");
+
+    auto const got = co_await readback.data();
+    REQUIRE(got.size() == k_width * k_height);
+
+    // Denoised rather than merely written: the speckle is gone where the albedo is flat.
+    //
+    // Measured as the difference between neighbours inside one checker cell, which noise inflates and a denoiser
+    // brings down — against the same measure on the input.
+    auto const roughness = [&](auto const& image)
+    {
+        auto sum = 0.0;
+        auto count = 0;
+        for (auto y = 14; y < 22; ++y)
+            for (auto x = 14; x < 22; ++x)
+                for (auto c = 0; c < 3; ++c)
+                {
+                    sum += f64(tg::abs(image[y * k_width + x][c] - image[y * k_width + x + 1][c]));
+                    ++count;
+                }
+        return sum / f64(count);
+    };
+
+    auto const before = roughness(color_pixels);
+    auto const after = roughness(got);
+    CHECK(after < 0.5 * before).context(cc::format("roughness went from {} to {}", before, after));
+
+    // Smoothness alone would also be satisfied by a blank image, which is the failure a member that writes nothing
+    // produces — so the mean has to survive the round trip too.
+    auto const mean = [&](auto const& image)
+    {
+        auto sum = 0.0;
+        for (auto y = 8; y < k_height - 8; ++y)
+            for (auto x = 8; x < k_width - 8; ++x)
+                for (auto c = 0; c < 3; ++c)
+                    sum += f64(image[y * k_width + x][c]);
+        return sum / f64((k_height - 16) * (k_width - 16) * 3);
+    };
+
+    auto const mean_in = mean(color_pixels);
+    auto const mean_out = mean(got);
+    CHECK(mean_out > 0.7 * mean_in);
+    CHECK(mean_out < 1.4 * mean_in).context(cc::format("mean went from {} to {}", mean_in, mean_out));
 }

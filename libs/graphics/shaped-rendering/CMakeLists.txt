@@ -14,6 +14,7 @@ add_library(shaped-rendering
     src/shaped-rendering/denoise.cc
     src/shaped-rendering/atrous_denoise_routine.cc
     src/shaped-rendering/svgf_denoise_routine.cc
+    src/shaped-rendering/oidn_denoise_routine.cc
     src/shaped-rendering/impl/tza.cc
     src/shaped-rendering/impl/oidn_network.cc
     src/shaped-rendering/raster_box_filter_mipmap_routine.cc
@@ -41,6 +42,7 @@ target_sources(shaped-rendering
     src/shaped-rendering/denoise.hh
     src/shaped-rendering/atrous_denoise_routine.hh
     src/shaped-rendering/svgf_denoise_routine.hh
+    src/shaped-rendering/oidn_denoise_routine.hh
     src/shaped-rendering/impl/denoise_images.hh
     src/shaped-rendering/raster_box_filter_mipmap_routine.hh
     src/shaped-rendering/window.hh

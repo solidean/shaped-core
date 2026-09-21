@@ -12,10 +12,19 @@
 
 struct nn_output_constants
 {
+    /// The TENSOR's extent, which is what indexes the source.
     uint width;
     uint height;
+
+    /// The IMAGE's extent. The padding beyond it was only ever there to give the pools a size they could halve, so
+    /// nothing is written for it.
+    uint target_width;
+    uint target_height;
+
     float input_scale; // the same one nn_input.hlsl applied; this divides by it
-    float _pad;
+    float _pad0;
+    float _pad1;
+    float _pad2;
 };
 
 #pragma sc push_constants
@@ -32,7 +41,7 @@ using namespace nn_output_bindings;
 
 [numthreads(8, 8, 1)] void main_cs(uint3 id : SV_DispatchThreadID)
 {
-    if (id.x >= gConstants.width || id.y >= gConstants.height)
+    if (id.x >= gConstants.target_width || id.y >= gConstants.target_height)
         return;
 
     uint const base = (id.y * gConstants.width + id.x) * 3u;

@@ -13,14 +13,22 @@
 
 struct nn_input_constants
 {
+    /// The TENSOR's extent, which is the image's rounded up to a multiple of sixteen so four pools can halve it.
     uint width;
     uint height;
+
+    /// The IMAGE's extent. Everything past it is the padding, and reads there are clamped to the edge rather than
+    /// left at zero — a black border would be an edge the network can see, and it would filter towards it.
+    uint source_width;
+    uint source_height;
 
     /// What the radiance is multiplied by before the curve, which is what brings a scene into the range the network
     /// was trained over.
     /// OIDN derives one by measuring the image; this takes it from the caller, and 1 means "already in that range".
     float input_scale;
-    float _pad;
+    float _pad0;
+    float _pad1;
+    float _pad2;
 };
 
 #pragma sc push_constants
@@ -43,7 +51,8 @@ using namespace nn_input_bindings;
     if (id.x >= gConstants.width || id.y >= gConstants.height)
         return;
 
-    int3 const p = int3(int2(id.xy), 0);
+    // Clamped into the image, so the padding repeats its edge.
+    int3 const p = int3(int(min(id.x, gConstants.source_width - 1u)), int(min(id.y, gConstants.source_height - 1u)), 0);
 
     float3 color = sanitize(gColor.Load(p).rgb) * gConstants.input_scale;
     color = max(color, float3(0, 0, 0));

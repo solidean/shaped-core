@@ -8,6 +8,7 @@
 #include <shaped-graphics/context/context.hh>
 #include <shaped-rendering/atrous_denoise_routine.hh>
 #include <shaped-rendering/denoise.hh>
+#include <shaped-rendering/oidn_denoise_routine.hh>
 #include <shaped-rendering/svgf_denoise_routine.hh>
 
 namespace sr
@@ -140,9 +141,10 @@ denoise_support query_denoise_support(sg::context const& ctx)
     (void)ctx; // every member so far is native compute; the vendor members will read the adapter here
 
     // The native members are plain compute, which every backend has.
-    // The others are not implemented yet, and saying so here is what makes `automatic` skip them and a named request
-    // report `unsupported` rather than silently running something else.
-    return {.atrous = true, .svgf = true};
+    // A member answers for itself: whether it is compiled in, and whether this device can run it.
+    // The ones still unimplemented stay false, which is what makes `automatic` skip them and a named request report
+    // `unsupported` rather than silently running something else.
+    return {.atrous = true, .svgf = true, .oidn = oidn_denoise_routine::is_available(ctx)};
 }
 
 bool is_temporal(denoise_method m)
@@ -161,8 +163,10 @@ denoise_guide_set required_guides(denoise_method m)
         return g::albedo | g::specular_albedo | g::normal | g::roughness | g::depth | g::motion;
     case denoise_method::fsr_rr:
         return g::albedo | g::normal | g::roughness | g::depth | g::motion;
-    case denoise_method::atrous:
     case denoise_method::oidn:
+        // Six of the network's nine input channels are these two, so a call without them is not a degraded run.
+        return g::albedo | g::normal;
+    case denoise_method::atrous:
     case denoise_method::none:
     case denoise_method::automatic:
     case denoise_method::count_:
@@ -181,7 +185,7 @@ denoise_guide_set optional_guides(denoise_method m)
     case denoise_method::svgf:
         return g::albedo;
     case denoise_method::oidn:
-        return g::albedo | g::normal;
+        return {};
     case denoise_method::dlss_rr:
         return g::hit_distance;
     case denoise_method::fsr_rr:
@@ -237,6 +241,8 @@ cc::shared_async<cc::unit> denoise_routine::init(sg::routine_init_scope scope)
         atrous_denoise_routine::prewarm(ctx);
     if (support.svgf)
         svgf_denoise_routine::prewarm(ctx);
+    if (support.oidn)
+        oidn_denoise_routine::prewarm(ctx);
     co_return;
 }
 
@@ -273,6 +279,7 @@ denoise_outcome denoise_routine::execute(sg::command_list& cmd,
     case denoise_method::svgf:
         return svgf_denoise_routine::execute(cmd, in, history, svgf_denoise_routine::options_for(settings));
     case denoise_method::oidn:
+        return oidn_denoise_routine::execute(cmd, in, history, oidn_denoise_routine::options_for(settings));
     case denoise_method::dlss_rr:
     case denoise_method::fsr_rr:
     case denoise_method::none:

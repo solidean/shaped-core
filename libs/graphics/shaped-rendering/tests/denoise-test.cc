@@ -179,10 +179,30 @@ ASYNC_INVOCABLE_TEST("sr - denoise automatic resolves to a supported member", (s
     // A caller feeding fresh frames gets the best temporal member.
     // One denoising a converging mean never does, since a temporal member's history would double-count what the mean
     // already averaged.
+    //
+    // The spatial side is written as the whole order for the same reason the temporal one below is: this asserted
+    // `atrous` outright until OIDN arrived, whose weights are fetched on some machines and not others.
     auto const automatic = sr::denoise_settings{.method = sr::denoise_method::automatic};
     CHECK(support.svgf);
-    CHECK(sr::resolve_denoise_method(ctx, automatic, false) == sr::denoise_method::atrous);
-    CHECK(sr::resolve_denoise_method(ctx, automatic, true) == sr::denoise_method::svgf);
+    auto const spatial = sr::resolve_denoise_method(ctx, automatic, false);
+    CHECK(spatial == (support.oidn ? sr::denoise_method::oidn : sr::denoise_method::atrous))
+        .context(cc::format("supported: oidn {}", support.oidn));
+    CHECK(!sr::is_temporal(spatial));
+
+    // WHICH temporal member depends on the machine, which is the whole point of `automatic`: a vendor member outranks
+    // the native one where its SDK was fetched and the adapter carries it, and svgf is what everything else gets.
+    // Asserting `svgf` outright would have been a test that passes only where no vendor member is present.
+    //
+    // Written as the whole ORDER rather than as one name, because naming the runner-up is the same mistake one step
+    // along: this asserted `svgf` until NRD arrived, which runs on every adapter and outranks it.
+    auto const temporal = sr::resolve_denoise_method(ctx, automatic, true);
+    auto const expected = support.dlss_rr ? sr::denoise_method::dlss_rr
+                        : support.fsr_rr  ? sr::denoise_method::fsr_rr
+                        : support.nrd     ? sr::denoise_method::nrd
+                                          : sr::denoise_method::svgf;
+    CHECK(temporal == expected)
+        .context(cc::format("supported: dlss_rr {}, fsr_rr {}, nrd {}", support.dlss_rr, support.fsr_rr, support.nrd));
+    CHECK(sr::is_temporal(temporal));
 
     // A named member resolves to itself whether or not it is supported: refusing it is execute's job, and it must
     // not be quietly exchanged for another.

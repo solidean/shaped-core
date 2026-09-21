@@ -146,16 +146,27 @@ constexpr resample_step k_upsamples[] = {
 }
 } // namespace
 
-bool oidn_network::create(sg::context& ctx, tg::vec2i extent)
+bool oidn_weights_present()
+{
+    auto const dir = cc::string_view(k_weights_dir);
+    if (dir.empty())
+        return false;
+
+    // Opened rather than merely tested for, because the path is baked in at configure time and an install that was
+    // removed afterwards is exactly the case this has to answer `false` for.
+    auto adapter = cc::file_read_stream_adapter::open(cc::string(dir) + "/rt_hdr_alb_nrm.tza");
+    return adapter.has_value();
+}
+
+bool oidn_network::create(sg::context& ctx, tg::vec2i image_extent)
 {
     _ctx = &ctx;
-    _extent = extent;
+    _image_extent = image_extent;
 
-    if (extent[0] % 16 != 0 || extent[1] % 16 != 0)
-    {
-        CC_LOG_WARNING("oidn: {}x{} is not a multiple of 16, which four pools need", extent[0], extent[1]);
-        return false;
-    }
+    // Four pools halve the tensor four times, so it is sized to a multiple of sixteen whatever the image is.
+    auto const round_up = [](int v) { return ((cc::max(v, 1) + 15) / 16) * 16; };
+    auto const extent = tg::vec2i(round_up(image_extent[0]), round_up(image_extent[1]));
+    _extent = extent;
 
     auto const path = cc::string(k_weights_dir) + "/rt_hdr_alb_nrm.tza";
     auto adapter = cc::file_read_stream_adapter::open(path);
@@ -276,12 +287,6 @@ bool oidn_network::create(sg::context& ctx, tg::vec2i extent)
     // Held until the first `execute`, which records the upload on the caller's list.
     _pending_weights = cc::move(packed);
 
-    _conv_layout = ctx.cached.acquire_binding_group_layout<shaders::nn_conv_bindings>();
-    _input_layout = ctx.cached.acquire_binding_group_layout<shaders::nn_input_bindings>();
-    _output_layout = ctx.cached.acquire_binding_group_layout<shaders::nn_output_bindings>();
-    _pool_layout = ctx.cached.acquire_binding_group_layout<shaders::nn_pool_bindings>();
-    _upsample_layout = ctx.cached.acquire_binding_group_layout<shaders::nn_upsample_bindings>();
-
     // Whether the network was CREATED, which is not whether it can run yet.
     // The pipelines compile in the background, so `prepare` is what a caller drives afterwards — returning its answer
     // here would report a first call as a failure to create, which is a different thing entirely.
@@ -289,16 +294,17 @@ bool oidn_network::create(sg::context& ctx, tg::vec2i extent)
     return true;
 }
 
-bool oidn_network::prepare()
+bool oidn_programs::build(sg::context& ctx)
 {
-    if (_ctx == nullptr || !is_valid())
-        return false;
-
-    auto& ctx = *_ctx;
+    conv_layout = ctx.cached.acquire_binding_group_layout<shaders::nn_conv_bindings>();
+    input_layout = ctx.cached.acquire_binding_group_layout<shaders::nn_input_bindings>();
+    output_layout = ctx.cached.acquire_binding_group_layout<shaders::nn_output_bindings>();
+    pool_layout = ctx.cached.acquire_binding_group_layout<shaders::nn_pool_bindings>();
+    upsample_layout = ctx.cached.acquire_binding_group_layout<shaders::nn_upsample_bindings>();
 
     // Acquiring is idempotent and cached, so this simply picks up whatever has finished compiling since last time.
-    auto const build = [&](slib::shader_asset_handle const& asset, sg::binding_group_layout_handle const& layout,
-                           sg::async_compute_pipeline& out)
+    auto const one = [&](slib::shader_asset_handle const& asset, sg::binding_group_layout_handle const& layout,
+                         sg::async_compute_pipeline& out)
     {
         if (out != nullptr)
             return;
@@ -323,23 +329,70 @@ bool oidn_network::prepare()
              .layout = ctx.cached.acquire_pipeline_layout({.groups = {layout}, .inline_constants = *constants})});
     };
 
-    build(shaders::nn_conv.compute.main_cs, _conv_layout, _conv);
-    build(shaders::nn_input.compute.main_cs, _input_layout, _input);
-    build(shaders::nn_output.compute.main_cs, _output_layout, _output);
-    build(shaders::nn_pool.compute.main_cs, _pool_layout, _pool);
-    build(shaders::nn_upsample.compute.main_cs, _upsample_layout, _upsample);
+    one(shaders::nn_conv.compute.main_cs, conv_layout, conv);
+    one(shaders::nn_input.compute.main_cs, input_layout, input);
+    one(shaders::nn_output.compute.main_cs, output_layout, output);
+    one(shaders::nn_pool.compute.main_cs, pool_layout, pool);
+    one(shaders::nn_upsample.compute.main_cs, upsample_layout, upsample);
 
     return is_ready();
 }
 
-bool oidn_network::is_ready() const
+bool oidn_programs::is_ready() const
 {
-    if (!is_valid())
-        return false;
-    for (auto const* const p : {&_conv, &_input, &_output, &_pool, &_upsample})
+    for (auto const* const p : {&conv, &input, &output, &pool, &upsample})
         if (*p == nullptr || (*p)->try_value() == nullptr)
             return false;
     return true;
+}
+
+cc::shared_async<bool> oidn_prewarm_pipelines(sg::context& ctx)
+{
+    // The shaders first, because a pipeline cannot be built before its shader exists.
+    for (auto const& asset :
+         {shaders::nn_conv.compute.main_cs, shaders::nn_input.compute.main_cs, shaders::nn_output.compute.main_cs,
+          shaders::nn_pool.compute.main_cs, shaders::nn_upsample.compute.main_cs})
+    {
+        auto const shader = asset->acquire(ctx);
+        co_await cc::async_settled(shader);
+        if (shader->try_value() == nullptr)
+        {
+            CC_LOG_WARNING("oidn: one of the network's shaders did not compile");
+            co_return false;
+        }
+    }
+
+    // Every shader is compiled now, so one pass creates all five pipelines; what is left is waiting for them.
+    auto programs = oidn_programs();
+    (void)programs.build(ctx);
+
+    for (auto const* const p : {&programs.conv, &programs.input, &programs.output, &programs.pool, &programs.upsample})
+    {
+        if (*p == nullptr)
+        {
+            CC_LOG_WARNING("oidn: one of the network's pipelines could not be created");
+            co_return false;
+        }
+        co_await cc::async_settled(*p);
+        if ((*p)->try_value() == nullptr)
+        {
+            CC_LOG_WARNING("oidn: one of the network's pipelines did not build");
+            co_return false;
+        }
+    }
+    co_return true;
+}
+
+bool oidn_network::prepare()
+{
+    if (_ctx == nullptr || !is_valid())
+        return false;
+    return _programs.build(*_ctx);
+}
+
+bool oidn_network::is_ready() const
+{
+    return is_valid() && _programs.is_ready();
 }
 
 bool oidn_network::execute(sg::command_list& cmd,
@@ -363,16 +416,20 @@ bool oidn_network::execute(sg::command_list& cmd,
     }
 
     // The nine packed channels.
-    cmd.compute.bind_pipeline(**_input->try_value());
+    cmd.compute.bind_pipeline(**_programs.input->try_value());
     cmd.compute.bind<shaders::nn_input_bindings>(*ctx.transient.create_binding_group(
-        _input_layout, shaders::nn_input_bindings{.gColor = color.as_readonly_view(),
-                                                  .gAlbedo = albedo.as_readonly_view(),
-                                                  .gNormal = normal.as_readonly_view(),
-                                                  .gTarget = _features[f_input].as_readwrite_buffer()}));
+        _programs.input_layout, shaders::nn_input_bindings{.gColor = color.as_readonly_view(),
+                                                           .gAlbedo = albedo.as_readonly_view(),
+                                                           .gNormal = normal.as_readonly_view(),
+                                                           .gTarget = _features[f_input].as_readwrite_buffer()}));
     cmd.compute.set_inline_constants(shaders::nn_input_constants{.width = u32(_extent[0]),
                                                                  .height = u32(_extent[1]),
+                                                                 .source_width = u32(_image_extent[0]),
+                                                                 .source_height = u32(_image_extent[1]),
                                                                  .input_scale = input_scale,
-                                                                 ._pad = 0});
+                                                                 ._pad0 = 0,
+                                                                 ._pad1 = 0,
+                                                                 ._pad2 = 0});
     cmd.compute.dispatch_threads(_extent[0], _extent[1], 1);
 
     // The convolutions, with the pools and upsamples that feed them.
@@ -385,10 +442,11 @@ bool oidn_network::execute(sg::command_list& cmd,
             {
                 auto const e = level_extent(_extent, p.level);
                 auto const channels = _feature_channels[p.target];
-                cmd.compute.bind_pipeline(**_pool->try_value());
+                cmd.compute.bind_pipeline(**_programs.pool->try_value());
                 cmd.compute.bind<shaders::nn_pool_bindings>(*ctx.transient.create_binding_group(
-                    _pool_layout, shaders::nn_pool_bindings{.gSource = _features[p.source].as_readonly_buffer(),
-                                                            .gTarget = _features[p.target].as_readwrite_buffer()}));
+                    _programs.pool_layout,
+                    shaders::nn_pool_bindings{.gSource = _features[p.source].as_readonly_buffer(),
+                                              .gTarget = _features[p.target].as_readwrite_buffer()}));
                 cmd.compute.set_inline_constants(shaders::nn_pool_constants{.width = u32(e[0]),
                                                                             .height = u32(e[1]),
                                                                             .channels = u32(channels),
@@ -401,9 +459,9 @@ bool oidn_network::execute(sg::command_list& cmd,
             {
                 auto const e = level_extent(_extent, u.level);
                 auto const channels = _feature_channels[u.target];
-                cmd.compute.bind_pipeline(**_upsample->try_value());
+                cmd.compute.bind_pipeline(**_programs.upsample->try_value());
                 cmd.compute.bind<shaders::nn_upsample_bindings>(*ctx.transient.create_binding_group(
-                    _upsample_layout,
+                    _programs.upsample_layout,
                     shaders::nn_upsample_bindings{.gSource = _features[u.source].as_readonly_buffer(),
                                                   .gTarget = _features[u.target].as_readwrite_buffer()}));
                 cmd.compute.set_inline_constants(shaders::nn_upsample_constants{.width = u32(e[0]),
@@ -429,12 +487,12 @@ bool oidn_network::execute(sg::command_list& cmd,
         auto const& source_b = step.skip == f_count ? _features[step.source] : _features[step.skip];
         auto const channels_a = _feature_channels[step.source];
 
-        cmd.compute.bind_pipeline(**_conv->try_value());
+        cmd.compute.bind_pipeline(**_programs.conv->try_value());
         cmd.compute.bind<shaders::nn_conv_bindings>(*ctx.transient.create_binding_group(
-            _conv_layout, shaders::nn_conv_bindings{.gSourceA = source_a.as_readonly_buffer(),
-                                                    .gSourceB = source_b.as_readonly_buffer(),
-                                                    .gWeights = _weights.as_readonly_buffer(),
-                                                    .gTarget = _features[step.target].as_readwrite_buffer()}));
+            _programs.conv_layout, shaders::nn_conv_bindings{.gSourceA = source_a.as_readonly_buffer(),
+                                                             .gSourceB = source_b.as_readonly_buffer(),
+                                                             .gWeights = _weights.as_readonly_buffer(),
+                                                             .gTarget = _features[step.target].as_readwrite_buffer()}));
         cmd.compute.set_inline_constants(shaders::nn_conv_constants{
             .width = u32(e[0]),
             .height = u32(e[1]),
@@ -449,15 +507,19 @@ bool oidn_network::execute(sg::command_list& cmd,
     }
 
     // Back to radiance.
-    cmd.compute.bind_pipeline(**_output->try_value());
+    cmd.compute.bind_pipeline(**_programs.output->try_value());
     cmd.compute.bind<shaders::nn_output_bindings>(*ctx.transient.create_binding_group(
-        _output_layout, shaders::nn_output_bindings{.gSource = _features[f_out].as_readonly_buffer(),
-                                                    .gTarget = output.as_readwrite_view()}));
+        _programs.output_layout, shaders::nn_output_bindings{.gSource = _features[f_out].as_readonly_buffer(),
+                                                             .gTarget = output.as_readwrite_view()}));
     cmd.compute.set_inline_constants(shaders::nn_output_constants{.width = u32(_extent[0]),
                                                                   .height = u32(_extent[1]),
+                                                                  .target_width = u32(_image_extent[0]),
+                                                                  .target_height = u32(_image_extent[1]),
                                                                   .input_scale = input_scale,
-                                                                  ._pad = 0});
-    cmd.compute.dispatch_threads(_extent[0], _extent[1], 1);
+                                                                  ._pad0 = 0,
+                                                                  ._pad1 = 0,
+                                                                  ._pad2 = 0});
+    cmd.compute.dispatch_threads(_image_extent[0], _image_extent[1], 1);
 
     return true;
 }

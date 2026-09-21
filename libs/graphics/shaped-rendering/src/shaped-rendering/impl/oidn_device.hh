@@ -10,14 +10,13 @@
 /// Two implementations, chosen by the build: `oidn_device.cc` where the release was fetched, `oidn_null.cc`
 /// otherwise — the same shape the DLSS and NRD seams take, and for the same reason.
 ///
-/// **OIDN is a CPU denoiser here, and that is a decision rather than a limitation of the library.**
-/// It has GPU devices of its own, on CUDA, HIP, SYCL and Metal, which share memory with a renderer through an OS
-/// handle — and sg has no exportable memory or shared fence to hand one.
-/// So the member downloads the image, filters it on the CPU and uploads the result, which is also why it is the one
-/// non-native member that needs no particular vendor's hardware.
+/// **No render path goes through here.**
+/// The member runs Intel's trained network in our own compute shaders (`impl/oidn_network.hh`), so nothing it does at
+/// render time touches this library at all.
+/// What is left is the oracle: OIDN's own filter, on host memory, as the thing our shaders are measured against.
 ///
-/// That round trip is what makes it ASYNCHRONOUS in a way no other member is: a filtered image is ready some frames
-/// after the frame it came from, so the member reports `pending` until one exists.
+/// The library is therefore a test dependency wearing a seam's shape, and the seam is kept because the alternative —
+/// a test that includes OIDN's headers directly — would put them in the build of everything that links sr.
 namespace sr::impl
 {
 /// Whether OIDN was compiled into this build at all.

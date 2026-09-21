@@ -13,7 +13,7 @@ This is the design, including the parts not built yet.
 |---|---|---|---|
 | `atrous` | spatial | every sg backend, WARP included | done |
 | `svgf` | temporal | every sg backend | done |
-| `oidn` | spatial | CPU everywhere; its GPU devices wait on sg | dependency fetched, member in progress |
+| `oidn` | spatial | every sg backend, WARP included | done, weights fetched on demand |
 | `dlss_rr` | temporal, upscales | NVIDIA RTX; dx12, vulkan | planned |
 | `fsr_rr` | temporal, upscales | AMD RDNA 4; dx12 | planned |
 
@@ -135,8 +135,10 @@ sv takes the scene signal from its trace hash with the camera left out; a caller
   It then hands out the native list and resources.
   Closing it records the declared states and invalidates the list's cached bindings.
   Without it a vendor SDK would bypass sg's barrier tracking silently.
-- **OIDN on a GPU needs exportable memory and shared fences in sg.**
-  OIDN on the CPU needs neither: download, filter, upload.
+- **OIDN needs nothing sg does not have either, because the member runs the network rather than the library.**
+  Intel's own GPU devices would need exportable memory and shared fences, which sg has not got; its CPU device would need only a download and an upload, and costs a frame of latency for them.
+  Running the weights ourselves is what avoids both, and it is why the one trained member is also the one that works on WARP.
+  The library is still fetched, for the oracle test alone.
 - **The vendor SDKs are fetched on request, never by default.**
   DLSS and FSR sit in sr behind `SR_HAS_<VENDOR>` and link PRIVATE, like SDL3.
   OIDN is the exception, and its size is why the question was open.
