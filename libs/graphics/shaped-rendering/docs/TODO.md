@@ -6,7 +6,7 @@ Bigger design intent lives in [structure.md](structure.md).
 - First routines on the framework: texture compression, tonemapping.
 - Denoising, beyond à-trous and SVGF — [denoising.md](denoising.md) is the design and the order:
   sg's declared native scope and DLSS Ray Reconstruction next; then FSR Ray Regeneration.
-  OIDN alongside, once its shipped size is measured, which decides whether its CPU build is fetched by default.
+  OIDN alongside: its size is measured and its CPU build IS fetched by default, so what is left is the member itself.
   NRD waits for a tracer that splits diffuse from specular radiance and writes hit distances.
 - à-trous estimates noise from the sample count alone, assuming one noise width per sample equal to the pixel's luminance.
   A tracer that accumulates the second moment would give it a measured per-pixel variance instead, which is what SVGF uses.

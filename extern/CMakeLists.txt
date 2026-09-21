@@ -86,6 +86,11 @@ option(SC_USE_VENDORED_SDL3 "Build the fetched SDL3 in extern/sdl3/.install (OFF
 # babel-serializer keeps its sqlite API always available and reports an unfetched backend at runtime.
 option(SC_USE_VENDORED_SQLITE "Build the fetched SQLite in extern/sqlite/.install (OFF expects an external `sqlite` target)" ON)
 
+# OIDN is fetched on demand like SDL3, not on request like the two NVIDIA SDKs: it is Apache-2.0, so there is no
+# license a person has to accept, and it is wanted on every platform.
+# shaped-rendering gates its trained denoise member on the `oidn` target existing and reports `unsupported` without it.
+option(SC_USE_VENDORED_OIDN "Wrap the fetched Open Image Denoise in extern/oidn/.install (OFF expects an external `oidn` target)" ON)
+
 # Also gated on SC_MIMALLOC: with the default resource on operator new nothing links mimalloc, so building it would be
 # dead weight in exactly the sanitizer builds that are already the slowest.
 if(SC_USE_VENDORED_MIMALLOC AND SC_MIMALLOC)
@@ -166,4 +171,8 @@ endif()
 
 if(_sc_host_side_deps AND SC_USE_VENDORED_SQLITE AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/sqlite/.install/pin.txt")
     add_subdirectory(sqlite)
+endif()
+
+if(_sc_host_side_deps AND SC_USE_VENDORED_OIDN AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/oidn/.install/pin.txt")
+    add_subdirectory(oidn)
 endif()

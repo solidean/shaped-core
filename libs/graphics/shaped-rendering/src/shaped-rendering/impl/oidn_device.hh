@@ -1,0 +1,35 @@
+#pragma once
+
+#include <clean-core/fwd.hh>
+#include <shaped-rendering/fwd.hh>
+
+/// The OIDN seam: what `sr::oidn_denoise_routine` needs from Intel Open Image Denoise, with none of its headers.
+///
+/// Two implementations, chosen by the build: `oidn_device.cc` where the release was fetched, `oidn_null.cc`
+/// otherwise — the same shape the DLSS and NRD seams take, and for the same reason.
+///
+/// **OIDN is a CPU denoiser here, and that is a decision rather than a limitation of the library.**
+/// It has GPU devices of its own, on CUDA, HIP, SYCL and Metal, which share memory with a renderer through an OS
+/// handle — and sg has no exportable memory or shared fence to hand one.
+/// So the member downloads the image, filters it on the CPU and uploads the result, which is also why it is the one
+/// non-native member that needs no particular vendor's hardware.
+///
+/// That round trip is what makes it ASYNCHRONOUS in a way no other member is: a filtered image is ready some frames
+/// after the frame it came from, so the member reports `pending` until one exists.
+namespace sr::impl
+{
+/// Whether OIDN was compiled into this build at all.
+[[nodiscard]] bool oidn_is_compiled_in();
+
+/// The library's version, as `major.minor.patch`, or empty when it is not compiled in.
+///
+/// Worth logging once: the filter names and the buffer contract move between major versions, and a mismatch between
+/// what a caller writes and what the library expects is a wrong image rather than an error.
+[[nodiscard]] cc::string oidn_version();
+
+/// Whether a CPU device can actually be created on this machine.
+///
+/// Separate from being compiled in, because the facade library loads its core and its device module by name out of
+/// its own directory: a binary that was built against OIDN but staged without them links, runs, and fails here.
+[[nodiscard]] bool oidn_has_device();
+} // namespace sr::impl

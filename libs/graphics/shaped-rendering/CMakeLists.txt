@@ -95,6 +95,20 @@ else()
     target_compile_definitions(shaped-rendering PUBLIC SR_HAS_WINDOW=0)
 endif()
 
+# Intel Open Image Denoise, when it has been fetched (extern/oidn/fetch-oidn.py, which dev.py runs on demand).
+#
+# It links PRIVATE and reaches impl/ alone, like every other denoiser SDK here.
+# No backend gate and no device gate: the member downloads, filters on the CPU and uploads, so it runs wherever sg
+# does and needs nobody's hardware — which is what makes it the one non-native member CI can exercise.
+if(TARGET oidn)
+    target_sources(shaped-rendering PRIVATE src/shaped-rendering/impl/oidn_device.cc)
+    target_link_libraries(shaped-rendering PRIVATE oidn)
+    target_compile_definitions(shaped-rendering PUBLIC SR_HAS_OIDN=1)
+else()
+    target_sources(shaped-rendering PRIVATE src/shaped-rendering/impl/oidn_null.cc)
+    target_compile_definitions(shaped-rendering PUBLIC SR_HAS_OIDN=0)
+endif()
+
 # sr's own shader package.
 # Must be declared here, in the CMakeLists that defines the target: the generated sources are added as PRIVATE sources and add_custom_command(OUTPUT) is directory-scoped.
 # Routines that need shaders add their entry points to this one package.
@@ -194,12 +208,19 @@ if(SC_BUILD_TESTS)
             tests/box-filter-mipmap-test.cc
             tests/raster-box-filter-mipmap-test.cc
             tests/denoise-test.cc
+        tests/oidn-test.cc
         )
         target_link_libraries(shaped-rendering-test PRIVATE shaped-graphics-dx12)
 
         # These import dxcompiler.dll, so the binary does not start without it, and dxil.dll signs what it emits.
         # Staged here rather than left to the SDL3 block's $<TARGET_RUNTIME_DLLS>, which a build without SDL3 never runs.
         sc_stage_runtime_dlls(shaped-rendering-test TAG shaped-rendering-test-dxc DLLS ${DXC_RUNTIME_DLLS})
+    endif()
+
+    # OIDN's facade loads its core and its CPU device module by name out of its own directory, so all of them have to
+    # sit beside the binary rather than only the one the link names.
+    if(OIDN_RUNTIME_LIBRARIES)
+        sc_stage_runtime_dlls(shaped-rendering-test DLLS ${OIDN_RUNTIME_LIBRARIES} TAG oidn)
     endif()
 
     # The one test that crosses sr's window into metal's windowed presentation, which nothing else covers.

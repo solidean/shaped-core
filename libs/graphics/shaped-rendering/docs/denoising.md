@@ -13,7 +13,7 @@ This is the design, including the parts not built yet.
 |---|---|---|---|
 | `atrous` | spatial | every sg backend, WARP included | done |
 | `svgf` | temporal | every sg backend | done |
-| `oidn` | spatial | CPU; NVIDIA, AMD, Intel and Apple GPUs | planned |
+| `oidn` | spatial | CPU everywhere; its GPU devices wait on sg | dependency fetched, member in progress |
 | `dlss_rr` | temporal, upscales | NVIDIA RTX; dx12, vulkan | planned |
 | `fsr_rr` | temporal, upscales | AMD RDNA 4; dx12 | planned |
 
@@ -109,7 +109,11 @@ sv takes the scene signal from its trace hash with the camera left out; a caller
   OIDN on the CPU needs neither: download, filter, upload.
 - **The vendor SDKs are fetched on request, never by default.**
   DLSS and FSR sit in sr behind `SR_HAS_<VENDOR>` and link PRIVATE, like SDL3.
-  Whether OIDN is fetched by default — its CPU build is the one non-native member CI could run — waits on measuring its size.
+  OIDN is the exception, and its size is why the question was open.
+  It is Apache-2.0, so nothing about it is a license a person accepts, and it is fetched on demand like SDL3.
+  The measurement settled it: the Windows release is 83 MB unpacked, and `OpenImageDenoise_core.dll` alone is 50.6 MB of that because the trained weights live inside it.
+  So no install plan makes this dependency small.
+  The CPU-only subset `extern/oidn/fetch-oidn.py` keeps is 52.8 MB — the same order as SDL3's 49.6 MB, which was already a default fetch.
 
 ## Testing
 
