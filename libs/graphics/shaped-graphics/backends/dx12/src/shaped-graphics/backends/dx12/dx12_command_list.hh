@@ -150,6 +150,12 @@ public:
     dx12_pipeline_layout const* _bound_raster_layout = nullptr;
     cc::vector<dx12_binding_group const*> _bound_raster_groups;
 
+    // Array-access declarations for the *next* draw, the graphics twin of the compute pair above; cleared after it.
+    // Kept apart from the compute ones because the bound groups they resolve against are: a dispatch recorded
+    // between a raster declare and its draw would otherwise consume the declaration.
+    cc::vector<dx12_array_buffer_declare> _pending_raster_array_buffer_declares;
+    cc::vector<dx12_array_texture_declare> _pending_raster_array_texture_declares;
+
     // Vertex / index buffers currently bound to the IA, slot-indexed; a null entry is an unbound slot.
     // Kept so their vertex_read / index_read accesses can be declared for hazard barriers at draw time, the point the GPU reads them.
     // Same rhythm compute uses for its bound groups, and cleared at raster_end_rendering with the rest of the bind state.
@@ -218,6 +224,10 @@ protected:
     void raster_bind_group(int group_index, sg::binding_group const& group) override;
     void raster_bind_vertex_buffers(int first_slot, cc::span<sg::vertex_buffer_view const> views) override;
     void raster_bind_index_buffer(sg::index_buffer_view const& view) override;
+    void raster_declare_array_buffer_access(cc::string_view binding_name,
+                                            cc::span<sg::array_buffer_access const> elements) override;
+    void raster_declare_array_texture_access(cc::string_view binding_name,
+                                             cc::span<sg::array_texture_access const> elements) override;
     void raster_set_viewport(sg::viewport const& vp) override;
     void raster_set_scissor(tg::aabb2i const& rect) override;
     void raster_set_stencil_reference(u32 reference) override;
@@ -277,9 +287,12 @@ private:
     // Called by raster_draw / raster_draw_indexed just before flush_barriers and the draw.
     void declare_raster_draw_barriers(bool indexed);
 
-    // Resolve the pending array-access declarations against the bound groups' array bindings and track each
-    // declared element's access, then clear the pending set.
+    // Resolve `buffer_declares` / `texture_declares` against `groups`' array bindings and track each declared
+    // element's access, then clear both pending sets.
     // Asserts every bound array binding is covered by a declaration, and every declaration names a bound one.
-    // Called by compute_dispatch / raytracing_dispatch_rays alongside the scalar hazard declares.
-    void declare_array_accesses();
+    // Called by compute_dispatch / raytracing_dispatch_rays with the compute bind point's state, and by
+    // declare_raster_draw_barriers with the graphics one's, alongside the scalar hazard declares.
+    void declare_array_accesses(cc::span<dx12_binding_group const* const> groups,
+                                cc::vector<dx12_array_buffer_declare>& buffer_declares,
+                                cc::vector<dx12_array_texture_declare>& texture_declares);
 };

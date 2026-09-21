@@ -360,12 +360,22 @@ void metal_command_list::flush_barriers()
     if (!any)
         return;
 
-    // Clamped to what a compute encoder can name: `barrierAfterEncoderStages` refuses any other stage, and with
+    // The barrier goes to whichever encoder is open, and inside a render pass that is the render encoder.
+    //
+    // **MTL4 is what makes a barrier inside a render pass possible at all.** `barrierAfterEncoderStages` is declared on
+    // `MTL4::CommandEncoder`, which the render encoder derives from, so it takes one exactly as the compute encoder
+    // does — where Vulkan forbids a barrier inside a dynamic-rendering instance and closes the pass around one.
+    // Opening the compute encoder here instead would be worse than wrong: Metal allows one encoder at a time, so it
+    // would end the pass mid-draw.
+    //
+    // Each is clamped to the stages its own encoder can name: `barrierAfterEncoderStages` refuses any other, and with
     // validation armed it aborts rather than warning.
-    // Nothing is lost while every op recorded here is a copy or a dispatch — a raster dependency will need the
-    // queue-scoped form or an encoder boundary, which is the raster milestone's problem.
-    compute_encoder()->barrierAfterEncoderStages(clamp_to_compute_encoder(after), clamp_to_compute_encoder(before),
-                                                 visibility);
+    if (_render_encoder != nullptr)
+        _render_encoder->barrierAfterEncoderStages(clamp_to_render_encoder(after), clamp_to_render_encoder(before),
+                                                   visibility);
+    else
+        compute_encoder()->barrierAfterEncoderStages(clamp_to_compute_encoder(after), clamp_to_compute_encoder(before),
+                                                     visibility);
 }
 
 void metal_command_list::end_recording(bool will_submit)
@@ -649,6 +659,9 @@ void metal_command_list::compute_bind_pipeline(compute_pipeline const& pipeline)
     _bound_compute = &mtl_pipeline;
     _bound_layout = static_cast<metal_pipeline_layout const*>(mtl_pipeline.layout().get());
 
+    // A new pipeline resets the bound groups, exactly as it does on dx12 and vulkan.
+    reset_bound_group_tracking();
+
     auto* const encoder = compute_encoder();
     encoder->setComputePipelineState(mtl_pipeline.state());
     encoder->setArgumentTable(argument_table());
@@ -723,14 +736,32 @@ void metal_command_list::compute_set_inline_constants(cc::span<byte const>, cc::
     SG_METAL_UNIMPLEMENTED("compute inline constants");
 }
 
+// The four array-access declarations below are accepted and then dropped, on purpose.
+//
+// They exist so a hazard tracker learns which elements of an array a shader touches, and metal's does not need
+// telling: every dispatch, dispatch_rays and draw reaches `declare_bound_groups`, which declares every resource a
+// bound group names — array elements included, since `metal_binding_group` holds them like any other — as
+// shader_read | shader_write at the stages that run.
+// That is a superset of any declaration a caller could make, so applying one would only narrow what is already
+// correct, and rejecting one would fail a portable bindless caller on metal alone.
+//
+// What it costs is precision rather than correctness: two draws reading the same table look like write-then-write and
+// get a barrier between them, where dx12 and vulkan read the declaration and emit nothing.
+
 void metal_command_list::compute_declare_array_buffer_access(cc::string_view, cc::span<array_buffer_access const>)
 {
-    SG_METAL_UNIMPLEMENTED("declaring compute array buffer access");
 }
 
 void metal_command_list::compute_declare_array_texture_access(cc::string_view, cc::span<array_texture_access const>)
 {
-    SG_METAL_UNIMPLEMENTED("declaring compute array texture access");
+}
+
+void metal_command_list::raster_declare_array_buffer_access(cc::string_view, cc::span<array_buffer_access const>)
+{
+}
+
+void metal_command_list::raster_declare_array_texture_access(cc::string_view, cc::span<array_texture_access const>)
+{
 }
 
 
@@ -754,6 +785,16 @@ void metal_command_list::raster_set_inline_constants(cc::span<byte const>, cc::o
 void metal_command_list::raster_draw_indexed(draw_indexed_config const&)
 {
     SG_METAL_UNIMPLEMENTED("an indexed draw");
+}
+
+void metal_command_list::reset_bound_group_tracking()
+{
+    for (auto& slot_buffers : _group_buffers)
+        slot_buffers.clear();
+    for (auto& slot_textures : _group_textures)
+        slot_textures.clear();
+    for (auto& slot_tlases : _group_tlases)
+        slot_tlases.clear();
 }
 
 void metal_command_list::declare_bound_groups(pipeline_stage_flags stages)
@@ -907,6 +948,9 @@ void metal_command_list::raster_bind_pipeline(raster_pipeline const& pipeline)
     _bound_raster = &mtl_pipeline;
     _bound_layout = static_cast<metal_pipeline_layout const*>(mtl_pipeline.layout().get());
 
+    // A new pipeline resets the bound groups, exactly as it does on dx12 and vulkan.
+    reset_bound_group_tracking();
+
     _render_encoder->setRenderPipelineState(mtl_pipeline.state());
     if (mtl_pipeline.depth_stencil_state() != nullptr)
         _render_encoder->setDepthStencilState(mtl_pipeline.depth_stencil_state());
@@ -964,6 +1008,12 @@ void metal_command_list::raster_draw(draw_config const& config)
     if (config.vertex_range.size == 0 || config.instance_range.size == 0)
         return;
 
+    // Everything the bound groups name is read by this draw, declared now rather than at bind time for the reason a
+    // dispatch declares late: a group bound and then rebound before any draw never ran.
+    // The barrier this may emit lands on the render encoder, which is why it can happen here at all — see
+    // flush_barriers.
+    declare_bound_groups(sg::pipeline_stage_flag::vertex | sg::pipeline_stage_flag::fragment);
+
     _render_encoder->drawPrimitives(primitive_type_of(_bound_raster->topology()),
                                     NS::UInteger(config.vertex_range.offset), NS::UInteger(config.vertex_range.size),
                                     NS::UInteger(config.instance_range.size), NS::UInteger(config.instance_range.offset));
@@ -976,6 +1026,9 @@ void metal_command_list::raytracing_bind_pipeline(raytracing_pipeline const& pip
     // So this only records the pipeline a later dispatch_rays must have been built for.
     _bound_raytracing = static_cast<metal_raytracing_pipeline const*>(&pipeline);
     _bound_layout = static_cast<metal_pipeline_layout const*>(_bound_raytracing->layout().get());
+
+    // A new pipeline resets the bound groups, exactly as it does on dx12 and vulkan.
+    reset_bound_group_tracking();
 }
 
 void metal_command_list::raytracing_bind_group(int group_index, binding_group const& group)

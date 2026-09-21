@@ -125,6 +125,7 @@ public:
     }
 
     // Array bindings are not auto-tracked, so their accesses arrive as explicit declarations and wait here.
+    // These are the compute bind point's, which ray tracing shares; the graphics ones are below.
     cc::vector<vulkan_array_buffer_declare> _pending_array_buffer_declares;
     cc::vector<vulkan_array_texture_declare> _pending_array_texture_declares;
 
@@ -151,6 +152,12 @@ public:
     cc::vector<vulkan_binding_group const*> _bound_raster_groups;
     cc::vector<vulkan_buffer const*> _bound_vertex_buffers;
     vulkan_buffer const* _bound_index_buffer = nullptr;
+
+    // Array-access declarations for the *next* draw, kept apart from the compute ones because the bound groups
+    // they resolve against are: a dispatch recorded between a raster declare and its draw would otherwise consume
+    // the declaration.
+    cc::vector<vulkan_array_buffer_declare> _pending_raster_array_buffer_declares;
+    cc::vector<vulkan_array_texture_declare> _pending_raster_array_texture_declares;
 
     // The hazard declares a draw owes: the bound groups' shader accesses plus the input-assembly reads.
     void declare_raster_draw_barriers(bool indexed);
@@ -182,9 +189,12 @@ public:
     // Flushes what the build declared, then records it.
     void record_acceleration_structure_build(built_acceleration_structure const& built);
 
-    /// Resolves the pending array declares against the bound groups and tracks each named element.
+    /// Resolves `buffer_declares` / `texture_declares` against `groups`' array bindings, tracks each named element, and clears both.
     // Also the accounting pass: a bound array binding with no declaration is an error.
-    void declare_array_accesses();
+    // Called with the compute bind point's state by a dispatch, and with the graphics one's by a draw.
+    void declare_array_accesses(cc::span<vulkan_binding_group const* const> groups,
+                                cc::vector<vulkan_array_buffer_declare>& buffer_declares,
+                                cc::vector<vulkan_array_texture_declare>& texture_declares);
 
     // Every resource this list has tracked, so submit can finalize each slot and drop can discard it.
     // Public so the context can walk it at submit; deduplicated by mark_recorded.
@@ -243,6 +253,10 @@ protected:
     void raster_bind_group(int group_index, sg::binding_group const& group) override;
     void raster_bind_vertex_buffers(int first_slot, cc::span<sg::vertex_buffer_view const> views) override;
     void raster_bind_index_buffer(sg::index_buffer_view const& view) override;
+    void raster_declare_array_buffer_access(cc::string_view binding_name,
+                                            cc::span<sg::array_buffer_access const> elements) override;
+    void raster_declare_array_texture_access(cc::string_view binding_name,
+                                             cc::span<sg::array_texture_access const> elements) override;
     void raster_set_viewport(sg::viewport const& vp) override;
     void raster_set_scissor(tg::aabb2i const& rect) override;
     void raster_set_stencil_reference(u32 reference) override;

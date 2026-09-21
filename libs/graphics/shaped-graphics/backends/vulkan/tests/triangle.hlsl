@@ -13,6 +13,7 @@
 //   dxc -T vs_6_0 -E vs_main -spirv -fspv-target-env=vulkan1.3 -Fh triangle.vs.spirv.h -Vn triangle_vs_spirv triangle.hlsl
 //   dxc -T ps_6_0 -E ps_main -spirv -fspv-target-env=vulkan1.3 -Fh triangle.ps.spirv.h -Vn triangle_ps_spirv triangle.hlsl
 //   dxc -T ps_6_0 -E ps_from_buffer -spirv -fspv-target-env=vulkan1.3 -Fh triangle.psbuf.spirv.h -Vn triangle_psbuf_spirv triangle.hlsl
+//   dxc -T ps_6_0 -E ps_from_array -spirv -fspv-target-env=vulkan1.3 -Fh triangle.psarray.spirv.h -Vn triangle_psarray_spirv triangle.hlsl
 
 struct vs_in
 {
@@ -47,4 +48,14 @@ float4 ps_main(vs_out i) : SV_Target
 float4 ps_from_buffer(vs_out i) : SV_Target
 {
     return float4(float(Values[3]) / 255.0f, 0.0f, 0.0f, 1.0f);
+}
+
+// A third fragment stage reading an ARRAY binding, so a draw can exercise the raster `declare_array_*_access` path.
+// Four descriptors under one binding, of which the test fills only elements 0 and 3 — the shader reads exactly those,
+// so the vacant two stay vacant and the draw declares the two it touches.
+[[vk::binding(1, 0)]] StructuredBuffer<uint> Table[4] : register(t1);
+
+float4 ps_from_array(vs_out i) : SV_Target
+{
+    return float4(float(Table[0][0]) / 255.0f, float(Table[3][0]) / 255.0f, 0.0f, 1.0f);
 }

@@ -101,9 +101,11 @@ Each of these is a fact about Metal rather than a gap in the backend.
   The render pass establishes the rest at encode time.
   sg's `depth_stencil_format` is therefore carried for validation rather than for building — `metal_raster_pipeline::depth_stencil_format()` is what the rendering scope is checked against.
   That is the opposite of dx12's DSVFormat and vulkan's dynamic-rendering formats.
-- **A barrier is flushed before the render encoder opens, not inside it.**
-  Vulkan forbids a barrier inside a dynamic-rendering instance and closes the pass around one.
-  Here the declares are simply flushed first, which costs nothing a frame that transitions its targets up front was not already paying.
+- **A barrier can be emitted inside a render pass, which is a Metal 4 difference rather than a shortcut.**
+  `barrierAfterEncoderStages` is declared on `MTL4CommandEncoder`, so the render encoder takes one exactly as the compute encoder does.
+  Vulkan forbids a barrier inside a dynamic-rendering instance and closes the pass around one, forcing every load op to LOAD; here a draw simply declares its bound groups and flushes like a dispatch.
+  The targets' own transitions are still flushed *before* the encoder opens, since at that point there is no render encoder to put them on.
+  What the encoder-scoped form cannot do is name a stage its encoder cannot encode, so a draw reading what a copy wrote widens `StageBlit` to vertex plus fragment — see `clamp_to_render_encoder`.
 - **A pipeline is built through an explicit compiler object.**
   MTL4 makes compilation an `MTL4Compiler` the context owns, where Metal 3 hid it behind the device.
   A metallib blob reaches it as `dispatch_data`, and the entry point is named through an `MTL4LibraryFunctionDescriptor` rather than looked up on the library.

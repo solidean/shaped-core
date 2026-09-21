@@ -467,7 +467,7 @@ void vulkan_command_list::raytracing_dispatch_rays(sg::raytracing_shader_table c
                                        sg::shader_access_of(tv.access), sg::shader_layout_of(tv.access));
     }
 
-    declare_array_accesses();
+    declare_array_accesses(_bound_groups, _pending_array_buffer_declares, _pending_array_texture_declares);
 
     // The shader table buffer is read by the fixed-function ray dispatch.
     track_buffer_access(*vt->buffer, sg::pipeline_stage_flag::raytracing, sg::access_flag::shader_read);

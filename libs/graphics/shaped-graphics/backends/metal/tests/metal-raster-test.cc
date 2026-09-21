@@ -2,10 +2,13 @@
 #include "triangle.metallib.h"
 
 #include <clean-core/common/utility.hh>
+#include <clean-core/container/vector.hh>
 #include <clean-core/string/format.hh>
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/binding/compiled_shader.hh>
+#include <shaped-graphics/binding/pipeline_layout.hh>
+#include <shaped-graphics/binding/staging_binding_group.hh>
 
 #include <atomic>
 #include <thread>
@@ -34,11 +37,18 @@ namespace
     return shader;
 }
 
+// `group_layout` null is the plain fixture: no bindings, an empty pipeline layout.
+// A layout is passed only by the hazard test below, whose draw needs a group to bind — the shader reads neither way.
 [[nodiscard]] cc::result<sg::backend::metal::metal_raster_pipeline_handle> make_triangle_pipeline(
     mtl::metal_context_handle const& ctx,
-    sg::pixel_format format)
+    sg::pixel_format format,
+    sg::binding_group_layout_handle const& group_layout = nullptr)
 {
-    auto layout = ctx->create_metal_pipeline_layout({}, sg::lifetime_scope::persistent);
+    auto description = sg::pipeline_layout_description{};
+    if (group_layout != nullptr)
+        description.groups.push_back(group_layout);
+
+    auto layout = ctx->create_metal_pipeline_layout(description, sg::lifetime_scope::persistent);
     if (layout.has_error())
         return cc::error(layout.error().to_string());
 
@@ -380,4 +390,89 @@ ASYNC_TEST("sg metal - a stencil-masked draw is masked by the stencil clear")
     CHECK(int(u8(drawn_bytes.value()[0])) < 128)
         .context(cc::format("the stencil-passing draw wrote {}", int(u8(drawn_bytes.value()[0]))));
     CHECK(int(u8(drawn_bytes.value()[1])) > 100);
+}
+
+ASYNC_TEST("sg metal - a draw declares its bound groups and flushes onto the render encoder")
+{
+    auto const ctx = mtl::test::make_context();
+    if (ctx == nullptr)
+        SKIP("no metal 4 device on this host");
+
+    // The regression this pins is structural rather than visual.
+    //
+    // A draw declares every resource its bound groups name, so `flush_barriers` runs with a render pass open — and a
+    // barrier emitted there has to land on the render encoder.
+    // Reaching for the compute encoder instead would open a second encoder while this one is live, which Metal
+    // refuses; naming a stage a render encoder cannot encode would be refused too.
+    // The validation layer is armed for this binary, so either mistake aborts the run rather than failing a CHECK.
+    //
+    // The buffer is written in an earlier list and read by the draw, which is what makes the tracker ask for a barrier
+    // at all: an upload declares `copy_write`, and `MTLStageBlit` is a stage no render encoder can name, so this also
+    // covers the clamp's widening fallback.
+    // The fragment shader ignores the binding — what is under test is the declare-and-flush path, not the sampling.
+    auto const b = sg::binding{
+        .name = "Data",
+        .space = 0,
+        .index = 0,
+        .count = 1,
+        .type = sg::binding_type::readonly_structured_buffer,
+    };
+    auto group_layout
+        = ctx->create_metal_binding_group_layout(cc::span<sg::binding const>(&b, 1), {}, sg::lifetime_scope::persistent);
+    REQUIRE(group_layout.has_value()).context(group_layout.has_error() ? group_layout.error().to_string() : cc::string());
+
+    auto const buffer
+        = ctx->persistent.create_raw_buffer(256, sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);
+    REQUIRE(buffer != nullptr);
+
+    auto const nv = sg::named_view{.name = "Data", .view = sg::buffer<u32>::from_raw(buffer).as_readonly_buffer()};
+    auto group = ctx->create_metal_binding_group(group_layout.value(), cc::span<sg::named_view const>(&nv, 1), {},
+                                                 sg::lifetime_scope::persistent);
+    REQUIRE(group.has_value()).context(group.has_error() ? group.error().to_string() : cc::string());
+
+    constexpr auto k_size = 4;
+    auto const target = ctx->persistent.create_texture_2d({
+        .format = sg::pixel_format::rgba8_unorm,
+        .width = k_size,
+        .height = k_size,
+        .usage = sg::texture_usage::render_target | sg::texture_usage::copy_src,
+    });
+
+    auto pipeline = make_triangle_pipeline(ctx, sg::pixel_format::rgba8_unorm, group_layout.value());
+    REQUIRE(pipeline.has_value()).context(pipeline.has_error() ? pipeline.error().to_string() : cc::string());
+
+    // The producer, in a list of its own so the dependency crosses lists rather than encoders.
+    cc::vector<u32> const contents = {1, 2, 3, 4};
+    auto up = ctx->create_command_list();
+    up->upload.data_to_buffer(buffer, contents);
+    ctx->submit_command_list(cc::move(up));
+
+    auto cmd = ctx->create_command_list();
+    {
+        auto info = sg::rendering_info{};
+        info.color_targets.push_back(target.as_render_target_view().cleared(tg::vec4f(1, 0, 0, 1)));
+        auto scope = cmd->raster.render_to(info);
+        scope.bind_pipeline(*pipeline.value());
+        scope.bind_group(0, *group.value());
+        scope.draw({.vertex_range = {.offset = 0, .size = 3}});
+    }
+    auto future = cmd->download.bytes_from_texture(target.raw());
+    ctx->submit_command_list(cc::move(cmd));
+
+    co_await ctx->idle_completion();
+
+    auto const bytes = future.try_get_bytes();
+    REQUIRE(bytes.has_value());
+    REQUIRE(bytes.value().size() == k_size * k_size * 4);
+
+    // The draw still lands: a barrier in the middle of a pass must not cost the pass its contents.
+    auto const near = [](byte value, int expected)
+    {
+        auto const delta = int(u8(value)) - expected;
+        return (delta < 0 ? -delta : delta) <= 1;
+    };
+    auto const* const texel = &bytes.value()[0];
+    CHECK(near(texel[0], 64));
+    CHECK(near(texel[1], 128));
+    CHECK(near(texel[2], 191));
 }

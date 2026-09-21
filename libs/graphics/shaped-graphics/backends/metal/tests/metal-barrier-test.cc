@@ -103,3 +103,26 @@ TEST("sg metal - an encoder barrier is clamped to what a compute encoder accepts
     CHECK(mtl::clamp_to_compute_encoder(MTL::StageVertex) == mtl::k_compute_encoder_stages);
     CHECK(mtl::clamp_to_compute_encoder(MTL::StageAll) == mtl::k_compute_encoder_stages);
 }
+
+TEST("sg metal - an encoder barrier is clamped to what a render encoder accepts")
+{
+    // The same rule one encoder over: a draw's own stages pass through.
+    CHECK(mtl::clamp_to_render_encoder(MTL::StageFragment) == MTL::StageFragment);
+    CHECK(mtl::clamp_to_render_encoder(MTL::StageVertex | MTL::StageFragment) == (MTL::StageVertex | MTL::StageFragment));
+
+    // A stage a render encoder cannot encode work for is dropped rather than passed through.
+    CHECK(mtl::clamp_to_render_encoder(MTL::StageFragment | MTL::StageDispatch) == MTL::StageFragment);
+
+    // The set is the two stages sg can actually name, not every stage a render encoder could encode — the fallback
+    // below is why that distinction is worth keeping.
+    CHECK(mtl::k_render_encoder_stages == (MTL::StageVertex | MTL::StageFragment));
+
+    // The case that matters for a draw reading what a dispatch or a copy wrote: the producer stage clamps to nothing,
+    // so the barrier widens to every geometry stage instead of vanishing.
+    CHECK(mtl::clamp_to_render_encoder(MTL::StageDispatch) == mtl::k_render_encoder_stages);
+    CHECK(mtl::clamp_to_render_encoder(MTL::StageBlit) == mtl::k_render_encoder_stages);
+    CHECK(mtl::clamp_to_render_encoder(MTL::StageAll) == mtl::k_render_encoder_stages);
+
+    // The two encoders' sets are disjoint, which is why a barrier has to be clamped per encoder rather than once.
+    CHECK((mtl::k_render_encoder_stages & mtl::k_compute_encoder_stages) == 0);
+}

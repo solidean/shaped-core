@@ -309,6 +309,9 @@ cmd.raster.bind_pipeline(raster_pipeline)               // void — active raste
 cmd.raster.bind_group(group_index, binding_group)      // void — bind at slot `group_index` (indexes the pipeline layout's groups)
 cmd.raster.bind_vertex_buffers({vbuf->as_vertex_buffer<Vtx>()}, first_slot=0)  // void — also: bind_vertex_buffer(view, slot) / span overload
 cmd.raster.bind_index_buffer(ibuf->as_index_buffer(sg::index_format::uint16))  // void
+cmd.raster.declare_array_buffer_access(name, elements)  // void — per-element access for a buffer array/bindless binding, NEXT DRAW only
+cmd.raster.declare_array_texture_access(name, elements) // void — same for a texture array (elements also carry a layout)
+                                                        // same rules as cmd.compute's pair, and its own pending state; name the stage the shader indexes in
 cmd.raster.set_viewport(vp) / .set_scissor(rect)       // void — override the scope's viewport / scissor
 cmd.raster.set_stencil_reference(u32) / .set_blend_constants(tg::vec4f)  // void — dynamic depth-stencil / blend state
 cmd.raster.set_inline_constants(data|POD, offset={})   // void — root/push constants (same as cmd.compute)
@@ -698,7 +701,7 @@ cmd.compute.dispatch_groups(x, y, z)     // void — dispatch x*y*z workgroups
 cmd.compute.dispatch_threads(x, y, z)    // void — dispatch ceil(threads / workgroup_size) groups per axis
 cmd.compute.declare_array_buffer_access(name, elements)  // void — per-element access for a buffer array/bindless binding, next dispatch only
 cmd.compute.declare_array_texture_access(name, elements) // void — same for a texture array (elements also carry a layout)
-                                                         // (scalar bindings are inferred; arrays can't be — declare them; cmd.raytracing has the same pair)
+                                                         // (scalar bindings are inferred; arrays can't be — declare them; cmd.raytracing and cmd.raster have the same pair)
                                                          // ACCOUNTED FOR: dispatch asserts every bound array binding was declared; empty span = "unused"
 
 // raster_pipeline — a graphics PSO. Owns its shaders; formats/state baked in (must match the rendering scope). Draws via cmd.raster (above).

@@ -87,6 +87,12 @@ MTL::Stages clamp_to_compute_encoder(MTL::Stages stages)
     return clamped != 0 ? clamped : k_compute_encoder_stages;
 }
 
+MTL::Stages clamp_to_render_encoder(MTL::Stages stages)
+{
+    auto const clamped = stages & k_render_encoder_stages;
+    return clamped != 0 ? clamped : k_render_encoder_stages;
+}
+
 metal_barrier translate_barrier(sg::access_barrier const& barrier)
 {
     if (!barrier.needed)

@@ -113,14 +113,16 @@ void vulkan_command_list::compute_declare_array_texture_access(cc::string_view b
     _pending_array_texture_declares.push_back(cc::move(declare));
 }
 
-void vulkan_command_list::declare_array_accesses()
+void vulkan_command_list::declare_array_accesses(cc::span<vulkan_binding_group const* const> groups,
+                                                 cc::vector<vulkan_array_buffer_declare>& buffer_declares,
+                                                 cc::vector<vulkan_array_texture_declare>& texture_declares)
 {
     // The bound groups' array bindings, resolved by name — also the accounting set: every array binding must be
     // covered by a declaration, since which elements a shader indexes cannot be inferred and silently skipping one
     // would leave its resources untracked (wrong layouts, missed hazards).
     auto const find_array_binding = [&](cc::string_view name, bool want_texture) -> vulkan_array_binding const*
     {
-        for (auto const* bound_group : _bound_groups)
+        for (auto const* bound_group : groups)
         {
             if (bound_group == nullptr)
                 continue;
@@ -131,7 +133,7 @@ void vulkan_command_list::declare_array_accesses()
         return nullptr;
     };
 
-    for (auto const& declare : _pending_array_buffer_declares)
+    for (auto const& declare : buffer_declares)
     {
         auto const* ab = find_array_binding(declare.name, false);
         CC_ASSERT(ab != nullptr, "declare_array_buffer_access names no buffer array binding of a bound group");
@@ -144,7 +146,7 @@ void vulkan_command_list::declare_array_accesses()
         }
     }
 
-    for (auto const& declare : _pending_array_texture_declares)
+    for (auto const& declare : texture_declares)
     {
         auto const* ab = find_array_binding(declare.name, true);
         CC_ASSERT(ab != nullptr, "declare_array_texture_access names no texture array binding of a bound group");
@@ -159,8 +161,8 @@ void vulkan_command_list::declare_array_accesses()
 
 #if CC_ASSERT_ENABLED
     // The reverse direction of the accounting: an undeclared array binding is a hard error, not "no access" — an
-    // empty-span declaration is the way to say a dispatch touches no elements of an array.
-    for (auto const* bound_group : _bound_groups)
+    // empty-span declaration is the way to say a dispatch or draw touches no elements of an array.
+    for (auto const* bound_group : groups)
     {
         if (bound_group == nullptr)
             continue;
@@ -169,22 +171,22 @@ void vulkan_command_list::declare_array_accesses()
             bool declared = false;
             if (ab.is_texture)
             {
-                for (auto const& declare : _pending_array_texture_declares)
+                for (auto const& declare : texture_declares)
                     declared |= declare.name == ab.name;
             }
             else
             {
-                for (auto const& declare : _pending_array_buffer_declares)
+                for (auto const& declare : buffer_declares)
                     declared |= declare.name == ab.name;
             }
-            CC_ASSERT(declared, "a bound array binding has no declare_array_*_access for this dispatch (declare an "
-                                "empty span if it is unused)");
+            CC_ASSERT(declared, "a bound array binding has no declare_array_*_access for this dispatch or draw "
+                                "(declare an empty span if it is unused)");
         }
     }
 #endif
 
-    _pending_array_buffer_declares.clear();
-    _pending_array_texture_declares.clear();
+    buffer_declares.clear();
+    texture_declares.clear();
 }
 
 void vulkan_command_list::compute_dispatch(int x, int y, int z)
@@ -212,7 +214,7 @@ void vulkan_command_list::compute_dispatch(int x, int y, int z)
     }
 
     // Array bindings are not auto-tracked — apply (and account for) the caller's explicit declarations.
-    declare_array_accesses();
+    declare_array_accesses(_bound_groups, _pending_array_buffer_declares, _pending_array_texture_declares);
 
     // Emit every hazard the bound resources declared, batched, right before the dispatch consumes them.
     flush_barriers();

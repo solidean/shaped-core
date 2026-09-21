@@ -112,6 +112,16 @@ void rendering_scope::bind_index_buffer(index_buffer_view const& view)
 {
     _cmd.raster_bind_index_buffer(view);
 }
+void rendering_scope::declare_array_buffer_access(cc::string_view binding_name,
+                                                  cc::span<array_buffer_access const> elements)
+{
+    _cmd.raster_declare_array_buffer_access(binding_name, elements);
+}
+void rendering_scope::declare_array_texture_access(cc::string_view binding_name,
+                                                   cc::span<array_texture_access const> elements)
+{
+    _cmd.raster_declare_array_texture_access(binding_name, elements);
+}
 void rendering_scope::set_viewport(viewport const& vp)
 {
     _cmd.raster_set_viewport(vp);
@@ -183,6 +193,16 @@ void command_list_raster_scope::bind_index_buffer(index_buffer_view const& view)
 {
     _cmd.raster_bind_index_buffer(view);
 }
+void command_list_raster_scope::declare_array_buffer_access(cc::string_view binding_name,
+                                                            cc::span<array_buffer_access const> elements)
+{
+    _cmd.raster_declare_array_buffer_access(binding_name, elements);
+}
+void command_list_raster_scope::declare_array_texture_access(cc::string_view binding_name,
+                                                             cc::span<array_texture_access const> elements)
+{
+    _cmd.raster_declare_array_texture_access(binding_name, elements);
+}
 void command_list_raster_scope::set_viewport(viewport const& vp)
 {
     _cmd.raster_set_viewport(vp);
@@ -235,6 +255,16 @@ void command_list_raster_manual_scope::bind_vertex_buffer(vertex_buffer_view con
 void command_list_raster_manual_scope::bind_index_buffer(index_buffer_view const& view)
 {
     _cmd.raster_bind_index_buffer(view);
+}
+void command_list_raster_manual_scope::declare_array_buffer_access(cc::string_view binding_name,
+                                                                   cc::span<array_buffer_access const> elements)
+{
+    _cmd.raster_declare_array_buffer_access(binding_name, elements);
+}
+void command_list_raster_manual_scope::declare_array_texture_access(cc::string_view binding_name,
+                                                                    cc::span<array_texture_access const> elements)
+{
+    _cmd.raster_declare_array_texture_access(binding_name, elements);
 }
 void command_list_raster_manual_scope::set_viewport(viewport const& vp)
 {

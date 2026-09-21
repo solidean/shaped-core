@@ -57,12 +57,29 @@ namespace sg::backend::metal
 inline constexpr MTL::Stages k_compute_encoder_stages
     = MTL::StageDispatch | MTL::StageBlit | MTL::StageAccelerationStructure;
 
+/// The only stages an encoder-scoped barrier on a *render* encoder may name — the same restriction, one encoder over.
+///
+/// A render encoder encodes the geometry and pixel stages, so a dispatch or blit stage reaching one is dropped exactly
+/// as a vertex stage reaching a compute encoder is.
+/// `MTLStageTile`, `MTLStageObject` and `MTLStageMesh` are deliberately absent though a render encoder can encode
+/// them: `stages_of` cannot produce one — sg has no tile, object or mesh stage — so listing them would only widen the
+/// fallback below onto stages no pipeline here has work in.
+inline constexpr MTL::Stages k_render_encoder_stages = MTL::StageVertex | MTL::StageFragment;
+
 /// `stages` narrowed to what a compute encoder accepts.
 ///
 /// A mask that clamps to nothing becomes the encoder's whole set rather than an empty one: an empty mask orders
 /// nothing, and the stages being dropped are ones this encoder cannot name anyway.
 /// That is conservative and legal, where the alternative is a barrier the API refuses.
 [[nodiscard]] MTL::Stages clamp_to_compute_encoder(MTL::Stages stages);
+
+/// `stages` narrowed to what a render encoder accepts, the same rule and the same fallback.
+///
+/// The fallback carries the weight here: a draw reading what a copy or a dispatch wrote names `StageBlit` or
+/// `StageDispatch` as its *after* stage, neither of which a render encoder can name.
+/// Widening that to every geometry stage orders the draw against more than it strictly must, which is the safe
+/// direction — the unsafe one is dropping the barrier.
+[[nodiscard]] MTL::Stages clamp_to_render_encoder(MTL::Stages stages);
 
 /// Translate one sg access barrier into the MTL4 form.
 ///

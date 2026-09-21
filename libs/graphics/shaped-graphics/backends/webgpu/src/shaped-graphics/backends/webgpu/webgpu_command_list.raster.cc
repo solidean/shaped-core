@@ -234,6 +234,19 @@ void webgpu_command_list::raster_bind_index_buffer(sg::index_buffer_view const& 
         wgpuRenderPassEncoderSetIndexBuffer(render_pass(), _index_buffer, _index_format, _index_offset, _index_size);
 }
 
+void webgpu_command_list::raster_declare_array_buffer_access(cc::string_view,
+                                                             cc::span<sg::array_buffer_access const> elements)
+{
+    // No layout accepts an array binding here, so the only declaration that can be right is the empty one.
+    CC_ASSERT(elements.empty(), "webgpu has no binding arrays, so there is no array element to declare");
+}
+
+void webgpu_command_list::raster_declare_array_texture_access(cc::string_view,
+                                                              cc::span<sg::array_texture_access const> elements)
+{
+    CC_ASSERT(elements.empty(), "webgpu has no binding arrays, so there is no array element to declare");
+}
+
 void webgpu_command_list::raster_set_viewport(sg::viewport const& vp)
 {
     CC_ASSERT(_in_rendering_scope, "set_viewport is only valid inside a rendering scope");

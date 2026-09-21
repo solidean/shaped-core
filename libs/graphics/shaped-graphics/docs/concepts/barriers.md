@@ -18,8 +18,9 @@ The mapping lives in [access_inference.hh](../../src/shaped-graphics/barrier/acc
 Element usage of a resource *array* bound to a shader cannot be inferred: the shader may index only some elements, or use them differently.
 So the caller declares it explicitly, split by resource family since buffers carry no layout.
 `declare_array_buffer_access` takes `array_buffer_access` `{index, stages, access}`; `declare_array_texture_access` takes `array_texture_access`, which also names the required `layout`.
-A declaration applies to the next dispatch only, resolved by binding name against the bound groups' array elements and tracked exactly like an inferred scalar access.
-Declarations are **accounted for**: the dispatch asserts that every bound array binding was declared — an empty element span declares "unused", a missing declaration is a bug.
+A declaration applies to the next dispatch only — or, on `cmd.raster`, the next draw.
+It is resolved by binding name against that bind point's bound groups and tracked exactly like an inferred scalar access.
+Declarations are **accounted for**: the dispatch or draw asserts that every bound array binding was declared — an empty element span declares "unused", a missing declaration is a bug.
 Declaring a vacant (null-handle) or out-of-range element asserts too.
 See [bindings — array bindings](bindings.md#array-bindings).
 

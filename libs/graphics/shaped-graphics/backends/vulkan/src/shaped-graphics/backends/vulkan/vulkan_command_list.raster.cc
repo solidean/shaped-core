@@ -203,6 +203,10 @@ void vulkan_command_list::raster_end_rendering()
     _bound_raster_groups.clear();
     _bound_vertex_buffers.clear();
     _bound_index_buffer = nullptr;
+
+    // A declaration the pass never drew with names groups that are gone, so it cannot resolve in the next pass.
+    _pending_raster_array_buffer_declares.clear();
+    _pending_raster_array_texture_declares.clear();
 }
 
 // --- draw recording (reached through cmd.raster / cmd.raster.manual) -----------------------------------
@@ -344,6 +348,28 @@ void vulkan_command_list::raster_set_inline_constants(cc::span<byte const> data,
                        data.data());
 }
 
+void vulkan_command_list::raster_declare_array_buffer_access(cc::string_view binding_name,
+                                                             cc::span<sg::array_buffer_access const> elements)
+{
+    CC_ASSERT(!binding_name.empty(), "declare_array_buffer_access requires a binding name");
+
+    // Arrays / bindless are not auto-tracked: which elements a shader indexes, and how, cannot be inferred, so the
+    // caller declares it here.
+    // Held until the next draw resolves it against the bound graphics groups.
+    auto declare = vulkan_array_buffer_declare{.name = cc::string(binding_name), .elements = {}};
+    declare.elements.push_back_range(elements);
+    _pending_raster_array_buffer_declares.push_back(cc::move(declare));
+}
+
+void vulkan_command_list::raster_declare_array_texture_access(cc::string_view binding_name,
+                                                              cc::span<sg::array_texture_access const> elements)
+{
+    CC_ASSERT(!binding_name.empty(), "declare_array_texture_access requires a binding name");
+    auto declare = vulkan_array_texture_declare{.name = cc::string(binding_name), .elements = {}};
+    declare.elements.push_back_range(elements);
+    _pending_raster_array_texture_declares.push_back(cc::move(declare));
+}
+
 void vulkan_command_list::declare_raster_draw_barriers(bool indexed)
 {
     // Bound groups' shader reads/writes, same policy as compute_dispatch, keyed to the graphics stages.
@@ -352,8 +378,6 @@ void vulkan_command_list::declare_raster_draw_barriers(bool indexed)
         if (bound_group == nullptr)
             continue;
 
-        // The raster scope has no declare_array_*_access yet, so an array binding here would go untracked.
-        CC_ASSERT(bound_group->array_bindings.empty(), "array bindings are not supported in raster draws yet");
         for (auto const& view : bound_group->hazard_views)
             if (view.buffer != nullptr)
                 track_buffer_access(*view.buffer, sg::pipeline_stage_flag::vertex | sg::pipeline_stage_flag::fragment,
@@ -363,6 +387,12 @@ void vulkan_command_list::declare_raster_draw_barriers(bool indexed)
                                        sg::pipeline_stage_flag::vertex | sg::pipeline_stage_flag::fragment,
                                        sg::shader_access_of(tv.access), sg::shader_layout_of(tv.access));
     }
+
+    // Array bindings are not auto-tracked — apply (and account for) the caller's explicit declarations.
+    // The stages come from the declaration rather than the scalar path's vertex|fragment, so a table only the
+    // fragment shader indexes says so.
+    declare_array_accesses(_bound_raster_groups, _pending_raster_array_buffer_declares,
+                           _pending_raster_array_texture_declares);
 
     // The input assembler reads the bound vertex buffers; an indexed draw also fetches the index buffer.
     for (auto const* vb : _bound_vertex_buffers)

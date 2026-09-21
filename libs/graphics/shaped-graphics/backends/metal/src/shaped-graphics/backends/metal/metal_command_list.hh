@@ -146,6 +146,10 @@ private:
     void raster_bind_group(int group_index, binding_group const& group) override;
     void raster_bind_vertex_buffers(int first_slot, cc::span<vertex_buffer_view const> views) override;
     void raster_bind_index_buffer(index_buffer_view const& view) override;
+    void raster_declare_array_buffer_access(cc::string_view binding_name,
+                                            cc::span<array_buffer_access const> elements) override;
+    void raster_declare_array_texture_access(cc::string_view binding_name,
+                                             cc::span<array_texture_access const> elements) override;
     void raster_set_viewport(viewport const& vp) override;
     void raster_set_scissor(tg::aabb2i const& rect) override;
     void raster_set_stencil_reference(u32 reference) override;
@@ -198,6 +202,15 @@ private:
 
     /// Declare access on everything the bound groups name, and flush — the shape a draw and a dispatch share.
     void declare_bound_groups(pipeline_stage_flags stages);
+
+    /// Forgets which resources each slot's group named, so the next dispatch or draw declares only what it binds.
+    ///
+    /// Called from every bind_pipeline, which is where sg's bound groups reset — dx12 and vulkan resize their
+    /// bound-group vector there for the same reason.
+    /// Without it one argument table is shared across bind points with no reset anywhere, so a pass would declare a
+    /// group an earlier dispatch bound — and if that group named this pass's render target, declare shader access on
+    /// a texture the output-merger holds.
+    void reset_bound_group_tracking();
 
     /// Write a group's argument-buffer address into the table and remember what it names.
     /// Shared by the compute and raster bind paths, which differ only in which encoder is open.
@@ -302,7 +315,8 @@ private:
 
     /// Per slot, the buffers the group bound there names — copied at bind time, because a binding_group is handed over
     /// by reference and has no handle to take.
-    /// Rebinding a slot replaces its list, so what a dispatch declares is exactly what is bound when it runs.
+    /// Rebinding a slot replaces its list, and `reset_bound_group_tracking` empties every slot when a pipeline is
+    /// bound, so what a dispatch or draw declares is exactly what is bound when it runs.
     cc::vector<sg::raw_buffer_handle> _group_buffers[sg::max_binding_groups];
     cc::vector<sg::raw_texture_handle> _group_textures[sg::max_binding_groups];
     cc::vector<sg::tlas_handle> _group_tlases[sg::max_binding_groups];

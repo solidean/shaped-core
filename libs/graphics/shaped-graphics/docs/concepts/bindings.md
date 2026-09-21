@@ -123,13 +123,14 @@ Three rules distinguish an array binding from a scalar one:
 - **Access is never inferred.**
   Which elements a shader indexes, and how, cannot be read from the binding, so array bindings skip the automatic hazard tracking scalar bindings get.
   The dispatching caller declares the touched elements via `cmd.compute.declare_array_buffer_access` / `declare_array_texture_access`, applied to the next dispatch only.
-  The raytracing scope has the same pair.
-- **Every bound array binding must be declared before each dispatch** — the backend asserts it.
+  The raytracing and raster scopes have the same pair, the raster one applying to the next *draw*.
+  Each bind point keeps its own pending declarations, since the groups they resolve against are its own.
+- **Every bound array binding must be declared before each dispatch or draw** — the backend asserts it.
   A missing declaration is a bug, never "no access"; an empty element span is the way to say "unused this dispatch".
+  A raster declaration is also where the *stages* come from: the scalar path keys every bound view of a draw to vertex | fragment, while a declared element says which stage actually indexes it.
 
 Element resources are still kept alive by the group, exactly like scalar bindings.
 Arrays of samplers, uniform buffers or acceleration structures are not supported.
-Raster draws do not support array bindings yet.
 
 ## Staging a group instead of rebuilding it
 

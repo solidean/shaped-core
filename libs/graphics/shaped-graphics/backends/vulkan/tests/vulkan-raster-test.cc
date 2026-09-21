@@ -8,6 +8,7 @@
 // See those files for the dxc commands.
 #include "double_compute.spirv.h"
 #include "triangle.ps.spirv.h"
+#include "triangle.psarray.spirv.h"
 #include "triangle.psbuf.spirv.h"
 #include "triangle.vs.spirv.h"
 
@@ -267,6 +268,183 @@ ASYNC_INVOCABLE_TEST("sg vulkan - a draw depending on a dispatch in the same lis
             all_six = false;
     }
     CHECK(all_six);
+}
+
+// Array bindings through the raster path: a partially filled table, the access a draw declares, and the barrier that
+// declaration is what produces.
+//
+// The two table buffers are uploaded in the SAME list as the draw that reads them, so the declaration has real work to
+// do: without it the elements would go untracked and the draw would read what the copy had not yet made visible.
+// Vulkan forbids a barrier inside a dynamic-rendering instance, so this is also what drives the backend's close and
+// reopen — the draw still has to land, which the readback is what checks.
+ASYNC_INVOCABLE_TEST("sg vulkan - a draw declares its array elements and reads what a copy wrote",
+                     (vulkan::vulkan_context_handle const& handle))
+{
+    auto& ctx = *handle;
+
+    constexpr u32 k_first_value = 6;
+    constexpr u32 k_last_value = 9;
+
+    auto target
+        = ctx.persistent.create_texture_2d({.format = sg::pixel_format::rgba8_unorm,
+                                            .width = k_extent,
+                                            .height = k_extent,
+                                            .usage = sg::texture_usage::render_target | sg::texture_usage::copy_src});
+    REQUIRE(target.raw() != nullptr);
+
+    // The shader declares `StructuredBuffer<uint> Table[4]` at set 0, binding 1 — so the layout is one array binding
+    // of four, spaced by its own count because nothing else shares the set.
+    auto const bindings = cc::vector<sg::binding>{
+        {.name = "Table", .group_index = 0, .index = 1, .count = 4, .type = sg::binding_type::readonly_structured_buffer}};
+    auto group_layout = ctx.cached.acquire_binding_group_layout(bindings);
+    REQUIRE(group_layout != nullptr);
+    auto pipeline_layout = ctx.cached.acquire_pipeline_layout(sg::pipeline_layout_description{.groups = {group_layout}});
+    REQUIRE(pipeline_layout != nullptr);
+
+    auto pipeline = co_await ctx.cached.acquire_raster_pipeline(sg::raster_pipeline_description{
+        .layout = pipeline_layout,
+        .vertex_shader = make_shader(
+            sg::shader_stage::vertex,
+            cc::span<byte const>(reinterpret_cast<byte const*>(triangle_vs_spirv), isize(sizeof(triangle_vs_spirv))),
+            "vs_main"),
+        .fragment_shader = make_shader(sg::shader_stage::fragment,
+                                       cc::span<byte const>(reinterpret_cast<byte const*>(triangle_psarray_spirv),
+                                                            isize(sizeof(triangle_psarray_spirv))),
+                                       "ps_from_array"),
+        .vertex_input = make_vertex_layout(),
+        .color_targets = {{.format = sg::pixel_format::rgba8_unorm}},
+    });
+    REQUIRE(pipeline != nullptr);
+
+    auto const make_table_buffer = [&]
+    {
+        auto buffer
+            = ctx.persistent.create_raw_buffer(16, sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);
+        REQUIRE(buffer != nullptr);
+        return buffer;
+    };
+    auto first = make_table_buffer();
+    auto last = make_table_buffer();
+
+    // Elements 1 and 2 stay vacant: a table may be partly filled, and the shader reads only what is there.
+    auto elements = cc::vector<sg::raw_view>();
+    elements.push_back(sg::buffer<u32>::from_raw(first).as_readonly_buffer());
+    elements.push_back(sg::vacant_view{});
+    elements.push_back(sg::vacant_view{});
+    elements.push_back(sg::buffer<u32>::from_raw(last).as_readonly_buffer());
+    auto const nv = sg::named_view{.name = "Table", .view = cc::move(elements)};
+    auto group = ctx.persistent.create_binding_group(group_layout, cc::span<sg::named_view const>(&nv, 1));
+    REQUIRE(group != nullptr);
+
+    auto vertex_buffer = ctx.persistent.create_raw_buffer(isize(sizeof(vertex)) * 3,
+                                                          sg::buffer_usage::vertex_buffer | sg::buffer_usage::copy_dst);
+    REQUIRE(vertex_buffer != nullptr);
+    vertex const vertices[] = {
+        {.x = -1.0f, .y = -1.0f, .r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 1.0f},
+        {.x = 3.0f, .y = -1.0f, .r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 1.0f},
+        {.x = -1.0f, .y = 3.0f, .r = 0.0f, .g = 0.0f, .b = 0.0f, .a = 1.0f},
+    };
+
+    // The elements the shader indexes, at the stage it indexes them in — a scalar binding would have been inferred as
+    // vertex | fragment, and this says fragment alone.
+    sg::array_buffer_access const declared[] = {
+        {.index = 0, .stages = sg::pipeline_stage_flag::fragment, .access = sg::access_flag::shader_read},
+        {.index = 3, .stages = sg::pipeline_stage_flag::fragment, .access = sg::access_flag::shader_read},
+    };
+
+    auto cmd = ctx.create_command_list();
+    REQUIRE(cmd != nullptr);
+    cmd->upload.bytes_to_buffer(vertex_buffer, cc::as_bytes(cc::span<vertex const>(vertices, 3)));
+    cc::vector<u32> const first_data = {k_first_value, 0, 0, 0};
+    cc::vector<u32> const last_data = {k_last_value, 0, 0, 0};
+    cmd->upload.data_to_buffer(first, first_data);
+    cmd->upload.data_to_buffer(last, last_data);
+
+    {
+        auto pass
+            = cmd->raster.render_to({.color_targets = {target.as_render_target_view().cleared(tg::vec4f(0, 1, 0, 1))}});
+        pass.bind_pipeline(*pipeline);
+        pass.bind_group(0, *group);
+        pass.bind_vertex_buffers({{.buffer = vertex_buffer, .stride_in_bytes = isize(sizeof(vertex))}});
+        pass.declare_array_buffer_access("Table", declared);
+        pass.draw({.vertex_range = {.offset = 0, .size = 3}});
+    }
+    ctx.submit_command_list(cc::move(cmd));
+
+    auto down = ctx.create_command_list();
+    auto future = down->download.bytes_from_texture(target.raw());
+    ctx.submit_command_list(cc::move(down));
+
+    auto const pixels = co_await future.bytes();
+
+    // Every pixel carries Table[0][0] in red and Table[3][0] in green.
+    // A green-only pixel would mean the clear survived, so the reopen lost the draw.
+    auto wrong = 0;
+    for (int i = 0; i < k_extent * k_extent; ++i)
+    {
+        auto const* p = reinterpret_cast<u8 const*>(pixels.data()) + isize(i) * 4;
+        if (p[0] != u8(k_first_value) || p[1] != u8(k_last_value) || p[2] != 0 || p[3] != 255)
+            ++wrong;
+    }
+    CHECK(wrong == 0);
+}
+
+// The accounting rule, on the raster path: a bound array binding that no declaration names is a bug rather than
+// "no access", and an empty span is how a draw says it touches none of it.
+ASYNC_INVOCABLE_TEST("sg vulkan - a draw with an undeclared array binding trips the accounting assert",
+                     (vulkan::vulkan_context_handle const& handle))
+{
+    auto& ctx = *handle;
+
+    auto target = ctx.persistent.create_texture_2d({.format = sg::pixel_format::rgba8_unorm,
+                                                    .width = k_extent,
+                                                    .height = k_extent,
+                                                    .usage = sg::texture_usage::render_target});
+    REQUIRE(target.raw() != nullptr);
+
+    auto const bindings = cc::vector<sg::binding>{
+        {.name = "Table", .group_index = 0, .index = 1, .count = 4, .type = sg::binding_type::readonly_structured_buffer}};
+    auto group_layout = ctx.cached.acquire_binding_group_layout(bindings);
+    auto pipeline_layout = ctx.cached.acquire_pipeline_layout(sg::pipeline_layout_description{.groups = {group_layout}});
+
+    auto pipeline = co_await ctx.cached.acquire_raster_pipeline(sg::raster_pipeline_description{
+        .layout = pipeline_layout,
+        .vertex_shader = make_shader(
+            sg::shader_stage::vertex,
+            cc::span<byte const>(reinterpret_cast<byte const*>(triangle_vs_spirv), isize(sizeof(triangle_vs_spirv))),
+            "vs_main"),
+        .fragment_shader = make_shader(sg::shader_stage::fragment,
+                                       cc::span<byte const>(reinterpret_cast<byte const*>(triangle_psarray_spirv),
+                                                            isize(sizeof(triangle_psarray_spirv))),
+                                       "ps_from_array"),
+        .vertex_input = make_vertex_layout(),
+        .color_targets = {{.format = sg::pixel_format::rgba8_unorm}},
+    });
+    REQUIRE(pipeline != nullptr);
+
+    // An all-vacant table needs no data: nothing here reaches a draw that runs.
+    auto elements = cc::vector<sg::raw_view>();
+    for (auto i = 0; i < 4; ++i)
+        elements.push_back(sg::vacant_view{});
+    auto const nv = sg::named_view{.name = "Table", .view = cc::move(elements)};
+    auto group = ctx.persistent.create_binding_group(group_layout, cc::span<sg::named_view const>(&nv, 1));
+    REQUIRE(group != nullptr);
+
+    auto vertex_buffer = ctx.persistent.create_raw_buffer(isize(sizeof(vertex)) * 3, sg::buffer_usage::vertex_buffer);
+    REQUIRE(vertex_buffer != nullptr);
+
+    auto cmd = ctx.create_command_list();
+    REQUIRE(cmd != nullptr);
+    {
+        auto pass
+            = cmd->raster.render_to({.color_targets = {target.as_render_target_view().cleared(tg::vec4f(0, 1, 0, 1))}});
+        pass.bind_pipeline(*pipeline);
+        pass.bind_group(0, *group);
+        pass.bind_vertex_buffers({{.buffer = vertex_buffer, .stride_in_bytes = isize(sizeof(vertex))}});
+        CHECK_ASSERTS(pass.draw({.vertex_range = {.offset = 0, .size = 3}}));
+    }
+    ctx.drop_command_list(cc::move(cmd));
+    co_return;
 }
 
 // The context, not the last handle, is what destroys a cached pipeline's device objects.
