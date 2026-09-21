@@ -64,6 +64,30 @@ inline constexpr MTL::Stages k_compute_encoder_stages
 /// That is conservative and legal, where the alternative is a barrier the API refuses.
 [[nodiscard]] MTL::Stages clamp_to_compute_encoder(MTL::Stages stages);
 
+/// The stages a render encoder's barrier may name as its SOURCE — and the destination set is a different one.
+///
+/// **The two halves are not symmetric here, where on a compute encoder they are.**
+/// `barrierAfterEncoderStages` on a render encoder rejects `MTLStageFragment` outright, by name, and accepts only
+/// `MTLStageVertex | MTLStageObject | MTLStageMesh`: within one pass the fragment stage is the last one, so there is
+/// no later stage inside the encoder for work ordered after it to reach.
+/// sg has no object or mesh stage, so the source set is the vertex stage alone.
+///
+/// Measured rather than read: the validation layer aborts on the pair, which is how the asymmetry was found.
+inline constexpr MTL::Stages k_render_encoder_source_stages = MTL::StageVertex;
+
+/// The stages a render encoder's barrier may name as its DESTINATION, which is the whole pass.
+inline constexpr MTL::Stages k_render_encoder_destination_stages = MTL::StageVertex | MTL::StageFragment;
+
+/// `stages` narrowed to what a render encoder accepts as a barrier source, with `clamp_to_compute_encoder`'s fallback.
+///
+/// A copy or a dispatch clamps to nothing here, and that is not a lost dependency: an encoder-scoped barrier orders
+/// work inside its own encoder, so a producer in another encoder is ordered by the publish/wait pair at the boundary
+/// instead.
+[[nodiscard]] MTL::Stages clamp_to_render_source(MTL::Stages stages);
+
+/// `stages` narrowed to what a render encoder accepts as a barrier destination.
+[[nodiscard]] MTL::Stages clamp_to_render_destination(MTL::Stages stages);
+
 /// Translate one sg access barrier into the MTL4 form.
 ///
 /// The layouts are dropped rather than mapped, and that is not a gap: a Metal texture has no layout, so

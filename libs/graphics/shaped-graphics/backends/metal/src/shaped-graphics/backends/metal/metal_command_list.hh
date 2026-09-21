@@ -3,6 +3,7 @@
 // metal-cpp's umbrella Metal.hpp does not include this one, and nothing else in the package does either — so the
 // MTL4 acceleration-structure descriptors are unreachable without naming it, unlike every other MTL4 type.
 #include <Metal/MTL4AccelerationStructure.hpp>
+#include <clean-core/container/small_vector.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/function/unique_function.hh>
 #include <clean-core/memory/shared_ptr.hh>
@@ -10,11 +11,13 @@
 #include <clean-core/thread/atomic.hh>
 #include <shaped-graphics/backends/metal/fwd.hh>
 #include <shaped-graphics/backends/metal/metal_barrier.hh>
+#include <shaped-graphics/backends/metal/metal_binding_group.hh>
 #include <shaped-graphics/backends/metal/metal_common.hh>
 #include <shaped-graphics/backends/metal/metal_query.hh>
 #include <shaped-graphics/backends/metal/metal_staging_ring.hh>
 #include <shaped-graphics/barrier/command_list_slot.hh>
 #include <shaped-graphics/command_list/command_list.hh>
+#include <shaped-graphics/command_list/compute.hh> // sg::array_buffer_access, sg::array_texture_access
 #include <shaped-graphics/fwd.hh>
 
 /// Metal implementation of sg::command_list.
@@ -23,8 +26,11 @@
 /// submit — the allocator cannot be reset while a buffer built from it is still executing, which is what makes the
 /// epoch rather than the submit the right moment.
 ///
-/// Recording is not implemented yet: every seam below the transfer line asserts.
-/// See libs/graphics/shaped-graphics/docs/writing-a-backend.md for the milestone order it is being filled in along.
+/// **Bindings reach the GPU through one `MTL4ArgumentTable`**, whose buffer slots are the MSL `[[buffer(n)]]` indices:
+/// a binding group at its own `group_index`, inline constants at `k_inline_constants_buffer_index`, and vertex-input
+/// slot `n` at `k_vertex_buffer_base_index + n`.
+/// MTL4's render encoder has no `setVertexBuffer` and no root constants, so all three arrive the same way — as an
+/// address in that table.
 class sg::backend::metal::metal_command_list final : public sg::command_list
 {
 public:
@@ -63,6 +69,21 @@ public:
 
         /// Releases what the copy out borrowed, whether it ran or was cancelled.
         void settle_staging();
+    };
+
+    /// One `declare_array_buffer_access` call, held until the next dispatch or draw resolves it against the bound
+    /// groups.
+    struct array_buffer_declare
+    {
+        cc::string name;
+        cc::vector<sg::array_buffer_access> elements;
+    };
+
+    /// The texture twin of array_buffer_declare; the layout each element carries is dropped, as every layout is here.
+    struct array_texture_declare
+    {
+        cc::string name;
+        cc::vector<sg::array_texture_access> elements;
     };
 
     /// One acceleration structure a declare named, kept alive for as long as the recording that names it.
@@ -199,6 +220,34 @@ private:
     /// Declare access on everything the bound groups name, and flush — the shape a draw and a dispatch share.
     void declare_bound_groups(pipeline_stage_flags stages);
 
+    /// Declare what the pending `declare_array_*_access` calls named, and clear them.
+    ///
+    /// An array binding is the one thing a dispatch cannot infer, so this is the caller's declaration being applied
+    /// rather than a derived one — and a bound array binding nothing declared is an error, not "no access".
+    void declare_array_accesses();
+
+    /// Patch the inline-constants shadow, for whichever pipeline kind is bound.
+    ///
+    /// **Metal has neither root constants nor push constants**, so the block is an ordinary buffer — the same thing
+    /// WebGPU's backend faces, and the same answer it gives: the host keeps the block, and a dispatch or draw is what
+    /// places it.
+    /// Setting alone therefore touches no GPU memory.
+    void set_inline_constants(cc::span<byte const> data, cc::optional<isize> offset);
+
+    /// Stage the inline-constants block if it changed, and bind its address into the argument table.
+    ///
+    /// Called from the dispatch and draw paths rather than from the setter, because an unchanged block binds again at
+    /// the address it already has — which is what keeps a list that sets the same constants for every draw at one
+    /// staged block rather than one per draw.
+    void place_inline_constants();
+
+    /// Reset the shadow when a pipeline of a different layout is bound, and keep it when the layout is the same.
+    /// Call it before `_bound_layout` is reassigned; it compares against the old one.
+    void rebind_inline_constants(metal_pipeline_layout const* layout);
+
+    /// Declare what a draw reads: the bound groups' resources, the vertex buffers, and an indexed draw's index buffer.
+    void declare_raster_draw(bool indexed);
+
     /// Write a group's argument-buffer address into the table and remember what it names.
     /// Shared by the compute and raster bind paths, which differ only in which encoder is open.
     void bind_group_to_table(int group_index, binding_group const& group);
@@ -291,6 +340,27 @@ private:
     /// it and would otherwise never notice a mismatch.
     sg::pixel_format _scope_depth_stencil_format = sg::pixel_format::undefined;
 
+    /// The vertex buffer bound at each input slot, in slot order and with a null for a slot nothing bound.
+    /// Held so a draw can declare `vertex_read` on them — the address itself lives in the argument table.
+    cc::small_vector<sg::raw_buffer_handle, sg::max_vertex_buffers> _bound_vertex_buffers;
+
+    /// The bound index buffer, and what `drawIndexedPrimitives` needs of it.
+    ///
+    /// An index buffer is passed by GPU address per draw here rather than bound once, so the view's own offset is
+    /// folded into `_index_address` and the draw adds only its first-index.
+    sg::raw_buffer_handle _bound_index_buffer;
+    u64 _index_address = 0;
+    isize _index_size_in_bytes = 0; ///< bytes left from `_index_address` to the end of the view
+    sg::index_format _index_format = sg::index_format::uint16;
+
+    /// The CPU-side image of the bound layout's inline-constants block, sized by the layout and zeroed on a rebind.
+    ///
+    /// A partial update writes into this and the next dispatch or draw stages the whole block, because there is
+    /// nothing to patch in place: what the GPU reads is a staging span already handed over.
+    cc::vector<byte> _inline_constants;
+    bool _inline_constants_dirty = false;  ///< the shadow has changed since it was last staged
+    bool _inline_constants_placed = false; ///< an address for this layout's block is in the argument table
+
     /// The layout of whichever pipeline was bound last, and what every group bound after it is checked against.
     /// One member for all three kinds: a bind replaces it, which is the same rule the encoders follow.
     metal_pipeline_layout const* _bound_layout = nullptr;
@@ -306,6 +376,11 @@ private:
     cc::vector<sg::raw_buffer_handle> _group_buffers[sg::max_binding_groups];
     cc::vector<sg::raw_texture_handle> _group_textures[sg::max_binding_groups];
     cc::vector<sg::tlas_handle> _group_tlases[sg::max_binding_groups];
+    cc::vector<metal_binding_group::array_binding> _group_arrays[sg::max_binding_groups];
+
+    /// The array declares recorded since the last dispatch or draw, applied by `declare_array_accesses`.
+    cc::vector<array_buffer_declare> _pending_array_buffer_declares;
+    cc::vector<array_texture_declare> _pending_array_texture_declares;
 
     /// One per download recorded: copies the bytes out of the staging ring and settles the future.
     ///

@@ -104,6 +104,7 @@ if(SC_BUILD_TESTS)
         tests/metal-texture-test.cc
         tests/metal-transfer-test.cc
         tests/metal-validation-test.cc
+        tests/metal-vertex-input-test.cc
     )
     sc_nexus_binary(shaped-graphics-metal-test KINDS tests)
 

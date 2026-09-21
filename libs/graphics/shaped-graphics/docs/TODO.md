@@ -145,20 +145,30 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
 - **A group's implicit constant buffer is one upload each.**
   `create_binding_group` allocates a buffer for a generated group's plain members and fills it through `ctx.upload`, one allocation and one copy per group.
   A per-frame group wants a transient constant-buffer writer instead: a ring in host-visible device memory (ReBAR where there is some), suballocated per epoch and written in place.
-- **The metal barrier clamp has outlived the premise it was written under, and needs checking on a Mac.**
-  `metal_command_list::flush_barriers` clamps its stage pair to what a compute encoder accepts, above a comment saying
-  nothing is lost "while every op recorded here is a copy or a dispatch — a raster dependency will need the
-  queue-scoped form or an encoder boundary, which is the raster milestone's problem".
-  Raster landed after that was written, so the premise no longer holds.
-  The render encoder does open with `barrierAfterQueueStages(MTL::StageAll, MTL::StageAll, …)` and close with
-  `barrierAfterStages(MTL::StageAll, MTL::StageAll, …)`, which looks like it covers the case.
-  Read that with the queue barrier pair's limit in mind: it carries visibility, and a queue wait between two commits
-  leaves the consumer half with nothing to find, which is why cross-list *ordering* now rides the submission timeline
-  instead.
-  What has not been established is whether a fragment-stage dependency can reach `flush_barriers` and be silently
-  clamped away, and that cannot be established without a Metal device.
-  If the encoder-boundary pair does cover it, replace the comment with that invariant and name the two call sites,
-  rather than leaving a deferral to a milestone that has already arrived.
+- **The metal encoder-boundary barrier pair is emitted but not proved.**
+  `flush_barriers` now emits on whichever encoder is open, clamped to the stages that encoder accepts, and every
+  encoder publishes its work as it closes — so a dependency crossing an encoder boundary is carried by that publish
+  plus the queue wait the next encoder opens with, rather than by the encoder-scoped barrier that cannot reach across
+  one.
+  That replaced the clamp's old "a raster dependency is the raster milestone's problem" comment, which had outlived
+  its premise.
+  What is *not* established is that the pair is load-bearing.
+  `sg metal - a draw reads the vertex buffer a dispatch in the same list wrote` covers the path and passes with the
+  publish removed, because a four-thread dispatch finishes well before the pass it precedes on an M4.
+  A test that would catch the ordering needs a dispatch long enough to lose the race, which trades a sharp test for a
+  slow one — so the pair stands on Apple's documented model rather than on an oracle of ours.
+
+- **A metal indexed draw refuses an odd first index into a 16-bit index buffer, where dx12 and vulkan take one.**
+  MTL4's `drawIndexedPrimitives` names the indices by GPU address and has no first-index parameter, so sg's
+  `index_range.offset` is folded into that address — and Metal requires it to be a multiple of 4.
+  An odd first index into a `uint16` buffer lands 2 mod 4, and Metal then draws whatever fits before the next boundary
+  and reports nothing at all: not an error, not a validation message.
+  So the backend asserts, naming the two fixes a caller has — an even first index, or 32-bit indices.
+  That is a real portability gap rather than a spelling: a sub-mesh whose first index happens to be odd draws on the
+  other two backends and asserts here.
+  Closing it means staging a shifted copy of the range, which needs a copy the render pass it is inside cannot record
+  — so it wants either a pre-pass fixup or an aligned index allocator, and neither is worth building before something
+  hits it.
 
 - **The metal tier-2 tests block on `block_until_idle` where they could await `idle_completion()`.**
   `.shaped-lint.yml` allows that by name.

@@ -63,6 +63,18 @@ cc::result<metal_pipeline_layout_handle> metal_context::create_metal_pipeline_la
     sg::pipeline_layout_description const& desc,
     sg::lifetime_scope)
 {
+    // The inline-constants block is staged and bound as an ordinary buffer here, so its size is what the stage
+    // allocates rather than a root-signature parameter — and a block nobody sized would stage nothing.
+    if (desc.inline_constants.has_value())
+    {
+        auto const& ic = desc.inline_constants.value();
+        if (ic.type != sg::binding_type::uniform_buffer)
+            return cc::error("pipeline_layout: the inline_constants binding must be a uniform buffer");
+        if (!ic.block_size.has_value() || ic.block_size.value() <= 0 || ic.block_size.value() % 4 != 0)
+            return cc::error("pipeline_layout: the inline_constants binding needs a block_size that is positive and a "
+                             "multiple of 4");
+    }
+
     auto const hash = sg::impl::pipeline_layout_hash(desc);
     return std::make_shared<metal_pipeline_layout const>(hash, desc);
 }
@@ -117,6 +129,7 @@ cc::result<metal_binding_group_handle> metal_context::create_metal_binding_group
     auto bound_buffers = cc::vector<sg::raw_buffer_handle>();
     auto bound_textures = cc::vector<sg::raw_texture_handle>();
     auto bound_tlases = cc::vector<sg::tlas_handle>();
+    auto array_bindings = cc::vector<metal_binding_group::array_binding>();
 
     auto const find_binding = [&](cc::string_view name) -> isize
     {
@@ -146,6 +159,18 @@ cc::result<metal_binding_group_handle> metal_context::create_metal_binding_group
         CC_ASSERT(filled[index] == char(0), "binding_group: a binding was provided more than once");
         filled[index] = char(1);
 
+        // An array binding's elements are collected rather than auto-declared: which of them a dispatch indexes is
+        // the caller's to say through declare_array_*_access, and nothing here can infer it.
+        //
+        // An acceleration-structure array is the exception, and stays auto-declared: a trace reads every structure the
+        // table can reach, so there is nothing for a per-element declare to narrow — and sg's two declare calls are
+        // split by buffer and texture, with no third for this kind to arrive through.
+        auto const shape = sg::shape_of(b.type);
+        auto const is_array = b.is_array() && shape != sg::view_shape::acceleration_structure;
+        auto array = metal_binding_group::array_binding{.name = cc::string(b.name),
+                                                        .is_texture = shape == sg::view_shape::texture,
+                                                        .elements = {}};
+
         for (auto element = isize(0); element < provided.size(); ++element)
         {
             auto const& view = provided[element];
@@ -156,7 +181,9 @@ cc::result<metal_binding_group_handle> metal_context::create_metal_binding_group
                     return cc::error(cc::format("binding_group: '{}' — a vacant element is only valid in an array "
                                                 "binding",
                                                 b.name));
-                continue; // the zero already there IS the null descriptor
+                if (is_array)
+                    array.elements.push_back({}); // the zero already there IS the null descriptor
+                continue;
             }
 
             if (!sg::accepts(b.type, view))
@@ -190,7 +217,10 @@ cc::result<metal_binding_group_handle> metal_context::create_metal_binding_group
                     return cc::error(cc::format("binding_group: '{}' — the bound texture has no storage", b.name));
 
                 slots[slot_of(b, element)] = bound->gpuResourceID()._impl;
-                bound_textures.push_back(texture_view->texture);
+                if (is_array)
+                    array.elements.push_back({.texture = texture_view->texture});
+                else
+                    bound_textures.push_back(texture_view->texture);
                 continue;
             }
 
@@ -206,8 +236,14 @@ cc::result<metal_binding_group_handle> metal_context::create_metal_binding_group
             // The address the shader reads through, already offset: MSL indexes from the pointer it is given, so the
             // view's offset has to be folded in here rather than carried alongside.
             slots[slot_of(b, element)] = mtl_buffer.gpu_address() + u64(buffer_view->offset_in_bytes);
-            bound_buffers.push_back(buffer_view->buffer);
+            if (is_array)
+                array.elements.push_back({.buffer = buffer_view->buffer});
+            else
+                bound_buffers.push_back(buffer_view->buffer);
         }
+
+        if (is_array)
+            array_bindings.push_back(cc::move(array));
     }
 
     // Static samplers first, so a dynamic one for the same name is rejected rather than silently overriding it.
@@ -262,7 +298,8 @@ cc::result<metal_binding_group_handle> metal_context::create_metal_binding_group
 
     _residency.add(arguments);
 
-    return std::make_shared<metal_binding_group const>(*this, cc::move(typed_layout), arguments, cc::move(bound_buffers),
-                                                       cc::move(bound_textures), cc::move(bound_tlases));
+    return std::make_shared<metal_binding_group const>(*this, cc::move(typed_layout), arguments,
+                                                       cc::move(bound_buffers), cc::move(bound_textures),
+                                                       cc::move(bound_tlases), cc::move(array_bindings));
 }
 } // namespace sg::backend::metal
