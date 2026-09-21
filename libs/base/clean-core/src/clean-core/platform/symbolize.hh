@@ -158,10 +158,11 @@ namespace cc::impl
 
 /// Runs `fn` holding the process-global DbgHelp lock, waiting for it if someone else has it.
 ///
-/// For clean-core's OTHER DbgHelp user: `cc::to_string(cc::stacktrace)`, which on Windows renders through
-/// `std::to_string(std::stacktrace)` and so symbolizes inside the standard library, on the same process-wide
-/// DbgHelp state a cc::symbolizer is using.
-/// The STL has a lock of its own, which does not help -- two different mutexes over one library serialize nothing.
+/// For clean-core's OTHER DbgHelp users.
+/// `cc::to_string(cc::stacktrace)` renders through `std::to_string(std::stacktrace)` on Windows, and so symbolizes
+/// inside the standard library, on the same process-wide DbgHelp state a cc::symbolizer is using.
+/// `cc::demangle_symbol` calls UnDecorateSymbolName, which is DbgHelp as well.
+/// A lock of their own does not help -- two different mutexes over one library serialize nothing.
 ///
 /// Waiting is correct here, unlike in the crash handler: no thread is suspended, so whoever holds it will finish.
 /// A plain pass-through where there is no DbgHelp to guard, so a caller needs no platform test of its own.
