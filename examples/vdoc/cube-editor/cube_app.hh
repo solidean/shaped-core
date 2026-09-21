@@ -86,6 +86,10 @@ public:
     app() = default;
 
 private:
+    /// Everything `end_frame` does once imgui's frame is closed: drawing, presenting and the pipelining wait.
+    [[nodiscard]] cc::shared_async<cc::unit> draw_and_present(vdoc::document const& doc,
+                                                              orbit_camera const& cam,
+                                                              vdoc::entity_id selected);
 
     cc::unique_ptr<sr::window_system> _wsys;
     cc::unique_ptr<sr::window> _win;

@@ -143,9 +143,18 @@ tg::mat4f app::view_projection(orbit_camera const& cam) const
 cc::shared_async<cc::unit> app::end_frame(vdoc::document const& doc, orbit_camera const& cam, vdoc::entity_id selected)
 {
     if (_viewport[0] == 0 || _viewport[1] == 0)
-        co_return; // minimized: begin_frame never opened an imgui frame either
+        return cc::make_async_from_value(cc::unit{}); // minimized: begin_frame never opened an imgui frame either
 
+    // Not in the coroutine below: that one is cold, so the caller's co_await would suspend with imgui's frame scope,
+    // which begin_frame opened, still open on its thread.
     _imgui.end_frame();
+    return draw_and_present(doc, cam, selected);
+}
+
+cc::shared_async<cc::unit> app::draw_and_present(vdoc::document const& doc,
+                                                 orbit_camera const& cam,
+                                                 vdoc::entity_id selected)
+{
 
     // The frame's output: a back buffer normally, the capture texture when there is no display.
     // Everything below is written against a render target and cannot tell which it got.
