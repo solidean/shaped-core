@@ -638,6 +638,10 @@ ctx.transient.create_binding_group(group_layout, span<named_view const>, span<na
 // a GENERATED group struct (slib's binding pass) is taken directly, against a layout acquired from its declarations:
 sg::declared_binding_set     // concept in binding/binding_group.hh — { declared_bindings(); declared_samplers(); gather() }
 sg::declared_binding_group   // ... and `group_index`, which only `scope.bind<G>(group)` needs; an SGL group has none
+sg::declared_inline_constants  // { static binding inline_binding(); } — a generated @inline block
+ctx.cached.acquire_pipeline_layout<frame, work, constants>(static_samplers = {})
+                             // -> pipeline_layout_handle from generated types alone: each binding set is the group at its
+                             //    position among the sets, and one inline-constants type is the inline block
 ctx.cached.acquire_binding_group_layout<G>()                    // -> binding_group_layout_handle from G's declarations alone
 ctx.cached.acquire_binding_group_layout<G>(span<named_sampler const>)  // + static samplers G left undeclared; one it DID declare asserts
 ctx.transient.create_binding_group(layout, G{...})              // -> binding_group_handle; the layout is PASSED IN, not re-acquired per call

@@ -17,11 +17,9 @@ ASYNC_INVOCABLE_TEST("sg - a compute shader doubles every element of a buffer", 
 {
     REQUIRE(ctx != nullptr);
 
-    auto const& shader = co_await shaders::double_values.compute.main->acquire(*ctx);
+    // The entry point's binding list is `{work}`, so its pipeline needs nothing but the entry point.
+    auto const pipeline = co_await shaders::double_values.compute.main.acquire_pipeline(*ctx);
     auto const group_layout = ctx->cached.acquire_binding_group_layout<shaders::work>();
-    auto const layout = ctx->cached.acquire_pipeline_layout(sg::pipeline_layout_description{.groups = {group_layout}});
-    auto const pipeline = co_await ctx->cached.acquire_compute_pipeline(
-        sg::compute_pipeline_description{.shader = shader, .layout = layout});
 
     constexpr auto count = 256;
     auto const values = ctx->persistent.create_buffer<float>(

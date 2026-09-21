@@ -216,7 +216,12 @@ def emit_inline(package: str, namespace: str, file: SglFile, binding: dict) -> s
     out.append("\n")
     out.append("    /// This value as the shader reads it: every member at the offset the compiler placed it, the rest zero.\n")
     out.append("    [[nodiscard]] cc::fixed_array<cc::byte, block_size> to_block() const;\n")
+    out.append("\n")
+    out.append("    /// The block as a pipeline layout takes it, `inline_constants`: every backend places it by a fixed rule.\n")
+    out.append("    [[nodiscard]] static sg::binding inline_binding();\n")
     out.append("};\n")
+    out.append("\n")
+    out.append(f"static_assert(sg::declared_inline_constants<{name}>);\n")
     out.append(f"}} // namespace {namespace}\n")
     return "".join(out)
 
@@ -228,6 +233,16 @@ def emit_inline_impl(package: str, namespace: str, file: SglFile, binding: dict)
     out.append("    auto block = cc::fixed_array<cc::byte, block_size>{};\n")
     out.append(pack_members(package, file, name, binding))
     out.append("    return block;\n}\n")
+    # A block is read in 4-byte words, which is what every backend's inline constants are counted in.
+    words = (binding["block_size"] + 3) // 4 * 4
+    out.append(f"\nsg::binding {qualified}::inline_binding()\n{{\n")
+    out.append("    // dx12 reads it at b0 in slib's reserved space; vulkan and WebGPU read only the kind and the size.\n")
+    out.append(f'    return {{.name = "{name}",\n')
+    out.append("            .space = slib::inline_constants_space,\n")
+    out.append("            .index = 0u,\n")
+    out.append("            .count = 1u,\n")
+    out.append("            .type = sg::binding_type::uniform_buffer,\n")
+    out.append(f"            .block_size = {words}}};\n}}\n")
     return "".join(out)
 
 
@@ -252,3 +267,51 @@ def emit_source(package: str, namespace: str, entries: SglEntries) -> str:
         else:
             out.append(emit_group_impl(package, namespace, file, binding))
     return "".join(out)
+
+
+# ---- the entry points --------------------------------------------------------------------------------------------------
+
+
+def entry_wrappers(entries: SglEntries, stems: dict[str, str]) -> dict[tuple[str, str], str]:
+    """The wrapper type each described entry point gets, by (path, entry point).
+
+    One is written only where every binding the entry point lists has a generated type, since its layout is spelled
+    with them; any other entry point stays a plain handle.
+    """
+    generated = {b["name"] for _, b in entries.bindings}
+    out = {}
+    for (path, name), described in entries.described_entry_points.items():
+        if all(b in generated for b in described["bindings"]):
+            out[(path, name)] = f"{stems[path]}_{name}_t"
+    return out
+
+
+def emit_entry_wrappers(entries: SglEntries, stems: dict[str, str]) -> str:
+    """One struct per wrapped entry point: its asset, and the pipeline layout its binding list states."""
+    wrappers = entry_wrappers(entries, stems)
+    out = []
+    for (path, name), type_name in wrappers.items():
+        described = entries.described_entry_points[(path, name)]
+        listed = described["bindings"]
+        types = ", ".join(listed)
+        out.append(f"/// `{name}` of {path}: a {described['stage']} entry point listing {{{', '.join(listed)}}}.\n")
+        out.append(f"struct {type_name}\n{{\n")
+        out.append("    slib::shader_asset_handle asset;\n")
+        out.append("\n")
+        out.append("    /// The asset, as a plain handle has it: `->acquire(ctx)`.\n")
+        out.append("    [[nodiscard]] slib::shader_asset* operator->() const { return asset.get(); }\n")
+        out.append("    [[nodiscard]] bool operator==(std::nullptr_t) const { return asset == nullptr; }\n")
+        out.append("\n")
+        out.append(f"    /// The pipeline layout this entry point's binding list states, with no reflected binding in it.\n")
+        out.append("    /// A raster pipeline whose stages list different groups needs their union instead, spelled with\n")
+        out.append("    /// `ctx.cached.acquire_pipeline_layout<...>()`.\n")
+        out.append("    [[nodiscard]] sg::pipeline_layout_handle acquire_layout(sg::context& ctx) const\n    {\n")
+        out.append(f"        return ctx.cached.acquire_pipeline_layout<{types}>();\n    }}\n")
+        if described["stage"] == "compute":
+            out.append("\n")
+            out.append("    /// The compute pipeline of this entry point over that layout, which is all a compute pipeline needs.\n")
+            out.append("    [[nodiscard]] sg::async_compute_pipeline acquire_pipeline(sg::context& ctx) const\n    {\n")
+            out.append("        return slib::acquire_compute_pipeline(&ctx, asset, acquire_layout(ctx));\n    }\n")
+        out.append("};\n\n")
+    return "".join(out)
+

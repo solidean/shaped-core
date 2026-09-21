@@ -1,5 +1,7 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/string/format.hh>
+#include <clean-core/thread/async_coroutine.hh>
+#include <shaped-graphics/compute/compute_pipeline.hh>
 #include <shaped-graphics/context/context.hh> // acquire(ctx) asks it which formats it accepts
 #include <shaped-shader-library/shader_asset.hh>
 #include <shaped-shader-library/shader_library.hh>
@@ -181,4 +183,12 @@ void slib::shader_asset::stage_reload()
                 }
             });
     }
+}
+
+sg::async_compute_pipeline slib::acquire_compute_pipeline(sg::context* ctx,
+                                                          shader_asset_handle asset,
+                                                          sg::pipeline_layout_handle layout)
+{
+    auto const shader = co_await asset->acquire(*ctx);
+    co_return co_await ctx->cached.acquire_compute_pipeline({.shader = shader, .layout = layout});
 }

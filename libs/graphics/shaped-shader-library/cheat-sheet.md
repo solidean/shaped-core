@@ -295,6 +295,11 @@ cmd.compute.bind_group(0, *group);        // group 0 of `main`, group 1 of an en
 // `@inline binding constants` -> shaders::constants: plain fields in C++'s layout, and the block the shader reads:
 pass.set_inline_constants(shaders::constants{.view_projection = vp}.to_block());
 // every name lives in the package namespace, so two files declaring one name is a generator error.
+// `@inline binding constants` also gives constants::inline_binding(): the pipeline layout's inline block, no reflection.
+// an entry point of a `*`-declared file is a small wrapper: `->acquire(ctx)` as before, plus the layout its list states:
+auto const layout = shaders::cube.vertex.main_vs.acquire_layout(ctx);                  // {constants}, nothing reflected
+auto const pipeline = co_await shaders::double_values.compute.main.acquire_pipeline(ctx); // compute: needs nothing else
+// a raster pipeline whose stages list different groups takes their union instead: acquire_pipeline_layout<frame, work>().
 ```
 
 ## include resolution

@@ -98,3 +98,16 @@ private:
     // Mutable so acquire() stays const: promoting a staged compile is not a change a caller can observe as one.
     mutable cc::mutex<state> _state;
 };
+
+namespace slib
+{
+/// The compute pipeline of `asset` over `layout`, once the shader has compiled for `ctx`.
+///
+/// What a generated compute entry point's `acquire_pipeline` is: the layout comes from its binding list, so nothing is
+/// reflected, and a compute pipeline needs nothing beyond a shader and a layout.
+/// Cold, like every coroutine here: awaiting it is what starts the compile.
+/// `ctx` must outlive the result.
+[[nodiscard]] sg::async_compute_pipeline acquire_compute_pipeline(sg::context* ctx,
+                                                                  shader_asset_handle asset,
+                                                                  sg::pipeline_layout_handle layout);
+} // namespace slib

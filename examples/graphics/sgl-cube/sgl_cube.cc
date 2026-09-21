@@ -240,20 +240,12 @@ struct orbit_camera
     auto const& compiled_vs = *compiled_vs_ptr;
     auto const& compiled_ps = *compiled_ps_ptr;
 
-    // The only binding is the vertex stage's 64-byte view-projection block, and it rides as inline constants —
-    // so there are no binding groups at all, which is why nothing here builds one.
-    auto const* const constants = [&]() -> sg::binding const*
-    {
-        for (auto const& b : compiled_vs.bindings)
-            if (b.type == sg::binding_type::uniform_buffer)
-                return &b;
-        return nullptr;
-    }();
-    if (constants == nullptr)
-        co_return cc::error(cc::any_error("the cube's vertex stage must list the `constants` binding"));
+    // The layout the vertex stage's binding list states, `{constants}`: an @inline block and no group.
+    // The pixel stage lists nothing, so this is the whole pipeline's layout, and no binding is read from reflection.
+    auto const layout = shaders::cube.vertex.main_vs.acquire_layout(ctx);
 
     auto const built = ctx.cached.acquire_raster_pipeline(
-        {.layout = ctx.cached.acquire_pipeline_layout({.inline_constants = *constants}),
+        {.layout = layout,
          .vertex_shader = compiled_vs,
          .fragment_shader = compiled_ps,
          .vertex_input = cube_vertex_layout(),

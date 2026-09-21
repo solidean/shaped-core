@@ -654,9 +654,15 @@ def emit_header(manifest: Manifest, entries: Entries) -> str:
     if vertex_inputs or payloads or constants:
         out.append("\n#include <cstddef> // offsetof\n")
     sgl_includes = sgl_host_code.includes(entries.sgl)
+    stems = {f.path: f.stem for f in files}
+    wrappers = sgl_host_code.entry_wrappers(entries.sgl, stems)
+    if wrappers:
+        sgl_includes += ["<shaped-graphics/context/context.hh>", "<cstddef> // std::nullptr_t"]
     if sgl_includes:
         out.append("\n")
-        out.extend(f"#include {header}\n" for header in sgl_includes)
+        out.extend(f"#include {header}\n" for header in dict.fromkeys(sgl_includes))
+    # An SGL package's types stand first: an entry point's wrapper names them.
+    out.append(sgl_host_code.emit_header(manifest.name, manifest.namespace, entries.sgl))
     if bindings:
         out.append("\n#include <clean-core/container/span.hh>\n")
         out.append("#include <clean-core/container/vector.hh>\n")
@@ -668,6 +674,7 @@ def emit_header(manifest: Manifest, entries: Entries) -> str:
         out.append("#include <shaped-graphics/binding/binding_group.hh>\n")
         out.append("#include <shaped-graphics/resource/views.hh>\n")
     out.append(f"\nnamespace {manifest.namespace}\n{{\n")
+    out.append(sgl_host_code.emit_entry_wrappers(entries.sgl, stems))
 
     for file in files:
         out.append(f"/// {file.path}\n")
@@ -675,7 +682,8 @@ def emit_header(manifest: Manifest, entries: Entries) -> str:
         for stage, entry_points in file.stages.items():
             out.append("    struct\n    {\n")
             for entry_point in entry_points:
-                out.append(f"        slib::shader_asset_handle {entry_point};\n")
+                field_type = wrappers.get((file.path, entry_point), "slib::shader_asset_handle")
+                out.append(f"        {field_type} {entry_point};\n")
             out.append(f"    }} {stage};\n")
         out.append("};\n")
         out.append(f"extern {file.stem}_t {file.stem};\n\n")
@@ -693,7 +701,6 @@ def emit_header(manifest: Manifest, entries: Entries) -> str:
 
     for entry in bindings:
         out.append(emit_binding_group(manifest, entry))
-    out.append(sgl_host_code.emit_header(manifest.name, manifest.namespace, entries.sgl))
     for entry in vertex_inputs:
         out.append(emit_vertex_input(manifest, entry))
     for entry in payloads:
@@ -775,6 +782,8 @@ def emit_source(manifest: Manifest, files: list[ShaderFile], bindings: list[Bind
     if any(b["inline"] or sgl_host_code.has_block(b) for _, b in sgl.bindings):
         out.append("#include <clean-core/common/assert.hh>\n")
         out.append("#include <clean-core/common/utility.hh> // cc::memcpy\n")
+    if any(b["inline"] for _, b in sgl.bindings):
+        out.append("#include <shaped-shader-library/binding/binding_groups.hh> // slib::inline_constants_space\n")
     out.append("\n")
 
     for file in files:
@@ -802,7 +811,10 @@ def emit_source(manifest: Manifest, files: list[ShaderFile], bindings: list[Bind
                 enumerator = SGL_STAGES[stage] if manifest.language == "sgl" else stage
                 out.append(f"     .stage = sg::shader_stage::{enumerator},\n")
                 out.append(f'     .entry_point = "{point}",\n')
-                out.append(f"     .asset = &{manifest.namespace}::{file.stem}.{stage}.{point}}},\n")
+                # A wrapped SGL entry point holds its handle as `asset`.
+                wrapped = (file.path, point) in sgl_host_code.entry_wrappers(sgl, {f.path: f.stem for f in files})
+                member = f"{point}.asset" if wrapped else point
+                out.append(f"     .asset = &{manifest.namespace}::{file.stem}.{stage}.{member}}},\n")
     out.append("};\n")
 
     for entry in bindings:

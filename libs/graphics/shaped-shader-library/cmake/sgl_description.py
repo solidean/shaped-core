@@ -57,6 +57,8 @@ class SglEntries:
 
     # (path, stage, entry point) in the package's stage words; the stage is the one the source declares.
     entry_points: list[tuple[str, str, str]] = field(default_factory=list)
+    # (path, entry point) -> what the compiler said about it, for every entry point of a file it described.
+    described_entry_points: dict[tuple[str, str], dict] = field(default_factory=dict)
     # (file, the described binding)
     bindings: list[tuple[SglFile, dict]] = field(default_factory=list)
     vertex_inputs: list[tuple[SglFile, dict]] = field(default_factory=list)
@@ -110,6 +112,7 @@ def resolve(package: str, entries: list[str], source_dir: Path, tool: Path | Non
             described = file_of(path)
             for e in described.entry_points:
                 add("entry_points", (path, e["name"]), (path, e["stage"], e["name"]))
+                out.described_entry_points[(path, e["name"])] = e
             for b in described.bindings:
                 add("bindings", (path, b["name"]), (described, b))
             for s in described.structs:

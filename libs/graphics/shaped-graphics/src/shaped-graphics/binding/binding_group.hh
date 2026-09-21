@@ -115,6 +115,13 @@ concept declared_binding_set
           g.gather(views, samplers);
       };
 
+/// A generated inline-constants block: what a pipeline layout takes as its `inline_constants`, rather than as a group.
+/// Its binding is a constant, since every backend places inline constants by a fixed rule of its own.
+template <class C>
+concept declared_inline_constants = requires {
+    { C::inline_binding() } -> std::convertible_to<binding>;
+};
+
 /// A `declared_binding_set` that also fixes its own group index, which `bind<G>` binds it at.
 /// An HLSL group is one: its index is written on the declaration, so no call site has to write the number.
 template <class G>
