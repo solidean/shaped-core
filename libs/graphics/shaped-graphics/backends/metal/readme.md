@@ -99,16 +99,23 @@ Each of these is a fact about Metal rather than a gap in the backend.
 - **An index buffer must sit at a 4-byte boundary, and nothing says so when it does not.**
   MTL4's `drawIndexedPrimitives` takes the indices as a GPU address with no first-index of its own, so sg's `index_range.offset` is folded into that address.
   An odd first index into a `uint16` buffer therefore lands 2 mod 4.
-  Metal then draws whatever fits before the next boundary and reports nothing: not an error, not a validation message, just a partly-drawn mesh that D3D12 and Vulkan both draw whole.
+  Metal then draws part of the mesh and reports nothing: not an error, not a validation message, just a partly-drawn mesh that D3D12 and Vulkan both draw whole.
   It was found by a test whose quad came out as one triangle, which is the only way it can be found.
   **This backend is the reason `sg::index_buffer_offset_alignment` exists**, and the rule is sg-wide rather than metal's.
   Every backend asserts it, so the violation fails on whichever dev box the author has.
   [concepts/raster-pipeline.md](../../docs/concepts/raster-pipeline.md) is the rule, and `sg::is_aligned_index_fetch` answers it without asserting.
 - **A render encoder's barrier is asymmetric, where a compute encoder's is not.**
   `barrierAfterEncoderStages` on a render encoder refuses `MTLStageFragment` as its *source* by name, accepting only `MTLStageVertex | MTLStageObject | MTLStageMesh`.
-  Inside one pass the fragment stage is last, so there is no later stage for work ordered after it to reach.
+  Inside one draw the fragment stage is last, so there is no later stage of that draw for work ordered after it to reach.
   Its destination half takes the whole pass.
   Hence two clamps rather than one, and the validation layer aborting on the pair is how the asymmetry was found rather than read.
+- **A fragment-stage producer is ordered by closing and reopening the pass.**
+  The reasoning above holds for one draw and not for two.
+  A fragment shader writing what a later draw in the same pass reads is a dependency no barrier here can name, and one clamped to the vertex stage orders nothing that matters.
+  So `flush_barriers` ends the render encoder and opens it again over the same targets, with every load op forced to LOAD — the same answer vulkan gives.
+  The encoder boundary's publish/wait pair is what carries the dependency.
+  The scope's encoder state is replayed onto the new encoder, since none of it survives the boundary.
+  `metal_command_list::pass_reopens` counts them, which is what the tier-2 test asserts rather than trusting the pixels.
 - **Every encoder publishes as it closes, rather than the list publishing once at the end.**
   An encoder-scoped barrier orders work inside its own encoder and cannot reach across a boundary, so a dispatch written and then read by a draw is ordered by the pair at that boundary instead.
   That pair is the publish `end_encoder` and `raster_end_rendering` emit, plus the queue wait the next encoder opens with.

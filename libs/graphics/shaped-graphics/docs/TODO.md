@@ -129,10 +129,13 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
     `declare_array_buffer_access` / `declare_array_texture_access` live on the compute scope and the raytracing scope alone.
     `command_list_raster_scope` has neither, and there is no `raster_declare_array_*` virtual for one to dispatch to.
     A dispatch therefore resolves its declares against the bound groups, and a draw cannot.
-    Every backend asserts `"array bindings are not supported in raster draws yet"` on a bound array binding, which [concepts/bindings.md](concepts/bindings.md#array-bindings) states as the contract.
+    dx12, vulkan and metal each assert `"array bindings are not supported in raster draws yet"` on a bound array binding.
+    [concepts/bindings.md](concepts/bindings.md#array-bindings) states that refusal as the contract.
+    webgpu has no binding arrays at all, so there is nothing there to refuse.
     **What it costs is any bindless material table on a draw.**
     sv's tables work today only because it path-traces, declaring them through `cmd.raytracing` in `gpu_resource_manager`; the moment a raster path wants one it stops at this assert.
-    Closing it is the declare pair on the raster scope, a `raster_declare_array_*` virtual, and the resolution in all four backends — the compute path's shape, at the vertex and fragment stages.
+    Closing it is the declare pair on the raster scope, a `raster_declare_array_*` virtual, and the resolution in three backends — the compute path's shape, at the vertex and fragment stages.
+    webgpu would have to gain binding arrays first.
     Nothing subtle blocks it; it has simply never been the blocking thing.
   - a per-draw/dispatch **escape hatch** disabling automatic transitions where the caller knows its resources are already in the right layout;
   - folding the redundant `_open_command_lists` epoch-advance counter into the slot allocator's live count.
@@ -174,6 +177,10 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   publish removed, because a four-thread dispatch finishes well before the pass it precedes on an M4.
   A test that would catch the ordering needs a dispatch long enough to lose the race, which trades a sharp test for a
   slow one — so the pair stands on Apple's documented model rather than on an oracle of ours.
+  The in-pass case is one step better off: a fragment-stage producer closes and reopens the pass, and
+  `metal_command_list::pass_reopens` makes that observable, so `sg metal - a draw sees what the previous draw's
+  fragment shader wrote` asserts the mechanism fired rather than only that the pixels came out right.
+  The ordering itself is still the same race, and still not what a 4x4 draw can prove.
 
 - **An odd first index into a 16-bit index buffer is refused everywhere, and closing that would need a shifted copy.**
   `sg::index_buffer_offset_alignment` is now a portable rule every backend asserts, so the failure is the same on all

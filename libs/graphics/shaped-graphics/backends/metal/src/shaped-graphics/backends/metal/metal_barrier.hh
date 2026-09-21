@@ -68,9 +68,14 @@ inline constexpr MTL::Stages k_compute_encoder_stages
 ///
 /// **The two halves are not symmetric here, where on a compute encoder they are.**
 /// `barrierAfterEncoderStages` on a render encoder rejects `MTLStageFragment` outright, by name, and accepts only
-/// `MTLStageVertex | MTLStageObject | MTLStageMesh`: within one pass the fragment stage is the last one, so there is
-/// no later stage inside the encoder for work ordered after it to reach.
+/// `MTLStageVertex | MTLStageObject | MTLStageMesh`: within one draw the fragment stage is the last one, so there is
+/// no later stage of that draw for work ordered after it to reach.
 /// sg has no object or mesh stage, so the source set is the vertex stage alone.
+///
+/// **That reasoning covers one draw and not two.** A fragment shader writing what a later draw in the same pass reads
+/// is a real dependency with no barrier to express it, so the command list closes and reopens the pass instead —
+/// `metal_command_list::reopen_render_encoder`.
+/// Clamping a fragment source down to the vertex stage would order nothing that matters.
 ///
 /// Measured rather than read: the validation layer aborts on the pair, which is how the asymmetry was found.
 inline constexpr MTL::Stages k_render_encoder_source_stages = MTL::StageVertex;

@@ -101,7 +101,7 @@ Our injected config widens `ImDrawIdx` to `unsigned int` — see [imgui_config.h
 An `ImDrawCmd` names its first index as an arbitrary `IdxOffset`, and about half of those are odd.
 With imgui's default 16-bit index that puts the fetch 2 bytes into a 4-byte word, which [`sg::index_buffer_offset_alignment`](../../shaped-graphics/docs/concepts/raster-pipeline.md) refuses.
 MTL4 is why the rule exists: its draw takes the indices as a GPU address with no offset parameter of its own.
-A misaligned first index is silently truncated to the previous word, so the UI draws in pieces — with API validation enabled and nothing reported.
+A misaligned first index draws part of the mesh, so the UI draws in pieces — with API validation enabled and nothing reported.
 Widening the index makes every one of them 4-aligned by construction, so no draw has to be split or padded.
 It lifts imgui's 64K-vertex-per-draw-list ceiling as a side effect, which is the reason imgui's own `imconfig.h` offers the switch.
 

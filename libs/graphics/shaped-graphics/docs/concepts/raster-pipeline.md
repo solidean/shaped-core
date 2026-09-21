@@ -101,7 +101,7 @@ An attribute's `[[attribute(n)]]` index is its position in `attributes`, the sam
 **webgpu** records through `wgpuRenderPassEncoderSetIndexBuffer` / `wgpuRenderPassEncoderDrawIndexed`, re-binding its pass state when a pass reopens.
 
 **No backend supports an array binding on a draw.**
-The raster scope has no `declare_array_*_access` pair, so a bound array binding cannot be accounted for and every backend asserts on one.
+The raster scope has no `declare_array_*_access` pair, so a bound array binding cannot be accounted for: dx12, vulkan and metal each assert on one, and webgpu has no binding arrays at all.
 See [bindings](bindings.md#array-bindings) and [TODO](../TODO.md).
 
 ## Deferred
