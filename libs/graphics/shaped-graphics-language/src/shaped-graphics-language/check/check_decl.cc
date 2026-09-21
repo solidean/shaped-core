@@ -193,6 +193,15 @@ type_id checker::resolve_type(i32 file, ast::expr_id expr)
     return result;
 }
 
+type_id checker::resolve_value_type(i32 file, ast::expr_id expr)
+{
+    auto const type = resolve_type(file, expr);
+    if (type == checked_module::error_type || out.at(type).kind != type_kind::buffer)
+        return type;
+    unsupported(file, span_of(file, expr), "a buffer as a value; a buffer is a binding member, read as `values[i]`");
+    return checked_module::error_type;
+}
+
 type_id checker::type_of_builtin(cc::string_view name, i32 file, source_span where)
 {
     auto const* const found = names.get_ptr(name);
@@ -257,7 +266,7 @@ ast::range_of<member_info> checker::compile_members(i32 file, ast::range_of<ast:
 
         auto type = checked_module::error_type;
         if (ast::is_valid(f.type))
-            type = resolve_type(file, f.type);
+            type = is_struct ? resolve_value_type(file, f.type) : resolve_type(file, f.type);
         else
             report(diagnostic_kind::missing_type, file, f.name, name);
 
@@ -329,7 +338,7 @@ void checker::compile_enum(symbol_id id)
     judge_attributes(file, ast.at(decl).attributes, {}, "an enum");
 
     auto collected = cc::vector<enum_case_info>();
-    auto next_value = 0;
+    auto next_value = cc::optional<i32>(0);
 
     for (auto const member : ast.at(e.members))
     {
@@ -363,7 +372,12 @@ void checker::compile_enum(symbol_id id)
             continue;
         }
 
-        auto value = next_value;
+        if (!next_value.has_value() && !ast::is_valid(c->value))
+        {
+            unsupported(file, c->name, "an implicit case value past the last int");
+            continue;
+        }
+        auto value = next_value.value_or(0);
         if (ast::is_valid(c->value))
         {
             auto const where_value = span_of(file, c->value);
@@ -377,7 +391,11 @@ void checker::compile_enum(symbol_id id)
             else
                 unsupported(file, where_value, "a case value that is no int literal");
         }
-        next_value = value + 1;
+        // An implicit value follows the one before it, and `int` has no value after its last.
+        if (value == 2147483647)
+            next_value = cc::nullopt;
+        else
+            next_value = value + 1;
 
         collected.push_back({.name = cc::string(name), .value = value, .declaration = member});
     }
@@ -468,7 +486,7 @@ void checker::compile_function(symbol_id id)
 
         auto type = checked_module::error_type;
         if (ast::is_valid(p.type))
-            type = resolve_type(file, p.type);
+            type = resolve_value_type(file, p.type);
         else if (f.receiver == ast::receiver_kind::none || &p != &ast.at(f.parameters).front())
             report(diagnostic_kind::missing_type, file, span_of(file, p.form), name);
         is_failed = is_failed || type == checked_module::error_type;
@@ -523,7 +541,7 @@ void checker::compile_function(symbol_id id)
     auto result = checked_module::nothing_type;
     auto const infers_result = !ast::is_valid(f.return_type) && f.body.kind == ast::body_kind::arrow;
     if (ast::is_valid(f.return_type))
-        result = resolve_type(file, f.return_type);
+        result = resolve_value_type(file, f.return_type);
     else if (infers_result)
         result = checked_module::error_type;
     is_failed = is_failed || (result == checked_module::error_type && !infers_result);

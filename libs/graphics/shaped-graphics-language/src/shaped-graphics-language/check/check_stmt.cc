@@ -56,16 +56,8 @@ flow checker::check_nested(function_scope& scope, ast::body const& body)
 
 bool checker::declare_local(function_scope& scope, source_span name_where, local_name local)
 {
-    for (auto i = scope.locals.size() - 1; i >= 0; --i)
-    {
-        if (scope.locals[i].name != local.name)
-            continue;
-        if (scope.locals[i].depth == scope.depth)
-            report(diagnostic_kind::duplicate_declaration, scope.file, name_where, local.name);
-        else
-            unsupported(scope.file, name_where, "a local that shadows a local of an enclosing block");
-        return false;
-    }
+    // CHK-53: a later local shadows every earlier local and parameter of its name, and lookup finds the newest.
+    // It is a local of its own, so a later pass mints it a name of its own too.
     if (names.contains(local.name))
         unsupported(scope.file, name_where, "a local that shadows a module-level name");
 
@@ -125,7 +117,7 @@ flow checker::check_stmt(function_scope& scope, ast::stmt_id stmt)
                 result = flow::exits;
             }
             else if (auto const* const c = value.node.try_as<ast::case_expr>())
-                set_type(file, e.value, check_case(scope, e.value, *c, false));
+                set_type(file, e.value, check_case(scope, e.value, *c, false, &result));
             else if (auto const* const loop = value.node.try_as<ast::loop_expr>())
             {
                 auto has_break = false;
@@ -167,7 +159,7 @@ void checker::check_let(function_scope& scope, ast::stmt_id id, ast::let_stmt co
 
     if (ast::is_valid(let.type))
     {
-        auto const declared = resolve_type(file, let.type);
+        auto const declared = resolve_value_type(file, let.type);
         if (type != error_type && declared != error_type && type != declared)
             report(diagnostic_kind::type_mismatch, file, span_of(file, let.value),
                    cc::format("expected {}, got {}", out.name_of(declared), out.name_of(type)));

@@ -81,7 +81,10 @@ type_id checker::check_index(function_scope& scope, ast::expr_id id, ast::index 
     auto const file = scope.file;
     auto const where = span_of(file, id);
 
+    auto const outer = subscripted;
+    subscripted = node.object;
     auto const object = check_expr(scope, node.object);
+    subscripted = outer;
     if (object == error_type)
         return error_type;
     if (out.at(object).kind != type_kind::buffer)
@@ -342,7 +345,13 @@ type_id checker::check_member(function_scope& scope, ast::expr_id id, ast::membe
                 return error_type;
             }
             set_target(file, id, {.kind = target_kind::binding_member, .symbol = binding, .index = i32(index)});
-            return out.at(out.bindings[out.at(binding).info].members)[index].type;
+            auto const type = out.at(out.bindings[out.at(binding).info].members)[index].type;
+            if (type != error_type && out.at(type).kind == type_kind::buffer && id != subscripted)
+            {
+                unsupported(file, span_of(file, id), "a buffer as a value; read an element of it, as in `values[i]`");
+                return error_type;
+            }
+            return type;
         }
 
         // `light_kind.point`: an enum is no value either (CHK-148), so its name never reaches `check_expr`

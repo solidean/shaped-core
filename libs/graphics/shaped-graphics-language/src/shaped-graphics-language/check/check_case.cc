@@ -136,8 +136,10 @@ void checker::check_yield(function_scope& scope, source_span where, ast::expr_id
                cc::format("this block yields {}, and this yield carries a {}", out.name_of(expected), out.name_of(type)));
 }
 
-type_id checker::check_case(function_scope& scope, ast::expr_id id, ast::case_expr const& node, bool yields_value)
+type_id checker::check_case(function_scope& scope, ast::expr_id id, ast::case_expr const& node, bool yields_value, flow* ending)
 {
+    if (ending != nullptr)
+        *ending = flow::falls_through;
     auto const file = scope.file;
     auto const& ast = ast_of(file);
     auto const where = span_of(file, id);
@@ -162,6 +164,9 @@ type_id checker::check_case(function_scope& scope, ast::expr_id id, ast::case_ex
     auto result = yields_value ? type_id::none : nothing_type;
     auto is_failed = false;
     auto reported_unreachable = false;
+    // CHK-123: whether every arm leaves the list the `case` stands in
+    auto every_arm_exits = true;
+    auto arm_count = 0;
 
     for (auto const& arm : ast.at(node.arms))
     {
@@ -169,8 +174,10 @@ type_id checker::check_case(function_scope& scope, ast::expr_id id, ast::case_ex
         if (!ast::is_valid(arm.pattern) && arm.result.kind == ast::body_kind::none)
         {
             is_failed = true;
+            every_arm_exits = false;
             continue;
         }
+        ++arm_count;
 
         if (has_wildcard && !reported_unreachable)
         {
@@ -233,6 +240,7 @@ type_id checker::check_case(function_scope& scope, ast::expr_id id, ast::case_ex
         }
         --scope.depth;
         scope.locals.resize_down_to(visible);
+        every_arm_exits = every_arm_exits && arm_exits;
 
         if (!yields_value || arm_exits)
             continue;
@@ -256,6 +264,7 @@ type_id checker::check_case(function_scope& scope, ast::expr_id id, ast::case_ex
     }
 
     // CHK-159: a `_` makes it exhaustive, and so does an enum whose every case a constant pattern named.
+    auto is_exhaustive = has_wildcard;
     if (!has_wildcard && scrutinee != error_type)
     {
         auto missing = cc::string();
@@ -275,6 +284,7 @@ type_id checker::check_case(function_scope& scope, ast::expr_id id, ast::case_ex
             }
             if (!missing.empty())
                 report(diagnostic_kind::non_exhaustive_case, file, where, cc::move(missing));
+            is_exhaustive = missing.empty();
         }
         else
             report(diagnostic_kind::non_exhaustive_case, file, where,
@@ -293,6 +303,8 @@ type_id checker::check_case(function_scope& scope, ast::expr_id id, ast::case_ex
                 break;
             }
 
+    if (ending != nullptr && is_exhaustive && every_arm_exits && arm_count > 0)
+        *ending = flow::exits;
     if (is_failed)
         return error_type;
     if (!yields_value)

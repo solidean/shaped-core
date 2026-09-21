@@ -44,6 +44,11 @@ TEST("sgl check - a case value is an int literal, and anything else is unsupport
 {
     CHECK(reports_for("enum e:\n    a = 1.5\n") == "unsupported-yet user:[1.5] a case value that is no int literal\n");
     CHECK(reports_for("enum e:\n    a = b\n") == "unsupported-yet user:[b] a case value that is no int literal\n");
+
+    // An implicit value follows the one before it, and the last int has none after it.
+    CHECK(reports_for("enum e:\n    a = 2147483647\n    b\n")
+          == "unsupported-yet user:[b] an implicit case value past the last int\n");
+    CHECK(reports_for("enum e:\n    a = 2147483647\n    b = 0\n") == "");
 }
 
 TEST("sgl check - a member of an enum that is no case is unsupported-yet")

@@ -57,7 +57,7 @@ It applies to the names of types, functions and variables, and never to the name
 
 * The full list of constructs that open a scope, and the kind of each: `binding`, `enum`, `case` arms, loops and plain blocks are not classified.
 * Whether a nested function is visible before its own declaration inside an ordered scope.
-* Whether a local name may shadow a name of an enclosing scope, and whether that is silent, a warning or an error.
+* Whether a local name may shadow a module-level name, and whether that is silent, a warning or an error; shadowing another local is settled by CHK-53 of [checking](../semantics/checking.md).
 * Whether a nested function sees a variable that is declared after it in the surrounding function.
 * How a cycle between declarations of an unordered scope is reported, for example two constants that initialize each other.
 * Whether a notation brought in by a `use` inside a function applies only from that line on.

@@ -69,6 +69,21 @@ TEST("sgl check - a buffer element is read by subscript and written where the bu
     CHECK(reports_for(listing(members, "    let v = p.position[0]\n")).contains("a subscript on anything but a buffer"));
 }
 
+TEST("sgl check - a buffer is a resource and never a value")
+{
+    constexpr auto members = "    src: buffer[float]\n    dst: mut buffer[float]\n";
+    constexpr auto value = "a buffer as a value";
+
+    // Read through a subscript and nowhere else: not bound to a local, not passed, not returned.
+    CHECK(reports_for(listing(members, "    let b = work.src\n")).contains(value));
+    CHECK(reports_for(cc::string("fun first(b: buffer[float]) -> float => b[0]\n\n") + listing(members)).contains(value));
+    CHECK(reports_for(cc::string("fun pass(x: float) -> buffer[float] => x\n\n") + listing(members)).contains(value));
+    CHECK(reports_for(listing(members, "    let b : buffer[float] = work.src\n")).contains(value));
+
+    // Nor a field of a struct, which no target can hold; relaxing that needs a rule for hoisting it (the spec's bindings file).
+    CHECK(reports_for(cc::string("struct view:\n    items: buffer[float]\n\n") + listing(members)).contains(value));
+}
+
 TEST("sgl check - a compute entry point takes the thread id and returns nothing")
 {
     constexpr auto work = "binding work:\n    values: mut buffer[float]\n\n";

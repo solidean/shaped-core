@@ -115,3 +115,5 @@ A shader using one then gets a diagnostic that names the feature, rather than a 
 * A `sampler` member collides with the `sampler` keyword, which declares a static sampler.
   A binding member `smp: sampler` reads as a keyword form today, so the dynamic-sampler member has no spelling yet.
 * The layout of a struct element type: our own rules, portable across the four targets, with explicit padding where they need it, and the generated host struct matching byte for byte.
+* A buffer as a field of a struct, which is `unsupported-yet` like every buffer outside a binding member.
+  It could be allowed where the buffer is hoisted and stays uniform across every use, a scalarization of the struct that inlining makes possible.

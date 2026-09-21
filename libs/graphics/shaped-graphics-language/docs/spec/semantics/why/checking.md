@@ -65,15 +65,21 @@ A binding is a global of the target, or a local function that is inlined, so the
 The list is an effect annotation: it says what a function may touch, and the check is that it touches nothing else.
 The [binding effects](../../incubator/binding-effects.md) idea has the second, later half: that every callee's list is satisfied.
 
+## CHK-53
+
+`let x = x * 2.0` is how a value is refined step by step without a `mut`, and without inventing `x2` for every step.
+Rust made the same choice for the same reason, and a shader is mostly such chains.
+Every local is a local of its own, so the flat tree never sees a name twice: the emitter mints `x`, `x_1`, … as it mints every name.
+
 ## CHK-54
 
 Whether a local may shadow a module-level name is open in [scopes](../../incubator/scopes.md).
 Both answers are easy to give later and neither is easy to take back, so the tracer gives none.
-A second local of one name in one block is a plain `duplicate-declaration`.
+Shadowing another local is settled, by CHK-53.
 
 ## CHK-110
 
-Whether an inner block may shadow is open in [scopes](../../incubator/scopes.md), like the module-level case of CHK-54.
+An inner block shadows by CHK-53, the way the same block does, and what it declares is gone behind it.
 Two blocks beside each other share nothing, so the same name in both is fine: that is no shadowing, and guard clauses need it.
 
 ## CHK-115

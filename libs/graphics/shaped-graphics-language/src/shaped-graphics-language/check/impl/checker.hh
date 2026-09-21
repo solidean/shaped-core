@@ -139,6 +139,8 @@ struct checker
     cc::vector<function_notes> notes;
     /// Every call of a function that is no `@builtin`, in the order the bodies were checked.
     cc::vector<call_edge> calls;
+    /// The object `check_index` is checking right now: the one place a buffer may stand as an expression.
+    ast::expr_id subscripted = ast::expr_id::none;
 
     // ---- shared helpers (check.cc) ----------------------------------------------------------------------------------
 
@@ -193,6 +195,9 @@ struct checker
     [[nodiscard]] ast::range_of<member_info> compile_members(i32 file, ast::range_of<ast::decl_id> members, bool is_struct);
     /// The type an expression in a type position names; the error type when it names none.
     [[nodiscard]] type_id resolve_type(i32 file, ast::expr_id expr);
+    /// `resolve_type` for the type of a value — a field, a parameter, a result, a local — where a buffer cannot stand.
+    /// A buffer is a resource a binding member names, and is only ever read through a subscript.
+    [[nodiscard]] type_id resolve_value_type(i32 file, ast::expr_id expr);
     /// The type of the prelude's `@builtin struct` named `name`; without one it reports at `where` and is the error type.
     [[nodiscard]] type_id type_of_builtin(cc::string_view name, i32 file, source_span where);
     /// `buffer[element]`, or its `mut` form, interned: two mentions of one buffer type share an id.
@@ -223,7 +228,7 @@ struct checker
     void check_return(function_scope& scope, source_span where, ast::expr_id value);
     void check_break(function_scope& scope, source_span where, ast::expr_id value);
     void check_condition(function_scope& scope, ast::expr_id condition);
-    /// Declares a local; false when the name is taken, which was reported.
+    /// Declares a local, which shadows any earlier local or parameter of its name (CHK-53); always true.
     bool declare_local(function_scope& scope, source_span name_where, local_name local);
     /// A `loop:`; the result is the type its breaks carry, and `nothing` for one that is a statement.
     /// `has_break` is false for a loop nothing leaves, which never ends.
@@ -233,7 +238,12 @@ struct checker
                                      bool yields_value,
                                      bool& has_break);
     /// A `case`; the result is the type of its arms, and `nothing` for one that is a statement.
-    [[nodiscard]] type_id check_case(function_scope& scope, ast::expr_id id, ast::case_expr const& node, bool yields_value);
+    /// `ending`, where given, is how the `case` ends as a statement: it exits when it is exhaustive and every arm exits.
+    [[nodiscard]] type_id check_case(function_scope& scope,
+                                     ast::expr_id id,
+                                     ast::case_expr const& node,
+                                     bool yields_value,
+                                     flow* ending = nullptr);
     /// One arm's pattern, against the scrutinee's type; appends the enum cases it names, and says whether all were cases.
     void check_pattern(function_scope& scope,
                        ast::expr_id pattern,
@@ -243,7 +253,7 @@ struct checker
     void check_yield(function_scope& scope, source_span where, ast::expr_id value);
     /// Reports every loop of calls once, and marks the functions on it.
     void find_recursion();
-    /// CHK-172: every buffer member's host name, `<binding>_<member>`, is its own.
+    /// True when `function` and every function it calls checked soundly and none is recursive, so all of it inlines.
     [[nodiscard]] bool inlines_whole(symbol_id function);
 
     [[nodiscard]] type_id check_expr(function_scope& scope, ast::expr_id expr);

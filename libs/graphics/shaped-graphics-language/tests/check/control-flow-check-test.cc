@@ -74,16 +74,19 @@ TEST("sgl check - an assignment names a mutable local, or a member of one")
           == "not-assignable user:[frame.exposure] frame is a binding, which no shader writes\n");
 }
 
-TEST("sgl check - a block is a scope: a local ends with it, and shadowing waits for its rule")
+TEST("sgl check - a block is a scope: a local ends with it, and a later local shadows an earlier one")
 {
     CHECK(body_reports("if k > 0.0:\n    let x = k\nreturn x\n").starts_with("unknown-name user:[x] x\n"));
     // two blocks beside each other share nothing
     CHECK(body_reports("if k > 0.0:\n    let x = 1.0\n    return x\nelse:\n    let x = 2.0\n    return x\n") == "");
-    CHECK(body_reports("let x = k\nif k > 0.0:\n    let x = 1.0\nreturn x\n")
-          == "unsupported-yet user:[x] a local that shadows a local of an enclosing block\n");
-    CHECK(body_reports("for k in 0 ..< n:\n    return 1.0\nreturn 0.0\n")
-          == "unsupported-yet user:[k] a local that shadows a local of an enclosing block\n");
-    CHECK(body_reports("let x = k\nlet x = k\nreturn x\n") == "duplicate-declaration user:[x] x\n");
+    // CHK-53: in the same block, in an inner one, over a parameter and by a `for`, as in Rust
+    CHECK(body_reports("let x = k\nlet x = x * 2.0\nreturn x\n") == "");
+    CHECK(body_reports("let x = k\nif k > 0.0:\n    let x = 1.0\nreturn x\n") == "");
+    CHECK(body_reports("let k = k * 2.0\nreturn k\n") == "");
+    CHECK(body_reports("for k in 0 ..< n:\n    return 1.0\nreturn 0.0\n") == "");
+    // a shadowing local may change the type, and the value it is given still sees the one it hides
+    CHECK(body_reports("let x = n\nlet x = k\nreturn x\n") == "");
+    CHECK(body_reports("let x = k\nlet x = x < 1.0\nreturn x\n") == "type-mismatch user:[x] expected float, got bool\n");
 }
 
 TEST("sgl check - every path of a function that returns a value ends in a return")

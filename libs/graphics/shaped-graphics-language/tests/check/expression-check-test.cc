@@ -214,8 +214,9 @@ TEST("sgl check - a returned object converts structurally: every field once, typ
 TEST("sgl check - let introduces an immutable local, in order")
 {
     CHECK(body_reports("let a = b\nlet b = k\nreturn k\n") == "unknown-name user:[b] b\n");
-    CHECK(body_reports("let a = k\nlet a = k\nreturn k\n") == "duplicate-declaration user:[a] a\n");
-    CHECK(body_reports("let k = 1.0\nreturn k\n") == "duplicate-declaration user:[k] k\n");
+    // CHK-53: shadowing a local or a parameter is legal; only a module-level name is not yet
+    CHECK(body_reports("let a = k\nlet a = k\nreturn k\n") == "");
+    CHECK(body_reports("let k = 1.0\nreturn k\n") == "");
     CHECK(body_reports("let x : vec3 = k\nreturn k\n") == "type-mismatch user:[k] expected vec3, got float\n");
     CHECK(body_reports("let dot = k\nreturn k\n")
           == "unsupported-yet user:[dot] a local that shadows a module-level name\n");

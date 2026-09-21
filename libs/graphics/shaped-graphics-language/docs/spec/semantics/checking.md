@@ -142,7 +142,8 @@ enum light_kind:
 * **CHK-50** A function body is an ordered scope: a parameter is visible from the start, and a local from the statement after its `let`.
 * **CHK-51** `let name = value` introduces an immutable local of the type of `value`.
 * **CHK-52** `let name : type = value` needs `value` to be of `type`, or it is the normal error `type-mismatch`.
-* **CHK-53** A second local of one name in one block is `duplicate-declaration`, and so is a local of the function's own block that has the name of a parameter.
+* **CHK-53** A local **shadows** every earlier local and parameter of its name, in its own block or an enclosing one, from the statement after its `let`, as in Rust ([why](why/checking.md#chk-53)).
+  The value it is given still sees the one it hides, and its type may differ.
 * **CHK-54** A local or a parameter that has the name of a module-level symbol is `unsupported-yet` ([why](why/checking.md#chk-54)).
 * **CHK-55** A pattern in a `let` and a `let` without a value are `unsupported-yet`; `let mut` is CHK-111.
 * **CHK-56** `return value` needs `value` to be of the function's return type, or it is `type-mismatch`.
@@ -229,7 +230,7 @@ let color = float4(..lit, 1.0)
 ## Control flow
 
 * **CHK-109** The body of an `if` branch, of a `while`, of a `for` and of a `loop:` is a block, and a block is a scope: a local ends where its block ends.
-* **CHK-110** A local that has the name of a local of an enclosing block is `unsupported-yet` ([why](why/checking.md#chk-110)).
+* **CHK-110** A local of an inner block that shadows one of an enclosing block is CHK-53's shadowing: the outer local is visible again once the block ends ([why](why/checking.md#chk-110)).
 * **CHK-111** `let mut name = value` introduces a mutable local; a local without `mut`, a parameter and the variable of a `for` are immutable.
 * **CHK-112** `place = value` needs `place` to be a mutable local or a member of one, at any depth, or it is the normal error `not-assignable`.
   `value` is of the type of `place`, or it is `type-mismatch`.
@@ -294,6 +295,7 @@ fun shade(kind: light_kind, base: float) -> float:
 * **CHK-122** An arrow body without a written return type returns what its expression is: the function's return type is the type of that expression.
   A block body without `-> T` still returns nothing, by CHK-121.
 * **CHK-123** A statement list **exits** when it holds a `return`, a `break` or a `continue`, an `if` with an `else` whose every branch exits, or a `loop:` that holds no `break` of its own.
+  So does an exhaustive `case` (CHK-159) whose every arm exits.
 * **CHK-124** A `while` and a `for` never make their list exit, whatever their condition is ([why](why/checking.md#chk-124)).
 * **CHK-125** The body of a function that returns a value exits, or it is the normal error `missing-return`.
 * **CHK-126** A statement that follows an exit in its list never runs: it is the warning `unreachable-code`, once per list.
@@ -346,7 +348,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | kind | reported by |
 |---|---|
 | `unsupported-yet` | CHK-8 |
-| `duplicate-declaration` | CHK-12, CHK-28, CHK-53 |
+| `duplicate-declaration` | CHK-12, CHK-28 |
 | `dependency-cycle` | CHK-18, CHK-136 |
 | `unknown-name` | CHK-24, CHK-62 |
 | `wrong-kind-of-name` | CHK-24, CHK-79 |
@@ -374,7 +376,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 
 * Whether `@builtin` is allowed outside the prelude; today it is.
 * Whether a builtin's declaration is checked against its record beyond the key; today its result type and its attributes are not.
-* Whether a local may shadow a module-level name, or a local of an enclosing block ([scopes](../incubator/scopes.md)).
+* Whether a local may shadow a module-level name ([scopes](../incubator/scopes.md)); shadowing a local or a parameter is CHK-53.
 * Whether a body is checked once or where it is inlined, once a generic makes the two differ ([why](why/checking.md#chk-129)).
 * `true` and `false`, which are names nothing declares yet.
 * Whether a second function with the parameter types of another is an error where it is declared.

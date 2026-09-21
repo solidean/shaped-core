@@ -154,3 +154,36 @@ TEST("sgl check - a case is a statement where nothing reads its value")
                       "        .b => print 1\n")
           == "");
 }
+
+TEST("sgl check - an exhaustive case whose every arm exits ends its list (CHK-123)")
+{
+    // So a function may end in one, with no return behind it that never runs.
+    CHECK(reports_for(over_light_kind("    case k:\n"
+                                      "        .point => return 1.0\n"
+                                      "        .spot => return 0.5\n"
+                                      "        .sun => return 0.25\n"))
+          == "");
+    CHECK(reports_for(over_light_kind("    case k:\n"
+                                      "        .point => return 1.0\n"
+                                      "        _ =>:\n"
+                                      "            return 0.5\n"))
+          == "");
+
+    // And what follows one never runs.
+    CHECK(reports_for(over_light_kind("    case k:\n"
+                                      "        .point => return 1.0\n"
+                                      "        _ => return 0.5\n"
+                                      "    return 0.0\n"))
+              .starts_with("unreachable-code"));
+
+    // One arm that falls through, or a case that is not exhaustive, still leaves the end reachable.
+    CHECK(reports_for(over_light_kind("    case k:\n"
+                                      "        .point => return 1.0\n"
+                                      "        _ =>:\n"
+                                      "            let x = 1.0\n"))
+              .starts_with("missing-return"));
+    CHECK(reports_for(over_light_kind("    case k:\n"
+                                      "        .point => return 1.0\n"
+                                      "        .spot => return 0.5\n"))
+              .contains("non-exhaustive-case"));
+}
