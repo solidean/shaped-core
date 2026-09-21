@@ -28,6 +28,7 @@ upstreams:
     notes: |
       Intel Open Image Denoise: a trained denoiser for path-traced images, and the one non-native member that runs without vendor hardware.
       Apache-2.0, so it is `fetched` like SDL3 rather than `on-request` like the two NVIDIA SDKs — nothing here is a license a person has to accept.
+      `prereqs.ensure_oidn` hydrates it on configure, and SC_SKIP_OIDN is the way out for a checkout that does not want to pay 53 MB for it.
 
       IT IS BIG, AND THAT WAS THE OPEN QUESTION.
       The Windows archive is 56.6 MB compressed and 83.1 MB unpacked across 34 files.
