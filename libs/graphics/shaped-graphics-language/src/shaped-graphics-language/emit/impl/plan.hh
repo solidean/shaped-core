@@ -120,6 +120,27 @@ struct plan
 /// Appends what keeps `e` from being written, which is the same for every target.
 void validate(check::checked_module const& m, check::flat_entry_point const& e, cc::vector<error>& errors);
 
+/// Appends what keeps a struct from standing at one edge of the pipeline in `role`, whichever entry point uses it.
+void validate_edge_struct(check::checked_module const& m, check::type_id type, struct_role role, cc::vector<error>& errors);
+
+/// Appends what keeps the binding `id` from being written, whichever entry point lists it.
+/// What only a list can get wrong, an `@inline` binding that does not stand last, is `validate`'s.
+void validate_binding(check::checked_module const& m, check::symbol_id id, cc::vector<error>& errors);
+
+/// Where the members of an `@inline` block land, which is the same in every target or `validate_binding` refused it.
+struct block_placement
+{
+    /// Parallel to the members.
+    cc::vector<i32> offsets;
+    /// Parallel to the members.
+    cc::vector<i32> sizes;
+    /// Where the last member ends.
+    i32 size = 0;
+};
+
+/// `members` must belong to a binding that passed `validate_binding`.
+[[nodiscard]] block_placement place_block(check::checked_module const& m, cc::span<check::member_info const> members);
+
 /// `e` must have passed `validate`.
 [[nodiscard]] plan make_plan(check::checked_module const& m, check::flat_entry_point const& e, target t);
 } // namespace sgl::emit::impl

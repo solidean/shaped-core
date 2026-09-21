@@ -29,6 +29,15 @@ struct text_request;
 struct emitted_source;
 struct prelude_file;
 
+enum class described_member_kind : u8;
+struct described_binding_member;
+struct described_binding;
+struct described_struct_member;
+struct described_struct;
+struct described_entry_point;
+struct module_description;
+struct describe_request;
+
 enum class line_kind : u8;
 struct line;
 

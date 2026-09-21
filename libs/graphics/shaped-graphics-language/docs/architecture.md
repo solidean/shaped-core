@@ -14,6 +14,8 @@ bytes → line tree → tokens → group tokens → form tree      sgl::parse   
 ```
 
 `sgl::compile_to_text` is the whole pipeline in one call, against the prelude the library carries, so compiling needs no file.
+`sgl::describe` stops short of text: it runs the same front end and the emitter's own checks, and hands back what a host is generated from.
+It is what slib's package generator reads, through `sgl describe`, and it describes exactly what the emitter would build.
 
 **Total and local by construction.**
 Any bytes parse to a tree plus diagnostics, and no syntax error escapes its indentation.

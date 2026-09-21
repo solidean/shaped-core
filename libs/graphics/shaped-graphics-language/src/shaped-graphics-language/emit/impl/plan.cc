@@ -90,39 +90,7 @@ struct validator
         errors.push_back({.kind = kind, .symbol = symbol, .detail = cc::move(detail)});
     }
 
-    void edge_struct(type_id type, struct_role role)
-    {
-        auto const& info = m.at(type);
-        auto const name = m.name_of(type);
-        auto positions = 0;
-        for (auto const& member : m.at(info.members))
-        {
-            auto const* const record = m.builtin_type_of(member.type);
-            if (record == nullptr || !record->crosses_edges)
-                report(error_kind::unsupported, info.symbol,
-                       cc::format("a member of type '{}' in a {}: '{}.{}'", m.name_of(member.type), role_name(role),
-                                  name, member.name));
-
-            if (member.is_position)
-            {
-                ++positions;
-                if (role != struct_role::stage_link)
-                    report(error_kind::unsupported, info.symbol,
-                           cc::format("@position in a {}: '{}.{}'", role_name(role), name, member.name));
-                else if (positions == 2)
-                    report(error_kind::unsupported, info.symbol,
-                           cc::format("a second @position: '{}.{}'", name, member.name));
-            }
-            else if (role == struct_role::vertex_input)
-            {
-                auto const n = cc::string_view(member.name);
-                auto const is_sv
-                    = n.size() >= 3 && (n[0] == 's' || n[0] == 'S') && (n[1] == 'v' || n[1] == 'V') && n[2] == '_';
-                if (is_sv)
-                    report(error_kind::system_value_semantic, info.symbol, cc::format("'{}.{}'", name, member.name));
-            }
-        }
-    }
+    void edge_struct(type_id type, struct_role role) { validate_edge_struct(m, type, role, errors); }
 
     void bindings()
     {
@@ -132,56 +100,17 @@ struct validator
         {
             ++listed;
             auto const& s = m.at(id);
-            auto const& b = m.bindings[s.info];
-            if (!b.is_inline)
-            {
-                // A resource group: every member is a buffer, since nothing else is built (the spec's bindings file).
-                for (auto const& member : m.at(b.members))
-                    if (m.at(member.type).kind != check::type_kind::buffer)
-                        report(error_kind::unsupported, id,
-                               cc::format("a binding member that is no buffer: '{}.{}'", s.name, member.name));
+            if (!m.bindings[s.info].is_inline)
                 continue;
-            }
             // Listed and skipped when numbering, so it has to stand last or a group would move under the host.
             if (listed != e.bindings.size())
                 report(error_kind::unsupported, id,
                        cc::format("an @inline binding that is not the last of the list: '{}'", s.name));
             if (++inline_count == 2)
                 report(error_kind::unsupported, id, cc::format("a second @inline binding: '{}'", s.name));
-
-            auto is_placed = true;
-            for (auto const& member : m.at(b.members))
-                if (layout_of(m, member.type).hlsl.size == 0)
-                {
-                    is_placed = false;
-                    report(error_kind::unsupported, id,
-                           cc::format("a member of type '{}' in an @inline binding: '{}.{}'", m.name_of(member.type),
-                                      s.name, member.name));
-                }
-            if (!is_placed)
-                continue;
-
-            auto hlsl = 0;
-            auto wgsl = 0;
-            auto msl = 0;
-            for (auto const& member : m.at(b.members))
-            {
-                auto const l = layout_of(m, member.type);
-                hlsl = hlsl_offset(hlsl, l.hlsl);
-                wgsl = round_up(wgsl, l.wgsl.alignment);
-                msl = round_up(msl, l.msl.alignment);
-                if (hlsl != wgsl || hlsl != msl)
-                {
-                    report(error_kind::layout_mismatch, id,
-                           cc::format("'{}.{}' is at byte {} in HLSL, at byte {} in WGSL and at byte {} in MSL", s.name,
-                                      member.name, hlsl, wgsl, msl));
-                    break;
-                }
-                hlsl += l.hlsl.size;
-                wgsl += l.wgsl.size;
-                msl += l.msl.size;
-            }
         }
+        for (auto const id : e.bindings)
+            validate_binding(m, id, errors);
     }
 
     void tree()
@@ -362,14 +291,9 @@ struct planner
                 .block_name = p.names.mint(cc::format("{}_data", s.name)),
                 .members = members_of(b.members, false),
             };
-            auto offset = 0;
-            for (auto& member : planned.members)
-            {
-                auto const l = layout_of(p.m, member.type).hlsl;
-                offset = hlsl_offset(offset, l);
-                member.offset = offset;
-                offset += l.size;
-            }
+            auto const placed = place_block(p.m, p.m.at(b.members));
+            for (auto i = isize(0); i < planned.members.size(); ++i)
+                planned.members[i].offset = placed.offsets[i];
             p.constants = cc::move(planned);
         }
     }
@@ -402,6 +326,113 @@ sgl::i32 sgl::emit::impl::buffer_of(plan const& p, check::symbol_id binding, i32
 bool sgl::emit::impl::is_builtin_type(check::checked_module const& m, check::type_id type)
 {
     return m.builtin_type_of(type) != nullptr;
+}
+
+void sgl::emit::impl::validate_edge_struct(check::checked_module const& m,
+                                           check::type_id type,
+                                           struct_role role,
+                                           cc::vector<error>& errors)
+{
+    auto const report = [&](error_kind kind, symbol_id symbol, cc::string detail)
+    { errors.push_back({.kind = kind, .symbol = symbol, .detail = cc::move(detail)}); };
+
+    auto const& info = m.at(type);
+    auto const name = m.name_of(type);
+    auto positions = 0;
+    for (auto const& member : m.at(info.members))
+    {
+        auto const* const record = m.builtin_type_of(member.type);
+        if (record == nullptr || !record->crosses_edges)
+            report(error_kind::unsupported, info.symbol,
+                   cc::format("a member of type '{}' in a {}: '{}.{}'", m.name_of(member.type), role_name(role), name,
+                              member.name));
+
+        if (member.is_position)
+        {
+            ++positions;
+            if (role != struct_role::stage_link)
+                report(error_kind::unsupported, info.symbol,
+                       cc::format("@position in a {}: '{}.{}'", role_name(role), name, member.name));
+            else if (positions == 2)
+                report(error_kind::unsupported, info.symbol,
+                       cc::format("a second @position: '{}.{}'", name, member.name));
+        }
+        else if (role == struct_role::vertex_input)
+        {
+            auto const n = cc::string_view(member.name);
+            auto const is_sv
+                = n.size() >= 3 && (n[0] == 's' || n[0] == 'S') && (n[1] == 'v' || n[1] == 'V') && n[2] == '_';
+            if (is_sv)
+                report(error_kind::system_value_semantic, info.symbol, cc::format("'{}.{}'", name, member.name));
+        }
+    }
+}
+
+void sgl::emit::impl::validate_binding(check::checked_module const& m, check::symbol_id id, cc::vector<error>& errors)
+{
+    auto const report = [&](error_kind kind, cc::string detail)
+    { errors.push_back({.kind = kind, .symbol = id, .detail = cc::move(detail)}); };
+
+    auto const& s = m.at(id);
+    auto const& b = m.bindings[s.info];
+    if (!b.is_inline)
+    {
+        // A resource group: every member is a buffer, since nothing else is built (the spec's bindings file).
+        for (auto const& member : m.at(b.members))
+            if (m.at(member.type).kind != check::type_kind::buffer)
+                report(error_kind::unsupported,
+                       cc::format("a binding member that is no buffer: '{}.{}'", s.name, member.name));
+        return;
+    }
+
+    auto is_placed = true;
+    for (auto const& member : m.at(b.members))
+        if (layout_of(m, member.type).hlsl.size == 0)
+        {
+            is_placed = false;
+            report(error_kind::unsupported, cc::format("a member of type '{}' in an @inline binding: '{}.{}'",
+                                                       m.name_of(member.type), s.name, member.name));
+        }
+    if (!is_placed)
+        return;
+
+    auto hlsl = 0;
+    auto wgsl = 0;
+    auto msl = 0;
+    for (auto const& member : m.at(b.members))
+    {
+        auto const l = layout_of(m, member.type);
+        hlsl = hlsl_offset(hlsl, l.hlsl);
+        wgsl = round_up(wgsl, l.wgsl.alignment);
+        msl = round_up(msl, l.msl.alignment);
+        if (hlsl != wgsl || hlsl != msl)
+        {
+            report(error_kind::layout_mismatch, cc::format("'{}.{}' is at byte {} in HLSL, at byte {} in WGSL and at "
+                                                           "byte {} in MSL",
+                                                           s.name, member.name, hlsl, wgsl, msl));
+            return;
+        }
+        hlsl += l.hlsl.size;
+        wgsl += l.wgsl.size;
+        msl += l.msl.size;
+    }
+}
+
+sgl::emit::impl::block_placement sgl::emit::impl::place_block(check::checked_module const& m,
+                                                              cc::span<check::member_info const> members)
+{
+    auto result = block_placement();
+    auto offset = 0;
+    for (auto const& member : members)
+    {
+        auto const l = layout_of(m, member.type).hlsl;
+        offset = hlsl_offset(offset, l);
+        result.offsets.push_back(offset);
+        result.sizes.push_back(l.size);
+        offset += l.size;
+    }
+    result.size = offset;
+    return result;
 }
 
 void sgl::emit::impl::validate(check::checked_module const& m, check::flat_entry_point const& e, cc::vector<error>& errors)

@@ -28,6 +28,15 @@ r.error()                                  // one line per diagnostic: `cube.sgl
 sgl::text_request                          // source, source_name ("<sgl>"), entry_point, stage (none = any), target
                                            // the entry point is found by NAME; source_name is never opened
 
+#include <shaped-graphics-language/driver/describe.hh>
+auto const d = sgl::describe({.source = text, .source_name = "cube.sgl"});
+                                           // -> cc::result<module_description, cc::string>: what the host side is generated from
+d.value().bindings                         // name, is_inline, members (constant: offset + size; buffer: slot + reflected_name), block_size
+d.value().structs                          // the @vertex / @pixel structs: name, edge, members with their location
+d.value().entry_points                     // name, stage, workgroup, bindings (the list as written)
+                                           // types are SGL spellings (`float3`, `mat4`); mapping them to a host is the reader's job
+                                           // only the file's own declarations, and only what the emitter would build
+
 #include <shaped-graphics-language/driver/prelude.hh>
 sgl::prelude_files()                       // -> cc::span<prelude_file const> { name, source }, in module order:
                                            // "builtins.sgl": GENERATED in memory from the builtin registry, never read from disk
