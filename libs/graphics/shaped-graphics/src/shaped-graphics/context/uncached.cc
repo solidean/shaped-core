@@ -93,7 +93,10 @@ cc::result<raster_pipeline_handle> context_uncached_scope::try_create_raster_pip
     if (auto conflict = impl::find_binding_conflict(stages); conflict.has_value())
         return cc::error(cc::move(conflict.value()));
 
-    return _ctx.try_create_raster_pipeline(desc, lifetime_scope::persistent);
+    auto r = _ctx.try_create_raster_pipeline(desc, lifetime_scope::persistent);
+    if (r.has_value())
+        impl::finish_raster_pipeline(const_cast<raster_pipeline&>(*r.value()), desc); // not yet shared with anyone
+    return r;
 }
 
 cc::shared_async<compute_pipeline_handle> context_uncached_scope::create_compute_pipeline_async(

@@ -47,6 +47,7 @@ def check_names(package: str, entries: SglEntries, taken: dict[str, str]) -> Non
     """
     declared = [(file, b["name"], f"`binding {b['name']}`") for file, b in entries.bindings]
     declared += [(file, v["name"], f"`@vertex struct {v['name']}`") for file, v in entries.vertex_inputs]
+    declared += [(file, t["name"], f"`@pixel struct {t['name']}`") for file, t in entries.render_targets]
     for file, name, what in declared:
         if name in taken:
             raise HostCodeError(
@@ -57,7 +58,7 @@ def check_names(package: str, entries: SglEntries, taken: dict[str, str]) -> Non
 
 def includes(entries: SglEntries) -> list[str]:
     """The headers the generated SGL types need, beyond what every package header includes."""
-    if not entries.bindings and not entries.vertex_inputs:
+    if not entries.bindings and not entries.vertex_inputs and not entries.render_targets:
         return []
     out = ["<clean-core/container/span.hh>", "<clean-core/container/vector.hh>",
            "<shaped-graphics/binding/binding.hh>", "<shaped-graphics/binding/binding_group.hh>"]
@@ -66,6 +67,10 @@ def includes(entries: SglEntries) -> list[str]:
                 "<shaped-graphics/resource/vertex_buffer_view.hh>", "<clean-core/container/fixed_array.hh>"]
     if any(not b["inline"] for _, b in entries.bindings):
         out.append("<shaped-graphics/resource/views.hh>")
+    if entries.render_targets:
+        out += ["<clean-core/container/fixed_vector.hh>", "<clean-core/error/optional.hh>",
+                "<clean-core/string/string_view.hh>", "<shaped-graphics/command_list/raster.hh>",
+                "<shaped-graphics/raster/raster_pipeline.hh>"]
     if any(b["inline"] for _, b in entries.bindings):
         out += ["<clean-core/container/fixed_array.hh>", "<clean-core/fwd.hh>"]
 
@@ -263,6 +268,8 @@ def emit_header(package: str, namespace: str, entries: SglEntries) -> str:
             out.append(emit_group(package, namespace, file, binding))
     for file, struct in entries.vertex_inputs:
         out.append(emit_vertex_input(package, namespace, file, struct))
+    for file, struct in entries.render_targets:
+        out.append(emit_render_target(package, namespace, file, struct))
     return "".join(out)
 
 
@@ -275,6 +282,8 @@ def emit_source(package: str, namespace: str, entries: SglEntries) -> str:
             out.append(emit_group_impl(package, namespace, file, binding))
     for file, struct in entries.vertex_inputs:
         out.append(emit_vertex_input_impl(package, namespace, file, struct))
+    for file, struct in entries.render_targets:
+        out.append(emit_render_target_impl(namespace, struct))
     return "".join(out)
 
 
@@ -424,5 +433,61 @@ def emit_vertex_input_impl(package: str, namespace: str, file: SglFile, struct: 
     if not single:
         out.append(f"\ncc::fixed_array<sg::vertex_buffer_view, {len(streams)}> {qualified}::buffers::views() const\n{{\n")
         out.append("    return {" + ", ".join(f"{stream}.as_vertex_buffer()" for stream, _, _ in streams) + "};\n}\n")
+    return "".join(out)
+
+
+# ---- a render target ---------------------------------------------------------------------------------------------------
+
+# What a generated render target declares beside its members, so no member may take one of these names.
+RENDER_TARGET_RESERVED = ("name", "depth_stencil", "states")
+
+
+def emit_render_target(package: str, namespace: str, file: SglFile, struct: dict) -> str:
+    """A `@pixel struct`: the color targets a rendering binds, by member name rather than by index.
+
+    It carries its qualified name, which a pipeline built from its `states` carries too, so sg refuses a draw that
+    mixes two target sets even where their formats agree.
+    """
+    name = struct["name"]
+    members = struct["members"]
+    for m in members:
+        if m["name"] in RENDER_TARGET_RESERVED:
+            raise HostCodeError(
+                f"shader package '{package}': '{file.path}' `@pixel struct {name}` member '{m['name']}' takes a name "
+                f"the generated target declares itself ({', '.join(RENDER_TARGET_RESERVED)})")
+
+    out = [f"\nnamespace {namespace}\n{{\n"]
+    out.append(f"/// `@pixel struct {name}` of {file.path}: the targets a rendering draws into, one per member. "
+               "Generated; do not edit.\n")
+    out.append(f"struct {name}\n{{\n")
+    out.append("    /// What a pipeline built from `states` and a rendering opened with this both carry, and sg compares.\n")
+    out.append(f'    static constexpr cc::string_view name = "{namespace}::{name}";\n\n')
+    for m in members:
+        out.append(f"    sg::color_target {m['name']}; ///< location {m['location']}\n")
+    out.append("    /// A `@pixel struct` says nothing about depth, so the depth target stands beside the colors.\n")
+    out.append("    cc::optional<sg::depth_stencil_target> depth_stencil;\n\n")
+    out.append("    /// Every target in location order, and the name; viewport and scissor stay unset.\n")
+    out.append("    [[nodiscard]] operator sg::rendering_info() const;\n\n")
+    out.append("    /// The pipeline's half: one state per target, which converts to `color_targets` in location order.\n")
+    out.append("    /// Set `target_set = name` beside it, or sg cannot refuse the pipeline in a rendering of another set.\n")
+    out.append("    struct states\n    {\n")
+    for m in members:
+        out.append(f"        sg::color_target_state {m['name']};\n")
+    out.append("\n")
+    out.append("        [[nodiscard]] operator cc::fixed_vector<sg::color_target_state, sg::max_color_targets>() const;\n")
+    out.append("    };\n")
+    out.append("};\n")
+    out.append(f"}} // namespace {namespace}\n")
+    return "".join(out)
+
+
+def emit_render_target_impl(namespace: str, struct: dict) -> str:
+    qualified = f"{namespace}::{struct['name']}"
+    names = [m["name"] for m in struct["members"]]
+    out = [f"\n{qualified}::operator sg::rendering_info() const\n{{\n"]
+    out.append("    return {.color_targets = {" + ", ".join(names) + "}, .depth_stencil_target = depth_stencil, "
+               ".target_set = name};\n}\n")
+    out.append(f"\n{qualified}::states::operator cc::fixed_vector<sg::color_target_state, sg::max_color_targets>() const\n{{\n")
+    out.append("    return {" + ", ".join(names) + "};\n}\n")
     return "".join(out)
 

@@ -326,6 +326,8 @@ cc::hash128 pipeline_cache::compute_raster_pipeline_key(raster_pipeline_descript
 
     b.add_pod(desc.topology);
     b.add_pod(desc.patch_control_points);
+    // A pipeline carries its target set's name, so two that differ only in it are two pipelines.
+    b.add_string(desc.target_set);
 
     // Field by field, like add_sampler: padding bytes would make the hash nondeterministic for logically-equal states.
     b.add_pod(desc.rasterization.fill);

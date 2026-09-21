@@ -134,6 +134,12 @@ protected:
     virtual void raster_begin_rendering(rendering_info const& info) = 0;
     virtual void raster_end_rendering() = 0;
 
+    // What every raster facade calls instead of the three seams they wrap.
+    // They track which target set is open, and refuse a pipeline that names another.
+    void open_rendering(rendering_info const& info);
+    void close_rendering();
+    void bind_raster_pipeline(raster_pipeline const& pipeline);
+
     // Raster draw recording (reached through cmd.raster / cmd.raster.manual).
     // bind_pipeline sets the graphics PSO + root signature and the IA topology, bind_group binds through
     // that root signature, and the set/bind ops configure IA + dynamic state.
@@ -182,4 +188,7 @@ protected:
 
     epoch _epoch = epoch::invalid;
     class context* _context = nullptr; // the creating context; outlives this list
+
+private:
+    cc::string _rendering_target_set; // of the open rendering, or empty
 };

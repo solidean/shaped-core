@@ -304,6 +304,10 @@ auto const pipeline = co_await shaders::double_values.compute.main.acquire_pipel
 //   members marked `@per_instance` / `@stream(name)` split it over buffers: then v::<stream> per buffer, in slot order,
 //   and v::buffers{.per_vertex = verts, .per_instance = insts}.views() for bind_vertex_buffers — typed, so a
 //   buffer of the wrong stream does not compile.
+// `@pixel struct target` -> shaders::target: one sg::color_target per member, by name, plus an optional depth_stencil.
+cmd.raster.render_to(shaders::target{.color = rt.cleared(c), .depth_stencil = depth.cleared(1.0f)}); // -> rendering_info
+//   the pipeline side: .color_targets = shaders::target::states{.color = {.format = f}}, .target_set = shaders::target::name
+//   sg then refuses to bind that pipeline in a rendering of another target set, even one of the same shape.
 ```
 
 ## include resolution

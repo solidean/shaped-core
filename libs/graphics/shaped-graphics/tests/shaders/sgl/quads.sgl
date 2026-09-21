@@ -23,3 +23,12 @@ struct pixel_input:
     return {
         color = p.color
     }
+
+// The same shape under another name, which is another target set to the host.
+@pixel struct overlay:
+    color: float4
+
+@pixel fun overlay_ps(p: pixel_input) -> overlay:
+    return {
+        color = p.color
+    }

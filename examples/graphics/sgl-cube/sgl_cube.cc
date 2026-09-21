@@ -4,7 +4,7 @@
 // Here the package is SGL, and slib's SGL compiler edge writes it as the text the backend's own compiler reads.
 // So nothing on the shader side forks: every `#if` left is about the host, which context to create and whether DXC exists.
 //
-// The host side is generated from cube.sgl too: the vertex struct, its layout and the inline constants are `shaders::`.
+// The host side is generated from cube.sgl too: the vertex struct, its layout, the render target and the inline constants are `shaders::`.
 //
 // Under `--capture` there is no window and no swapchain: the frame goes into a texture and is written out, which is
 // how the committed image is produced and how the example is verified on a machine with no display at all.
@@ -229,8 +229,9 @@ struct orbit_camera
          // Both default to OFF, and solid geometry needs both — a cube drawn without them shows whichever face
          // happened to be recorded last.
          .depth_stencil = {.depth_test = true, .depth_write = true},
-         .color_targets = {{.format = color_format}},
-         .depth_stencil_format = sg::pixel_format::depth32_float});
+         .color_targets = shaders::target::states{.color = {.format = color_format}},
+         .depth_stencil_format = sg::pixel_format::depth32_float,
+         .target_set = shaders::target::name});
     co_await cc::async_settled(built);
 
     auto const* const pipeline = built->try_value();
@@ -416,8 +417,8 @@ ASYNC_EXAMPLE("shaped-graphics/sgl-cube")
                                                                  .height = rt.height(),
                                                                  .usage = sg::texture_usage::depth_stencil});
 
-            auto pass = cmd->raster.render_to({.color_targets = {rt.cleared(tg::vec4f(0.09f, 0.10f, 0.13f, 1.0f))},
-                                               .depth_stencil_target = depth.as_depth_stencil_view().cleared(1.0f)});
+            auto pass = cmd->raster.render_to(shaders::target{.color = rt.cleared(tg::vec4f(0.09f, 0.10f, 0.13f, 1.0f)),
+                                                              .depth_stencil = depth.as_depth_stencil_view().cleared(1.0f)});
             pass.bind_pipeline(*pipeline);
             pass.bind_vertex_buffers({vertices.as_vertex_buffer()});
             pass.bind_index_buffer(index_buffer.as_index_buffer());

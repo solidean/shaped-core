@@ -1,6 +1,9 @@
+#include <clean-core/common/assertf.hh>
 #include <clean-core/common/utility.hh> // cc::move
+#include <clean-core/string/format.hh>
 #include <shaped-graphics/command_list/command_list.hh>
 #include <shaped-graphics/command_list/raster.hh>
+#include <shaped-graphics/raster/raster_pipeline.hh>
 
 namespace sg
 {
@@ -62,6 +65,27 @@ depth_stencil_target depth_stencil_view::discarded() &&
     return {.view = cc::move(*this), .op = target_op::discard};
 }
 
+void command_list::open_rendering(rendering_info const& info)
+{
+    _rendering_target_set = info.target_set;
+    raster_begin_rendering(info);
+}
+
+void command_list::close_rendering()
+{
+    _rendering_target_set.clear();
+    raster_end_rendering();
+}
+
+void command_list::bind_raster_pipeline(raster_pipeline const& pipeline)
+{
+    // Empty on either side is a hand-built description, which the backend still checks by format.
+    CC_ASSERTF(
+        pipeline.target_set().empty() || _rendering_target_set.empty() || pipeline.target_set() == _rendering_target_set,
+        "this pipeline draws into '{}', and the open rendering is '{}'", pipeline.target_set(), _rendering_target_set);
+    raster_bind_pipeline(pipeline);
+}
+
 rendering_scope::rendering_scope(class command_list& cmd, rendering_info const& info) : _cmd(cmd)
 {
     // Snapshot the target formats and extent so a routine recording into the scope reads them back rather than being told them again.
@@ -77,12 +101,12 @@ rendering_scope::rendering_scope(class command_list& cmd, rendering_info const& 
     else if (info.depth_stencil_target.has_value())
         _size = info.depth_stencil_target.value().view.size();
 
-    _cmd.raster_begin_rendering(info);
+    _cmd.open_rendering(info);
 }
 
 rendering_scope::~rendering_scope()
 {
-    _cmd.raster_end_rendering();
+    _cmd.close_rendering();
 }
 
 // Raster draw recording on the scope — the same thin forwarders as command_list_raster_scope.
@@ -90,7 +114,7 @@ rendering_scope::~rendering_scope()
 
 void rendering_scope::bind_pipeline(raster_pipeline const& pipeline)
 {
-    _cmd.raster_bind_pipeline(pipeline);
+    _cmd.bind_raster_pipeline(pipeline);
 }
 void rendering_scope::bind_group(int group_index, binding_group const& group)
 {
@@ -143,12 +167,12 @@ void rendering_scope::draw_indexed(draw_indexed_config const& config)
 
 void command_list_raster_manual_scope::begin_rendering(rendering_info const& info)
 {
-    _cmd.raster_begin_rendering(info);
+    _cmd.open_rendering(info);
 }
 
 void command_list_raster_manual_scope::end_rendering()
 {
-    _cmd.raster_end_rendering();
+    _cmd.close_rendering();
 }
 
 rendering_scope command_list_raster_scope::render_to(rendering_info const& info)
@@ -161,7 +185,7 @@ rendering_scope command_list_raster_scope::render_to(rendering_info const& info)
 
 void command_list_raster_scope::bind_pipeline(raster_pipeline const& pipeline)
 {
-    _cmd.raster_bind_pipeline(pipeline);
+    _cmd.bind_raster_pipeline(pipeline);
 }
 void command_list_raster_scope::bind_group(int group_index, binding_group const& group)
 {
@@ -214,7 +238,7 @@ void command_list_raster_scope::draw_indexed(draw_indexed_config const& config)
 
 void command_list_raster_manual_scope::bind_pipeline(raster_pipeline const& pipeline)
 {
-    _cmd.raster_bind_pipeline(pipeline);
+    _cmd.bind_raster_pipeline(pipeline);
 }
 void command_list_raster_manual_scope::bind_group(int group_index, binding_group const& group)
 {
