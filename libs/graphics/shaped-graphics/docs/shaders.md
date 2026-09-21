@@ -259,6 +259,13 @@ Four more entry kinds generate C++ from what the binding pass reads, rather than
 A group struct is data rather than an API.
 `ctx.cached.acquire_binding_group_layout<G>()`, `ctx.transient.create_binding_group(layout, G{...})` and `scope.bind<G>(group)` are the verbs, and they are sg's.
 
+**An SGL package generates from its declarations too, read by the SGL compiler rather than a parser in the build.**
+`cube.sgl:*` asks for everything a file declares, and `path:binding:name` for one group.
+A `binding` block becomes a group struct satisfying `sg::declared_binding_set` — the same data, with no `group_index`.
+SGL numbers a group by its position in each entry point's list, so the caller binds it with `bind_group(index, group)`, and one group type serves every slot.
+An `@inline binding` becomes a plain struct whose `to_block()` is the block the shader reads.
+[ShaderPackage.cmake](../../shaped-shader-library/cmake/ShaderPackage.cmake) has the kinds, and what a cross build needs to run the compiler.
+
 ## More
 
 - [shaped-shader-library](../../shaped-shader-library/readme.md) — packages, mounts, reload ([cheat-sheet](../../shaped-shader-library/cheat-sheet.md)).

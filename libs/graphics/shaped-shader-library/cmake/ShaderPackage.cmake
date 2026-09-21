@@ -73,6 +73,8 @@ set(SC_SHADER_PACKAGE_GRAMMAR "${CMAKE_CURRENT_LIST_DIR}/binding_grammar.py"
     CACHE INTERNAL "The binding grammar the generator imports")
 set(SC_SHADER_PACKAGE_SGL "${CMAKE_CURRENT_LIST_DIR}/sgl_description.py"
     CACHE INTERNAL "How the generator reads an SGL package, through the compiler")
+set(SC_SHADER_PACKAGE_SGL_HOST "${CMAKE_CURRENT_LIST_DIR}/sgl_host_code.py"
+    CACHE INTERNAL "The C++ an SGL package's typed entries become")
 
 set(SC_SGL_TOOL "" CACHE FILEPATH
     "A runnable `sgl`, for an SGL shader package's `*` and typed entries where the tree's own cannot run or is not built")
@@ -179,7 +181,7 @@ function(sc_add_shader_package)
         OUTPUT "${_gen_hh}" "${_gen_cc}"
         COMMAND uv run "${SC_SHADER_PACKAGE_SCRIPT}" --manifest "${_manifest}" --out-dir "${_gen_dir}" ${_sgl_args}
         DEPENDS "${_manifest}" "${SC_SHADER_PACKAGE_SCRIPT}" "${SC_SHADER_PACKAGE_GRAMMAR}" "${SC_SHADER_PACKAGE_SGL}"
-                ${_shader_files} ${_sgl_depends}
+                "${SC_SHADER_PACKAGE_SGL_HOST}" ${_shader_files} ${_sgl_depends}
         DEPFILE "${_gen_dir}/${PKG_NAME}.d"
         COMMENT "[slib] shader package ${PKG_NAME} (${PKG_TARGET})"
         VERBATIM

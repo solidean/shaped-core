@@ -140,5 +140,6 @@ Every "why" is mirrored in a `why/` folder beside its rules, and ideas that are 
 ## What does not exist yet
 
 Generics, methods and lambdas.
-GLSL, a Metal toolchain, the generated host mirror, and every binding that is not `@inline`.
+GLSL, a Metal toolchain, and the vertex-input and render-target halves of the generated host side.
+A binding member that is neither a buffer nor a constant of an `@inline` block, which is also what an ordinary group's implicit constant buffer waits on.
 Modules, interfaces and the parallel driver of [the compilation model](spec/incubator/compilation-model.md).

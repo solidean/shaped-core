@@ -7,3 +7,10 @@ binding work:
 
 @compute(64) fun main(@thread_id id: int3){work}:
     work.values[id.x] = work.values[id.x] * 2.0
+
+binding factor:
+    by: buffer[float]
+
+// The same `work`, listed second: here it is group 1, and nothing about its declaration changed.
+@compute(64) fun scaled(@thread_id id: int3){factor, work}:
+    work.values[id.x] = work.values[id.x] * factor.by[0]

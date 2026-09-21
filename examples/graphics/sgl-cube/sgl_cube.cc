@@ -453,7 +453,7 @@ ASYNC_EXAMPLE("shaped-graphics/sgl-cube")
             pass.bind_pipeline(*pipeline);
             pass.bind_vertex_buffers({vertices.as_vertex_buffer()});
             pass.bind_index_buffer(index_buffer.as_index_buffer());
-            pass.set_inline_constants(spun.view_projection(rt.aspect_ratio()));
+            pass.set_inline_constants(shaders::constants{.view_projection = spun.view_projection(rt.aspect_ratio())}.to_block());
             pass.draw_indexed({.index_range = {.offset = 0, .size = cube_index_count}});
         }
         auto const after = cmd->query.record_gpu_timestamp();

@@ -280,6 +280,20 @@ auto const g = ctx.transient.create_binding_group(layout, shaders::frame_binding
 scope.bind<shaders::frame_bindings>(*g);   // binds at G::group_index, on raster / compute / raytracing
 ```
 
+### an SGL package's generated types
+
+```cpp
+// `binding work` -> shaders::work: one sg::bound_view per buffer member, declared_bindings(), gather().
+//   sg::declared_binding_set, NOT declared_binding_group: no group_index, because SGL numbers a group by its
+//   position in each entry point's list. Bind it at the index the pipeline has it at:
+auto const layout = ctx.cached.acquire_binding_group_layout<shaders::work>();
+auto const group = ctx.transient.create_binding_group(layout, shaders::work{.values = buf.as_readwrite_buffer()});
+cmd.compute.bind_group(0, *group);        // group 0 of `main`, group 1 of an entry point listing {factor, work}
+// `@inline binding constants` -> shaders::constants: plain fields in C++'s layout, and the block the shader reads:
+pass.set_inline_constants(shaders::constants{.view_projection = vp}.to_block());
+// every name lives in the package namespace, so two files declaring one name is a generator error.
+```
+
 ## include resolution
 
 ```

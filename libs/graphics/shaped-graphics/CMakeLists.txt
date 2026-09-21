@@ -351,7 +351,8 @@ if(SC_BUILD_TESTS)
     if(_sg_backends)
         target_sources(shaped-graphics-test PRIVATE
             tests/shaders/shader_fixtures.cc
-            tests/compute/sgl-compute-test.cc
+            tests/shaders/sgl-package-test.cc
+            tests/compute/compute-test.cc
         )
         sc_add_shader_package(
             TARGET     shaped-graphics-test

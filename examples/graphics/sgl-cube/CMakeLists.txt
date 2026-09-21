@@ -52,9 +52,8 @@ target_compile_definitions(graphics-sgl-cube-example PRIVATE
     SGL_CUBE_BACKEND_WEBGPU=${_sgl_cube_backend_is_webgpu}
 )
 
-# One declaration for every backend.
-# SGL names the fragment stage `pixel`, and an SGL package has no `vertex_input` / `constants` mirrors yet --
-# the example writes that layout out instead.
+# One declaration for every backend, and one line for the whole file: its two entry points and its `@inline`
+# constants, which the example fills as `shaders::constants`.
 sc_add_shader_package(
     TARGET     graphics-sgl-cube-example
     NAME       sgl_cube_shaders
@@ -62,8 +61,7 @@ sc_add_shader_package(
     SOURCE_DIR shaders
     LANGUAGE   sgl
     SHADERS
-        cube.sgl:vertex:main_vs
-        cube.sgl:pixel:main_ps
+        cube.sgl:*
 )
 
 # A standalone page for the web build, exactly as rotating-cube makes one: a second link of the same sources.
