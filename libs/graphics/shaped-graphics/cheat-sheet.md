@@ -636,7 +636,8 @@ ctx.persistent.create_binding_group(group_layout, span<named_view const>, span<n
 ctx.transient.create_binding_group(group_layout, span<named_view const>, span<named_sampler const> dyn={})   // -> binding_group_handle per-epoch (ring-allocated); layouts/pipeline come from ctx.uncached (+ try_ twin)
 // both scopes take span<slotted_view const> as well — same validation, no name lookup; a slot naming a sampler or past the end is an error, never a wrong bind
 // a GENERATED group struct (slib's binding pass) is taken directly, against a layout acquired from its declarations:
-sg::declared_binding_group   // concept in binding/binding_group.hh — { group_index; declared_bindings(); declared_samplers(); gather() }
+sg::declared_binding_set     // concept in binding/binding_group.hh — { declared_bindings(); declared_samplers(); gather() }
+sg::declared_binding_group   // ... and `group_index`, which only `scope.bind<G>(group)` needs; an SGL group has none
 ctx.cached.acquire_binding_group_layout<G>()                    // -> binding_group_layout_handle from G's declarations alone
 ctx.cached.acquire_binding_group_layout<G>(span<named_sampler const>)  // + static samplers G left undeclared; one it DID declare asserts
 ctx.transient.create_binding_group(layout, G{...})              // -> binding_group_handle; the layout is PASSED IN, not re-acquired per call

@@ -52,8 +52,9 @@ void vulkan_command_list::compute_bind_group(int group_index, sg::binding_group 
 
     // The group's schema must be the one the pipeline layout declared at this slot, or the offset below addresses a
     // set with a different shape.
-    CC_ASSERT(vg->layout == _bound_pipeline_layout->_groups[group_index], "binding_group's layout does not match the "
-                                                                          "pipeline layout's slot");
+    CC_ASSERTF(vg->layout == _bound_pipeline_layout->_groups[group_index], "{}",
+               sg::impl::describe_layout_mismatch(group_index, _bound_pipeline_layout->_groups[group_index].get(),
+                                                  vg->layout.get()));
     auto const pinned = vg->layout->group_index();
     CC_ASSERTF(!pinned.has_value() || pinned.value() == u32(group_index),
                "binding_group is pinned to group index {} by its bindings and cannot be bound at slot {}",

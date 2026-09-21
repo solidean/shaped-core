@@ -238,7 +238,8 @@ void dx12_command_list::raster_bind_group(int group_index, sg::binding_group con
               "transient binding_group used past its epoch (its descriptors have been recycled)");
 
     auto const& gslot = _bound_raster_layout->groups[group_index];
-    CC_ASSERT(dg->layout == gslot.layout, "binding_group's layout does not match the pipeline layout's slot");
+    CC_ASSERTF(dg->layout == gslot.layout, "{}",
+               sg::impl::describe_layout_mismatch(group_index, gslot.layout.get(), dg->layout.get()));
     // A layout whose bindings name a descriptor set may only be bound at that one slot.
     auto const pinned = dg->layout->group_index();
     CC_ASSERTF(!pinned.has_value() || pinned.value() == u32(group_index),

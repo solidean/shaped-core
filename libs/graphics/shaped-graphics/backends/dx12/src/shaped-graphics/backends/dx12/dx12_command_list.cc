@@ -252,7 +252,8 @@ void dx12_command_list::compute_bind_group(int group_index, sg::binding_group co
     // The group's own schema must match what the pipeline layout declared at this slot (same root-signature
     // table shape), otherwise the descriptor tables below would be bound against the wrong parameters.
     auto const& gslot = _bound_pipeline_layout->groups[group_index];
-    CC_ASSERT(dg->layout == gslot.layout, "binding_group's layout does not match the pipeline layout's slot");
+    CC_ASSERTF(dg->layout == gslot.layout, "{}",
+               sg::impl::describe_layout_mismatch(group_index, gslot.layout.get(), dg->layout.get()));
     // A layout whose bindings name a descriptor set may only be bound at that one slot.
     auto const pinned = dg->layout->group_index();
     CC_ASSERTF(!pinned.has_value() || pinned.value() == u32(group_index),

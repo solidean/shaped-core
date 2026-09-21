@@ -238,8 +238,9 @@ void vulkan_command_list::raster_bind_group(int group_index, sg::binding_group c
     CC_ASSERT(vg != nullptr, "binding_group is not a vulkan binding_group");
     CC_ASSERT(!(vg->transient && vg->creation_epoch != _ctx.current_epoch()),
               "transient binding_group used past its epoch (its descriptors have been recycled)");
-    CC_ASSERT(vg->layout == _bound_raster_layout->_groups[group_index], "binding_group's layout does not match the "
-                                                                        "pipeline layout's slot");
+    CC_ASSERTF(vg->layout == _bound_raster_layout->_groups[group_index], "{}",
+               sg::impl::describe_layout_mismatch(group_index, _bound_raster_layout->_groups[group_index].get(),
+                                                  vg->layout.get()));
     auto const pinned = vg->layout->group_index();
     CC_ASSERTF(!pinned.has_value() || pinned.value() == u32(group_index),
                "binding_group is pinned to group index {} by its bindings and cannot be bound at slot {}",

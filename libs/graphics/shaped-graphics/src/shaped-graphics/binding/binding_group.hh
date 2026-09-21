@@ -92,25 +92,34 @@ void drop_static_samplers(binding_group_layout const& layout, cc::vector<named_s
 namespace sg
 {
 /// What a generated binding-group struct provides — the protocol slib's package generator emits, and the
-/// constraint on every `<G>` scope template that takes one.
+/// constraint on the `<G>` scope templates that acquire a layout for one and create one.
 ///
-/// A group struct is a plain aggregate of bound resources plus this: the group index the shader's attribute
-/// gave, the declarations the pass wrote the shader's own addresses from, and `gather`, which turns the fields
-/// into the slot-keyed supply `create_binding_group` takes.
-/// Everything a caller does with one — acquire its layout, create it, bind it — is a scope method constrained
-/// on this concept, so the generator emits data and never an API of its own.
+/// A group struct is a plain aggregate of bound resources plus this: the declarations the shader's own
+/// addresses were written from, and `gather`, which turns the fields into the slot-keyed supply
+/// `create_binding_group` takes.
+/// Everything a caller does with one is a scope method constrained on this concept or on `declared_binding_group`,
+/// so the generator emits data and never an API of its own.
 ///
 /// `declared_bindings` is the whole table rather than a stage's reflected subset, which is the property the
 /// binding pass exists to buy: a merge over three stages' reflected bindings can silently omit a stage, and a
 /// declaration cannot.
+///
+/// It says nothing about WHERE the group is bound, because that need not be a property of the group.
+/// An SGL group is numbered by its position in each entry point's list, so one group is 0 for one pipeline and 1
+/// for the next; its caller binds it with `bind_group(index, group)`.
 template <class G>
-concept declared_binding_group
+concept declared_binding_set
     = requires(G const& g, cc::vector<slotted_view>& views, cc::vector<named_sampler>& samplers) {
-          requires std::is_same_v<std::remove_cv_t<decltype(G::group_index)>, int>;
           requires std::is_convertible_v<decltype(G::declared_bindings()), cc::span<binding const>>;
           requires std::is_convertible_v<decltype(G::declared_samplers()), cc::span<named_sampler const>>;
           g.gather(views, samplers);
       };
+
+/// A `declared_binding_set` that also fixes its own group index, which `bind<G>` binds it at.
+/// An HLSL group is one: its index is written on the declaration, so no call site has to write the number.
+template <class G>
+concept declared_binding_group
+    = declared_binding_set<G> && std::is_same_v<std::remove_cv_t<decltype(G::group_index)>, int>;
 } // namespace sg
 
 namespace sg::impl

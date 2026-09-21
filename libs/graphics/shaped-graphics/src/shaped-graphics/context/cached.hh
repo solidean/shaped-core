@@ -1,7 +1,7 @@
 #pragma once
 
 #include <clean-core/container/span.hh>
-#include <shaped-graphics/binding/binding_group.hh> // sg::declared_binding_group, and the sampler merge below
+#include <shaped-graphics/binding/binding_group.hh> // sg::declared_binding_set, and the sampler merge below
 #include <shaped-graphics/fwd.hh>
 
 /// Cache facade for a context's built-in pipeline_cache, reached as `ctx.cached`.
@@ -22,7 +22,7 @@ public:
 
     /// The cached layout the generated group `G` declares — its bindings and the samplers it marked `static`.
     /// Constant rather than reflected: the same parse that wrote the shader's addresses produced this table.
-    template <declared_binding_group G>
+    template <declared_binding_set G>
     [[nodiscard]] binding_group_layout_handle acquire_binding_group_layout()
     {
         return acquire_binding_group_layout(G::declared_bindings(), G::declared_samplers());
@@ -31,7 +31,7 @@ public:
     /// The same, plus static samplers for the ones `G` left undeclared — what a runtime-generated permutation
     /// supplies.
     /// A declared sampler wins; see sg::impl::merge_declared_samplers for why supplying one is a mistake.
-    template <declared_binding_group G>
+    template <declared_binding_set G>
     [[nodiscard]] binding_group_layout_handle acquire_binding_group_layout(cc::span<named_sampler const> samplers)
     {
         return acquire_binding_group_layout(G::declared_bindings(),

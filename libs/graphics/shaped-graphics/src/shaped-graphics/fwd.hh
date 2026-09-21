@@ -244,7 +244,7 @@ struct named_sampler; // {name, sampler} — static sampler (group layout) / dyn
 
 // The protocol a generated binding-group struct provides, and what every `<G>` scope template is constrained on.
 // A concept cannot be forward-declared, so this is a pointer rather than a declaration:
-// `sg::declared_binding_group` lives in binding/binding_group.hh, beside sg::slotted_view.
+// `sg::declared_binding_set` and `sg::declared_binding_group` live in binding/binding_group.hh, beside sg::slotted_view.
 
 // The mutable builder above the immutable group: set descriptors one at a time, snapshot an immutable binding_group out of it.
 // See binding/staging_binding_group.hh.

@@ -672,8 +672,8 @@ void metal_command_list::bind_group_to_table(int group_index, binding_group cons
     CC_ASSERT(_bound_layout != nullptr, "bind a pipeline before binding its groups");
     auto const& declared = _bound_layout->description().groups;
     CC_ASSERT(group_index < isize(declared.size()), "the bound pipeline layout declares no group at this slot");
-    CC_ASSERT(declared[group_index].get() == &mtl_group.layout(), "binding_group's layout does not match the pipeline "
-                                                                  "layout's slot");
+    CC_ASSERTF(declared[group_index].get() == &mtl_group.layout(), "{}",
+               sg::impl::describe_layout_mismatch(group_index, declared[group_index].get(), &mtl_group.layout()));
 
     // The group's argument buffer address goes into the table's buffer slot, which IS the MSL [[buffer(N)]] index.
     argument_table()->setAddress(mtl_group.argument_address(), NS::UInteger(group_index));

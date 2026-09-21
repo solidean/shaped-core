@@ -4,7 +4,7 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/result.hh>
 #include <clean-core/thread/mutex.hh>
-#include <shaped-graphics/binding/binding_group.hh> // sg::declared_binding_group, sg::slotted_view
+#include <shaped-graphics/binding/binding_group.hh> // sg::declared_binding_set, sg::slotted_view
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/resource/buffer.hh>               // typed buffer<T> wrapper (returned by create_buffer below)
 #include <shaped-graphics/resource/texture_descriptions.hh> // shape-specific descriptions + the typed factories below
@@ -128,7 +128,7 @@ public:
     ///
     /// Throws sg::binding_group_exception on a layout that does not match `G`, and sg::device_lost_exception
     /// on a lost device.
-    template <declared_binding_group G>
+    template <declared_binding_set G>
     [[nodiscard]] binding_group_handle create_binding_group(binding_group_layout_handle const& layout, G const& group)
     {
         cc::vector<slotted_view> views;
