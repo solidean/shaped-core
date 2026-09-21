@@ -49,8 +49,14 @@ public:
     /// -1 for a static sampler, which is in neither table: it lives in the root signature.
     cc::vector<int> slot_by_binding;
 
+    /// The RegisterSpace of a range whose binding states none: the pipeline layout writes the group's slot in its place.
+    ///
+    /// A binding without a space is one that fixes no group of its own, which is every binding of an SGL group.
+    /// Its register space is then where the pipeline layout puts the group, the same rule vulkan applies to a set.
+    static constexpr UINT space_of_slot = ~UINT(0);
+
     // Descriptor ranges, in this group's table space, plus static sampler descs — assembled into the root signature by dx12_pipeline_layout.
-    // The range vectors must outlive its serialization, which the pipeline layout holding this group layout alive guarantees.
+    // A range may carry `space_of_slot`, so the pipeline layout copies them rather than pointing at these.
     cc::vector<D3D12_DESCRIPTOR_RANGE> view_ranges;
     cc::vector<D3D12_DESCRIPTOR_RANGE> sampler_ranges;
     cc::vector<D3D12_STATIC_SAMPLER_DESC> static_sampler_descs;

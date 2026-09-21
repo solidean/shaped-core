@@ -19,18 +19,28 @@ cc::result<dx12_pipeline_layout_handle> dx12_pipeline_layout::create(ID3D12Devic
         sg::impl::pipeline_layout_hash(groups, static_samplers, inline_constants));
 
     // One descriptor-table root parameter per group table, appended in group order (resource table then
-    // sampler table). The group layouts' range arrays back pDescriptorRanges and must outlive serialization
-    // below — they do, since pl holds each group layout alive.
+    // sampler table).
+    // The ranges are copied, because a range whose binding states no space takes its group's slot here, and a group
+    // layout is shared by every pipeline layout that places it, at whatever slot.
+    // Each group gets its own vector, reserved up front: pDescriptorRanges points into it until serialization below.
     cc::vector<D3D12_ROOT_PARAMETER> params;
     cc::vector<D3D12_STATIC_SAMPLER_DESC> static_sampler_descs;
+    cc::vector<cc::vector<D3D12_DESCRIPTOR_RANGE>> placed_ranges;
+    placed_ranges.reserve(2 * groups.size());
 
-    auto const add_table = [&](cc::span<D3D12_DESCRIPTOR_RANGE const> ranges)
+    auto const add_table = [&](cc::span<D3D12_DESCRIPTOR_RANGE const> ranges, UINT group_slot_index)
     {
+        auto& placed = placed_ranges.emplace_back();
+        placed.push_back_range(ranges);
+        for (auto& r : placed)
+            if (r.RegisterSpace == dx12_binding_group_layout::space_of_slot)
+                r.RegisterSpace = group_slot_index;
+
         D3D12_ROOT_PARAMETER param = {};
         param.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
         param.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL; // compute uses ALL
-        param.DescriptorTable.NumDescriptorRanges = UINT(ranges.size());
-        param.DescriptorTable.pDescriptorRanges = ranges.data();
+        param.DescriptorTable.NumDescriptorRanges = UINT(placed.size());
+        param.DescriptorTable.pDescriptorRanges = placed.data();
         int const index = int(params.size());
         params.push_back(param);
         return index;
@@ -40,13 +50,14 @@ cc::result<dx12_pipeline_layout_handle> dx12_pipeline_layout::create(ID3D12Devic
     {
         auto const gl = std::dynamic_pointer_cast<dx12_binding_group_layout const>(g);
         CC_ASSERT(gl != nullptr, "binding_group_layout is not a dx12 binding_group_layout");
+        auto const slot_index = UINT(pl->groups.size());
 
         group_slot slot;
         slot.layout = gl;
         if (!gl->view_ranges.empty())
-            slot.resource_root_param = add_table(gl->view_ranges);
+            slot.resource_root_param = add_table(gl->view_ranges, slot_index);
         if (!gl->sampler_ranges.empty())
-            slot.sampler_root_param = add_table(gl->sampler_ranges);
+            slot.sampler_root_param = add_table(gl->sampler_ranges, slot_index);
         for (auto const& ss : gl->static_sampler_descs)
             static_sampler_descs.push_back(ss);
         pl->groups.push_back(cc::move(slot));
