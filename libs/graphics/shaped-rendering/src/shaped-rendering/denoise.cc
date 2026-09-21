@@ -226,7 +226,10 @@ denoise_guide_set required_guides(denoise_method m)
     case denoise_method::fsr_rr:
         return g::albedo | g::normal | g::roughness | g::depth | g::motion;
     case denoise_method::nrd:
-        return g::normal | g::roughness | g::depth | g::motion | g::hit_distance | g::split_diffuse_specular;
+        // The albedo pair is required rather than optional: NRD asks for radiance with no material information in it,
+        // and the member divides both out rather than handing it texture to filter as noise.
+        return g::albedo | g::specular_albedo | g::normal | g::roughness | g::depth | g::motion | g::hit_distance
+             | g::split_diffuse_specular;
     case denoise_method::atrous:
     case denoise_method::oidn:
     case denoise_method::none:

@@ -118,37 +118,30 @@ TEST("sr - an uncreated NRD session is inert")
     CHECK(!session.is_valid());
     CHECK(!session.is_ready());
 }
-
 // The member, end to end: guides in, one denoised image out.
 //
-// A constant radiance field is the one input whose answer is known without reimplementing REBLUR.
-// Blurring a constant is that constant, accumulating it is that constant, and reprojecting it across zero motion is
-// that constant — so whatever the denoiser does inside, the output has to come back as what went in.
-//
-// That makes this a real check on every encoding step between us and NRD rather than a smoke test.
-// The radiance is packed into YCoCg with a normalized hit distance in alpha and decoded back out; a pack that dropped
-// the chroma, a resolve that skipped the decode, or a repack that fed the diffuse texture to both lobes all land on a
-// different colour, and none of them would report an error.
-ASYNC_INVOCABLE_TEST("sr - NRD returns a constant radiance field unchanged",
-                     (sg::context_handle const& ctx_h),
-                     exclusive("slib-shader-library"))
+// Both tests below light one flat surface uniformly and hand NRD what a tracer would have produced for it, so the
+// answer is known without reimplementing REBLUR.
+// Radiance picked free of the albedo it supposedly came off — a specular of 0.3 from an F0 of 0.04 — de-modulates to
+// twenty times what any real frame carries, and REBLUR then reshapes a signal no tracer would have handed it.
+
+namespace
 {
-    REQUIRE(ctx_h != nullptr);
-    auto& ctx = *ctx_h;
+/// Big enough that REBLUR's filters are local to it.
+/// Its history-fix pass samples at a stride of 14 texels and its blur radius reaches 30, so on a 16-texel image every
+/// pixel mixes the whole picture and nothing about the de-modulation can be told from its absence.
+constexpr auto k_size = 64;
 
-    auto lib = slib::shader_library();
-    auto compiler = slib::create_dxc_compiler();
-    if (!compiler.has_value())
-        SKIP("no DXC compiler to build NRD's repack and resolve passes");
-    lib.add_compiler(cc::move(compiler.value()));
-    lib.add_package(sr::shader_package());
+constexpr auto k_irradiance = 0.5f;
+constexpr auto k_specular_radiance = 0.02f;
+constexpr auto k_specular_albedo = 0.04f;
 
-    sr::nrd_denoise_routine::prewarm(ctx);
-    (void)co_await ctx.routines.idle_completion();
-
-    constexpr auto k_size = 16;
-    auto const extent = tg::vec2i(k_size, k_size);
-
+/// Denoises one flat, uniformly lit surface whose diffuse albedo is `albedo`, and reads the result back.
+///
+/// The radiance follows the albedo, which is what a uniformly lit surface produces and what makes the de-modulated
+/// signal the thing REBLUR is actually meant to see.
+[[nodiscard]] cc::shared_async<cc::vector<tg::vec4f>> denoise_lit_surface(sg::context& ctx, cc::vector<tg::vec4f> albedo)
+{
     auto const make = [&](sg::pixel_format format)
     {
         return ctx.persistent.create_texture_2d({.format = format,
@@ -166,11 +159,14 @@ ASYNC_INVOCABLE_TEST("sr - NRD returns a constant radiance field unchanged",
     auto const depth = make(sg::pixel_format::rgba32_float);
     auto const motion = make(sg::pixel_format::rgba32_float);
     auto const hit_distance = make(sg::pixel_format::rg32_float);
+    auto const albedo_texture = make(sg::pixel_format::rgba32_float);
+    auto const specular_albedo = make(sg::pixel_format::rgba32_float);
     auto const output = make(sg::pixel_format::rgba32_float);
 
-    // Channels that differ from one another, so a repack that collapsed colour onto luminance cannot pass.
-    auto const diffuse_radiance = tg::vec3f(0.2f, 0.5f, 0.9f);
-    auto const specular_radiance = tg::vec3f(0.3f, 0.1f, 0.05f);
+    auto lit = cc::vector<tg::vec4f>();
+    lit.reserve(albedo.size());
+    for (auto const& a : albedo)
+        lit.push_back(a * k_irradiance);
 
     auto const fill = [&](sg::command_list& cmd, sg::texture_2d const& t, tg::vec4f v)
     {
@@ -179,18 +175,19 @@ ASYNC_INVOCABLE_TEST("sr - NRD returns a constant radiance field unchanged",
     };
 
     auto history = sr::denoise_history();
-    auto outcome = sr::denoise_outcome{};
 
-    // The session's own pipelines build after the first call reaches it, so the first call reports pending by design.
-    // Run until it stops doing so rather than assuming a fixed number of frames, and keep going for one more after
-    // that: a reset frame and a continued frame are different dispatch lists.
+    // Past REBLUR's `historyFixFrameNum` of 3, because that pass is a wide blur meant to carry a young history and
+    // stops once there is one — measuring inside it would be measuring the transient rather than the member.
+    // The session's own pipelines build after the first call reaches it, so the first calls report pending by design.
     auto denoised_frames = 0;
-    for (auto attempt = 0; attempt < 8 && denoised_frames < 2; ++attempt)
+    for (auto attempt = 0; attempt < 16 && denoised_frames < 6; ++attempt)
     {
         auto cmd = ctx.create_command_list();
 
-        fill(*cmd, diffuse, tg::vec4f(diffuse_radiance[0], diffuse_radiance[1], diffuse_radiance[2], 0));
-        fill(*cmd, specular, tg::vec4f(specular_radiance[0], specular_radiance[1], specular_radiance[2], 0));
+        cmd->upload.bytes_to_texture(diffuse.raw(), cc::span<tg::vec4f const>(lit).as_bytes());
+        cmd->upload.bytes_to_texture(albedo_texture.raw(), cc::span<tg::vec4f const>(albedo).as_bytes());
+        fill(*cmd, specular, tg::vec4f(k_specular_radiance, k_specular_radiance, k_specular_radiance, 0));
+        fill(*cmd, specular_albedo, tg::vec4f(k_specular_albedo, k_specular_albedo, k_specular_albedo, 0));
         fill(*cmd, normal, tg::vec4f(0, 0, 1, 0));
         fill(*cmd, roughness, tg::vec4f(0.5f, 0, 0, 0));
         fill(*cmd, depth, tg::vec4f(5.0f, 0, 0, 0));
@@ -203,15 +200,19 @@ ASYNC_INVOCABLE_TEST("sr - NRD returns a constant radiance field unchanged",
         auto const in = sr::denoise_inputs{
             .color = diffuse,
             .specular = specular,
-            .guides
-            = {.normal = normal, .roughness = roughness, .depth = depth, .motion = motion, .hit_distance = hit_distance},
+            .guides = {.albedo = albedo_texture,
+                       .specular_albedo = specular_albedo,
+                       .normal = normal,
+                       .roughness = roughness,
+                       .depth = depth,
+                       .motion = motion,
+                       .hit_distance = hit_distance},
             .output = output,
         };
 
-        outcome = sr::nrd_denoise_routine::execute(*cmd, in, history);
+        auto const outcome = sr::nrd_denoise_routine::execute(*cmd, in, history);
         REQUIRE(outcome.status != sr::denoise_status::unsupported);
         REQUIRE(outcome.status != sr::denoise_status::failed);
-
         if (outcome.is_denoised())
             ++denoised_frames;
 
@@ -222,7 +223,7 @@ ASYNC_INVOCABLE_TEST("sr - NRD returns a constant radiance field unchanged",
         co_await cc::async_settled(cc::async_backlog::settled(backlogs));
     }
 
-    REQUIRE(denoised_frames == 2).context("NRD never produced a denoised frame");
+    REQUIRE(denoised_frames == 6).context("NRD never produced a denoised frame");
 
     auto cmd = ctx.create_command_list();
     auto const readback = sg::data_future<tg::vec4f>(cmd->download.bytes_from_texture(output.raw()));
@@ -232,10 +233,108 @@ ASYNC_INVOCABLE_TEST("sr - NRD returns a constant radiance field unchanged",
     auto const pixels = co_await readback.data();
     REQUIRE(pixels.size() == k_size * k_size);
 
-    // The interior, away from the border REBLUR's spatial passes clamp against.
-    auto const expected = diffuse_radiance + specular_radiance;
-    auto const& centre = pixels[(k_size / 2) * k_size + k_size / 2];
+    auto out = cc::vector<tg::vec4f>();
+    out.reserve(pixels.size());
+    for (auto i = isize(0); i < pixels.size(); ++i)
+        out.push_back(pixels[i]);
+    co_return out;
+}
+} // namespace
+
+// The encodings, end to end, on a surface with nothing for REBLUR to blur.
+//
+// A uniform albedo means the de-modulated signal is uniform too, so whatever REBLUR does inside, the output has to
+// come back as what went in — which makes this a check on every encoding step between us and NRD.
+// The radiance is divided by a material factor, packed into YCoCg with a normalized hit distance in alpha, decoded,
+// and multiplied back; a pack that dropped the chroma, a resolve that skipped the decode, or one that lost the factor
+// all land on a different colour, and none of them would report an error.
+ASYNC_INVOCABLE_TEST("sr - NRD returns a uniformly lit surface unchanged",
+                     (sg::context_handle const& ctx_h),
+                     exclusive("slib-shader-library"))
+{
+    REQUIRE(ctx_h != nullptr);
+    auto& ctx = *ctx_h;
+
+    auto lib = slib::shader_library();
+    auto compiler = slib::create_dxc_compiler();
+    if (!compiler.has_value())
+        SKIP("no DXC compiler to build NRD's repack and resolve passes");
+    lib.add_compiler(cc::move(compiler.value()));
+    lib.add_package(sr::shader_package());
+    if (!sr::query_denoise_support(ctx).nrd)
+        SKIP("NRD was not fetched into this build (extern/nrd/fetch-nrd.py)");
+
+    sr::nrd_denoise_routine::prewarm(ctx);
+    (void)co_await ctx.routines.idle_completion();
+
+    // Channels that differ from one another, so a repack that collapsed colour onto luminance cannot pass.
+    auto const albedo = tg::vec4f(0.85f, 0.7f, 0.2f, 0);
+    auto const out = co_await denoise_lit_surface(ctx, cc::vector<tg::vec4f>::create_filled(k_size * k_size, albedo));
+
+    for (auto const q : {tg::vec2i(16, 16), tg::vec2i(48, 16), tg::vec2i(48, 48)})
+        for (auto c = 0; c < 3; ++c)
+        {
+            auto const expected = albedo[c] * k_irradiance + k_specular_radiance;
+            auto const got = out[q[1] * k_size + q[0]][c];
+            CHECK(tg::abs(got - expected) < 0.02f)
+                .context(cc::format("pixel {},{} channel {}: got {}, expected {}", q[0], q[1], c, got, expected));
+        }
+}
+
+// De-modulation, which is the difference between denoising a surface and smearing its texture.
+//
+// A checkerboard albedo under one uniform light is the case it exists for: nothing in the normal or the depth says
+// there is an edge there, so REBLUR has every reason to average across it, and only dividing the albedo out keeps it
+// from doing so.
+//
+// Asserted as contrast RETAINED rather than as an exact value, because de-modulation is partial by construction —
+// NRD floors both factors well above zero and calls the specular half a biased solution — so some of the contrast
+// does reach the blur.
+// The bound has room on both sides rather than being fitted to what this machine returns: de-modulated, the three
+// channels keep 0.85, 0.90 and 0.93 of the contrast; with the division and its inverse removed they keep 0.09, 0.09
+// and 0.02, because REBLUR then sees the full seventeen-to-one radiance ratio and pulls the two cells together.
+ASYNC_INVOCABLE_TEST("sr - NRD keeps a surface's texture rather than filtering it as noise",
+                     (sg::context_handle const& ctx_h),
+                     exclusive("slib-shader-library"))
+{
+    REQUIRE(ctx_h != nullptr);
+    auto& ctx = *ctx_h;
+
+    auto lib = slib::shader_library();
+    auto compiler = slib::create_dxc_compiler();
+    if (!compiler.has_value())
+        SKIP("no DXC compiler to build NRD's repack and resolve passes");
+    lib.add_compiler(cc::move(compiler.value()));
+    lib.add_package(sr::shader_package());
+    if (!sr::query_denoise_support(ctx).nrd)
+        SKIP("NRD was not fetched into this build (extern/nrd/fetch-nrd.py)");
+
+    sr::nrd_denoise_routine::prewarm(ctx);
+    (void)co_await ctx.routines.idle_completion();
+
+    auto const bright = tg::vec4f(0.85f, 0.7f, 0.2f, 0);
+    auto const dark = tg::vec4f(0.05f, 0.1f, 0.6f, 0);
+
+    auto albedo = cc::vector<tg::vec4f>();
+    albedo.reserve(k_size * k_size);
+    for (auto y = 0; y < k_size; ++y)
+        for (auto x = 0; x < k_size; ++x)
+            albedo.push_back((x / 32 + y / 32) % 2 == 0 ? bright : dark);
+
+    auto const out = co_await denoise_lit_surface(ctx, cc::move(albedo));
+
+    // Cell centres, as far from an edge as a two-by-two checker allows.
+    auto const bright_out = out[16 * k_size + 16];
+    auto const dark_out = out[16 * k_size + 48];
+
     for (auto c = 0; c < 3; ++c)
-        CHECK(tg::abs(centre[c] - expected[c]) < 0.02f).context(cc::format("channel {}", c));
+    {
+        auto const in_contrast = (bright[c] - dark[c]) * k_irradiance;
+        auto const out_contrast = bright_out[c] - dark_out[c];
+        auto const retained = out_contrast / in_contrast;
+        CHECK(retained > 0.6f)
+            .context(cc::format("channel {}: kept {} of the input contrast ({} of {})", c, retained, out_contrast,
+                                in_contrast));
+    }
 }
 #endif

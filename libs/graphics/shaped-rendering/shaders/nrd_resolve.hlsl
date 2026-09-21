@@ -1,7 +1,7 @@
 // NRD's two denoised signals, decoded and summed back into one image.
 //
-// What REBLUR writes is not radiance: it is YCoCg with a normalized hit distance in alpha, so a pass that simply added
-// the two textures would produce a plausible-looking wrong picture.
+// What REBLUR writes is not radiance: it is YCoCg with a normalized hit distance in alpha, and it is de-modulated —
+// so a pass that simply added the two textures would produce a plausible-looking wrong picture.
 // The decode is NRD's own, for the reason nrd_repack.hlsl gives.
 //
 // Every address below is written by slib's binding pass; see shaped-shader-library/docs/binding-preprocessor.md.
@@ -13,6 +13,12 @@ namespace nrd_resolve_bindings
 {
     Texture2D<float4> gDiffuseRadianceHitDistance;  // OUT_DIFF_RADIANCE_HITDIST
     Texture2D<float4> gSpecularRadianceHitDistance; // OUT_SPEC_RADIANCE_HITDIST
+
+    // What nrd_repack.hlsl divided the two signals by, read back rather than recomputed.
+    // NRD requires the de-modulation and the modulation to use the same factors, and storing them is what makes that
+    // structural instead of two shaders independently agreeing on a camera, a normal and a roughness.
+    Texture2D<float4> gDiffuseFactor;
+    Texture2D<float4> gSpecularFactor;
 
     RWTexture2D<float4> gOutput;
 }
@@ -28,8 +34,10 @@ using namespace nrd_resolve_bindings;
 
     int3 p = int3(int2(id.xy), 0);
 
-    float3 const diffuse = REBLUR_BackEnd_UnpackRadianceAndNormHitDist(gDiffuseRadianceHitDistance.Load(p)).rgb;
-    float3 const specular = REBLUR_BackEnd_UnpackRadianceAndNormHitDist(gSpecularRadianceHitDistance.Load(p)).rgb;
+    float3 const diffuse
+        = REBLUR_BackEnd_UnpackRadianceAndNormHitDist(gDiffuseRadianceHitDistance.Load(p)).rgb * gDiffuseFactor.Load(p).rgb;
+    float3 const specular
+        = REBLUR_BackEnd_UnpackRadianceAndNormHitDist(gSpecularRadianceHitDistance.Load(p)).rgb * gSpecularFactor.Load(p).rgb;
 
     gOutput[id.xy] = float4(diffuse + specular, 1);
 }

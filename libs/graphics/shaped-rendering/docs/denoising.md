@@ -42,11 +42,16 @@ So `nrd_repack.hlsl` and `nrd_resolve.hlsl` include NRD's own `NRD.hlsli`.
 A reimplementation that drifted would be a worse image rather than a build error.
 `nrd_session::create` refuses outright a library whose reported encodings are not the ones the repack target's format assumes.
 
-**What it is not given yet is de-modulated radiance, and that is a known quality gap.**
-NRD's input contract asks that radiance carry no material information: that albedo be divided out before denoising and multiplied back after.
-That is what keeps texture detail from being filtered as though it were noise.
-The member hands it the radiance the tracer produced instead, which is correct but blurs texture along with the noise.
-Everything needed to close it already reaches the member: `albedo` and `specular_albedo` are guides the call carries, and the two passes that would divide and multiply are the repack and the resolve.
+**The radiance handed over is de-modulated, which is what keeps a surface's texture from being filtered as noise.**
+NRD's input contract asks that radiance carry no material information, and `NRD_MaterialFactors` is the helper it ships for the purpose.
+So that is what the repack divides by and the resolve multiplies back.
+The factors are written to scratch by the repack rather than recomputed by the resolve, because NRD requires both directions to use the same ones.
+Storing them makes that structural, instead of two passes independently agreeing on a camera, a normal and a roughness.
+That is why `albedo` and `specular_albedo` are REQUIRED guides for this member rather than optional ones.
+
+It is partial by construction, because NRD floors both factors well above zero and calls the specular half a biased solution.
+On a checkerboard albedo under one flat normal, the case where nothing but the albedo says there is an edge, the member keeps about nine tenths of the contrast.
+Feeding radiance straight through keeps under one tenth of it.
 
 **Two conventions run the other way round from ours, and both are carried in settings rather than in a repack.**
 NRD reads a motion vector as `pixelUvPrev = pixelUv + mv`, so its units are UV and its direction is previous minus current, where ours is pixels and current minus previous.

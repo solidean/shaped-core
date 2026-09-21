@@ -61,6 +61,10 @@ enum image_slot
     slot_specular_in = 3,
     slot_diffuse_out = 4,
     slot_specular_out = 5,
+
+    /// What the repack divided each signal by, which the resolve multiplies back.
+    slot_diffuse_factor = 6,
+    slot_specular_factor = 7,
 };
 } // namespace
 
@@ -159,7 +163,8 @@ denoise_outcome nrd_denoise_routine::execute(sg::command_list& cmd,
     // whose encoding says otherwise, so this pair cannot drift apart silently.
     (void)impl::ensure_image(ctx, history._state[slot_normal_roughness], extent, sg::pixel_format::rgb10a2_unorm);
     (void)impl::ensure_image(ctx, history._state[slot_view_z], extent, sg::pixel_format::r32_float);
-    for (auto const slot : {slot_diffuse_in, slot_specular_in, slot_diffuse_out, slot_specular_out})
+    for (auto const slot : {slot_diffuse_in, slot_specular_in, slot_diffuse_out, slot_specular_out, slot_diffuse_factor,
+                            slot_specular_factor})
         (void)impl::ensure_image(ctx, history._state[slot], extent, sg::pixel_format::rgba16_float);
 
     if (history._vendor_state == nullptr)
@@ -193,18 +198,32 @@ denoise_outcome nrd_denoise_routine::execute(sg::command_list& cmd,
                                   .gRoughness = in.guides.roughness.as_readonly_view(),
                                   .gDepth = in.guides.depth.as_readonly_view(),
                                   .gHitDistance = in.guides.hit_distance.as_readonly_view(),
+                                  .gAlbedo = in.guides.albedo.as_readonly_view(),
+                                  .gSpecularAlbedo = in.guides.specular_albedo.as_readonly_view(),
                                   .gNormalRoughness = history._state[slot_normal_roughness].as_readwrite_view(),
                                   .gViewZ = history._state[slot_view_z].as_readwrite_view(),
                                   .gDiffuseRadianceHitDistance = history._state[slot_diffuse_in].as_readwrite_view(),
                                   .gSpecularRadianceHitDistance = history._state[slot_specular_in].as_readwrite_view(),
+                                  .gDiffuseFactor = history._state[slot_diffuse_factor].as_readwrite_view(),
+                                  .gSpecularFactor = history._state[slot_specular_factor].as_readwrite_view(),
                               });
 
     auto const hit_distance = impl::nrd_hit_distance_parameters();
+
+    // The rotation of world-to-view by rows, and the projection's diagonal — between them enough to turn a pixel into
+    // a view ray and a world normal into a view-space one, which is all the de-modulation reads.
+    auto const& w2v = in.guides.world_to_view;
+    auto const& v2c = in.guides.view_to_clip;
+
     auto const repack_constants = shaders::nrd_repack_constants{
         .hit_distance_a = hit_distance[0],
         .hit_distance_b = hit_distance[1],
         .hit_distance_c = hit_distance[2],
         .sky_view_z = impl::nrd_sky_view_z(),
+        .world_to_view_row0 = {w2v[0, 0], w2v[1, 0], w2v[2, 0], 0.0f},
+        .world_to_view_row1 = {w2v[0, 1], w2v[1, 1], w2v[2, 1], 0.0f},
+        .world_to_view_row2 = {w2v[0, 2], w2v[1, 2], w2v[2, 2], 0.0f},
+        .tan_half = {v2c[0, 0] != 0.0f ? 1.0f / v2c[0, 0] : 1.0f, v2c[1, 1] != 0.0f ? 1.0f / v2c[1, 1] : 1.0f},
     };
 
     cmd.compute.bind_pipeline(*self->_repack_pipeline);
@@ -242,6 +261,8 @@ denoise_outcome nrd_denoise_routine::execute(sg::command_list& cmd,
         self->_resolve_layout, shaders::nrd_resolve_bindings{
                                    .gDiffuseRadianceHitDistance = history._state[slot_diffuse_out].as_readonly_view(),
                                    .gSpecularRadianceHitDistance = history._state[slot_specular_out].as_readonly_view(),
+                                   .gDiffuseFactor = history._state[slot_diffuse_factor].as_readonly_view(),
+                                   .gSpecularFactor = history._state[slot_specular_factor].as_readonly_view(),
                                    .gOutput = in.output.as_readwrite_view(),
                                });
 
