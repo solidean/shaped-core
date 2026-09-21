@@ -71,12 +71,35 @@ public:
     oidn_network(oidn_network const&) = delete;
     oidn_network& operator=(oidn_network const&) = delete;
 
+    /// How large a tile the network runs at by default, in pixels, before padding.
+    ///
+    /// The twenty-five feature maps are what this buys down: they cost 2.7 GiB for a whole 1080p frame and about
+    /// 90 MiB at this size, which is the whole reason tiling exists here.
+    static constexpr int k_default_tile = 256;
+
+    /// How much of a tile is discarded on each side, so its interior sees what a whole-image run would.
+    ///
+    /// 80 is where the network's receptive field is covered, and it was measured rather than derived: the same image
+    /// tiled and whole agrees BIT FOR BIT at 80, is 1.4e-03 out at 64, and 2.8e-01 out with no overlap at all.
+    /// So this is not a tolerance to trade against — below it the answer is wrong, and above it nothing improves.
+    static constexpr int k_tile_overlap = 80;
+
     /// Reads the weights, uploads them, and allocates every feature map for an image of `image_extent`.
     ///
     /// The TENSORS are allocated at that size rounded up to a multiple of 16, because four pools halve it four times.
     /// The padding repeats the image's edge rather than being black, and nothing is written back for it.
     /// False when the weights are missing or are not the network this was written against, which is logged once.
-    [[nodiscard]] bool create(sg::context& ctx, tg::vec2i image_extent);
+    ///
+    /// `max_tile` caps the tensors rather than the image: an image larger than it is run in overlapping tiles, and
+    /// only a tile's interior reaches the output.
+    /// An image that fits in one tile is run whole, with no overlap and no seams to answer for.
+    ///
+    /// `overlap` is how much of each tile is discarded per side; it is a parameter so a test can price it rather than
+    /// trust it, and `k_tile_overlap` is the figure that pricing settled on.
+    [[nodiscard]] bool create(sg::context& ctx,
+                              tg::vec2i image_extent,
+                              int max_tile = k_default_tile,
+                              int overlap = k_tile_overlap);
 
     /// Builds whichever pipelines have finished compiling since the last call.
     ///
@@ -92,8 +115,15 @@ public:
     /// The image this was created for, which is what `execute` reads and writes.
     [[nodiscard]] tg::vec2i extent() const { return _image_extent; }
 
-    /// The tensors' extent, which is `extent()` rounded up to a multiple of 16.
+    /// The tensors' extent, which is one tile rounded up to a multiple of 16 — the whole image when it fits in one.
     [[nodiscard]] tg::vec2i padded_extent() const { return _extent; }
+
+    /// How many tiles one `execute` runs, which is 1 whenever the image fits a tile.
+    [[nodiscard]] tg::vec2i tile_counts() const { return _tile_counts; }
+
+    /// How much of a tile is kept, and how much of it is the overlap discarded on each side.
+    [[nodiscard]] tg::vec2i tile_step() const { return _tile_step; }
+    [[nodiscard]] int tile_overlap() const { return _overlap; }
 
     /// What the feature maps cost at `image_extent`, in bytes, without allocating anything.
     ///
@@ -102,8 +132,8 @@ public:
     /// The weights themselves are not counted: they are a fixed few megabytes and are shared by nothing here.
     [[nodiscard]] i64 feature_bytes_for(tg::vec2i image_extent) const;
 
-    /// What this network's own feature maps cost.
-    [[nodiscard]] i64 feature_bytes() const { return feature_bytes_for(_image_extent); }
+    /// What this network ACTUALLY allocated, which is one tile's worth however large the image is.
+    [[nodiscard]] i64 feature_bytes() const;
 
     /// Records the whole network onto `cmd`, from three guides to one denoised image.
     ///
@@ -120,7 +150,14 @@ public:
 private:
     sg::context* _ctx = nullptr;
     tg::vec2i _image_extent = tg::vec2i(0, 0);
-    tg::vec2i _extent = tg::vec2i(0, 0); // the padded one the tensors are sized by
+    tg::vec2i _extent = tg::vec2i(0, 0); // the padded one the tensors are sized by — one TILE, not the image
+
+    /// How far the interior of one tile advances, and how wide the discarded border around it is.
+    /// `_overlap` is 0 exactly when the image fits one tile, which is what keeps a small image bit-identical to what
+    /// it produced before tiles existed.
+    tg::vec2i _tile_step = tg::vec2i(0, 0);
+    tg::vec2i _tile_counts = tg::vec2i(1, 1);
+    int _overlap = 0;
 
     /// Every layer's weights and bias, in one buffer; a layer is a pair of offsets into it.
     sg::buffer<f32> _weights;

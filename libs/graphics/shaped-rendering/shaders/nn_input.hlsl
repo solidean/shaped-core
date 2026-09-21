@@ -22,13 +22,17 @@ struct nn_input_constants
     uint source_width;
     uint source_height;
 
+    /// Where this tile's tensor starts in the image, which is its interior's origin less the overlap.
+    /// Negative on the first tile of a row or column, and that is the point: the clamp below then repeats the edge
+    /// exactly as it does for the padding, so an edge tile sees what an interior one does.
+    int source_offset_x;
+    int source_offset_y;
+
     /// What the radiance is multiplied by before the curve, which is what brings a scene into the range the network
     /// was trained over.
     /// OIDN derives one by measuring the image; this takes it from the caller, and 1 means "already in that range".
     float input_scale;
     float _pad0;
-    float _pad1;
-    float _pad2;
 };
 
 #pragma sc push_constants
@@ -51,8 +55,10 @@ using namespace nn_input_bindings;
     if (id.x >= gConstants.width || id.y >= gConstants.height)
         return;
 
-    // Clamped into the image, so the padding repeats its edge.
-    int3 const p = int3(int(min(id.x, gConstants.source_width - 1u)), int(min(id.y, gConstants.source_height - 1u)), 0);
+    // Clamped into the image, so both the padding and a tile's overhang repeat its edge.
+    int2 const sample = int2(gConstants.source_offset_x + int(id.x), gConstants.source_offset_y + int(id.y));
+    int3 const p = int3(clamp(sample.x, 0, int(gConstants.source_width) - 1),
+                        clamp(sample.y, 0, int(gConstants.source_height) - 1), 0);
 
     float3 color = sanitize(gColor.Load(p).rgb) * gConstants.input_scale;
     color = max(color, float3(0, 0, 0));

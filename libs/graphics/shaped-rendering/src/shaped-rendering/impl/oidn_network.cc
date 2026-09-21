@@ -158,15 +158,41 @@ bool oidn_weights_present()
     return adapter.has_value();
 }
 
-bool oidn_network::create(sg::context& ctx, tg::vec2i image_extent)
+bool oidn_network::create(sg::context& ctx, tg::vec2i image_extent, int max_tile, int overlap)
 {
     _ctx = &ctx;
     _image_extent = image_extent;
 
     // Four pools halve the tensor four times, so it is sized to a multiple of sixteen whatever the image is.
     auto const round_up = [](int v) { return ((cc::max(v, 1) + 15) / 16) * 16; };
-    auto const extent = tg::vec2i(round_up(image_extent[0]), round_up(image_extent[1]));
-    _extent = extent;
+
+    // One tile or many, decided here and nowhere else.
+    //
+    // An image that fits is run whole with no overlap, which is both cheaper and the case every accuracy test covers.
+    // Otherwise the tensor is the capped tile, and its interior advances by the tile less the overlap on both sides.
+    auto const whole = tg::vec2i(round_up(image_extent[0]), round_up(image_extent[1]));
+    // No tile smaller than an overlap on both sides plus an interior that actually advances.
+    auto const cap = round_up(cc::max(max_tile, 2 * overlap + 16));
+
+    if (whole[0] <= cap && whole[1] <= cap)
+    {
+        _extent = whole;
+        _overlap = 0;
+        _tile_step = whole;
+        _tile_counts = tg::vec2i(1, 1);
+    }
+    else
+    {
+        _extent = tg::vec2i(cc::min(whole[0], cap), cc::min(whole[1], cap));
+        _overlap = overlap;
+
+        // The interior has to be a real advance, or the loop below would not terminate.
+        _tile_step = tg::vec2i(cc::max(_extent[0] - 2 * _overlap, 16), cc::max(_extent[1] - 2 * _overlap, 16));
+        _tile_counts = tg::vec2i((image_extent[0] + _tile_step[0] - 1) / _tile_step[0],
+                                 (image_extent[1] + _tile_step[1] - 1) / _tile_step[1]);
+    }
+
+    auto const extent = _extent;
 
     auto const path = cc::string(k_weights_dir) + "/rt_hdr_alb_nrm.tza";
     auto adapter = cc::file_read_stream_adapter::open(path);
@@ -292,6 +318,20 @@ bool oidn_network::create(sg::context& ctx, tg::vec2i image_extent)
     // here would report a first call as a failure to create, which is a different thing entirely.
     (void)prepare();
     return true;
+}
+
+i64 oidn_network::feature_bytes() const
+{
+    if (_feature_channels.size() != f_count)
+        return 0;
+
+    auto total = i64(0);
+    for (auto t = 0; t < f_count; ++t)
+    {
+        auto const e = level_extent(_extent, _feature_levels[t]);
+        total += i64(e[0]) * i64(e[1]) * i64(_feature_channels[t]) * i64(sizeof(f32));
+    }
+    return total;
 }
 
 i64 oidn_network::feature_bytes_for(tg::vec2i image_extent) const
@@ -432,111 +472,142 @@ bool oidn_network::execute(sg::command_list& cmd,
         _pending_weights.clear();
     }
 
-    // The nine packed channels.
-    cmd.compute.bind_pipeline(**_programs.input->try_value());
-    cmd.compute.bind<shaders::nn_input_bindings>(*ctx.transient.create_binding_group(
-        _programs.input_layout, shaders::nn_input_bindings{.gColor = color.as_readonly_view(),
-                                                           .gAlbedo = albedo.as_readonly_view(),
-                                                           .gNormal = normal.as_readonly_view(),
-                                                           .gTarget = _features[f_input].as_readwrite_buffer()}));
-    cmd.compute.set_inline_constants(shaders::nn_input_constants{.width = u32(_extent[0]),
-                                                                 .height = u32(_extent[1]),
-                                                                 .source_width = u32(_image_extent[0]),
-                                                                 .source_height = u32(_image_extent[1]),
-                                                                 .input_scale = input_scale,
-                                                                 ._pad0 = 0,
-                                                                 ._pad1 = 0,
-                                                                 ._pad2 = 0});
-    cmd.compute.dispatch_threads(_extent[0], _extent[1], 1);
+    // One pass per tile, each writing only its interior.
+    // The tensors are reused across tiles, which is the point: they are sized for one tile and never for the image.
+    for (auto ty = 0; ty < _tile_counts[1]; ++ty)
+        for (auto tx = 0; tx < _tile_counts[0]; ++tx)
+        {
+            auto const interior_origin = tg::vec2i(tx * _tile_step[0], ty * _tile_step[1]);
+            auto const interior = tg::vec2i(cc::min(_tile_step[0], _image_extent[0] - interior_origin[0]),
+                                            cc::min(_tile_step[1], _image_extent[1] - interior_origin[1]));
 
-    // The convolutions, with the pools and upsamples that feed them.
-    // Walked in table order, and each resample runs as soon as its source exists, which is what the fixed order of
-    // `k_convs` already guarantees.
-    auto const run_resamples_before = [&](int target)
-    {
-        for (auto const& p : k_pools)
-            if (p.target == target)
+            // An edge tile is SHIFTED INWARD rather than allowed to hang over the image.
+            //
+            // Hanging over would fill the overhang by repeating the border pixel, and that smear is an image the whole-frame
+            // run never sees — so it moves the result, and it moves it further the wider the overlap is.
+            // Shifting instead means every tile's tensor is real content, and the border is where the network finds it.
+            auto const clamp_origin = [](int want, int tensor, int image)
+            { return image <= tensor ? 0 : cc::clamp(want, 0, image - tensor); };
+            auto const tensor_origin
+                = tg::vec2i(clamp_origin(interior_origin[0] - _overlap, _extent[0], _image_extent[0]),
+                            clamp_origin(interior_origin[1] - _overlap, _extent[1], _image_extent[1]));
+
+            // What is kept therefore sits wherever the shift left it, rather than always at `_overlap`.
+            auto const read_offset = interior_origin - tensor_origin;
+
+            // The nine packed channels.
+            cmd.compute.bind_pipeline(**_programs.input->try_value());
+            cmd.compute.bind<shaders::nn_input_bindings>(*ctx.transient.create_binding_group(
+                _programs.input_layout, shaders::nn_input_bindings{.gColor = color.as_readonly_view(),
+                                                                   .gAlbedo = albedo.as_readonly_view(),
+                                                                   .gNormal = normal.as_readonly_view(),
+                                                                   .gTarget = _features[f_input].as_readwrite_buffer()}));
+            cmd.compute.set_inline_constants(shaders::nn_input_constants{.width = u32(_extent[0]),
+                                                                         .height = u32(_extent[1]),
+                                                                         .source_width = u32(_image_extent[0]),
+                                                                         .source_height = u32(_image_extent[1]),
+                                                                         .source_offset_x = tensor_origin[0],
+                                                                         .source_offset_y = tensor_origin[1],
+                                                                         .input_scale = input_scale,
+                                                                         ._pad0 = 0});
+            cmd.compute.dispatch_threads(_extent[0], _extent[1], 1);
+
+            // The convolutions, with the pools and upsamples that feed them.
+            // Walked in table order, and each resample runs as soon as its source exists, which is what the fixed order of
+            // `k_convs` already guarantees.
+            auto const run_resamples_before = [&](int target)
             {
-                auto const e = level_extent(_extent, p.level);
-                auto const channels = _feature_channels[p.target];
-                cmd.compute.bind_pipeline(**_programs.pool->try_value());
-                cmd.compute.bind<shaders::nn_pool_bindings>(*ctx.transient.create_binding_group(
-                    _programs.pool_layout,
-                    shaders::nn_pool_bindings{.gSource = _features[p.source].as_readonly_buffer(),
-                                              .gTarget = _features[p.target].as_readwrite_buffer()}));
-                cmd.compute.set_inline_constants(shaders::nn_pool_constants{.width = u32(e[0]),
-                                                                            .height = u32(e[1]),
-                                                                            .channels = u32(channels),
-                                                                            ._pad = 0});
-                cmd.compute.dispatch_threads(channels, e[0], e[1]);
+                for (auto const& p : k_pools)
+                    if (p.target == target)
+                    {
+                        auto const e = level_extent(_extent, p.level);
+                        auto const channels = _feature_channels[p.target];
+                        cmd.compute.bind_pipeline(**_programs.pool->try_value());
+                        cmd.compute.bind<shaders::nn_pool_bindings>(*ctx.transient.create_binding_group(
+                            _programs.pool_layout,
+                            shaders::nn_pool_bindings{.gSource = _features[p.source].as_readonly_buffer(),
+                                                      .gTarget = _features[p.target].as_readwrite_buffer()}));
+                        cmd.compute.set_inline_constants(shaders::nn_pool_constants{.width = u32(e[0]),
+                                                                                    .height = u32(e[1]),
+                                                                                    .channels = u32(channels),
+                                                                                    ._pad = 0});
+                        cmd.compute.dispatch_threads(channels, e[0], e[1]);
+                    }
+
+                for (auto const& u : k_upsamples)
+                    if (u.target == target)
+                    {
+                        auto const e = level_extent(_extent, u.level);
+                        auto const channels = _feature_channels[u.target];
+                        cmd.compute.bind_pipeline(**_programs.upsample->try_value());
+                        cmd.compute.bind<shaders::nn_upsample_bindings>(*ctx.transient.create_binding_group(
+                            _programs.upsample_layout,
+                            shaders::nn_upsample_bindings{.gSource = _features[u.source].as_readonly_buffer(),
+                                                          .gTarget = _features[u.target].as_readwrite_buffer()}));
+                        cmd.compute.set_inline_constants(shaders::nn_upsample_constants{.width = u32(e[0]),
+                                                                                        .height = u32(e[1]),
+                                                                                        .channels = u32(channels),
+                                                                                        ._pad = 0});
+                        cmd.compute.dispatch_threads(channels, e[0], e[1]);
+                    }
+            };
+
+            for (auto n = 0; n < k_conv_count; ++n)
+            {
+                auto const& step = k_convs[n];
+                run_resamples_before(step.source);
+
+                auto const e = level_extent(_extent, step.level);
+                auto const in_channels = _in_channels[n];
+                auto const out_channels = _out_channels[n];
+
+                // A concatenated source is two buffers and a split point; a plain one names the same buffer twice, which the
+                // shader never reads past.
+                auto const& source_a = _features[step.source];
+                auto const& source_b = step.skip == f_count ? _features[step.source] : _features[step.skip];
+                auto const channels_a = _feature_channels[step.source];
+
+                cmd.compute.bind_pipeline(**_programs.conv->try_value());
+                cmd.compute.bind<shaders::nn_conv_bindings>(*ctx.transient.create_binding_group(
+                    _programs.conv_layout,
+                    shaders::nn_conv_bindings{.gSourceA = source_a.as_readonly_buffer(),
+                                              .gSourceB = source_b.as_readonly_buffer(),
+                                              .gWeights = _weights.as_readonly_buffer(),
+                                              .gTarget = _features[step.target].as_readwrite_buffer()}));
+                cmd.compute.set_inline_constants(shaders::nn_conv_constants{
+                    .width = u32(e[0]),
+                    .height = u32(e[1]),
+                    .in_channels = u32(in_channels),
+                    .out_channels = u32(out_channels),
+                    .weight_offset = _weight_offsets[n],
+                    .bias_offset = _bias_offsets[n],
+                    .in_channels_a = u32(step.skip == f_count ? in_channels : channels_a),
+                    ._pad = 0,
+                });
+                cmd.compute.dispatch_threads(out_channels, e[0], e[1]);
             }
 
-        for (auto const& u : k_upsamples)
-            if (u.target == target)
-            {
-                auto const e = level_extent(_extent, u.level);
-                auto const channels = _feature_channels[u.target];
-                cmd.compute.bind_pipeline(**_programs.upsample->try_value());
-                cmd.compute.bind<shaders::nn_upsample_bindings>(*ctx.transient.create_binding_group(
-                    _programs.upsample_layout,
-                    shaders::nn_upsample_bindings{.gSource = _features[u.source].as_readonly_buffer(),
-                                                  .gTarget = _features[u.target].as_readwrite_buffer()}));
-                cmd.compute.set_inline_constants(shaders::nn_upsample_constants{.width = u32(e[0]),
-                                                                                .height = u32(e[1]),
-                                                                                .channels = u32(channels),
-                                                                                ._pad = 0});
-                cmd.compute.dispatch_threads(channels, e[0], e[1]);
-            }
-    };
-
-    for (auto n = 0; n < k_conv_count; ++n)
-    {
-        auto const& step = k_convs[n];
-        run_resamples_before(step.source);
-
-        auto const e = level_extent(_extent, step.level);
-        auto const in_channels = _in_channels[n];
-        auto const out_channels = _out_channels[n];
-
-        // A concatenated source is two buffers and a split point; a plain one names the same buffer twice, which the
-        // shader never reads past.
-        auto const& source_a = _features[step.source];
-        auto const& source_b = step.skip == f_count ? _features[step.source] : _features[step.skip];
-        auto const channels_a = _feature_channels[step.source];
-
-        cmd.compute.bind_pipeline(**_programs.conv->try_value());
-        cmd.compute.bind<shaders::nn_conv_bindings>(*ctx.transient.create_binding_group(
-            _programs.conv_layout, shaders::nn_conv_bindings{.gSourceA = source_a.as_readonly_buffer(),
-                                                             .gSourceB = source_b.as_readonly_buffer(),
-                                                             .gWeights = _weights.as_readonly_buffer(),
-                                                             .gTarget = _features[step.target].as_readwrite_buffer()}));
-        cmd.compute.set_inline_constants(shaders::nn_conv_constants{
-            .width = u32(e[0]),
-            .height = u32(e[1]),
-            .in_channels = u32(in_channels),
-            .out_channels = u32(out_channels),
-            .weight_offset = _weight_offsets[n],
-            .bias_offset = _bias_offsets[n],
-            .in_channels_a = u32(step.skip == f_count ? in_channels : channels_a),
-            ._pad = 0,
-        });
-        cmd.compute.dispatch_threads(out_channels, e[0], e[1]);
-    }
-
-    // Back to radiance.
-    cmd.compute.bind_pipeline(**_programs.output->try_value());
-    cmd.compute.bind<shaders::nn_output_bindings>(*ctx.transient.create_binding_group(
-        _programs.output_layout, shaders::nn_output_bindings{.gSource = _features[f_out].as_readonly_buffer(),
-                                                             .gTarget = output.as_readwrite_view()}));
-    cmd.compute.set_inline_constants(shaders::nn_output_constants{.width = u32(_extent[0]),
-                                                                  .height = u32(_extent[1]),
-                                                                  .target_width = u32(_image_extent[0]),
-                                                                  .target_height = u32(_image_extent[1]),
-                                                                  .input_scale = input_scale,
-                                                                  ._pad0 = 0,
-                                                                  ._pad1 = 0,
-                                                                  ._pad2 = 0});
-    cmd.compute.dispatch_threads(_image_extent[0], _image_extent[1], 1);
+            // Back to radiance.
+            cmd.compute.bind_pipeline(**_programs.output->try_value());
+            cmd.compute.bind<shaders::nn_output_bindings>(*ctx.transient.create_binding_group(
+                _programs.output_layout, shaders::nn_output_bindings{.gSource = _features[f_out].as_readonly_buffer(),
+                                                                     .gTarget = output.as_readwrite_view()}));
+            cmd.compute.set_inline_constants(shaders::nn_output_constants{.width = u32(_extent[0]),
+                                                                          .height = u32(_extent[1]),
+                                                                          .target_width = u32(_image_extent[0]),
+                                                                          .target_height = u32(_image_extent[1]),
+                                                                          .write_width = u32(interior[0]),
+                                                                          .write_height = u32(interior[1]),
+                                                                          .target_offset_x = interior_origin[0],
+                                                                          .target_offset_y = interior_origin[1],
+                                                                          .read_offset_x = read_offset[0],
+                                                                          .read_offset_y = read_offset[1],
+                                                                          .input_scale = input_scale,
+                                                                          ._pad0 = 0,
+                                                                          ._pad1 = 0,
+                                                                          ._pad2 = 0});
+            cmd.compute.dispatch_threads(interior[0], interior[1], 1);
+        }
 
     return true;
 }

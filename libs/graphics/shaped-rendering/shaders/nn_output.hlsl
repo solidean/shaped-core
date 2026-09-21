@@ -21,6 +21,18 @@ struct nn_output_constants
     uint target_width;
     uint target_height;
 
+    /// This tile's INTERIOR, which is the only part of the tensor worth keeping.
+    /// The overlap around it exists so the interior sees the same neighbourhood a whole-image run would, and it is
+    /// discarded rather than written.
+    uint write_width;
+    uint write_height;
+
+    /// Where the interior lands in the image, and where it starts inside the tensor.
+    int target_offset_x;
+    int target_offset_y;
+    int read_offset_x;
+    int read_offset_y;
+
     float input_scale; // the same one nn_input.hlsl applied; this divides by it
     float _pad0;
     float _pad1;
@@ -41,10 +53,15 @@ using namespace nn_output_bindings;
 
 [numthreads(8, 8, 1)] void main_cs(uint3 id : SV_DispatchThreadID)
 {
-    if (id.x >= gConstants.target_width || id.y >= gConstants.target_height)
+    if (id.x >= gConstants.write_width || id.y >= gConstants.write_height)
         return;
 
-    uint const base = (id.y * gConstants.width + id.x) * 3u;
+    int2 const dst = int2(gConstants.target_offset_x + int(id.x), gConstants.target_offset_y + int(id.y));
+    if (dst.x >= int(gConstants.target_width) || dst.y >= int(gConstants.target_height))
+        return;
+
+    uint2 const src = uint2(uint(gConstants.read_offset_x + int(id.x)), uint(gConstants.read_offset_y + int(id.y)));
+    uint const base = (src.y * gConstants.width + src.x) * 3u;
     float3 value = float3(gSource[base + 0], gSource[base + 1], gSource[base + 2]);
 
     value = max(sanitize(value), float3(0, 0, 0));
@@ -52,5 +69,5 @@ using namespace nn_output_bindings;
 
     // Undoing the scale the input applied, so the result is in the caller's units.
     float const scale = gConstants.input_scale != 0.0 ? 1.0 / gConstants.input_scale : 0.0;
-    gTarget[id.xy] = float4(value * scale, 1);
+    gTarget[uint2(dst)] = float4(value * scale, 1);
 }

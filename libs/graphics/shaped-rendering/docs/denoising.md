@@ -37,11 +37,21 @@ So shaped-rendering runs it in its own compute shaders, on every backend sg has,
 The topology is a table in `impl/oidn_network.cc` and the layer widths come out of the weights file.
 That split is what keeps a weights bump honest: a changed layer count fails to find its tensor, and a changed width fails the shape test beside it.
 
-**The member runs on small images only, and its memory is why.**
-The network holds twenty-five feature maps at once, because the skips have to stay live across the whole decoder.
-That is 5.4 MiB at 64x64, 2.7 GiB at 1080p and 10.7 GiB at 4K, measured by `oidn_network::feature_bytes_for` rather than estimated.
-So a whole frame is not something to allocate, and running the network over tiles is a prerequisite rather than an optimisation — which is what OIDN itself does.
-Half precision would halve the figure and settle nothing.
+**The network runs in tiles, and its memory is why.**
+It holds twenty-five feature maps at once, because the skips have to stay live across the whole decoder.
+Run whole that is 5.4 MiB at 64x64, 2.7 GiB at 1080p and 10.7 GiB at 4K, measured by `oidn_network::feature_bytes_for` rather than estimated.
+So the tensors are sized by a tile instead, 256 pixels by default, which is about 90 MiB whatever the image is.
+Half precision would halve the untiled figure and settle nothing.
+
+**A tile is 80 pixels wider than what it keeps, on every side, and 80 is measured rather than chosen.**
+At that overlap a tiled image agrees with the same image run whole BIT FOR BIT, so the number is where the network's receptive field ends.
+At 64 the two are 1.4e-03 apart, and with no overlap at all 2.8e-01 — which is what a seam looks like.
+Nothing improves above 80, so it is a threshold rather than a quality knob.
+
+**An edge tile is shifted inward rather than allowed to hang over the image.**
+Hanging over means filling the overhang by repeating the border pixel, and that smear is an image the whole-frame run never sees.
+It moves the result, and it moves it further the wider the overlap is.
+So before this was fixed the error GREW with the overlap, which is the opposite of how a halo behaves and is what gave the bug away.
 
 **That it computes what Intel computes is measured, not assumed.**
 `oidn_filter_reference` runs OIDN's own filter over the same input, and the test compares the two.

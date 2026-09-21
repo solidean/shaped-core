@@ -544,3 +544,139 @@ ASYNC_INVOCABLE_TEST("sr - the OIDN network's memory is what stands between it a
 
     co_return;
 }
+
+// Tiles against the whole image, which is the only thing that can price the overlap.
+//
+// The network is the same either way; what tiling changes is what each pixel could see while it was computed.
+// So the question is entirely "is the overlap wide enough", and the answer is a comparison rather than an argument.
+ASYNC_INVOCABLE_TEST("sr - the OIDN network in tiles agrees with the same image run whole",
+                     (sg::context_handle const& ctx_h),
+                     exclusive("slib-shader-library"))
+{
+    REQUIRE(ctx_h != nullptr);
+    auto& ctx = *ctx_h;
+
+    auto lib = slib::shader_library();
+    auto compiler = slib::create_dxc_compiler();
+    if (!compiler.has_value())
+        SKIP("no DXC compiler to build the network's shaders");
+    lib.add_compiler(cc::move(compiler.value()));
+    lib.add_package(sr::shader_package());
+
+    if (!sr::impl::oidn_weights_present())
+        SKIP("the OIDN weights were not fetched (extern/oidn-weights/fetch-oidn-weights.py)");
+
+    REQUIRE(co_await sr::impl::oidn_prewarm_pipelines(ctx)).context("the network's pipelines did not build");
+
+    constexpr auto k_extent = 384;
+
+    auto const make = [&]
+    {
+        return ctx.persistent.create_texture_2d({.format = sg::pixel_format::rgba32_float,
+                                                 .width = k_extent,
+                                                 .height = k_extent,
+                                                 .usage = sg::texture_usage::readonly_texture
+                                                        | sg::texture_usage::readwrite_texture
+                                                        | sg::texture_usage::copy_dst | sg::texture_usage::copy_src});
+    };
+
+    auto const color = make();
+    auto const albedo = make();
+    auto const normal = make();
+    auto const whole_output = make();
+    auto const tiled_output = make();
+
+    // Structure at several scales, so a tile seam would have something to break.
+    // A flat image would hide an insufficient overlap completely.
+    auto color_pixels = cc::vector<tg::vec4f>();
+    auto albedo_pixels = cc::vector<tg::vec4f>();
+    auto normal_pixels = cc::vector<tg::vec4f>();
+    for (auto y = 0; y < k_extent; ++y)
+        for (auto x = 0; x < k_extent; ++x)
+        {
+            auto const coarse = ((x / 24 + y / 24) % 2) == 0;
+            auto const fine = ((x / 3 + y / 5) % 2) == 0;
+            auto const a = coarse ? tg::vec4f(0.8f, 0.6f, 0.3f, 0) : tg::vec4f(0.1f, 0.2f, 0.5f, 0);
+            auto const gradient = f32(x + y) / f32(2 * k_extent);
+            auto const speckle = 0.3f + f32((x * 7 + y * 13) % 11) / 11.0f + (fine ? 0.2f : 0.0f);
+
+            albedo_pixels.push_back(a);
+            color_pixels.push_back(
+                tg::vec4f(a[0] * speckle * (0.5f + gradient), a[1] * speckle, a[2] * speckle * (1.5f - gradient), 0));
+            normal_pixels.push_back(tg::vec4f(0, 0, 1, 0));
+        }
+
+    auto whole = sr::impl::oidn_network();
+    REQUIRE(whole.create(ctx, tg::vec2i(k_extent, k_extent), 512));
+    CHECK(whole.tile_counts() == tg::vec2i(1, 1)).context("384 fits one 512 tile, so it should not be tiled at all");
+    CHECK(whole.tile_overlap() == 0);
+
+    // A 288 tensor over a 384 image, at the overlap the member actually uses, which is three tiles per axis.
+    auto tiled = sr::impl::oidn_network();
+    REQUIRE(tiled.create(ctx, tg::vec2i(k_extent, k_extent), 288));
+    CHECK(tiled.padded_extent() == tg::vec2i(288, 288));
+    CHECK(tiled.tile_counts()[0] > 1).context("a 384 image should not fit one 288 tile");
+    CHECK(tiled.tile_overlap() == sr::impl::oidn_network::k_tile_overlap);
+
+    // The whole point of tiling, restated as a number: the tensors are sized by the tile, not by the image.
+    CHECK(tiled.feature_bytes() < whole.feature_bytes())
+        .context(cc::format("tiled {} bytes vs whole {} bytes", tiled.feature_bytes(), whole.feature_bytes()));
+
+    REQUIRE(whole.prepare());
+    REQUIRE(tiled.prepare());
+
+    auto cmd = ctx.create_command_list();
+    cmd->upload.bytes_to_texture(color.raw(), cc::span<tg::vec4f const>(color_pixels).as_bytes());
+    cmd->upload.bytes_to_texture(albedo.raw(), cc::span<tg::vec4f const>(albedo_pixels).as_bytes());
+    cmd->upload.bytes_to_texture(normal.raw(), cc::span<tg::vec4f const>(normal_pixels).as_bytes());
+
+    REQUIRE(whole.execute(*cmd, color, albedo, normal, whole_output, 1.0f));
+    REQUIRE(tiled.execute(*cmd, color, albedo, normal, tiled_output, 1.0f));
+
+    auto const whole_read = sg::data_future<tg::vec4f>(cmd->download.bytes_from_texture(whole_output.raw()));
+    auto const tiled_read = sg::data_future<tg::vec4f>(cmd->download.bytes_from_texture(tiled_output.raw()));
+    ctx.submit_command_list(cc::move(cmd));
+    ctx.advance_epoch();
+
+    auto const a = co_await whole_read.data();
+    auto const b = co_await tiled_read.data();
+    REQUIRE(a.size() == k_extent * k_extent);
+    REQUIRE(b.size() == k_extent * k_extent);
+
+    // Every pixel is written exactly once, so a gap between tiles shows up as an untouched texel rather than a seam.
+    auto unwritten = 0;
+    for (auto i = 0; i < b.size(); ++i)
+        if (b[i][3] != 1.0f)
+            ++unwritten;
+    CHECK(unwritten == 0).context(cc::format("{} texels no tile wrote", unwritten));
+
+    auto worst = 0.0;
+    auto sum = 0.0;
+    auto worst_at = tg::vec2i(0, 0);
+    for (auto y = 0; y < k_extent; ++y)
+        for (auto x = 0; x < k_extent; ++x)
+            for (auto c = 0; c < 3; ++c)
+            {
+                auto const d = f64(tg::abs(a[y * k_extent + x][c] - b[y * k_extent + x][c]));
+                sum += d;
+                if (d > worst)
+                {
+                    worst = d;
+                    worst_at = tg::vec2i(x, y);
+                }
+            }
+
+    auto const mean = sum / f64(k_extent * k_extent * 3);
+
+    // The bound the overlap is chosen against.
+    // An overlap too narrow shows up here and nowhere else, and it shows up at a tile boundary rather than spread out.
+    // Bounds set where the measurement put them, not where they felt safe.
+    //
+    // At this overlap the two runs agree bit for bit, so anything above noise here means the geometry moved.
+    // For scale: the same comparison is 2.8e-01 out with no overlap, and 1.4e-03 out at an overlap of 64.
+    CHECK(mean < 1.0e-6).context(cc::format("mean difference {}", mean));
+    CHECK(worst < 1.0e-4)
+        .context(cc::format("worst difference {} at {},{} (mean {})", worst, worst_at[0], worst_at[1], mean));
+
+    co_return;
+}

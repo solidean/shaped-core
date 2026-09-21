@@ -174,10 +174,10 @@ ASYNC_INVOCABLE_TEST("sr - the network's transfer curve round-trips across the H
                                                                       .height = 1,
                                                                       .source_width = u32(width),
                                                                       .source_height = 1,
+                                                                      .source_offset_x = 0,
+                                                                      .source_offset_y = 0,
                                                                       .input_scale = 1.0f,
-                                                                      ._pad0 = 0,
-                                                                      ._pad1 = 0,
-                                                                      ._pad2 = 0});
+                                                                      ._pad0 = 0});
     cmd->compute.dispatch_threads(width, 1, 1);
 
     // The input writes nine channels and the output reads three, which in the real network is what the sixteen
@@ -210,6 +210,12 @@ ASYNC_INVOCABLE_TEST("sr - the network's transfer curve round-trips across the H
                                                                         .height = 1,
                                                                         .target_width = u32(width),
                                                                         .target_height = 1,
+                                                                        .write_width = u32(width),
+                                                                        .write_height = 1,
+                                                                        .target_offset_x = 0,
+                                                                        .target_offset_y = 0,
+                                                                        .read_offset_x = 0,
+                                                                        .read_offset_y = 0,
                                                                         .input_scale = 1.0f,
                                                                         ._pad0 = 0,
                                                                         ._pad1 = 0,
