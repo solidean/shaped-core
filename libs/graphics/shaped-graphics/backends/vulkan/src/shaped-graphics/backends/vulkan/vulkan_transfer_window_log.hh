@@ -19,6 +19,8 @@ struct sg::backend::vulkan::vulkan_transfer_window_record
     u64 wait_token = 0;       // the direct-queue submission this window waited on, or 0
     u64 cross_wait_value = 0; // the other direction's timeline value it waited on, or 0
     u64 completion_value = 0; // the completion value this window signalled, or 0
+    u64 command_buffer = 0;   // the VkCommandBuffer that carried it, as validation messages print it
+    u64 staging = 0;          // the system's staging VkBuffer, which every window of it copies through
 };
 
 /// The last windows a transfer system submitted, readable from any thread.
@@ -40,23 +42,32 @@ public:
             });
     }
 
-    /// Oldest first, one line per window.
-    [[nodiscard]] cc::string describe(cc::string_view system_name)
+    /// Oldest first, one line per window whose command buffer, destination or staging buffer `message` names.
+    /// Filtered because a logged message is capped in size, and the windows a hazard is about are the ones it names;
+    /// a system with none says so, which rules its copies out.
+    [[nodiscard]] cc::string describe(cc::string_view system_name, cc::string_view message)
     {
+        auto const names = [&](u64 handle) { return handle != 0 && message.contains(cc::format("0x{:x}", handle)); };
         return _state.lock(
             [&](state& s)
             {
-                auto out = cc::format("last {} {} windows, oldest first:\n", s.count, system_name);
+                auto lines = cc::string();
+                auto matched = 0;
                 for (isize i = 0; i < s.count; ++i)
                 {
                     auto const& r = s.records[(s.next - s.count + i + k_capacity) % k_capacity];
-                    out += cc::format("  window {} slot {} seq {} {} 0x{:x} offset {} bytes {} wait_token {} "
-                                      "cross_wait {} completion {}\n",
-                                      r.window_value, r.slot, r.sequence, r.is_texture ? "image" : "buffer",
-                                      r.destination, r.offset, r.bytes, r.wait_token, r.cross_wait_value,
-                                      r.completion_value);
+                    if (!names(r.command_buffer) && !names(r.destination) && !names(r.staging))
+                        continue;
+                    ++matched;
+                    lines += cc::format("  window {} slot {} cmd 0x{:x} seq {} {} 0x{:x} offset {} bytes {} "
+                                        "wait_token {} cross_wait {} completion {}\n",
+                                        r.window_value, r.slot, r.command_buffer, r.sequence,
+                                        r.is_texture ? "image" : "buffer", r.destination, r.offset, r.bytes,
+                                        r.wait_token, r.cross_wait_value, r.completion_value);
                 }
-                return out;
+                return cc::format("{} of the last {} {} windows name a handle in the message (staging 0x{:x}){}\n{}",
+                                  matched, s.count, system_name, s.count > 0 ? s.records[0].staging : 0,
+                                  matched > 0 ? ", oldest first:" : "", lines);
             });
     }
 

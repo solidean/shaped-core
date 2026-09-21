@@ -438,6 +438,8 @@ bool vulkan_download_async_system::run_one_window()
                 .wait_token = job.wait_token != sg::submission_token::not_submitted ? u64(job.wait_token) : 0,
                 .cross_wait_value = job.upload_wait.is_pending() ? job.upload_wait.value : 0,
                 .completion_value = signal_count == 2 ? signal_values[1] : 0,
+                .command_buffer = u64(reinterpret_cast<uintptr_t>(_window_buffers[slot])),
+                .staging = u64(reinterpret_cast<uintptr_t>(_staging)),
             });
         }
 

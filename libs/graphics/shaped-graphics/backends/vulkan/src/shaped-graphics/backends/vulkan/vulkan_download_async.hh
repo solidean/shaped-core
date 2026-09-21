@@ -134,7 +134,10 @@ class sg::backend::vulkan::vulkan_download_async_system
 {
 public:
     /// The last windows this system submitted, one line each, for a validation hazard to be read against.
-    [[nodiscard]] cc::string describe_recent_windows() { return _window_log.describe("async download"); }
+    [[nodiscard]] cc::string describe_recent_windows(cc::string_view message)
+    {
+        return _window_log.describe("async download", message);
+    }
 
     [[nodiscard]] cc::result<cc::unit> initialize(vulkan_context& ctx, isize window_bytes);
 
