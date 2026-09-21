@@ -176,6 +176,10 @@ if(SC_BUILD_TESTS)
             tests/raster-box-filter-mipmap-test.cc
         )
         target_link_libraries(shaped-rendering-test PRIVATE shaped-graphics-dx12)
+
+        # These import dxcompiler.dll, so the binary does not start without it, and dxil.dll signs what it emits.
+        # Staged here rather than left to the SDL3 block's $<TARGET_RUNTIME_DLLS>, which a build without SDL3 never runs.
+        sc_stage_runtime_dlls(shaped-rendering-test TAG shaped-rendering-test-dxc DLLS ${DXC_RUNTIME_DLLS})
     endif()
 
     # The one test that crosses sr's window into metal's windowed presentation, which nothing else covers.
