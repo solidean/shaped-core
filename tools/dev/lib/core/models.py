@@ -52,6 +52,16 @@ class Preset:
         return "arm64" if "arm64" in self.configure_preset else "x64"
 
     @property
+    def is_cross_compiling(self) -> bool:
+        """Whether this preset builds for a machine other than the one building it, so its own binaries cannot run here.
+
+        What that costs is a host tool: whatever the build runs, `sgl` for one, has to come from a native preset instead.
+        Keyed off the preset naming, like `is_emscripten`.
+        """
+        cp = self.configure_preset
+        return self.is_emscripten or cp.startswith("android-") or cp.startswith("ios-")
+
+    @property
     def is_emscripten(self) -> bool:
         """Whether this preset cross-compiles to WebAssembly via Emscripten.
 

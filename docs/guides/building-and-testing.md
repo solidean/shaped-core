@@ -228,6 +228,12 @@ uv run dev.py test --preset emscripten-relwithdebinfo --emsdk-path /path/to/emsd
 ```
 
 The test binaries are `.wasm` plus a `.js` loader; dev.py runs them under emsdk's Node by default and parses the same JUnit report as native runs.
+
+**A cross preset builds a native `sgl` first.**
+A shader package's SGL entries are read by the SGL compiler while the build runs, and a wasm build's own `sgl` is wasm, which the build machine cannot run.
+So dev.py builds `sgl` in the platform's default preset, hands its path to the cross build as `SC_SGL_TOOL`, and rebuilds it before every cross build so a compiler change reaches the generated code.
+The same applies to the Android and iOS presets.
+A build driven by CMake alone sets `SC_SGL_TOOL` itself; see [ShaderPackage.cmake](../../libs/graphics/shaped-shader-library/cmake/ShaderPackage.cmake).
 `uv run dev.py doctor` validates the toolchain, and the full setup and feature knobs are [requirements.md](../requirements.md#emscripten--wasm)'s.
 
 #### Which runtime executes the artifact

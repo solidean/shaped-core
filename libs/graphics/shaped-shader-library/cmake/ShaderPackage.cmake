@@ -47,14 +47,35 @@
 # generator emits the enumerator instead of a string for C++ to parse back.
 #
 # LANGUAGE is hlsl (the default), wgsl or sgl.
+# The four generating kinds above read HLSL, so a WGSL package that names one is a generator error.
+#
 # An SGL package spells its stages as SGL does -- `cube.sgl:vertex:main_vs`, `cube.sgl:pixel:main_ps` -- and
 # `pixel` is sg's fragment stage.
-# The four generating kinds above read HLSL, so a WGSL or an SGL package that names one is a generator error.
+# It has three generating kinds of its own, and one entry that asks for a whole file:
+#
+#           cube.sgl:*                                   # every entry point and every declaration below
+#           cube.sgl:binding:frame                       # a `binding` block -> a group struct
+#           cube.sgl:vertex_input:cube_vertex            # a `@vertex struct` -> its mirror and vertex layout
+#           cube.sgl:render_target:target                # a `@pixel struct` -> its named color targets
+#
+# The third field is the SGL name exactly as the shader spells it, and one the file does not declare is a build error.
+# `*` generates nothing for what the file `use`s: an imported module is described by its own package entry.
+#
+# Those entries are read by the SGL compiler itself, `sgl describe`, because it is the one parser of the language.
+# So a package that has one needs a runnable `sgl` while it builds:
+# the tree's own `sgl` target in a native build, or SC_SGL_TOOL, which also serves a cross build and an
+# add_subdirectory consumer that builds no tools.
+# A package of entry points alone needs neither, which is why the wasm presets build today without one.
 
 set(SC_SHADER_PACKAGE_SCRIPT "${CMAKE_CURRENT_LIST_DIR}/generate_shader_package.py"
     CACHE INTERNAL "Generator script backing sc_add_shader_package")
 set(SC_SHADER_PACKAGE_GRAMMAR "${CMAKE_CURRENT_LIST_DIR}/binding_grammar.py"
     CACHE INTERNAL "The binding grammar the generator imports")
+set(SC_SHADER_PACKAGE_SGL "${CMAKE_CURRENT_LIST_DIR}/sgl_description.py"
+    CACHE INTERNAL "How the generator reads an SGL package, through the compiler")
+
+set(SC_SGL_TOOL "" CACHE FILEPATH
+    "A runnable `sgl`, for an SGL shader package's `*` and typed entries where the tree's own cannot run or is not built")
 
 function(sc_add_shader_package)
     cmake_parse_arguments(PKG "" "TARGET;NAME;NAMESPACE;SOURCE_DIR;LANGUAGE" "SHADERS" ${ARGN})
@@ -110,6 +131,41 @@ function(sc_add_shader_package)
     # manifest's mtime and retrigger codegen + compile + link on every preset `dev.py check` builds.
     file(CONFIGURE OUTPUT "${_manifest}" CONTENT "${_manifest_text}" @ONLY)
 
+    # An SGL package whose entries the compiler has to read runs `sgl describe` while it builds.
+    # Only those: a package of entry points alone must keep building where no `sgl` can run.
+    set(_sgl_args "")
+    set(_sgl_depends "")
+    if(PKG_LANGUAGE STREQUAL "sgl")
+        set(_needs_sgl OFF)
+        foreach(_shader IN LISTS PKG_SHADERS)
+            string(REPLACE ":" ";" _parts "${_shader}")
+            list(LENGTH _parts _count)
+            list(GET _parts 1 _kind)
+            if((_count EQUAL 2 AND _kind STREQUAL "*")
+               OR _kind STREQUAL "binding" OR _kind STREQUAL "vertex_input" OR _kind STREQUAL "render_target")
+                set(_needs_sgl ON)
+            endif()
+        endforeach()
+
+        if(_needs_sgl AND SC_SGL_TOOL)
+            set(_sgl_args --sgl-tool "${SC_SGL_TOOL}")
+            set(_sgl_depends "${SC_SGL_TOOL}")
+        elseif(_needs_sgl AND CMAKE_CROSSCOMPILING)
+            # The tree's `sgl` is built for the target here, so the build machine could not run it.
+            message(FATAL_ERROR
+                "sc_add_shader_package(${PKG_NAME}): an SGL entry that generates C++ needs a runnable `sgl`, and this "
+                "build compiles for another machine. Set SC_SGL_TOOL to a natively built one.")
+        elseif(_needs_sgl AND NOT SC_BUILD_TOOLS)
+            message(FATAL_ERROR
+                "sc_add_shader_package(${PKG_NAME}): an SGL entry that generates C++ needs `sgl`, which "
+                "SC_BUILD_TOOLS=OFF does not build. Set SC_SGL_TOOL to one.")
+        elseif(_needs_sgl)
+            # A target defined after this call, which is legal: the generator expression and the edge resolve at generate time.
+            set(_sgl_args --sgl-tool "$<TARGET_FILE:sgl>")
+            set(_sgl_depends sgl)
+        endif()
+    endif()
+
     # DEPENDS covers the declared shaders; DEPFILE covers the #include closure the generator discovers.
     set(_shader_files "")
     foreach(_shader IN LISTS PKG_SHADERS)
@@ -117,11 +173,13 @@ function(sc_add_shader_package)
         list(GET _parts 0 _path)
         list(APPEND _shader_files "${_source_dir}/${_path}")
     endforeach()
+    list(REMOVE_DUPLICATES _shader_files)
 
     add_custom_command(
         OUTPUT "${_gen_hh}" "${_gen_cc}"
-        COMMAND uv run "${SC_SHADER_PACKAGE_SCRIPT}" --manifest "${_manifest}" --out-dir "${_gen_dir}"
-        DEPENDS "${_manifest}" "${SC_SHADER_PACKAGE_SCRIPT}" "${SC_SHADER_PACKAGE_GRAMMAR}" ${_shader_files}
+        COMMAND uv run "${SC_SHADER_PACKAGE_SCRIPT}" --manifest "${_manifest}" --out-dir "${_gen_dir}" ${_sgl_args}
+        DEPENDS "${_manifest}" "${SC_SHADER_PACKAGE_SCRIPT}" "${SC_SHADER_PACKAGE_GRAMMAR}" "${SC_SHADER_PACKAGE_SGL}"
+                ${_shader_files} ${_sgl_depends}
         DEPFILE "${_gen_dir}/${PKG_NAME}.d"
         COMMENT "[slib] shader package ${PKG_NAME} (${PKG_TARGET})"
         VERBATIM

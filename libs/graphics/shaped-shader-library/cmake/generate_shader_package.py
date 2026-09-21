@@ -38,6 +38,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from binding_grammar import (BindingError, DeclaredSampler, Group, InlineConstants, Payload,  # noqa: E402
                              StructMember, VALUE_TYPES, VERTEX_FORMATS, VertexInput, parse_binding_groups)
+from sgl_description import SGL_STAGES, DescriptionError, SglEntries, resolve as resolve_sgl  # noqa: E402
 
 # How each sg::sampler field is spelled in C++, and the order sg::sampler declares them in -- a designated
 # initializer has to follow the declaration order, so the order here is load-bearing.
@@ -70,10 +71,6 @@ VALID_STAGES = (
 )
 
 VALID_LANGUAGES = ("hlsl", "wgsl", "sgl")
-
-# SGL calls the fragment stage `pixel`, and an SGL package spells it as its source does.
-# The word is the package's and the generated symbol's; sg has one stage, so the enumerator stays `fragment`.
-SGL_STAGES = {"vertex": "vertex", "pixel": "fragment", "compute": "compute"}
 
 # The stage words that declare something other than an entry point.
 BINDING_STAGE = "binding"
@@ -194,6 +191,8 @@ class Entries:
     """Everything a package's manifest declares, grouped by what it generates."""
 
     files: list[ShaderFile] = field(default_factory=list)
+    # An SGL package's typed declarations, read from the compiler; empty for every other language.
+    sgl: SglEntries = field(default_factory=SglEntries)
     bindings: list[BindingEntry] = field(default_factory=list)
     vertex_inputs: list[VertexInputEntry] = field(default_factory=list)
     payloads: list[PayloadEntry] = field(default_factory=list)
@@ -202,12 +201,43 @@ class Entries:
     @property
     def paths(self) -> list[str]:
         """Every file an entry names, which is what the embed closure starts from."""
-        return ([f.path for f in self.files] + [b.path for b in self.bindings]
+        # An SGL file that only declares, with no entry point asked for, still regenerates the package when it changes.
+        described = [f.path for f, _ in self.sgl.bindings + self.sgl.vertex_inputs + self.sgl.render_targets]
+        return ([f.path for f in self.files] + list(dict.fromkeys(described)) + [b.path for b in self.bindings]
                 + [v.path for v in self.vertex_inputs] + [p.path for p in self.payloads]
                 + [c.path for c in self.constants])
 
 
-def parse_entries(manifest: Manifest) -> Entries:
+def parse_sgl_entries(manifest: Manifest, sgl_tool: Path | None) -> Entries:
+    """An SGL package: the compiler says what each file holds, which is what `*` and a typed entry need."""
+    entries = Entries()
+    for path in {entry.split(":")[0] for entry in manifest.shaders}:
+        if not (manifest.source_dir / path).is_file():
+            raise GeneratorError(f"shader package '{manifest.name}': '{path}' does not exist under {manifest.source_dir}")
+    try:
+        entries.sgl = resolve_sgl(manifest.name, manifest.shaders, manifest.source_dir, sgl_tool)
+    except DescriptionError as e:
+        raise GeneratorError(str(e)) from e
+
+    by_stem: dict[str, ShaderFile] = {}
+    for path, stage, entry_point in entries.sgl.entry_points:
+        stem = identifier_of(path)
+        existing = by_stem.get(stem)
+        if existing is None:
+            existing = ShaderFile(stem, path)
+            by_stem[stem] = existing
+            entries.files.append(existing)
+        elif existing.path != path:
+            raise GeneratorError(
+                f"shader package '{manifest.name}': '{path}' and '{existing.path}' both map to the C++ identifier '{stem}'")
+        existing.stages.setdefault(stage, []).append(entry_point)
+    return entries
+
+
+def parse_entries(manifest: Manifest, sgl_tool: Path | None = None) -> Entries:
+    if manifest.language == "sgl":
+        return parse_sgl_entries(manifest, sgl_tool)
+
     entries = Entries()
     files = entries.files
     by_stem: dict[str, ShaderFile] = {}
@@ -227,25 +257,13 @@ def parse_entries(manifest: Manifest) -> Entries:
 
         path, stage, tail = parts
 
-        # Before the stage check, so an SGL package that names a mirror is told that, not that its stage is unknown.
-        # SGL's host mirror is not generated yet: the vertex layout and the constants are written by hand.
-        if manifest.language == "sgl" and stage in (BINDING_STAGE, VERTEX_INPUT_STAGE, PAYLOAD_STAGE, CONSTANTS_STAGE):
-            raise GeneratorError(
-                f"shader package '{name}': entry '{entry}' is a '{stage}' entry, which an SGL package does not "
-                f"have yet: write the vertex layout and the constants struct by hand")
-
-        if manifest.language == "sgl" and stage not in SGL_STAGES:
-            raise GeneratorError(
-                f"shader package '{name}': entry '{entry}' has stage '{stage}'. "
-                f"An SGL package spells its stages as SGL does: {' '.join(SGL_STAGES)}")
-
-        if manifest.language != "sgl" and stage == "pixel":
+        if stage == "pixel":
             raise GeneratorError(
                 f"shader package '{name}': entry '{entry}' has stage 'pixel', which only an SGL package spells "
                 f"that way; here it is 'fragment'")
 
         if (stage not in (BINDING_STAGE, VERTEX_INPUT_STAGE, PAYLOAD_STAGE, CONSTANTS_STAGE)
-                and stage not in VALID_STAGES and manifest.language != "sgl"):
+                and stage not in VALID_STAGES):
             raise GeneratorError(
                 f"shader package '{name}': entry '{entry}' has unknown stage '{stage}'. "
                 f"Stages are spelled as sg::shader_stage: {' '.join(VALID_STAGES)}")
@@ -962,6 +980,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", required=True, type=Path)
     parser.add_argument("--out-dir", required=True, type=Path)
+    parser.add_argument("--sgl-tool", type=Path, default=None,
+                        help="the `sgl` binary an SGL package's `*` and typed entries are read with")
     args = parser.parse_args()
 
     manifest = read_manifest(args.manifest)
@@ -971,7 +991,7 @@ def main() -> int:
         return 1
 
     try:
-        entries = parse_entries(manifest)
+        entries = parse_entries(manifest, args.sgl_tool)
         embedded = include_closure(manifest, entries.paths)
     except GeneratorError as e:
         print(str(e), file=sys.stderr)

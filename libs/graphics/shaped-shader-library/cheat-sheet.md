@@ -37,6 +37,13 @@ sc_add_shader_package(
 #   `pixel` is the symbol too (cube.pixel.main_ps) and reaches sg as shader_stage::fragment.
 #   ONE file holds both stages, and ONE package serves dx12, vulkan and webgpu.
 #   binding / vertex_input / payload / constants entries are HLSL's alone: an SGL or WGSL package naming one is an error.
+# an SGL package has its own generating kinds, read by the COMPILER (`sgl describe`), never by a parser here:
+#   cube.sgl:*                          # every entry point, binding and @vertex / @pixel struct the file declares
+#   cube.sgl:binding:frame              # a `binding` block;  cube.sgl:vertex_input:v  a `@vertex struct`
+#   cube.sgl:render_target:target       # a `@pixel struct`; a name the file does not declare is a build error
+#   `*` needs no stage word: an SGL entry point carries its stage in the source.
+#   those need a runnable `sgl` while building: the tree's own natively, SC_SGL_TOOL otherwise (a cross build,
+#   SC_BUILD_TOOLS=OFF). dev.py builds the host one for a cross preset itself. Entry points alone need neither.
 # generated at BUILD time into the binary dir; PRIVATE to TARGET. Editing a shader (or an .hlsli it
 #   includes) regenerates; a reconfigure that changes nothing rebuilds nothing.
 # a binding entry generates from the NAMED FILE and never from its includes, so an .hlsli that declares a

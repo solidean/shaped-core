@@ -67,6 +67,14 @@ def resolve_cache_variable(root: Path, configure_preset: str, var: str) -> str |
     return _resolve_cache_var(configure_preset, configs, var)
 
 
+# Default build preset per platform: what dev.py builds when no --preset is given, and where host tools are built.
+DEFAULT_BUILD_PRESETS: dict[str, str] = {
+    "Windows": "relwithdebinfo-clang",
+    "Linux": "relwithdebinfo-linux-clang",
+    "Darwin": "macos-arm-llvm-relwithdebinfo",
+}
+
+
 def load_presets(root: Path) -> list[Preset]:
     """Return all non-hidden build presets, in declaration order."""
     data = _read_presets_file(root)

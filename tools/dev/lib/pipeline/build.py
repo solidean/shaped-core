@@ -15,6 +15,7 @@ from pathlib import Path
 
 from . import cmake, diagjobs
 from .configure import ensure_configured_all
+from .host_tools import ensure_host_sgl
 from ..core import profile
 from ..core.logs import ninja_built_count, step_fields, write_sidecar
 from ..core.models import Preset, StepResult
@@ -64,6 +65,13 @@ def build(
     for preset in presets:
         if preset.name in failed_configure:
             continue  # configure failed — skip building this preset
+        if preset.is_cross_compiling:
+            # The package generator runs the host `sgl`, and depends on its file rather than on a target it can see.
+            # So a stale one would regenerate nothing: rebuilt here, it is a no-op when nothing changed.
+            sgl = ensure_host_sgl(root, mirror=mirror, verbose=verbose)
+            if isinstance(sgl, StepResult):
+                results.append(sgl)
+                continue
         # Per-preset environment: emsdk for Emscripten presets, MSVC env otherwise.
         env = env_for_preset(preset, emsdk_path)
 

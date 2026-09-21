@@ -59,6 +59,16 @@ def _configure_one(
     if not prereqs_done:
         _ensure_prereqs(root, preset, emsdk_path)
 
+    defines = toolset.compiler_defines(preset, root)
+    if preset.is_cross_compiling:
+        # Imported here: host_tools configures the host preset through this module.
+        from .host_tools import ensure_host_sgl
+
+        sgl = ensure_host_sgl(root, mirror=mirror, verbose=verbose)
+        if isinstance(sgl, StepResult):
+            return sgl
+        defines = {**defines, "SC_SGL_TOOL": sgl.as_posix()}
+
     # Request a File API codemodel so target discovery works after configure.
     targets.write_query(preset.build_dir)
     env = env_for_preset(preset, emsdk_path)
@@ -66,7 +76,7 @@ def _configure_one(
         cmake.configure_command(
             preset.configure_preset,
             build_dir=preset.build_dir,
-            defines=toolset.compiler_defines(preset, root),
+            defines=defines,
         ),
         step_type="configure",
         build_dir=preset.build_dir,
