@@ -84,8 +84,12 @@ ASYNC_TEST("sg dx12 hardware backend")
 //
 // On WARP whatever hardware the host has, since what it proves is about sg rather than the device.
 // A third hardware context overlapping the other two is exactly the device-lifecycle overlap the NVIDIA driver deadlocks on (docs/bugs-external/nvidia-raytracing-device-lifecycle-cross-api-deadlock).
+// So beside a GPU it runs under --thorough only, like the WARP driver; a GPU-less host, CI's, runs it every time.
 ASYNC_TEST("sg dx12 never-block backend")
 {
+    if (!nx::is_thorough() && sg::backend::dx12::has_hardware_adapter())
+        SKIP("a default run beside a GPU never brings up WARP; this sweep runs under --thorough");
+
     auto ctx = sg::create_dx12_context({.activate_global_debug_layer = true,
                                         .adapter = sg::backend::dx12::dx12_adapter::warp,
                                         .execution = sg::execution_model::never_block});

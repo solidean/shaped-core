@@ -85,8 +85,9 @@ It becomes runnable against each backend by two pieces working together:
   Nexus's orphan check exempts an alias-reachable invocable for exactly this case, so the suite stays green while the backend grows.
   The disabled comes off once no seam aborts, and every backend now sweeps.
   **The whole sweep runs a second time under a browser's rules**, through a `never_block` driver per native backend: any sg call that would wait on the caller's thread asserts there.
-  The dx12 one runs on WARP in every default run, and the vulkan one only under `--thorough`.
-  So on Linux the default run exercises `never_block` only on wasm, through the webgpu driver, which is never-block by nature.
+  The dx12 one runs on WARP, so beside a GPU only under `--thorough`, and every time on a GPU-less host — the Windows Clang CI job.
+  The vulkan one runs only under `--thorough`.
+  So a default run on a machine with a GPU exercises `never_block` only on wasm, through the webgpu driver, which is never-block by nature.
 - **Alias setup** — [`tests/backends/backends.cc`](../tests/backends/backends.cc) defines, per invocable, an alias of the same name expanding to one scoped run per registered backend.
   So `dev.py test "sg - <name>"` runs it on whichever backends this binary was built with.
 
