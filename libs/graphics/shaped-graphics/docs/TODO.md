@@ -129,16 +129,6 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
 - **A group's implicit constant buffer is one upload each.**
   `create_binding_group` allocates a buffer for a generated group's plain members and fills it through `ctx.upload`, one allocation and one copy per group.
   A per-frame group wants a transient constant-buffer writer instead: a ring in host-visible device memory (ReBAR where there is some), suballocated per epoch and written in place.
-- **Nothing validates a shader's reflection against the layout its pipeline is built with.**
-  The agreed direction is that layouts come from generated types, and sg only checks the compiled shader against them.
-  Today a mismatch surfaces as a backend error at pipeline creation, or as a wrong binding at draw time.
-  For an SGL package, the generated `check_reflection(ctx)` covers it in the owning target's test, which is the check to move into pipeline creation.
-  The abstract types already carry the stats a refit needs — build and update scratch sizes, and the flags.
-  Still open:
-  - the **transient (single-epoch) AS variant** for per-frame rebuilds — a property of the build call's result, not a new scope;
-  - **refit / update** — reuses the topology, and needs `allow_update` at build plus `PERFORM_UPDATE` and the source AS at update time;
-  - **compaction** — BLAS `allow_compaction`, query the compacted size, copy into a smaller buffer;
-  - **compaction** on both backends, which is the one build-time flag neither implements.
 - **The metal barrier clamp has outlived the premise it was written under, and needs checking on a Mac.**
   `metal_command_list::flush_barriers` clamps its stage pair to what a compute encoder accepts, above a comment saying
   nothing is lost "while every op recorded here is a copy or a dispatch — a raster dependency will need the
