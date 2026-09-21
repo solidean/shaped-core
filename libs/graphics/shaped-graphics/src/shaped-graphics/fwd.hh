@@ -40,6 +40,7 @@ class stream_source;                  // the lazy chunk sequence feeding a strea
 
 class context;
 struct adapter_info;          // which GPU a context runs on (see context/adapter_info.hh)
+struct cold_caches;           // which persistent caches a process runs cold (see context/cold_caches.hh)
 enum class feature;           // a capability a context has or has not (see context/capabilities.hh)
 enum class execution_model;   // whether a caller may block on this context at all (see context/capabilities.hh)
 enum class device_error_kind; // what kind of deferred error a backend reported (see context/device_error.hh)

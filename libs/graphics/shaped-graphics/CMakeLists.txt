@@ -35,6 +35,7 @@ add_library(shaped-graphics
     src/shaped-graphics/binding/staging_binding_group.cc
     src/shaped-graphics/binding/bindless_array.cc
     src/shaped-graphics/context/pipeline_cache.cc
+    src/shaped-graphics/context/cold_caches.cc
     src/shaped-graphics/present/swapchain.cc
     src/shaped-graphics/routine/reload_generation.cc
     src/shaped-graphics/routine/render_routine.cc
@@ -257,6 +258,7 @@ if(SC_BUILD_TESTS)
         target_sources(shaped-graphics-test PRIVATE
             tests/backends/backends.cc
             tests/context/context-test.cc
+            tests/context/cold-caches-test.cc
             tests/buffer/buffer-test.cc
             tests/texture/texture-create-test.cc
             tests/command_list/command_list-test.cc

@@ -31,6 +31,8 @@ These rules bind every GPU test in the repo — sg's two tiers, and the librarie
   The WARP drivers ask `dx12::has_hardware_adapter()` and `nx::is_thorough()` and skip otherwise.
   A hardware driver skips only when there is no hardware adapter; one that exists and still fails to create a device fails the test.
   `SC_DX12_ADAPTER=warp` hides every hardware adapter from a whole process, which is how to reproduce a GPU-less run locally: the hardware drivers skip and the WARP ones run.
+  `SC_SG_COLD=all` adds the other half of a CI runner, a first build of every shader and pipeline: the persistent tiers are neither read nor written.
+  `pipelines` or `shaders` turns off one of the two, and the driver's own cache is out of its reach.
 - **A test passes on any adapter.**
   Hardware and WARP differ in precision, in timing and in what a driver does with a blob, and a test is written against the contract rather than against one of them.
   Pinning a test to an adapter is reserved for a **known bug** in that adapter, named where it is pinned, and the list of those stays short.

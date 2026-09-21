@@ -14,6 +14,7 @@
 #include <shaped-graphics/binding/pipeline_layout.hh> // pipeline_layout_description::groups
 #include <shaped-graphics/binding/sampler.hh>
 #include <shaped-graphics/compute/compute_pipeline.hh>
+#include <shaped-graphics/context/cold_caches.hh>
 #include <shaped-graphics/context/context.hh>
 #include <shaped-graphics/context/pipeline_cache.hh>
 #include <shaped-graphics/raster/raster_pipeline.hh>
@@ -173,6 +174,8 @@ bcache::blob_cache* pipeline_cache::resolve_blob_cache()
     // With nowhere to route, the tier is skipped rather than parking on a node whose completion could not wake it —
     // a cache may never change what a caller gets, only how fast.
     if (!cc::impl::async_can_schedule_here())
+        return nullptr;
+    if (cold_caches_from_environment().pipelines)
         return nullptr;
 
     // Resolved lazily so that merely creating a context never opens a cache file.

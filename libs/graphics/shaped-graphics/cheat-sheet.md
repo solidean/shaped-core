@@ -810,6 +810,7 @@ ctx.backlog.start(node);  ctx.backlog.settled()                //   detach work 
 // RASTER takes the layout's ADDRESS, so acquire it through the cache or two identical layouts miss each other.
 //   In-memory only today; it would have to go structural before raster PSOs could be persisted.
 ctx.cached.cache().set_blob_cache(&c)   // persistent 2nd tier: serialized PSO blobs surviving across RUNS (bcache::blob_cache*)
+// SC_SG_COLD=pipelines|shaders|all (comma-combined) runs that tier, and/or DXC's shader tier, cold: neither read nor written (context/cold_caches.hh)
                                         // defaults to bcache::default_cache(); nullptr = off. Keyed on adapter + driver too
                                         // The build PARKS on the store: with no ambient scheduler and no worker scope, the tier
                                         //   is skipped and the pipeline is built plainly

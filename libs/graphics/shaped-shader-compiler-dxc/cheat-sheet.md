@@ -64,6 +64,7 @@ cache.backlog()                  // -> cc::async_backlog const&; every compile t
                            //   key = hash128 over source + entry_point + stage + model + all options + the DXC VERSION
                            //   (the version only matters to the persistent tier — without it a DXC upgrade serves old DXIL)
 cache.set_blob_cache(&c)         // persistent 2nd tier: encoded compiled shaders surviving across RUNS (bcache::blob_cache*)
+// SC_SG_COLD=shaders (or all) runs that tier cold, neither read nor written — sg::cold_caches_from_environment()
                            //   defaults to bcache::default_cache(); nullptr = off. Encoded via sg::impl::encode_compiled_shader
                            //   the compile PARKS on the store: with no ambient scheduler and no worker scope, the tier is skipped
                            //   without threads the store is swept by whoever blocks (cc::thread_pump_all), not pumped by name

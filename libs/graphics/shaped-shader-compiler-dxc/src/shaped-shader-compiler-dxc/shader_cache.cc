@@ -11,6 +11,7 @@
 #include <clean-core/thread/async_coroutine.hh> // including it is what makes compile_shader a coroutine
 #include <shaped-graphics/binding/compiled_shader.hh>
 #include <shaped-graphics/binding/impl/shader_codec.hh>
+#include <shaped-graphics/context/cold_caches.hh>
 #include <shaped-shader-compiler-dxc/compiler.hh>
 
 #include <memory>
@@ -154,6 +155,8 @@ bcache::blob_cache* shader_cache::resolve_blob_cache()
     // A compile parks on the store, so it needs somewhere to resume.
     // With nowhere to route, the tier is skipped rather than parking on a node whose completion could not wake it.
     if (!cc::impl::async_can_schedule_here())
+        return nullptr;
+    if (sg::cold_caches_from_environment().shaders)
         return nullptr;
 
     if (!_blob_cache.has_value())
