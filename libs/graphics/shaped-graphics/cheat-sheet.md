@@ -713,7 +713,7 @@ sg::raster_pipeline_description   // { pipeline_layout_handle layout; compiled_s
                                   //   small_vector<color_target_state,8> color_targets; pixel_format depth_stencil_format=undefined; int sample_count=1; pinned_data cached_pipeline={}; string target_set }
                                   //   depth/stencil state with no depth_stencil_format warns at creation: it would draw without either
                                   //   creation asserts every stage's reflection fits `layout` (sg::describe_layout_misfit, binding/layout_fit.hh),
-                                  //   and a fragment shader's color_output_count / target_set against color_targets / target_set; an empty target_set takes the shader's
+                                  //   and a fragment shader's color_output_count (at most color_targets; the rest need an empty write_mask) and target_set; an empty target_set takes the shader's
 sg::color_target_state            // { pixel_format format; optional<blend_state> blend={}; color_write_mask write_mask=color_write_mask_all }  — one color target's PSO state
 sg::vertex_input_layout           // { small_vector<vertex_input_slot,8> slots; vector<vertex_attribute> attributes }; static create<Vs...>() derives one slot per type
                                   //   via a sg::vertex_layout_of<V> specialization (static vertex_type_layout get()). vertex_attribute { string semantic; u32 semantic_index; vertex_attribute_format format; isize offset; int slot }

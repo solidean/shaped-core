@@ -14,6 +14,8 @@
 #include <shaped-graphics/raster/raster_pipeline.hh>         // raster_pipeline_description
 #include <shaped-graphics/raytracing/raytracing_pipeline.hh> // raytracing_pipeline_description
 
+using namespace cc::primitive_defines;
+
 namespace
 {
 /// A shader whose reflection does not fit the layout it is built against is a caller's bug, whatever the backend makes of it.
@@ -42,9 +44,19 @@ cc::optional<cc::string> refusal_of(sg::raster_pipeline_description const& desc)
     if (desc.fragment_shader.has_value())
     {
         auto const& fs = desc.fragment_shader.value();
-        CC_ASSERTF(!fs.color_output_count.has_value() || fs.color_output_count.value() == desc.color_targets.size(),
-                   "the fragment shader '{}' writes {} color targets, and the pipeline has {}", fs.entry_point,
-                   fs.color_output_count.value_or(-1), desc.color_targets.size());
+        // A target no output writes is left undefined by every backend, unless its write mask keeps it unwritten.
+        if (fs.color_output_count.has_value())
+        {
+            auto const written = isize(fs.color_output_count.value());
+            CC_ASSERTF(written <= desc.color_targets.size(),
+                       "the fragment shader '{}' writes {} color targets, and the pipeline has {}", fs.entry_point,
+                       written, desc.color_targets.size());
+            for (auto i = written; i < desc.color_targets.size(); ++i)
+                CC_ASSERTF(desc.color_targets[i].write_mask == sg::color_write_mask{},
+                           "color target {} of the pipeline for '{}' is written by no output of the shader, so its "
+                           "write mask must be empty",
+                           i, fs.entry_point);
+        }
         CC_ASSERTF(fs.target_set.empty() || desc.target_set.empty() || fs.target_set == desc.target_set,
                    "the fragment shader '{}' writes '{}', and the pipeline names '{}'", fs.entry_point, fs.target_set,
                    desc.target_set);

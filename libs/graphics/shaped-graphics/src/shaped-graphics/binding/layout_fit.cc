@@ -15,7 +15,8 @@ namespace
     if (!inline_constants.has_value() || reflected.type != sg::binding_type::uniform_buffer)
         return false;
     auto const& block = inline_constants.value();
-    if (reflected.name == block.name)
+    // A push-constant block lives in no set and no space, whatever it is called.
+    if (reflected.name == block.name || (!reflected.group_index.has_value() && !reflected.space.has_value()))
         return true;
     return reflected.space.has_value() && reflected.space == block.space && reflected.index == block.index;
 }

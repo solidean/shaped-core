@@ -256,6 +256,9 @@ cc::vector<byte> encode_compiled_shader(compiled_shader const& shader)
     put_string(out, shader.compiler.version);
     put_string(out, shader.compiler.signature);
 
+    put_bool(out, shader.color_output_count.has_value());
+    put_u32(out, u32(shader.color_output_count.value_or(0)));
+
     return out;
 }
 
@@ -303,6 +306,11 @@ cc::optional<compiled_shader> decode_compiled_shader(cc::span<byte const> bytes)
     shader.compiler.name = r.get_string();
     shader.compiler.version = r.get_string();
     shader.compiler.signature = r.get_string();
+
+    auto const has_color_outputs = r.get_bool();
+    auto const color_outputs = i32(r.get_u32());
+    if (has_color_outputs)
+        shader.color_output_count = color_outputs;
 
     // Trailing bytes mean this is not the blob we think it is, so it is refused like any other inconsistency.
     if (!r.ok || r.pos != bytes.size())

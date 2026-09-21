@@ -174,6 +174,22 @@ cc::result<reflected_shader> reflect_spirv(cc::span<byte const> spirv, sg::shade
         out.bindings.push_back(cc::move(out_binding));
     }
 
+    if (stage == sg::shader_stage::fragment)
+    {
+        auto const* const entry = find_entry_point(module, entry_point);
+        if (entry == nullptr)
+            return cc::error(cc::format("SPIR-V module declares no entry point named '{}'", entry_point));
+        // A render target is an output at a location; a builtin output, such as a depth write, is not one.
+        auto count = 0;
+        for (uint32_t i = 0; i < entry->output_variable_count; ++i)
+        {
+            auto const* const v = entry->output_variables[i];
+            if (v != nullptr && v->built_in == -1)
+                count = cc::max(count, int(v->location) + 1);
+        }
+        out.color_output_count = count;
+    }
+
     if (sg::is_compute_stage(stage))
     {
         auto const* const entry = find_entry_point(module, entry_point);

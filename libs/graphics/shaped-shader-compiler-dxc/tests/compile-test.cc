@@ -362,3 +362,33 @@ TEST("ssc::dxc compile - compute shader -> SPIR-V")
     CHECK(shader.workgroup_size.value().y == 1);
     CHECK(shader.workgroup_size.value().z == 1);
 }
+
+TEST("ssc::dxc compile - a pixel shader reports one past the highest render target it writes")
+{
+    auto comp = ssc::dxc::compiler::create();
+    REQUIRE(comp.has_value());
+
+    // Targets 0 and 2: a pipeline needs three, the middle one unwritten.
+    auto const src = cc::string(R"(
+        struct ps_out { float4 a : SV_Target0; float4 c : SV_Target2; float depth : SV_Depth; };
+        ps_out main_ps(float4 p : SV_Position) { ps_out o; o.a = 1; o.c = 0; o.depth = 0.5; return o; }
+    )");
+    auto const spirv
+        = comp.value().compile({.source = src, .entry_point = "main_ps", .stage = sg::shader_stage::fragment},
+                               {.target = ssc::dxc::compile_target::spirv});
+    REQUIRE(spirv.has_value());
+    CHECK(spirv.value().color_output_count == 3); // the depth write is a builtin, and no target
+
+#ifdef CC_OS_WINDOWS
+    auto const dxil
+        = comp.value().compile({.source = src, .entry_point = "main_ps", .stage = sg::shader_stage::fragment});
+    REQUIRE(dxil.has_value());
+    CHECK(dxil.value().color_output_count == 3);
+#endif
+
+    // Every other stage leaves it unset.
+    auto const cs = comp.value().compile(
+        {.source = cc::string(double_compute_hlsl), .entry_point = "main", .stage = sg::shader_stage::compute});
+    REQUIRE(cs.has_value());
+    CHECK(!cs.value().color_output_count.has_value());
+}

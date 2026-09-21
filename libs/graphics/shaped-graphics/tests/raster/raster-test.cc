@@ -136,8 +136,12 @@ ASYNC_INVOCABLE_TEST("sg - an SGL pixel shader states its targets, and a pipelin
                                                .target_set = target_set};
     };
 
-    // One target written, two declared.
+    // One target written, two declared: the second is left undefined unless its write mask is empty.
+    // (An empty one differs from the first target's, which vulkan without independentBlend refuses, so it is not
+    // built here; the dx12 pipeline-cache test builds one.)
     CHECK_ASSERTS((void)ctx->uncached.create_raster_pipeline_async(described({rgba, rgba}, "")));
+    // One written, none declared: the output goes nowhere.
+    CHECK_ASSERTS((void)ctx->uncached.create_raster_pipeline_async(described({}, "")));
     // A description that names another set than the shader writes.
     CHECK_ASSERTS((void)ctx->uncached.create_raster_pipeline_async(described({rgba}, shaders::overlay::name)));
 }

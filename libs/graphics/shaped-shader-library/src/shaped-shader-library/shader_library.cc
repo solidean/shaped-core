@@ -48,7 +48,8 @@ void apply(sg::compiled_shader& shader, host_facts const& facts)
                 b.name = r.name;
                 break;
             }
-    shader.color_output_count = facts.color_output_count;
+    if (facts.color_output_count.has_value())
+        shader.color_output_count = facts.color_output_count;
     shader.target_set = facts.target_set;
 }
 
