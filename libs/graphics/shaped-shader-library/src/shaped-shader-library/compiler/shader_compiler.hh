@@ -1,5 +1,6 @@
 #pragma once
 
+#include <clean-core/container/vector.hh>
 #include <clean-core/error/optional.hh>
 #include <clean-core/error/result.hh>
 #include <clean-core/function/function_ref.hh>
@@ -27,13 +28,23 @@ using include_resolver = cc::function_ref<cc::optional<cc::string>(cc::string_vi
 
 } // namespace slib
 
+/// A binding the compiler will reflect under one name, and the name the host knows it by.
+struct slib::binding_rename
+{
+    cc::string reflected;
+    cc::string name;
+};
+
 /// What `preprocess` hands back.
 /// `entry_point` is empty where preprocessing kept the name it was given, which is every compiler but SGL's:
 /// SGL renames an entry point the target reserves, and the compile has to ask for the name the text declares.
+/// `renamed_bindings` is empty likewise: SGL's text declares `work_values` for what the host binds as `work.values`,
+/// and the library renames the compiled shader's reflected bindings with it once the compile settles.
 struct slib::preprocessed_source
 {
     cc::string source;
     cc::string entry_point;
+    cc::vector<binding_rename> renamed_bindings;
 };
 
 /// One shader to compile.

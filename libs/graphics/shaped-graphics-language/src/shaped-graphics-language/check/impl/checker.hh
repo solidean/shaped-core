@@ -244,7 +244,6 @@ struct checker
     /// Reports every loop of calls once, and marks the functions on it.
     void find_recursion();
     /// CHK-172: every buffer member's host name, `<binding>_<member>`, is its own.
-    void check_reflected_names();
     [[nodiscard]] bool inlines_whole(symbol_id function);
 
     [[nodiscard]] type_id check_expr(function_scope& scope, ast::expr_id expr);

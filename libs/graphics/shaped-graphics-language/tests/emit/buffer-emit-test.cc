@@ -108,17 +108,53 @@ TEST("sgl emit - MSL declines a buffer rather than writing text no compiler take
     CHECK(errors_for(k_buffers, target::hlsl_vulkan) == "");
 }
 
-TEST("sgl emit - a local that has a buffer's name is renamed, and the buffer keeps it")
+TEST("sgl emit - a buffer's identifier is minted like any other name, and the text says what the host calls it")
 {
-    // The buffer's name is what the host binds by, so it is the one that may not move.
-    auto const text = text_of("binding work:\n"
-                              "    dst: mut buffer[float]\n"
-                              "\n"
-                              "@pixel fun main_ps(p: pixel_input){work} -> frame:\n"
-                              "    let work_dst = 2.0\n"
-                              "    work.dst[0] = work_dst\n"
-                              "    return {color = float4(1.0, 1.0, 1.0, 1.0)}\n",
-                              target::wgsl);
-    CHECK(text.contains("var<storage, read_write> work_dst: array<f32>;"));
-    CHECK(text.contains("work_dst_1"));
+    // Nothing binds by the identifier, so a local keeps its name and the buffer is the one minted.
+    auto const e = emit_source(cc::string(k_edges)
+                                   + "binding work:\n"
+                                     "    dst: mut buffer[float]\n"
+                                     "\n"
+                                     "@pixel fun main_ps(p: pixel_input){work} -> frame:\n"
+                                     "    let work_dst = 2.0\n"
+                                     "    work.dst[0] = work_dst\n"
+                                     "    return {color = float4(1.0, 1.0, 1.0, 1.0)}\n",
+                               0, target::wgsl);
+    REQUIRE(sgl::emit::dump_errors(e) == "");
+    CHECK(e.text.contains("var<storage, read_write> work_dst_1: array<f32>;"));
+    CHECK(e.text.contains("let work_dst: f32 = 2.0;"));
+    REQUIRE(e.bound_names.size() == 1);
+    CHECK(e.bound_names[0].emitted == "work_dst_1");
+    CHECK(e.bound_names[0].host == "work.dst");
+}
+
+TEST("sgl emit - two buffers whose identifiers would collide both reach the host under their own paths")
+{
+    // `a_b.c` and `a.b_c` both want the identifier `a_b_c`; the host never sees it.
+    auto const e = emit_source(cc::string(k_edges)
+                                   + "binding a_b:\n"
+                                     "    c: buffer[float]\n"
+                                     "\n"
+                                     "binding a:\n"
+                                     "    b_c: buffer[float]\n"
+                                     "    scale: float\n"
+                                     "\n"
+                                     "@pixel fun main_ps(p: pixel_input){a_b, a} -> frame:\n"
+                                     "    let v = a_b.c[0] + a.b_c[0] * a.scale\n"
+                                     "    return {color = float4(v, v, v, 1.0)}\n",
+                               0, target::wgsl);
+    REQUIRE(sgl::emit::dump_errors(e) == "");
+    auto hosts = cc::vector<cc::string>();
+    auto emitted = cc::vector<cc::string>();
+    for (auto const& b : e.bound_names)
+    {
+        hosts.push_back(b.host);
+        emitted.push_back(b.emitted);
+    }
+    // The group's block first, under the binding's own name, then the buffers in group order.
+    REQUIRE(hosts.size() == 3);
+    CHECK(hosts[0] == "a");
+    CHECK(hosts[1] == "a_b.c");
+    CHECK(hosts[2] == "a.b_c");
+    CHECK(emitted[1] != emitted[2]);
 }

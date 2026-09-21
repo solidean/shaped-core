@@ -59,8 +59,10 @@ struct planned_enum
 struct planned_constants
 {
     check::symbol_id symbol = check::symbol_id::none;
-    /// The global a member is read through; a group's block is the binding's own name, which is what the host binds.
+    /// The global a member is read through, minted like any other name.
     cc::string name;
+    /// What the host binds the block by: the binding's own name.
+    cc::string host_name;
     /// The struct type of the block, which SGL has no name for, so it is minted.
     cc::string block_name;
     /// The plain members only, each at the offset `place_block` gave it.
@@ -81,8 +83,10 @@ struct planned_buffer
     check::symbol_id binding = check::symbol_id::none;
     /// A position in the binding's `members`.
     i32 member = -1;
-    /// The global the shader reads and writes through.
+    /// The global the shader reads and writes through, minted like any other name.
     cc::string name;
+    /// What the host binds the buffer by: `binding.member`, which no target can spell.
+    cc::string host_name;
     check::type_id element = check::type_id::none;
     bool is_mut = false;
     i32 group = 0;

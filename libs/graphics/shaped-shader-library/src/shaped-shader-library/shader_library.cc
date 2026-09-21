@@ -3,6 +3,7 @@
 #include <clean-core/record/domain.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/async.hh>
+#include <clean-core/thread/async_coroutine.hh>
 #include <clean-core/thread/thread_pump.hh>
 #include <shaped-graphics/routine/reload_generation.hh>
 #include <shaped-shader-library/binding/binding_groups.hh>
@@ -23,6 +24,37 @@ namespace
 {
 // The generated package symbols are process-wide globals, so two libraries would fight over who owns the assets they point at.
 bool g_library_alive = false;
+
+void rename_bindings(sg::compiled_shader& shader, cc::span<slib::binding_rename const> renames)
+{
+    for (auto& b : shader.bindings)
+        for (auto const& r : renames)
+            if (b.name == r.reflected)
+            {
+                b.reflected_name = cc::move(b.name);
+                b.name = r.name;
+                break;
+            }
+}
+
+sg::async_compiled_shader renamed_once_settled(sg::async_compiled_shader built, cc::vector<slib::binding_rename> renames)
+{
+    auto shader = co_await built;
+    rename_bindings(shader, renames);
+    co_return shader;
+}
+
+/// `built`, with every reflected binding `renames` names under the name the host knows it by.
+/// Applied after the compile rather than inside it, so a compiler's cache holds what the compiler reflected.
+/// A compile that settled already stays settled, as a WGSL one does.
+sg::async_compiled_shader renamed(sg::async_compiled_shader built, cc::vector<slib::binding_rename> renames)
+{
+    if (!built->has_value())
+        return renamed_once_settled(cc::move(built), cc::move(renames));
+    auto shader = *built->try_value();
+    rename_bindings(shader, renames);
+    return cc::make_async_from_value(cc::move(shader));
+}
 
 sg::async_compiled_shader make_failed_shader(cc::string message)
 {
@@ -311,6 +343,7 @@ void slib::shader_library::_compile_text(compile_outcome& outcome,
     }
 
     desc.source = cc::move(preprocessed.value().source);
+    auto renames = cc::move(preprocessed.value().renamed_bindings);
     // A preprocessor that renamed the entry point says so, and the compile has to ask for the name the text declares.
     if (!preprocessed.value().entry_point.empty())
         desc.entry_point = cc::move(preprocessed.value().entry_point);
@@ -339,5 +372,7 @@ void slib::shader_library::_compile_text(compile_outcome& outcome,
         desc.source = cc::move(rewritten.value());
     }
     outcome.shader = compiler->compile(desc);
+    if (!renames.empty())
+        outcome.shader = renamed(cc::move(outcome.shader), cc::move(renames));
     _backlog.track(outcome.shader);
 }

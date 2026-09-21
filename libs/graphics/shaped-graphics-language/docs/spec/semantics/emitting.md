@@ -100,6 +100,7 @@ const light_kind_sun: i32 = 2;
 * **EMIT-92** A vertex input member's **stream** is the name `@stream` gives it, else `per_instance` where it carries `@per_instance`, else `per_vertex`.
 * **EMIT-93** The members of one stream agree on `@per_instance`, or the struct is `unsupported`.
 * **EMIT-94** A stream changes nothing in the text: it is which buffer the host reads a member from, and a location stays the member's position ([why](why/emitting.md#emit-94)).
+* **EMIT-95** The text of an entry point comes with the pair of every buffer and constant buffer it declares: the name it minted, and the host name CHK-171 gives ([why](why/emitting.md#emit-95)).
 
 | stage | parameter | result |
 |---|---|---|
@@ -137,7 +138,7 @@ A binding that is not `@inline` is a group.
 * **EMIT-82** A group's number is its position in the entry point's binding list, the `@inline` binding skipped.
 * **EMIT-83** A group's plain members are a struct of their own and one constant buffer of it, named after the binding, at slot 0.
 * **EMIT-84** A group's plain members are placed by EMIT-39 to EMIT-41, as the members of an `@inline` binding are.
-* **EMIT-85** A buffer member is one global named `<binding>_<member>`, which CHK-172 keeps unique, and a local of that name is the one renamed.
+* **EMIT-85** A buffer member is one global whose name is minted from `<binding>_<member>`, and a group's constant buffer is named after the binding, as any declaration is.
 * **EMIT-86** HLSL writes a group as `#pragma sc group N` and a namespace `<binding>_bindings`, with no register: slib's binding pass assigns every one ([why](why/emitting.md#emit-86)).
 * **EMIT-87** The struct of a group's constant buffer stands ahead of that namespace, and `hlsl-vulkan` states no offset on its members ([why](why/emitting.md#emit-87)).
 * **EMIT-88** WGSL writes each resource of a group as `@group(N) @binding(slot)`: the constant buffer as `var<uniform>`, a buffer as a `var<storage>` array, `read` or `read_write`.

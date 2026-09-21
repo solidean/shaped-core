@@ -135,3 +135,9 @@ Vulkan and WGSL read a vertex attribute by its location, and sg's vulkan backend
 Splitting a vertex input over several buffers is a host question — which buffer holds which member, and how it steps — and the shader reads one struct either way.
 So the text ignores streams entirely, and the host layout lists its attributes in member order whatever buffer each comes from.
 
+## EMIT-95
+
+A target's compiler reflects the names the text declares, and those follow each target's identifier rules and reserved words.
+The host binds by the path instead, so whoever compiles the text renames what the compiler reflected, and needs the pairs to do it.
+slib does that as the compile settles, which is why no target's identifier rules ever reach sg.
+

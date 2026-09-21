@@ -62,7 +62,7 @@ TEST("sgl describe - the cube: an inline block, a vertex input, a target set and
     CHECK(d.entry_points[1].bindings.empty());
 }
 
-TEST("sgl describe - a buffer group numbers its buffers and names each as the shader reflects it")
+TEST("sgl describe - a buffer group numbers its buffers and names each by its path")
 {
     auto const d = described(R"(binding work:
     src: buffer[float]
@@ -80,10 +80,10 @@ TEST("sgl describe - a buffer group numbers its buffers and names each as the sh
     CHECK(work.members[0].type == "float");
     CHECK(!work.members[0].is_mut);
     CHECK(work.members[0].slot == 0);
-    CHECK(work.members[0].reflected_name == "work_src");
+    CHECK(work.members[0].host_name == "work.src");
     CHECK(work.members[1].is_mut);
     CHECK(work.members[1].slot == 1);
-    CHECK(work.members[1].reflected_name == "work_dst");
+    CHECK(work.members[1].host_name == "work.dst");
 
     REQUIRE(d.entry_points.size() == 1);
     CHECK(d.entry_points[0].stage == stage::compute);
@@ -145,7 +145,7 @@ TEST("sgl describe - a group's plain members are its constant buffer, at slot 0 
     REQUIRE(d.bindings.size() == 1);
     auto const& affine = d.bindings[0];
     CHECK(affine.block_slot == 0);
-    CHECK(affine.block_reflected_name == "affine");
+    CHECK(affine.block_host_name == "affine");
     CHECK(affine.block_size == 8);
     REQUIRE(affine.members.size() == 3);
     CHECK(affine.members[1].kind == sgl::described_member_kind::constant);

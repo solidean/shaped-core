@@ -692,33 +692,3 @@ void checker::judge_entry_point(symbol_id id)
 
     notes[s.info].is_valid_entry = is_valid;
 }
-
-void checker::check_reflected_names()
-{
-    // First the module-level names, which a buffer's name must not repeat either, then each buffer in declaration order.
-    auto seen = cc::vector<cc::string>();
-    for (auto const& s : out.symbols)
-        seen.push_back(s.name);
-    auto const module_names = seen.size();
-
-    for (auto const& s : out.symbols)
-    {
-        if (s.kind != symbol_kind::binding || s.state != symbol_state::checked)
-            continue;
-        for (auto const& member : out.at(out.bindings[s.info].members))
-        {
-            if (out.at(member.type).kind != type_kind::buffer)
-                continue;
-            auto name = cc::format("{}_{}", s.name, member.name);
-            auto clash = isize(-1);
-            for (auto i = isize(0); i < seen.size(); ++i)
-                if (seen[i] == name)
-                    clash = i;
-            if (clash >= 0)
-                report(diagnostic_kind::duplicate_reflected_name, s.file, ast_of(s.file).at(member.field).name,
-                       cc::format("'{}.{}' is known to the host as '{}', which {} is already", s.name, member.name,
-                                  name, clash < module_names ? "a module-level declaration" : "another buffer"));
-            seen.push_back(cc::move(name));
-        }
-    }
-}

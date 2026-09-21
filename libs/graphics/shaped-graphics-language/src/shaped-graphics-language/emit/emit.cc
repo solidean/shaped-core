@@ -122,6 +122,12 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
     }
     result.text = impl::write_text(plan, impl::dialect_of(t));
     result.entry_point = plan.entry_name;
+    if (plan.constants.has_value())
+        result.bound_names.push_back({.emitted = plan.constants.value().name, .host = plan.constants.value().host_name});
+    for (auto const& block : plan.group_blocks)
+        result.bound_names.push_back({.emitted = block.name, .host = block.host_name});
+    for (auto const& buffer : plan.buffers)
+        result.bound_names.push_back({.emitted = buffer.name, .host = buffer.host_name});
     return result;
 }
 

@@ -35,6 +35,7 @@ struct wgsl_declarations;
 // shader packages
 enum class shader_language;
 struct shader_source_description;
+struct binding_rename;
 struct preprocessed_source;
 struct shader_definition;
 struct shader_package;

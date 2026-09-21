@@ -154,11 +154,11 @@ def emit_group_impl(package: str, namespace: str, file: SglFile, binding: dict) 
     if has_block(binding):
         # A uniform block is read in rows of 16 bytes, so that is what the shader reflects its size as.
         size = (binding["block_size"] + 15) // 16 * 16
-        out.append(f'    {{.name = "{binding["block_reflected_name"]}", .index = {binding["block_slot"]}u, .count = 1u, '
+        out.append(f'    {{.name = "{binding["block_host_name"]}", .index = {binding["block_slot"]}u, .count = 1u, '
                    f".type = sg::binding_type::uniform_buffer, .block_size = {size}}},\n")
     for member in buffers:
         kind = "readwrite_structured_buffer" if member["mut"] else "readonly_structured_buffer"
-        out.append(f'    {{.name = "{member["reflected_name"]}", .index = {member["slot"]}u, .count = 1u, '
+        out.append(f'    {{.name = "{member["host_name"]}", .index = {member["slot"]}u, .count = 1u, '
                    f".type = sg::binding_type::{kind}}},\n")
     out.append("};\n} // namespace\n")
 

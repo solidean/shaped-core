@@ -31,7 +31,7 @@ sgl::text_request                          // source, source_name ("<sgl>"), ent
 #include <shaped-graphics-language/driver/describe.hh>
 auto const d = sgl::describe({.source = text, .source_name = "cube.sgl"});
                                            // -> cc::result<module_description, cc::string>: what the host side is generated from
-d.value().bindings                         // name, is_inline, members (constant: offset + size; buffer: slot + reflected_name), block_size
+d.value().bindings                         // name, is_inline, members (constant: offset + size; buffer: slot + host_name `work.values`), block_size
 d.value().structs                          // the @vertex / @pixel structs: name, edge, members with their location
 d.value().entry_points                     // name, stage, workgroup, bindings (the list as written)
                                            // types are SGL spellings (`float3`, `mat4`); mapping them to a host is the reader's job

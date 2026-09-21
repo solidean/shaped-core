@@ -40,7 +40,7 @@ void write_binding(babel::json::object_writer& o, sgl::described_binding const& 
     if (b.block_slot >= 0)
     {
         o.write("block_slot", b.block_slot);
-        o.write("block_reflected_name", cc::string_view(b.block_reflected_name));
+        o.write("block_host_name", cc::string_view(b.block_host_name));
     }
     auto members = o.write_array("members");
     for (auto const& m : b.members)
@@ -53,7 +53,7 @@ void write_binding(babel::json::object_writer& o, sgl::described_binding const& 
         {
             mo.write("mut", m.is_mut);
             mo.write("slot", m.slot);
-            mo.write("reflected_name", cc::string_view(m.reflected_name));
+            mo.write("host_name", cc::string_view(m.host_name));
         }
         else
         {

@@ -48,7 +48,10 @@ ASYNC_INVOCABLE_TEST("sg - an SGL package's generated group is what its compiled
     REQUIRE(compiled.bindings.size() == declared.size());
     for (auto i = isize(0); i < declared.size(); ++i)
     {
-        CHECK(compiled.bindings[i].name == declared[i].name); // `<binding>_<member>`: `work_values`
+        CHECK(compiled.bindings[i].name == declared[i].name); // the SGL path: `work.values`
+        // What the target's compiler called it, kept for a diagnostic; `.` is in no target's identifiers.
+        CHECK(!compiled.bindings[i].reflected_name.empty());
+        CHECK(!compiled.bindings[i].reflected_name.contains('.'));
         CHECK(compiled.bindings[i].index == declared[i].index);
         CHECK(compiled.bindings[i].count == declared[i].count);
         CHECK(compiled.bindings[i].type == declared[i].type); // `mut buffer[float]` is read-write

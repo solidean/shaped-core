@@ -186,9 +186,8 @@ Asking the source for it costs a `_` and makes the missing case a diagnostic ins
 
 ## CHK-171
 
-A buffer's name is what the host binds it by, and what a shader package's generated table states.
-`<binding>_<member>` is not injective, since `_` may stand anywhere in a name: `a_b.c` and `a.b_c` both give `a_b_c`.
-An emitter that dodged the clash would rename one of them, and which one would depend on the entry point being written, so one group could reach the host under two names.
-Refusing it where the two are declared keeps a buffer's host name a function of its declaration alone.
-It is judged module-wide rather than per list for the same reason: a group is bound by the host whichever entry point it is used with.
-
+A buffer's host name is what sg matches a bound view against, and what a shader package's generated table states.
+No target binds by name: HLSL by register, SPIR-V by set and binding, WGSL by `@group` and `@binding`, MSL by index.
+So the host name need not be an identifier of any target, and the path is the one name that is injective and needs no rule for a reader to learn.
+`a_b.c` and `a.b_c` stay two buffers, where any identifier built from them would clash.
+The identifier a target writes is the emitter's to mint (EMIT-85), and the text reports the pair (EMIT-95).

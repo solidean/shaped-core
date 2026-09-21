@@ -53,6 +53,17 @@ struct sgl::emit::error
     bool operator==(error const&) const = default;
 };
 
+/// One resource the text declares: the identifier it chose, and the name the host binds it by.
+struct sgl::emit::bound_name
+{
+    /// As the text spells it, which is what the target's compiler reflects.
+    cc::string emitted;
+    /// `binding.member` for a buffer, the binding's own name for a block of constants.
+    cc::string host;
+
+    bool operator==(bound_name const&) const = default;
+};
+
 /// Either the text or the reasons there is none.
 struct sgl::emit::emitted_text
 {
@@ -61,13 +72,16 @@ struct sgl::emit::emitted_text
     /// The name the text actually declares the entry point under, which is the source's unless this target reserves it.
     /// A caller compiling the text has to ask for THIS name, not the one it requested.
     cc::string entry_point;
+    /// Every buffer and block of constants the text declares, so a caller can rename what the compiler reflects.
+    cc::vector<bound_name> bound_names;
     cc::vector<error> errors;
 
     [[nodiscard]] bool has_text() const { return errors.empty(); }
 
     [[nodiscard]] bool operator==(emitted_text const& rhs) const
     {
-        return text == rhs.text && entry_point == rhs.entry_point && ast::impl::is_equal(errors, rhs.errors);
+        return text == rhs.text && entry_point == rhs.entry_point && ast::impl::is_equal(bound_names, rhs.bound_names)
+            && ast::impl::is_equal(errors, rhs.errors);
     }
 };
 

@@ -38,7 +38,7 @@ described_binding describe_binding(check::checked_module const& m, check::symbol
     {
         result.block_size = placed.size;
         result.block_slot = 0;
-        result.block_reflected_name = s.name;
+        result.block_host_name = s.name;
     }
     auto slot = emit_impl::first_buffer_slot(m, b);
     auto next_constant = isize(0);
@@ -60,7 +60,7 @@ described_binding describe_binding(check::checked_module const& m, check::symbol
                                   .type = cc::string(m.name_of(t.element)),
                                   .is_mut = t.is_mut,
                                   .slot = slot++,
-                                  .reflected_name = cc::format("{}_{}", s.name, member.name)});
+                                  .host_name = cc::format("{}.{}", s.name, member.name)});
     }
     return result;
 }

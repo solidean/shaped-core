@@ -268,12 +268,10 @@ struct planner
                 auto const& t = p.m.at(members[i].type);
                 if (t.kind != check::type_kind::buffer)
                     continue;
-                // Exactly `<binding>_<member>`, never minted: it is what the host binds by (CHK-172 keeps it unique).
-                auto name = cc::format("{}_{}", s.name, members[i].name);
-                p.names.taken.push_back(name);
                 p.buffers.push_back({.binding = id,
                                      .member = i32(i),
-                                     .name = cc::move(name),
+                                     .name = p.names.mint(cc::format("{}_{}", s.name, members[i].name)),
+                                     .host_name = cc::format("{}.{}", s.name, members[i].name),
                                      .element = t.element,
                                      .is_mut = t.is_mut,
                                      .group = group,
@@ -297,11 +295,11 @@ struct planner
             auto const plain = plain_members_of(p.m, b);
             if (!plain.empty())
             {
-                // The binding's own name, never minted: it is what the host binds the block by, and CHK-12 keeps it unique.
-                p.names.taken.push_back(s.name);
+                // The binding is a module-level declaration, so its name is its own unless the target reserves it.
                 auto planned = planned_constants{
                     .symbol = id,
-                    .name = s.name,
+                    .name = spell(s.name),
+                    .host_name = s.name,
                     .block_name = p.names.mint(cc::format("{}_data", s.name)),
                     .members = members_of(plain, false),
                     .group = group,
@@ -331,6 +329,7 @@ struct planner
             auto planned = planned_constants{
                 .symbol = id,
                 .name = spell(s.name),
+                .host_name = s.name,
                 .block_name = p.names.mint(cc::format("{}_data", s.name)),
                 .members = members_of(b.members, false),
             };
@@ -577,16 +576,8 @@ sgl::emit::impl::plan sgl::emit::impl::make_plan(check::checked_module const& m,
     p.constants();
     p.group_blocks();
     p.buffers();
-    // A local may share the name of a buffer or of a group's block, and those are what the host knows, so the local is
-    // the one renamed.
+    // The check pass minted the locals, so a buffer or a block minted above never took one's name.
     for (auto const& local : e.locals)
-    {
-        auto is_bound = false;
-        for (auto const& b : result.buffers)
-            is_bound = is_bound || b.name == local.name;
-        for (auto const& b : result.group_blocks)
-            is_bound = is_bound || b.name == local.name;
-        result.locals.push_back(is_bound ? result.names.mint(local.name) : p.spell(local.name));
-    }
+        result.locals.push_back(p.spell(local.name));
     return result;
 }

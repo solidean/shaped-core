@@ -204,7 +204,6 @@ void checker::run()
             check_body(symbol_id(i));
 
     find_recursion();
-    check_reflected_names();
 
     for (auto i = isize(0); i < out.symbols.size(); ++i)
         if (out.symbols[i].kind == symbol_kind::function && out.symbols[i].state == symbol_state::checked)

@@ -35,8 +35,9 @@ struct sgl::described_binding_member
     i32 size = 0;
     /// A buffer's position among its binding's resources; -1 for a constant.
     i32 slot = -1;
-    /// The name a compiled shader reflects a buffer under, `<binding>_<member>`; empty for a constant.
-    cc::string reflected_name;
+    /// What the host binds a buffer by, `binding.member`; empty for a constant.
+    /// slib renames the compiled shader's reflected binding to it, so it is the name sg sees.
+    cc::string host_name;
 };
 
 struct sgl::described_binding
@@ -47,10 +48,10 @@ struct sgl::described_binding
     cc::vector<described_binding_member> members;
     /// Where the last constant ends; 0 without one.
     i32 block_size = 0;
-    /// A group's constant block: its slot, which is 0, and the name it reflects under, which is the binding's own.
+    /// A group's constant block: its slot, which is 0, and the name the host binds it by, which is the binding's own.
     /// -1 and empty for an `@inline` binding and for a group without a plain member.
     i32 block_slot = -1;
-    cc::string block_reflected_name;
+    cc::string block_host_name;
 };
 
 struct sgl::described_struct_member

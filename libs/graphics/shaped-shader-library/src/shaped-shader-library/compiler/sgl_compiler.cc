@@ -60,8 +60,11 @@ public:
         if (text.has_error())
             return cc::error(cc::format("SGL reported errors:\n{}", text.error()));
         // The name the text declares, which is the source's unless this target reserves it.
-        return slib::preprocessed_source{.source = cc::move(text.value().text),
-                                         .entry_point = cc::move(text.value().entry_point)};
+        auto result = slib::preprocessed_source{.source = cc::move(text.value().text),
+                                                .entry_point = cc::move(text.value().entry_point)};
+        for (auto& bound : text.value().bound_names)
+            result.renamed_bindings.push_back({.reflected = cc::move(bound.emitted), .name = cc::move(bound.host)});
+        return result;
     }
 
     [[nodiscard]] sg::async_compiled_shader compile(slib::shader_source_description const& desc) const override

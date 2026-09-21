@@ -96,7 +96,7 @@ Everything not named here is the diagnostic `unsupported-yet`, never a guess.
 * A subscript on a buffer, as a value and as the place of an assignment.
 * A plain member of a group, as a field of the constant buffer the group owns, for a type whose place in a block every target agrees on.
 * The positional group numbering, and `@inline` last.
-* A buffer's host name, `<binding>_<member>`, which [CHK-172](semantics/checking.md#bindings) keeps unique in a module.
+* A buffer's host name, its path `binding.member` ([CHK-171](semantics/checking.md#bindings)), which the text reports beside the identifier it minted.
 
 Three targets write a group, and the fourth declines rather than guessing.
 WGSL gives each resource its own `@group`/`@binding`, and HLSL writes `#pragma sc group n` and a namespace, so that every register stays slib's binding pass's to assign.

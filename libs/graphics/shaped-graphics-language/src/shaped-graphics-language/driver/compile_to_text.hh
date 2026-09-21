@@ -26,6 +26,9 @@ struct sgl::emitted_source
     /// The source's name, unless the target reserves it: HLSL and MSL both reserve words an SGL author may pick.
     /// A caller compiling the text asks for THIS name.
     cc::string entry_point;
+    /// What each resource the text declares is called there, and what the host calls it: `work.values`.
+    /// A caller renames the compiler's reflected bindings with it, so no target's identifier rules reach the host.
+    cc::vector<emit::bound_name> bound_names;
 };
 
 namespace sgl

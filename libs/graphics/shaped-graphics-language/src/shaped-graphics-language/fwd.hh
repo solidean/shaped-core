@@ -248,4 +248,5 @@ enum class target : u8;
 enum class error_kind : u8;
 struct error;
 struct emitted_text;
+struct bound_name;
 } // namespace sgl::emit

@@ -567,7 +567,7 @@ sg::compare_op              // never|less|equal|less_equal|greater|not_equal|gre
 #include <shaped-graphics/binding/binding.hh>
 sg::binding_type            // uniform_buffer | read{only,write}_structured_buffer | read{only,write}_raw_buffer
                             //   | read{only,write}_texture | sampler | acceleration_structure   (replaces D3D_SHADER_INPUT_TYPE)
-sg::binding                 // { cc::string name; cc::optional<u32> group_index, space; u32 index, count; binding_type type; cc::optional<isize> block_size;
+sg::binding                 // { cc::string name, reflected_name (diagnostics only; set where a compiler edge renamed it); cc::optional<u32> group_index, space; u32 index, count; binding_type type; cc::optional<isize> block_size;
                             //   cc::optional<texture_view_dimension> texture_dimension }  — reflected for texture kinds; hand-written array bindings must set it
                             //   + what a WebGPU bind group layout needs and dx12/vulkan ignore:
                             //   shader_stages visibility        — EMPTY = not known (treated as every stage), never "no stage"

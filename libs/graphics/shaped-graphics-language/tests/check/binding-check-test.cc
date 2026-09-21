@@ -106,20 +106,11 @@ TEST("sgl check - a compute entry point takes the thread id and returns nothing"
               .contains("a workgroup size is a positive int literal"));
 }
 
-TEST("sgl check - a buffer's host name is its own, module-wide (CHK-172)")
+TEST("sgl check - a buffer's host name is its path, so no two buffers of a module share one (CHK-171)")
 {
-    // `_` may stand anywhere in a name, so `<binding>_<member>` alone does not keep two buffers apart.
-    auto const two_groups = cc::string("binding a:\n    b_c: buffer[float]\n\n") + listing("    unused: buffer[float]\n");
+    // `a_b.c` and `a.b_c` would share an identifier in any target, and the host never sees one.
+    auto const two_groups = cc::string("binding work_a:\n    b: buffer[float]\n\n") + listing("    a_b: buffer[float]\n");
     CHECK(reports_for(two_groups) == "");
-
-    auto const clash = cc::string("binding work_a:\n    b: buffer[float]\n\n") + listing("    a_b: buffer[float]\n");
-    CHECK(reports_for(clash).contains("duplicate-reflected-name"));
-    CHECK(reports_for(clash).contains("'work_a_b'"));
-
-    // A module-level declaration's name is taken too, since the host name is a global in every target.
-    auto const with_function = cc::string("fun work_src() -> float => 1.0\n\n") + listing("    src: buffer[float]\n");
-    CHECK(reports_for(with_function).contains("a module-level declaration"));
-
-    // A plain member is no buffer and has no host name of its own.
-    CHECK(reports_for(cc::string("fun work_scale() -> float => 1.0\n\n") + listing("    scale: float\n")) == "");
+    // Nor does a module-level declaration's name matter to a buffer.
+    CHECK(reports_for(cc::string("fun work_src() -> float => 1.0\n\n") + listing("    src: buffer[float]\n")) == "");
 }
