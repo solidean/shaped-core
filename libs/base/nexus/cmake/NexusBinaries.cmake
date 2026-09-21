@@ -5,8 +5,9 @@
 # from the manifest this writes at the end of configure.
 # The CMake File API reports no custom target property, which is why the manifest exists at all.
 #
-#   sc_nexus_binary(<target> KINDS <tests|examples|tool>...)
+#   sc_nexus_binary(<target> KINDS <tests|examples|tool|stub>...)
 #       Records `target` as a nexus binary holding those kinds. Call it once per target, after add_executable.
+#       `stub` marks a stand-in that only says why its example is not built here: no nexus runner, so no test run starts it.
 #
 #   sc_write_nexus_binary_manifest()
 #       Writes <build>/nexus-binaries.json. Called once, at the end of the top-level CMakeLists.
@@ -20,8 +21,8 @@ function(sc_nexus_binary target)
         message(FATAL_ERROR "sc_nexus_binary(${target}): unexpected arguments: ${NB_UNPARSED_ARGUMENTS}")
     endif()
     foreach(_kind IN LISTS NB_KINDS)
-        if(NOT _kind MATCHES "^(tests|examples|tool)$")
-            message(FATAL_ERROR "sc_nexus_binary(${target}): unknown kind '${_kind}' — one of tests, examples, tool")
+        if(NOT _kind MATCHES "^(tests|examples|tool|stub)$")
+            message(FATAL_ERROR "sc_nexus_binary(${target}): unknown kind '${_kind}' — one of tests, examples, tool, stub")
         endif()
     endforeach()
 

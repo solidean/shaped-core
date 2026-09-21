@@ -16,7 +16,7 @@ from pathlib import Path
 
 from tools import dev
 from tools.dev import console
-from tools.dev.lib.project.targets import carries_examples, carries_tests, is_tool
+from tools.dev.lib.project.targets import carries_examples, carries_tests, is_stub, is_tool
 
 
 @dataclass(frozen=True)
@@ -63,6 +63,10 @@ class Context:
     def is_example_target(self, target: dev.Target) -> bool:
         """A nexus binary carrying examples, as the build's nexus-binaries.json records it."""
         return carries_examples(target)
+
+    def is_stub_target(self, target: dev.Target) -> bool:
+        """A stand-in for an example this build cannot make; it carries no tests, whatever it is registered as."""
+        return is_stub(target)
 
     def is_tool_target(self, target: dev.Target) -> bool:
         """A nexus binary that is also a program a user runs, whatever tests or examples it carries."""

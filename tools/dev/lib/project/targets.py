@@ -140,6 +140,11 @@ def carries_examples(target: Target) -> bool:
     return "examples" in target.nexus_kinds
 
 
+def is_stub(target: Target) -> bool:
+    """A stand-in for an example this build cannot make, which only says why: it answers no nexus query, so nothing probes or tests it."""
+    return target.nexus_kinds is not None and "stub" in target.nexus_kinds
+
+
 def is_tool(target: Target) -> bool:
     """A nexus binary that is also a program — apps or commands a user runs — whatever else it carries."""
     return target.nexus_kinds is not None and "tool" in target.nexus_kinds

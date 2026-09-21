@@ -138,9 +138,10 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
     all_targets = ctx.discover(primary, args.emsdk_path)
     wanted = ctx.resolve_target_names(primary, args.target, args.emsdk_path) if args.target else None
     # Example binaries are candidates too: one may carry ordinary TESTs for machinery it grew, and those are tests like any other.
-    # Its EXAMPLEs are in their own bucket and never run here.
+    # Its EXAMPLEs are in their own bucket and never run here, and a stub standing in for one carries nothing.
     binary_names, test_name, err = dev.select_test_binaries(
-        all_targets, is_test=lambda t: ctx.is_test_target(t) or ctx.is_example_target(t),
+        all_targets,
+        is_test=lambda t: ctx.is_test_target(t) or (ctx.is_example_target(t) and not ctx.is_stub_target(t)),
         wanted_names=wanted, name_arg=args.test_name, target_label=args.target,
     )
     if err:

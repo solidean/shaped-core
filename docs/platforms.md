@@ -194,6 +194,7 @@ Three outcomes, and which one an example gets depends on what it supports:
   The setting named something this build does not have, and falling back silently would hide that.
 - **A built backend the example cannot use gives a stub** under the example's own name: it prints what was chosen and what the example supports, and exits non-zero.
   A stub rather than nothing, so `dev.py example` still resolves the name and says why it cannot run.
+  It is registered as a `stub` as well as an example, so `dev.py test` never starts it: it is no nexus binary, and would fail any run it joined.
   It links nothing graphical, because the real target would link a backend that does not exist on that leg.
 - **Otherwise the example builds against it**, `auto` resolving to the example's own first choice.
 
