@@ -158,3 +158,79 @@ TEST("sgl emit - two buffers whose identifiers would collide both reach the host
     CHECK(hosts[2] == "a.b_c");
     CHECK(emitted[1] != emitted[2]);
 }
+
+namespace
+{
+/// A helper with a loop, so a call of it is a block that legalizing moves in front of its statement.
+constexpr cc::string_view k_pick = "binding work:\n"
+                                   "    values: mut buffer[float]\n"
+                                   "\n"
+                                   "fun pick(i: int) -> int:\n"
+                                   "    let mut j = i\n"
+                                   "    while j > 3:\n"
+                                   "        j -= 4\n"
+                                   "    return j\n"
+                                   "\n";
+} // namespace
+
+TEST("sgl emit - an index that inlines a helper is evaluated in front, the place's before the value's")
+{
+    // EVAL-14: the place's index first, then the value.
+    auto const hlsl = text_of(cc::string(k_pick)
+                                  + "@pixel fun main_ps(p: pixel_input){work} -> frame:\n"
+                                    "    work.values[pick(1)] = work.values[pick(2)]\n"
+                                    "    return {color = float4(1.0, 1.0, 1.0, 1.0)}\n",
+                              target::hlsl_dx12);
+    CHECK(!hlsl.contains("[]"));
+    auto const place = hlsl.find("int j = 1;");
+    auto const value = hlsl.find("int j_1 = 2;");
+    CHECK(place >= 0);
+    CHECK(value > place);
+    CHECK(hlsl.contains("work_bindings::work_values[j] = work_bindings::work_values[j_1];\n"));
+}
+
+TEST("sgl emit - `op=` on a buffer element evaluates its index once")
+{
+    auto const wgsl = text_of(cc::string(k_pick)
+                                  + "@pixel fun main_ps(p: pixel_input){work} -> frame:\n"
+                                    "    work.values[pick(5)] += 2.0\n"
+                                    "    return {color = float4(1.0, 1.0, 1.0, 1.0)}\n",
+                              target::wgsl);
+    // One loop, not two: the read goes through the local the store's index was evaluated into.
+    CHECK(wgsl.find("while") == wgsl.rfind("while"));
+    CHECK(wgsl.contains("    work_values[index] = work_values[index] + 2.0;\n"));
+}
+
+TEST("sgl emit - an element read to the left of a helper that stores to its buffer is read first")
+{
+    // A store is an effect: the read on the left is pinned before the helper's body moves in front of it.
+    auto const wgsl = text_of("binding work:\n"
+                              "    values: mut buffer[float]\n"
+                              "\n"
+                              "fun bump(i: int){work} -> float:\n"
+                              "    work.values[i] = work.values[i] + 1.0\n"
+                              "    return 0.0\n"
+                              "\n"
+                              "@pixel fun main_ps(p: pixel_input){work} -> frame:\n"
+                              "    let a = work.values[0] + bump(0)\n"
+                              "    return {color = float4(a, a, a, 1.0)}\n",
+                              target::wgsl);
+    auto const pin = wgsl.find("let values_before: f32 = work_values[0];");
+    auto const store = wgsl.find("work_values[0] = work_values[0] + 1.0;");
+    CHECK(pin >= 0);
+    CHECK(store > pin);
+    CHECK(wgsl.contains("let a: f32 = values_before + 0.0;"));
+}
+
+TEST("sgl emit - a shadowing local is a local of its own in the text")
+{
+    // CHK-53: each `let x` is its own local, so the second is minted and the first is still what its value reads.
+    auto const wgsl = text_of("@pixel fun main_ps(p: pixel_input) -> frame:\n"
+                              "    let x = p.position.x\n"
+                              "    let x = x * 2.0\n"
+                              "    return {color = float4(x, x, x, 1.0)}\n",
+                              target::wgsl);
+    CHECK(wgsl.contains("    let x: f32 = p.position.x;\n"));
+    CHECK(wgsl.contains("    let x_1: f32 = x * 2.0;\n"));
+    CHECK(wgsl.contains("vec4f(x_1, x_1, x_1, 1.0)"));
+}

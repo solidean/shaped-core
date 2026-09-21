@@ -127,6 +127,18 @@ flat_expr_id flat_builder::construct(type_id type, cc::span<flat_expr_id const> 
     return add_expr(type, flat_construct{.arguments = expr_list(arguments)});
 }
 
+flat_expr_id flat_builder::binding_member(symbol_id binding, i32 member)
+{
+    auto const members = m.at(m.bindings[m.at(binding).info].members);
+    auto const type = member >= 0 && member < members.size() ? members[member].type : checked_module::error_type;
+    return add_expr(type, flat_binding_member{.binding = binding, .member = member});
+}
+
+flat_expr_id flat_builder::buffer_element(flat_expr_id buffer, flat_expr_id index)
+{
+    return add_expr(m.at(e.at(buffer).type).element, flat_buffer_element{.buffer = buffer, .index = index});
+}
+
 flat_expr_id flat_builder::call(cc::string_view name, cc::span<flat_expr_id const> arguments)
 {
     return add_call(*this, name, arguments, false);

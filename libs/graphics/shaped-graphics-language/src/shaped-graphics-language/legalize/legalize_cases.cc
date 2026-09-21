@@ -7,7 +7,8 @@ using namespace sgl::check;
 using namespace sgl::check::impl;
 
 // Rule C1: a `case` is a `switch` where every pattern is a literal, and a chain of `if` over `==` otherwise.
-// It runs in front of the expression rules, so what it writes is an ordinary tree they already know.
+// It runs behind one pass of the expression rules and in front of a second, so what it writes is an ordinary tree the
+// second already knows.
 
 namespace
 {

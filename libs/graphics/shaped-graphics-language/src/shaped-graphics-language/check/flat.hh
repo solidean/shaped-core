@@ -247,10 +247,9 @@ struct sgl::check::flat_member
     constexpr bool operator==(flat_member const&) const = default;
 };
 
-/// A value of the node's struct type from one value per field, in field order.
-/// A splat is gone: its fields stand here one by one.
 /// `values[i]` on a `buffer`: the element a shader loads, and the place it stores to.
 /// `buffer` is what names the resource, which today is always a `flat_binding_member`.
+/// As a place, `index` is evaluated before the value that is stored.
 struct sgl::check::flat_buffer_element
 {
     flat_expr_id buffer = flat_expr_id::none;
@@ -259,6 +258,8 @@ struct sgl::check::flat_buffer_element
     constexpr bool operator==(flat_buffer_element const&) const = default;
 };
 
+/// A value of the node's struct type from one value per field, in field order.
+/// A splat is gone: its fields stand here one by one.
 struct sgl::check::flat_construct
 {
     ast::range_of<flat_expr_id> arguments;
@@ -360,7 +361,8 @@ struct sgl::check::flat_var
     constexpr bool operator==(flat_var const&) const = default;
 };
 
-/// `place` is a `flat_local_ref` of a mutable local, or a chain of `flat_member` over one.
+/// `place` is a `flat_local_ref` of a mutable local, a chain of `flat_member` over one, or a `flat_buffer_element` of a
+/// `mut` buffer, whose index is evaluated before `value`.
 struct sgl::check::flat_assign
 {
     flat_expr_id place = flat_expr_id::none;
@@ -585,10 +587,11 @@ struct sgl::check::flat_entry_point
     {
         using ast::impl::is_equal;
         return entry_stage == rhs.entry_stage && name == rhs.name && function == rhs.function && input == rhs.input
-            && result == rhs.result && is_equal(bindings, rhs.bindings) && is_equal(locals, rhs.locals)
-            && is_equal(labels, rhs.labels) && root == rhs.root && is_equal(exprs, rhs.exprs)
-            && is_equal(stmts, rhs.stmts) && is_equal(expr_lists, rhs.expr_lists)
-            && is_equal(stmt_lists, rhs.stmt_lists) && is_equal(arms, rhs.arms) && is_equal(call_sites, rhs.call_sites)
-            && body == rhs.body && names == rhs.names;
+            && result == rhs.result && is_equal(bindings, rhs.bindings) && workgroup[0] == rhs.workgroup[0]
+            && workgroup[1] == rhs.workgroup[1] && workgroup[2] == rhs.workgroup[2]
+            && takes_thread_id == rhs.takes_thread_id && is_equal(locals, rhs.locals) && is_equal(labels, rhs.labels)
+            && root == rhs.root && is_equal(exprs, rhs.exprs) && is_equal(stmts, rhs.stmts)
+            && is_equal(expr_lists, rhs.expr_lists) && is_equal(stmt_lists, rhs.stmt_lists) && is_equal(arms, rhs.arms)
+            && is_equal(call_sites, rhs.call_sites) && body == rhs.body && names == rhs.names;
     }
 };

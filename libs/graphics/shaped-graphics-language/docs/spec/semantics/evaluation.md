@@ -26,9 +26,9 @@ A listing here is the dump of a flat tree, shortened: a label is `$name`, and a 
 * **EVAL-9** `let` declares an immutable local and gives it its value; nothing assigns it afterwards.
 * **EVAL-10** `var` declares a mutable local; without a value it holds nothing, and reading it before an assignment is an error of the program.
 * **EVAL-11** A declaration that runs again, in a later iteration of a loop, starts the local afresh.
-* **EVAL-12** A **place** is a mutable local, or a member of a place.
+* **EVAL-12** A **place** is a mutable local, a member of a place, or an element of a `mut` buffer.
 * **EVAL-13** `place = value` evaluates `value` and then stores it; the members of the place it does not name keep their values.
-* **EVAL-14** A place holds no expression that needs evaluating, so an assignment evaluates its value and nothing else.
+* **EVAL-14** The one expression a place holds is a buffer element's index: it is evaluated once, before the value, and the store goes to the element it named.
 
 ## Expressions
 
@@ -144,7 +144,8 @@ fun graded(a: float) -> float:
 
 ## From the source
 
-* **EVAL-54** `let` is `let`, `let mut` is `var`, and `place op= value` is `place = place op value`, whose second read of the place evaluates nothing by EVAL-14.
+* **EVAL-54** `let` is `let`, `let mut` is `var`, and `place op= value` is `place = place op value`.
+  Its second read of the place goes through the index EVAL-14 evaluated, and evaluates nothing again.
 * **EVAL-55** An `if` / `else if` / `else` chain is an `if` whose `else` holds the rest of the chain.
 * **EVAL-56** `while`, `for … in first ..< end` and `loop:` are the loops of the same names; `break` is `leave $loop` and `continue` is `continue $loop`, of the innermost loop.
 * **EVAL-57** A `loop:` that is a value is `block $loop_value { loop $loop { … } }`, and its `break value` is `leave $loop_value value`.
@@ -174,4 +175,3 @@ fun graded(a: float) -> float:
 * What an `int` division by zero is, which is why `int` has no `/` yet.
 * Whether `float` arithmetic is exact across targets; the machine computes in `f32`, and a target may fuse or reorder.
 * Whether a pattern that has an effect is worth the ordering EVAL-68 has to promise, which a pattern language would make sharper ([patterns](../incubator/patterns.md)).
-* A place that holds an index, whose index expression EVAL-14 then has to order.

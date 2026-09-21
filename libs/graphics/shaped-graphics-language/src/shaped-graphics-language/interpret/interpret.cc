@@ -70,6 +70,8 @@ struct machine
 
     cc::vector<value> locals;
     cc::vector<bool> is_set;
+    /// Parallel to `out.buffers`: whether the run stored to that buffer, which is what the outcome keeps.
+    cc::vector<bool> is_stored;
     /// The value a `leave` or a `return` under way carries.
     value carried;
     int depth = 0;
@@ -166,6 +168,37 @@ struct machine
         return {};
     }
 
+    /// The element `b` names: evaluates the index, then finds the buffer in `out.buffers` and the element's first scalar.
+    /// A position rather than a pointer, since whatever runs next may be the value of a store.
+    flow locate(flat_buffer_element const& b, type_id element_type, isize& buffer, isize& offset)
+    {
+        auto index = value();
+        if (auto const f = eval(b.index, index); !f.is_normal())
+            return f;
+        if (index.leaves.size() != 1 || index.leaves[0].kind != value_kind::scalar_int)
+            return type_error("a buffer index that is no int");
+        if (!is_known(e, b.buffer))
+            return type_error("an expression id that names nothing");
+        auto const* const named = e.at(b.buffer).node.try_as<flat_binding_member>();
+        if (named == nullptr)
+            return type_error("a buffer that no binding member names");
+
+        buffer = -1;
+        for (auto i = isize(0); i < out.buffers.size(); ++i)
+            if (out.buffers[i].binding == named->binding && out.buffers[i].member == named->member)
+                buffer = i;
+        if (buffer < 0)
+            return type_error("a buffer the inputs do not hold");
+
+        auto const count = leaf_count_of(m, element_type);
+        auto const at = isize(index.leaves[0].as_int());
+        if (count <= 0 || at < 0 || (at + 1) * count > out.buffers[buffer].leaves.size())
+            return type_error(
+                cc::format("the element {} of a buffer of {} scalars", at, out.buffers[buffer].leaves.size()));
+        offset = at * count;
+        return {};
+    }
+
     flow eval_bool(flat_expr_id id, bool& result)
     {
         auto v = value();
@@ -251,6 +284,18 @@ struct machine
                 return {};
             }
             return type_error("a binding member the inputs do not hold");
+        }
+        if (auto const* const element = x.node.try_as<flat_buffer_element>())
+        {
+            auto buffer = isize(-1);
+            auto offset = isize(0);
+            if (auto const f = locate(*element, x.type, buffer, offset); !f.is_normal())
+                return f;
+            result.type = x.type;
+            result.leaves.clear();
+            result.leaves.push_back_range(cc::span<scalar const>(out.buffers[buffer].leaves)
+                                              .subspan({.offset = offset, .size = leaf_count_of(m, x.type)}));
+            return {};
         }
         if (auto const* const member = x.node.try_as<flat_member>())
         {
@@ -374,6 +419,25 @@ struct machine
         return {};
     }
 
+    /// EVAL-14: the index first, then the value, then the store.
+    flow store_element(flat_buffer_element const& element, type_id element_type, flat_expr_id stored)
+    {
+        auto buffer = isize(-1);
+        auto offset = isize(0);
+        if (auto const f = locate(element, element_type, buffer, offset); !f.is_normal())
+            return f;
+        auto v = value();
+        if (auto const f = eval(stored, v); !f.is_normal())
+            return f;
+        auto const count = leaf_count_of(m, element_type);
+        if (v.leaves.size() != count)
+            return type_error("a store of a value of the wrong size");
+        for (auto i = isize(0); i < count; ++i)
+            out.buffers[buffer].leaves[offset + i] = v.leaves[i];
+        is_stored[buffer] = true;
+        return {};
+    }
+
     flow run_body(ast::range_of<flat_stmt_id> range)
     {
         if (!is_known(e, range))
@@ -485,6 +549,10 @@ struct machine
         }
         if (auto const* const a = s.node.try_as<flat_assign>())
         {
+            auto const* const element
+                = is_known(e, a->place) ? e.at(a->place).node.try_as<flat_buffer_element>() : nullptr;
+            if (element != nullptr)
+                return store_element(*element, e.at(a->place).type, a->value);
             auto v = value();
             if (auto const f = eval(a->value, v); !f.is_normal())
                 return f;
@@ -673,6 +741,8 @@ outcome sgl::check::interpret(checked_module const& m,
                               run_limits const& limits)
 {
     auto run = machine{.m = m, .e = e, .inputs = inputs, .fuel = limits.fuel};
+    run.out.buffers = inputs.buffers;
+    run.is_stored.resize_to_filled(inputs.buffers.size(), false);
     run.locals.resize_to_defaulted(e.locals.size());
     run.is_set.resize_to_filled(e.locals.size(), false);
     if (!e.locals.empty())
@@ -693,6 +763,12 @@ outcome sgl::check::interpret(checked_module const& m,
         run.fail(run_status::fell_off_the_end, "the function");
     else if (f.kind != flow_kind::failed)
         run.type_error("an exit that nothing encloses");
+
+    auto stored = cc::vector<buffer_contents>();
+    for (auto i = isize(0); i < run.out.buffers.size(); ++i)
+        if (run.is_stored[i])
+            stored.push_back(cc::move(run.out.buffers[i]));
+    run.out.buffers = cc::move(stored);
     return cc::move(run.out);
 }
 
@@ -718,6 +794,11 @@ cc::string sgl::check::dump(outcome const& o)
     {
         out += " | print";
         write(out, v);
+    }
+    for (auto const& b : o.buffers)
+    {
+        out += " | buffer";
+        write(out, value{.leaves = b.leaves});
     }
     return out;
 }

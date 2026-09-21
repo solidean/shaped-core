@@ -18,7 +18,7 @@ The worked examples are WGSL, since it is the strictest target: no `do … while
 * **LEGAL-50** A `switch` may stand between them: every target takes a `continue` inside one as the enclosing loop's, WGSL included ([why](why/legalization.md#legal-50)).
 * **LEGAL-5** `return` is legal at any depth: it is the exit of the root block.
 * **LEGAL-6** The right operand of `and` / `or` has no effect ([why](why/legalization.md#legal-6)).
-* **LEGAL-7** The `end` of a `for` has no effect and reads no mutable local, since a target evaluates it before every iteration.
+* **LEGAL-7** The `end` of a `for` has no effect and reads no mutable local and no buffer element, since a target evaluates it before every iteration.
 * **LEGAL-8** A tree that is core already is left as it is.
 * **LEGAL-9** An emitter refuses a tree that is not core with the error `not-core`, whose detail names the first violation; it never asserts.
 
@@ -57,11 +57,11 @@ One row per core construct, one column per target; GLSL has no emitter yet, and 
 * **LEGAL-44** The core form has `switch v { [a, b] { … } … default { … } }`, whose `default` is mandatory.
   An arm's values are literals a target can write as a label: an `int` literal, or an enum case, which is one under a name.
 * **LEGAL-45** A `case` becomes a `switch` when every pattern of every arm is such a literal, and a chain of `if` otherwise ([why](why/legalization.md#legal-45)).
-  It runs after the expression rules, which are what take a `case` out of the block expression that held it.
+  It runs between two passes of the expression rules: the first takes a `case` out of the block expression that held it, and the second lowers the conditions the chain writes.
 * **LEGAL-46** (C1) The chain binds the scrutinee to a `let`, and each arm is an `if` whose condition is its patterns compared with `==` and joined by `or`; the `default` arm is the last `else`.
   It costs one `let`.
-* **LEGAL-47** A pattern that has an effect is not carried: C1 runs behind the expression rules, so nothing is left to take the `or` that would hold it to an `if`.
-  Such a pattern reaches the core check as a block expression and the tree is refused, which is a report and never a wrong shader.
+* **LEGAL-47** A pattern that has an effect is carried by the second pass: its block moves in front of the `if` that tests it.
+  That `if` stands inside the branch that reaches it, so the pattern runs only where EVAL-68 says it runs.
 * **LEGAL-48** The chain captures no `break`, so an exit that crosses a `case` in that form costs nothing, and only the `switch` form is a construct X5 crosses.
 * **LEGAL-49** X6 extends to a `switch` that is the last statement of its block: a `leave` of that block, directly inside an arm, is that arm's `break`.
   So a `case` expression costs the one `var` of E1 and nothing else.
@@ -100,8 +100,9 @@ The rules run cheapest first, and each costs what its line says.
   It costs nothing.
 * **LEGAL-16** (E2) Before a block moves, every operand to its LEFT in evaluation order is **pinned** into a `let`.
   It costs one `let` per pinned operand.
-* **LEGAL-17** (E2) An operand is left unpinned when it has no effect AND the moved statements assign no local it reads.
+* **LEGAL-17** (E2) An operand is left unpinned when it has no effect AND the moved statements assign no local it reads and store to no buffer it reads an element of.
 * **LEGAL-18** So a literal, an immutable local and a member of one are never pinned, and a read of a `var` that the block assigns always is.
+* **LEGAL-51** (E2) An assignment to a buffer element lowers the element's index before its value, and pins the index into a `let` when the value's moved statements could change it (EVAL-14).
 * **LEGAL-19** (E3) `and` / `or` whose right operand moved statements, or has an effect, is an `if` over a `var`; any other stays `&&` / `||`.
   It costs one `var` and one `if`.
 * **LEGAL-20** (E4) A `while` whose condition moved statements is a `loop` that starts with them and with `if not c { break }`.

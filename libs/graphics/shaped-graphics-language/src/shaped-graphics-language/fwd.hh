@@ -230,6 +230,7 @@ struct core_violation;
 enum class value_kind : u8;
 struct scalar;
 struct value;
+struct buffer_contents;
 enum class run_status : u8;
 struct run_inputs;
 struct run_limits;

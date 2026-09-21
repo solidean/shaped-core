@@ -115,3 +115,37 @@ TEST("sgl emit - an exit out of an arm crosses the switch and takes a flag")
     CHECK(wgsl.contains("guarded_left = true;"));
     CHECK(wgsl.contains("    if guarded_left {\n"));
 }
+
+TEST("sgl emit - a pattern that inlines a helper runs inside the branch that reaches it")
+{
+    // EVAL-68: a pattern is evaluated only where it is reached, so the helper's body stands behind the first arm's test.
+    auto const wgsl = text_of("fun limit(x: float) -> float:\n"
+                              "    if x > 1.0 => return 1.0\n"
+                              "    return x\n"
+                              "\n"
+                              "@pixel fun main_ps(p: pixel_input) -> frame:\n"
+                              "    let v = case p.position.x:\n"
+                              "        0.25 => 2.0\n"
+                              "        limit(0.5) => 1.0\n"
+                              "        _ => 0.0\n"
+                              "    return {color = float4(v, v, v, 1.0)}\n",
+                              target::wgsl);
+    auto const first_test = wgsl.find("if case_value == 0.25 {");
+    auto const helper = wgsl.find("var limit_result: f32;");
+    CHECK(first_test >= 0);
+    CHECK(helper > first_test);
+    CHECK(wgsl.contains("if case_value == limit_result {"));
+    for (auto const t : {target::hlsl_dx12, target::hlsl_vulkan, target::msl})
+        CHECK(sgl::emit::dump_errors(emit_source(cc::string(k_edges)
+                                                     + "fun limit(x: float) -> float:\n"
+                                                       "    if x > 1.0 => return 1.0\n"
+                                                       "    return x\n"
+                                                       "\n"
+                                                       "@pixel fun main_ps(p: pixel_input) -> frame:\n"
+                                                       "    let v = case p.position.x:\n"
+                                                       "        limit(0.5) => 1.0\n"
+                                                       "        _ => 0.0\n"
+                                                       "    return {color = float4(v, v, v, 1.0)}\n",
+                                                 0, t))
+              == "");
+}

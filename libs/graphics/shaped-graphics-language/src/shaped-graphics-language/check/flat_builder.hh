@@ -64,6 +64,10 @@ struct sgl::check::flat_builder
     /// `name` must be a field of the object's type.
     flat_expr_id member(flat_expr_id object, cc::string_view name);
     flat_expr_id construct(type_id type, cc::span<flat_expr_id const> arguments);
+    /// `binding.member`, of the member's type; `member` is a position in the binding's members.
+    flat_expr_id binding_member(symbol_id binding, i32 member);
+    /// `buffer[index]`, of the buffer's element type; `buffer` names a `buffer[T]`, today always a binding member.
+    flat_expr_id buffer_element(flat_expr_id buffer, flat_expr_id index);
     /// A call of the prelude's `@builtin` function `name`, with its result type and its purity: `call("add_int", {a, b})`.
     /// Among overloads, the one whose parameter types are the arguments' types; an operator function is named by its own name.
     /// The module must declare it.

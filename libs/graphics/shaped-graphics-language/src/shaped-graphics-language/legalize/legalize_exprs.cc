@@ -44,11 +44,31 @@ struct leave_counter
     }
 };
 
-/// The locals the statements of a list assign, at any depth; by then no expression holds a statement.
+/// The binding member a buffer element reads or writes; `none` where the buffer is named any other way.
+struct buffer_ref
+{
+    symbol_id binding = symbol_id::none;
+    i32 member = -1;
+
+    constexpr bool operator==(buffer_ref const&) const = default;
+};
+
+buffer_ref buffer_of(flat_entry_point const& e, flat_buffer_element const& element)
+{
+    if (!is_known(e, element.buffer))
+        return {};
+    auto const* const b = e.at(element.buffer).node.try_as<flat_binding_member>();
+    if (b == nullptr)
+        return {};
+    return {.binding = b->binding, .member = b->member};
+}
+
+/// The locals and the buffers the statements of a list assign, at any depth; by then no expression holds a statement.
 struct assigned_locals
 {
     flat_entry_point const& e;
     cc::vector<local_id> locals;
+    cc::vector<buffer_ref> buffers;
 
     void place(flat_expr_id id)
     {
@@ -58,6 +78,11 @@ struct assigned_locals
             if (auto const* const ref = x.node.try_as<flat_local_ref>())
             {
                 locals.push_back(ref->local);
+                return;
+            }
+            if (auto const* const element = x.node.try_as<flat_buffer_element>())
+            {
+                buffers.push_back(buffer_of(e, *element));
                 return;
             }
             auto const* const member = x.node.try_as<flat_member>();
@@ -84,20 +109,25 @@ struct assigned_locals
     }
 };
 
-bool reads_any(flat_entry_point const& e, flat_expr_id id, cc::span<local_id const> locals, int depth = 0)
+/// True when `id` reads one of the locals `assigned` holds, or an element of one of its buffers.
+bool reads_any(flat_entry_point const& e, flat_expr_id id, assigned_locals const& assigned, int depth = 0)
 {
     if (!is_known(e, id) || depth > k_max_depth)
         return true;
     auto const& x = e.at(id);
     if (auto const* const ref = x.node.try_as<flat_local_ref>())
     {
-        for (auto const l : locals)
+        for (auto const l : assigned.locals)
             if (l == ref->local)
                 return true;
         return false;
     }
+    if (auto const* const element = x.node.try_as<flat_buffer_element>())
+        for (auto const b : assigned.buffers)
+            if (b == buffer_of(e, *element))
+                return true;
     auto result = false;
-    for_each_operand(e, x, [&](flat_expr_id operand) { result = result || reads_any(e, operand, locals, depth + 1); });
+    for_each_operand(e, x, [&](flat_expr_id operand) { result = result || reads_any(e, operand, assigned, depth + 1); });
     return result;
 }
 
@@ -108,6 +138,9 @@ bool reads_mutable(flat_entry_point const& e, flat_expr_id id, int depth = 0)
     auto const& x = e.at(id);
     if (auto const* const ref = x.node.try_as<flat_local_ref>())
         return !is_known(e, ref->local) || e.at(ref->local).is_mut;
+    // an element may be stored to between two reads of it
+    if (x.node.is<flat_buffer_element>())
+        return true;
     auto result = false;
     for_each_operand(e, x, [&](flat_expr_id operand) { result = result || reads_mutable(e, operand, depth + 1); });
     return result;
@@ -156,6 +189,13 @@ struct expr_lowering
             if (member->member >= 0 && member->member < fields.size())
                 return cc::format("{}_before", fields[member->member].name);
         }
+        if (auto const* const element = x.node.try_as<flat_buffer_element>())
+            if (auto const b = buffer_of(out.e, *element); is_valid(b.binding))
+            {
+                auto const members = out.m.at(out.m.bindings[out.m.at(b.binding).info].members);
+                if (b.member >= 0 && b.member < members.size())
+                    return cc::format("{}_before", members[b.member].name);
+            }
         return "operand";
     }
 
@@ -183,7 +223,7 @@ struct expr_lowering
                 auto const operand = result[j];
                 if (!is_known(out.e, operand))
                     continue;
-                if (!has_effect(out.e, operand) && !reads_any(out.e, operand, moved.locals))
+                if (!has_effect(out.e, operand) && !reads_any(out.e, operand, moved))
                     continue;
                 out.from = out.e.at(operand).from;
                 auto const pin = out.let(pin_name(operand), operand);
@@ -288,6 +328,11 @@ struct expr_lowering
         auto copy = x;
         if (auto* const member = copy.node.try_as<flat_member>())
             member->object = lowered[0];
+        else if (auto* const element = copy.node.try_as<flat_buffer_element>())
+        {
+            element->buffer = lowered[0];
+            element->index = lowered[1];
+        }
         else if (auto* const construct = copy.node.try_as<flat_construct>())
             construct->arguments = out.expr_list(lowered);
         else if (auto* const call = copy.node.try_as<flat_call>())
@@ -363,10 +408,7 @@ struct expr_lowering
             into.push_back(attributed().var(var->local, value));
         }
         else if (auto const* const assign = s.node.try_as<flat_assign>())
-        {
-            auto const value = lower_expr(assign->value, into);
-            into.push_back(attributed().assign(assign->place, value));
-        }
+            lower_assign(*assign, attributed, into);
         else if (auto const* const print = s.node.try_as<flat_print>())
         {
             auto const value = lower_expr(print->value, into);
@@ -443,6 +485,19 @@ struct expr_lowering
             auto const value = lower_expr(r->value, into);
             into.push_back(attributed().return_(value));
         }
+        else if (auto const* const sw = s.node.try_as<flat_switch>())
+        {
+            // Written by C1 behind the first pass of these rules, so its scrutinee and its patterns are core already.
+            auto copy = *sw;
+            auto original = cc::vector<flat_arm>();
+            original.push_back_range(out.e.at(sw->arms));
+            auto arms = cc::vector<flat_arm>();
+            for (auto const& a : original)
+                arms.push_back({.patterns = a.patterns, .body = out.stmt_list(lower_body(a.body))});
+            copy.arms = out.arm_list(arms);
+            copy.default_body = out.stmt_list(lower_body(sw->default_body));
+            into.push_back(attributed().add_stmt(cc::move(copy)));
+        }
         else if (auto const* const c = s.node.try_as<flat_case>())
         {
             auto copy = *c;
@@ -463,6 +518,49 @@ struct expr_lowering
             // Dropping it instead would write a shader that quietly does less than its source says.
             into.push_back(id);
         }
+    }
+
+    /// EVAL-14: a buffer element's index is evaluated before the value that is stored to it.
+    /// What evaluating the value moves in front runs after the index, so an index it could change is pinned first.
+    template <class Attributed>
+    void lower_assign(flat_assign const& assign, Attributed&& attributed, stmt_list& into)
+    {
+        auto place = assign.place;
+        auto const* const element = is_known(out.e, place) ? out.e.at(place).node.try_as<flat_buffer_element>() : nullptr;
+        if (element == nullptr)
+        {
+            auto const value = lower_expr(assign.value, into);
+            into.push_back(attributed().assign(place, value));
+            return;
+        }
+
+        // by value: lowering appends to the tree
+        auto const x = out.e.at(place);
+        auto const written = *element;
+        auto index = lower_expr(written.index, into);
+        auto value_pre = stmt_list();
+        auto const value = lower_expr(assign.value, value_pre);
+        if (!value_pre.empty() && !options.skip_pinning && is_known(out.e, index))
+        {
+            auto moved = assigned_locals{.e = out.e};
+            for (auto const id : value_pre)
+                moved.stmt(id, 0);
+            if (has_effect(out.e, index) || reads_any(out.e, index, moved))
+            {
+                out.from = out.e.at(index).from;
+                auto const pin = out.let("index", index);
+                out.e.locals[index_of(pin.local)].kind = local_kind::temporary;
+                into.push_back(pin.stmt);
+                index = out.local(pin.local);
+            }
+        }
+        if (index != written.index)
+        {
+            out.from = x.from;
+            place = out.add_expr(x.type, flat_buffer_element{.buffer = written.buffer, .index = index});
+        }
+        into.push_back_range(value_pre);
+        into.push_back(attributed().assign(place, value));
     }
 
     /// Rule E4.

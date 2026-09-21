@@ -9,13 +9,18 @@
 
 namespace sgl_test
 {
-/// A module that holds the prelude and the two edge structs a hand-built entry point stands between.
+/// A module that holds the prelude, the two edge structs a hand-built entry point stands between, and `store`,
+/// a binding of two buffers that a tree may read and write once it lists it.
 /// A rule test builds its tree by hand, so the module's one function only has to check.
 inline checked_sources flat_test_module()
 {
     auto checked = check_sources(read_prelude(), "struct frag:\n"
                                                  "    a: float\n"
                                                  "    b: float\n"
+                                                 "\n"
+                                                 "binding store:\n"
+                                                 "    data: mut buffer[float]\n"
+                                                 "    counts: mut buffer[int]\n"
                                                  "\n"
                                                  "@pixel struct target:\n"
                                                  "    color: float4\n"
@@ -36,13 +41,38 @@ inline sgl::check::flat_builder float_function(sgl::check::checked_module const&
     return sgl::check::flat_builder::create(m, {.input = frag, .result = float_type});
 }
 
-/// `frag { a = 0.25, b = 0.75 }`.
+/// The binding `store` of `flat_test_module`, or `none` in a module without it.
+inline sgl::check::symbol_id store_binding(sgl::check::checked_module const& m)
+{
+    for (auto i = isize(0); i < m.symbols.size(); ++i)
+        if (m.symbols[i].kind == sgl::check::symbol_kind::binding && m.symbols[i].name == "store")
+            return sgl::check::symbol_id(i);
+    return sgl::check::symbol_id::none;
+}
+
+/// How many elements each buffer of `store` holds in `test_inputs`.
+constexpr auto k_store_elements = 4;
+
+/// `frag { a = 0.25, b = 0.75 }`, and where the module has `store`, `data = [0.5, 1.5, 2.5, 3.5]` and `counts = [1, 2, 3, 4]`.
 inline sgl::check::run_inputs test_inputs(sgl::check::checked_module const& m)
 {
     auto inputs = sgl::check::run_inputs{
         .parameter = sgl::check::zero_value(m, sgl::check::flat_builder{.m = m}.type_named("frag"))};
     inputs.parameter.leaves[0] = sgl::check::scalar::of(0.25f);
     inputs.parameter.leaves[1] = sgl::check::scalar::of(0.75f);
+
+    if (auto const store = store_binding(m); sgl::check::is_valid(store))
+    {
+        auto data = sgl::check::buffer_contents{.binding = store, .member = 0};
+        auto counts = sgl::check::buffer_contents{.binding = store, .member = 1};
+        for (auto i = 0; i < k_store_elements; ++i)
+        {
+            data.leaves.push_back(sgl::check::scalar::of(float(i) + 0.5f));
+            counts.leaves.push_back(sgl::check::scalar::of(i + 1));
+        }
+        inputs.buffers.push_back(cc::move(data));
+        inputs.buffers.push_back(cc::move(counts));
+    }
     return inputs;
 }
 

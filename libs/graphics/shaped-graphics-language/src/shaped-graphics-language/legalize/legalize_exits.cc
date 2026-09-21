@@ -508,6 +508,11 @@ struct compactor
         auto copy = in.at(id);
         if (auto* const member = copy.node.try_as<flat_member>())
             member->object = expr(member->object, depth + 1);
+        else if (auto* const element = copy.node.try_as<flat_buffer_element>())
+        {
+            element->buffer = expr(element->buffer, depth + 1);
+            element->index = expr(element->index, depth + 1);
+        }
         else if (auto* const construct = copy.node.try_as<flat_construct>())
             construct->arguments = exprs(construct->arguments, depth);
         else if (auto* const call = copy.node.try_as<flat_call>())
@@ -619,19 +624,14 @@ stmt_list sgl::check::impl::lower_exits(flat_builder& out, stmt_list const& body
 
 flat_entry_point sgl::check::impl::compacted(checked_module const& m, flat_entry_point const& e, stmt_list const& body)
 {
-    auto header = flat_entry_point{
-        .entry_stage = e.entry_stage,
-        .name = e.name,
-        .function = e.function,
-        .input = e.input,
-        .result = e.result,
-        .bindings = e.bindings,
-        .locals = e.locals,
-        .labels = e.labels,
-        .root = e.root,
-        .call_sites = e.call_sites,
-        .names = e.names,
-    };
+    // Everything but the tree itself is carried as it is, so a field added to the entry point later survives by default.
+    auto header = e;
+    header.exprs.clear();
+    header.stmts.clear();
+    header.expr_lists.clear();
+    header.stmt_lists.clear();
+    header.arms.clear();
+    header.body = {};
     auto c = compactor{.in = e, .out = flat_builder::extend(m, cc::move(header))};
     c.out.e.body = c.body(body, 0);
     return cc::move(c.out.e);
@@ -642,9 +642,10 @@ flat_entry_point sgl::check::legalize(checked_module const& m, flat_entry_point 
     if (is_core(e))
         return e;
     auto out = flat_builder::extend(m, e);
+    out.set_body(lower_expressions(out, options));
+    out.set_body(lower_cases(out));
+    // Again, for the conditions the chain form of C1 wrote; on a tree that holds no block it changes nothing.
     auto const without_blocks = lower_expressions(out, options);
-    out.set_body(without_blocks);
-    auto const with_switches = lower_cases(out);
-    auto const without_leaves = lower_exits(out, with_switches, options);
+    auto const without_leaves = lower_exits(out, without_blocks, options);
     return compacted(m, out.e, without_leaves);
 }

@@ -18,7 +18,11 @@ using stmt_list = cc::vector<flat_stmt_id>;
 [[nodiscard]] flat_expr_id negated(flat_builder& out, flat_expr_id x);
 
 /// Rule C1: the body of `out.e` with every `case` written as a `switch` or as a chain of `if` over `==`.
-/// It runs after the expression rules, which are what take a `case` out of the block expression that held it.
+/// It runs between two passes of the expression rules.
+/// The first takes a `case` out of the block expression that held it, and leaves its patterns alone, since a pattern
+/// runs only where it is reached.
+/// The second lowers the conditions the chain writes, so a pattern that holds a block is lowered inside the branch
+/// that reaches it.
 [[nodiscard]] stmt_list lower_cases(flat_builder& out);
 
 /// Rules E1 to E4: the body of `out.e` without a block expression, with `and` / `or` only over operands without effects.

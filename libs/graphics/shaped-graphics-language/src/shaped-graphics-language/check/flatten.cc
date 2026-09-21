@@ -731,7 +731,6 @@ struct flattener
         }
         if (op != "=")
         {
-            // A place holds nothing that needs evaluating, so reading it a second time is reading it once.
             type_id const types[] = {entry.at(place).type, entry.at(value).type};
             auto const callee = c.find_operator(op.subview({.offset = 0, .size = op.size() - 1}), types);
             if (!is_valid(callee))
@@ -739,10 +738,35 @@ struct flattener
                 is_failed = true;
                 return;
             }
-            flat_expr_id const arguments[] = {flatten_expr(assign.target), value};
+            flat_expr_id const arguments[] = {read_of_place(place, assign.target), value};
             value = builtin_call(assign.value, callee, arguments);
         }
         add_stmt(from, flat_assign{.place = place, .value = value});
+    }
+
+    /// What `place op= value` reads the place as, which is the place read a second time.
+    /// A local or a member of one holds nothing to evaluate, so it is simply flattened again.
+    /// A buffer element's index is evaluated once (EVAL-14): the place gets its first evaluation, and the read the local
+    /// that holds it.
+    flat_expr_id read_of_place(flat_expr_id place, ast::expr_id target)
+    {
+        if (!is_valid(place) || !entry.at(place).node.is<flat_buffer_element>())
+            return flatten_expr(target);
+
+        // by value: evaluating once adds nodes, and the arrays move
+        auto const x = entry.at(place);
+        auto const element = x.node.as<flat_buffer_element>();
+        auto const& indexed = ast().at(target).node.as<ast::index>();
+        auto const arguments = ast().at(indexed.arguments);
+        if (arguments.size() != 1)
+            return fail();
+
+        auto const once = evaluate_once(element.index, "index", arguments[0].value);
+        entry.exprs[index_of(place)].node = flat_buffer_element{.buffer = element.buffer, .index = once.first};
+        auto const buffer = entry.at(element.buffer);
+        auto const buffer_again = add_expr(buffer.type, indexed.object, buffer.node);
+        auto const index_again = once.later == once.first ? again(once.first, arguments[0].value) : once.later;
+        return add_expr(x.type, target, flat_buffer_element{.buffer = buffer_again, .index = index_again});
     }
 
     void flatten_for(origin from, ast::stmt_id id, ast::for_stmt const& loop)

@@ -43,6 +43,11 @@ void for_each_operand(flat_entry_point const& e, flat_expr const& x, Fn&& fn)
 {
     if (auto const* const member = x.node.try_as<flat_member>())
         fn(member->object);
+    else if (auto const* const element = x.node.try_as<flat_buffer_element>())
+    {
+        fn(element->buffer);
+        fn(element->index);
+    }
     else if (auto const* const construct = x.node.try_as<flat_construct>())
     {
         if (is_known(e, construct->arguments))

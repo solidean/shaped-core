@@ -20,6 +20,8 @@ struct generator
     type_id int_type = type_id::none;
     type_id bool_type = type_id::none;
     type_id float3_type = type_id::none;
+    /// `store` of the test module, whose `data` and `counts` the program reads and writes; `none` where there is none.
+    symbol_id store = symbol_id::none;
 
     struct visible
     {
@@ -63,6 +65,57 @@ struct generator
         return b.bool_literal(chance(50));
     }
 
+    // ---- buffers ----------------------------------------------------------------------------------------------------
+
+    [[nodiscard]] bool has_buffer_of(type_id type) const
+    {
+        return is_valid(store) && (type == float_type || type == int_type);
+    }
+
+    /// `store.data` for a float, `store.counts` for an int.
+    flat_expr_id buffer_of(type_id type) { return b.binding_member(store, type == float_type ? 0 : 1); }
+
+    /// An index that is always in range: a literal, or a block that prints or stores on its way to one.
+    flat_expr_id element_index(int depth)
+    {
+        auto const in_range = [&] { return b.int_literal(pick(k_store_elements)); };
+        if (depth <= 0 || !chance(35))
+            return in_range();
+        auto const label = b.add_label("k");
+        auto body = cc::vector<flat_stmt_id>();
+        if (chance(50))
+            body.push_back(b.print(leaf(any_type())));
+        else
+            body.push_back(store_statement(0));
+        body.push_back(b.leave(label, in_range()));
+        return b.block_expr(label, int_type, body);
+    }
+
+    flat_expr_id buffer_read(type_id type, int depth)
+    {
+        return b.buffer_element(buffer_of(type), element_index(depth));
+    }
+
+    /// `data[i] = …` or `counts[i] = …`, the index a block now and then, which EVAL-14 evaluates before the value.
+    flat_stmt_id store_statement(int depth)
+    {
+        auto const type = chance(50) ? float_type : int_type;
+        auto const place = b.buffer_element(buffer_of(type), element_index(depth));
+        return b.assign(place, expr(type, depth));
+    }
+
+    /// A read of an element to the left of a block that stores to that same buffer: the operand rule E2 must pin it.
+    flat_expr_id racy_element(type_id type)
+    {
+        auto const read = b.buffer_element(buffer_of(type), b.int_literal(pick(k_store_elements)));
+        auto const label = b.add_label("r");
+        auto body = cc::vector<flat_stmt_id>();
+        body.push_back(b.assign(b.buffer_element(buffer_of(type), b.int_literal(pick(k_store_elements))), leaf(type)));
+        body.push_back(b.leave(label, leaf(type)));
+        auto const block = b.block_expr(label, type, body);
+        return b.call(type == float_type ? "add" : "add_int", {read, block});
+    }
+
     flat_expr_id leaf(type_id type)
     {
         auto candidates = cc::vector<local_id>();
@@ -71,6 +124,8 @@ struct generator
                 candidates.push_back(v.local);
         if (!candidates.empty() && chance(60))
             return b.local(candidates[pick(int(candidates.size()))]);
+        if (has_buffer_of(type) && chance(15))
+            return b.buffer_element(buffer_of(type), b.int_literal(pick(k_store_elements)));
         if (type == float_type && chance(30))
             return b.member(b.local(local_id(0)), chance(50) ? "a" : "b");
         if (type == float_type && chance(30))
@@ -157,6 +212,10 @@ struct generator
             if (r == 6)
                 return chance(40) ? b.call_with_effect("saturate", {expr(type, depth - 1)})
                                   : b.call("saturate", {expr(type, depth - 1)});
+            if (r == 9 && has_buffer_of(type) && chance(40))
+                return racy_element(type);
+            if (r == 8 && has_buffer_of(type) && chance(40))
+                return buffer_read(type, depth);
             return r == 9 ? racy(type, depth) : block_expr(type, depth);
         }
         if (type == int_type)
@@ -323,8 +382,8 @@ struct generator
 
     /// True when the statement added last always exits.
     /// A `case` over an `int`, whose arms leave, continue and print like any other list.
-    /// Its patterns are literals most of the time, which is the switch form, and effect-free leaves otherwise,
-    /// which is the chain: a pattern with an effect is not carried, since C1 runs behind the expression rules.
+    /// Its patterns are literals most of the time, which is the switch form, and leaves or blocks otherwise, which is
+    /// the chain: a pattern that prints runs only where it is reached, so the chain has to keep it inside its branch.
     void generate_case(int depth, cc::vector<flat_stmt_id>& list)
     {
         auto const scrutinee = expr(int_type, 2);
@@ -347,7 +406,16 @@ struct generator
                 if (is_used)
                     continue;
                 used.push_back(value);
-                patterns.push_back(wants_chain && chance(50) ? leaf(int_type) : b.int_literal(value));
+                if (!wants_chain || chance(50))
+                    patterns.push_back(b.int_literal(value));
+                else if (chance(60))
+                    patterns.push_back(leaf(int_type));
+                else
+                {
+                    auto const label = b.add_label("p");
+                    patterns.push_back(b.block_expr(
+                        label, int_type, {b.print(b.int_literal(value)), b.leave(label, b.int_literal(value))}));
+                }
             }
             if (patterns.empty())
                 continue;
@@ -410,6 +478,11 @@ struct generator
                 list.push_back(b.assign(b.member(b.local(s), pick(3)), expr(float_type, 2)));
                 return false;
             }
+        if (r >= 38 && r < 42 && is_valid(store))
+        {
+            list.push_back(store_statement(2));
+            return false;
+        }
         if (r < 45)
         {
             auto const type = any_type();
@@ -538,6 +611,9 @@ flat_entry_point sgl_test::random_program(checked_module const& m, u64 seed, pro
     g.int_type = g.b.type_named("int");
     g.bool_type = g.b.type_named("bool");
     g.float3_type = g.b.type_named("float3");
+    g.store = store_binding(m);
+    if (is_valid(g.store))
+        g.b.e.bindings.push_back(g.store);
     g.targets.push_back({.label = g.b.e.root, .value_type = g.float_type});
 
     auto body = g.statements(shape.max_depth);

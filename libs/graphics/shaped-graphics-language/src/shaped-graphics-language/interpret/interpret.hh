@@ -25,6 +25,20 @@ struct sgl::check::value
     }
 };
 
+/// One `buffer[T]` member of a binding: its elements' scalars, element after element.
+struct sgl::check::buffer_contents
+{
+    symbol_id binding = symbol_id::none;
+    /// A position in the binding's `members`.
+    i32 member = -1;
+    cc::vector<scalar> leaves;
+
+    [[nodiscard]] bool operator==(buffer_contents const& rhs) const
+    {
+        return binding == rhs.binding && member == rhs.member && ast::impl::is_equal(leaves, rhs.leaves);
+    }
+};
+
 enum class sgl::check::run_status : sgl::u8
 {
     ok,
@@ -43,7 +57,10 @@ struct sgl::check::run_inputs
     /// The value of `locals[0]`.
     value parameter;
     /// Parallel to `flat_entry_point::bindings`: the members of each binding as one value, in member order.
+    /// A buffer member has no scalars there; its contents are `buffers`.
     cc::vector<value> bindings;
+    /// What every buffer the tree reads or writes holds when the run starts; one it names and this lacks is a type error.
+    cc::vector<buffer_contents> buffers;
 };
 
 struct sgl::check::run_limits
@@ -59,13 +76,16 @@ struct sgl::check::outcome
     value result;
     /// Every printed value, in the order the prints ran; kept up to the point a failed run stopped.
     cc::vector<value> trace;
+    /// Every buffer the run stored to, as the run left it: a store is an effect, so two runs are compared by these too.
+    cc::vector<buffer_contents> buffers;
     /// For a reader, and no part of what two runs are compared by.
     cc::string detail;
 
-    /// Same status, same result, same trace.
+    /// Same status, same result, same trace, same buffers.
     [[nodiscard]] bool operator==(outcome const& rhs) const
     {
-        return status == rhs.status && result == rhs.result && ast::impl::is_equal(trace, rhs.trace);
+        return status == rhs.status && result == rhs.result && ast::impl::is_equal(trace, rhs.trace)
+            && ast::impl::is_equal(buffers, rhs.buffers);
     }
 };
 
@@ -88,6 +108,6 @@ namespace sgl::check
                                 run_inputs const& inputs,
                                 run_limits const& limits = {});
 
-/// `ok 1.5` with one ` | print …` per printed value, for a failing test to show.
+/// `ok 1.5` with one ` | print …` per printed value, then one ` | buffer …` per buffer, for a failing test to show.
 [[nodiscard]] cc::string dump(outcome const& o);
 } // namespace sgl::check
