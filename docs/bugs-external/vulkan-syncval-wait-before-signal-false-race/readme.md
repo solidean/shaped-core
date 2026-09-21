@@ -1,6 +1,6 @@
 # Vulkan validation layer: false WRITE_RACING_READ after a wait on a not-yet-signalled timeline value
 
-**Status:** fixed upstream in Vulkan SDK 1.4.350; `dev.py doctor` flags anything older.
+**Status:** fixed upstream in Vulkan SDK 1.4.350; `dev.py` warns about anything older.
 **Affects:** `VK_LAYER_KHRONOS_validation` with synchronization validation, SDK 1.4.304 through 1.4.341.
 We hit it on 1.4.313 and confirmed the fix on 1.4.357.
 **Found by:** `shaped-graphics-test` failing at random with validation errors attributed to no test.
@@ -63,7 +63,9 @@ That upstream test is the standalone reproduction, which is why this entry has n
 ## What we do about it
 
 Nothing in the library.
-`dev.py doctor` reports a `VULKAN_SDK` older than 1.4.350 as a problem (`tools/dev/lib/toolchain/graphics.py`), and `vulkan-entry.cc` says why next to where it enables synchronization validation.
+A `VULKAN_SDK` older than 1.4.350 is a known issue in `tools/dev/lib/toolchain/known_issues.py`.
+`dev.py doctor` shows it as a warning, and every command that runs our binaries prints it before it starts.
+`vulkan-entry.cc` says why next to where it enables synchronization validation.
 
 ## Retiring it
 

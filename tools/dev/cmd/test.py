@@ -85,6 +85,7 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
 def run(args: argparse.Namespace, ctx: Context) -> None:
     presets = ctx.resolve_build_presets(args)
     primary = presets[0]
+    ctx.warn_known_issues(presets)
 
     # parse_known_args already drops the first `--`.
     # Strip a stray leading one as well, so an explicit `test <name> -- -c foo` never leaks the separator through.

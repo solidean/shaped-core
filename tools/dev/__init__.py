@@ -67,6 +67,8 @@ from .lib.quality.format import (
 )
 from .lib.toolchain import clangd
 from .lib.toolchain.doctor import doctor
+from .lib.toolchain.known_issues import WARN as KNOWN_ISSUE_WARN
+from .lib.toolchain.known_issues import warn_active as warn_known_issues
 from .lib.toolchain.llvm_tools import resolve_tool
 from .lib.toolchain.toolset import ToolsetError, apply_overrides, list_toolsets, toolset_hint
 from .lib.perf.coverage import (
@@ -127,6 +129,8 @@ __all__ = [
     "CrossRefResult",
     "check_crossrefs",
     "doctor",
+    "KNOWN_ISSUE_WARN",
+    "warn_known_issues",
     "FormatResult",
     "FormatSetupError",
     "clang_format_version",

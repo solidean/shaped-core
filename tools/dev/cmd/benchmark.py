@@ -82,6 +82,7 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
     except dev.ToolsetError as e:
         ctx.die(str(e))
     preset = presets[0]
+    ctx.warn_known_issues(presets)
 
     wanted = ctx.resolve_target_names(preset, args.target, None) if args.target else None
 

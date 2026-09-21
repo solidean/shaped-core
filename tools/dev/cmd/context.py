@@ -99,6 +99,10 @@ class Context:
         except dev.ToolsetError as e:
             self.die(str(e))
 
+    def warn_known_issues(self, presets: list[dev.Preset]) -> None:
+        """Warn about each known external issue that affects running our code under `presets`, once per invocation."""
+        dev.warn_known_issues(presets)
+
     def discover(self, preset: dev.Preset, emsdk_path: str | None = None) -> list[dev.Target]:
         """Discover targets for a preset, (re)configuring first when the tree is stale or unconfigured.
 

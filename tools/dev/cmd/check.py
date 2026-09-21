@@ -299,6 +299,8 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
         dev.list_checks(checks)
         sys.exit(0)
 
+    ctx.warn_known_issues(ctx.resolve_presets(None))
+
     by_name = {c.name: c for c in checks}
     if args.names:
         for name in args.names:

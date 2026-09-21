@@ -64,6 +64,7 @@ def _resolve_presets(ctx: Context, specs: list[str] | None) -> list[dev.Preset]:
 def run(args: argparse.Namespace, ctx: Context) -> None:
     match args.coverage_cmd:
         case "run":
+            ctx.warn_known_issues(ctx.resolve_presets(None))
             _run(args, ctx)
         case "merge":
             _merge(args, ctx)

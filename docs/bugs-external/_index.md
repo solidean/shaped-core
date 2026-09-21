@@ -29,6 +29,8 @@ So each entry carries the answer as something runnable.
 - **Isolate the variable.** Two compilers, two optimization levels, two vendors' drivers — whatever separates "the tool is wrong" from "we are wrong".
   That table is usually the most valuable thing in the entry.
 - **Link both ways.** The workaround in the tree names this directory; this directory names the workaround.
+- **A bug a machine can carry gets a probe** in [known_issues.py](../../tools/dev/lib/toolchain/known_issues.py), when a version or a path gives it away without running anything.
+  `dev.py doctor` then warns about it, and so does every command that runs our code, before the failure it explains.
 
 ## The entries
 
