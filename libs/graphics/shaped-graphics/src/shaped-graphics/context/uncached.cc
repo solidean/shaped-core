@@ -1,5 +1,7 @@
+#include <clean-core/common/log.hh>
 #include <clean-core/common/utility.hh>
-#include <clean-core/string/format.hh>        // cc::format
+#include <clean-core/string/format.hh> // cc::format
+#include <clean-core/thread/async_coroutine.hh>
 #include <shaped-graphics/binding/binding.hh> // binding::count
 #include <shaped-graphics/binding/impl/binding_conflicts.hh>
 #include <shaped-graphics/compute/compute_pipeline.hh> // compute_pipeline_description::shader
@@ -8,6 +10,39 @@
 #include <shaped-graphics/exceptions.hh>
 #include <shaped-graphics/raster/raster_pipeline.hh>         // raster_pipeline_description
 #include <shaped-graphics/raytracing/raytracing_pipeline.hh> // raytracing_pipeline_description
+
+namespace
+{
+// What the frontend checks of a raster description before any backend sees it.
+cc::optional<cc::string> refusal_of(sg::raster_pipeline_description const& desc)
+{
+    sg::compiled_shader const* const stages[] = {
+        &desc.vertex_shader,
+        desc.fragment_shader.has_value() ? &desc.fragment_shader.value() : nullptr,
+        desc.tessellation_control_shader.has_value() ? &desc.tessellation_control_shader.value() : nullptr,
+        desc.tessellation_evaluation_shader.has_value() ? &desc.tessellation_evaluation_shader.value() : nullptr,
+        desc.geometry_shader.has_value() ? &desc.geometry_shader.value() : nullptr,
+    };
+    if (auto conflict = sg::impl::find_binding_conflict(stages); conflict.has_value())
+        return conflict;
+
+    // Such a pipeline still builds, and draws as if the state were off.
+    auto const& ds = desc.depth_stencil;
+    if ((ds.depth_test || ds.depth_write || ds.stencil_test) && desc.depth_stencil_format == sg::pixel_format::undefined)
+        CC_LOG_WARNING("a raster pipeline for '{}' tests depth or stencil and has no depth_stencil_format, "
+                       "so it draws without either",
+                       desc.vertex_shader.entry_point);
+    return {};
+}
+
+cc::shared_async<sg::raster_pipeline_handle> named(cc::shared_async<sg::raster_pipeline_handle> built,
+                                                   cc::string target_set)
+{
+    auto pipeline = co_await built;
+    sg::impl::set_target_set(*pipeline, target_set);
+    co_return pipeline;
+}
+} // namespace
 
 namespace sg
 {
@@ -83,19 +118,12 @@ raster_pipeline_handle context_uncached_scope::create_raster_pipeline(raster_pip
 
 cc::result<raster_pipeline_handle> context_uncached_scope::try_create_raster_pipeline(raster_pipeline_description const& desc)
 {
-    compiled_shader const* const stages[] = {
-        &desc.vertex_shader,
-        desc.fragment_shader.has_value() ? &desc.fragment_shader.value() : nullptr,
-        desc.tessellation_control_shader.has_value() ? &desc.tessellation_control_shader.value() : nullptr,
-        desc.tessellation_evaluation_shader.has_value() ? &desc.tessellation_evaluation_shader.value() : nullptr,
-        desc.geometry_shader.has_value() ? &desc.geometry_shader.value() : nullptr,
-    };
-    if (auto conflict = impl::find_binding_conflict(stages); conflict.has_value())
-        return cc::error(cc::move(conflict.value()));
+    if (auto refusal = refusal_of(desc); refusal.has_value())
+        return cc::error(cc::move(refusal.value()));
 
     auto r = _ctx.try_create_raster_pipeline(desc, lifetime_scope::persistent);
     if (r.has_value())
-        impl::finish_raster_pipeline(const_cast<raster_pipeline&>(*r.value()), desc); // not yet shared with anyone
+        impl::set_target_set(*r.value(), desc.target_set);
     return r;
 }
 
@@ -108,18 +136,15 @@ cc::shared_async<compute_pipeline_handle> context_uncached_scope::create_compute
 cc::shared_async<raster_pipeline_handle> context_uncached_scope::create_raster_pipeline_async(
     raster_pipeline_description const& desc)
 {
-    compiled_shader const* const stages[] = {
-        &desc.vertex_shader,
-        desc.fragment_shader.has_value() ? &desc.fragment_shader.value() : nullptr,
-        desc.tessellation_control_shader.has_value() ? &desc.tessellation_control_shader.value() : nullptr,
-        desc.tessellation_evaluation_shader.has_value() ? &desc.tessellation_evaluation_shader.value() : nullptr,
-        desc.geometry_shader.has_value() ? &desc.geometry_shader.value() : nullptr,
-    };
-    if (auto conflict = impl::find_binding_conflict(stages); conflict.has_value())
+    if (auto refusal = refusal_of(desc); refusal.has_value())
         return cc::make_async_from_error<raster_pipeline_handle>(
-            cc::async_error::make_error(cc::any_error(cc::move(conflict.value()))));
+            cc::async_error::make_error(cc::any_error(cc::move(refusal.value()))));
 
-    return _ctx.create_raster_pipeline_async(desc, lifetime_scope::persistent);
+    // A backend may settle the build from a callback of its own, so the name is set once it has.
+    auto built = _ctx.create_raster_pipeline_async(desc, lifetime_scope::persistent);
+    if (desc.target_set.empty())
+        return built;
+    return named(cc::move(built), desc.target_set);
 }
 
 raytracing_pipeline_handle context_uncached_scope::create_raytracing_pipeline(raytracing_pipeline_description const& desc)

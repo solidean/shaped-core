@@ -298,8 +298,8 @@ struct color_target_state;          // {format, blend, write_mask} — one color
 struct raster_pipeline_description; // {layout, shaders, vertex_input, state, ...} — input to create_raster_pipeline
 namespace impl
 {
-// what the frontend adds to a raster pipeline a backend built; defined in raster/raster_pipeline.cc
-void finish_raster_pipeline(raster_pipeline& pipeline, raster_pipeline_description const& desc);
+// names the target set of a raster pipeline a backend just built; defined in raster/raster_pipeline.cc
+void set_target_set(raster_pipeline const& pipeline, cc::string_view target_set);
 } // namespace impl
 
 // Draw recording (see command_list/raster.hh) — vertex/index buffer views + draw parameters.

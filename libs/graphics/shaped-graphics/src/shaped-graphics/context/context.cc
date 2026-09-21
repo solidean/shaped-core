@@ -457,7 +457,6 @@ cc::shared_async<raster_pipeline_handle> context::create_raster_pipeline_async(r
         auto res = try_create_raster_pipeline(d, scope);
         if (res.has_error())
             return actx.error(cc::move(res.error()));
-        impl::finish_raster_pipeline(const_cast<raster_pipeline&>(*res.value()), d); // not yet shared with anyone
         return actx.success(cc::move(res.value()));
     };
     if (_device_home != nullptr)

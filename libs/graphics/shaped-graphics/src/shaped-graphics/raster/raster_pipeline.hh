@@ -117,7 +117,7 @@ protected:
     bool _used_cached_pipeline = false;
 
 private:
-    friend void impl::finish_raster_pipeline(raster_pipeline& pipeline, raster_pipeline_description const& desc);
+    friend void impl::set_target_set(raster_pipeline const& pipeline, cc::string_view target_set);
 
     cc::string _target_set;
 };
