@@ -15,6 +15,12 @@ if(EMSCRIPTEN)
     set(SC_WASM_EXCEPTIONS "fexceptions" CACHE STRING "WASM C++ exception mode: fexceptions | wasm-exceptions")
     option(SC_WASM_WEBGPU "Build the WebGPU (emdawnwebgpu) WASM variant" OFF)
 
+    # A native stack, where emscripten's default is 64 KiB.
+    # A tree walk here bounds its depth rather than its frames, and a native thread's megabyte is what that bound was
+    # sized against: sgl's interpreter overflows 64 KiB at the nesting it accepts.
+    # The pthread default is the same 64 KiB, so a worker gets the megabyte too.
+    add_link_options("SHELL:-s STACK_SIZE=1MB")
+
     # Threads are the repo-wide SC_THREADS knob (root CMakeLists), not a wasm-local one.
     # -pthread is what predefines __EMSCRIPTEN_PTHREADS__, which is what clean-core's CC_HAS_THREADS reads --
     # so passing it here is the whole of the C++-side wiring (see common/macros.hh).
@@ -27,6 +33,7 @@ if(EMSCRIPTEN)
         # is serviced by that same event loop -- which the join has stopped. That is a deadlock, not a slowdown.
         # _STRICT=0 keeps exhausting the pool a warning plus an on-demand spawn rather than a hard error.
         add_link_options("SHELL:-s PTHREAD_POOL_SIZE=8" "SHELL:-s PTHREAD_POOL_SIZE_STRICT=0")
+        add_link_options("SHELL:-s DEFAULT_PTHREAD_STACK_SIZE=1MB")
     endif()
 
     # emdawnwebgpu ships inside the emsdk, so WebGPU costs no vendored dependency -- which is the reason this

@@ -51,6 +51,10 @@ All four build and run their suites; only the plain one is gated in CI, which is
 They are deployment tiers rather than a performance gradient: threads mean `SharedArrayBuffer` and therefore a cross-origin-isolated page, while WebGPU alone imposes no such requirement.
 `SC_WASM_EXCEPTIONS=wasm-exceptions` is the one knob that still fails configure as not-yet-supported — [requirements.md](requirements.md#emscripten--wasm) owns all three.
 
+**A wasm binary gets a native-sized stack**: 1 MiB for the main thread and for each pthread, where emscripten's default is 64 KiB.
+Overflowing it is no trap on wasm: the stack grows into the heap, and the crash surfaces later as an out-of-bounds read inside the allocator.
+Code here bounds a recursion's depth and was sized against a native stack, so 64 KiB is a portability bug rather than a tighter budget; [Emscripten.cmake](../tools/cmake/Emscripten.cmake) sets it.
+
 ### WASM debug sidecars (`SC_WASM_DEBUG_SIDECARS`)
 
 `off` (the default), `source-map`, `dwarf` or `both` — where a wasm build's debug info goes when it is not going into the binary.
