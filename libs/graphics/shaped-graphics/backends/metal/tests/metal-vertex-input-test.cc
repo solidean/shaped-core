@@ -1,4 +1,4 @@
-#include "mesh.metallib.h"
+#include "mesh-fixture.hh"
 #include "metal-test-common.hh"
 
 #include <clean-core/common/utility.hh>
@@ -43,18 +43,6 @@ struct tint_constants
     float a = 1.0f;
 };
 
-[[nodiscard]] sg::compiled_shader mesh_stage(sg::shader_stage stage, cc::string entry)
-{
-    auto shader = sg::compiled_shader{};
-    shader.stage = stage;
-    shader.format = sg::shader_format::metal_lib;
-    shader.entry_point = cc::move(entry);
-
-    auto blob = cc::pinned_data<byte>::create_uninitialized(isize(sizeof(mtl::test::mesh_metallib)));
-    cc::memcpy(blob.data(), mtl::test::mesh_metallib, sizeof(mtl::test::mesh_metallib));
-    shader.bytecode = cc::pinned_data<byte const>(cc::move(blob));
-    return shader;
-}
 
 /// The vertex-input layout of `mesh_vertex`, written by hand beside the shader it has to agree with.
 ///
@@ -94,8 +82,8 @@ struct tint_constants
 {
     auto desc = sg::raster_pipeline_description{
         .layout = cc::move(layout),
-        .vertex_shader = mesh_stage(sg::shader_stage::vertex, "vertex_main"),
-        .fragment_shader = mesh_stage(sg::shader_stage::fragment, "fragment_main"),
+        .vertex_shader = mtl::test::mesh_shader(sg::shader_stage::vertex, "vertex_main"),
+        .fragment_shader = mtl::test::mesh_shader(sg::shader_stage::fragment, "fragment_main"),
         .vertex_input = mesh_vertex_layout(),
         // No culling: what these tests assert is which vertices were fetched, not which way the quad happens to wind.
         .rasterization = {.cull = sg::cull_mode::none},
@@ -309,8 +297,7 @@ ASYNC_TEST("sg metal - a draw reads the vertex buffer a dispatch in the same lis
     // So read a failure here as the dispatch-to-draw path being broken, not as the ordering being unprotected — what
     // would catch that needs a dispatch long enough to lose the race, which is a slow test rather than a sharp one.
     // libs/graphics/shaped-graphics/docs/TODO.md carries it.
-    auto emit = mesh_stage(sg::shader_stage::compute, "emit_quad_main");
-    emit.workgroup_size = sg::compute_dimensions{.x = 1, .y = 1, .z = 1};
+    auto emit = mtl::test::mesh_kernel("emit_quad_main");
     emit.bindings.push_back({
         .name = "vertices",
         .space = 0,
@@ -518,5 +505,88 @@ TEST("sg metal - a rendering scope leaves no bound-group state behind")
         scope.draw({.vertex_range = {.offset = 2, .size = 4}});
     }
     CHECK(true); // reaching here is the assertion: no stale array binding refused the second draw
+    ctx->drop_command_list(cc::move(cmd));
+}
+
+TEST("sg metal - a compute-bound group is not bound at the first draw of a rendering scope")
+{
+    auto const ctx = mtl::test::make_context();
+    if (ctx == nullptr)
+        SKIP("no metal 4 device on this host");
+
+    // **One set of per-slot bookkeeping serves compute, ray tracing and raster here**, where dx12 walks a raster set of
+    // its own — so a group bound for a dispatch is still on the books when a rendering scope opens unless the scope
+    // clears it.
+    // With an array binding in that group the draw below refuses outright; without one it merely declares resources no
+    // draw reads, which is the same bug spending barriers instead of asserting.
+    // dx12 and vulkan both draw this.
+    auto kernel = mtl::test::mesh_kernel("array_sum_main");
+    kernel.bindings.push_back(
+        {.name = "inputs", .space = 0, .index = 0, .count = 4, .type = sg::binding_type::readonly_structured_buffer});
+    kernel.bindings.push_back(
+        {.name = "output", .space = 0, .index = 4, .count = 1, .type = sg::binding_type::readwrite_structured_buffer});
+
+    auto group_layout = ctx->create_metal_binding_group_layout(kernel.bindings, {}, sg::lifetime_scope::persistent);
+    REQUIRE(group_layout.has_value());
+
+    auto kernel_desc = sg::pipeline_layout_description{};
+    kernel_desc.groups.push_back(group_layout.value());
+    auto kernel_layout = ctx->create_metal_pipeline_layout(kernel_desc, sg::lifetime_scope::persistent);
+    REQUIRE(kernel_layout.has_value());
+
+    auto kernel_pipeline = ctx->create_metal_compute_pipeline({.shader = kernel, .layout = kernel_layout.value()},
+                                                              sg::lifetime_scope::persistent);
+    REQUIRE(kernel_pipeline.has_value())
+        .context(kernel_pipeline.has_error() ? kernel_pipeline.error().to_string() : cc::string());
+
+    constexpr auto k_count = 8;
+    auto elements = cc::vector<sg::raw_view>();
+    auto kept = cc::vector<sg::raw_buffer_handle>();
+    for (auto e = 0; e < 4; ++e)
+    {
+        auto const buffer
+            = ctx->persistent.create_raw_buffer(k_count * isize(sizeof(u32)), sg::buffer_usage::readonly_buffer);
+        elements.push_back(buffer->as_raw_readonly({.offset = 0, .size = buffer->size_in_bytes()}, isize(sizeof(u32))));
+        kept.push_back(buffer);
+    }
+    auto const output
+        = ctx->persistent.create_raw_buffer(k_count * isize(sizeof(u32)), sg::buffer_usage::readwrite_buffer);
+
+    auto views = cc::vector<sg::named_view>();
+    views.push_back({.name = "inputs", .view = sg::bound_view(cc::move(elements))});
+    views.push_back(
+        {.name = "output",
+         .view = output->as_raw_readwrite({.offset = 0, .size = output->size_in_bytes()}, isize(sizeof(u32)))});
+    auto array_group = ctx->create_metal_binding_group(group_layout.value(), views, {}, sg::lifetime_scope::persistent);
+    REQUIRE(array_group.has_value());
+
+    auto plain_layout = make_tint_pipeline_layout(ctx);
+    REQUIRE(plain_layout.has_value());
+    auto plain_pipeline = make_mesh_pipeline(ctx, plain_layout.value());
+    REQUIRE(plain_pipeline.has_value());
+
+    auto const target = make_color_target(ctx);
+    auto const vertices = quad_vertices();
+    auto const vertex_buffer
+        = ctx->persistent.create_raw_buffer(isize(vertices.size()) * isize(sizeof(mesh_vertex)),
+                                            sg::buffer_usage::vertex_buffer | sg::buffer_usage::copy_dst);
+
+    auto cmd = ctx->create_command_list();
+    cmd->upload.bytes_to_buffer(vertex_buffer, cc::as_bytes(cc::span<mesh_vertex const>(vertices)));
+
+    // Bound for compute, and never dispatched: what the scope must forget is the binding, not the work.
+    cmd->compute.bind_pipeline(*kernel_pipeline.value());
+    cmd->compute.bind_group(0, *array_group.value());
+
+    {
+        auto info = sg::rendering_info{};
+        info.color_targets.push_back(target.as_render_target_view().cleared(tg::vec4f(1, 0, 0, 1)));
+        auto scope = cmd->raster.render_to(info);
+        scope.bind_pipeline(*plain_pipeline.value());
+        scope.set_inline_constants(tint_constants{});
+        scope.bind_vertex_buffer({.buffer = vertex_buffer, .stride_in_bytes = isize(sizeof(mesh_vertex))});
+        scope.draw({.vertex_range = {.offset = 2, .size = 4}});
+    }
+    CHECK(true); // reaching here is the assertion: the compute group's array binding did not refuse this draw
     ctx->drop_command_list(cc::move(cmd));
 }

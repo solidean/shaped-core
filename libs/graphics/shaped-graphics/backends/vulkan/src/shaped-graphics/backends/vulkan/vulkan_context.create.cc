@@ -362,6 +362,12 @@ cc::string_view missing_required_capability(VkPhysicalDevice dev)
 
     // The epoch system rests on timeline semaphores; barriers on synchronization2; the raster scope on dynamic
     // rendering; bindless arrays on the three descriptor-indexing bits; acceleration structures on device addresses.
+    //
+    // A read-write binding in a fragment shader is a group sg lets any raster pipeline bind, and Vulkan gates the
+    // store behind a core 1.0 feature rather than behind anything the shader declares — so a device without it would
+    // take the pipeline and fail validation at the draw.
+    if (features.features.fragmentStoresAndAtomics != VK_TRUE)
+        return "fragmentStoresAndAtomics";
     if (vk12.timelineSemaphore != VK_TRUE)
         return "timelineSemaphore";
     if (vk13.synchronization2 != VK_TRUE)
@@ -661,9 +667,19 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
             });
     }
 
+    // **The core 1.0 features go through `pNext`, not `pEnabledFeatures`**: the two are mutually exclusive, and the
+    // chain already carries the 1.2 and 1.3 structures.
+    // `fragmentStoresAndAtomics` is the one sg needs — without it a fragment shader may not write a storage buffer,
+    // which is a binding group sg's raster scope accepts.
+    auto core_features = VkPhysicalDeviceFeatures2{
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
+        .pNext = &vk12_features,
+        .features = {.fragmentStoresAndAtomics = VK_TRUE},
+    };
+
     auto const device_info = VkDeviceCreateInfo{
         .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
-        .pNext = &vk12_features,
+        .pNext = &core_features,
         .queueCreateInfoCount = u32(queue_infos.size()),
         .pQueueCreateInfos = queue_infos.data(),
         .enabledExtensionCount = u32(device_extensions.size()),

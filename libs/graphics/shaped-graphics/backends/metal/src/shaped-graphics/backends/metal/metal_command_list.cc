@@ -16,6 +16,7 @@
 #include <shaped-graphics/backends/metal/metal_raytracing_shader_table.hh>
 #include <shaped-graphics/backends/metal/metal_staging_ring.hh>
 #include <shaped-graphics/backends/metal/metal_texture.hh>
+#include <shaped-graphics/barrier/access_inference.hh> // shader_access_of
 #include <shaped-graphics/exceptions.hh> // sg::exception, thrown where a recording seam has no error channel
 
 namespace sg::backend::metal
@@ -226,12 +227,6 @@ void metal_command_list::declare_buffer(raw_buffer_handle const& buffer, pipelin
         _touched_buffers.push_back(buffer);
     if (newly_pending)
         _pending_buffers.push_back(buffer);
-
-    // Any declared access means this list records GPU work a later list may have to wait for.
-    //
-    // Set here rather than where a barrier is emitted, which is the bug this replaces: a list whose ops need no
-    // barrier at all — an upload into a buffer nothing has touched — published nothing, so the next list's wait found
-    // no producer and read what was there before.
 }
 
 void metal_command_list::declare_texture(raw_texture_handle const& texture, pipeline_stage_flags stages, access_flags access)
@@ -364,12 +359,31 @@ void metal_command_list::flush_barriers()
     // That one is carried by the publish/wait pair each encoder opens and closes with, which is why `end_encoder`
     // publishes rather than leaving it to the end of the list.
     // So a mask clamping to nothing here is not a lost dependency: it is one the boundary pair already covers.
-    if (_render_encoder != nullptr)
-        _render_encoder->barrierAfterEncoderStages(clamp_to_render_source(after), clamp_to_render_destination(before),
-                                                   visibility);
-    else
+    ++_barriers_emitted;
+
+    if (_render_encoder == nullptr)
+    {
         compute_encoder()->barrierAfterEncoderStages(clamp_to_compute_encoder(after), clamp_to_compute_encoder(before),
                                                      visibility);
+        return;
+    }
+
+    // **A fragment-stage source has no barrier to be expressed as, so the pass is closed and opened again.**
+    // `barrierAfterEncoderStages` on a render encoder rejects `MTLStageFragment` outright, and the clamp below would
+    // quietly cut it down to the vertex stage — leaving a draw free to read what the previous draw's fragment shader
+    // is still writing.
+    // The boundary pair orders it instead, at the cost of resolving and reloading the attachments.
+    //
+    // Only a fragment source reaches this: a dispatch or a copy clamps to nothing here too, but it sits in another
+    // encoder and is already ordered by the boundary it crossed.
+    if ((after & MTL::StageFragment) != 0)
+    {
+        reopen_render_encoder();
+        return;
+    }
+
+    _render_encoder->barrierAfterEncoderStages(clamp_to_render_source(after), clamp_to_render_destination(before),
+                                               visibility);
 }
 
 void metal_command_list::end_recording(bool will_submit)
@@ -685,13 +699,13 @@ void metal_command_list::bind_group_to_table(int group_index, binding_group cons
     // take, and what a draw or dispatch needs is the access list rather than the group itself.
     auto& slot_buffers = _group_buffers[group_index];
     slot_buffers.clear();
-    for (auto const& buffer : mtl_group.bound_buffers())
-        slot_buffers.push_back(buffer);
+    for (auto const& bound : mtl_group.bound_buffers())
+        slot_buffers.push_back(bound);
 
     auto& slot_textures = _group_textures[group_index];
     slot_textures.clear();
-    for (auto const& texture : mtl_group.bound_textures())
-        slot_textures.push_back(texture);
+    for (auto const& bound : mtl_group.bound_textures())
+        slot_textures.push_back(bound);
 
     auto& slot_tlases = _group_tlases[group_index];
     slot_tlases.clear();
@@ -995,12 +1009,17 @@ void metal_command_list::raster_draw_indexed(draw_indexed_config const& config)
 
 void metal_command_list::declare_bound_groups(pipeline_stage_flags stages)
 {
+    // **Each binding is declared under its own access class**, which is what makes a read after a read free.
+    // Declaring `shader_read | shader_write` for everything instead made each op meet the previous one's unordered
+    // write, so a draw loop over one readonly group emitted one barrier per draw.
+    // libs/graphics/shaped-graphics/docs/concepts/barriers.md is explicit that a bind emits nothing, and that reads do
+    // not order against each other.
     for (auto const& slot_buffers : _group_buffers)
-        for (auto const& buffer : slot_buffers)
-            declare_buffer(buffer, stages, sg::access_flag::shader_read | sg::access_flag::shader_write);
+        for (auto const& bound : slot_buffers)
+            declare_buffer(bound.buffer, stages, sg::shader_access_of(bound.access));
     for (auto const& slot_textures : _group_textures)
-        for (auto const& texture : slot_textures)
-            declare_texture(texture, stages, sg::access_flag::shader_read | sg::access_flag::shader_write);
+        for (auto const& bound : slot_textures)
+            declare_texture(bound.texture, stages, sg::shader_access_of(bound.access));
 
     // A bound acceleration structure is read and never written by the work that traces it, which is why this one
     // declare is narrower than the two above.
@@ -1056,9 +1075,11 @@ void metal_command_list::raster_begin_rendering(rendering_info const& info)
 
     // Declare and flush BEFORE the render encoder opens.
     //
-    // A barrier cannot be emitted inside a render pass here any more than it can on vulkan, and closing and reopening
-    // the pass around one — which vulkan does — would need every load op forced to LOAD to keep the contents.
-    // Doing it first is cheaper, and it is what a frame that transitions its targets up front already gets.
+    // A barrier *can* be emitted inside a render pass, but only with a vertex-stage source: `barrierAfterEncoderStages`
+    // on a render encoder refuses `MTLStageFragment`, which is what `clamp_to_render_source` enforces.
+    // The target transitions have no such source, so flushing them here is what keeps them out of that narrow form.
+    // A dependency that does need a fragment source closes and reopens the pass instead, which costs every load op
+    // being forced to LOAD — see `reopen_render_encoder`.
     for (auto const& target : info.color_targets)
         declare_texture(target.view.texture(), sg::pipeline_stage_flag::render_target, sg::access_flag::color_write);
     if (info.depth_stencil_target.has_value())
@@ -1068,8 +1089,28 @@ void metal_command_list::raster_begin_rendering(rendering_info const& info)
 
     // The compute encoder has to close first: Metal allows one encoder open at a time.
     end_encoder();
+
+    // **Whatever was bound for compute is not bound for this scope.** One set of per-slot bookkeeping serves all three
+    // pipeline kinds here, where dx12 keeps a raster set of its own — so without this, a compute group bound before the
+    // scope is still on the books at its first draw, declaring its resources and tripping the array-binding refusal.
+    clear_bound_groups();
+
+    _scope_info = info;
+    open_render_encoder(false);
+}
+
+void metal_command_list::open_render_encoder(bool force_load)
+{
+    auto const& info = _scope_info;
+
     auto const scope = autorelease_scope();
     auto* const descriptor = MTL4::RenderPassDescriptor::alloc()->init();
+
+    // A reopened pass loads and stores whatever the last one left, because the caller's clear or discard already
+    // happened when the scope opened — honouring it again would wipe what the draws before the reopen produced.
+    auto const load_of = [force_load](sg::target_op op) { return force_load ? MTL::LoadActionLoad : load_action_of(op); };
+    auto const store_of
+        = [force_load](sg::target_op op) { return force_load ? MTL::StoreActionStore : store_action_of(op); };
 
     auto width = 0;
     auto height = 0;
@@ -1082,8 +1123,8 @@ void metal_command_list::raster_begin_rendering(rendering_info const& info)
         attachment->setTexture(mtl_texture.texture());
         attachment->setLevel(NS::UInteger(target.view.range().mip_range.start));
         attachment->setSlice(NS::UInteger(target.view.range().array_range.start));
-        attachment->setLoadAction(load_action_of(target.op));
-        attachment->setStoreAction(store_action_of(target.op));
+        attachment->setLoadAction(load_of(target.op));
+        attachment->setStoreAction(store_of(target.op));
         attachment->setClearColor(MTL::ClearColor(target.clear_color[0], target.clear_color[1], target.clear_color[2],
                                                   target.clear_color[3]));
 
@@ -1100,8 +1141,8 @@ void metal_command_list::raster_begin_rendering(rendering_info const& info)
         attachment->setTexture(mtl_texture.texture());
         attachment->setLevel(NS::UInteger(target.view.range().mip_range.start));
         attachment->setSlice(NS::UInteger(target.view.range().array_range.start));
-        attachment->setLoadAction(load_action_of(target.op));
-        attachment->setStoreAction(store_action_of(target.op));
+        attachment->setLoadAction(load_of(target.op));
+        attachment->setStoreAction(store_of(target.op));
         attachment->setClearDepth(target.clear_depth);
 
         // A combined format is two attachments in Metal's model, where sg names one target.
@@ -1113,8 +1154,8 @@ void metal_command_list::raster_begin_rendering(rendering_info const& info)
             stencil->setTexture(mtl_texture.texture());
             stencil->setLevel(NS::UInteger(target.view.range().mip_range.start));
             stencil->setSlice(NS::UInteger(target.view.range().array_range.start));
-            stencil->setLoadAction(load_action_of(target.op));
-            stencil->setStoreAction(store_action_of(target.op));
+            stencil->setLoadAction(load_of(target.op));
+            stencil->setStoreAction(store_of(target.op));
             stencil->setClearStencil(target.clear_stencil);
         }
 
@@ -1137,19 +1178,67 @@ void metal_command_list::raster_begin_rendering(rendering_info const& info)
     // Every encoder is ordered against the queue on open, the same as the compute one.
     _render_encoder->barrierAfterQueueStages(MTL::StageAll, MTL::StageAll, MTL4::VisibilityOptionDevice);
 
-    auto const vp = info.viewport.has_value()
-                      ? info.viewport.value()
-                      : sg::viewport{.offset = tg::pos2f(0.0f, 0.0f), .size = tg::vec2f(float(width), float(height))};
-    _render_encoder->setViewport(
-        MTL::Viewport{vp.offset[0], vp.offset[1], vp.size[0], vp.size[1], vp.min_depth, vp.max_depth});
+    // Only a fresh scope takes its viewport and scissor from the info: a reopen finds the current ones already here,
+    // which is what keeps a caller's mid-pass `set_viewport` across the boundary.
+    if (!force_load)
+    {
+        auto const vp = info.viewport.has_value()
+                          ? info.viewport.value()
+                          : sg::viewport{.offset = tg::pos2f(0.0f, 0.0f), .size = tg::vec2f(float(width), float(height))};
+        _scope_viewport = MTL::Viewport{vp.offset[0], vp.offset[1], vp.size[0], vp.size[1], vp.min_depth, vp.max_depth};
 
-    auto const rect
-        = info.scissor.has_value()
-            ? MTL::ScissorRect{NS::UInteger(info.scissor.value().min[0]), NS::UInteger(info.scissor.value().min[1]),
-                               NS::UInteger(info.scissor.value().max[0] - info.scissor.value().min[0]),
-                               NS::UInteger(info.scissor.value().max[1] - info.scissor.value().min[1])}
-            : MTL::ScissorRect{0, 0, NS::UInteger(width), NS::UInteger(height)};
-    _render_encoder->setScissorRect(rect);
+        _scope_scissor
+            = info.scissor.has_value()
+                ? MTL::ScissorRect{NS::UInteger(info.scissor.value().min[0]), NS::UInteger(info.scissor.value().min[1]),
+                                   NS::UInteger(info.scissor.value().max[0] - info.scissor.value().min[0]),
+                                   NS::UInteger(info.scissor.value().max[1] - info.scissor.value().min[1])}
+                : MTL::ScissorRect{0, 0, NS::UInteger(width), NS::UInteger(height)};
+    }
+
+    _render_encoder->setViewport(_scope_viewport);
+    _render_encoder->setScissorRect(_scope_scissor);
+}
+
+void metal_command_list::reopen_render_encoder()
+{
+    CC_ASSERT(_render_encoder != nullptr, "reopening a pass needs one to be open");
+
+    // Publish what the pass has recorded so far, so the encoder opened next has a producer to wait on.
+    // This is the same pair `raster_end_rendering` and `barrierAfterQueueStages` form at every other boundary.
+    _render_encoder->barrierAfterStages(MTL::StageAll, MTL::StageAll, MTL4::VisibilityOptionDevice);
+    _render_encoder->endEncoding();
+    _render_encoder->release();
+    _render_encoder = nullptr;
+
+    ++_pass_reopens;
+    open_render_encoder(true);
+
+    // Encoder state does not survive the boundary, so everything the scope set is replayed onto the new encoder.
+    // The bound groups do survive: their addresses live in the argument table, which is an object rather than
+    // encoder state — rebinding the table is what brings them back.
+    if (_bound_raster != nullptr)
+    {
+        _render_encoder->setRenderPipelineState(_bound_raster->state());
+        if (_bound_raster->depth_stencil_state() != nullptr)
+            _render_encoder->setDepthStencilState(_bound_raster->depth_stencil_state());
+
+        auto const& raster = _bound_raster->rasterization();
+        _render_encoder->setCullMode(cull_mode_of(raster.cull));
+        _render_encoder->setTriangleFillMode(fill_mode_of(raster.fill));
+        _render_encoder->setFrontFacingWinding(winding_of(raster.front));
+        _render_encoder->setDepthBias(raster.depth_bias, raster.depth_bias_slope, raster.depth_bias_clamp);
+        _render_encoder->setDepthClipMode(raster.depth_clip_enabled ? MTL::DepthClipModeClip : MTL::DepthClipModeClamp);
+
+        _render_encoder->setArgumentTable(argument_table(), MTL::RenderStageVertex | MTL::RenderStageFragment);
+    }
+
+    if (_scope_stencil_reference.has_value())
+        _render_encoder->setStencilReferenceValue(_scope_stencil_reference.value());
+    if (_scope_blend_constants.has_value())
+    {
+        auto const& c = _scope_blend_constants.value();
+        _render_encoder->setBlendColor(c[0], c[1], c[2], c[3]);
+    }
 }
 
 void metal_command_list::raster_end_rendering()
@@ -1167,6 +1256,9 @@ void metal_command_list::raster_end_rendering()
     _index_address = 0;
     _index_size_in_bytes = 0;
     _scope_depth_stencil_format = sg::pixel_format::undefined;
+    _scope_info = {};
+    _scope_stencil_reference = {};
+    _scope_blend_constants = {};
     clear_bound_groups();
 }
 
@@ -1210,27 +1302,29 @@ void metal_command_list::raster_bind_group(int group_index, binding_group const&
 void metal_command_list::raster_set_viewport(viewport const& vp)
 {
     CC_ASSERT(_render_encoder != nullptr, "setting the viewport needs an open rendering scope");
-    _render_encoder->setViewport(
-        MTL::Viewport{vp.offset[0], vp.offset[1], vp.size[0], vp.size[1], vp.min_depth, vp.max_depth});
+    _scope_viewport = MTL::Viewport{vp.offset[0], vp.offset[1], vp.size[0], vp.size[1], vp.min_depth, vp.max_depth};
+    _render_encoder->setViewport(_scope_viewport);
 }
 
 void metal_command_list::raster_set_scissor(tg::aabb2i const& rect)
 {
     CC_ASSERT(_render_encoder != nullptr, "setting the scissor needs an open rendering scope");
-    _render_encoder->setScissorRect(MTL::ScissorRect{NS::UInteger(rect.min[0]), NS::UInteger(rect.min[1]),
-                                                     NS::UInteger(rect.max[0] - rect.min[0]),
-                                                     NS::UInteger(rect.max[1] - rect.min[1])});
+    _scope_scissor = MTL::ScissorRect{NS::UInteger(rect.min[0]), NS::UInteger(rect.min[1]),
+                                      NS::UInteger(rect.max[0] - rect.min[0]), NS::UInteger(rect.max[1] - rect.min[1])};
+    _render_encoder->setScissorRect(_scope_scissor);
 }
 
 void metal_command_list::raster_set_stencil_reference(u32 reference)
 {
     CC_ASSERT(_render_encoder != nullptr, "setting the stencil reference needs an open rendering scope");
+    _scope_stencil_reference = reference;
     _render_encoder->setStencilReferenceValue(reference);
 }
 
 void metal_command_list::raster_set_blend_constants(tg::vec4f constants)
 {
     CC_ASSERT(_render_encoder != nullptr, "setting the blend constants needs an open rendering scope");
+    _scope_blend_constants = constants;
     _render_encoder->setBlendColor(constants[0], constants[1], constants[2], constants[3]);
 }
 

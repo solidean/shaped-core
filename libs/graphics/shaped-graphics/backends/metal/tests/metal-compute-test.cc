@@ -1,5 +1,5 @@
 #include "double_compute.metallib.h"
-#include "mesh.metallib.h"
+#include "mesh-fixture.hh"
 #include "metal-test-common.hh"
 
 #include <clean-core/common/utility.hh>
@@ -153,19 +153,6 @@ struct scale_constants
     u32 factor = 1;
 };
 
-[[nodiscard]] sg::compiled_shader mesh_kernel(cc::string entry)
-{
-    auto shader = sg::compiled_shader{};
-    shader.stage = sg::shader_stage::compute;
-    shader.format = sg::shader_format::metal_lib;
-    shader.entry_point = cc::move(entry);
-    shader.workgroup_size = sg::compute_dimensions{.x = 1, .y = 1, .z = 1};
-
-    auto blob = cc::pinned_data<byte>::create_uninitialized(isize(sizeof(mtl::test::mesh_metallib)));
-    cc::memcpy(blob.data(), mtl::test::mesh_metallib, sizeof(mtl::test::mesh_metallib));
-    shader.bytecode = cc::pinned_data<byte const>(cc::move(blob));
-    return shader;
-}
 } // namespace
 
 ASYNC_TEST("sg metal - compute inline constants reach the kernel")
@@ -174,7 +161,7 @@ ASYNC_TEST("sg metal - compute inline constants reach the kernel")
     if (ctx == nullptr)
         SKIP("no metal 4 device on this host");
 
-    auto shader = mesh_kernel("scale_main");
+    auto shader = mtl::test::mesh_kernel("scale_main");
     shader.bindings.push_back({
         .name = "values",
         .space = 0,
@@ -255,7 +242,7 @@ ASYNC_TEST("sg metal - an array binding's elements are declared one by one")
 
     // The array takes four consecutive slots from its own index, so the scalar output sits at index 4 — the spacing
     // rule a layout must follow and nothing checks.
-    auto shader = mesh_kernel("array_sum_main");
+    auto shader = mtl::test::mesh_kernel("array_sum_main");
     shader.bindings.push_back({
         .name = "inputs",
         .space = 0,

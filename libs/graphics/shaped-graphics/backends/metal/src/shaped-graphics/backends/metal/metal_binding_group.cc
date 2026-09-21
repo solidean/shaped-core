@@ -8,8 +8,8 @@ namespace sg::backend::metal
 metal_binding_group::metal_binding_group(metal_context& ctx,
                                          metal_binding_group_layout_handle layout,
                                          MTL::Buffer* arguments,
-                                         cc::vector<sg::raw_buffer_handle> bound_buffers,
-                                         cc::vector<sg::raw_texture_handle> bound_textures,
+                                         cc::vector<bound_buffer> bound_buffers,
+                                         cc::vector<bound_texture> bound_textures,
                                          cc::vector<sg::tlas_handle> bound_tlases,
                                          cc::vector<array_binding> array_bindings)
   : _ctx(ctx),

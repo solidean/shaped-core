@@ -98,6 +98,7 @@ if(SC_BUILD_TESTS)
         tests/metal-compute-test.cc
         tests/metal-present-test.cc
         tests/metal-query-test.cc
+        tests/metal-raster-barrier-test.cc
         tests/metal-raster-test.cc
         tests/metal-raytracing-test.cc
         tests/metal-test.cc

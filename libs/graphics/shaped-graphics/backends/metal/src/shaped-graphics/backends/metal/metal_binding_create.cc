@@ -126,8 +126,8 @@ cc::result<metal_binding_group_handle> metal_context::create_metal_binding_group
     // Zero-initialized, so a slot nothing writes reads as a null descriptor rather than as whatever was there.
     auto slots = cc::vector<argument_slot>::create_filled(slot_count, argument_slot(0));
     auto filled = cc::vector<char>::create_filled(bindings.size(), char(0));
-    auto bound_buffers = cc::vector<sg::raw_buffer_handle>();
-    auto bound_textures = cc::vector<sg::raw_texture_handle>();
+    auto bound_buffers = cc::vector<metal_binding_group::bound_buffer>();
+    auto bound_textures = cc::vector<metal_binding_group::bound_texture>();
     auto bound_tlases = cc::vector<sg::tlas_handle>();
     auto array_bindings = cc::vector<metal_binding_group::array_binding>();
 
@@ -220,7 +220,7 @@ cc::result<metal_binding_group_handle> metal_context::create_metal_binding_group
                 if (is_array)
                     array.elements.push_back({.texture = texture_view->texture});
                 else
-                    bound_textures.push_back(texture_view->texture);
+                    bound_textures.push_back({.texture = texture_view->texture, .access = sg::access_of(view)});
                 continue;
             }
 
@@ -239,7 +239,7 @@ cc::result<metal_binding_group_handle> metal_context::create_metal_binding_group
             if (is_array)
                 array.elements.push_back({.buffer = buffer_view->buffer});
             else
-                bound_buffers.push_back(buffer_view->buffer);
+                bound_buffers.push_back({.buffer = buffer_view->buffer, .access = sg::access_of(view)});
         }
 
         if (is_array)

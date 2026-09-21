@@ -130,6 +130,20 @@ public:
         return table;
     }
 
+    /// How many barriers this list has emitted so far.
+    ///
+    /// **This is a test seam, not a statistic.** Whether an op emits a barrier is the whole of what the hazard
+    /// tracking decides, and nothing else observes it: a redundant barrier is correct and silent, and only its cost
+    /// says it was there.
+    /// A backend type, so this adds nothing to sg's API.
+    [[nodiscard]] i64 barriers_emitted() const { return _barriers_emitted; }
+
+    /// How many times a render pass has been closed and opened again to carry a barrier it could not name.
+    ///
+    /// The other half of the same test seam: a reopen is what orders a fragment-stage write against a later draw, and
+    /// a run that produced the right pixels without one got them by timing rather than by ordering.
+    [[nodiscard]] i64 pass_reopens() const { return _pass_reopens; }
+
 private:
     void transition_texture_layout(raw_texture_handle texture,
                                    texture_layout layout,
@@ -256,6 +270,25 @@ private:
     /// Declare what a draw reads: the bound groups' resources, the vertex buffers, and an indexed draw's index buffer.
     void declare_raster_draw(bool indexed);
 
+    /// Open a render encoder over `_scope_info`.
+    ///
+    /// `force_load` keeps every attachment's contents instead of honouring its `target_op` — what a reopened pass
+    /// needs, since the clear or discard the caller asked for already happened when the scope opened.
+    void open_render_encoder(bool force_load);
+
+    /// Close the open render pass and open it again over the same targets, ordering the two halves at the boundary.
+    ///
+    /// **This is how a fragment-stage producer is ordered against a later draw.** A render encoder's
+    /// `barrierAfterEncoderStages` refuses `MTLStageFragment` as its source, so a shader write in one draw cannot be
+    /// named as what the next draw waits on — and a barrier clamped down to the vertex stage orders nothing that
+    /// matters.
+    /// The encoder boundary carries it instead: the closing encoder publishes with `barrierAfterStages` and the new
+    /// one waits with `barrierAfterQueueStages`, which is the pair every encoder boundary here already uses.
+    /// vulkan does the same thing for the same reason.
+    ///
+    /// The encoder state is replayed, and the attachments reload rather than reclear.
+    void reopen_render_encoder();
+
     /// Write a group's argument-buffer address into the table and remember what it names.
     /// Shared by the compute and raster bind paths, which differ only in which encoder is open.
     void bind_group_to_table(int group_index, binding_group const& group);
@@ -344,6 +377,19 @@ private:
     /// it and would otherwise never notice a mismatch.
     sg::pixel_format _scope_depth_stencil_format = sg::pixel_format::undefined;
 
+    /// The open rendering scope's targets, kept so the pass can be reopened around a barrier the encoder cannot name.
+    /// A value type holding handles, so the copy keeps its own targets alive for as long as the scope lasts.
+    sg::rendering_info _scope_info;
+
+    /// The scope's current encoder state, replayed onto the encoder a reopen opens.
+    ///
+    /// **The current values rather than the scope's initial ones**: a caller that moved the viewport mid-pass has to
+    /// find it where it left it, and a new encoder starts at Metal's defaults rather than at the old one's state.
+    MTL::Viewport _scope_viewport = {};
+    MTL::ScissorRect _scope_scissor = {};
+    cc::optional<u32> _scope_stencil_reference;
+    cc::optional<tg::vec4f> _scope_blend_constants;
+
     /// The vertex buffer bound at each input slot, in slot order and with a null for a slot nothing bound.
     /// Held so a draw can declare `vertex_read` on them — the address itself lives in the argument table.
     cc::small_vector<sg::raw_buffer_handle, sg::max_vertex_buffers> _bound_vertex_buffers;
@@ -381,14 +427,21 @@ private:
     /// Per slot, the buffers the group bound there names — copied at bind time, because a binding_group is handed over
     /// by reference and has no handle to take.
     /// Rebinding a slot replaces its list, so what a dispatch declares is exactly what is bound when it runs.
-    cc::vector<sg::raw_buffer_handle> _group_buffers[sg::max_binding_groups];
-    cc::vector<sg::raw_texture_handle> _group_textures[sg::max_binding_groups];
+    cc::vector<metal_binding_group::bound_buffer> _group_buffers[sg::max_binding_groups];
+    cc::vector<metal_binding_group::bound_texture> _group_textures[sg::max_binding_groups];
     cc::vector<sg::tlas_handle> _group_tlases[sg::max_binding_groups];
     cc::vector<metal_binding_group::array_binding> _group_arrays[sg::max_binding_groups];
 
     /// The array declares recorded since the last dispatch or draw, applied by `declare_array_accesses`.
     cc::vector<array_buffer_declare> _pending_array_buffer_declares;
     cc::vector<array_texture_declare> _pending_array_texture_declares;
+
+    /// Counted for `barriers_emitted`, incremented where a barrier actually reaches an encoder.
+    /// A pass reopen counts as one too: it is the barrier, for a dependency the encoder cannot name.
+    i64 _barriers_emitted = 0;
+
+    /// Counted for `pass_reopens`, incremented once per reopen.
+    i64 _pass_reopens = 0;
 
     /// One per download recorded: copies the bytes out of the staging ring and settles the future.
     ///
