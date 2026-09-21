@@ -116,7 +116,7 @@ struct pixel_input
 * **EMIT-35** The bindings an emitter writes are the ones the entry point's binding list names.
 * **EMIT-36** An `@inline binding` is a struct of its members and one global of that struct, which has the binding's name.
 * **EMIT-37** The global is where `sg` expects inline constants, by the table below.
-* **EMIT-38** A binding that is not `@inline`, and a second `@inline` binding, are `unsupported`.
+* **EMIT-38** A second `@inline` binding is `unsupported`, and so is one that is not the last of the list.
 * **EMIT-39** A member of an `@inline` binding is of a builtin type whose record has a size in a block, which `bool` has not, or it is `unsupported`.
 * **EMIT-40** A member's offset follows HLSL's packing of a constant buffer, and `hlsl-vulkan` states it on every member ([why](why/emitting.md#emit-40)).
 * **EMIT-41** A member that WGSL's layout or MSL's places at another offset is `layout-mismatch`, and its detail gives the offset in each.
@@ -127,6 +127,28 @@ struct pixel_input
 | `hlsl-vulkan` | `[[vk::push_constant]] ConstantBuffer<T> name;` |
 | `wgsl` | `@group(3) @binding(0) var<uniform> name: T;` |
 | `msl` | no global: the parameter `constant T& name [[buffer(4)]]` (EMIT-58) |
+
+A binding that is not `@inline` is a group.
+
+* **EMIT-82** A group's number is its position in the entry point's binding list, the `@inline` binding skipped.
+* **EMIT-83** A group's plain members are a struct of their own and one constant buffer of it, named after the binding, at slot 0.
+* **EMIT-84** A group's plain members are placed by EMIT-39 to EMIT-41, as the members of an `@inline` binding are.
+* **EMIT-85** A buffer member is one global named `<binding>_<member>`, which CHK-172 keeps unique, and a local of that name is the one renamed.
+* **EMIT-86** HLSL writes a group as `#pragma sc group N` and a namespace `<binding>_bindings`, with no register: slib's binding pass assigns every one ([why](why/emitting.md#emit-86)).
+* **EMIT-87** The struct of a group's constant buffer stands ahead of that namespace, and `hlsl-vulkan` states no offset on its members ([why](why/emitting.md#emit-87)).
+* **EMIT-88** WGSL writes each resource of a group as `@group(N) @binding(slot)`: the constant buffer as `var<uniform>`, a buffer as a `var<storage>` array, `read` or `read_write`.
+* **EMIT-89** MSL writes no group yet, and an entry point that lists one is `unsupported`.
+* **EMIT-90** A group's buffers take the slots after its constant buffer, from 1, or from 0 when it has no plain member.
+
+```sgl
+binding affine:
+    scale: float
+    bias: float
+    values: mut buffer[float]
+
+@compute(64) fun affine_map(@thread_id id: int3){affine}:
+    affine.values[id.x] = affine.values[id.x] * affine.scale + affine.bias
+```
 
 ## Matrices
 

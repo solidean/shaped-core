@@ -62,8 +62,15 @@ public:
     /// How the body names a buffer, which is the bare global everywhere but HLSL, where it stands in a namespace.
     [[nodiscard]] virtual cc::string buffer_reference(planned_buffer const& b) const { return b.name; }
 
+    /// How a group's constant block is named where a member is read through it.
+    [[nodiscard]] virtual cc::string block_reference(planned_constants const& b) const { return b.name; }
+
     /// The buffers of one binding, which is one group: HLSL wraps them, and WGSL writes each with its own address.
-    virtual void write_buffer_group(cc::string& out, plan const& p, cc::span<planned_buffer const> group) const = 0;
+    /// One group: its constant block when it has one, then its buffers; never called for a group with neither.
+    virtual void write_group(cc::string& out,
+                             plan const& p,
+                             planned_constants const* block,
+                             cc::span<planned_buffer const> buffers) const = 0;
 
     /// Everything of the function up to and including the line that opens its body.
     virtual void write_function_head(cc::string& out, plan const& p) const = 0;

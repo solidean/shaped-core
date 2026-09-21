@@ -120,6 +120,9 @@ enum light_kind:
 * **CHK-44** `binding.member` is an expression of the member's type, inside a function whose binding list names that binding.
 * **CHK-45** In any other function it is the normal error `binding-not-listed`.
 * **CHK-46** A binding is no value: its bare name in an expression is `unsupported-yet`.
+* **CHK-171** A buffer member is known to the host as `<binding>_<member>` ([why](why/checking.md#chk-171)).
+* **CHK-172** Two buffer members of a module with one host name are the normal error `duplicate-reflected-name`, whether or not a function lists both.
+  So is one whose host name a module-level declaration has.
 
 ```sgl
 @inline binding constants:
@@ -364,6 +367,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `non-exhaustive-case` | CHK-160 |
 | `duplicate-case-pattern` | CHK-161 |
 | `missing-value-in-arm` | CHK-168 |
+| `duplicate-reflected-name` | CHK-172 |
 | `ambiguous-overload` | CHK-72 |
 | `missing-field`, `unknown-field`, `duplicate-field` | CHK-84 |
 | `invalid-entry-point` | CHK-87, CHK-93 |

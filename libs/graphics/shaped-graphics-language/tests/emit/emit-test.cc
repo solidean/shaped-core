@@ -177,22 +177,34 @@ TEST("sgl emit - an entry point a target reserves is renamed there, and the text
     }
 }
 
-TEST("sgl emit - a binding member that is no buffer has no address to give it")
+TEST("sgl emit - a group's plain member is a field of the constant buffer the group owns")
 {
-    // A plain member belongs in the group's own constant buffer, which the spec decides and nothing builds yet.
+    // EMIT-83: the block is named after the binding, at slot 0, so a group without a buffer is one constant buffer.
     auto const source = with_edges("binding scene:\n"
-                                   "    tint: float3\n"
+                                   "    tint: float4\n"
                                    "\n"
                                    "@pixel fun main_ps(p: pixel_input){scene} -> frame:\n"
                                    "    return {\n"
-                                   "        color = float4(..scene.tint, 1.0)\n"
+                                   "        color = scene.tint\n"
                                    "    }\n");
-    CHECK(errors_of(source) == "unsupported a binding member that is no buffer: 'scene.tint'\n");
+    // Three targets write it, and MSL declines a group as it declines a buffer (EMIT-89).
+    CHECK(emit_source(source, 0, target::hlsl_dx12).errors.empty());
+    CHECK(emit_source(source, 0, target::hlsl_vulkan).errors.empty());
+    CHECK(!emit_source(source, 0, target::msl).errors.empty());
+    auto const wgsl = emit_source(source, 0, target::wgsl).text;
+    CHECK(wgsl.contains("@group(0) @binding(0) var<uniform> scene: scene_data;"));
+    CHECK(wgsl.contains("scene.tint")); // a member is read through the block
 
-    auto const e = emit_source(source, 0, target::wgsl);
+    // A member with no place in a block has no address either, in a group as in an `@inline` binding.
+    auto const e = emit_source(with_edges("binding scene:\n"
+                                          "    lit: bool\n"
+                                          "\n"
+                                          "@pixel fun main_ps(p: pixel_input){scene} -> frame:\n"
+                                          "    return {color = float4(1.0, 1.0, 1.0, 1.0)}\n"),
+                               0, target::wgsl);
     REQUIRE(e.errors.size() == 1);
     CHECK(e.errors[0].kind == sgl::emit::error_kind::unsupported);
-    CHECK(sgl::check::is_valid(e.errors[0].symbol));
+    CHECK(e.errors[0].detail == "a member of type 'bool' in a binding: 'scene.lit'");
 }
 
 TEST("sgl emit - an inline block whose members would sit elsewhere in one target than in another is an error")

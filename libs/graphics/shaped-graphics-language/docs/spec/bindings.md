@@ -94,10 +94,13 @@ Everything not named here is the diagnostic `unsupported-yet`, never a guess.
 
 * `buffer[T]` and `mut buffer[T]`, for a `T` that is a scalar or a vector.
 * A subscript on a buffer, as a value and as the place of an assignment.
+* A plain member of a group, as a field of the constant buffer the group owns, for a type whose place in a block every target agrees on.
 * The positional group numbering, and `@inline` last.
+* A buffer's host name, `<binding>_<member>`, which [CHK-172](semantics/checking.md#bindings) keeps unique in a module.
 
-Three targets write a buffer, and the fourth declines rather than guessing.
-WGSL gives each its own `@group`/`@binding`, and HLSL writes `#pragma sc group n` and a namespace, so that every register stays slib's binding pass's to assign.
+Three targets write a group, and the fourth declines rather than guessing.
+WGSL gives each resource its own `@group`/`@binding`, and HLSL writes `#pragma sc group n` and a namespace, so that every register stays slib's binding pass's to assign.
+A group's plain members are one constant buffer at the group's slot 0, named after the binding, and its buffers follow it.
 MSL takes a buffer as an argument of the entry point rather than as a global, which this writer does not build yet, so it reports `unsupported`.
 
 A struct element type, `bytes`, `constants[T]`, every texture form and a `sampler` member all parse and are then reported.

@@ -104,10 +104,10 @@ TEST("sgl describe - a group no entry point lists is still described, and still 
 
     // And an unlisted group the emitter could not write is refused as if something listed it.
     auto const error = error_of(R"(binding spare:
-    scale: float
+    lit: bool
 )");
     CHECK(error.contains("unsupported"));
-    CHECK(error.contains("spare.scale"));
+    CHECK(error.contains("spare.lit"));
 }
 
 TEST("sgl describe - what the emitter refuses is refused here, in the emitter's words")
@@ -130,4 +130,26 @@ TEST("sgl describe - a source with errors describes nothing, and says why")
     auto const error = error_of("fun f() -> float => nope\n");
     CHECK(error.contains("t.sgl:1:"));
     CHECK(error.contains("unknown-name"));
+}
+
+TEST("sgl describe - a group's plain members are its constant buffer, at slot 0 and under the binding's name")
+{
+    auto const d = described(R"(binding affine:
+    scale: float
+    bias: float
+    values: mut buffer[float]
+
+@compute(64) fun main(@thread_id id: int3){affine}:
+    affine.values[id.x] = affine.values[id.x] * affine.scale + affine.bias
+)");
+    REQUIRE(d.bindings.size() == 1);
+    auto const& affine = d.bindings[0];
+    CHECK(affine.block_slot == 0);
+    CHECK(affine.block_reflected_name == "affine");
+    CHECK(affine.block_size == 8);
+    REQUIRE(affine.members.size() == 3);
+    CHECK(affine.members[1].kind == sgl::described_member_kind::constant);
+    CHECK(affine.members[1].offset == 4);
+    // The buffers follow the block.
+    CHECK(affine.members[2].slot == 1);
 }

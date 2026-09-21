@@ -95,13 +95,29 @@ public:
     }
 
     /// slib's binding pass owns every address in the text it reads, and this pragma is the one thing we write.
-    void write_buffer_group(cc::string& out, plan const& p, cc::span<planned_buffer const> group) const override
+    /// A group's block is a `ConstantBuffer` of a struct declared ahead of the namespace, which the pass requires.
+    void write_group(cc::string& out,
+                     plan const& p,
+                     planned_constants const* block,
+                     cc::span<planned_buffer const> buffers) const override
     {
-        if (group.empty())
-            return;
-        out.appendf("#pragma sc group {}\n", group[0].group);
-        out.appendf("namespace {}\n{{\n", group[0].group_name);
-        for (auto const& b : group)
+        if (block != nullptr)
+        {
+            // No `[[vk::offset]]` here, unlike the push-constant block: in a descriptor set `-fvk-use-dx-layout` already
+            // gives vulkan dx12's layout, and slib's pass refuses an offset written by hand.
+            out.appendf("struct {}\n{{\n", block->block_name);
+            for (auto member : block->members)
+            {
+                member.offset = -1;
+                write_member(out, nullptr, member, p);
+            }
+            out += "};\n\n";
+        }
+        out.appendf("#pragma sc group {}\n", block != nullptr ? block->group : buffers[0].group);
+        out.appendf("namespace {}\n{{\n", block != nullptr ? block->group_name : buffers[0].group_name);
+        if (block != nullptr)
+            out.appendf("    ConstantBuffer<{}> {};\n", block->block_name, block->name);
+        for (auto const& b : buffers)
             out.appendf("    {}StructuredBuffer<{}> {};\n", b.is_mut ? "RW" : "", type_text(p, *this, b.element), b.name);
         out += "}\n\n";
     }
@@ -109,6 +125,11 @@ public:
     [[nodiscard]] cc::string buffer_reference(planned_buffer const& b) const override
     {
         return cc::format("{}::{}", b.group_name, b.name);
+    }
+
+    [[nodiscard]] cc::string block_reference(planned_constants const& b) const override
+    {
+        return b.group >= 0 ? cc::format("{}::{}", b.group_name, b.name) : b.name;
     }
 
     void write_declarations(cc::string& out, plan const& p) const override

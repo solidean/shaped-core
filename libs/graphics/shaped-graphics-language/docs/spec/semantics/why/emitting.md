@@ -116,3 +116,16 @@ EMIT-5 writes exactly the structs and the binding an entry point needs, so writi
 It is not: the unit that is needed is the enum, and a reader comparing the text against the source wants its set rather than the subset this entry point happened to match on.
 An enum is small and closed, so the cost is bounded by the declaration; a struct's members are written whole for the same reason.
 A `default` arm also stands for the cases nobody named, and a reader who cannot see them cannot tell what it covers.
+
+## EMIT-86
+
+A register is an address the host has to agree with, and in HLSL it is a pair of a class and a space that the two backends read differently.
+slib's binding pass already owns that question for every HLSL shader in the tree, so the emitter states which group a resource belongs to and nothing more.
+The group number is the one address that is SGL's, because it comes from the entry point's list.
+
+## EMIT-87
+
+In a descriptor set, slib compiles vulkan's HLSL with `-fvk-use-dx-layout`, so a constant buffer already has dx12's layout there.
+The push-constant block is the one that flag does not reach, which is why an `@inline` block states its offsets and a group's constant buffer does not.
+slib's pass refuses an offset written by hand in a group, since it states every layout itself.
+

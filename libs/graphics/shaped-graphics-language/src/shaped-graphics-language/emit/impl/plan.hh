@@ -55,15 +55,23 @@ struct planned_enum
     cc::vector<cc::string> case_names;
 };
 
-/// The one `@inline binding` of the entry point.
+/// A block of constants: the one `@inline binding` of the entry point, or the plain members of one of its groups.
 struct planned_constants
 {
     check::symbol_id symbol = check::symbol_id::none;
-    /// The global a member is read through.
+    /// The global a member is read through; a group's block is the binding's own name, which is what the host binds.
     cc::string name;
     /// The struct type of the block, which SGL has no name for, so it is minted.
     cc::string block_name;
+    /// The plain members only, each at the offset `place_block` gave it.
     cc::vector<planned_member> members;
+    /// Parallel to the binding's members: a position in `members`, or -1 for a buffer.
+    cc::vector<i32> block_member_of;
+    /// A group's block is the first resource of its group, at slot 0; -1 for the `@inline` block, which takes no group.
+    i32 group = -1;
+    i32 slot = -1;
+    /// What HLSL declares the group as, as for a buffer.
+    cc::string group_name;
 };
 
 /// A `buffer[T]` member of a binding, which is a resource of its own rather than a field of a block.
@@ -100,6 +108,8 @@ struct plan
     /// What this target declares the entry point as: the source's name, or a minted one where the target reserves it.
     cc::string entry_name;
     cc::optional<planned_constants> constants;
+    /// The constant blocks of the entry point's groups, one per group with a plain member, in group order.
+    cc::vector<planned_constants> group_blocks;
     /// The buffers the entry point's bindings declare, in group then slot order.
     cc::vector<planned_buffer> buffers;
     /// Parallel to `e.locals`.
@@ -110,6 +120,16 @@ struct plan
 
 /// The position in `buffers` of the buffer `binding.member` names, or -1 where that member is no buffer.
 [[nodiscard]] i32 buffer_of(plan const& p, check::symbol_id binding, i32 member);
+
+/// The block `binding` is read through: the `@inline` one, or its group's; null for a group with no plain member.
+[[nodiscard]] planned_constants const* block_of(plan const& p, check::symbol_id binding);
+
+/// The members of a binding that are values rather than buffers, which is every member of an `@inline` one.
+[[nodiscard]] cc::vector<check::member_info> plain_members_of(check::checked_module const& m,
+                                                              check::binding_info const& b);
+
+/// The slot a group's first buffer takes: 1 behind a constant block, which takes 0, and 0 without one.
+[[nodiscard]] i32 first_buffer_slot(check::checked_module const& m, check::binding_info const& b);
 
 /// The column of a builtin's record `t` reads; the two HLSL targets share one.
 [[nodiscard]] builtins::language language_of(target t);

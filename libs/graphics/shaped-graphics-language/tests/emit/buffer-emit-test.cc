@@ -107,3 +107,18 @@ TEST("sgl emit - MSL declines a buffer rather than writing text no compiler take
           == "unsupported a buffer binding, which MSL takes as an entry-point argument\n");
     CHECK(errors_for(k_buffers, target::hlsl_vulkan) == "");
 }
+
+TEST("sgl emit - a local that has a buffer's name is renamed, and the buffer keeps it")
+{
+    // The buffer's name is what the host binds by, so it is the one that may not move.
+    auto const text = text_of("binding work:\n"
+                              "    dst: mut buffer[float]\n"
+                              "\n"
+                              "@pixel fun main_ps(p: pixel_input){work} -> frame:\n"
+                              "    let work_dst = 2.0\n"
+                              "    work.dst[0] = work_dst\n"
+                              "    return {color = float4(1.0, 1.0, 1.0, 1.0)}\n",
+                              target::wgsl);
+    CHECK(text.contains("var<storage, read_write> work_dst: array<f32>;"));
+    CHECK(text.contains("work_dst_1"));
+}

@@ -193,9 +193,13 @@ struct planner
 
     cc::vector<planned_member> members_of(ast::range_of<member_info> range, bool has_locations)
     {
+        return members_of(p.m.at(range), has_locations);
+    }
+
+    cc::vector<planned_member> members_of(cc::span<member_info const> members, bool has_locations)
+    {
         auto result = cc::vector<planned_member>();
         auto next_location = 0;
-        auto const members = p.m.at(range);
         for (auto const& member : members)
             result.push_back({
                 .name = spell_member(member.name, members),
@@ -257,21 +261,60 @@ struct planner
             auto const& b = p.m.bindings[s.info];
             if (b.is_inline)
                 continue; // sg addresses the inline constants itself, so they take no group of their own
-            auto slot = 0;
+            auto slot = first_buffer_slot(p.m, b);
             auto const members = p.m.at(b.members);
             for (auto i = isize(0); i < members.size(); ++i)
             {
                 auto const& t = p.m.at(members[i].type);
                 if (t.kind != check::type_kind::buffer)
                     continue;
+                // Exactly `<binding>_<member>`, never minted: it is what the host binds by (CHK-172 keeps it unique).
+                auto name = cc::format("{}_{}", s.name, members[i].name);
+                p.names.taken.push_back(name);
                 p.buffers.push_back({.binding = id,
                                      .member = i32(i),
-                                     .name = p.names.mint(cc::format("{}_{}", s.name, members[i].name)),
+                                     .name = cc::move(name),
                                      .element = t.element,
                                      .is_mut = t.is_mut,
                                      .group = group,
                                      .slot = slot++,
                                      .group_name = cc::format("{}_bindings", s.name)});
+            }
+            ++group;
+        }
+    }
+
+    /// A group's plain members are a constant block the group owns, as its first resource.
+    void group_blocks()
+    {
+        auto group = 0;
+        for (auto const id : p.e.bindings)
+        {
+            auto const& s = p.m.at(id);
+            auto const& b = p.m.bindings[s.info];
+            if (b.is_inline)
+                continue;
+            auto const plain = plain_members_of(p.m, b);
+            if (!plain.empty())
+            {
+                // The binding's own name, never minted: it is what the host binds the block by, and CHK-12 keeps it unique.
+                p.names.taken.push_back(s.name);
+                auto planned = planned_constants{
+                    .symbol = id,
+                    .name = s.name,
+                    .block_name = p.names.mint(cc::format("{}_data", s.name)),
+                    .members = members_of(plain, false),
+                    .group = group,
+                    .slot = 0,
+                    .group_name = cc::format("{}_bindings", s.name),
+                };
+                auto const placed = place_block(p.m, plain);
+                for (auto i = isize(0); i < planned.members.size(); ++i)
+                    planned.members[i].offset = placed.offsets[i];
+                auto next = 0;
+                for (auto const& member : p.m.at(b.members))
+                    planned.block_member_of.push_back(p.m.at(member.type).kind == type_kind::buffer ? -1 : next++);
+                p.group_blocks.push_back(cc::move(planned));
             }
             ++group;
         }
@@ -293,7 +336,10 @@ struct planner
             };
             auto const placed = place_block(p.m, p.m.at(b.members));
             for (auto i = isize(0); i < planned.members.size(); ++i)
+            {
                 planned.members[i].offset = placed.offsets[i];
+                planned.block_member_of.push_back(i32(i));
+            }
             p.constants = cc::move(planned);
         }
     }
@@ -375,31 +421,28 @@ void sgl::emit::impl::validate_binding(check::checked_module const& m, check::sy
 
     auto const& s = m.at(id);
     auto const& b = m.bindings[s.info];
-    if (!b.is_inline)
-    {
-        // A resource group: every member is a buffer, since nothing else is built (the spec's bindings file).
-        for (auto const& member : m.at(b.members))
-            if (m.at(member.type).kind != check::type_kind::buffer)
-                report(error_kind::unsupported,
-                       cc::format("a binding member that is no buffer: '{}.{}'", s.name, member.name));
-        return;
-    }
 
+    // A plain member is a constant of a block: the `@inline` one, or the constant buffer its group owns.
+    // A buffer is a resource of its own in a group, and has no place in an `@inline` block.
     auto is_placed = true;
     for (auto const& member : m.at(b.members))
-        if (layout_of(m, member.type).hlsl.size == 0)
-        {
-            is_placed = false;
-            report(error_kind::unsupported, cc::format("a member of type '{}' in an @inline binding: '{}.{}'",
-                                                       m.name_of(member.type), s.name, member.name));
-        }
+    {
+        if (!b.is_inline && m.at(member.type).kind == check::type_kind::buffer)
+            continue;
+        if (layout_of(m, member.type).hlsl.size != 0)
+            continue;
+        is_placed = false;
+        report(error_kind::unsupported,
+               cc::format("a member of type '{}' in {}: '{}.{}'", m.name_of(member.type),
+                          b.is_inline ? "an @inline binding" : "a binding", s.name, member.name));
+    }
     if (!is_placed)
         return;
 
     auto hlsl = 0;
     auto wgsl = 0;
     auto msl = 0;
-    for (auto const& member : m.at(b.members))
+    for (auto const& member : plain_members_of(m, b))
     {
         auto const l = layout_of(m, member.type);
         hlsl = hlsl_offset(hlsl, l.hlsl);
@@ -416,6 +459,31 @@ void sgl::emit::impl::validate_binding(check::checked_module const& m, check::sy
         wgsl += l.wgsl.size;
         msl += l.msl.size;
     }
+}
+
+cc::vector<sgl::check::member_info> sgl::emit::impl::plain_members_of(check::checked_module const& m,
+                                                                      check::binding_info const& b)
+{
+    auto result = cc::vector<check::member_info>();
+    for (auto const& member : m.at(b.members))
+        if (m.at(member.type).kind != check::type_kind::buffer)
+            result.push_back(member);
+    return result;
+}
+
+sgl::i32 sgl::emit::impl::first_buffer_slot(check::checked_module const& m, check::binding_info const& b)
+{
+    return !b.is_inline && !plain_members_of(m, b).empty() ? 1 : 0;
+}
+
+sgl::emit::impl::planned_constants const* sgl::emit::impl::block_of(plan const& p, check::symbol_id binding)
+{
+    if (p.constants.has_value() && p.constants.value().symbol == binding)
+        return &p.constants.value();
+    for (auto const& block : p.group_blocks)
+        if (block.symbol == binding)
+            return &block;
+    return nullptr;
 }
 
 sgl::emit::impl::block_placement sgl::emit::impl::place_block(check::checked_module const& m,
@@ -486,8 +554,18 @@ sgl::emit::impl::plan sgl::emit::impl::make_plan(check::checked_module const& m,
     // `spell` is what mints `<name>_` where the target reserves the name or a builtin is called by it.
     result.entry_name = p.spell(e.name);
     p.constants();
+    p.group_blocks();
     p.buffers();
+    // A local may share the name of a buffer or of a group's block, and those are what the host knows, so the local is
+    // the one renamed.
     for (auto const& local : e.locals)
-        result.locals.push_back(p.spell(local.name));
+    {
+        auto is_bound = false;
+        for (auto const& b : result.buffers)
+            is_bound = is_bound || b.name == local.name;
+        for (auto const& b : result.group_blocks)
+            is_bound = is_bound || b.name == local.name;
+        result.locals.push_back(is_bound ? result.names.mint(local.name) : p.spell(local.name));
+    }
     return result;
 }

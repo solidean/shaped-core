@@ -37,6 +37,11 @@ void write_binding(babel::json::object_writer& o, sgl::described_binding const& 
     o.write("name", cc::string_view(b.name));
     o.write("inline", b.is_inline);
     o.write("block_size", b.block_size);
+    if (b.block_slot >= 0)
+    {
+        o.write("block_slot", b.block_slot);
+        o.write("block_reflected_name", cc::string_view(b.block_reflected_name));
+    }
     auto members = o.write_array("members");
     for (auto const& m : b.members)
     {

@@ -15,7 +15,7 @@
 /// What a binding member is to the host.
 enum class sgl::described_member_kind : sgl::u8
 {
-    /// A plain value in an `@inline` block, at a byte offset every target agrees on.
+    /// A plain value in a block: the `@inline` one, or the constant buffer a group owns; at an offset every target agrees on.
     constant,
     /// A `buffer[T]`, which the host binds as a resource of its own.
     buffer,
@@ -47,6 +47,10 @@ struct sgl::described_binding
     cc::vector<described_binding_member> members;
     /// Where the last constant ends; 0 without one.
     i32 block_size = 0;
+    /// A group's constant block: its slot, which is 0, and the name it reflects under, which is the binding's own.
+    /// -1 and empty for an `@inline` binding and for a group without a plain member.
+    i32 block_slot = -1;
+    cc::string block_reflected_name;
 };
 
 struct sgl::described_struct_member

@@ -78,7 +78,9 @@ public:
 
     /// A Metal buffer is a parameter of the entry point rather than a global, so `emit_entry_point` declines
     /// before a line is written; nothing reaches here.
-    void write_buffer_group(cc::string&, plan const&, cc::span<planned_buffer const>) const override {}
+    void write_group(cc::string&, plan const&, planned_constants const*, cc::span<planned_buffer const>) const override
+    {
+    }
 
     void write_declarations(cc::string& out, plan const& p) const override
     {

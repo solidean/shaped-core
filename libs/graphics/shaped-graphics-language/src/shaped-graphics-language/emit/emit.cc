@@ -113,7 +113,7 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
 
     auto plan = impl::make_plan(m, e, t);
     // A Metal buffer is an argument of the kernel rather than a global, which this writer does not build yet.
-    if (t == target::msl && !plan.buffers.empty())
+    if (t == target::msl && (!plan.buffers.empty() || !plan.group_blocks.empty()))
     {
         result.errors.push_back({.kind = error_kind::unsupported,
                                  .symbol = e.function,

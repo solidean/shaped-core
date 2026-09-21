@@ -183,3 +183,12 @@ A `case` that is a value must produce one on every path, which is the property C
 And WGSL refuses a `switch` without a `default` outright, so an emitter has to invent one whatever the language says.
 Inventing one silently means a value the program never wrote, in the one place a reader would not look.
 Asking the source for it costs a `_` and makes the missing case a diagnostic instead of a zero.
+
+## CHK-171
+
+A buffer's name is what the host binds it by, and what a shader package's generated table states.
+`<binding>_<member>` is not injective, since `_` may stand anywhere in a name: `a_b.c` and `a.b_c` both give `a_b_c`.
+An emitter that dodged the clash would rename one of them, and which one would depend on the entry point being written, so one group could reach the host under two names.
+Refusing it where the two are declared keeps a buffer's host name a function of its declaration alone.
+It is judged module-wide rather than per list for the same reason: a group is bound by the host whichever entry point it is used with.
+

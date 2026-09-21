@@ -30,11 +30,31 @@ described_binding describe_binding(check::checked_module const& m, check::symbol
         return result;
     }
 
-    // Numbered as the emitter numbers them: the buffers in declaration order, each the next slot of its group.
-    auto slot = 0;
+    // Numbered as the emitter numbers them: the constant block first when there is one, then the buffers in
+    // declaration order, each the next slot of its group.
+    auto const plain = emit_impl::plain_members_of(m, b);
+    auto const placed = emit_impl::place_block(m, plain);
+    if (!plain.empty())
+    {
+        result.block_size = placed.size;
+        result.block_slot = 0;
+        result.block_reflected_name = s.name;
+    }
+    auto slot = emit_impl::first_buffer_slot(m, b);
+    auto next_constant = isize(0);
     for (auto const& member : members)
     {
         auto const& t = m.at(member.type);
+        if (t.kind != check::type_kind::buffer)
+        {
+            result.members.push_back({.name = member.name,
+                                      .kind = described_member_kind::constant,
+                                      .type = cc::string(m.name_of(member.type)),
+                                      .offset = placed.offsets[next_constant],
+                                      .size = placed.sizes[next_constant]});
+            ++next_constant;
+            continue;
+        }
         result.members.push_back({.name = member.name,
                                   .kind = described_member_kind::buffer,
                                   .type = cc::string(m.name_of(t.element)),

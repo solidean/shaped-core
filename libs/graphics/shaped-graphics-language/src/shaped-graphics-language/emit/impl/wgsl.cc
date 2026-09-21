@@ -58,13 +58,23 @@ public:
         out.appendf("const {}: i32 = {};\n", name, value);
     }
 
-    void write_buffer_group(cc::string& out, plan const& p, cc::span<planned_buffer const> group) const override
+    void write_group(cc::string& out,
+                     plan const& p,
+                     planned_constants const* block,
+                     cc::span<planned_buffer const> buffers) const override
     {
-        for (auto const& b : group)
+        if (block != nullptr)
+        {
+            out.appendf("struct {} {{\n", block->block_name);
+            write_members(out, block->members, p);
+            out += "}\n\n";
+            out.appendf("@group({}) @binding({}) var<uniform> {}: {};\n", block->group, block->slot, block->name,
+                        block->block_name);
+        }
+        for (auto const& b : buffers)
             out.appendf("@group({}) @binding({}) var<storage, {}> {}: array<{}>;\n", b.group, b.slot,
                         b.is_mut ? "read_write" : "read", b.name, type_text(p, *this, b.element));
-        if (!group.empty())
-            out += "\n";
+        out += "\n";
     }
 
     void write_declarations(cc::string& out, plan const& p) const override
