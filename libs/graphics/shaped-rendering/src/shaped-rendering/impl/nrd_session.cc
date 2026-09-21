@@ -279,8 +279,16 @@ bool nrd_session::create(sg::context& ctx, nrd_denoiser denoiser, tg::vec2i exte
 
     // One denoiser per session, under a fixed identifier: the identifier only has to be unique within an instance,
     // and an instance is one stream's history.
-    auto const kind = denoiser == nrd_denoiser::reblur_diffuse_specular ? nrd::Denoiser::REBLUR_DIFFUSE_SPECULAR
-                                                                        : nrd::Denoiser::REBLUR_DIFFUSE_SPECULAR;
+    //
+    // A switch rather than a lookup, so adding a member to `nrd_denoiser` fails to compile here rather than silently
+    // running REBLUR under another name.
+    auto kind = nrd::Denoiser::REBLUR_DIFFUSE_SPECULAR;
+    switch (denoiser)
+    {
+    case nrd_denoiser::reblur_diffuse_specular:
+        kind = nrd::Denoiser::REBLUR_DIFFUSE_SPECULAR;
+        break;
+    }
     nrd::DenoiserDesc const denoisers[] = {{.identifier = 0, .denoiser = kind}};
 
     auto const creation = nrd::InstanceCreationDesc{.denoisers = denoisers, .denoisersNum = 1};

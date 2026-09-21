@@ -10,6 +10,9 @@ Bigger design intent lives in [structure.md](structure.md).
     That is five textures per denoising layer on a machine no vendor member can run, which is the price of the declaration being made before the choice is.
     Only the declaration, though: the tracer writes the split lobes only when the member that resolves on this device reads them.
   - **A per-frame Halton jitter** while a vendor temporal member runs; SVGF does not need one, DLSS Ray Reconstruction does.
+    Distinct from the per-pixel random offset the raygen already applies, whose mean is the pixel centre and which is why `denoise_guides::jitter` is correctly zero today.
+    What is missing is one offset shared by every pixel of a frame, which is what a temporal upscaler reconstructs sub-pixel detail from.
+    So it lands with `render_settings::render_scale` rather than before it.
   - **Object motion vectors** need scene items with an identity that survives a frame, which they do not have; camera motion covers a static scene.
   - **`render_settings::render_scale`**, once a member upscales: the plan traces at `sr::denoise_input_extent` instead of the view's own size.
     Inert until then, which is why it is not there yet.
