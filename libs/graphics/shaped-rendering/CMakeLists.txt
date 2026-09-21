@@ -15,6 +15,7 @@ add_library(shaped-rendering
     src/shaped-rendering/atrous_denoise_routine.cc
     src/shaped-rendering/svgf_denoise_routine.cc
     src/shaped-rendering/impl/tza.cc
+    src/shaped-rendering/impl/oidn_network.cc
     src/shaped-rendering/raster_box_filter_mipmap_routine.cc
     src/shaped-rendering/imgui_context.cc
     src/shaped-rendering/imgui_routine.cc
@@ -237,6 +238,7 @@ if(SC_BUILD_TESTS)
         tests/tza-test.cc
         tests/nn-conv-test.cc
         tests/nn-ops-test.cc
+        tests/oidn-network-test.cc
         )
         target_link_libraries(shaped-rendering-test PRIVATE shaped-graphics-dx12)
 
