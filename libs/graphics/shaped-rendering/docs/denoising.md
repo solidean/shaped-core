@@ -37,6 +37,12 @@ So shaped-rendering runs it in its own compute shaders, on every backend sg has,
 The topology is a table in `impl/oidn_network.cc` and the layer widths come out of the weights file.
 That split is what keeps a weights bump honest: a changed layer count fails to find its tensor, and a changed width fails the shape test beside it.
 
+**The member runs on small images only, and its memory is why.**
+The network holds twenty-five feature maps at once, because the skips have to stay live across the whole decoder.
+That is 5.4 MiB at 64x64, 2.7 GiB at 1080p and 10.7 GiB at 4K, measured by `oidn_network::feature_bytes_for` rather than estimated.
+So a whole frame is not something to allocate, and running the network over tiles is a prerequisite rather than an optimisation — which is what OIDN itself does.
+Half precision would halve the figure and settle nothing.
+
 **That it computes what Intel computes is measured, not assumed.**
 `oidn_filter_reference` runs OIDN's own filter over the same input, and the test compares the two.
 The difference is a mean of 1.0e-05 and a worst of 7.5e-05 across a 64x64 image, which is what sixteen layers of fp32 on the GPU against their CPU inference costs.

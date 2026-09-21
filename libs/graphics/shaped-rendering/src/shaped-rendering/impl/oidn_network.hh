@@ -95,6 +95,16 @@ public:
     /// The tensors' extent, which is `extent()` rounded up to a multiple of 16.
     [[nodiscard]] tg::vec2i padded_extent() const { return _extent; }
 
+    /// What the feature maps cost at `image_extent`, in bytes, without allocating anything.
+    ///
+    /// Answered from the layer widths this network already read, so it needs a created network but not one at that
+    /// size — which is the only way to ask the question for an extent too large to allocate.
+    /// The weights themselves are not counted: they are a fixed few megabytes and are shared by nothing here.
+    [[nodiscard]] i64 feature_bytes_for(tg::vec2i image_extent) const;
+
+    /// What this network's own feature maps cost.
+    [[nodiscard]] i64 feature_bytes() const { return feature_bytes_for(_image_extent); }
+
     /// Records the whole network onto `cmd`, from three guides to one denoised image.
     ///
     /// `input_scale` multiplies the radiance before the transfer curve and divides it back out afterwards, which is

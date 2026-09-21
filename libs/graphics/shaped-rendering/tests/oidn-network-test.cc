@@ -493,3 +493,54 @@ ASYNC_INVOCABLE_TEST("sr - the OIDN member denoises through the denoise front",
     CHECK(mean_out > 0.7 * mean_in);
     CHECK(mean_out < 1.4 * mean_in).context(cc::format("mean went from {} to {}", mean_in, mean_out));
 }
+
+// What the network costs at a real resolution, which is the reason it cannot yet be pointed at one.
+//
+// Asked of a small network rather than a large one: the widths come from the weights and the extents are arithmetic,
+// so the figure for 1080p is computable without allocating a byte of it.
+ASYNC_INVOCABLE_TEST("sr - the OIDN network's memory is what stands between it and a real image",
+                     (sg::context_handle const& ctx_h),
+                     exclusive("slib-shader-library"))
+{
+    REQUIRE(ctx_h != nullptr);
+    auto& ctx = *ctx_h;
+
+    auto lib = slib::shader_library();
+    auto compiler = slib::create_dxc_compiler();
+    if (!compiler.has_value())
+        SKIP("no DXC compiler to build the network's shaders");
+    lib.add_compiler(cc::move(compiler.value()));
+    lib.add_package(sr::shader_package());
+
+    // `create` starts the pipelines compiling, and this test asks a question that never runs them.
+    // Drained rather than abandoned, because work still carrying a finished test's context is what nexus reports.
+    (void)co_await sr::impl::oidn_prewarm_pipelines(ctx);
+
+    auto network = sr::impl::oidn_network();
+    if (!network.create(ctx, tg::vec2i(64, 64)))
+        SKIP("the network could not be created; sr's log says why");
+
+    auto const mib = [](i64 bytes) { return f64(bytes) / (1024.0 * 1024.0); };
+
+    // The twenty-five feature maps are the whole cost; the weights are a few megabytes beside them.
+    auto const at_64 = network.feature_bytes_for(tg::vec2i(64, 64));
+    auto const at_1080p = network.feature_bytes_for(tg::vec2i(1920, 1080));
+    auto const at_4k = network.feature_bytes_for(tg::vec2i(3840, 2160));
+
+    CHECK(at_64 == network.feature_bytes());
+
+    // Quadratic in the image, because every map is a fraction of it.
+    // 1080p is 510x the pixels of 64x64, and the cost tracks that within the padding's slack.
+    CHECK(f64(at_1080p) / f64(at_64) > 400.0);
+    CHECK(f64(at_1080p) / f64(at_64) < 600.0)
+        .context(cc::format("64x64 {} MiB, 1080p {} MiB, 4K {} MiB", mib(at_64), mib(at_1080p), mib(at_4k)));
+
+    // The number this test exists to pin: one 1080p frame wants 2.7 GiB of feature maps, and 4K wants 10.7 GiB.
+    // That is what makes tiling a prerequisite for pointing the member at a real image rather than an optimisation.
+    //
+    // This measures the UNTILED cost and will keep measuring it once tiles exist — a tile is what the network is
+    // created at, so the figure below is exactly the reason a whole frame is not.
+    CHECK(at_1080p > i64(2) * 1024 * 1024 * 1024).context(cc::format("1080p needs {} MiB of feature maps", mib(at_1080p)));
+
+    co_return;
+}

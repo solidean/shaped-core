@@ -294,6 +294,23 @@ bool oidn_network::create(sg::context& ctx, tg::vec2i image_extent)
     return true;
 }
 
+i64 oidn_network::feature_bytes_for(tg::vec2i image_extent) const
+{
+    if (_feature_channels.size() != f_count)
+        return 0;
+
+    auto const round_up = [](int v) { return ((cc::max(v, 1) + 15) / 16) * 16; };
+    auto const extent = tg::vec2i(round_up(image_extent[0]), round_up(image_extent[1]));
+
+    auto total = i64(0);
+    for (auto t = 0; t < f_count; ++t)
+    {
+        auto const e = level_extent(extent, _feature_levels[t]);
+        total += i64(e[0]) * i64(e[1]) * i64(_feature_channels[t]) * i64(sizeof(f32));
+    }
+    return total;
+}
+
 bool oidn_programs::build(sg::context& ctx)
 {
     conv_layout = ctx.cached.acquire_binding_group_layout<shaders::nn_conv_bindings>();
