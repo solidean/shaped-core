@@ -4,6 +4,8 @@ A cross preset compiles every target for its own machine, the tree's own `sgl` i
 Emscripten is the one that matters today: every WebAssembly preset builds the SGL shader packages of the tier-1 tests.
 So a shader package whose SGL entries the compiler has to read would have nothing to read them with.
 This builds `sgl` in the platform's default native preset and hands its path to the cross build as SC_SGL_TOOL.
+`SC_HOST_TOOLSET` pins that preset's toolset, as `--toolset` does for a native one; the cross build's own `--toolset` names its cross compiler instead.
+A cross CI runner sets it, since the image's default compiler is not one the tree builds with.
 
 Every cross build refreshes it first, not only the first configure.
 The package generator depends on the tool's file, so a stale one would regenerate nothing and describe shaders the way an older compiler did.
@@ -15,6 +17,7 @@ Public API:
 
 from __future__ import annotations
 
+import os
 import platform
 from pathlib import Path
 
@@ -24,13 +27,21 @@ from ..core.models import Preset, StepResult
 from ..core.process import env_for_preset, run_step
 from ..project import targets
 from ..project.presets import DEFAULT_BUILD_PRESETS, resolve_presets
+from ..toolchain.toolset import ToolsetError, apply_overrides
 
 SGL_TARGET = "sgl"
 
 
 def host_preset(root: Path) -> Preset:
-    """The native preset host tools are built in: the platform's default one."""
-    return resolve_presets(root, [DEFAULT_BUILD_PRESETS[platform.system()]])[0]
+    """The native preset host tools are built in: the platform's default one, at `SC_HOST_TOOLSET` when that is set."""
+    preset = resolve_presets(root, [DEFAULT_BUILD_PRESETS[platform.system()]])[0]
+    toolset = os.environ.get("SC_HOST_TOOLSET") or None
+    if toolset is None:
+        return preset
+    try:
+        return apply_overrides([preset], root=root, toolset=toolset)[0]
+    except ToolsetError as e:
+        raise ToolsetError(f"SC_HOST_TOOLSET={toolset} for the host preset: {e}") from None
 
 
 def ensure_host_sgl(root: Path, *, mirror: bool = False, verbose: bool = False) -> Path | StepResult:
