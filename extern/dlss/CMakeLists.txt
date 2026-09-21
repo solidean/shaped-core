@@ -25,6 +25,23 @@ if(NOT WIN32 OR NOT SC_ARCH_X64)
     return()
 endif()
 
+# The prebuilt import library is built against the RELEASE CRT, and says so: every object in it records
+# `RuntimeLibrary=MD_DynamicRelease`, while every object WE compile in a Debug configuration records
+# `MDd_DynamicDebug`.
+# The linker refuses that pairing outright, so a Debug build linking DLSS fails to produce any binary that reaches
+# shaped-rendering — which is every test and example it has.
+#
+# Nothing here can move that: the library is a vendor binary. So a Debug build takes the same path a machine without
+# the SDK takes, and `sr::denoise_method::dlss_rr` reports `unsupported` — which is exactly the shape that member was
+# built to have where it cannot run.
+#
+# Single-config generators only; a multi-config one picks its configuration after this runs, and would need the gate
+# on the consuming targets instead.
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    message(STATUS "dlss: its import library is release-CRT only, so a Debug build cannot link it — skipping, so sr::dlss_rr_routine reports unsupported.")
+    return()
+endif()
+
 set(_dlss_lib "${DLSS_INSTALL}/lib/Windows_x86_64/x64/nvsdk_ngx_d.lib")
 set(_dlss_runtime "${DLSS_INSTALL}/lib/Windows_x86_64/rel/nvngx_dlssd.dll")
 
