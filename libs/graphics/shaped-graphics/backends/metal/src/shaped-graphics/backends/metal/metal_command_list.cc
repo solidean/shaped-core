@@ -930,6 +930,8 @@ void metal_command_list::raster_bind_index_buffer(index_buffer_view const& view)
     CC_ASSERT(view.buffer->usage().has(sg::buffer_usage::index_buffer), "the bound buffer lacks index usage");
     CC_ASSERT(view.offset_in_bytes >= 0 && view.offset_in_bytes <= view.buffer->size_in_bytes(),
               "the index_buffer_view's offset is outside the buffer");
+    CC_ASSERT(view.offset_in_bytes % sg::index_buffer_offset_alignment == 0,
+              "an index_buffer_view's offset must be 4-byte aligned — see sg::index_buffer_offset_alignment");
 
     auto const remaining = view.buffer->size_in_bytes() - view.offset_in_bytes;
     auto const covered = view.size_in_bytes < 0 ? remaining : view.size_in_bytes;
@@ -943,6 +945,7 @@ void metal_command_list::raster_bind_index_buffer(index_buffer_view const& view)
     _index_address = mtl_buffer.gpu_address() + u64(view.offset_in_bytes);
     _index_size_in_bytes = covered;
     _index_format = view.format;
+    _index_view_offset_in_bytes = view.offset_in_bytes;
 }
 
 
@@ -962,23 +965,19 @@ void metal_command_list::raster_draw_indexed(draw_indexed_config const& config)
     CC_ASSERT(config.instance_range.offset >= 0 && config.instance_range.size >= 0, "the instance range must be "
                                                                                     "non-negative");
 
-    auto const index_size = index_size_of(_index_format);
+    auto const index_size = sg::index_size_in_bytes(_index_format);
     auto const first_byte = config.index_range.offset * index_size;
     CC_ASSERT(first_byte + config.index_range.size * index_size <= _index_size_in_bytes,
               "the indexed draw reads past the bound index buffer's range");
 
-    // **Metal reads indices from a 4-byte boundary, and says nothing when one is not.**
-    // The first index is folded into the address here — MTL4's draw takes no first-index of its own — so a `uint16`
-    // buffer drawn from an odd index lands at a 2-mod-4 address, and the draw is silently truncated to whatever fits
-    // before the next boundary rather than refused.
-    // Not even the validation layer reports it, which is why this is an assert and not a comment: the symptom is a
-    // partly-drawn mesh, one D3D12 and Vulkan both draw whole.
-    //
-    // A caller reaches this by drawing a sub-mesh whose first index is odd; the fixes are an even first index or
-    // 32-bit indices.
-    CC_ASSERT((_index_address + u64(first_byte)) % 4 == 0,
-              "metal reads indices from a 4-byte boundary: this draw's first index puts the fetch at an odd 16-bit "
-              "offset. Use an even first index, or 32-bit indices");
+    // **An index fetch starts on a 4-byte boundary**, and `index_range.offset` counts indices rather than bytes — so
+    // an aligned view is not enough on its own.
+    // **This backend is the reason the rule exists.** MTL4's draw takes no first-index of its own, so the offset is
+    // folded into the address, and Metal answers a misaligned one by drawing part of the mesh with no error and no
+    // validation message — where D3D12 and Vulkan simply take it.
+    CC_ASSERT(sg::is_aligned_index_fetch(_index_format, _index_view_offset_in_bytes, config.index_range.offset),
+              "an odd first index into a 16-bit index buffer starts the fetch off a 4-byte boundary. Use an even "
+              "first index, or 32-bit indices — sg::is_aligned_index_fetch answers it without asserting");
 
     if (config.index_range.size == 0 || config.instance_range.size == 0)
         return;

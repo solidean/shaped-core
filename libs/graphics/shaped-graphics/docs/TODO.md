@@ -158,16 +158,13 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   A test that would catch the ordering needs a dispatch long enough to lose the race, which trades a sharp test for a
   slow one — so the pair stands on Apple's documented model rather than on an oracle of ours.
 
-- **A metal indexed draw refuses an odd first index into a 16-bit index buffer, where dx12 and vulkan take one.**
-  MTL4's `drawIndexedPrimitives` names the indices by GPU address and has no first-index parameter, so sg's
-  `index_range.offset` is folded into that address — and Metal requires it to be a multiple of 4.
-  An odd first index into a `uint16` buffer lands 2 mod 4, and Metal then draws whatever fits before the next boundary
-  and reports nothing at all: not an error, not a validation message.
-  So the backend asserts, naming the two fixes a caller has — an even first index, or 32-bit indices.
-  That is a real portability gap rather than a spelling: a sub-mesh whose first index happens to be odd draws on the
-  other two backends and asserts here.
-  Closing it means staging a shifted copy of the range, which needs a copy the render pass it is inside cannot record
-  — so it wants either a pre-pass fixup or an aligned index allocator, and neither is worth building before something
+- **An odd first index into a 16-bit index buffer is refused everywhere, and closing that would need a shifted copy.**
+  `sg::index_buffer_offset_alignment` is now a portable rule every backend asserts, so the failure is the same on all
+  of them rather than metal-only — see [concepts/raster-pipeline.md](concepts/raster-pipeline.md).
+  What it costs is real: a sub-mesh whose first index happens to be odd is a legal D3D12 and Vulkan draw that sg
+  rejects, so a caller pads the range or uses 32-bit indices.
+  Lifting it means staging a shifted copy of the index range, which needs a copy the render pass it sits inside cannot
+  record — so it wants a pre-pass fixup or an aligned index allocator, and neither is worth building before something
   hits it.
 
 - **The metal tier-2 tests block on `block_until_idle` where they could await `idle_completion()`.**

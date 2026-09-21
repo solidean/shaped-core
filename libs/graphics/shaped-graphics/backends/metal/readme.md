@@ -100,8 +100,10 @@ Each of these is a fact about Metal rather than a gap in the backend.
   MTL4's `drawIndexedPrimitives` takes the indices as a GPU address with no first-index of its own, so sg's `index_range.offset` is folded into that address.
   An odd first index into a `uint16` buffer therefore lands 2 mod 4.
   Metal then draws whatever fits before the next boundary and reports nothing: not an error, not a validation message, just a partly-drawn mesh that D3D12 and Vulkan both draw whole.
-  So the backend asserts on it, naming the two fixes — an even first index, or 32-bit indices.
   It was found by a test whose quad came out as one triangle, which is the only way it can be found.
+  **This backend is the reason `sg::index_buffer_offset_alignment` exists**, and the rule is sg-wide rather than metal's.
+  Every backend asserts it, so the violation fails on whichever dev box the author has.
+  [concepts/raster-pipeline.md](../../docs/concepts/raster-pipeline.md) is the rule, and `sg::is_aligned_index_fetch` answers it without asserting.
 - **A render encoder's barrier is asymmetric, where a compute encoder's is not.**
   `barrierAfterEncoderStages` on a render encoder refuses `MTLStageFragment` as its *source* by name, accepting only `MTLStageVertex | MTLStageObject | MTLStageMesh`.
   Inside one pass the fragment stage is last, so there is no later stage for work ordered after it to reach.

@@ -8,6 +8,7 @@
 #include <shaped-graphics/raster/primitive_topology.hh>
 #include <shaped-graphics/raster/rasterization_state.hh>
 #include <shaped-graphics/raster/vertex_input.hh>
+#include <shaped-graphics/resource/index_buffer_view.hh> // sg::index_size_in_bytes, and the alignment rule it carries
 
 // Translating sg's raster state into Metal's.
 //
@@ -44,8 +45,6 @@ namespace sg::backend::metal
 [[nodiscard]] MTL::VertexFormat vertex_format_of(sg::vertex_attribute_format format);
 
 /// The MTLIndexType an indexed draw fetches with.
+/// The width itself is `sg::index_size_in_bytes`, which is what turns a first-index into a byte offset.
 [[nodiscard]] MTL::IndexType index_type_of(sg::index_format format);
-
-/// Bytes one index occupies, which is what turns a first-index into the byte offset `drawIndexedPrimitives` takes.
-[[nodiscard]] isize index_size_of(sg::index_format format);
 } // namespace sg::backend::metal

@@ -353,6 +353,10 @@ private:
     isize _index_size_in_bytes = 0; ///< bytes left from `_index_address` to the end of the view
     sg::index_format _index_format = sg::index_format::uint16;
 
+    /// The view's own offset, which with the draw's first index is what `sg::index_buffer_offset_alignment` binds on.
+    /// Every backend carries this check.
+    isize _index_view_offset_in_bytes = 0;
+
     /// The CPU-side image of the bound layout's inline-constants block, sized by the layout and zeroed on a rebind.
     ///
     /// A partial update writes into this and the next dispatch or draw stages the whole block, because there is

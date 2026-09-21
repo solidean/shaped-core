@@ -56,6 +56,26 @@ Recording through the returned scope keeps the "draw into this pass" flow on the
 `cmd.raster` records the same draws for a caller not holding the scope, and `cmd.raster.manual` is the path with no RAII object at all.
 Only *raster* operations are mirrored onto the scope; uploads, downloads and the context stay on the command list, reached through `scope.command_list()`.
 
+### An index fetch starts on a 4-byte boundary
+
+`sg::index_buffer_offset_alignment` is 4.
+It binds on the *sum* of the bound view's `offset_in_bytes` and the draw's `index_range.offset` — the latter counted in indices, not bytes.
+So a perfectly aligned `index_buffer_view` still yields a misaligned fetch when a draw starts at an odd index of a 16-bit buffer.
+That is why `bind_index_buffer` cannot carry the rule alone, and `draw_indexed` checks it too.
+
+**It is a portable floor, hardcoded rather than queried**, the same shape as the storage-buffer offset rules in [views.md](views.md).
+Metal is the only backend that minds.
+It names the indices by GPU address, so sg's first index is folded into that address — and it answers a misaligned one by drawing *part* of the mesh, with no error and no validation message.
+D3D12 and Vulkan take an odd first index without complaint.
+A rule left to the backend that needs it would therefore be a rule nobody developing on Windows ever meets, in code that then draws wrong on a Mac.
+
+**Every backend carries the check**, which is the convention [writing-a-backend](../writing-a-backend.md) states for contracts sg does not validate before the seam.
+`tests/command_list/index_buffer_alignment-test.cc` is what holds them to it: the two refusals are invocable, so they run against whichever backends the suite has.
+
+`sg::is_aligned_index_fetch(format, view_offset, first_index)` answers it without asserting, for a caller that would rather ask.
+A mesh importer splitting sub-meshes is the case it exists for.
+The two fixes are an even first index, or 32-bit indices — where every index is already 4 bytes wide and the rule cannot bind.
+
 ## Backend split (dx12 real, vulkan stubbed)
 
 The frontend is the abstract `raster_pipeline` + description + the `raster_*` command-list virtuals.

@@ -272,6 +272,7 @@ if(SC_BUILD_TESTS)
             tests/buffer/buffer-test.cc
             tests/texture/texture-create-test.cc
             tests/command_list/command_list-test.cc
+        tests/command_list/index_buffer_alignment-test.cc
             tests/transfer/transfer-test.cc
             tests/transfer/transfer-fuzz-test.cc
             tests/transfer/upload-async-test.cc

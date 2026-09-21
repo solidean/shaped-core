@@ -315,6 +315,9 @@ cmd.raster.set_stencil_reference(u32) / .set_blend_constants(tg::vec4f)  // void
 cmd.raster.set_inline_constants(data|POD, offset={})   // void — root/push constants (same as cmd.compute)
 cmd.raster.draw({.vertex_range={.offset=0,.size=3}, .instance_range={.offset=0,.size=1}})   // void — ranges are cc::offset_size {first, count}
 cmd.raster.draw_indexed({.index_range={.offset=0,.size=N}, .instance_range={.offset=0,.size=1}, .vertex_offset=0})  // void
+//   GOTCHA: view.offset_in_bytes + index_range.offset*index_size must be 4-byte aligned (sg::index_buffer_offset_alignment).
+//   So an ODD first index into a uint16 buffer asserts — metal draws only part of the mesh, silently, and dx12/vulkan do not mind.
+//   sg::is_aligned_index_fetch(format, view_offset, first_index) -> bool   // ask instead of asserting
 ```
 
 ## sg::gpu_timestamp — result of cmd.query.record_gpu_timestamp
@@ -742,6 +745,9 @@ sg::tlas_instance  { blas_handle blas; float transform[12] ROW-MAJOR 3x4 (transf
 sg::accel_build_flag    // fast_trace(default)/fast_build/allow_update/allow_compaction/minimize_memory
 sg::accel_build_flags   // cc::flags<accel_build_flag> — a set of them; combine with |, test with .has()
 sg::index_format        // uint16 | uint32  — index-buffer element width (shared with draw's bind_index_buffer)
+sg::index_size_in_bytes(format)          // -> 2 | 4
+sg::index_buffer_offset_alignment        // 4 — portable floor an index fetch must start on
+sg::is_aligned_index_fetch(fmt, off, i)  // -> bool; the rule over (view offset + first index)
 sg::instance_cull_mode  // back(default) | front | none
 
 // recording (on a command_list, via the cmd.raytracing scope). Sizes+allocates the persistent result from a

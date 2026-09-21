@@ -217,9 +217,4 @@ MTL::IndexType index_type_of(sg::index_format format)
 {
     return format == sg::index_format::uint32 ? MTL::IndexTypeUInt32 : MTL::IndexTypeUInt16;
 }
-
-isize index_size_of(sg::index_format format)
-{
-    return format == sg::index_format::uint32 ? 4 : 2;
-}
 } // namespace sg::backend::metal
