@@ -45,6 +45,10 @@ struct slib::preprocessed_source
     cc::string source;
     cc::string entry_point;
     cc::vector<binding_rename> renamed_bindings;
+    /// A pixel entry point's render targets: how many, and the name of the struct that declares them; -1 and empty
+    /// otherwise, and for every compiler but SGL's.
+    i32 color_targets = -1;
+    cc::string target_struct;
 };
 
 /// One shader to compile.

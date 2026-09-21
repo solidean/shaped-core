@@ -29,6 +29,9 @@ struct sgl::emitted_source
     /// What each resource the text declares is called there, and what the host calls it: `work.values`.
     /// A caller renames the compiler's reflected bindings with it, so no target's identifier rules reach the host.
     cc::vector<emit::bound_name> bound_names;
+    /// A pixel entry point's render targets: how many, and the `@pixel struct` it returns; -1 and empty otherwise.
+    i32 color_targets = -1;
+    cc::string target_struct;
 };
 
 namespace sgl

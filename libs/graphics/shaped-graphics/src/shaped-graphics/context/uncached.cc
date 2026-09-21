@@ -1,9 +1,12 @@
+#include <clean-core/common/assertf.hh>
 #include <clean-core/common/log.hh>
 #include <clean-core/common/utility.hh>
 #include <clean-core/string/format.hh> // cc::format
 #include <clean-core/thread/async_coroutine.hh>
 #include <shaped-graphics/binding/binding.hh> // binding::count
 #include <shaped-graphics/binding/impl/binding_conflicts.hh>
+#include <shaped-graphics/binding/layout_fit.hh>
+#include <shaped-graphics/binding/pipeline_layout.hh>
 #include <shaped-graphics/compute/compute_pipeline.hh> // compute_pipeline_description::shader
 #include <shaped-graphics/context/context.hh>
 #include <shaped-graphics/context/uncached.hh>
@@ -13,6 +16,14 @@
 
 namespace
 {
+/// A shader whose reflection does not fit the layout it is built against is a caller's bug, whatever the backend makes of it.
+void assert_fits(sg::compiled_shader const& shader, sg::pipeline_layout_handle const& layout)
+{
+    CC_ASSERT(layout != nullptr, "a pipeline needs a layout");
+    auto const misfit = sg::describe_layout_misfit(shader, *layout);
+    CC_ASSERTF(misfit.empty(), "the shader does not fit its pipeline layout:\n{}", misfit);
+}
+
 // What the frontend checks of a raster description before any backend sees it.
 cc::optional<cc::string> refusal_of(sg::raster_pipeline_description const& desc)
 {
@@ -25,6 +36,19 @@ cc::optional<cc::string> refusal_of(sg::raster_pipeline_description const& desc)
     };
     if (auto conflict = sg::impl::find_binding_conflict(stages); conflict.has_value())
         return conflict;
+    for (auto const* stage : stages)
+        if (stage != nullptr)
+            assert_fits(*stage, desc.layout);
+    if (desc.fragment_shader.has_value())
+    {
+        auto const& fs = desc.fragment_shader.value();
+        CC_ASSERTF(!fs.color_output_count.has_value() || fs.color_output_count.value() == desc.color_targets.size(),
+                   "the fragment shader '{}' writes {} color targets, and the pipeline has {}", fs.entry_point,
+                   fs.color_output_count.value_or(-1), desc.color_targets.size());
+        CC_ASSERTF(fs.target_set.empty() || desc.target_set.empty() || fs.target_set == desc.target_set,
+                   "the fragment shader '{}' writes '{}', and the pipeline names '{}'", fs.entry_point, fs.target_set,
+                   desc.target_set);
+    }
 
     // Such a pipeline still builds, and draws as if the state were off.
     auto const& ds = desc.depth_stencil;
@@ -33,6 +57,14 @@ cc::optional<cc::string> refusal_of(sg::raster_pipeline_description const& desc)
                        "so it draws without either",
                        desc.vertex_shader.entry_point);
     return {};
+}
+
+/// The target set a pipeline draws into: the description's, else what its fragment shader writes.
+cc::string_view target_set_of(sg::raster_pipeline_description const& desc)
+{
+    if (!desc.target_set.empty() || !desc.fragment_shader.has_value())
+        return desc.target_set;
+    return desc.fragment_shader.value().target_set;
 }
 
 cc::shared_async<sg::raster_pipeline_handle> named(cc::shared_async<sg::raster_pipeline_handle> built,
@@ -103,6 +135,7 @@ compute_pipeline_handle context_uncached_scope::create_compute_pipeline(compute_
 cc::result<compute_pipeline_handle> context_uncached_scope::try_create_compute_pipeline(
     compute_pipeline_description const& desc)
 {
+    assert_fits(desc.shader, desc.layout);
     return _ctx.try_create_compute_pipeline(desc, lifetime_scope::persistent);
 }
 
@@ -123,13 +156,14 @@ cc::result<raster_pipeline_handle> context_uncached_scope::try_create_raster_pip
 
     auto r = _ctx.try_create_raster_pipeline(desc, lifetime_scope::persistent);
     if (r.has_value())
-        impl::set_target_set(*r.value(), desc.target_set);
+        impl::set_target_set(*r.value(), target_set_of(desc));
     return r;
 }
 
 cc::shared_async<compute_pipeline_handle> context_uncached_scope::create_compute_pipeline_async(
     compute_pipeline_description const& desc)
 {
+    assert_fits(desc.shader, desc.layout);
     return _ctx.create_compute_pipeline_async(desc, lifetime_scope::persistent);
 }
 
@@ -142,9 +176,10 @@ cc::shared_async<raster_pipeline_handle> context_uncached_scope::create_raster_p
 
     // A backend may settle the build from a callback of its own, so the name is set once it has.
     auto built = _ctx.create_raster_pipeline_async(desc, lifetime_scope::persistent);
-    if (desc.target_set.empty())
+    auto const target_set = target_set_of(desc);
+    if (target_set.empty())
         return built;
-    return named(cc::move(built), desc.target_set);
+    return named(cc::move(built), cc::string(target_set));
 }
 
 raytracing_pipeline_handle context_uncached_scope::create_raytracing_pipeline(raytracing_pipeline_description const& desc)

@@ -128,6 +128,11 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
         result.bound_names.push_back({.emitted = block.name, .host = block.host_name});
     for (auto const& buffer : plan.buffers)
         result.bound_names.push_back({.emitted = buffer.name, .host = buffer.host_name});
+    if (e.entry_stage == check::stage::pixel && e.result != check::type_id::none)
+    {
+        result.color_targets = i32(m.at(m.at(e.result).members).size());
+        result.target_struct = cc::string(m.name_of(e.result));
+    }
     return result;
 }
 

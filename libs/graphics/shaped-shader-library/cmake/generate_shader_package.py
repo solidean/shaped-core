@@ -835,6 +835,7 @@ def emit_source(manifest: Manifest, files: list[ShaderFile], bindings: list[Bind
     out.append(f"slib::shader_package const& {manifest.namespace}::package()\n{{\n")
     out.append("    static slib::shader_package const pkg = {\n")
     out.append(f'        .name = "{manifest.name}",\n')
+    out.append(f'        .host_namespace = "{manifest.namespace}",\n')
     out.append(f"        .language = slib::shader_language::{manifest.language},\n")
     out.append(f'        .source_dir = "{manifest.source_dir.as_posix()}",\n')
     out.append("        .embedded_files = k_embedded_files,\n")

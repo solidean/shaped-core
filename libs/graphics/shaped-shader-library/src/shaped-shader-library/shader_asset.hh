@@ -121,10 +121,8 @@ namespace slib
 
 /// What keeps `compiled`'s reflection from fitting the groups `entry` lists, one line each; empty where it fits.
 ///
-/// Every reflected binding must be declared by the group listed at its position, at the same index, count and kind.
-/// A declared binding the shader never reads may be missing from the reflection, since compilers strip those.
-/// A binding's position is its descriptor set, or its register space on a target that has spaces instead.
-/// `inline_block` is the listed `@inline` binding, which a target reflects as a uniform buffer or not at all.
+/// sg::describe_layout_misfit against the layout the list states, which is where the rules are.
+/// `inline_block` is the listed `@inline` binding.
 [[nodiscard]] cc::string reflection_mismatch(cc::string_view entry,
                                              sg::compiled_shader const& compiled,
                                              cc::span<listed_group const> listed,

@@ -37,12 +37,12 @@ TEST("slib - reflection fits the listed groups by name, position, index, count a
           == "");
 
     CHECK(mismatch_of(reflecting({{.name = "stray", .group_index = 1u}}))
-              .contains("reflects 'stray', which no group it lists declares"));
+              .contains("reflects 'stray', which no group of the layout declares"));
     CHECK(mismatch_of(reflecting({{.name = "work_src",
                                    .group_index = 0u,
                                    .index = 0,
                                    .type = sg::binding_type::readonly_structured_buffer}}))
-              .contains("'work_src' is at position 0, and its group is listed at 1"));
+              .contains("'work_src' is in set 0, and the layout has its group at slot 1"));
     CHECK(mismatch_of(reflecting({{.name = "work_dst",
                                    .group_index = 1u,
                                    .index = 1,

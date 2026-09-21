@@ -194,6 +194,7 @@ private:
     struct package_entry
     {
         cc::string name;
+        cc::string host_namespace;
         shader_language language = shader_language::hlsl;
     };
 
@@ -210,6 +211,7 @@ private:
                        cc::string_view label,
                        cc::string_view source_dir,
                        cc::string_view package_root,
+                       cc::string_view host_namespace,
                        shader_language language,
                        sg::shader_stage stage,
                        cc::string_view entry_point,

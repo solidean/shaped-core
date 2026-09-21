@@ -83,7 +83,7 @@ cc::result<vulkan_pipeline_layout_handle> vulkan_pipeline_layout::create(vulkan_
     }
 
     return vulkan_pipeline_layout_handle(std::make_shared<vulkan_pipeline_layout>(
-        ctx, hash, layout, cc::move(groups), cc::move(static_samplers), inline_bytes));
+        ctx, hash, layout, cc::move(groups), cc::move(static_samplers), desc.inline_constants, inline_bytes));
 }
 
 // Immediate rather than epoch-deferred, unchanged from what the destructor always did: a layout is consumed at

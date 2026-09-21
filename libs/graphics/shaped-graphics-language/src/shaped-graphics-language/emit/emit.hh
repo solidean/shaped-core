@@ -74,6 +74,9 @@ struct sgl::emit::emitted_text
     cc::string entry_point;
     /// Every buffer and block of constants the text declares, so a caller can rename what the compiler reflects.
     cc::vector<bound_name> bound_names;
+    /// A pixel entry point's render targets: how many, and the `@pixel struct` it returns; -1 and empty otherwise.
+    i32 color_targets = -1;
+    cc::string target_struct;
     cc::vector<error> errors;
 
     [[nodiscard]] bool has_text() const { return errors.empty(); }
@@ -81,6 +84,7 @@ struct sgl::emit::emitted_text
     [[nodiscard]] bool operator==(emitted_text const& rhs) const
     {
         return text == rhs.text && entry_point == rhs.entry_point && ast::impl::is_equal(bound_names, rhs.bound_names)
+            && color_targets == rhs.color_targets && target_struct == rhs.target_struct
             && ast::impl::is_equal(errors, rhs.errors);
     }
 };

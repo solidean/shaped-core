@@ -310,6 +310,7 @@ auto const pipeline = co_await shaders::double_values.compute.main.acquire_pipel
 cmd.raster.render_to(shaders::target{.color = rt.cleared(c), .depth_stencil = depth.cleared(1.0f)}); // -> rendering_info
 //   the pipeline side: .color_targets = shaders::target::states{.color = {.format = f}}, .target_set = shaders::target::name
 //   sg then refuses to bind that pipeline in a rendering of another target set, even one of the same shape.
+//   .target_set may be left out: a compiled SGL pixel shader states its own (and its target count), which sg takes.
 // a package with wrapped entry points also gets check_reflection(ctx) -> shared_async<string>: empty while every
 //   entry point's compiled reflection fits the groups it lists. Compiles them all, so it belongs in a test.
 CHECK(co_await shaders::check_reflection(*ctx) == "");

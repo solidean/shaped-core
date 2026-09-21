@@ -3,6 +3,7 @@
 #include <nexus/async-test.hh>
 #include <sg_test_sgl_shaders.hh>
 #include <shaped-graphics/binding/compiled_shader.hh>
+#include <shaped-graphics/binding/layout_fit.hh>
 #include <shaped-graphics/binding/pipeline_layout.hh>
 #include <shaped-graphics/command_list/command_list.hh>
 #include <shaped-graphics/compute/compute_pipeline.hh>
@@ -127,4 +128,19 @@ ASYNC_INVOCABLE_TEST("sg - a group's plain members reach the shader through the 
     REQUIRE(data.size() == isize(count));
     for (auto i = 0; i < count; ++i)
         CHECK(data[i] == (float(i) * 3.0f + 1.0f) * 0.5f - 2.0f);
+}
+
+ASYNC_INVOCABLE_TEST("sg - a pipeline whose shader does not fit its layout is refused at creation",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+
+    // `main` lists `{work}`, so `work` is its group 0, and this layout has `work` at slot 1.
+    auto const& shader = co_await shaders::double_values.compute.main->acquire(*ctx);
+    auto const misplaced = ctx->cached.acquire_pipeline_layout<shaders::factor, shaders::work>();
+    CHECK(!sg::describe_layout_misfit(shader, *misplaced).empty());
+    CHECK_ASSERTS((void)ctx->uncached.create_compute_pipeline_async({.shader = shader, .layout = misplaced}));
+
+    // The layout the entry point states fits, which is the check passing rather than being absent.
+    CHECK(sg::describe_layout_misfit(shader, *shaders::double_values.compute.main.acquire_layout(*ctx)) == "");
 }

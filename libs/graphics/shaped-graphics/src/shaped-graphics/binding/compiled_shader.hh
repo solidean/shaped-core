@@ -65,5 +65,12 @@ struct sg::compiled_shader
 
     compiler_info compiler;
 
+    /// A fragment shader's render-target count, where the compiler edge knows it; a pipeline must have as many.
+    cc::optional<i32> color_output_count;
+    /// The target set a fragment shader writes, as a generated SGL render target names it; empty where there is none.
+    /// A pipeline description that names no target set takes this one.
+    /// Both are set by slib once a compile settles, so a cached shader carries neither.
+    cc::string target_set;
+
     // Deferred: constant-buffer member layouts, root/push constants, content hash, I/O signatures.
 };

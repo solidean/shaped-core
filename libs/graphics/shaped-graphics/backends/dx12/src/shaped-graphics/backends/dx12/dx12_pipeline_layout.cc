@@ -16,7 +16,7 @@ cc::result<dx12_pipeline_layout_handle> dx12_pipeline_layout::create(ID3D12Devic
         return cc::error("pipeline_layout: more group slots than max_binding_groups");
 
     auto pl = std::make_shared<dx12_pipeline_layout>(
-        sg::impl::pipeline_layout_hash(groups, static_samplers, inline_constants));
+        sg::impl::pipeline_layout_hash(groups, static_samplers, inline_constants), groups, inline_constants);
 
     // One descriptor-table root parameter per group table, appended in group order (resource table then
     // sampler table).

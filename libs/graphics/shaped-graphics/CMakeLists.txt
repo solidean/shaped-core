@@ -22,6 +22,7 @@ add_library(shaped-graphics
     src/shaped-graphics/barrier/command_list_slot.cc
     src/shaped-graphics/binding/binding.cc
     src/shaped-graphics/binding/impl/binding_conflicts.cc
+    src/shaped-graphics/binding/layout_fit.cc
     src/shaped-graphics/binding/binding_group_layout.cc
     src/shaped-graphics/binding/pipeline_layout.cc
     src/shaped-graphics/binding/impl/layout_hash.cc

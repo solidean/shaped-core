@@ -1,3 +1,5 @@
+#include <clean-core/common/utility.hh> // cc::move
+#include <clean-core/container/fixed_vector.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <nexus/async-test.hh>
 #include <sg_test_sgl_shaders.hh>
@@ -84,13 +86,13 @@ ASYNC_INVOCABLE_TEST("sg - a pipeline built for one target set refuses a renderi
     auto const& vs = co_await shaders::quads.vertex.main_vs->acquire(*ctx);
     auto const& ps = co_await shaders::quads.pixel.overlay_ps->acquire(*ctx);
     // `overlay` has the shape of `target`, one float4, and is still another set.
+    // The description names none, so it is the one the pixel shader writes.
     auto const pipeline = co_await ctx->cached.acquire_raster_pipeline({
         .layout = shaders::quads.vertex.main_vs.acquire_layout(*ctx),
         .vertex_shader = vs,
         .fragment_shader = ps,
         .vertex_input = shaders::quad::layout(),
         .color_targets = shaders::overlay::states{.color = {.format = sg::pixel_format::rgba8_unorm}},
-        .target_set = shaders::overlay::name,
     });
     CHECK(pipeline->target_set() == "sg::test::sgl_shaders::overlay");
 
@@ -107,4 +109,35 @@ ASYNC_INVOCABLE_TEST("sg - a pipeline built for one target set refuses a renderi
         pass.bind_pipeline(*pipeline);
     }
     ctx->submit_command_list(cc::move(cmd));
+}
+
+ASYNC_INVOCABLE_TEST("sg - an SGL pixel shader states its targets, and a pipeline that disagrees is refused at "
+                     "creation",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+
+    auto const& vs = co_await shaders::quads.vertex.main_vs->acquire(*ctx);
+    auto const& ps = co_await shaders::quads.pixel.main_ps->acquire(*ctx);
+    REQUIRE(ps.color_output_count.has_value());
+    CHECK(ps.color_output_count.value() == 1);
+    CHECK(ps.target_set == shaders::target::name);
+
+    auto const layout = shaders::quads.vertex.main_vs.acquire_layout(*ctx);
+    auto const rgba = sg::color_target_state{.format = sg::pixel_format::rgba8_unorm};
+    auto const described
+        = [&](cc::fixed_vector<sg::color_target_state, sg::max_color_targets> targets, cc::string_view target_set)
+    {
+        return sg::raster_pipeline_description{.layout = layout,
+                                               .vertex_shader = vs,
+                                               .fragment_shader = ps,
+                                               .vertex_input = shaders::quad::layout(),
+                                               .color_targets = cc::move(targets),
+                                               .target_set = target_set};
+    };
+
+    // One target written, two declared.
+    CHECK_ASSERTS((void)ctx->uncached.create_raster_pipeline_async(described({rgba, rgba}, "")));
+    // A description that names another set than the shader writes.
+    CHECK_ASSERTS((void)ctx->uncached.create_raster_pipeline_async(described({rgba}, shaders::overlay::name)));
 }

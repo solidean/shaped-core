@@ -14,7 +14,12 @@
 class sg::backend::dx12::dx12_pipeline_layout final : public sg::pipeline_layout
 {
 public:
-    explicit dx12_pipeline_layout(cc::hash128 structural_hash) : sg::pipeline_layout(structural_hash) {}
+    dx12_pipeline_layout(cc::hash128 structural_hash,
+                         cc::span<sg::binding_group_layout_handle const> groups,
+                         cc::optional<sg::binding> inline_constants)
+      : sg::pipeline_layout(structural_hash, groups, cc::move(inline_constants))
+    {
+    }
 
     /// One group slot: the group layout bound here, plus the root-parameter indices of its descriptor tables.
     /// Each index is -1 when the group has no view / no dynamic-sampler bindings respectively.

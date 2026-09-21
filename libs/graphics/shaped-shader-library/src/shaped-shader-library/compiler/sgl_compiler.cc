@@ -64,6 +64,8 @@ public:
                                                 .entry_point = cc::move(text.value().entry_point)};
         for (auto& bound : text.value().bound_names)
             result.renamed_bindings.push_back({.reflected = cc::move(bound.emitted), .name = cc::move(bound.host)});
+        result.color_targets = text.value().color_targets;
+        result.target_struct = cc::move(text.value().target_struct);
         return result;
     }
 

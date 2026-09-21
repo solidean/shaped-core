@@ -62,7 +62,7 @@ public:
     [[nodiscard]] static cc::result<webgpu_pipeline_layout_handle> create(webgpu_context& ctx,
                                                                           sg::pipeline_layout_description const& desc);
 
-    webgpu_pipeline_layout(webgpu_context& ctx, cc::hash128 hash);
+    webgpu_pipeline_layout(webgpu_context& ctx, cc::hash128 hash, sg::pipeline_layout_description const& desc);
 
     [[nodiscard]] WGPUPipelineLayout raw() const;
 
