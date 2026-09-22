@@ -157,3 +157,79 @@ ASYNC_INVOCABLE_TEST("sg - an SGL pixel shader states its targets, and a pipelin
     // A description that names another set than the shader writes.
     CHECK((co_await refusal_of(*ctx, described({rgba}, shaders::overlay::name))).contains("and the pipeline names"));
 }
+
+ASYNC_INVOCABLE_TEST("sg - a 32-bit indexed draw honours an odd first index", (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+
+    // **The positive half of the index-fetch alignment rule**, which
+    // libs/graphics/shaped-graphics/tests/command_list/index_buffer_alignment-test.cc only states in the negative.
+    // 32-bit indices are the fix that rule names for a sub-mesh whose first index is odd, so an odd first index into
+    // one must draw exactly what it names.
+    // `sr::imgui_routine` is the caller that rests on it: an ImDrawCmd's first index is arbitrary, which is why its
+    // draw indices are u32.
+    auto const& vs = co_await shaders::quads.vertex.main_vs->acquire(*ctx);
+    auto const& ps = co_await shaders::quads.pixel.main_ps->acquire(*ctx);
+    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline({
+        .layout = shaders::quads.vertex.main_vs.acquire_layout(*ctx),
+        .vertex_shader = vs,
+        .fragment_shader = ps,
+        .vertex_input = shaders::quad::layout(),
+        .rasterization = {.cull = sg::cull_mode::none},
+        .color_targets = shaders::target::states{.color = {.format = sg::pixel_format::rgba8_unorm}},
+        .target_set = shaders::target::name,
+    });
+
+    auto const corner = [](float x, float y) { return shaders::quad::per_vertex{.corner = tg::vec3f(x, y, 0.0f)}; };
+    // The left half's corners first, then the right half's, so the two halves are reachable by index alone.
+    shaders::quad::per_vertex const corners[] = {
+        corner(-1, -1), corner(0, -1), corner(0, 1), corner(-1, 1), corner(1, -1), corner(1, 1),
+    };
+    shaders::quad::per_instance const placed[] = {{.offset = tg::vec3f(0, 0, 0), .tint = tg::vec4f(1, 0, 0, 1)}};
+
+    // Seven indices, and the draw starts at the second: index 0 is a decoy that only a draw ignoring the first index
+    // would read.
+    // Reading from 0 would draw the bottom-left triangle (0, 1, 4) instead, which is a different picture rather than
+    // a shifted one — so the check below distinguishes them.
+    u32 const indices[] = {0, 1, 4, 5, 1, 5, 2};
+
+    auto const vertex_buffer = ctx->persistent.create_buffer<shaders::quad::per_vertex>(
+        6, sg::buffer_usage::vertex_buffer | sg::buffer_usage::copy_dst);
+    auto const instance_buffer = ctx->persistent.create_buffer<shaders::quad::per_instance>(
+        1, sg::buffer_usage::vertex_buffer | sg::buffer_usage::copy_dst);
+    auto const index_buffer
+        = ctx->persistent.create_buffer<u32>(7, sg::buffer_usage::index_buffer | sg::buffer_usage::copy_dst);
+
+    auto const image
+        = ctx->persistent.create_texture_2d({.format = sg::pixel_format::rgba8_unorm,
+                                             .width = 4,
+                                             .height = 4,
+                                             .usage = sg::texture_usage::render_target | sg::texture_usage::copy_src});
+
+    auto cmd = ctx->create_command_list();
+    cmd->upload.data_to_buffer(vertex_buffer, corners);
+    cmd->upload.data_to_buffer(instance_buffer, placed);
+    cmd->upload.data_to_buffer(index_buffer, indices);
+    {
+        auto pass = cmd->raster.render_to(
+            shaders::target{.color = image.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 1))});
+        pass.bind_pipeline(*pipeline);
+        pass.bind_vertex_buffers(
+            shaders::quad::buffers{.per_vertex = vertex_buffer, .per_instance = instance_buffer}.views());
+        pass.bind_index_buffer(index_buffer.as_index_buffer());
+        pass.draw_indexed({.index_range = {.offset = 1, .size = 6}});
+    }
+    auto const future = cmd->download.bytes_from_texture(image.raw());
+    ctx->submit_command_list(cc::move(cmd));
+
+    auto const pixels = co_await future.bytes();
+    REQUIRE(pixels.size() == 4 * 4 * 4);
+    auto const red_at = [&](int x, int y) { return int(pixels[(y * 4 + x) * 4]); };
+    for (auto y = 0; y < 4; ++y)
+    {
+        CHECK(red_at(0, y) == 0); // the left half the decoy index would have reached into
+        CHECK(red_at(1, y) == 0);
+        CHECK(red_at(2, y) == 255); // the right-half quad indices 1..6 name
+        CHECK(red_at(3, y) == 255);
+    }
+}
