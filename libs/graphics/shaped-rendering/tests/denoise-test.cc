@@ -1,3 +1,5 @@
+#include "shader_fixtures.hh"
+
 #include <clean-core/common/utility.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <nexus/async-test.hh>
@@ -106,18 +108,6 @@ void upload(sg::command_list& cmd, sg::texture_2d const& tex, cc::span<tg::vec4f
     cmd.upload.bytes_to_texture(tex.raw(), pixels.as_bytes());
 }
 
-/// Gives `lib` a compiler and sr's package, which every à-trous test needs before the routine can compile.
-/// False when there is no compiler, and the caller skips.
-[[nodiscard]] bool add_sr_shaders(slib::shader_library& lib)
-{
-    auto compiler = slib::create_dxc_compiler();
-    if (!compiler.has_value())
-        return false;
-    lib.add_compiler(cc::move(compiler.value()));
-    lib.add_package(sr::shader_package());
-    return true;
-}
-
 /// Brings the à-trous member up before a list opens, so the first call does not decline.
 cc::shared_async<cc::unit> prewarm(sg::context& ctx)
 {
@@ -207,15 +197,12 @@ ASYNC_INVOCABLE_TEST("sr - denoise automatic resolves to a supported member", (s
 }
 
 ASYNC_INVOCABLE_TEST("sr - denoise refuses a named member it cannot run and writes nothing",
-                     (sg::context_handle const& ctx_h),
-                     exclusive("slib-shader-library"))
+                     (sg::context_handle const& ctx_h), )
 {
     REQUIRE(ctx_h != nullptr);
     sg::context& ctx = *ctx_h;
 
-    auto lib = slib::shader_library();
-    if (!add_sr_shaders(lib))
-        SKIP("no DXC compiler to build the denoise shaders");
+    (void)sr_test::shader_fixtures(); // sr's one library, alive for the whole binary
     co_await prewarm(ctx);
 
     // Logged once per process, and it is the one line that tells a person why their image is still noisy.
@@ -230,16 +217,12 @@ ASYNC_INVOCABLE_TEST("sr - denoise refuses a named member it cannot run and writ
     CHECK(history.method() == sr::denoise_method::none);
 }
 
-ASYNC_INVOCABLE_TEST("sr - atrous keeps a flat image flat",
-                     (sg::context_handle const& ctx_h),
-                     exclusive("slib-shader-library"))
+ASYNC_INVOCABLE_TEST("sr - atrous keeps a flat image flat", (sg::context_handle const& ctx_h), )
 {
     REQUIRE(ctx_h != nullptr);
     sg::context& ctx = *ctx_h;
 
-    auto lib = slib::shader_library();
-    if (!add_sr_shaders(lib))
-        SKIP("no DXC compiler to build the denoise shaders");
+    (void)sr_test::shader_fixtures(); // sr's one library, alive for the whole binary
     co_await prewarm(ctx);
 
     // Every weight is normalized, so averaging equal values must return that value exactly — up to float rounding.
@@ -255,16 +238,12 @@ ASYNC_INVOCABLE_TEST("sr - atrous keeps a flat image flat",
     CHECK(worst < 1e-5f);
 }
 
-ASYNC_INVOCABLE_TEST("sr - atrous removes noise without bleeding across a guide edge",
-                     (sg::context_handle const& ctx_h),
-                     exclusive("slib-shader-library"))
+ASYNC_INVOCABLE_TEST("sr - atrous removes noise without bleeding across a guide edge", (sg::context_handle const& ctx_h), )
 {
     REQUIRE(ctx_h != nullptr);
     sg::context& ctx = *ctx_h;
 
-    auto lib = slib::shader_library();
-    if (!add_sr_shaders(lib))
-        SKIP("no DXC compiler to build the denoise shaders");
+    (void)sr_test::shader_fixtures(); // sr's one library, alive for the whole binary
     co_await prewarm(ctx);
 
     auto const noisy = noisy_halves(0.1f);
@@ -286,16 +265,12 @@ ASYNC_INVOCABLE_TEST("sr - atrous removes noise without bleeding across a guide 
     }
 }
 
-ASYNC_INVOCABLE_TEST("sr - atrous leaves a deep mean almost alone",
-                     (sg::context_handle const& ctx_h),
-                     exclusive("slib-shader-library"))
+ASYNC_INVOCABLE_TEST("sr - atrous leaves a deep mean almost alone", (sg::context_handle const& ctx_h), )
 {
     REQUIRE(ctx_h != nullptr);
     sg::context& ctx = *ctx_h;
 
-    auto lib = slib::shader_library();
-    if (!add_sr_shaders(lib))
-        SKIP("no DXC compiler to build the denoise shaders");
+    (void)sr_test::shader_fixtures(); // sr's one library, alive for the whole binary
     co_await prewarm(ctx);
 
     // The same pixels, claimed to average 4096 samples each: the noise a mean that deep carries is 1/64 of a single
@@ -318,16 +293,12 @@ ASYNC_INVOCABLE_TEST("sr - atrous leaves a deep mean almost alone",
     CHECK(moved < 0.2f * rmse_against_clean(noisy));
 }
 
-ASYNC_INVOCABLE_TEST("sr - denoise history restarts on first use and after a reset",
-                     (sg::context_handle const& ctx_h),
-                     exclusive("slib-shader-library"))
+ASYNC_INVOCABLE_TEST("sr - denoise history restarts on first use and after a reset", (sg::context_handle const& ctx_h), )
 {
     REQUIRE(ctx_h != nullptr);
     sg::context& ctx = *ctx_h;
 
-    auto lib = slib::shader_library();
-    if (!add_sr_shaders(lib))
-        SKIP("no DXC compiler to build the denoise shaders");
+    (void)sr_test::shader_fixtures(); // sr's one library, alive for the whole binary
     co_await prewarm(ctx);
 
     auto const noisy = noisy_halves(0.1f);
@@ -427,16 +398,12 @@ cc::shared_async<denoise_run> stream_frame(sg::context& ctx, svgf_stream& stream
 }
 } // namespace
 
-ASYNC_INVOCABLE_TEST("sr - svgf converges a static noisy stream",
-                     (sg::context_handle const& ctx_h),
-                     exclusive("slib-shader-library"))
+ASYNC_INVOCABLE_TEST("sr - svgf converges a static noisy stream", (sg::context_handle const& ctx_h), )
 {
     REQUIRE(ctx_h != nullptr);
     sg::context& ctx = *ctx_h;
 
-    auto lib = slib::shader_library();
-    if (!add_sr_shaders(lib))
-        SKIP("no DXC compiler to build the denoise shaders");
+    (void)sr_test::shader_fixtures(); // sr's one library, alive for the whole binary
     co_await prewarm(ctx);
 
     // Eight independent one-sample frames of a still image.
@@ -461,15 +428,12 @@ ASYNC_INVOCABLE_TEST("sr - svgf converges a static noisy stream",
 }
 
 ASYNC_INVOCABLE_TEST("sr - svgf drops the history where the depth jumped, and after a reset",
-                     (sg::context_handle const& ctx_h),
-                     exclusive("slib-shader-library"))
+                     (sg::context_handle const& ctx_h), )
 {
     REQUIRE(ctx_h != nullptr);
     sg::context& ctx = *ctx_h;
 
-    auto lib = slib::shader_library();
-    if (!add_sr_shaders(lib))
-        SKIP("no DXC compiler to build the denoise shaders");
+    (void)sr_test::shader_fixtures(); // sr's one library, alive for the whole binary
     co_await prewarm(ctx);
 
     // A few frames of one flat value build a history of it.
@@ -493,16 +457,12 @@ ASYNC_INVOCABLE_TEST("sr - svgf drops the history where the depth jumped, and af
     CHECK(max_distance_from(after_reset.output, 0.3f) < 1e-3f);
 }
 
-ASYNC_INVOCABLE_TEST("sr - denoise refuses svgf without a motion guide",
-                     (sg::context_handle const& ctx_h),
-                     exclusive("slib-shader-library"))
+ASYNC_INVOCABLE_TEST("sr - denoise refuses svgf without a motion guide", (sg::context_handle const& ctx_h), )
 {
     REQUIRE(ctx_h != nullptr);
     sg::context& ctx = *ctx_h;
 
-    auto lib = slib::shader_library();
-    if (!add_sr_shaders(lib))
-        SKIP("no DXC compiler to build the denoise shaders");
+    (void)sr_test::shader_fixtures(); // sr's one library, alive for the whole binary
     co_await prewarm(ctx);
 
     nx::allow_warnings("denoiser 'svgf' did not run");
