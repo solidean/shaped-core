@@ -4,11 +4,11 @@
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
-#include <shaped-shader-library/compiler/dxc_compiler.hh>
-#include <shaped-shader-library/shader_library.hh>
 
 // The package this test target declares itself, generated into the build dir; see sc_add_shader_package in
-// shaped-graphics' CMakeLists.
+// shaped-graphics' CMakeLists, and the one library the whole binary acquires through.
+#include "../shaders/shader_fixtures.hh"
+
 #include <sg_test_shaders.hh>
 
 using namespace cc::primitive_defines;
@@ -51,20 +51,12 @@ constexpr auto k_count = k_size * k_size;
 }
 } // namespace
 
-ASYNC_INVOCABLE_TEST("sg - a draw sees what the previous draw's fragment shader wrote",
-                     (sg::context_handle const& ctx_h),
-                     exclusive("slib-shader-library"))
+ASYNC_INVOCABLE_TEST("sg - a draw sees what the previous draw's fragment shader wrote", (sg::context_handle const& ctx_h))
 {
     REQUIRE(ctx_h != nullptr);
     sg::context& ctx = *ctx_h;
 
-    auto compiler = slib::create_dxc_compiler();
-    if (!compiler.has_value())
-        SKIP("no DXC compiler to build the hazard shaders");
-
-    auto lib = slib::shader_library();
-    lib.add_compiler(cc::move(compiler.value()));
-    lib.add_package(sg::test::shaders::package());
+    (void)sg_test::shader_fixtures(); // the library the generated globals resolve through
 
     auto const vertex = sg::test::shaders::fragment_hazard.vertex.vs_main->acquire(ctx);
     auto const writer = sg::test::shaders::fragment_hazard.fragment.ps_write->acquire(ctx);
