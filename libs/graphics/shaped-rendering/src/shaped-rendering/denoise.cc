@@ -100,12 +100,67 @@ denoise_guide_set denoise_inputs::present_guides() const
     return set;
 }
 
+denoise_history::denoise_history(denoise_history&& other) noexcept
+  : _method(other._method),
+    _extent(other._extent),
+    _reset_requested(other._reset_requested),
+    _frame(other._frame),
+    _vendor_state(other._vendor_state),
+    _release_vendor_state(other._release_vendor_state)
+{
+    for (auto i = 0; i < 8; ++i)
+        _state[i] = cc::move(other._state[i]);
+
+    // Moved FROM rather than shared: two histories releasing one object is the double free this exists to prevent,
+    // and the type is move-only precisely so there is one owner.
+    other._vendor_state = nullptr;
+    other._release_vendor_state = nullptr;
+}
+
+denoise_history& denoise_history::operator=(denoise_history&& other) noexcept
+{
+    if (this == &other)
+        return *this;
+
+    // Whatever this held is going away, so it owes its release before it is overwritten.
+    _release_vendor();
+
+    _method = other._method;
+    _extent = other._extent;
+    _reset_requested = other._reset_requested;
+    _frame = other._frame;
+    for (auto i = 0; i < 8; ++i)
+        _state[i] = cc::move(other._state[i]);
+
+    _vendor_state = other._vendor_state;
+    _release_vendor_state = other._release_vendor_state;
+    other._vendor_state = nullptr;
+    other._release_vendor_state = nullptr;
+    return *this;
+}
+
+denoise_history::~denoise_history()
+{
+    _release_vendor();
+}
+
+void denoise_history::_release_vendor()
+{
+    if (_vendor_state != nullptr && _release_vendor_state != nullptr)
+        _release_vendor_state(_vendor_state);
+    _vendor_state = nullptr;
+    _release_vendor_state = nullptr;
+}
+
 bool denoise_history::_prepare(denoise_method method, tg::vec2i extent)
 {
     auto const changed = _method != method || _extent != extent;
     auto const restarted = changed || _reset_requested;
     if (changed)
     {
+        // The state is built for one extent and one member, so it goes with them.
+        _release_vendor();
+
         // Built for another member or size, so nothing in it can be reused.
         for (auto& t : _state)
             t = {};
