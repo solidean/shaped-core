@@ -68,6 +68,12 @@ So 512 buys almost nothing for nearly twice 384's memory.
 At that overlap a tiled image agrees with the same image run whole BIT FOR BIT, so the number is where the network's receptive field ends.
 At 64 the two are 1.4e-03 apart, and with no overlap at all 2.8e-01 — which is what a seam looks like.
 Nothing improves above 80, so it is a threshold rather than a quality knob.
+OIDN derives its own the same way, as `tileOverlap = round_up(receptiveField / 2, tileAlignment)`.
+Our measured 80 implies a receptive field of about 160, which is the range their base model sits in.
+That agreement was found after the fact and is worth more than deriving it would have been: the number came from the image rather than from their source, and then matched it.
+
+Their minimum tile is larger than ours, at `max(4 * tileOverlap, 768)`.
+A 768 tile would cut a 1080p frame's wasted work from 3.2x to 2.3x and cost about 780 MiB of fp32 tensors, so it is a memory decision rather than a correctness one.
 
 **An edge tile is shifted inward rather than allowed to hang over the image.**
 Hanging over means filling the overhang by repeating the border pixel, and that smear is an image the whole-frame run never sees.
