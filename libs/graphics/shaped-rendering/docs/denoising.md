@@ -13,7 +13,7 @@ This is the design, including the parts not built yet.
 |---|---|---|---|
 | `atrous` | spatial | every sg backend, WARP included | done |
 | `svgf` | temporal | every sg backend | done |
-| `oidn` | spatial | every sg backend, WARP included | done, weights fetched on demand |
+| `oidn` | spatial | every sg backend | done, weights fetched on demand |
 | `dlss_rr` | temporal, upscales | NVIDIA RTX; dx12, vulkan | planned |
 | `fsr_rr` | temporal, upscales | AMD RDNA 4; dx12 | planned |
 
@@ -44,26 +44,33 @@ So the tensors are sized by a tile instead, 384 pixels by default, which is abou
 Half precision would halve the untiled figure and settle nothing.
 
 **A convolution thread produces a RUN of texels, which is what makes the network affordable.**
-The weights dominate: every thread in a wave reads a different output channel's row, so those reads are strided where the input reads are a broadcast.
 Producing one texel per thread spends a whole row of weights on a single output and reuses none of it.
-Producing 32 spends the same row on 32 outputs, and one loaded input row serves all three kernel columns instead of being fetched three times.
-Swept over a 256x256 tile: 1 texel is 91 ms, 8 is 18.5, 16 is 12.2, 32 is 11.6, and 48 falls back to 16.4 as the accumulators spill.
+Producing sixteen spends the same row on sixteen outputs, and one loaded input row serves all three kernel columns instead of being fetched three times.
+That one change took a 256x256 tile from 91 ms to 18.5.
 
-**The bounds test and the concat split are hoisted out of the inner loop, which is worth a further fifth.**
-Neither depends on the input channel, so leaving them there meant thirty-four branches for every ninety-six multiply-adds.
-Lifting the window's addresses to once per row, and the choice of concatenation half to once per channel, takes the same tile from 11.6 ms to 9.6 ms.
+**The weights are stored with the OUTPUT channel innermost, because that is the dimension a wave varies.**
+A lane's output channel is what differs across the wave, so the original `[o][ky][kx][i]` made a single weight load touch sixty-four rows scattered `9 * in_channels` floats apart.
+Turning it inside out to `[ky][kx][i][o]` makes that load one or two cache lines.
+It is worth about 1.1x at the same blocking and 1.25x once the blocking is re-tuned, because cheaper weights move the best run of texels from 32 down to 16.
+
+**Blocking the output channels as well was tried twice and does not pay.**
+16x1 is 8.0 ms where 16x2 is 10.9 and 8x2 is 9.4, under both weight layouts.
+The sixty-four lanes of a wave already read the same input, so that traffic is a broadcast rather than something a second blocking dimension could amortize.
+The registers it costs therefore buy nothing back.
+This is the one place where the obvious next step is measurably wrong, which is why it is written down rather than left to be retried.
 
 **Against OIDN's own GPU device we are far behind, and that is the comparison that matters.**
-Their CUDA device filters a 256x256 tile in 0.67 ms against our 9.4, and a whole 1080p frame in 20.6 ms against our 887 — 14x and 43x.
+Their CUDA device filters a 256x256 tile in 0.67 ms against our 7.6, and a whole 1080p frame in 20.6 ms against our 662 — 11x and 32x.
 Both were timed the same way: device-resident buffers, warmed, best of several, with only the filter and its sync inside the clock.
-The CPU comparison flatters us and is not the bar — for the record it is 30 ms against our 9.6 at 256x256, so we are about 3x faster than their CPU and 43x slower than their GPU.
+The CPU comparison flatters us and is not the bar — for the record it is 30 ms against our 7.6 at 256x256.
 
 **The gap is architectural rather than a matter of tuning.**
 OIDN's GPU path is fp16 on tensor cores through cutlass; ours is fp32 SIMT.
 Their minimum tile is 768 against our 384, so they waste less on overlap.
 And their kernel is a tuned implicit GEMM where ours is hand-written.
-A 1080p frame is about 1660 GFLOP the way we tile it, and we sustain 1.9 TFLOP/s of roughly 20-25 peak on this GPU — so even a well-tuned fp32 kernel lands near 140 ms and is still 7x off.
-Closing it needs half precision and the matrix hardware, which on DirectX means cooperative vectors, rather than more of what this shader already does.
+A 1080p frame is about 1660 GFLOP the way we tile it, and we sustain 2.5 TFLOP/s of roughly 20-25 peak on this GPU.
+So even a perfectly tuned fp32 kernel lands near 80 ms and is still 4x off: closing the rest needs half precision and the matrix hardware, which on DirectX means cooperative vectors.
+That is also what an SGL port cannot reach today, since SGL stays on the intersection of its backends and neither fp16 nor a matrix type is in it.
 
 **Reproducing the GPU comparison takes a file we deliberately do not fetch.**
 `fetch-oidn.py` keeps the CPU device module and drops the CUDA, HIP and SYCL ones.
@@ -71,8 +78,8 @@ So `OpenImageDenoise_device_cuda.dll` has to be taken out of the upstream archiv
 
 **The default tile is 384 because that is where the curve flattens, and it trades memory against wasted work.**
 The overlap is a fixed 80 per side, so a 384 tile keeps a 224 interior and a 256 tile keeps only 96.
-Measured end to end on a 1080p frame, before the inner loop was hoisted: 256 takes 2.8 s for 87 MiB, 384 takes 0.98 s for 195 MiB, and 512 takes 0.94 s for 346 MiB.
-So 512 buys almost nothing for nearly twice 384's memory.
+Measured end to end on a 1080p frame: 384 takes 662 ms for 195 MiB and 768 takes 459 ms for 779 MiB.
+So the curve keeps paying, but in memory — 768 is a third faster for four times 384's tensors, and an earlier sweep found 1024 regressing outright.
 
 **A tile is 80 pixels wider than what it keeps, on every side, and 80 is measured rather than chosen.**
 At that overlap a tiled image agrees with the same image run whole BIT FOR BIT, so the number is where the network's receptive field ends.
@@ -197,7 +204,7 @@ sv takes the scene signal from its trace hash with the camera left out; a caller
   Without it a vendor SDK would bypass sg's barrier tracking silently.
 - **OIDN needs nothing sg does not have either, because the member runs the network rather than the library.**
   Intel's own GPU devices would need exportable memory and shared fences, which sg has not got; its CPU device would need only a download and an upload, and costs a frame of latency for them.
-  Running the weights ourselves is what avoids both, and it is why the one trained member is also the one that works on WARP.
+  Running the weights ourselves is what avoids both, and it is why this is the one trained member that needs neither a vendor SDK nor a particular vendor's hardware.
   The library is still fetched, for the oracle test alone.
 - **The vendor SDKs are fetched on request, never by default.**
   DLSS and FSR sit in sr behind `SR_HAS_<VENDOR>` and link PRIVATE, like SDL3.

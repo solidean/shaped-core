@@ -40,7 +40,8 @@ constexpr int k_out = 4;
 }
 
 /// The convolution, written from its definition: zero padding, 3x3, bias, ReLU.
-/// Feature maps are HWC and the weights are [o][ky][kx][i], which is the contract the shader also holds.
+/// Feature maps are HWC and the weights are [ky][kx][i][o], which is the contract the shader also holds.
+/// The output channel is innermost because it is what varies across a wave, and the shader's loads have to coalesce.
 [[nodiscard]] cc::vector<f32> reference_conv(cc::span<f32 const> source,
                                              cc::span<f32 const> weights,
                                              cc::span<f32 const> bias)
@@ -63,7 +64,7 @@ constexpr int k_out = 4;
                         auto const tap = ((ky + 1) * 3 + (kx + 1));
                         for (auto i = 0; i < k_in; ++i)
                         {
-                            auto const w = weights[(o * 9 + tap) * k_in + i];
+                            auto const w = weights[(tap * k_in + i) * k_out + o];
                             sum += w * source[(sy * k_width + sx) * k_in + i];
                         }
                     }

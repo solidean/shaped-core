@@ -7,9 +7,14 @@
 // That is what OIDN's own GPU kernels use, for the reason their comments give — adjacent threads want adjacent
 // memory, and a thread per output CHANNEL is what makes a write coalesce.
 //
-// WEIGHTS ARE [o][ky][kx][i], which is `oihw` with the input channel moved innermost.
-// The inner loop below walks `i`, so this is the order that makes it contiguous; `sr::impl::oidn_network` does that
-// transpose once when it uploads them.
+// WEIGHTS ARE [ky][kx][i][o], which is `oihw` turned inside out so the OUTPUT channel is innermost.
+//
+// That is the layout the wave wants rather than the one a thread wants: a lane's output channel is what varies across
+// the wave, so putting `o` innermost makes one weight load touch one or two cache lines instead of sixty-four rows
+// scattered `9 * in_channels` floats apart.
+// `sr::impl::oidn_network` does that transpose once when it uploads them.
+// It is worth about 1.1x at the same blocking, and 1.25x once the blocking is re-tuned — cheaper weights move the
+// best run of texels from 32 down to 16.
 //
 // Padding is ZERO and the output keeps the input's width and height, which is what OIDN's convolutions do — its
 // descriptor gives the destination the source's H and W, and the skip connections could not concatenate otherwise.
@@ -76,13 +81,16 @@ float source_at(int x, int y, uint c)
 // The weights are what dominate — every thread in a wave reads a DIFFERENT output channel's row, so those reads are
 // strided where the input reads are a broadcast, and there is no reuse of them across texels otherwise.
 //
-// 32 was swept rather than picked, over a whole 256x256 tile: 1 is 91 ms, 8 is 18.5, 16 is 12.2, 32 is 11.6 and 48
-// falls back to 16.4 as the accumulators start spilling.
-// A larger tile prefers it more strongly still — at 512 it is 39 ms against 52 for 16.
+// 16 was swept rather than picked, over a whole 256x256 tile: 8 is 8.3 ms, 12 is 7.7, 16 is 7.6, 20 is 7.9 and 24
+// is 8.4, with 48 and beyond falling away as the accumulators spill.
+// Blocking the OUTPUT CHANNELS too was tried under both weight layouts and does not pay — 16x1 is 8.0 ms where 16x2
+// is 10.9 and 8x2 is 9.4.
+// The sixty-four lanes of a wave already read the same input, so that traffic is a broadcast rather than something a
+// second blocking dimension could amortize, and the registers it costs buy nothing back.
 //
 // `sr::impl::oidn_network` dispatches against this, and the two must agree; a mismatch is a wrong image, which the
 // oracle test against OIDN's own filter catches immediately.
-#define NN_CONV_TEXELS 32
+#define NN_CONV_TEXELS 16
 
 // One thread per output channel, for a run of NN_CONV_TEXELS texels along x.
 //
@@ -104,16 +112,18 @@ float source_at(int x, int y, uint c)
         sums[s] = bias;
 
     uint const in_channels = gConstants.in_channels;
-    uint w = gConstants.weight_offset + o * 9u * in_channels;
+    uint const out_channels = gConstants.out_channels;
+
+    // One kernel column's worth of weights, which is the stride between kx blocks in the layout above.
+    uint const column = in_channels * out_channels;
 
     for (int ky = -1; ky <= 1; ++ky)
     {
         int const sy = int(y) + ky;
         if (sy < 0 || sy >= int(gConstants.height))
-        {
-            w += 3u * in_channels; // the row is entirely padding, and padding is zero
-            continue;
-        }
+            continue; // the row is entirely padding, and padding is zero
+
+        uint const row = gConstants.weight_offset + uint(ky + 1) * 3u * column;
 
         // Where each column of the window sits, worked out ONCE for the row rather than per input channel.
         //
@@ -147,21 +157,20 @@ float source_at(int x, int y, uint c)
                 v[j] = inside[j] ? (from_a ? gSourceA[at] : gSourceB[at]) : 0.0;
             }
 
-            float const w0 = gWeights[w + i];
-            float const w1 = gWeights[w + in_channels + i];
-            float const w2 = gWeights[w + 2u * in_channels + i];
+            uint const at_w = row + i * out_channels + o;
+            float const w0 = gWeights[at_w];
+            float const w1 = gWeights[at_w + column];
+            float const w2 = gWeights[at_w + 2u * column];
 
             [unroll] for (uint t = 0; t < NN_CONV_TEXELS; ++t)
                 sums[t] += w0 * v[t] + w1 * v[t + 1] + w2 * v[t + 2];
         }
-
-        w += 3u * in_channels;
     }
 
     // ReLU on every layer, the last one included — which is why the network's output is never negative, and why the
     // radiance it produces needs no clamp of its own.
-    uint const base = (y * gConstants.width + x0) * gConstants.out_channels + o;
+    uint const base = (y * gConstants.width + x0) * out_channels + o;
     [unroll] for (uint t = 0; t < NN_CONV_TEXELS; ++t)
         if (x0 + t < gConstants.width)
-            gTarget[base + t * gConstants.out_channels] = max(sums[t], 0.0);
+            gTarget[base + t * out_channels] = max(sums[t], 0.0);
 }

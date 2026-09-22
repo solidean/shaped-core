@@ -111,7 +111,7 @@ constexpr int k_upsample_count = int(sizeof(k_upsamples) / sizeof(k_upsamples[0]
 
 /// How many texels along x one convolution thread produces.
 /// Must match NN_CONV_TEXELS in nn_conv.hlsl; the oracle test is what notices if it does not.
-constexpr int k_conv_texels = 32;
+constexpr int k_conv_texels = 16;
 
 /// Half a fp16 lane, widened.
 ///
@@ -258,11 +258,13 @@ bool oidn_network::create(sg::context& ctx, tg::vec2i image_extent, int max_tile
         _weight_offsets.push_back(u32(packed.size()));
 
         auto const* const source = reinterpret_cast<u16 const*>(weight->data.data());
-        for (auto o = 0; o < out_channels; ++o)
-            for (auto k = 0; k < 9; ++k)
-                for (auto i = 0; i < in_channels; ++i)
+        for (auto k = 0; k < 9; ++k)
+            for (auto i = 0; i < in_channels; ++i)
+                for (auto o = 0; o < out_channels; ++o)
                 {
                     // oihw: o major, then i, then the 3x3 — so one element is at ((o * in + i) * 9 + k).
+                    // Written out as [ky][kx][i][o], with the OUTPUT channel innermost: that is what varies across a
+                    // wave, so it is what has to be contiguous for a weight load to touch one cache line.
                     packed.push_back(from_half(source[(o * in_channels + i) * 9 + k]));
                 }
 
