@@ -53,11 +53,21 @@ Swept over a 256x256 tile: 1 texel is 91 ms, 8 is 18.5, 16 is 12.2, 32 is 11.6, 
 Neither depends on the input channel, so leaving them there meant thirty-four branches for every ninety-six multiply-adds.
 Lifting the window's addresses to once per row, and the choice of concatenation half to once per channel, takes the same tile from 11.6 ms to 9.6 ms.
 
-**Where that leaves us against Intel, measured rather than claimed.**
-At 256x256 OIDN's own CPU filter takes 30 ms on this machine and ours now takes 9.6 ms, so per pixel we are about 3x faster than their CPU implementation.
-A whole 1080p frame takes 0.83 s, against tens of seconds before — it hung a test watchdog rather than finishing.
-Per pixel we are ahead; per FRAME we are roughly level with their CPU, because the overlap makes us compute 6.6 Mpx to deliver 2.1 Mpx.
-So the next real win is the overlap rather than the shader.
+**Against OIDN's own GPU device we are far behind, and that is the comparison that matters.**
+Their CUDA device filters a 256x256 tile in 0.67 ms against our 9.4, and a whole 1080p frame in 20.6 ms against our 887 — 14x and 43x.
+Both were timed the same way: device-resident buffers, warmed, best of several, with only the filter and its sync inside the clock.
+The CPU comparison flatters us and is not the bar — for the record it is 30 ms against our 9.6 at 256x256, so we are about 3x faster than their CPU and 43x slower than their GPU.
+
+**The gap is architectural rather than a matter of tuning.**
+OIDN's GPU path is fp16 on tensor cores through cutlass; ours is fp32 SIMT.
+Their minimum tile is 768 against our 384, so they waste less on overlap.
+And their kernel is a tuned implicit GEMM where ours is hand-written.
+A 1080p frame is about 1660 GFLOP the way we tile it, and we sustain 1.9 TFLOP/s of roughly 20-25 peak on this GPU — so even a well-tuned fp32 kernel lands near 140 ms and is still 7x off.
+Closing it needs half precision and the matrix hardware, which on DirectX means cooperative vectors, rather than more of what this shader already does.
+
+**Reproducing the GPU comparison takes a file we deliberately do not fetch.**
+`fetch-oidn.py` keeps the CPU device module and drops the CUDA, HIP and SYCL ones.
+So `OpenImageDenoise_device_cuda.dll` has to be taken out of the upstream archive and put beside the core before `oidn::DeviceType::CUDA` will create.
 
 **The default tile is 384 because that is where the curve flattens, and it trades memory against wasted work.**
 The overlap is a fixed 80 per side, so a 384 tile keeps a 224 interior and a 256 tile keeps only 96.
