@@ -357,7 +357,9 @@ cc::string_view missing_required_capability(VkPhysicalDevice dev)
     VkPhysicalDeviceVulkan13Features vk13 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES};
     VkPhysicalDeviceVulkan12Features vk12
         = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES, .pNext = &vk13};
-    VkPhysicalDeviceFeatures2 features = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = &vk12};
+    VkPhysicalDeviceVulkan11Features vk11
+        = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES, .pNext = &vk12};
+    VkPhysicalDeviceFeatures2 features = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = &vk11};
     vkGetPhysicalDeviceFeatures2(dev, &features);
 
     // The epoch system rests on timeline semaphores; barriers on synchronization2; the raster scope on dynamic
@@ -368,6 +370,11 @@ cc::string_view missing_required_capability(VkPhysicalDevice dev)
     // take the pipeline and fail validation at the draw.
     if (features.features.fragmentStoresAndAtomics != VK_TRUE)
         return "fragmentStoresAndAtomics";
+    // A vertex shader reading SV_VertexID compiles to SPIR-V that declares the DrawParameters capability, since HLSL's
+    // id is the index minus the base and Vulkan's VertexIndex is not.
+    // So every HLSL vertex shader through DXC needs this, not just one that asks for the base vertex itself.
+    if (vk11.shaderDrawParameters != VK_TRUE)
+        return "shaderDrawParameters";
     if (vk12.timelineSemaphore != VK_TRUE)
         return "timelineSemaphore";
     if (vk13.synchronization2 != VK_TRUE)
@@ -667,13 +674,21 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
             });
     }
 
+    // `shaderDrawParameters` is what SPIR-V's DrawParameters capability needs enabled, and every HLSL vertex shader
+    // reading SV_VertexID declares it — see missing_required_capability.
+    auto vk11_features = VkPhysicalDeviceVulkan11Features{
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES,
+        .pNext = &vk12_features,
+        .shaderDrawParameters = VK_TRUE,
+    };
+
     // **The core 1.0 features go through `pNext`, not `pEnabledFeatures`**: the two are mutually exclusive, and the
-    // chain already carries the 1.2 and 1.3 structures.
+    // chain already carries the 1.1, 1.2 and 1.3 structures.
     // `fragmentStoresAndAtomics` is the one sg needs — without it a fragment shader may not write a storage buffer,
     // which is a binding group sg's raster scope accepts.
     auto core_features = VkPhysicalDeviceFeatures2{
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
-        .pNext = &vk12_features,
+        .pNext = &vk11_features,
         .features = {.fragmentStoresAndAtomics = VK_TRUE},
     };
 
