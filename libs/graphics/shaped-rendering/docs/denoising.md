@@ -101,6 +101,20 @@ The overlap is a fixed 80 per side and everything inside it is computed twice, s
 Measured end to end on a 1080p frame: 384 takes 500 ms for 197 MiB, 512 takes 378 for 277, 640 takes 308 for 451, and 768 takes 276 for 602.
 `oidn_options::max_tile` is how a caller buys the rest, and 0 takes this default.
 
+**WebGPU's default limits cap that before memory does.**
+`maxStorageBufferBindingSize` defaults to 128 MiB, and one level-0 feature map with sixty-four channels is the largest single binding this network makes.
+At the 512 cap the chosen tile is 480x432 and that map is 50 MiB; at 768 it is 640x704 and 110 MiB; at 1024 it is 800x704 and 137 MiB, which no longer binds.
+So the cap cannot go far past 768 on a device offering only the defaults, whatever the total memory allows.
+`maxComputeInvocationsPerWorkgroup` defaults to 256 against the 64 these shaders use, and `maxComputeWorkgroupStorageSize` to 48 KiB, so neither of those is close.
+
+**Half precision is the one acceleration this network could take that is portable.**
+DX12 has it as SM 6.2 with `-enable-16bit-types`, Vulkan as `VK_KHR_shader_float16_int8` with `VK_KHR_16bit_storage`, and Metal has `half` outright.
+WebGPU has the optional `shader-f16` feature, which WGSL gates behind `enable f16;` and allows in storable and host-shareable types at two bytes.
+Optional on all four rather than guaranteed, so it is a feature level rather than a floor — but a shipped one, unlike the matrix instructions.
+What stops us is ours rather than theirs: slib passes DXC no flag and has no option to, and sg has no capability to gate on.
+The webgpu backend already has the shape for one, in `k_optional_features`.
+For THIS shader it would buy memory rather than speed, because the limit measured above is cache lines rather than bytes — and memory is what buys a larger tile.
+
 
 **A tile is 80 pixels wider than what it keeps, on every side, and 80 is measured rather than chosen.**
 At that overlap a tiled image agrees with the same image run whole BIT FOR BIT, so the number is where the network's receptive field ends.
