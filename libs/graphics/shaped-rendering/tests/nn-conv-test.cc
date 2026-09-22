@@ -3,6 +3,8 @@
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_coroutine.hh>
+#include "shader_fixtures.hh"
+
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
@@ -76,18 +78,12 @@ constexpr int k_out = 4;
 } // namespace
 
 ASYNC_INVOCABLE_TEST("sr - the network's convolution matches a reference implementation",
-                     (sg::context_handle const& ctx_h),
-                     exclusive("slib-shader-library"))
+                     (sg::context_handle const& ctx_h))
 {
     REQUIRE(ctx_h != nullptr);
     auto& ctx = *ctx_h;
 
-    auto lib = slib::shader_library();
-    auto compiler = slib::create_dxc_compiler();
-    if (!compiler.has_value())
-        SKIP("no DXC compiler to build the convolution");
-    lib.add_compiler(cc::move(compiler.value()));
-    lib.add_package(sr::shader_package());
+    (void)sr_test::shader_fixtures(); // sr's one library, alive for the whole binary
 
     auto const shader = sr::shaders::nn_conv.compute.main_cs->acquire(ctx);
     co_await cc::async_settled(shader);

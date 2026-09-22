@@ -3,6 +3,8 @@
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_coroutine.hh>
+#include "shader_fixtures.hh"
+
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
@@ -76,15 +78,12 @@ namespace
 // Cheap, and it is the check that turns an HLSL mistake into a message here rather than into a member that declines
 // every frame for a reason nothing prints.
 ASYNC_INVOCABLE_TEST("sr - every network operation compiles",
-                     (sg::context_handle const& ctx_h),
-                     exclusive("slib-shader-library"))
+                     (sg::context_handle const& ctx_h))
 {
     REQUIRE(ctx_h != nullptr);
     auto& ctx = *ctx_h;
 
-    auto lib = slib::shader_library();
-    if (!add_sr_shaders(lib))
-        SKIP("no DXC compiler to build the network's shaders");
+    (void)sr_test::shader_fixtures(); // sr's one library, alive for the whole binary
 
     auto nn_conv_pipeline = sg::compute_pipeline_handle();
     co_await build(ctx, sr::shaders::nn_conv.compute.main_cs,
@@ -112,15 +111,12 @@ ASYNC_INVOCABLE_TEST("sr - every network operation compiles",
 // it comes back — across the whole range, and across both of the curve's two interior knees, where a mistranscribed
 // constant would show up as a step rather than as a small error.
 ASYNC_INVOCABLE_TEST("sr - the network's transfer curve round-trips across the HDR range",
-                     (sg::context_handle const& ctx_h),
-                     exclusive("slib-shader-library"))
+                     (sg::context_handle const& ctx_h))
 {
     REQUIRE(ctx_h != nullptr);
     auto& ctx = *ctx_h;
 
-    auto lib = slib::shader_library();
-    if (!add_sr_shaders(lib))
-        SKIP("no DXC compiler to build the network's shaders");
+    (void)sr_test::shader_fixtures(); // sr's one library, alive for the whole binary
 
     auto const input_layout = ctx.cached.acquire_binding_group_layout<sr::shaders::nn_input_bindings>();
     auto const output_layout = ctx.cached.acquire_binding_group_layout<sr::shaders::nn_output_bindings>();
@@ -253,15 +249,12 @@ ASYNC_INVOCABLE_TEST("sr - the network's transfer curve round-trips across the H
 // Both are trivial and both are easy to get subtly wrong: a pool that takes the wrong four texels, or an upsample
 // that writes three of its four, produces a feature map that is the right size and the wrong content.
 ASYNC_INVOCABLE_TEST("sr - the network's pool and upsample move the texels they say they do",
-                     (sg::context_handle const& ctx_h),
-                     exclusive("slib-shader-library"))
+                     (sg::context_handle const& ctx_h))
 {
     REQUIRE(ctx_h != nullptr);
     auto& ctx = *ctx_h;
 
-    auto lib = slib::shader_library();
-    if (!add_sr_shaders(lib))
-        SKIP("no DXC compiler to build the network's shaders");
+    (void)sr_test::shader_fixtures(); // sr's one library, alive for the whole binary
 
     auto const pool_layout = ctx.cached.acquire_binding_group_layout<sr::shaders::nn_pool_bindings>();
     auto const up_layout = ctx.cached.acquire_binding_group_layout<sr::shaders::nn_upsample_bindings>();

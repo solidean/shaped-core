@@ -3,6 +3,8 @@
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_coroutine.hh>
+#include "shader_fixtures.hh"
+
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
@@ -26,18 +28,12 @@ using namespace cc::primitive_defines;
 // comparison against OIDN's own filter rather than anything assertable here.
 
 ASYNC_INVOCABLE_TEST("sr - the denoise network runs end to end",
-                     (sg::context_handle const& ctx_h),
-                     exclusive("slib-shader-library"))
+                     (sg::context_handle const& ctx_h))
 {
     REQUIRE(ctx_h != nullptr);
     auto& ctx = *ctx_h;
 
-    auto lib = slib::shader_library();
-    auto compiler = slib::create_dxc_compiler();
-    if (!compiler.has_value())
-        SKIP("no DXC compiler to build the network's shaders");
-    lib.add_compiler(cc::move(compiler.value()));
-    lib.add_package(sr::shader_package());
+    (void)sr_test::shader_fixtures(); // sr's one library, alive for the whole binary
 
     // Deliberately NOT a multiple of sixteen, and not square.
     // Four pools need one, so the network pads its tensors up and repeats the image's edge into the padding — an
@@ -172,8 +168,7 @@ ASYNC_INVOCABLE_TEST("sr - the denoise network runs end to end",
 //
 // So this runs OIDN's own filter over the same input and compares, which is the only way to ask the question.
 ASYNC_INVOCABLE_TEST("sr - the network agrees with OIDN's own filter",
-                     (sg::context_handle const& ctx_h),
-                     exclusive("slib-shader-library"))
+                     (sg::context_handle const& ctx_h))
 {
     REQUIRE(ctx_h != nullptr);
     auto& ctx = *ctx_h;
@@ -181,12 +176,7 @@ ASYNC_INVOCABLE_TEST("sr - the network agrees with OIDN's own filter",
     if (!sr::impl::oidn_is_compiled_in() || !sr::impl::oidn_has_device())
         SKIP("OIDN itself was not fetched, so there is nothing to compare against");
 
-    auto lib = slib::shader_library();
-    auto compiler = slib::create_dxc_compiler();
-    if (!compiler.has_value())
-        SKIP("no DXC compiler to build the network's shaders");
-    lib.add_compiler(cc::move(compiler.value()));
-    lib.add_package(sr::shader_package());
+    (void)sr_test::shader_fixtures(); // sr's one library, alive for the whole binary
 
     for (auto const& asset : {sr::shaders::nn_conv.compute.main_cs, sr::shaders::nn_input.compute.main_cs,
                               sr::shaders::nn_output.compute.main_cs, sr::shaders::nn_pool.compute.main_cs,
@@ -324,18 +314,12 @@ ASYNC_INVOCABLE_TEST("sr - the network agrees with OIDN's own filter",
 // resolves, that the guide contract is enforced, that the network lands in the caller's history and is reused, and
 // that a second call on the same history does not rebuild it.
 ASYNC_INVOCABLE_TEST("sr - the OIDN member denoises through the denoise front",
-                     (sg::context_handle const& ctx_h),
-                     exclusive("slib-shader-library"))
+                     (sg::context_handle const& ctx_h))
 {
     REQUIRE(ctx_h != nullptr);
     auto& ctx = *ctx_h;
 
-    auto lib = slib::shader_library();
-    auto compiler = slib::create_dxc_compiler();
-    if (!compiler.has_value())
-        SKIP("no DXC compiler to build the network's shaders");
-    lib.add_compiler(cc::move(compiler.value()));
-    lib.add_package(sr::shader_package());
+    (void)sr_test::shader_fixtures(); // sr's one library, alive for the whole binary
 
     if (!sr::query_denoise_support(ctx).oidn)
         SKIP("the OIDN weights were not fetched (extern/oidn-weights/fetch-oidn-weights.py)");
@@ -499,18 +483,12 @@ ASYNC_INVOCABLE_TEST("sr - the OIDN member denoises through the denoise front",
 // Asked of a small network rather than a large one: the widths come from the weights and the extents are arithmetic,
 // so the figure for 1080p is computable without allocating a byte of it.
 ASYNC_INVOCABLE_TEST("sr - the OIDN network's memory is what stands between it and a real image",
-                     (sg::context_handle const& ctx_h),
-                     exclusive("slib-shader-library"))
+                     (sg::context_handle const& ctx_h))
 {
     REQUIRE(ctx_h != nullptr);
     auto& ctx = *ctx_h;
 
-    auto lib = slib::shader_library();
-    auto compiler = slib::create_dxc_compiler();
-    if (!compiler.has_value())
-        SKIP("no DXC compiler to build the network's shaders");
-    lib.add_compiler(cc::move(compiler.value()));
-    lib.add_package(sr::shader_package());
+    (void)sr_test::shader_fixtures(); // sr's one library, alive for the whole binary
 
     // `create` starts the pipelines compiling, and this test asks a question that never runs them.
     // Drained rather than abandoned, because work still carrying a finished test's context is what nexus reports.
@@ -550,18 +528,12 @@ ASYNC_INVOCABLE_TEST("sr - the OIDN network's memory is what stands between it a
 // The network is the same either way; what tiling changes is what each pixel could see while it was computed.
 // So the question is entirely "is the overlap wide enough", and the answer is a comparison rather than an argument.
 ASYNC_INVOCABLE_TEST("sr - the OIDN network in tiles agrees with the same image run whole",
-                     (sg::context_handle const& ctx_h),
-                     exclusive("slib-shader-library"))
+                     (sg::context_handle const& ctx_h))
 {
     REQUIRE(ctx_h != nullptr);
     auto& ctx = *ctx_h;
 
-    auto lib = slib::shader_library();
-    auto compiler = slib::create_dxc_compiler();
-    if (!compiler.has_value())
-        SKIP("no DXC compiler to build the network's shaders");
-    lib.add_compiler(cc::move(compiler.value()));
-    lib.add_package(sr::shader_package());
+    (void)sr_test::shader_fixtures(); // sr's one library, alive for the whole binary
 
     if (!sr::impl::oidn_weights_present())
         SKIP("the OIDN weights were not fetched (extern/oidn-weights/fetch-oidn-weights.py)");
@@ -687,8 +659,7 @@ ASYNC_INVOCABLE_TEST("sr - the OIDN network in tiles agrees with the same image 
 // The tiling test beside it compares against our own whole-image run rather than against Intel.
 // This closes that: OIDN filters the whole image, we filter it in nine tiles, and the two are put side by side.
 ASYNC_INVOCABLE_TEST("sr - the tiled network agrees with OIDN's own filter",
-                     (sg::context_handle const& ctx_h),
-                     exclusive("slib-shader-library"))
+                     (sg::context_handle const& ctx_h))
 {
     REQUIRE(ctx_h != nullptr);
     auto& ctx = *ctx_h;
@@ -696,12 +667,7 @@ ASYNC_INVOCABLE_TEST("sr - the tiled network agrees with OIDN's own filter",
     if (!sr::impl::oidn_is_compiled_in() || !sr::impl::oidn_has_device())
         SKIP("OIDN itself was not fetched, so there is nothing to compare against");
 
-    auto lib = slib::shader_library();
-    auto compiler = slib::create_dxc_compiler();
-    if (!compiler.has_value())
-        SKIP("no DXC compiler to build the network's shaders");
-    lib.add_compiler(cc::move(compiler.value()));
-    lib.add_package(sr::shader_package());
+    (void)sr_test::shader_fixtures(); // sr's one library, alive for the whole binary
 
     REQUIRE(co_await sr::impl::oidn_prewarm_pipelines(ctx)).context("the network's pipelines did not build");
 
@@ -808,18 +774,12 @@ ASYNC_INVOCABLE_TEST("sr - the tiled network agrees with OIDN's own filter",
 // Taking the cap outright gets that wrong: over 1920x1080 a 512 tile computes more than a 448 one AND costs more
 // memory, because its interior divides the image badly.
 ASYNC_INVOCABLE_TEST("sr - the OIDN network picks the tile that computes least",
-                     (sg::context_handle const& ctx_h),
-                     exclusive("slib-shader-library"))
+                     (sg::context_handle const& ctx_h))
 {
     REQUIRE(ctx_h != nullptr);
     auto& ctx = *ctx_h;
 
-    auto lib = slib::shader_library();
-    auto compiler = slib::create_dxc_compiler();
-    if (!compiler.has_value())
-        SKIP("no DXC compiler to build the network's shaders");
-    lib.add_compiler(cc::move(compiler.value()));
-    lib.add_package(sr::shader_package());
+    (void)sr_test::shader_fixtures(); // sr's one library, alive for the whole binary
 
     if (!sr::impl::oidn_weights_present())
         SKIP("the OIDN weights were not fetched (extern/oidn-weights/fetch-oidn-weights.py)");
