@@ -14,6 +14,13 @@ struct sr::oidn_options
     /// Unlike NRD — which forbids a premultiplied exposure — OIDN asks for one: left to itself it MEASURES the image
     /// and derives its own, and this is `options_for` handing it the caller's instead.
     f32 input_scale = 1.0f;
+
+    /// The largest tile the network may run at, which is what trades memory against wasted work.
+    ///
+    /// A cap rather than the size used, and 0 takes the network's own default.
+    /// The overlap around a tile is computed twice, so a bigger cap means fewer tiles and less repeated work: a 1080p
+    /// frame is 500 ms at 384, 378 at the default 512 and 276 at 768, for 197, 277 and 602 MiB of tensors.
+    i32 max_tile = 0;
 };
 
 /// Intel Open Image Denoise: a trained spatial denoiser, run as our own compute shaders.

@@ -801,3 +801,58 @@ ASYNC_INVOCABLE_TEST("sr - the tiled network agrees with OIDN's own filter",
     CHECK(mean < 1e-4f).context(cc::format("mean difference {} over {} samples", mean, samples));
     CHECK(worst < 1e-3f).context(cc::format("worst difference {} at {},{} (mean {})", worst, worst_at[0], worst_at[1], mean));
 }
+
+// The tile is CHOSEN rather than taken as large as it may be, and this is what that has to mean.
+//
+// Cost is flat per computed pixel, so the only thing a tile size decides is how much of the image is computed twice.
+// Taking the cap outright gets that wrong: over 1920x1080 a 512 tile computes more than a 448 one AND costs more
+// memory, because its interior divides the image badly.
+ASYNC_INVOCABLE_TEST("sr - the OIDN network picks the tile that computes least",
+                     (sg::context_handle const& ctx_h),
+                     exclusive("slib-shader-library"))
+{
+    REQUIRE(ctx_h != nullptr);
+    auto& ctx = *ctx_h;
+
+    auto lib = slib::shader_library();
+    auto compiler = slib::create_dxc_compiler();
+    if (!compiler.has_value())
+        SKIP("no DXC compiler to build the network's shaders");
+    lib.add_compiler(cc::move(compiler.value()));
+    lib.add_package(sr::shader_package());
+
+    if (!sr::impl::oidn_weights_present())
+        SKIP("the OIDN weights were not fetched (extern/oidn-weights/fetch-oidn-weights.py)");
+
+    // `create` starts the pipelines compiling, and this test asks a question that never runs them.
+    (void)co_await sr::impl::oidn_prewarm_pipelines(ctx);
+
+    constexpr auto k_image = tg::vec2i(1920, 1080);
+
+    auto const computed_pixels = [](sr::impl::oidn_network const& n)
+    { return i64(n.tile_counts()[0]) * i64(n.padded_extent()[0]) * i64(n.tile_counts()[1]) * i64(n.padded_extent()[1]); };
+
+    auto previous = i64(0);
+    for (auto const cap : {384, 448, 512, 640, 768})
+    {
+        auto network = sr::impl::oidn_network();
+        REQUIRE(network.create(ctx, k_image, cap));
+
+        // Never larger than the cap, on either axis.
+        CHECK(network.padded_extent()[0] <= cap);
+        CHECK(network.padded_extent()[1] <= cap);
+
+        // Raising the cap may never make the network compute MORE, which is exactly what taking the cap outright did.
+        auto const total = computed_pixels(network);
+        if (previous != 0)
+            CHECK(total <= previous)
+                .context(cc::format("cap {} computes {} where the cap below it computed {}", cap, total, previous));
+        previous = total;
+
+        // And it has to beat the naive choice at the cap whose interior divides 1920x1080 badly.
+        if (cap == 512)
+            CHECK(network.padded_extent()[0] < 512).context(cc::format("chose {} on x", network.padded_extent()[0]));
+    }
+
+    co_return;
+}

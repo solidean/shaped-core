@@ -40,7 +40,7 @@ That split is what keeps a weights bump honest: a changed layer count fails to f
 **The network runs in tiles, and its memory is why.**
 It holds twenty-five feature maps at once, because the skips have to stay live across the whole decoder.
 Run whole that is 5.4 MiB at 64x64, 2.7 GiB at 1080p and 10.7 GiB at 4K, measured by `oidn_network::feature_bytes_for` rather than estimated.
-So the tensors are sized by a tile instead, 384 pixels by default, which is about 197 MiB whatever the image is.
+So the tensors are sized by a tile instead, capped at 512 pixels by default, which is about 277 MiB whatever the image is.
 Half precision would halve the untiled figure and settle nothing.
 
 **A convolution thread produces a RUN of texels, which is what made the network affordable at all.**
@@ -74,7 +74,7 @@ The registers it costs therefore buy nothing back.
 This is the one place where the obvious next step is measurably wrong, which is why it is written down rather than left to be retried.
 
 **Against OIDN's own GPU device we are still far behind, and that is the comparison that matters.**
-Their CUDA device filters a 256x256 tile in 0.67 ms against our 5.3, and a whole 1080p frame in 20.6 ms against our 504 — 8x and 24x.
+Their CUDA device filters a 256x256 tile in 0.67 ms against our 5.3, and a whole 1080p frame in 20.6 ms against our 378 — 8x and 18x.
 Both were timed the same way: device-resident buffers, warmed, best of several, with only the filter and its sync inside the clock.
 The CPU comparison flatters us and is not the bar — for the record it is 30 ms against our 5.3 at 256x256.
 
@@ -82,18 +82,25 @@ The CPU comparison flatters us and is not the bar — for the record it is 30 ms
 OIDN's GPU path is `cutlass::conv::device::ImplicitGemmConvolution` over `TensorNHWC`, in fp16, on tensor cores.
 The SM80 instantiation uses a `GemmShape<16, 8, 16>` instruction with a fused `LinearCombinationRelu` epilogue.
 Their weights are `ohwi` and their activations `hwc`, with channels padded to eight; `CUDADevice::init` sets `tensorBlockC = 8` and says why, "required by Tensor Core operations".
-Ours is fp32 SIMT, and a 1080p frame is about 1700 GFLOP the way we tile it, sustained at 3.4 TFLOP/s of roughly 20-25 peak.
-So even a perfectly tuned fp32 kernel lands near 85 ms and is still 4x off: the rest is the matrix hardware, which on DirectX means cooperative vectors.
+Ours is fp32 SIMT, sustaining about 3.2 TFLOP/s of roughly 20-25 peak — 80 ms per computed megapixel, and a 1080p frame computes 4.7 of them.
+So even a perfectly tuned fp32 kernel lands near 60 ms and is still 3x off: the rest is the matrix hardware, which on DirectX means cooperative vectors.
 That is also what an SGL port cannot reach today, since SGL stays on the intersection of its backends and neither fp16 nor a matrix type is in it.
 
 **Reproducing the GPU comparison takes a file we deliberately do not fetch.**
 `fetch-oidn.py` keeps the CPU device module and drops the CUDA, HIP and SYCL ones.
 So `OpenImageDenoise_device_cuda.dll` has to be taken out of the upstream archive and put beside the core before `oidn::DeviceType::CUDA` will create.
 
-**The default tile is 384 because that is where the curve flattens, and it trades memory against wasted work.**
-The overlap is a fixed 80 per side, so a 384 tile keeps a 224 interior and a 256 tile keeps only 96.
-Measured end to end on a 1080p frame: 384 takes 504 ms for 197 MiB and 768 takes 351 ms for 788 MiB.
-So the curve keeps paying, but in memory — 768 is a third faster for four times 384's tensors, and an earlier sweep found 1024 regressing outright.
+**The tile is CHOSEN to compute the fewest pixels, not taken as large as it may be.**
+Cost is flat per computed pixel — about 80 ms per megapixel on the machine this was tuned on — so the only thing a tile size decides is how much of the image is computed twice.
+That is not monotonic in the tile: over 1920x1080 a 512 tile computes more than a 448 one, because its interior divides the image badly, and it costs more memory for the privilege.
+So `create` searches under the cap, per axis, since a tile's count along one axis depends on its extent along that one alone.
+It was worth 495 ms down to 378 at a 512 cap, and 350 MiB down to 277 at the same time.
+
+**The cap is 512 by default, and it trades memory against wasted work rather than against quality.**
+The overlap is a fixed 80 per side and everything inside it is computed twice, so a larger cap means fewer tiles.
+Measured end to end on a 1080p frame: 384 takes 500 ms for 197 MiB, 512 takes 378 for 277, 640 takes 308 for 451, and 768 takes 276 for 602.
+`oidn_options::max_tile` is how a caller buys the rest, and 0 takes this default.
+
 
 **A tile is 80 pixels wider than what it keeps, on every side, and 80 is measured rather than chosen.**
 At that overlap a tiled image agrees with the same image run whole BIT FOR BIT, so the number is where the network's receptive field ends.

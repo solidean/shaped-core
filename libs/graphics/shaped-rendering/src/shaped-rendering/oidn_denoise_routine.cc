@@ -78,7 +78,8 @@ denoise_outcome oidn_denoise_routine::execute(sg::command_list& cmd,
         // Owned raw because the history's slot is a `void*` with a release function beside it — the one shape that
         // lets `denoise.hh` free a member's state without naming its type.
         auto* const fresh = new impl::oidn_network();
-        if (!fresh->create(ctx, extent))
+        auto const tile = options.max_tile > 0 ? options.max_tile : impl::oidn_network::k_default_tile;
+        if (!fresh->create(ctx, extent, tile))
         {
             delete fresh;
             return outcome_of(denoise_status::failed);

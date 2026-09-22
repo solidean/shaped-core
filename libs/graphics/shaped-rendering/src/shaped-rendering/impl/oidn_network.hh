@@ -71,16 +71,18 @@ public:
     oidn_network(oidn_network const&) = delete;
     oidn_network& operator=(oidn_network const&) = delete;
 
-    /// How large a tile the network runs at by default, in pixels, before padding.
+    /// The largest tile the network may run at, in pixels, before padding.
     ///
-    /// The twenty-five feature maps are what this buys down: they cost 2.7 GiB for a whole 1080p frame and about
-    /// 195 MiB at this size, which is the whole reason tiling exists here.
+    /// A CAP rather than the size used: `create` picks the tile under it that computes the fewest pixels, which is
+    /// usually smaller and never larger.
+    /// The twenty-five feature maps are what this buys down — they cost 2.7 GiB for a whole 1080p frame and about
+    /// 277 MiB at this cap, which is the whole reason tiling exists here.
     ///
-    /// It trades that memory against WASTED WORK rather than against quality, because the overlap is a fixed 80 on
-    /// every side: a 384 tile keeps a 224 interior, a 256 tile keeps only 96.
-    /// Measured end to end on a 1080p frame — 256 takes 2.8 s, 384 takes 0.98 s, and 512 takes 0.94 s for nearly
-    /// twice 384's memory, so this is where the curve flattens.
-    static constexpr int k_default_tile = 384;
+    /// It trades that memory against WASTED WORK rather than against quality, because the overlap is a fixed 80 per
+    /// side and everything within it is computed twice.
+    /// Measured end to end on a 1080p frame: 384 takes 500 ms for 197 MiB, 512 takes 378 for 277, and 768 takes 276
+    /// for 602 — so this is the knee, and a caller who wants the rest can raise it.
+    static constexpr int k_default_tile = 512;
 
     /// How much of a tile is discarded on each side, so its interior sees what a whole-image run would.
     ///
