@@ -1,3 +1,5 @@
+#include "../shaders/shader_fixtures.hh"
+
 #include <clean-core/common/utility.hh> // cc::move
 #include <clean-core/container/fixed_vector.hh>
 #include <clean-core/thread/async_coroutine.hh>
@@ -30,6 +32,8 @@ ASYNC_INVOCABLE_TEST("sg - a raster pipeline draws instanced quads from two vert
                      (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
 
     auto const& vs = co_await shaders::quads.vertex.main_vs->acquire(*ctx);
     auto const& ps = co_await shaders::quads.pixel.main_ps->acquire(*ctx);
@@ -93,6 +97,8 @@ ASYNC_INVOCABLE_TEST("sg - a pipeline built for one target set refuses a renderi
                      (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
 
     auto const& vs = co_await shaders::quads.vertex.main_vs->acquire(*ctx);
     auto const& ps = co_await shaders::quads.pixel.overlay_ps->acquire(*ctx);
@@ -127,6 +133,8 @@ ASYNC_INVOCABLE_TEST("sg - an SGL pixel shader states its targets, and a pipelin
                      (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
 
     auto const& vs = co_await shaders::quads.vertex.main_vs->acquire(*ctx);
     auto const& ps = co_await shaders::quads.pixel.main_ps->acquire(*ctx);
@@ -161,6 +169,8 @@ ASYNC_INVOCABLE_TEST("sg - an SGL pixel shader states its targets, and a pipelin
 ASYNC_INVOCABLE_TEST("sg - a 32-bit indexed draw honours an odd first index", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
 
     // **The positive half of the index-fetch alignment rule**, which
     // libs/graphics/shaped-graphics/tests/command_list/index_buffer_alignment-test.cc only states in the negative.

@@ -350,6 +350,18 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
 - **Tier 2 / legacy backends:** metal, then opengl, webgl.
   webgpu exists on wasm; what it still owes is its own item below.
 
+- **There is no SGL to metallib edge, so the shader-using half of the tier-1 sweep skips on metal.**
+  `shader_fixtures.cc` registers SGL to WGSL and, where DXC exists, to DXIL and SPIR-V.
+  A metal context accepts none of those, so every tier-1 test that acquires a shader is offered a format it cannot
+  take — eleven of them, across `compute-test.cc`, `raster-test.cc` and `sgl-package-test.cc`.
+  They now ask `sg_test::shaders_reach` and SKIP rather than failing on an acquire that cannot succeed.
+  **CI never saw this**: its macOS runner has no Metal 4 device, so the whole metal driver skips there, and the
+  failure only appears on a Mac that has one.
+  Closing it is an SGL-to-MSL compiler, at which point the guard answers true and the eleven start running with
+  nothing to revert.
+  `sg - the SGL fixtures reach at least one format on every build` is what keeps the guard from quietly skipping them
+  on every backend instead.
+
 - **The webgpu backend's remaining gaps.**
   - **The WGSL twins of sg's tier-1 shader tests.**
     The shader package and the routine tests need DXC, so on wasm no tier-1 test dispatches or draws.
