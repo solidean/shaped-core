@@ -109,6 +109,10 @@ constexpr resample_step k_upsamples[] = {
 
 constexpr int k_upsample_count = int(sizeof(k_upsamples) / sizeof(k_upsamples[0]));
 
+/// How many texels along x one convolution thread produces.
+/// Must match NN_CONV_TEXELS in nn_conv.hlsl; the oracle test is what notices if it does not.
+constexpr int k_conv_texels = 32;
+
 /// Half a fp16 lane, widened.
 ///
 /// Written out rather than taken from a library because this is the only place the repo reads one, and the weights
@@ -624,7 +628,7 @@ bool oidn_network::execute(sg::command_list& cmd,
                     .in_channels_a = u32(step.skip == f_count ? in_channels : channels_a),
                     ._pad = 0,
                 });
-                cmd.compute.dispatch_threads(out_channels, e[0], e[1]);
+                cmd.compute.dispatch_threads(out_channels, (e[0] + k_conv_texels - 1) / k_conv_texels, e[1]);
             }
 
             // Back to radiance.

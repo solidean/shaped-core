@@ -69,35 +69,75 @@ float source_at(int x, int y, uint c)
     return gSourceB[texel * b + (c - a)];
 }
 
-// One thread per output channel of one texel.
+// How many texels along x one thread produces.
 //
-// The channel is the FASTEST dimension so that a wave writes one contiguous run, which is the whole reason the
-// feature maps are HWC.
+// This is what makes the shader worth its name rather than a definition of the arithmetic: a thread reads a layer's
+// weights once and spends them on NN_CONV_TEXELS outputs, so the weight traffic per texel falls by that factor.
+// The weights are what dominate — every thread in a wave reads a DIFFERENT output channel's row, so those reads are
+// strided where the input reads are a broadcast, and there is no reuse of them across texels otherwise.
+//
+// 32 was swept rather than picked, over a whole 256x256 tile: 1 is 91 ms, 8 is 18.5, 16 is 12.2, 32 is 11.6 and 48
+// falls back to 16.4 as the accumulators start spilling.
+// A larger tile prefers it more strongly still — at 512 it is 39 ms against 52 for 16.
+//
+// `sr::impl::oidn_network` dispatches against this, and the two must agree; a mismatch is a wrong image, which the
+// oracle test against OIDN's own filter catches immediately.
+#define NN_CONV_TEXELS 32
+
+// One thread per output channel, for a run of NN_CONV_TEXELS texels along x.
+//
+// The channel is still the FASTEST dimension so that a wave writes one contiguous run per texel, which is the whole
+// reason the feature maps are HWC.
 [numthreads(64, 1, 1)] void main_cs(uint3 id : SV_DispatchThreadID)
 {
     uint const o = id.x;
-    uint const x = id.y;
+    uint const x0 = id.y * NN_CONV_TEXELS;
     uint const y = id.z;
-    if (o >= gConstants.out_channels || x >= gConstants.width || y >= gConstants.height)
+    if (o >= gConstants.out_channels || x0 >= gConstants.width || y >= gConstants.height)
         return;
 
     // The bias sits after every weight of the layer, so one buffer carries both.
-    float sum = gWeights[gConstants.bias_offset + o];
+    float const bias = gWeights[gConstants.bias_offset + o];
+
+    float sums[NN_CONV_TEXELS];
+    [unroll] for (uint s = 0; s < NN_CONV_TEXELS; ++s)
+        sums[s] = bias;
 
     uint const in_channels = gConstants.in_channels;
     uint w = gConstants.weight_offset + o * 9u * in_channels;
 
     for (int ky = -1; ky <= 1; ++ky)
     {
-        for (int kx = -1; kx <= 1; ++kx)
+        int const sy = int(y) + ky;
+        if (sy < 0 || sy >= int(gConstants.height))
         {
-            for (uint i = 0; i < in_channels; ++i)
-                sum += gWeights[w + i] * source_at(int(x) + kx, int(y) + ky, i);
-            w += in_channels;
+            w += 3u * in_channels; // the row is entirely padding, and padding is zero
+            continue;
         }
+
+        for (uint i = 0; i < in_channels; ++i)
+        {
+            // One row of the window, read once and spent on all three kernel columns.
+            // Reading it per column instead would trip over the same values three times.
+            float v[NN_CONV_TEXELS + 2];
+            [unroll] for (uint j = 0; j < NN_CONV_TEXELS + 2; ++j)
+                v[j] = source_at(int(x0) + int(j) - 1, sy, i);
+
+            float const w0 = gWeights[w + i];
+            float const w1 = gWeights[w + in_channels + i];
+            float const w2 = gWeights[w + 2u * in_channels + i];
+
+            [unroll] for (uint t = 0; t < NN_CONV_TEXELS; ++t)
+                sums[t] += w0 * v[t] + w1 * v[t + 1] + w2 * v[t + 2];
+        }
+
+        w += 3u * in_channels;
     }
 
     // ReLU on every layer, the last one included — which is why the network's output is never negative, and why the
     // radiance it produces needs no clamp of its own.
-    gTarget[(y * gConstants.width + x) * gConstants.out_channels + o] = max(sum, 0.0);
+    uint const base = (y * gConstants.width + x0) * gConstants.out_channels + o;
+    [unroll] for (uint t = 0; t < NN_CONV_TEXELS; ++t)
+        if (x0 + t < gConstants.width)
+            gTarget[base + t * gConstants.out_channels] = max(sums[t], 0.0);
 }

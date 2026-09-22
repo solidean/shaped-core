@@ -74,8 +74,13 @@ public:
     /// How large a tile the network runs at by default, in pixels, before padding.
     ///
     /// The twenty-five feature maps are what this buys down: they cost 2.7 GiB for a whole 1080p frame and about
-    /// 90 MiB at this size, which is the whole reason tiling exists here.
-    static constexpr int k_default_tile = 256;
+    /// 195 MiB at this size, which is the whole reason tiling exists here.
+    ///
+    /// It trades that memory against WASTED WORK rather than against quality, because the overlap is a fixed 80 on
+    /// every side: a 384 tile keeps a 224 interior, a 256 tile keeps only 96.
+    /// Measured end to end on a 1080p frame — 256 takes 2.8 s, 384 takes 0.98 s, and 512 takes 0.94 s for nearly
+    /// twice 384's memory, so this is where the curve flattens.
+    static constexpr int k_default_tile = 384;
 
     /// How much of a tile is discarded on each side, so its interior sees what a whole-image run would.
     ///

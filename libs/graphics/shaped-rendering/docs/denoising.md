@@ -40,19 +40,25 @@ That split is what keeps a weights bump honest: a changed layer count fails to f
 **The network runs in tiles, and its memory is why.**
 It holds twenty-five feature maps at once, because the skips have to stay live across the whole decoder.
 Run whole that is 5.4 MiB at 64x64, 2.7 GiB at 1080p and 10.7 GiB at 4K, measured by `oidn_network::feature_bytes_for` rather than estimated.
-So the tensors are sized by a tile instead, 256 pixels by default, which is about 90 MiB whatever the image is.
+So the tensors are sized by a tile instead, 384 pixels by default, which is about 195 MiB whatever the image is.
 Half precision would halve the untiled figure and settle nothing.
 
-**It is correct and it is far too slow, and both halves are measured.**
-At 256x256, one tile, OIDN's own CPU filter takes 30 ms on this machine and ours takes 153 ms — so our GPU implementation is about five times slower than their CPU one, per pixel.
-The convolution is the reason: one thread per output channel per texel, each re-reading its own 3x3 neighbourhood across every input channel.
-Nothing is staged into groupshared memory and nothing is reused between neighbouring texels.
-A whole 1080p frame is 240 tiles at that rate, which is tens of seconds and hangs a test watchdog rather than rendering.
+**A convolution thread produces a RUN of texels, which is what makes the network affordable.**
+The weights dominate: every thread in a wave reads a different output channel's row, so those reads are strided where the input reads are a broadcast.
+Producing one texel per thread spends a whole row of weights on a single output and reuses none of it.
+Producing 32 spends the same row on 32 outputs, and one loaded input row serves all three kernel columns instead of being fetched three times.
+Swept over a 256x256 tile: 1 texel is 91 ms, 8 is 18.5, 16 is 12.2, 32 is 11.6, and 48 falls back to 16.4 as the accumulators spill.
 
-**The default tile is also a poor point on the overlap curve, separately from the shader.**
-An 80-pixel overlap on a 256 tile leaves a 96-pixel interior, so a 1080p frame computes 15.7 Mpx to deliver 2.1 Mpx — a 7.6x overhead.
-A 384 tile leaves 224 and drops that to 3.2x for 195 MiB of tensors, and 512 reaches 3.0x for 346 MiB.
-So the tile size trades memory against wasted work, and 256 was chosen for memory before the work was measured.
+**Where that leaves us against Intel, measured rather than claimed.**
+At 256x256 OIDN's own CPU filter takes 30 ms on this machine and ours now takes 11.6 ms, so per pixel we are about 2.6x faster than their CPU implementation.
+A whole 1080p frame takes 1.04 s, against tens of seconds before — it hung a test watchdog rather than finishing.
+Per pixel we are ahead; per FRAME we are roughly level with their CPU, because the overlap makes us compute 6.6 Mpx to deliver 2.1 Mpx.
+So the next real win is the overlap rather than the shader.
+
+**The default tile is 384 because that is where the curve flattens, and it trades memory against wasted work.**
+The overlap is a fixed 80 per side, so a 384 tile keeps a 224 interior and a 256 tile keeps only 96.
+Measured end to end on a 1080p frame: 256 takes 2.8 s for 87 MiB, 384 takes 0.98 s for 195 MiB, and 512 takes 0.94 s for 346 MiB.
+So 512 buys almost nothing for nearly twice 384's memory.
 
 **A tile is 80 pixels wider than what it keeps, on every side, and 80 is measured rather than chosen.**
 At that overlap a tiled image agrees with the same image run whole BIT FOR BIT, so the number is where the network's receptive field ends.
