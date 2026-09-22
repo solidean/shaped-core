@@ -98,12 +98,16 @@ constexpr resample_step k_pools[] = {
     {f_enc4, f_pool4, 4},
 };
 
+constexpr int k_pool_count = int(sizeof(k_pools) / sizeof(k_pools[0]));
+
 constexpr resample_step k_upsamples[] = {
     {f_enc5b, f_up4, 4}, // from the sixteenth up to the eighth
     {f_dec4b, f_up3, 3},
     {f_dec3b, f_up2, 2},
     {f_dec2b, f_up1, 1},
 };
+
+constexpr int k_upsample_count = int(sizeof(k_upsamples) / sizeof(k_upsamples[0]));
 
 /// Half a fp16 lane, widened.
 ///
@@ -444,7 +448,41 @@ bool oidn_network::prepare()
 {
     if (_ctx == nullptr || !is_valid())
         return false;
-    return _programs.build(*_ctx);
+    if (!_programs.build(*_ctx))
+        return false;
+
+    // Built once, the first time the pipelines are all there, and reused by every tile and every frame afterwards.
+    if (_conv_groups.empty())
+        build_groups();
+    return true;
+}
+
+void oidn_network::build_groups()
+{
+    auto& ctx = *_ctx;
+
+    for (auto n = 0; n < k_conv_count; ++n)
+    {
+        auto const& step = k_convs[n];
+        auto const& source_a = _features[step.source];
+        auto const& source_b = step.skip == f_count ? _features[step.source] : _features[step.skip];
+        _conv_groups.push_back(ctx.persistent.create_binding_group(
+            _programs.conv_layout, shaders::nn_conv_bindings{.gSourceA = source_a.as_readonly_buffer(),
+                                                             .gSourceB = source_b.as_readonly_buffer(),
+                                                             .gWeights = _weights.as_readonly_buffer(),
+                                                             .gTarget = _features[step.target].as_readwrite_buffer()}));
+    }
+
+    for (auto const& p : k_pools)
+        _pool_groups.push_back(ctx.persistent.create_binding_group(
+            _programs.pool_layout, shaders::nn_pool_bindings{.gSource = _features[p.source].as_readonly_buffer(),
+                                                             .gTarget = _features[p.target].as_readwrite_buffer()}));
+
+    for (auto const& u : k_upsamples)
+        _upsample_groups.push_back(ctx.persistent.create_binding_group(
+            _programs.upsample_layout,
+            shaders::nn_upsample_bindings{.gSource = _features[u.source].as_readonly_buffer(),
+                                          .gTarget = _features[u.target].as_readwrite_buffer()}));
 }
 
 bool oidn_network::is_ready() const
@@ -472,6 +510,17 @@ bool oidn_network::execute(sg::command_list& cmd,
         _pending_weights.clear();
     }
 
+    // The two groups that name the CALLER's textures, built once per call rather than once per tile.
+    // Everything else was built with the network, because a tile changes push constants and nothing a group names.
+    auto const input_group = ctx.transient.create_binding_group(
+        _programs.input_layout, shaders::nn_input_bindings{.gColor = color.as_readonly_view(),
+                                                           .gAlbedo = albedo.as_readonly_view(),
+                                                           .gNormal = normal.as_readonly_view(),
+                                                           .gTarget = _features[f_input].as_readwrite_buffer()});
+    auto const output_group = ctx.transient.create_binding_group(
+        _programs.output_layout, shaders::nn_output_bindings{.gSource = _features[f_out].as_readonly_buffer(),
+                                                             .gTarget = output.as_readwrite_view()});
+
     // One pass per tile, each writing only its interior.
     // The tensors are reused across tiles, which is the point: they are sized for one tile and never for the image.
     for (auto ty = 0; ty < _tile_counts[1]; ++ty)
@@ -497,11 +546,7 @@ bool oidn_network::execute(sg::command_list& cmd,
 
             // The nine packed channels.
             cmd.compute.bind_pipeline(**_programs.input->try_value());
-            cmd.compute.bind<shaders::nn_input_bindings>(*ctx.transient.create_binding_group(
-                _programs.input_layout, shaders::nn_input_bindings{.gColor = color.as_readonly_view(),
-                                                                   .gAlbedo = albedo.as_readonly_view(),
-                                                                   .gNormal = normal.as_readonly_view(),
-                                                                   .gTarget = _features[f_input].as_readwrite_buffer()}));
+            cmd.compute.bind<shaders::nn_input_bindings>(*input_group);
             cmd.compute.set_inline_constants(shaders::nn_input_constants{.width = u32(_extent[0]),
                                                                          .height = u32(_extent[1]),
                                                                          .source_width = u32(_image_extent[0]),
@@ -517,39 +562,39 @@ bool oidn_network::execute(sg::command_list& cmd,
             // `k_convs` already guarantees.
             auto const run_resamples_before = [&](int target)
             {
-                for (auto const& p : k_pools)
+                for (auto i = 0; i < k_pool_count; ++i)
+                {
+                    auto const& p = k_pools[i];
                     if (p.target == target)
                     {
                         auto const e = level_extent(_extent, p.level);
                         auto const channels = _feature_channels[p.target];
                         cmd.compute.bind_pipeline(**_programs.pool->try_value());
-                        cmd.compute.bind<shaders::nn_pool_bindings>(*ctx.transient.create_binding_group(
-                            _programs.pool_layout,
-                            shaders::nn_pool_bindings{.gSource = _features[p.source].as_readonly_buffer(),
-                                                      .gTarget = _features[p.target].as_readwrite_buffer()}));
+                        cmd.compute.bind<shaders::nn_pool_bindings>(*_pool_groups[i]);
                         cmd.compute.set_inline_constants(shaders::nn_pool_constants{.width = u32(e[0]),
                                                                                     .height = u32(e[1]),
                                                                                     .channels = u32(channels),
                                                                                     ._pad = 0});
                         cmd.compute.dispatch_threads(channels, e[0], e[1]);
                     }
+                }
 
-                for (auto const& u : k_upsamples)
+                for (auto i = 0; i < k_upsample_count; ++i)
+                {
+                    auto const& u = k_upsamples[i];
                     if (u.target == target)
                     {
                         auto const e = level_extent(_extent, u.level);
                         auto const channels = _feature_channels[u.target];
                         cmd.compute.bind_pipeline(**_programs.upsample->try_value());
-                        cmd.compute.bind<shaders::nn_upsample_bindings>(*ctx.transient.create_binding_group(
-                            _programs.upsample_layout,
-                            shaders::nn_upsample_bindings{.gSource = _features[u.source].as_readonly_buffer(),
-                                                          .gTarget = _features[u.target].as_readwrite_buffer()}));
+                        cmd.compute.bind<shaders::nn_upsample_bindings>(*_upsample_groups[i]);
                         cmd.compute.set_inline_constants(shaders::nn_upsample_constants{.width = u32(e[0]),
                                                                                         .height = u32(e[1]),
                                                                                         .channels = u32(channels),
                                                                                         ._pad = 0});
                         cmd.compute.dispatch_threads(channels, e[0], e[1]);
                     }
+                }
             };
 
             for (auto n = 0; n < k_conv_count; ++n)
@@ -568,12 +613,7 @@ bool oidn_network::execute(sg::command_list& cmd,
                 auto const channels_a = _feature_channels[step.source];
 
                 cmd.compute.bind_pipeline(**_programs.conv->try_value());
-                cmd.compute.bind<shaders::nn_conv_bindings>(*ctx.transient.create_binding_group(
-                    _programs.conv_layout,
-                    shaders::nn_conv_bindings{.gSourceA = source_a.as_readonly_buffer(),
-                                              .gSourceB = source_b.as_readonly_buffer(),
-                                              .gWeights = _weights.as_readonly_buffer(),
-                                              .gTarget = _features[step.target].as_readwrite_buffer()}));
+                cmd.compute.bind<shaders::nn_conv_bindings>(*_conv_groups[n]);
                 cmd.compute.set_inline_constants(shaders::nn_conv_constants{
                     .width = u32(e[0]),
                     .height = u32(e[1]),
@@ -589,9 +629,7 @@ bool oidn_network::execute(sg::command_list& cmd,
 
             // Back to radiance.
             cmd.compute.bind_pipeline(**_programs.output->try_value());
-            cmd.compute.bind<shaders::nn_output_bindings>(*ctx.transient.create_binding_group(
-                _programs.output_layout, shaders::nn_output_bindings{.gSource = _features[f_out].as_readonly_buffer(),
-                                                                     .gTarget = output.as_readwrite_view()}));
+            cmd.compute.bind<shaders::nn_output_bindings>(*output_group);
             cmd.compute.set_inline_constants(shaders::nn_output_constants{.width = u32(_extent[0]),
                                                                           .height = u32(_extent[1]),
                                                                           .target_width = u32(_image_extent[0]),

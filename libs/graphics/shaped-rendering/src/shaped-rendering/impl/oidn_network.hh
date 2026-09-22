@@ -148,6 +148,9 @@ public:
                                f32 input_scale);
 
 private:
+    /// Creates the tile-invariant binding groups, once the pipelines exist to say what they bind against.
+    void build_groups();
+
     sg::context* _ctx = nullptr;
     tg::vec2i _image_extent = tg::vec2i(0, 0);
     tg::vec2i _extent = tg::vec2i(0, 0); // the padded one the tensors are sized by — one TILE, not the image
@@ -188,5 +191,15 @@ private:
     cc::vector<i32> _out_channels;
 
     oidn_programs _programs;
+
+    /// The binding groups the network dispatches against, built once and reused by every tile and every frame.
+    ///
+    /// They are tile-invariant on purpose: a tile changes the push constants and nothing a group names, so building
+    /// one per tile would mean 26 groups per tile and 6240 in a 1080p frame — past what a transient descriptor region
+    /// holds, which is how this was found.
+    /// The input and output groups are NOT here, because they name the caller's textures rather than ours.
+    cc::vector<sg::binding_group_handle> _conv_groups;
+    cc::vector<sg::binding_group_handle> _pool_groups;
+    cc::vector<sg::binding_group_handle> _upsample_groups;
 };
 } // namespace sr::impl

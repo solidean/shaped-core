@@ -43,6 +43,17 @@ Run whole that is 5.4 MiB at 64x64, 2.7 GiB at 1080p and 10.7 GiB at 4K, measure
 So the tensors are sized by a tile instead, 256 pixels by default, which is about 90 MiB whatever the image is.
 Half precision would halve the untiled figure and settle nothing.
 
+**It is correct and it is far too slow, and both halves are measured.**
+At 256x256, one tile, OIDN's own CPU filter takes 30 ms on this machine and ours takes 153 ms — so our GPU implementation is about five times slower than their CPU one, per pixel.
+The convolution is the reason: one thread per output channel per texel, each re-reading its own 3x3 neighbourhood across every input channel.
+Nothing is staged into groupshared memory and nothing is reused between neighbouring texels.
+A whole 1080p frame is 240 tiles at that rate, which is tens of seconds and hangs a test watchdog rather than rendering.
+
+**The default tile is also a poor point on the overlap curve, separately from the shader.**
+An 80-pixel overlap on a 256 tile leaves a 96-pixel interior, so a 1080p frame computes 15.7 Mpx to deliver 2.1 Mpx — a 7.6x overhead.
+A 384 tile leaves 224 and drops that to 3.2x for 195 MiB of tensors, and 512 reaches 3.0x for 346 MiB.
+So the tile size trades memory against wasted work, and 256 was chosen for memory before the work was measured.
+
 **A tile is 80 pixels wider than what it keeps, on every side, and 80 is measured rather than chosen.**
 At that overlap a tiled image agrees with the same image run whole BIT FOR BIT, so the number is where the network's receptive field ends.
 At 64 the two are 1.4e-03 apart, and with no overlap at all 2.8e-01 — which is what a seam looks like.
@@ -53,9 +64,16 @@ Hanging over means filling the overhang by repeating the border pixel, and that 
 It moves the result, and it moves it further the wider the overlap is.
 So before this was fixed the error GREW with the overlap, which is the opposite of how a halo behaves and is what gave the bug away.
 
+**Binding groups are built with the network, not with a dispatch.**
+A tile changes push constants and nothing a group names, so all twenty-four internal groups are made once and reused by every tile and every frame.
+Only the two that name the caller's own textures are per call, and they are still not per tile.
+Built per dispatch instead, a 1080p frame wants 240 tiles x 26 groups, which overruns the transient descriptor region — that is how this was found rather than reasoned about.
+
 **That it computes what Intel computes is measured, not assumed.**
 `oidn_filter_reference` runs OIDN's own filter over the same input, and the test compares the two.
 The difference is a mean of 1.0e-05 and a worst of 7.5e-05 across a 64x64 image, which is what sixteen layers of fp32 on the GPU against their CPU inference costs.
+The TILED path is held to the same standard by a second oracle: nine tiles over a 384x384 image land a mean of 1.1e-05 and a worst of 1.4e-04 against Intel's whole-image filter.
+So tiling costs nothing measurable in agreement, and the first oracle alone would not have shown that, because 64x64 fits one tile and never tiles at all.
 Reading the weights in the wrong source layout moves that mean to 0.29, four orders of magnitude out, which is the margin the bound is set against.
 It is the only test that can ask the question: every other one checks a piece against its own definition, and a self-consistent mistake passes all of them.
 
