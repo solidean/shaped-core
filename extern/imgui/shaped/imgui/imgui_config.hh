@@ -23,6 +23,15 @@ template <int D, class T>
 struct vec;
 } // namespace tg
 
+/// **32-bit draw indices, because sg requires an index fetch to start on a 4-byte boundary.**
+///
+/// An `ImDrawCmd` names its first index as an arbitrary `IdxOffset`, and roughly half of those are odd.
+/// With imgui's default 16-bit index that puts the fetch 2 bytes past a boundary, which `sg::index_buffer_offset_alignment`
+/// refuses — and which metal, the backend the rule comes from, answers by drawing part of the UI with no error at all.
+/// 32-bit indices make every index 4-aligned by construction, so the rule cannot bind and no draw has to be split or padded.
+/// The cost is two extra bytes per index on UI geometry that is rebuilt each frame anyway.
+#define ImDrawIdx unsigned int
+
 /// Implicit ImVec2 <-> tg::vec2f conversions — definitions in <imgui/imgui_sc.hh>.
 #define IM_VEC2_CLASS_EXTRA               \
     ImVec2(::tg::vec<2, float> const& v); \

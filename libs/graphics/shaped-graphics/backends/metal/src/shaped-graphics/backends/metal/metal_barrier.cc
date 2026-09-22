@@ -87,6 +87,18 @@ MTL::Stages clamp_to_compute_encoder(MTL::Stages stages)
     return clamped != 0 ? clamped : k_compute_encoder_stages;
 }
 
+MTL::Stages clamp_to_render_source(MTL::Stages stages)
+{
+    auto const clamped = stages & k_render_encoder_source_stages;
+    return clamped != 0 ? clamped : k_render_encoder_source_stages;
+}
+
+MTL::Stages clamp_to_render_destination(MTL::Stages stages)
+{
+    auto const clamped = stages & k_render_encoder_destination_stages;
+    return clamped != 0 ? clamped : k_render_encoder_destination_stages;
+}
+
 metal_barrier translate_barrier(sg::access_barrier const& barrier)
 {
     if (!barrier.needed)

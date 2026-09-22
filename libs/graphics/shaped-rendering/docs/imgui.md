@@ -96,6 +96,15 @@ This frame's geometry is deliberately *not* on the routine.
 It comes from the transient scope and lives on the stack for one `execute()`, which is what makes the call re-entrant across viewports —
 with multi-viewport imgui calls it once per viewport per frame, and geometry cached on the routine would have each viewport overwrite the last one's.
 
+**The indices are 32-bit, and that is a correctness requirement rather than a capacity one.**
+Our injected config widens `ImDrawIdx` to `unsigned int` — see [imgui_config.hh](../../../../extern/imgui/shaped/imgui/imgui_config.hh).
+An `ImDrawCmd` names its first index as an arbitrary `IdxOffset`, and about half of those are odd.
+With imgui's default 16-bit index that puts the fetch 2 bytes into a 4-byte word, which [`sg::index_buffer_offset_alignment`](../../shaped-graphics/docs/concepts/raster-pipeline.md) refuses.
+MTL4 is why the rule exists: its draw takes the indices as a GPU address with no offset parameter of its own.
+A misaligned first index draws part of the mesh, so the UI draws in pieces — with API validation enabled and nothing reported.
+Widening the index makes every one of them 4-aligned by construction, so no draw has to be split or padded.
+It lifts imgui's 64K-vertex-per-draw-list ceiling as a side effect, which is the reason imgui's own `imconfig.h` offers the switch.
+
 ## Theming
 
 The Solidean dark theme, on the near-black `#0b0d12` ground.

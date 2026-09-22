@@ -48,6 +48,13 @@ public:
 
     [[nodiscard]] sg::pipeline_layout_description const& description() const { return _desc; }
 
+    /// Bytes the inline-constants block occupies, or 0 for a layout that declares none.
+    /// Validated at creation, so a non-zero answer is a positive multiple of four.
+    [[nodiscard]] isize inline_constants_size() const
+    {
+        return _desc.inline_constants.has_value() ? _desc.inline_constants.value().block_size.value_or(0) : 0;
+    }
+
 private:
     sg::pipeline_layout_description _desc;
 };

@@ -140,15 +140,56 @@ cc::result<sg::binding_group_handle> metal_staging_binding_group::mint()
 
     // Everything the snapshot names, deduplicated only by being a handle each: the group has to outlive the builder's
     // next mutation.
-    auto bound = cc::vector<sg::raw_buffer_handle>();
-    for (auto const& r : _resources)
-        if (r != nullptr)
-            bound.push_back(r);
+    //
+    // **An array binding's elements are routed apart from the scalar ones**, exactly as the direct creation path routes
+    // them, because a dispatch declares an array per element and a scalar binding automatically.
+    // The slot is what connects the two: a binding owns `count` consecutive slots from its own index, so walking the
+    // layout's bindings is what turns this flat image back into the shape a declare addresses by name.
+    auto bound = cc::vector<metal_binding_group::bound_buffer>();
+    auto bound_textures = cc::vector<metal_binding_group::bound_texture>();
+    auto array_bindings = cc::vector<metal_binding_group::array_binding>();
 
-    auto bound_textures = cc::vector<sg::raw_texture_handle>();
-    for (auto const& r : _texture_resources)
-        if (r != nullptr)
-            bound_textures.push_back(r);
+    auto const slot_resource = [&](isize slot) -> metal_binding_group::array_element
+    {
+        auto out = metal_binding_group::array_element{};
+        if (slot < _resources.size())
+            out.buffer = _resources[slot];
+        if (slot < _texture_resources.size())
+            out.texture = _texture_resources[slot];
+        return out;
+    };
+
+    for (auto const& b : typed_layout.bindings())
+    {
+        auto const shape = sg::shape_of(b.type);
+        auto const count = isize(b.count < 1 ? 1 : b.count);
+        auto const is_array = b.is_array() && shape != sg::view_shape::acceleration_structure;
+
+        if (!is_array)
+        {
+            // The bound view is gone by now — a snapshot keeps the resource, not what it was bound through — so the
+            // access class comes from the layout's binding type instead.
+            // The two agree by construction: `sg::accepts` is what let the view be staged here at all.
+            auto const access = sg::access_of(b.type);
+
+            for (auto element = isize(0); element < count; ++element)
+            {
+                auto const resource = slot_resource(isize(b.index) + element);
+                if (resource.buffer != nullptr)
+                    bound.push_back({.buffer = resource.buffer, .access = access});
+                if (resource.texture != nullptr)
+                    bound_textures.push_back({.texture = resource.texture, .access = access});
+            }
+            continue;
+        }
+
+        auto array = metal_binding_group::array_binding{.name = cc::string(b.name),
+                                                        .is_texture = shape == sg::view_shape::texture,
+                                                        .elements = {}};
+        for (auto element = isize(0); element < count; ++element)
+            array.elements.push_back(slot_resource(isize(b.index) + element));
+        array_bindings.push_back(cc::move(array));
+    }
 
     auto bound_tlases = cc::vector<sg::tlas_handle>();
     for (auto const& r : _tlas_resources)
@@ -159,6 +200,7 @@ cc::result<sg::binding_group_handle> metal_staging_binding_group::mint()
 
     auto typed = std::static_pointer_cast<metal_binding_group_layout const>(layout());
     return sg::binding_group_handle(std::make_shared<metal_binding_group const>(
-        _ctx, cc::move(typed), arguments, cc::move(bound), cc::move(bound_textures), cc::move(bound_tlases)));
+        _ctx, cc::move(typed), arguments, cc::move(bound), cc::move(bound_textures), cc::move(bound_tlases),
+        cc::move(array_bindings)));
 }
 } // namespace sg::backend::metal

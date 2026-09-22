@@ -56,20 +56,57 @@ Recording through the returned scope keeps the "draw into this pass" flow on the
 `cmd.raster` records the same draws for a caller not holding the scope, and `cmd.raster.manual` is the path with no RAII object at all.
 Only *raster* operations are mirrored onto the scope; uploads, downloads and the context stay on the command list, reached through `scope.command_list()`.
 
-## Backend split (dx12 real, vulkan stubbed)
+### An index fetch starts on a 4-byte boundary
+
+`sg::index_buffer_offset_alignment` is 4.
+It binds on the *sum* of the bound view's `offset_in_bytes` and the draw's `index_range.offset` — the latter counted in indices, not bytes.
+So a perfectly aligned `index_buffer_view` still yields a misaligned fetch when a draw starts at an odd index of a 16-bit buffer.
+That is why `bind_index_buffer` cannot carry the rule alone, and `draw_indexed` checks it too.
+
+**It is a portable floor, hardcoded rather than queried**, the same shape as the storage-buffer offset rules in [views.md](views.md).
+Metal is the only backend that minds.
+It names the indices by GPU address, so sg's first index is folded into that address — and it answers a misaligned one by drawing *part* of the mesh, with no error and no validation message.
+D3D12 and Vulkan take an odd first index without complaint.
+A rule left to the backend that needs it would therefore be a rule nobody developing on Windows ever meets, in code that then draws wrong on a Mac.
+
+**Every backend carries the check**, which is the convention [writing-a-backend](../writing-a-backend.md) states for contracts sg does not validate before the seam.
+`tests/command_list/index_buffer_alignment-test.cc` is what holds them to it: the two refusals are invocable, so they run against whichever backends the suite has.
+
+`sg::is_aligned_index_fetch(format, view_offset, first_index)` answers it without asserting, for a caller that would rather ask.
+A mesh importer splitting sub-meshes is the case it exists for.
+The two fixes are an even first index, or 32-bit indices — where every index is already 4 bytes wide and the rule cannot bind.
+
+## Backend split
 
 The frontend is the abstract `raster_pipeline` + description + the `raster_*` command-list virtuals.
-The **dx12** backend fills a `D3D12_GRAPHICS_PIPELINE_STATE_DESC` in [`dx12_raster_pipeline`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_raster_pipeline.cc).
+All four backends implement it.
+
+**dx12** fills a `D3D12_GRAPHICS_PIPELINE_STATE_DESC` in [`dx12_raster_pipeline`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_raster_pipeline.cc).
 The state→D3D12 mappings live in `dx12_raster_state.cc`.
 It binds on the **graphics** root-signature bind point — `SetGraphicsRootSignature` / `SetGraphicsRootDescriptorTable`, distinct from compute.
 It declares vertex, index and bound-group hazards at draw time, the same rhythm as `compute_dispatch`.
 [`dx12_pipeline_layout`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_pipeline_layout.cc) sets `ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT` on every root signature.
 A graphics PSO with a vertex-input layout requires it, and it is inert for compute and ray tracing.
-**vulkan** is a `CC_UNREACHABLE` stub.
+
+**vulkan** builds a `VkGraphicsPipelineCreateInfo` in [`vulkan_raster_pipeline`](../../backends/vulkan/src/shaped-graphics/backends/vulkan/vulkan_raster_pipeline.cc).
+It records draws through `vkCmdBindIndexBuffer` / `vkCmdDrawIndexed`, declaring the same hazards at draw time.
+A vertex attribute's SPIR-V `location` is its index in `vertex_input_layout::attributes`, since sg names an input by an HLSL semantic and SPIR-V has none.
+
+**metal** splits what a D3D12 PSO folds together, across three MTL4 objects, and is the one backend with no `setVertexBuffer` and no root constants.
+Vertex buffers and inline constants therefore arrive as addresses in the command list's one `MTL4ArgumentTable`, at the buffer indices `metal_common.hh` fixes.
+Groups sit at 0 to 2, sg's reserved group at 3, inline constants at 4, and vertex-input slot `n` at 5 + `n`.
+An attribute's `[[attribute(n)]]` index is its position in `attributes`, the same workaround vulkan makes for the same missing field.
+[backends/metal/readme.md](../../backends/metal/readme.md) carries the rest, including why the index alignment above is a portable rule rather than metal's.
+
+**webgpu** records through `wgpuRenderPassEncoderSetIndexBuffer` / `wgpuRenderPassEncoderDrawIndexed`, re-binding its pass state when a pass reopens.
+
+**No backend supports an array binding on a draw.**
+The raster scope has no `declare_array_*_access` pair, so a bound array binding cannot be accounted for: dx12, vulkan and metal each assert on one, and webgpu has no binding arrays at all.
+See [bindings](bindings.md#array-bindings) and [TODO](../TODO.md).
 
 ## Deferred
 
-**Indirect draws**, **dynamic** primitive topology and depth bias (baked into the PSO for now), **mesh / task** stages, and the **vulkan** implementation.
+**Indirect draws**, **dynamic** primitive topology and depth bias (baked into the PSO for now), **mesh / task** stages, and **array bindings in a draw**.
 Geometry and tessellation stages are **in** (dx12). See [TODO](../TODO.md).
 
 ## See also
