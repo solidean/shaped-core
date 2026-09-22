@@ -61,7 +61,9 @@ using namespace nn_output_bindings;
         return;
 
     uint2 const src = uint2(uint(gConstants.read_offset_x + int(id.x)), uint(gConstants.read_offset_y + int(id.y)));
-    uint const base = (src.y * gConstants.width + src.x) * 3u;
+    // Four, not three: the network's last tensor is padded to a multiple of four like every other one, and its
+    // fourth channel is a zero nothing reads.
+    uint const base = (src.y * gConstants.width + src.x) * 4u;
     float3 value = float3(gSource[base + 0], gSource[base + 1], gSource[base + 2]);
 
     value = max(sanitize(value), float3(0, 0, 0));

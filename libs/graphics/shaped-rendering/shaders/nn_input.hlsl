@@ -69,7 +69,9 @@ using namespace nn_input_bindings;
     // A missing normal reads as zero and maps to the middle of the range, which is what an absent guide should be.
     float3 const normal = clamp(sanitize(gNormal.Load(p).rgb), -1.0, 1.0) * 0.5 + 0.5;
 
-    uint const base = (id.y * gConstants.width + id.x) * 9u;
+    // Twelve, not nine: every tensor's channel count is padded to a multiple of four so the convolution can read
+    // four at a time, and the three padding channels carry a hard zero rather than whatever was in memory.
+    uint const base = (id.y * gConstants.width + id.x) * 12u;
     gTarget[base + 0] = color.x;
     gTarget[base + 1] = color.y;
     gTarget[base + 2] = color.z;
@@ -79,4 +81,7 @@ using namespace nn_input_bindings;
     gTarget[base + 6] = normal.x;
     gTarget[base + 7] = normal.y;
     gTarget[base + 8] = normal.z;
+    gTarget[base + 9] = 0.0;
+    gTarget[base + 10] = 0.0;
+    gTarget[base + 11] = 0.0;
 }

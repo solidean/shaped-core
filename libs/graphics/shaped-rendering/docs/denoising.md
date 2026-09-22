@@ -40,36 +40,50 @@ That split is what keeps a weights bump honest: a changed layer count fails to f
 **The network runs in tiles, and its memory is why.**
 It holds twenty-five feature maps at once, because the skips have to stay live across the whole decoder.
 Run whole that is 5.4 MiB at 64x64, 2.7 GiB at 1080p and 10.7 GiB at 4K, measured by `oidn_network::feature_bytes_for` rather than estimated.
-So the tensors are sized by a tile instead, 384 pixels by default, which is about 195 MiB whatever the image is.
+So the tensors are sized by a tile instead, 384 pixels by default, which is about 197 MiB whatever the image is.
 Half precision would halve the untiled figure and settle nothing.
 
-**A convolution thread produces a RUN of texels, which is what makes the network affordable.**
+**A convolution thread produces a RUN of texels, which is what made the network affordable at all.**
 Producing one texel per thread spends a whole row of weights on a single output and reuses none of it.
-Producing sixteen spends the same row on sixteen outputs, and one loaded input row serves all three kernel columns instead of being fetched three times.
+Producing several spends the same row on all of them, and one loaded input row serves all three kernel columns instead of being fetched three times.
 That one change took a 256x256 tile from 91 ms to 18.5.
 
 **The weights are stored with the OUTPUT channel innermost, because that is the dimension a wave varies.**
 A lane's output channel is what differs across the wave, so the original `[o][ky][kx][i]` made a single weight load touch sixty-four rows scattered `9 * in_channels` floats apart.
-Turning it inside out to `[ky][kx][i][o]` makes that load one or two cache lines.
-It is worth about 1.1x at the same blocking and 1.25x once the blocking is re-tuned, because cheaper weights move the best run of texels from 32 down to 16.
+Turning it inside out to `[ky][kx][i][o]` makes that load one or two cache lines, and is worth about 1.25x once the blocking is re-tuned.
 
-**Blocking the output channels as well was tried twice and does not pay.**
-16x1 is 8.0 ms where 16x2 is 10.9 and 8x2 is 9.4, under both weight layouts.
+**Every channel count is padded to a multiple of four, so the source is read four channels at a time.**
+This is OIDN's `tensorBlockC` in our own terms, and the measurement asked for it.
+Hoisting the input reads out of the channel loop took a tile from 7.4 ms to 2.6, so they were two thirds of the time.
+A channel is contiguous within a texel, so one `float4` fetches four of them.
+Only three of the network's shapes are not already a multiple of four: the nine input channels, the three output ones, and the seventy-three `dec_conv1a` concatenates.
+So the padding costs almost nothing to compute.
+A padding channel carries a hard zero and a weight of zero, because a NaN left in memory would survive being multiplied by nothing.
+Together with a re-swept run of eight texels that is 7.6 ms to 5.3.
+
+**It is worth less than the instruction count suggests, and that says where the limit now is.**
+Four times fewer load instructions bought 1.4x rather than 4x.
+The eighteen texels of a window are far apart in memory, so a `float4` and a `float` from the same texel cost the same cache line.
+So what remains is memory divergence rather than issue rate.
+The fix for that is a layout where a window's texels are contiguous, which is CHW — the layout OIDN's CPU device uses and its GPU device does not.
+
+**Blocking the output channels as well was tried under both weight layouts and does not pay.**
+16x1 is 8.0 ms where 16x2 is 10.9 and 8x2 is 9.4.
 The sixty-four lanes of a wave already read the same input, so that traffic is a broadcast rather than something a second blocking dimension could amortize.
 The registers it costs therefore buy nothing back.
 This is the one place where the obvious next step is measurably wrong, which is why it is written down rather than left to be retried.
 
-**Against OIDN's own GPU device we are far behind, and that is the comparison that matters.**
-Their CUDA device filters a 256x256 tile in 0.67 ms against our 7.6, and a whole 1080p frame in 20.6 ms against our 662 — 11x and 32x.
+**Against OIDN's own GPU device we are still far behind, and that is the comparison that matters.**
+Their CUDA device filters a 256x256 tile in 0.67 ms against our 5.3, and a whole 1080p frame in 20.6 ms against our 504 — 8x and 24x.
 Both were timed the same way: device-resident buffers, warmed, best of several, with only the filter and its sync inside the clock.
-The CPU comparison flatters us and is not the bar — for the record it is 30 ms against our 7.6 at 256x256.
+The CPU comparison flatters us and is not the bar — for the record it is 30 ms against our 5.3 at 256x256.
 
 **The gap is architectural rather than a matter of tuning.**
-OIDN's GPU path is fp16 on tensor cores through cutlass; ours is fp32 SIMT.
-Their minimum tile is 768 against our 384, so they waste less on overlap.
-And their kernel is a tuned implicit GEMM where ours is hand-written.
-A 1080p frame is about 1660 GFLOP the way we tile it, and we sustain 2.5 TFLOP/s of roughly 20-25 peak on this GPU.
-So even a perfectly tuned fp32 kernel lands near 80 ms and is still 4x off: closing the rest needs half precision and the matrix hardware, which on DirectX means cooperative vectors.
+OIDN's GPU path is `cutlass::conv::device::ImplicitGemmConvolution` over `TensorNHWC`, in fp16, on tensor cores.
+The SM80 instantiation uses a `GemmShape<16, 8, 16>` instruction with a fused `LinearCombinationRelu` epilogue.
+Their weights are `ohwi` and their activations `hwc`, with channels padded to eight; `CUDADevice::init` sets `tensorBlockC = 8` and says why, "required by Tensor Core operations".
+Ours is fp32 SIMT, and a 1080p frame is about 1700 GFLOP the way we tile it, sustained at 3.4 TFLOP/s of roughly 20-25 peak.
+So even a perfectly tuned fp32 kernel lands near 85 ms and is still 4x off: the rest is the matrix hardware, which on DirectX means cooperative vectors.
 That is also what an SGL port cannot reach today, since SGL stays on the intersection of its backends and neither fp16 nor a matrix type is in it.
 
 **Reproducing the GPU comparison takes a file we deliberately do not fetch.**
@@ -78,7 +92,7 @@ So `OpenImageDenoise_device_cuda.dll` has to be taken out of the upstream archiv
 
 **The default tile is 384 because that is where the curve flattens, and it trades memory against wasted work.**
 The overlap is a fixed 80 per side, so a 384 tile keeps a 224 interior and a 256 tile keeps only 96.
-Measured end to end on a 1080p frame: 384 takes 662 ms for 195 MiB and 768 takes 459 ms for 779 MiB.
+Measured end to end on a 1080p frame: 384 takes 504 ms for 197 MiB and 768 takes 351 ms for 788 MiB.
 So the curve keeps paying, but in memory — 768 is a third faster for four times 384's tensors, and an earlier sweep found 1024 regressing outright.
 
 **A tile is 80 pixels wider than what it keeps, on every side, and 80 is measured rather than chosen.**

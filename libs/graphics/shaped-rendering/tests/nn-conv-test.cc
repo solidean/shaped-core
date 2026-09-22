@@ -30,7 +30,7 @@ namespace
 {
 constexpr int k_width = 7;
 constexpr int k_height = 5;
-constexpr int k_in = 6;
+constexpr int k_in = 8; // a multiple of four, because the shader reads four channels in one load
 constexpr int k_out = 4;
 
 /// Deterministic, and spread over positive and negative so a dropped sign does not cancel out.
@@ -144,10 +144,14 @@ ASYNC_INVOCABLE_TEST("sr - the network's convolution matches a reference impleme
     auto const target_buffer = ctx.transient.create_buffer<f32>(
         k_width * k_height * k_out, sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
 
+    // The shader reads its sources four channels at a time, so they are bound as a float4 view of the same memory.
+    auto const source4 = source_buffer.try_reinterpret_as<tg::vec4f>();
+    REQUIRE(source4.has_value());
+
     auto const group = ctx.transient.create_binding_group(
-        group_layout, sr::shaders::nn_conv_bindings{.gSourceA = source_buffer.as_readonly_buffer(),
+        group_layout, sr::shaders::nn_conv_bindings{.gSourceA = source4.value().as_readonly_buffer(),
                                                     // Nothing reads B here: every channel is below in_channels_a.
-                                                    .gSourceB = source_buffer.as_readonly_buffer(),
+                                                    .gSourceB = source4.value().as_readonly_buffer(),
                                                     .gWeights = weight_buffer.as_readonly_buffer(),
                                                     .gTarget = target_buffer.as_readwrite_buffer()});
 

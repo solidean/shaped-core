@@ -160,9 +160,11 @@ ASYNC_INVOCABLE_TEST("sr - the network's transfer curve round-trips across the H
     cmd->upload.bytes_to_texture(albedo.raw(), cc::span<tg::vec4f const>(zeros).as_bytes());
     cmd->upload.bytes_to_texture(normal.raw(), cc::span<tg::vec4f const>(zeros).as_bytes());
 
-    // The nine-channel tensor the input shader writes, and the three-channel slice the output shader reads.
+    // The tensor the input shader writes, and the slice the output shader reads.
+    // Both are padded to a multiple of four channels — nine becomes twelve and three becomes four — because that is
+    // what lets the convolution between them read four channels in one load.
     auto const packed = ctx.transient.create_buffer<f32>(
-        width * 9, sg::buffer_usage::readonly_buffer | sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
+        width * 12, sg::buffer_usage::readonly_buffer | sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
 
     cmd->compute.bind_pipeline(*input_pipeline);
     cmd->compute.bind<sr::shaders::nn_input_bindings>(*ctx.transient.create_binding_group(
@@ -189,18 +191,18 @@ ASYNC_INVOCABLE_TEST("sr - the network's transfer curve round-trips across the H
     ctx.advance_epoch();
 
     auto const encoded = co_await readback_packed.data();
-    REQUIRE(encoded.size() == width * 9);
+    REQUIRE(encoded.size() == width * 12);
 
     auto compacted = cc::vector<f32>();
     for (auto i = 0; i < width; ++i)
-        for (auto c = 0; c < 3; ++c)
-            compacted.push_back(encoded[i * 9 + c]);
+        for (auto c = 0; c < 4; ++c)
+            compacted.push_back(c < 3 ? encoded[i * 12 + c] : 0.0f);
 
     // Created in the SECOND epoch: a transient buffer does not outlive the one it was made in, and everything above
     // ran in the first.
     auto cmd2 = ctx.create_command_list();
     auto const three
-        = ctx.transient.create_buffer<f32>(width * 3, sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);
+        = ctx.transient.create_buffer<f32>(width * 4, sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);
     cmd2->upload.data_to_buffer(three, compacted);
     cmd2->compute.bind_pipeline(*output_pipeline);
     cmd2->compute.bind<sr::shaders::nn_output_bindings>(*ctx.transient.create_binding_group(

@@ -1,3 +1,4 @@
+#include <clean-core/common/assert.hh>
 #include <clean-core/common/utility.hh>
 #include <clean-core/record/log.hh>
 #include <clean-core/streams/file_stream.hh>
@@ -111,7 +112,7 @@ constexpr int k_upsample_count = int(sizeof(k_upsamples) / sizeof(k_upsamples[0]
 
 /// How many texels along x one convolution thread produces.
 /// Must match NN_CONV_TEXELS in nn_conv.hlsl; the oracle test is what notices if it does not.
-constexpr int k_conv_texels = 16;
+constexpr int k_conv_texels = 8;
 
 /// Half a fp16 lane, widened.
 ///
@@ -222,14 +223,23 @@ bool oidn_network::create(sg::context& ctx, tg::vec2i image_extent, int max_tile
     if (tensors.empty())
         return false;
 
-    // Every layer's weights, transposed out of `oihw` into the [o][ky][kx][i] the shader walks, then its bias.
-    // One buffer for the network, because a layer is cheaper to address as a pair of offsets than as a binding.
-    auto packed = cc::vector<f32>();
-    _weight_offsets.clear();
-    _bias_offsets.clear();
+    // Read every layer first, because the weights cannot be packed until the feature shapes are known.
+    //
+    // CHANNELS ARE PADDED TO A MULTIPLE OF FOUR so the convolution can read its source four channels at a time.
+    // That is OIDN's `tensorBlockC` in our own terms, and it is what the measurement asked for: the input reads were
+    // two thirds of the shader's time, eighteen scattered loads for every three weight loads.
+    // Only three of the network's shapes are not already a multiple of four — the nine input channels, the three
+    // output ones, and the seventy-three `dec_conv1a` concatenates — so the padding costs almost nothing to compute.
+    struct layer_source
+    {
+        tza_tensor const* weight = nullptr;
+        tza_tensor const* bias = nullptr;
+        i32 in_channels = 0;
+        i32 out_channels = 0;
+    };
 
-    auto widths = cc::vector<tg::vec2i>(); // in, out — per layer, read from the weights themselves
-    widths.reserve(k_conv_count);
+    auto sources = cc::vector<layer_source>();
+    sources.reserve(k_conv_count);
 
     for (auto const& step : k_convs)
     {
@@ -254,47 +264,95 @@ bool oidn_network::create(sg::context& ctx, tg::vec2i image_extent, int max_tile
             return false;
         }
 
-        widths.push_back(tg::vec2i(in_channels, out_channels));
-        _weight_offsets.push_back(u32(packed.size()));
-
-        auto const* const source = reinterpret_cast<u16 const*>(weight->data.data());
-        for (auto k = 0; k < 9; ++k)
-            for (auto i = 0; i < in_channels; ++i)
-                for (auto o = 0; o < out_channels; ++o)
-                {
-                    // oihw: o major, then i, then the 3x3 — so one element is at ((o * in + i) * 9 + k).
-                    // Written out as [ky][kx][i][o], with the OUTPUT channel innermost: that is what varies across a
-                    // wave, so it is what has to be contiguous for a weight load to touch one cache line.
-                    packed.push_back(from_half(source[(o * in_channels + i) * 9 + k]));
-                }
-
-        _bias_offsets.push_back(u32(packed.size()));
-        auto const* const bias_source = reinterpret_cast<u16 const*>(bias->data.data());
-        for (auto o = 0; o < out_channels; ++o)
-            packed.push_back(from_half(bias_source[o]));
+        sources.push_back({.weight = weight, .bias = bias, .in_channels = in_channels, .out_channels = out_channels});
     }
 
     // Every feature map's shape, in one forward pass.
     // The enum's order is the order the network produces them, so a tensor's source is always already known — which
     // is what lets this be a loop rather than a recursion.
-    _feature_channels = cc::vector<i32>::create_filled(f_count, 0);
+    auto real_channels = cc::vector<i32>::create_filled(f_count, 0);
     _feature_levels = cc::vector<i32>::create_filled(f_count, 0);
 
-    _feature_channels[f_input] = 9;
+    real_channels[f_input] = 9;
     for (auto n = 0; n < k_conv_count; ++n)
     {
-        _feature_channels[k_convs[n].target] = widths[n][1];
+        real_channels[k_convs[n].target] = sources[n].out_channels;
         _feature_levels[k_convs[n].target] = k_convs[n].level;
     }
     for (auto const& p : k_pools)
     {
-        _feature_channels[p.target] = _feature_channels[p.source];
+        real_channels[p.target] = real_channels[p.source];
         _feature_levels[p.target] = p.level;
     }
     for (auto const& u : k_upsamples)
     {
-        _feature_channels[u.target] = _feature_channels[u.source];
+        real_channels[u.target] = real_channels[u.source];
         _feature_levels[u.target] = u.level - 1; // an upsample lands one level finer than its source
+    }
+
+    // What every tensor is actually stored with: the padded count, which is what every shader is told.
+    // A padding channel carries a hard zero rather than whatever was left in memory, because the next layer would
+    // multiply it by a weight of zero and a NaN times zero is still a NaN.
+    _feature_channels = cc::vector<i32>::create_filled(f_count, 0);
+    for (auto t = 0; t < f_count; ++t)
+        _feature_channels[t] = ((real_channels[t] + 3) / 4) * 4;
+
+    // Every layer's weights, as [ky][kx][i][o] over the PADDED channel spaces, then its bias.
+    // One buffer for the network, because a layer is cheaper to address as a pair of offsets than as a binding.
+    auto packed = cc::vector<f32>();
+    _weight_offsets.clear();
+    _bias_offsets.clear();
+
+    auto widths = cc::vector<tg::vec2i>(); // stored in, stored out — what the shader is dispatched against
+    widths.reserve(k_conv_count);
+
+    for (auto n = 0; n < k_conv_count; ++n)
+    {
+        auto const& step = k_convs[n];
+        auto const& src = sources[n];
+
+        auto const real_a = real_channels[step.source];
+        auto const stored_a = _feature_channels[step.source];
+        auto const real_b = step.skip == f_count ? 0 : real_channels[step.skip];
+        auto const stored_b = step.skip == f_count ? 0 : _feature_channels[step.skip];
+
+        auto const stored_in = stored_a + stored_b;
+        auto const stored_out = _feature_channels[step.target];
+
+        if (real_a + real_b != src.in_channels)
+        {
+            CC_LOG_WARNING("oidn: layer '{}' wants {} input channels and the tensors carry {}", step.name,
+                           src.in_channels, real_a + real_b);
+            return false;
+        }
+
+        widths.push_back(tg::vec2i(stored_in, stored_out));
+        _weight_offsets.push_back(u32(packed.size()));
+
+        // Which real input channel a stored one carries, or -1 where it is padding.
+        auto const real_of = [&](i32 stored)
+        {
+            return stored < stored_a ? (stored < real_a ? stored : -1)
+                                     : (stored - stored_a < real_b ? real_a + (stored - stored_a) : -1);
+        };
+
+        auto const* const weights = reinterpret_cast<u16 const*>(src.weight->data.data());
+        for (auto k = 0; k < 9; ++k)
+            for (auto i = 0; i < stored_in; ++i)
+            {
+                auto const j = real_of(i);
+                for (auto o = 0; o < stored_out; ++o)
+                {
+                    // oihw: o major, then i, then the 3x3 — so one element is at ((o * in + i) * 9 + k).
+                    auto const live = j >= 0 && o < src.out_channels;
+                    packed.push_back(live ? from_half(weights[(o * src.in_channels + j) * 9 + k]) : 0.0f);
+                }
+            }
+
+        _bias_offsets.push_back(u32(packed.size()));
+        auto const* const bias_source = reinterpret_cast<u16 const*>(src.bias->data.data());
+        for (auto o = 0; o < stored_out; ++o)
+            packed.push_back(o < src.out_channels ? from_half(bias_source[o]) : 0.0f);
     }
 
     // One buffer per tensor: the skips stay live across the whole decoder, and reusing one that is still wanted is a
@@ -470,11 +528,17 @@ void oidn_network::build_groups()
     for (auto n = 0; n < k_conv_count; ++n)
     {
         auto const& step = k_convs[n];
-        auto const& source_a = _features[step.source];
-        auto const& source_b = step.skip == f_count ? _features[step.source] : _features[step.skip];
+        // The sources are READ four channels at a time, so they are bound as a float4 view of the same memory the
+        // target writes one channel at a time.
+        // Padding every channel count to four is what makes that reinterpret exact rather than a truncation.
+        auto const source_a = _features[step.source].template try_reinterpret_as<tg::vec4f>();
+        auto const source_b = (step.skip == f_count ? _features[step.source] : _features[step.skip])
+                                  .template try_reinterpret_as<tg::vec4f>();
+        CC_ASSERT(source_a.has_value() && source_b.has_value(), "a feature map is not a whole number of float4s");
+
         _conv_groups.push_back(ctx.persistent.create_binding_group(
-            _programs.conv_layout, shaders::nn_conv_bindings{.gSourceA = source_a.as_readonly_buffer(),
-                                                             .gSourceB = source_b.as_readonly_buffer(),
+            _programs.conv_layout, shaders::nn_conv_bindings{.gSourceA = source_a.value().as_readonly_buffer(),
+                                                             .gSourceB = source_b.value().as_readonly_buffer(),
                                                              .gWeights = _weights.as_readonly_buffer(),
                                                              .gTarget = _features[step.target].as_readwrite_buffer()}));
     }

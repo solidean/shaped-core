@@ -3,7 +3,8 @@
 // Sixteen of these, four max pools and four nearest upsamples are the entire U-Net, so this shader is where the
 // member's cost and its correctness both live.
 //
-// FEATURE MAPS ARE HWC: index (y * width + x) * channels + c, channels innermost.
+// FEATURE MAPS ARE HWC: index (y * width + x) * channels + c, channels innermost, and `channels` is padded to a
+// multiple of four so this shader can read four of them in one load.
 // That is what OIDN's own GPU kernels use, for the reason their comments give — adjacent threads want adjacent
 // memory, and a thread per output CHANNEL is what makes a write coalesce.
 //
@@ -49,30 +50,13 @@ ConstantBuffer<nn_conv_constants> gConstants;
 #pragma sc group 0
 namespace nn_conv_bindings
 {
-    StructuredBuffer<float> gSourceA;
-    StructuredBuffer<float> gSourceB;
+    StructuredBuffer<float4> gSourceA;
+    StructuredBuffer<float4> gSourceB;
     StructuredBuffer<float> gWeights;
     RWStructuredBuffer<float> gTarget;
 }
 
 using namespace nn_conv_bindings;
-
-// One input channel at one texel, taken from whichever half of the concatenation holds it.
-// Outside the image reads zero, which is the padding.
-float source_at(int x, int y, uint c)
-{
-    if (x < 0 || y < 0 || x >= int(gConstants.width) || y >= int(gConstants.height))
-        return 0.0;
-
-    uint const a = gConstants.in_channels_a;
-    uint const texel = uint(y) * gConstants.width + uint(x);
-
-    if (c < a)
-        return gSourceA[texel * a + c];
-
-    uint const b = gConstants.in_channels - a;
-    return gSourceB[texel * b + (c - a)];
-}
 
 // How many texels along x one thread produces.
 //
@@ -81,8 +65,10 @@ float source_at(int x, int y, uint c)
 // The weights are what dominate — every thread in a wave reads a DIFFERENT output channel's row, so those reads are
 // strided where the input reads are a broadcast, and there is no reuse of them across texels otherwise.
 //
-// 16 was swept rather than picked, over a whole 256x256 tile: 8 is 8.3 ms, 12 is 7.7, 16 is 7.6, 20 is 7.9 and 24
-// is 8.4, with 48 and beyond falling away as the accumulators spill.
+// 8 was swept rather than picked, over a whole 256x256 tile: 4 is 5.8 ms, 8 is 5.3, 12 is 6.3, 16 is 7.2 and 24 is
+// 9.1.
+// The best run got shorter when the reads became float4, because the window they hold grew four times as wide in
+// registers — it was 32 when a thread read one channel at a time, and 16 once the weights were transposed.
 // Blocking the OUTPUT CHANNELS too was tried under both weight layouts and does not pay — 16x1 is 8.0 ms where 16x2
 // is 10.9 and 8x2 is 9.4.
 // The sixty-four lanes of a wave already read the same input, so that traffic is a broadcast rather than something a
@@ -90,7 +76,7 @@ float source_at(int x, int y, uint c)
 //
 // `sr::impl::oidn_network` dispatches against this, and the two must agree; a mismatch is a wrong image, which the
 // oracle test against OIDN's own filter catches immediately.
-#define NN_CONV_TEXELS 16
+#define NN_CONV_TEXELS 8
 
 // One thread per output channel, for a run of NN_CONV_TEXELS texels along x.
 //
@@ -142,28 +128,38 @@ float source_at(int x, int y, uint c)
         uint const b = in_channels - a;
 
         // Which half of the concatenation a channel comes from is decided once per channel, not once per element.
-        for (uint i = 0; i < in_channels; ++i)
+        // FOUR input channels at a time, which is the whole reason every tensor's channel count is padded to four.
+        //
+        // A channel is contiguous within a texel, so one float4 fetches four of them; the eighteen loads that used to
+        // cover one channel now cover four. They were two thirds of this shader's time, measured by hoisting them out
+        // of the loop and watching a 256x256 tile fall from 7.4 ms to 2.6.
+        for (uint i = 0; i < in_channels; i += 4u)
         {
             bool const from_a = i < a;
-            uint const stride = from_a ? a : b;
-            uint const c = from_a ? i : i - a;
+            uint const stride4 = (from_a ? a : b) >> 2;
+            uint const c4 = (from_a ? i : i - a) >> 2;
 
-            // One row of the window, read once and spent on all three kernel columns.
-            // Reading it per column instead would trip over the same values three times.
-            float v[NN_CONV_TEXELS + 2];
+            // One row of the window, read once and spent on all three kernel columns and all four channels.
+            float4 v[NN_CONV_TEXELS + 2];
             [unroll] for (uint j = 0; j < NN_CONV_TEXELS + 2; ++j)
             {
-                uint const at = texels[j] * stride + c;
-                v[j] = inside[j] ? (from_a ? gSourceA[at] : gSourceB[at]) : 0.0;
+                uint const at = texels[j] * stride4 + c4;
+                v[j] = inside[j] ? (from_a ? gSourceA[at] : gSourceB[at]) : float4(0, 0, 0, 0);
             }
 
-            uint const at_w = row + i * out_channels + o;
-            float const w0 = gWeights[at_w];
-            float const w1 = gWeights[at_w + column];
-            float const w2 = gWeights[at_w + 2u * column];
+            // The weights cannot come four at a time with them: `o` is innermost, so consecutive input channels are
+            // `out_channels` apart. That is the right trade, because a weight load serves sixteen texels and an input
+            // load serves one.
+            [unroll] for (uint d = 0; d < 4u; ++d)
+            {
+                uint const at_w = row + (i + d) * out_channels + o;
+                float const w0 = gWeights[at_w];
+                float const w1 = gWeights[at_w + column];
+                float const w2 = gWeights[at_w + 2u * column];
 
-            [unroll] for (uint t = 0; t < NN_CONV_TEXELS; ++t)
-                sums[t] += w0 * v[t] + w1 * v[t + 1] + w2 * v[t + 2];
+                [unroll] for (uint t = 0; t < NN_CONV_TEXELS; ++t)
+                    sums[t] += w0 * v[t][d] + w1 * v[t + 1][d] + w2 * v[t + 2][d];
+            }
         }
     }
 
