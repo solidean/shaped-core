@@ -233,6 +233,7 @@ The loop is **run `dev.py`, then diagnose with `repo_tools`** — `build_diag` a
 * `SC_EXAMPLE_BACKEND` (default `auto`) picks the graphics backend the `*-example` binaries build against: `auto`, `dx12`, `vulkan`, `metal` or `webgpu`.
   `auto` takes dx12 wherever there is one, so the setting exists to reach the vulkan arm — building `rotating-cube` both ways is how one HLSL source is shown to serve both.
   `sgl-cube` is the same cube from one SGL source, on every backend.
+  `uv run dev.py example <match> --example-backend vulkan` is how to reach one: the flag redirects the build directory per backend, the way `--toolset` does, so the default build is never touched.
   **Every graphical example reads it**: a backend that was not built is a configure error, and one an example does not support gives a stub target that says so and exits non-zero.
   See [docs/platforms.md](docs/platforms.md#example-backend-sc_example_backend).
 * `SC_BUILD_TESTS` / `SC_BUILD_TOOLS` / `SC_BUILD_EXAMPLES` gate the `*-test` binaries, `tools/` and the `*-example` binaries.

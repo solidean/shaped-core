@@ -177,15 +177,18 @@ So `try_resize_bytes_in_place` returning -1 is a normal outcome rather than a pl
 So the setting exists to reach the others: building `rotating-cube` every way is how one example is shown to really serve all three, HLSL through DXC for the first two and WGSL for the last.
 `sgl-cube` supports all three as well, from one SGL source.
 
-No preset and no `dev.py` flag sets it, so reaching another backend is a build directory of its own, configured once by hand:
+`dev.py` sets it with `--example-backend`, a per-subcommand flag wherever `--toolset` is one:
 
 ```bash
-cmake --preset x64-windows-clang-ninja-relwithdebinfo -B build/x64-windows-clang-ninja-relwithdebinfo-vulkan -DSC_EXAMPLE_BACKEND=vulkan
-uv run dev.py example sgl-cube --capture --build-suffix vulkan --target graphics-sgl-cube-example
+uv run dev.py example sgl-cube --example-backend vulkan --capture --target graphics-sgl-cube-example
 ```
 
-The cache keeps the setting, so every later `dev.py` run with that `--build-suffix` stays on it, and the default build directory is never touched.
+**It redirects the build directory itself**, to `build/<preset>-<backend>`, exactly as `--toolset` does — two backends are two caches, and the default build directory is never touched.
+So the flag belongs on every later run for that backend rather than only the first, and dropping it means the default directory again.
 `--target` keeps the run from building every other example into the new directory just to resolve a name.
+
+Reaching for `cmake -B … -DSC_EXAMPLE_BACKEND=…` by hand instead is a trap on Windows: that configure runs without the MSVC environment `dev.py` injects.
+The tree it writes can then hang in the resource compiler rather than fail, which reads as a slow build rather than as a broken one.
 
 **Every graphical example reads it**, not only the one that supports every backend — a setting the rest ignore is a setting that lies.
 Three outcomes, and which one an example gets depends on what it supports:

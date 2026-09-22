@@ -8,6 +8,7 @@ A requested toolset that cannot be found is a hard error (ToolsetError), raised 
 docs/guides/building-and-testing.md is what --toolset means to a user.
 
 Public API:
+    EXAMPLE_BACKENDS                                # the values --example-backend takes
     apply_overrides(presets, ...) -> list[Preset]   # rewrite build_dir + attach toolset, validate
     compiler_defines(preset)      -> dict[str, str] # CMAKE_{C,CXX}_COMPILER for clang/gcc, else {}
     find_msvc_instance(toolset)   -> Path | None     # VS install whose VC/Tools/MSVC has the toolset
@@ -32,6 +33,11 @@ from ..project.presets import resolve_cache_variable
 
 class ToolsetError(Exception):
     """Raised when a requested --toolset cannot be resolved, or overrides conflict."""
+
+
+# What SC_EXAMPLE_BACKEND accepts, mirroring the cache property the root CMakeLists sets on it.
+# Rejected here rather than at configure, since CMake takes an unknown value and only the example targets then fail.
+EXAMPLE_BACKENDS = ("auto", "dx12", "vulkan", "webgpu", "metal")
 
 
 def _looks_like_path(value: str) -> bool:
@@ -319,31 +325,38 @@ def apply_overrides(
     toolset: str | None = None,
     build_suffix: str | None = None,
     build_dir: str | None = None,
+    example_backend: str | None = None,
 ) -> list[Preset]:
     """Rewrite each preset's build_dir and attach the pinned toolset, validating eagerly.
 
     Build-dir precedence (highest first): --build-dir replaces the whole directory;
     --build-suffix appends `-<suffix>` to the preset folder; otherwise a pinned --toolset
-    auto-derives `-<toolset>` so it never clobbers the default-toolset build's CMake cache.
+    and a chosen --example-backend each auto-derive a tag so neither clobbers the default
+    build's CMake cache.
     With no override the preset is returned unchanged.
     """
     if build_dir is not None and len(presets) > 1:
         raise ToolsetError("--build-dir names a single directory; it can't apply to multiple presets "
                            "(use --build-suffix for a toolset matrix)")
+    if example_backend is not None and example_backend not in EXAMPLE_BACKENDS:
+        raise ToolsetError(f"--example-backend {example_backend!r}: expected one of "
+                           f"{', '.join(EXAMPLE_BACKENDS)}")
 
     out: list[Preset] = []
     for preset in presets:
+        # A tag per override that changes the cache, so a matrix of them stays one folder each.
+        auto = [_sanitize(t) for t in (toolset, example_backend) if t is not None]
         if build_dir is not None:
             bd = Path(build_dir)
             bd = bd if bd.is_absolute() else root / bd
         elif build_suffix is not None:
             bd = preset.build_dir.with_name(f"{preset.build_dir.name}-{build_suffix}")
-        elif toolset is not None:
-            bd = preset.build_dir.with_name(f"{preset.build_dir.name}-{_sanitize(toolset)}")
+        elif auto:
+            bd = preset.build_dir.with_name("-".join([preset.build_dir.name, *auto]))
         else:
             bd = preset.build_dir
 
-        new = dataclasses.replace(preset, build_dir=bd, toolset=toolset)
+        new = dataclasses.replace(preset, build_dir=bd, toolset=toolset, example_backend=example_backend)
         _validate(new, root)
         out.append(new)
     return out
