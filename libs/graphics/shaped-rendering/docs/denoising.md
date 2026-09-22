@@ -49,15 +49,19 @@ Producing one texel per thread spends a whole row of weights on a single output 
 Producing 32 spends the same row on 32 outputs, and one loaded input row serves all three kernel columns instead of being fetched three times.
 Swept over a 256x256 tile: 1 texel is 91 ms, 8 is 18.5, 16 is 12.2, 32 is 11.6, and 48 falls back to 16.4 as the accumulators spill.
 
+**The bounds test and the concat split are hoisted out of the inner loop, which is worth a further fifth.**
+Neither depends on the input channel, so leaving them there meant thirty-four branches for every ninety-six multiply-adds.
+Lifting the window's addresses to once per row, and the choice of concatenation half to once per channel, takes the same tile from 11.6 ms to 9.6 ms.
+
 **Where that leaves us against Intel, measured rather than claimed.**
-At 256x256 OIDN's own CPU filter takes 30 ms on this machine and ours now takes 11.6 ms, so per pixel we are about 2.6x faster than their CPU implementation.
-A whole 1080p frame takes 1.04 s, against tens of seconds before — it hung a test watchdog rather than finishing.
+At 256x256 OIDN's own CPU filter takes 30 ms on this machine and ours now takes 9.6 ms, so per pixel we are about 3x faster than their CPU implementation.
+A whole 1080p frame takes 0.83 s, against tens of seconds before — it hung a test watchdog rather than finishing.
 Per pixel we are ahead; per FRAME we are roughly level with their CPU, because the overlap makes us compute 6.6 Mpx to deliver 2.1 Mpx.
 So the next real win is the overlap rather than the shader.
 
 **The default tile is 384 because that is where the curve flattens, and it trades memory against wasted work.**
 The overlap is a fixed 80 per side, so a 384 tile keeps a 224 interior and a 256 tile keeps only 96.
-Measured end to end on a 1080p frame: 256 takes 2.8 s for 87 MiB, 384 takes 0.98 s for 195 MiB, and 512 takes 0.94 s for 346 MiB.
+Measured end to end on a 1080p frame, before the inner loop was hoisted: 256 takes 2.8 s for 87 MiB, 384 takes 0.98 s for 195 MiB, and 512 takes 0.94 s for 346 MiB.
 So 512 buys almost nothing for nearly twice 384's memory.
 
 **A tile is 80 pixels wider than what it keeps, on every side, and 80 is measured rather than chosen.**

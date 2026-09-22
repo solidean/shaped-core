@@ -115,13 +115,37 @@ float source_at(int x, int y, uint c)
             continue;
         }
 
+        // Where each column of the window sits, worked out ONCE for the row rather than per input channel.
+        //
+        // The bounds test and the concat split do not depend on the channel, so leaving them in the inner loop meant
+        // thirty-four branches for every ninety-six multiply-adds.
+        uint texels[NN_CONV_TEXELS + 2];
+        bool inside[NN_CONV_TEXELS + 2];
+        [unroll] for (uint j = 0; j < NN_CONV_TEXELS + 2; ++j)
+        {
+            int const sx = int(x0) + int(j) - 1;
+            inside[j] = sx >= 0 && sx < int(gConstants.width);
+            texels[j] = inside[j] ? uint(sy) * gConstants.width + uint(sx) : 0u;
+        }
+
+        uint const a = gConstants.in_channels_a;
+        uint const b = in_channels - a;
+
+        // Which half of the concatenation a channel comes from is decided once per channel, not once per element.
         for (uint i = 0; i < in_channels; ++i)
         {
+            bool const from_a = i < a;
+            uint const stride = from_a ? a : b;
+            uint const c = from_a ? i : i - a;
+
             // One row of the window, read once and spent on all three kernel columns.
             // Reading it per column instead would trip over the same values three times.
             float v[NN_CONV_TEXELS + 2];
             [unroll] for (uint j = 0; j < NN_CONV_TEXELS + 2; ++j)
-                v[j] = source_at(int(x0) + int(j) - 1, sy, i);
+            {
+                uint const at = texels[j] * stride + c;
+                v[j] = inside[j] ? (from_a ? gSourceA[at] : gSourceB[at]) : 0.0;
+            }
 
             float const w0 = gWeights[w + i];
             float const w1 = gWeights[w + in_channels + i];
