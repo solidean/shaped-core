@@ -24,7 +24,7 @@ MANIFEST_NAME = "dependency.yml"
 
 # `source` says how we obtain the upstream; `track` says how "what is current" is defined.
 # They are separate because stb, ImPlot and ImGuizmo are ordinary git clones whose newest version is a branch head, not a tag.
-SOURCES = {"git", "github-release", "url"}
+SOURCES = {"git", "github-release", "github-files", "url"}
 TRACKS = {"tags", "default-branch", "github-releases", "sqlite", "none"}
 DIGEST_ALGOS = {"git-commit", "sha256", "sha3-256"}
 # `vendored` is committed in-tree; `fetched` hydrates a gitignored .install/ on demand, so it can be absent or stale on a given checkout.
@@ -57,6 +57,10 @@ class Upstream:
     # Distinct from a missing per-OS key, which stays an error: that means nobody has looked, and this means somebody did.
     unavailable_on: list[str] = field(default_factory=list)
     license_files: list[str] = field(default_factory=list)
+
+    # For `source: github-files`: the individual files fetched, each with its own digest.
+    # A whole repository is the wrong unit when what is wanted is three files out of several hundred megabytes.
+    files: list[dict] = field(default_factory=list)
     # Verbatim license text, for an upstream that ships no file of its own — sqlite's amalgamation is the only one.
     license_text: str = ""
     used_by: str = ""
@@ -220,6 +224,7 @@ def _build(path: Path, directory: Path, entry: object) -> Upstream:
         tag_pattern=entry.get("tag_pattern", ""),
         unavailable_on=unavailable,
         license_files=list(entry.get("license_files", [])),
+        files=[dict(f) for f in entry.get("files", [])],
         license_text=entry.get("license_text", ""),
         used_by=entry.get("used_by", ""),
         notes=entry.get("notes", ""),
@@ -233,6 +238,8 @@ def _build(path: Path, directory: Path, entry: object) -> Upstream:
         raise ValueError(f"{path}: {up.name}: `install` must be one of {sorted(INSTALLS)}, got {up.install!r}")
     if up.digest_algo not in DIGEST_ALGOS:
         raise ValueError(f"{path}: {up.name}: `digest_algo` must be one of {sorted(DIGEST_ALGOS)}, got {up.digest_algo!r}")
+    if up.source == "github-files" and not up.files:
+        raise ValueError(f"{path}: {up.name}: `source: github-files` needs a `files` list")
     if not up.license_files and not up.license_text:
         raise ValueError(f"{path}: {up.name}: needs `license_files` or `license_text`")
 

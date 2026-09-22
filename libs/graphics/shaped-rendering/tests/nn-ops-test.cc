@@ -1,10 +1,10 @@
+#include "shader_fixtures.hh"
+
 #include <clean-core/common/utility.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_coroutine.hh>
-#include "shader_fixtures.hh"
-
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
@@ -77,8 +77,7 @@ namespace
 //
 // Cheap, and it is the check that turns an HLSL mistake into a message here rather than into a member that declines
 // every frame for a reason nothing prints.
-ASYNC_INVOCABLE_TEST("sr - every network operation compiles",
-                     (sg::context_handle const& ctx_h))
+ASYNC_INVOCABLE_TEST("sr - every network operation compiles", (sg::context_handle const& ctx_h))
 {
     REQUIRE(ctx_h != nullptr);
     auto& ctx = *ctx_h;

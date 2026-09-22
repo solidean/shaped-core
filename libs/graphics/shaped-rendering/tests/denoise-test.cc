@@ -197,10 +197,9 @@ ASYNC_INVOCABLE_TEST("sr - denoise automatic resolves to a supported member", (s
     // the machines where no better member is present.
     auto const temporal = sr::resolve_denoise_method(ctx, automatic, true);
     auto const expected = support.dlss_rr ? sr::denoise_method::dlss_rr
-                        : support.fsr_rr ? sr::denoise_method::fsr_rr
-                                         : sr::denoise_method::svgf;
-    CHECK(temporal == expected)
-        .context(cc::format("supported: dlss_rr {}, fsr_rr {}", support.dlss_rr, support.fsr_rr));
+                        : support.fsr_rr  ? sr::denoise_method::fsr_rr
+                                          : sr::denoise_method::svgf;
+    CHECK(temporal == expected).context(cc::format("supported: dlss_rr {}, fsr_rr {}", support.dlss_rr, support.fsr_rr));
     CHECK(sr::is_temporal(temporal));
 
     // A named member resolves to itself whether or not it is supported: refusing it is execute's job, and it must

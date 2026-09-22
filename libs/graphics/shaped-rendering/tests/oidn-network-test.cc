@@ -1,10 +1,10 @@
+#include "shader_fixtures.hh"
+
 #include <clean-core/common/utility.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_coroutine.hh>
-#include "shader_fixtures.hh"
-
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
@@ -27,8 +27,7 @@ using namespace cc::primitive_defines;
 // Whether it computes what Intel's implementation computes is a different question, and the answer to it is a
 // comparison against OIDN's own filter rather than anything assertable here.
 
-ASYNC_INVOCABLE_TEST("sr - the denoise network runs end to end",
-                     (sg::context_handle const& ctx_h))
+ASYNC_INVOCABLE_TEST("sr - the denoise network runs end to end", (sg::context_handle const& ctx_h))
 {
     REQUIRE(ctx_h != nullptr);
     auto& ctx = *ctx_h;
@@ -167,8 +166,7 @@ ASYNC_INVOCABLE_TEST("sr - the denoise network runs end to end",
 // index that is self-consistent, a transfer curve wrong in a way the round trip cancels, a different padding.
 //
 // So this runs OIDN's own filter over the same input and compares, which is the only way to ask the question.
-ASYNC_INVOCABLE_TEST("sr - the network agrees with OIDN's own filter",
-                     (sg::context_handle const& ctx_h))
+ASYNC_INVOCABLE_TEST("sr - the network agrees with OIDN's own filter", (sg::context_handle const& ctx_h))
 {
     REQUIRE(ctx_h != nullptr);
     auto& ctx = *ctx_h;
@@ -313,8 +311,7 @@ ASYNC_INVOCABLE_TEST("sr - the network agrees with OIDN's own filter",
 // What this adds over the tests above is everything between `sr::denoise_routine` and the shaders: that the method
 // resolves, that the guide contract is enforced, that the network lands in the caller's history and is reused, and
 // that a second call on the same history does not rebuild it.
-ASYNC_INVOCABLE_TEST("sr - the OIDN member denoises through the denoise front",
-                     (sg::context_handle const& ctx_h))
+ASYNC_INVOCABLE_TEST("sr - the OIDN member denoises through the denoise front", (sg::context_handle const& ctx_h))
 {
     REQUIRE(ctx_h != nullptr);
     auto& ctx = *ctx_h;
@@ -658,8 +655,7 @@ ASYNC_INVOCABLE_TEST("sr - the OIDN network in tiles agrees with the same image 
 // The oracle above runs at 64x64 and fits one tile, so it never exercises tiling at all.
 // The tiling test beside it compares against our own whole-image run rather than against Intel.
 // This closes that: OIDN filters the whole image, we filter it in nine tiles, and the two are put side by side.
-ASYNC_INVOCABLE_TEST("sr - the tiled network agrees with OIDN's own filter",
-                     (sg::context_handle const& ctx_h))
+ASYNC_INVOCABLE_TEST("sr - the tiled network agrees with OIDN's own filter", (sg::context_handle const& ctx_h))
 {
     REQUIRE(ctx_h != nullptr);
     auto& ctx = *ctx_h;
@@ -773,8 +769,7 @@ ASYNC_INVOCABLE_TEST("sr - the tiled network agrees with OIDN's own filter",
 // Cost is flat per computed pixel, so the only thing a tile size decides is how much of the image is computed twice.
 // Taking the cap outright gets that wrong: over 1920x1080 a 512 tile computes more than a 448 one AND costs more
 // memory, because its interior divides the image badly.
-ASYNC_INVOCABLE_TEST("sr - the OIDN network picks the tile that computes least",
-                     (sg::context_handle const& ctx_h))
+ASYNC_INVOCABLE_TEST("sr - the OIDN network picks the tile that computes least", (sg::context_handle const& ctx_h))
 {
     REQUIRE(ctx_h != nullptr);
     auto& ctx = *ctx_h;
