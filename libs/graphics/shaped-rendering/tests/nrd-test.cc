@@ -2,6 +2,8 @@
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_coroutine.hh>
+#include "shader_fixtures.hh"
+
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
@@ -249,18 +251,12 @@ constexpr auto k_specular_albedo = 0.04f;
 // and multiplied back; a pack that dropped the chroma, a resolve that skipped the decode, or one that lost the factor
 // all land on a different colour, and none of them would report an error.
 ASYNC_INVOCABLE_TEST("sr - NRD returns a uniformly lit surface unchanged",
-                     (sg::context_handle const& ctx_h),
-                     exclusive("slib-shader-library"))
+                     (sg::context_handle const& ctx_h))
 {
     REQUIRE(ctx_h != nullptr);
     auto& ctx = *ctx_h;
 
-    auto lib = slib::shader_library();
-    auto compiler = slib::create_dxc_compiler();
-    if (!compiler.has_value())
-        SKIP("no DXC compiler to build NRD's repack and resolve passes");
-    lib.add_compiler(cc::move(compiler.value()));
-    lib.add_package(sr::shader_package());
+    (void)sr_test::shader_fixtures(); // sr's one library, alive for the whole binary
     if (!sr::query_denoise_support(ctx).nrd)
         SKIP("NRD was not fetched into this build (extern/nrd/fetch-nrd.py)");
 
@@ -294,18 +290,12 @@ ASYNC_INVOCABLE_TEST("sr - NRD returns a uniformly lit surface unchanged",
 // channels keep 0.85, 0.90 and 0.93 of the contrast; with the division and its inverse removed they keep 0.09, 0.09
 // and 0.02, because REBLUR then sees the full seventeen-to-one radiance ratio and pulls the two cells together.
 ASYNC_INVOCABLE_TEST("sr - NRD keeps a surface's texture rather than filtering it as noise",
-                     (sg::context_handle const& ctx_h),
-                     exclusive("slib-shader-library"))
+                     (sg::context_handle const& ctx_h))
 {
     REQUIRE(ctx_h != nullptr);
     auto& ctx = *ctx_h;
 
-    auto lib = slib::shader_library();
-    auto compiler = slib::create_dxc_compiler();
-    if (!compiler.has_value())
-        SKIP("no DXC compiler to build NRD's repack and resolve passes");
-    lib.add_compiler(cc::move(compiler.value()));
-    lib.add_package(sr::shader_package());
+    (void)sr_test::shader_fixtures(); // sr's one library, alive for the whole binary
     if (!sr::query_denoise_support(ctx).nrd)
         SKIP("NRD was not fetched into this build (extern/nrd/fetch-nrd.py)");
 

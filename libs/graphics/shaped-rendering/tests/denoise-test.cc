@@ -183,7 +183,16 @@ ASYNC_INVOCABLE_TEST("sr - denoise automatic resolves to a supported member", (s
     auto const automatic = sr::denoise_settings{.method = sr::denoise_method::automatic};
     CHECK(support.svgf);
     CHECK(sr::resolve_denoise_method(ctx, automatic, false) == sr::denoise_method::atrous);
-    CHECK(sr::resolve_denoise_method(ctx, automatic, true) == sr::denoise_method::svgf);
+
+    // WHICH temporal member depends on the machine, which is the whole point of `automatic`: NRD runs on every
+    // adapter where its sources were fetched and outranks svgf, which is what everything else gets.
+    //
+    // Written as the whole ORDER rather than as one name, because naming the runner-up is a test that passes only on
+    // the machines where no better member is present — this asserted `svgf` outright until NRD arrived.
+    auto const temporal = sr::resolve_denoise_method(ctx, automatic, true);
+    CHECK(temporal == (support.nrd ? sr::denoise_method::nrd : sr::denoise_method::svgf))
+        .context(cc::format("supported: nrd {}", support.nrd));
+    CHECK(sr::is_temporal(temporal));
 
     // A named member resolves to itself whether or not it is supported: refusing it is execute's job, and it must
     // not be quietly exchanged for another.
