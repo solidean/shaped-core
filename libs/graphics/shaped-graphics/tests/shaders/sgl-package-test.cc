@@ -52,7 +52,7 @@ ASYNC_INVOCABLE_TEST("sg - an SGL package's generated group is what its compiled
         SKIP("no compiler builds this binary's shaders into a format this context accepts");
 
     // The asset picks the format by asking the context what it accepts, so this names no backend.
-    auto const& compiled = co_await shaders::double_values.compute.main->acquire(*ctx);
+    auto const& compiled = co_await shaders::double_values.main->acquire(*ctx);
 
     CHECK(compiled.stage == sg::shader_stage::compute);
     REQUIRE(compiled.workgroup_size.has_value());

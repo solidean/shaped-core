@@ -492,6 +492,148 @@ def emit_render_target_impl(namespace: str, struct: dict) -> str:
     return "".join(out)
 
 
+# ---- a pipeline -------------------------------------------------------------------------------------------------------
+
+
+def pipeline_type(stem: str, name: str) -> str:
+    return f"{stem}_{name}_t"
+
+
+def open_fields(pipeline: dict) -> list[tuple[str, str, str]]:
+    """The open struct's fields: (C++ type and default, field name, the path it states), in the order first left open."""
+    out = []
+    for path in pipeline["open"]:
+        if path == "sample_count":
+            out.append(("int", "sample_count", path))
+        elif path == "depth_stencil_format":
+            out.append(("sg::pixel_format", "depth_stencil_format", path))
+        else:
+            # color_targets.<target>.format: the field is the target's own name.
+            out.append(("sg::pixel_format", path.split(".")[1], path))
+    return out
+
+
+def pipeline_includes(entries: SglEntries) -> list[str]:
+    if not entries.pipelines:
+        return []
+    return ["<shaped-shader-library/pipeline.hh>", "<shaped-graphics/fwd.hh>", "<clean-core/thread/async.hh>"]
+
+
+def emit_pipelines(entries: SglEntries, stems: dict[str, str]) -> str:
+    """One type per `pipeline` declaration, which is what acquires it: its stages, layout and settings are all baked."""
+    out = []
+    for file, p in entries.pipelines:
+        stem = stems[file.path]
+        type_name = pipeline_type(stem, p["name"])
+        fields = open_fields(p)
+        stages = p["vertex"] + (f" and {p['pixel']}" if p["pixel"] else "")
+        writes = f", writing `{p['target_set']}`" if p["target_set"] else ", writing depth alone"
+        out.append(f"/// `pipeline {p['name']}` of {file.path}: {stages}{writes}. Generated; do not edit.\n")
+        out.append(f"struct {type_name}\n{{\n")
+        parts = ""
+        if fields:
+            out.append("    /// What the pipeline leaves to the host with `.host`, stated when it is acquired; every field must be.\n")
+            out.append("    struct open\n    {\n")
+            for cpp, name, path in fields:
+                default = "0" if cpp == "int" else "sg::pixel_format::undefined"
+                out.append(f"        {cpp} {name} = {default}; ///< `{path}`\n")
+            out.append("    };\n\n")
+            parts = "open const& parts, "
+        out.append("    /// The pipeline, built for `ctx` through `ctx.cached`; `customize` runs on its description last.\n")
+        out.append(f"    [[nodiscard]] sg::async_raster_pipeline acquire(sg::context& ctx, {parts}"
+                   "slib::pipeline_customize customize = {}) const;\n")
+        out.append("    /// The newest build that is valid, even where its frozen part moved away from what this code was built against.\n")
+        out.append(f"    [[nodiscard]] sg::async_raster_pipeline acquire_latest(sg::context& ctx, {parts}"
+                   "slib::pipeline_customize customize = {}) const;\n")
+        out.append("    /// The description `acquire` builds, for a host that builds it itself.\n")
+        out.append(f"    [[nodiscard]] cc::shared_async<sg::raster_pipeline_description> description(sg::context& ctx"
+                   f"{', open const& parts' if fields else ''}) const;\n")
+        out.append("    /// What slib builds it from: the stages, the layout, and the settings as the build saw them.\n")
+        out.append("    [[nodiscard]] static slib::pipeline_definition const& definition();\n")
+        out.append("};\n\n")
+    return "".join(out)
+
+
+def cpp_setting(s: dict) -> str:
+    path = s["path"]
+    kind = s["kind"]
+    if kind == "bool":
+        return f'{{.path = "{path}", .kind = slib::setting_kind::boolean, .integer = {1 if s["value"] else 0}}}'
+    if kind == "int":
+        return f'{{.path = "{path}", .kind = slib::setting_kind::integer, .integer = {s["value"]}}}'
+    if kind == "float":
+        return f'{{.path = "{path}", .kind = slib::setting_kind::real, .real = {float(s["value"])!r}}}'
+    if kind == "case":
+        return f'{{.path = "{path}", .kind = slib::setting_kind::enum_case, .enum_case = "{s["value"]}"}}'
+    return f'{{.path = "{path}", .kind = slib::setting_kind::{kind}}}'
+
+
+def emit_pipelines_impl(package: str, namespace: str, entries: SglEntries, stems: dict[str, str],
+                        wrappers: dict[tuple[str, str], str]) -> str:
+    out = []
+    generated = {b["name"] for _, b in entries.bindings}
+    vertex_inputs = {v["name"] for _, v in entries.vertex_inputs}
+    for file, p in entries.pipelines:
+        stem = stems[file.path]
+        type_name = pipeline_type(stem, p["name"])
+        qualified = f"{namespace}::{type_name}"
+        key = f"{stem}_{p['name']}"
+        groups = p["layout"] + ([p["inline"]] if p["inline"] else [])
+        missing = [g for g in groups if g not in generated]
+        if p["vertex_input"] not in vertex_inputs:
+            missing.append(p["vertex_input"])
+        if missing:
+            raise HostCodeError(
+                f"shader package '{package}': `pipeline {p['name']}` of '{file.path}' is built from generated types, and "
+                f"{', '.join(missing)} has none; declare the file as '{file.path}:*'")
+
+        def handle(entry: str) -> str:
+            return f"&{namespace}::{stem}.{entry}" + (".asset" if (file.path, entry) in wrappers else "")
+
+        out.append("\nnamespace\n{\n")
+        if p["settings"]:
+            out.append(f"constexpr slib::pipeline_setting k_{key}_settings[] = {{\n")
+            for s in p["settings"]:
+                out.append(f"    {cpp_setting(s)},\n")
+            out.append("};\n")
+        if p["targets"]:
+            names = ", ".join(f'"{t}"' for t in p["targets"])
+            out.append(f"constexpr cc::string_view k_{key}_targets[] = {{{names}}};\n")
+        group_types = ", ".join(f"{namespace}::{g}" for g in groups)
+        out.append(f"sg::pipeline_layout_handle {key}_layout(sg::context& ctx)\n{{\n")
+        out.append(f"    return ctx.cached.acquire_pipeline_layout<{group_types}>();\n}}\n")
+        out.append("} // namespace\n")
+
+        out.append(f"\nslib::pipeline_definition const& {qualified}::definition()\n{{\n")
+        out.append("    static slib::pipeline_definition const d = {\n")
+        out.append(f'        .file = "{file.path}",\n')
+        out.append(f'        .name = "{p["name"]}",\n')
+        out.append(f"        .vertex = {handle(p['vertex'])},\n")
+        if p["pixel"]:
+            out.append(f"        .pixel = {handle(p['pixel'])},\n")
+        out.append(f"        .acquire_layout = &{key}_layout,\n")
+        out.append(f"        .vertex_input = &{namespace}::{p['vertex_input']}::layout,\n")
+        if p["target_set"]:
+            out.append(f"        .target_set = {namespace}::{p['target_set']}::name,\n")
+        if p["targets"]:
+            out.append(f"        .targets = k_{key}_targets,\n")
+        if p["settings"]:
+            out.append(f"        .settings = k_{key}_settings,\n")
+        out.append("    };\n    return d;\n}\n")
+
+        fields = open_fields(p)
+        parameter = ", open const& parts" if fields else ""
+        stated = "{" + ", ".join(f'{{.path = "{path}", .value = cc::i64(parts.{name})}}' for _, name, path in fields) + "}"
+        for verb in ("acquire", "acquire_latest"):
+            out.append(f"\nsg::async_raster_pipeline {qualified}::{verb}(sg::context& ctx{parameter}, "
+                       "slib::pipeline_customize customize) const\n{\n")
+            out.append(f"    return slib::acquire_raster_pipeline(&ctx, &definition(), cc::vector<slib::open_part>{stated}, "
+                       "cc::move(customize));\n}\n")
+        out.append(f"\ncc::shared_async<sg::raster_pipeline_description> {qualified}::description(sg::context& ctx{parameter}) const\n{{\n")
+        out.append(f"    return slib::describe_raster_pipeline(&ctx, &definition(), cc::vector<slib::open_part>{stated}, {{}});\n}}\n")
+    return "".join(out)
+
+
 # ---- the reflection check ----------------------------------------------------------------------------------------------
 
 
@@ -516,7 +658,7 @@ def emit_check_reflection(namespace: str, entries: SglEntries, stems: dict[str, 
         groups = [b for b in listed if b not in inline]
         inline_block = next((b for b in listed if b in inline), None)
         out.append("    {\n")
-        out.append(f"        auto const& compiled = co_await {stems[path]}.{described['stage']}.{name}->acquire(ctx);\n")
+        out.append(f"        auto const& compiled = co_await {stems[path]}.{name}->acquire(ctx);\n")
         if groups:
             out.append("        slib::listed_group const listed[] = {\n")
             for position, group in enumerate(groups):

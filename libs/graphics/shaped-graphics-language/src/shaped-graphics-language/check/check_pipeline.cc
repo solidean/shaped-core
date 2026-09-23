@@ -684,7 +684,14 @@ void checker::compile_pipeline(symbol_id id)
 
         target_set = pixel_info.result;
         for (auto const& m : out.at(out.at(target_set).members))
+        {
+            // The host states an open target's format by the target's name, beside these two.
+            if (m.name == "sample_count" || m.name == "depth_stencil_format")
+                pc.fail(
+                    file, where,
+                    cc::format("a target of a pipeline is not named {}, which the pipeline's own setting is", m.name));
             pc.targets.push_back(m.name);
+        }
     }
 
     // ---- the binding lists

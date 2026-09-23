@@ -260,6 +260,16 @@ TEST("sgl check - the short form places each entry point by its stage")
           == "invalid-pipeline user:[helper] helper is no entry point\n");
 }
 
+TEST("sgl check - a target is not named like a setting of the pipeline itself")
+{
+    // The host states an open target's format by the target's name, beside `sample_count` and `depth_stencil_format`.
+    CHECK(reports("@pixel struct odd:\n    sample_count: float4\n"
+                  "@pixel fun odd_ps(l: link) -> odd:\n    return { sample_count = float4(..l.n, 1.0) }\n"
+                  "pipeline:\n    vertex = vs\n    pixel = odd_ps\n    format = .host\n")
+          == "invalid-pipeline user:[pipeline:] a target of a pipeline is not named sample_count, which the pipeline's "
+             "own setting is\n");
+}
+
 TEST("sgl check - a pipeline shares its file's names, and only a raster pipeline is declared")
 {
     CHECK(reports(cc::string("pipeline:\n    vertex = vs\n    pixel = ps\n") + formats + "pipeline:\n    vertex = vs\n")

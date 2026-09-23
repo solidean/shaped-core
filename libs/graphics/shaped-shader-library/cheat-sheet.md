@@ -34,14 +34,15 @@ sc_add_shader_package(
 # stages are spelled as sg::shader_stage: compute vertex fragment tessellation_control
 #   tessellation_evaluation geometry raygen closest_hit any_hit miss intersection callable
 # an SGL package spells its stages as SGL does: `cube.sgl:vertex:main_vs`, `cube.sgl:pixel:main_ps`.
-#   `pixel` is the symbol too (cube.pixel.main_ps) and reaches sg as shader_stage::fragment.
+#   `pixel` reaches sg as shader_stage::fragment; the symbol has no stage in it (cube.main_ps), since the entry point carries one.
 #   ONE file holds both stages, and ONE package serves dx12, vulkan and webgpu.
 #   payload / constants entries are HLSL's alone, and a WGSL package names no generating entry at all.
 #   `binding` and `vertex_input` mean an SGL declaration in an SGL package, below.
 # an SGL package has its own generating kinds, read by the COMPILER (`sgl describe`), never by a parser here:
-#   cube.sgl:*                          # every entry point, binding and @vertex / @pixel struct the file declares
+#   cube.sgl:*                          # every entry point, binding, @vertex / @pixel struct and pipeline the file declares
 #   cube.sgl:binding:frame              # a `binding` block;  cube.sgl:vertex_input:v  a `@vertex struct`
 #   cube.sgl:render_target:target       # a `@pixel struct`; a name the file does not declare is a build error
+#   cube.sgl:pipeline:pipeline          # a `pipeline` declaration
 #   `*` needs no stage word: an SGL entry point carries its stage in the source.
 #   those need a runnable `sgl` while building: the tree's own natively, SC_SGL_TOOL otherwise (a cross build,
 #   SC_BUILD_TOOLS=OFF). dev.py builds the host one for a cross preset itself. Entry points alone need neither.
@@ -301,16 +302,22 @@ pass.set_inline_constants(shaders::constants{.view_projection = vp}.to_block());
 //   slib renames what the target's compiler reflected, which stays on each binding as `reflected_name`.
 // `@inline binding constants` also gives constants::inline_binding(): the pipeline layout's inline block, no reflection.
 // an entry point of a `*`-declared file is a small wrapper: `->acquire(ctx)` as before, plus the layout its list states:
-auto const layout = shaders::cube.vertex.main_vs.acquire_layout(ctx);                  // {constants}, nothing reflected
-auto const pipeline = co_await shaders::double_values.compute.main.acquire_pipeline(ctx); // compute: needs nothing else
+auto const layout = shaders::cube.main_vs.acquire_layout(ctx);                  // {constants}, nothing reflected
+auto const pipeline = co_await shaders::double_values.main.acquire_pipeline(ctx); // compute: needs nothing else
 // a raster pipeline whose stages list different groups takes their union instead: acquire_pipeline_layout<frame, work>().
+// a `pipeline` declaration -> shaders::<file>.<name> (an unnamed `pipeline:` is `.pipeline`), built from ITS stages,
+//   layout, vertex input, targets and settings; the host states only what the declaration left `.host`:
+auto const p = co_await shaders::cube.pipeline.acquire(ctx, {.color = swapchain_format});  // open: one field per `.host` part
+//   nothing `.host` -> acquire(ctx); an optional last argument customize(sg::raster_pipeline_description&) runs on every build
+//   acquire_latest(ctx, ...)  the newest valid build, even one whose frozen part moved; description(ctx, ...) to build it yourself
+//   an open field left unset (a format still `undefined`) asserts: the declaration said the host would state it
 // `@vertex struct v` -> shaders::v and v::layout(): attributes in the shader's order, no semantic or offset by hand.
 //   members marked `@per_instance` / `@stream(name)` split it over buffers: then v::<stream> per buffer, in slot order,
 //   and v::buffers{.per_vertex = verts, .per_instance = insts}.views() for bind_vertex_buffers — typed, so a
 //   buffer of the wrong stream does not compile.
 // `@pixel struct target` -> shaders::target: one sg::color_target per member, by name, plus an optional depth_stencil.
 cmd.raster.render_to(shaders::target{.color = rt.cleared(c), .depth_stencil = depth.cleared(1.0f)}); // -> rendering_info
-//   the pipeline side: .color_targets = shaders::target::states{.color = {.format = f}}, .target_set = shaders::target::name
+//   the pipeline side, for one built by hand: .color_targets = shaders::target::states{.color = {.format = f}}, .target_set = shaders::target::name
 //   sg then refuses to bind that pipeline in a rendering of another target set, even one of the same shape.
 //   .target_set may be left out: a compiled SGL pixel shader states its own (and its target count), which sg takes.
 // a package with wrapped entry points also gets check_reflection(ctx) -> shared_async<string>: empty while every
