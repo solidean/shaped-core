@@ -61,6 +61,14 @@ public:
     /// The transition is computed from the texture's tracked layout, so it composes with whatever the frame's render pass left it in.
     void transition_texture_to(dx12_texture_handle const& texture, sg::texture_layout layout);
 
+    /// Drop what this list believes it has bound — pipeline, groups, and the raster scope's vertex and index buffers.
+    ///
+    /// For after foreign code recorded onto the native list (see dx12_native_scope): it may have set its own
+    /// descriptor heaps, root signature and pipeline, so sg's next draw or dispatch must rebind rather than trust
+    /// what it last set.
+    /// Touches no GPU state itself — the rebind does.
+    void forget_bind_state();
+
     /// Resolve every leased query heap into one transient buffer and start one inline readback per heap, filling each heap's shared future in place.
     /// Records GPU work, so it must run before Close; submit drives it under the submission lock.
     /// A no-op for a list that recorded no queries.
@@ -250,6 +258,9 @@ protected:
     [[nodiscard]] sg::gpu_timestamp query_record_gpu_timestamp() override;
 
 private:
+    // The native scope declares an access for code sg cannot see into, which is exactly what track_* is for.
+    friend class dx12_native_scope;
+
     // Declare `stages`/`access` on `buffer` for this list's slot, emit the intra-list barrier the tracker asks for, and record the buffer so its slot is finalized at submit/drop.
     // The barrier is precise (COPY_DEST→COPY_SOURCE and the like), with no bounce through COMMON.
     // Cross-list ordering rides on D3D12's decay of buffers to COMMON at ExecuteCommandLists, so no trailing barrier is needed.

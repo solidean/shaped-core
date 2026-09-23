@@ -933,4 +933,14 @@ dctx.create_dx12_buffer(size, usage)      // -> cc::result<dx12_buffer_handle>  
 dctx.create_dx12_command_list()           // -> cc::result<std::unique_ptr<dx12_command_list>>
 // the sg::context virtuals are thin forwarders to these backend-typed methods
 // escape hatch: dynamic_cast<sg::backend::vulkan::vulkan_context*>(ctx.get()) — "here be dragons"
+
+// foreign code recording onto an sg list (a vendor SDK, a capture tool) — dx12 only, see docs/concepts/barriers.md
+#include <shaped-graphics/backends/dx12/dx12_native_scope.hh>
+auto const native = sg::backend::dx12::dx12_native_scope::open(cmd,   // -> dx12_native_scope (RAII; no rendering scope open)
+    {{.texture = tex, .access = sg::access_flag::shader_write, .stages = sg::pipeline_stage_flag::compute}},
+    {{.buffer = buf, .access = sg::access_flag::shader_read}});
+native.list() / native.device()        // -> ID3D12GraphicsCommandList* / ID3D12Device*
+native.resource(tex)                   // -> ID3D12Resource*; ASSERTS on a handle the scope did not declare
+// open transitions each declared resource and records that as its state; ~scope forgets the list's bind state, so sg rebinds
+// under-declaring corrupts the tracker: declare everything the foreign call touches, and nothing it does not
 ```

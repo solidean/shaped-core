@@ -45,6 +45,9 @@ class dx12_context;
 using dx12_context_handle = std::shared_ptr<dx12_context>;
 
 class dx12_command_list;
+class dx12_native_scope;      // the declared escape hatch for foreign code (dx12_native_scope.hh)
+struct native_texture_access; // one texture a native scope declares
+struct native_buffer_access;  // one buffer a native scope declares
 class dx12_command_allocator_pool;
 class dx12_buffer;
 using dx12_buffer_handle = std::shared_ptr<dx12_buffer const>;
