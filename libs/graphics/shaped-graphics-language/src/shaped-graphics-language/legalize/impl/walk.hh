@@ -5,7 +5,13 @@
 namespace sgl::check::impl
 {
 /// Beyond this nesting a tree is no program, and a walk stops descending so that a cyclic tree cannot exhaust the stack.
-constexpr int k_max_depth = 200;
+///
+/// The number is bounded by the smallest stack a walk may run on, rather than by what a program might legitimately nest.
+/// A `cc::async_thread_pool` worker gets the platform's default 512 KiB where the main thread gets 8 MiB, and an
+/// unoptimized sanitizer build spends ~8 KiB on one `interpret` level — so at 200 the stack died at about level 60 and
+/// this guard never fired, which is the crash it exists to prevent.
+/// Raise it only against that budget; nothing the tree compiles nests past single digits.
+constexpr int k_max_depth = 40;
 
 [[nodiscard]] inline bool is_known(flat_entry_point const& e, flat_expr_id id)
 {
