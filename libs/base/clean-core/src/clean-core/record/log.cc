@@ -1,8 +1,10 @@
 #include "log.hh"
 
 #include <clean-core/common/assert.hh>
+#include <clean-core/common/utility.hh>
 #include <clean-core/platform/stack_capture.hh>
 #include <clean-core/record/value.hh>
+#include <clean-core/record/writer.hh>
 
 using namespace cc::primitive_defines;
 
@@ -35,7 +37,83 @@ constexpr cc::rec::desc stacktrace_desc = {
     .field_count = u16(CC_ARRAY_COUNT_OF(stacktrace_fields)),
     .fixed_payload_size = cc::rec::desc::variable_payload,
 };
+
+/// Whether this thread's format buffer has been built yet, and whether it is still there.
+///
+/// Three states rather than a bool, because "not yet" and "gone" both read as absent and only one of them may
+/// construct the buffer.
+/// The variable is constant-initialized and trivially destructible, so it stays readable for the whole thread —
+/// including after every thread_local with a destructor has run.
+enum class scratch_state : u8
+{
+    unborn = 0,
+    alive,
+    dead,
+};
+thread_local scratch_state tl_scratch_state = scratch_state::unborn;
+
+/// Owns the buffer and publishes its lifetime through `tl_scratch_state`.
+struct scratch_holder
+{
+    cc::string buffer = cc::string::create_with_capacity(cc::rec::impl::log_scratch_capacity);
+
+    scratch_holder() { tl_scratch_state = scratch_state::alive; }
+    ~scratch_holder() { tl_scratch_state = scratch_state::dead; }
+
+    scratch_holder(scratch_holder const&) = delete;
+    scratch_holder& operator=(scratch_holder const&) = delete;
+};
 } // namespace
+
+cc::string* cc::rec::impl::log_scratch()
+{
+    // Checked before the buffer is touched: reaching a destroyed thread_local is what this exists to prevent, and a
+    // late record on a dying thread is a case the writer's own exit handshake already plans for.
+    if (tl_scratch_state == scratch_state::dead) [[unlikely]]
+        return nullptr;
+
+    // Built on first use, which is what sets the state to alive.
+    thread_local scratch_holder holder;
+    return &holder.buffer;
+}
+
+isize cc::rec::impl::log_payload_cap()
+{
+    auto const room = impl::max_event_payload();
+    return room > 0 ? cc::min(log_max_payload, room) : log_max_payload;
+}
+
+void cc::rec::impl::log_emit(cc::rec::desc const& d, cc::string_view text)
+{
+    // The reservation is what the message actually needs, so a short chunk tail is left behind rather than deciding
+    // where the message ends.
+    //
+    // The cap is only consulted for a message that could possibly exceed it, since reaching it asks the pool for the
+    // configured chunk size and an ordinary message is three orders of magnitude below it.
+    //
+    // At least one byte: an empty formatted message still gets an event, and open_event's contract has no zero.
+    auto wanted = text.size() > 0 ? text.size() : isize(1);
+    if (wanted > log_max_payload) [[unlikely]]
+        wanted = log_payload_cap();
+
+    auto writer = rec::open_event(d, wanted, wanted);
+    if (!writer.is_open())
+        return; // the pool had nothing to give; open_event counted the loss for the next gap event
+
+    auto const out = writer.payload();
+    auto const kept = cc::min(text.size(), out.size());
+    if (kept > 0)
+        cc::memcpy(out.data(), text.data(), size_t(kept));
+
+    // Committing the FULL size rather than what was copied: commit clamps to the reservation and flags the cut, so
+    // the cap and a message larger than one whole chunk are reported through the same path.
+    writer.commit(text.size());
+}
+
+void cc::rec::impl::log_shrink_scratch(cc::string& scratch)
+{
+    scratch = cc::string::create_with_capacity(log_scratch_capacity);
+}
 
 void cc::rec::impl::log_write(cc::rec::desc const& d, cc::format_string<> fmt)
 {

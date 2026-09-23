@@ -1061,7 +1061,8 @@ Recording sites — every name below MUST be a compile-time constant, since it l
 CC_LOG_INFO("shader cache warmed");          // no payload at all: the text IS the descriptor
 CC_LOG_WARNING("fell back to {} after {}", name, reason); // formatted straight into the chunk, no temp buffer
 CC_LOG_TRACE / _DEBUG / _INFO / _WARNING / _ERROR         // trace+debug off by default; error captures a stack
-                                             // too long for the chunk => truncated and flagged, never dropped
+                                             // formatted once into a per-thread buffer, then copied in whole
+                                             // past 1 MiB (or one chunk) => truncated and flagged, never dropped
 
 #include <clean-core/common/profiling.hh>    // scopes, values, markers, stats
 CC_RECORD_SCOPE();                           // times the block, named after the enclosing function
@@ -1177,6 +1178,7 @@ cc::rec::is_recording(desc);               // -> bool; the gate on its own
 cc::rec::record_event(desc, payload);      // POD payload, cc::span<byte const>, or nothing
 auto w = cc::rec::open_event(desc, 256);   // reserve, fill w.payload() in place, then w.commit(n) — no temp buffer
 auto w = cc::rec::open_event(desc, 256, 256); // 3rd arg: what it refuses to be cut below, taking a fresh chunk instead
+                                           // default is 1: takes any tail, so only a payload useful cut short wants it
 cc::rec::set_current_thread_record_name("worker");
 cc::rec::seal_current_thread_chunk();      // hand this thread's tail over without waiting for the chunk to fill
 ```

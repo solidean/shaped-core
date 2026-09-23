@@ -261,6 +261,22 @@ bool cc::rec::impl::writer_rotate(isize needed)
 }
 
 
+isize cc::rec::impl::max_event_payload()
+{
+    auto* const pool = impl::g_pool.load(cc::memory_order_acquire);
+    if (pool == nullptr)
+        return 0;
+
+    // Every fresh chunk opens with the preamble, and a chunk taken after a drop storm carries a gap event too, so the
+    // worst case is all three.
+    auto const preamble = impl::event_bytes_for(isize(sizeof(stream_state_payload))) //
+                        + impl::event_bytes_for(isize(sizeof(gap_payload)))          //
+                        + impl::event_bytes_for(isize(sizeof(acquired_payload)));
+
+    auto const room = pool->data_bytes_per_chunk() - preamble - isize(sizeof(impl::event_header));
+    return room > 0 ? room : 0;
+}
+
 void cc::rec::impl::writer_account_drop(isize bytes, u64 cycles)
 {
     auto& w = t_writer;
@@ -276,6 +292,8 @@ void cc::rec::impl::writer_account_drop(isize bytes, u64 cycles)
 
 cc::rec::event_writer cc::rec::open_event(cc::rec::desc const& d, isize max_payload, isize min_payload)
 {
+    CC_ASSERT(min_payload >= 1 && min_payload <= max_payload, "min_payload must be in [1, max_payload]");
+
     rec::event_writer e;
     if (!rec::is_recording(d))
         return e;
@@ -288,13 +306,19 @@ cc::rec::event_writer cc::rec::open_event(cc::rec::desc const& d, isize max_payl
     // A rotation is worth it only when the current chunk cannot hold what the caller refuses to be cut below.
     // The default of one byte is the old behaviour: a long payload is better truncated than allowed to abandon most of
     // a megabyte, and a caller who cannot live with that cut says so.
-    auto const cap = max_payload < 1 ? isize(1) : max_payload;
-    auto const wanted = cc::clamp(min_payload, isize(1), cap);
-    if (header_bytes + impl::padded_payload(wanted) > w.end - w.cur)
+    //
+    // **`min_payload + 31` rather than `header_bytes + padded_payload(min_payload)`**, which is the same number for
+    // the default of 1, never smaller than it, and at most seven larger.
+    // Erring larger can only rotate a hair early; erring smaller would hand back a reservation shorter than the
+    // caller said it would accept, so the approximation is only sound in this direction.
+    // It is worth the seven bytes because this line is on the path EVERY event takes: the exact form costs a cmov
+    // chain, a 64-bit mask and two adds that the rotation branch then waits on, and this one is a single lea.
+    auto const needed = min_payload + header_bytes + 7;
+    if (needed > w.end - w.cur)
     {
-        // A rotation reports failure when it could not make room for `wanted`, which a fresh chunk it DID take may
+        // A rotation reports failure when it could not make room for `needed`, which a fresh chunk it DID take may
         // still fall short of — so what matters here is whether anything at all can be written now.
-        (void)impl::writer_rotate(header_bytes + impl::padded_payload(wanted));
+        (void)impl::writer_rotate(needed);
         if (header_bytes + impl::padded_payload(1) > w.end - w.cur)
         {
             impl::writer_account_drop(header_bytes, cc::current_cycles());

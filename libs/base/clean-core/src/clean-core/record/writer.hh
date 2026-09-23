@@ -104,6 +104,12 @@ CC_COLD_FUNC bool writer_rotate(isize needed);
 /// Accounts one event this thread could not write, for the next gap event to report.
 CC_COLD_FUNC void writer_account_drop(isize bytes, u64 cycles);
 
+/// The largest payload one event can carry: what a whole chunk holds, less the preamble every fresh chunk opens with
+/// and this event's own header.
+/// A payload past it cannot be written whole however the chunks fall, so it is truncated and flagged.
+/// Zero while the system is down.
+[[nodiscard]] isize max_event_payload();
+
 /// Writes the ambient delta a thread deferred when it left every context; see note_ambient_change.
 CC_COLD_FUNC void flush_ambient_reset();
 
@@ -196,8 +202,11 @@ CC_FORCE_INLINE void record_event(rec::desc const& d, PayloadT const& payload)
 ///
 /// **`min_payload` is what the caller refuses to be cut below**, and a chunk whose tail is shorter is left behind for a
 /// fresh one.
-/// The default of one byte takes whatever tail there is, which is right for a payload that stays useful cut short — a
-/// stack sample, a stamp — and wrong for one a consumer matches as a whole, since the cut is invisible to it.
+/// The default of one byte takes whatever tail there is, which is right only for a payload that stays useful cut
+/// short — `rec::impl::emit_section`'s `key=value` stamp lines, and the stacktrace event that sizes its frame count to
+/// what fit.
+/// It is wrong for a payload a consumer reads as a whole, because that cut lands at an offset set by the log volume
+/// rather than by anything about the payload, and nothing downstream can tell.
 /// Asking for more than the tail costs the rest of that chunk, so a caller states what it needs rather than the most it
 /// might use.
 ///

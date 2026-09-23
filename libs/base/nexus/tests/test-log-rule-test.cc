@@ -342,8 +342,8 @@ TEST("log rule - a long record is matched whole however the chunks fall", no_sch
     if (!has_recorder())
         SKIP("the run has no recorder (--no-recording)");
 
-    // Enough volume to cross a chunk boundary several times, with the padding walking so a boundary cannot keep
-    // landing between two messages.
+    // Over 2 MiB of messages against the default 1 MiB chunk, so the stream rotates twice under the loop, with the
+    // padding walking so a boundary cannot keep landing between two messages.
     // A message the boundary cut short would carry only its head, which nothing declares.
     auto const exec = run_one(
         []
