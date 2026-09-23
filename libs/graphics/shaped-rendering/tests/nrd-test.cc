@@ -1,9 +1,9 @@
+#include "shader_fixtures.hh"
+
 #include <clean-core/common/utility.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_coroutine.hh>
-#include "shader_fixtures.hh"
-
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
@@ -250,8 +250,7 @@ constexpr auto k_specular_albedo = 0.04f;
 // The radiance is divided by a material factor, packed into YCoCg with a normalized hit distance in alpha, decoded,
 // and multiplied back; a pack that dropped the chroma, a resolve that skipped the decode, or one that lost the factor
 // all land on a different colour, and none of them would report an error.
-ASYNC_INVOCABLE_TEST("sr - NRD returns a uniformly lit surface unchanged",
-                     (sg::context_handle const& ctx_h))
+ASYNC_INVOCABLE_TEST("sr - NRD returns a uniformly lit surface unchanged", (sg::context_handle const& ctx_h))
 {
     REQUIRE(ctx_h != nullptr);
     auto& ctx = *ctx_h;

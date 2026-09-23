@@ -51,6 +51,19 @@ exceptions:
       It is Windows-only and reaches no other platform's shipping bundle.
 
 # Licenses we will not take, listed so a refusal comes with a reason rather than a silent absence.
+  - identifier: LicenseRef-NVIDIA-RTX-SDK
+    why: >-
+      NVIDIA RTX SDKs License, governing the NRD sources we fetch for sr::nrd_denoise_routine.
+      Proprietary, and accepted only for a dependency nothing fetches by default — extern/nrd is `install: on-request`,
+      so a build that nobody opted into never downloads it and never links it.
+      Section 1c permits distributing SDK materials in object code inside an application, which is how NRD is used:
+      built from source into shaped-rendering, which links it PRIVATE.
+      Section 2a requires the application to have material additional functionality beyond the SDK, which a renderer
+      plainly does, and section 4b forbids shipping the SDK as a stand-alone product, which we never do.
+      Two terms are worth re-reading on any bump.
+      Section 4e forbids using the SDK so that it becomes subject to an open source license, which is why it links
+      PRIVATE behind SR_HAS_NRD and reaches no public header.
+      Section 4f excludes life-critical use without a separate agreement, and section 15 carries US export terms.
 denied:
   - identifier: GPL-2.0-only
     why: Copyleft. Linking it into our libraries would impose its terms on every consumer.

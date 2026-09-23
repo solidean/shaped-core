@@ -29,7 +29,10 @@ TRACKS = {"tags", "default-branch", "github-releases", "sqlite", "none"}
 DIGEST_ALGOS = {"git-commit", "sha256", "sha3-256"}
 # `vendored` is committed in-tree; `fetched` hydrates a gitignored .install/ on demand, so it can be absent or stale on a given checkout.
 # `bundled` arrives inside another upstream in the same directory — Zycore, which the Zydis amalgamation folds in — so it has no install state of its own.
-INSTALLS = {"vendored", "fetched", "bundled"}
+# `on-request` hydrates the same way `fetched` does and is NEVER run for you: no configure step fetches it, because its
+# license is one a person accepts rather than one the build accepts on their behalf.
+# So it is normally ABSENT, and everything reading a manifest has to cope with that — a license collector above all.
+INSTALLS = {"vendored", "fetched", "bundled", "on-request"}
 
 
 @dataclass(frozen=True)
@@ -78,7 +81,22 @@ class Upstream:
 
     @property
     def is_fetched(self) -> bool:
-        return self.install == "fetched"
+        """Whether this upstream hydrates a gitignored `.install/` rather than being committed.
+
+        True for `on-request` too: it installs exactly the same way, and every pin and path rule below is the same.
+        What differs is who runs the fetch, which is `is_on_request`.
+        """
+        return self.install in ("fetched", "on-request")
+
+    @property
+    def is_on_request(self) -> bool:
+        """Whether a person has to fetch this by hand, so an absent install is the normal state rather than a failure."""
+        return self.install == "on-request"
+
+    @property
+    def is_installed(self) -> bool:
+        """Whether the install is actually on disk, which for an `on-request` upstream is usually false."""
+        return not self.is_fetched or self.pin_file.is_file()
 
     @property
     def is_available(self) -> bool:
