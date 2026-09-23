@@ -11,9 +11,6 @@
 
 #include <thread>
 
-// Seams the milestone order has not reached; see libs/graphics/shaped-graphics/docs/writing-a-backend.md.
-#define SG_METAL_UNIMPLEMENTED(what) CC_UNREACHABLE(what " is not implemented in the metal backend yet")
-
 namespace sg::backend::metal
 {
 CC_REC_DEFINE_DOMAIN(g_rec_domain, "sg.metal");

@@ -204,6 +204,10 @@ done
 
 Reach for `--build-suffix` only when you want a name the auto-redirect would not pick — two builds of the *same* toolset that differ some other way.
 
+`--example-backend` redirects the same way, to `build/<preset>-<backend>`, since it too is a cache variable two builds must not share.
+It sets `SC_EXAMPLE_BACKEND`, which picks the graphics backend the `*-example` binaries link — see [platforms.md](../platforms.md#example-backend-sc_example_backend).
+The two compose: a pinned toolset and a chosen backend give `build/<preset>-<toolset>-<backend>`.
+
 ### WebAssembly (Emscripten)
 
 The `emscripten-*` presets cross-compile to WASM.

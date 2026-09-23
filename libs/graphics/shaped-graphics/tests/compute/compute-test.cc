@@ -1,3 +1,5 @@
+#include "../shaders/shader_fixtures.hh"
+
 #include <clean-core/container/vector.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <nexus/async-test.hh>
@@ -17,6 +19,8 @@ namespace shaders = sg::test::sgl_shaders;
 ASYNC_INVOCABLE_TEST("sg - a compute shader doubles every element of a buffer", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
 
     // The entry point's binding list is `{work}`, so its pipeline needs nothing but the entry point.
     auto const pipeline = co_await shaders::double_values.compute.main.acquire_pipeline(*ctx);
@@ -49,6 +53,8 @@ ASYNC_INVOCABLE_TEST("sg - a compute shader doubles every element of a buffer", 
 ASYNC_INVOCABLE_TEST("sg - one group binds at whichever slot the entry point lists it", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
 
     // `scaled` lists `{factor, work}`, so `work` is its group 1 where it is `main`'s group 0.
     // The group's type and its layout are the same object either way; only the pipeline layout places them.
@@ -94,6 +100,8 @@ ASYNC_INVOCABLE_TEST("sg - a group's plain members reach the shader through the 
                      (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
 
     auto const& shader = co_await shaders::double_values.compute.affine_map->acquire(*ctx);
     auto const group_layout = ctx->cached.acquire_binding_group_layout<shaders::affine>();
@@ -134,6 +142,8 @@ ASYNC_INVOCABLE_TEST("sg - a pipeline whose shader does not fit its layout is re
                      (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
 
     // `main` lists `{work}`, so `work` is its group 0, and this layout has `work` at slot 1.
     auto const& shader = co_await shaders::double_values.compute.main->acquire(*ctx);
@@ -154,6 +164,8 @@ ASYNC_INVOCABLE_TEST("sg - a compute shader that calls a helper keeps its workgr
                      (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
 
     // `at_most` returns early, so the entry point is legalized before it is written; its dispatch shape must survive.
     auto const pipeline = co_await shaders::double_values.compute.clamp_values.acquire_pipeline(*ctx);

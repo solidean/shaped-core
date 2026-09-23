@@ -5,7 +5,7 @@
 Real across the surface, presenting windowed and headless and recording GPU timestamps.
 The device, the queue, the epoch timelines, the command-list lifecycle, buffers, memory heaps, barriers, inline transfer and the bind path's layouts and groups are real.
 Staging binding groups work too, which is what makes bindless arrays work — they are pure sg on top of one.
-Compute pipelines build from a metallib and dispatch, textures create, bind and transfer, raster draws, and a swapchain presents.
+Compute pipelines build from a metallib and dispatch, textures create, bind and transfer, a swapchain presents, and raster draws — indexed and not, over vertex buffers, with inline constants.
 Async transfer and streaming are real, and so is ray tracing — acceleration structures, a bound TLAS, and the DXR-shaped pipeline path.
 [docs/writing-a-backend.md](../../docs/writing-a-backend.md) is the milestone order it is being filled in along.
 [docs/concepts/backends.md](../../docs/concepts/backends.md) says what a backend is.
@@ -84,6 +84,48 @@ Each of these is a fact about Metal rather than a gap in the backend.
   Metal 4's `MTL4Archive` is one store per *compiler* where sg's surface is one blob per *pipeline*, so the mapping
   vulkan found — a `VkPipelineCache` per pipeline — has no counterpart here.
   Recorded as open in [docs/TODO.md](../../docs/TODO.md), and pinned by a test so it reads as deliberate.
+- **Vertex buffers and inline constants are argument-table addresses, because Metal has neither of the usual forms.**
+  MTL4's render encoder has no `setVertexBuffer`, and Metal has no root constants and no push constants — so both arrive the way a binding group does, as an address in the one `MTL4ArgumentTable`.
+  That fixes a buffer-index convention the shader has to agree with, and `metal_common.hh` is where it is stated.
+  Groups at 0 to 2, sg's reserved group at 3, inline constants at 4, and vertex-input slot `n` at 5 + `n`.
+  An `[[attribute(n)]]` index is the attribute's position in `vertex_input_layout::attributes`, which is the workaround the vulkan backend already states for its SPIR-V locations.
+  Both are a workaround for the same missing field: sg names a vertex input by an HLSL semantic, and neither MSL nor SPIR-V has one.
+  **Nothing below checks any of it.**
+  A wrong buffer index is not an API error here; it is a draw that reads whatever else was bound there, which is why `tests/metal-vertex-input-test.cc` exists.
+- **Inline constants are staged by the draw, not by the setter** — the shape WebGPU's backend arrived at for the same missing feature.
+  A set patches a host-side shadow, and the next dispatch or draw copies the block into the upload ring and binds its address.
+  An unchanged block is bound again at the address it already has, so a list setting the same constants for every draw stages one block rather than one per draw.
+  A *changed* one takes a fresh span rather than a rewrite in place, because the address an earlier draw was recorded against is still what that draw will read.
+- **An index buffer must sit at a 4-byte boundary, and nothing says so when it does not.**
+  MTL4's `drawIndexedPrimitives` takes the indices as a GPU address with no first-index of its own, so sg's `index_range.offset` is folded into that address.
+  An odd first index into a `uint16` buffer therefore lands 2 mod 4.
+  Metal then draws part of the mesh and reports nothing: not an error, not a validation message, just a partly-drawn mesh that D3D12 and Vulkan both draw whole.
+  It was found by a test whose quad came out as one triangle, which is the only way it can be found.
+  **This backend is the reason `sg::index_buffer_offset_alignment` exists**, and the rule is sg-wide rather than metal's.
+  Every backend asserts it, so the violation fails on whichever dev box the author has.
+  [concepts/raster-pipeline.md](../../docs/concepts/raster-pipeline.md) is the rule, and `sg::is_aligned_index_fetch` answers it without asserting.
+- **A render encoder's barrier is asymmetric, where a compute encoder's is not.**
+  `barrierAfterEncoderStages` on a render encoder refuses `MTLStageFragment` as its *source* by name, accepting only `MTLStageVertex | MTLStageObject | MTLStageMesh`.
+  Inside one draw the fragment stage is last, so there is no later stage of that draw for work ordered after it to reach.
+  Its destination half takes the whole pass.
+  Hence two clamps rather than one, and the validation layer aborting on the pair is how the asymmetry was found rather than read.
+- **A fragment-stage producer is ordered by closing and reopening the pass.**
+  The reasoning above holds for one draw and not for two.
+  A fragment shader writing what a later draw in the same pass reads is a dependency no barrier here can name, and one clamped to the vertex stage orders nothing that matters.
+  So `flush_barriers` ends the render encoder and opens it again over the same targets, with every load op forced to LOAD — the same answer vulkan gives.
+  The encoder boundary's publish/wait pair is what carries the dependency.
+  The scope's encoder state is replayed onto the new encoder, since none of it survives the boundary.
+  `metal_command_list::pass_reopens` counts them, which is what the tier-2 test asserts rather than trusting the pixels.
+- **Every encoder publishes as it closes, rather than the list publishing once at the end.**
+  An encoder-scoped barrier orders work inside its own encoder and cannot reach across a boundary, so a dispatch written and then read by a draw is ordered by the pair at that boundary instead.
+  That pair is the publish `end_encoder` and `raster_end_rendering` emit, plus the queue wait the next encoder opens with.
+  That is also what makes a mask clamping to nothing in `flush_barriers` harmless rather than a dropped dependency.
+- **An array binding's elements are declared one at a time, and an undeclared one is an error.**
+  Which elements a shader indexes is decided by data no backend sees, so a group keeps its array bindings apart from its scalar ones.
+  The scalar bindings are declared automatically at the dispatch or draw, and the arrays only by `cmd.compute.declare_array_*_access`.
+  A bound array binding with no declare asserts rather than going untracked, and an empty span is how a caller says one is unused — the same accounting dx12 and vulkan keep.
+  An acceleration-structure array is the exception and stays automatic.
+  A trace reads every structure its table can reach, and sg's two declare calls are split by buffer and texture with no third for that kind to arrive through.
 - **A raster pipeline is three objects where dx12 and vulkan have one.**
   MTL4 splits what a D3D12 PSO folds together.
   The render pipeline state carries the shaders, the vertex layout and the colour attachments' blending.
@@ -373,10 +415,14 @@ A handler still in flight then does nothing instead of reporting into freed memo
 
 ## Testing
 
-`shaped-graphics-metal-test` is the tier-2 binary: bring-up, the floor refusal, the epoch timelines, command-list lifetime, transfer, the bind path, compute, and what Metal reports where.
+`shaped-graphics-metal-test` is the tier-2 binary: bring-up, the floor refusal, the epoch timelines, command-list lifetime, transfer, the bind path, compute, raster, and what Metal reports where.
 
 The tier-1 suite has **no compute execution test at all** — it cannot, because bytecode is per-backend by construction — so this tier is the specification for the dispatch path.
 `double_compute.metal` is checked in beside the `double_compute.metallib.h` compiled from it, with the command line in the source's own comment.
+`mesh.metal` is the vertex-input fixture, one library with five entry points.
+The two stages of a draw that reads its colour from a vertex attribute and its tint from inline constants, plus three kernels.
+One kernel takes inline constants, one takes an array binding, and one writes the vertex buffer a draw then reads.
+Its quad carries decoy vertices and decoy indices ahead of the real ones, so a draw that ignored `vertex_offset` or the first index covers a different part of the target rather than the same one.
 `raytrace.metal` is the ray-tracing fixture, one library with seven entry points.
 Two raygen kernels and the inline ray-query one, plus a miss function, a closest-hit function, an any-hit function and a procedural intersection function.
 It is what makes the two execution tests the only thing anywhere that traces a ray on metal, since the tier-1 suite cannot.

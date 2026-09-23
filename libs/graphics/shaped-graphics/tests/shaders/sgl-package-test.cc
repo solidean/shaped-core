@@ -1,9 +1,14 @@
+#include "shader_fixtures.hh"
+
 #include <clean-core/thread/async_coroutine.hh>
 #include <nexus/async-test.hh>
+#include <nexus/test.hh>
 #include <shaped-graphics/binding/binding_group.hh>
 #include <shaped-graphics/binding/compiled_shader.hh>
 #include <shaped-graphics/context/context.hh>
+#include <shaped-shader-library/compiler/shader_compiler.hh>
 #include <shaped-shader-library/shader_asset.hh>
+#include <shaped-shader-library/shader_library.hh>
 
 // The package this target declares itself (see sc_add_shader_package in shaped-graphics' CMakeLists).
 #include <sg_test_sgl_shaders.hh>
@@ -29,10 +34,22 @@ static_assert(!std::is_assignable_v<decltype(shaders::work::values)&, sg::readon
 static_assert(!std::is_assignable_v<decltype(shaders::work::values)&, sg::readwrite_buffer_view<int>>);  // `[float]`
 static_assert(std::is_assignable_v<decltype(shaders::factor::by)&, sg::readonly_buffer_view<float>>);
 
+TEST("sg - the SGL fixtures reach at least one format on every build")
+{
+    // The guard `shaders_reach` applies is what keeps the shader-using tier-1 tests off a metal context, and a guard
+    // that answered "no" everywhere would skip them on every backend while the suite still reported green.
+    // SGL's own compiler needs no external toolchain, so at least one format is reachable on every host there is —
+    // which makes an empty answer a broken registration rather than a thin environment.
+    auto const formats = sg_test::shader_fixtures().supported_formats(slib::shader_language::sgl);
+    CHECK(formats.size() > 0);
+}
+
 ASYNC_INVOCABLE_TEST("sg - an SGL package's generated group is what its compiled shader reflects",
                      (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
 
     // The asset picks the format by asking the context what it accepts, so this names no backend.
     auto const& compiled = co_await shaders::double_values.compute.main->acquire(*ctx);
@@ -62,6 +79,8 @@ ASYNC_INVOCABLE_TEST("sg - every entry point of the SGL package reflects what th
                      (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
 
     // Generated for the whole package, so a shader added to it is checked here without this test changing.
     auto const mismatch = co_await shaders::check_reflection(*ctx);

@@ -272,6 +272,7 @@ if(SC_BUILD_TESTS)
             tests/buffer/buffer-test.cc
             tests/texture/texture-create-test.cc
             tests/command_list/command_list-test.cc
+            tests/command_list/index_buffer_alignment-test.cc
             tests/transfer/transfer-test.cc
             tests/transfer/transfer-fuzz-test.cc
             tests/transfer/upload-async-test.cc
@@ -335,11 +336,17 @@ if(SC_BUILD_TESTS)
             LANGUAGE   hlsl
             SHADERS
                 double_values.hlsl:compute:main
+                fragment_hazard.hlsl:vertex:vs_main
+                fragment_hazard.hlsl:fragment:ps_write
+                fragment_hazard.hlsl:fragment:ps_read
                 pattern_fill.hlsl:compute:main
                 ping_pong.hlsl:compute:main
         )
         # What tests/shaders/shader_fixtures.cc keys on: the SGL package is always there, this one is not.
         target_compile_definitions(shaped-graphics-test PRIVATE SG_TEST_HAS_HLSL_SHADERS=1)
+
+        # The one tier-1 test that executes raster shaders, for the hazard only a running GPU shows.
+        target_sources(shaped-graphics-test PRIVATE tests/command_list/fragment-write-hazard-test.cc)
 
         # Frame-shaped: what creating render targets every frame costs against keeping them, per backend.
         target_sources(shaped-graphics-test PRIVATE tests/transient/transient-benchmark.cc)

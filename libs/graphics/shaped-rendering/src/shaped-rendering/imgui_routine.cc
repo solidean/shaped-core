@@ -46,7 +46,8 @@ struct sg::vertex_layout_of<ImDrawVert>
     }
 };
 
-static_assert(sizeof(ImDrawIdx) == 2, "imgui_routine binds a u16 index buffer");
+static_assert(sizeof(ImDrawIdx) == 4,
+              "imgui_routine binds a u32 index buffer — see extern/imgui/shaped/imgui/imgui_config.hh");
 
 namespace sr
 {
@@ -215,7 +216,7 @@ imgui_routine::geometry imgui_routine::upload_geometry(sg::command_list& cmd, Im
     auto const geo
         = geometry{.vertices = ctx.transient.create_buffer<ImDrawVert>(
                        isize(draw_data->TotalVtxCount), sg::buffer_usage::vertex_buffer | sg::buffer_usage::copy_dst),
-                   .indices = ctx.transient.create_buffer<u16>(
+                   .indices = ctx.transient.create_buffer<u32>(
                        isize(draw_data->TotalIdxCount), sg::buffer_usage::index_buffer | sg::buffer_usage::copy_dst)};
 
     // imgui keeps one vertex/index buffer per draw list; we concatenate them into one pair, and the draw loop offsets each list's commands accordingly.
@@ -225,7 +226,7 @@ imgui_routine::geometry imgui_routine::upload_geometry(sg::command_list& cmd, Im
     {
         cmd.upload.data_to_buffer(geo.vertices, cc::span<ImDrawVert const>(list->VtxBuffer.Data, list->VtxBuffer.Size),
                                   vertex_offset);
-        cmd.upload.data_to_buffer(geo.indices, cc::span<u16 const>(list->IdxBuffer.Data, list->IdxBuffer.Size),
+        cmd.upload.data_to_buffer(geo.indices, cc::span<u32 const>(list->IdxBuffer.Data, list->IdxBuffer.Size),
                                   index_offset);
         vertex_offset += isize(list->VtxBuffer.Size);
         index_offset += isize(list->IdxBuffer.Size);

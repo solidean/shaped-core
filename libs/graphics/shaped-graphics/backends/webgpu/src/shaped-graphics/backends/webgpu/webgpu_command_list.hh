@@ -129,6 +129,12 @@ public:
     WGPUBuffer _index_buffer = nullptr;
     WGPUIndexFormat _index_format = WGPUIndexFormat_Undefined;
     u64 _index_offset = 0;
+
+    // The same two facts in sg's own vocabulary, for the alignment rule an indexed draw must satisfy — `_index_format`
+    // above is already WebGPU's spelling of the width.
+    // See sg::index_buffer_offset_alignment; every backend carries this check.
+    sg::index_format _sg_index_format = sg::index_format::uint16;
+    isize _index_view_offset_in_bytes = 0;
     u64 _index_size = 0;
 
     /// Opens the render pass from the stored attachments; `reopen` forces every load op to load.
