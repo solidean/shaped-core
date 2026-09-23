@@ -42,6 +42,14 @@ raw_buffer_handle context_transient_scope::create_raw_buffer(isize size_in_bytes
     throw allocation_exception("transient buffer allocation failed", size_in_bytes, r.error());
 }
 
+raw_buffer_handle context_transient_scope::create_raw_buffer_from_pin(cc::pinned_data<byte const> bytes,
+                                                                      buffer_usages usage)
+{
+    auto buffer = create_raw_buffer(bytes.size(), usage | buffer_usage::copy_dst);
+    _ctx.upload.bytes_to_buffer(buffer, cc::move(bytes));
+    return buffer;
+}
+
 cc::result<raw_buffer_handle> context_transient_scope::try_create_raw_buffer(isize size_in_bytes, buffer_usages usage)
 {
     CC_ASSERT(size_in_bytes >= 0, "buffer size must be non-negative");

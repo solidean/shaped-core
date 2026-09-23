@@ -266,3 +266,127 @@ ASYNC_INVOCABLE_TEST("sg - async upload to a dropped buffer still releases it", 
 
     CHECK(released->load(std::memory_order_acquire));
 }
+
+// The create_buffer_from_* factories: one call that allocates a buffer sized to its data and fills it through ctx.upload.
+// Each round-trips through a download, which must wait for the async copy without being told to.
+
+ASYNC_INVOCABLE_TEST("sg - create_buffer_from_bytes round-trips and adds copy_dst", (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    byte data[256];
+    for (int i = 0; i < 256; ++i)
+        data[i] = pattern(i);
+
+    // copy_src alone: the factory adds the copy_dst its upload needs.
+    auto const buf = ctx->persistent.create_buffer_from_bytes(data, sg::buffer_usage::copy_src);
+    REQUIRE(buf != nullptr);
+    CHECK(buf->size_in_bytes() == 256);
+    CHECK(buf->usage().has(sg::buffer_usage::copy_dst));
+
+    auto down = ctx->create_command_list();
+    REQUIRE(down != nullptr);
+    auto future = down->download.bytes_from_buffer(buf, 0, 256);
+    ctx->submit_command_list(cc::move(down));
+
+    auto const bytes = co_await future.bytes();
+    REQUIRE(bytes.size() == 256);
+    bool matches = true;
+    for (int i = 0; i < 256; ++i)
+        if (bytes[i] != pattern(i))
+            matches = false;
+    CHECK(matches);
+}
+
+ASYNC_INVOCABLE_TEST("sg - create_buffer_from_data types the buffer by the range", (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+
+    // An owning rvalue is moved into the pin rather than copied.
+    auto values = cc::vector<int>();
+    for (int i = 0; i < 64; ++i)
+        values.push_back(i * 3);
+    sg::buffer<int> const from_vector
+        = ctx->persistent.create_buffer_from_data(cc::move(values), sg::buffer_usage::copy_src);
+    CHECK(from_vector.element_count() == 64);
+
+    // A C array is copied once.
+    float const weights[4] = {0.5f, 1.5f, 2.5f, 3.5f};
+    sg::buffer<float> const from_array = ctx->persistent.create_buffer_from_data(weights, sg::buffer_usage::copy_src);
+    CHECK(from_array.element_count() == 4);
+
+    auto down = ctx->create_command_list();
+    REQUIRE(down != nullptr);
+    auto ints = down->download.data_from_buffer(from_vector);
+    auto floats = down->download.data_from_buffer(from_array);
+    ctx->submit_command_list(cc::move(down));
+
+    auto const int_data = co_await ints.data();
+    REQUIRE(int_data.size() == 64);
+    bool matches = true;
+    for (int i = 0; i < 64; ++i)
+        if (int_data[i] != i * 3)
+            matches = false;
+    CHECK(matches);
+
+    auto const float_data = co_await floats.data();
+    REQUIRE(float_data.size() == 4);
+    CHECK(float_data[0] == 0.5f);
+    CHECK(float_data[3] == 3.5f);
+}
+
+ASYNC_INVOCABLE_TEST("sg - create_buffer_from_pod holds one element", (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    struct pair
+    {
+        u32 a;
+        u32 b;
+    };
+
+    auto const buf = ctx->persistent.create_buffer_from_pod(pair{.a = 7, .b = 11}, sg::buffer_usage::copy_src);
+    CHECK(buf.element_count() == 1);
+
+    auto down = ctx->create_command_list();
+    REQUIRE(down != nullptr);
+    auto future = down->download.data_from_buffer(buf);
+    ctx->submit_command_list(cc::move(down));
+
+    auto const data = co_await future.data();
+    REQUIRE(data.size() == 1);
+    CHECK(data[0].a == 7);
+    CHECK(data[0].b == 11);
+}
+
+ASYNC_INVOCABLE_TEST("sg - transient create_buffer_from_data is readable in its epoch", (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    u32 const in[3] = {1, 2, 3};
+    auto const buf = ctx->transient.create_buffer_from_data(in, sg::buffer_usage::copy_src);
+    auto const raw
+        = ctx->transient.create_buffer_from_bytes(cc::span<u32 const>(in).as_bytes(), sg::buffer_usage::copy_src);
+    auto const one = ctx->transient.create_buffer_from_pod(u32(42), sg::buffer_usage::copy_src);
+
+    auto down = ctx->create_command_list();
+    REQUIRE(down != nullptr);
+    auto typed = down->download.data_from_buffer(buf);
+    auto bytes = down->download.data_from_buffer<u32>(raw, 0, 3);
+    auto pod = down->download.data_from_buffer(one);
+    ctx->submit_command_list(cc::move(down));
+
+    auto const typed_data = co_await typed.data();
+    auto const byte_data = co_await bytes.data();
+    auto const pod_data = co_await pod.data();
+    REQUIRE(typed_data.size() == 3);
+    REQUIRE(byte_data.size() == 3);
+    REQUIRE(pod_data.size() == 1);
+    CHECK(typed_data[2] == 3);
+    CHECK(byte_data[1] == 2);
+    CHECK(pod_data[0] == 42);
+}
+
+INVOCABLE_TEST("sg - create_buffer_from_data of an empty range is an empty buffer", (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    auto const buf = ctx->persistent.create_buffer_from_data(cc::span<float const>(), sg::buffer_usage::copy_src);
+    CHECK(buf.element_count() == 0);
+}

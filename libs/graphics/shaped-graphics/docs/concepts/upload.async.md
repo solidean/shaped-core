@@ -17,6 +17,10 @@ The source bytes are only read during the memcpy into staging, so the caller may
 Inline upload copies synchronously instead.
 Empty data is a no-op.
 
+**A buffer that starts filled is created in one call.**
+`ctx.persistent.create_buffer_from_data`, `create_buffer_from_pod` and `create_buffer_from_bytes` — and their `ctx.transient` twins — allocate a buffer sized to the data and fill it through this path.
+They are the preferred spelling over `create_buffer` followed by an upload, since no command list is needed and the automatic sync below makes the buffer readable at once.
+
 ## Why sync is automatic in both directions (the load-bearing decision)
 
 The staged copy runs **later**, asynchronously, on a queue the caller never sees.

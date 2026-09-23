@@ -5,6 +5,7 @@
 #include <clean-core/error/result.hh>
 #include <clean-core/thread/mutex.hh>
 #include <shaped-graphics/binding/binding_group.hh> // sg::declared_binding_set, sg::slotted_view
+#include <shaped-graphics/context/upload.hh>        // sg::upload_range, what the create_buffer_from_* factories take
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/resource/buffer.hh>               // typed buffer<T> wrapper (returned by create_buffer below)
 #include <shaped-graphics/resource/texture_descriptions.hh> // shape-specific descriptions + the typed factories below
@@ -37,6 +38,36 @@ public:
     [[nodiscard]] buffer<T> create_buffer(isize element_count, buffer_usages usage)
     {
         return buffer<T>::from_raw(create_raw_buffer(element_count * isize(sizeof(T)), usage));
+    }
+
+    // Filled buffer factories — the preferred way to create a buffer with contents, as on context_persistent_scope.
+    // Each allocates a buffer sized exactly to its data and streams the data in through ctx.upload, so no command list is involved.
+    // `usage` gains buffer_usage::copy_dst, which the upload needs.
+    // A later command list that reads the buffer waits for the copy on its own, so the buffer is usable in this epoch.
+    // The data is pinned with cc::make_pinned_data: a pinned_data or an owning rvalue is uploaded in place, anything else is copied once.
+    // Empty data is a valid empty buffer.
+    // Error behaviour mirrors create_raw_buffer.
+
+    /// A buffer holding `bytes`, returned raw — the byte-level form, as bytes_to_buffer is on ctx.upload.
+    template <upload_byte_range Bytes>
+    [[nodiscard]] raw_buffer_handle create_buffer_from_bytes(Bytes&& bytes, buffer_usages usage)
+    {
+        return create_raw_buffer_from_pin(impl::pin_upload_range(cc::forward<Bytes>(bytes)), usage);
+    }
+
+    /// A `buffer<T>` holding every element of `data`, `T` being the range's element type.
+    template <upload_range Data>
+    [[nodiscard]] buffer<std::ranges::range_value_t<Data>> create_buffer_from_data(Data&& data, buffer_usages usage)
+    {
+        auto const pin = impl::pin_upload_range(cc::forward<Data>(data));
+        return buffer<std::ranges::range_value_t<Data>>::from_raw(create_raw_buffer_from_pin(pin.as_bytes(), usage));
+    }
+
+    /// A one-element `buffer<T>` holding `value`.
+    template <class T>
+    [[nodiscard]] buffer<T> create_buffer_from_pod(T const& value, buffer_usages usage)
+    {
+        return create_buffer_from_data(cc::span<T const>(&value, 1), usage);
     }
 
     // textures
@@ -172,6 +203,9 @@ private:
     [[nodiscard]] cc::result<raw_buffer_handle> try_create_raw_buffer(isize size_in_bytes, buffer_usages usage);
 
     [[nodiscard]] cc::result<raw_texture_handle> try_create_raw_texture(texture_description const& desc);
+
+    // The one core the create_buffer_from_* factories share: a copy_dst buffer of bytes.size(), filled through ctx.upload.
+    [[nodiscard]] raw_buffer_handle create_raw_buffer_from_pin(cc::pinned_data<byte const> bytes, buffer_usages usage);
 
     [[nodiscard]] cc::result<binding_group_handle> try_create_binding_group(binding_group_layout_handle layout,
                                                                             cc::span<named_view const> views,
