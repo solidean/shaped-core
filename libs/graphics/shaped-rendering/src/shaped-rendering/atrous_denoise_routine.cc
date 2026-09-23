@@ -194,14 +194,14 @@ denoise_outcome atrous_denoise_routine::execute(sg::command_list& cmd,
             .depth_sigma = options.depth_sigma,
         };
 
-        auto const group
-            = ctx.transient.create_binding_group(self->_group_layout, shaders::atrous_bindings{
-                                                                          .gSource = source.as_readonly_view(),
-                                                                          .gAlbedo = albedo,
-                                                                          .gNormal = normal,
-                                                                          .gDepth = depth,
-                                                                          .gTarget = target.as_readwrite_view(),
-                                                                      });
+        auto const group = ctx.transient.create_binding_group(cmd, self->_group_layout,
+                                                              shaders::atrous_bindings{
+                                                                  .gSource = source.as_readonly_view(),
+                                                                  .gAlbedo = albedo,
+                                                                  .gNormal = normal,
+                                                                  .gDepth = depth,
+                                                                  .gTarget = target.as_readwrite_view(),
+                                                              });
 
         cmd.compute.bind_pipeline(*self->_pipeline);
         cmd.compute.bind<shaders::atrous_bindings>(*group);
