@@ -195,6 +195,11 @@ and `T` never has to be spelled out.
 **A `.raw()` in a transfer call is a smell** — it means an overload is missing; add it rather than
 unwrapping at the call site.
 
+**A buffer that starts with contents is created from them** — `create_buffer_from_data(range, usage)` on `ctx.persistent` or `ctx.transient`.
+`create_buffer_from_pod(value, usage)` and `create_buffer_from_bytes(bytes, usage)` are its one-value and byte-level siblings.
+They fill it through `ctx.upload`, so no command list is involved and `copy_dst` is implied.
+`create_buffer` followed by an upload is for a buffer whose contents change after it exists.
+
 `raw_*` stays the escape hatch for byte-addressed work, and for a struct field that genuinely holds a
 `raw_buffer_handle` — a `blas_triangles`'s vertex buffer, say.
 Those reach through `.raw()`.

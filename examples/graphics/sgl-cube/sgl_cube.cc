@@ -299,16 +299,8 @@ ASYNC_EXAMPLE("shaped-graphics/sgl-cube")
     auto const pipeline = pipeline_result->value();
 
     // Persistent, uploaded once: the mesh never changes, and this is what most real geometry looks like.
-    auto const mesh = build_cube_mesh();
-    auto const indices = build_cube_indices();
-    auto const vertices = ctx->persistent.create_buffer<cube_vertex>(cube_vertex_count, sg::buffer_usage::vertex_buffer | sg::buffer_usage::copy_dst);
-    auto const index_buffer = ctx->persistent.create_buffer<u16>(cube_index_count, sg::buffer_usage::index_buffer | sg::buffer_usage::copy_dst);
-    {
-        auto cmd = ctx->create_command_list();
-        cmd->upload.data_to_buffer(vertices, cc::span<cube_vertex const>(mesh));
-        cmd->upload.data_to_buffer(index_buffer, cc::span<u16 const>(indices));
-        ctx->submit_command_list(cc::move(cmd));
-    }
+    auto const vertices = ctx->persistent.create_buffer_from_data(build_cube_mesh(), sg::buffer_usage::vertex_buffer);
+    auto const index_buffer = ctx->persistent.create_buffer_from_data(build_cube_indices(), sg::buffer_usage::index_buffer);
 
     // A window, an HTML canvas, or a texture to render into — the frame below does not care which.
     // The window system is only brought up when there is something to show, so a capture runs where there is no
