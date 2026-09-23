@@ -28,6 +28,15 @@ cc::result<raw_buffer_handle> context_persistent_scope::try_create_raw_buffer(is
     return _ctx.try_create_raw_buffer(size_in_bytes, usage, alloc);
 }
 
+raw_buffer_handle context_persistent_scope::create_raw_buffer_from_pin(cc::pinned_data<byte const> bytes,
+                                                                       buffer_usages usage,
+                                                                       allocation_info const& alloc)
+{
+    auto buffer = create_raw_buffer(bytes.size(), usage | buffer_usage::copy_dst, alloc);
+    _ctx.upload.bytes_to_buffer(buffer, cc::move(bytes));
+    return buffer;
+}
+
 // textures
 
 raw_texture_handle context_persistent_scope::create_raw_texture(texture_description const& desc,

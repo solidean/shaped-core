@@ -282,7 +282,7 @@ auto const layout = ctx.cached.acquire_binding_group_layout<shaders::frame_bindi
 auto const layout = ctx.cached.acquire_binding_group_layout<shaders::frame_bindings>(runtime_samplers);
                                     // + static samplers for the ones the shader left undeclared;
                                     //   supplying one it DID declare asserts -- it is a mistake, not an override
-auto const g = ctx.transient.create_binding_group(layout, shaders::frame_bindings{.albedo = tex.as_readonly_view()});
+auto const g = ctx.transient.create_binding_group(cmd, layout, shaders::frame_bindings{.albedo = tex.as_readonly_view()});
                                     // the LAYOUT is passed in: a group is created on the frame path, and
                                     //   acquiring hashes the table and takes the pipeline cache's lock
                                     // a sampler the group gathers that `layout` declares static is dropped
@@ -295,11 +295,12 @@ scope.bind<shaders::frame_bindings>(*g);   // binds at G::group_index, on raster
 // `binding work` -> shaders::work: one field per member, in the shader's order, plus declared_bindings(), gather().
 //   a buffer member is a TYPED view: `mut buffer[float]` -> sg::readwrite_buffer_view<float>, so a read-only view or
 //   a buffer<int> does not compile. A plain member is a plain field (`scale: float` -> float): the group's own
-//   constant buffer, which create_binding_group allocates with the scope's lifetime and fills via ctx.upload.
+//   constant buffer, which create_binding_group allocates with the scope's lifetime: a transient one is uploaded
+//   inline into the `cmd` it is given, a persistent one through ctx.upload.
 //   sg::declared_binding_set, NOT declared_binding_group: no group_index, because SGL numbers a group by its
 //   position in each entry point's list. Bind it at the index the pipeline has it at:
 auto const layout = ctx.cached.acquire_binding_group_layout<shaders::work>();
-auto const group = ctx.transient.create_binding_group(layout, shaders::work{.scale = 2.0f, .values = buf.as_readwrite_buffer()});
+auto const group = ctx.transient.create_binding_group(cmd, layout, shaders::work{.scale = 2.0f, .values = buf.as_readwrite_buffer()});
 cmd.compute.bind_group(0, *group);        // group 0 of `main`, group 1 of an entry point listing {factor, work}
 // `@inline binding constants` -> shaders::constants: plain fields in C++'s layout, and the block the shader reads:
 pass.set_inline_constants(shaders::constants{.view_projection = vp}.to_block());

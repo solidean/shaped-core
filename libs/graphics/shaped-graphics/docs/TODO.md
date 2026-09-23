@@ -163,8 +163,16 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   - **compaction** — BLAS `allow_compaction`, query the compacted size, copy into a smaller buffer;
   - **compaction** on both backends, which is the one build-time flag neither implements.
 - **A group's implicit constant buffer is one upload each.**
-  `create_binding_group` allocates a buffer for a generated group's plain members and fills it through `ctx.upload`, one allocation and one copy per group.
+  `create_binding_group` allocates a buffer for a generated group's plain members and fills it with one copy per group.
+  On `ctx.transient` that copy is recorded inline into the `cmd` the call takes, and on `ctx.persistent` it goes through `ctx.upload`.
   A per-frame group wants a transient constant-buffer writer instead: a ring in host-visible device memory (ReBAR where there is some), suballocated per epoch and written in place.
+- **A resource's lifetime scope is stamped after construction, through a friend.**
+  `raw_buffer::scope()` / `raw_texture::scope()` read a `mutable` field that `context_transient_scope` sets on the handle the backend just returned.
+  Every backend already receives `allocation_info::scope` when it creates a resource, so each could forward it to the `raw_buffer` / `raw_texture` constructor instead.
+  The field then becomes `const` and the friend goes away.
+  It touches all eight backend resource classes and the four test fakes that construct the bases, metal's included, for no behavioural change.
+  So it is its own change rather than part of the one that added the stamp.
+
 - **The metal encoder-boundary barrier pair is emitted but not proved.**
   `flush_barriers` now emits on whichever encoder is open, clamped to the stages that encoder accepts, and every
   encoder publishes its work as it closes — so a dependency crossing an encoder boundary is carried by that publish

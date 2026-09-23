@@ -39,8 +39,8 @@ rules:
 
   - kind: allow-include
     value: <ranges>
-    reason: std::ranges::contiguous_range is what constrains the upload overloads, and cc:: has no range vocabulary
-    files: src/shaped-graphics/command_list/upload.hh
+    reason: std::ranges::contiguous_range is what constrains the upload overloads and the create_buffer_from_* factories, and cc:: has no range vocabulary
+    files: [src/shaped-graphics/command_list/upload.hh, src/shaped-graphics/context/upload.hh]
 
   - kind: allow-include
     value: <cstdlib>

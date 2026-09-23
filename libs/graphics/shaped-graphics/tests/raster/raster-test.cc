@@ -48,10 +48,6 @@ ASYNC_INVOCABLE_TEST("sg - a raster pipeline draws instanced quads from two vert
     });
 
     // One quad over the left half of clip space, drawn twice: once where it is, once moved onto the right half.
-    auto const corners = ctx->persistent.create_buffer<shaders::quad::per_vertex>(
-        6, sg::buffer_usage::vertex_buffer | sg::buffer_usage::copy_dst);
-    auto const instances = ctx->persistent.create_buffer<shaders::quad::per_instance>(
-        2, sg::buffer_usage::vertex_buffer | sg::buffer_usage::copy_dst);
     auto const corner = [](float x, float y) { return shaders::quad::per_vertex{.corner = tg::vec3f(x, y, 0.0f)}; };
     shaders::quad::per_vertex const quad[] = {
         corner(-1, -1), corner(0, -1), corner(0, 1), corner(-1, -1), corner(0, 1), corner(-1, 1),
@@ -60,6 +56,8 @@ ASYNC_INVOCABLE_TEST("sg - a raster pipeline draws instanced quads from two vert
         {.offset = tg::vec3f(0, 0, 0), .tint = tg::vec4f(1, 0, 0, 1)},
         {.offset = tg::vec3f(1, 0, 0), .tint = tg::vec4f(0, 0, 1, 1)},
     };
+    auto const corners = ctx->persistent.create_buffer_from_data(quad, sg::buffer_usage::vertex_buffer);
+    auto const instances = ctx->persistent.create_buffer_from_data(placed, sg::buffer_usage::vertex_buffer);
 
     auto const image
         = ctx->persistent.create_texture_2d({.format = sg::pixel_format::rgba8_unorm,
@@ -68,8 +66,6 @@ ASYNC_INVOCABLE_TEST("sg - a raster pipeline draws instanced quads from two vert
                                              .usage = sg::texture_usage::render_target | sg::texture_usage::copy_src});
 
     auto cmd = ctx->create_command_list();
-    cmd->upload.data_to_buffer(corners, quad);
-    cmd->upload.data_to_buffer(instances, placed);
     {
         auto pass = cmd->raster.render_to(
             shaders::target{.color = image.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 1))});
@@ -203,12 +199,9 @@ ASYNC_INVOCABLE_TEST("sg - a 32-bit indexed draw honours an odd first index", (s
     // a shifted one — so the check below distinguishes them.
     u32 const indices[] = {0, 1, 4, 5, 1, 5, 2};
 
-    auto const vertex_buffer = ctx->persistent.create_buffer<shaders::quad::per_vertex>(
-        6, sg::buffer_usage::vertex_buffer | sg::buffer_usage::copy_dst);
-    auto const instance_buffer = ctx->persistent.create_buffer<shaders::quad::per_instance>(
-        1, sg::buffer_usage::vertex_buffer | sg::buffer_usage::copy_dst);
-    auto const index_buffer
-        = ctx->persistent.create_buffer<u32>(7, sg::buffer_usage::index_buffer | sg::buffer_usage::copy_dst);
+    auto const vertex_buffer = ctx->persistent.create_buffer_from_data(corners, sg::buffer_usage::vertex_buffer);
+    auto const instance_buffer = ctx->persistent.create_buffer_from_data(placed, sg::buffer_usage::vertex_buffer);
+    auto const index_buffer = ctx->persistent.create_buffer_from_data(indices, sg::buffer_usage::index_buffer);
 
     auto const image
         = ctx->persistent.create_texture_2d({.format = sg::pixel_format::rgba8_unorm,
@@ -217,9 +210,6 @@ ASYNC_INVOCABLE_TEST("sg - a 32-bit indexed draw honours an odd first index", (s
                                              .usage = sg::texture_usage::render_target | sg::texture_usage::copy_src});
 
     auto cmd = ctx->create_command_list();
-    cmd->upload.data_to_buffer(vertex_buffer, corners);
-    cmd->upload.data_to_buffer(instance_buffer, placed);
-    cmd->upload.data_to_buffer(index_buffer, indices);
     {
         auto pass = cmd->raster.render_to(
             shaders::target{.color = image.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 1))});

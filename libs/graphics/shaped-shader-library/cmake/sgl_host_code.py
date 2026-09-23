@@ -100,7 +100,7 @@ def emit_group(package: str, namespace: str, file: SglFile, binding: dict) -> st
     out.append("/// with `bind_group(index, group)` at the index the pipeline has it at.\n")
     out.append("///\n")
     out.append(f"///     auto const layout = ctx.cached.acquire_binding_group_layout<{namespace}::{name}>();\n")
-    out.append(f"///     auto const g = ctx.transient.create_binding_group(layout, {namespace}::{name}{{...}});\n")
+    out.append(f"///     auto const g = ctx.transient.create_binding_group(cmd, layout, {namespace}::{name}{{...}});\n")
     out.append(f"struct {name}\n{{\n")
     # One field per member, in the shader's order.
     # A buffer's field is the view its access takes, of the element the shader reads, so a read-only view of a `mut`

@@ -370,6 +370,25 @@ The worked example is sg's transfer completion.
 A stream to one buffer finishing therefore reported an older upload to a different buffer complete, and a reader stopped waiting for a copy that had not run.
 `dx12_completion_group` is the split: one fence per resource per direction, pooled and recycled.
 
+### A flake seen during a review is chased before it is deferred
+
+**We do not want flakes, so a failure seen while validating a branch gets a reasonable amount of chasing, whatever code it is in.**
+Only once its mechanism is known do we decide whether to fix it in the branch or postpone it.
+"Not in code this branch touches" is where the report starts, not where it ends.
+
+pr-187 is the worked case.
+Validating it on Windows turned up one dx12 debug-layer warning in an untouched viewer test, and a macOS `nexus-test` abort in CI.
+The review offered "note both and chase them separately" as the recommended option, and the answer was, verbatim:
+
+```raw
+we dont want flakes usually. so whenever we see one, we spend some reasonable time chasing it. only afterwards do we decide if we postpone it or not. so chase it for now
+```
+
+Chasing the first took one temporary print of the full debug-layer text and a repeated suite run.
+The warning was an advisory the binary already allows by substring.
+A log written near the end of a recording chunk is truncated to the space left, and the truncated text no longer contained the substring.
+None of that was reachable from "it passed 20 of 20 in isolation".
+
 ### A named owner is a claim to verify, not a fact to accept
 
 When a change introduces one owner for an invariant, check that **every participant actually routes through it**.

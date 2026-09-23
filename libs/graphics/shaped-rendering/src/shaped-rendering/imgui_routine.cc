@@ -316,7 +316,7 @@ sg::routine_outcome imgui_routine::execute(sg::rendering_scope& scope, ImDrawDat
                 // The layout comes from init rather than from the create: this is the frame path, and
                 // acquiring would hash the declared table and take the pipeline cache's lock per switch.
                 bound_group = ctx.transient.create_binding_group(
-                    self->_group_layout, shaders::imgui_bindings{.texture = texture.value().as_readonly_view()});
+                    cmd, self->_group_layout, shaders::imgui_bindings{.texture = texture.value().as_readonly_view()});
                 scope.bind<shaders::imgui_bindings>(*bound_group);
                 bound_texture = dc.GetTexID();
             }

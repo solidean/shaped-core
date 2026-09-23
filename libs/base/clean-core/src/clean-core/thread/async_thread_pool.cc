@@ -477,18 +477,18 @@ void cc::async_thread_pool::participate_until_ready(async_node_base& root)
         struct parked_waiter
         {
             cc::atomic<bool> done = {false};
+            cc::atomic<bool> finished = {false};
             async_thread_pool* pool = nullptr;
 
+            // May run on any thread — whichever completes the root, a foreign one included.
+            // So neither the waiter nor the pool may be touched once `finished` is published: that store is what lets
+            // the parked participant return, and its caller may destroy the pool the moment it does.
             static void fire(void* p)
             {
                 auto* const self = static_cast<parked_waiter*>(p);
-
-                // Read the pool BEFORE publishing `done`: that store is what releases the parked participant to
-                // leave the loop, and the waiter lives on ITS stack, so `self` may already be dead by the next line.
-                // The pool cannot be — it is the one being driven, and its caller holds it.
-                auto* const pool = self->pool;
                 self->done.store(true, cc::memory_order_release);
-                pool->wake_all();
+                self->pool->wake_all();
+                self->finished.store(true, cc::memory_order_release);
             }
         };
 
@@ -581,6 +581,12 @@ void cc::async_thread_pool::participate_until_ready(async_node_base& root)
             if (_stop.load(cc::memory_order_relaxed) && !waiter.done.load(cc::memory_order_acquire))
                 break;
         }
+
+        // `done` releases the loop while the latch is still inside wake_all; leaving now would free the waiter and
+        // let the caller destroy the pool under it.
+        if (latched && waiter.done.load(cc::memory_order_acquire))
+            while (!waiter.finished.load(cc::memory_order_acquire))
+                cc::spin_pause();
 
         // Only for a slot we borrowed: it goes back to the pool when we leave, and a node left `scheduled` in a deque
         // nobody owns any more would strand forever.

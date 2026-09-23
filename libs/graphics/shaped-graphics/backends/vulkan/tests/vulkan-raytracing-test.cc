@@ -31,12 +31,7 @@ namespace vulkan = sg::backend::vulkan;
 sg::raw_buffer_handle make_triangle_vertices(sg::context& ctx)
 {
     float const verts[9] = {0, 0, 0, 1, 0, 0, 0, 1, 0};
-    auto const buf = ctx.persistent.create_raw_buffer(
-        sizeof(verts), sg::buffer_usage::accel_structure_build_input | sg::buffer_usage::copy_dst);
-    auto cmd = ctx.create_command_list();
-    cmd->upload.data_to_buffer(buf, cc::span<float const>(verts, 9));
-    ctx.submit_command_list(cc::move(cmd));
-    return buf;
+    return ctx.persistent.create_buffer_from_data(verts, sg::buffer_usage::accel_structure_build_input).raw();
 }
 } // namespace
 
@@ -94,13 +89,7 @@ ASYNC_INVOCABLE_TEST("sg vulkan - builds a procedural (aabb) blas", (vulkan::vul
         SKIP("no ray tracing on this device");
 
     float const aabb[6] = {0, 0, 0, 1, 1, 1};
-    auto const buf = ctx.persistent.create_raw_buffer(
-        sizeof(aabb), sg::buffer_usage::accel_structure_build_input | sg::buffer_usage::copy_dst);
-    {
-        auto up = ctx.create_command_list();
-        up->upload.data_to_buffer(buf, cc::span<float const>(aabb, 6));
-        ctx.submit_command_list(cc::move(up));
-    }
+    auto const buf = ctx.persistent.create_buffer_from_data(aabb, sg::buffer_usage::accel_structure_build_input).raw();
 
     sg::blas_aabbs geo;
     geo.aabbs = buf;
