@@ -517,6 +517,7 @@ fun update(state: particle):
 | binding | `binding name:` and a block of members | yes | yes |
 | binding composition | `binding name = other`, `binding name = (a, b)` | yes | yes |
 | sampler | `sampler name:` and a block of settings | yes | no |
+| pipeline | `pipeline name:` and a block of settings, or `pipeline name = (a, b)` | yes | no |
 | notation | `notation a => b` | yes | yes |
 | `let` | see [statements](#let-and-assignment) | no | yes |
 
@@ -610,6 +611,31 @@ fun shade_sky(v: basic_vertex){frame} -> vec3:
         skymap => frame.fancy_sky
     return sky_library.sample_sky v.normal
 ```
+
+### Pipelines
+
+* **AST-131** A `pipeline` with a block declares a pipeline by its **settings**, one `path = value` per line.
+  The path is a name or a member chain, and the value is an expression.
+* **AST-132** The name of a `pipeline` is optional, so `pipeline:` is a pipeline without one ([pipelines](../pipelines.md) names it).
+* **AST-133** A `pipeline` with `=` is the **short form**: its right side is a round list, whose elements are the pipeline's entry points.
+* **AST-134** A setting whose left side is neither a name nor a member chain is the normal error `expected-name`, and a line that is no `=` is `expected-member`.
+  Both are still read.
+
+```sgl
+pipeline:
+    vertex = main_vs
+    pixel = main_ps
+    cull = .back
+    color_targets.albedo.blend = .alpha
+
+pipeline shadow = (shadow_vs, shadow_ps)
+```
+
+| source | reads as |
+|---|---|
+| `pipeline:` | a pipeline without a name |
+| `color_targets.albedo.blend = .alpha` | a setting whose path is a member chain |
+| `pipeline shadow = (shadow_vs, shadow_ps)` | the short form, with two entry points |
 
 ## Members
 

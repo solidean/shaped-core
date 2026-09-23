@@ -186,6 +186,28 @@ TEST("sgl ast - a sampler is a list of settings, at file level only")
           == "(sampler s\n  filter=.linear) !! declaration-not-allowed-here @13+7\n");
 }
 
+TEST("sgl ast - a pipeline is a list of settings whose left side is a path")
+{
+    CHECK(ast_of("pipeline cube:\n    vertex = main_vs\n    color_targets.albedo.blend = .alpha\n")
+          == "(pipeline cube\n"
+             "  (setting vertex = main_vs)\n"
+             "  (setting (member (member color_targets albedo) blend) = .alpha))");
+    // The name is optional.
+    CHECK(ast_of("pipeline:\n    cull = .back\n") == "(pipeline <unnamed>\n  (setting cull = .back))");
+    // The short form lists entry points.
+    CHECK(ast_of("pipeline cube = (main_vs, main_ps)\n") == "(pipeline:short cube main_vs main_ps)");
+    CHECK(ast_of("@raster pipeline = (main_vs, main_ps)\n") == "(pipeline:short{@raster} <unnamed> main_vs main_ps)");
+
+    // A left side that is no path, and a line that is no setting.
+    CHECK(ast_of("pipeline p:\n    f(x) = 1\n    cull\n")
+          == "(pipeline p\n"
+             "  (setting (invalid \"f(x)\") = num:1)\n"
+             "  (invalid \"cull\")) !! expected-name @16+4\n"
+             "expected-member @29+4\n");
+    CHECK(body_of("pipeline p:\n    cull = .back\n")
+          == "(pipeline p\n  (setting cull = .back)) !! declaration-not-allowed-here @13+8\n");
+}
+
 TEST("sgl ast - what is no declaration at file level")
 {
     CHECK(ast_of("let x = 5\n") == "(invalid-decl \"let x = 5\") !! declaration-not-allowed-here @0+3\n");

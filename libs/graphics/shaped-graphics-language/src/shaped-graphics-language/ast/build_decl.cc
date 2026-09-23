@@ -8,7 +8,7 @@ bool builder::is_declaration_keyword(cc::string_view keyword)
 {
     return keyword == "module" || keyword == "use" || keyword == "fun" || keyword == "struct" || keyword == "enum"
         || keyword == "type" || keyword == "const" || keyword == "binding" || keyword == "sampler"
-        || keyword == "notation";
+        || keyword == "pipeline" || keyword == "notation";
 }
 
 range_of<decl_id> builder::declarations(form_id block, scope_kind scope)
@@ -50,7 +50,7 @@ decl_id builder::declaration(statement_head const& head, scope_kind scope, bool 
     // A misplaced declaration is still read: where it stands is wrong, what it says is not.
     if (keyword == "module" && !is_first_in_file)
         report(diagnostic_kind::misplaced_module, head.keyword_form);
-    else if (keyword == "sampler" && scope != scope_kind::file)
+    else if ((keyword == "sampler" || keyword == "pipeline") && scope != scope_kind::file)
         report(diagnostic_kind::declaration_not_allowed_here, head.keyword_form);
     else if (scope == scope_kind::binding_body)
         report(diagnostic_kind::member_not_allowed_here, head.keyword_form);
@@ -73,6 +73,8 @@ decl_id builder::declaration(statement_head const& head, scope_kind scope, bool 
         return const_declaration(head, parts);
     if (keyword == "sampler")
         return sampler_declaration(head, parts);
+    if (keyword == "pipeline")
+        return pipeline_declaration(head, parts);
     return notation_declaration(head, parts);
 }
 
@@ -401,6 +403,60 @@ decl_id builder::sampler_declaration(statement_head const& head, keyword_parts c
         }
     }
     result.settings = append(ast.arguments, cc::span<argument const>(collected));
+    return make_decl(head.whole, attributes, result);
+}
+
+decl_id builder::pipeline_declaration(statement_head const& head, keyword_parts const& parts)
+{
+    auto const attributes = attributes_of(head.whole);
+    reject_arrow(head);
+    auto result = pipeline_decl();
+
+    // The name is optional: `pipeline:` declares the file's pipeline, which a later phase names.
+    if (parts.arguments.size() > 1)
+        report(diagnostic_kind::too_many_arguments, parts.arguments[1]);
+    if (!parts.arguments.empty())
+    {
+        if (is_kind(parts.arguments[0], form_kind::identifier))
+            result.name = at(parts.arguments[0]).where;
+        else
+            report(diagnostic_kind::expected_name, parts.arguments[0]);
+    }
+
+    if (is_valid(head.assign_value))
+    {
+        if (token_text_of(head.assign_operator) != "=")
+            report(diagnostic_kind::unexpected_token, head.assign_operator);
+        if (is_valid(parts.block))
+            report(diagnostic_kind::too_many_arguments, parts.block);
+        result.is_short_form = true;
+        if (is_kind(head.assign_value, form_kind::round_list))
+            result.stages = list_elements(head.assign_value, false, false);
+        else
+            report(diagnostic_kind::expected_expression, head.assign_value);
+        return make_decl(head.whole, attributes, result);
+    }
+
+    auto collected = cc::vector<setting>();
+    if (is_valid(parts.block))
+    {
+        for (auto const line : lines_of(parts.block))
+        {
+            if (!is_binary_run(line, "="))
+            {
+                collected.push_back({.form = line, .value = invalid_expression(line, diagnostic_kind::expected_member)});
+                continue;
+            }
+            auto const line_parts = run_parts_of(line);
+            auto const target = line_parts.operands[0];
+            auto const is_path = is_kind(target, form_kind::identifier) || is_kind(target, form_kind::member);
+            collected.push_back(
+                {.form = line,
+                 .path = is_path ? expression(target) : invalid_expression(target, diagnostic_kind::expected_name),
+                 .value = expression(line_parts.operands[1])});
+        }
+    }
+    result.settings = append(ast.settings, cc::span<setting const>(collected));
     return make_decl(head.whole, attributes, result);
 }
 

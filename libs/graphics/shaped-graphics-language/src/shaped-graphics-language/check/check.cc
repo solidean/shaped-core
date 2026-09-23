@@ -318,6 +318,7 @@ void checker::declare(i32 file, ast::decl_id decl)
         [&](ast::type_decl const& t) { unsupported_symbol(t.name, "type alias"); },
         [&](ast::const_decl const& c) { unsupported_symbol(c.name, "const"); },
         [&](ast::sampler_decl const& s) { unsupported_symbol(s.name, "sampler"); },
+        [&](ast::pipeline_decl const& p) { unsupported_symbol(p.name, "pipeline"); },
         [&](ast::notation_decl const&) { unsupported(file, span_of(file, decl), "notation"); },
         // A member line at module level and an `invalid` declaration were reported by the AST pass.
         [&](ast::field_decl const&) {}, //

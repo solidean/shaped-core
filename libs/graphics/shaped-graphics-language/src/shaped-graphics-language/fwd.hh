@@ -75,6 +75,7 @@ enum class body_kind : u8;
 struct body;
 struct case_arm;
 struct if_branch;
+struct setting;
 
 enum class literal_kind : u8;
 enum class call_spelling : u8;
@@ -133,6 +134,7 @@ struct type_decl;
 struct const_decl;
 struct binding_decl;
 struct sampler_decl;
+struct pipeline_decl;
 struct notation_decl;
 struct field_decl;
 struct property_decl;

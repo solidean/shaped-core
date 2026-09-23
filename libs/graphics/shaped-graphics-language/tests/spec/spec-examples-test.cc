@@ -19,6 +19,7 @@ constexpr cc::string_view spec_files[] = {
     "_index.md",
     "keywords.md",
     "notation.md",
+    "pipelines.md",
     "syntax/_index.md",
     "syntax/line-tree.md",
     "syntax/tokens.md",
