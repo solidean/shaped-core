@@ -169,17 +169,12 @@ image_stats trace_furnace(sg::context& ctx,
         auto records = cc::vector<sv::instance_gpu>();
         records.push_back(resources.describe_instance(*cmd, item.mesh, item.instance));
 
-        auto const frame = ctx.transient.create_buffer<sv::pt_frame_constants_gpu>(
-            1, sg::buffer_usage::uniform_buffer | sg::buffer_usage::copy_dst);
-        cmd->upload.pod_to_buffer(frame, fc);
+        auto const frame = ctx.transient.create_buffer_from_pod(fc, sg::buffer_usage::uniform_buffer);
 
-        auto const background = ctx.transient.create_buffer<sv::background_gpu>(
-            1, sg::buffer_usage::uniform_buffer | sg::buffer_usage::copy_dst);
-        cmd->upload.pod_to_buffer(background, sv::background_gpu::from(sv::background::uniform(environment)));
+        auto const background = ctx.transient.create_buffer_from_pod(
+            sv::background_gpu::from(sv::background::uniform(environment)), sg::buffer_usage::uniform_buffer);
 
-        auto const instance_table = ctx.transient.create_buffer<sv::instance_gpu>(
-            records.size(), sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);
-        cmd->upload.data_to_buffer(instance_table, records);
+        auto const instance_table = ctx.transient.create_buffer_from_data(records, sg::buffer_usage::readonly_buffer);
 
         auto const bindless = resources.freeze();
 

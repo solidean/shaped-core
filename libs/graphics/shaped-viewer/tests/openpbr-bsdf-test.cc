@@ -170,9 +170,7 @@ cc::shared_async<cc::vector<probe_result>> run_probe_chunk(sg::context& ctx, cc:
 
     auto cmd = ctx.create_command_list();
 
-    auto const case_buffer = ctx.transient.create_buffer<probe_case>(
-        cases.size(), sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);
-    cmd->upload.data_to_buffer(case_buffer, cases);
+    auto const case_buffer = ctx.transient.create_buffer_from_data(cases, sg::buffer_usage::readonly_buffer);
 
     auto const result_buffer = ctx.transient.create_buffer<tg::vec4f>(
         item_count, sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);

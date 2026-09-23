@@ -37,19 +37,13 @@ cc::shared_async<bool> transient_round_trip(sg::context_handle const& ctx, int s
     if (auto* const home = ctx->device_home())
         co_await cc::async_resume_on(*home);
 
-    auto buf = ctx->transient.create_raw_buffer(256, copy_both);
-    if (!buf)
-        co_return false;
-
     byte src[256];
     for (int i = 0; i < 256; ++i)
         src[i] = pattern(seed + i);
 
-    auto up = ctx->create_command_list();
-    if (!up)
+    auto buf = ctx->transient.create_buffer_from_bytes(src, sg::buffer_usage::copy_src);
+    if (!buf)
         co_return false;
-    up->upload.bytes_to_buffer(buf, cc::span<byte const>(src, 256));
-    ctx->submit_command_list(cc::move(up));
 
     auto down = ctx->create_command_list();
     if (!down)
@@ -103,11 +97,6 @@ ASYNC_INVOCABLE_TEST("sg - transient buffers in one epoch are independent", (sg:
 {
     REQUIRE(ctx != nullptr);
 
-    auto a = ctx->transient.create_raw_buffer(128, copy_both);
-    auto b = ctx->transient.create_raw_buffer(128, copy_both);
-    REQUIRE(a != nullptr);
-    REQUIRE(b != nullptr);
-
     byte src_a[128];
     byte src_b[128];
     for (int i = 0; i < 128; ++i)
@@ -116,11 +105,10 @@ ASYNC_INVOCABLE_TEST("sg - transient buffers in one epoch are independent", (sg:
         src_b[i] = byte(0xB0 + (i & 0xF));
     }
 
-    auto up = ctx->create_command_list();
-    REQUIRE(up != nullptr);
-    up->upload.bytes_to_buffer(a, cc::span<byte const>(src_a, 128));
-    up->upload.bytes_to_buffer(b, cc::span<byte const>(src_b, 128));
-    ctx->submit_command_list(cc::move(up));
+    auto a = ctx->transient.create_buffer_from_bytes(src_a, sg::buffer_usage::copy_src);
+    auto b = ctx->transient.create_buffer_from_bytes(src_b, sg::buffer_usage::copy_src);
+    REQUIRE(a != nullptr);
+    REQUIRE(b != nullptr);
 
     auto down = ctx->create_command_list();
     REQUIRE(down != nullptr);

@@ -236,16 +236,8 @@ TEST("ssc::dxc + dx12 - spinning cube in a window", nx::config::manual)
     auto pipeline = cc::async_blocking_get(ctx.cached.acquire_raster_pipeline(desc));
     REQUIRE(pipeline != nullptr);
 
-    // Upload the cube's vertices once, in their own list so the buffer decays to COMMON before draws read it.
-    cc::vector<vertex> const cube = make_cube();
-    auto vbuf = ctx.persistent.create_raw_buffer(isize(cube.size()) * isize(sizeof(vertex)),
-                                                 sg::buffer_usage::vertex_buffer | sg::buffer_usage::copy_dst);
+    auto vbuf = ctx.persistent.create_buffer_from_data(make_cube(), sg::buffer_usage::vertex_buffer).raw();
     REQUIRE(vbuf != nullptr);
-    {
-        auto up = ctx.create_command_list();
-        up->upload.data_to_buffer(vbuf, cc::span<vertex const>(cube));
-        ctx.submit_command_list(cc::move(up));
-    }
 
     // Depth buffer, (re)created to match the swapchain size (which follows the window).
     sg::raw_texture_handle depth_tex;

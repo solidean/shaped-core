@@ -87,8 +87,9 @@ ASYNC_INVOCABLE_TEST("sg - a draw sees what the previous draw's fragment shader 
     REQUIRE(*writer_state != nullptr);
     REQUIRE(*reader_state != nullptr);
 
-    auto const results
-        = ctx.persistent.create_buffer<u32>(k_count, sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_dst);
+    // Zeroed first, so a read that raced ahead of the write reads 0 rather than whatever the allocation held.
+    auto const results = ctx.persistent.create_buffer_from_data(cc::vector<u32>::create_filled(k_count, u32(0)),
+                                                                sg::buffer_usage::readwrite_buffer);
     auto const target = ctx.persistent.create_texture_2d({
         .format = sg::pixel_format::rgba8_unorm,
         .width = k_size,
@@ -97,10 +98,6 @@ ASYNC_INVOCABLE_TEST("sg - a draw sees what the previous draw's fragment shader 
     });
 
     auto cmd = ctx.create_command_list();
-
-    // Zeroed first, so a read that raced ahead of the write reads 0 rather than whatever the allocation held.
-    auto const zeros = cc::vector<u32>::create_filled(k_count, u32(0));
-    cmd->upload.data_to_buffer(results, zeros);
 
     auto const group = ctx.transient.create_binding_group(
         group_layout, {{.name = "gResults", .view = results.as_readwrite_buffer()}});
