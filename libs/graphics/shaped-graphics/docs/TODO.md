@@ -146,15 +146,11 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   - a **backend-neutral numeric `location`** on `sg::vertex_attribute`, replacing the HLSL `semantic` string.
     The vulkan backend currently numbers a SPIR-V location by an attribute's index in `vertex_input_layout::attributes`.
     That makes the shader's `[[vk::location(N)]]` annotations part of the contract — see `vulkan_raster_pipeline.cc`.
-  - **a metal shader package, so `rotating-cube` can grow a metal arm and `metal-cube` can retire.**
-    `SC_EXAMPLE_BACKEND` now takes `metal`, and `examples/graphics/metal-cube` is a runnable windowed cube on it.
-    It is a sibling of `rotating-cube` rather than a case of it, and that split is the open part.
-    The cause is slib: `sc_add_shader_package` speaks `hlsl` and `wgsl`, and nothing in it speaks metal.
-    HLSL is no way out either, since DXC publishes no macOS build, so there is no compiler on the host to turn rotating-cube's own source into something a metal context accepts.
-    So `metal-cube` embeds a metallib compiled ahead of time by `xcrun metal`, the way the tier-2 fixtures do.
-    It hand-writes the vertex layout and the constants block that a package would have generated.
-    Closing it means a `metal` language for `sc_add_shader_package` that builds a `.metallib` and embeds it, plus the slib compiler seam that hands the blob back at `acquire`.
-    `rotating-cube` then lists `metal` in its `SUPPORTS`, and the sibling example goes away along with its copy of the geometry and camera maths.
+  - **`rotating-cube` still has no metal arm, and `metal-cube` is still its stand-in.**
+    `sgl-cube` does draw on metal now, from the same `cube.sgl` every other backend reads, so the cube exists on metal from a package rather than from an embedded blob.
+    What is left is HLSL: `rotating-cube`'s own source is HLSL, DXC publishes no macOS build, and nothing turns HLSL into MSL on this host.
+    So either `rotating-cube` gains an SGL twin — which `sgl-cube` already is — or `metal-cube` retires in favour of it.
+    `metal-cube` still hand-writes the vertex layout and the constants block that a package generates, which is the duplication worth removing.
 - **Acceleration structures.** See [concepts/acceleration-structures.md](concepts/acceleration-structures.md).
   The abstract types already carry the stats a refit needs — build and update scratch sizes, and the flags.
   Still open:

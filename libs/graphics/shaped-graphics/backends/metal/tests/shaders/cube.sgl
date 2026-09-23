@@ -1,0 +1,33 @@
+// The raster fixture, written in SGL rather than in MSL.
+//
+// It is the shape examples/graphics/sgl-cube/shaders/cube.sgl has, reduced to what a pixel assertion can pin:
+// one inline-constants matrix, a vertex input, one interpolant, and a colour target.
+// What it proves is the whole chain — SGL emits MSL, ssc::msl compiles it, and the backend draws it — so the
+// interesting part is that no address is written here and every one of them still has to agree with sg.
+
+// one matrix, small enough to ride as inline constants; sg keeps them at their own buffer index
+@inline binding constants:
+    view_projection: mat4
+
+// member order is the vertex layout's: the test writes the same two attributes in the same order
+@vertex struct cube_vertex:
+    position: pos3
+    color: float3
+
+@pixel struct target:
+    color: float4
+
+struct pixel_input:
+    @position position: hpos4
+    color: float3
+
+@vertex fun main_vs(v: cube_vertex){constants} -> pixel_input:
+    return {
+        position = constants.view_projection * v.position
+        color = v.color
+    }
+
+@pixel fun main_ps(p: pixel_input) -> target:
+    return {
+        color = float4(..p.color, 1.0)
+    }

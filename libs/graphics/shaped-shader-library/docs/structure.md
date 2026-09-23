@@ -104,11 +104,10 @@ The shape the seam is built for, and what is still `[planned]`:
   It is not a chain in the sense below, since the hop is inside one edge: `preprocess` writes the target's text, and that text is what is cached, hashed and compiled.
   It carries [examples/graphics/sgl-cube](../../../../examples/graphics/sgl-cube/shaders/cube.sgl) and the tier-1 compute and raster fixtures.
   A package generates host types from it: groups, `@inline` constants, vertex inputs and render targets.
-  **SGL writes MSL too, and nothing here can build it**: `create_sgl_compiler` maps a `metal_lib` inner compiler to the `msl` target, and slib has no such compiler.
-  What a Mac run still needs is an MSL-to-`metal_lib` compiler over Apple's `metal` tool or a runtime `newLibraryWithSource`, which also has to reflect the MSL.
-  sg's metal backend has to bind vertex buffers through a vertex descriptor, and inline constants at buffer index 4, since both are unimplemented there.
-  So are the index buffer and the indexed draw, which the cube uses as well.
-  Until then `sgl-cube` on a metal-only build is a stub target that says so.
+  **The MSL arm runs too**: `create_metal_compiler()` is the `metal_lib` inner compiler that `create_sgl_compiler` maps to the `msl` target.
+  `sgl-cube` draws on metal from the same `cube.sgl` every other backend reads, and `sg metal - a draw from an SGL shader writes what the shader computed` pins the path with a pixel readback.
+  What SGL's own MSL emitter still refuses is a binding **group** and a compute entry point, both of which it deferred while no Metal compiler existed to test them against.
+  So a shader reaches metal today when its resources are `@inline` constants and a vertex input, which is what the cube is.
 - **chains** — a shader is authored in one language but consumed as several backend formats, and the path may need an intermediate hop (`slang -> hlsl -> dxil`).
   That needs a language→language transpile edge and a graph search to replace the direct lookup.
   Call sites do not change: `acquire(ctx)` already asks "reach a format this context accepts", which is a path query either way.

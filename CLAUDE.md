@@ -118,7 +118,7 @@ One-liner per library:
   `SR_HAS_WINDOW` (1/0) says whether a backend was compiled in.
 * **`libs/graphics/shaped-graphics-language`** — SGL, our own shading language, and its whole toolchain in one library: compiler, linter, formatter, language server.
   One `.sgl` source compiles to readable shader text for dx12, vulkan, webgpu and metal, and slib's SGL compiler edge is what calls it.
-  [examples/graphics/sgl-cube](examples/graphics/sgl-cube/shaders/cube.sgl) draws one on dx12, vulkan and webgpu, and its metal text compiles through shaped-shader-compiler-msl.
+  [examples/graphics/sgl-cube](examples/graphics/sgl-cube/shaders/cube.sgl) draws one on dx12, vulkan, webgpu and metal, from that one source.
   **To write SGL**: [docs/spec/](libs/graphics/shaped-graphics-language/docs/spec/_index.md) is the language.
   `uv run dev.py run sgl -- emit <file> --entry <name> --target <t>` shows what a shader becomes.
   The compiler carries a deliberately thin slice of the language so far, and everything else is the one diagnostic `unsupported-yet`, never a guess.
