@@ -119,6 +119,14 @@ u64 slib::shader_asset::generation() const
     return _state.lock([](state const& s) { return s.generation; });
 }
 
+cc::optional<cc::string> slib::shader_asset::read_source() const
+{
+    auto const library = _library.lock();
+    if (library == nullptr)
+        return cc::nullopt;
+    return library->filesystem().read_text(_virtual_path);
+}
+
 cc::optional<cc::string> slib::shader_asset::last_error() const
 {
     return _state.lock([](state const& s) { return s.last_error; });

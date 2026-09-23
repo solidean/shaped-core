@@ -599,6 +599,9 @@ def emit_pipelines_impl(package: str, namespace: str, entries: SglEntries, stems
         if p["targets"]:
             names = ", ".join(f'"{t}"' for t in p["targets"])
             out.append(f"constexpr cc::string_view k_{key}_targets[] = {{{names}}};\n")
+        if p["layout"]:
+            names = ", ".join(f'"{g}"' for g in p["layout"])
+            out.append(f"constexpr cc::string_view k_{key}_layout[] = {{{names}}};\n")
         group_types = ", ".join(f"{namespace}::{g}" for g in groups)
         out.append(f"sg::pipeline_layout_handle {key}_layout(sg::context& ctx)\n{{\n")
         out.append(f"    return ctx.cached.acquire_pipeline_layout<{group_types}>();\n}}\n")
@@ -619,15 +622,22 @@ def emit_pipelines_impl(package: str, namespace: str, entries: SglEntries, stems
             out.append(f"        .targets = k_{key}_targets,\n")
         if p["settings"]:
             out.append(f"        .settings = k_{key}_settings,\n")
+        if p["layout"]:
+            out.append(f"        .layout = k_{key}_layout,\n")
+        if p["inline"]:
+            out.append(f'        .inline_constants = "{p["inline"]}",\n')
+        out.append(f'        .vertex_input_name = "{p["vertex_input"]}",\n')
+        if p["target_set"]:
+            out.append(f'        .target_struct = "{p["target_set"]}",\n')
         out.append("    };\n    return d;\n}\n")
 
         fields = open_fields(p)
         parameter = ", open const& parts" if fields else ""
         stated = "{" + ", ".join(f'{{.path = "{path}", .value = cc::i64(parts.{name})}}' for _, name, path in fields) + "}"
-        for verb in ("acquire", "acquire_latest"):
+        for verb, call in (("acquire", "acquire_raster_pipeline"), ("acquire_latest", "acquire_latest_raster_pipeline")):
             out.append(f"\nsg::async_raster_pipeline {qualified}::{verb}(sg::context& ctx{parameter}, "
                        "slib::pipeline_customize customize) const\n{\n")
-            out.append(f"    return slib::acquire_raster_pipeline(&ctx, &definition(), cc::vector<slib::open_part>{stated}, "
+            out.append(f"    return slib::{call}(&ctx, &definition(), cc::vector<slib::open_part>{stated}, "
                        "cc::move(customize));\n}\n")
         out.append(f"\ncc::shared_async<sg::raster_pipeline_description> {qualified}::description(sg::context& ctx{parameter}) const\n{{\n")
         out.append(f"    return slib::describe_raster_pipeline(&ctx, &definition(), cc::vector<slib::open_part>{stated}, {{}});\n}}\n")

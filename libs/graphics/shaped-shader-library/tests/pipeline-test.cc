@@ -2,12 +2,21 @@
 #include <clean-core/string/format.hh>
 #include <clean-core/string/string.hh>
 #include <nexus/test.hh>
+#include <nexus/tests/logs.hh>
 #include <shaped-graphics-language/ast/build.hh>
 #include <shaped-graphics-language/check/check.hh>
 #include <shaped-graphics-language/driver/prelude.hh>
 #include <shaped-graphics-language/syntax/parsed_file.hh>
 #include <shaped-graphics/raster/raster_pipeline.hh>
+#include <shaped-shader-library/compiler/sgl_compiler.hh>
+#include <shaped-shader-library/compiler/wgsl_compiler.hh>
+#include <shaped-shader-library/filesystem/memory_filesystem.hh>
 #include <shaped-shader-library/pipeline.hh>
+#include <shaped-shader-library/shader_asset.hh>
+#include <shaped-shader-library/shader_library.hh>
+#include <shaped-shader-library/shader_package.hh>
+
+#include <memory>
 
 using namespace cc::primitive_defines;
 
@@ -192,4 +201,132 @@ TEST("slib pipeline - a setting a description cannot take is an error that names
           == "rasterization.cull: the field cannot take this value");
     CHECK(error_of({.path = "color_targets.normal.format", .kind = slib::setting_kind::enum_case, .enum_case = "r8_unorm"})
           == "color_targets.normal.format: the pipeline has no target normal");
+}
+
+namespace
+{
+/// One pipeline over two stages; `extra` is appended to its block, which is what each reload edits.
+cc::string reload_source(cc::string_view extra)
+{
+    return cc::string("@vertex struct vin:\n    p: pos3\n"
+                      "struct link:\n    @position p: hpos4\n"
+                      "@pixel struct target:\n    color: float4\n"
+                      "@vertex fun vs(v: vin) -> link:\n    return { p = hpos4(..v.p, 1.0) }\n"
+                      "@pixel fun ps(l: link) -> target:\n    return { color = float4(1.0, 1.0, 1.0, 1.0) }\n"
+                      "pipeline:\n    vertex = vs\n    pixel = ps\n    format = .host\n")
+         + extra;
+}
+
+/// What a pipeline's settings say, one `path = value` per line.
+cc::string text_of(cc::span<slib::pipeline_setting const> settings)
+{
+    auto out = cc::string();
+    for (auto const& s : settings)
+    {
+        out.appendf("{} = ", s.path);
+        switch (s.kind)
+        {
+        case slib::setting_kind::enum_case:
+            out.appendf(".{}", s.enum_case);
+            break;
+        case slib::setting_kind::integer:
+            out.appendf("{}", s.integer);
+            break;
+        case slib::setting_kind::host:
+            out += ".host";
+            break;
+        default:
+            out += "?";
+            break;
+        }
+        out += "\n";
+    }
+    return out;
+}
+} // namespace
+
+TEST("slib pipeline - a reload moves a pipeline's configuration, and never its frozen part",
+     exclusive("slib-shader-library"))
+{
+    auto const fs = std::make_shared<slib::memory_filesystem>();
+    fs->write("pipeline.sgl", reload_source(""));
+
+    auto lib = slib::shader_library();
+    lib.add_compiler(slib::create_sgl_compiler(slib::create_wgsl_compiler()));
+    auto vs = slib::shader_asset_handle();
+    auto ps = slib::shader_asset_handle();
+    slib::shader_definition const definitions[] = {
+        {.path = "pipeline.sgl", .stage = sg::shader_stage::vertex, .entry_point = "vs", .asset = &vs},
+        {.path = "pipeline.sgl", .stage = sg::shader_stage::fragment, .entry_point = "ps", .asset = &ps},
+    };
+    lib.add_package({.name = "reload_pkg", .language = slib::shader_language::sgl, .definitions = definitions}, fs);
+    lib.start_hot_reload({.unthreaded = true});
+
+    // What the generator writes for this source: the definition the host's code was built against.
+    cc::string_view const targets[] = {"color"};
+    slib::pipeline_setting const baked[] = {
+        {.path = "color_targets.color.format", .kind = slib::setting_kind::host},
+    };
+    auto const definition = slib::pipeline_definition{.file = "pipeline.sgl",
+                                                      .name = "pipeline",
+                                                      .vertex = &vs,
+                                                      .pixel = &ps,
+                                                      .targets = targets,
+                                                      .settings = baked,
+                                                      .vertex_input_name = "vin",
+                                                      .target_struct = "target"};
+
+    // A WGSL compile settles at once, so acquiring is what compiles, and after a reload what promotes.
+    auto const compile = [&]
+    {
+        REQUIRE(vs->acquire(sg::shader_format::wgsl)->has_value());
+        REQUIRE(ps->acquire(sg::shader_format::wgsl)->has_value());
+    };
+    auto const edit = [&](cc::string_view extra)
+    {
+        fs->write("pipeline.sgl", reload_source(extra));
+        lib.poll_hot_reload();
+        compile();
+    };
+
+    compile();
+    // The watcher's first scan is its baseline, so an edit before it would read as the file it already knew.
+    lib.poll_hot_reload();
+    // Nothing reloaded: the build's own settings, and nothing read.
+    CHECK(text_of(slib::configuration_of(definition).settings) == "color_targets.color.format = .host\n");
+
+    // Configuration follows the source.
+    edit("    cull = .front\n");
+    auto const followed = slib::configuration_of(definition);
+    CHECK(followed.frozen_moved == "");
+    CHECK(text_of(followed.settings) == "color_targets.color.format = .host\nrasterization.cull = .front\n");
+
+    // A format is frozen: the host created its targets in it, so the configuration stays where it last matched.
+    nx::expect_warning("keeps its last good build");
+    edit("    cull = .none\n    sample_count = 4\n");
+    auto const kept = slib::configuration_of(definition);
+    CHECK(kept.frozen_moved == "sample_count: <unset> -> 4\n");
+    CHECK(text_of(kept.settings) == "color_targets.color.format = .host\nrasterization.cull = .front\n");
+    // The newest settings are still there, for a host that follows them itself.
+    CHECK(text_of(kept.latest) == "color_targets.color.format = .host\nrasterization.cull = .none\nsample_count = 4\n");
+
+    // Taking the frozen part back where it was lets the configuration follow again.
+    edit("    cull = .none\n");
+    CHECK(text_of(slib::configuration_of(definition).settings)
+          == "color_targets.color.format = .host\nrasterization.cull = .none\n");
+
+    // A group the host has no generated type for moves the layout, which is frozen like a format.
+    nx::expect_warning("keeps its last good build");
+    fs->write("pipeline.sgl", "binding frame:\n    scale: float\n"
+                              "@vertex struct vin:\n    p: pos3\n"
+                              "struct link:\n    @position p: hpos4\n"
+                              "@pixel struct target:\n    color: float4\n"
+                              "@vertex fun vs(v: vin){frame} -> link:\n    return { p = hpos4(..v.p, frame.scale) }\n"
+                              "@pixel fun ps(l: link) -> target:\n    return { color = float4(1.0, 1.0, 1.0, 1.0) }\n"
+                              "pipeline:\n    vertex = vs\n    pixel = ps\n    format = .host\n    cull = .back\n");
+    lib.poll_hot_reload();
+    compile();
+    auto const regrouped = slib::configuration_of(definition);
+    CHECK(regrouped.frozen_moved == "layout:  -> frame\n");
+    CHECK(text_of(regrouped.settings) == "color_targets.color.format = .host\nrasterization.cull = .none\n");
 }

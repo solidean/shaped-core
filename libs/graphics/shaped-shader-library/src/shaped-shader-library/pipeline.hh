@@ -68,6 +68,24 @@ struct slib::pipeline_definition
     cc::string_view target_set;
     cc::span<cc::string_view const> targets;
     cc::span<pipeline_setting const> settings;
+
+    /// The frozen part as SGL names it, which a reloaded source is held to: the layout's bindings in group order,
+    /// the `@inline` binding, the vertex input and the `@pixel struct`; empty where there is none.
+    cc::span<cc::string_view const> layout;
+    cc::string_view inline_constants;
+    cc::string_view vertex_input_name;
+    cc::string_view target_struct;
+};
+
+/// What a declared pipeline is configured with now, as its source says after the latest reload.
+struct slib::pipeline_configuration
+{
+    /// What `acquire` builds with: the source's settings, or the last ones whose frozen part matched the build.
+    cc::vector<pipeline_setting> settings;
+    /// The source's newest settings, which `acquire_latest` builds with even where their frozen part moved.
+    cc::vector<pipeline_setting> latest;
+    /// Empty while the source's frozen part is the one the host was built against; otherwise what moved, one line each.
+    cc::string frozen_moved;
 };
 
 namespace slib
@@ -97,9 +115,23 @@ using pipeline_customize = cc::unique_function<void(sg::raster_pipeline_descript
                                                                                          cc::vector<open_part> open,
                                                                                          pipeline_customize customize);
 
+/// The configuration `definition`'s source states now.
+/// Where hot reload moved a stage to a new generation, the source is described again: the configuration then follows
+/// it, unless its frozen part moved, which keeps the last configuration that matched and says why in the log.
+/// Without a reload it is the build's, and nothing is read.
+[[nodiscard]] pipeline_configuration configuration_of(pipeline_definition const& definition);
+
 /// The pipeline `describe_raster_pipeline` describes, built through `ctx.cached`.
+/// A reload that moved the frozen part keeps handing out the last pipeline that built for these open parts, while
+/// that pipeline is still alive somewhere.
 [[nodiscard]] sg::async_raster_pipeline acquire_raster_pipeline(sg::context* ctx,
                                                                 pipeline_definition const* definition,
                                                                 cc::vector<open_part> open,
                                                                 pipeline_customize customize);
+
+/// The pipeline the source's newest settings describe, frozen part and all; for a host that follows a reload itself.
+[[nodiscard]] sg::async_raster_pipeline acquire_latest_raster_pipeline(sg::context* ctx,
+                                                                       pipeline_definition const* definition,
+                                                                       cc::vector<open_part> open,
+                                                                       pipeline_customize customize);
 } // namespace slib

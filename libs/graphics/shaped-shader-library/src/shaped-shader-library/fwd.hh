@@ -49,6 +49,7 @@ enum class setting_kind : u8;
 struct pipeline_setting;
 struct open_part;
 struct pipeline_definition;
+struct pipeline_configuration;
 
 /// A shared filesystem.
 /// std::shared_ptr because the handle is polymorphic: cc::shared_ptr's default traits place the refcount at an offset derived from sizeof(T), so it cannot hold a derived object through a base handle.

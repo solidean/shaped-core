@@ -50,6 +50,10 @@ public:
 
     /// The virtual path of this shader's own source (not its includes).
     [[nodiscard]] cc::string_view virtual_path() const { return _virtual_path; }
+
+    /// The text of that source as its library's filesystem holds it now; nullopt when the file or the library is gone.
+    /// Not the text the current shader was compiled from, which a reload may not have promoted yet.
+    [[nodiscard]] cc::optional<cc::string> read_source() const;
     [[nodiscard]] sg::shader_stage stage() const { return _stage; }
     [[nodiscard]] cc::string_view entry_point() const { return _entry_point; }
 

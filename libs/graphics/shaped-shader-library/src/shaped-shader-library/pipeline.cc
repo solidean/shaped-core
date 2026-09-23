@@ -1,9 +1,13 @@
 #include "pipeline.hh"
 
 #include <clean-core/common/assertf.hh>
+#include <clean-core/common/log.hh>
 #include <clean-core/common/utility.hh>
+#include <clean-core/memory/unique_ptr.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/async_coroutine.hh>
+#include <clean-core/thread/mutex.hh>
+#include <shaped-graphics-language/driver/describe.hh>
 #include <shaped-graphics/binding/sampler.hh>
 #include <shaped-graphics/context/context.hh>
 #include <shaped-shader-library/shader_asset.hh>
@@ -336,11 +340,10 @@ cc::result<cc::unit, cc::string> slib::apply_settings(sg::raster_pipeline_descri
 
 namespace
 {
-/// The paths a definition leaves to the host: those whose last setting is `.host`.
-cc::vector<cc::string_view> open_paths_of(slib::pipeline_definition const& d)
+/// The paths `settings` leaves to the host: those whose last setting is `.host`.
+cc::vector<cc::string_view> open_paths_of(cc::span<pipeline_setting const> settings)
 {
     auto result = cc::vector<cc::string_view>();
-    auto const settings = d.settings;
     for (auto i = isize(0); i < settings.size(); ++i)
     {
         auto is_last = true;
@@ -351,17 +354,295 @@ cc::vector<cc::string_view> open_paths_of(slib::pipeline_definition const& d)
     }
     return result;
 }
+
+/// A string that lives as long as the process, so a setting read from a reloaded source is viewed like a baked one.
+/// A reload adds a handful and most repeat, so they are kept rather than freed.
+cc::string_view interned(cc::string_view text)
+{
+    static auto strings = cc::mutex<cc::vector<cc::unique_ptr<cc::string>>>();
+    return strings.lock(
+        [&](cc::vector<cc::unique_ptr<cc::string>>& all) -> cc::string_view
+        {
+            for (auto const& s : all)
+                if (*s == text)
+                    return *s;
+            all.push_back(cc::make_unique<cc::string>(text));
+            return *all.back();
+        });
+}
+
+cc::string value_text(pipeline_setting const& s)
+{
+    switch (s.kind)
+    {
+    case setting_kind::boolean:
+        return s.integer != 0 ? cc::string("true") : cc::string("false");
+    case setting_kind::integer:
+        return cc::format("{}", s.integer);
+    case setting_kind::real:
+        return cc::format("{}", s.real);
+    case setting_kind::enum_case:
+        return cc::format(".{}", s.enum_case);
+    case setting_kind::host:
+        return cc::string(".host");
+    case setting_kind::none:
+        return cc::string(".none");
+    }
+    return {};
+}
+
+/// The frozen part as `key = value` lines: what the host's own code is built against, and what a reload may not move.
+struct frozen_part
+{
+    cc::vector<cc::string> keys;
+    cc::vector<cc::string> values;
+
+    void add(cc::string key, cc::string value)
+    {
+        keys.push_back(cc::move(key));
+        values.push_back(cc::move(value));
+    }
+};
+
+template <class Names>
+cc::string joined(Names const& names)
+{
+    auto out = cc::string();
+    for (auto const& n : names)
+    {
+        if (!out.empty())
+            out += ", ";
+        out += cc::string_view(n);
+    }
+    return out;
+}
+
+frozen_part frozen_of(cc::string joined_layout,
+                      cc::string_view inline_constants,
+                      cc::string_view vertex_input,
+                      cc::string_view target_struct,
+                      cc::string joined_targets,
+                      cc::span<pipeline_setting const> settings)
+{
+    auto part = frozen_part();
+    part.add("layout", cc::move(joined_layout));
+    part.add("inline constants", cc::string(inline_constants));
+    part.add("vertex input", cc::string(vertex_input));
+    part.add("target set", cc::string(target_struct));
+    part.add("targets", cc::move(joined_targets));
+    // The formats and the sample count, by their last setting.
+    for (auto i = isize(0); i < settings.size(); ++i)
+    {
+        auto const& s = settings[i];
+        auto const is_frozen
+            = s.path.ends_with(".format") || s.path == "depth_stencil_format" || s.path == "sample_count";
+        auto is_last = true;
+        for (auto j = i + 1; j < settings.size(); ++j)
+            is_last = is_last && settings[j].path != s.path;
+        if (is_frozen && is_last)
+            part.add(cc::string(s.path), value_text(s));
+    }
+    return part;
+}
+
+/// What moved from `built` to `now`, one line each; empty where nothing did.
+cc::string moved(frozen_part const& built, frozen_part const& now)
+{
+    auto out = cc::string();
+    auto const value_in = [](frozen_part const& p, cc::string_view key) -> cc::string
+    {
+        for (auto i = isize(0); i < p.keys.size(); ++i)
+            if (p.keys[i] == key)
+                return p.values[i];
+        return cc::string("<unset>");
+    };
+    for (auto const* side : {&built, &now})
+        for (auto const& key : side->keys)
+        {
+            auto const was = value_in(built, key);
+            auto const is = value_in(now, key);
+            if (was != is && !out.contains(cc::format("{}:", key)))
+                out.appendf("{}: {} -> {}\n", key, was, is);
+        }
+    return out;
+}
+
+/// One declared pipeline's reload state, kept for the life of the process like the definition it belongs to.
+struct live_pipeline
+{
+    slib::pipeline_definition const* definition = nullptr;
+    /// The stages' generations the configuration was last read at.
+    u64 vertex_generation = 0;
+    u64 pixel_generation = 0;
+    slib::pipeline_configuration configuration;
+
+    /// The last pipeline that built for a context and its open parts; weak, so the host's holding it is what keeps it.
+    struct built
+    {
+        sg::context const* ctx = nullptr;
+        cc::vector<slib::open_part> open;
+        std::weak_ptr<sg::raster_pipeline const> pipeline;
+    };
+    cc::vector<built> last_good;
+};
+
+cc::mutex<cc::vector<cc::unique_ptr<live_pipeline>>>& live_pipelines()
+{
+    static auto all = cc::mutex<cc::vector<cc::unique_ptr<live_pipeline>>>();
+    return all;
+}
+
+bool same_open(cc::span<slib::open_part const> a, cc::span<slib::open_part const> b)
+{
+    if (a.size() != b.size())
+        return false;
+    for (auto i = isize(0); i < a.size(); ++i)
+        if (a[i].path != b[i].path || a[i].value != b[i].value)
+            return false;
+    return true;
+}
+
+sg::raster_pipeline_handle last_good_of(slib::pipeline_definition const* d,
+                                        sg::context const* ctx,
+                                        cc::span<slib::open_part const> open)
+{
+    return live_pipelines().lock(
+        [&](cc::vector<cc::unique_ptr<live_pipeline>>& all) -> sg::raster_pipeline_handle
+        {
+            for (auto const& live : all)
+                if (live->definition == d)
+                    for (auto const& b : live->last_good)
+                        if (b.ctx == ctx && same_open(b.open, open))
+                            return b.pipeline.lock();
+            return nullptr;
+        });
+}
+
+void remember_good(slib::pipeline_definition const* d,
+                   sg::context const* ctx,
+                   cc::span<slib::open_part const> open,
+                   sg::raster_pipeline_handle const& pipeline)
+{
+    live_pipelines().lock(
+        [&](cc::vector<cc::unique_ptr<live_pipeline>>& all)
+        {
+            for (auto const& live : all)
+                if (live->definition == d)
+                {
+                    for (auto& b : live->last_good)
+                        if (b.ctx == ctx && same_open(b.open, open))
+                        {
+                            b.pipeline = pipeline;
+                            return;
+                        }
+                    auto kept = cc::vector<slib::open_part>();
+                    kept.push_back_range(open);
+                    live->last_good.push_back({.ctx = ctx, .open = cc::move(kept), .pipeline = pipeline});
+                    return;
+                }
+        });
+}
 } // namespace
 
-cc::shared_async<sg::raster_pipeline_description> slib::describe_raster_pipeline(sg::context* ctx,
-                                                                                 pipeline_definition const* definition,
-                                                                                 cc::vector<open_part> open,
-                                                                                 pipeline_customize customize)
+slib::pipeline_configuration slib::configuration_of(pipeline_definition const& d)
+{
+    auto const vertex_generation = d.vertex != nullptr && *d.vertex != nullptr ? (*d.vertex)->generation() : 0;
+    auto const pixel_generation = d.pixel != nullptr && *d.pixel != nullptr ? (*d.pixel)->generation() : 0;
+
+    // What is known now, and whether a reload moved a stage since it was read.
+    auto needs_read = false;
+    auto current = live_pipelines().lock(
+        [&](cc::vector<cc::unique_ptr<live_pipeline>>& all) -> pipeline_configuration
+        {
+            for (auto const& live : all)
+                if (live->definition == &d)
+                {
+                    needs_read
+                        = live->vertex_generation != vertex_generation || live->pixel_generation != pixel_generation;
+                    return live->configuration;
+                }
+            // The build's own settings, read at the generations the stages have now.
+            auto baked = pipeline_configuration();
+            baked.settings.push_back_range(d.settings);
+            baked.latest.push_back_range(d.settings);
+            all.push_back(cc::make_unique<live_pipeline>(live_pipeline{.definition = &d,
+                                                                       .vertex_generation = vertex_generation,
+                                                                       .pixel_generation = pixel_generation,
+                                                                       .configuration = baked}));
+            return baked;
+        });
+    if (!needs_read)
+        return current;
+
+    // A stage reloaded, so the source may say something new: described outside the lock, since it checks the whole file.
+    auto next = current;
+    auto const source = (*d.vertex)->read_source();
+    auto const described
+        = source.has_value()
+            ? sgl::describe({.source = source.value(), .source_name = d.file})
+            : cc::result<sgl::module_description, cc::string>(cc::error(cc::string("the source is gone")));
+    auto const* found = static_cast<sgl::described_pipeline const*>(nullptr);
+    if (described.has_value())
+        for (auto const& p : described.value().pipelines)
+            if (p.name == d.name)
+                found = &p;
+
+    if (found == nullptr)
+        CC_LOG_WARNING("{}'s pipeline {} keeps its configuration, since the reloaded source does not state it: {}",
+                       d.file, d.name,
+                       described.has_value() ? cc::string("no pipeline of that name") : described.error());
+    else
+    {
+        next.latest.clear();
+        for (auto const& s : found->settings)
+            next.latest.push_back({.path = interned(s.path),
+                                   .kind = setting_kind(s.kind),
+                                   .integer = s.integer,
+                                   .real = s.real,
+                                   .enum_case = interned(s.enum_case)});
+
+        auto const built = frozen_of(joined(d.layout), d.inline_constants, d.vertex_input_name, d.target_struct,
+                                     joined(d.targets), d.settings);
+        auto const now = frozen_of(joined(found->layout), found->inline_constants, found->vertex_input,
+                                   found->target_set, joined(found->targets), next.latest);
+        next.frozen_moved = moved(built, now);
+        if (next.frozen_moved.empty())
+            next.settings = next.latest;
+        else
+            CC_LOG_WARNING("{}'s pipeline {} keeps its last good build: the reloaded source moves what the host was "
+                           "built against\n{}",
+                           d.file, d.name, next.frozen_moved);
+    }
+
+    live_pipelines().lock(
+        [&](cc::vector<cc::unique_ptr<live_pipeline>>& all)
+        {
+            for (auto const& live : all)
+                if (live->definition == &d)
+                {
+                    live->configuration = next;
+                    live->vertex_generation = vertex_generation;
+                    live->pixel_generation = pixel_generation;
+                }
+        });
+    return next;
+}
+
+namespace
+{
+/// The description a definition states with `settings`, once its stages compiled for `ctx`.
+/// `use_latest` builds with the source's newest settings rather than the last ones that match the build.
+cc::shared_async<sg::raster_pipeline_description> describe_with(sg::context* ctx,
+                                                                slib::pipeline_definition const* definition,
+                                                                cc::vector<slib::open_part> open,
+                                                                slib::pipeline_customize customize,
+                                                                bool use_latest)
 {
     auto const& d = *definition;
     CC_ASSERTF(d.vertex != nullptr && *d.vertex != nullptr,
                "{}'s {}: its package was never added to a shader library, so it has no shaders", d.file, d.name);
 
+    // The stages first: awaiting them is what promotes a reload, which the configuration is then read against.
     auto desc = raster_pipeline_description();
     desc.layout = d.acquire_layout(*ctx);
     desc.vertex_shader = co_await (*d.vertex)->acquire(*ctx);
@@ -372,13 +653,15 @@ cc::shared_async<sg::raster_pipeline_description> slib::describe_raster_pipeline
     for (auto i = isize(0); i < d.targets.size(); ++i)
         desc.color_targets.push_back({});
 
-    auto const applied = apply_settings(desc, d.settings, d.targets);
+    auto const configuration = slib::configuration_of(d);
+    auto const& settings = use_latest ? configuration.latest : configuration.settings;
+    auto const applied = slib::apply_settings(desc, settings, d.targets);
     CC_ASSERTF(applied.has_value(), "{}'s {}: {}", d.file, d.name, applied.has_value() ? cc::string() : applied.error());
 
     // Each open part as the setting it stands for, with the host's value in place of `.host`.
-    for (auto const path : open_paths_of(d))
+    for (auto const path : open_paths_of(settings))
     {
-        auto const* part = static_cast<open_part const*>(nullptr);
+        auto const* part = static_cast<slib::open_part const*>(nullptr);
         for (auto const& p : open)
             if (p.path == path)
                 part = &p;
@@ -387,13 +670,13 @@ cc::shared_async<sg::raster_pipeline_description> slib::describe_raster_pipeline
         auto setting = pipeline_setting{.path = path, .kind = setting_kind::integer, .integer = part->value};
         if (!path.ends_with("sample_count"))
         {
-            auto const names = enum_case_names("pixel_format");
+            auto const names = slib::enum_case_names("pixel_format");
             CC_ASSERTF(part->value > 0 && part->value < names.size(), "{}'s {}: {} is stated as no format", d.file,
                        d.name, path);
             setting = {.path = path, .kind = setting_kind::enum_case, .enum_case = names[part->value]};
         }
         pipeline_setting const one[] = {setting};
-        auto const stated = apply_settings(desc, one, d.targets);
+        auto const stated = slib::apply_settings(desc, one, d.targets);
         CC_ASSERTF(stated.has_value(), "{}'s {}: {}", d.file, d.name, stated.has_value() ? cc::string() : stated.error());
     }
 
@@ -401,12 +684,43 @@ cc::shared_async<sg::raster_pipeline_description> slib::describe_raster_pipeline
         customize(desc);
     co_return desc;
 }
+} // namespace
+
+cc::shared_async<sg::raster_pipeline_description> slib::describe_raster_pipeline(sg::context* ctx,
+                                                                                 pipeline_definition const* definition,
+                                                                                 cc::vector<open_part> open,
+                                                                                 pipeline_customize customize)
+{
+    return describe_with(ctx, definition, cc::move(open), cc::move(customize), false);
+}
 
 sg::async_raster_pipeline slib::acquire_raster_pipeline(sg::context* ctx,
                                                         pipeline_definition const* definition,
                                                         cc::vector<open_part> open,
                                                         pipeline_customize customize)
 {
-    auto const desc = co_await describe_raster_pipeline(ctx, definition, cc::move(open), cc::move(customize));
+    auto const desc = co_await describe_with(ctx, definition, open, cc::move(customize), false);
+
+    // A frozen part that moved means the host's own code no longer fits the source, so what built last is kept.
+    if (!configuration_of(*definition).frozen_moved.empty())
+        if (auto kept = last_good_of(definition, ctx, open); kept != nullptr)
+            co_return kept;
+
+    auto const built = ctx->cached.acquire_raster_pipeline(desc);
+    co_await cc::async_settled(built);
+    if (auto const* const pipeline = built->try_value(); pipeline != nullptr)
+    {
+        remember_good(definition, ctx, open, *pipeline);
+        co_return *pipeline;
+    }
+    co_return co_await built;
+}
+
+sg::async_raster_pipeline slib::acquire_latest_raster_pipeline(sg::context* ctx,
+                                                               pipeline_definition const* definition,
+                                                               cc::vector<open_part> open,
+                                                               pipeline_customize customize)
+{
+    auto const desc = co_await describe_with(ctx, definition, cc::move(open), cc::move(customize), true);
     co_return co_await ctx->cached.acquire_raster_pipeline(desc);
 }

@@ -28,9 +28,9 @@ src/shaped-shader-library/
                                                 slots; consumer-side promotion; generation/last_error
   shader_library.hh/.cc           [done]        mounts + compilers + read->preprocess->compile; packages;
                                                 start_hot_reload/poll_hot_reload; weak alive-token
-  pipeline.hh/.cc                 [in progress] an SGL `pipeline` declaration built: its generated definition,
-                                                the settings applier, acquire/description; hot reload of its
-                                                configuration is next
+  pipeline.hh/.cc                 [done]        an SGL `pipeline` declaration built: its generated definition,
+                                                the settings applier, acquire/acquire_latest/description; a reload
+                                                moves its configuration, and never its frozen part
   filesystem/
     filesystem.hh                 [done]        read_text + revision + optional watch; file_revision
                                                 (opaque, not a time)
