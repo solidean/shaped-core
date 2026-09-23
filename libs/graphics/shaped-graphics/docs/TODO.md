@@ -146,11 +146,9 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   - a **backend-neutral numeric `location`** on `sg::vertex_attribute`, replacing the HLSL `semantic` string.
     The vulkan backend currently numbers a SPIR-V location by an attribute's index in `vertex_input_layout::attributes`.
     That makes the shader's `[[vk::location(N)]]` annotations part of the contract — see `vulkan_raster_pipeline.cc`.
-  - **`rotating-cube` still has no metal arm, and `metal-cube` is still its stand-in.**
-    `sgl-cube` does draw on metal now, from the same `cube.sgl` every other backend reads, so the cube exists on metal from a package rather than from an embedded blob.
-    What is left is HLSL: `rotating-cube`'s own source is HLSL, DXC publishes no macOS build, and nothing turns HLSL into MSL on this host.
-    So either `rotating-cube` gains an SGL twin — which `sgl-cube` already is — or `metal-cube` retires in favour of it.
-    `metal-cube` still hand-writes the vertex layout and the constants block that a package generates, which is the duplication worth removing.
+  - **`rotating-cube` has no metal arm**, and it is the one example that still cannot get one.
+    Its source is HLSL, DXC publishes no macOS build, and nothing turns HLSL into MSL on this host — so the cube reaches metal through `sgl-cube` instead, from a package rather than an embedded blob.
+    `metal-cube` was the stand-in for that and is gone, along with its copy of the geometry, the camera maths, the hand-written vertex layout and the checked-in metallib.
 - **Acceleration structures.** See [concepts/acceleration-structures.md](concepts/acceleration-structures.md).
   The abstract types already carry the stats a refit needs — build and update scratch sizes, and the flags.
   Still open:
