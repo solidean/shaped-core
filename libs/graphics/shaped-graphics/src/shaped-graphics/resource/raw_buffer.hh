@@ -228,15 +228,15 @@ public:
     /// Const because registering a finalizer is a lifetime hook, not a change to the buffer's shape.
     void add_finalizer(cc::unique_function<void()> finalizer) const { _finalizers.push_back(cc::move(finalizer)); }
 
+    /// The lifetime scope that created the buffer.
+    /// Only a persistent one may be the target of ctx.upload, ctx.download or ctx.stream; a transient buffer transfers inline, through a command list.
+    [[nodiscard]] lifetime_scope scope() const { return _scope; }
+
     // Expiry — a buffer may be marked expired, its storage reclaimed, while handles to it still exist.
     // Naming an expired buffer in a transfer or a binding is invalid.
 
     /// Whether this buffer's storage has been reclaimed.
     /// Once true, it never goes back to false.
-    /// The lifetime scope that created the buffer.
-    /// Only a persistent one may be the target of ctx.upload, ctx.download or ctx.stream; a transient buffer transfers inline, through a command list.
-    [[nodiscard]] lifetime_scope scope() const { return _scope; }
-
     [[nodiscard]] bool is_expired() const { return _expired.load(std::memory_order_acquire); }
 
     /// The negation of is_expired(): the buffer still names live storage.

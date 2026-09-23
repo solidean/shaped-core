@@ -145,15 +145,15 @@ public:
     /// Const because registering a finalizer is a lifetime hook.
     void add_finalizer(cc::unique_function<void()> finalizer) const { _finalizers.push_back(cc::move(finalizer)); }
 
+    /// The lifetime scope that created the texture.
+    /// Only a persistent one may be the target of ctx.upload, ctx.download or ctx.stream; a transient texture transfers inline, through a command list.
+    [[nodiscard]] lifetime_scope scope() const { return _scope; }
+
     // Expiry — a texture may be marked expired, its storage reclaimed, while handles to it still exist.
     // Naming an expired texture is invalid.
 
     /// Whether this texture's storage has been reclaimed.
     /// Once true, it never goes back to false.
-    /// The lifetime scope that created the texture.
-    /// Only a persistent one may be the target of ctx.upload, ctx.download or ctx.stream; a transient texture transfers inline, through a command list.
-    [[nodiscard]] lifetime_scope scope() const { return _scope; }
-
     [[nodiscard]] bool is_expired() const { return _expired.load(std::memory_order_acquire); }
 
     /// The negation of is_expired(): the texture still names live storage.
