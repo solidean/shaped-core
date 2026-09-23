@@ -6,7 +6,35 @@
 #include <shaped-graphics/resource/buffer.hh> // typed buffer<T> — the preferred overloads below take it
 #include <shaped-graphics/resource/texture_region.hh>
 
+#include <ranges>
 #include <type_traits>
+
+namespace sg
+{
+/// A contiguous range of trivially-copyable elements — what the `create_buffer_from_data` factories fill a buffer from.
+/// A cc::pinned_data, a cc::vector, a cc::span and a C array all qualify.
+template <class Range>
+concept upload_range
+    = std::ranges::contiguous_range<Range> && std::is_trivially_copyable_v<std::ranges::range_value_t<Range>>;
+
+/// The byte-only upload_range `create_buffer_from_bytes` takes.
+template <class Range>
+concept upload_byte_range = upload_range<Range> && std::is_same_v<std::ranges::range_value_t<Range>, byte>;
+} // namespace sg
+
+namespace sg::impl
+{
+/// Pins `data` for ctx.upload as cheaply as cc::make_pinned_data can.
+/// A pinned_data or an owning rvalue keeps its elements where they are; an lvalue, a borrow or a C array is copied once.
+template <upload_range Range>
+[[nodiscard]] auto pin_upload_range(Range&& data)
+{
+    if constexpr (std::is_array_v<std::remove_reference_t<Range>>)
+        return cc::make_pinned_data(cc::span<std::remove_extent_t<std::remove_reference_t<Range>>>(data));
+    else
+        return cc::make_pinned_data(cc::forward<Range>(data));
+}
+} // namespace sg::impl
 
 /// Async host→device upload facade for a context, reached as `ctx.upload`.
 ///

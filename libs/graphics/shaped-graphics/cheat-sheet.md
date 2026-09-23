@@ -115,6 +115,7 @@ ctx.create_command_list()                          // -> std::unique_ptr<command
 ctx.create_swapchain(swapchain_description = {})   // -> swapchain_handle (throws sg::swapchain_creation_exception / device_lost); see the swapchain section
 ctx.try_create_swapchain(swapchain_description = {})  // -> cc::result<swapchain_handle>  (fallible twin)
 // PREFER the typed factories below (create_buffer<T> / create_texture_2d) — raw_* is the byte-level escape hatch.
+// PREFER create_buffer_from_data / _from_pod / _from_bytes over create_buffer + an upload, for a buffer that starts filled.
 // PREFER ctx.transient for anything sized by the current frame; ctx.persistent only for what outlives it.
 ctx.persistent.create_raw_buffer(size, usage, alloc={})     // -> raw_buffer_handle  (throws sg::allocation_exception; size>=0, 0 = empty, no alloc)
                                                    //   resource creation lives on the lifetime scope (sg::context_persistent_scope)
@@ -378,6 +379,13 @@ sg::buffer<T>                              // GPU-side span<T>: wraps a raw_buff
 // create typed (preferred): element_count -> byte size = count * sizeof(T); returns the wrapped buffer<T>:
 ctx.persistent.create_buffer<Particle>(1000, usage, alloc={})  // -> sg::buffer<Particle>  (+ try_ twin)
 ctx.transient.create_buffer<Particle>(64, usage)               // -> sg::buffer<Particle>  (transient; no allocation_info)
+// create FILLED (preferred for a buffer with contents): sized to the data, filled via ctx.upload — no command list; usage gains copy_dst:
+ctx.persistent.create_buffer_from_data(particles, usage, alloc={})  // -> sg::buffer<T>, T = the range's element (vector, span, pinned_data, C array)
+ctx.persistent.create_buffer_from_pod(params, usage, alloc={})      // -> sg::buffer<T> holding one element
+ctx.persistent.create_buffer_from_bytes(bytes, usage, alloc={})     // -> raw_buffer_handle (a byte range)
+ctx.transient.create_buffer_from_data / _from_pod / _from_bytes(cmd, …, usage)  // transient: uploaded INLINE into cmd, visible to its later commands
+//   a transient resource can never be the target of ctx.upload / ctx.download / ctx.stream — those assert (raw_buffer::scope())
+//   an rvalue owner or a pinned_data is uploaded in place; an lvalue / span / C array is copied once. a later list reading it auto-waits
 sg::buffer<T>::from_raw(raw_handle)         // wrap a raw handle: byte size must be a whole number of T (asserts); try_from_raw -> cc::optional
 sg::buffer<T>::from_raw_clamped(raw_handle) // wrap, flooring to whole elements (a trailing partial element is ignored)
 buf.reinterpret_as<U>()                     // -> buffer<U>; static_assert sizeof(T)%sizeof(U)==0 (U tiles T, e.g. buffer<vec3f>->buffer<float>)
@@ -649,7 +657,8 @@ ctx.cached.acquire_pipeline_layout<frame, work, constants>(static_samplers = {})
                              //    position among the sets, and one inline-constants type is the inline block
 ctx.cached.acquire_binding_group_layout<G>()                    // -> binding_group_layout_handle from G's declarations alone
 ctx.cached.acquire_binding_group_layout<G>(span<named_sampler const>)  // + static samplers G left undeclared; one it DID declare asserts
-ctx.transient.create_binding_group(layout, G{...})              // -> binding_group_handle; the layout is PASSED IN, not re-acquired per call
+ctx.transient.create_binding_group(cmd, layout, G{...})         // -> binding_group_handle; the layout is PASSED IN, not re-acquired per call
+                                                                //   cmd: the list it is used in; a G with plain members uploads its constants inline there
 ctx.persistent.create_binding_group(layout, G{...})             // which scope you call IS the lifetime
                                     // a sampler G gathers that `layout` declares static is dropped, so the
                                     // samplers overload above pairs with this

@@ -236,19 +236,8 @@ ASYNC_EXAMPLE("shaped-graphics/metal-cube")
     auto const depth_format = sg::pixel_format::depth32_float;
     auto size = capture.active ? capture.size : tg::vec2i(1280, 720);
 
-    auto const mesh = build_cube_mesh();
-    auto const indices = build_cube_indices();
-
-    auto const vertices = ctx->persistent.create_raw_buffer(isize(mesh.size()) * isize(sizeof(cube_vertex)),
-                                                            sg::buffer_usage::vertex_buffer | sg::buffer_usage::copy_dst);
-    auto const index_buffer = ctx->persistent.create_raw_buffer(isize(indices.size()) * isize(sizeof(u16)),
-                                                               sg::buffer_usage::index_buffer | sg::buffer_usage::copy_dst);
-    {
-        auto cmd = ctx->create_command_list();
-        cmd->upload.data_to_buffer(vertices, cc::span<cube_vertex const>(mesh));
-        cmd->upload.data_to_buffer(index_buffer, cc::span<u16 const>(indices));
-        ctx->submit_command_list(cc::move(cmd));
-    }
+    auto const vertices = ctx->persistent.create_buffer_from_data(build_cube_mesh(), sg::buffer_usage::vertex_buffer);
+    auto const index_buffer = ctx->persistent.create_buffer_from_data(build_cube_indices(), sg::buffer_usage::index_buffer);
 
     auto const constants = sg::binding{.space = 0,
                                        .index = 0,
@@ -388,8 +377,8 @@ ASYNC_EXAMPLE("shaped-graphics/metal-cube")
             auto scope = cmd->raster.render_to(info);
             scope.bind_pipeline(*pipeline);
             scope.set_inline_constants(cube_constants{.view_projection = spun.view_projection(aspect)});
-            scope.bind_vertex_buffer({.buffer = vertices, .stride_in_bytes = isize(sizeof(cube_vertex))});
-            scope.bind_index_buffer({.buffer = index_buffer, .format = sg::index_format::uint16});
+            scope.bind_vertex_buffer(vertices.as_vertex_buffer());
+            scope.bind_index_buffer(index_buffer.as_index_buffer());
             scope.draw_indexed({.index_range = {.offset = 0, .size = cube_index_count}});
         }
 

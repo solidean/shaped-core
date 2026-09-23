@@ -425,7 +425,11 @@ cc::shared_async<cc::unit> context::epochs_in_flight_steps(int allowed_in_flight
     process_completed_epochs();
     while (in_flight_epoch_count() > allowed_in_flight)
     {
-        co_await epoch_completion(epoch(u64(completed_epoch()) + 1));
+        // The GPU may have finished every closed epoch since the retire above, which makes the next one the open epoch.
+        // Nothing signals that before an advance, so it is retired again rather than waited on.
+        auto const next = u64(completed_epoch()) + 1;
+        if (next < u64(current_epoch()))
+            co_await epoch_completion(epoch(next));
         process_completed_epochs();
     }
     co_return;

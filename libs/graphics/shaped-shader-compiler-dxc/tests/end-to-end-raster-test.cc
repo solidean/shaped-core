@@ -113,14 +113,8 @@ ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - raster pipeline draws a triangle over a 
         {{-0.8f, -0.8f, 0.0f}, {1, 0, 0, 1}},
         {{0.8f, -0.8f, 0.0f}, {1, 0, 0, 1}},
     };
-    auto vbuf = ctx.persistent.create_raw_buffer(isize(sizeof(verts)),
-                                                 sg::buffer_usage::vertex_buffer | sg::buffer_usage::copy_dst);
+    auto vbuf = ctx.persistent.create_buffer_from_data(verts, sg::buffer_usage::vertex_buffer).raw();
     REQUIRE(vbuf != nullptr);
-
-    // Upload the vertices in their own list so the buffer decays to COMMON before the draw reads it.
-    auto up = ctx.create_command_list();
-    up->upload.data_to_buffer(vbuf, cc::span<vertex const>(verts));
-    ctx.submit_command_list(cc::move(up));
 
     // Clear to blue, then draw the red triangle over it.
     auto cmd = ctx.create_command_list();

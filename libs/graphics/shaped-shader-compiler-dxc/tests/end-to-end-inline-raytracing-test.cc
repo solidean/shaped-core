@@ -69,13 +69,7 @@ ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - inline raytracing traces a bound TLAS in
     // Build the scene: one triangle BLAS, one identity-transform TLAS instance.
     // Wait for the GPU so the AS is fully built before the trace reads it.
     float const verts[9] = {0, 0, 0, 1, 0, 0, 0, 1, 0};
-    auto const vbuf = ctx.persistent.create_raw_buffer(
-        sizeof(verts), sg::buffer_usage::accel_structure_build_input | sg::buffer_usage::copy_dst);
-    {
-        auto up = ctx.create_command_list();
-        up->upload.data_to_buffer(vbuf, cc::span<float const>(verts, 9));
-        ctx.submit_command_list(cc::move(up));
-    }
+    auto const vbuf = ctx.persistent.create_buffer_from_data(verts, sg::buffer_usage::accel_structure_build_input).raw();
 
     sg::blas_triangles tri;
     tri.vertices = vbuf;

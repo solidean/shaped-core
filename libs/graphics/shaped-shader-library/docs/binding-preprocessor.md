@@ -547,7 +547,7 @@ struct frame_bindings
     /// Everything else is DATA. The verbs are sg's scopes', constrained on sg::declared_binding_group:
     ///
     ///     auto const layout = ctx.cached.acquire_binding_group_layout<shaders::frame_bindings>();
-    ///     auto const g = ctx.transient.create_binding_group(layout, shaders::frame_bindings{...});
+    ///     auto const g = ctx.transient.create_binding_group(cmd, layout, shaders::frame_bindings{...});
     ///     scope.bind<shaders::frame_bindings>(*g);
     ///
     /// so the generator emits no API of its own.
