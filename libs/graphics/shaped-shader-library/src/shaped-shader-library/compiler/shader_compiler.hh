@@ -17,6 +17,7 @@ enum class slib::shader_language
     hlsl,
     wgsl, ///< WebGPU's own language: handed on as source, reflected by slib (see compiler/wgsl_compiler.hh)
     sgl, ///< our own: written as the text of the target's language, then compiled as that (see compiler/sgl_compiler.hh)
+    metal, ///< MSL, for a shader hand-written against metal (see compiler/metal_compiler.hh)
 };
 
 namespace slib

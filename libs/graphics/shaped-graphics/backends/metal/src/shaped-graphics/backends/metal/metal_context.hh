@@ -61,7 +61,9 @@ struct sg::backend::metal::metal_config
 class sg::backend::metal::metal_context final : public sg::context
 {
     // metal consumes compiled Metal libraries only.
-    static constexpr sg::shader_format k_accepted_shader_formats[] = {sg::shader_format::metal_lib};
+    // Both of Metal's: a metallib is AIR in a container, and MSL is source the driver compiles at pipeline build.
+    static constexpr sg::shader_format k_accepted_shader_formats[]
+        = {sg::shader_format::metal_lib, sg::shader_format::msl};
 
 public:
     /// Takes ownership of every argument; `create_metal_context` is what assembles them.

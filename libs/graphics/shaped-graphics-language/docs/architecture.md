@@ -124,7 +124,7 @@ The size and alignment the `layout-mismatch` check places a member by are fields
   The function a builtin is called as is reserved from its record, so a local named `lerp` is renamed in HLSL without an entry in any list.
   The exception is a function only a custom writer calls, such as `mul`, which stands in `emit/reserved_words.cc`.
   An entry point is renamed the same way, and `emitted_text::entry_point` is the name a caller compiles.
-* **The `msl` text has met no Metal compiler yet**, and nothing builds it.
+* **The `msl` text compiles**, through `shaped-shader-compiler-msl` and slib's metal edge.
   slib has no metallib compiler, and sg's metal backend binds no vertex buffers or inline constants.
 
 [semantics/emitting.md](spec/semantics/emitting.md) has the rules.

@@ -361,7 +361,8 @@ What *is* checked, since Metal has no validation-message callback to lean on:
 - handle ranges are bounds-checked against the pipeline.
 
 **It does not make `sv` run on macOS.**
-`sv`'s path tracer is written against the DXR pipeline path and its shaders are HLSL; nothing in the tree compiles MSL yet.
+`sv`'s path tracer is written against the DXR pipeline path and its shaders are HLSL, and there is no macOS route from HLSL to MSL.
+MSL itself compiles — `shaped-shader-compiler-msl` — so porting those shaders means rewriting them in SGL or building an HLSL route elsewhere.
 The backend having ray tracing and the viewer working on macOS are separate milestones.
 
 ## Validation: no callback exists, so the gate is an abort

@@ -25,6 +25,13 @@ enum class sg::shader_format
     metal_lib, ///< Metal library — metal
     // WGSL is SOURCE text rather than bytecode: WebGPU consumes it and compiles it itself.
     wgsl, ///< WGSL — webgpu
+    /// Metal Shading Language source — metal, compiled by the driver when a pipeline is built.
+    ///
+    /// The second source format, and it exists for the same reason `wgsl` does: producing a metallib needs Apple's
+    /// Metal toolchain, a component installed separately from Xcode, while the driver's own compiler ships with the OS.
+    /// So a host without that component emits this instead, and a shipping build asks for `metal_lib`.
+    /// New values go after this one: `impl/shader_codec.cc` encodes a format by its ordinal.
+    msl,
     // Future: dxbc.
 };
 

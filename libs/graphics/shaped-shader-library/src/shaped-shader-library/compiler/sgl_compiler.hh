@@ -10,7 +10,7 @@ namespace slib
 ///
 /// `preprocess` runs SGL's whole pipeline and hands back the text of the target `inner` compiles:
 /// HLSL for dx12 over a dxil compiler, HLSL for vulkan over a spirv one, WGSL over the wgsl one, MSL over a metal_lib one.
-/// slib has no metal_lib compiler yet, so that last edge is there for whoever brings one, and its text has met no Metal compiler.
+/// The metal_lib edge is `create_metal_compiler()`, so an SGL package compiles for metal like any other target.
 /// So the flattened source a `shader_asset` keeps and a compiler's cache hashes IS the emitted text, and `compile` is `inner`'s.
 /// Reflection is `inner`'s too: whatever it reads out of that text is what the shader reports.
 ///

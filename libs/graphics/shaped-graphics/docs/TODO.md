@@ -197,24 +197,22 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   That build no longer exists: `SC_THREADS=OFF` is refused on Apple targets, per [docs/platforms.md](../../../../docs/platforms.md#threading-sc_threads).
   So the conversion is unblocked whenever someone wants it.
 
-- **No metal shader toolchain exists.**
-  `sg::shader_format::metal_lib` implies one does, and nothing in the tree produces a metallib.
-  `shaped-shader-library` has no metal arm, and the only metallibs are hand-compiled test fixtures checked in beside their `.metal` sources.
-  So the metal backend's ray-tracing and compute paths are reachable by a caller who brings their own bytecode and by nobody else.
-  The agreed shape for a fixture is HLSL run through SPIRV-Cross once by hand, with all three artifacts checked in.
-  That matters because the argument-buffer layout was chosen to match what SPIRV-Cross emits, so a hand-written kernel would pin a convention no real pipeline produces.
-  **What blocks it is DXC, and only on the host.**
-  Microsoft ships no macOS release binary, and building it from source is an LLVM-scale build.
-  [extern/dxc/dependency.yml](../../../../extern/dxc/dependency.yml) records that as `unavailable_on: [macos]`.
-  SPIRV-Cross is not vendored at all, but it is plain CMake and would build here; it is not the constraint.
+- **The metal shader toolchain is MSL-only, and the tier-2 fixtures are still hand-compiled.**
+  `shaped-shader-compiler-msl` compiles MSL to a metallib (or to MSL source where Apple's separately-installed Metal
+  toolchain is absent), slib's `create_metal_compiler` is the edge, and an SGL package reaches metal through it.
+  So a shader authored in SGL compiles for metal like any other target, and the gap that is left is narrower than it was.
 
-  That splits the work into two pieces with different costs, and they are worth deciding separately.
-  Regenerating the *fixtures* needs DXC once, on any machine — the artifacts are checked in either way, so a Windows or Linux host does it and macOS never needs a compiler.
-  A *toolchain* — a metal arm in `shaped-shader-library`, compiling at build time — is what genuinely needs DXC where the build runs, and there is no macOS path to HLSL → SPIR-V today.
-  Apple's own `metal` command-line compiler is the third shape.
-  It takes MSL rather than HLSL, so it would serve metallibs while giving up the one-source-two-backends property the HLSL route exists for.
+  **What remains is HLSL.**
+  `sv`'s path tracer is written in HLSL against the DXR pipeline path, and there is no macOS route from HLSL to
+  anything metal reads: DXC publishes no macOS binary, and SPIRV-Cross is unvendored.
+  Porting `sv` to metal therefore means either an SGL rewrite of its shaders or an HLSL route built elsewhere.
 
-  **The stand-in is `backends/metal/tests/raytrace.metal`**, hand-written and marked temporary in its own comment — regenerate it from HLSL once the toolchain exists.
+  **And the tier-2 fixtures are still `xxd -i` dumps** — `double_compute.metallib.h` and its neighbours, with their
+  reflection written by hand beside them.
+  Compiling them through the wrapper at build time would drop the dumps, at the cost of making the tier-2 binary
+  require the Metal toolchain component; that is a trade worth making deliberately rather than in passing.
+  `ssc::msl end to end - the reflected bindings build the layout the backend encodes` is what now checks that a
+  reflected layout and the encoded one agree, which is the property those hand-written fixtures could never pin.
 
 - **Metal implements refit, compaction and placement natively, and sg exposes none of them.**
   Recorded here so the eventual surface is designed against three APIs rather than two.

@@ -1,0 +1,13 @@
+# shaped-shader-compiler-msl's lint policy, on top of the repo-root .shaped-lint.yml.
+#
+# The root's entries apply here too; what follows extends them, and the last matching entry decides.
+# See tools/shaped-linter/docs/configuration.md.
+#
+# Every entry below is for one file: the child-process helper that runs Apple's `metal` driver.
+# They go away with it, once clean-core grows a process API — impl/metal_driver.hh says why it is here at all.
+
+rules:
+  - kind: allow-include
+    value: [<spawn.h>, <unistd.h>, <poll.h>, <fcntl.h>, <sys/wait.h>, <errno.h>, <string.h>]
+    reason: "TEMPORARY: spawning `xcrun metal` and piping a metallib back needs POSIX process calls, and clean-core has no process API yet — see impl/metal_driver.hh"
+    files: src/shaped-shader-compiler-msl/impl/metal_driver.cc

@@ -217,6 +217,13 @@ if(SC_HAS_DXC_COMPILER)
     add_subdirectory(libs/graphics/shaped-shader-compiler-dxc)
 endif()
 
+# shaped-shader-compiler-msl (ssc::msl): MSL -> sg::compiled_shader, for the metal backend.
+# APPLE alone gates it: nothing here links a compiler, `xcrun metal` is resolved at run time, and the
+# MSL-source arm works on a Mac with no Metal toolchain installed at all.
+if(APPLE)
+    add_subdirectory(libs/graphics/shaped-shader-compiler-msl)
+endif()
+
 # shaped-shader-library (slib): shader packages + hot reload, over sg. Added after ssc so its optional
 # dxc compiler adapter can see that target; the packages themselves work without any compiler.
 add_subdirectory(libs/graphics/shaped-shader-library)

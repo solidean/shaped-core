@@ -24,19 +24,10 @@ struct loaded_stage
                                                   sg::compiled_shader const& shader,
                                                   cc::string_view what)
 {
-    if (shader.format != sg::shader_format::metal_lib)
-        return cc::error(cc::format("raster_pipeline: the {} shader is not a metal library", what));
-    if (shader.bytecode.empty())
-        return cc::error(cc::format("raster_pipeline: the {} shader has no bytecode", what));
-
-    auto* const blob = dispatch_data_create(shader.bytecode.data(), size_t(shader.bytecode.size()), nullptr,
-                                            DISPATCH_DATA_DESTRUCTOR_DEFAULT);
-    NS::Error* error = nullptr;
-    auto* const library = device->newLibrary(blob, &error);
-    dispatch_release(blob);
-
-    if (library == nullptr)
-        return metal_error(error, cc::format("raster_pipeline: the {} library could not be loaded", what));
+    auto loaded = library_from_shader(device, shader, cc::format("raster_pipeline: the {} shader", what));
+    if (loaded.has_error())
+        return cc::error(cc::move(loaded).error());
+    auto* const library = loaded.value();
 
     auto* const function = MTL4::LibraryFunctionDescriptor::alloc()->init();
     function->setLibrary(library);
