@@ -1,3 +1,5 @@
+#include "shader_fixtures.hh"
+
 #include <clean-core/common/utility.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <nexus/async-test.hh>
@@ -39,18 +41,6 @@ constexpr auto image_usage = sg::texture_usage::readonly_texture | sg::texture_u
     return cc::vector<tg::vec4f>::create_filled(k_size * k_size, v);
 }
 
-/// Gives `lib` a compiler and sr's package, which the routine needs before it can compile.
-/// False when there is no compiler, and the caller skips.
-[[nodiscard]] bool add_sr_shaders(slib::shader_library& lib)
-{
-    auto compiler = slib::create_dxc_compiler();
-    if (!compiler.has_value())
-        return false;
-    lib.add_compiler(cc::move(compiler.value()));
-    lib.add_package(sr::shader_package());
-    return true;
-}
-
 /// Uploads both images, mixes `source` into `destination` by `weight`, and reads the destination back.
 cc::shared_async<cc::vector<tg::vec4f>> mix_once(sg::context& ctx, tg::vec4f destination, tg::vec4f source, f32 weight)
 {
@@ -81,16 +71,12 @@ cc::shared_async<cc::vector<tg::vec4f>> mix_once(sg::context& ctx, tg::vec4f des
 }
 } // namespace
 
-ASYNC_INVOCABLE_TEST("sr - a mix reaches both of its endpoints exactly",
-                     (sg::context_handle const& ctx_h),
-                     exclusive("slib-shader-library"))
+ASYNC_INVOCABLE_TEST("sr - a mix reaches both of its endpoints exactly", (sg::context_handle const& ctx_h))
 {
     REQUIRE(ctx_h != nullptr);
     auto& ctx = *ctx_h;
 
-    auto lib = slib::shader_library();
-    if (!add_sr_shaders(lib))
-        SKIP("no DXC compiler to build the mix shader");
+    (void)sr_test::shader_fixtures(); // sr's one library, alive for the whole binary
 
     auto const a = tg::vec4f(0.25f, 0.5f, 0.75f, 1.0f);
     auto const b = tg::vec4f(0.9f, 0.1f, 0.4f, 0.5f);
@@ -108,16 +94,12 @@ ASYNC_INVOCABLE_TEST("sr - a mix reaches both of its endpoints exactly",
         CHECK(tg::abs(replaced[0][c] - b[c]) < 1e-6f);
 }
 
-ASYNC_INVOCABLE_TEST("sr - a mix interpolates every channel on its own",
-                     (sg::context_handle const& ctx_h),
-                     exclusive("slib-shader-library"))
+ASYNC_INVOCABLE_TEST("sr - a mix interpolates every channel on its own", (sg::context_handle const& ctx_h))
 {
     REQUIRE(ctx_h != nullptr);
     auto& ctx = *ctx_h;
 
-    auto lib = slib::shader_library();
-    if (!add_sr_shaders(lib))
-        SKIP("no DXC compiler to build the mix shader");
+    (void)sr_test::shader_fixtures(); // sr's one library, alive for the whole binary
 
     // Channels that move in different directions and by different amounts, so a blend that collapsed them onto one
     // scalar — luminance, or the red channel alone — cannot pass.
