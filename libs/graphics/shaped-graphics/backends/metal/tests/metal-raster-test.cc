@@ -340,8 +340,9 @@ ASYNC_TEST("sg metal - a stencil-masked draw is masked by the stencil clear")
         .fragment_shader = triangle_stage(sg::shader_stage::fragment, "fragment_main"),
         .rasterization = {.cull = sg::cull_mode::none},
         // Draw only where the stencil equals the reference, which each pass sets for itself.
-        .depth_stencil
-        = {.stencil_test = true, .front = {.compare = sg::compare_op::equal}, .back = {.compare = sg::compare_op::equal}},
+        .depth_stencil = {.stencil_test = true,
+                          .stencil_front = {.compare = sg::compare_op::equal},
+                          .stencil_back = {.compare = sg::compare_op::equal}},
         .depth_stencil_format = sg::pixel_format::depth32_float_stencil8,
     };
     desc.color_targets.push_back({.format = sg::pixel_format::rgba8_unorm});

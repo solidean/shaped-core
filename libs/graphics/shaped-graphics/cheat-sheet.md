@@ -719,7 +719,8 @@ cmd.compute.declare_array_texture_access(name, elements) // void — same for a 
                                                          // (scalar bindings are inferred; arrays can't be — declare them; cmd.raytracing has the same pair)
                                                          // ACCOUNTED FOR: dispatch asserts every bound array binding was declared; empty span = "unused"
 
-// raster_pipeline — a graphics PSO. Owns its shaders; formats/state baked in (must match the rendering scope). Draws via cmd.raster (above).
+// raster_pipeline — a graphics PSO. Owns its shaders; formats/state baked in. Draws via cmd.raster (above).
+//   bind_pipeline ASSERTS the rendering's color count/formats, depth format and sample count equal pipeline.target_formats()
 sg::raster_pipeline_description   // { pipeline_layout_handle layout; compiled_shader vertex_shader; optional<compiled_shader> fragment_shader;
                                   //   optional<compiled_shader> tessellation_control_shader/tessellation_evaluation_shader (both-or-neither, need patch_list); optional<compiled_shader> geometry_shader;
                                   //   vertex_input_layout vertex_input; primitive_topology topology=triangle_list; int patch_control_points=0 (1..32, patch_list only); rasterization_state; depth_stencil_state;
@@ -733,6 +734,8 @@ sg::vertex_input_layout           // { small_vector<vertex_input_slot,8> slots; 
 // state vocab (backend-neutral enums; primitive_topology.hh / rasterization_state.hh / blend_state.hh / depth_stencil_state.hh):
 //   primitive_topology {point_list,line_list,line_strip,triangle_list,triangle_strip,patch_list}  fill_mode{solid,wireframe}  cull_mode{none,front,back}  front_face{counter_clockwise,clockwise}
 //   blend_factor / blend_op / color_channel {r,g,b,a} with color_write_mask = cc::flags<color_channel> and color_write_mask_all  stencil_op  depth_stencil_state reuses sg::compare_op (from sampler.hh)
+//   depth_stencil_state { depth_test, depth_write, depth_compare, stencil_test, stencil_read_mask, stencil_write_mask, stencil_front, stencil_back }
+//   blend presets: sg::blend_alpha, sg::blend_premultiplied_alpha, sg::blend_additive — opaque is an unset `blend`
 //   vertex_attribute_format {f32,vec2f,vec3f,vec4f, i32.., u32.., rgba8_unorm, rgba8_uint}   index_format {uint16, uint32}
 raster_pipeline.cached_pipeline_data()  // -> pinned_data<byte const> — serialized PSO blob; persist + feed back via desc.cached_pipeline (empty if unsupported)
 // Access is inferred from each op (upload⇒copy_write, dispatch⇒bound views' access); no public

@@ -124,6 +124,55 @@ ASYNC_INVOCABLE_TEST("sg - a pipeline built for one target set refuses a renderi
     ctx->submit_command_list(cc::move(cmd));
 }
 
+ASYNC_INVOCABLE_TEST("sg - a pipeline refuses a rendering whose target formats differ from the ones it was built for",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+
+    auto const& vs = co_await shaders::quads.vertex.main_vs->acquire(*ctx);
+    auto const& ps = co_await shaders::quads.pixel.main_ps->acquire(*ctx);
+    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline({
+        .layout = shaders::quads.vertex.main_vs.acquire_layout(*ctx),
+        .vertex_shader = vs,
+        .fragment_shader = ps,
+        .vertex_input = shaders::quad::layout(),
+        .color_targets = shaders::target::states{.color = {.format = sg::pixel_format::rgba8_unorm}},
+        .target_set = shaders::target::name,
+    });
+    REQUIRE(pipeline->target_formats().has_value());
+    CHECK(pipeline->target_formats().value().color[0] == sg::pixel_format::rgba8_unorm);
+
+    auto const target_of = [&](sg::pixel_format format)
+    {
+        return ctx->persistent.create_texture_2d(
+            {.format = format, .width = 4, .height = 4, .usage = sg::texture_usage::render_target});
+    };
+    auto const rgba8 = target_of(sg::pixel_format::rgba8_unorm);
+    auto const rgba16 = target_of(sg::pixel_format::rgba16_float);
+    auto const depth = ctx->persistent.create_texture_2d(
+        {.format = sg::pixel_format::depth32_float, .width = 4, .height = 4, .usage = sg::texture_usage::depth_stencil});
+
+    auto cmd = ctx->create_command_list();
+    {
+        // The same target set, so only the format tells them apart.
+        auto pass = cmd->raster.render_to(shaders::target{.color = rgba16.as_render_target_view().discarded()});
+        CHECK_ASSERTS(pass.bind_pipeline(*pipeline));
+    }
+    {
+        // A depth target the pipeline was not built with.
+        auto pass = cmd->raster.render_to(shaders::target{.color = rgba8.as_render_target_view().discarded(),
+                                                          .depth_stencil = depth.as_depth_stencil_view().discarded()});
+        CHECK_ASSERTS(pass.bind_pipeline(*pipeline));
+    }
+    {
+        auto pass = cmd->raster.render_to(shaders::target{.color = rgba8.as_render_target_view().discarded()});
+        pass.bind_pipeline(*pipeline);
+    }
+    ctx->submit_command_list(cc::move(cmd));
+}
+
 ASYNC_INVOCABLE_TEST("sg - an SGL pixel shader states its targets, and a pipeline that disagrees is refused at "
                      "creation",
                      (sg::context_handle const& ctx))
