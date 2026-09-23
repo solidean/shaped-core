@@ -72,6 +72,7 @@ Without it an entry opens in the middle of its argument, and the reader reconstr
 
 The page draws an intro first in its round wherever it sits in the file, so appending one late still leads.
 `validate` warns about a round that has an open ask and no intro, and a finalized round is exempt because it cannot be edited.
+A round whose only question is the synthetic acknowledgement is exempt too: it has no options for an intro to list.
 
 The word limits on the context tiers warn rather than fail.
 They exist because a collapsed tier nobody can skim is a tier nobody opens.

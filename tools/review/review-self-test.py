@@ -810,6 +810,12 @@ def test_a_round_that_asks_is_owed_an_intro(root: Path) -> None:
     introduced = parse_text(front + ask_r1 + ask_r2 + intro_r2, Path("e.md"))
     assert missing_intro_rounds(introduced, {"second"}) == []
 
+    # A round that adds material and asks nothing is owed only the acknowledgement, which has no options to introduce.
+    note_r2 = block("## prose", "round: 2", "", "How the answer above was carried forward.")
+    noted = parse_text(front + ask_r1 + note_r2, Path("e.md"))
+    assert noted.acknowledgement is not None
+    assert missing_intro_rounds(noted, {noted.acknowledgement.name}) == []
+
 
 def test_an_intro_leads_its_round_wherever_it_is_written(root: Path) -> None:
     """The intro is what the rest of a round is read against, so the page draws it first."""

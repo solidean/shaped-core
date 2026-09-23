@@ -146,9 +146,12 @@ def missing_intro_rounds(entry: Entry, open_asks: set[str]) -> list[int]:
     An entry answered out of order is read cold, and a round that opens on facts makes the reader reconstruct the
     question before they can weigh anything.
     Only rounds with an open ask are owed one: a finalized round is immutable, so a warning there would have no remedy.
+    The synthetic acknowledgement is no such ask: it has no options to introduce, so a round that asks nothing else owes none.
     """
     latest = entry.newest_round
-    asking = {b.round or latest for b in entry.asks if b.name in open_asks}
+    acknowledgement = entry.acknowledgement
+    acknowledged = acknowledgement.name if acknowledgement is not None else None
+    asking = {b.round or latest for b in entry.asks if b.name in open_asks and b.name != acknowledged}
     introduced = {b.round or latest for b in entry.blocks if b.type == "intro"}
     return sorted(asking - introduced)
 
