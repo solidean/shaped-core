@@ -30,7 +30,7 @@ pipeline:
     vertex = main_vs
     pixel = main_ps
     cull = .back
-    color_targets.color.blend = .alpha
+    color_targets.color.format = .rgba8_unorm
 
 pipeline quick = (main_vs, main_ps)
 

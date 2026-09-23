@@ -293,6 +293,10 @@ type_id checker::check_name(function_scope& scope, ast::expr_id id, ast::name co
     case symbol_kind::binding:
         unsupported(file, where, "a binding as a value");
         break;
+    case symbol_kind::pipeline:
+        report(diagnostic_kind::wrong_kind_of_name, file, where,
+               cc::format("{} is a pipeline, which the host acquires and no shader reads", text));
+        break;
     case symbol_kind::unsupported:
         break;
     }
@@ -539,6 +543,14 @@ type_id checker::check_call(function_scope& scope, ast::expr_id id, ast::call co
         set_target(file, call.callee, {.kind = target_kind::symbol, .symbol = first});
         report(diagnostic_kind::wrong_kind_of_name, file, callee_where,
                cc::format("{} is a binding, and a call needs a function or a struct", text));
+        return error_type;
+    case symbol_kind::enumeration:
+    case symbol_kind::pipeline:
+        (void)check_arguments(scope, call.arguments, false);
+        set_target(file, call.callee, {.kind = target_kind::symbol, .symbol = first});
+        report(diagnostic_kind::wrong_kind_of_name, file, callee_where,
+               cc::format("{} is {}, and a call needs a function or a struct", text,
+                          out.at(first).kind == symbol_kind::pipeline ? "a pipeline" : "an enum"));
         return error_type;
     case symbol_kind::unsupported:
         (void)check_arguments(scope, call.arguments, false);

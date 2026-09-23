@@ -19,6 +19,7 @@ pipeline:
     depth_test = true
     depth_write = true
     depth_stencil_format = .depth32_float
+    format = .host
 ```
 
 The host then acquires it by name, and states nothing the shader already said: not the vertex layout, not the binding layout, not the targets.
@@ -54,7 +55,7 @@ Writing every path in full would make `rasterization.cull` the common spelling, 
 
 * **A name that is no field of the description is looked for below it**, and stands for the one field of that name.
 * **A name found twice is an error that names both paths**, and the setting is then written in full.
-* **A setting under `color_targets` means every target**: `blend = .alpha` blends each of them.
+* **A setting under `color_targets` means every target**: `format = .rgba8_unorm` is each target's format.
 * **One target is set by its full path**, `color_targets.albedo.blend`, where `albedo` is a member of the pixel stage's `@pixel struct`.
   A target's name never stands for its path, so renaming a target cannot make another line ambiguous.
 
@@ -63,8 +64,8 @@ pipeline gbuffer:
     vertex = scene_vs
     pixel = gbuffer_ps
     cull = .back                               // rasterization.cull
-    blend = .alpha                             // every target
-    color_targets.normal.blend = .none         // then one target switched off again
+    format = .rgba8_unorm                      // every target
+    color_targets.normal.format = .rgba16_float // then one target otherwise
 ```
 
 ### Attributes on the code are settings too
@@ -72,7 +73,7 @@ pipeline gbuffer:
 A shader that is only correct under one configuration says so where it is written.
 
 * **`@name(value)` on an entry point or an edge struct is the setting `name = value`**, found the same way a setting's name is.
-* **On a member of a `@pixel struct` it is that target's**: `@blend(.alpha) color: float4`.
+* **On a member of a `@pixel struct` it is that target's**: `@format(.rgba16_float) normal: float4`.
   `@format` is one of these, which is how a shader pins a target's format.
 * **Stage names are not settings**, since `@vertex` and `@pixel` already mark a stage.
 
@@ -114,7 +115,10 @@ Everything a pipeline states reaches the host as one generated symbol per pipeli
 
 ## What the compiler carries today
 
-The syntax above is what the AST builds, and checking reports every `pipeline` as `unsupported-yet`.
+[CHK-174 to CHK-187](semantics/checking.md#pipelines) is what the check pass carries: the stages, the settings with their names and their fan-out, the attributes, and the checks between the stages.
+
+* A raster pipeline of a vertex and a pixel stage, or of a vertex stage alone.
+* A value is a literal, `true`, `false`, a case, `.host`, `.none`, or a paren literal of those.
 
 ## Open
 

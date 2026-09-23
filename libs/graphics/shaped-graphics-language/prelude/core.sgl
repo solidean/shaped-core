@@ -7,6 +7,189 @@
 // What belongs here is whatever can be said in terms of builtins.sgl: a helper with a body, a struct with fields.
 // What cannot - a new opaque type, a function some target spells in its own way - is a record in the registry.
 //
-// Nothing stands here yet.
 // Every overload family needs generics to be written once, and until SGL has them the registry's C++ loops write them out.
 // A function written here is inlined like any other, so it costs an emitter nothing and an editor can jump into it.
+
+// ---- the raster pipeline description --------------------------------------------------------------------------------
+//
+// What a `pipeline` declaration's settings are paths into: sg::raster_pipeline_description, with sg's names and nesting.
+// See docs/spec/pipelines.md.
+// No field has a default, since sg's defaults are the C++ side's, and a pipeline starts from them.
+//
+// The checker reads four things here by name, which the types alone cannot say:
+//     color_targets        is one entry per member of the pixel stage's @pixel struct, not one struct
+//     blend                is optional: `blend = .none` switches it off
+//     format, depth_stencil_format and sample_count  may be `.host`
+//     the fields the entry points give - layout, vertex input, target set - are not here at all
+//
+// Every case must name an enumerator of sg's enum of the same name: slib's settings table and its test pin that.
+
+enum primitive_topology:
+    point_list
+    line_list
+    line_strip
+    triangle_list
+    triangle_strip
+    patch_list
+
+enum fill_mode:
+    solid
+    wireframe
+
+enum cull_mode:
+    none
+    front
+    back
+
+enum front_face:
+    counter_clockwise
+    clockwise
+
+enum compare_op:
+    never
+    less
+    equal
+    less_equal
+    greater
+    not_equal
+    greater_equal
+    always
+
+enum stencil_op:
+    keep
+    zero
+    replace
+    increment_clamp
+    decrement_clamp
+    invert
+    increment_wrap
+    decrement_wrap
+
+enum blend_factor:
+    zero
+    one
+    src_color
+    one_minus_src_color
+    dst_color
+    one_minus_dst_color
+    src_alpha
+    one_minus_src_alpha
+    dst_alpha
+    one_minus_dst_alpha
+
+enum blend_op:
+    add
+    subtract
+    reverse_subtract
+    min
+    max
+
+enum pixel_format:
+    undefined
+    r8_unorm
+    r8_snorm
+    r8_uint
+    r8_sint
+    rg8_unorm
+    rg8_snorm
+    rg8_uint
+    rg8_sint
+    rgba8_unorm
+    rgba8_snorm
+    rgba8_uint
+    rgba8_sint
+    rgba8_unorm_srgb
+    bgra8_unorm
+    bgra8_unorm_srgb
+    r16_float
+    r16_uint
+    r16_sint
+    rg16_float
+    rg16_uint
+    rg16_sint
+    rgba16_float
+    rgba16_uint
+    rgba16_sint
+    r32_float
+    r32_uint
+    r32_sint
+    rg32_float
+    rg32_uint
+    rg32_sint
+    rgba32_float
+    rgba32_uint
+    rgba32_sint
+    rgb10a2_unorm
+    rg11b10_float
+    depth16_unorm
+    depth32_float
+    depth32_float_stencil8
+    bc1_rgba_unorm
+    bc1_rgba_unorm_srgb
+    bc2_unorm
+    bc2_unorm_srgb
+    bc3_unorm
+    bc3_unorm_srgb
+    bc4_r_unorm
+    bc4_r_snorm
+    bc5_rg_unorm
+    bc5_rg_snorm
+    bc6h_rgb_ufloat
+    bc6h_rgb_sfloat
+    bc7_rgba_unorm
+    bc7_rgba_unorm_srgb
+
+struct rasterization_state:
+    fill: fill_mode
+    cull: cull_mode
+    front: front_face
+    depth_clip_enabled: bool
+    depth_bias: float
+    depth_bias_slope: float
+    depth_bias_clamp: float
+
+struct stencil_face:
+    fail: stencil_op
+    depth_fail: stencil_op
+    pass: stencil_op
+    compare: compare_op
+
+struct depth_stencil_state:
+    depth_test: bool
+    depth_write: bool
+    depth_compare: compare_op
+    stencil_test: bool
+    stencil_read_mask: int
+    stencil_write_mask: int
+    stencil_front: stencil_face
+    stencil_back: stencil_face
+
+struct blend_component:
+    source: blend_factor
+    target: blend_factor
+    op: blend_op
+
+struct blend_state:
+    color: blend_component
+    alpha: blend_component
+
+// sg's is a set of channels, and SGL has no set of enum cases.
+struct color_write_mask:
+    r: bool
+    g: bool
+    b: bool
+    a: bool
+
+struct color_target_state:
+    format: pixel_format
+    blend: blend_state
+    write_mask: color_write_mask
+
+struct raster_pipeline_description:
+    topology: primitive_topology
+    patch_control_points: int
+    rasterization: rasterization_state
+    depth_stencil: depth_stencil_state
+    color_targets: color_target_state
+    depth_stencil_format: pixel_format
+    sample_count: int

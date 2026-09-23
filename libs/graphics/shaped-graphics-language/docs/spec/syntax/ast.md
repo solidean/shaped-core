@@ -727,7 +727,7 @@ binding frame:
 * **AST-88** An attribute in the AST is the span of its name and its arguments, each read as an argument by AST-23: positional, named or a splat.
 * **AST-89** An attribute may stand on a declaration, a member, a parameter, a binding entry, a statement and an expression in a type position.
 * **AST-90** An attribute on any other expression is a normal error, and the attribute is kept.
-* **AST-91** A later phase validates every attribute against its name and the kind of its node, and an attribute it does not know is a warning.
+* **AST-91** A later phase validates every attribute against its name and the kind of its node ([CHK-38 and CHK-39](../semantics/checking.md#builtins-and-the-prelude)).
 * **AST-92** One name may mean different things on different kinds of node: `@vertex struct` is a vertex, and `@vertex fun` is the vertex stage.
 
 ```sgl

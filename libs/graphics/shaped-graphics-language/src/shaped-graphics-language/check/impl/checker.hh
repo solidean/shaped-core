@@ -122,6 +122,17 @@ struct call_arguments
     bool is_poisoned = false;
 };
 
+/// Which pipeline settings an attribute may be, by what it stands on.
+enum class setting_scope : u8
+{
+    /// None: every attribute there is the compiler's own.
+    none,
+    /// An entry point or an edge struct, whose attributes may be any setting of the description.
+    description,
+    /// A member of a `@pixel struct`, whose attributes are settings of that one target.
+    target,
+};
+
 /// The one demand-driven pass; every member function only appends to `out` and flips symbol states.
 struct checker
 {
@@ -160,10 +171,12 @@ struct checker
                                                        ast::range_of<ast::attribute> range,
                                                        cc::string_view name) const;
     /// Reports every attribute whose name is not in `known` as `unsupported-yet`, and arguments on a known one.
+    /// Where `scope` allows pipeline settings, an attribute that names one is known and takes its value.
     void judge_attributes(i32 file,
                           ast::range_of<ast::attribute> range,
                           cc::span<cc::string_view const> known,
-                          cc::string_view owner);
+                          cc::string_view owner,
+                          setting_scope scope = setting_scope::none);
 
     void set_type(i32 file, ast::expr_id expr, type_id type);
     void set_target(i32 file, ast::expr_id expr, target where);
@@ -192,7 +205,11 @@ struct checker
     /// The name of a `@stream(name)`; empty without one, and after a bad argument it reports.
     [[nodiscard]] cc::string stream_of(i32 file, ast::attribute const* a);
     /// The members of a struct or a binding, collected locally and appended whole so the range stays contiguous.
-    [[nodiscard]] ast::range_of<member_info> compile_members(i32 file, ast::range_of<ast::decl_id> members, bool is_struct);
+    /// A `@pixel struct`'s members are targets, so their attributes may be a target's settings.
+    [[nodiscard]] ast::range_of<member_info> compile_members(i32 file,
+                                                             ast::range_of<ast::decl_id> members,
+                                                             bool is_struct,
+                                                             bool is_target_struct = false);
     /// The type an expression in a type position names; the error type when it names none.
     [[nodiscard]] type_id resolve_type(i32 file, ast::expr_id expr);
     /// `resolve_type` for the type of a value — a field, a parameter, a result, a local — where a buffer cannot stand.
@@ -206,6 +223,15 @@ struct checker
     [[nodiscard]] type_id resolve_buffer(i32 file, ast::expr_id expr, ast::index const& node);
     /// True where `expr` is the bare name `name`, which is how a resource type is recognized before lookup.
     [[nodiscard]] bool is_named(i32 file, ast::expr_id expr, cc::string_view name) const;
+
+    // ---- pipelines (check_pipeline.cc) ------------------------------------------------------------------------------
+
+    void compile_pipeline(symbol_id id);
+    /// The prelude's `raster_pipeline_description`, compiled on first use; the error type where the prelude has none.
+    [[nodiscard]] type_id pipeline_description_type();
+    /// True when `name` alone is one field of the description, or of one target's part when `is_on_target`.
+    /// A stage name never is: it marks an entry point.
+    [[nodiscard]] bool is_setting_attribute(cc::string_view name, bool is_on_target);
 
     // ---- bodies and expressions (check_expr.cc) ---------------------------------------------------------------------
 

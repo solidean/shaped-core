@@ -180,6 +180,8 @@ cc::string_view sgl::to_string(diagnostic_kind kind)
         return "duplicate-case-pattern";
     case diagnostic_kind::missing_value_in_arm:
         return "missing-value-in-arm";
+    case diagnostic_kind::invalid_pipeline:
+        return "invalid-pipeline";
     }
     CC_UNREACHABLE("unknown diagnostic_kind");
 }
@@ -271,6 +273,7 @@ sgl::severity sgl::default_severity_of(diagnostic_kind kind)
     case diagnostic_kind::non_exhaustive_case:
     case diagnostic_kind::duplicate_case_pattern:
     case diagnostic_kind::missing_value_in_arm:
+    case diagnostic_kind::invalid_pipeline:
         return severity::normal_error;
     case diagnostic_kind::spaced_attribute_arguments:
     case diagnostic_kind::no_effect:
