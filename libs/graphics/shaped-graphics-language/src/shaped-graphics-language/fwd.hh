@@ -35,6 +35,8 @@ struct described_binding;
 struct described_struct_member;
 struct described_struct;
 struct described_entry_point;
+struct described_pipeline_setting;
+struct described_pipeline;
 struct module_description;
 struct describe_request;
 

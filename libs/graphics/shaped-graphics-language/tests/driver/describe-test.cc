@@ -212,3 +212,45 @@ struct pixel_input:
 )") + edges)
               .contains("@stream takes one name"));
 }
+
+TEST("sgl describe - a pipeline: its stages, its layout, its settings in order, and what the host states")
+{
+    auto const d = described(read_text(cc::string(SGL_SAMPLES_DIR) + "/pipeline.sgl"));
+
+    REQUIRE(d.pipelines.size() == 1);
+    auto const& p = d.pipelines[0];
+    CHECK(p.name == "pipeline");
+    CHECK(p.vertex == "main_vs");
+    CHECK(p.pixel == "main_ps");
+    // `constants` is @inline, so it is no group of the layout.
+    CHECK(p.layout.empty());
+    CHECK(p.inline_constants == "constants");
+    CHECK(p.vertex_input == "cube_vertex");
+    CHECK(p.target_set == "target");
+    REQUIRE(p.targets.size() == 1);
+    CHECK(p.targets[0] == "color");
+
+    // The @pixel struct's attribute first, then the declaration's lines.
+    REQUIRE(p.settings.size() == 5);
+    CHECK(p.settings[0].path == "color_targets.color.format");
+    CHECK(p.settings[0].kind == sgl::check::setting_kind::host);
+    CHECK(p.settings[1].path == "rasterization.cull");
+    CHECK(p.settings[1].enum_case == "back");
+    CHECK(p.settings[2].path == "depth_stencil.depth_test");
+    CHECK(p.settings[2].integer == 1);
+    CHECK(p.settings[4].path == "depth_stencil_format");
+    CHECK(p.settings[4].enum_case == "depth32_float");
+
+    REQUIRE(p.open.size() == 1);
+    CHECK(p.open[0] == "color_targets.color.format");
+}
+
+TEST("sgl describe - a later setting takes a part back from the host")
+{
+    auto const d = described(read_text(cc::string(SGL_SAMPLES_DIR) + "/pipeline.sgl")
+                             + "pipeline fixed:\n"
+                               "    vertex = main_vs\n    pixel = main_ps\n    format = .bgra8_unorm\n");
+    REQUIRE(d.pipelines.size() == 2);
+    CHECK(d.pipelines[1].name == "fixed");
+    CHECK(d.pipelines[1].open.empty());
+}

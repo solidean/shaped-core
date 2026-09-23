@@ -87,6 +87,39 @@ described_entry_point describe_entry_point(check::checked_module const& m, check
         result.bindings.push_back(m.at(id).name);
     return result;
 }
+described_pipeline describe_pipeline(check::checked_module const& m, check::pipeline_info const& p)
+{
+    auto result = described_pipeline{.name = m.at(p.symbol).name, .vertex = m.at(p.vertex).name};
+    if (check::is_valid(p.pixel))
+        result.pixel = m.at(p.pixel).name;
+    for (auto const b : m.at(p.layout))
+        result.layout.push_back(m.at(b).name);
+    if (check::is_valid(p.inline_constants))
+        result.inline_constants = m.at(p.inline_constants).name;
+    result.vertex_input = m.name_of(p.vertex_input);
+    if (check::is_valid(p.target_set))
+    {
+        result.target_set = m.name_of(p.target_set);
+        for (auto const& member : m.at(m.at(p.target_set).members))
+            result.targets.push_back(member.name);
+    }
+
+    auto const settings = m.at(p.settings);
+    for (auto const& s : settings)
+        result.settings.push_back(
+            {.path = s.path, .kind = s.kind, .integer = s.integer, .real = s.real, .enum_case = s.enum_case});
+
+    // Open is where the last word is `.host`: a later setting of that field takes it back.
+    for (auto i = isize(0); i < settings.size(); ++i)
+    {
+        auto is_last = true;
+        for (auto j = i + 1; j < settings.size(); ++j)
+            is_last = is_last && settings[j].path != settings[i].path;
+        if (is_last && settings[i].kind == check::setting_kind::host)
+            result.open.push_back(settings[i].path);
+    }
+    return result;
+}
 } // namespace
 
 cc::result<sgl::module_description, cc::string> sgl::describe(describe_request const& request)
@@ -136,6 +169,10 @@ cc::result<sgl::module_description, cc::string> sgl::describe(describe_request c
         if (errors.size() == before)
             result.entry_points.push_back(describe_entry_point(m, e));
     }
+
+    for (auto const& p : m.pipelines)
+        if (m.at(p.symbol).file == front.program_file())
+            result.pipelines.push_back(describe_pipeline(m, p));
 
     if (!errors.empty())
     {
