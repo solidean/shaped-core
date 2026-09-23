@@ -89,8 +89,10 @@ ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - array bindings: partial fill, declared a
     REQUIRE(pipeline != nullptr);
 
     // Elements: Bufs[0] and Bufs[3] are real buffers, Texs[1] a real texture; the rest stay vacant.
-    auto b0_buf = ctx.persistent.create_raw_buffer(16, sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);
-    auto b3_buf = ctx.persistent.create_raw_buffer(16, sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);
+    u32 const b0_data[] = {b0_value, 0, 0, 0};
+    u32 const b3_data[] = {b3_value, 0, 0, 0};
+    auto b0_buf = ctx.persistent.create_buffer_from_data(b0_data, sg::buffer_usage::readonly_buffer).raw();
+    auto b3_buf = ctx.persistent.create_buffer_from_data(b3_data, sg::buffer_usage::readonly_buffer).raw();
     auto out_buf = ctx.persistent.create_raw_buffer(16, sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
     REQUIRE(b0_buf != nullptr);
     REQUIRE(b3_buf != nullptr);
@@ -105,15 +107,11 @@ ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - array bindings: partial fill, declared a
     auto tex = ctx.persistent.create_raw_texture(tex_desc);
     REQUIRE(tex != nullptr);
 
-    // Upload the inputs: the two buffer words and a constant-valued texture.
-    cc::vector<u32> const b0_data = {b0_value, 0, 0, 0};
-    cc::vector<u32> const b3_data = {b3_value, 0, 0, 0};
+    // Upload the constant-valued texture.
     cc::vector<byte> texels;
     for (isize i = 0; i < 4 * 4 * 4; ++i)
         texels.push_back(byte(texel_value));
     auto up = ctx.create_command_list();
-    up->upload.data_to_buffer(b0_buf, b0_data);
-    up->upload.data_to_buffer(b3_buf, b3_data);
     up->upload.bytes_to_texture(tex, texels);
     ctx.submit_command_list(cc::move(up));
 

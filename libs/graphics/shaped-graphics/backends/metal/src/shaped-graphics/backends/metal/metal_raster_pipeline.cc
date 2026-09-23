@@ -44,6 +44,68 @@ struct loaded_stage
 
     return loaded_stage{.library = library, .function = function};
 }
+
+/// The vertex descriptor for `layout`, or null when the pipeline reads no vertex buffers at all.
+///
+/// **An attribute's `[[attribute(n)]]` index is its position in `attributes`**, because sg identifies a vertex input by
+/// an HLSL `semantic` string and MSL has no such thing.
+/// That is the same rule the vulkan backend states for its SPIR-V locations, and it is a workaround for the same
+/// missing field: the backend-neutral numeric `location` on `sg::vertex_attribute` that
+/// libs/graphics/shaped-graphics/docs/TODO.md already plans.
+///
+/// The layout index is `k_vertex_buffer_base_index + slot`, which is what `raster_bind_vertex_buffers` writes the
+/// buffer's address into — the two halves have to agree or the fetch reads whatever else is bound there.
+[[nodiscard]] cc::result<MTL::VertexDescriptor*> build_vertex_descriptor(sg::vertex_input_layout const& layout)
+{
+    if (layout.slots.empty() && layout.attributes.empty())
+        return static_cast<MTL::VertexDescriptor*>(nullptr);
+
+    if (layout.slots.size() > sg::max_vertex_buffers)
+        return cc::error(cc::format("raster_pipeline: the vertex input declares {} slots, past sg's budget of {}",
+                                    layout.slots.size(), sg::max_vertex_buffers));
+
+    auto* const descriptor = MTL::VertexDescriptor::alloc()->init();
+
+    for (auto i = isize(0); i < layout.slots.size(); ++i)
+    {
+        auto const& slot = layout.slots[i];
+
+        // Metal refuses a zero stride outright, where D3D12 and Vulkan read it as "every vertex reads element 0".
+        // Refused here rather than at the pipeline build, so the message names the slot.
+        if (slot.stride <= 0)
+        {
+            descriptor->release();
+            return cc::error(cc::format("raster_pipeline: vertex input slot {} has a stride of {}; metal needs a "
+                                        "positive stride",
+                                        i, slot.stride));
+        }
+
+        auto* const slot_layout = descriptor->layouts()->object(NS::UInteger(k_vertex_buffer_base_index + i));
+        slot_layout->setStride(NS::UInteger(slot.stride));
+        slot_layout->setStepFunction(slot.per_instance ? MTL::VertexStepFunctionPerInstance
+                                                       : MTL::VertexStepFunctionPerVertex);
+        slot_layout->setStepRate(1);
+    }
+
+    for (auto i = isize(0); i < layout.attributes.size(); ++i)
+    {
+        auto const& attribute = layout.attributes[i];
+        if (attribute.slot < 0 || attribute.slot >= layout.slots.size())
+        {
+            descriptor->release();
+            return cc::error(cc::format("raster_pipeline: vertex attribute '{}' names slot {}, which the layout does "
+                                        "not declare",
+                                        attribute.semantic, attribute.slot));
+        }
+
+        auto* const attr = descriptor->attributes()->object(NS::UInteger(i));
+        attr->setFormat(vertex_format_of(attribute.format));
+        attr->setOffset(NS::UInteger(attribute.offset));
+        attr->setBufferIndex(NS::UInteger(k_vertex_buffer_base_index + attribute.slot));
+    }
+
+    return descriptor;
+}
 } // namespace
 
 void metal_raster_pipeline::release_backend_objects()
@@ -95,10 +157,30 @@ cc::result<metal_raster_pipeline_handle> metal_context::create_metal_raster_pipe
         }
     }
 
+    auto const release_stages = [&]
+    {
+        if (fragment.value().function != nullptr)
+        {
+            fragment.value().function->release();
+            fragment.value().library->release();
+        }
+        vertex.value().function->release();
+        vertex.value().library->release();
+    };
+
+    auto vertex_descriptor = build_vertex_descriptor(desc.vertex_input);
+    if (vertex_descriptor.has_error())
+    {
+        release_stages();
+        return cc::error(vertex_descriptor.error().to_string());
+    }
+
     auto* const descriptor = MTL4::RenderPipelineDescriptor::alloc()->init();
     descriptor->setVertexFunctionDescriptor(vertex.value().function);
     if (fragment.value().function != nullptr)
         descriptor->setFragmentFunctionDescriptor(fragment.value().function);
+    if (vertex_descriptor.value() != nullptr)
+        descriptor->setVertexDescriptor(vertex_descriptor.value());
 
     descriptor->setInputPrimitiveTopology(topology_class_of(desc.topology));
     descriptor->setRasterSampleCount(NS::UInteger(desc.sample_count < 1 ? 1 : desc.sample_count));
@@ -136,13 +218,9 @@ cc::result<metal_raster_pipeline_handle> metal_context::create_metal_raster_pipe
     auto* const state = _compiler->newRenderPipelineState(descriptor, nullptr, &pipeline_error);
 
     descriptor->release();
-    if (fragment.value().function != nullptr)
-    {
-        fragment.value().function->release();
-        fragment.value().library->release();
-    }
-    vertex.value().function->release();
-    vertex.value().library->release();
+    if (vertex_descriptor.value() != nullptr)
+        vertex_descriptor.value()->release();
+    release_stages();
 
     if (state == nullptr)
         return metal_error(pipeline_error, "raster_pipeline: the pipeline could not be built");
@@ -186,7 +264,11 @@ cc::result<metal_raster_pipeline_handle> metal_context::create_metal_raster_pipe
         return cc::error("raster_pipeline: the metal device refused a depth-stencil state");
     }
 
+    auto strides = cc::small_vector<isize, sg::max_vertex_buffers>();
+    for (auto const& slot : desc.vertex_input.slots)
+        strides.push_back(slot.stride);
+
     return std::make_shared<metal_raster_pipeline>(*this, state, depth_stencil, desc.rasterization, desc.topology,
-                                                   desc.depth_stencil_format, desc.layout);
+                                                   desc.depth_stencil_format, cc::move(strides), desc.layout);
 }
 } // namespace sg::backend::metal

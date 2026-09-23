@@ -139,7 +139,18 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
     Finer would be to notice it per window and stop mid-copy, releasing the source with it.
     Pure quality of implementation: the bytes are unobservable either way, and what it buys is releasing a large source sooner.
 - **Barriers + access tracking.** See [concepts/barriers.md](concepts/barriers.md). Still open:
-  - **array bindings in raster draws** — compute/RT dispatches resolve `declare_array_*_access` against the bound groups, but the raster scope has no declare pair and asserts on a bound array binding;
+  - **array bindings in raster draws** — the one gap here that a real renderer will hit, so it is spelled out rather than listed.
+    `declare_array_buffer_access` / `declare_array_texture_access` live on the compute scope and the raytracing scope alone.
+    `command_list_raster_scope` has neither, and there is no `raster_declare_array_*` virtual for one to dispatch to.
+    A dispatch therefore resolves its declares against the bound groups, and a draw cannot.
+    dx12, vulkan and metal each assert `"array bindings are not supported in raster draws yet"` on a bound array binding.
+    [concepts/bindings.md](concepts/bindings.md#array-bindings) states that refusal as the contract.
+    webgpu has no binding arrays at all, so there is nothing there to refuse.
+    **What it costs is any bindless material table on a draw.**
+    sv's tables work today only because it path-traces, declaring them through `cmd.raytracing` in `gpu_resource_manager`; the moment a raster path wants one it stops at this assert.
+    Closing it is the declare pair on the raster scope, a `raster_declare_array_*` virtual, and the resolution in three backends — the compute path's shape, at the vertex and fragment stages.
+    webgpu would have to gain binding arrays first.
+    Nothing subtle blocks it; it has simply never been the blocking thing.
   - a per-draw/dispatch **escape hatch** disabling automatic transitions where the caller knows its resources are already in the right layout;
   - folding the redundant `_open_command_lists` epoch-advance counter into the slot allocator's live count.
 - **Raster pipeline + draws.** See [concepts/raster-pipeline.md](concepts/raster-pipeline.md). Still open:
@@ -149,6 +160,15 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   - a **backend-neutral numeric `location`** on `sg::vertex_attribute`, replacing the HLSL `semantic` string.
     The vulkan backend currently numbers a SPIR-V location by an attribute's index in `vertex_input_layout::attributes`.
     That makes the shader's `[[vk::location(N)]]` annotations part of the contract — see `vulkan_raster_pipeline.cc`.
+  - **a metal shader package, so `rotating-cube` can grow a metal arm and `metal-cube` can retire.**
+    `SC_EXAMPLE_BACKEND` now takes `metal`, and `examples/graphics/metal-cube` is a runnable windowed cube on it.
+    It is a sibling of `rotating-cube` rather than a case of it, and that split is the open part.
+    The cause is slib: `sc_add_shader_package` speaks `hlsl` and `wgsl`, and nothing in it speaks metal.
+    HLSL is no way out either, since DXC publishes no macOS build, so there is no compiler on the host to turn rotating-cube's own source into something a metal context accepts.
+    So `metal-cube` embeds a metallib compiled ahead of time by `xcrun metal`, the way the tier-2 fixtures do.
+    It hand-writes the vertex layout and the constants block that a package would have generated.
+    Closing it means a `metal` language for `sc_add_shader_package` that builds a `.metallib` and embeds it, plus the slib compiler seam that hands the blob back at `acquire`.
+    `rotating-cube` then lists `metal` in its `SUPPORTS`, and the sibling example goes away along with its copy of the geometry and camera maths.
 - **Acceleration structures.** See [concepts/acceleration-structures.md](concepts/acceleration-structures.md).
   The abstract types already carry the stats a refit needs — build and update scratch sizes, and the flags.
   Still open:
@@ -157,22 +177,41 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   - **compaction** — BLAS `allow_compaction`, query the compacted size, copy into a smaller buffer;
   - **compaction** on both backends, which is the one build-time flag neither implements.
 - **A group's implicit constant buffer is one upload each.**
-  `create_binding_group` allocates a buffer for a generated group's plain members and fills it through `ctx.upload`, one allocation and one copy per group.
+  `create_binding_group` allocates a buffer for a generated group's plain members and fills it with one copy per group.
+  On `ctx.transient` that copy is recorded inline into the `cmd` the call takes, and on `ctx.persistent` it goes through `ctx.upload`.
   A per-frame group wants a transient constant-buffer writer instead: a ring in host-visible device memory (ReBAR where there is some), suballocated per epoch and written in place.
-- **The metal barrier clamp has outlived the premise it was written under, and needs checking on a Mac.**
-  `metal_command_list::flush_barriers` clamps its stage pair to what a compute encoder accepts, above a comment saying
-  nothing is lost "while every op recorded here is a copy or a dispatch — a raster dependency will need the
-  queue-scoped form or an encoder boundary, which is the raster milestone's problem".
-  Raster landed after that was written, so the premise no longer holds.
-  The render encoder does open with `barrierAfterQueueStages(MTL::StageAll, MTL::StageAll, …)` and close with
-  `barrierAfterStages(MTL::StageAll, MTL::StageAll, …)`, which looks like it covers the case.
-  Read that with the queue barrier pair's limit in mind: it carries visibility, and a queue wait between two commits
-  leaves the consumer half with nothing to find, which is why cross-list *ordering* now rides the submission timeline
-  instead.
-  What has not been established is whether a fragment-stage dependency can reach `flush_barriers` and be silently
-  clamped away, and that cannot be established without a Metal device.
-  If the encoder-boundary pair does cover it, replace the comment with that invariant and name the two call sites,
-  rather than leaving a deferral to a milestone that has already arrived.
+- **A resource's lifetime scope is stamped after construction, through a friend.**
+  `raw_buffer::scope()` / `raw_texture::scope()` read a `mutable` field that `context_transient_scope` sets on the handle the backend just returned.
+  Every backend already receives `allocation_info::scope` when it creates a resource, so each could forward it to the `raw_buffer` / `raw_texture` constructor instead.
+  The field then becomes `const` and the friend goes away.
+  It touches all eight backend resource classes and the four test fakes that construct the bases, metal's included, for no behavioural change.
+  So it is its own change rather than part of the one that added the stamp.
+
+- **The metal encoder-boundary barrier pair is emitted but not proved.**
+  `flush_barriers` now emits on whichever encoder is open, clamped to the stages that encoder accepts, and every
+  encoder publishes its work as it closes — so a dependency crossing an encoder boundary is carried by that publish
+  plus the queue wait the next encoder opens with, rather than by the encoder-scoped barrier that cannot reach across
+  one.
+  That replaced the clamp's old "a raster dependency is the raster milestone's problem" comment, which had outlived
+  its premise.
+  What is *not* established is that the pair is load-bearing.
+  `sg metal - a draw reads the vertex buffer a dispatch in the same list wrote` covers the path and passes with the
+  publish removed, because a four-thread dispatch finishes well before the pass it precedes on an M4.
+  A test that would catch the ordering needs a dispatch long enough to lose the race, which trades a sharp test for a
+  slow one — so the pair stands on Apple's documented model rather than on an oracle of ours.
+  The in-pass case is one step better off: a fragment-stage producer closes and reopens the pass, and
+  `metal_command_list::pass_reopens` makes that observable, so `sg metal - a draw sees what the previous draw's
+  fragment shader wrote` asserts the mechanism fired rather than only that the pixels came out right.
+  The ordering itself is still the same race, and still not what a 4x4 draw can prove.
+
+- **An odd first index into a 16-bit index buffer is refused everywhere, and closing that would need a shifted copy.**
+  `sg::index_buffer_offset_alignment` is now a portable rule every backend asserts, so the failure is the same on all
+  of them rather than metal-only — see [concepts/raster-pipeline.md](concepts/raster-pipeline.md).
+  What it costs is real: a sub-mesh whose first index happens to be odd is a legal D3D12 and Vulkan draw that sg
+  rejects, so a caller pads the range or uses 32-bit indices.
+  Lifting it means staging a shifted copy of the index range, which needs a copy the render pass it sits inside cannot
+  record — so it wants a pre-pass fixup or an aligned index allocator, and neither is worth building before something
+  hits it.
 
 - **The metal tier-2 tests block on `block_until_idle` where they could await `idle_completion()`.**
   `.shaped-lint.yml` allows that by name.
@@ -332,6 +371,18 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
 
 - **Tier 2 / legacy backends:** metal, then opengl, webgl.
   webgpu exists on wasm; what it still owes is its own item below.
+
+- **There is no SGL to metallib edge, so the shader-using half of the tier-1 sweep skips on metal.**
+  `shader_fixtures.cc` registers SGL to WGSL and, where DXC exists, to DXIL and SPIR-V.
+  A metal context accepts none of those, so every tier-1 test that acquires a shader is offered a format it cannot
+  take — eleven of them, across `compute-test.cc`, `raster-test.cc` and `sgl-package-test.cc`.
+  They now ask `sg_test::shaders_reach` and SKIP rather than failing on an acquire that cannot succeed.
+  **CI never saw this**: its macOS runner has no Metal 4 device, so the whole metal driver skips there, and the
+  failure only appears on a Mac that has one.
+  Closing it is an SGL-to-MSL compiler, at which point the guard answers true and the eleven start running with
+  nothing to revert.
+  `sg - the SGL fixtures reach at least one format on every build` is what keeps the guard from quietly skipping them
+  on every backend instead.
 
 - **The webgpu backend's remaining gaps.**
   - **The WGSL twins of sg's tier-1 shader tests.**

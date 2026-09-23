@@ -285,10 +285,14 @@ void vulkan_command_list::raster_bind_vertex_buffers(int first_slot, cc::span<sg
 void vulkan_command_list::raster_bind_index_buffer(sg::index_buffer_view const& view)
 {
     CC_ASSERT(view.buffer != nullptr, "index_buffer_view has no buffer");
+    CC_ASSERT(view.offset_in_bytes % sg::index_buffer_offset_alignment == 0,
+              "an index_buffer_view's offset must be 4-byte aligned — see sg::index_buffer_offset_alignment");
     auto const& buf = as_vulkan_buffer(view.buffer);
     vkCmdBindIndexBuffer(_buffer, buf._buffer, VkDeviceSize(view.offset_in_bytes),
                          view.format == sg::index_format::uint16 ? VK_INDEX_TYPE_UINT16 : VK_INDEX_TYPE_UINT32);
     _bound_index_buffer = &buf;
+    _index_format = view.format;
+    _index_view_offset_in_bytes = view.offset_in_bytes;
 }
 
 void vulkan_command_list::raster_set_viewport(sg::viewport const& vp)
@@ -395,6 +399,14 @@ void vulkan_command_list::raster_draw_indexed(sg::draw_indexed_config const& con
     CC_ASSERT(config.index_range.offset >= 0 && config.index_range.size >= 0, "index range must be non-negative");
     CC_ASSERT(config.instance_range.offset >= 0 && config.instance_range.size >= 0, "instance range must be "
                                                                                     "non-negative");
+
+    // **An index fetch starts on a 4-byte boundary**, and `index_range.offset` counts indices rather than bytes — so
+    // an aligned view is not enough on its own.
+    // Metal is the backend that cannot do otherwise, and it answers a misaligned fetch by drawing part of the mesh
+    // with no error and no validation message; the rule is sg's so that it fails here too.
+    CC_ASSERT(sg::is_aligned_index_fetch(_index_format, _index_view_offset_in_bytes, config.index_range.offset),
+              "an odd first index into a 16-bit index buffer starts the fetch off a 4-byte boundary. Use an even "
+              "first index, or 32-bit indices — sg::is_aligned_index_fetch answers it without asserting");
 
     declare_raster_draw_barriers(true);
     flush_barriers();

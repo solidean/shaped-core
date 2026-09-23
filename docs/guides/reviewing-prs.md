@@ -92,6 +92,26 @@ So introduce each mechanism before judging it: the situation as a concrete scena
 
 pr-173 is the worked case: a correct critique the maintainer could not follow — "nothing is properly introduced" — and a verdict they found "always hard to read" as paragraphs.
 
+#### A set named by its cardinality is a set the reader cannot check
+
+**Never write "the four backends" or "the same two asserts" without enumerating them once.**
+A count reads as precision and carries none: the writer is counting something they can see, and the reader is being told how many of something they cannot.
+
+It is the most reliable thing the cold-read check finds, because it is invisible from the inside.
+The writer re-reads "four backends" and pictures four; nothing on the page disagrees.
+
+Two failure modes, and the second is the one that costs credibility:
+
+- **The count is right and the set is never named**, so the reader cannot verify a word of the argument that rests on it.
+  "The same two asserts" three times in one entry, with the two never enumerated, leaves every duplication complaint unjudgeable — is it two lines or two invariants?
+- **The count is simply wrong**, which a reader spots instantly and the writer never does.
+
+The metal-raster-completion review is the worked case.
+Its design critique said "each of the four backends carries the same two asserts" while the entry named three — dx12, vulkan and metal — leaving the reader to invent webgpu.
+The fix was one sentence naming all four at first use, plus a short block enumerating the two conditions before the options that argue about them.
+
+The cheap habit that prevents it: **enumerate at first use, then count freely afterwards.**
+
 ### Two alternatives the maintainer wants on the table
 
 These are not preferences that decide a case.
@@ -349,6 +369,25 @@ The worked example is sg's transfer completion.
 `ctx.stream` made the copy actors select jobs out of order, and both actors still signaled one per-system fence to the highest value each window finished.
 A stream to one buffer finishing therefore reported an older upload to a different buffer complete, and a reader stopped waiting for a copy that had not run.
 `dx12_completion_group` is the split: one fence per resource per direction, pooled and recycled.
+
+### A flake seen during a review is chased before it is deferred
+
+**We do not want flakes, so a failure seen while validating a branch gets a reasonable amount of chasing, whatever code it is in.**
+Only once its mechanism is known do we decide whether to fix it in the branch or postpone it.
+"Not in code this branch touches" is where the report starts, not where it ends.
+
+pr-187 is the worked case.
+Validating it on Windows turned up one dx12 debug-layer warning in an untouched viewer test, and a macOS `nexus-test` abort in CI.
+The review offered "note both and chase them separately" as the recommended option, and the answer was, verbatim:
+
+```raw
+we dont want flakes usually. so whenever we see one, we spend some reasonable time chasing it. only afterwards do we decide if we postpone it or not. so chase it for now
+```
+
+Chasing the first took one temporary print of the full debug-layer text and a repeated suite run.
+The warning was an advisory the binary already allows by substring.
+A log written near the end of a recording chunk is truncated to the space left, and the truncated text no longer contained the substring.
+None of that was reachable from "it passed 20 of 20 in isolation".
 
 ### A named owner is a claim to verify, not a fact to accept
 

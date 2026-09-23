@@ -84,17 +84,15 @@ ASYNC_INVOCABLE_TEST("sg - copies a buffer across separate lists", (sg::context_
 ASYNC_INVOCABLE_TEST("sg - copies a sub-range with offsets", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
-    auto const src = make_copy_buffer(ctx, 256);
-    auto const dst = make_copy_buffer(ctx, 256);
-
     byte data[256];
     for (int i = 0; i < 256; ++i)
         data[i] = pattern(i);
+    auto const src = ctx->persistent.create_buffer_from_bytes(data, sg::buffer_usage::copy_src);
+    auto const dst = make_copy_buffer(ctx, 256);
 
     // Copy src[64,128) into dst[128,192); read back exactly that window.
     auto cmd = ctx->create_command_list();
     REQUIRE(cmd != nullptr);
-    cmd->upload.bytes_to_buffer(src, cc::span<byte const>(data, 256));
     cmd->copy.buffer_bytes_region(
         {.src = src, .dst = dst, .size_in_bytes = 64, .src_offset_in_bytes = 64, .dst_offset_in_bytes = 128});
     auto future = cmd->download.bytes_from_buffer(dst, 128, 64);
@@ -115,17 +113,12 @@ ASYNC_INVOCABLE_TEST("sg - copies a sub-range with offsets", (sg::context_handle
 ASYNC_INVOCABLE_TEST("sg - copies within one buffer on its first use in a list", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
-    auto const buf = make_copy_buffer(ctx, 256);
-
     byte data[256];
     for (int i = 0; i < 256; ++i)
         data[i] = pattern(i);
 
-    // Fill in a list of its own, so the copy list below starts with no tracked access for this buffer.
-    auto up = ctx->create_command_list();
-    REQUIRE(up != nullptr);
-    up->upload.bytes_to_buffer(buf, cc::span<byte const>(data, 256));
-    ctx->submit_command_list(cc::move(up));
+    // Filled through ctx.upload rather than a list, so the copy list below starts with no tracked access for this buffer.
+    auto const buf = ctx->persistent.create_buffer_from_bytes(data, sg::buffer_usage::copy_src);
 
     auto cmd = ctx->create_command_list();
     REQUIRE(cmd != nullptr);
@@ -146,16 +139,14 @@ ASYNC_INVOCABLE_TEST("sg - copies within one buffer on its first use in a list",
 ASYNC_INVOCABLE_TEST("sg - typed copy in element units", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
-    auto const src = make_copy_buffer(ctx, isize(8) * sizeof(int));
-    auto const dst = make_copy_buffer(ctx, isize(8) * sizeof(int));
-
     int const in[8] = {1, 2, 3, 4, 5, 6, 7, 8};
+    auto const src = ctx->persistent.create_buffer_from_data(in, sg::buffer_usage::copy_src);
+    auto const dst = make_copy_buffer(ctx, isize(8) * sizeof(int));
 
     // Copy in[2,6) into dst[0,4): count / offsets are in elements of int.
     auto cmd = ctx->create_command_list();
     REQUIRE(cmd != nullptr);
-    cmd->upload.data_to_buffer(src, cc::span<int const>(in, 8));
-    cmd->copy.buffer_data_region<int>({.src = src, .dst = dst, .count = 4, .src_offset = 2, .dst_offset = 0});
+    cmd->copy.buffer_data_region<int>({.src = src.raw(), .dst = dst, .count = 4, .src_offset = 2, .dst_offset = 0});
     auto future = cmd->download.data_from_buffer<int>(dst, 0, 4);
     ctx->submit_command_list(cc::move(cmd));
 
@@ -168,9 +159,6 @@ ASYNC_INVOCABLE_TEST("sg - typed copy in element units", (sg::context_handle con
 ASYNC_INVOCABLE_TEST("sg - zero-size copy leaves the destination untouched", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
-    auto const src = make_copy_buffer(ctx, 16);
-    auto const dst = make_copy_buffer(ctx, 16);
-
     byte src_data[16];
     byte dst_data[16];
     for (int i = 0; i < 16; ++i)
@@ -179,10 +167,11 @@ ASYNC_INVOCABLE_TEST("sg - zero-size copy leaves the destination untouched", (sg
         dst_data[i] = byte(0xBB);
     }
 
+    auto const src = ctx->persistent.create_buffer_from_bytes(src_data, sg::buffer_usage::copy_src);
+    auto const dst = ctx->persistent.create_buffer_from_bytes(dst_data, sg::buffer_usage::copy_src);
+
     auto cmd = ctx->create_command_list();
     REQUIRE(cmd != nullptr);
-    cmd->upload.bytes_to_buffer(src, cc::span<byte const>(src_data, 16));
-    cmd->upload.bytes_to_buffer(dst, cc::span<byte const>(dst_data, 16));
     cmd->copy.buffer_bytes_region({.src = src, .dst = dst, .size_in_bytes = 0}); // no-op
     auto future = cmd->download.bytes_from_buffer(dst, 0, 16);
     ctx->submit_command_list(cc::move(cmd));

@@ -105,7 +105,10 @@ private:
     struct geometry
     {
         sg::buffer<ImDrawVert> vertices;
-        sg::buffer<u16> indices;
+
+        /// 32-bit, matching the `ImDrawIdx` our injected imgui config widens — an `ImDrawCmd`'s first index is
+        /// arbitrary, and a 16-bit one lands off the 4-byte boundary `sg::index_buffer_offset_alignment` requires.
+        sg::buffer<u32> indices;
     };
 
     /// Allocates this frame's transient vertex + index buffers and records their inline uploads.
