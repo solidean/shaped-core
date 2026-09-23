@@ -317,7 +317,7 @@ public:
     /// An unset `frames` asks only whether this view has finished as far as it can.
     /// False for a view with no traced layer, since nothing there has converged.
     /// What it does NOT see is post-load work a resource still owes, which changes a texture's contents rather than
-    /// its id — `frame::pending_resource_work` is that half.
+    /// its id — `frame::pending_resource_work` and `frame::streaming_resources` are the rest.
     [[nodiscard]] bool is_accumulation_converged(cc::optional<u32> frames = {}) const;
 
     [[nodiscard]] view_id id() const;

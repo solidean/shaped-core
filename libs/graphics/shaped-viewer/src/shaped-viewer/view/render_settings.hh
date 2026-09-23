@@ -1,5 +1,6 @@
 #pragma once
 
+#include <shaped-rendering/denoise.hh>
 #include <shaped-viewer/fwd.hh>
 
 namespace sv
@@ -35,4 +36,21 @@ struct sv::render_settings
 
     /// Path length: the primary hit plus this many diffuse bounces.
     i32 max_bounces = 5;
+
+    /// How this layer's image is denoised before its parent composites it; off unless asked for.
+    ///
+    /// **Never restarts accumulation.**
+    /// The mean is radiance only, and everything this selects is written beside it or computed after it, so none of it
+    /// reaches the trace hash — turning it on, off or to another member keeps a converged image converged.
+    /// While the mean is young a temporal member denoises this frame's own samples, then a spatial one takes over on
+    /// the mean — see `temporal_denoise_frames`.
+    sr::denoise_settings denoise = {.method = sr::denoise_method::none};
+
+    /// For how many accumulated frames after a restart a temporal member denoises this frame's own samples, before the
+    /// spatial one takes over on the mean.
+    ///
+    /// A young mean is barely less noisy than one frame, which is where a temporal member's history pays; an old one
+    /// has converged past anything that history could add, and only a spatial member keeps it unbiased.
+    /// Only a layer whose `denoise.method` may run temporally reads it.
+    u32 temporal_denoise_frames = 16;
 };

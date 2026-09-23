@@ -231,6 +231,7 @@ if(SC_BUILD_TESTS)
             tests/dx12-entry.cc
             tests/raytraced-view-test.cc
             tests/headless-viewer-test.cc
+            tests/denoise-view-test.cc
             tests/pathtraced-view-test.cc
             tests/openpbr-bsdf-test.cc
             tests/volumetric-furnace-test.cc

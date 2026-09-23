@@ -126,6 +126,22 @@ enum class permutation_state
 }
 } // namespace
 
+cc::shared_async<cc::unit> pathtrace_routine::init_once(sg::routine_init_scope scope)
+{
+    auto& ctx = scope.context();
+    _guide_normal_stand_in = ctx.persistent.create_texture_2d(
+        {.format = sg::pixel_format::rgba16_float, .width = 1, .height = 1, .usage = sg::texture_usage::readwrite_texture});
+    _guide_depth_stand_in = ctx.persistent.create_texture_2d(
+        {.format = sg::pixel_format::r32_float, .width = 1, .height = 1, .usage = sg::texture_usage::readwrite_texture});
+    _guide_albedo_stand_in = ctx.persistent.create_texture_2d(
+        {.format = sg::pixel_format::rgba16_float, .width = 1, .height = 1, .usage = sg::texture_usage::readwrite_texture});
+    _frame_output_stand_in = ctx.persistent.create_texture_2d(
+        {.format = sg::pixel_format::rgba16_float, .width = 1, .height = 1, .usage = sg::texture_usage::readwrite_texture});
+    _guide_motion_stand_in = ctx.persistent.create_texture_2d(
+        {.format = sg::pixel_format::rg32_float, .width = 1, .height = 1, .usage = sg::texture_usage::readwrite_texture});
+    co_return;
+}
+
 cc::shared_async<cc::unit> pathtrace_routine::init(sg::routine_init_scope scope)
 {
     auto& ctx = scope.context();
@@ -313,8 +329,8 @@ pathtrace_routine::pipeline_variant const* pathtrace_routine::_variant_for(sg::c
 
     auto const pipeline_layout = ctx.cached.acquire_pipeline_layout({.groups = cc::move(groups_for_layout)});
 
-    // Payload is PtPayload from pt_common.hlsli: rng, the medium (extinction, albedo, g), the wavelength channel, the
-    // last-bounce flag, five float3 results, and bsdf_pdf + hit_t = 27 lanes.
+    // Payload is PtPayload from pt_common.hlsli: rng, the medium (extinction, albedo, g), the wavelength channel,
+    // the last-bounce flag, six float3 results, and bsdf_pdf + hit_t = 30 lanes.
     //
     // Depth 2 rather than 1, because the shading moved into the closest-hit: the raygen's trace is the first level and the
     // shadow rays that hit shader casts for next-event estimation are the second.
@@ -335,9 +351,9 @@ pathtrace_routine::pipeline_variant const* pathtrace_routine::_variant_for(sg::c
     auto rpd = sg::raytracing_pipeline_description{
         .layout = pipeline_layout,
         .max_recursion_depth = 2,
-        // PtPayload's 27 four-byte fields (shaders/pt_common.hlsli); a field added there has to be counted here, or
+        // PtPayload's 30 four-byte fields (shaders/pt_common.hlsli); a field added there has to be counted here, or
         // the state object is refused and every trace declines.
-        .max_payload_size = isize(sizeof(u32) * 27),
+        .max_payload_size = isize(sizeof(u32) * 30),
         .max_attribute_size = has_intersection ? isize(sizeof(float) * 3) : isize(sizeof(float) * 2)};
     auto const raygen_h = rpd.add_raygen_shader(*compiled_rg);
     auto const miss_h = rpd.add_miss_shader(*compiled_ms);
@@ -449,6 +465,21 @@ sg::routine_outcome pathtrace_routine::execute(sg::command_list& cmd, pt_trace_d
     CC_ASSERT(d.output.raw()->description().format == sg::pixel_format::rgba32_float,
               "pathtrace_routine: the accumulator must be rgba32_float — the blend weight is 1 / (accum_frame + 1)");
     CC_ASSERT(d.instance_table.raw() != nullptr, "pathtrace_routine: no instance table bound");
+    auto const has_guides = d.guide_normal.raw() != nullptr;
+    CC_ASSERT(has_guides == (d.guide_depth.raw() != nullptr) && has_guides == (d.guide_albedo.raw() != nullptr),
+              "pathtrace_routine: the three guides come together or not at all");
+    CC_ASSERT(!has_guides
+                  || (d.guide_normal.width() == d.output.width() && d.guide_normal.height() == d.output.height()
+                      && d.guide_depth.width() == d.output.width() && d.guide_depth.height() == d.output.height()
+                      && d.guide_albedo.width() == d.output.width() && d.guide_albedo.height() == d.output.height()),
+              "pathtrace_routine: the guides must match the accumulator's extent");
+    auto const has_temporal = d.frame_output.raw() != nullptr;
+    CC_ASSERT(has_temporal == (d.guide_motion.raw() != nullptr), "pathtrace_routine: the frame output and the motion "
+                                                                 "guide come together or not at all");
+    CC_ASSERT(!has_temporal
+                  || (d.frame_output.width() == d.output.width() && d.frame_output.height() == d.output.height()
+                      && d.guide_motion.width() == d.output.width() && d.guide_motion.height() == d.output.height()),
+              "pathtrace_routine: the temporal targets must match the accumulator's extent");
     CC_ASSERT(!d.hit_groups.empty(), "pathtrace_routine: a trace needs at least one hit group to shade with");
 
     auto const* const variant = self->_variant_for(ctx, d);
@@ -468,12 +499,20 @@ sg::routine_outcome pathtrace_routine::execute(sg::command_list& cmd, pt_trace_d
     }
 
     auto const group = ctx.transient.create_binding_group(
-        variant->group_layout, {{.name = "scene", .view = tlas->as_view()},
-                                {.name = "Output", .view = d.output.as_readwrite_view()},
-                                {.name = "frame", .view = d.frame.as_uniform_buffer()},
-                                {.name = "background", .view = d.background.as_uniform_buffer()},
-                                {.name = "Instances", .view = d.instance_table.as_readonly_buffer()},
-                                {.name = "Lights", .view = lights.as_readonly_buffer()}});
+        variant->group_layout,
+        {{.name = "scene", .view = tlas->as_view()},
+         {.name = "Output", .view = d.output.as_readwrite_view()},
+         {.name = "frame", .view = d.frame.as_uniform_buffer()},
+         {.name = "background", .view = d.background.as_uniform_buffer()},
+         {.name = "Instances", .view = d.instance_table.as_readonly_buffer()},
+         {.name = "GuideNormal", .view = (has_guides ? d.guide_normal : self->_guide_normal_stand_in).as_readwrite_view()},
+         {.name = "GuideDepth", .view = (has_guides ? d.guide_depth : self->_guide_depth_stand_in).as_readwrite_view()},
+         {.name = "GuideAlbedo", .view = (has_guides ? d.guide_albedo : self->_guide_albedo_stand_in).as_readwrite_view()},
+         {.name = "FrameOutput",
+          .view = (has_temporal ? d.frame_output : self->_frame_output_stand_in).as_readwrite_view()},
+         {.name = "GuideMotion",
+          .view = (has_temporal ? d.guide_motion : self->_guide_motion_stand_in).as_readwrite_view()},
+         {.name = "Lights", .view = lights.as_readonly_buffer()}});
 
     cmd.raytracing.bind_pipeline(*variant->pipeline);
     cmd.raytracing.bind_group(0, *group);

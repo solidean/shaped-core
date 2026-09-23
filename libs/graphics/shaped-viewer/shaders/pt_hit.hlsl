@@ -17,6 +17,7 @@ void PtMiss(inout PtPayload payload)
     payload.throughput = float3(0, 0, 0);
     payload.direction = float3(0, 0, 0);
     payload.normal = float3(0, 0, 0);
+    payload.albedo = float3(0, 0, 0);
     payload.bsdf_pdf = 0.0;
     payload.hit_t = -1.0;
 }

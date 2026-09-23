@@ -49,8 +49,23 @@ struct sv::pt_frame_constants_gpu
     u32 path_offset[4] = {};
     u32 path_count[4] = {};
 
+    /// Whether the raygen writes the denoiser guides — nonzero exactly when `pt_trace_desc` carries guide textures.
+    u32 write_guides = 0;
+
+    /// How many frames the guide textures already average; the same 0-overwrites rule as `accum_frame`, on a count of
+    /// its own.
+    u32 guide_frame = 0;
+    /// Whether the raygen writes this frame's own samples and the motion vectors, for a temporal denoiser — nonzero
+    /// exactly when `pt_trace_desc` carries `frame_output` and `guide_motion`.
+    u32 write_temporal = 0;
+    u32 _guide_pad = 0;
+
+    /// The camera this layer's previous frame was traced from, which the motion vectors reproject into.
+    /// The current camera when there was none, which reads as no motion.
+    camera_gpu previous_camera = {};
+
     // Pad the block to a full 256-byte CBV range (see frame_constants.hh).
-    f32 _reserved[32] = {};
+    f32 _reserved[12] = {};
 };
 
 namespace sv
@@ -96,6 +111,22 @@ struct sv::pt_trace_desc
     /// The blend weight is 1 / (`accum_frame` + 1), so a half float stops moving the mean a couple of thousand
     /// frames in — which is exactly where an uncapped estimate is supposed to still be converging.
     sg::texture_2d output;
+
+    /// The denoiser guides the raygen blends into beside `output`, all zero where the primary ray escaped: the primary
+    /// hit's facing normal (rgba16_float, rgb), linear view depth (r32_float) and diffuse albedo (rgba16_float, rgb).
+    ///
+    /// All three or none, at `output`'s extent, and set exactly when the frame block's `write_guides` is.
+    /// Left empty, the trace binds 1x1 stand-ins of its own that nothing writes.
+    sg::texture_2d guide_normal;
+    sg::texture_2d guide_depth;
+    sg::texture_2d guide_albedo;
+
+    /// What a temporal denoiser reads: this frame's samples alone (rgba16_float), and each pixel's motion since the previous
+    /// frame, as this pixel minus that one in pixels (rg32_float).
+    ///
+    /// Both or neither, at `output`'s extent, and set exactly when the frame block's `write_temporal` is.
+    sg::texture_2d frame_output;
+    sg::texture_2d guide_motion;
 
     /// One `sv::instance_gpu` per entry of `instances`, in that same order — the closest-hit's `Instances`, read by `InstanceID()`.
     /// Everything a hit needs is reached from here, which is what lets one view hold any number of meshes and materials.
@@ -174,9 +205,20 @@ public:
     [[nodiscard]] static sg::routine_outcome execute(sg::command_list& cmd, pt_trace_desc const& d);
 
 protected:
+    /// Creates the guide stand-ins, which outlive every shader reload.
+    cc::shared_async<cc::unit> init_once(sg::routine_init_scope scope) override;
+
     cc::shared_async<cc::unit> init(sg::routine_init_scope scope) override;
 
 private:
+    /// What the guide bindings hold when a trace writes no guides: every binding of the group must be filled, and the
+    /// raygen never writes them while `write_guides` is clear.
+    sg::texture_2d _guide_normal_stand_in;
+    sg::texture_2d _guide_depth_stand_in;
+    sg::texture_2d _guide_albedo_stand_in;
+    sg::texture_2d _frame_output_stand_in;
+    sg::texture_2d _guide_motion_stand_in;
+
     /// One pipeline, built over one ordered set of hit groups.
     ///
     /// `group_layout` covers the trace's own bindings alone: the manager's tables are the second group and are

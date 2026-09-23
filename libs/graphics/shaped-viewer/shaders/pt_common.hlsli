@@ -42,6 +42,13 @@ struct FrameConstants
     uint3 _pad0;
     uint4 path_offset;
     uint4 path_count;
+
+    // denoiser guides: whether to write GuideNormal / GuideDepth, and how many frames they already average
+    // write_temporal: whether to write FrameOutput and GuideMotion, for a temporal denoiser
+    uint write_guides;  uint guide_frame;  uint write_temporal;  uint _guide_pad1;
+
+    // The camera the previous frame of this layer was traced from, which motion vectors reproject into.
+    Camera previous_camera;
 };
 
 // Every resource this pipeline's stages share, declared once for all of them.
@@ -78,9 +85,36 @@ namespace pt_bindings
     // across register classes, so appending is the one edit to a shared group that moves nothing.
     ConstantBuffer<FrameConstants> frame;
 
+    // What a denoiser steers by: the primary hit's facing normal, linear view depth and diffuse albedo, as running means
+    // over the same samples the accumulator averages, with zero where the primary ray escaped.
+    // Written only while `frame.write_guides` is set; otherwise bound to 1x1 stand-ins nothing writes.
+    // Appended after `frame` for the reason given above it.
+    RWTexture2D<float4> GuideNormal;
+    RWTexture2D<float> GuideDepth;
+    RWTexture2D<float4> GuideAlbedo;
+
+    // What a temporal denoiser reads instead of the running mean: this frame's samples alone, and where each pixel's
+    // primary hit sat on the previous frame's screen, as this pixel minus that one.
+    // Written only while `frame.write_temporal` is set; otherwise bound to 1x1 stand-ins nothing writes.
+    RWTexture2D<float4> FrameOutput;
+    RWTexture2D<float2> GuideMotion;
     /// Every light the trace samples, grouped by path — mirrors what sv::pt_light_table builds.
     /// Appended last for the same reason `frame` was.
     StructuredBuffer<sv::light> Lights;
+}
+
+// Where `offset` — a point relative to the camera's position, or a direction for a point at infinity — lands on `cam`'s
+// image, as a continuous pixel position over `dim`: the inverse of the raygen's primary ray.
+// Behind the camera is reported far off the image, which a reprojection reads as "not visible last frame".
+float2 pt_project(Camera cam, float3 offset, float2 dim)
+{
+    float z = dot(offset, normalize(cam.forward));
+    if (z <= 1e-6)
+        return float2(-1e6, -1e6);
+    float2 ndc = float2(dot(offset, cam.right_scaled) / dot(cam.right_scaled, cam.right_scaled),
+                        -dot(offset, cam.up_scaled) / dot(cam.up_scaled, cam.up_scaled))
+               / z;
+    return (ndc + 1.0) * 0.5 * dim;
 }
 
 // One path segment, in and out.
@@ -127,6 +161,7 @@ struct [raypayload] PtPayload
     float3 throughput : read(caller) : write(closesthit, miss); // f * cos / pdf for the sampled continuation
     float3 direction  : read(caller) : write(closesthit, miss); // where the path goes next
     float3 normal     : read(caller) : write(closesthit, miss); // shading normal, for the ray offset off the surface
+    float3 albedo     : read(caller) : write(closesthit, miss); // diffuse reflectance here, for the denoiser's guide
 
     float bsdf_pdf : read(caller) : write(closesthit, miss); // pdf of `direction`, for the escaped-environment MIS weight
     float hit_t    : read(caller) : write(closesthit, miss); // < 0 => the ray escaped (miss)

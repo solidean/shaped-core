@@ -25,6 +25,14 @@ void PathTraceRayGen()
     int spp = max(1, pt_bindings::frame.samples_per_pixel);
     float3 accum = float3(0, 0, 0);
 
+    // The denoiser guides, summed over this frame's samples like `accum` is.
+    float3 guide_normal = float3(0, 0, 0);
+    float guide_depth = 0.0;
+    float3 guide_albedo = float3(0, 0, 0);
+
+    // The primary hits' motion, summed over this frame's samples: where each landed on the previous frame's screen.
+    float2 motion = float2(0, 0);
+
     for (int s = 0; s < spp; ++s)
     {
         // jittered pinhole primary ray
@@ -53,6 +61,10 @@ void PathTraceRayGen()
 
         // Which wavelength this path has been collapsed onto, or 3 while it still carries all three.
         uint channel = 3u;
+
+        // The first TraceRay of a sample is the primary ray, whose hit the guides describe.
+        // Not `b == 0`: a scattering event continues the walk without spending a bounce.
+        bool primary = true;
 
         // Scattering events do not count against `max_bounces`.
         //
@@ -92,8 +104,33 @@ void PathTraceRayGen()
             float3 weight = p.throughput;
             float3 next_dir = p.direction;
             float3 N = p.normal;
+            float3 albedo = p.albedo;
             float pdf = p.bsdf_pdf;
 
+            if (primary)
+            {
+                // Linear view depth rather than the distance along the ray, which grows toward the image's edges.
+                // An escaped primary ray leaves both at zero, which is what the denoiser reads as "no surface".
+                if (hit_t >= 0.0)
+                {
+                    guide_normal += N;
+                    guide_depth += hit_t * dot(dir, normalize(cam.forward));
+                    guide_albedo += albedo;
+                }
+
+                // An escaped ray reprojects as a point at infinity, so the sky moves with rotation and not with translation.
+                Camera prev = pt_bindings::frame.previous_camera;
+                float3 offset = hit_t >= 0.0 ? origin + dir * hit_t - prev.position : dir;
+                motion += (float2(px) + jitter) - pt_project(prev, offset, float2(dim));
+                primary = false;
+            }
+
+            // The BSDF strategy for the area light: the continuation this ray came from may have aimed at the rect.
+            //
+            // Only from b >= 1, because that is what pairs with a next-event estimate — the primary ray has none to
+            // balance against, and weighting it here would make the light visible to the camera, which it is not.
+            // The rect is analytic and absent from the TLAS, so `hit_t` is the whole occlusion test: geometry nearer
+            // than the light blocks it, and nothing else can.
             bool const inside = any(medium_sigma_t > float3(0, 0, 0));
             bool const scattering = inside && any(medium_albedo > float3(0, 0, 0));
 
@@ -308,6 +345,12 @@ void PathTraceRayGen()
 
     float3 color = accum / float(spp);
 
+    if (pt_bindings::frame.write_temporal != 0)
+    {
+        pt_bindings::FrameOutput[px] = float4(color, 1.0);
+        pt_bindings::GuideMotion[px] = motion / float(spp);
+    }
+
     // Progressive accumulation: this frame's estimate folded into the running mean already in the target.
     //
     // Exact rather than exponential — every frame ever folded in carries the same weight, so a view left alone
@@ -325,4 +368,23 @@ void PathTraceRayGen()
     }
 
     pt_bindings::Output[px] = float4(color, 1.0);
+
+    // The guides blend exactly as the colour does, but on a count of their own: they may start later than the colour
+    // (denoising turned on mid-estimate), and must not blend into guides that were never written.
+    if (pt_bindings::frame.write_guides != 0)
+    {
+        float3 n_mean = guide_normal / float(spp);
+        float d_mean = guide_depth / float(spp);
+        float3 a_mean = guide_albedo / float(spp);
+        if (pt_bindings::frame.guide_frame > 0)
+        {
+            float g = float(pt_bindings::frame.guide_frame);
+            n_mean = (pt_bindings::GuideNormal[px].rgb * g + n_mean) / (g + 1.0);
+            d_mean = (pt_bindings::GuideDepth[px] * g + d_mean) / (g + 1.0);
+            a_mean = (pt_bindings::GuideAlbedo[px].rgb * g + a_mean) / (g + 1.0);
+        }
+        pt_bindings::GuideNormal[px] = float4(n_mean, 0.0);
+        pt_bindings::GuideDepth[px] = d_mean;
+        pt_bindings::GuideAlbedo[px] = float4(a_mean, 0.0);
+    }
 }

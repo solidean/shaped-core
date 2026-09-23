@@ -365,6 +365,11 @@ isize viewer::pending_resource_work() const
     return _impl->resources.pending_work_count();
 }
 
+isize viewer::streaming_resources() const
+{
+    return _impl->resources.settling_count();
+}
+
 cc::shared_async<cc::unit> viewer::background_work()
 {
     return sv::background_work(*_impl->ctx);
@@ -967,7 +972,11 @@ void viewer::advance_capture(render_plan const& plan, bool traces_ran)
         views_converged &= im.views.is_accumulation_converged(tr.id, session.request().accumulate_frames);
     }
 
-    auto const settled = session.is_settled(views_converged, any_traced, im.resources.pending_work_count(), traces_ran);
+    // Payloads still streaming count as owed work too: until they land their meshes are traced as placeholder boxes, and
+    // an image converged over those is a picture of the stand-ins.
+    // Landing does restart the accumulation, but a stream slower than the convergence lets the stand-ins finish first.
+    auto const owed = im.resources.pending_work_count() + im.resources.settling_count();
+    auto const settled = session.is_settled(views_converged, any_traced, owed, traces_ran);
     if (!settled && !session.is_out_of_time())
         return;
 

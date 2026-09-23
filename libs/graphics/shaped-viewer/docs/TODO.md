@@ -3,6 +3,21 @@
 Running list of known follow-ups.
 Bigger design intent lives in [structure.md](structure.md).
 
+- **Denoising: both halves run; what is left**, in order — shaped-rendering's [denoising.md](../../shaped-rendering/docs/denoising.md) is the design:
+  - **Measure what the albedo guide's payload growth costs.**
+    `PtPayload` went from 26 to 29 lanes for it, on every ray rather than only primary ones.
+  - **Specular albedo and roughness guides**, which DLSS Ray Reconstruction requires; the same pattern as albedo, when DLSS lands.
+  - **A crossfade at the hand-off.** The switch from the temporal member to the spatial one is a hard cut today.
+    Running both for a few frames and blending wants a small lerp pass, which sr has no routine for yet.
+  - **A camera cut**, `view_ref::camera_cut()`: the scene-hash signal restarts the temporal history on a scene change, but nothing lets a caller say a jump happened.
+  - **A per-frame Halton jitter** while a vendor temporal member runs; SVGF does not need one, DLSS Ray Reconstruction does.
+  - **No test moves the camera.** The captures pin SVGF reaching the screen at zero motion; a readback of the motion guide under a known camera step is the missing one.
+  - **Object motion vectors** need scene items with an identity that survives a frame, which they do not have; camera motion covers a static scene.
+  - **`render_settings::render_scale`**, once a member upscales: the plan traces at `sr::denoise_input_extent` instead of the view's own size.
+    Inert until then, which is why it is not there yet.
+  - **`render_settings::exposure`**, for the tonemap when it lands; the denoisers already read `denoise.exposure`.
+  - **`view_renderer::execute`** — the single-view entry point — does not denoise; only the plan path does.
+
 - **The frame API blocks.**
   `sv::viewer` is a synchronous pull loop — `is_running()`, `end_frame()`, a draining destructor.
   So it throttles and drains with `cc::async_blocking_get` on sg's completions, behind a `may_block` assert.
@@ -50,8 +65,8 @@ What is left is the interaction on top of it, in dependency order:
   it is what makes flying noisy.
   Reprojecting the history through the previous camera and rejecting per pixel is the classical answer and was tried;
   it cost a G-buffer, a ping-pong pair, a disocclusion heuristic and a per-pixel sample count, and it capped the mean.
-  A spatial filter over a moving frame (A-trous / SVGF) buys the same smoothness without touching the estimator, and
-  is the direction to take this if flying needs to look better.
+  A denoiser buys the same smoothness without touching the estimator, and that is the direction taken: the spatial half
+  exists (`render_settings::denoise`), and the moving-camera half is the denoising entry at the top of this list.
 - **The GPU tests may still be passing vacuously.** `pathtrace_routine`'s init used to drive its shader compiles
   with a throwaway single-threaded scheduler, which could not complete a node the ambient pool already owned — so the
   routine ended up with no pipeline and `execute` silently no-opped.

@@ -4,6 +4,7 @@
 #include <clean-core/error/optional.hh>
 #include <clean-core/string/string.hh>
 #include <shaped-graphics/resource/texture.hh>
+#include <shaped-rendering/denoise.hh>
 #include <shaped-viewer/fwd.hh>
 #include <shaped-viewer/layout/layout_tree.hh>
 #include <shaped-viewer/view/camera.hh>
@@ -39,6 +40,17 @@ struct temporal_slot
     u64 declared_hash = 0;
 
     u32 accum_frame = 0;
+
+    /// The denoiser's own state, held only by a `temporal_id::denoised` slot.
+    ///
+    /// Here rather than on a routine because a routine cannot know which layer a call belongs to, and here rather than
+    /// beside the view because it lives and dies with the image it produces.
+    sr::denoise_history denoise;
+
+    /// The camera this slot's layer was last traced from, held only by a `temporal_id::motion_guide` slot.
+    /// The next frame's motion vectors reproject into it.
+    camera_gpu last_camera = {};
+    bool has_last_camera = false;
 };
 
 /// Everything a view keeps across frames, keyed by its view_id — held by `sv::view_store`.

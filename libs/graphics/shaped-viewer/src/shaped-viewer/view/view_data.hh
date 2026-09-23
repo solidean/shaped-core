@@ -46,6 +46,45 @@ inline constexpr u64 caller_range_end = u64(1) << kind_shift;
     return (u64(1) << kind_shift) | u64(layer);
 }
 
+/// The denoiser's normal guide for a traced layer, which the tracer blends beside its accumulator.
+[[nodiscard]] constexpr u64 normal_guide(u8 layer)
+{
+    return (u64(2) << kind_shift) | u64(layer);
+}
+
+/// The denoiser's depth guide for a traced layer.
+[[nodiscard]] constexpr u64 depth_guide(u8 layer)
+{
+    return (u64(3) << kind_shift) | u64(layer);
+}
+
+/// The denoiser's diffuse-albedo guide for a traced layer.
+[[nodiscard]] constexpr u64 albedo_guide(u8 layer)
+{
+    return (u64(5) << kind_shift) | u64(layer);
+}
+
+/// A traced layer's own samples of the current frame, before they are blended into the accumulator — what a temporal
+/// denoiser reads.
+/// Its `sr::denoise_history` is the temporal member's, kept apart from the spatial one's so each survives the other.
+[[nodiscard]] constexpr u64 frame_samples(u8 layer)
+{
+    return (u64(6) << kind_shift) | u64(layer);
+}
+
+/// The motion vectors for a traced layer, from the previous frame's camera to this one's.
+/// Its slot also remembers that camera.
+[[nodiscard]] constexpr u64 motion_guide(u8 layer)
+{
+    return (u64(7) << kind_shift) | u64(layer);
+}
+
+/// Where a traced layer's denoised image lands, and what its parent samples instead of the accumulator once there is one.
+[[nodiscard]] constexpr u64 denoised(u8 layer)
+{
+    return (u64(4) << kind_shift) | u64(layer);
+}
+
 /// Whether `id` is an accumulation slot, whatever layer it belongs to.
 ///
 /// For a caller folding over every traced layer of a view rather than naming one.
@@ -119,6 +158,7 @@ namespace sv
 [[nodiscard]] bool is_traceable(layer const& l);
 
 /// Every temporal resource `v` needs this frame: the ones it declared, plus one accumulator per traced layer.
+/// A traced layer that denoises adds its three guides and the denoised image.
 ///
 /// The tracer's accumulator is *derived* rather than baked into the renderer, which is what makes it one temporal
 /// input among others instead of a special case — the plan sizes it and the store keeps it exactly like any other.

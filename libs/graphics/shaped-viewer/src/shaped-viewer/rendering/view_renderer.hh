@@ -3,6 +3,7 @@
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/resource/texture.hh>
 #include <shaped-graphics/routine/render_routine.hh>
+#include <shaped-rendering/fwd.hh> // sr::denoise_status
 #include <shaped-viewer/fwd.hh>
 #include <shaped-viewer/rendering/layout_routine.hh> // plan_textures
 #include <shaped-viewer/stable_id.hh>
@@ -67,11 +68,15 @@ public:
 
     /// Records the trace at `trace_index` into its own accumulation texture.
     /// Must be called with no rendering scope open, and before anything samples that texture.
+    ///
+    /// A layer that denoises is denoised right after its trace, and `res.traces[trace_index]` then names what a parent
+    /// should sample: the denoised image when this frame produced one, the raw mean otherwise.
+    /// A denoiser still initializing declines the frame, so a capture never saves the raw mean in its place.
     [[nodiscard]] static sg::routine_outcome trace(sg::command_list& cmd,
                                                    viewer_definition const& def,
                                                    render_plan const& plan,
                                                    u32 trace_index,
-                                                   plan_resources const& res,
+                                                   plan_resources& res,
                                                    gpu_resource_manager& resources,
                                                    view_store& store);
 
@@ -80,6 +85,25 @@ protected:
     cc::shared_async<cc::unit> init(sg::routine_init_scope scope) override;
 
 private:
+    /// One traced layer's denoiser slots; the last two are null unless the layer may denoise temporally.
+    struct denoise_slots
+    {
+        impl::temporal_slot* normal = nullptr;
+        impl::temporal_slot* depth = nullptr;
+        impl::temporal_slot* albedo = nullptr;
+        impl::temporal_slot* denoised = nullptr;
+        impl::temporal_slot* frame = nullptr;
+        impl::temporal_slot* motion = nullptr;
+    };
+
+    /// Denoises a traced layer into its denoised slot — temporally while its mean is young, spatially after — and points
+    /// `presented` at what its parent should sample.
+    [[nodiscard]] static sr::denoise_status _denoise(sg::command_list& cmd,
+                                                     render_settings const& settings,
+                                                     impl::temporal_slot const& accumulator,
+                                                     denoise_slots const& ds,
+                                                     sg::texture_2d& presented);
+
     /// Bumped every time the routine initializes, which is once per shader reload.
     ///
     /// Folded into the trace hash, so a reloaded tracer restarts rather than blending a new image into one the old
