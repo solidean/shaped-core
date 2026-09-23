@@ -1,5 +1,6 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/utility.hh>
+#include <shaped-graphics/command_list/command_list.hh>
 #include <shaped-graphics/context/context.hh>
 #include <shaped-graphics/context/transient.hh>
 #include <shaped-graphics/exceptions.hh>
@@ -42,11 +43,12 @@ raw_buffer_handle context_transient_scope::create_raw_buffer(isize size_in_bytes
     throw allocation_exception("transient buffer allocation failed", size_in_bytes, r.error());
 }
 
-raw_buffer_handle context_transient_scope::create_raw_buffer_from_pin(cc::pinned_data<byte const> bytes,
-                                                                      buffer_usages usage)
+raw_buffer_handle context_transient_scope::create_raw_buffer_from_bytes(command_list& cmd,
+                                                                        cc::span<byte const> bytes,
+                                                                        buffer_usages usage)
 {
     auto buffer = create_raw_buffer(bytes.size(), usage | buffer_usage::copy_dst);
-    _ctx.upload.bytes_to_buffer(buffer, cc::move(bytes));
+    cmd.upload.bytes_to_buffer(buffer, bytes);
     return buffer;
 }
 
@@ -95,7 +97,10 @@ cc::result<raw_buffer_handle> context_transient_scope::try_create_raw_buffer(isi
         alloc = reserved.value();
     }
 
-    return _ctx.try_create_raw_buffer(size_in_bytes, usage, alloc);
+    auto created = _ctx.try_create_raw_buffer(size_in_bytes, usage, alloc);
+    if (created.has_value())
+        created.value()->_scope = lifetime_scope::transient;
+    return created;
 }
 
 raw_texture_handle context_transient_scope::create_raw_texture(texture_description const& desc)
@@ -114,7 +119,10 @@ cc::result<raw_texture_handle> context_transient_scope::try_create_raw_texture(t
     // Placed/bump-allocated transient textures wait on a texture-capable transient memory_heap; see the header note.
     allocation_info alloc;
     alloc.scope = lifetime_scope::transient;
-    return _ctx.try_create_raw_texture(desc, alloc);
+    auto created = _ctx.try_create_raw_texture(desc, alloc);
+    if (created.has_value())
+        created.value()->_scope = lifetime_scope::transient;
+    return created;
 }
 
 binding_group_handle context_transient_scope::create_binding_group(binding_group_layout_handle layout,
@@ -172,13 +180,13 @@ void context_transient_scope::release_heap_at_shutdown()
 }
 } // namespace sg
 
-sg::raw_view sg::context_transient_scope::implicit_constants(cc::vector<byte> block)
+sg::raw_view sg::context_transient_scope::implicit_constants(command_list& cmd, cc::vector<byte> block)
 {
     // A uniform block is read in rows of 16 bytes, and a buffer holding one is sized in 256-byte units on dx12.
     auto const view_size = cc::align_up(block.size(), isize(16));
     auto const raw = create_raw_buffer(cc::align_up(view_size, uniform_buffer_offset_alignment),
                                        buffer_usage::uniform_buffer | buffer_usage::copy_dst);
-    _ctx.upload.bytes_to_buffer(raw, cc::make_pinned_data(cc::move(block)));
+    cmd.upload.bytes_to_buffer(raw, block);
     return raw_buffer_view{.access = view_class::uniform,
                            .shape = view_shape::uniform_block,
                            .buffer = raw,

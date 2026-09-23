@@ -383,7 +383,7 @@ namespace sv_test
 /// The records `lights` holds, uploaded for one recording — what `pt_trace_desc::lights` takes.
 [[nodiscard]] inline sg::buffer<sv::light_gpu> upload_lights(sg::command_list& cmd, sv::pt_light_table const& lights)
 {
-    return cmd.context().transient.create_buffer_from_data(lights.records, sg::buffer_usage::readonly_buffer);
+    return cmd.context().transient.create_buffer_from_data(cmd, lights.records, sg::buffer_usage::readonly_buffer);
 }
 } // namespace sv_test
 

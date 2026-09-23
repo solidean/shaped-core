@@ -33,10 +33,10 @@ ASYNC_INVOCABLE_TEST("sg - a compute shader doubles every element of a buffer", 
     auto const values = ctx->persistent.create_buffer_from_data(
         cc::move(initial), sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
 
-    auto const group
-        = ctx->transient.create_binding_group(group_layout, shaders::work{.values = values.as_readwrite_buffer()});
-
     auto cmd = ctx->create_command_list();
+    auto const group
+        = ctx->transient.create_binding_group(*cmd, group_layout, shaders::work{.values = values.as_readwrite_buffer()});
+
     cmd->compute.bind_pipeline(*pipeline);
     cmd->compute.bind_group(0, *group);
     cmd->compute.dispatch_threads(count);
@@ -73,12 +73,12 @@ ASYNC_INVOCABLE_TEST("sg - one group binds at whichever slot the entry point lis
         cc::move(initial), sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
     auto const by = ctx->persistent.create_buffer_from_pod(3.0f, sg::buffer_usage::readonly_buffer);
 
-    auto const factor
-        = ctx->transient.create_binding_group(factor_layout, shaders::factor{.by = by.as_readonly_buffer()});
-    auto const work
-        = ctx->transient.create_binding_group(work_layout, shaders::work{.values = values.as_readwrite_buffer()});
-
     auto cmd = ctx->create_command_list();
+    auto const factor
+        = ctx->transient.create_binding_group(*cmd, factor_layout, shaders::factor{.by = by.as_readonly_buffer()});
+    auto const work
+        = ctx->transient.create_binding_group(*cmd, work_layout, shaders::work{.values = values.as_readwrite_buffer()});
+
     cmd->compute.bind_pipeline(*pipeline);
     cmd->compute.bind_group(0, *factor);
     cmd->compute.bind_group(1, *work);
@@ -112,13 +112,13 @@ ASYNC_INVOCABLE_TEST("sg - a group's plain members reach the shader through the 
     auto const values = ctx->persistent.create_buffer_from_data(
         cc::move(initial), sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
 
+    auto cmd = ctx->create_command_list();
     // Both scopes, since each owns the constant buffer for its own lifetime: one frame, or as long as the group.
     auto const transient = ctx->transient.create_binding_group(
-        group_layout, shaders::affine{.scale = 3.0f, .bias = 1.0f, .values = values.as_readwrite_buffer()});
+        *cmd, group_layout, shaders::affine{.scale = 3.0f, .bias = 1.0f, .values = values.as_readwrite_buffer()});
     auto const persistent = ctx->persistent.create_binding_group(
         group_layout, shaders::affine{.scale = 0.5f, .bias = -2.0f, .values = values.as_readwrite_buffer()});
 
-    auto cmd = ctx->create_command_list();
     cmd->compute.bind_pipeline(*pipeline);
     cmd->compute.bind_group(0, *transient);
     cmd->compute.dispatch_threads(count);
@@ -172,10 +172,10 @@ ASYNC_INVOCABLE_TEST("sg - a compute shader that calls a helper keeps its workgr
         initial[i] = float(i);
     auto const values = ctx->persistent.create_buffer_from_data(
         cc::move(initial), sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
-    auto const group
-        = ctx->transient.create_binding_group(group_layout, shaders::work{.values = values.as_readwrite_buffer()});
-
     auto cmd = ctx->create_command_list();
+    auto const group
+        = ctx->transient.create_binding_group(*cmd, group_layout, shaders::work{.values = values.as_readwrite_buffer()});
+
     cmd->compute.bind_pipeline(*pipeline);
     cmd->compute.bind_group(0, *group);
     cmd->compute.dispatch_threads(count);

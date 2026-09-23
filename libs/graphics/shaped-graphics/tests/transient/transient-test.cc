@@ -41,12 +41,11 @@ cc::shared_async<bool> transient_round_trip(sg::context_handle const& ctx, int s
     for (int i = 0; i < 256; ++i)
         src[i] = pattern(seed + i);
 
-    auto buf = ctx->transient.create_buffer_from_bytes(src, sg::buffer_usage::copy_src);
-    if (!buf)
-        co_return false;
-
     auto down = ctx->create_command_list();
     if (!down)
+        co_return false;
+    auto buf = ctx->transient.create_buffer_from_bytes(*down, src, sg::buffer_usage::copy_src);
+    if (!buf)
         co_return false;
     auto future = down->download.bytes_from_buffer(buf, 0, 256);
     ctx->submit_command_list(cc::move(down));
@@ -105,13 +104,12 @@ ASYNC_INVOCABLE_TEST("sg - transient buffers in one epoch are independent", (sg:
         src_b[i] = byte(0xB0 + (i & 0xF));
     }
 
-    auto a = ctx->transient.create_buffer_from_bytes(src_a, sg::buffer_usage::copy_src);
-    auto b = ctx->transient.create_buffer_from_bytes(src_b, sg::buffer_usage::copy_src);
-    REQUIRE(a != nullptr);
-    REQUIRE(b != nullptr);
-
     auto down = ctx->create_command_list();
     REQUIRE(down != nullptr);
+    auto a = ctx->transient.create_buffer_from_bytes(*down, src_a, sg::buffer_usage::copy_src);
+    auto b = ctx->transient.create_buffer_from_bytes(*down, src_b, sg::buffer_usage::copy_src);
+    REQUIRE(a != nullptr);
+    REQUIRE(b != nullptr);
     auto future_a = down->download.bytes_from_buffer(a, 0, 128);
     auto future_b = down->download.bytes_from_buffer(b, 0, 128);
     ctx->submit_command_list(cc::move(down));
@@ -287,4 +285,37 @@ INVOCABLE_TEST("sg - transient binding group rejects an unknown binding name", (
     sg::named_view const wrong = {.name = "Nope", .view = sg::buffer<particle>::from_raw(buf).as_readwrite_buffer()};
     CHECK_THROWS_AS(ctx->transient.create_binding_group(layout, cc::span<sg::named_view const>(&wrong, 1)),
                     sg::binding_group_exception);
+}
+
+// The transient create_buffer_from_* upload inline, so the list they were given sees the contents without a submit in between.
+ASYNC_INVOCABLE_TEST("sg - transient create_buffer_from_* fill the buffer inline in the given list",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    u32 const in[3] = {1, 2, 3};
+
+    auto cmd = ctx->create_command_list();
+    REQUIRE(cmd != nullptr);
+    auto const typed = ctx->transient.create_buffer_from_data(*cmd, in, sg::buffer_usage::copy_src);
+    auto const raw
+        = ctx->transient.create_buffer_from_bytes(*cmd, cc::span<u32 const>(in).as_bytes(), sg::buffer_usage::copy_src);
+    auto const one = ctx->transient.create_buffer_from_pod(*cmd, u32(42), sg::buffer_usage::copy_src);
+    CHECK(typed.raw()->scope() == sg::lifetime_scope::transient);
+    CHECK(typed.raw()->usage().has(sg::buffer_usage::copy_dst));
+
+    // Read back in the SAME list: only an inline upload is ordered before these.
+    auto typed_future = cmd->download.data_from_buffer(typed);
+    auto raw_future = cmd->download.data_from_buffer<u32>(raw, 0, 3);
+    auto one_future = cmd->download.data_from_buffer(one);
+    ctx->submit_command_list(cc::move(cmd));
+
+    auto const typed_data = co_await typed_future.data();
+    auto const raw_data = co_await raw_future.data();
+    auto const one_data = co_await one_future.data();
+    REQUIRE(typed_data.size() == 3);
+    REQUIRE(raw_data.size() == 3);
+    REQUIRE(one_data.size() == 1);
+    CHECK(typed_data[2] == 3);
+    CHECK(raw_data[1] == 2);
+    CHECK(one_data[0] == 42);
 }

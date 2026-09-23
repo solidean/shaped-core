@@ -68,10 +68,10 @@ ASYNC_INVOCABLE_TEST("sv - flat-PBR raytraced view (headless)", (sg::context_han
         ctx,
         [&](sg::command_list& cmd)
         {
-            auto const frame = ctx.transient.create_buffer_from_pod(fc, sg::buffer_usage::uniform_buffer);
+            auto const frame = ctx.transient.create_buffer_from_pod(cmd, fc, sg::buffer_usage::uniform_buffer);
 
-            auto const background
-                = ctx.transient.create_buffer_from_pod(sv::background_gpu::from(bg), sg::buffer_usage::uniform_buffer);
+            auto const background = ctx.transient.create_buffer_from_pod(cmd, sv::background_gpu::from(bg),
+                                                                         sg::buffer_usage::uniform_buffer);
 
             auto const target = ctx.transient.create_texture_2d(
                 {.format = sg::pixel_format::rgba16_float, // UAV-writable by the raygen

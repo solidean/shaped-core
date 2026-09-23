@@ -218,9 +218,9 @@ sg::routine_outcome cube_routine::execute(sg::rendering_scope& scope,
     // Transient: allocated from the per-epoch bump heap and recycled at advance_epoch, which is the right lifetime
     // for anything rebuilt every frame. A real renderer would keep the static mesh persistent; at 24 vertices the
     // difference is not worth the extra lifetime to explain.
-    auto const vertices = ctx.transient.create_buffer_from_data(build_cube_mesh(), sg::buffer_usage::vertex_buffer);
-    auto const index_buffer = ctx.transient.create_buffer_from_data(build_cube_indices(), sg::buffer_usage::index_buffer);
-    auto const instances = ctx.transient.create_buffer_from_data(self->_instances, sg::buffer_usage::vertex_buffer);
+    auto const vertices = ctx.transient.create_buffer_from_data(cmd, build_cube_mesh(), sg::buffer_usage::vertex_buffer);
+    auto const index_buffer = ctx.transient.create_buffer_from_data(cmd, build_cube_indices(), sg::buffer_usage::index_buffer);
+    auto const instances = ctx.transient.create_buffer_from_data(cmd, self->_instances, sg::buffer_usage::vertex_buffer);
 
     scope.bind_pipeline(**pipeline);
     scope.bind_vertex_buffers({vertices.as_vertex_buffer(), instances.as_vertex_buffer()});

@@ -233,6 +233,10 @@ public:
 
     /// Whether this buffer's storage has been reclaimed.
     /// Once true, it never goes back to false.
+    /// The lifetime scope that created the buffer.
+    /// Only a persistent one may be the target of ctx.upload, ctx.download or ctx.stream; a transient buffer transfers inline, through a command list.
+    [[nodiscard]] lifetime_scope scope() const { return _scope; }
+
     [[nodiscard]] bool is_expired() const { return _expired.load(std::memory_order_acquire); }
 
     /// The negation of is_expired(): the buffer still names live storage.
@@ -350,5 +354,10 @@ protected:
     buffer_usages _usage = {};
     mutable cc::vector<cc::unique_function<void()>> _finalizers; // mutable: add_finalizer is const (a lifetime hook)
     mutable std::atomic<bool> _expired = {false};                // mutable: expire() is a const lifetime hook
+
+private:
+    // Stamped by the transient scope right after the backend creates the resource, before any handle escapes.
+    friend class sg::context_transient_scope;
+    mutable lifetime_scope _scope = lifetime_scope::persistent; // mutable: handles are const, and the stamp lands on one
     mutable std::atomic<u64> _warned_stream_wait = {0}; // highest stream value already warned about, or promoted
 };

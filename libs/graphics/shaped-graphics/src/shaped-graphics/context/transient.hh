@@ -40,34 +40,36 @@ public:
         return buffer<T>::from_raw(create_raw_buffer(element_count * isize(sizeof(T)), usage));
     }
 
-    // Filled buffer factories — the preferred way to create a buffer with contents, as on context_persistent_scope.
-    // Each allocates a buffer sized exactly to its data and streams the data in through ctx.upload, so no command list is involved.
+    // Filled buffer factories — the preferred way to create a transient buffer with contents.
+    // Each allocates a buffer sized exactly to its data and records its upload inline into `cmd`, so later commands in that list see it.
+    // Not ctx.upload, as on context_persistent_scope: a transient buffer cannot be the target of an async upload.
     // `usage` gains buffer_usage::copy_dst, which the upload needs.
-    // A later command list that reads the buffer waits for the copy on its own, so the buffer is usable in this epoch.
-    // The data is pinned with cc::make_pinned_data: a pinned_data or an owning rvalue is uploaded in place, anything else is copied once.
+    // The data is copied during the call, so it may be freed once the call returns.
     // Empty data is a valid empty buffer.
     // Error behaviour mirrors create_raw_buffer.
 
-    /// A buffer holding `bytes`, returned raw — the byte-level form, as bytes_to_buffer is on ctx.upload.
+    /// A buffer holding `bytes`, returned raw — the byte-level form, as bytes_to_buffer is on cmd.upload.
     template <upload_byte_range Bytes>
-    [[nodiscard]] raw_buffer_handle create_buffer_from_bytes(Bytes&& bytes, buffer_usages usage)
+    [[nodiscard]] raw_buffer_handle create_buffer_from_bytes(command_list& cmd, Bytes const& bytes, buffer_usages usage)
     {
-        return create_raw_buffer_from_pin(impl::pin_upload_range(cc::forward<Bytes>(bytes)), usage);
+        return create_raw_buffer_from_bytes(cmd, cc::span<byte const>(bytes), usage);
     }
 
     /// A `buffer<T>` holding every element of `data`, `T` being the range's element type.
     template <upload_range Data>
-    [[nodiscard]] buffer<std::ranges::range_value_t<Data>> create_buffer_from_data(Data&& data, buffer_usages usage)
+    [[nodiscard]] buffer<std::ranges::range_value_t<Data>> create_buffer_from_data(command_list& cmd,
+                                                                                   Data const& data,
+                                                                                   buffer_usages usage)
     {
-        auto const pin = impl::pin_upload_range(cc::forward<Data>(data));
-        return buffer<std::ranges::range_value_t<Data>>::from_raw(create_raw_buffer_from_pin(pin.as_bytes(), usage));
+        using T = std::ranges::range_value_t<Data>;
+        return buffer<T>::from_raw(create_raw_buffer_from_bytes(cmd, cc::span<T const>(data).as_bytes(), usage));
     }
 
     /// A one-element `buffer<T>` holding `value`.
     template <class T>
-    [[nodiscard]] buffer<T> create_buffer_from_pod(T const& value, buffer_usages usage)
+    [[nodiscard]] buffer<T> create_buffer_from_pod(command_list& cmd, T const& value, buffer_usages usage)
     {
-        return create_buffer_from_data(cc::span<T const>(&value, 1), usage);
+        return create_buffer_from_data(cmd, cc::span<T const>(&value, 1), usage);
     }
 
     // textures
@@ -157,10 +159,15 @@ public:
     /// A sampler `G` gathered that `layout` already declares static is dropped rather than passed on: dx12
     /// refuses a static sampler supplied per group, so sending it would be an error rather than a duplicate.
     ///
+    /// **`cmd` is the list the group will be used in.**
+    /// A `G` with plain members gets a transient constant buffer, uploaded inline into `cmd` — a transient buffer cannot take an async upload.
+    ///
     /// Throws sg::binding_group_exception on a layout that does not match `G`, and sg::device_lost_exception
     /// on a lost device.
     template <declared_binding_set G>
-    [[nodiscard]] binding_group_handle create_binding_group(binding_group_layout_handle const& layout, G const& group)
+    [[nodiscard]] binding_group_handle create_binding_group(command_list& cmd,
+                                                            binding_group_layout_handle const& layout,
+                                                            G const& group)
     {
         cc::vector<slotted_view> views;
         cc::vector<named_sampler> samplers;
@@ -169,7 +176,7 @@ public:
         {
             auto block = cc::vector<byte>::create_filled(G::constants_size, byte(0));
             group.write_constants(block);
-            views.push_back({.slot = binding_slot(G::constants_slot), .view = implicit_constants(cc::move(block))});
+            views.push_back({.slot = binding_slot(G::constants_slot), .view = implicit_constants(cmd, cc::move(block))});
         }
         impl::drop_static_samplers(*layout, samplers);
         return create_binding_group(layout, views, samplers);
@@ -204,8 +211,10 @@ private:
 
     [[nodiscard]] cc::result<raw_texture_handle> try_create_raw_texture(texture_description const& desc);
 
-    // The one core the create_buffer_from_* factories share: a copy_dst buffer of bytes.size(), filled through ctx.upload.
-    [[nodiscard]] raw_buffer_handle create_raw_buffer_from_pin(cc::pinned_data<byte const> bytes, buffer_usages usage);
+    // The one core the create_buffer_from_* factories share: a copy_dst buffer of bytes.size(), filled inline through cmd.upload.
+    [[nodiscard]] raw_buffer_handle create_raw_buffer_from_bytes(command_list& cmd,
+                                                                 cc::span<byte const> bytes,
+                                                                 buffer_usages usage);
 
     [[nodiscard]] cc::result<binding_group_handle> try_create_binding_group(binding_group_layout_handle layout,
                                                                             cc::span<named_view const> views,
@@ -233,8 +242,8 @@ private:
     void release_heap_at_shutdown();
 
     /// A generated group's constant block, in a transient buffer of its own that expires with the group's epoch.
-    /// Filled through `ctx.upload`, which a later command list reading it waits for.
-    [[nodiscard]] raw_view implicit_constants(cc::vector<byte> block);
+    /// Filled inline through `cmd.upload`, so later commands in `cmd` read it.
+    [[nodiscard]] raw_view implicit_constants(command_list& cmd, cc::vector<byte> block);
 
     context& _ctx;
 

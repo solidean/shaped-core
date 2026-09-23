@@ -357,33 +357,6 @@ ASYNC_INVOCABLE_TEST("sg - create_buffer_from_pod holds one element", (sg::conte
     CHECK(data[0].b == 11);
 }
 
-ASYNC_INVOCABLE_TEST("sg - transient create_buffer_from_data is readable in its epoch", (sg::context_handle const& ctx))
-{
-    REQUIRE(ctx != nullptr);
-    u32 const in[3] = {1, 2, 3};
-    auto const buf = ctx->transient.create_buffer_from_data(in, sg::buffer_usage::copy_src);
-    auto const raw
-        = ctx->transient.create_buffer_from_bytes(cc::span<u32 const>(in).as_bytes(), sg::buffer_usage::copy_src);
-    auto const one = ctx->transient.create_buffer_from_pod(u32(42), sg::buffer_usage::copy_src);
-
-    auto down = ctx->create_command_list();
-    REQUIRE(down != nullptr);
-    auto typed = down->download.data_from_buffer(buf);
-    auto bytes = down->download.data_from_buffer<u32>(raw, 0, 3);
-    auto pod = down->download.data_from_buffer(one);
-    ctx->submit_command_list(cc::move(down));
-
-    auto const typed_data = co_await typed.data();
-    auto const byte_data = co_await bytes.data();
-    auto const pod_data = co_await pod.data();
-    REQUIRE(typed_data.size() == 3);
-    REQUIRE(byte_data.size() == 3);
-    REQUIRE(pod_data.size() == 1);
-    CHECK(typed_data[2] == 3);
-    CHECK(byte_data[1] == 2);
-    CHECK(pod_data[0] == 42);
-}
-
 INVOCABLE_TEST("sg - create_buffer_from_data of an empty range is an empty buffer", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);

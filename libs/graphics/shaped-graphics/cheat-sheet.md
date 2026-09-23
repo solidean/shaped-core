@@ -383,7 +383,8 @@ ctx.transient.create_buffer<Particle>(64, usage)               // -> sg::buffer<
 ctx.persistent.create_buffer_from_data(particles, usage, alloc={})  // -> sg::buffer<T>, T = the range's element (vector, span, pinned_data, C array)
 ctx.persistent.create_buffer_from_pod(params, usage, alloc={})      // -> sg::buffer<T> holding one element
 ctx.persistent.create_buffer_from_bytes(bytes, usage, alloc={})     // -> raw_buffer_handle (a byte range)
-ctx.transient.create_buffer_from_data / _from_pod / _from_bytes(…, usage)  // the same on the transient scope (no allocation_info)
+ctx.transient.create_buffer_from_data / _from_pod / _from_bytes(cmd, …, usage)  // transient: uploaded INLINE into cmd, visible to its later commands
+//   a transient resource can never be the target of ctx.upload / ctx.download / ctx.stream — those assert (raw_buffer::scope())
 //   an rvalue owner or a pinned_data is uploaded in place; an lvalue / span / C array is copied once. a later list reading it auto-waits
 sg::buffer<T>::from_raw(raw_handle)         // wrap a raw handle: byte size must be a whole number of T (asserts); try_from_raw -> cc::optional
 sg::buffer<T>::from_raw_clamped(raw_handle) // wrap, flooring to whole elements (a trailing partial element is ignored)
@@ -656,7 +657,8 @@ ctx.cached.acquire_pipeline_layout<frame, work, constants>(static_samplers = {})
                              //    position among the sets, and one inline-constants type is the inline block
 ctx.cached.acquire_binding_group_layout<G>()                    // -> binding_group_layout_handle from G's declarations alone
 ctx.cached.acquire_binding_group_layout<G>(span<named_sampler const>)  // + static samplers G left undeclared; one it DID declare asserts
-ctx.transient.create_binding_group(layout, G{...})              // -> binding_group_handle; the layout is PASSED IN, not re-acquired per call
+ctx.transient.create_binding_group(cmd, layout, G{...})         // -> binding_group_handle; the layout is PASSED IN, not re-acquired per call
+                                                                //   cmd: the list it is used in; a G with plain members uploads its constants inline there
 ctx.persistent.create_binding_group(layout, G{...})             // which scope you call IS the lifetime
                                     // a sampler G gathers that `layout` declares static is dropped, so the
                                     // samplers overload above pairs with this
