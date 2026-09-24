@@ -19,6 +19,7 @@
 
 #include <clean-core/common/time.hh>
 #include <clean-core/common/utility.hh>
+#include <clean-core/string/format.hh>
 #include <clean-core/string/print.hh>
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_coroutine.hh>
@@ -354,14 +355,6 @@ void draw_panel(controls& ui,
 
 ASYNC_EXAMPLE("shaped-rendering/denoise-playground")
 {
-    // sr's imgui font atlas uploads through `ctx.upload`, which takes a context and no command list — so there is
-    // nowhere for it to record `cmd.prepare_for_async`, and the first upload to a fresh atlas texture always takes
-    // sg's fixup path and warns once.
-    // Nothing here can avoid it: it is sr's upload, not this example's.
-    // It shows up here and not in the other imgui examples because this one's frames are heavy enough to change when
-    // the upload lands relative to them.
-    nx::allow_warnings("an async transfer found a texture in a layout its transfer queue cannot use");
-
     // Picking a member this build cannot run is the refusal path, and the method dropdown offers three of them on
     // purpose — so the one line each of them logs is expected here rather than a surprise.
     // Showing what a refusal does is a thing this example is FOR, and it would otherwise fail the moment it is used.
@@ -396,14 +389,21 @@ ASYNC_EXAMPLE("shaped-rendering/denoise-playground")
     }
     auto& ctx = *context.value();
 
+    // Both formats, because the backend decides which one the context accepts: DXIL for dx12, SPIR-V for vulkan.
+    // Registering only one is a build that compiles for every backend and runs on exactly one, which is what this
+    // example did until somebody ran the vulkan arm.
     auto lib = slib::shader_library();
-    auto compiler = slib::create_dxc_compiler();
-    if (compiler.has_error())
+    auto dxil = slib::create_dxc_compiler();
+    auto spirv = slib::create_dxc_spirv_compiler();
+    if (dxil.has_error() && spirv.has_error())
     {
-        cc::eprintln("no shader compiler: {}", compiler.error().to_string());
+        cc::eprintln("no shader compiler: {}", dxil.error().to_string());
         co_return;
     }
-    lib.add_compiler(cc::move(compiler.value()));
+    if (dxil.has_value())
+        lib.add_compiler(cc::move(dxil.value()));
+    if (spirv.has_value())
+        lib.add_compiler(cc::move(spirv.value()));
     lib.add_package(sr::shader_package()); // imgui, blit and the denoise members
     lib.add_package(shaders::package());   // the tracer
 
@@ -432,7 +432,9 @@ ASYNC_EXAMPLE("shaped-rendering/denoise-playground")
     auto const* const scene_compiled = scene_shader->try_value();
     if (scene_compiled == nullptr)
     {
-        FAIL("the scene shader did not compile"); // a bare co_return here would read as a passing example
+        auto const* const why = scene_shader->try_error();
+        FAIL(cc::format("noisy_scene.hlsl did not compile: {}",
+                        why != nullptr ? why->underlying().to_string() : cc::string("no reason given")));
         co_return;
     }
     auto const* scene_constants_binding = static_cast<sg::binding const*>(nullptr);
@@ -462,7 +464,9 @@ ASYNC_EXAMPLE("shaped-rendering/denoise-playground")
     auto const* const compose_compiled = compose_shader->try_value();
     if (compose_compiled == nullptr)
     {
-        FAIL("the compose shader did not compile"); // a bare co_return here would read as a passing example
+        auto const* const why = compose_shader->try_error();
+        FAIL(cc::format("compose.hlsl did not compile: {}",
+                        why != nullptr ? why->underlying().to_string() : cc::string("no reason given")));
         co_return;
     }
     auto const* compose_constants_binding = static_cast<sg::binding const*>(nullptr);
