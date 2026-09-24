@@ -210,6 +210,8 @@ struct checker
     void add_symbol(symbol s, source_span name_where);
     /// Lays the user file's scope over the prelude's into `names`.
     void merge_scopes();
+    /// True where every symbol of `ids` is a function, so the name is an overload set (CHK-12, CHK-189).
+    [[nodiscard]] bool is_all_functions(cc::span<symbol_id const> ids) const;
 
     /// Compiles the symbol when nobody has, and reports a cycle when somebody is.
     /// The state it returns is `checked` or `failed`, or `in_compilation` for a cycle, which was reported at `where`.
@@ -244,7 +246,7 @@ struct checker
     /// `buffer[element]`, or its `mut` form, interned: two mentions of one buffer type share an id.
     [[nodiscard]] type_id buffer_type(type_id element, bool is_mut);
     /// `buffer[T]` in a type position, which is the `index` node `buffer` heads.
-    [[nodiscard]] type_id resolve_buffer(i32 file, ast::expr_id expr, ast::index const& node);
+    [[nodiscard]] type_id resolve_buffer(i32 file, ast::expr_id expr, ast::index const& node, function_scope const* scope);
     /// True where `expr` is the bare name `name`, which is how a resource type is recognized before lookup.
     [[nodiscard]] bool is_named(i32 file, ast::expr_id expr, cc::string_view name) const;
 

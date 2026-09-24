@@ -251,10 +251,7 @@ void checker::add_symbol(symbol s, source_span name_where)
 
     // CHK-12 holds within one scope; the user file's may shadow the prelude's.
     auto& declared = is_prelude_file(file) ? prelude_names[name] : file_names[name];
-    auto is_overload_set = is_function;
-    for (auto const other : declared)
-        is_overload_set = is_overload_set && out.at(other).kind == symbol_kind::function;
-    if (!declared.empty() && !is_overload_set)
+    if (!declared.empty() && !(is_function && is_all_functions(declared)))
     {
         // The later declaration is compiled like any other and no lookup finds it.
         report(diagnostic_kind::duplicate_declaration, file, name_where, name);
@@ -263,18 +260,18 @@ void checker::add_symbol(symbol s, source_span name_where)
     declared.push_back(id);
 }
 
+bool checker::is_all_functions(cc::span<symbol_id const> ids) const
+{
+    auto result = true;
+    for (auto const id : ids)
+        result = result && out.at(id).kind == symbol_kind::function;
+    return result;
+}
+
 void checker::merge_scopes()
 {
-    auto const is_all_functions = [&](cc::span<symbol_id const> ids)
-    {
-        auto result = true;
-        for (auto const id : ids)
-            result = result && out.at(id).kind == symbol_kind::function;
-        return result;
-    };
-
     names = prelude_names;
-    for (auto [name, ids] : file_names)
+    for (auto const& [name, ids] : file_names)
     {
         auto& seen = names[name];
         // Two overload sets are one; anything else of the user file hides what the prelude has of that name.

@@ -84,6 +84,11 @@ With one shared scope, every prelude addition would be a `duplicate-declaration`
 Only a clash inside one unordered scope is an error, since there no order says which declaration is meant.
 Overload sets still join across the two, so declaring `dot` for a struct of the program's own adds to the prelude's `dot` rather than hiding it.
 
+## CHK-192
+
+Joined overload sets would otherwise reopen CHK-188's problem for functions: a prelude that gains a signature the program already declares makes every call of it `ambiguous-overload`.
+The rule is special to the prelude because the prelude is special: nobody writes it into the program, it is placed around every file implicitly.
+
 ## CHK-110
 
 An inner block shadows by CHK-53, the way the same block does, and what it declares is gone behind it.

@@ -101,7 +101,7 @@ type_id checker::buffer_type(type_id element, bool is_mut)
     return id;
 }
 
-type_id checker::resolve_buffer(i32 file, ast::expr_id expr, ast::index const& node)
+type_id checker::resolve_buffer(i32 file, ast::expr_id expr, ast::index const& node, function_scope const* scope)
 {
     auto const where = span_of(file, expr);
     auto const arguments = ast_of(file).at(node.arguments);
@@ -111,7 +111,7 @@ type_id checker::resolve_buffer(i32 file, ast::expr_id expr, ast::index const& n
         return checked_module::error_type;
     }
 
-    auto const element = resolve_type(file, arguments[0].value);
+    auto const element = resolve_type(file, arguments[0].value, scope);
     if (element == checked_module::error_type)
         return checked_module::error_type;
 
@@ -169,7 +169,7 @@ type_id checker::resolve_type(i32 file, ast::expr_id expr, function_scope const*
     else if (auto const* const applied = e.node.try_as<ast::index>())
     {
         if (is_named(file, applied->object, "buffer"))
-            result = resolve_buffer(file, expr, *applied);
+            result = resolve_buffer(file, expr, *applied, scope);
         else
             unsupported(file, where, "type arguments");
     }

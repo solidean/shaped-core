@@ -405,6 +405,18 @@ TEST("sgl emit - a local named after a function is a local of its own in the tex
     CHECK(wgsl.contains("let helper_1: f32"));
 }
 
+TEST("sgl emit - a function of the user file with a prelude function's parameter types is the one called")
+{
+    // CHK-192: the call is the inlined body of the user file's `dot`, not the builtin
+    auto const wgsl = text_of(with_edges("fun dot(a: vec3, b: vec3) -> float => 7.0\n"
+                                         "@pixel fun main_ps(p: pixel_input) -> frame:\n"
+                                         "    let d = dot(p.normal, p.normal)\n"
+                                         "    return { color = float4(d, d, d, 1.0) }\n"),
+                              target::wgsl);
+    CHECK(wgsl.contains("7.0"));
+    CHECK(!wgsl.contains("dot("));
+}
+
 TEST("sgl emit - a struct that shadows one of the prelude is written under a name of its own")
 {
     // the prelude's `light` reaches the entry point through `lit`, and the user file's through `dim`

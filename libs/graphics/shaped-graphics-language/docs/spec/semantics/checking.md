@@ -28,6 +28,8 @@ Back to the [semantics](_index.md); the reasons are in [why/checking.md](why/che
 * **CHK-188** The module scope is two: the files of the prelude share the outer one, and the program's file has the inner one ([why](why/checking.md#chk-188)).
   A declaration of the program's file **shadows** what the prelude declares of its name, so a `struct vec3` there is no duplicate.
 * **CHK-189** Where both scopes declare nothing but functions of one name, the functions of both are one overload set.
+* **CHK-192** Where a call matches functions of both scopes, those of the program's file are its only candidates ([why](why/checking.md#chk-192)).
+  Two matches in one scope are still CHK-72.
 * **CHK-190** A lookup from a prelude file sees the prelude's scope alone, and never a name of the program's file.
 * **CHK-191** What the check pass needs of the prelude by name is always the prelude's, whatever the program's file shadows.
   That is the type of a literal, of a condition and of a `for`, and `raster_pipeline_description`.

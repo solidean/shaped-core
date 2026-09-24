@@ -628,6 +628,12 @@ type_id checker::resolve_overload(function_scope& scope,
             report(diagnostic_kind::no_matching_overload, file, where, signature_text(spelling, arguments.types));
         return error_type;
     }
+    // CHK-192: a match of the program's file hides every match of the prelude
+    auto is_program_match = false;
+    for (auto const m : matches)
+        is_program_match = is_program_match || !is_prelude_file(out.at(m).file);
+    if (is_program_match)
+        matches.remove_all_where([&](symbol_id m) { return is_prelude_file(out.at(m).file); });
     if (matches.size() > 1)
     {
         report(diagnostic_kind::ambiguous_overload, file, where,

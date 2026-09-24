@@ -49,9 +49,19 @@ TEST("sgl check - overloads resolve by exact argument types")
     CHECK(body_reports("return dot(v)\n") == "no-matching-overload user:[dot(v)] dot(vec3)\n");
     CHECK(body_reports("return saturate()\n") == "no-matching-overload user:[saturate()] saturate()\n");
 
-    // A second declaration with the same parameter types is no error by itself; the call cannot choose.
-    CHECK(reports_for("@builtin fun dot(x: vec3, y: vec3) -> float\nfun f(v: vec3) -> float:\n    return dot(v, v)\n")
-          == "ambiguous-overload user:[dot(v, v)] dot(vec3, vec3) has 2 candidates\n");
+    // A second declaration with the same parameter types in one scope is no error by itself; the call cannot choose.
+    CHECK(reports_for("fun g(v: vec3) -> float => v.x\nfun g(v: vec3) -> float => v.y\nfun f(v: vec3) -> float:\n"
+                      "    return g(v)\n")
+          == "ambiguous-overload user:[g(v)] g(vec3) has 2 candidates\n");
+
+    // CHK-192: across the two scopes the user file's wins, so a prelude that gains its signature later breaks nothing
+    auto const shadowed = check_sources(read_prelude(), "fun dot(x: vec3, y: vec3) -> float => 7.0\n"
+                                                        "fun f(v: vec3) -> float:\n"
+                                                        "    return dot(v, v)\n");
+    CHECK(reports_of(shadowed) == "");
+    auto const chosen = shadowed.tables().target_at(find_expr(shadowed, "dot(v, v)"));
+    CHECK(chosen.kind == target_kind::overload);
+    CHECK(shadowed.module.at(chosen.symbol).file == shadowed.user_file());
 
     // An overload on other types takes nothing away, and each call records the one it chose.
     auto const checked = check_sources(read_prelude(), "fun dot(a: pos3, b: pos3) -> float => a.x * b.x\n"
