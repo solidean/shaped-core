@@ -135,7 +135,8 @@ cc::result<binding_group_layout_handle> context_uncached_scope::try_create_bindi
                                         "not support — declare a bounded count and treat it as capacity",
                                         b.name));
 
-    if (auto unsupported = impl::find_unsupported_binding(_ctx, bindings); unsupported.has_value())
+    if (auto unsupported = impl::find_unsupported_binding(_ctx.supports(feature::extended_storage_formats), bindings);
+        unsupported.has_value())
         return cc::error(cc::move(unsupported.value()));
 
     return _ctx.try_create_binding_group_layout(bindings, static_samplers, lifetime_scope::persistent);

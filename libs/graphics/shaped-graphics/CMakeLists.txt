@@ -244,6 +244,7 @@ if(SC_BUILD_TESTS)
         tests/binding/binding-test.cc
         tests/binding/binding_conflicts-test.cc
         tests/binding/layout_hash-test.cc
+        tests/binding/portability-test.cc
         tests/binding/slot-table-test.cc
         tests/binding/shader_codec-test.cc
         tests/pipeline/raster_pipeline-test.cc
@@ -272,7 +273,7 @@ if(SC_BUILD_TESTS)
             tests/context/cold-caches-test.cc
             tests/buffer/buffer-test.cc
             tests/texture/texture-create-test.cc
-        tests/texture/texture-feature-test.cc
+            tests/texture/texture-feature-test.cc
             tests/command_list/command_list-test.cc
             tests/command_list/index_buffer_alignment-test.cc
             tests/transfer/transfer-test.cc

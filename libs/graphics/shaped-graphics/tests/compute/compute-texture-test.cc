@@ -16,7 +16,7 @@ using namespace cc::primitive_defines;
 namespace shaders = sg::test::sgl_shaders;
 
 // The SGL fixture in tests/shaders/sgl/textures.sgl, end to end: a texture sampled through a static and through a
-// bound sampler, an image written, and an image read and written in one dispatch.
+// dynamic sampler, an image written, and an image read and written in one dispatch.
 
 namespace
 {
@@ -97,6 +97,67 @@ ASYNC_INVOCABLE_TEST("sg - an SGL shader samples a texture through a static samp
         wrong += value > expected + 1e-5f || value < expected - 1e-5f ? 1 : 0;
     }
     CHECK(wrong == 0);
+}
+
+// dx12 places a group's static sampler in the register space of the slot it binds at, which differs per pipeline layout.
+ASYNC_INVOCABLE_TEST("sg - one group's static sampler samples at whichever slot the entry point lists the group",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+
+    auto const at_slot_0 = co_await shaders::textures.copy_accumulate.acquire_pipeline(*ctx);
+    auto const at_slot_1 = co_await shaders::textures.copy_second_slot.acquire_pipeline(*ctx);
+    auto const post_layout = ctx->cached.acquire_binding_group_layout<shaders::post>();
+    auto const sampled_layout = ctx->cached.acquire_binding_group_layout<shaders::sampled>();
+
+    auto const src = make_texture(ctx, sg::pixel_format::rgba8_unorm, sg::texture_usage::readonly_texture);
+    auto const dst = make_texture(ctx, sg::pixel_format::rgba8_unorm, sg::texture_usage::readwrite_texture);
+    auto const acc = make_texture(ctx, sg::pixel_format::r32_float, sg::texture_usage::readwrite_texture);
+    auto const second = make_texture(ctx, sg::pixel_format::rgba8_unorm, sg::texture_usage::readwrite_texture);
+    auto const texels = pattern();
+
+    auto cmd = ctx->create_command_list();
+    cmd->upload.bytes_to_texture(src.raw(), cc::span<byte const>(texels));
+    auto const post = ctx->transient.create_binding_group(*cmd, post_layout,
+                                                          shaders::post{
+                                                              .texel_size = tg::vec2f(1.0f / k_extent, 1.0f / k_extent),
+                                                              .src = src.as_readonly_view(),
+                                                              .dst = dst.as_readwrite_view(),
+                                                              .acc = acc.as_readwrite_view(),
+                                                          });
+    auto const sampled = ctx->transient.create_binding_group(*cmd, sampled_layout,
+                                                             shaders::sampled{
+                                                                 .src = src.as_readonly_view(),
+                                                                 .smp = {},
+                                                                 .dst = second.as_readwrite_view(),
+                                                             });
+    cmd->compute.bind_pipeline(*at_slot_0);
+    cmd->compute.bind_group(0, *post);
+    cmd->compute.dispatch_threads(k_extent, k_extent);
+    cmd->compute.bind_pipeline(*at_slot_1);
+    cmd->compute.bind_group(0, *sampled);
+    cmd->compute.bind_group(1, *post);
+    cmd->compute.dispatch_threads(k_extent, k_extent);
+    auto const first_written = cmd->download.bytes_from_texture(dst.raw());
+    auto const second_written = cmd->download.bytes_from_texture(second.raw());
+    ctx->submit_command_list(cc::move(cmd));
+
+    // A size mismatch counts every texel, so it fails the same check.
+    auto const mismatches = [&](auto const& copied)
+    {
+        if (copied.size() != texels.size())
+            return int(texels.size());
+        auto count = 0;
+        for (auto i = isize(0); i < texels.size(); ++i)
+            count += copied[i] != texels[i] ? 1 : 0;
+        return count;
+    };
+    auto const at_slot_0_copied = co_await first_written.bytes();
+    CHECK(mismatches(at_slot_0_copied) == 0);
+    auto const at_slot_1_copied = co_await second_written.bytes();
+    CHECK(mismatches(at_slot_1_copied) == 0);
 }
 
 // The shader divides by the texture's size and bounds its store by the image's, so a wrong size shows in the texels.

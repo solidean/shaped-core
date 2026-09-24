@@ -23,6 +23,12 @@ binding sampled:
     DEBUG_store(post.dst, xy, c)
     DEBUG_store(post.acc, xy, DEBUG_load(post.acc, xy) + c.x)
 
+// The same copy with `post` listed second, so the one group layout and its static sampler sit at slot 1 here and slot 0 above.
+@compute(8, 8) fun copy_second_slot(@thread_id id: int3){sampled, post}:
+    let xy = int2(id.x, id.y)
+    let uv = ((xy as float2) + float2(0.5, 0.5)) * post.texel_size
+    DEBUG_store(sampled.dst, xy, DEBUG_sample_level(post.src, uv, 0.0, post.bilinear))
+
 // The same copy through a sampler the host binds, sized by the texture it reads and the image it writes.
 @compute(8, 8) fun copy_dynamic(@thread_id id: int3){sampled}:
     let xy = int2(id.x, id.y)

@@ -34,10 +34,12 @@ The reason to carry it at all is that **WebGPU cannot be permissive here**, wher
 Its default limits allow *zero* storage buffers in the vertex stage, so a storage binding wrongly marked vertex-visible fails validation on a conformant device rather than merely costing something.
 Vulkan consumes the real mask today — an empty set still means `VK_SHADER_STAGE_ALL` — which is what keeps the field true rather than aspirational.
 
-**`storage_format` has no HLSL source.**
+**`storage_format` has no source in DXC reflection.**
 `RWTexture2D<float4>` declares a component type and count, not a concrete texel format, and DXIL carries no format for a typed UAV.
-WGSL does declare one (`texture_storage_2d<rgba8unorm, write>`), so that field is filled by the WGSL path and left absent by the DXC one.
-The access mode is the same story: WGSL states it, HLSL's `RWTexture` is always read-write, so the DXC path leaves `storage_access` at its default.
+So an HLSL shader package states it beside the declaration, with slib's `#pragma sc format`, and the binding table generated for the package carries it as `.storage_format`.
+WGSL declares one itself (`texture_storage_2d<rgba8unorm, write>`), and an SGL `image2d[.F]` member does too, so both of those paths fill it from the source.
+A binding reflected by DXC alone, outside a package's table, leaves it absent.
+The access mode is the same story without the pragma: WGSL and SGL state it, HLSL's `RWTexture` is always read-write, so the HLSL path leaves `storage_access` at its default.
 
 ## A group index binds, a space only numbers
 
@@ -107,7 +109,12 @@ Two such forms are judged before any backend sees them, in [portability.cc](../.
 - A storage texture, or a storage binding, in a format outside `is_portable_storage_format` needs `feature::extended_storage_formats`.
   The portable set is core WebGPU's storage formats, and the refusal comes at texture creation and at layout creation.
 - A 32-bit float view bound to a `filterable_float` binding needs `feature::float32_filtering`, and the refusal comes at group creation.
+  A view of format `undefined` reads as its texture's own format, so that is the format judged.
   A binding with no `sample_type` is not judged, since a layout reflected from HLSL states none and only WebGPU reads it.
+  A `staging_binding_group` judges each view it is set to, writes none it refuses, and reports the refusal from `try_snapshot` — the point it mints a group.
+  Only replacing the whole binding lifts that refusal, since replacing one array element cannot tell whether it was the refused one.
+
+The refusal is an error from each `try_` creation, and the `sg::exception` its throwing twin raises.
 
 `readwrite_storage_formats` is still webgpu's alone to judge, at layout creation, because every other backend has it.
 

@@ -136,6 +136,12 @@ public:
         vkGetPhysicalDeviceFeatures(_physical_device, &features);
         _extended_storage_formats = features.shaderStorageImageExtendedFormats == VK_TRUE;
 
+        // shaderStorageImageExtendedFormats does not cover bgra8_unorm, whose storage is asked per format.
+        auto bgra8 = VkFormatProperties{};
+        vkGetPhysicalDeviceFormatProperties(_physical_device, VK_FORMAT_B8G8R8A8_UNORM, &bgra8);
+        if ((bgra8.optimalTilingFeatures & VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT) == 0)
+            _extended_storage_formats = false;
+
         // Linear filtering of the three 32-bit float formats is optional in Vulkan, so it is asked per format.
         _float32_filtering = true;
         for (auto const format : {VK_FORMAT_R32_SFLOAT, VK_FORMAT_R32G32_SFLOAT, VK_FORMAT_R32G32B32A32_SFLOAT})

@@ -47,7 +47,10 @@ enum class sg::feature
     float32_filtering,
 
     /// A storage texture may use a format outside `sg::is_portable_storage_format`, such as `r8_unorm` or `rgb10a2_unorm`.
-    /// WebGPU grants them with `texture-formats-tier1` and `bgra8unorm-storage`, Vulkan with `shaderStorageImageExtendedFormats`.
+    /// `bgra8_unorm` is among them, and it is the one each API asks for on its own.
+    /// WebGPU grants them with `texture-formats-tier1` and `bgra8unorm-storage`.
+    /// Vulkan grants them with `shaderStorageImageExtendedFormats` plus `VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT` on `B8G8R8A8_UNORM`.
+    /// D3D12 grants them with a typed UAV on `DXGI_FORMAT_B8G8R8A8_UNORM`, the rest being required at feature level 11_0.
     extended_storage_formats,
 
     /// A block-compressed texture may have a width or height that is no multiple of its block (4 for BC).

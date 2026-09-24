@@ -221,8 +221,11 @@ texture              [in progress]  raw_texture + texture<Traits> + pixel_format
                                   SRV/UAV + RTV/DSV views and host↔device copies done; device→device copies remain
 pipeline             [in progress]  compute + raster pipelines and the bind path (dx12 real, vulkan stub); shaders are
                                   compiled by shaped-shader-compiler-dxc. Raster PSO caching is the remaining gap
-sampler              [in progress]  sampler + static/dynamic samplers; dx12 real (root-sig static samplers
-                                  + a separate sampler descriptor heap for dynamic ones); vulkan pending
+sampler              [in progress]  sampler + static/dynamic samplers. A group's static sampler (named_sampler on the
+                                  group layout) binds on all four: dx12 root-sig static samplers, vulkan immutable
+                                  samplers, metal argument-buffer entries, webgpu the layout's own sampler.
+                                  A pipeline-level one (bound_sampler) binds on dx12 and webgpu; vulkan and metal
+                                  refuse the pipeline layout. dx12 keeps dynamic ones in a separate sampler heap
 accel structures     [in progress]  ray-tracing blas/tlas: recorded build on cmd.raytracing (build_blas for
                                   triangles + procedural AABBs, build_tlas, is_supported), result sized from a
                                   prebuild query with transient scratch, persistent handles across epochs;

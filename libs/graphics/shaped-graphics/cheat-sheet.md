@@ -421,6 +421,9 @@ sg::is_srgb_format(f)           // bool  — hardware applies the sRGB transfer 
 sg::is_compressed_format(f)     // bool  — BC block-compressed (4x4 blocks)
 sg::supports_typed_uav(f)       // bool  — can carry a typed UAV, i.e. texture_usage::readwrite_texture; false for sRGB, BC and depth
                                 //         an sRGB format is still RENDERABLE, so a raster pass is how you write one (sr::raster_box_filter_mipmap_routine)
+sg::is_portable_storage_format(f) // bool — storage every device takes (core WebGPU's set); any other typed-UAV format needs
+                                  //         feature::extended_storage_formats, so gate compute writes on both
+sg::is_float32_format(f)        // bool  — r32/rg32/rgba32_float: filtering one needs feature::float32_filtering
 sg::format_block_size(f)        // int   — bytes per texel, or per 4x4 block for BC (0 for undefined)
 sg::format_block_extent(f)      // int   — 1 (uncompressed) or 4 (BC)
 sg::format_aspect_count(f)      // int   — subresource planes (1, or 2 for depth+stencil)
@@ -573,7 +576,7 @@ sg::compare_op              // never|less|equal|less_equal|greater|not_equal|gre
 //                                  DYNAMIC = named_sampler on create_binding_group (written to a sampler heap).
 // per backend: dx12 puts them in their own descriptor heap + root table, vulkan makes a group's statics the set
 //   layout's immutable samplers, metal writes them into the group's argument buffer at their binding index.
-//   A pipeline-level static sampler (one on no group) is dx12 only so far.
+//   A pipeline-level static sampler (a bound_sampler, on no group): dx12 and webgpu bind it; vulkan and metal refuse the pipeline layout.
 ```
 
 ## bindings & compiled shaders — reflection data model  (see docs/concepts/bindings.md)
@@ -644,6 +647,7 @@ layout->structural_hash()                // -> cc::hash128 on binding_group_layo
 // layouts + pipelines are schemas/PSOs (not lifetime-scoped) -> the RAW ctx.uncached scope. Prefer ctx.cached (below).
 ctx.uncached.create_binding_group_layout(span<binding const>, span<named_sampler const> statics={})  // -> binding_group_layout_handle (name-matched statics baked into the root sig by the pipeline layout; + try_ twin)
 ctx.uncached.create_pipeline_layout({.groups={gl0, gl1, ...}, .static_samplers={...}})  // -> pipeline_layout_handle (ordered group layouts + extra register-bound static samplers -> one root signature; + try_ twin)
+                            //   non-empty .static_samplers on vulkan / metal: try_ returns an error, this throws sg::pipeline_creation_exception
 ctx.uncached.create_compute_pipeline({.shader=, .layout=})               // -> compute_pipeline_handle (.layout is a pipeline_layout; blocking build; throws sg::pipeline_creation_exception; + try_ twin)
 ctx.uncached.create_raster_pipeline({.layout=, .vertex_shader=, .fragment_shader=, .vertex_input=, .color_targets={{...}}, ...})  // -> raster_pipeline_handle (blocking build; throws; + try_ twin)
 ctx.uncached.create_compute_pipeline_async(desc)  // -> shared_async<compute_pipeline_handle>; free-threaded; the desc's shader must outlive it (+ _raster_ twin)
@@ -658,6 +662,7 @@ sg::declared_inline_constants  // { static binding inline_binding(); } — a gen
 ctx.cached.acquire_pipeline_layout<frame, work, constants>(static_samplers = {})
                              // -> pipeline_layout_handle from generated types alone: each binding set is the group at its
                              //    position among the sets, and one inline-constants type is the inline block
+                             //    non-empty static_samplers THROW sg::pipeline_creation_exception on vulkan / metal (no try_ twin)
 ctx.cached.acquire_binding_group_layout<G>()                    // -> binding_group_layout_handle from G's declarations alone
 ctx.cached.acquire_binding_group_layout<G>(span<named_sampler const>)  // + static samplers G left undeclared; one it DID declare asserts
 ctx.transient.create_binding_group(cmd, layout, G{...})         // -> binding_group_handle; the layout is PASSED IN, not re-acquired per call
@@ -688,6 +693,7 @@ sbg->set_sampler(slot, sampler) / unset_sampler(slot)  // void — dynamic sampl
 // by NAME (asserts the binding exists) — the one-shot whole-binding calls only; per-element work runs off a resolved slot, which is the point of having one:
 sbg->set_binding(name, raw_view) / set_array(name, views) / unset_array(name) / set_sampler(name, sampler) / unset_sampler(name)
 sbg->snapshot()                       // -> binding_group_handle — SAME handle while nothing changed since the last one; throws sg::binding_group_exception (+ try_ twin)
+                                      // a view set without its feature (float32 on a filterable binding) is never written and fails every snapshot until the binding is replaced whole
 sbg->is_dirty() / sbg->layout()       // -> bool / binding_group_layout_handle const&
                                       // starts FULLY VACANT, but EVERY binding must be set once before the first snapshot (static samplers excepted) — say what it holds,
                                       //   even if that is nothing: unset_array, or an empty range, answers it. array elements themselves may stay vacant
