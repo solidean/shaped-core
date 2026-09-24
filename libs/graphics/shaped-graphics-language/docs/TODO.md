@@ -11,4 +11,5 @@ Work that is decided and not built, as opposed to [spec/incubator/](spec/_index.
   A function declares the features it needs ([feature-levels.md](spec/incubator/feature-levels.md)).
 * **Unsigned literals.** A `uint` is reached through `as` today, `1 as uint`, since a literal with a suffix is `unsupported-yet` (CHK-61).
   Whether `1u` exists or a literal takes the type it is asked for is the question [literal-types.md](spec/incubator/literal-types.md) holds.
-* **File-scope samplers.** A `sampler name:` at file scope is a pipeline layout's `sg::bound_sampler`, and slib generates no pipeline layout's static samplers yet, nor has an HLSL spelling for one.
+* **File-scope samplers.** A `sampler name:` at file scope is a pipeline layout's `sg::bound_sampler`, which vulkan and metal do not bind yet (sg's TODO.md).
+  Once they do, it needs slib to spell one in HLSL, `#pragma sc static` outside a group, and the generated `acquire_pipeline` to fill `static_samplers`.

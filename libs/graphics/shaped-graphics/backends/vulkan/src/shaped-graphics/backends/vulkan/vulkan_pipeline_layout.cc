@@ -16,6 +16,12 @@ cc::result<vulkan_pipeline_layout_handle> vulkan_pipeline_layout::create(vulkan_
     if (int(desc.groups.size()) > sg::max_binding_groups)
         return cc::error("pipeline_layout: more group slots than max_binding_groups");
 
+    // Refused rather than accepted: nothing below binds the samplers to a set a shader could read.
+    // The gap is libs/graphics/shaped-graphics/docs/TODO.md's, and a group's name-matched static sampler is the working form.
+    if (!desc.static_samplers.empty())
+        return cc::error("pipeline_layout: a pipeline-level static sampler (bound_sampler) is not bound by the vulkan "
+                         "backend yet; declare it a group's static sampler instead");
+
     auto const hash = sg::impl::pipeline_layout_hash(desc);
 
     // A group's position in the description is its bind slot, and the same index is the `firstSet` a bind command
