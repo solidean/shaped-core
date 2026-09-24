@@ -10,7 +10,13 @@ namespace sgl::check::impl
 /// A `cc::async_thread_pool` worker gets the platform's default 512 KiB where the main thread gets 8 MiB, and an
 /// unoptimized sanitizer build spends ~8 KiB on one `interpret` level — so at 200 the stack died at about level 60 and
 /// this guard never fired, which is the crash it exists to prevent.
-/// Raise it only against that budget; nothing the tree compiles nests past single digits.
+/// Raise it only against that budget.
+///
+/// It is a language limit as well: a top-level `let x = a + b + …` of 40 terms is past it.
+/// The check pass refuses such an entry point as `nesting-too-deep` (CHK-200), so no walk here ever meets the hole it
+/// would leave behind.
+/// The real fix is iterative walks over an explicit work stack for `interpret`'s `eval` and the legalizer's expression
+/// walks, with a cycle caught by an on-path bit rather than by depth; the limit could then be far higher.
 constexpr int k_max_depth = 40;
 
 [[nodiscard]] inline bool is_known(flat_entry_point const& e, flat_expr_id id)

@@ -1,5 +1,6 @@
 #include "../emit/emit-test-support.hh"
 
+#include <clean-core/string/format.hh>
 #include <shaped-graphics-language/driver/compile_to_text.hh>
 #include <shaped-graphics-language/driver/prelude.hh>
 #include <shaped-graphics-language/source/format_diagnostic.hh>
@@ -19,6 +20,27 @@ cc::string error_of(sgl::text_request const& request)
     auto const r = sgl::compile_to_text(request);
     REQUIRE(r.has_error());
     return r.error();
+}
+
+/// A pixel shader whose one `let` is a left-deep sum of `terms` reads, which nests one level per term.
+cc::string sum_source(int terms)
+{
+    auto sum = cc::string("p.v");
+    for (auto i = 1; i < terms; ++i)
+        sum += " + p.v";
+    return cc::format("@pixel struct target:\n"
+                      "    color: float4\n"
+                      "\n"
+                      "struct pixel_input:\n"
+                      "    @position position: hpos4\n"
+                      "    v: float\n"
+                      "\n"
+                      "@pixel fun main_ps(p: pixel_input) -> target:\n"
+                      "    let x = {}\n"
+                      "    return {{\n"
+                      "        color = float4(x, x, x, 1.0)\n"
+                      "    }}\n",
+                      sum);
 }
 } // namespace
 
@@ -105,4 +127,20 @@ TEST("sgl driver - a broken source reports where and what, and gives no text")
                                         "    }\n");
     CHECK(error_of({.source = source, .source_name = "broken.sgl", .entry_point = "main_ps", .target = target::hlsl_dx12})
           == "broken.sgl:9:24: error: unknown-name: missing\n");
+}
+
+TEST("sgl driver - a tree past the depth limit is refused by name, never as a hole a later pass trips over")
+{
+    // The `let` is a level of its own, so 39 terms reach exactly 40 levels and 40 terms reach 41.
+    // Every target, since each legalizes and emits the tree the check pass handed over.
+    for (auto const t : sgl::emit::all_targets())
+    {
+        auto const at_limit = sgl::compile_to_text({.source = sum_source(39), .entry_point = "main_ps", .target = t});
+        REQUIRE(at_limit.has_value()).context(at_limit.has_error() ? at_limit.error() : cc::string());
+
+        auto const past
+            = error_of({.source = sum_source(40), .source_name = "sum.sgl", .entry_point = "main_ps", .target = t});
+        CHECK(past.contains("error: nesting-too-deep: 'main_ps' nests deeper than 40 levels")).context(past);
+        CHECK(!past.contains("not-core")).context(past);
+    }
 }
