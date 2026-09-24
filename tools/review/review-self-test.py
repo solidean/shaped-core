@@ -909,6 +909,10 @@ def test_sgl_is_highlighted_by_its_line_tree(root: Path) -> None:
     assert kinds["..<"] == "Token.Operator", "a range must not be read as the number `0.`"
     assert kinds["+"] == "Token.Operator", "the child of a trailing comment's line is still code"
 
+    declared = [(str(kind), value) for _, kind, value in SglLexer(stripnl=False).get_tokens_unprocessed("pipeline shadow:\n")]
+    assert ("Token.Keyword.Declaration", "pipeline") in declared or ("Token.Keyword", "pipeline") in declared
+    assert ("Token.Name.Class", "shadow") in declared, "a pipeline's name is drawn like a declared type's"
+
     interpolated = 'print "n = $count, $p.x and $(a + b) cost $$5"\n'
     pieces = [(str(kind), value) for _, kind, value in SglLexer(stripnl=False).get_tokens_unprocessed(interpolated)]
     assert "".join(value for _, value in pieces) == interpolated
