@@ -1,5 +1,6 @@
 #pragma once
 
+#include <clean-core/common/utility.hh>
 #include <clean-core/record/record.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/string.hh>
@@ -41,20 +42,24 @@ inline constexpr isize log_scratch_capacity = 4096;
 /// Writes a message whose text is already in the descriptor, so the event carries no payload.
 void log_write(rec::desc const& d, cc::format_string<> fmt);
 
-/// This thread's format buffer, or null once it has been destroyed.
+/// Claims this thread's format buffer, or returns null when it cannot be had; `log_write` then formats into a local
+/// buffer instead.
 ///
-/// **A thread that logs from a thread_local destructor can reach this after the buffer is gone**, which the recorder
-/// already contemplates for its write cursor — see the thread exit handshake in `writer.cc`.
-/// Null is that case, and `log_write` formats into a local buffer instead.
+/// **Null has two causes.**
+/// The buffer is already claimed, because a formatter the outer message is running logs a message of its own.
+/// Or the buffer is destroyed, because a thread_local destructor logs — which the recorder already contemplates for
+/// its write cursor, see the thread exit handshake in `writer.cc`.
+///
+/// A non-null result must be handed back through `log_release_scratch`, and a null one must not be.
 [[nodiscard]] cc::string* log_scratch();
+
+/// Hands back a buffer `log_scratch` claimed, first giving its memory back if a message grew it past
+/// `log_scratch_capacity`.
+void log_release_scratch(cc::string& scratch);
 
 /// Reserves `text.size()` bytes, taking a fresh chunk when the current one cannot hold them, and publishes the copy.
 /// A text past `log_payload_cap()` is truncated and flagged.
 void log_emit(rec::desc const& d, cc::string_view text);
-
-/// Gives a grown format buffer its memory back.
-/// Out of line because it runs for a message past `log_scratch_capacity` and nothing else.
-CC_COLD_FUNC void log_shrink_scratch(cc::string& scratch);
 
 /// Runs the domain's per-level stacktrace and debug-break policy.
 ///
@@ -79,26 +84,34 @@ CC_COLD_FUNC void log_apply_policy(rec::desc const& d);
 /// The only cut is `log_payload_cap()`, which a reader can explain; a cut at an offset that moves with the log volume
 /// is not.
 ///
-/// The cost of that is one copy out of the format buffer, against a `cc::format_to` that used to write where the
-/// bytes would stay.
-/// It buys a single format call, an exact reservation rather than a 4 KiB one, and no cut below a megabyte.
+/// It costs one copy out of the format buffer, and a 4 KiB buffer per logging thread.
+///
+/// **A formatter may itself log.**
+/// The nested message finds the buffer claimed and formats into a local one, so neither text bleeds into the other.
 template <class... Args>
     requires(sizeof...(Args) > 0)
 void log_write(rec::desc const& d, cc::format_string<std::type_identity_t<Args>...> fmt, Args&&... args)
 {
-    // Empty and inline, so it costs nothing unless the thread buffer is gone.
+    // Empty and inline, so it costs nothing unless the thread buffer is claimed or gone.
     auto local = cc::string();
 
     auto* const scratch = impl::log_scratch();
     auto& buffer = scratch != nullptr ? *scratch : local;
 
-    buffer.clear();
-    cc::format_append(buffer, fmt, cc::forward<Args>(args)...);
+    {
+        // Only the call that claimed the buffer releases it, or a nested call would free the outer one's claim.
+        // A guard rather than a trailing call, so a throwing formatter does not leave the thread on the fallback.
+        CC_DEFER
+        {
+            if (scratch != nullptr)
+                impl::log_release_scratch(*scratch);
+        };
 
-    impl::log_emit(d, buffer);
+        buffer.clear();
+        cc::format_append(buffer, fmt, cc::forward<Args>(args)...);
 
-    if (scratch != nullptr && scratch->size() > log_scratch_capacity) [[unlikely]]
-        impl::log_shrink_scratch(*scratch);
+        impl::log_emit(d, buffer);
+    }
 
     if (log_needs_policy(d)) [[unlikely]]
         log_apply_policy(d);

@@ -38,16 +38,18 @@ constexpr cc::rec::desc stacktrace_desc = {
     .fixed_payload_size = cc::rec::desc::variable_payload,
 };
 
-/// Whether this thread's format buffer has been built yet, and whether it is still there.
+/// Whether this thread's format buffer has been built yet, whether a message is formatting into it, and whether it is
+/// still there.
 ///
-/// Three states rather than a bool, because "not yet" and "gone" both read as absent and only one of them may
-/// construct the buffer.
+/// `unborn` and `dead` both read as absent, and only the first may construct the buffer.
+/// `busy` is a message holding the buffer, so a formatter that logs is sent to a local one instead.
 /// The variable is constant-initialized and trivially destructible, so it stays readable for the whole thread —
 /// including after every thread_local with a destructor has run.
 enum class scratch_state : u8
 {
     unborn = 0,
     alive,
+    busy,
     dead,
 };
 thread_local scratch_state tl_scratch_state = scratch_state::unborn;
@@ -69,12 +71,21 @@ cc::string* cc::rec::impl::log_scratch()
 {
     // Checked before the buffer is touched: reaching a destroyed thread_local is what this exists to prevent, and a
     // late record on a dying thread is a case the writer's own exit handshake already plans for.
-    if (tl_scratch_state == scratch_state::dead) [[unlikely]]
+    if (tl_scratch_state == scratch_state::busy || tl_scratch_state == scratch_state::dead) [[unlikely]]
         return nullptr;
 
     // Built on first use, which is what sets the state to alive.
     thread_local scratch_holder holder;
+    tl_scratch_state = scratch_state::busy;
     return &holder.buffer;
+}
+
+void cc::rec::impl::log_release_scratch(cc::string& scratch)
+{
+    if (scratch.size() > log_scratch_capacity) [[unlikely]]
+        scratch = cc::string::create_with_capacity(log_scratch_capacity);
+
+    tl_scratch_state = scratch_state::alive;
 }
 
 isize cc::rec::impl::log_payload_cap()
@@ -110,11 +121,6 @@ void cc::rec::impl::log_emit(cc::rec::desc const& d, cc::string_view text)
     writer.commit(text.size());
 }
 
-void cc::rec::impl::log_shrink_scratch(cc::string& scratch)
-{
-    scratch = cc::string::create_with_capacity(log_scratch_capacity);
-}
-
 void cc::rec::impl::log_write(cc::rec::desc const& d, cc::format_string<> fmt)
 {
     // The text is the descriptor's name, so the event is a header and nothing else.
@@ -139,7 +145,7 @@ void cc::rec::impl::log_apply_policy(cc::rec::desc const& d)
         // reader's bounds check short by half, which returns no frames at all rather than wrong ones.
         // sampling.cc writes its own frames this way for the same reason.
         constexpr auto frames_offset = isize(12);
-        auto writer = rec::open_event(stacktrace_desc, frames_offset + count * isize(sizeof(u64)));
+        auto writer = rec::open_event(stacktrace_desc, frames_offset + count * isize(sizeof(u64)), 1);
         if (writer.is_open())
         {
             auto const out = writer.payload();

@@ -211,7 +211,7 @@ REC_TEST("record - an open writer publishes only what was written, and flags tru
                            cc::rec::desc::variable_payload);
 
         {
-            auto writer = cc::rec::open_event(text_desc, 16);
+            auto writer = cc::rec::open_event(text_desc, 16, 1);
             REQUIRE(writer.is_open());
             auto const out = writer.payload();
             REQUIRE(out.size() >= 5);
@@ -245,17 +245,17 @@ REC_TEST("record - open_event takes a fresh chunk rather than cut a caller below
         // cursor by the header plus the payload rounded up to the eight-byte grid.
         constexpr isize wanted_tail = 512;
         {
-            auto probe = cc::rec::open_event(probe_desc, 1 << 20);
+            auto probe = cc::rec::open_event(probe_desc, 1 << 20, 1);
             REQUIRE(probe.is_open());
             auto const available = probe.payload().size();
             REQUIRE(available > wanted_tail + 64);
             probe.commit(available - wanted_tail - 24);
         }
 
-        // The default min_payload takes whatever is there, which is the whole point of the default.
+        // A floor of one byte takes whatever tail is there.
         // Abandoning the writer leaves the chunk untouched, so the tail is still there for the next one.
         {
-            auto const tail = cc::rec::open_event(probe_desc, 4096);
+            auto const tail = cc::rec::open_event(probe_desc, 4096, 1);
             REQUIRE(tail.is_open());
             CHECK(tail.payload().size() == wanted_tail);
         }
@@ -273,6 +273,61 @@ REC_TEST("record - open_event takes a fresh chunk rather than cut a caller below
 
     CHECK(c.count_named("min-payload") == 2); // the cursor walk and the 4 KiB event; the tail probe was abandoned
     CHECK(c.count_named("record.chunk_acquired") > 1);
+}
+
+REC_TEST("record - a pinned value on a chunk tail too short for it takes a fresh chunk")
+{
+    auto cfg = deterministic_config();
+    cfg.chunk_bytes = 8 * 1024;
+    rec_fixture const fixture(cfg);
+
+    cc::rec::recording_listener capture;
+    {
+        scoped_listener const reg(capture);
+
+        CC_REC_DEFINE_DESC(probe_desc, cc::rec::event_kind::log, cc::rec::level::info,
+                           cc::rec::enable_bit_of(cc::rec::level::info), "tail-walk", nullptr, nullptr, 0,
+                           cc::rec::desc::variable_payload);
+
+        // A 32-byte tail: a 24-byte header and 8 bytes of payload, short of the 16 a pinned value needs.
+        constexpr isize wanted_tail = 8;
+        {
+            auto probe = cc::rec::open_event(probe_desc, 1 << 20, 1);
+            REQUIRE(probe.is_open());
+            auto const available = probe.payload().size();
+            REQUIRE(available > wanted_tail + 64);
+            probe.commit(available - wanted_tail - 24);
+        }
+        {
+            auto const tail = cc::rec::open_event(probe_desc, 64, 1);
+            REQUIRE(tail.is_open());
+            REQUIRE(tail.payload().size() == wanted_tail);
+        }
+
+        auto payload = cc::vector<byte>();
+        payload.resize_to_constructed(64, byte(0xCD));
+        auto const pinned = cc::make_pinned_data(cc::move(payload)).reinterpret_as<byte const>();
+        CC_RECORD_PINNED("tail.pin", pinned);
+
+        cc::rec::flush_blocking();
+    }
+
+    auto const rec = capture.take();
+
+    isize seen = 0;
+    rec.for_each_event(
+        [&](cc::rec::chunk_view const&, cc::rec::event_view const& e)
+        {
+            if (e.name() != "tail.pin")
+                return;
+
+            ++seen;
+            auto const bytes = e.field_as_bytes("value");
+            REQUIRE(bytes.size() == 64);
+            CHECK(bytes[63] == byte(0xCD));
+        });
+
+    CHECK(seen == 1);
 }
 
 REC_TEST("record - a formatted message is cut by its own cap, never by where the chunk ended")

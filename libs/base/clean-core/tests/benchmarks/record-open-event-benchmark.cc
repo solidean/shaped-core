@@ -45,12 +45,12 @@ BENCHMARK("bench-rec-open-event - reserve one event")
     // The batch form: the body owns the inner loop, so the harness costs nothing per reservation.
     constexpr auto run_cfg = nx::bench::run_config{.min_time_secs = 0.2, .max_samples = 2048};
 
-    (void)nx::bench::run("open_event(desc, 64)", run_cfg,
+    (void)nx::bench::run("open_event(desc, 64, 1)", run_cfg,
                          [&](isize count)
                          {
                              for (isize i = 0; i < count; ++i)
                              {
-                                 auto const w = cc::rec::open_event(bench_desc, 64);
+                                 auto const w = cc::rec::open_event(bench_desc, 64, 1);
                                  nx::bench::sink(w.is_open());
                              }
                          });

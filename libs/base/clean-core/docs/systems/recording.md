@@ -118,10 +118,9 @@ A cut at an offset that moves with the log volume is invisible to whoever reads 
 A message past `log_max_payload` (1 MiB), or longer than one whole chunk, is **truncated and flagged, never dropped**.
 A truncated message is still evidence, and both of those cuts are ones a reader can explain.
 
-The price is one copy out of the format buffer, where `cc::format_to` used to write where the bytes would stay.
-What it buys is the single format call, a reservation of exactly what the message needs rather than a fixed ceiling, and no cut below a megabyte.
-The buffer rests at `log_scratch_capacity` (4 KiB) per thread.
+It costs one copy out of the format buffer, which rests at `log_scratch_capacity` (4 KiB) per thread.
 A message that pushes it past that gives the memory back afterwards, so one enormous message does not leave its buffer resident for the life of the thread.
+A formatter that logs finds the buffer claimed, and its message formats into a local buffer instead of into the outer one's text.
 
 Levels are `trace`, `debug`, `info`, `warning`, `error`, and each gates on its own bit in the domain's mask.
 `trace` and `debug` are off by default, because a build that records them by default teaches everyone to turn logging off.

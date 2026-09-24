@@ -23,6 +23,16 @@ enum class widget_kind : u8
     round = 3,
     square = 7,
 };
+
+/// Logs while it is being formatted, so an outer message's format runs a nested `log_write`.
+struct logs_while_formatted
+{
+    cc::string_view to_string() const
+    {
+        CC_LOG_INFO("inner {}", 42);
+        return "VALUE";
+    }
+};
 } // namespace
 
 //
@@ -49,7 +59,7 @@ REC_TEST("record/log - a message with no arguments costs the stream no payload a
     CHECK(e.value().text.empty());
 }
 
-REC_TEST("record/log - a formatted message is written straight into the chunk")
+REC_TEST("record/log - a formatted message records its formatted text")
 {
     rec_fixture const fixture(deterministic_config());
 
@@ -64,6 +74,26 @@ REC_TEST("record/log - a formatted message is written straight into the chunk")
     auto const e = c.first_named("uploaded {} bytes to {}");
     REQUIRE(e.has_value());
     CHECK(e.value().text == "uploaded 4096 bytes to gpu");
+}
+
+REC_TEST("record/log - a message logged from inside a formatter leaves the outer message whole")
+{
+    rec_fixture const fixture(deterministic_config());
+
+    collector c;
+    {
+        scoped_listener const reg(c);
+        CC_LOG_INFO("outer-head {} outer-tail", logs_while_formatted{});
+        cc::rec::flush_blocking();
+    }
+
+    auto const inner = c.first_named("inner {}");
+    REQUIRE(inner.has_value());
+    CHECK(inner.value().text == "inner 42");
+
+    auto const outer = c.first_named("outer-head {} outer-tail");
+    REQUIRE(outer.has_value());
+    CHECK(outer.value().text == "outer-head VALUE outer-tail");
 }
 
 REC_TEST("record/log - levels gate independently, and the gate is the domain's")

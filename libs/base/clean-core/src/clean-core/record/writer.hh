@@ -202,22 +202,21 @@ CC_FORCE_INLINE void record_event(rec::desc const& d, PayloadT const& payload)
 ///
 /// **`min_payload` is what the caller refuses to be cut below**, and a chunk whose tail is shorter is left behind for a
 /// fresh one.
-/// The default of one byte takes whatever tail there is, which is right only for a payload that stays useful cut
-/// short — `rec::impl::emit_section`'s `key=value` stamp lines, and the stacktrace event that sizes its frame count to
-/// what fit.
+/// A floor of one byte takes whatever tail there is, which is right only for a payload that stays useful cut short —
+/// `rec::impl::emit_section`'s `key=value` stamp lines, and the stacktrace event that sizes its frame count to what fit.
 /// It is wrong for a payload a consumer reads as a whole, because that cut lands at an offset set by the log volume
 /// rather than by anything about the payload, and nothing downstream can tell.
 /// Asking for more than the tail costs the rest of that chunk, so a caller states what it needs rather than the most it
 /// might use.
 ///
 /// Returns a closed writer when the site is disabled or the stream could not take the event.
-[[nodiscard]] rec::event_writer open_event(rec::desc const& d, isize max_payload, isize min_payload = 1);
+[[nodiscard]] rec::event_writer open_event(rec::desc const& d, isize max_payload, isize min_payload);
 } // namespace cc::rec
 
 /// A reserved but unpublished event whose payload the caller fills in place.
 ///
-/// This is what a formatted log message wants: reserve the remaining space, format straight into it, then publish only
-/// the bytes that were actually written — no temporary buffer and no copy.
+/// It is for a payload built where it will stay: reserve, write into `payload()`, then publish only the bytes that were
+/// actually written.
 /// An open writer that is never committed leaves the chunk untouched, which is what makes abandoning one safe.
 ///
 /// **Nothing else may record on this thread while a writer is open**, since both would claim the same cursor.

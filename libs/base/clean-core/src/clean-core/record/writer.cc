@@ -304,11 +304,11 @@ cc::rec::event_writer cc::rec::open_event(cc::rec::desc const& d, isize max_payl
     auto const header_bytes = isize(sizeof(impl::event_header));
 
     // A rotation is worth it only when the current chunk cannot hold what the caller refuses to be cut below.
-    // The default of one byte is the old behaviour: a long payload is better truncated than allowed to abandon most of
-    // a megabyte, and a caller who cannot live with that cut says so.
+    // A floor of one byte takes any tail, for a payload that is better truncated than allowed to abandon most of a
+    // megabyte.
     //
     // **`min_payload + 31` rather than `header_bytes + padded_payload(min_payload)`**, which is the same number for
-    // the default of 1, never smaller than it, and at most seven larger.
+    // a floor of 1, never smaller than it, and at most seven larger.
     // Erring larger can only rotate a hair early; erring smaller would hand back a reservation shorter than the
     // caller said it would accept, so the approximation is only sound in this direction.
     // It is worth the seven bytes because this line is on the path EVERY event takes: the exact form costs a cmov
