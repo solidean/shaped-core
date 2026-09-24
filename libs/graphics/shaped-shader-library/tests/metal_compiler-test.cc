@@ -79,18 +79,18 @@ ASYNC_TEST("slib metal compiler - the same source twice is one node, not a secon
     auto const compiler = slib::create_metal_compiler();
     REQUIRE(compiler != nullptr);
 
-    auto const desc = slib::shader_source_description{.source = "struct w { device uint* v [[id(0)]]; };
-                                                      kernel void k(constant w & b [[buffer(0)]]){(void)b;
-}
-",
-    .entry_point = "k",
-  .stage = sg::shader_stage::compute
-}
-;
-auto const first = compiler->compile(desc);
-auto const second = compiler->compile(desc);
-CHECK(first.get() == second.get());
-co_await cc::async_settled(first);
+    auto const desc = slib::shader_source_description{
+        .source = R"(
+struct w { device uint* v [[id(0)]]; };
+kernel void k(constant w& b [[buffer(0)]]) { (void)b; }
+)",
+        .entry_point = "k",
+        .stage = sg::shader_stage::compute,
+    };
+    auto const first = compiler->compile(desc);
+    auto const second = compiler->compile(desc);
+    CHECK(first.get() == second.get());
+    co_await cc::async_settled(first);
 }
 
 ASYNC_TEST("slib metal compiler - the sgl edge carries a package to metal", exclusive("slib-shader-library"))
