@@ -9,7 +9,7 @@
 @inline binding constants:
     view_projection: mat4
 
-// member order is the vertex layout's: the test writes the same two attributes in the same order
+// member order is the vertex layout's, and the test reads that layout from the generated struct
 @vertex struct cube_vertex:
     position: pos3
     color: float3

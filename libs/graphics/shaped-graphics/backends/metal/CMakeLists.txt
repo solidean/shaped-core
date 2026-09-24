@@ -127,8 +127,7 @@ if(SC_BUILD_TESTS)
             SOURCE_DIR tests/shaders
             LANGUAGE   sgl
             SHADERS
-                cube.sgl:vertex:main_vs
-                cube.sgl:pixel:main_ps
+                cube.sgl:*
         )
     endif()
 endif()

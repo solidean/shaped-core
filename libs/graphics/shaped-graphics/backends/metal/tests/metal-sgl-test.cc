@@ -2,6 +2,8 @@
 
 #include <clean-core/common/utility.hh>
 #include <clean-core/string/format.hh>
+#include <clean-core/thread/async.hh>
+#include <clean-core/thread/async_coroutine.hh>
 #include <metal_sgl_shaders.hh>
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
@@ -14,45 +16,21 @@
 //
 // Every other fixture in this directory is MSL written by hand with its reflection written beside it, which pins the
 // backend against a convention no real pipeline produces.
-// This one is the real path end to end — SGL emits MSL, ssc::msl compiles it, and the backend draws it — so what it
-// proves is that the addresses nobody wrote agree: `[[attribute(n)]]` against sg's vertex_input_layout, the
+// This one is the real path end to end — SGL emits MSL, ssc::msl compiles it, and the backend draws it — and the host
+// side is the package's generated code too: the vertex struct and its layout, the constants block, the pipeline layout.
+// So what it proves is that the addresses nobody wrote agree: `[[attribute(n)]]` against the generated layout, the
 // inline-constants buffer index against metal_common.hh, and an interpolant against the stage that reads it.
 
 namespace mtl = sg::backend::metal;
+namespace shaders = metal_test::sgl_shaders;
 using namespace cc::primitive_defines;
 
 namespace
 {
 constexpr auto k_size = 8;
 
-/// Mirrors `cube_vertex` in tests/shaders/cube.sgl, in the order its members are declared.
-struct cube_vertex
-{
-    tg::pos3f position;
-    tg::vec3f color;
-};
-
-/// The inline-constants block of the same shader.
-struct cube_constants
-{
-    tg::mat4f view_projection = tg::mat4f::identity;
-};
-
-/// The vertex layout the shader's `@vertex struct` implies.
-/// An attribute's `[[attribute(n)]]` index is its position here, which is the rule the SGL emitter writes against.
-[[nodiscard]] sg::vertex_input_layout cube_vertex_layout()
-{
-    auto layout = sg::vertex_input_layout{};
-    layout.slots.push_back({.stride = isize(sizeof(cube_vertex))});
-    layout.attributes.push_back(
-        {.semantic = "POSITION", .format = sg::vertex_attribute_format::vec3f, .offset = 0, .slot = 0});
-    layout.attributes.push_back(
-        {.semantic = "COLOR", .format = sg::vertex_attribute_format::vec3f, .offset = isize(sizeof(tg::pos3f)), .slot = 0});
-    return layout;
-}
-
-/// Two triangles covering the whole target, so every texel is written by the shader rather than by the clear.
-[[nodiscard]] cc::vector<cube_vertex> full_target_quad()
+/// One triangle whose bounding square covers the whole target, so every texel it reaches is written by the shader.
+[[nodiscard]] cc::vector<shaders::cube_vertex> covering_triangle()
 {
     auto const color = tg::vec3f(0.25f, 0.5f, 0.75f);
     return {
@@ -71,9 +49,15 @@ struct cube_constants
         .usage = sg::texture_usage::render_target | sg::texture_usage::copy_src,
     });
 }
+
+/// What a settled `node` failed with, or empty where it succeeded.
+[[nodiscard]] cc::string failure_of(sg::async_compiled_shader const& node)
+{
+    return node->has_error() ? node->try_error()->underlying().to_string() : cc::string();
+}
 } // namespace
 
-TEST("sg metal - an SGL package compiles for metal", exclusive("slib-shader-library"))
+ASYNC_TEST("sg metal - an SGL package compiles for metal", exclusive("slib-shader-library"))
 {
     auto const ctx = mtl::test::make_context();
     if (ctx == nullptr)
@@ -81,13 +65,15 @@ TEST("sg metal - an SGL package compiles for metal", exclusive("slib-shader-libr
 
     slib::shader_library lib;
     lib.add_compiler(slib::create_sgl_compiler(slib::create_metal_compiler()));
-    lib.add_package(metal_test::sgl_shaders::package());
+    lib.add_package(shaders::package());
 
-    auto const vs = metal_test::sgl_shaders::cube.vertex.main_vs->acquire(*ctx);
-    auto const ps = metal_test::sgl_shaders::cube.pixel.main_ps->acquire(*ctx);
+    auto const vs = shaders::cube.main_vs->acquire(*ctx);
+    auto const ps = shaders::cube.main_ps->acquire(*ctx);
+    co_await cc::async_settled(vs);
+    co_await cc::async_settled(ps);
 
-    REQUIRE(vs->has_value()).context(vs->has_error() ? vs->try_error()->underlying().to_string() : cc::string());
-    REQUIRE(ps->has_value()).context(ps->has_error() ? ps->try_error()->underlying().to_string() : cc::string());
+    REQUIRE(vs->has_value()).context(failure_of(vs));
+    REQUIRE(ps->has_value()).context(failure_of(ps));
 
     CHECK(vs->try_value()->stage == sg::shader_stage::vertex);
     CHECK(ps->try_value()->stage == sg::shader_stage::fragment);
@@ -106,52 +92,52 @@ ASYNC_TEST("sg metal - a draw from an SGL shader writes what the shader computed
 
     slib::shader_library lib;
     lib.add_compiler(slib::create_sgl_compiler(slib::create_metal_compiler()));
-    lib.add_package(metal_test::sgl_shaders::package());
+    lib.add_package(shaders::package());
 
-    auto const vs = metal_test::sgl_shaders::cube.vertex.main_vs->acquire(*ctx);
-    auto const ps = metal_test::sgl_shaders::cube.pixel.main_ps->acquire(*ctx);
-    REQUIRE(vs->has_value()).context(vs->has_error() ? vs->try_error()->underlying().to_string() : cc::string());
-    REQUIRE(ps->has_value()).context(ps->has_error() ? ps->try_error()->underlying().to_string() : cc::string());
+    auto const vs = shaders::cube.main_vs->acquire(*ctx);
+    auto const ps = shaders::cube.main_ps->acquire(*ctx);
+    co_await cc::async_settled(vs);
+    co_await cc::async_settled(ps);
+    REQUIRE(vs->has_value()).context(failure_of(vs));
+    REQUIRE(ps->has_value()).context(failure_of(ps));
 
-    auto layout_desc = sg::pipeline_layout_description{};
-    layout_desc.inline_constants = sg::binding{
-        .space = 0,
-        .index = 0,
-        .count = 1,
-        .type = sg::binding_type::uniform_buffer,
-        .block_size = isize(sizeof(cube_constants)),
-    };
-    auto pipeline_layout = ctx->create_metal_pipeline_layout(layout_desc, sg::lifetime_scope::persistent);
-    REQUIRE(pipeline_layout.has_value());
-
+    // Built through the cache, so the frontend's layout fit sees the reflection before the backend does.
     auto desc = sg::raster_pipeline_description{
-        .layout = sg::pipeline_layout_handle(pipeline_layout.value()),
+        .layout = shaders::cube.main_vs.acquire_layout(*ctx),
         .vertex_shader = *vs->try_value(),
         .fragment_shader = *ps->try_value(),
-        .vertex_input = cube_vertex_layout(),
+        .vertex_input = shaders::cube_vertex::layout(),
         .rasterization = {.cull = sg::cull_mode::none},
     };
     desc.color_targets.push_back({.format = sg::pixel_format::rgba8_unorm});
 
-    auto pipeline = ctx->create_metal_raster_pipeline(desc, sg::lifetime_scope::persistent);
-    REQUIRE(pipeline.has_value()).context(pipeline.has_error() ? pipeline.error().to_string() : cc::string());
+    auto const pipeline = ctx->cached.acquire_raster_pipeline(desc);
+    co_await cc::async_settled(pipeline);
+    REQUIRE(pipeline->has_value())
+        .context(pipeline->has_error() ? pipeline->try_error()->underlying().to_string() : cc::string());
 
     auto const target = make_color_target(ctx);
-    auto const vertices = full_target_quad();
+    auto const vertices = covering_triangle();
     auto const vertex_buffer
-        = ctx->persistent.create_raw_buffer(isize(vertices.size()) * isize(sizeof(cube_vertex)),
+        = ctx->persistent.create_raw_buffer(isize(vertices.size()) * isize(sizeof(shaders::cube_vertex)),
                                             sg::buffer_usage::vertex_buffer | sg::buffer_usage::copy_dst);
 
+    // One unit right in clip space, so the left half of the target keeps the clear colour.
+    // Not the identity, which is its own transpose: a row/column-major mismatch would move the other half instead.
+    auto const constants = shaders::constants{
+        .view_projection = tg::rigid_transform3f::make_translation(tg::vec3f(1, 0, 0)).to_mat(),
+    };
+
     auto cmd = ctx->create_command_list();
-    cmd->upload.bytes_to_buffer(vertex_buffer, cc::as_bytes(cc::span<cube_vertex const>(vertices)));
+    cmd->upload.bytes_to_buffer(vertex_buffer, cc::as_bytes(cc::span<shaders::cube_vertex const>(vertices)));
     {
         auto info = sg::rendering_info{};
         // Red, so a texel the shader never wrote is loud in the readback.
         info.color_targets.push_back(target.as_render_target_view().cleared(tg::vec4f(1, 0, 0, 1)));
         auto scope = cmd->raster.render_to(info);
-        scope.bind_pipeline(*pipeline.value());
-        scope.set_inline_constants(cube_constants{});
-        scope.bind_vertex_buffer({.buffer = vertex_buffer, .stride_in_bytes = isize(sizeof(cube_vertex))});
+        scope.bind_pipeline(**pipeline->try_value());
+        scope.set_inline_constants(constants.to_block());
+        scope.bind_vertex_buffer({.buffer = vertex_buffer, .stride_in_bytes = isize(sizeof(shaders::cube_vertex))});
         scope.draw({.vertex_range = {.offset = 0, .size = 3}});
     }
     auto future = cmd->download.bytes_from_texture(target.raw());
@@ -166,11 +152,19 @@ ASYNC_TEST("sg metal - a draw from an SGL shader writes what the shader computed
     // The vertex colour reaches the pixel stage through an interpolant the shader never addressed, so a wrong
     // `[[user(...)]]` mapping shows up here as the clear colour rather than as a build failure.
     auto wrong = 0;
-    for (auto i = 0; i < k_size * k_size; ++i)
+    for (auto y = 0; y < k_size; ++y)
     {
-        auto const* const texel = reinterpret_cast<byte const*>(bytes.value().data()) + i * 4;
-        if (u8(texel[0]) != 64 || u8(texel[1]) != 128 || u8(texel[2]) != 191)
-            ++wrong;
+        for (auto x = 0; x < k_size; ++x)
+        {
+            auto const* const texel = reinterpret_cast<byte const*>(bytes.value().data()) + (y * k_size + x) * 4;
+            auto const is_shaded = x >= k_size / 2;
+            auto const expected_r = is_shaded ? 64 : 255;
+            auto const expected_g = is_shaded ? 128 : 0;
+            auto const expected_b = is_shaded ? 191 : 0;
+            if (u8(texel[0]) != expected_r || u8(texel[1]) != expected_g || u8(texel[2]) != expected_b)
+                ++wrong;
+        }
     }
-    CHECK(wrong == 0).context(cc::format("{} of {} texels are not the shader's colour", wrong, k_size * k_size));
+    CHECK(wrong == 0)
+        .context(cc::format("{} of {} texels are not what the translated draw leaves there", wrong, k_size * k_size));
 }
