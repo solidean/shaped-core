@@ -125,7 +125,7 @@ The size and alignment the `layout-mismatch` check places a member by are fields
   The exception is a function only a custom writer calls, such as `mul`, which stands in `emit/reserved_words.cc`.
   An entry point is renamed the same way, and `emitted_text::entry_point` is the name a caller compiles.
 * **The `msl` text has met no Metal compiler yet**, and nothing builds it.
-  slib has no metallib compiler, and sg's metal backend binds no vertex buffers or inline constants.
+  slib has no metallib compiler; sg's metal backend reads vertex buffers through a vertex descriptor and inline constants at buffer index 4, which is what this text assumes.
 
 [semantics/emitting.md](spec/semantics/emitting.md) has the rules.
 

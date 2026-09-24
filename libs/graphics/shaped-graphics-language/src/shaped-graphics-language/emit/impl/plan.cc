@@ -2,6 +2,7 @@
 
 #include <clean-core/container/set.hh>
 #include <clean-core/string/format.hh>
+#include <shaped-graphics-language/check/resources.hh>
 #include <shaped-graphics-language/emit/reserved_words.hh>
 #include <shaped-graphics-language/legalize/core.hh>
 
@@ -266,7 +267,7 @@ struct planner
         p.enums.push_back(cc::move(planned));
     }
 
-    void buffers()
+    void resources()
     {
         auto group = 0;
         for (auto const id : p.e.bindings)
@@ -275,22 +276,24 @@ struct planner
             auto const& b = p.m.bindings[s.info];
             if (b.is_inline)
                 continue; // sg addresses the inline constants itself, so they take no group of their own
-            auto slot = first_buffer_slot(p.m, b);
+            auto slot = first_resource_slot(p.m, b);
             auto const members = p.m.at(b.members);
             for (auto i = isize(0); i < members.size(); ++i)
             {
                 auto const& t = p.m.at(members[i].type);
-                if (t.kind != check::type_kind::buffer)
+                if (!check::is_resource(t.kind))
                     continue;
-                p.buffers.push_back({.binding = id,
-                                     .member = i32(i),
-                                     .name = p.names.mint(cc::format("{}_{}", s.name, members[i].name)),
-                                     .host_name = cc::format("{}.{}", s.name, members[i].name),
-                                     .element = t.element,
-                                     .is_mut = t.is_mut,
-                                     .group = group,
-                                     .slot = slot++,
-                                     .group_name = cc::format("{}_bindings", s.name)});
+                p.resources.push_back({.binding = id,
+                                       .member = i32(i),
+                                       .name = p.names.mint(cc::format("{}_{}", s.name, members[i].name)),
+                                       .host_name = cc::format("{}.{}", s.name, members[i].name),
+                                       .type = members[i].type,
+                                       .element = t.element,
+                                       .is_mut = t.is_mut,
+                                       .static_sampler = members[i].static_sampler,
+                                       .group = group,
+                                       .slot = slot++,
+                                       .group_name = cc::format("{}_bindings", s.name)});
             }
             ++group;
         }
@@ -325,7 +328,7 @@ struct planner
                     planned.members[i].offset = placed.offsets[i];
                 auto next = 0;
                 for (auto const& member : p.m.at(b.members))
-                    planned.block_member_of.push_back(p.m.at(member.type).kind == type_kind::buffer ? -1 : next++);
+                    planned.block_member_of.push_back(check::is_resource(p.m.at(member.type).kind) ? -1 : next++);
                 p.group_blocks.push_back(cc::move(planned));
             }
             ++group;
@@ -374,12 +377,18 @@ sgl::builtins::language sgl::emit::impl::language_of(target t)
     return builtins::language::hlsl;
 }
 
-sgl::i32 sgl::emit::impl::buffer_of(plan const& p, check::symbol_id binding, i32 member)
+sgl::i32 sgl::emit::impl::resource_of(plan const& p, check::symbol_id binding, i32 member)
 {
-    for (auto i = isize(0); i < p.buffers.size(); ++i)
-        if (p.buffers[i].binding == binding && p.buffers[i].member == member)
+    for (auto i = isize(0); i < p.resources.size(); ++i)
+        if (p.resources[i].binding == binding && p.resources[i].member == member)
             return i32(i);
     return -1;
+}
+
+cc::string_view sgl::emit::impl::builtin_spelling(plan const& p, cc::string_view name)
+{
+    auto const type = p.m.builtins->find_type(name);
+    return is_valid(type) ? p.m.builtins->at(type).spelled_in(language_of(p.which)) : cc::string_view();
 }
 
 bool sgl::emit::impl::is_builtin_type(check::checked_module const& m, check::type_id type)
@@ -457,11 +466,11 @@ void sgl::emit::impl::validate_binding(check::checked_module const& m, check::sy
     auto const& b = m.bindings[s.info];
 
     // A plain member is a constant of a block: the `@inline` one, or the constant buffer its group owns.
-    // A buffer is a resource of its own in a group, and has no place in an `@inline` block.
+    // A resource is a slot of its own in a group, and has no place in an `@inline` block.
     auto is_placed = true;
     for (auto const& member : m.at(b.members))
     {
-        if (!b.is_inline && m.at(member.type).kind == check::type_kind::buffer)
+        if (!b.is_inline && check::is_resource(m.at(member.type).kind))
             continue;
         if (layout_of(m, member.type).hlsl.size != 0)
             continue;
@@ -500,12 +509,12 @@ cc::vector<sgl::check::member_info> sgl::emit::impl::plain_members_of(check::che
 {
     auto result = cc::vector<check::member_info>();
     for (auto const& member : m.at(b.members))
-        if (m.at(member.type).kind != check::type_kind::buffer)
+        if (!check::is_resource(m.at(member.type).kind))
             result.push_back(member);
     return result;
 }
 
-sgl::i32 sgl::emit::impl::first_buffer_slot(check::checked_module const& m, check::binding_info const& b)
+sgl::i32 sgl::emit::impl::first_resource_slot(check::checked_module const& m, check::binding_info const& b)
 {
     return !b.is_inline && !plain_members_of(m, b).empty() ? 1 : 0;
 }
@@ -589,7 +598,7 @@ sgl::emit::impl::plan sgl::emit::impl::make_plan(check::checked_module const& m,
     result.entry_name = p.spell(e.name);
     p.constants();
     p.group_blocks();
-    p.buffers();
+    p.resources();
     // The check pass minted the locals, so a buffer or a block minted above never took one's name.
     for (auto const& local : e.locals)
         result.locals.push_back(p.spell(local.name));

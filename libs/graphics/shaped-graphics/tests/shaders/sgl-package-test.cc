@@ -86,3 +86,33 @@ ASYNC_INVOCABLE_TEST("sg - every entry point of the SGL package reflects what th
     auto const mismatch = co_await shaders::check_reflection(*ctx);
     CHECK(mismatch == "");
 }
+
+ASYNC_TEST("sg - the WGSL an SGL group becomes reflects every fact its generated table declares")
+{
+    // A WebGPU layout is built from the generated table, and WebGPU refuses one that disagrees with the module.
+    // So every fact beyond the kind has to agree with what the WGSL declares, which DXIL and SPIR-V never state.
+    auto const formats = sg_test::shader_fixtures().supported_formats(slib::shader_language::sgl);
+    auto has_wgsl = false;
+    for (auto const f : formats)
+        has_wgsl = has_wgsl || f == sg::shader_format::wgsl;
+    if (!has_wgsl)
+        SKIP("no WGSL compiler is registered in this build");
+
+    auto const& compiled = co_await shaders::textures.copy_accumulate->acquire(sg::shader_format::wgsl);
+    auto const declared = shaders::post::declared_bindings();
+    REQUIRE(compiled.bindings.size() == declared.size());
+    for (auto const& want : declared)
+    {
+        sg::binding const* got = nullptr;
+        for (auto const& b : compiled.bindings)
+            if (b.name == want.name)
+                got = &b;
+        REQUIRE(got != nullptr);
+        CHECK(got->type == want.type);
+        CHECK(got->texture_dimension == want.texture_dimension);
+        CHECK(got->sample_type == want.sample_type);
+        CHECK(got->storage_format == want.storage_format);
+        CHECK(got->storage_access == want.storage_access);
+        CHECK(got->sampler_type == want.sampler_type);
+    }
+}

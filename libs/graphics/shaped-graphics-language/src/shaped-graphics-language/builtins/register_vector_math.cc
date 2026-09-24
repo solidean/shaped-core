@@ -124,6 +124,27 @@ void mix(leaves in, result& out)
         out.push_back(scalar::of(in[i].as_float() * (1.0f - t) + in[width + i].as_float() * t));
 }
 
+/// Componentwise on the bits, which is two's-complement wrapping for int and plain wrapping for uint alike.
+template <class Fn>
+void bitwise_pairs(leaves in, result& out, Fn&& fn)
+{
+    auto const width = in.size() / 2;
+    for (auto i = isize(0); i < width; ++i)
+        out.push_back({.kind = in[i].kind, .bits = fn(in[i].bits, in[width + i].bits)});
+}
+void add_bits(leaves in, result& out)
+{
+    bitwise_pairs(in, out, [](u32 a, u32 b) { return a + b; });
+}
+void subtract_bits(leaves in, result& out)
+{
+    bitwise_pairs(in, out, [](u32 a, u32 b) { return a - b; });
+}
+void multiply_bits(leaves in, result& out)
+{
+    bitwise_pairs(in, out, [](u32 a, u32 b) { return a * b; });
+}
+
 void dot(leaves in, result& out)
 {
     auto const width = in.size() / 2;
@@ -148,10 +169,11 @@ void sgl::builtins::register_vector_math(registry& r)
     auto const named
         = [](cc::string_view name, cc::string_view type) { return cc::format("{}{}", name, suffix_of(type)); };
 
-    cc::string_view const numbers[] = {"float", "float3", "float4"};
-    cc::string_view const plain_vectors[] = {"float3", "float4"};
-    cc::string_view const scaled[] = {"float3", "float4", "vec3"};
-    cc::string_view const measured[] = {"vec3", "float3", "float4"};
+    cc::string_view const numbers[] = {"float", "float2", "float3", "float4"};
+    cc::string_view const plain_vectors[] = {"float2", "float3", "float4"};
+    cc::string_view const scaled[] = {"float2", "float3", "float4", "vec3"};
+    cc::string_view const measured[] = {"vec3", "float2", "float3", "float4"};
+    cc::string_view const integer_vectors[] = {"int2", "int3", "int4", "uint2", "uint3", "uint4"};
 
     r.add_comment("// what a float and a plain vector of floats share, component by component");
     for (auto const type : numbers)
@@ -172,6 +194,14 @@ void sgl::builtins::register_vector_math(registry& r)
         add_infix(r, "-", named("subtract", type), type, type, type, subtract);
         add_infix(r, "*", named("multiply", type), type, type, type, multiply);
         add_infix(r, "/", named("divide", type), type, type, type, divide);
+    }
+
+    r.add_comment("// integer vectors wrap componentwise, and division is left out as it is for their scalars");
+    for (auto const type : integer_vectors)
+    {
+        add_infix(r, "+", named("add", type), type, type, type, add_bits);
+        add_infix(r, "-", named("subtract", type), type, type, type, subtract_bits);
+        add_infix(r, "*", named("multiply", type), type, type, type, multiply_bits);
     }
 
     r.add_comment("// a direction adds to a direction; what `vec3 * vec3` would mean is a question, so it is no "

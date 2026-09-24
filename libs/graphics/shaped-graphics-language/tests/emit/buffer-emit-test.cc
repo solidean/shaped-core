@@ -104,7 +104,7 @@ TEST("sgl emit - MSL declines a buffer rather than writing text no compiler take
 {
     // A Metal buffer is an argument of the kernel, not a global, which this writer does not build yet.
     CHECK(errors_for(k_buffers, target::msl)
-          == "unsupported a buffer binding, which MSL takes as an entry-point argument\n");
+          == "unsupported a binding group, which MSL takes as an argument buffer of the entry point\n");
     CHECK(errors_for(k_buffers, target::hlsl_vulkan) == "");
 }
 

@@ -17,6 +17,10 @@
 // A struct line without a block is opaque: there is no member to name.
 @builtin struct float
 
+@builtin struct float2:
+    x: float
+    y: float
+
 @builtin struct float3:
     x: float
     y: float
@@ -53,13 +57,55 @@
 /// 32 bits, signed; its arithmetic wraps.
 @builtin struct int
 
-/// Three ints; what a compute dispatch reports as the thread's own id.
+@builtin struct int2:
+    x: int
+    y: int
+
 @builtin struct int3:
     x: int
     y: int
     z: int
 
+@builtin struct int4:
+    x: int
+    y: int
+    z: int
+    w: int
+
+/// 32 bits, unsigned; its arithmetic wraps.
+@builtin struct uint
+
+@builtin struct uint2:
+    x: uint
+    y: uint
+
+@builtin struct uint3:
+    x: uint
+    y: uint
+    z: uint
+
+@builtin struct uint4:
+    x: uint
+    y: uint
+    z: uint
+    w: uint
+
 @builtin struct bool
+
+@builtin struct bool2:
+    x: bool
+    y: bool
+
+@builtin struct bool3:
+    x: bool
+    y: bool
+    z: bool
+
+@builtin struct bool4:
+    x: bool
+    y: bool
+    z: bool
+    w: bool
 
 // @pure: a call has no effect, so nobody can tell whether or when it ran.
 // A @builtin without it is assumed to have one, and the compiler then keeps its place among its neighbours.
@@ -83,7 +129,15 @@
 @builtin @pure fun max(a: int, b: int) -> int
 @builtin @pure fun clamp(x: int, low: int, high: int) -> int
 
-// comparisons, of float and of int
+// uint: division is left out, as it is for int
+@builtin @pure @operator("*") fun multiply_uint(a: uint, b: uint) -> uint
+@builtin @pure @operator("+") fun add_uint(a: uint, b: uint) -> uint
+@builtin @pure @operator("-") fun subtract_uint(a: uint, b: uint) -> uint
+@builtin @pure fun min(a: uint, b: uint) -> uint
+@builtin @pure fun max(a: uint, b: uint) -> uint
+@builtin @pure fun clamp(x: uint, low: uint, high: uint) -> uint
+
+// comparisons, of float, of int and of uint
 @builtin @pure @operator("<") fun less(a: float, b: float) -> bool
 @builtin @pure @operator("<=") fun less_equal(a: float, b: float) -> bool
 @builtin @pure @operator(">") fun greater(a: float, b: float) -> bool
@@ -96,6 +150,12 @@
 @builtin @pure @operator(">=") fun greater_equal_int(a: int, b: int) -> bool
 @builtin @pure @operator("==") fun equal_int(a: int, b: int) -> bool
 @builtin @pure @operator("!=") fun not_equal_int(a: int, b: int) -> bool
+@builtin @pure @operator("<") fun less_uint(a: uint, b: uint) -> bool
+@builtin @pure @operator("<=") fun less_equal_uint(a: uint, b: uint) -> bool
+@builtin @pure @operator(">") fun greater_uint(a: uint, b: uint) -> bool
+@builtin @pure @operator(">=") fun greater_equal_uint(a: uint, b: uint) -> bool
+@builtin @pure @operator("==") fun equal_uint(a: uint, b: uint) -> bool
+@builtin @pure @operator("!=") fun not_equal_uint(a: uint, b: uint) -> bool
 
 // bool: `and`, `or` and `not` are the language's own, since no function could leave an operand unevaluated
 @builtin @pure @operator("==") fun equal_bool(a: bool, b: bool) -> bool
@@ -109,6 +169,13 @@
 @builtin @pure fun clamp(x: float, low: float, high: float) -> float
 /// `a` where `t` is 0 and `b` where it is 1.
 @builtin @pure fun mix(a: float, b: float, t: float) -> float
+@builtin @pure fun saturate(x: float2) -> float2
+@builtin @pure fun abs(x: float2) -> float2
+@builtin @pure fun min(a: float2, b: float2) -> float2
+@builtin @pure fun max(a: float2, b: float2) -> float2
+@builtin @pure fun clamp(x: float2, low: float2, high: float2) -> float2
+/// `a` where `t` is 0 and `b` where it is 1.
+@builtin @pure fun mix(a: float2, b: float2, t: float) -> float2
 @builtin @pure fun saturate(x: float3) -> float3
 @builtin @pure fun abs(x: float3) -> float3
 @builtin @pure fun min(a: float3, b: float3) -> float3
@@ -125,6 +192,10 @@
 @builtin @pure fun mix(a: float4, b: float4, t: float) -> float4
 
 // float3 and float4 are plain numbers, so all of their arithmetic is componentwise
+@builtin @pure @operator("+") fun add_float2(a: float2, b: float2) -> float2
+@builtin @pure @operator("-") fun subtract_float2(a: float2, b: float2) -> float2
+@builtin @pure @operator("*") fun multiply_float2(a: float2, b: float2) -> float2
+@builtin @pure @operator("/") fun divide_float2(a: float2, b: float2) -> float2
 @builtin @pure @operator("+") fun add_color(a: float3, b: float3) -> float3
 @builtin @pure @operator("-") fun subtract_color(a: float3, b: float3) -> float3
 @builtin @pure @operator("*") fun multiply_color(a: float3, b: float3) -> float3
@@ -134,11 +205,35 @@
 @builtin @pure @operator("*") fun multiply_float4(a: float4, b: float4) -> float4
 @builtin @pure @operator("/") fun divide_float4(a: float4, b: float4) -> float4
 
+// integer vectors wrap componentwise, and division is left out as it is for their scalars
+@builtin @pure @operator("+") fun add_int2(a: int2, b: int2) -> int2
+@builtin @pure @operator("-") fun subtract_int2(a: int2, b: int2) -> int2
+@builtin @pure @operator("*") fun multiply_int2(a: int2, b: int2) -> int2
+@builtin @pure @operator("+") fun add_int3(a: int3, b: int3) -> int3
+@builtin @pure @operator("-") fun subtract_int3(a: int3, b: int3) -> int3
+@builtin @pure @operator("*") fun multiply_int3(a: int3, b: int3) -> int3
+@builtin @pure @operator("+") fun add_int4(a: int4, b: int4) -> int4
+@builtin @pure @operator("-") fun subtract_int4(a: int4, b: int4) -> int4
+@builtin @pure @operator("*") fun multiply_int4(a: int4, b: int4) -> int4
+@builtin @pure @operator("+") fun add_uint2(a: uint2, b: uint2) -> uint2
+@builtin @pure @operator("-") fun subtract_uint2(a: uint2, b: uint2) -> uint2
+@builtin @pure @operator("*") fun multiply_uint2(a: uint2, b: uint2) -> uint2
+@builtin @pure @operator("+") fun add_uint3(a: uint3, b: uint3) -> uint3
+@builtin @pure @operator("-") fun subtract_uint3(a: uint3, b: uint3) -> uint3
+@builtin @pure @operator("*") fun multiply_uint3(a: uint3, b: uint3) -> uint3
+@builtin @pure @operator("+") fun add_uint4(a: uint4, b: uint4) -> uint4
+@builtin @pure @operator("-") fun subtract_uint4(a: uint4, b: uint4) -> uint4
+@builtin @pure @operator("*") fun multiply_uint4(a: uint4, b: uint4) -> uint4
+
 // a direction adds to a direction; what `vec3 * vec3` would mean is a question, so it is no operator
 @builtin @pure @operator("+") fun add_vec3(a: vec3, b: vec3) -> vec3
 @builtin @pure @operator("-") fun subtract_vec3(a: vec3, b: vec3) -> vec3
 
 // scaling, from either side
+@builtin @pure @operator("*") fun scale_float2(a: float2, b: float) -> float2
+@builtin @pure @operator("*") fun prescale_float2(a: float, b: float2) -> float2
+@builtin @pure @operator("/") fun unscale_float2(a: float2, b: float) -> float2
+@builtin @pure @operator("-") fun negate_float2(x: float2) -> float2
 @builtin @pure @operator("*") fun scale_color(a: float3, b: float) -> float3
 @builtin @pure @operator("*") fun prescale_color(a: float, b: float3) -> float3
 @builtin @pure @operator("/") fun unscale_color(a: float3, b: float) -> float3
@@ -161,6 +256,9 @@
 @builtin @pure fun dot(a: vec3, b: vec3) -> float
 @builtin @pure fun length(v: vec3) -> float
 @builtin @pure fun normalize(v: vec3) -> vec3
+@builtin @pure fun dot(a: float2, b: float2) -> float
+@builtin @pure fun length(v: float2) -> float
+@builtin @pure fun normalize(v: float2) -> float2
 @builtin @pure fun dot(a: float3, b: float3) -> float
 @builtin @pure fun length(v: float3) -> float
 @builtin @pure fun normalize(v: float3) -> float3
@@ -174,3 +272,78 @@
 @builtin @pure @operator("*") fun transform_direction(m: mat4, v: vec3) -> vec3
 @builtin @pure @operator("*") fun transform_float4(m: mat4, v: float4) -> float4
 @builtin @pure @operator("*") fun multiply_mat4(m: mat4, b: mat4) -> mat4
+
+// `x as T` between the numeric families, width for width; each target writes a conversion to `T`
+@builtin @pure @operator("as") fun convert_float_to_int(x: float) -> int
+@builtin @pure @operator("as") fun convert_float_to_uint(x: float) -> uint
+@builtin @pure @operator("as") fun convert_int_to_float(x: int) -> float
+@builtin @pure @operator("as") fun convert_int_to_uint(x: int) -> uint
+@builtin @pure @operator("as") fun convert_uint_to_float(x: uint) -> float
+@builtin @pure @operator("as") fun convert_uint_to_int(x: uint) -> int
+@builtin @pure @operator("as") fun convert_float2_to_int2(x: float2) -> int2
+@builtin @pure @operator("as") fun convert_float2_to_uint2(x: float2) -> uint2
+@builtin @pure @operator("as") fun convert_int2_to_float2(x: int2) -> float2
+@builtin @pure @operator("as") fun convert_int2_to_uint2(x: int2) -> uint2
+@builtin @pure @operator("as") fun convert_uint2_to_float2(x: uint2) -> float2
+@builtin @pure @operator("as") fun convert_uint2_to_int2(x: uint2) -> int2
+@builtin @pure @operator("as") fun convert_float3_to_int3(x: float3) -> int3
+@builtin @pure @operator("as") fun convert_float3_to_uint3(x: float3) -> uint3
+@builtin @pure @operator("as") fun convert_int3_to_float3(x: int3) -> float3
+@builtin @pure @operator("as") fun convert_int3_to_uint3(x: int3) -> uint3
+@builtin @pure @operator("as") fun convert_uint3_to_float3(x: uint3) -> float3
+@builtin @pure @operator("as") fun convert_uint3_to_int3(x: uint3) -> int3
+@builtin @pure @operator("as") fun convert_float4_to_int4(x: float4) -> int4
+@builtin @pure @operator("as") fun convert_float4_to_uint4(x: float4) -> uint4
+@builtin @pure @operator("as") fun convert_int4_to_float4(x: int4) -> float4
+@builtin @pure @operator("as") fun convert_int4_to_uint4(x: int4) -> uint4
+@builtin @pure @operator("as") fun convert_uint4_to_float4(x: uint4) -> float4
+@builtin @pure @operator("as") fun convert_uint4_to_int4(x: uint4) -> int4
+
+// DEBUG: stand-ins for the texture methods, in the order the methods will take their arguments.
+// A texture samples and loads, an image loads where the shader may read it and stores where it may write it.
+@builtin @pure @stages(.pixel) fun DEBUG_sample(t: texture2d[float], coord: float2, s: sampler) -> float
+@builtin @pure fun DEBUG_sample_level(t: texture2d[float], coord: float2, level: float, s: sampler) -> float
+@builtin @pure fun DEBUG_load(t: texture2d[float], xy: int2, level: int) -> float
+@builtin fun DEBUG_load(i: image2d[float], xy: int2) -> float
+@builtin @stages(.pixel, .compute) fun DEBUG_store(i: out image2d[float], xy: int2, value: float)
+@builtin @pure @stages(.pixel) fun DEBUG_sample(t: texture2d[float2], coord: float2, s: sampler) -> float2
+@builtin @pure fun DEBUG_sample_level(t: texture2d[float2], coord: float2, level: float, s: sampler) -> float2
+@builtin @pure fun DEBUG_load(t: texture2d[float2], xy: int2, level: int) -> float2
+@builtin fun DEBUG_load(i: image2d[float2], xy: int2) -> float2
+@builtin @stages(.pixel, .compute) fun DEBUG_store(i: out image2d[float2], xy: int2, value: float2)
+@builtin @pure @stages(.pixel) fun DEBUG_sample(t: texture2d[float3], coord: float2, s: sampler) -> float3
+@builtin @pure fun DEBUG_sample_level(t: texture2d[float3], coord: float2, level: float, s: sampler) -> float3
+@builtin @pure fun DEBUG_load(t: texture2d[float3], xy: int2, level: int) -> float3
+@builtin fun DEBUG_load(i: image2d[float3], xy: int2) -> float3
+@builtin @stages(.pixel, .compute) fun DEBUG_store(i: out image2d[float3], xy: int2, value: float3)
+@builtin @pure @stages(.pixel) fun DEBUG_sample(t: texture2d[float4], coord: float2, s: sampler) -> float4
+@builtin @pure fun DEBUG_sample_level(t: texture2d[float4], coord: float2, level: float, s: sampler) -> float4
+@builtin @pure fun DEBUG_load(t: texture2d[float4], xy: int2, level: int) -> float4
+@builtin fun DEBUG_load(i: image2d[float4], xy: int2) -> float4
+@builtin @stages(.pixel, .compute) fun DEBUG_store(i: out image2d[float4], xy: int2, value: float4)
+@builtin @pure fun DEBUG_load(t: texture2d[int], xy: int2, level: int) -> int
+@builtin fun DEBUG_load(i: image2d[int], xy: int2) -> int
+@builtin @stages(.pixel, .compute) fun DEBUG_store(i: out image2d[int], xy: int2, value: int)
+@builtin @pure fun DEBUG_load(t: texture2d[int2], xy: int2, level: int) -> int2
+@builtin fun DEBUG_load(i: image2d[int2], xy: int2) -> int2
+@builtin @stages(.pixel, .compute) fun DEBUG_store(i: out image2d[int2], xy: int2, value: int2)
+@builtin @pure fun DEBUG_load(t: texture2d[int3], xy: int2, level: int) -> int3
+@builtin fun DEBUG_load(i: image2d[int3], xy: int2) -> int3
+@builtin @stages(.pixel, .compute) fun DEBUG_store(i: out image2d[int3], xy: int2, value: int3)
+@builtin @pure fun DEBUG_load(t: texture2d[int4], xy: int2, level: int) -> int4
+@builtin fun DEBUG_load(i: image2d[int4], xy: int2) -> int4
+@builtin @stages(.pixel, .compute) fun DEBUG_store(i: out image2d[int4], xy: int2, value: int4)
+@builtin @pure fun DEBUG_load(t: texture2d[uint], xy: int2, level: int) -> uint
+@builtin fun DEBUG_load(i: image2d[uint], xy: int2) -> uint
+@builtin @stages(.pixel, .compute) fun DEBUG_store(i: out image2d[uint], xy: int2, value: uint)
+@builtin @pure fun DEBUG_load(t: texture2d[uint2], xy: int2, level: int) -> uint2
+@builtin fun DEBUG_load(i: image2d[uint2], xy: int2) -> uint2
+@builtin @stages(.pixel, .compute) fun DEBUG_store(i: out image2d[uint2], xy: int2, value: uint2)
+@builtin @pure fun DEBUG_load(t: texture2d[uint3], xy: int2, level: int) -> uint3
+@builtin fun DEBUG_load(i: image2d[uint3], xy: int2) -> uint3
+@builtin @stages(.pixel, .compute) fun DEBUG_store(i: out image2d[uint3], xy: int2, value: uint3)
+@builtin @pure fun DEBUG_load(t: texture2d[uint4], xy: int2, level: int) -> uint4
+@builtin fun DEBUG_load(i: image2d[uint4], xy: int2) -> uint4
+@builtin @stages(.pixel, .compute) fun DEBUG_store(i: out image2d[uint4], xy: int2, value: uint4)
+@builtin @pure fun DEBUG_size(t: texture2d, level: int) -> int2
+@builtin @pure fun DEBUG_size(i: image2d) -> int2

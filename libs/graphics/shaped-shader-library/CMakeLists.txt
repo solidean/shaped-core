@@ -19,6 +19,7 @@ add_library(shaped-shader-library
     src/shaped-shader-library/compiler/sgl_compiler.cc
     src/shaped-shader-library/binding/impl/hlsl_binding_types.cc
     src/shaped-shader-library/binding/impl/hlsl_sampler_state.cc
+    src/shaped-shader-library/binding/impl/hlsl_storage_format.cc
     src/shaped-shader-library/binding/impl/hlsl_value_types.cc
     src/shaped-shader-library/binding/impl/hlsl_tokens.cc
     src/shaped-shader-library/shader_asset.cc

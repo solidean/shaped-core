@@ -120,6 +120,10 @@ public:
             return true;
         case sg::feature::readwrite_storage_formats:
             return _readwrite_storage_formats;
+        case sg::feature::float32_filtering:
+            return _float32_filtering;
+        case sg::feature::extended_storage_formats:
+            return _extended_storage_formats;
         case sg::feature::raytracing:
         case sg::feature::geometry_shader:
         case sg::feature::tessellation_shader:
@@ -422,8 +426,17 @@ public:
     webgpu_stream_system _streams;
     webgpu_query_system _queries;
 
+    /// The optional device features creation was granted.
+    struct granted_features
+    {
+        bool timestamps = false;
+        bool readwrite_storage_formats = false; ///< texture-formats-tier2
+        bool float32_filtering = false;         ///< float32-filterable
+        bool extended_storage_formats = false;  ///< texture-formats-tier1 and bgra8unorm-storage
+    };
+
     // Set once at creation.
-    void set_limits(isize uniform_offset_alignment, bool timestamps, bool readwrite_storage_formats);
+    void set_limits(isize uniform_offset_alignment, granted_features const& features);
 
 private:
     [[nodiscard]] static webgpu_binding_group_layout_handle as_webgpu_layout(sg::binding_group_layout_handle const& layout);
@@ -436,6 +449,8 @@ private:
     webgpu_config _config;
     isize _uniform_offset_alignment = 256;
     bool _readwrite_storage_formats = false; // texture-formats-tier2 was granted
+    bool _float32_filtering = false;
+    bool _extended_storage_formats = false;
 
     sg::epoch _current_epoch = sg::epoch::first;
     u64 _next_submission = u64(sg::submission_token::first);

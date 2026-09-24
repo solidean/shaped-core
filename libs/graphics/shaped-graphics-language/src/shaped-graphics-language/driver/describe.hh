@@ -1,6 +1,7 @@
 #pragma once
 
 #include <clean-core/container/vector.hh>
+#include <clean-core/error/optional.hh>
 #include <clean-core/error/result.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
@@ -19,25 +20,61 @@ enum class sgl::described_member_kind : sgl::u8
     constant,
     /// A `buffer[T]`, which the host binds as a resource of its own.
     buffer,
+    /// A sampled texture, `texture2d[float4]` or a depth texture.
+    texture,
+    /// A storage texture, `out image2d[.rgba8_unorm]`.
+    image,
+    /// A sampler: one the host binds, or a static one of the group, which carries `sampler_state`.
+    sampler,
+};
+
+/// A static sampler's settings, named as `sg::sampler`'s fields and enum values name them.
+struct sgl::described_sampler
+{
+    cc::string min_filter;
+    cc::string mag_filter;
+    cc::string mip_filter;
+    cc::string address_u;
+    cc::string address_v;
+    cc::string address_w;
+    /// Empty for a sampler that compares nothing.
+    cc::string compare;
+    i32 max_anisotropy = 1;
+    f32 min_lod = 0.0f;
+    f32 max_lod = 0.0f;
+    f32 mip_lod_bias = 0.0f;
 };
 
 struct sgl::described_binding_member
 {
     cc::string name;
     described_member_kind kind = described_member_kind::constant;
-    /// The value's type; for a buffer, its element.
+    /// A constant's type, a buffer's element, and any other resource's whole spelling: `out image2d[.rgba8_unorm]`.
     cc::string type;
-    /// A buffer the shader may write: `mut buffer[T]`.
+    /// A resource the shader may write: `mut buffer[T]`, or an `out` or `mut` image.
     bool is_mut = false;
-    /// A constant's byte offset in its block; -1 for a buffer.
+    /// A constant's byte offset in its block; -1 for a resource.
     i32 offset = -1;
-    /// A constant's size in bytes; 0 for a buffer.
+    /// A constant's size in bytes; 0 for a resource.
     i32 size = 0;
-    /// A buffer's position among its binding's resources; -1 for a constant.
+    /// A resource's position among its binding's resources; -1 for a constant.
     i32 slot = -1;
-    /// What the host binds a buffer by, `binding.member`; empty for a constant.
+    /// What the host binds a resource by, `binding.member`; empty for a constant.
     /// slib renames the compiled shader's reflected binding to it, so it is the name sg sees.
     cc::string host_name;
+
+    // What an `sg::binding` states beyond its kind, each spelled as the sg enum value it is; empty where it does not apply.
+    /// A texture's or an image's `sg::texture_view_dimension`: `tex_2d`.
+    cc::string texture_dimension;
+    /// A texture's `sg::texture_sample_type`: `filterable_float`, `depth`, ….
+    cc::string sample_type;
+    /// An image's `sg::pixel_format` and `sg::storage_access`: `rgba8_unorm`, `write`.
+    cc::string storage_format;
+    cc::string storage_access;
+    /// A sampler's `sg::sampler_binding_type`: `filtering`, `non_filtering` or `comparison`.
+    cc::string sampler_type;
+    /// A static sampler of the group; absent for one the host binds.
+    cc::optional<described_sampler> static_sampler;
 };
 
 struct sgl::described_binding

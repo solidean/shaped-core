@@ -171,7 +171,7 @@ void checker::judge_attributes(i32 file,
         }
         if (!is_known)
             unsupported(file, a.name, cc::format("the attribute @{} on {}", name, owner));
-        else if (sgl::is_valid(a.list) && name != "operator" && name != "compute" && name != "stream")
+        else if (sgl::is_valid(a.list) && name != "operator" && name != "compute" && name != "stream" && name != "stages")
             report(diagnostic_kind::invalid_attribute_arguments, file, span_of(file, a.list),
                    cc::format("@{} takes no arguments", name));
     }

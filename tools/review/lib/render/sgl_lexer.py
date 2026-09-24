@@ -16,9 +16,11 @@ from pygments.lexer import Lexer
 from pygments.token import Comment, Error, Keyword, Name, Number, Operator, Punctuation, String, Whitespace
 
 _DECLARATION_KEYWORDS = frozenset({
-    "fun", "let", "mut", "struct", "enum", "binding", "sampler", "pipeline", "const", "use", "module", "type", "notation",
-    "assert", "print",
+    "fun", "let", "mut", "out", "struct", "enum", "binding", "sampler", "pipeline", "const", "use", "module", "type",
+    "notation", "assert", "print",
 })
+# `mut buffer[float]`, `out image2d[.rgba8_unorm]`: an access word at the top of a type position leaves the position a type.
+_TYPE_QUALIFIERS = frozenset({"mut", "out"})
 _CONTROL_KEYWORDS = frozenset({"if", "else", "for", "while", "loop", "return", "yield", "continue", "break", "case"})
 _WORD_OPERATORS = frozenset({"and", "or", "not", "in", "as"})
 _CONSTANTS = frozenset({"true", "false"})
@@ -113,6 +115,9 @@ def _code_tokens(line: str, closes: str):
     first = True
     previous_symbol = ""
     expects_type = False
+    # Depth of `[` lists opened directly after a type: `buffer[float]`, whose arguments are types too.
+    type_arguments = 0
+    last_was_type = False
     code = ("code", "")
     while i < len(line):
         ch = line[i]
@@ -168,9 +173,17 @@ def _code_tokens(line: str, closes: str):
                 yield i, Number, line[i:end], code
             else:
                 fused_call = line.startswith("(", end)
-                yield i, _classify(word, previous_symbol, expects_type, fused_call), word, code
+                token = _classify(word, previous_symbol, expects_type or type_arguments > 0, fused_call)
+                yield i, token, word, code
+                last_was_type = token is Name.Class
+                expects_type = expects_type and word in _TYPE_QUALIFIERS
+                previous_symbol = word
+                i = end
+                first = False
+                continue
             previous_symbol = word
             expects_type = False
+            last_was_type = False
             i = end
             first = False
             continue
@@ -185,6 +198,10 @@ def _code_tokens(line: str, closes: str):
             i += 2
         elif ch in ".,;:()[]{}":
             yield i, Punctuation, ch, code
+            if ch == "[" and (last_was_type or type_arguments > 0):
+                type_arguments += 1
+            elif ch == "]" and type_arguments > 0:
+                type_arguments -= 1
             expects_type = ch == ":"
             i += 1
         else:
@@ -192,6 +209,7 @@ def _code_tokens(line: str, closes: str):
             i += 1
         first = False
         previous_symbol = ""
+        last_was_type = False
 
 
 def _classify(word: str, previous_symbol: str, expects_type: bool, fused_call: bool):

@@ -59,18 +59,21 @@ public:
     /// The structs of `p.structs` and the constant block, each followed by an empty line.
     virtual void write_declarations(cc::string& out, plan const& p) const = 0;
 
-    /// How the body names a buffer, which is the bare global everywhere but HLSL, where it stands in a namespace.
-    [[nodiscard]] virtual cc::string buffer_reference(planned_buffer const& b) const { return b.name; }
+    /// How the body names a resource, which is the bare global everywhere but HLSL, where it stands in a namespace.
+    [[nodiscard]] virtual cc::string resource_reference(planned_resource const& b) const { return b.name; }
 
     /// How a group's constant block is named where a member is read through it.
     [[nodiscard]] virtual cc::string block_reference(planned_constants const& b) const { return b.name; }
 
-    /// The buffers of one binding, which is one group: HLSL wraps them, and WGSL writes each with its own address.
-    /// One group: its constant block when it has one, then its buffers; never called for a group with neither.
+    /// The resources of one binding, which is one group: HLSL wraps them, and WGSL writes each with its own address.
+    /// One group: its constant block when it has one, then its resources; never called for a group with neither.
     virtual void write_group(cc::string& out,
                              plan const& p,
                              planned_constants const* block,
-                             cc::span<planned_buffer const> buffers) const = 0;
+                             cc::span<planned_resource const> buffers) const = 0;
+
+    /// How the target spells a texture, an image or a sampler type, as a helper's parameter declares it.
+    [[nodiscard]] virtual cc::string resource_text(plan const& p, check::type_id type) const = 0;
 
     /// Everything of the function up to and including the line that opens its body.
     virtual void write_function_head(cc::string& out, plan const& p) const = 0;
@@ -89,8 +92,12 @@ protected:
 
 /// The constants of every enum of `p`, each set followed by an empty line; a dialect calls it from its declarations.
 void write_enum_constants(cc::string& out, plan const& p, dialect const& d);
-/// Every buffer of the entry point, handed to the dialect one binding at a time.
+/// The helpers the entry point's builtin calls need, each once, ahead of the function.
+void write_helpers(cc::string& out, plan const& p, dialect const& d);
+/// Every resource of the entry point, handed to the dialect one binding at a time.
 void write_buffers(cc::string& out, plan const& p, dialect const& d);
+/// True when the entry point calls a builtin that takes derivatives implicitly: a sample that picks its own level.
+[[nodiscard]] bool uses_derivatives(plan const& p);
 
 /// The whole text of the planned entry point: a header comment, the declarations, and the function.
 /// Mints what the body still needs from `p.names`.

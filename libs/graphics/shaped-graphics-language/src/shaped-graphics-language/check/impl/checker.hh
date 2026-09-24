@@ -166,6 +166,8 @@ struct checker
     cc::vector<call_edge> calls;
     /// The object `check_index` is checking right now: the one place a buffer may stand as an expression.
     ast::expr_id subscripted = ast::expr_id::none;
+    /// The arguments of the call being checked, which a texture, an image or a sampler may stand as (CHK-206).
+    cc::vector<ast::expr_id> handed;
 
     // ---- shared helpers (check.cc) ----------------------------------------------------------------------------------
 
@@ -225,6 +227,8 @@ struct checker
 
     /// True for the prelude's `int3`, the type a dispatch reports a thread's id as.
     [[nodiscard]] bool is_int3(type_id type) const;
+    /// The stages a `@stages` attribute names, as `function_info::stages`; every stage without one or after a bad one.
+    [[nodiscard]] u8 stages_of(i32 file, ast::attribute const* a);
     /// The grid of a `@compute` attribute; `{1, 1, 1}` without one, and after a bad argument it reports.
     [[nodiscard]] cc::fixed_array<i32, 3> workgroup_of(i32 file, ast::attribute const* a);
     /// The name of a `@stream(name)`; empty without one, and after a bad argument it reports.
@@ -247,6 +251,24 @@ struct checker
     [[nodiscard]] type_id buffer_type(type_id element, bool is_mut);
     /// `buffer[T]` in a type position, which is the `index` node `buffer` heads.
     [[nodiscard]] type_id resolve_buffer(i32 file, ast::expr_id expr, ast::index const& node, function_scope const* scope);
+    /// A texture, image or sampler type, interned like `buffer_type`; `info` needs no `spelled`.
+    [[nodiscard]] type_id resource_type(type_info info);
+    /// The resource type a bare name in a type position names — a depth texture or a sampler — and `none` otherwise.
+    [[nodiscard]] type_id resolve_resource_name(i32 file, ast::expr_id expr, cc::string_view text);
+    /// `texture2d[float4]` or `image2d[.rgba8_unorm]`; `none` where `node` heads with no texture or image name.
+    [[nodiscard]] type_id resolve_resource_applied(i32 file, ast::expr_id expr, ast::index const& node);
+    /// `mut` or `out` in front of `inner`, which only a buffer and an image take.
+    [[nodiscard]] type_id qualify_resource(i32 file, ast::expr_id expr, type_id inner, ast::type_access access);
+    /// The settings of a `sampler name:` block; a setting that is wrong is reported and left at its default.
+    [[nodiscard]] sampler_state compile_sampler(i32 file, ast::sampler_decl const& s);
+    /// Reports a call that hands over an `@unfilterable` texture member together with a sampler member that filters.
+    void judge_filtering(i32 file, source_span call, ast::range_of<ast::argument> arguments);
+    /// A builtin's parameter type, where an image names the texel it reads or writes: `out image2d[float4]`.
+    [[nodiscard]] type_id resolve_pattern_type(i32 file, ast::expr_id expr);
+    /// True where an argument of type `argument` may stand for a parameter of type `parameter` (CHK-70, CHK-207).
+    [[nodiscard]] bool takes(type_id parameter, type_id argument) const;
+    /// Reports `form` as `needs-feature`, naming the feature that would grant it.
+    void judge_feature(i32 file, source_span where, cc::string_view form, cc::string_view feature);
     /// True where `expr` is the bare name `name`, which is how a resource type is recognized before lookup.
     [[nodiscard]] bool is_named(i32 file, ast::expr_id expr, cc::string_view name) const;
 
@@ -267,6 +289,8 @@ struct checker
     void convert_object(function_scope& scope, ast::expr_id object, type_id to);
     /// `values[i]`, which today is a buffer element and nothing else; the error type where it is not one.
     [[nodiscard]] type_id check_index(function_scope& scope, ast::expr_id id, ast::index const& node);
+    /// `x as T`, which is the operator function of `as` that takes `x` and gives `T`; the error type where none does.
+    [[nodiscard]] type_id check_cast(function_scope& scope, ast::expr_id id, ast::cast const& node);
 
     // ---- statements and control flow (check_stmt.cc) ----------------------------------------------------------------
 
@@ -344,6 +368,9 @@ struct checker
                                            call_arguments const& arguments,
                                            cc::string_view spelling);
     [[nodiscard]] cc::string signature_text(cc::string_view spelling, cc::span<type_id const> types) const;
+    /// Records a call of `callee`, a function of the program, as an edge of the call graph, and reports each binding it
+    /// reads that the caller does not list.
+    void note_program_call(function_scope const& scope, symbol_id callee, source_span where);
 
     // ---- the flat tree (flatten.cc) ---------------------------------------------------------------------------------
 

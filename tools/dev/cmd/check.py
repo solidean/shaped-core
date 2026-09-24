@@ -151,6 +151,15 @@ def _build_checks(ctx: Context) -> list[dev.Check]:
         if not result.ok:
             return False
 
+        # The host code SGL groups generate, fed describe-shaped input directly, so every arm runs without a package.
+        result = dev.run_step(
+            ["uv", "run", str(runner.with_name("sgl-host-code-self-test.py"))],
+            step_type="lint", name="sgl-host-code-self-test",
+            build_dir=ctx.root / "build", cwd=ctx.root, mirror=mirror, verbose=verbose,
+        )
+        if not result.ok:
+            return False
+
         presets = ctx.resolve_presets([ctx.default_preset_name()])
         builds = dev.build(presets, ["shaped-shader-library-test"], root=ctx.root, auto_configure=True,
                            mirror=mirror, verbose=verbose)
