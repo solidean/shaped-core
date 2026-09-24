@@ -172,6 +172,22 @@ TEST("sgl check - a setting's value has the type of its field")
              "state it\n");
 }
 
+TEST("sgl check - an int setting is held to the range sg keeps it in")
+{
+    auto const bad = [](cc::string_view line)
+    { return reports(cc::string("pipeline:\n    vertex = vs\n    pixel = ps\n") + formats + line); };
+    // A mask is a byte in sg, so 300 would reach it as 44.
+    CHECK(bad("    stencil_read_mask = 300\n")
+          == "invalid-pipeline user:[300] depth_stencil.stencil_read_mask is a byte: 0 to 255\n");
+    CHECK(bad("    stencil_write_mask = -1\n")
+          == "invalid-pipeline user:[-1] depth_stencil.stencil_write_mask is a byte: 0 to 255\n");
+    CHECK(bad("    sample_count = 3\n") == "invalid-pipeline user:[3] sample_count is a power of two from 1 to 64\n");
+    CHECK(bad("    sample_count = 0\n") == "invalid-pipeline user:[0] sample_count is a power of two from 1 to 64\n");
+    CHECK(bad("    patch_control_points = 33\n") == "invalid-pipeline user:[33] patch_control_points is 0 to 32\n");
+    // The edges are in range.
+    CHECK(bad("    stencil_read_mask = 255\n    sample_count = 64\n    patch_control_points = 0\n") == "");
+}
+
 TEST("sgl check - every target has a format, stated or left to the host")
 {
     CHECK(reports("pipeline:\n    vertex = vs\n    pixel = ps\n    color_targets.albedo.format = .rgba8_unorm\n")

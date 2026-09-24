@@ -68,6 +68,21 @@ struct settings_source
 {
     return names.size() == 3 && names[0] == k_color_targets && names[2] == "blend";
 }
+
+/// Why `value` is out of range for the int field at `path`, or empty where it is in range.
+/// sg holds these narrower than SGL's `int`, so a value outside is truncated or refused past this point.
+[[nodiscard]] cc::string range_error(cc::string_view path, i64 value)
+{
+    if (path == "depth_stencil.stencil_read_mask" || path == "depth_stencil.stencil_write_mask")
+        return value >= 0 && value <= 255 ? cc::string() : cc::format("{} is a byte: 0 to 255", path);
+    if (path == "sample_count")
+        return value >= 1 && value <= 64 && (value & (value - 1)) == 0
+                 ? cc::string()
+                 : cc::format("{} is a power of two from 1 to 64", path);
+    if (path == "patch_control_points")
+        return value >= 0 && value <= 32 ? cc::string() : cc::format("{} is 0 to 32", path);
+    return {};
+}
 } // namespace
 
 // ---- the description ------------------------------------------------------------------------------------------------
@@ -354,6 +369,11 @@ struct pipeline_compiler
                 {
                     setting.kind = setting_kind::integer;
                     setting.integer = is_negative ? -i64(parsed.value()) : i64(parsed.value());
+                    if (auto const range = range_error(field, setting.integer); !range.empty())
+                    {
+                        fail(in_file, at, range);
+                        return false;
+                    }
                     into.push_back(cc::move(setting));
                     return true;
                 }

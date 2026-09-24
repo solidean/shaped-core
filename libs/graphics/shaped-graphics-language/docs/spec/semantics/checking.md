@@ -222,6 +222,7 @@ let color = float4(..lit, 1.0)
   A name that is no field anywhere, or two, is `invalid-pipeline`, and the detail names both paths.
 * **CHK-178** A value is `true` or `false` for a `bool`, a number literal for an `int` or a `float`, and a case for an enum (CHK-152).
   A paren literal writes a struct whole and names each of its fields once, or it is `missing-field`, `unknown-field` or `duplicate-field`.
+  An `int` is held to the range sg keeps its field in: a stencil mask is 0 to 255, `sample_count` a power of two from 1 to 64, and `patch_control_points` 0 to 32.
 * **CHK-179** Under `color_targets` stands one entry per member of the pixel stage's `@pixel struct`; a setting whose path names no member there is one per member.
 * **CHK-180** `.host` stands only for a target's `format`, the `depth_stencil_format` and the `sample_count`, and `.none` only for a target's `blend`.
 * **CHK-181** An attribute of an entry point, of a `@vertex struct` or of a `@pixel struct` is a setting when its name alone is one field.
