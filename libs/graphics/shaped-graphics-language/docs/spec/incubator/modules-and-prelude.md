@@ -35,6 +35,9 @@ Modules rather than namespaces is a decision of its own: unrelated code cannot a
 It predefines lots of useful types: the component-wise vectors, the `tg` mirrors, the format types ([vector-and-format-types.md](vector-and-format-types.md)).
 Opting out is a matter of shader config, not of source.
 
+**The prelude is a scope around the file's.**
+A declaration of the file shadows a prelude name, and two overload sets of one name join ([CHK-188](../semantics/checking.md#symbols)).
+
 **The prelude is two files, split by who writes them.**
 
 * **`builtins.sgl` is generated.**
@@ -74,4 +77,3 @@ The normative half of this is [CHK-138](../semantics/checking.md#the-two-files-o
 * Whether modules nest, and what a dotted module name would mean.
 * What exactly the prelude holds, and how much of `builtins.sgl` moves into `core.sgl` once generics can write a family once.
 * Whether the prelude is itself an ordinary module, which `use` could then name.
-* Whether a prelude name may be shadowed by a declaration of the file.

@@ -98,7 +98,7 @@ struct settings_source
 
 type_id checker::pipeline_description_type()
 {
-    auto const* const found = names.get_ptr(k_description);
+    auto const* const found = prelude_names.get_ptr(k_description);
     if (found == nullptr || found->empty() || out.at(found->front()).kind != symbol_kind::structure)
         return checked_module::error_type;
     auto const id = found->front();
@@ -602,7 +602,7 @@ void checker::compile_pipeline(symbol_id id)
             return false;
         }
         auto const text = text_of(file, n->where);
-        auto const* const found = names.get_ptr(text);
+        auto const* const found = names_seen_from(file).get_ptr(text);
         if (found == nullptr || found->empty())
         {
             report(diagnostic_kind::unknown_name, file, n->where, text);

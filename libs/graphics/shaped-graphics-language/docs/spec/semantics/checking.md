@@ -23,8 +23,16 @@ Back to the [semantics](_index.md); the reasons are in [why/checking.md](why/che
 
 * **CHK-10** A **symbol** is a `fun`, a `struct`, an `enum` or a `binding` declared at the top level of a file, named by its file and its declaration.
 * **CHK-11** The module scope is unordered: a symbol may be used above its declaration.
-* **CHK-12** A name is declared once in the module scope, unless every declaration of it is a function; a later declaration is the normal error `duplicate-declaration`.
+* **CHK-12** A name is declared once in one scope, unless every declaration of it is a function; a later declaration is the normal error `duplicate-declaration`.
 * **CHK-13** Several functions of one name are an **overload set**.
+* **CHK-188** The module scope is two: the files of the prelude share the outer one, and the program's file has the inner one ([why](why/checking.md#chk-188)).
+  A declaration of the program's file **shadows** what the prelude declares of its name, so a `struct vec3` there is no duplicate.
+* **CHK-189** Where both scopes declare nothing but functions of one name, the functions of both are one overload set.
+* **CHK-192** Where a call matches functions of both scopes, those of the program's file are its only candidates ([why](why/checking.md#chk-192)).
+  Two matches in one scope are still CHK-72.
+* **CHK-190** A lookup from a prelude file sees the prelude's scope alone, and never a name of the program's file.
+* **CHK-191** What the check pass needs of the prelude by name is always the prelude's, whatever the program's file shadows.
+  That is the type of a literal, of a condition and of a `for`, and `raster_pipeline_description`.
 * **CHK-14** A `const`, a `type` alias and a `sampler` are `unsupported-yet`, and each still owns its name, so a use of it is silent.
   An `enum` is a symbol of its own, by CHK-142.
 * **CHK-15** `use` and `notation` are `unsupported-yet`.
@@ -146,7 +154,9 @@ enum light_kind:
 * **CHK-52** `let name : type = value` needs `value` to be of `type`, or it is the normal error `type-mismatch`.
 * **CHK-53** A local **shadows** every earlier local and parameter of its name, in its own block or an enclosing one, from the statement after its `let`, as in Rust ([why](why/checking.md#chk-53)).
   The value it is given still sees the one it hides, and its type may differ.
-* **CHK-54** A local or a parameter that has the name of a module-level symbol is `unsupported-yet` ([why](why/checking.md#chk-54)).
+* **CHK-54** A local or a parameter may have the name of a module-level symbol, and shadows it as it shadows a local ([why](why/checking.md#chk-54)).
+  Types and values share one namespace, so behind it the name is the local wherever it stands: a call of it is CHK-78, and a type position holding it is the normal error `wrong-kind-of-name`.
+  A parameter's type is resolved before any parameter is in scope, so `light: light` is fine.
 * **CHK-55** A pattern in a `let` and a `let` without a value are `unsupported-yet`; `let mut` is CHK-111.
 * **CHK-56** `return value` needs `value` to be of the function's return type, or it is `type-mismatch`.
 * **CHK-57** An arrow body `=> value` is `return value`.
@@ -383,7 +393,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `duplicate-declaration` | CHK-12, CHK-28 |
 | `dependency-cycle` | CHK-18, CHK-136 |
 | `unknown-name` | CHK-24, CHK-62 |
-| `wrong-kind-of-name` | CHK-24, CHK-79 |
+| `wrong-kind-of-name` | CHK-24, CHK-54, CHK-79 |
 | `missing-type` | CHK-26 |
 | `unknown-builtin` | CHK-31 |
 | `expected-body` | CHK-32 |
@@ -409,7 +419,6 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 
 * Whether `@builtin` is allowed outside the prelude; today it is.
 * Whether a builtin's declaration is checked against its record beyond the key; today its result type and its attributes are not.
-* Whether a local may shadow a module-level name ([scopes](../incubator/scopes.md)); shadowing a local or a parameter is CHK-53.
 * Whether a body is checked once or where it is inlined, once a generic makes the two differ ([why](why/checking.md#chk-129)).
 * `true` and `false`, which are names nothing declares yet, beyond the value of a pipeline setting (CHK-178).
 * Whether a second function with the parameter types of another is an error where it is declared.

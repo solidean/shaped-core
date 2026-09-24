@@ -10,14 +10,6 @@ namespace
 {
 constexpr auto error_type = checked_module::error_type;
 constexpr auto nothing_type = checked_module::nothing_type;
-
-local_name const* find_local(function_scope const& scope, cc::string_view name)
-{
-    for (auto i = scope.locals.size() - 1; i >= 0; --i)
-        if (scope.locals[i].name == name)
-            return &scope.locals[i];
-    return nullptr;
-}
 } // namespace
 
 // ---- bodies ---------------------------------------------------------------------------------------------------------
@@ -37,8 +29,7 @@ void checker::check_body(symbol_id id)
     auto scope = function_scope{.function = id, .file = file, .result = info.result};
     for (auto const& p : out.at(info.parameters))
     {
-        if (names.contains(p.name))
-            unsupported(file, ast.at(p.field).name, "a parameter that shadows a module-level name");
+        // CHK-54: a parameter may have the name of a module-level symbol, which it hides in the body.
         scope.locals.push_back({
             .name = text_of(file, ast.at(p.field).name),
             .where = {.kind = target_kind::parameter, .index = i32(p.field)},
@@ -266,13 +257,13 @@ type_id checker::check_name(function_scope& scope, ast::expr_id id, ast::name co
     auto const where = span_of(file, id);
     auto const text = text_of(file, name.where);
 
-    if (auto const* const local = find_local(scope, text))
+    if (auto const* const local = scope.find_local(text))
     {
         set_target(file, id, local->where);
         return local->type;
     }
 
-    auto const* const found = names.get_ptr(text);
+    auto const* const found = names_seen_from(file).get_ptr(text);
     if (found == nullptr || found->empty())
     {
         report(diagnostic_kind::unknown_name, file, where, text);
@@ -321,9 +312,9 @@ type_id checker::check_member(function_scope& scope, ast::expr_id id, ast::membe
     // `constants.view_projection`: a binding is no value, so the object is looked at before it is checked
     auto const* const object_name
         = ast::is_valid(member.object) ? ast.at(member.object).node.try_as<ast::name>() : nullptr;
-    if (object_name != nullptr && find_local(scope, text_of(file, object_name->where)) == nullptr)
+    if (object_name != nullptr && scope.find_local(text_of(file, object_name->where)) == nullptr)
     {
-        auto const* const found = names.get_ptr(text_of(file, object_name->where));
+        auto const* const found = names_seen_from(file).get_ptr(text_of(file, object_name->where));
         if (found != nullptr && !found->empty() && out.at(found->front()).kind == symbol_kind::binding)
         {
             auto const binding = found->front();
@@ -515,7 +506,7 @@ type_id checker::check_call(function_scope& scope, ast::expr_id id, ast::call co
     }
 
     auto const text = text_of(file, n->where);
-    if (auto const* const local = find_local(scope, text))
+    if (auto const* const local = scope.find_local(text))
     {
         set_target(file, call.callee, local->where);
         (void)check_arguments(scope, call.arguments, false);
@@ -523,7 +514,7 @@ type_id checker::check_call(function_scope& scope, ast::expr_id id, ast::call co
         return error_type;
     }
 
-    auto const* const found = names.get_ptr(text);
+    auto const* const found = names_seen_from(file).get_ptr(text);
     if (found == nullptr || found->empty())
     {
         (void)check_arguments(scope, call.arguments, false);
@@ -637,6 +628,12 @@ type_id checker::resolve_overload(function_scope& scope,
             report(diagnostic_kind::no_matching_overload, file, where, signature_text(spelling, arguments.types));
         return error_type;
     }
+    // CHK-192: a match of the program's file hides every match of the prelude
+    auto is_program_match = false;
+    for (auto const m : matches)
+        is_program_match = is_program_match || !is_prelude_file(out.at(m).file);
+    if (is_program_match)
+        matches.remove_all_where([&](symbol_id m) { return is_prelude_file(out.at(m).file); });
     if (matches.size() > 1)
     {
         report(diagnostic_kind::ambiguous_overload, file, where,

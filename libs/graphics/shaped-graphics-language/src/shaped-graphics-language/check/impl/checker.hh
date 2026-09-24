@@ -84,6 +84,15 @@ struct function_scope
     cc::vector<loop_scope> loops;
     /// The value blocks a `yield` can name, innermost last; a `case` arm that is a value pushes one.
     cc::vector<value_block_scope> value_blocks;
+
+    /// The newest visible local or parameter of that name, which hides every module-level symbol of it.
+    [[nodiscard]] local_name const* find_local(cc::string_view name) const
+    {
+        for (auto i = locals.size() - 1; i >= 0; --i)
+            if (locals[i].name == name)
+                return &locals[i];
+        return nullptr;
+    }
 };
 
 /// One call of a function of the program, which is an edge of the graph recursion is looked for in.
@@ -140,8 +149,13 @@ struct checker
     builtins::registry const& builtins;
     checked_module out;
 
-    /// Module scope: every name but those of `@operator` functions.
-    /// More than one symbol under a name means all of them are functions.
+    /// The prelude's scope: every name its files declare but those of `@operator` functions.
+    /// More than one symbol under a name means all of them are functions; the same holds for `file_names`.
+    cc::map<cc::string, cc::vector<symbol_id>> prelude_names;
+    /// The user file's own scope, the inner one.
+    cc::map<cc::string, cc::vector<symbol_id>> file_names;
+    /// What the user file sees: `file_names` over `prelude_names`, where two overload sets of one name merge.
+    /// Built once every file is declared.
     cc::map<cc::string, cc::vector<symbol_id>> names;
     /// `@operator` functions by operator spelling.
     cc::map<cc::string, cc::vector<symbol_id>> operators;
@@ -158,6 +172,13 @@ struct checker
     [[nodiscard]] parsed_file const& file_of(i32 file) const { return files[file].file; }
     [[nodiscard]] ast::file_ast const& ast_of(i32 file) const { return files[file].ast; }
     [[nodiscard]] cc::string_view text_of(i32 file, source_span where) const { return file_of(file).text_of(where); }
+    /// The user file is the last one; every file before it is the prelude's.
+    [[nodiscard]] bool is_prelude_file(i32 file) const { return file < i32(files.size()) - 1; }
+    /// The module-level names a lookup from `file` finds: a prelude file never sees the user file's.
+    [[nodiscard]] cc::map<cc::string, cc::vector<symbol_id>> const& names_seen_from(i32 file) const
+    {
+        return is_prelude_file(file) ? prelude_names : names;
+    }
     [[nodiscard]] source_span span_of(i32 file, form_id form) const;
     [[nodiscard]] source_span span_of(i32 file, ast::expr_id expr) const;
     [[nodiscard]] source_span span_of(i32 file, ast::decl_id decl) const;
@@ -187,6 +208,10 @@ struct checker
     void declare_file(i32 file);
     void declare(i32 file, ast::decl_id decl);
     void add_symbol(symbol s, source_span name_where);
+    /// Lays the user file's scope over the prelude's into `names`.
+    void merge_scopes();
+    /// True where every symbol of `ids` is a function, so the name is an overload set (CHK-12, CHK-189).
+    [[nodiscard]] bool is_all_functions(cc::span<symbol_id const> ids) const;
 
     /// Compiles the symbol when nobody has, and reports a cycle when somebody is.
     /// The state it returns is `checked` or `failed`, or `in_compilation` for a cycle, which was reported at `where`.
@@ -211,16 +236,17 @@ struct checker
                                                              bool is_struct,
                                                              bool is_target_struct = false);
     /// The type an expression in a type position names; the error type when it names none.
-    [[nodiscard]] type_id resolve_type(i32 file, ast::expr_id expr);
+    /// Inside a body, `scope` holds the locals, which hide a module-level type of their name.
+    [[nodiscard]] type_id resolve_type(i32 file, ast::expr_id expr, function_scope const* scope = nullptr);
     /// `resolve_type` for the type of a value — a field, a parameter, a result, a local — where a buffer cannot stand.
     /// A buffer is a resource a binding member names, and is only ever read through a subscript.
-    [[nodiscard]] type_id resolve_value_type(i32 file, ast::expr_id expr);
+    [[nodiscard]] type_id resolve_value_type(i32 file, ast::expr_id expr, function_scope const* scope = nullptr);
     /// The type of the prelude's `@builtin struct` named `name`; without one it reports at `where` and is the error type.
     [[nodiscard]] type_id type_of_builtin(cc::string_view name, i32 file, source_span where);
     /// `buffer[element]`, or its `mut` form, interned: two mentions of one buffer type share an id.
     [[nodiscard]] type_id buffer_type(type_id element, bool is_mut);
     /// `buffer[T]` in a type position, which is the `index` node `buffer` heads.
-    [[nodiscard]] type_id resolve_buffer(i32 file, ast::expr_id expr, ast::index const& node);
+    [[nodiscard]] type_id resolve_buffer(i32 file, ast::expr_id expr, ast::index const& node, function_scope const* scope);
     /// True where `expr` is the bare name `name`, which is how a resource type is recognized before lookup.
     [[nodiscard]] bool is_named(i32 file, ast::expr_id expr, cc::string_view name) const;
 
@@ -256,8 +282,8 @@ struct checker
     void check_return(function_scope& scope, source_span where, ast::expr_id value);
     void check_break(function_scope& scope, source_span where, ast::expr_id value);
     void check_condition(function_scope& scope, ast::expr_id condition);
-    /// Declares a local, which shadows any earlier local or parameter of its name (CHK-53); always true.
-    bool declare_local(function_scope& scope, source_span name_where, local_name local);
+    /// Declares a local, which shadows every earlier local, parameter and module-level symbol of its name (CHK-53, CHK-54).
+    void declare_local(function_scope& scope, local_name local);
     /// A `loop:`; the result is the type its breaks carry, and `nothing` for one that is a statement.
     /// `has_break` is false for a loop nothing leaves, which never ends.
     [[nodiscard]] type_id check_loop(function_scope& scope,
