@@ -346,15 +346,10 @@ TEST("ssc::dxc + dx12 - raytraced spinning cube in a window", nx::config::manual
 
     // --- cube BLAS (built once, reused every frame) -------------------------------------------------
     auto const cube = make_cube_positions();
-    auto const vbuf = ctx.persistent.create_buffer<tg::pos3f>(
-        cube.size(), sg::buffer_usage::accel_structure_build_input | sg::buffer_usage::copy_dst);
+    auto const vbuf = ctx.persistent.create_buffer_from_data(cube, sg::buffer_usage::accel_structure_build_input);
 
     sg::blas_handle blas;
     {
-        auto up = ctx.create_command_list();
-        up->upload.data_to_buffer(vbuf, cube);
-        ctx.submit_command_list(cc::move(up));
-
         auto build = ctx.create_command_list();
         blas = build->raytracing.build_blas({{.vertices = vbuf.raw(), .vertex_count = cube.size()}});
         ctx.submit_command_list(cc::move(build));

@@ -40,23 +40,28 @@ TEST("sgl builtins - the registry generates a prelude that parses, and reads eve
     CHECK(r.at(float3).leaf_count == 3);
 
     // a record is one overload: the name and the parameter types, read from the signature's own text
-    sgl::builtin_type_id const on_vec3[] = {vec3, vec3};
-    sgl::builtin_type_id const on_float3[] = {float3, float3};
+    cc::string_view const on_vec3[] = {"vec3", "vec3"};
+    cc::string_view const on_float3[] = {"float3", "float3"};
     auto const dot_vec3 = r.find_function("dot", on_vec3);
     auto const dot_float3 = r.find_function("dot", on_float3);
     REQUIRE(sgl::is_valid(dot_vec3));
     REQUIRE(sgl::is_valid(dot_float3));
     CHECK(dot_vec3 != dot_float3);
     CHECK(r.at(dot_vec3).result == r.find_type("float"));
-    sgl::builtin_type_id const mixed[] = {vec3, float3};
+    cc::string_view const mixed[] = {"vec3", "float3"};
     CHECK(!sgl::is_valid(r.find_function("dot", mixed)));
 
     // no two records are the same overload, or a declaration could not say which one it stands for
     for (auto i = isize(0); i < r.functions.size(); ++i)
-        CHECK(r.find_function(r.functions[i].name, r.functions[i].parameters) == sgl::builtin_id(i));
+    {
+        auto parameters = cc::vector<cc::string_view>();
+        for (auto const& p : r.functions[i].parameters)
+            parameters.push_back(p);
+        CHECK(r.find_function(r.functions[i].name, parameters) == sgl::builtin_id(i));
+    }
 
     // the one name a target spells differently so far
-    sgl::builtin_type_id const on_mix[] = {float3, float3, r.find_type("float")};
+    cc::string_view const on_mix[] = {"float3", "float3", "float"};
     auto const mix = r.find_function("mix", on_mix);
     REQUIRE(sgl::is_valid(mix));
     CHECK(r.at(mix).called_in(builtins::language::hlsl) == "lerp");
@@ -66,15 +71,14 @@ TEST("sgl builtins - the registry generates a prelude that parses, and reads eve
 TEST("sgl builtins - what means nothing is not there: a position plus a position, a direction times a direction")
 {
     auto const& r = builtins::default_registry();
-    auto const pos3 = r.find_type("pos3");
     auto const vec3 = r.find_type("vec3");
     for (auto const& f : r.functions)
     {
-        auto const is_pair = [&](sgl::builtin_type_id a, sgl::builtin_type_id b)
+        auto const is_pair = [&](cc::string_view a, cc::string_view b)
         { return f.parameters.size() == 2 && f.parameters[0] == a && f.parameters[1] == b; };
-        if (is_pair(pos3, pos3))
+        if (is_pair("pos3", "pos3"))
             CHECK(f.result == vec3);
-        CHECK(!(is_pair(vec3, vec3) && f.name.starts_with("multiply")));
+        CHECK(!(is_pair("vec3", "vec3") && f.name.starts_with("multiply")));
     }
 }
 

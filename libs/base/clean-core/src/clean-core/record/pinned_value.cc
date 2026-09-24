@@ -26,10 +26,11 @@ bool cc::rec::impl::record_pinned_bytes(cc::rec::desc const& d, cc::pinned_data<
 {
     // Reserved BEFORE the pin is taken, so a rotation cannot land between the two and leave the reference on a chunk
     // the event does not end up in.
-    auto writer = rec::open_event(d, isize(sizeof(pinned_payload)));
+    auto writer = rec::open_event(d, isize(sizeof(pinned_payload)), isize(sizeof(pinned_payload)));
     if (!writer.is_open())
         return false;
 
+    // Still reachable despite the floor: a rotation during shutdown, with the pool gone, leaves the short tail in place.
     auto const out = writer.payload();
     if (out.size() < isize(sizeof(pinned_payload)))
         return false;

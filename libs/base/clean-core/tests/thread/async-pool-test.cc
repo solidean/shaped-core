@@ -109,6 +109,28 @@ TEST("async - external push from a foreign thread wakes a pool-parked dependent"
 
     CHECK(v == 42);
 }
+
+// The root's completion hook runs on the pushing thread, and the caller destroys the pool as soon as the wait returns.
+// So the wait must not return while that hook is still waking the pool.
+// The window is a few hundred nanoseconds, so this exercises it rather than reliably catching it, even under a sanitizer.
+TEST("async - a pool can be destroyed as soon as a root completed by a foreign thread is got",
+     nx::config::no_scheduler,
+     exclusive("cc-compute-async-pool"))
+{
+    auto got = 0;
+    for (auto i = 0; i < 200; ++i)
+    {
+        auto root = cc::make_async_manual<int>();
+        std::thread pusher;
+        {
+            cc::async_thread_pool pool(1);
+            pusher = std::thread([root] { root->push_value(7); });
+            got += cc::async_blocking_get_on(pool, root);
+        }
+        pusher.join();
+    }
+    CHECK(got == 200 * 7);
+}
 #endif
 
 TEST("async - two pools coexist; each drives its own submitted root", nx::config::no_scheduler)

@@ -20,7 +20,7 @@ class sr::impl::imgui_texture_routine : public sg::render_routine<imgui_texture_
 {
 public:
     /// Creates, updates and destroys GPU textures to match what imgui is asking for this frame.
-    void service_requests(sg::context& ctx, ImDrawData* draw_data) { _textures.service_requests(ctx, draw_data); }
+    void service_requests(sg::command_list& cmd, ImDrawData* draw_data) { _textures.service_requests(cmd, draw_data); }
 
     /// The texture behind an ImDrawCmd's id, or an error if imgui named one the registry never created.
     [[nodiscard]] cc::result<sg::texture_2d> try_texture_of(ImTextureID id) const
@@ -105,7 +105,10 @@ private:
     struct geometry
     {
         sg::buffer<ImDrawVert> vertices;
-        sg::buffer<u16> indices;
+
+        /// 32-bit, matching the `ImDrawIdx` our injected imgui config widens — an `ImDrawCmd`'s first index is
+        /// arbitrary, and a 16-bit one lands off the 4-byte boundary `sg::index_buffer_offset_alignment` requires.
+        sg::buffer<u32> indices;
     };
 
     /// Allocates this frame's transient vertex + index buffers and records their inline uploads.

@@ -12,7 +12,8 @@ struct sr::svgf_options
     int iterations = 4;
 
     /// How many measured noise widths a luminance difference may span and still average.
-    f32 luminance_sigma = 4.0f;
+    /// 5 is what `options_for` produces at the default sharpness, so the two spellings of "default" agree.
+    f32 luminance_sigma = 5.0f;
 
     /// How closely normals must agree, as the exponent on their dot product.
     f32 normal_power = 128.0f;
@@ -21,7 +22,8 @@ struct sr::svgf_options
     f32 depth_sigma = 0.02f;
 
     /// The smallest weight a new frame gets in the colour history once it is long; higher follows change faster and is noisier.
-    f32 color_alpha_min = 0.2f;
+    /// 0.125 is what `options_for` produces at the default responsiveness, so the two spellings of "default" agree.
+    f32 color_alpha_min = 0.125f;
 
     /// The same for the luminance moments the variance comes from.
     f32 moments_alpha_min = 0.2f;

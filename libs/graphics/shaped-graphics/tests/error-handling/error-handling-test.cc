@@ -1,4 +1,6 @@
+#include <clean-core/container/pinned_data.hh>
 #include <clean-core/container/span.hh>
+#include <clean-core/container/vector.hh>
 #include <clean-core/fwd.hh> // cc::byte, cc::u32
 #include <nexus/test.hh>
 #include <shaped-graphics/binding/binding.hh>
@@ -9,6 +11,7 @@
 #include <shaped-graphics/resource/buffer.hh>
 #include <shaped-graphics/resource/raw_buffer.hh>
 #include <shaped-graphics/resource/raw_texture.hh>
+#include <shaped-graphics/transfer/stream.hh>
 #include <shaped-graphics/types.hh>
 
 using namespace cc::primitive_defines;
@@ -119,6 +122,36 @@ INVOCABLE_TEST("sg error handling - inline upload validates its arguments", (sg:
     CHECK_ASSERTS(cmd->upload.bytes_to_buffer(dst, bytes, -1));  // negative offset
 
     ctx->drop_command_list(cc::move(cmd));
+}
+
+// ctx.upload, ctx.download and ctx.stream copy on the transfer queue, which nothing orders against the epoch boundary that recycles a transient resource.
+// So each must refuse a transient target at the call, rather than let the copy land in storage another epoch already owns.
+INVOCABLE_TEST("sg error handling - async transfers refuse a transient target", (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+
+    auto const buffer = ctx->transient.create_raw_buffer(256, copy_both);
+    auto const texture
+        = ctx->transient.create_texture_2d({.format = sg::pixel_format::rgba8_unorm,
+                                            .width = 4,
+                                            .height = 4,
+                                            .usage = sg::texture_usage::copy_src | sg::texture_usage::copy_dst});
+    REQUIRE(buffer != nullptr);
+    CHECK(buffer->scope() == sg::lifetime_scope::transient);
+    CHECK(texture.raw()->scope() == sg::lifetime_scope::transient);
+    CHECK(ctx->persistent.create_raw_buffer(16, copy_both)->scope() == sg::lifetime_scope::persistent);
+
+    auto const bytes = cc::make_pinned_data(cc::vector<byte>::create_filled(64, byte(1)));
+    auto const pixels = cc::make_pinned_data(cc::vector<byte>::create_filled(4 * 4 * 4, byte(1)));
+
+    CHECK_ASSERTS(ctx->upload.bytes_to_buffer(buffer, bytes));
+    CHECK_ASSERTS(ctx->upload.bytes_to_texture(texture.raw(), pixels));
+    CHECK_ASSERTS((void)ctx->download.bytes_from_buffer(buffer, 0, 64));
+    CHECK_ASSERTS((void)ctx->download.bytes_from_texture(texture.raw()));
+    CHECK_ASSERTS((void)ctx->stream.bytes_to_buffer(buffer, bytes));
+    CHECK_ASSERTS((void)ctx->stream.bytes_to_texture(texture.raw(), pixels));
+    CHECK_ASSERTS((void)ctx->stream.bytes_from_buffer(buffer, 0, 64));
+    CHECK_ASSERTS((void)ctx->stream.bytes_from_texture(texture.raw()));
 }
 
 INVOCABLE_TEST("sg error handling - inline download validates its arguments", (sg::context_handle const& ctx))

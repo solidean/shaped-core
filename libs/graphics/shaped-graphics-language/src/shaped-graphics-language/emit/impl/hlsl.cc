@@ -1,6 +1,7 @@
 #include "dialect.hh"
 
 #include <clean-core/string/format.hh>
+#include <shaped-graphics-language/check/resources.hh>
 
 namespace
 {
@@ -12,6 +13,13 @@ using namespace sgl::emit::impl;
 /// The space slib's binding pass gives the inline constants of a dx12 pipeline, `slib::inline_constants_space`.
 /// sgl does not link slib, so the number is repeated here, and the pipeline layout sg builds is what it has to match.
 constexpr auto k_dx12_inline_constants_space = 9;
+
+/// HLSL's texture and image types, parallel to `texture_shape`; an image has no multisampled or cube form.
+constexpr cc::string_view k_texture_names[]
+    = {"Texture1D",        "Texture1DArray", "Texture2D",   "Texture2DArray",  "Texture2DMS",
+       "Texture2DMSArray", "Texture3D",      "TextureCube", "TextureCubeArray"};
+constexpr cc::string_view k_image_names[]
+    = {"RWTexture1D", "RWTexture1DArray", "RWTexture2D", "RWTexture2DArray", "", "", "RWTexture3D", "", ""};
 
 /// `position` -> `POSITION`, which is how a dx12 input layout names a vertex attribute.
 cc::string upper_cased(cc::string_view name)
@@ -99,7 +107,7 @@ public:
     void write_group(cc::string& out,
                      plan const& p,
                      planned_constants const* block,
-                     cc::span<planned_buffer const> buffers) const override
+                     cc::span<planned_resource const> buffers) const override
     {
         if (block != nullptr)
         {
@@ -118,11 +126,61 @@ public:
         if (block != nullptr)
             out.appendf("    ConstantBuffer<{}> {};\n", block->block_name, block->name);
         for (auto const& b : buffers)
-            out.appendf("    {}StructuredBuffer<{}> {};\n", b.is_mut ? "RW" : "", type_text(p, *this, b.element), b.name);
+            write_resource(out, p, b);
         out += "}\n\n";
     }
 
-    [[nodiscard]] cc::string buffer_reference(planned_buffer const& b) const override
+    void write_resource(cc::string& out, plan const& p, planned_resource const& b) const
+    {
+        auto const& t = p.m.at(b.type);
+        if (t.kind == type_kind::image)
+            // slib's `#pragma sc format` states the format, which vulkan's SPIR-V wants and dx12 leaves to the view.
+            out.appendf("#pragma sc format {}\n", k_storage_formats[t.format].name);
+        if (t.kind == type_kind::sampler && b.static_sampler >= 0)
+            write_static_sampler(out, p.m.samplers[b.static_sampler]);
+        out.appendf("    {} {};\n", resource_text(p, b.type), b.name);
+    }
+
+    [[nodiscard]] cc::string resource_text(plan const& p, type_id type) const override
+    {
+        auto const& t = p.m.at(type);
+        switch (t.kind)
+        {
+        case type_kind::buffer:
+            return cc::format("{}StructuredBuffer<{}>", t.is_mut ? "RW" : "", type_text(p, *this, t.element));
+        case type_kind::texture:
+            // A depth texture samples to one float, which is how HLSL declares it.
+            return cc::format("{}<{}>", k_texture_names[isize(t.shape)],
+                              t.is_depth ? cc::string_view("float") : type_text(p, *this, t.element));
+        case type_kind::image:
+            return cc::format("{}<{}>", k_image_names[isize(t.shape)], builtin_spelling(p, texel_name_of(t.format)));
+        case type_kind::sampler:
+            return t.is_comparison ? "SamplerComparisonState" : "SamplerState";
+        default:
+            return {};
+        }
+    }
+
+    /// slib's `#pragma sc static` states the sampler, and its keys are `sg::sampler`'s fields.
+    static void write_static_sampler(cc::string& out, sampler_state const& s)
+    {
+        out.appendf("#pragma sc static filter=({}, {}, {}) address=({}, {}, {})", k_sampler_filters[s.min_filter],
+                    k_sampler_filters[s.mag_filter], k_sampler_filters[s.mip_filter], k_sampler_addresses[s.address_u],
+                    k_sampler_addresses[s.address_v], k_sampler_addresses[s.address_w]);
+        if (s.compare >= 0)
+            out.appendf(" compare={}", k_compare_ops[s.compare]);
+        if (s.max_anisotropy != 1)
+            out.appendf(" max_anisotropy={}", s.max_anisotropy);
+        if (s.min_lod != 0.0f)
+            out.appendf(" min_lod={}", s.min_lod);
+        if (s.max_lod != sampler_state{}.max_lod)
+            out.appendf(" max_lod={}", s.max_lod);
+        if (s.mip_lod_bias != 0.0f)
+            out.appendf(" mip_lod_bias={}", s.mip_lod_bias);
+        out += "\n";
+    }
+
+    [[nodiscard]] cc::string resource_reference(planned_resource const& b) const override
     {
         return cc::format("{}::{}", b.group_name, b.name);
     }

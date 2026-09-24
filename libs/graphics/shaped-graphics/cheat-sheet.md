@@ -91,6 +91,9 @@ ctx.accepts_shader_format(f)                       // bool — hand this to slib
 ctx.supports(sg::feature::raytracing)              // bool — THE capability question; feature is deliberately coarse (see context/capabilities.hh)
                                                    //   raytracing | timestamp_query | headless_present | geometry_shader | tessellation_shader | binding_arrays
                                                    //   | readwrite_storage_formats (false on core webgpu: read_write storage only in r32 formats)
+                                                   //   | float32_filtering (filter r32/rg32/rgba32_float) | extended_storage_formats (storage beyond is_portable_storage_format)
+                                                   //   | unaligned_block_compression (false on webgpu and metal: a BC texture needs whole 4x4 blocks,
+                                                   //     and create_texture THROWS on one that has not; desc.unaligned_block_error(supports) asks first)
                                                    //   binding_arrays false (webgpu) = no count > 1 bindings, no staging_binding_group, no bindless_array
                                                    //   the per-scope bools (cmd.raytracing.is_supported(), cmd.query.is_supported(),
                                                    //   ctx.supports_headless_present()) all forward here, so there is one answer per question
@@ -115,6 +118,7 @@ ctx.create_command_list()                          // -> std::unique_ptr<command
 ctx.create_swapchain(swapchain_description = {})   // -> swapchain_handle (throws sg::swapchain_creation_exception / device_lost); see the swapchain section
 ctx.try_create_swapchain(swapchain_description = {})  // -> cc::result<swapchain_handle>  (fallible twin)
 // PREFER the typed factories below (create_buffer<T> / create_texture_2d) — raw_* is the byte-level escape hatch.
+// PREFER create_buffer_from_data / _from_pod / _from_bytes over create_buffer + an upload, for a buffer that starts filled.
 // PREFER ctx.transient for anything sized by the current frame; ctx.persistent only for what outlives it.
 ctx.persistent.create_raw_buffer(size, usage, alloc={})     // -> raw_buffer_handle  (throws sg::allocation_exception; size>=0, 0 = empty, no alloc)
                                                    //   resource creation lives on the lifetime scope (sg::context_persistent_scope)
@@ -315,6 +319,9 @@ cmd.raster.set_stencil_reference(u32) / .set_blend_constants(tg::vec4f)  // void
 cmd.raster.set_inline_constants(data|POD, offset={})   // void — root/push constants (same as cmd.compute)
 cmd.raster.draw({.vertex_range={.offset=0,.size=3}, .instance_range={.offset=0,.size=1}})   // void — ranges are cc::offset_size {first, count}
 cmd.raster.draw_indexed({.index_range={.offset=0,.size=N}, .instance_range={.offset=0,.size=1}, .vertex_offset=0})  // void
+//   GOTCHA: view.offset_in_bytes + index_range.offset*index_size must be 4-byte aligned (sg::index_buffer_offset_alignment).
+//   So an ODD first index into a uint16 buffer asserts — metal draws only part of the mesh, silently, and dx12/vulkan do not mind.
+//   sg::is_aligned_index_fetch(format, view_offset, first_index) -> bool   // ask instead of asserting
 ```
 
 ## sg::gpu_timestamp — result of cmd.query.record_gpu_timestamp
@@ -375,6 +382,13 @@ sg::buffer<T>                              // GPU-side span<T>: wraps a raw_buff
 // create typed (preferred): element_count -> byte size = count * sizeof(T); returns the wrapped buffer<T>:
 ctx.persistent.create_buffer<Particle>(1000, usage, alloc={})  // -> sg::buffer<Particle>  (+ try_ twin)
 ctx.transient.create_buffer<Particle>(64, usage)               // -> sg::buffer<Particle>  (transient; no allocation_info)
+// create FILLED (preferred for a buffer with contents): sized to the data, filled via ctx.upload — no command list; usage gains copy_dst:
+ctx.persistent.create_buffer_from_data(particles, usage, alloc={})  // -> sg::buffer<T>, T = the range's element (vector, span, pinned_data, C array)
+ctx.persistent.create_buffer_from_pod(params, usage, alloc={})      // -> sg::buffer<T> holding one element
+ctx.persistent.create_buffer_from_bytes(bytes, usage, alloc={})     // -> raw_buffer_handle (a byte range)
+ctx.transient.create_buffer_from_data / _from_pod / _from_bytes(cmd, …, usage)  // transient: uploaded INLINE into cmd, visible to its later commands
+//   a transient resource can never be the target of ctx.upload / ctx.download / ctx.stream — those assert (raw_buffer::scope())
+//   an rvalue owner or a pinned_data is uploaded in place; an lvalue / span / C array is copied once. a later list reading it auto-waits
 sg::buffer<T>::from_raw(raw_handle)         // wrap a raw handle: byte size must be a whole number of T (asserts); try_from_raw -> cc::optional
 sg::buffer<T>::from_raw_clamped(raw_handle) // wrap, flooring to whole elements (a trailing partial element is ignored)
 buf.reinterpret_as<U>()                     // -> buffer<U>; static_assert sizeof(T)%sizeof(U)==0 (U tiles T, e.g. buffer<vec3f>->buffer<float>)
@@ -407,6 +421,9 @@ sg::is_srgb_format(f)           // bool  — hardware applies the sRGB transfer 
 sg::is_compressed_format(f)     // bool  — BC block-compressed (4x4 blocks)
 sg::supports_typed_uav(f)       // bool  — can carry a typed UAV, i.e. texture_usage::readwrite_texture; false for sRGB, BC and depth
                                 //         an sRGB format is still RENDERABLE, so a raster pass is how you write one (sr::raster_box_filter_mipmap_routine)
+sg::is_portable_storage_format(f) // bool — storage every device takes (core WebGPU's set); any other typed-UAV format needs
+                                  //         feature::extended_storage_formats, so gate compute writes on both
+sg::is_float32_format(f)        // bool  — r32/rg32/rgba32_float: filtering one needs feature::float32_filtering
 sg::format_block_size(f)        // int   — bytes per texel, or per 4x4 block for BC (0 for undefined)
 sg::format_block_extent(f)      // int   — 1 (uncompressed) or 4 (BC)
 sg::format_aspect_count(f)      // int   — subresource planes (1, or 2 for depth+stencil)
@@ -559,7 +576,7 @@ sg::compare_op              // never|less|equal|less_equal|greater|not_equal|gre
 //                                  DYNAMIC = named_sampler on create_binding_group (written to a sampler heap).
 // per backend: dx12 puts them in their own descriptor heap + root table, vulkan makes a group's statics the set
 //   layout's immutable samplers, metal writes them into the group's argument buffer at their binding index.
-//   A pipeline-level static sampler (one on no group) is dx12 only so far.
+//   A pipeline-level static sampler (a bound_sampler, on no group): dx12 and webgpu bind it; vulkan and metal refuse the pipeline layout.
 ```
 
 ## bindings & compiled shaders — reflection data model  (see docs/concepts/bindings.md)
@@ -630,6 +647,7 @@ layout->structural_hash()                // -> cc::hash128 on binding_group_layo
 // layouts + pipelines are schemas/PSOs (not lifetime-scoped) -> the RAW ctx.uncached scope. Prefer ctx.cached (below).
 ctx.uncached.create_binding_group_layout(span<binding const>, span<named_sampler const> statics={})  // -> binding_group_layout_handle (name-matched statics baked into the root sig by the pipeline layout; + try_ twin)
 ctx.uncached.create_pipeline_layout({.groups={gl0, gl1, ...}, .static_samplers={...}})  // -> pipeline_layout_handle (ordered group layouts + extra register-bound static samplers -> one root signature; + try_ twin)
+                            //   non-empty .static_samplers on vulkan / metal: try_ returns an error, this throws sg::pipeline_creation_exception
 ctx.uncached.create_compute_pipeline({.shader=, .layout=})               // -> compute_pipeline_handle (.layout is a pipeline_layout; blocking build; throws sg::pipeline_creation_exception; + try_ twin)
 ctx.uncached.create_raster_pipeline({.layout=, .vertex_shader=, .fragment_shader=, .vertex_input=, .color_targets={{...}}, ...})  // -> raster_pipeline_handle (blocking build; throws; + try_ twin)
 ctx.uncached.create_compute_pipeline_async(desc)  // -> shared_async<compute_pipeline_handle>; free-threaded; the desc's shader must outlive it (+ _raster_ twin)
@@ -644,9 +662,11 @@ sg::declared_inline_constants  // { static binding inline_binding(); } — a gen
 ctx.cached.acquire_pipeline_layout<frame, work, constants>(static_samplers = {})
                              // -> pipeline_layout_handle from generated types alone: each binding set is the group at its
                              //    position among the sets, and one inline-constants type is the inline block
+                             //    non-empty static_samplers THROW sg::pipeline_creation_exception on vulkan / metal (no try_ twin)
 ctx.cached.acquire_binding_group_layout<G>()                    // -> binding_group_layout_handle from G's declarations alone
 ctx.cached.acquire_binding_group_layout<G>(span<named_sampler const>)  // + static samplers G left undeclared; one it DID declare asserts
-ctx.transient.create_binding_group(layout, G{...})              // -> binding_group_handle; the layout is PASSED IN, not re-acquired per call
+ctx.transient.create_binding_group(cmd, layout, G{...})         // -> binding_group_handle; the layout is PASSED IN, not re-acquired per call
+                                                                //   cmd: the list it is used in; a G with plain members uploads its constants inline there
 ctx.persistent.create_binding_group(layout, G{...})             // which scope you call IS the lifetime
                                     // a sampler G gathers that `layout` declares static is dropped, so the
                                     // samplers overload above pairs with this
@@ -673,6 +693,7 @@ sbg->set_sampler(slot, sampler) / unset_sampler(slot)  // void — dynamic sampl
 // by NAME (asserts the binding exists) — the one-shot whole-binding calls only; per-element work runs off a resolved slot, which is the point of having one:
 sbg->set_binding(name, raw_view) / set_array(name, views) / unset_array(name) / set_sampler(name, sampler) / unset_sampler(name)
 sbg->snapshot()                       // -> binding_group_handle — SAME handle while nothing changed since the last one; throws sg::binding_group_exception (+ try_ twin)
+                                      // a view set without its feature (float32 on a filterable binding) is never written and fails every snapshot until the binding is replaced whole
 sbg->is_dirty() / sbg->layout()       // -> bool / binding_group_layout_handle const&
                                       // starts FULLY VACANT, but EVERY binding must be set once before the first snapshot (static samplers excepted) — say what it holds,
                                       //   even if that is nothing: unset_array, or an empty range, answers it. array elements themselves may stay vacant
@@ -707,7 +728,8 @@ cmd.compute.declare_array_texture_access(name, elements) // void — same for a 
                                                          // (scalar bindings are inferred; arrays can't be — declare them; cmd.raytracing has the same pair)
                                                          // ACCOUNTED FOR: dispatch asserts every bound array binding was declared; empty span = "unused"
 
-// raster_pipeline — a graphics PSO. Owns its shaders; formats/state baked in (must match the rendering scope). Draws via cmd.raster (above).
+// raster_pipeline — a graphics PSO. Owns its shaders; formats/state baked in. Draws via cmd.raster (above).
+//   bind_pipeline ASSERTS the rendering's color count/formats, depth format and sample count equal pipeline.target_formats()
 sg::raster_pipeline_description   // { pipeline_layout_handle layout; compiled_shader vertex_shader; optional<compiled_shader> fragment_shader;
                                   //   optional<compiled_shader> tessellation_control_shader/tessellation_evaluation_shader (both-or-neither, need patch_list); optional<compiled_shader> geometry_shader;
                                   //   vertex_input_layout vertex_input; primitive_topology topology=triangle_list; int patch_control_points=0 (1..32, patch_list only); rasterization_state; depth_stencil_state;
@@ -721,6 +743,8 @@ sg::vertex_input_layout           // { small_vector<vertex_input_slot,8> slots; 
 // state vocab (backend-neutral enums; primitive_topology.hh / rasterization_state.hh / blend_state.hh / depth_stencil_state.hh):
 //   primitive_topology {point_list,line_list,line_strip,triangle_list,triangle_strip,patch_list}  fill_mode{solid,wireframe}  cull_mode{none,front,back}  front_face{counter_clockwise,clockwise}
 //   blend_factor / blend_op / color_channel {r,g,b,a} with color_write_mask = cc::flags<color_channel> and color_write_mask_all  stencil_op  depth_stencil_state reuses sg::compare_op (from sampler.hh)
+//   depth_stencil_state { depth_test, depth_write, depth_compare, stencil_test, stencil_read_mask, stencil_write_mask, stencil_front, stencil_back }
+//   blend presets: sg::blend_alpha, sg::blend_premultiplied_alpha, sg::blend_additive — opaque is an unset `blend`
 //   vertex_attribute_format {f32,vec2f,vec3f,vec4f, i32.., u32.., rgba8_unorm, rgba8_uint}   index_format {uint16, uint32}
 raster_pipeline.cached_pipeline_data()  // -> pinned_data<byte const> — serialized PSO blob; persist + feed back via desc.cached_pipeline (empty if unsupported)
 // Access is inferred from each op (upload⇒copy_write, dispatch⇒bound views' access); no public
@@ -742,6 +766,9 @@ sg::tlas_instance  { blas_handle blas; float transform[12] ROW-MAJOR 3x4 (transf
 sg::accel_build_flag    // fast_trace(default)/fast_build/allow_update/allow_compaction/minimize_memory
 sg::accel_build_flags   // cc::flags<accel_build_flag> — a set of them; combine with |, test with .has()
 sg::index_format        // uint16 | uint32  — index-buffer element width (shared with draw's bind_index_buffer)
+sg::index_size_in_bytes(format)          // -> 2 | 4
+sg::index_buffer_offset_alignment        // 4 — portable floor an index fetch must start on
+sg::is_aligned_index_fetch(fmt, off, i)  // -> bool; the rule over (view offset + first index)
 sg::instance_cull_mode  // back(default) | front | none
 
 // recording (on a command_list, via the cmd.raytracing scope). Sizes+allocates the persistent result from a
@@ -796,6 +823,10 @@ ctx.cached.acquire_pipeline_layout({.groups={gl0, ...}})       // -> pipeline_la
 ctx.cached.acquire_compute_pipeline({.shader=, .layout=})      // -> sg::async_compute_pipeline  async PSO build; identical (shader, pipeline layout) => one node
                                                                //   drive: cc::async_blocking_get(p) -> compute_pipeline_handle; or poll p->is_ready()/try_value()
 ctx.cached.acquire_raster_pipeline(raster_desc)               // -> sg::async_raster_pipeline  async PSO build; keyed on all shaders + layout + vertex input + every fixed-function state
+ctx.cached.acquire_raster_pipeline(source, parts, customize)  // any sg::raster_pipeline_source: `source.description(ctx, parts, customize)` is acquired
+                                                              //   — a generated SGL pipeline is one: acquire_raster_pipeline(shaders::cube.pipeline, {.color = f})
+                                                              //   parts is `S::open`, not deduced, so a braced {.field = …} works; customize edits the description last
+ctx.cached.acquire_raster_pipeline(shared_async<desc>)       // the same once a description arrives; its failure is the result's
                                                                //   NOT keyed on .cached_pipeline — that blob only accelerates a build
 ctx.cached.acquire_raytracing_pipeline(rt_desc)               // -> sg::async_raytracing_pipeline  async state-object build; keyed on all shaders + layout + limits
 ctx.cached.cache()                                             // -> pipeline_cache&  to install extra tiers / run bookkeeping

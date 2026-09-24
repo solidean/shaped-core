@@ -221,8 +221,11 @@ texture              [in progress]  raw_texture + texture<Traits> + pixel_format
                                   SRV/UAV + RTV/DSV views and host↔device copies done; device→device copies remain
 pipeline             [in progress]  compute + raster pipelines and the bind path (dx12 real, vulkan stub); shaders are
                                   compiled by shaped-shader-compiler-dxc. Raster PSO caching is the remaining gap
-sampler              [in progress]  sampler + static/dynamic samplers; dx12 real (root-sig static samplers
-                                  + a separate sampler descriptor heap for dynamic ones); vulkan pending
+sampler              [in progress]  sampler + static/dynamic samplers. A group's static sampler (named_sampler on the
+                                  group layout) binds on all four: dx12 root-sig static samplers, vulkan immutable
+                                  samplers, metal argument-buffer entries, webgpu the layout's own sampler.
+                                  A pipeline-level one (bound_sampler) binds on dx12 and webgpu; vulkan and metal
+                                  refuse the pipeline layout. dx12 keeps dynamic ones in a separate sampler heap
 accel structures     [in progress]  ray-tracing blas/tlas: recorded build on cmd.raytracing (build_blas for
                                   triangles + procedural AABBs, build_tlas, is_supported), result sized from a
                                   prebuild query with transient scratch, persistent handles across epochs;
@@ -257,12 +260,12 @@ See [concepts/epochs.md](concepts/epochs.md).
 ## Initial implementation order
 
 ```text
-1. core types + backend bridge stubs + dx12/vulkan stubs   [in progress]  (this bootstrap)
-2. command_list buffer inline upload / download / copy     [in progress]  dx12 real; vulkan pending
-3. real dx12 + vulkan backends for (2) (+ SDK detection)   [in progress]  dx12 done; vulkan is a TODO stub
-4. textures + views                                        [in progress]  resource, creation, views and host↔device copies done (dx12 real, vulkan minimal); texel buffer views remain
-5. pipelines + shaders                                     [in progress]  compute + raster bind paths dx12-real, DXC compiler in place (vulkan pending)
-6. presentation (swapchain/surface) + submission/sync      [in progress]  dx12 swapchain real (WARP-tested); vulkan pending
-7. tier 2 backends (metal, webgpu)                         [in progress]  webgpu real on wasm but ray tracing; metal planned
+1. core types + backend bridge stubs + dx12/vulkan stubs   [done]
+2. command_list buffer inline upload / download / copy     [done]         dx12 and vulkan both real
+3. real dx12 + vulkan backends for (2) (+ SDK detection)   [done]
+4. textures + views                                        [in progress]  resource, creation, views and host↔device copies real on dx12 and vulkan; texel buffer views remain
+5. pipelines + shaders                                     [in progress]  compute + raster bind paths real on dx12 and vulkan, DXC compiler in place
+6. presentation (swapchain/surface) + submission/sync      [done]         dx12 (WARP-tested) and vulkan
+7. tier 2 backends (metal, webgpu)                         [in progress]  metal covers the whole surface; webgpu is real but ray tracing
 8. legacy backends (opengl, webgl)                         [planned]
 ```

@@ -60,8 +60,8 @@ Give a subagent the branch and that file, withhold everything else, and ask per 
 Have it look up every symbol the comment names.
 The two things it catches are a decision that lost its specifics on the way out, and a claim about the code that stopped being true.
 
-**Group it `finalize`**, which exempts it from the three context tiers.
-A draft comment needs no cold tier: it is not a finding, and the reader has been in the review for several rounds by the time it appears.
+**Group it `finalize`.**
+A draft comment is not a finding, and the reader has been in the review for several rounds by the time it appears.
 
 ## The ask
 

@@ -1,9 +1,29 @@
 #pragma once
 
 #include <clean-core/container/span.hh>
+#include <clean-core/function/unique_function.hh>
+#include <clean-core/thread/async.hh>
 #include <shaped-graphics/binding/binding_group.hh>   // sg::declared_binding_set, and the sampler merge below
 #include <shaped-graphics/binding/pipeline_layout.hh> // acquire_pipeline_layout<Ts...> fills a description
 #include <shaped-graphics/fwd.hh>
+
+#include <concepts>
+
+namespace sg
+{
+/// Edits a raster pipeline's description last, after everything its source stated.
+using raster_pipeline_customize = cc::unique_function<void(raster_pipeline_description&)>;
+
+/// Something that describes a raster pipeline for a context, given the parts it leaves to the caller as `S::open`.
+/// A generated SGL `pipeline` is one, which is what lets `ctx.cached.acquire_raster_pipeline(shaders::cube.pipeline, {.color = f})` build it.
+/// sg knows nothing else about it: the description is what is acquired, so the cache key is the description's.
+template <class S>
+concept raster_pipeline_source = requires(S const& source, context& ctx, typename S::open const& parts) {
+    {
+        source.description(ctx, parts, raster_pipeline_customize())
+    } -> std::same_as<cc::shared_async<raster_pipeline_description>>;
+};
+} // namespace sg
 
 /// Cache facade for a context's built-in pipeline_cache, reached as `ctx.cached`.
 /// `acquire` is the get-or-create verb: identical arguments return the already-built handle / async node instead of rebuilding.
@@ -70,6 +90,20 @@ public:
     /// Drive with cc::async_blocking_get, or poll .is_ready() / .try_value(); a build failure surfaces as an async error.
     /// Acquire the pipeline layout through this scope too for full dedup (see pipeline_cache).
     [[nodiscard]] async_raster_pipeline acquire_raster_pipeline(raster_pipeline_description const& desc);
+
+    /// The same, once `desc` is known: what a pipeline source's description is acquired through.
+    /// A failed description is the returned async's failure.
+    [[nodiscard]] async_raster_pipeline acquire_raster_pipeline(cc::shared_async<raster_pipeline_description> desc);
+
+    /// The pipeline `source` describes, with `parts` stated and `customize` applied to the description last.
+    /// `parts` is not deduced, so `{.color = f}` names the source's own open parts.
+    template <raster_pipeline_source S>
+    [[nodiscard]] async_raster_pipeline acquire_raster_pipeline(S const& source,
+                                                                typename S::open const& parts = {},
+                                                                raster_pipeline_customize customize = {})
+    {
+        return acquire_raster_pipeline(source.description(_ctx, parts, cc::move(customize)));
+    }
 
     /// The async raytracing_pipeline for `desc`, built on a miss.
     /// Drive with cc::async_blocking_get, or poll .is_ready() / .try_value(); a build failure surfaces as an async error.

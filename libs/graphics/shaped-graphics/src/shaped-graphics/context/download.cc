@@ -4,11 +4,14 @@
 #include <shaped-graphics/context/download.hh>
 #include <shaped-graphics/fwd.hh> // std::unique_ptr / std::shared_ptr
 #include <shaped-graphics/resource/impl/texture_copy_region.hh>
+#include <shaped-graphics/transfer/impl/async_target.hh>
 
 namespace sg
 {
 bytes_future context_download_scope::bytes_from_buffer(raw_buffer_handle buffer, isize offset_in_bytes, isize size_in_bytes)
 {
+    CC_ASSERT(buffer != nullptr, "async download source buffer is null");
+    impl::assert_async_transfer_target(*buffer);
     return _ctx.async_download_bytes_from_buffer(cc::move(buffer), offset_in_bytes, size_in_bytes);
 }
 
@@ -17,6 +20,8 @@ bytes_future context_download_scope::bytes_from_texture(raw_texture_handle textu
                                                         cc::optional<texture_region> region)
 {
     // No region reads the whole subresource; a given region is used as-is, bounds-checked, and an empty one returns a ready, empty future.
+    CC_ASSERT(texture != nullptr, "async download source texture is null");
+    impl::assert_async_transfer_target(*texture);
     impl::assert_valid_subresource(texture, subresource);
     texture_region const box = region.has_value() ? region.value() : impl::full_subresource_region(texture, subresource);
     impl::assert_texture_region_in_bounds(texture, subresource, box);

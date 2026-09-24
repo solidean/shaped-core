@@ -1,0 +1,38 @@
+// The cube of cube.sgl, drawn by a pipeline its file declares.
+// The host acquires `pipeline` and states only the swapchain's format, which no shader can know.
+
+@inline binding constants:
+    view_projection: mat4
+
+@vertex struct cube_vertex:
+    position: pos3
+    normal: vec3
+    color: float3
+
+@pixel struct target:
+    @format(.host) color: float4
+
+struct pixel_input:
+    @position position: hpos4
+    normal: vec3
+    color: float3
+
+@vertex fun main_vs(v: cube_vertex){constants} -> pixel_input:
+    return {
+        position = constants.view_projection * v.position
+        normal = v.normal
+        color = v.color
+    }
+
+@pixel fun main_ps(p: pixel_input) -> target:
+    return {
+        color = float4(..p.color, 1.0)
+    }
+
+pipeline:
+    vertex = main_vs
+    pixel = main_ps
+    cull = .back
+    depth_test = true
+    depth_write = true
+    depth_stencil_format = .depth32_float

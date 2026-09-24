@@ -267,3 +267,5 @@ if(SC_BUILD_TESTS)
     # Browser test runner (Emscripten only); a no-op on native toolchains.
     sc_add_nexus_web_runner(shaped-rendering-test)
 endif()
+
+add_subdirectory(examples)

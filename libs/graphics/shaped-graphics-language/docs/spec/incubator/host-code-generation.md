@@ -44,7 +44,7 @@ That is why `-` is not a symbol character, and why snake_case is the convention 
 * The type system: every type that may appear in a mirrored struct needs one defined host type and one defined layout.
 * [Vector and format types](vector-and-format-types.md): `pos3` mirrors a `tg` type, and `rgba8` names a format the host knows.
 * [Binding effects](binding-effects.md): the binding list of an entry point is what numbers its groups.
-* A `pipeline` declaration, which would state a whole pipeline in SGL: [pipeline-declarations.md](pipeline-declarations.md).
+* A `pipeline` declaration, which states a whole pipeline in SGL: [pipelines.md](../pipelines.md).
 
 ## Already fixed by the syntax
 
@@ -57,5 +57,4 @@ That is why `-` is not a symbol character, and why snake_case is the convention 
 
 * Whether a name that is a keyword in a host language is an error, a warning, or mangled.
 * Which host languages besides C++ are targets.
-* `@format` on a `@pixel struct` member, which would fix a target's format rather than leave it to the pipeline.
 * A shader used both with one vertex buffer and split over several, which the generated convenience does not cover.

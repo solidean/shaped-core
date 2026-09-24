@@ -102,13 +102,10 @@ ASYNC_INVOCABLE_TEST("sv - path-traced Cornell box (headless)", (sg::context_han
             records.clear();
             records.push_back(resources.describe_instance(cmd, item.mesh, item.instance));
 
-            auto const frame = ctx.transient.create_buffer<sv::pt_frame_constants_gpu>(
-                1, sg::buffer_usage::uniform_buffer | sg::buffer_usage::copy_dst);
-            cmd.upload.pod_to_buffer(frame, fc);
+            auto const frame = ctx.transient.create_buffer_from_pod(cmd, fc, sg::buffer_usage::uniform_buffer);
 
-            auto const background = ctx.transient.create_buffer<sv::background_gpu>(
-                1, sg::buffer_usage::uniform_buffer | sg::buffer_usage::copy_dst);
-            cmd.upload.pod_to_buffer(background, sv::background_gpu::from(bg));
+            auto const background = ctx.transient.create_buffer_from_pod(cmd, sv::background_gpu::from(bg),
+                                                                         sg::buffer_usage::uniform_buffer);
 
             // rgba32_float, which the routine asserts on: the raygen reads the target back to blend into it.
             auto const target = ctx.transient.create_texture_2d(
@@ -118,9 +115,8 @@ ASYNC_INVOCABLE_TEST("sv - path-traced Cornell box (headless)", (sg::context_han
                  .usage = sg::texture_usage::readonly_texture | sg::texture_usage::readwrite_texture});
 
             // One `sv::instance` per TLAS instance: where this item's material parameters live, and its geometry.
-            auto const instance_table = ctx.transient.create_buffer<sv::instance_gpu>(
-                records.size(), sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);
-            cmd.upload.data_to_buffer(instance_table, records);
+            auto const instance_table
+                = ctx.transient.create_buffer_from_data(cmd, records, sg::buffer_usage::readonly_buffer);
             auto const light_buffer = sv_test::upload_lights(cmd, lights);
 
             // The tables the closest-hit reaches all of that through, locked for the recording.
@@ -197,13 +193,11 @@ ASYNC_INVOCABLE_TEST("sv::pathtrace_routine - a material that does not compile c
         auto records = cc::vector<sv::instance_gpu>();
         records.push_back(resources.describe_instance(cmd, item.mesh, item.instance));
 
-        auto const frame = ctx.transient.create_buffer<sv::pt_frame_constants_gpu>(
-            1, sg::buffer_usage::uniform_buffer | sg::buffer_usage::copy_dst);
-        cmd.upload.pod_to_buffer(frame, sv::pt_frame_constants_gpu{.samples_per_pixel = 1, .max_bounces = 1});
+        auto const frame = ctx.transient.create_buffer_from_pod(
+            cmd, sv::pt_frame_constants_gpu{.samples_per_pixel = 1, .max_bounces = 1}, sg::buffer_usage::uniform_buffer);
 
-        auto const background = ctx.transient.create_buffer<sv::background_gpu>(
-            1, sg::buffer_usage::uniform_buffer | sg::buffer_usage::copy_dst);
-        cmd.upload.pod_to_buffer(background, sv::background_gpu::from(sv::background{}));
+        auto const background = ctx.transient.create_buffer_from_pod(cmd, sv::background_gpu::from(sv::background{}),
+                                                                     sg::buffer_usage::uniform_buffer);
 
         auto const target = ctx.transient.create_texture_2d(
             {.format = sg::pixel_format::rgba32_float,
@@ -211,9 +205,8 @@ ASYNC_INVOCABLE_TEST("sv::pathtrace_routine - a material that does not compile c
              .height = size[1],
              .usage = sg::texture_usage::readonly_texture | sg::texture_usage::readwrite_texture});
 
-        auto const instance_table = ctx.transient.create_buffer<sv::instance_gpu>(
-            records.size(), sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);
-        cmd.upload.data_to_buffer(instance_table, records);
+        auto const instance_table
+            = ctx.transient.create_buffer_from_data(cmd, records, sg::buffer_usage::readonly_buffer);
 
         auto const bindless = resources.freeze();
         return sv::pathtrace_routine::execute(cmd, {.frame = frame,
@@ -331,17 +324,13 @@ ASYNC_INVOCABLE_TEST("sv - a path-traced textured material builds its sampler gr
             auto records = cc::vector<sv::instance_gpu>();
             records.push_back(resources.describe_instance(cmd, item.mesh, item.instance));
 
-            auto const frame = ctx.transient.create_buffer<sv::pt_frame_constants_gpu>(
-                1, sg::buffer_usage::uniform_buffer | sg::buffer_usage::copy_dst);
-            cmd.upload.pod_to_buffer(frame, fc);
+            auto const frame = ctx.transient.create_buffer_from_pod(cmd, fc, sg::buffer_usage::uniform_buffer);
 
-            auto const background = ctx.transient.create_buffer<sv::background_gpu>(
-                1, sg::buffer_usage::uniform_buffer | sg::buffer_usage::copy_dst);
-            cmd.upload.pod_to_buffer(background, sv::background_gpu::from(sv::background{}));
+            auto const background = ctx.transient.create_buffer_from_pod(
+                cmd, sv::background_gpu::from(sv::background{}), sg::buffer_usage::uniform_buffer);
 
-            auto const instance_table = ctx.transient.create_buffer<sv::instance_gpu>(
-                records.size(), sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);
-            cmd.upload.data_to_buffer(instance_table, records);
+            auto const instance_table
+                = ctx.transient.create_buffer_from_data(cmd, records, sg::buffer_usage::readonly_buffer);
             auto const light_buffer = sv_test::upload_lights(cmd, lights);
 
             auto const bindless = resources.freeze();
@@ -426,13 +415,10 @@ cc::shared_async<cc::vector<cc::vector<tg::vec4f>>> trace_under(sg::context* ctx
             fc.max_bounces = scene.max_bounces;
             fc.seed = 1u;
 
-            auto const frame = ctx->transient.create_buffer<sv::pt_frame_constants_gpu>(
-                1, sg::buffer_usage::uniform_buffer | sg::buffer_usage::copy_dst);
-            cmd->upload.pod_to_buffer(frame, fc);
+            auto const frame = ctx->transient.create_buffer_from_pod(*cmd, fc, sg::buffer_usage::uniform_buffer);
 
-            auto const background = ctx->transient.create_buffer<sv::background_gpu>(
-                1, sg::buffer_usage::uniform_buffer | sg::buffer_usage::copy_dst);
-            cmd->upload.pod_to_buffer(background, sv::background_gpu::from(scene.environment));
+            auto const background = ctx->transient.create_buffer_from_pod(
+                *cmd, sv::background_gpu::from(scene.environment), sg::buffer_usage::uniform_buffer);
 
             auto const target = ctx->transient.create_texture_2d({.format = sg::pixel_format::rgba32_float,
                                                                   .width = scene.size,
@@ -443,9 +429,8 @@ cc::shared_async<cc::vector<cc::vector<tg::vec4f>>> trace_under(sg::context* ctx
 
             auto records = cc::vector<sv::instance_gpu>();
             records.push_back(resources->describe_instance(*cmd, scene.item.mesh, scene.item.instance));
-            auto const instance_table = ctx->transient.create_buffer<sv::instance_gpu>(
-                records.size(), sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);
-            cmd->upload.data_to_buffer(instance_table, records);
+            auto const instance_table
+                = ctx->transient.create_buffer_from_data(*cmd, records, sg::buffer_usage::readonly_buffer);
 
             // A table with no lights binds nothing, which is the routine's own stand-in path.
             auto const light_buffer

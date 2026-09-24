@@ -23,14 +23,12 @@ public:
                            cc::hash128 structural_hash,
                            VkPipelineLayout layout,
                            cc::vector<sg::binding_group_layout_handle> groups,
-                           cc::vector<VkSampler> static_samplers,
                            cc::optional<sg::binding> inline_constants,
                            int inline_constants_bytes)
       : sg::pipeline_layout(structural_hash, groups, cc::move(inline_constants)),
         _ctx(ctx),
         _layout(layout),
         _groups(cc::move(groups)),
-        _static_samplers(cc::move(static_samplers)),
         _inline_constants_bytes(inline_constants_bytes)
     {
     }
@@ -45,9 +43,6 @@ public:
 
     /// Held so every set layout this was built from outlives it.
     cc::vector<sg::binding_group_layout_handle> _groups;
-
-    /// Pipeline-level static samplers, owned here for the same reason the group layout owns its own.
-    cc::vector<VkSampler> _static_samplers;
 
     /// Push-constant size in bytes; 0 when the description declares none.
     /// Read when validating a set_inline_constants call against what the layout actually reserved.
