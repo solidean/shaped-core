@@ -540,13 +540,13 @@ struct flattener
         return c.find_operator("==", both);
     }
 
-    /// The prelude's `int`, which an enum's comparison runs on.
+    /// The prelude's `int`, which an enum's comparison runs on, even where the user file shadows the name.
     type_id int_type() const
     {
-        for (auto const& s : c.out.symbols)
-            if (s.name == builtins::k_int && s.kind == symbol_kind::structure)
-                return s.type;
-        return type_id::none;
+        auto const* const found = c.prelude_names.get_ptr(builtins::k_int);
+        if (found == nullptr || found->empty() || c.out.at(found->front()).kind != symbol_kind::structure)
+            return type_id::none;
+        return c.out.at(found->front()).type;
     }
 
     /// `a or b` is a list of patterns rather than the `or` of the language (CHK-157).

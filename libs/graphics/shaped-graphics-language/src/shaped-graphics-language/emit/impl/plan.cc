@@ -1,5 +1,6 @@
 #include "plan.hh"
 
+#include <clean-core/container/set.hh>
 #include <clean-core/string/format.hh>
 #include <shaped-graphics-language/check/resources.hh>
 #include <shaped-graphics-language/emit/reserved_words.hh>
@@ -163,6 +164,8 @@ struct validator
 struct planner
 {
     plan& p;
+    /// Every spelling a struct or an enum case was given.
+    cc::set<cc::string> type_spellings;
 
     /// A name of the program as this target may spell it: itself, or with a trailing underscore where it is reserved.
     cc::string spell(cc::string_view name)
@@ -170,6 +173,17 @@ struct planner
         if (!is_reserved(p.which, name) && !is_called_by_a_builtin(p.m, p.which, name))
             return name;
         return p.names.mint(cc::format("{}_", name));
+    }
+
+    /// `spell` for the name of a struct or an enum case, which the text declares at its top level.
+    /// A struct of the user file may shadow one of the prelude's, so a second of one name is minted one of its own.
+    cc::string spell_type(cc::string_view name)
+    {
+        auto result = spell(name);
+        if (type_spellings.contains(result))
+            result = p.names.mint(result);
+        type_spellings.insert(result);
+        return result;
     }
 
     /// A member lives in the scope of its struct, so it only has to differ from its siblings.
@@ -229,7 +243,7 @@ struct planner
         p.struct_of_type[index_of(type)] = i32(p.structs.size());
         p.structs.push_back({
             .type = type,
-            .name = spell(p.m.at(info.symbol).name),
+            .name = spell_type(p.m.at(info.symbol).name),
             .role = role,
             .members = members_of(info.members, role != struct_role::plain),
         });
@@ -247,7 +261,7 @@ struct planner
         auto const name = p.m.at(info.symbol).name;
         auto planned = planned_enum{.type = type};
         for (auto const& c : p.m.at(info.cases))
-            planned.case_names.push_back(spell(cc::format("{}_{}", name, c.name)));
+            planned.case_names.push_back(spell_type(cc::format("{}_{}", name, c.name)));
 
         p.enum_of_type[index_of(type)] = i32(p.enums.size());
         p.enums.push_back(cc::move(planned));

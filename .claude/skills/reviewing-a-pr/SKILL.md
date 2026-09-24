@@ -126,8 +126,13 @@ Name it with `title` as usual, and hand it over the same way.
    ```bash
    git fetch origin main --quiet
    git fetch origin refs/pull/<n>/head:pr-<n>
-   uv run review.py init pr-<n> --range origin/main..pr-<n> --goal pr-comment
+   git worktree add .tmp/worktrees/pr-<n> pr-<n>
+   uv run review.py init pr-<n> --repo .tmp/worktrees/pr-<n> --range origin/main..pr-<n> --goal pr-comment
    ```
+   **The worktree is not optional here.**
+   Every path an entry names resolves against the checkout `repo` points at.
+   From any other branch a file the PR adds fails `validate` as missing, and every `file:line` link opens the wrong version.
+   `init` warns when the checkout is not the head under review.
 
    `init` resolves the merge base and pins it as a sha, so a moving `main` cannot change what the review is accountable for.
    **Never diff against local `main`** — it only moves when someone pulls.

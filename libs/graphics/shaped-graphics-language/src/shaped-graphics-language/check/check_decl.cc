@@ -136,7 +136,7 @@ type_id checker::buffer_type(type_id element, bool is_mut)
     return id;
 }
 
-type_id checker::resolve_buffer(i32 file, ast::expr_id expr, ast::index const& node)
+type_id checker::resolve_buffer(i32 file, ast::expr_id expr, ast::index const& node, function_scope const* scope)
 {
     auto const where = span_of(file, expr);
     auto const arguments = ast_of(file).at(node.arguments);
@@ -146,7 +146,7 @@ type_id checker::resolve_buffer(i32 file, ast::expr_id expr, ast::index const& n
         return checked_module::error_type;
     }
 
-    auto const element = resolve_type(file, arguments[0].value);
+    auto const element = resolve_type(file, arguments[0].value, scope);
     if (element == checked_module::error_type)
         return checked_module::error_type;
 
@@ -160,7 +160,7 @@ type_id checker::resolve_buffer(i32 file, ast::expr_id expr, ast::index const& n
     return buffer_type(element, false);
 }
 
-type_id checker::resolve_type(i32 file, ast::expr_id expr)
+type_id checker::resolve_type(i32 file, ast::expr_id expr, function_scope const* scope)
 {
     if (!ast::is_valid(expr))
         return checked_module::error_type;
@@ -179,8 +179,15 @@ type_id checker::resolve_type(i32 file, ast::expr_id expr)
     else if (n != nullptr)
     {
         auto const text = text_of(file, n->where);
-        auto const* const found = names.get_ptr(text);
-        if (found == nullptr || found->empty())
+        auto const* const found = names_seen_from(file).get_ptr(text);
+        // CHK-54: types and values share one namespace, so a local hides a type of its name
+        if (auto const* const local = scope != nullptr ? scope->find_local(text) : nullptr)
+        {
+            set_target(file, expr, local->where);
+            report(diagnostic_kind::wrong_kind_of_name, file, where,
+                   cc::format("{} is a local, and a type stands here", text));
+        }
+        else if (found == nullptr || found->empty())
             report(diagnostic_kind::unknown_name, file, where, text);
         else
         {
@@ -201,7 +208,7 @@ type_id checker::resolve_type(i32 file, ast::expr_id expr)
     else if (auto const* const applied = e.node.try_as<ast::index>())
     {
         if (is_named(file, applied->object, "buffer"))
-            result = resolve_buffer(file, expr, *applied);
+            result = resolve_buffer(file, expr, *applied, scope);
         else if (auto const applied_resource = resolve_resource_applied(file, expr, *applied);
                  applied_resource != type_id::none)
             result = applied_resource;
@@ -218,7 +225,7 @@ type_id checker::resolve_type(i32 file, ast::expr_id expr)
         unsupported(file, where, "a qualified type name");
     else if (auto const* const q = e.node.try_as<ast::qualified_type>())
     {
-        auto const inner = resolve_type(file, q->type);
+        auto const inner = resolve_type(file, q->type, scope);
         if (inner != checked_module::error_type)
             result = qualify_resource(file, expr, inner, q->access);
     }
@@ -229,9 +236,9 @@ type_id checker::resolve_type(i32 file, ast::expr_id expr)
     return result;
 }
 
-type_id checker::resolve_value_type(i32 file, ast::expr_id expr)
+type_id checker::resolve_value_type(i32 file, ast::expr_id expr, function_scope const* scope)
 {
-    auto const type = resolve_type(file, expr);
+    auto const type = resolve_type(file, expr, scope);
     if (type == checked_module::error_type || !is_resource(out.at(type).kind))
         return type;
     unsupported(file, span_of(file, expr),
@@ -243,7 +250,7 @@ type_id checker::resolve_value_type(i32 file, ast::expr_id expr)
 
 type_id checker::type_of_builtin(cc::string_view name, i32 file, source_span where)
 {
-    auto const* const found = names.get_ptr(name);
+    auto const* const found = prelude_names.get_ptr(name);
     if (found != nullptr && !found->empty())
     {
         auto const id = found->front();
@@ -610,7 +617,7 @@ void checker::compile_function(symbol_id id)
         }
 
         auto const text = text_of(file, n->where);
-        auto const* const found = names.get_ptr(text);
+        auto const* const found = names_seen_from(file).get_ptr(text);
         if (found == nullptr || found->empty())
         {
             report(diagnostic_kind::unknown_name, file, where, text);
