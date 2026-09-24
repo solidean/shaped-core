@@ -11,9 +11,7 @@ using namespace sgl::emit::impl;
 
 /// The buffer index of the inline constants, in every stage that reads them.
 ///
-/// sg's metal backend binds group N at buffer index N, and its argument table has `sg::max_binding_groups + 1` = 4 slots.
-/// So 4 is the first index no binding group can take.
-/// The backend does not bind inline constants yet, so this number is a proposal it has to adopt, not one it was read from.
+/// sg's metal backend binds group N at buffer index N and the inline constants at 4, its `k_inline_constants_buffer_index`.
 constexpr auto k_inline_constants_buffer = 4;
 
 class msl_dialect_t final : public dialect

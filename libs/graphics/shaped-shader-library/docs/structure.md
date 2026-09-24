@@ -106,8 +106,7 @@ The shape the seam is built for, and what is still `[planned]`:
   A package generates host types from it: groups, `@inline` constants, vertex inputs and render targets.
   **SGL writes MSL too, and nothing here can build it**: `create_sgl_compiler` maps a `metal_lib` inner compiler to the `msl` target, and slib has no such compiler.
   What a Mac run still needs is an MSL-to-`metal_lib` compiler over Apple's `metal` tool or a runtime `newLibraryWithSource`, which also has to reflect the MSL.
-  sg's metal backend has to bind vertex buffers through a vertex descriptor, and inline constants at buffer index 4, since both are unimplemented there.
-  So are the index buffer and the indexed draw, which the cube uses as well.
+  sg's metal backend already binds what that text assumes: vertex buffers through a vertex descriptor, inline constants at buffer index 4, and indexed draws.
   Until then `sgl-cube` on a metal-only build is a stub target that says so.
 - **chains** — a shader is authored in one language but consumed as several backend formats, and the path may need an intermediate hop (`slang -> hlsl -> dxil`).
   That needs a language→language transpile edge and a graph search to replace the direct lookup.
