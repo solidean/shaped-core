@@ -254,3 +254,42 @@ TEST("sgl describe - a later setting takes a part back from the host")
     CHECK(d.pipelines[1].name == "fixed");
     CHECK(d.pipelines[1].open.empty());
 }
+
+TEST("sgl describe - a struct's shape is its members, and not its name")
+{
+    // A pipeline's host code is built against these shapes, so a hot reload compares them.
+    auto const shape_of = [](cc::string_view vertex_struct)
+    {
+        auto const d = described(cc::string(vertex_struct)
+                                 + "struct link:\n    @position p: hpos4\n"
+                                   "@vertex fun vs(v: vin) -> link:\n    return { p = hpos4(..v.p, 1.0) }\n");
+        REQUIRE(d.structs.size() == 1);
+        return d.structs[0].shape;
+    };
+    auto const base = shape_of("@vertex struct vin:\n    p: pos3\n");
+    CHECK(base.size() == 32);
+
+    // Only the same file described again gives the same shape.
+    CHECK(shape_of("@vertex struct vin:\n    p: pos3\n") == base);
+    // A member added, renamed or retyped is a new shape, which is what a reload must not miss.
+    CHECK(shape_of("@vertex struct vin:\n    p: pos3\n    q: float4\n") != base);
+    CHECK(shape_of("@vertex struct vin:\n    p: pos3\n    q: float4\n")
+          != shape_of("@vertex struct vin:\n    p: pos3\n    r: float4\n"));
+    CHECK(shape_of("@vertex struct vin:\n    p: float3\n") != base);
+    // An attribute the host lays buffers out by is part of it.
+    CHECK(shape_of("@vertex struct vin:\n    @per_instance p: pos3\n") != base);
+
+    // Bindings have one too, over their members.
+    auto const binding_shape = [](cc::string_view member)
+    {
+        auto const d
+            = described(cc::string("@inline binding constants:\n") + member
+                        + "@vertex struct vin:\n    p: pos3\n"
+                          "struct link:\n    @position p: hpos4\n"
+                          "@vertex fun vs(v: vin){constants} -> link:\n    return { p = hpos4(..v.p, 1.0) }\n");
+        REQUIRE(d.bindings.size() == 1);
+        return d.bindings[0].shape;
+    };
+    CHECK(binding_shape("    scale: float\n") == binding_shape("    scale: float\n"));
+    CHECK(binding_shape("    scale: float\n") != binding_shape("    scale: float\n    bias: float\n"));
+}

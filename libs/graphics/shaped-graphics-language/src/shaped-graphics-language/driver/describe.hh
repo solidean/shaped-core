@@ -52,6 +52,8 @@ struct sgl::described_binding
     /// -1 and empty for an `@inline` binding and for a group without a plain member.
     i32 block_slot = -1;
     cc::string block_host_name;
+    /// The members' structural hash (`check::structural_hash`), as 32 hex digits: what a hot reload compares.
+    cc::string shape;
 };
 
 struct sgl::described_struct_member
@@ -72,6 +74,8 @@ struct sgl::described_struct
     /// `vertex` or `pixel`.
     check::stage edge = check::stage::none;
     cc::vector<described_struct_member> members;
+    /// The members' structural hash (`check::structural_hash`), as 32 hex digits: what a hot reload compares.
+    cc::string shape;
 };
 
 struct sgl::described_entry_point

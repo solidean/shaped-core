@@ -1,6 +1,7 @@
 #include "describe.hh"
 
 #include <clean-core/string/format.hh>
+#include <shaped-graphics-language/check/structural_hash.hh>
 #include <shaped-graphics-language/driver/impl/front_end.hh>
 #include <shaped-graphics-language/emit/impl/plan.hh>
 #include <shaped-graphics-language/legalize/legalize.hh>
@@ -15,7 +16,9 @@ described_binding describe_binding(check::checked_module const& m, check::symbol
 {
     auto const& b = m.bindings[s.info];
     auto const members = m.at(b.members);
-    auto result = described_binding{.name = s.name, .is_inline = b.is_inline};
+    auto result = described_binding{.name = s.name,
+                                    .is_inline = b.is_inline,
+                                    .shape = check::hex_of(check::structural_hash(m, members))};
 
     if (b.is_inline)
     {
@@ -67,7 +70,9 @@ described_binding describe_binding(check::checked_module const& m, check::symbol
 
 described_struct describe_struct(check::checked_module const& m, check::type_info const& t)
 {
-    auto result = described_struct{.name = m.at(t.symbol).name, .edge = t.edge};
+    auto result = described_struct{.name = m.at(t.symbol).name,
+                                   .edge = t.edge,
+                                   .shape = check::hex_of(check::structural_hash(m, m.at(t.members)))};
     auto location = 0;
     for (auto const& member : m.at(t.members))
         result.members.push_back({.name = member.name,

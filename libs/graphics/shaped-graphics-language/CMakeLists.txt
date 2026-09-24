@@ -48,6 +48,7 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/check/dump.cc
     src/shaped-graphics-language/check/flat.cc
     src/shaped-graphics-language/check/flat_builder.cc
+    src/shaped-graphics-language/check/structural_hash.cc
     src/shaped-graphics-language/check/flatten.cc
 
     src/shaped-graphics-language/legalize/core.cc
@@ -182,6 +183,7 @@ target_sources(shaped-graphics-language
     src/shaped-graphics-language/check/dump.hh
     src/shaped-graphics-language/check/flat.hh
     src/shaped-graphics-language/check/flat_builder.hh
+    src/shaped-graphics-language/check/structural_hash.hh
     src/shaped-graphics-language/check/ids.hh
     src/shaped-graphics-language/check/symbols.hh
     src/shaped-graphics-language/check/impl/checker.hh

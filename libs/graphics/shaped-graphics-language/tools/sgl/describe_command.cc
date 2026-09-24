@@ -36,6 +36,7 @@ void write_binding(babel::json::object_writer& o, sgl::described_binding const& 
 {
     o.write("name", cc::string_view(b.name));
     o.write("inline", b.is_inline);
+    o.write("shape", cc::string_view(b.shape));
     o.write("block_size", b.block_size);
     if (b.block_slot >= 0)
     {
@@ -67,6 +68,7 @@ void write_struct(babel::json::object_writer& o, sgl::described_struct const& s)
 {
     o.write("name", cc::string_view(s.name));
     o.write("edge", stage_name(s.edge));
+    o.write("shape", cc::string_view(s.shape));
     auto members = o.write_array("members");
     for (auto const& m : s.members)
     {
