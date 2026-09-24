@@ -76,7 +76,7 @@ TEST("sgl check - every texture, image and sampler form sg binds is a binding me
 
 TEST("sgl check - a resource that some backend lacks needs a feature, and a misplaced word is an error")
 {
-    // CHK-196: refused by the feature that would grant it, on every target alike.
+    // CHK-201: refused by the feature that would grant it, on every target alike.
     CHECK(reports_for(listing("    a: mut image2d[.rgba8_unorm]\n")).contains("needs-feature"));
     CHECK(reports_for(listing("    a: mut image2d[.rgba8_unorm]\n")).contains("readwrite_storage_formats"));
     CHECK(reports_for(listing("    a: out image2d[.r8_unorm]\n")).contains("extended_storage_formats"));
@@ -115,7 +115,7 @@ TEST("sgl check - a sampler block's settings and attributes are judged")
         CHECK(anisotropy(bad).contains(range));
     }
 
-    // CHK-207: anisotropy needs every filter linear, since WebGPU refuses it otherwise.
+    // CHK-212: anisotropy needs every filter linear, since WebGPU refuses it otherwise.
     CHECK(reports_for(listing("    sampler s:\n        filter = .linear\n        mip_filter = .nearest\n"
                               "        max_anisotropy = 4\n"))
               .contains("max_anisotropy above 1 needs every filter .linear"));
@@ -186,7 +186,7 @@ TEST("sgl check - a texture, an image or a sampler is handed to a builtin and is
           == "");
 
     CHECK(reports_for(listing(members, "    let t = work.src\n")).contains("texture2d[float4] as a value"));
-    // CHK-202: a read-only image cannot be stored to, and a write-only one cannot be loaded.
+    // CHK-207: a read-only image cannot be stored to, and a write-only one cannot be loaded.
     CHECK(reports_for(listing(members, "    DEBUG_store(work.ro, int2(0, 0), float4(1.0, 1.0, 1.0, 1.0))\n"))
               .contains("no-matching-overload"));
     CHECK(reports_for(listing(members, "    let v = DEBUG_load(work.dst, int2(0, 0))\n")).contains("no-matching-overload"));

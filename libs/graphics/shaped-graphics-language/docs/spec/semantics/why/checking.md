@@ -198,7 +198,7 @@ So the host name need not be an identifier of any target, and the path is the on
 `a_b.c` and `a.b_c` stay two buffers, where any identifier built from them would clash.
 The identifier a target writes is the emitter's to mint (EMIT-85), and the text reports the pair (EMIT-95).
 
-## CHK-192
+## CHK-197
 
 SGL's semantics are the intersection of what the targets' fast native operations guarantee, and no operation pays a tax on every target to be defined where one target leaves it open.
 Each target writes `x as int` as its own native conversion, and those agree only where the truncated value fits: SPIR-V, for one, leaves every other float undefined.

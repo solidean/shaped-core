@@ -47,12 +47,12 @@ cc::string spelling_of(check::type_info const& t, checked_module const& m)
     case type_kind::texture:
         if (t.is_depth)
             return cc::string(shape.depth);
-        // A builtin's bare pattern takes every texture of the shape (CHK-189).
+        // A builtin's bare pattern takes every texture of the shape (CHK-194).
         return t.element == type_id::none ? cc::string(shape.texture)
                                           : cc::format("{}[{}]", shape.texture, m.name_of(t.element));
     case type_kind::image:
-        // A builtin's pattern names the texel it reads or writes where an image names its format (CHK-202),
-        // and a bare one takes every image of the shape (CHK-189).
+        // A builtin's pattern names the texel it reads or writes where an image names its format (CHK-207),
+        // and a bare one takes every image of the shape (CHK-194).
         if (t.format < 0 && t.element == type_id::none)
             return cc::string(shape.image);
         return t.format < 0
@@ -156,7 +156,7 @@ type_id checker::resolve_resource_applied(i32 file, ast::expr_id expr, ast::inde
         return resource_type({.kind = type_kind::texture, .element = element, .shape = texture->shape});
     }
 
-    // CHK-195 (temporary): the argument is read as exactly an enum case of sg's formats.
+    // CHK-200 (temporary): the argument is read as exactly an enum case of sg's formats.
     // Values as type arguments in general are in libs/graphics/shaped-graphics-language/docs/TODO.md.
     auto const* const dot = ast_of(file).at(arguments[0].value).node.try_as<ast::leading_dot>();
     auto const format = dot != nullptr ? find_storage_format(text_of(file, dot->name)) : -1;
@@ -290,7 +290,7 @@ sampler_state checker::compile_sampler(i32 file, ast::sampler_decl const& s)
             state.compare = enum_setting(k_compare_ops);
         else if (key == "max_anisotropy")
         {
-            // CHK-206: a plain int from 1 to 16, the range every backend takes as it is.
+            // CHK-211: a plain int from 1 to 16, the range every backend takes as it is.
             auto const text = text_of(file, where);
             auto const n = value.node.is<ast::literal>() && classify_number(text) == number_class::plain_integer
                              ? parse_plain_integer(text)
@@ -317,7 +317,7 @@ sampler_state checker::compile_sampler(i32 file, ast::sampler_decl const& s)
                    cc::format("{} is no sampler setting; the settings are sg::sampler's fields", key));
     }
 
-    // CHK-207: judged on the final settings, since a later one overrides an earlier one (CHK-199).
+    // CHK-212: judged on the final settings, since a later one overrides an earlier one (CHK-204).
     auto const is_all_linear = state.min_filter == 1 && state.mag_filter == 1 && state.mip_filter == 1;
     if (state.max_anisotropy > 1 && !is_all_linear)
         report(diagnostic_kind::invalid_attribute_arguments, file, anisotropy_where,
@@ -327,7 +327,7 @@ sampler_state checker::compile_sampler(i32 file, ast::sampler_decl const& s)
 
 void checker::judge_filtering(i32 file, source_span call, ast::range_of<ast::argument> arguments)
 {
-    // CHK-205: an @unfilterable texture is sampled through a sampler that never filters.
+    // CHK-210: an @unfilterable texture is sampled through a sampler that never filters.
     auto texture = cc::string();
     auto sampler = cc::string();
     for (auto const& a : ast_of(file).at(arguments))
@@ -384,7 +384,7 @@ type_id checker::resolve_pattern_type(i32 file, ast::expr_id expr)
         return result;
     }
 
-    // CHK-189: a bare shape name takes every texture or image of that shape, whatever it holds and however it is read.
+    // CHK-194: a bare shape name takes every texture or image of that shape, whatever it holds and however it is read.
     if (auto const* const bare = e.node.try_as<ast::name>())
         for (auto const& shape : k_shapes)
         {

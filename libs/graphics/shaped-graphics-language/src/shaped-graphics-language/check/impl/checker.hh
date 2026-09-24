@@ -152,7 +152,7 @@ struct checker
     cc::vector<call_edge> calls;
     /// The object `check_index` is checking right now: the one place a buffer may stand as an expression.
     ast::expr_id subscripted = ast::expr_id::none;
-    /// The arguments of the call being checked, which a texture, an image or a sampler may stand as (CHK-201).
+    /// The arguments of the call being checked, which a texture, an image or a sampler may stand as (CHK-206).
     cc::vector<ast::expr_id> handed;
 
     // ---- shared helpers (check.cc) ----------------------------------------------------------------------------------
@@ -239,7 +239,7 @@ struct checker
     void judge_filtering(i32 file, source_span call, ast::range_of<ast::argument> arguments);
     /// A builtin's parameter type, where an image names the texel it reads or writes: `out image2d[float4]`.
     [[nodiscard]] type_id resolve_pattern_type(i32 file, ast::expr_id expr);
-    /// True where an argument of type `argument` may stand for a parameter of type `parameter` (CHK-70, CHK-202).
+    /// True where an argument of type `argument` may stand for a parameter of type `parameter` (CHK-70, CHK-207).
     [[nodiscard]] bool takes(type_id parameter, type_id argument) const;
     /// Reports `form` as `needs-feature`, naming the feature that would grant it.
     void judge_feature(i32 file, source_span where, cc::string_view form, cc::string_view feature);

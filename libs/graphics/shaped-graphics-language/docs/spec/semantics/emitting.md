@@ -148,17 +148,17 @@ A binding that is not `@inline` is a group.
 * **EMIT-89** MSL writes no group and no compute entry point yet: an entry point that lists a group, or is `@compute`, is `unsupported`.
   How a group will read in MSL is in [bindings.md](../bindings.md#how-a-group-reaches-sg).
 * **EMIT-90** A group's resources — buffers, textures, images and samplers — take the slots after its constant buffer, in declaration order, from 1, or from 0 when it has no plain member.
-* **EMIT-96** A texture, an image and a sampler member are each one global minted as a buffer's is, by EMIT-85, and each has its target's own type by the table below.
-* **EMIT-97** HLSL states an image's format as slib's `#pragma sc format`, with sg's name for it.
+* **EMIT-97** A texture, an image and a sampler member are each one global minted as a buffer's is, by EMIT-85, and each has its target's own type by the table below.
+* **EMIT-98** HLSL states an image's format as slib's `#pragma sc format`, with sg's name for it.
   slib's pass turns it into `[[vk::image_format]]` on the SPIR-V arm, which DXC makes a typed image of, and records it as the binding's `storage_format`.
-* **EMIT-98** A static sampler of a group is its `SamplerState`, or `SamplerComparisonState` where it has a `compare`, preceded by slib's `#pragma sc static`.
+* **EMIT-99** A static sampler of a group is its `SamplerState`, or `SamplerComparisonState` where it has a `compare`, preceded by slib's `#pragma sc static`.
   The pragma carries every filter and address and each other setting that is not its default.
   WGSL has no static sampler, and writes it as it writes a sampler the host binds: the layout says it is static.
-* **EMIT-99** WGSL writes a 1D texture or image as a 2D one and a 1D array as a 2D array, since sg's webgpu backend creates every 1D texture that way (the bindings file, "Shapes").
-* **EMIT-100** A call of a builtin that gives nothing is a statement as it stands, with no `_ =` in WGSL.
-* **EMIT-101** A builtin a target cannot write as one expression declares a helper function ahead of the entry point, once per text, and the call names it.
+* **EMIT-100** WGSL writes a 1D texture or image as a 2D one and a 1D array as a 2D array, since sg's webgpu backend creates every 1D texture that way (the bindings file, "Shapes").
+* **EMIT-101** A call of a builtin that gives nothing is a statement as it stands, with no `_ =` in WGSL.
+* **EMIT-102** A builtin a target cannot write as one expression declares a helper function ahead of the entry point, once per text, and the call names it.
   HLSL's `GetDimensions` writes through out parameters, so `DEBUG_size` is an overload of `sgl_size` per texture type the entry point passes.
-* **EMIT-102** WGSL text whose entry point calls a builtin that takes derivatives implicitly, `DEBUG_sample`, opens with `diagnostic(off, derivative_uniformity);`, and other WGSL text does not.
+* **EMIT-103** WGSL text whose entry point calls a builtin that takes derivatives implicitly, `DEBUG_sample`, opens with `diagnostic(off, derivative_uniformity);`, and other WGSL text does not.
   HLSL samples under an `if` that differs between pixels, and Tint refuses it, so without the directive a program would be written for some targets only, against EMIT-13.
   It is a stopgap: SGL is to judge uniformity itself, as the [incubator](../incubator/uniformity.md) sketches.
 

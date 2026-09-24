@@ -11,7 +11,7 @@ Ray tracing, binding arrays, tier 2 formats and their like are not fully portabl
 That refusal is a normal error, so it works during development and not only when a shader reaches a device that lacks the feature.
 
 This may well be an effect per function, similar to bindings ([binding-effects.md](binding-effects.md)).
-`@stages` is the precedent that exists: a function names the stages it may be reached from, and the entry point is judged once everything is inlined ([CHK-188](../semantics/checking.md#entry-points)).
+`@stages` is the precedent that exists: a function names the stages it may be reached from, and the entry point is judged once everything is inlined ([CHK-193](../semantics/checking.md#entry-points)).
 A function that uses a feature declares it, a function that calls it must declare it too, and the entry point states what the pipeline asks of the device.
 
 ```sgl sketch

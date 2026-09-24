@@ -31,7 +31,7 @@ sgl::u8 checker::stages_of(i32 file, ast::attribute const* a)
     if (a == nullptr)
         return k_every_stage;
 
-    // CHK-203: each argument is one stage as an enum case; the function is reached only from an entry point of one.
+    // CHK-208: each argument is one stage as an enum case; the function is reached only from an entry point of one.
     auto result = u8(0);
     auto const arguments = ast_of(file).at(a->arguments);
     for (auto const& argument : arguments)
@@ -273,7 +273,7 @@ ast::range_of<member_info> checker::compile_members(i32 file,
 
         if (auto const* const smp = d.node.try_as<ast::sampler_decl>(); smp != nullptr && !is_struct)
         {
-            // CHK-199: a static sampler of the group, a member whose type is the sampler its settings make.
+            // CHK-204: a static sampler of the group, a member whose type is the sampler its settings make.
             auto const name = text_of(file, smp->name);
             auto is_duplicate = false;
             for (auto const& other : collected)
@@ -336,7 +336,7 @@ ast::range_of<member_info> checker::compile_members(i32 file,
         else
             report(diagnostic_kind::missing_type, file, f.name, name);
 
-        // CHK-197 and CHK-198: each attribute names what only one kind of member can be.
+        // CHK-202 and CHK-203: each attribute names what only one kind of member can be.
         auto const* const unfilterable = find_attribute(file, f.attributes, "unfilterable");
         auto const* const non_filtering = find_attribute(file, f.attributes, "non_filtering");
         auto const& t = out.at(type);
@@ -515,7 +515,7 @@ void checker::compile_binding(symbol_id id)
 
     auto const members = compile_members(file, b.members, false);
     auto const is_inline = find_attribute(file, d.attributes, "inline") != nullptr;
-    // CHK-200: an `@inline` binding holds constants only, so a static sampler in one has nowhere to go.
+    // CHK-205: an `@inline` binding holds constants only, so a static sampler in one has nowhere to go.
     if (is_inline)
         for (auto const member : ast_of(file).at(b.members))
             if (auto const* const smp = ast_of(file).at(member).node.try_as<ast::sampler_decl>())
@@ -580,7 +580,7 @@ void checker::compile_function(symbol_id id)
                 is_failed = true;
             }
 
-        // CHK-201: a builtin alone may take a resource, and its parameter is then a pattern of one (CHK-202).
+        // CHK-206: a builtin alone may take a resource, and its parameter is then a pattern of one (CHK-207).
         auto type = checked_module::error_type;
         if (ast::is_valid(p.type))
             type = is_builtin ? resolve_pattern_type(file, p.type) : resolve_value_type(file, p.type);

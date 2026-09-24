@@ -517,7 +517,7 @@ cc::string_view sgl::emit::impl::stage_name(check::stage s)
 
 void sgl::emit::impl::write_helpers(cc::string& out, plan const& p, dialect const& d)
 {
-    // EMIT-101: each helper the entry point's builtin calls need, once, in the order first needed.
+    // EMIT-102: each helper the entry point's builtin calls need, once, in the order first needed.
     auto written = cc::vector<cc::string>();
     for (auto const& x : p.e.exprs)
     {

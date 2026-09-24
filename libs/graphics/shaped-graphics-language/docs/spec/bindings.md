@@ -262,7 +262,7 @@ Everything not named here is the diagnostic `unsupported-yet`, never a guess.
 * A subscript on a buffer, as a value and as the place of an assignment.
 * Every texture, depth texture, image and sampler form above, with `@unfilterable` and `@non_filtering`.
 * A static sampler in a binding, and the `needs-feature` refusals.
-* A texture, an image or a sampler handed to a builtin, which is the only way one is used ([CHK-201](semantics/checking.md#bindings)).
+* A texture, an image or a sampler handed to a builtin, which is the only way one is used ([CHK-206](semantics/checking.md#bindings)).
   The builtins that take one are the `DEBUG_` stand-ins in `prelude/builtins.sgl`, until textures have methods ([texture-methods.md](incubator/texture-methods.md)).
 * A plain member of a group, as a field of the constant buffer the group owns, for a type whose place in a block every target agrees on.
 * The positional group numbering, and `@inline` last.

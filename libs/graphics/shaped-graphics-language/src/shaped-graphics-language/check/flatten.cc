@@ -8,7 +8,7 @@ using namespace sgl::check::impl;
 
 namespace
 {
-/// A call reached from an entry point of a stage its callee's `@stages` leaves out (CHK-188).
+/// A call reached from an entry point of a stage its callee's `@stages` leaves out (CHK-193).
 struct stage_violation
 {
     i32 file = 0;
@@ -22,7 +22,7 @@ struct stage_violation
 /// leaves of that block.
 /// Nothing here hoists and nothing reorders; evaluation order is the legalizer's job alone.
 /// Every body is known to be sound, so an unexpected shape is a gap of this pass: it sets `is_failed`, and the entry
-/// point is dropped with an `unsupported-yet` at its name (CHK-208), which keeps a half-built tree away from every
+/// point is dropped with an `unsupported-yet` at its name (CHK-213), which keeps a half-built tree away from every
 /// emitter.
 /// A value of the error type is not a gap: whatever gave it that type reported already.
 struct flattener
@@ -333,7 +333,7 @@ struct flattener
             if (where.kind != target_kind::overload)
                 return value;
             flat_expr_id const arguments[] = {value};
-            // A conversion the program declares is inlined like any call of it (CHK-190).
+            // A conversion the program declares is inlined like any call of it (CHK-195).
             if (!is_valid(c.out.at(where.symbol).intrinsic))
             {
                 auto const inlined = inline_call(id, where.symbol, arguments);
@@ -1027,7 +1027,7 @@ void checker::flatten_entry_point(symbol_id id)
     for (auto const stmt : ast_of(s.file).at(body.statements))
         f.flatten_stmt(stmt);
 
-    // CHK-188: known only now, since only the whole inlined body says what an entry point reaches.
+    // CHK-193: known only now, since only the whole inlined body says what an entry point reaches.
     auto const stage_name = [](stage st)
     {
         return st == stage::vertex ? "vertex" : st == stage::pixel ? "pixel" : "compute";
@@ -1040,7 +1040,7 @@ void checker::flatten_entry_point(symbol_id id)
         report(diagnostic_kind::stage_not_allowed, s.file, ast_of(s.file).at(s.declaration).node.as<ast::fun_decl>().name,
                cc::format("{} is a {} entry point, and its own @stages leaves that out", s.name,
                           stage_name(info.entry_stage)));
-    // CHK-208: a gap of this pass is reported, so an entry point never vanishes without a word.
+    // CHK-213: a gap of this pass is reported, so an entry point never vanishes without a word.
     if (f.is_failed && !f.meets_error)
         unsupported(s.file, ast_of(s.file).at(s.declaration).node.as<ast::fun_decl>().name,
                     cc::format("{}: its body reaches a construct the flat tree cannot hold yet", s.name));

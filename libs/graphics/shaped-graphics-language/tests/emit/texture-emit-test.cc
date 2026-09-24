@@ -262,7 +262,7 @@ TEST("sgl emit - a static sampler that compares is a comparison sampler, and sta
 
 TEST("sgl emit - WGSL lets an implicit-derivative sample stand in non-uniform control flow, only where one is called")
 {
-    // Tint refuses what HLSL accepts, so the directive keeps the program written for every target (EMIT-102).
+    // Tint refuses what HLSL accepts, so the directive keeps the program written for every target (EMIT-103).
     constexpr auto branched = "binding material:\n"
                               "    albedo: texture2d[float4]\n"
                               "    smp: sampler\n"

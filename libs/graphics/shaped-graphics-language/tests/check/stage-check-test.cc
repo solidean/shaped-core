@@ -4,7 +4,7 @@
 
 using namespace sgl_test;
 
-// CHK-203 and CHK-188: `@stages` restricts where a function may be reached from, judged per entry point after inlining.
+// CHK-208 and CHK-193: `@stages` restricts where a function may be reached from, judged per entry point after inlining.
 
 namespace
 {

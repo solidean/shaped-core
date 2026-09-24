@@ -18,7 +18,7 @@ Either the control flow is annotated as uniform, with `@uniform` or something li
 Or the gradient is computed before the branch, where every pixel of the quad still runs, and the sample inside takes it explicitly through the `grad` form of `sample`.
 
 **It replaces a stopgap.**
-Today the WGSL text of an entry point that samples opens with `diagnostic(off, derivative_uniformity);` ([EMIT-102](../semantics/emitting.md#bindings)).
+Today the WGSL text of an entry point that samples opens with `diagnostic(off, derivative_uniformity);` ([EMIT-103](../semantics/emitting.md#bindings)).
 That keeps Tint quiet and leaves the undefined result in place.
 Once SGL judges uniformity, that directive goes, and WGSL's own analysis agrees with SGL's or finds nothing SGL has not already refused.
 

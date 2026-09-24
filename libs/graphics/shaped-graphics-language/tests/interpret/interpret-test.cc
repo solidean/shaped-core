@@ -150,7 +150,7 @@ TEST("sgl interpret - its choice where a conversion is unspecified, and the bits
     auto b = float_function(checked.module);
     auto const nan = cc::bit_cast<f64>(u64(0x7ff8000000000000ull));
     b.set_body({
-        // A NaN is unspecified on the targets (CHK-192), and the interpreter picks 0.
+        // A NaN is unspecified on the targets (CHK-197), and the interpreter picks 0.
         b.print(b.call("convert_float_to_int", {b.literal(nan)})),
         b.print(b.call("convert_float_to_uint", {b.literal(nan)})),
         b.print(b.call("convert_float_to_int", {b.literal(-1e20)})),
