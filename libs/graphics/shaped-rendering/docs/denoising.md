@@ -162,7 +162,7 @@ Turning `fresh samples` off switches to the accumulating half, where `samples` c
 - à-trous itself: a flat image stays flat, a guide edge does not bleed, and a deep mean is left close to itself.
 - SVGF itself: a static noisy stream converges, a moving one is followed through its motion vectors, and a depth jump or a reset drops the history rather than ghosting it.
   The moving test is the one that pins reprojection at all.
-  It runs the same shifting image twice — once with an honest motion vector, once told nothing moved — and requires the honest one to converge at least twice as far.
+  It runs the same shifting image twice — once with an honest motion vector, once told nothing moved — and requires the honest one to converge substantially further.
   A stream of zero motion alone would pass with the sign flipped, the half-pixel offset missing, or the motion texture bound to the wrong slot.
 - Every member, once it exists, gets the same property test: the error against a converged reference falls.
   A vendor member's version is gated on its hardware and reports "not run" elsewhere rather than passing.

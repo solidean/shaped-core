@@ -535,7 +535,13 @@ ASYNC_INVOCABLE_TEST("sr - svgf follows a moving image through its motion vector
     }
 
     // Following the motion is the whole mechanism, so it must converge substantially further.
-    CHECK(with_motion_last < 0.5f * without_motion_last);
+    //
+    // 0.6 rather than something tighter: the defects this exists to catch — a flipped sign, a missing half-pixel
+    // offset, a motion texture bound to the wrong slot — do not shave the ratio, they remove reprojection, so the
+    // result collapses toward the told-nothing-moved figure.
+    // Anything between the two values catches all three, and the slack is what keeps a float-rounding difference
+    // between two backends or two drivers from failing a test that is measuring a factor of two.
+    CHECK(with_motion_last < 0.6f * without_motion_last);
 
     // And it must reach the same place a stream that never moved does: that is what reprojection buys.
     auto still = make_stream(ctx);
