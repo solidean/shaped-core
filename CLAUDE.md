@@ -100,11 +100,16 @@ One-liner per library:
 * **`libs/graphics/shaped-shader-compiler-dxc`** — a lean DXC wrapper: HLSL → `sg::compiled_shader` (bytecode + reflection), plus an async content-keyed cache.
   Namespace `ssc::dxc`. Depends on shaped-graphics.
   Windows-only, and built only once `extern/dxc` has fetched DXC.
+* **`libs/graphics/shaped-shader-compiler-msl`** — the Metal wrapper: MSL → `sg::compiled_shader` (a metallib, or MSL source where Apple's separately-installed Metal toolchain is absent).
+  Reflection reads the source text, because a metallib carries none and Metal's own reflection needs a device and a built pipeline.
+  Namespace `ssc::msl`. Depends on shaped-graphics.
+  Apple-only, and built there **unconditionally** — the toolchain is a run-time lookup rather than a configure gate, since one arm needs no toolchain at all.
 * **`libs/graphics/shaped-shader-library`** — shader packages + hot reloading:
   any target declares its shaders via `sc_add_shader_package` and gets typed C++ symbols; `acquire(ctx)` returns bytecode in a format that context accepts.
-  A package is written in HLSL, WGSL or **SGL**, and an SGL package is one source for dx12, vulkan and webgpu.
-  `slib::create_sgl_compiler(inner)` is that edge: sgl's pipeline as `preprocess`, then the DXC or WGSL compiler that was there already.
-  Namespace `slib`. Depends on shaped-graphics, plus shaped-graphics-language privately and shaped-shader-compiler-dxc where DXC exists — **sg does not depend on it**.
+  A package is written in HLSL, WGSL, MSL or **SGL**, and an SGL package is one source for dx12, vulkan, webgpu and metal.
+  `slib::create_sgl_compiler(inner)` is that edge: sgl's pipeline as `preprocess`, then the DXC, WGSL or metal compiler that was there already.
+  Namespace `slib`. Depends on shaped-graphics, plus shaped-graphics-language privately.
+  The compiler edges are optional: shaped-shader-compiler-dxc where DXC exists, shaped-shader-compiler-msl on Apple — **sg does not depend on it**.
 * **`libs/graphics/shaped-rendering`** — concrete render routines on top of sg's routine framework (mipmap gen, tonemapping, texture compression, …).
   Namespace `sr`. Depends on shaped-graphics + shaped-shader-library (routines acquire their shaders through it), plus the vendored `imgui` bundle (Dear ImGui + ImPlot + ImGuizmo).
   Hosts the **Dear ImGui renderer** (`sr::imgui_context` + `sr::imgui_routine`), drawn entirely through sg — see [docs/imgui.md](libs/graphics/shaped-rendering/docs/imgui.md).
@@ -113,7 +118,7 @@ One-liner per library:
   `SR_HAS_WINDOW` (1/0) says whether a backend was compiled in.
 * **`libs/graphics/shaped-graphics-language`** — SGL, our own shading language, and its whole toolchain in one library: compiler, linter, formatter, language server.
   One `.sgl` source compiles to readable shader text for dx12, vulkan, webgpu and metal, and slib's SGL compiler edge is what calls it.
-  [examples/graphics/sgl-cube](examples/graphics/sgl-cube/shaders/cube.sgl) draws one on dx12, vulkan and webgpu; the metal text has met no Metal compiler yet.
+  [examples/graphics/sgl-cube](examples/graphics/sgl-cube/shaders/cube.sgl) draws one on dx12, vulkan, webgpu and metal, from that one source.
   **To write SGL**: [docs/spec/](libs/graphics/shaped-graphics-language/docs/spec/_index.md) is the language.
   `uv run dev.py run sgl -- emit <file> --entry <name> --target <t>` shows what a shader becomes.
   The compiler carries a deliberately thin slice of the language so far, and everything else is the one diagnostic `unsupported-yet`, never a guess.

@@ -159,6 +159,8 @@ enum class sgl::diagnostic_kind : sgl::u8
     stage_not_allowed,
     /// A `pipeline` whose stages do not fit together, or a setting that names no field or has a value it cannot.
     invalid_pipeline,
+    /// An entry point whose flat tree, with every call inlined, nests deeper than the compiler walks.
+    nesting_too_deep,
 };
 
 namespace sgl

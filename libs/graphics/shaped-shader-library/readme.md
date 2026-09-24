@@ -29,7 +29,7 @@ auto cs = my::shaders::vignette.compute.main->acquire(ctx);   // sg::async_compi
 
 - **You pass the context, not a format** — `acquire(ctx)` picks a compiler that reaches a format that context accepts.
 - **The compiler is a seam**, one edge per language and format.
-  HLSL→DXIL and HLSL→SPIR-V exist where DXC does, WGSL→WGSL exists everywhere, and SGL wraps any of the three.
+  HLSL→DXIL and HLSL→SPIR-V exist where DXC does, WGSL→WGSL exists everywhere, MSL→metallib on Apple, and SGL wraps any of the four.
 - **A package in SGL is one source for every backend**: `create_sgl_compiler(inner)` writes it as the text `inner` compiles.
   [examples/graphics/sgl-cube](../../../examples/graphics/sgl-cube/sgl_cube.cc) is the worked example.
 - **Dev vs shipping is not a mode flag**, and shader sources are reached only through a mounted virtual filesystem.

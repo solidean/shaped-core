@@ -310,6 +310,10 @@ let color = float4(..lit, 1.0)
 * **CHK-105** An entry point keeps its name, and every module-level name is taken in the mint before the first local is minted.
 * **CHK-213** An entry point whose flat tree the pass cannot write, though nothing it reaches reported an error, is `unsupported-yet` at its name.
   A gap of the pass is never a silent loss of the entry point.
+* **CHK-214** A flat tree nests at most 40 levels, and an entry point whose tree nests deeper is `nesting-too-deep` and has no flat tree.
+  A level is an operand, the body of a block expression, an expression a statement holds, and a statement list inside a statement; every call counts as inlined.
+  A top-level `let x = a + b + …` is one level for the `let` and one per term, so 40 terms is past the limit.
+  This is an implementation limit rather than a rule of the language, and it is expected to rise.
 
 ## Control flow
 
@@ -457,6 +461,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `ambiguous-overload` | CHK-72 |
 | `missing-field`, `unknown-field`, `duplicate-field` | CHK-84 |
 | `invalid-entry-point` | CHK-87, CHK-93 |
+| `nesting-too-deep` | CHK-214 |
 | `invalid-pipeline` | CHK-175 to CHK-185, CHK-187 |
 
 ## Open

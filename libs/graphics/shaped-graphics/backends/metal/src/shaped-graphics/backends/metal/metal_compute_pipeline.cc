@@ -26,26 +26,13 @@ cc::result<metal_compute_pipeline_handle> metal_context::create_metal_compute_pi
     auto const& shader = desc.shader;
     if (shader.stage != sg::shader_stage::compute)
         return cc::error("compute_pipeline: the shader is not a compute shader");
-    if (shader.format != sg::shader_format::metal_lib)
-        return cc::error(cc::format("compute_pipeline: the metal backend needs a metal_lib shader, got format {}",
-                                    int(shader.format)));
-    if (shader.bytecode.empty())
-        return cc::error("compute_pipeline: the shader has no bytecode");
 
     auto const scope = autorelease_scope();
 
-    // A metallib blob reaches Metal as dispatch_data.
-    // DISPATCH_DATA_DESTRUCTOR_DEFAULT copies it, so the pinned bytes need not outlive this call — the library owns
-    // what it parsed.
-    auto* const blob = dispatch_data_create(shader.bytecode.data(), size_t(shader.bytecode.size()), nullptr,
-                                            DISPATCH_DATA_DESTRUCTOR_DEFAULT);
-
-    NS::Error* library_error = nullptr;
-    auto* const library = _device->newLibrary(blob, &library_error);
-    dispatch_release(blob);
-
-    if (library == nullptr)
-        return metal_error(library_error, "compute_pipeline: the metal library could not be loaded");
+    auto loaded = library_from_shader(_device, shader, "compute_pipeline");
+    if (loaded.has_error())
+        return cc::error(cc::move(loaded).error());
+    auto* const library = loaded.value();
 
     auto* const function_descriptor = MTL4::LibraryFunctionDescriptor::alloc()->init();
     function_descriptor->setLibrary(library);

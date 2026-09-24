@@ -155,6 +155,17 @@ else()
     set(SC_HAS_DXC_COMPILER OFF)
 endif()
 
+# Whether the metal shader compiler is available, on the same terms and for the same reason.
+# shaped-shader-compiler-msl is built on every Apple target and gates on nothing else: it links no compiler, resolves
+# `xcrun metal` at run time, and emits MSL source where there is no toolchain — so APPLE is the whole answer.
+# The metal backend's test declares an SGL package and is added before the compiler, which is what makes this a
+# variable rather than an `if(TARGET ...)` down there.
+if(APPLE)
+    set(SC_HAS_METAL_COMPILER ON)
+else()
+    set(SC_HAS_METAL_COMPILER OFF)
+endif()
+
 # Whether a window backend is available.
 # shaped-rendering's sr::window is backed by SDL3, present only once extern/sdl3 has fetched it.
 # Computed here for symmetry with SC_HAS_DXC_COMPILER.
@@ -215,6 +226,13 @@ add_subdirectory(libs/graphics/shaped-graphics-language)
 # does this automatically) to enable it.
 if(SC_HAS_DXC_COMPILER)
     add_subdirectory(libs/graphics/shaped-shader-compiler-dxc)
+endif()
+
+# shaped-shader-compiler-msl (ssc::msl): MSL -> sg::compiled_shader, for the metal backend.
+# APPLE alone gates it: nothing here links a compiler, `xcrun metal` is resolved at run time, and the
+# MSL-source arm works on a Mac with no Metal toolchain installed at all.
+if(APPLE)
+    add_subdirectory(libs/graphics/shaped-shader-compiler-msl)
 endif()
 
 # shaped-shader-library (slib): shader packages + hot reload, over sg. Added after ssc so its optional

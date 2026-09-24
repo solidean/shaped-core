@@ -1,0 +1,98 @@
+# shaped-shader-compiler-msl cheat sheet
+
+Metal wrapper: MSL -> `sg::compiled_shader`.
+Namespace `ssc::msl`.
+Depends on shaped-graphics.
+Apple only, and built there unconditionally — the toolchain is a run-time lookup, never a configure gate.
+Headers are included by full path from `src/`: `#include <shaped-shader-compiler-msl/<name>.hh>`.
+
+> **Scope note:** compute, vertex and fragment, plus the six ray-tracing stages; tessellation and geometry are refused by name.
+> Fallible calls return `cc::result`.
+> Format conventions live in [docs/guides/cheat-sheets.md](../../../docs/guides/cheat-sheets.md).
+
+How to read this: each block leads with the include; one symbol per line with a trailing comment.
+
+---
+
+**Recording domain:** `ssc.msl`.
+Every `CC_LOG_*` and `CC_RECORD_*` site in this library is attributed to it; see [logging](../../base/clean-core/docs/logging.md).
+
+## options & inputs
+
+```cpp
+#include <shaped-shader-compiler-msl/compile_options.hh>
+ssc::msl::artifact_kind      // automatic (metallib where there is a toolchain, else source) | metallib | msl_source
+ssc::msl::optimization_level // disabled(-O0) | level_1 | level_2 (default) | level_3
+ssc::msl::compile_options    // { artifact; optimization; bool debug_info; bool warnings_as_errors;
+                             //   cc::string language_version ("metal3.2" -> -std=); defines; extra_args }
+                             //   debug_info -> -frecord-sources; warnings_as_errors -> -Werror; -I goes in extra_args
+
+#include <shaped-shader-compiler-msl/shader_description.hh>
+ssc::msl::shader_description // { cc::string source; cc::string entry_point="main";
+                             //   sg::shader_stage stage=compute; cc::optional<sg::compute_dimensions> workgroup_size }
+                             //   workgroup_size overrides `#pragma sc numthreads x y z`; absent = derive at dispatch
+```
+
+## compiler
+
+```cpp
+#include <shaped-shader-compiler-msl/compiler.hh>
+ssc::msl::toolchain_info     // { bool is_available; cc::string version; cc::string driver_path }
+ssc::msl::compiler           // move-only; holds what `xcrun -f metal` resolved. One serves every thread.
+ssc::msl::compiler::create() // -> cc::result<compiler>; NEVER fails for want of a toolchain
+c.compile(desc, opts={})     // -> cc::result<sg::compiled_shader>; const, and synchronous: it may spawn `metal`
+c.toolchain()                // -> toolchain_info const&; version belongs in any persistent cache key
+// compile() output: stage/entry_point set; format = metal_lib or msl per the arm that ran;
+// bindings + workgroup_size from the SOURCE; compiler = {"metal", version, "<arm> <args>"}
+```
+
+## shader_cache (async + cached)
+
+```cpp
+#include <shaped-shader-compiler-msl/shader_cache.hh>
+ssc::msl::shader_cache cache;            // the metal counterpart of ssc::dxc::shader_cache
+cache.add_default_in_memory_provider();  // in-memory tier (4096 entries by default)
+cache.compile(desc, opts={})             // -> sg::async_compiled_shader; runs on the scheduler, NEVER inside this call
+                                         //   same key -> the SAME node, in flight or finished
+cache.set_blob_cache(&c)                 // persistent tier; defaults to bcache::default_cache(), nullptr = off
+                                         //   SC_SG_COLD=shaders runs it cold
+cache.backlog()                          // -> cc::async_backlog const&; every compile this cache started
+// key = source + entry_point + stage + workgroup_size + every option + the ARM that will run + the toolchain VERSION
+// One ssc::msl::compiler for the whole process sits behind every cache, so `xcrun` runs once.
+// GOTCHA: read a node only once it is settled — `co_await cc::async_settled(node)` in an ASYNC_TEST.
+```
+
+## reflection mapping (MSL -> sg::binding)
+
+```
+struct frame { texture2d<float> albedo [[id(0)]]; };     ->  group_index = the [[buffer(N)]] the struct is bound at
+kernel void k(constant frame& f [[buffer(0)]])               index       = the member's [[id(n)]]
+                                                             space       = absent (MSL has no register spaces)
+
+texture*<...>            -> readonly_texture, + texture_dimension     (access::write / read_write -> readwrite_texture)
+sampler                  -> sampler
+constant T& / constant T*-> uniform_buffer
+device T*                -> readwrite_structured_buffer              (a `const` pointee -> readonly_structured_buffer)
+raytracing::*_acceleration_structure -> acceleration_structure
+T name[k]                -> count = k, occupying k CONSECUTIVE indices
+constant T& x [[buffer(4)]] on the entry point -> the INLINE-CONSTANTS block: uniform_buffer, no group, no space
+// GOTCHA: any other [[buffer]] / [[texture]] / [[sampler]] on the entry point itself is an ERROR — the backend binds
+//   only argument buffers (group N at [[buffer(N)]], N <= sg::reserved_binding_group) and the inline block.
+// GOTCHA: `#pragma sc numthreads x y z` counts only in the lines DIRECTLY above the signature (blank, pragma and
+//   [[attribute]] lines between are fine); a kernel never inherits the pragma of one above it.
+// GOTCHA: every `device T*` is STRUCTURED. MSL spells a raw byte-addressed buffer identically, so the text cannot
+//   tell them apart — a shader needing a raw buffer is a reason to grow the rule, not to guess.
+// GOTCHA: a declared-but-unreferenced binding IS reported, unlike DXIL reflection, because the text declares it.
+// [[stage_in]] and the built-ins ([[thread_position_in_grid]], ...) bind nothing and are skipped.
+```
+
+## stages
+
+```cpp
+compute, raygen            -> `kernel`     // Metal schedules no raygen: the kernel runs the traversal itself
+vertex                     -> `vertex`
+fragment                   -> `fragment`
+miss/closest_hit/any_hit/intersection/callable -> `[[visible]]`   // what a shader table links
+tessellation_*, geometry   -> cc::error naming what Metal has instead
+// An entry point declared with the wrong qualifier is an error HERE, not at pipeline creation.
+```

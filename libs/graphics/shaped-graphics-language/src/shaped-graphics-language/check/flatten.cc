@@ -1,6 +1,7 @@
 #include <clean-core/common/utility.hh>
 #include <clean-core/string/format.hh>
 #include <shaped-graphics-language/check/impl/checker.hh>
+#include <shaped-graphics-language/legalize/impl/walk.hh>
 
 using namespace sgl;
 using namespace sgl::check;
@@ -972,6 +973,55 @@ struct flattener
     /// Far beyond any program; it bounds the work on a tree the check pass should never have let through.
     static constexpr isize k_max_inline_depth = 256;
 };
+
+/// Finds the first node of a flat tree that stands deeper than `k_max_depth`, counted the way every later walk counts.
+/// It descends at most one level past the limit, so it is safe on any tree the flattener wrote.
+struct depth_probe
+{
+    flat_entry_point const& e;
+    cc::optional<origin> found;
+
+    void expr(flat_expr_id id, int depth)
+    {
+        if (found.has_value() || !is_known(e, id))
+            return;
+        auto const& x = e.at(id);
+        if (depth > k_max_depth)
+        {
+            found = x.from;
+            return;
+        }
+        if (auto const* const b = x.node.try_as<flat_block>())
+            body(b->body, depth + 1);
+        for_each_operand(e, x, [&](flat_expr_id operand) { expr(operand, depth + 1); });
+    }
+
+    void body(ast::range_of<flat_stmt_id> range, int depth)
+    {
+        if (found.has_value() || !is_known(e, range))
+            return;
+        for (auto const id : e.at(range))
+        {
+            if (found.has_value() || !is_known(e, id))
+                continue;
+            auto const& s = e.at(id);
+            if (depth > k_max_depth)
+            {
+                found = s.from;
+                return;
+            }
+            for_each_expr_of(s, [&](flat_expr_id x) { expr(x, depth + 1); });
+            for_each_pattern_of(e, s,
+                                [&](ast::range_of<flat_expr_id> patterns)
+                                {
+                                    if (is_known(e, patterns))
+                                        for (auto const p : e.at(patterns))
+                                            expr(p, depth + 1);
+                                });
+            for_each_body_of(e, s, [&](ast::range_of<flat_stmt_id> inner) { body(inner, depth + 1); });
+        }
+    }
+};
 } // namespace
 
 bool checker::is_sound(type_id type) const
@@ -1047,5 +1097,18 @@ void checker::flatten_entry_point(symbol_id id)
     if (f.is_failed || !f.stage_violations.empty() || (info.stages & stage_bit(info.entry_stage)) == 0)
         return;
     f.entry.body = f.add_list(f.block);
+
+    // Every later walk stops descending at the limit and leaves a hole where it stopped, so a tree past it must never
+    // reach them: the hole would surface as a missing id rather than as the limit (CHK-214).
+    auto probe = depth_probe{.e = f.entry};
+    probe.body(f.entry.body, 0);
+    if (probe.found.has_value())
+    {
+        auto const& at = probe.found.value();
+        auto const where = ast::is_valid(at.expr) ? span_of(at.file, at.expr) : span_of(at.file, at.stmt);
+        report(diagnostic_kind::nesting_too_deep, at.file, where,
+               cc::format("'{}' nests deeper than {} levels here, with every call inlined", s.name, k_max_depth));
+        return;
+    }
     out.entry_points.push_back(cc::move(f.entry));
 }

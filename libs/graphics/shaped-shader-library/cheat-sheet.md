@@ -123,7 +123,7 @@ asset->dependencies()               // -> vector<string>; source + resolved incl
 
 ```cpp
 #include <shaped-shader-library/compiler/shader_compiler.hh>
-slib::shader_language              // hlsl | wgsl | sgl   (slang/glsl planned)
+slib::shader_language              // hlsl | wgsl | sgl | metal   (slang/glsl planned)
 slib::include_resolver             // cc::function_ref<cc::optional<cc::string>(cc::string_view path)>
 slib::shader_source_description    // { cc::string source; cc::string entry_point; sg::shader_stage stage; cc::string label; }
                                    //   label = what a diagnostic calls the source; never opened, may be empty
@@ -143,15 +143,24 @@ slib::create_dxc_spirv_compiler()  // the same, hlsl -> spirv; works everywhere 
 slib::create_wgsl_compiler()       // -> std::unique_ptr<shader_compiler>; wgsl -> wgsl, the source IS the bytecode
                                    //   reflection only: a stage or entry point other than the package's is an async error
 
+#include <shaped-shader-library/compiler/metal_compiler.hh>  // Apple only: SLIB_HAS_METAL says whether it is there
+slib::create_metal_compiler()      // -> std::unique_ptr<shader_compiler>; metal -> metal_lib
+                                   //   the artifact is a metallib, or MSL source where Apple's Metal toolchain is not
+                                   //   installed — target_format() is metal_lib either way, and the shader says which
+                                   //   compiles through an ssc::msl::shader_cache: async, in memory and in the blob cache
+                                   //   preprocess hands the text back: MSL here has no #include to flatten
+                                   //   reflection reads the SOURCE (see shaped-shader-compiler-msl/cheat-sheet.md)
+
 #include <shaped-shader-library/compiler/sgl_compiler.hh>   // wherever the inner compiler exists
 slib::create_sgl_compiler(std::unique_ptr<shader_compiler> inner)
                                    // -> std::unique_ptr<shader_compiler>; sgl -> inner->target_format()
-                                   //   dxil -> HLSL for dx12, spirv -> HLSL for vulkan, wgsl -> WGSL
+                                   //   dxil -> HLSL for dx12, spirv -> HLSL for vulkan, wgsl -> WGSL, metal_lib -> MSL
                                    //   preprocess IS SGL's pipeline, so the flattened source is the EMITTED TEXT;
                                    //   compile and reflection are the inner compiler's
                                    //   an SGL error is a preprocess error: `pkg/cube.sgl:12:5: error: unknown-name: foo`
                                    //   the binding pass runs behind it: the HLSL names each group, the pass writes registers
 lib.add_compiler(slib::create_sgl_compiler(slib::create_wgsl_compiler()));   // one edge per format you can build
+lib.add_compiler(slib::create_sgl_compiler(slib::create_metal_compiler()));  // ... and this is how a package reaches metal
 
 #include <shaped-shader-library/binding/wgsl_declarations.hh>
 slib::parse_wgsl_declarations(src) // -> cc::result<wgsl_declarations>; { stage; entry_point; workgroup_size; bindings }

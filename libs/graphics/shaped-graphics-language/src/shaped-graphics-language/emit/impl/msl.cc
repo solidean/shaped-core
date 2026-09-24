@@ -10,8 +10,7 @@ using namespace sgl::emit;
 using namespace sgl::emit::impl;
 
 /// The buffer index of the inline constants, in every stage that reads them.
-///
-/// sg's metal backend binds group N at buffer index N and the inline constants at 4, its `k_inline_constants_buffer_index`.
+/// It must equal sg's metal `k_inline_constants_buffer_index`, which sgl cannot include.
 constexpr auto k_inline_constants_buffer = 4;
 
 class msl_dialect_t final : public dialect

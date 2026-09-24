@@ -1,5 +1,8 @@
 #include "metal_common.hh"
 
+#include <clean-core/string/format.hh>
+#include <shaped-graphics/binding/compiled_shader.hh> // library_from_shader reads a shader's format and bytes
+
 #include <cstdlib> // setenv, the only way to configure Metal's validation layer
 #include <mutex>
 
@@ -47,3 +50,43 @@ cc::string describe_error(NS::Error const* error, cc::string_view what)
                       i64(mutable_error->code()));
 }
 } // namespace sg::backend::metal
+
+cc::result<MTL::Library*> sg::backend::metal::library_from_shader(MTL::Device* device,
+                                                                  sg::compiled_shader const& shader,
+                                                                  cc::string_view what)
+{
+    if (shader.bytecode.empty())
+        return cc::error(cc::format("{}: the shader carries nothing to build a library from", what));
+
+    NS::Error* error = nullptr;
+    auto* library = static_cast<MTL::Library*>(nullptr);
+
+    if (shader.format == sg::shader_format::metal_lib)
+    {
+        // DISPATCH_DATA_DESTRUCTOR_DEFAULT copies, so the pinned bytes need not outlive this call.
+        auto* const blob = dispatch_data_create(shader.bytecode.data(), size_t(shader.bytecode.size()), nullptr,
+                                                DISPATCH_DATA_DESTRUCTOR_DEFAULT);
+        library = device->newLibrary(blob, &error);
+        dispatch_release(blob);
+    }
+    else if (shader.format == sg::shader_format::msl)
+    {
+        // The blob is UTF-8 source rather than bytecode, and NS::String wants a terminator the blob does not carry.
+        auto source = cc::string::create_filled(shader.bytecode.size(), char(0));
+        for (auto i = isize(0); i < shader.bytecode.size(); ++i)
+            source[i] = char(shader.bytecode[i]);
+
+        auto* const options = MTL::CompileOptions::alloc()->init();
+        library = device->newLibrary(ns_string(source), options, &error);
+        options->release();
+    }
+    else
+    {
+        return cc::error(cc::format("{}: metal takes a metal_lib or msl shader, got format {}", what, int(shader.format)));
+    }
+
+    if (library == nullptr)
+        return metal_error(error, cc::format("{}: the shader library could not be built", what));
+
+    return library;
+}
