@@ -330,3 +330,52 @@ TEST("slib pipeline - a reload moves a pipeline's configuration, and never its f
     CHECK(regrouped.frozen_moved == "layout:  -> frame\n");
     CHECK(text_of(regrouped.settings) == "color_targets.color.format = .host\nrasterization.cull = .none\n");
 }
+
+
+TEST("slib pipeline - a reload promoted before a pipeline's first acquire is read by it",
+     exclusive("slib-shader-library"))
+{
+    auto const fs = std::make_shared<slib::memory_filesystem>();
+    fs->write("early.sgl", reload_source(""));
+
+    auto lib = slib::shader_library();
+    lib.add_compiler(slib::create_sgl_compiler(slib::create_wgsl_compiler()));
+    // Static like a generated package's handles: slib keys a pipeline's reload state by its definition's address.
+    static auto vs = slib::shader_asset_handle();
+    static auto ps = slib::shader_asset_handle();
+    slib::shader_definition const definitions[] = {
+        {.path = "early.sgl", .stage = sg::shader_stage::vertex, .entry_point = "vs", .asset = &vs},
+        {.path = "early.sgl", .stage = sg::shader_stage::fragment, .entry_point = "ps", .asset = &ps},
+    };
+    lib.add_package({.name = "early_pkg", .language = slib::shader_language::sgl, .definitions = definitions}, fs);
+    lib.start_hot_reload({.unthreaded = true});
+
+    static cc::string_view const targets[] = {"color"};
+    static slib::pipeline_setting const baked[] = {
+        {.path = "color_targets.color.format", .kind = slib::setting_kind::host},
+    };
+    static auto const definition = slib::pipeline_definition{.file = "early.sgl",
+                                                             .name = "pipeline",
+                                                             .vertex = &vs,
+                                                             .pixel = &ps,
+                                                             .targets = targets,
+                                                             .settings = baked,
+                                                             .vertex_input_name = "vin",
+                                                             .target_struct = "target"};
+    auto const compile = [&]
+    {
+        REQUIRE(vs->acquire(sg::shader_format::wgsl)->has_value());
+        REQUIRE(ps->acquire(sg::shader_format::wgsl)->has_value());
+    };
+
+    // The stages are acquired, edited and reloaded by someone else before the pipeline is ever asked about.
+    compile();
+    lib.poll_hot_reload();
+    fs->write("early.sgl", reload_source("    cull = .front\n"));
+    lib.poll_hot_reload();
+    compile();
+    REQUIRE(vs->generation() > 0);
+
+    CHECK(text_of(slib::configuration_of(definition).settings)
+          == "color_targets.color.format = .host\nrasterization.cull = .front\n");
+}

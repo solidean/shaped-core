@@ -554,22 +554,22 @@ slib::pipeline_configuration slib::configuration_of(pipeline_definition const& d
     auto current = live_pipelines().lock(
         [&](cc::vector<cc::unique_ptr<live_pipeline>>& all) -> pipeline_configuration
         {
-            for (auto const& live : all)
-                if (live->definition == &d)
-                {
-                    needs_read
-                        = live->vertex_generation != vertex_generation || live->pixel_generation != pixel_generation;
-                    return live->configuration;
-                }
-            // The build's own settings, read at the generations the stages have now.
-            auto baked = pipeline_configuration();
-            baked.settings.push_back_range(d.settings);
-            baked.latest.push_back_range(d.settings);
-            all.push_back(cc::make_unique<live_pipeline>(live_pipeline{.definition = &d,
-                                                                       .vertex_generation = vertex_generation,
-                                                                       .pixel_generation = pixel_generation,
-                                                                       .configuration = baked}));
-            return baked;
+            auto const* live = static_cast<live_pipeline const*>(nullptr);
+            for (auto const& l : all)
+                if (l->definition == &d)
+                    live = l.get();
+            if (live == nullptr)
+            {
+                // The build's own settings are generation 0's, whatever the stages have reached before this first
+                // call: a reload promoted earlier is then read below rather than recorded as read.
+                auto baked = pipeline_configuration();
+                baked.settings.push_back_range(d.settings);
+                baked.latest.push_back_range(d.settings);
+                all.push_back(cc::make_unique<live_pipeline>(live_pipeline{.definition = &d, .configuration = baked}));
+                live = all.back().get();
+            }
+            needs_read = live->vertex_generation != vertex_generation || live->pixel_generation != pixel_generation;
+            return live->configuration;
         });
     if (!needs_read)
         return current;
@@ -668,7 +668,11 @@ cc::shared_async<sg::raster_pipeline_description> describe_with(sg::context* ctx
         CC_ASSERTF(part != nullptr, "{}'s {} leaves {} to the host, and the acquire does not state it", d.file, d.name,
                    path);
         auto setting = pipeline_setting{.path = path, .kind = setting_kind::integer, .integer = part->value};
-        if (!path.ends_with("sample_count"))
+        if (path.ends_with("sample_count"))
+            CC_ASSERTF(part->value >= 1 && part->value <= 64 && (part->value & (part->value - 1)) == 0,
+                       "{}'s {}: the sample count is stated as {}, and it is a power of two from 1 to 64", d.file,
+                       d.name, part->value);
+        else
         {
             auto const names = slib::enum_case_names("pixel_format");
             CC_ASSERTF(part->value > 0 && part->value < names.size(), "{}'s {}: {} is stated as no format", d.file,

@@ -310,7 +310,7 @@ auto const pipeline = co_await shaders::double_values.main.acquire_pipeline(ctx)
 auto const p = co_await shaders::cube.pipeline.acquire(ctx, {.color = swapchain_format});  // open: one field per `.host` part
 //   nothing `.host` -> acquire(ctx); an optional last argument customize(sg::raster_pipeline_description&) runs on every build
 //   acquire_latest(ctx, ...)  the newest valid build, even one whose frozen part moved; description(ctx, ...) to build it yourself
-//   an open field left unset (a format still `undefined`) asserts: the declaration said the host would state it
+//   an open field left unset (a format still `undefined`, a sample count still 0) asserts: the declaration said the host would state it
 // `@vertex struct v` -> shaders::v and v::layout(): attributes in the shader's order, no semantic or offset by hand.
 //   members marked `@per_instance` / `@stream(name)` split it over buffers: then v::<stream> per buffer, in slot order,
 //   and v::buffers{.per_vertex = verts, .per_instance = insts}.views() for bind_vertex_buffers — typed, so a
