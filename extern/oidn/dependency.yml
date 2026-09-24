@@ -43,9 +43,10 @@ upstreams:
       OIDN on the CPU needs neither, because it goes through the existing download and upload.
       When sg grows those, the extract list here grows with them.
 
-      ALL THREE LAYOUTS ARE NOW UNPACKED, and the two Unix ones differ from Windows in a way that matters.
-      Each library there is one versioned real file plus the unversioned and soname symlinks onto it, and oneTBB is named `tbb` rather than Windows' `tbb12`.
-      fetch-oidn.py carries symlinks through for that reason, and checks the installed names rather than only their count.
+      ALL THREE LAYOUTS ARE NOW UNPACKED, and the two Unix ones differ from Windows in three ways that all matter.
+      Each library is one versioned real file plus the unversioned and soname symlinks onto it, oneTBB is named `tbb` rather than Windows' `tbb12`, and every library carries an RPATH of `$ORIGIN/../lib`.
+      So fetch-oidn.py carries symlinks through, keeps both oneTBB spellings, and leaves the Unix libraries in lib/ rather than flattening them into bin/ as the Windows shape would suggest.
+      It checks the installed names rather than only their count, because all three of those mistakes produced an install with a plausible number of files in it.
 
       x64 WINDOWS, x86_64 LINUX AND arm64 macOS ARE THE WHOLE RELEASE.
       `unavailable_on` names the three remaining machines, which are skipped rather than handed an archive for another instruction set.

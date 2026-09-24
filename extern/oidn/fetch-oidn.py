@@ -16,13 +16,12 @@ GPU devices share memory with ours through an OS handle, which needs exportable 
 have. The CPU device needs neither — it reads and writes ordinary memory, which is what a download and an upload
 already produce.
 
-Members are selected BY BASENAME rather than by directory, because a Unix build puts its shared libraries under lib/
-where Windows puts them under bin/, and the install flattens both onto one shape.
+Members are selected BY BASENAME rather than by directory, since the releases disagree about where a library lives.
 
-SYMLINKS ARE PART OF THE PAYLOAD on the two Unix platforms.
-Each library arrives as one versioned real file plus the unversioned and soname links onto it, and those links are the
-names extern/oidn/CMakeLists.txt links by and the dynamic loader resolves through.
-An install that keeps only regular files produces a directory that looks complete and builds nothing.
+THE UNIX LAYOUT IS KEPT RATHER THAN FLATTENED, and both halves of it matter.
+Each library arrives as one versioned real file plus the unversioned and soname symlinks onto it, and those links are the names extern/oidn/CMakeLists.txt links by.
+Each also carries an RPATH of `$ORIGIN/../lib`, `@loader_path/../lib` on macOS, and finds its siblings only through it.
+So an install that drops the links, or that moves the libraries to bin/ as a Windows-shaped install would, produces a directory that looks complete and loads nothing.
 
 NOT EVERY PLATFORM HAS A RELEASE.
 Upstream publishes x64 Windows, x86_64 Linux and arm64 macOS.
@@ -71,8 +70,8 @@ KEEP_STEMS = TBB_STEMS + (
 # An install that drops links has no file at this path, and the build then fails at ninja rather than anywhere informative.
 FACADE_LIBRARY = {
     "windows": "bin/OpenImageDenoise.dll",
-    "linux": "bin/libOpenImageDenoise.so",
-    "macos": "bin/libOpenImageDenoise.dylib",
+    "linux": "lib/libOpenImageDenoise.so",
+    "macos": "lib/libOpenImageDenoise.dylib",
 }
 
 # Library extensions across the three platforms, import libraries included.
@@ -89,8 +88,8 @@ LICENSE_MEMBERS = {
 def wanted(relative: PurePosixPath) -> str | None:
     """Where `relative` installs to, or None to skip it.
 
-    The returned path is relative to .install/, and deliberately flattens a platform's own layout onto one shape:
-    headers under include/, everything loadable under bin/, import libraries under lib/.
+    The returned path is relative to .install/: headers under include/, Windows DLLs under bin/, and everything else
+    under lib/ — which is where the Unix releases put their libraries and where their RPATH looks for them.
     """
     name = relative.name
 
@@ -112,7 +111,10 @@ def wanted(relative: PurePosixPath) -> str | None:
     if stem not in KEEP_STEMS:
         return None
 
-    return str(PurePosixPath("lib" if name.endswith(".lib") else "bin", name))
+    # Windows DLLs go beside the binaries; everything else keeps upstream's own lib/.
+    # That is not cosmetic: each Unix library carries an RPATH of `$ORIGIN/../lib` (`@loader_path/../lib` on macOS) and
+    # resolves its siblings through it, so a library moved to bin/ looks for them in an empty lib/ and is not found.
+    return str(PurePosixPath("bin" if name.endswith(".dll") else "lib", name))
 
 
 @dataclass(frozen=True)
@@ -235,7 +237,7 @@ def main() -> None:
     facade = FACADE_LIBRARY[deps_manifest.host_os_key()]
     if not (staging / facade).exists():
         missing.append(facade)
-    installed = sorted((staging / "bin").iterdir()) if (staging / "bin").is_dir() else []
+    installed = [path for folder in ("bin", "lib") if (staging / folder).is_dir() for path in (staging / folder).iterdir()]
     if not any(path.name.split(".")[0].removeprefix("lib") in TBB_STEMS for path in installed):
         missing.append("a oneTBB library")
     if written < 6 or missing:

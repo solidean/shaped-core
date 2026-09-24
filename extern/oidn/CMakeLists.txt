@@ -27,28 +27,32 @@ if(WIN32)
     set_target_properties(oidn PROPERTIES
         IMPORTED_LOCATION "${OIDN_INSTALL}/bin/OpenImageDenoise.dll"
         IMPORTED_IMPLIB "${OIDN_INSTALL}/lib/OpenImageDenoise.lib")
-elseif(APPLE)
-    set_target_properties(oidn PROPERTIES
-        IMPORTED_LOCATION "${OIDN_INSTALL}/bin/libOpenImageDenoise.dylib"
-        IMPORTED_NO_SONAME TRUE)
 else()
-    set_target_properties(oidn PROPERTIES
-        IMPORTED_LOCATION "${OIDN_INSTALL}/bin/libOpenImageDenoise.so"
-        IMPORTED_NO_SONAME TRUE)
+    # lib/ rather than bin/, and no IMPORTED_NO_SONAME: these carry a real SONAME (`libOpenImageDenoise.so.2`, or an
+    # `@rpath` install name on macOS), so CMake records that and adds the directory to the binary's rpath.
+    # Claiming they have none makes CMake link by full path and skip the rpath, which leaves the loader with a SONAME
+    # it has nowhere to look for.
+    set(_oidn_facade "${OIDN_INSTALL}/lib/libOpenImageDenoise.dylib")
+    if(NOT APPLE)
+        set(_oidn_facade "${OIDN_INSTALL}/lib/libOpenImageDenoise.so")
+    endif()
+    set_target_properties(oidn PROPERTIES IMPORTED_LOCATION "${_oidn_facade}")
 endif()
 
 # SYSTEM so oidn.h does not trip the consuming TU's warnings.
 target_include_directories(oidn SYSTEM INTERFACE "${OIDN_INSTALL}/include")
 
-# Every library a consuming binary must have beside it.
+# Every library a consuming binary must have beside it — a Windows concern only.
 #
-# The facade alone is not enough and the failure is a run-time one: it dlopens the core and the device module by name
-# out of its own directory, so a binary staged with only OpenImageDenoise.dll reports that no device could be created.
+# There the facade alone is not enough and the failure is a run-time one: it loads the core and the device module by
+# name out of its own directory, so a binary staged with only OpenImageDenoise.dll reports that no device came up.
 # $<TARGET_RUNTIME_DLLS> sees only the imported target, so the full list travels here as DXC's does.
 if(WIN32)
     file(GLOB _oidn_runtime "${OIDN_INSTALL}/bin/*.dll")
 else()
-    file(GLOB _oidn_runtime "${OIDN_INSTALL}/bin/*.so*" "${OIDN_INSTALL}/bin/*.dylib")
+    # Empty on purpose: nothing is staged beside a Unix binary, because each library finds its siblings through the
+    # RPATH upstream built into it and the loader finds the first one through ours.
+    set(_oidn_runtime "")
 endif()
 set(OIDN_RUNTIME_LIBRARIES "${_oidn_runtime}"
     CACHE INTERNAL "OIDN libraries to copy next to consuming binaries")
