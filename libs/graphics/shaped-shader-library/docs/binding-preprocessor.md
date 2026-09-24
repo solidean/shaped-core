@@ -83,7 +83,7 @@ Three rules, and they are the whole grammar:
 
 - **An attribute stands on its own line and applies to the declaration after it.**
   A pragma is a line directive, so there is no trailing form: one attachment rule instead of two, and no lookahead in two directions.
-- **The first word is the attribute name**: `group`, `static`, `push_constants`, `payload`, `vertex_input`.
+- **The first word is the attribute name**: `group`, `static`, `format`, `push_constants`, `payload`, `vertex_input`, `attribute`.
   A name the pass does not know is an error naming the line, never a directive nobody reads — which is exactly what a compiler makes of it.
 - **The rest is `key=value`**, values being a bare token or a parenthesised tuple.
   No quotes, no nesting, no expressions.

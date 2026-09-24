@@ -82,8 +82,10 @@ cmake/
                                                 and the typed struct a `path:binding:namespace` entry declares
   binding_grammar.py              [done]        the binding pass again, in Python -- what the generator parses
                                                 a registered file with; kept in step by the shared corpus
-  binding-grammar-self-test.py    [done]        that corpus against the Python half; `dev.py check`'s
-                                                `shader-grammar` gate
+  binding-grammar-self-test.py    [done]        that corpus against the Python half, and the two halves'
+                                                storage-format lists as sets; `dev.py check`'s `shader-grammar` gate
+  sgl-host-code-self-test.py      [done]        the C++ sgl_host_code.py writes for a group's textures, images
+                                                and samplers, fed describe entries directly
 ```
 
 Each embedded source is emitted as a run of ~8 KB adjacent raw string literals rather than as one literal.
@@ -112,9 +114,9 @@ The shape the seam is built for, and what is still `[planned]`:
   A group's textures and images are typed views, a bound sampler an `sg::sampler` field, and a `sampler name:` block of the binding one of its `declared_samplers()`.
   Its table carries every fact sg's layouts take from a binding, from `sgl describe`, so the WebGPU layout agrees with the WGSL the group becomes.
   **SGL writes MSL too, and nothing here can build it**: `create_sgl_compiler` maps a `metal_lib` inner compiler to the `msl` target, and slib has no such compiler.
-  What a Mac run still needs is an MSL-to-`metal_lib` compiler over Apple's `metal` tool or a runtime `newLibraryWithSource`, which also has to reflect the MSL.
   sg's metal backend already binds what that text assumes: vertex buffers through a vertex descriptor, inline constants at buffer index 4, and indexed draws.
-  Until then `sgl-cube` on a metal-only build is a stub target that says so.
+  What a Mac run still needs is an MSL-to-`metal_lib` compiler over Apple's `metal` tool or a runtime `newLibraryWithSource`, which also has to reflect the MSL.
+  Until that compiler exists, `sgl-cube` on a metal-only build is a stub target that says so.
 - **chains** — a shader is authored in one language but consumed as several backend formats, and the path may need an intermediate hop (`slang -> hlsl -> dxil`).
   That needs a language→language transpile edge and a graph search to replace the direct lookup.
   Call sites do not change: `acquire(ctx)` already asks "reach a format this context accepts", which is a path query either way.

@@ -1344,3 +1344,60 @@ namespace post
 }
 --- error
 line 5: a 'format' attribute must stand before a storage texture in a group
+
+
+--- case a format attribute names one format, not two
+--- hlsl
+#pragma sc group 0
+namespace post
+{
+#pragma sc format rgba8_unorm r8_unorm
+    RWTexture2D<float4> dst;
+}
+--- error
+line 4: 'format' takes one storage format, as sg::pixel_format names it: `#pragma sc format rgba8_unorm`
+
+
+--- case a format attribute names its format bare, never as a key
+--- hlsl
+#pragma sc group 0
+namespace post
+{
+#pragma sc format format=rgba8_unorm
+    RWTexture2D<float4> dst;
+}
+--- error
+line 4: 'format' takes one storage format, as sg::pixel_format names it: `#pragma sc format rgba8_unorm`
+
+
+--- case a format attribute naming no format is an error
+--- hlsl
+#pragma sc group 0
+namespace post
+{
+#pragma sc format
+    RWTexture2D<float4> dst;
+}
+--- error
+line 4: 'format' takes one storage format, as sg::pixel_format names it: `#pragma sc format rgba8_unorm`
+
+
+--- case a format at file scope is an error, even standing before a storage texture
+--- hlsl
+#pragma sc format rgba8_unorm
+RWTexture2D<float4> dst;
+--- error
+line 1: a 'format' attribute must stand before a storage texture in a group
+
+
+--- case a format and a static before one declaration is an error, since each describes a different kind
+--- hlsl
+#pragma sc group 0
+namespace post
+{
+#pragma sc format rgba8_unorm
+#pragma sc static address=clamp_edge
+    SamplerState samp;
+}
+--- error
+line 5: two attributes stand before one declaration
