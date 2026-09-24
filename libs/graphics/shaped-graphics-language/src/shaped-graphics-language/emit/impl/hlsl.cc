@@ -133,29 +133,31 @@ public:
     void write_resource(cc::string& out, plan const& p, planned_resource const& b) const
     {
         auto const& t = p.m.at(b.type);
+        if (t.kind == type_kind::image)
+            // slib's `#pragma sc format` states the format, which vulkan's SPIR-V wants and dx12 leaves to the view.
+            out.appendf("#pragma sc format {}\n", k_storage_formats[t.format].name);
+        if (t.kind == type_kind::sampler && b.static_sampler >= 0)
+            write_static_sampler(out, p.m.samplers[b.static_sampler]);
+        out.appendf("    {} {};\n", resource_text(p, b.type), b.name);
+    }
+
+    [[nodiscard]] cc::string resource_text(plan const& p, type_id type) const override
+    {
+        auto const& t = p.m.at(type);
         switch (t.kind)
         {
         case type_kind::buffer:
-            out.appendf("    {}StructuredBuffer<{}> {};\n", b.is_mut ? "RW" : "", type_text(p, *this, b.element), b.name);
-            return;
+            return cc::format("{}StructuredBuffer<{}>", t.is_mut ? "RW" : "", type_text(p, *this, t.element));
         case type_kind::texture:
             // A depth texture samples to one float, which is how HLSL declares it.
-            out.appendf("    {}<{}> {};\n", k_texture_names[isize(t.shape)],
-                        t.is_depth ? cc::string_view("float") : type_text(p, *this, t.element), b.name);
-            return;
+            return cc::format("{}<{}>", k_texture_names[isize(t.shape)],
+                              t.is_depth ? cc::string_view("float") : type_text(p, *this, t.element));
         case type_kind::image:
-            // slib's `#pragma sc format` states the format, which vulkan's SPIR-V wants and dx12 leaves to the view.
-            out.appendf("#pragma sc format {}\n", k_storage_formats[t.format].name);
-            out.appendf("    {}<{}> {};\n", k_image_names[isize(t.shape)], builtin_spelling(p, texel_name_of(t.format)),
-                        b.name);
-            return;
+            return cc::format("{}<{}>", k_image_names[isize(t.shape)], builtin_spelling(p, texel_name_of(t.format)));
         case type_kind::sampler:
-            if (b.static_sampler >= 0)
-                write_static_sampler(out, p.m.samplers[b.static_sampler]);
-            out.appendf("    {} {};\n", t.is_comparison ? "SamplerComparisonState" : "SamplerState", b.name);
-            return;
+            return t.is_comparison ? "SamplerComparisonState" : "SamplerState";
         default:
-            return;
+            return {};
         }
     }
 

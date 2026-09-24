@@ -154,6 +154,8 @@ A binding that is not `@inline` is a group.
   WGSL has no static sampler, and writes it as it writes a sampler the host binds: the layout says it is static.
 * **EMIT-99** WGSL writes a 1D texture or image as a 2D one and a 1D array as a 2D array, since sg's webgpu backend creates every 1D texture that way (the bindings file, "Shapes").
 * **EMIT-100** A call of a builtin that gives nothing is a statement as it stands, with no `_ =` in WGSL.
+* **EMIT-101** A builtin a target cannot write as one expression declares a helper function ahead of the entry point, once per text, and the call names it.
+  HLSL's `GetDimensions` writes through out parameters, so `DEBUG_size` is an overload of `sgl_size` per texture type the entry point passes.
 
 | SGL | HLSL | WGSL |
 |---|---|---|

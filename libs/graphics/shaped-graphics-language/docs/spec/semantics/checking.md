@@ -136,6 +136,8 @@ enum light_kind:
 * **CHK-185** A `@builtin` function alone may take a texture, an image or a sampler; for any other function each is `unsupported-yet`, as it is anywhere a value stands.
 * **CHK-186** A builtin's image parameter names the texel it loads or stores instead of a format, `out image2d[float4]`, and is a pattern:
   it takes every image of that shape whose format's texel is that type, and which the shader may read where the pattern reads, or write where it writes.
+* **CHK-189** A builtin's bare `texture2d` or `image2d` parameter is a pattern too, which takes every texture, or every image, of that shape, whatever it holds and however it is read.
+  It is for what depends on neither, such as a size.
 
 ```sgl
 @inline binding constants:

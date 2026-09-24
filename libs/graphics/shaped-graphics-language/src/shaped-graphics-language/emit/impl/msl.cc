@@ -76,6 +76,9 @@ public:
 
     /// A Metal buffer is a parameter of the entry point rather than a global, so `emit_entry_point` declines
     /// before a line is written; nothing reaches here.
+    /// MSL declines every group (EMIT-89), so nothing asks for a resource's spelling.
+    [[nodiscard]] cc::string resource_text(plan const&, type_id) const override { return {}; }
+
     void write_group(cc::string&, plan const&, planned_constants const*, cc::span<planned_resource const>) const override
     {
     }

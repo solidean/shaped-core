@@ -23,11 +23,12 @@ binding sampled:
     DEBUG_store(post.dst, xy, c)
     DEBUG_store(post.acc, xy, DEBUG_load(post.acc, xy) + c.x)
 
-// The same copy through a sampler the host binds, over a 16 by 16 texture.
+// The same copy through a sampler the host binds, sized by the texture it reads and the image it writes.
 @compute(8, 8) fun copy_dynamic(@thread_id id: int3){sampled}:
     let xy = int2(id.x, id.y)
-    let uv = ((xy as float2) + float2(0.5, 0.5)) * float2(0.0625, 0.0625)
-    DEBUG_store(sampled.dst, xy, DEBUG_sample_level(sampled.src, uv, 0.0, sampled.smp))
+    let uv = ((xy as float2) + float2(0.5, 0.5)) / (DEBUG_size(sampled.src, 0) as float2)
+    if xy.x < DEBUG_size(sampled.dst).x and xy.y < DEBUG_size(sampled.dst).y:
+        DEBUG_store(sampled.dst, xy, DEBUG_sample_level(sampled.src, uv, 0.0, sampled.smp))
 
 // A full-screen quad whose pixel stage samples a texture: `DEBUG_sample` picks its level from derivatives,
 // which only a pixel stage has, so it is @stages(.pixel) and a compute entry point may not reach it.

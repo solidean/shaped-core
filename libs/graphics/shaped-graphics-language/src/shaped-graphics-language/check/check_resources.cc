@@ -45,9 +45,16 @@ cc::string spelling_of(type_info const& t, checked_module const& m)
     switch (t.kind)
     {
     case type_kind::texture:
-        return t.is_depth ? cc::string(shape.depth) : cc::format("{}[{}]", shape.texture, m.name_of(t.element));
+        if (t.is_depth)
+            return cc::string(shape.depth);
+        // A builtin's bare pattern takes every texture of the shape (CHK-189).
+        return t.element == type_id::none ? cc::string(shape.texture)
+                                          : cc::format("{}[{}]", shape.texture, m.name_of(t.element));
     case type_kind::image:
-        // A builtin's pattern names the texel it reads or writes where an image names its format (CHK-186).
+        // A builtin's pattern names the texel it reads or writes where an image names its format (CHK-186),
+        // and a bare one takes every image of the shape (CHK-189).
+        if (t.format < 0 && t.element == type_id::none)
+            return cc::string(shape.image);
         return t.format < 0
                  ? cc::format("{}{}[{}]", access_prefix(t.access), shape.image, m.name_of(t.element))
                  : cc::format("{}{}[.{}]", access_prefix(t.access), shape.image, k_storage_formats[t.format].name);
@@ -323,6 +330,20 @@ type_id checker::resolve_pattern_type(i32 file, ast::expr_id expr)
         return result;
     }
 
+    // CHK-189: a bare shape name takes every texture or image of that shape, whatever it holds and however it is read.
+    if (auto const* const bare = e.node.try_as<ast::name>())
+        for (auto const& shape : k_shapes)
+        {
+            auto const text = text_of(file, bare->where);
+            auto const is_texture = shape.texture == text;
+            if (!is_texture && (shape.image.empty() || shape.image != text))
+                continue;
+            auto const result
+                = resource_type({.kind = is_texture ? type_kind::texture : type_kind::image, .shape = shape.shape});
+            set_type(file, expr, result);
+            return result;
+        }
+
     auto const* const applied = e.node.try_as<ast::index>();
     auto const* const head = applied != nullptr && ast::is_valid(applied->object)
                                ? ast_of(file).at(applied->object).node.try_as<ast::name>()
@@ -348,6 +369,11 @@ bool checker::takes(type_id parameter, type_id argument) const
         return true;
     auto const& p = out.at(parameter);
     auto const& a = out.at(argument);
+    auto const is_bare = p.element == type_id::none && p.format < 0 && !p.is_depth;
+    if (is_bare && p.kind == type_kind::texture)
+        return a.kind == type_kind::texture && !a.is_depth && a.shape == p.shape;
+    if (is_bare && p.kind == type_kind::image)
+        return a.kind == type_kind::image && a.format >= 0 && a.shape == p.shape;
     if (p.kind != type_kind::image || p.format >= 0 || a.kind != type_kind::image || a.format < 0 || p.shape != a.shape)
         return false;
     if (out.name_of(p.element) != texel_name_of(a.format))

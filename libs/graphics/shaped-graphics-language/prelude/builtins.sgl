@@ -345,3 +345,5 @@
 @builtin @pure fun DEBUG_load(t: texture2d[uint4], xy: int2, level: int) -> uint4
 @builtin fun DEBUG_load(i: image2d[uint4], xy: int2) -> uint4
 @builtin fun DEBUG_store(i: out image2d[uint4], xy: int2, value: uint4)
+@builtin @pure fun DEBUG_size(t: texture2d, level: int) -> int2
+@builtin @pure fun DEBUG_size(i: image2d) -> int2

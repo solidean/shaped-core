@@ -126,6 +126,71 @@ written write_image_store(call_context const& c)
     return {};
 }
 
+// ---- sizes: HLSL's GetDimensions writes through out parameters, so its call is a helper the text declares ----
+
+void size_of(leaves, result& out)
+{
+    out.push_back(scalar::of(0));
+    out.push_back(scalar::of(0));
+}
+
+written write_texture_size(call_context const& c)
+{
+    auto const& a = c.arguments;
+    switch (c.target)
+    {
+    case language::hlsl:
+        return {.text = cc::format("sgl_size({}, {})", a[0].text, a[1].text)};
+    case language::wgsl:
+        return {.text = cc::format("vec2i(textureDimensions({}, {}))", a[0].text, a[1].text)};
+    case language::msl:
+        return {.text = cc::format("int2({0}.get_width({1}), {0}.get_height({1}))", a[0].text, a[1].text)};
+    }
+    return {};
+}
+
+written write_image_size(call_context const& c)
+{
+    auto const& a = c.arguments;
+    switch (c.target)
+    {
+    case language::hlsl:
+        return {.text = cc::format("sgl_size({})", a[0].text)};
+    case language::wgsl:
+        return {.text = cc::format("vec2i(textureDimensions({}))", a[0].text)};
+    case language::msl:
+        return {.text = cc::format("int2({0}.get_width(), {0}.get_height())", a[0].text)};
+    }
+    return {};
+}
+
+/// One overload of `sgl_size` per texture type a call passes, which is what lets every call spell it the same.
+cc::string texture_size_helper(helper_context const& c)
+{
+    if (c.target != language::hlsl)
+        return {};
+    return cc::format("int2 sgl_size({} t, int level)\n"
+                      "{{\n"
+                      "    uint width, height, levels;\n"
+                      "    t.GetDimensions(uint(level), width, height, levels);\n"
+                      "    return int2(width, height);\n"
+                      "}}\n",
+                      c.argument_types[0]);
+}
+
+cc::string image_size_helper(helper_context const& c)
+{
+    if (c.target != language::hlsl)
+        return {};
+    return cc::format("int2 sgl_size({} i)\n"
+                      "{{\n"
+                      "    uint width, height;\n"
+                      "    i.GetDimensions(width, height);\n"
+                      "    return int2(width, height);\n"
+                      "}}\n",
+                      c.argument_types[0]);
+}
+
 cc::string type_name(cc::string_view stem, int width)
 {
     return width == 1 ? cc::string(stem) : cc::format("{}{}", stem, width);
@@ -190,4 +255,16 @@ void sgl::builtins::register_textures(registry& r)
     add_widths<value_kind::scalar_float>(r, "float", true);
     add_widths<value_kind::scalar_int>(r, "int", false);
     add_widths<value_kind::scalar_uint>(r, "uint", false);
+
+    // A size is the same whatever a texture holds or however an image is read, so one record takes every one.
+    r.add(function_record{
+        .signature = "@pure fun DEBUG_size(t: texture2d, level: int) -> int2",
+        .evaluate = size_of,
+        .write = {.kind = spelling_kind::custom, .custom = write_texture_size, .helper = texture_size_helper},
+    });
+    r.add(function_record{
+        .signature = "@pure fun DEBUG_size(i: image2d) -> int2",
+        .evaluate = size_of,
+        .write = {.kind = spelling_kind::custom, .custom = write_image_size, .helper = image_size_helper},
+    });
 }

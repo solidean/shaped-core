@@ -149,6 +149,7 @@ enum class language : u8;
 enum class precedence : u8;
 struct written;
 struct call_context;
+struct helper_context;
 enum class spelling_kind : u8;
 struct spelling;
 struct block_layout;

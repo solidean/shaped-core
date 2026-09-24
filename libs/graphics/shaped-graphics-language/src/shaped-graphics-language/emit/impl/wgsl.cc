@@ -101,29 +101,32 @@ public:
     {
         auto const& t = p.m.at(b.type);
         auto const address = cc::format("@group({}) @binding({})", b.group, b.slot);
+        // WGSL has no static sampler: the layout carries it, and the group binds it (slib's WGSL notes).
+        if (t.kind == type_kind::buffer)
+            out.appendf("{} var<storage, {}> {}: {};\n", address, b.is_mut ? "read_write" : "read", b.name,
+                        resource_text(p, b.type));
+        else
+            out.appendf("{} var {}: {};\n", address, b.name, resource_text(p, b.type));
+    }
+
+    [[nodiscard]] cc::string resource_text(plan const& p, type_id type) const override
+    {
+        auto const& t = p.m.at(type);
         switch (t.kind)
         {
         case type_kind::buffer:
-            out.appendf("{} var<storage, {}> {}: array<{}>;\n", address, b.is_mut ? "read_write" : "read", b.name,
-                        type_text(p, *this, b.element));
-            return;
+            return cc::format("array<{}>", type_text(p, *this, t.element));
         case type_kind::texture:
             if (t.is_depth)
-                out.appendf("{} var {}: {};\n", address, b.name, k_depth_names[isize(t.shape)]);
-            else
-                out.appendf("{} var {}: {}<{}>;\n", address, b.name, k_texture_names[isize(t.shape)],
-                            scalar_of(p, t.element));
-            return;
+                return cc::string(k_depth_names[isize(t.shape)]);
+            return cc::format("{}<{}>", k_texture_names[isize(t.shape)], scalar_of(p, t.element));
         case type_kind::image:
-            out.appendf("{} var {}: {}<{}, {}>;\n", address, b.name, k_image_names[isize(t.shape)],
-                        k_storage_formats[t.format].wgsl, k_accesses[isize(t.access)]);
-            return;
+            return cc::format("{}<{}, {}>", k_image_names[isize(t.shape)], k_storage_formats[t.format].wgsl,
+                              k_accesses[isize(t.access)]);
         case type_kind::sampler:
-            // WGSL has no static sampler: the layout carries it, and the group binds it (slib's WGSL notes).
-            out.appendf("{} var {}: {};\n", address, b.name, t.is_comparison ? "sampler_comparison" : "sampler");
-            return;
+            return t.is_comparison ? "sampler_comparison" : "sampler";
         default:
-            return;
+            return {};
         }
     }
 

@@ -99,6 +99,7 @@ ASYNC_INVOCABLE_TEST("sg - an SGL shader samples a texture through a static samp
     CHECK(wrong == 0);
 }
 
+// The shader divides by the texture's size and bounds its store by the image's, so a wrong size shows in the texels.
 ASYNC_INVOCABLE_TEST("sg - an SGL shader samples through a sampler the group binds", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);

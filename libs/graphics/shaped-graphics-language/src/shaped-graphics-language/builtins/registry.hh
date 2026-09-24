@@ -52,9 +52,19 @@ struct sgl::builtins::call_context
     registry const& builtins;
 };
 
+/// What a helper writer is given: the target, and each argument's type as the target spells it.
+struct sgl::builtins::helper_context
+{
+    language target = language::hlsl;
+    cc::span<cc::string const> argument_types;
+};
+
 namespace sgl::builtins
 {
 using custom_writer = written (*)(call_context const&);
+/// A function the text declares once, ahead of the entry point, for a call the target cannot write as one expression.
+/// Empty for a target that needs none; two calls needing the same text get it once, so a helper may be an overload.
+using helper_writer = cc::string (*)(helper_context const&);
 
 /// Appends the result's scalars to `out`.
 /// `in` holds the scalars of every argument, one argument behind the other.
@@ -88,6 +98,7 @@ struct sgl::builtins::spelling
     /// How the result of an `infix` binds.
     precedence binds = precedence::primary;
     custom_writer custom = nullptr;
+    helper_writer helper = nullptr;
 };
 
 /// Where a value of a builtin type lands in a constant block; a size of 0 means it has no place in one.

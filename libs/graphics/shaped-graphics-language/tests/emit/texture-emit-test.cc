@@ -135,3 +135,37 @@ TEST("sgl emit - a pixel stage samples with the level its derivatives pick")
               .contains("const float3 c = material_bindings::material_albedo.Sample(material_bindings::material_smp, "
                         "p.uv);\n"));
 }
+
+TEST("sgl emit - a size is one HLSL helper per texture type, declared once however often it is called")
+{
+    constexpr auto sized
+        = "binding set:\n"
+          "    a: texture2d[float4]\n"
+          "    b: texture2d[uint]\n"
+          "    c: out image2d[.rgba8_unorm]\n"
+          "\n"
+          "@compute(8, 8) fun cs(@thread_id id: int3){set}:\n"
+          "    let s = DEBUG_size(set.a, 0) + DEBUG_size(set.a, 1) + DEBUG_size(set.b, 0) + DEBUG_size(set.c)\n"
+          "    DEBUG_store(set.c, s, float4(1.0, 1.0, 1.0, 1.0))\n";
+    auto const hlsl = text_of(sized, target::hlsl_dx12);
+    CHECK(hlsl.contains("int2 sgl_size(Texture2D<float4> t, int level)\n"
+                        "{\n"
+                        "    uint width, height, levels;\n"
+                        "    t.GetDimensions(uint(level), width, height, levels);\n"
+                        "    return int2(width, height);\n"
+                        "}\n"));
+    CHECK(hlsl.contains("int2 sgl_size(Texture2D<uint> t, int level)\n"));
+    CHECK(hlsl.contains("int2 sgl_size(RWTexture2D<float4> i)\n"));
+    // Two calls on one texture type, one overload.
+    auto const first = hlsl.find("int2 sgl_size(Texture2D<float4> t");
+    REQUIRE(first >= 0);
+    CHECK(!cc::string_view(hlsl)
+               .subview({.start = first + 1, .end = hlsl.size()})
+               .contains("int2 sgl_size(Texture2D<float4> t"));
+    CHECK(hlsl.contains("sgl_size(set_bindings::set_a, 0) + sgl_size(set_bindings::set_a, 1)"));
+
+    auto const wgsl = text_of(sized, target::wgsl);
+    CHECK(wgsl.contains("vec2i(textureDimensions(set_a, 0)) + vec2i(textureDimensions(set_a, 1))"));
+    CHECK(wgsl.contains("vec2i(textureDimensions(set_c))"));
+    CHECK(!wgsl.contains("sgl_size"));
+}

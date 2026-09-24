@@ -515,6 +515,34 @@ cc::string_view sgl::emit::impl::stage_name(check::stage s)
     return "";
 }
 
+void sgl::emit::impl::write_helpers(cc::string& out, plan const& p, dialect const& d)
+{
+    // EMIT-101: each helper the entry point's builtin calls need, once, in the order first needed.
+    auto written = cc::vector<cc::string>();
+    for (auto const& x : p.e.exprs)
+    {
+        auto const* const call = x.node.try_as<check::flat_call>();
+        auto const* const record = call != nullptr ? p.m.builtin_function(call->intrinsic) : nullptr;
+        if (record == nullptr || record->write.helper == nullptr)
+            continue;
+        auto types = cc::vector<cc::string>();
+        for (auto const argument : p.e.at(call->arguments))
+        {
+            auto const type = p.e.at(argument).type;
+            types.push_back(check::is_resource(p.m.at(type).kind) ? d.resource_text(p, type)
+                                                                  : cc::string(type_text(p, d, type)));
+        }
+        auto text = record->write.helper({.target = d.language(), .argument_types = types});
+        auto is_known = text.empty();
+        for (auto const& w : written)
+            is_known = is_known || w == text;
+        if (!is_known)
+            written.push_back(cc::move(text));
+    }
+    for (auto const& w : written)
+        out.appendf("{}\n", w);
+}
+
 cc::string sgl::emit::impl::write_text(plan& p, dialect const& d)
 {
     auto w = writer{.p = p, .d = d};
@@ -522,6 +550,7 @@ cc::string sgl::emit::impl::write_text(plan& p, dialect const& d)
                   d.description());
     w.out += "// Generated: the SGL source is what to edit.\n\n";
     d.write_declarations(w.out, p);
+    write_helpers(w.out, p, d);
     d.write_function_head(w.out, p);
     for (auto const id : p.e.at(p.e.body))
         w.statement(p.e.at(id));
