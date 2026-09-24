@@ -73,9 +73,16 @@ Every local is a local of its own, so the flat tree never sees a name twice: the
 
 ## CHK-54
 
-Whether a local may shadow a module-level name is open in [scopes](../../incubator/scopes.md).
-Both answers are easy to give later and neither is easy to take back, so the tracer gives none.
-Shadowing another local is settled, by CHK-53.
+`let length = length v` is the same refinement CHK-53 allows, and the prelude holds enough common words that forbidding it would forbid the idiom.
+An ordered scope cannot be ambiguous: the newest declaration is the one in effect, so there is nothing to report.
+One namespace keeps that rule whole — a local does not hide a name in one position and leave it visible in the next.
+
+## CHK-188
+
+A new function or type in the prelude must never break a program that already used its name.
+With one shared scope, every prelude addition would be a `duplicate-declaration` somewhere.
+Only a clash inside one unordered scope is an error, since there no order says which declaration is meant.
+Overload sets still join across the two, so declaring `dot` for a struct of the program's own adds to the prelude's `dot` rather than hiding it.
 
 ## CHK-110
 
