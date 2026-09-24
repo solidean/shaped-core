@@ -14,14 +14,15 @@ upstreams:
     tag: v2.5.1
     digest_algo: sha256
     # Per-OS assets, as DXC has: one release, one archive per platform, different layouts inside.
-    # macOS takes the arm64 build because Apple silicon is the tier this repo targets; the x86_64 macOS asset exists
-    # upstream and is deliberately not pinned.
     asset_windows: oidn-2.5.1.x64.windows.zip
     pin_hash_windows: f11f91bc072a5e3a564515724cb72ab8fcfbc445c84a84c197ff9b16cc01396f
     asset_linux: oidn-2.5.1.x86_64.linux.tar.gz
     pin_hash_linux: 743c3e2aff8c220d5d70fe6cb970fb3d36f2702d2693c61d1d148e404cf37cd6
     asset_macos: oidn-2.5.1.arm64.macos.tar.gz
     pin_hash_macos: 98e0aca8e7ab69e9f4f0191582a500fd8b0d9085d68662f18ab6469e934a6efd
+    # The release is per-architecture as well as per-OS, and these three machines have no asset at all.
+    # Each pinned archive is built for exactly one instruction set, so fetching it anywhere else gets as far as the linker refusing the import library.
+    unavailable_on: [windows-arm64, linux-arm64, macos-x64]
     license: Apache-2.0
     license_files: [.install/LICENSE.txt, .install/LICENSE-third-party-programs.txt, .install/LICENSE-oneTBB.txt]
     used_by: shaped-rendering — sr::denoise_method::oidn
@@ -37,10 +38,15 @@ upstreams:
 
       CPU ONLY FOR NOW, which is a size decision AND a capability one.
       Dropping the CUDA, HIP and SYCL device modules and their Level Zero loaders saves 22 MB of the 83.
-      They would buy nothing yet: OIDN's GPU devices run on their own API and share memory with ours through an OS handle, which needs exportable memory and shared fences that sg does not have — see libs/graphics/shaped-graphics/docs/TODO.md.
+      They would buy nothing yet: OIDN's GPU devices run on their own API and share memory with ours through an OS handle, which needs exportable memory and shared fences that sg does not have.
+      See libs/graphics/shaped-graphics/docs/TODO.md.
       OIDN on the CPU needs neither, because it goes through the existing download and upload.
       When sg grows those, the extract list here grows with them.
 
-      ONLY THE WINDOWS LAYOUT IS VERIFIED.
-      The Linux and macOS pins are the digests GitHub publishes for the release — the Windows one was checked against a local hash of the downloaded file and matched — but nobody has unpacked those two.
-      fetch-oidn.py selects members by basename rather than by directory for that reason, since a Unix build puts its shared libraries under lib/ where Windows puts them under bin/.
+      ALL THREE LAYOUTS ARE NOW UNPACKED, and the two Unix ones differ from Windows in a way that matters.
+      Each library there is one versioned real file plus the unversioned and soname symlinks onto it, and oneTBB is named `tbb` rather than Windows' `tbb12`.
+      fetch-oidn.py carries symlinks through for that reason, and checks the installed names rather than only their count.
+
+      x64 WINDOWS, x86_64 LINUX AND arm64 macOS ARE THE WHOLE RELEASE.
+      `unavailable_on` names the three remaining machines, which are skipped rather than handed an archive for another instruction set.
+      The x86_64 macOS asset exists upstream and stays deliberately unpinned, since Apple silicon is the tier this repo targets.

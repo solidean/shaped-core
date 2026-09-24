@@ -17,12 +17,22 @@ have. The CPU device needs neither — it reads and writes ordinary memory, whic
 already produce.
 
 Members are selected BY BASENAME rather than by directory, because a Unix build puts its shared libraries under lib/
-where Windows puts them under bin/, and only the Windows layout has actually been unpacked by anyone here.
+where Windows puts them under bin/, and the install flattens both onto one shape.
+
+SYMLINKS ARE PART OF THE PAYLOAD on the two Unix platforms.
+Each library arrives as one versioned real file plus the unversioned and soname links onto it, and those links are the
+names extern/oidn/CMakeLists.txt links by and the dynamic loader resolves through.
+An install that keeps only regular files produces a directory that looks complete and builds nothing.
+
+NOT EVERY PLATFORM HAS A RELEASE.
+Upstream publishes x64 Windows, x86_64 Linux and arm64 macOS.
+The other machines those systems run on are declared in `unavailable_on` and skipped here rather than handed an archive built for a different instruction set.
 
 Re-running is idempotent; pass --force to re-download anyway.
 """
 
 import argparse
+from dataclasses import dataclass
 import hashlib
 import io
 import shutil
@@ -44,15 +54,26 @@ import deps_manifest  # noqa: E402
 # What the CPU device actually needs, by basename stem.
 # The core library carries the trained weights and is most of the download; the device module is the CPU backend
 # itself; oneTBB is what it threads over.
-KEEP_STEMS = (
+# oneTBB is spelled `tbb12` on Windows and `tbb` on Unix, so both spellings must be kept — each matches only its own platform.
+# The install is checked below for having landed one of them.
+TBB_STEMS = ("tbb", "tbb12")
+KEEP_STEMS = TBB_STEMS + (
     "OpenImageDenoise",
     "OpenImageDenoise_core",
     "OpenImageDenoise_device_cpu",
-    "tbb12",
     "tbbbind",
     "tbbbind_2_0",
     "tbbbind_2_5",
 )
+
+# The facade library under .install/, per host — the name extern/oidn/CMakeLists.txt links by.
+# The Unix archives ship it ONLY as a symlink onto a versioned real file.
+# An install that drops links has no file at this path, and the build then fails at ninja rather than anywhere informative.
+FACADE_LIBRARY = {
+    "windows": "bin/OpenImageDenoise.dll",
+    "linux": "bin/libOpenImageDenoise.so",
+    "macos": "bin/libOpenImageDenoise.dylib",
+}
 
 # Library extensions across the three platforms, import libraries included.
 LIB_SUFFIXES = (".dll", ".lib", ".so", ".dylib", ".pdb")
@@ -94,43 +115,79 @@ def wanted(relative: PurePosixPath) -> str | None:
     return str(PurePosixPath("lib" if name.endswith(".lib") else "bin", name))
 
 
-def install_members(members: list[tuple[PurePosixPath, bytes]], into: Path) -> int:
-    """Writes every member the plan keeps, and reports how many that was."""
+@dataclass(frozen=True)
+class Member:
+    """One archive entry, already rerooted: a file's bytes, or the basename a symlink points at."""
+
+    path: PurePosixPath
+    data: bytes = b""
+    link_to: str = ""
+
+    @property
+    def is_link(self) -> bool:
+        return bool(self.link_to)
+
+
+def install_members(members: list[Member], into: Path) -> int:
+    """Writes every member the plan keeps, and reports how many that was.
+
+    Symlinks are recreated as symlinks, and are written after every file so a link never precedes what it names.
+    A host that refuses to create one is an error rather than a skip, since dropping the link is what leaves the facade library missing under the very name the build asks for.
+    """
     written = 0
-    for relative, data in members:
-        target = wanted(relative)
+    links: list[tuple[Path, str]] = []
+    for member in members:
+        target = wanted(member.path)
         if target is None:
             continue
         out = into / Path(target)
         out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_bytes(data)
+        if member.is_link:
+            links.append((out, member.link_to))
+        else:
+            out.write_bytes(member.data)
         written += 1
+
+    for out, link_to in links:
+        try:
+            out.symlink_to(link_to)
+        except OSError as error:
+            sys.exit(f"OIDN: cannot create the symlink {out} -> {link_to} ({error})")
     return written
 
 
-def read_archive(asset: str, data: bytes) -> list[tuple[PurePosixPath, bytes]]:
-    """Every file in the archive, with its single top-level directory stripped."""
-    out: list[tuple[PurePosixPath, bytes]] = []
+def read_archive(asset: str, data: bytes) -> list[Member]:
+    """Every file and symlink in the archive, with its single top-level directory stripped.
 
-    def add(name: str, payload: bytes) -> None:
+    Symlinks matter here rather than being an extraction detail.
+    The Unix releases ship each library as one versioned real file plus the unversioned and soname links onto it, and those links are the names both CMake and the dynamic loader use.
+    """
+    out: list[Member] = []
+
+    def add(name: str, payload: bytes = b"", link_to: str = "") -> None:
         path = PurePosixPath(name)
         if path.is_absolute() or ".." in path.parts:
             sys.exit(f"refusing to extract {name!r} (path traversal)")
+        if "/" in link_to or PurePosixPath(link_to).is_absolute():
+            sys.exit(f"refusing to extract {name!r} (symlink escapes its directory: {link_to!r})")
         # Every release archive has one top-level directory named for the version.
-        out.append((PurePosixPath(*path.parts[1:]) if len(path.parts) > 1 else path, payload))
+        rerooted = PurePosixPath(*path.parts[1:]) if len(path.parts) > 1 else path
+        out.append(Member(path=rerooted, data=payload, link_to=link_to))
 
     if asset.endswith(".zip"):
         with zipfile.ZipFile(io.BytesIO(data)) as archive:
             for member in archive.infolist():
                 if not member.is_dir():
-                    add(member.filename, archive.read(member))
+                    add(member.filename, payload=archive.read(member))
     else:
         with tarfile.open(fileobj=io.BytesIO(data), mode="r:*") as archive:
             for member in archive.getmembers():
-                if member.isfile():
+                if member.issym():
+                    add(member.name, link_to=member.linkname)
+                elif member.isfile():
                     handle = archive.extractfile(member)
                     if handle is not None:
-                        add(member.name, handle.read())
+                        add(member.name, payload=handle.read())
     return out
 
 
@@ -140,8 +197,11 @@ def main() -> None:
     args = parser.parse_args()
 
     upstream = deps_manifest.one(DEST)
-    if deps_manifest.host_os_key() in upstream.unavailable_on:
-        sys.exit(f"OIDN publishes no release for {deps_manifest.host_os_key()}")
+    if not upstream.is_available:
+        # Exit 0: a platform upstream does not build for is a fact about the release, not a failure of this run.
+        # shaped-rendering sees no `oidn` target, compiles impl/oidn_null.cc and reports the member unsupported.
+        print(f"OIDN publishes no release for {'/'.join(deps_manifest.host_keys())} — skipping")
+        return
 
     if not args.force and PIN_FILE.is_file() and PIN_FILE.read_text(encoding="utf-8").strip() == upstream.pin_hash:
         print("OIDN already installed")
@@ -169,7 +229,15 @@ def main() -> None:
 
     # The core library alone is most of the download, so a plan that matched nothing would still produce a directory.
     # Refusing here is what turns a changed archive layout into a message rather than a link error much later.
+    # The names are checked rather than only the count, because a count cannot see a platform-specific miss.
+    # An install can hold the expected number of members and still lack the facade library, or oneTBB entirely.
     missing = [name for name in LICENSE_MEMBERS.values() if not (staging / name).is_file()]
+    facade = FACADE_LIBRARY[deps_manifest.host_os_key()]
+    if not (staging / facade).exists():
+        missing.append(facade)
+    installed = sorted((staging / "bin").iterdir()) if (staging / "bin").is_dir() else []
+    if not any(path.name.split(".")[0].removeprefix("lib") in TBB_STEMS for path in installed):
+        missing.append("a oneTBB library")
     if written < 6 or missing:
         sys.exit(
             f"OIDN: the install plan kept {written} member(s) and is missing {missing or 'nothing'} — "
@@ -182,7 +250,7 @@ def main() -> None:
         shutil.rmtree(INSTALL)
     staging.rename(INSTALL)
 
-    total = sum(f.stat().st_size for f in INSTALL.rglob("*") if f.is_file())
+    total = sum(f.stat().st_size for f in INSTALL.rglob("*") if f.is_file() and not f.is_symlink())
     print(f"OIDN installed into {INSTALL} ({written} files, {total / 1e6:.1f} MB)")
     print("Configure again to pick it up: uv run dev.py configure")
 
