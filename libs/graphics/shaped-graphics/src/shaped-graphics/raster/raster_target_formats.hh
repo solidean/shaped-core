@@ -11,6 +11,4 @@ struct sg::raster_target_formats
     cc::fixed_vector<pixel_format, max_color_targets> color; ///< in output-merger order
     pixel_format depth_stencil = pixel_format::undefined;    ///< `undefined` for no depth-stencil target
     int sample_count = 1;
-
-    [[nodiscard]] friend bool operator==(raster_target_formats const&, raster_target_formats const&) = default;
 };
