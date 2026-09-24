@@ -214,15 +214,35 @@ TEST("sgl check - a returned object converts structurally: every field once, typ
 TEST("sgl check - let introduces an immutable local, in order")
 {
     CHECK(body_reports("let a = b\nlet b = k\nreturn k\n") == "unknown-name user:[b] b\n");
-    // CHK-53: shadowing a local or a parameter is legal; only a module-level name is not yet
+    // CHK-53: shadowing a local or a parameter is legal
     CHECK(body_reports("let a = k\nlet a = k\nreturn k\n") == "");
     CHECK(body_reports("let k = 1.0\nreturn k\n") == "");
     CHECK(body_reports("let x : vec3 = k\nreturn k\n") == "type-mismatch user:[k] expected vec3, got float\n");
-    CHECK(body_reports("let dot = k\nreturn k\n")
-          == "unsupported-yet user:[dot] a local that shadows a module-level name\n");
     CHECK(body_reports("let mut a = k\nreturn a\n") == "");
     CHECK(body_reports("let a : float\nreturn k\n") == "unsupported-yet user:[let a : float] a let without a value\n");
     CHECK(body_reports("let (a, b) = k\nreturn k\n") == "unsupported-yet user:[(a, b)] a pattern in let\n");
+}
+
+TEST("sgl check - a local or a parameter shadows a module-level name, and hides it wherever it stands")
+{
+    // CHK-54: the value still sees what the local hides
+    CHECK(body_reports("let dot = k\nreturn dot\n") == "");
+    CHECK(body_reports("let length = length v\nreturn length\n") == "");
+    // one namespace: behind the local, the name is no function and no type
+    CHECK(body_reports("let dot = k\nreturn dot v v\n") == "unsupported-yet user:[dot] a call of a local value\n");
+    CHECK(body_reports("let float = k\nlet a : float = k\nreturn k\n")
+          == "wrong-kind-of-name user:[float] float is a local, and a type stands here\n");
+    // a literal is of the prelude's type whatever a local is named
+    CHECK(body_reports("let float = 1.0\nlet int = 2\nreturn float\n") == "");
+    // an inner block's local hides the name only up to its end
+    CHECK(body_reports("if k > 0.0:\n    let dot = k\n    return dot\nreturn dot v v\n") == "");
+
+    CHECK(reports_for("fun g(dot: float) -> float:\n    return dot\n") == "");
+    CHECK(reports_for("binding frame:\n    exposure: float\nfun g(k: float) -> float:\n    let frame = k\n    return "
+                      "frame\n")
+          == "");
+    // a parameter's type is resolved before the parameters are in scope, so it may be named after its type
+    CHECK(reports_for("struct light:\n    x: float\nfun g(light: light) -> float:\n    return light.x\n") == "");
 }
 
 TEST("sgl check - statements and expressions the tracer does not carry")

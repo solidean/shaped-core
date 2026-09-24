@@ -206,6 +206,7 @@ void checker::run()
 
     for (auto file = i32(0); file < i32(files.size()); ++file)
         declare_file(file);
+    merge_scopes();
 
     // Source order is only the order of the first demand: whatever a symbol needs is compiled from inside it.
     for (auto i = isize(0); i < out.symbols.size(); ++i)
@@ -248,7 +249,8 @@ void checker::add_symbol(symbol s, source_span name_where)
         return;
     }
 
-    auto& declared = names[name];
+    // CHK-12 holds within one scope; the user file's may shadow the prelude's.
+    auto& declared = is_prelude_file(file) ? prelude_names[name] : file_names[name];
     auto is_overload_set = is_function;
     for (auto const other : declared)
         is_overload_set = is_overload_set && out.at(other).kind == symbol_kind::function;
@@ -259,6 +261,27 @@ void checker::add_symbol(symbol s, source_span name_where)
         return;
     }
     declared.push_back(id);
+}
+
+void checker::merge_scopes()
+{
+    auto const is_all_functions = [&](cc::span<symbol_id const> ids)
+    {
+        auto result = true;
+        for (auto const id : ids)
+            result = result && out.at(id).kind == symbol_kind::function;
+        return result;
+    };
+
+    names = prelude_names;
+    for (auto [name, ids] : file_names)
+    {
+        auto& seen = names[name];
+        // Two overload sets are one; anything else of the user file hides what the prelude has of that name.
+        if (!is_all_functions(seen) || !is_all_functions(ids))
+            seen.clear();
+        seen.push_back_range(ids);
+    }
 }
 
 void checker::declare(i32 file, ast::decl_id decl)
