@@ -334,6 +334,33 @@ TEST("log rule - NX_ALLOW_LOGS allows a record in every test of the binary", no_
     CHECK(as_error.count_failed_tests() == 1);
 }
 
+// The text this allows sits at the END of a long message, past where a chunk's tail would have cut it.
+NX_ALLOW_LOGS(cc::rec::level::warning, "", "log rule probe: the tail of a long message");
+
+TEST("log rule - a long record is matched whole however the chunks fall", no_scheduler)
+{
+    if (!has_recorder())
+        SKIP("the run has no recorder (--no-recording)");
+
+    // Over 2 MiB of messages against the default 1 MiB chunk, so the stream rotates twice under the loop, with the
+    // padding walking so a boundary cannot keep landing between two messages.
+    // A message the boundary cut short would carry only its head, which nothing declares.
+    auto const exec = run_one(
+        []
+        {
+            for (auto i = 0; i < 1024; ++i)
+            {
+                auto const padding = cc::string::create_filled(2048 + i % 64, '.');
+                CC_LOG_WARNING("log rule probe: a padded message {} log rule probe: the tail of a long message", padding);
+            }
+            CHECK(true);
+        });
+
+    REQUIRE(exec.executions.size() == 1);
+    CHECK(!mentions(exec.executions[0].root.errors, "undeclared warning"));
+    CHECK(exec.count_failed_tests() == 0);
+}
+
 TEST("log rule - a recorded test that fails only by the rule keeps its recording", no_scheduler)
 {
     if (!has_recorder())

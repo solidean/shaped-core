@@ -122,6 +122,11 @@ They are options the maintainer likes to **see beside the recommendation**, and 
   The async-tests design review is the worked case: letting an async invocable take a lock its driver did not hold was going to need a name-ordering constraint to stay deadlock-free.
   The maintainer's counter-proposal was "the driver may hold tags, or the child may, never both".
   It is deadlock-free by the same argument top-level exclusion is, and relaxable later without breaking anything it accepted.
+  **It loses on a high-level wrapper's public surface.**
+  There the maintainer prefers the complete shape on day one, because widening a wrapper later is friction for every caller even when it is additive.
+  The denoising design review is the worked case: denoise-only at one resolution was recommended over a reconstruct contract that admits upscaling.
+  The answer, verbatim: "if we don't have api for this day 1 (in the high-level wrapper) we might have friction adding it in the future".
+  The strict rule still won inside that surface, where a relaxation reaches no caller — ratios are named presets the routine resolves, with a free ratio left to add later.
 - **Deleting a legacy spelling, beside accommodating it.**
   When a new design has to grow a rule only to keep an old spelling working, removing the spelling is an alternative in its own right.
   The same review spent a round designing how `main_thread` should treat an `ASYNC_TEST` body that returns a raw graph instead of being a coroutine.
