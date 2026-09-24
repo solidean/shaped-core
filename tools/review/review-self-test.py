@@ -667,9 +667,9 @@ group: correctness
 severity: bug
 ---
 
-## context/delta
+## intro
 
-Some delta context.
+What this is about.
 
 ## changes  CHANGE-AAAA CHANGE-BBBB
 show: collapsed
@@ -693,7 +693,7 @@ def test_grammar_round_trip(root: Path) -> None:
 
     assert entry.id == "040"
     assert entry.severity == "bug"
-    assert [b.type for b in entry.blocks] == ["context/delta", "changes", "ask"]
+    assert [b.type for b in entry.blocks] == ["intro", "changes", "ask"]
     assert entry.blocks[1].change_ids == ["CHANGE-AAAA", "CHANGE-BBBB"]
 
     ask = entry.ask("pick-one")
@@ -758,7 +758,7 @@ def test_every_block_type_renders(root: Path) -> None:
     from tools.review.lib.render.entryview import render_entry
 
     body = "---\nid: 1\ntitle: t\nseverity: bug\n---\n"
-    for kind in ("context/cold", "context/repo", "context/delta", "prose", "recommendation"):
+    for kind in ("intro", "prose", "recommendation"):
         body += f"\n## {kind}\n\nSome prose with `a/b.cc:12` in it.\n"
     body += "\n## code\n\n```python:x.py\ndef f():\n    return 1\n```\n"
     body += "\n## changes  CHANGE-AAAA\nshow: visible\n\nCommentary.\n"
@@ -772,7 +772,7 @@ def test_every_block_type_renders(root: Path) -> None:
         entry, AnswerFile(root / "a.json"),
         repo=root, paths=ReviewPaths(root), ledger=ledger, hash_of=hash_ask,
     )
-    for needle in ("tier-delta-rule", "recommendation", "<pre class=\"pg\">", "class=\"changes\"", "ask-form"):
+    for needle in ('class="intro"', "recommendation", "<pre class=\"pg\">", "class=\"changes\"", "ask-form"):
         assert needle in html, f"{needle!r} missing from the rendered entry"
 
 
@@ -849,9 +849,7 @@ def test_option_labels_render_but_keep_their_value(root: Path) -> None:
 
     lines = [
         "---", "id: 1", "title: t", "---", "",
-        "## context/cold", "", "Context.", "",
-        "## context/repo", "", "Context.", "",
-        "## context/delta", "", "Context.", "",
+        "## intro", "", "Context.", "",
         "## ask  a-question", "", "Which way?", "",
         "- radio: keep `sv::interactive` as it is",
         "- radio: put it under `raw:build/<preset>/captures/`",
@@ -1037,7 +1035,7 @@ def test_an_unterminated_fence_is_an_error(root: Path) -> None:
 def test_block_names_are_derived_and_only_indexed_when_they_repeat(root: Path) -> None:
     """A lone block of its type keeps the bare name; a second one indexes both, never only one of the two."""
     entry = parse_text(ENTRY, Path("entry.md"))
-    assert entry.block("context-delta") is not None
+    assert entry.block("intro") is not None
     assert entry.block("changes") is not None
 
     two = parse_text(ENTRY + TWO_PROSE, Path("entry.md"))
@@ -1060,6 +1058,48 @@ def test_a_block_name_that_collides_is_rejected(root: Path) -> None:
         assert "named" in str(e)
         return
     raise AssertionError("two blocks of one round cannot share a name")
+
+
+def test_a_retired_background_block_is_an_unknown_block_type(root: Path) -> None:
+    """The `context/*` blocks were removed outright, so an entry still carrying one fails like any other misspelled type."""
+    for tier in ("cold", "repo", "delta"):
+        try:
+            parse_text(ENTRY + f"\n## context/{tier}\n\nBackground.\n", Path("entry.md"))
+        except ReviewParseError as e:
+            assert f"unknown block type 'context/{tier}'" in str(e), e
+            assert e.line == ENTRY.count("\n") + 2, e.line
+        else:
+            raise AssertionError(f"`context/{tier}` must not parse")
+
+
+def test_a_collision_says_an_ask_and_a_prose_block_share_one_name_space(root: Path) -> None:
+    """`## prose` with `name: foo` beside `## ask  foo` is the common way in, and nothing in either heading hints at it."""
+    try:
+        parse_text(ENTRY + "\n## prose\nname: pick-one\n\nCollides with the ask.\n", Path("entry.md"))
+    except ReviewParseError as e:
+        assert "share one name space" in str(e), e
+        return
+    raise AssertionError("two blocks of one round cannot share a name")
+
+
+def test_an_appended_collision_names_the_round_it_is_appended_as(root: Path) -> None:
+    """An appended block is stamped with the round about to be served, so that is the round a clash is in.
+
+    Parsed as the entry's newest round instead, the error named round 1 for a round-3 append,
+    and a block reusing a name from an earlier round clashed with it although the two would never share a round.
+    """
+    stamped = parse_text(stamp_rounds(parse_text(ENTRY, Path("entry.md")), 1), Path("entry.md"))
+    clash = compose_append(stamped, "## prose\nname: foo\n\nOne.\n\n## ask  foo\n\nWhich?\n\n- radio: a\n")
+    try:
+        parse_text(clash, Path("entry.md"), pending_round=3)
+    except ReviewParseError as e:
+        assert "round 3" in str(e), e
+    else:
+        raise AssertionError("two blocks of one appended round cannot share a name")
+
+    reused = compose_append(stamped, "## prose\nname: pick-one\n\nA prose block reusing a round-1 name.\n")
+    merged = parse_text(reused, Path("entry.md"), pending_round=3)
+    assert merged.blocks[-1].anchor == "r3/pick-one", merged.blocks[-1].anchor
 
 
 def test_block_names_are_scoped_to_a_round(root: Path) -> None:

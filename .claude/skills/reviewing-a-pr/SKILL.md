@@ -250,9 +250,9 @@ Name it with `title` as usual, and hand it over the same way.
    ```
    where the file holds the new blocks and nothing else:
    ```markdown
-   ## context/delta
+   ## intro
 
-   You asked whether X. Here is what the code says.
+   You asked whether X; the code says Y, which leaves two ways forward.
 
    ## prose
 
@@ -284,7 +284,7 @@ Name it with `title` as usual, and hand it over the same way.
    Never edit an entry file by hand while a server is reading it.
 
    **Open a new entry only when the subject is new**, not when the same subject reaches its second round.
-   A new entry owes all three context tiers again, so a follow-up written as one restates what the parent entry already established.
+   A new entry has to stand alone, so a follow-up written as one restates what the parent entry already established.
    `validate` warns when an ask's `follows:` names an ask in a different entry, which is the tell.
    Discharges are the other cost: the change ids stay on the parent, so the entry that owns the hunks stops being the entry with the live question.
 
@@ -334,18 +334,9 @@ The page draws it first in its round wherever it sits in the file, and `validate
 
 **Every entry stands alone.**
 The maintainer does not carry the changeset in their head, and assuming they do defeats the point of asking.
-**Every entry outside `meta`, `finalize` and `framing` carries all three context tiers, and `validate` fails without them.**
-The obligation lasts while an ask is still waiting: an entry answered in an earlier round is left alone rather than retrofitted.
-`context/cold` is for a reader new to both the change and the codebase, `context/repo` for one who knows the codebase, `context/delta` for one who has read the entries above.
-The first two collapse by default and have word budgets — 150 and 120 — so they cost a reader nothing until they are wanted.
-
-**Scope each tier to that entry's own subject, not to the change as a whole.**
-This is the rule that decides whether the tiers are worth having.
-Cold context for an entry about a texture budget is what a mip chain and an LRU budget are, and why charging the wrong one matters — not what the branch does.
-Written that way, twelve entries produce twelve distinct tiers, because they are about twelve different things.
-Written as "here is what this PR adds", they produce the same paragraph twelve times, and a reader who opens two of those never opens a third.
-
-The orientation and verdict entries are exempt because they *are* the review's cold context; repeating it there teaches exactly that skimming habit.
+So an entry's prose introduces every term it leans on where the term first appears, scoped to that entry's own subject rather than to the change as a whole.
+An entry about a texture budget says what a mip chain and an LRU budget are, and why charging the wrong one matters — not what the branch does.
+There is no background block to put this in, and [An entry carries no `context/*` blocks](../../../docs/guides/reviewing-prs.md#an-entry-carries-no-context-blocks) says why.
 
 **Describe neutrally, then recommend separately.**
 The `prose` block says what is true; the `recommendation` block says what you would do.
@@ -401,7 +392,7 @@ The guide has the full list; the ones that bite most often:
 
 When the goal is `pr-comment`, the artifact is **a task list for a fresh agent session** — not a summary of the review and not a record of the conversation.
 
-- **Drop the context tiers and the overview entirely.** They exist so the maintainer could judge a point; they tell the author nothing.
+- **Drop the overview entirely.** It exists so the maintainer could judge a point; it tells the author nothing.
 - **Drop everything still open.** Only decided instructions are posted.
 - **Every point is an instruction with its reasoning under it**, executable by someone who has not read the diff and cannot ask a follow-up.
 - **It has to stand alone.** No "as we discussed", no numbering that implies a conversation.

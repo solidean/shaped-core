@@ -16,9 +16,9 @@ state: open
 severity: bug
 ---
 
-## context/delta
+## intro
 
-What this entry adds over the ones before it.
+Whether a table that grows mid-submit can leave a stale index, and the two fixes on the table.
 
 ## changes  CHANGE-7Q2M CHANGE-K3PP
 show: collapsed
@@ -53,9 +53,6 @@ Filenames are `NNN-slug.md` with gaps — `010`, `020`, `030` — so a later rou
 | type | takes | what it is |
 |---|---|---|
 | `intro` | — | what the entry is about and the options on the table, before any fact; always shown, and drawn first in its round |
-| `context/cold` | — | for a reader new to the change *and* the codebase; collapsed by default, ~150 words |
-| `context/repo` | — | knows the codebase, new to the change; collapsed by default, ~120 words |
-| `context/delta` | — | what this entry adds over the previous ones; always shown |
 | `auto-acknowledge` | — | this entry is reference material, so reading it is not something to record |
 | `artifact` | — | the exact text the review will publish, read back by `review artifact` and `review post` |
 | `prose` | — | the body of the point, written neutrally; `glossary: true` makes its bold leads terms |
@@ -67,20 +64,16 @@ Filenames are `NNN-slug.md` with gaps — `010`, `020`, `030` — so a later rou
 
 **A round that asks something opens with an `intro`.**
 One line on what the entry is about, then the options as a list, and nothing about which is better.
-The context tiers are collapsed and supply what a reader lacks; the intro is what the visible part of the round is read against.
+The intro is what the rest of the round is read against.
 Without it an entry opens in the middle of its argument, and the reader reconstructs the question from the facts before they can weigh any of them.
 
 The page draws an intro first in its round wherever it sits in the file, so appending one late still leads.
 `validate` warns about a round that has an open ask and no intro, and a finalized round is exempt because it cannot be edited.
 A round whose only question is the synthetic acknowledgement is exempt too: it has no options for an intro to list.
 
-The word limits on the context tiers warn rather than fail.
-They exist because a collapsed tier nobody can skim is a tier nobody opens.
-
-All three are required on every entry whose group is not `meta`, `finalize` or `framing`, for as long as it still has an ask waiting for an answer, and `validate` reports a missing one as an error.
-An entry whose asks are all finalized is past the point of needing them, and adding tiers there would edit a question the maintainer has already read.
-An entry is answered on its own, out of order, by someone not carrying the changeset in their head, and the tiers are what make that possible.
-Each is scoped to that entry's subject rather than to the change as a whole — otherwise every cold tier restates the same paragraph and nobody opens one again.
+**An entry is answered on its own, out of order, by someone not carrying the changeset in their head.**
+So its prose introduces every term it leans on where the term first appears, rather than assuming the entries above it were read.
+There is no separate background block for that, and [the settled call](../../../docs/guides/reviewing-prs.md#an-entry-carries-no-context-blocks) says why.
 
 An `artifact` block is markdown destined for somewhere else, so it is the one block whose body wants headings of its own.
 **They have to start at `###`.**
@@ -128,7 +121,6 @@ A block's identity is `<entry>/r<round>/<name>`, and it is **derived** rather th
 The name is the block's type, indexed only when that type repeats within the same entry *and* round — and then all of them are indexed.
 Two prose blocks in round 2 are `prose#1` and `prose#2`; one on its own is `prose`, never a bare `prose` beside a `prose#2`.
 An `ask` is named by its heading, which is already unique.
-A `context/cold` becomes `context-cold`, since the identity is slash-separated.
 
 **`prose` and `prose#1` resolve to the same block.**
 That alias is what keeps an anchor taken mid-round valid after a later append turns the round's only prose block into the first of two.
@@ -138,6 +130,7 @@ Blocks are only ever appended and a frozen round cannot change, so a later block
 
 `name:` is optional, for a block the agent expects to point at later.
 Two blocks of one round answering to the same name is a parse error, since a name is what a comment and a `supersedes:` anchor on.
+An ask's heading and a `name:` on any other block share that one name space, so `## prose` with `name: foo` beside `## ask  foo` collides.
 
 `review show` prints each block's name beside its type, which is where an agent reads one off.
 

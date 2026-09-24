@@ -15,7 +15,7 @@ from pathlib import Path
 
 from ..core.atomic import write_atomic
 from .askhash import hash_ask
-from .grammar import ATTR_RE, CONTEXT_TIERS, WORD_LIMITS, ReviewParseError
+from .grammar import ATTR_RE, ReviewParseError
 from .parse import Entry, parse_text
 
 
@@ -129,17 +129,6 @@ def check_supersedes(entry: Entry, finalized: set[str]) -> None:
         )
 
 
-def missing_context_tiers(entry: Entry) -> list[str]:
-    """The context tiers this entry does not carry, in reading order.
-
-    An entry is answered on its own, out of order, by someone who is not carrying the changeset in their head.
-    All three tiers are what make that possible, and each is scoped to *this entry's subject* rather than to the change
-    as a whole — otherwise every cold tier restates the same paragraph and nobody opens one again.
-    """
-    present = {block.type for block in entry.blocks}
-    return [tier for tier in CONTEXT_TIERS if tier not in present]
-
-
 def missing_intro_rounds(entry: Entry, open_asks: set[str]) -> list[int]:
     """The rounds that ask something still open and carry no `intro` block of their own.
 
@@ -154,19 +143,6 @@ def missing_intro_rounds(entry: Entry, open_asks: set[str]) -> list[int]:
     asking = {b.round or latest for b in entry.asks if b.name in open_asks and b.name != acknowledged}
     introduced = {b.round or latest for b in entry.blocks if b.type == "intro"}
     return sorted(asking - introduced)
-
-
-def word_warnings(entry: Entry) -> list[str]:
-    """Context tiers past the length that keeps them worth collapsing."""
-    out = []
-    for block in entry.blocks:
-        limit = WORD_LIMITS.get(block.type)
-        if limit is None:
-            continue
-        words = len(block.prose.split())
-        if words > limit:
-            out.append(f"{entry.slug}: `{block.type}` is {words} words, past the {limit} that keeps it skimmable")
-    return out
 
 
 def render_front(front: dict[str, str]) -> str:

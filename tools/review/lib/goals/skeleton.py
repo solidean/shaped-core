@@ -48,14 +48,12 @@ _DESCRIPTIONS = {
 
 
 # Groups whose entries are the review's own orientation rather than a piece of the change.
-# They are exempt from the three context tiers because writing them there duplicates the orientation entry,
-# and twelve near-identical cold tiers is exactly how a reader learns the collapsed sections are noise.
-CONTEXT_EXEMPT_GROUPS = frozenset({"meta", "finalize", "framing"})
+ORIENTATION_GROUPS = frozenset({"meta", "finalize", "framing"})
 
 
-def requires_context(group: str) -> bool:
-    """Whether an entry in this group must carry all three context tiers."""
-    return group not in CONTEXT_EXEMPT_GROUPS
+def is_orientation(group: str) -> bool:
+    """Whether an entry in this group orients the review rather than judging a piece of the change."""
+    return group in ORIENTATION_GROUPS
 
 
 def thinly_discharged(entries) -> dict[str, list[str]]:
@@ -72,7 +70,7 @@ def thinly_discharged(entries) -> dict[str, list[str]]:
     for entry in entries:
         if entry.state != "open":
             continue
-        meta = not requires_context(entry.group)
+        meta = is_orientation(entry.group)
         for change_id in entry.discharged_changes():
             by_change.setdefault(change_id, []).append(entry.slug)
             if not meta:
