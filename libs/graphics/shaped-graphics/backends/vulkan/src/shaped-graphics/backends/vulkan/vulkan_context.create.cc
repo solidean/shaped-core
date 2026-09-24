@@ -686,10 +686,14 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     // chain already carries the 1.1, 1.2 and 1.3 structures.
     // `fragmentStoresAndAtomics` is the one sg needs — without it a fragment shader may not write a storage buffer,
     // which is a binding group sg's raster scope accepts.
+    // `shaderStorageImageExtendedFormats` is enabled wherever the device has it, and sg::feature::extended_storage_formats reports it.
+    auto supported = VkPhysicalDeviceFeatures{};
+    vkGetPhysicalDeviceFeatures(best_device, &supported);
     auto core_features = VkPhysicalDeviceFeatures2{
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
         .pNext = &vk11_features,
-        .features = {.fragmentStoresAndAtomics = VK_TRUE},
+        .features = {.fragmentStoresAndAtomics = VK_TRUE,
+                     .shaderStorageImageExtendedFormats = supported.shaderStorageImageExtendedFormats},
     };
 
     auto const device_info = VkDeviceCreateInfo{

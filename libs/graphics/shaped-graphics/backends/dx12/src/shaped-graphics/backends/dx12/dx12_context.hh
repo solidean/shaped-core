@@ -198,6 +198,8 @@ public:
         case sg::feature::binding_arrays:
         case sg::feature::tessellation_shader:
         case sg::feature::readwrite_storage_formats:
+        case sg::feature::float32_filtering:
+        case sg::feature::extended_storage_formats:
             return true;
         }
         return false;

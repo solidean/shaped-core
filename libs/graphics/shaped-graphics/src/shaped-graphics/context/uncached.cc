@@ -5,6 +5,7 @@
 #include <clean-core/thread/async_coroutine.hh>
 #include <shaped-graphics/binding/binding.hh> // binding::count
 #include <shaped-graphics/binding/impl/binding_conflicts.hh>
+#include <shaped-graphics/binding/impl/portability.hh>
 #include <shaped-graphics/binding/layout_fit.hh>
 #include <shaped-graphics/binding/pipeline_layout.hh>
 #include <shaped-graphics/compute/compute_pipeline.hh> // compute_pipeline_description::shader
@@ -122,6 +123,9 @@ cc::result<binding_group_layout_handle> context_uncached_scope::try_create_bindi
             return cc::error(cc::format("binding_group_layout: '{}' is an unbounded array (count 0), which sg does "
                                         "not support — declare a bounded count and treat it as capacity",
                                         b.name));
+
+    if (auto unsupported = impl::find_unsupported_binding(_ctx, bindings); unsupported.has_value())
+        return cc::error(cc::move(unsupported.value()));
 
     return _ctx.try_create_binding_group_layout(bindings, static_samplers, lifetime_scope::persistent);
 }

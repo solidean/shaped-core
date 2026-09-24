@@ -91,6 +91,7 @@ ctx.accepts_shader_format(f)                       // bool — hand this to slib
 ctx.supports(sg::feature::raytracing)              // bool — THE capability question; feature is deliberately coarse (see context/capabilities.hh)
                                                    //   raytracing | timestamp_query | headless_present | geometry_shader | tessellation_shader | binding_arrays
                                                    //   | readwrite_storage_formats (false on core webgpu: read_write storage only in r32 formats)
+                                                   //   | float32_filtering (filter r32/rg32/rgba32_float) | extended_storage_formats (storage beyond is_portable_storage_format)
                                                    //   binding_arrays false (webgpu) = no count > 1 bindings, no staging_binding_group, no bindless_array
                                                    //   the per-scope bools (cmd.raytracing.is_supported(), cmd.query.is_supported(),
                                                    //   ctx.supports_headless_present()) all forward here, so there is one answer per question

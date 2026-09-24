@@ -1,5 +1,6 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/utility.hh>
+#include <shaped-graphics/binding/impl/portability.hh>
 #include <shaped-graphics/command_list/command_list.hh>
 #include <shaped-graphics/context/context.hh>
 #include <shaped-graphics/context/transient.hh>
@@ -117,6 +118,8 @@ cc::result<raw_texture_handle> context_transient_scope::try_create_raw_texture(t
 {
     // WORKAROUND: the transient bump-heap is buffers-only, so a transient texture is a dedicated allocation tagged transient, which the backend auto-expires at the next epoch.
     // Placed/bump-allocated transient textures wait on a texture-capable transient memory_heap; see the header note.
+    if (auto unsupported = impl::find_unsupported_texture(_ctx, desc); unsupported.has_value())
+        return cc::error(cc::move(unsupported.value()));
     allocation_info alloc;
     alloc.scope = lifetime_scope::transient;
     auto created = _ctx.try_create_raw_texture(desc, alloc);
@@ -141,6 +144,8 @@ cc::result<binding_group_handle> context_transient_scope::try_create_binding_gro
                                                                                    cc::span<named_view const> views,
                                                                                    cc::span<named_sampler const> samplers)
 {
+    if (auto unsupported = impl::find_unsupported_view(_ctx, *layout, views); unsupported.has_value())
+        return cc::error(cc::move(unsupported.value()));
     return _ctx.try_create_binding_group(cc::move(layout), views, samplers, lifetime_scope::transient);
 }
 
@@ -160,6 +165,8 @@ cc::result<binding_group_handle> context_transient_scope::try_create_binding_gro
                                                                                    cc::span<slotted_view const> views,
                                                                                    cc::span<named_sampler const> samplers)
 {
+    if (auto unsupported = impl::find_unsupported_view(_ctx, *layout, views); unsupported.has_value())
+        return cc::error(cc::move(unsupported.value()));
     return _ctx.try_create_binding_group(cc::move(layout), views, samplers, lifetime_scope::transient);
 }
 } // namespace sg

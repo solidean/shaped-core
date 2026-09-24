@@ -123,6 +123,11 @@ bool metal_context::supports(sg::feature f) const
         // Asked of the device rather than assumed: tier 2 is what lifts read-write past r32, and Metal reports the
         // tier directly instead of leaving it to be inferred from the family.
         return _device != nullptr && _device->readWriteTextureSupport() >= MTL::ReadWriteTextureTier2;
+    case sg::feature::float32_filtering:
+        return _device != nullptr && _device->supports32BitFloatFiltering();
+    case sg::feature::extended_storage_formats:
+        // Apple silicon writes every uncompressed color format from a shader, which is this backend's floor.
+        return true;
     case sg::feature::geometry_shader:
     case sg::feature::tessellation_shader:
         // Metal has never had either stage; a caller asking gets a permanent answer rather than a temporary one.

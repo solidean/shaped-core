@@ -22,6 +22,7 @@ add_library(shaped-graphics
     src/shaped-graphics/barrier/command_list_slot.cc
     src/shaped-graphics/binding/binding.cc
     src/shaped-graphics/binding/impl/binding_conflicts.cc
+    src/shaped-graphics/binding/impl/portability.cc
     src/shaped-graphics/binding/layout_fit.cc
     src/shaped-graphics/binding/binding_group_layout.cc
     src/shaped-graphics/binding/pipeline_layout.cc
@@ -271,6 +272,7 @@ if(SC_BUILD_TESTS)
             tests/context/cold-caches-test.cc
             tests/buffer/buffer-test.cc
             tests/texture/texture-create-test.cc
+        tests/texture/texture-feature-test.cc
             tests/command_list/command_list-test.cc
             tests/command_list/index_buffer_alignment-test.cc
             tests/transfer/transfer-test.cc

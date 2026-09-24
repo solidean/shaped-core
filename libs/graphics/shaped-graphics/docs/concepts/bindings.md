@@ -99,6 +99,18 @@ For buffer and texture kinds they line up exactly: `access_of(binding_type)` and
 `accepts(binding_type, raw_view)` is the check.
 That equivalence is what lets a binding validate a bound view with no backend involved, and it is why `binding_type`'s view kinds mirror the view `(access, shape)` combinations one-to-one.
 
+## Features
+
+**A form some device lacks is refused where it is lacking, and refused alike on every backend.**
+Two such forms are judged before any backend sees them, in [portability.cc](../../src/shaped-graphics/binding/impl/portability.cc):
+
+- A storage texture, or a storage binding, in a format outside `is_portable_storage_format` needs `feature::extended_storage_formats`.
+  The portable set is core WebGPU's storage formats, and the refusal comes at texture creation and at layout creation.
+- A 32-bit float view bound to a `filterable_float` binding needs `feature::float32_filtering`, and the refusal comes at group creation.
+  A binding with no `sample_type` is not judged, since a layout reflected from HLSL states none and only WebGPU reads it.
+
+`readwrite_storage_formats` is still webgpu's alone to judge, at layout creation, because every other backend has it.
+
 ## Array bindings
 
 An array binding is a `binding` with `count > 1`: `count` consecutive descriptors under one name — `Texture2D Texs[4]` in HLSL, and the building block of a bindless table.

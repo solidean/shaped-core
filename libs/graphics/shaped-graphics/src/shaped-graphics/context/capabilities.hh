@@ -40,6 +40,15 @@ enum class sg::feature
     /// A storage texture may be `read_write` in any storage format, not only r32float / r32uint / r32sint.
     /// WebGPU core allows read-write on those three alone, and its `texture-formats-tier2` lifts that; write-only and read-only work everywhere.
     readwrite_storage_formats,
+
+    /// A sampled texture of `r32_float`, `rg32_float` or `rgba32_float` may be filtered.
+    /// Core WebGPU makes those three unfilterable and its `float32-filterable` lifts that, and Vulkan reports it per format.
+    /// Without it, binding such a view to a `filterable_float` binding is refused on every backend.
+    float32_filtering,
+
+    /// A storage texture may use a format outside `sg::is_portable_storage_format`, such as `r8_unorm` or `rgb10a2_unorm`.
+    /// WebGPU grants them with `texture-formats-tier1` and `bgra8unorm-storage`, Vulkan with `shaderStorageImageExtendedFormats`.
+    extended_storage_formats,
 };
 
 /// Whether the thread driving this context may block at all.

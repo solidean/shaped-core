@@ -1,5 +1,6 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/utility.hh>
+#include <shaped-graphics/binding/impl/portability.hh>
 #include <shaped-graphics/context/context.hh>
 #include <shaped-graphics/context/persistent.hh>
 #include <shaped-graphics/exceptions.hh>
@@ -54,6 +55,8 @@ cc::result<raw_texture_handle> context_persistent_scope::try_create_raw_texture(
                                                                                 allocation_info const& alloc)
 {
     CC_ASSERT(alloc.scope == lifetime_scope::persistent, "persistent scope requires a persistent allocation");
+    if (auto unsupported = impl::find_unsupported_texture(_ctx, desc); unsupported.has_value())
+        return cc::error(cc::move(unsupported.value()));
     return _ctx.try_create_raw_texture(desc, alloc);
 }
 
@@ -94,6 +97,8 @@ cc::result<binding_group_handle> context_persistent_scope::try_create_binding_gr
                                                                                     cc::span<named_view const> views,
                                                                                     cc::span<named_sampler const> samplers)
 {
+    if (auto unsupported = impl::find_unsupported_view(_ctx, *layout, views); unsupported.has_value())
+        return cc::error(cc::move(unsupported.value()));
     return _ctx.try_create_binding_group(cc::move(layout), views, samplers, lifetime_scope::persistent);
 }
 
@@ -113,6 +118,8 @@ cc::result<binding_group_handle> context_persistent_scope::try_create_binding_gr
                                                                                     cc::span<slotted_view const> views,
                                                                                     cc::span<named_sampler const> samplers)
 {
+    if (auto unsupported = impl::find_unsupported_view(_ctx, *layout, views); unsupported.has_value())
+        return cc::error(cc::move(unsupported.value()));
     return _ctx.try_create_binding_group(cc::move(layout), views, samplers, lifetime_scope::persistent);
 }
 
