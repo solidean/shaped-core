@@ -3,7 +3,23 @@
 Running list of known follow-ups.
 Bigger design intent lives in [structure.md](structure.md).
 
-- First routines on the framework: mipmap generation, texture compression, tonemapping.
+- First routines on the framework: texture compression, tonemapping.
+- Denoising, beyond à-trous and SVGF — [denoising.md](denoising.md) is the design and the order:
+  sg's declared native scope and DLSS Ray Reconstruction next; then FSR Ray Regeneration.
+  OIDN alongside, once its shipped size is measured, which decides whether its CPU build is fetched by default.
+  NRD waits for a tracer that splits diffuse from specular radiance and writes hit distances.
+- à-trous estimates noise from the sample count alone, assuming one noise width per sample equal to the pixel's luminance.
+  A tracer that accumulates the second moment would give it a measured per-pixel variance instead, which is what SVGF uses.
+- Port the native denoise members to SGL once it is feature-complete enough for them.
+  They are HLSL today, so `sr::query_denoise_support` answers false on webgpu and metal — SGL is what reaches those backends.
+  It also removes the four hand-written "find the uniform_buffer binding" loops the members and the playground example use to build their pipeline layouts.
+  An SGL package generates `inline_binding()` for its constants instead.
+- Two denoise tests worth having and not written yet.
+  A method switch on one history — à-trous then SVGF on the same `sr::denoise_history` — which is the one branch of `denoise_history::_prepare` nothing covers.
+  And `options_for` on both members, which maps `quality` and `sharpness` onto pass counts and sigmas and is what any settings UI drives.
+- SVGF feeds back its integrated, unfiltered colour, where the paper feeds back the first à-trous pass's output.
+  That is simpler and never compounds the filter across frames, at the price of a noisier history.
+  Its reprojection takes the nearest texel rather than a bilinear footprint, which smears slightly under subpixel motion.
 - Get imgui off stb.
   It bundles stb rect-pack, truetype and textedit; we scope them with `IMGUI_STB_NAMESPACE` so they cannot collide with anyone else's stb, but scoping is containment, not a fix.
   stb is hobby-grade — no release process, known robustness gaps parsing malformed fonts — and it sits on the path that loads user-supplied font files.

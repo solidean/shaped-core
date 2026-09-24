@@ -15,14 +15,19 @@ namespace sr::impl
 /// and a backend must set ImGuiBackendFlags_RendererHasTextures and drain ImDrawData::Textures every frame.
 /// Nothing here is optional — skipping a request wedges imgui's atlas.
 ///
-/// Uploads go through ctx.upload (the async copy queue), not a command list: a font atlas is bulk asset data,
-/// and a later command list that samples the texture waits on the copy automatically.
-/// That is why service_requests needs only a context.
+/// A new texture's bytes go through ctx.upload (the async copy queue): a font atlas is bulk asset data, and a later
+/// command list that samples the texture waits on the copy automatically.
+///
+/// An UPDATE is recorded on the caller's list instead, and that is why service_requests takes one.
+/// By the time imgui asks for one, a draw has sampled the atlas, so it sits in `shader_readonly` — and a transfer
+/// queue cannot move a layout for itself, so the async path would submit a throwaway list to fix it up and warn.
+/// The direct queue transitions it through the ordinary tracker, and an update is a few glyph rects rather than the
+/// bulk data the async path exists for.
 ///
 /// The ID handed to imgui is `slot index + 1`, so 0 stays ImTextureID_Invalid and a zero-initialized ImTextureData is never mistaken for slot 0.
 /// Freed slots are recycled, so IDs are not monotonic — imgui never assumes they are.
 ///
-///     registry.service_requests(ctx, draw_data);          // once per frame, before recording draws
+///     registry.service_requests(cmd, draw_data);          // once per frame, before recording draws
 ///     auto const* texture = registry.try_texture_of(cmd.GetTexID());
 class imgui_texture_registry
 {
@@ -30,7 +35,7 @@ class imgui_texture_registry
 public:
     /// Creates, updates and destroys GPU textures to match what imgui is asking for this frame.
     /// Must run before the draws that sample them are recorded.
-    void service_requests(sg::context& ctx, ImDrawData* draw_data);
+    void service_requests(sg::command_list& cmd, ImDrawData* draw_data);
 
     // queries
 public:
@@ -42,7 +47,7 @@ public:
 
 private:
     void create_texture(sg::context& ctx, ImTextureData* tex);
-    void update_texture(sg::context& ctx, ImTextureData* tex);
+    void update_texture(sg::command_list& cmd, ImTextureData* tex);
     void destroy_texture(ImTextureData* tex);
 
     /// Slots are addressed by `id - 1`; a null texture is a free slot.

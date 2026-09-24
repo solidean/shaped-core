@@ -40,6 +40,16 @@ public:
     /// For tests and tools that have no context.
     [[nodiscard]] sg::async_compiled_shader acquire(sg::shader_format format) const;
 
+    /// Whether a registered compiler connects this shader's language to `format`.
+    ///
+    /// Asked BEFORE acquiring, by a caller that would rather report "not supported" than hand back a failed shader —
+    /// a support query, say, whose answer is a promise about what a later call will do.
+    /// False for an asset whose library is gone, and for one whose package was never added to a library at all.
+    [[nodiscard]] bool can_build(sg::shader_format format) const;
+
+    /// Whether `can_build` holds for any format `ctx` accepts, which is exactly what `acquire(ctx)` will look for.
+    [[nodiscard]] bool can_acquire(sg::context const& ctx) const;
+
     /// Bumped whenever a reload replaces the shader for any format.
     /// Cache it to know when to rebuild a pipeline; it only moves inside acquire(), which is where a staged compile is promoted.
     [[nodiscard]] u64 generation() const;

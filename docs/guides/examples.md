@@ -86,6 +86,22 @@ So the partial image is there to look at, and the capture still counts as failed
 `dev.py` reads a file at the requested path as the run having succeeded, and the exit code alone cannot tell it otherwise.
 Without that split a sweep would refresh a half-converged image over the committed reference and report it as captured.
 
+### An example that names several backends is captured on each one
+
+`SC_EXAMPLE_BACKEND` decides which backend an example builds against.
+An example declaring more than one in `sc_resolve_example_backend`'s `SUPPORTS` list therefore has an arm per backend that nobody runs by default.
+
+**Building that arm proves nothing about running it.**
+A program picks its shader compiler at runtime.
+An example registering only `slib::create_dxc_compiler` — DXIL — therefore compiles, links and starts on a vulkan build, and then finds nothing it can hand the device.
+`uv run dev.py example <match> --example-backend <b> --capture` is the whole check, it needs no display, and it is about ten seconds per backend.
+
+Do it while writing the example, alongside the capture loop above, rather than leaving it to whoever first tries the other backend.
+
+**A failure path that drops the compiler's reason costs a second run to recover it.**
+`slib`'s async result carries the diagnostic.
+An example reporting "the shader did not compile" and discarding `try_error()` turns a one-line fix into a debugging session, on the arm where a reader has least context.
+
 ### What the default view owes the reader
 
 An example's committed capture is its documentation, and it is the only part a reader sees before deciding whether to open the source.
