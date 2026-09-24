@@ -200,21 +200,20 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   So the conversion is unblocked whenever someone wants it.
 
 - **The metal shader toolchain is MSL-only, and the tier-2 fixtures are still hand-compiled.**
-  `shaped-shader-compiler-msl` compiles MSL to a metallib (or to MSL source where Apple's separately-installed Metal
-  toolchain is absent), slib's `create_metal_compiler` is the edge, and an SGL package reaches metal through it.
+  `shaped-shader-compiler-msl` compiles MSL to a metallib, or to MSL source where Apple's separately installed Metal toolchain is absent.
+  slib's `create_metal_compiler` is the edge, and an SGL package reaches metal through it.
   So a shader authored in SGL compiles for metal like any other target, and the gap that is left is narrower than it was.
 
   **What remains is HLSL.**
-  `sv`'s path tracer is written in HLSL against the DXR pipeline path, and there is no macOS route from HLSL to
-  anything metal reads: DXC publishes no macOS binary, and SPIRV-Cross is unvendored.
+  `sv`'s path tracer is written in HLSL against the DXR pipeline path, and there is no macOS route from HLSL to anything metal reads.
+  DXC publishes no macOS binary, and SPIRV-Cross is unvendored.
   Porting `sv` to metal therefore means either an SGL rewrite of its shaders or an HLSL route built elsewhere.
 
-  **And the tier-2 fixtures are still `xxd -i` dumps** — `double_compute.metallib.h` and its neighbours, with their
-  reflection written by hand beside them.
-  Compiling them through the wrapper at build time would drop the dumps, at the cost of making the tier-2 binary
-  require the Metal toolchain component; that is a trade worth making deliberately rather than in passing.
-  `ssc::msl end to end - the reflected bindings build the layout the backend encodes` is what now checks that a
-  reflected layout and the encoded one agree, which is the property those hand-written fixtures could never pin.
+  **And the tier-2 fixtures are still `xxd -i` dumps**: `double_compute.metallib.h` and its neighbours, with their reflection written by hand beside them.
+  Compiling them through the wrapper at build time would drop the dumps.
+  The cost is that the tier-2 binary would then require the Metal toolchain component, a trade worth making deliberately rather than in passing.
+  `ssc::msl end to end - the reflected bindings build the layout the backend encodes` now checks that a reflected layout and the encoded one agree.
+  That is the property the hand-written fixtures could never pin.
 
 - **Metal implements refit, compaction and placement natively, and sg exposes none of them.**
   Recorded here so the eventual surface is designed against three APIs rather than two.

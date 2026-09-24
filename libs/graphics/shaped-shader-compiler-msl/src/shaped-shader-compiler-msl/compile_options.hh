@@ -9,8 +9,10 @@
 /// Which artifact a compile is asked for.
 ///
 /// Metal has two, and they are not the same kind of thing.
-/// A metallib is AIR in a portable container, which is what `sg::shader_format::metal_lib` means and what survives the
-/// machine that produced it; producing one needs Apple's Metal toolchain, a component installed separately from Xcode.
+/// A metallib is AIR in a container, which is what `sg::shader_format::metal_lib` means.
+/// It survives the machine that produced it, but only onto another Mac: the driver compiles against the macOS SDK, and
+/// a macOS metallib does not load on iOS.
+/// Producing one needs Apple's Metal toolchain, a component installed separately from Xcode.
 /// MSL source is the text itself, compiled by the driver when a pipeline is built — no toolchain, nothing to ship.
 enum class ssc::msl::artifact_kind
 {
