@@ -54,6 +54,8 @@ cc::result<raw_texture_handle> context_persistent_scope::try_create_raw_texture(
                                                                                 allocation_info const& alloc)
 {
     CC_ASSERT(alloc.scope == lifetime_scope::persistent, "persistent scope requires a persistent allocation");
+    if (auto error = desc.unaligned_block_error(_ctx.supports(feature::unaligned_block_compression)); !error.empty())
+        return cc::error(cc::move(error));
     return _ctx.try_create_raw_texture(desc, alloc);
 }
 

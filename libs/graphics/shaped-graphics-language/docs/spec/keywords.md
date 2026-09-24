@@ -16,6 +16,7 @@ Definitions:
 * `enum` - defines a new enum type
 * `binding` - defines a new binding group
 * `sampler` - declares a static sampler
+* `pipeline` - declares a pipeline: its stages and the configuration compiled into it ([pipelines](pipelines.md))
 * `const` - real constants
 * `use` - import other modules
 * `module` - declares a module

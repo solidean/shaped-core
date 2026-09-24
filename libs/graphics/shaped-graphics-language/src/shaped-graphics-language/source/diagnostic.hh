@@ -153,6 +153,8 @@ enum class sgl::diagnostic_kind : sgl::u8
     duplicate_case_pattern,
     /// An arm of a `case` that is a value and that neither produces one nor exits.
     missing_value_in_arm,
+    /// A `pipeline` whose stages do not fit together, or a setting that names no field or has a value it cannot.
+    invalid_pipeline,
 };
 
 namespace sgl

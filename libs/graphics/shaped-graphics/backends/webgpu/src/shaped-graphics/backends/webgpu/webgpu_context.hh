@@ -125,6 +125,9 @@ public:
         case sg::feature::tessellation_shader:
         case sg::feature::binding_arrays:
             return false;
+        case sg::feature::unaligned_block_compression:
+            // Lifted by `texture-compression-unaligned`, which the emdawnwebgpu this builds against does not offer.
+            return false;
         }
         return false;
     }

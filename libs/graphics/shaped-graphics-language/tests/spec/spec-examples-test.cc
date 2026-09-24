@@ -19,6 +19,7 @@ constexpr cc::string_view spec_files[] = {
     "_index.md",
     "keywords.md",
     "notation.md",
+    "pipelines.md",
     "syntax/_index.md",
     "syntax/line-tree.md",
     "syntax/tokens.md",
@@ -240,8 +241,8 @@ TEST("sgl spec - every example of the spec and every sample compiles for every t
             require_total(e.source, cc::format("{}:{}", file, e.line), failures);
         }
     }
-    for (auto const sample :
-         {"basic-raster.sgl", "control-flow.sgl", "cube.sgl", "helpers.sgl", "matrices.sgl", "members-and-bindings.sgl"})
+    for (auto const sample : {"basic-raster.sgl", "control-flow.sgl", "cube.sgl", "helpers.sgl", "matrices.sgl",
+                              "members-and-bindings.sgl", "pipeline.sgl"})
     {
         ++sources;
         require_total(read_text(cc::string(SGL_SAMPLES_DIR) + "/" + sample), sample, failures);

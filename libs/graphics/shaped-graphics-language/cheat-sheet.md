@@ -37,6 +37,9 @@ auto const d = sgl::describe({.source = text, .source_name = "cube.sgl"});
 d.value().bindings                         // name, is_inline, members (constant: offset + size; buffer: slot + host_name `work.values`), block_size
 d.value().structs                          // the @vertex / @pixel structs: name, edge, members with their location
 d.value().entry_points                     // name, stage, workgroup, bindings (the list as written)
+d.value().pipelines                        // name, stages, layout, vertex_input, target_set, targets, settings, open (the `.host` paths)
+                                           // bindings and structs carry `shape`: check::structural_hash of their members,
+                                           // 32 hex digits; the type's own name is not in it. What a hot reload compares.
                                            // types are SGL spellings (`float3`, `mat4`); mapping them to a host is the reader's job
                                            // only the file's own declarations, and only what the emitter would build
 
@@ -396,7 +399,11 @@ sgl::print_source(file)      // == file.source for EVERY input: the lossless inv
 - **A block is a scope.** A local ends with its block, and two blocks beside each other may reuse a name.
 - **A later local shadows an earlier one**, in the same block or an enclosing one, parameters included, as in Rust (CHK-53).
   Its value still sees the one it hides; each is a local of its own, minted `x`, `x_1`, … in the text.
-  Shadowing a module-level name is `unsupported-yet`.
+- **A local or a parameter may shadow a module-level or prelude name** (CHK-54), and behind it the name is the local everywhere.
+  So `let length = length v` is fine, and `length w` after it is a call of a local; a type position holding it is `wrong-kind-of-name`.
+- **The program's file may shadow a prelude name** (CHK-188): its `struct vec3` is no duplicate, and its `fun dot` joins the prelude's overloads.
+  Where both have a function a call matches, the program's wins (CHK-192), so a prelude release adding its signature breaks nothing.
+  Only two non-functions of one name in one file are `duplicate-declaration`.
 - **`and`, `or` and `not` are no functions**, and a comparison chain evaluates each inner operand once: it is bound where it first stands.
 - **Still `unsupported-yet`:** generics, `self` and methods, `mut` parameters, lambdas and function values, nested functions, `const`, `use`,
   a `for` over anything but `a ..< b`, a `let` without a value, an expression statement that is no call, `assert`.

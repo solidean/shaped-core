@@ -28,7 +28,7 @@ It is **not** a summary of the diff.
 
 ## Shape
 
-`context/cold` and `context/repo` earn their keep here more than anywhere else, because this is the entry a reader with no background actually starts from.
+This is the entry a reader with no background actually starts from, so its prose assumes none: the **Concepts** paragraph carries every term the findings lean on.
 
 An `ask` is optional and usually worth having: **is this the change you thought you were getting?**
 A no here is worth knowing before the maintainer spends an hour on findings about the wrong thing.
@@ -45,10 +45,6 @@ title: what this change is
 group: meta
 state: open
 ---
-
-## context/cold
-
-For a reader new to both the change and the repository.
 
 ## prose
 

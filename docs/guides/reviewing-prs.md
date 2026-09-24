@@ -298,6 +298,20 @@ The drafted comment ended in the harness's attribution line, and the maintainer'
 do not add "🤖 Generated with Claude Code". we keep it professional here and only want a summary of the changes in that comment.
 ```
 
+### An entry carries no `context/*` blocks
+
+**An entry introduces what it needs in its own prose; the review tool has no background block to put it in.**
+Entries once carried three collapsed tiers of background, one each for a reader new to the codebase, new to the change, and caught up on the entries above.
+`validate` required all three, and after more than ten reviews they had not earned their place.
+The maintainer's answer, verbatim:
+
+```raw
+after using the review tool 10+ times, I don't think context/* is useful. let's just rip this out completely in this change. whenever i wanted to get more context for an entry and opened it, it never really contained what I needed. so it doesnt pull its weight
+```
+
+What the tiers were for still holds: every entry is read on its own, so a term is introduced where it is first used.
+A `## context/...` heading is now an unknown block type, and fails to parse like any other.
+
 ### Price work in what it improves and how long an agent takes, never in human hours
 
 **The author hands a comment to an agent, so the work in it is effectively free.**
@@ -779,6 +793,11 @@ So every resource shared by two draws already looked like that write, and the as
 The finding survived; the fix had to start with declaring real per-binding access, the way dx12's `hazard_views` do.
 Before prescribing a check on a declared property, read the one function that declares it.
 
+**"This guard becomes unreachable, make it an assert" is a claim about every path into it.**
+pr-188's first draft said a raised floor on `cc::rec::open_event` made a pinned value's short-capacity guard dead code.
+It is dead on the normal path and not during shutdown: `writer_rotate` returns early without clearing the cursor once the pool is gone, so a short capacity can still come back.
+Trace the early returns of whatever the fix relies on before calling a branch unreachable.
+
 **A member of the right type is not the mechanism wired.**
 A helper that notifies, retires or releases usually needs a call that connects it, and holding the helper proves nothing about that call.
 pr-177's first draft said metal's streams "do notify, through `sg::impl::transfer_drain`", because `metal_stream_system` holds one.
@@ -974,6 +993,11 @@ pr-164's comment introduced a sentence with "Q14 measured it as portable" and th
 Q14 is a test; the sentence was the author's own doc, on the branch under review.
 That also made it the second failure below — quoting someone's documentation back at them to establish a point they wrote — where a pointer to the line would have carried the whole argument.
 
+**One phrase cited against two files is two quotes.**
+pr-188's first draft told the author to cut two phrases from "`log_write`'s doc and the matching paragraph in `recording.md`".
+Both phrases were in `log.hh`, and `recording.md` said the same things in different words, so the author would have searched one file for text it does not contain.
+Quote each file separately, with its own line.
+
 ### A rename's call-site list comes from a grep of the name
 
 Listing the sites you happened to read while forming the finding is not the same as listing the sites.
@@ -993,6 +1017,12 @@ Removing the `Buffer` row would have broken the corpus's every-type case, which 
 Giving `sg::binding_group_layout` a new constructor argument also reaches both backends' subclasses and `fake_group_layout` in `layout_hash-test.cc`.
 Replacing `create_binding_group(G const&)` left five docs still spelling the old call.
 Renaming a CMake custom target missed the `add_dependencies` naming it and the property that records it.
+
+**Removing a default argument owes the prose that explains the default, not only the calls that rely on it.**
+pr-188's first draft told the author to drop `min_payload = 1` from `cc::rec::open_event` and listed every call site correctly.
+It missed three places a grep for "default" finds and a grep for the call does not.
+The comment above `open_event`'s rotate check argued from "the default of one byte", and a test's comment said it exercised "the whole point of the default".
+A benchmark was labelled with the two-argument spelling.
 
 ### An instruction to "both halves" is checked against each half separately
 

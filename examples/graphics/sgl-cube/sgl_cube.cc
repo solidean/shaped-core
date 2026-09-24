@@ -4,7 +4,8 @@
 // Here the package is SGL, and slib's SGL compiler edge writes it as the text the backend's own compiler reads.
 // So nothing on the shader side forks: every `#if` left is about the host, which context to create and whether DXC exists.
 //
-// The host side is generated from cube.sgl too: the vertex struct, its layout, the render target and the inline constants are `shaders::`.
+// The host side is generated from cube.sgl too: the vertex struct, the render target, the inline constants, and the
+// pipeline cube.sgl declares, which is everything the draw is built from but the swapchain's format.
 //
 // Under `--capture` there is no window and no swapchain: the frame goes into a texture and is written out, which is
 // how the committed image is produced and how the example is verified on a machine with no display at all.
@@ -194,56 +195,22 @@ struct orbit_camera
 #endif
 }
 
-/// Compiles the cube's two shaders and builds the pipeline for one target format.
-/// Fails only when they did not compile, which is the one thing worth reporting rather than drawing nothing.
+/// The cube's pipeline for one target format: everything else about it is the `pipeline:` of cube.sgl.
+/// Fails only when the shaders did not compile, which is the one thing worth reporting rather than drawing nothing.
 [[nodiscard]] cc::shared_async<cc::result<sg::raster_pipeline_handle>> build_pipeline(sg::context& ctx,
                                                                                       sg::pixel_format color_format)
 {
-    // One file and two entry points, whatever `ctx` accepts; SGL calls the fragment stage `pixel`, and so does the package.
-    auto const vs = shaders::cube.vertex.main_vs->acquire(ctx);
-    auto const ps = shaders::cube.pixel.main_ps->acquire(ctx);
-    // Settled rather than awaited for their values: a compiled shader is read in place, and a failed compile is
-    // something this reports rather than propagates.
-    co_await cc::async_settled(vs);
-    co_await cc::async_settled(ps);
-
-    auto const* const compiled_vs_ptr = vs->try_value();
-    auto const* const compiled_ps_ptr = ps->try_value();
-    if (compiled_vs_ptr == nullptr || compiled_ps_ptr == nullptr)
-    {
-        // The compiler's diagnostics ride the async's failure channel, so "it did not compile" alone throws away the
-        // one thing worth reading.
-        auto const* const error = compiled_vs_ptr == nullptr ? vs->try_error() : ps->try_error();
-        co_return cc::error(cc::any_error(cc::format("the cube's shaders did not compile: {}",
-                                                     error != nullptr ? error->underlying().to_string()
-                                                                      : cc::string("the compile never ran"))));
-    }
-    auto const& compiled_vs = *compiled_vs_ptr;
-    auto const& compiled_ps = *compiled_ps_ptr;
-
-    // The layout the vertex stage's binding list states, `{constants}`: an @inline block and no group.
-    // The pixel stage lists nothing, so this is the whole pipeline's layout, and no binding is read from reflection.
-    auto const layout = shaders::cube.vertex.main_vs.acquire_layout(ctx);
-
-    auto const built = ctx.cached.acquire_raster_pipeline(
-        {.layout = layout,
-         .vertex_shader = compiled_vs,
-         .fragment_shader = compiled_ps,
-         .vertex_input = cube_vertex::layout(),
-         .rasterization = {.cull = sg::cull_mode::back},
-         // Both default to OFF, and solid geometry needs both — a cube drawn without them shows whichever face
-         // happened to be recorded last.
-         .depth_stencil = {.depth_test = true, .depth_write = true},
-         .color_targets = shaders::target::states{.color = {.format = color_format}},
-         .depth_stencil_format = sg::pixel_format::depth32_float,
-         .target_set = shaders::target::name});
+    // The target's format is the one part cube.sgl leaves to the host, so it is the one thing stated here.
+    auto const built = ctx.cached.acquire_raster_pipeline(shaders::cube.pipeline, {.color = color_format});
+    // Settled rather than awaited for its value: the compiler's diagnostics ride the async's failure channel, and
+    // "it did not build" alone throws away the one thing worth reading.
     co_await cc::async_settled(built);
 
     auto const* const pipeline = built->try_value();
     if (pipeline == nullptr)
     {
         auto const* const error = built->try_error();
-        co_return cc::error(cc::any_error(cc::format("the raster pipeline did not build: {}",
+        co_return cc::error(cc::any_error(cc::format("the cube's pipeline did not build: {}",
                                                      error != nullptr ? error->underlying().to_string()
                                                                       : cc::string("the build never ran"))));
     }

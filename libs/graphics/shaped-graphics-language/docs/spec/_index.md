@@ -17,6 +17,7 @@ Back to the [library readme](../../readme.md).
 | [notation.md](notation.md) | symbol replacements, `notation \phi => φ` |
 | [terminology.md](terminology.md) | the glossary: each term has one meaning |
 | [bindings.md](bindings.md) | binding groups |
+| [pipelines.md](pipelines.md) | pipeline declarations: stages, settings, and what a pipeline checks |
 | [incubator/_index.md](incubator/_index.md) | ideas recorded so they are not lost; nothing in it is normative |
 | [archive/syntax-draft.md](archive/syntax-draft.md) | the first draft of the syntax, kept unchanged; the files above replace it |
 

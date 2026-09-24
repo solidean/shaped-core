@@ -70,6 +70,12 @@ struct sg::texture_description
     /// The non-asserting counterpart of assert_valid().
     [[nodiscard]] bool is_valid() const;
 
+    /// Why this shape cannot be created on a device without `sg::feature::unaligned_block_compression`, or empty.
+    /// A block-compressed format then needs a width and height in whole blocks; `supports_unaligned` lifts that.
+    /// Creating one anyway throws rather than asserts, since the size of a texture loaded from a file is the file's;
+    /// a loader asks this first, with `ctx.supports(...)`, and pads or refuses the file itself.
+    [[nodiscard]] cc::string unaligned_block_error(bool supports_unaligned) const;
+
     /// Asserts the shape contract one invariant at a time — is_valid says what the contract is.
     /// Runs from raw_texture's constructor, and a backend calls it at the top of its create path so the contract is enforced before any fallible GPU work.
     void assert_valid() const;

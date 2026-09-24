@@ -23,8 +23,16 @@ Back to the [semantics](_index.md); the reasons are in [why/checking.md](why/che
 
 * **CHK-10** A **symbol** is a `fun`, a `struct`, an `enum` or a `binding` declared at the top level of a file, named by its file and its declaration.
 * **CHK-11** The module scope is unordered: a symbol may be used above its declaration.
-* **CHK-12** A name is declared once in the module scope, unless every declaration of it is a function; a later declaration is the normal error `duplicate-declaration`.
+* **CHK-12** A name is declared once in one scope, unless every declaration of it is a function; a later declaration is the normal error `duplicate-declaration`.
 * **CHK-13** Several functions of one name are an **overload set**.
+* **CHK-188** The module scope is two: the files of the prelude share the outer one, and the program's file has the inner one ([why](why/checking.md#chk-188)).
+  A declaration of the program's file **shadows** what the prelude declares of its name, so a `struct vec3` there is no duplicate.
+* **CHK-189** Where both scopes declare nothing but functions of one name, the functions of both are one overload set.
+* **CHK-192** Where a call matches functions of both scopes, those of the program's file are its only candidates ([why](why/checking.md#chk-192)).
+  Two matches in one scope are still CHK-72.
+* **CHK-190** A lookup from a prelude file sees the prelude's scope alone, and never a name of the program's file.
+* **CHK-191** What the check pass needs of the prelude by name is always the prelude's, whatever the program's file shadows.
+  That is the type of a literal, of a condition and of a `for`, and `raster_pipeline_description`.
 * **CHK-14** A `const`, a `type` alias and a `sampler` are `unsupported-yet`, and each still owns its name, so a use of it is silent.
   An `enum` is a symbol of its own, by CHK-142.
 * **CHK-15** `use` and `notation` are `unsupported-yet`.
@@ -90,14 +98,16 @@ enum light_kind:
 * **CHK-37** An `@operator` function is found through its operator alone: its own name is in no scope ([why](why/checking.md#chk-37)).
 * **CHK-38** The pass knows the attributes of the table below, each on the node kind the table names.
 * **CHK-39** Any other attribute, anywhere, is `unsupported-yet`, and arguments on a known attribute that takes none are `invalid-attribute-arguments`.
+  An attribute that names a pipeline setting is known where CHK-181 says, and takes its value.
 * **CHK-106** `@pure` on a function says that a call of it has no [effect](evaluation.md#effects); a `@builtin` without it is assumed to have one ([why](why/checking.md#chk-106)).
 
 | on | the known attributes |
 |---|---|
-| a function | `@builtin`, `@pure`, `@operator`, `@vertex`, `@pixel` |
+| a function | `@builtin`, `@pure`, `@operator`, `@vertex`, `@pixel`, `@compute` |
 | a struct | `@builtin`, `@vertex`, `@pixel` |
 | a binding | `@inline` |
-| a struct field | `@position` |
+| a struct field | `@position`, `@thread_id`, `@per_instance`, `@stream` |
+| a pipeline | `@raster`, `@compute`, `@raytracing` |
 
 ```sgl
 @builtin struct float
@@ -144,7 +154,9 @@ enum light_kind:
 * **CHK-52** `let name : type = value` needs `value` to be of `type`, or it is the normal error `type-mismatch`.
 * **CHK-53** A local **shadows** every earlier local and parameter of its name, in its own block or an enclosing one, from the statement after its `let`, as in Rust ([why](why/checking.md#chk-53)).
   The value it is given still sees the one it hides, and its type may differ.
-* **CHK-54** A local or a parameter that has the name of a module-level symbol is `unsupported-yet` ([why](why/checking.md#chk-54)).
+* **CHK-54** A local or a parameter may have the name of a module-level symbol, and shadows it as it shadows a local ([why](why/checking.md#chk-54)).
+  Types and values share one namespace, so behind it the name is the local wherever it stands: a call of it is CHK-78, and a type position holding it is the normal error `wrong-kind-of-name`.
+  A parameter's type is resolved before any parameter is in scope, so `light: light` is fine.
 * **CHK-55** A pattern in a `let` and a `let` without a value are `unsupported-yet`; `let mut` is CHK-111.
 * **CHK-56** `return value` needs `value` to be of the function's return type, or it is `type-mismatch`.
 * **CHK-57** An arrow body `=> value` is `return value`.
@@ -160,7 +172,7 @@ enum light_kind:
 * **CHK-63** A name that stands for a struct, a function or a binding is no value by itself: it is `unsupported-yet`.
 * **CHK-64** `value.name` is the field `name` of the struct type of `value`; a type without that field is the normal error `unknown-member`.
 * **CHK-65** `(x)` is `x`.
-* **CHK-152** `.name` is the case `name` of the enum the context expects, which today is the scrutinee of a `case` and nothing else.
+* **CHK-152** `.name` is the case `name` of the enum the context expects, which today is the scrutinee of a `case` and the field a pipeline setting assigns (CHK-178).
   A leading dot where no type is expected is `unsupported-yet`, and one whose expected type is no enum, or has no such case, is `unknown-member`.
 * **CHK-66** Every expression kind not named in this section is `unsupported-yet`.
 
@@ -207,6 +219,36 @@ let color = float4(..lit, 1.0)
 * **CHK-92** An entry point is neither `@builtin` nor `@operator`.
 * **CHK-173** `@per_instance` and `@stream(name)` are attributes of a struct field, recorded on the member; `@stream` takes one bare name.
 * **CHK-93** Breaking one of CHK-88 to CHK-92 is `invalid-entry-point`, and its detail names the rule.
+
+## Pipelines
+
+[pipelines](../pipelines.md) is the model; these are its rules.
+
+* **CHK-174** A `pipeline` declares a symbol of the module scope, named `pipeline` where it has no name of its own; it shares that scope with the file's functions (CHK-12).
+* **CHK-175** Its stages are the settings `vertex` and `pixel`, each the name of one entry point of that stage; in the short form each entry point takes the stage its attribute names.
+  A short form's settings block names no stage.
+  A pipeline has one vertex stage and at most one pixel stage, and a compute entry point is in none.
+* **CHK-176** Every other setting assigns one field of the prelude's `raster_pipeline_description`, and the settings apply in source order, each over the ones before it.
+* **CHK-177** The left side of a setting is a path of field names; its first name, where it is no field of the description, stands for the one field of that name below it.
+  A name that is no field anywhere, or two, is `invalid-pipeline`, and the detail names both paths.
+* **CHK-178** A value is `true` or `false` for a `bool`, a number literal for an `int` or a `float`, and a case for an enum (CHK-152).
+  A paren literal writes a struct whole and names each of its fields once, or it is `missing-field`, `unknown-field` or `duplicate-field`.
+  An `int` is held to the range sg keeps its field in: a stencil mask is 0 to 255, `sample_count` a power of two from 1 to 64, and `patch_control_points` 0 to 32.
+* **CHK-179** Under `color_targets` stands one entry per member of the pixel stage's `@pixel struct`; a setting whose path names no member there is one per member.
+* **CHK-180** `.host` stands only for a target's `format`, the `depth_stencil_format` and the `sample_count`, and `.none` only for a target's `blend`.
+* **CHK-181** An attribute of an entry point, of a `@vertex struct` or of a `@pixel struct` is a setting when its name alone is one field.
+  On a member of a `@pixel struct` it is one of that target's fields.
+  Such an attribute takes one value.
+  One whose name is two fields is `invalid-pipeline`, and the detail names both and says to set it in the pipeline, since an attribute has no path.
+* **CHK-182** A pipeline's settings apply in this order: the attributes of its vertex input, then of its `@pixel struct` and its members, then of its vertex and its pixel stage, then its own.
+  Two sources of one step that set one field differently are `invalid-pipeline`, unless the pipeline sets that field itself.
+  A part and a field inside it count as one field here, so `blend = .none` meets every field of another source's blend, and the pipeline's own `blend = .none` settles them.
+* **CHK-183** What the vertex stage returns has the members the pixel stage takes: as many, with the same names and types, in the same order, and `@position` on the same one.
+* **CHK-184** Its stages' binding lists, `@inline` bindings left out, name the same binding at every position they share.
+  The longest is the pipeline's layout, and the stages list one `@inline` binding at most.
+* **CHK-185** Every target has a format at the end: a case other than `.undefined`, or `.host`.
+* **CHK-186** `@compute` and `@raytracing` on a pipeline are `unsupported-yet`.
+* **CHK-187** Breaking one of CHK-175 to CHK-185 is `invalid-pipeline`, unless a rule names another kind, and its detail says what broke.
 
 ## The flat tree
 
@@ -351,7 +393,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `duplicate-declaration` | CHK-12, CHK-28 |
 | `dependency-cycle` | CHK-18, CHK-136 |
 | `unknown-name` | CHK-24, CHK-62 |
-| `wrong-kind-of-name` | CHK-24, CHK-79 |
+| `wrong-kind-of-name` | CHK-24, CHK-54, CHK-79 |
 | `missing-type` | CHK-26 |
 | `unknown-builtin` | CHK-31 |
 | `expected-body` | CHK-32 |
@@ -371,14 +413,14 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `ambiguous-overload` | CHK-72 |
 | `missing-field`, `unknown-field`, `duplicate-field` | CHK-84 |
 | `invalid-entry-point` | CHK-87, CHK-93 |
+| `invalid-pipeline` | CHK-175 to CHK-185, CHK-187 |
 
 ## Open
 
 * Whether `@builtin` is allowed outside the prelude; today it is.
 * Whether a builtin's declaration is checked against its record beyond the key; today its result type and its attributes are not.
-* Whether a local may shadow a module-level name ([scopes](../incubator/scopes.md)); shadowing a local or a parameter is CHK-53.
 * Whether a body is checked once or where it is inlined, once a generic makes the two differ ([why](why/checking.md#chk-129)).
-* `true` and `false`, which are names nothing declares yet.
+* `true` and `false`, which are names nothing declares yet, beyond the value of a pipeline setting (CHK-178).
 * Whether a second function with the parameter types of another is an error where it is declared.
 * Whether a pattern may bind a name, which is the pattern language of [patterns](../incubator/patterns.md) and the thing that would make exhaustiveness a real analysis.
 * Whether an enum reaches `int` through a cast, and what an `int` that names no case then is ([enum futures](../incubator/enum-futures.md)).

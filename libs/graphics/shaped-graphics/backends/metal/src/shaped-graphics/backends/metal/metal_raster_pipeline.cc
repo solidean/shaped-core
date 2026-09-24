@@ -239,8 +239,8 @@ cc::result<metal_raster_pipeline_handle> metal_context::create_metal_raster_pipe
             return out;
         };
 
-        auto* const front = face_state(ds.front);
-        auto* const back = face_state(ds.back);
+        auto* const front = face_state(ds.stencil_front);
+        auto* const back = face_state(ds.stencil_back);
         ds_descriptor->setFrontFaceStencil(front);
         ds_descriptor->setBackFaceStencil(back);
         front->release();

@@ -235,8 +235,8 @@ cc::result<vulkan_raster_pipeline_handle> vulkan_raster_pipeline::create(vulkan_
         .depthCompareOp = to_vk_compare_op(ds.depth_compare),
         .depthBoundsTestEnable = VK_FALSE,
         .stencilTestEnable = ds.stencil_test ? VK_TRUE : VK_FALSE,
-        .front = to_vk_stencil_face(ds.front, ds),
-        .back = to_vk_stencil_face(ds.back, ds),
+        .front = to_vk_stencil_face(ds.stencil_front, ds),
+        .back = to_vk_stencil_face(ds.stencil_back, ds),
         .minDepthBounds = 0.0f,
         .maxDepthBounds = 1.0f,
     };

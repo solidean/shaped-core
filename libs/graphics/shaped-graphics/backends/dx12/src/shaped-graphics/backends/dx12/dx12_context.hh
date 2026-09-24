@@ -199,6 +199,8 @@ public:
         case sg::feature::tessellation_shader:
         case sg::feature::readwrite_storage_formats:
             return true;
+        case sg::feature::unaligned_block_compression:
+            return _unaligned_block_textures;
         }
         return false;
     }
@@ -599,6 +601,7 @@ public:
     // DXR support tier, queried once at creation (D3D12_FEATURE_D3D12_OPTIONS5).
     // NOT_SUPPORTED until set.
     D3D12_RAYTRACING_TIER _raytracing_tier = D3D12_RAYTRACING_TIER_NOT_SUPPORTED;
+    bool _unaligned_block_textures = false; // D3D12_OPTIONS8, cached at creation
 
     // Where debug-layer messages go; empty means stderr.
     // See set_message_callback.

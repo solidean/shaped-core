@@ -52,6 +52,8 @@ struct sgl::described_binding
     /// -1 and empty for an `@inline` binding and for a group without a plain member.
     i32 block_slot = -1;
     cc::string block_host_name;
+    /// The members' structural hash (`check::structural_hash`), as 32 hex digits: what a hot reload compares.
+    cc::string shape;
 };
 
 struct sgl::described_struct_member
@@ -72,6 +74,8 @@ struct sgl::described_struct
     /// `vertex` or `pixel`.
     check::stage edge = check::stage::none;
     cc::vector<described_struct_member> members;
+    /// The members' structural hash (`check::structural_hash`), as 32 hex digits: what a hot reload compares.
+    cc::string shape;
 };
 
 struct sgl::described_entry_point
@@ -84,12 +88,53 @@ struct sgl::described_entry_point
     cc::vector<cc::string> bindings;
 };
 
+/// One field of a pipeline's description, as the check pass resolved it.
+struct sgl::described_pipeline_setting
+{
+    /// From the description down, with a target's member name where sg has an index: `color_targets.albedo.format`.
+    cc::string path;
+    check::setting_kind kind = check::setting_kind::boolean;
+    /// 0 or 1 for a boolean, the value of an integer.
+    i64 integer = 0;
+    f64 real = 0;
+    /// A case of `enum_name`, the enum of the same name in sg.
+    cc::string enum_case;
+    cc::string enum_name;
+};
+
+/// A `pipeline` declaration: its stages, its layout, and its settings over sg's defaults.
+struct sgl::described_pipeline
+{
+    cc::string name;
+    /// Entry point names; `pixel` is empty for a pipeline that writes depth alone.
+    cc::string vertex;
+    cc::string pixel;
+    /// The binding layout, in group order, and its one `@inline` binding or empty.
+    cc::vector<cc::string> layout;
+    cc::string inline_constants;
+    /// The `@vertex struct` it reads and the `@pixel struct` it writes; `target_set` is empty without a pixel stage.
+    cc::string vertex_input;
+    cc::string target_set;
+    /// The members of `target_set`, in location order.
+    cc::vector<cc::string> targets;
+    /// In the order they apply, each over the ones before it.
+    cc::vector<described_pipeline_setting> settings;
+    /// The paths the host states at acquire, whose last setting is `.host`, in the order first set so.
+    cc::vector<cc::string> open;
+    /// What the host's generated code is built against, one `key = value` line each, in a fixed order:
+    /// the layout, the inline constants, the vertex input and the target set, each as `name@shape`, then the last
+    /// setting of every format and of the sample count.
+    /// A build bakes these, and a hot reload that finds any of them changed keeps what it had.
+    cc::vector<cc::string> frozen;
+};
+
 struct sgl::module_description
 {
     /// In source order.
     cc::vector<described_binding> bindings;
     cc::vector<described_struct> structs;
     cc::vector<described_entry_point> entry_points;
+    cc::vector<described_pipeline> pipelines;
 };
 
 struct sgl::describe_request

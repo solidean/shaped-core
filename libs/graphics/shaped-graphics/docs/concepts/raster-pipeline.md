@@ -43,7 +43,8 @@ Each type provides its stride and attributes through a `sg::vertex_layout_of<V>`
 
 The color-target formats + per-target blend/write-mask (`color_target_state`), the depth-stencil format, and the sample count are part of `raster_pipeline_description` — not only the rendering scope —
 because backends bake them into the PSO (dx12 `RTVFormats` / `DSVFormat` / `SampleDesc`; vulkan dynamic-rendering `VkPipelineRenderingCreateInfo`).
-The rendering scope's bound *textures* must then match the pipeline's `color_targets` (count + format) and `depth_stencil_format`; a mismatch is a driver/debug-layer error.
+The rendering scope's bound *textures* must then match the pipeline's `color_targets` (count + format), `depth_stencil_format` and `sample_count`.
+No backend checks that, and a driver need not, so **`bind_pipeline` asserts it** against `raster_pipeline::target_formats()`, which creation records.
 
 ## Draws sit on any of the raster facades
 
