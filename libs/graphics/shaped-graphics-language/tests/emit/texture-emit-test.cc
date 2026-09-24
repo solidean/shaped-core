@@ -62,9 +62,9 @@ TEST("sgl emit - textures, images and a static sampler are resources of the grou
                           "{\n"
                           "    ConstantBuffer<post_data> post;\n"
                           "    Texture2D<float4> post_src;\n"
-                          "    [[vk::image_format(\"rgba8\")]]\n"
+                          "#pragma sc format rgba8_unorm\n"
                           "    RWTexture2D<float4> post_dst;\n"
-                          "    [[vk::image_format(\"r32f\")]]\n"
+                          "#pragma sc format r32_float\n"
                           "    RWTexture2D<float> post_acc;\n"
                           "#pragma sc static filter=(linear, linear, linear) address=(clamp_edge, clamp_edge, "
                           "clamp_edge)\n"
@@ -75,10 +75,9 @@ TEST("sgl emit - textures, images and a static sampler are resources of the grou
                           "    post_bindings::post_dst[xy] = c;\n"
                           "    post_bindings::post_acc[xy] = post_bindings::post_acc[xy] + c.x;\n"));
 
-    // dx12 takes an image's format from its view, so only vulkan states it.
+    // Both HLSL targets state the format the same way, and slib's pass writes what SPIR-V needs from it.
     auto const dx12 = text_of(k_blur, target::hlsl_dx12);
-    CHECK(!dx12.contains("vk::image_format"));
-    CHECK(dx12.contains("    RWTexture2D<float> post_acc;\n"));
+    CHECK(dx12.contains("#pragma sc format r32_float\n    RWTexture2D<float> post_acc;\n"));
 }
 
 TEST("sgl emit - each texture shape and depth is its target's own type, and 1D is 2D on WebGPU")

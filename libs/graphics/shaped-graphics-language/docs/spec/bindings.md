@@ -225,10 +225,11 @@ An `@inline` binding anywhere but the last position of a list is a normal error,
 A group-scope static sampler takes a slot like any sampler, since sg matches it by name to a sampler binding.
 
 **SGL states every fact of a binding itself.**
-Dimension, sample type, storage format, storage access and sampler kind are in the declaration.
-The SGL compiler edge hands them to slib beside the text it emits, and slib overlays them on what the target's compiler reflects, as it already does for binding names.
-No target syntax has to carry a fact it has no word for: HLSL cannot say `unfilterable`, and has no format outside vulkan's `[[vk::image_format]]`.
-The generated host group states the same facts, so the layout the host builds and the one the shader reflects agree on every backend.
+Dimension, sample type, storage format, storage access and sampler kind are in the declaration, and `sgl describe` hands each to the host.
+The generated group's table is what the host builds its layout from, so that is where every fact reaches sg.
+A compiled shader only has to fit that layout, and sg's fit check compares a binding's name, slot, count and kind — never the facts beyond them.
+The WGSL SGL writes states all of them, which a test holds to the generated table; HLSL states the dimension, and an image's format through slib's `#pragma sc format`.
+HLSL cannot say `unfilterable` at all, which costs nothing, since dx12 and vulkan read none of it.
 
 **MSL, as it is intended.**
 sg's metal backend makes a group one argument buffer at `[[buffer(group)]]`, whose member `[[id(n)]]` is slot `n` of the group.

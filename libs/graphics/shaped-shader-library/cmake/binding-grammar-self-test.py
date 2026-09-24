@@ -129,7 +129,7 @@ def read_corpus(text: str) -> list[Case]:
             if current.open_block == "vertex_input":
                 current.vertex_inputs[-1][1].append(" ".join(words))
                 continue
-            binding = {"name": words[0], "count": 1, "dim": None}
+            binding = {"name": words[0], "count": 1, "dim": None, "format": None}
             for word in words[1:]:
                 key, _, value = word.partition("=")
                 binding["index" if key == "index" else key] = int(value) if key in ("index", "count") else value
@@ -165,8 +165,8 @@ def check(case: Case) -> list[str]:
             problems.append(f"group '{name}' has {len(group.bindings)} binding(s), expected {len(expected)}")
             continue
         for binding, want in zip(group.bindings, expected):
-            got = (binding.name, binding.index, binding.count, binding.type, binding.dimension)
-            wanted = (want["name"], want["index"], want["count"], want["type"], want["dim"])
+            got = (binding.name, binding.index, binding.count, binding.type, binding.dimension, binding.storage_format)
+            wanted = (want["name"], want["index"], want["count"], want["type"], want["dim"], want["format"])
             if got != wanted:
                 problems.append(f"binding {got}, expected {wanted}")
 

@@ -144,15 +144,11 @@ public:
                         t.is_depth ? cc::string_view("float") : type_text(p, *this, t.element), b.name);
             return;
         case type_kind::image:
-        {
-            // HLSL leaves an image's format to the view, and SPIR-V wants it stated to read one without a device feature.
-            auto const& format = k_storage_formats[t.format];
-            if (_is_vulkan && !format.vulkan.empty())
-                out.appendf("    [[vk::image_format(\"{}\")]]\n", format.vulkan);
+            // slib's `#pragma sc format` states the format, which vulkan's SPIR-V wants and dx12 leaves to the view.
+            out.appendf("#pragma sc format {}\n", k_storage_formats[t.format].name);
             out.appendf("    {}<{}> {};\n", k_image_names[isize(t.shape)], builtin_spelling(p, texel_name_of(t.format)),
                         b.name);
             return;
-        }
         case type_kind::sampler:
             if (b.static_sampler >= 0)
                 write_static_sampler(out, p.m.samplers[b.static_sampler]);

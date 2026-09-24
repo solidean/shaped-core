@@ -104,6 +104,8 @@ The shape the seam is built for, and what is still `[planned]`:
   It is not a chain in the sense below, since the hop is inside one edge: `preprocess` writes the target's text, and that text is what is cached, hashed and compiled.
   It carries [examples/graphics/sgl-cube](../../../../examples/graphics/sgl-cube/shaders/cube.sgl) and the tier-1 compute and raster fixtures.
   A package generates host types from it: groups, `@inline` constants, vertex inputs and render targets.
+  A group's textures and images are typed views, a bound sampler an `sg::sampler` field, and a `sampler name:` block of the binding one of its `declared_samplers()`.
+  Its table carries every fact sg's layouts take from a binding, from `sgl describe`, so the WebGPU layout agrees with the WGSL the group becomes.
   **SGL writes MSL too, and nothing here can build it**: `create_sgl_compiler` maps a `metal_lib` inner compiler to the `msl` target, and slib has no such compiler.
   What a Mac run still needs is an MSL-to-`metal_lib` compiler over Apple's `metal` tool or a runtime `newLibraryWithSource`, which also has to reflect the MSL.
   sg's metal backend already binds what that text assumes: vertex buffers through a vertex descriptor, inline constants at buffer index 4, and indexed draws.

@@ -375,6 +375,7 @@ if(SC_BUILD_TESTS)
             tests/shaders/shader_fixtures.cc
             tests/shaders/sgl-package-test.cc
             tests/compute/compute-test.cc
+            tests/compute/compute-texture-test.cc
             tests/raster/raster-test.cc
         )
         sc_add_shader_package(
@@ -386,6 +387,7 @@ if(SC_BUILD_TESTS)
             SHADERS
                 double_values.sgl:*
                 quads.sgl:*
+                textures.sgl:*
         )
     endif()
 

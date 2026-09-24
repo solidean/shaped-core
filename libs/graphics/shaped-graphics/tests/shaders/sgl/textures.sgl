@@ -1,0 +1,30 @@
+// Textures, images and samplers in a group: the SGL fixture for sampling, loading and storing texels.
+// The DEBUG_ builtins stand in for texture methods, which the language does not have yet.
+
+binding post:
+    texel_size: float2
+    src: texture2d[float4]
+    dst: out image2d[.rgba8_unorm]
+    acc: mut image2d[.r32_float]
+    sampler bilinear:
+        filter = .linear
+        address = .clamp_edge
+
+binding sampled:
+    src: texture2d[float4]
+    smp: sampler
+    dst: out image2d[.rgba8_unorm]
+
+// Sampled at texel centres, so a filtering sampler gives each texel back unchanged.
+@compute(8, 8) fun copy_accumulate(@thread_id id: int3){post}:
+    let xy = int2(id.x, id.y)
+    let uv = ((xy as float2) + float2(0.5, 0.5)) * post.texel_size
+    let c = DEBUG_sample_level(post.src, uv, 0.0, post.bilinear)
+    DEBUG_store(post.dst, xy, c)
+    DEBUG_store(post.acc, xy, DEBUG_load(post.acc, xy) + c.x)
+
+// The same copy through a sampler the host binds, over a 16 by 16 texture.
+@compute(8, 8) fun copy_dynamic(@thread_id id: int3){sampled}:
+    let xy = int2(id.x, id.y)
+    let uv = ((xy as float2) + float2(0.5, 0.5)) * float2(0.0625, 0.0625)
+    DEBUG_store(sampled.dst, xy, DEBUG_sample_level(sampled.src, uv, 0.0, sampled.smp))

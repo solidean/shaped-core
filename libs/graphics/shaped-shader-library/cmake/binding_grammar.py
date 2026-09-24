@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 # The attribute names the grammar knows.
 # A name outside this set is an error rather than a directive nobody reads -- which is exactly what DXC makes
 # of it, since it ignores a pragma it does not know.
-ATTRIBUTE_NAMES = ("group", "static", "push_constants", "payload", "vertex_input", "attribute")
+ATTRIBUTE_NAMES = ("group", "static", "format", "push_constants", "payload", "vertex_input", "attribute")
 
 # HLSL constructs the pass cannot number, so they may not appear inside a group.
 REJECTED_KEYWORDS = ("namespace", "struct", "cbuffer", "tbuffer", "class", "typedef", "interface")
@@ -77,6 +77,7 @@ class Binding:
     type_offset: int
     semicolon_offset: int
     template_argument: str = ""
+    storage_format: str | None = None  # an sg::pixel_format enumerator a `format` attribute named, for storage textures
 
 
 @dataclass
@@ -380,6 +381,28 @@ def binding_rejection_reason_for(hlsl_type: str) -> str:
 def rejection_reason_for(hlsl_type: str) -> str:
     """The sentence to append to a refusal, or empty when the pass has nothing more specific to say."""
     return NARROW_COLUMN if is_matrix_type(hlsl_type) else ""
+
+
+# Every format sg::supports_typed_uav allows, by sg's name; keep in step with impl/hlsl_storage_format.cc.
+STORAGE_FORMATS = (
+    "r8_unorm", "r8_snorm", "r8_uint", "r8_sint", "rg8_unorm", "rg8_snorm", "rg8_uint", "rg8_sint",
+    "rgba8_unorm", "rgba8_snorm", "rgba8_uint", "rgba8_sint", "bgra8_unorm",
+    "r16_float", "r16_uint", "r16_sint", "rg16_float", "rg16_uint", "rg16_sint", "rgba16_float", "rgba16_uint",
+    "rgba16_sint", "r32_float", "r32_uint", "r32_sint", "rg32_float", "rg32_uint", "rg32_sint", "rgba32_float",
+    "rgba32_uint", "rgba32_sint", "rgb10a2_unorm", "rg11b10_float",
+)
+
+
+def parse_storage_format(attribute: Annotation) -> str:
+    """The sg::pixel_format a `format` attribute names; keep in step with impl/hlsl_storage_format.cc, messages included."""
+    args = attribute.arguments
+    if len(args) != 1 or args[0][0] or len(args[0][1]) != 1:
+        raise BindingError(f"{attribute.location}: 'format' takes one storage format, as sg::pixel_format names it: "
+                           "`#pragma sc format rgba8_unorm`")
+    name = args[0][1][0]
+    if name not in STORAGE_FORMATS:
+        raise BindingError(f"{attribute.location}: '{name}' is no format a storage texture can have")
+    return name
 
 
 def parse_sampler_state(attribute: Annotation) -> dict[str, str]:
@@ -971,6 +994,9 @@ class _Parser:
         if pending.name == "static":
             _Parser.reject_unclaimed_static(pending)
 
+        if pending.name == "format":
+            raise BindingError(f"{pending.location}: a 'format' attribute must stand before a storage texture in a group")
+
         if pending.name == "attribute":
             raise BindingError(
                 f"{pending.location}: an 'attribute' attribute must stand before a struct member")
@@ -1297,7 +1323,7 @@ class _Parser:
                 raise BindingError(f"{self.location_here()}: namespace '{group_name}' is never closed")
 
             if self.is_punctuation("}"):
-                self.reject_unclaimed_static(pending)
+                self.reject_unclaimed(pending)
                 self.at += 1
                 return bindings, statics
 
@@ -1305,7 +1331,7 @@ class _Parser:
 
             if token.kind == "annotation":
                 parsed = self.read_annotation()
-                if parsed.name != "static":
+                if parsed.name not in ("static", "format"):
                     raise BindingError(f"{token.location}: '{parsed.name}' is not an attribute of a binding")
                 if pending is not None:
                     raise BindingError(f"{token.location}: two attributes stand before one declaration")
@@ -1325,6 +1351,12 @@ class _Parser:
 
             binding = self.parse_binding(next_index)
 
+            if pending is not None and pending.name == "format":
+                if binding.type != "readwrite_texture":
+                    raise BindingError(
+                        f"{pending.location}: 'format' describes a storage texture, and '{binding.name}' is not one")
+                binding.storage_format = parse_storage_format(pending)
+                pending = None
             if pending is not None:
                 if binding.type != "sampler":
                     raise BindingError(
