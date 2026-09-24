@@ -139,6 +139,9 @@ public:
 
     void write_declarations(cc::string& out, plan const& p) const override
     {
+        // EMIT-102: a directive, so it stands ahead of every declaration.
+        if (uses_derivatives(p))
+            out += "diagnostic(off, derivative_uniformity);\n\n";
         write_enum_constants(out, p, *this);
         write_buffers(out, p, *this);
 

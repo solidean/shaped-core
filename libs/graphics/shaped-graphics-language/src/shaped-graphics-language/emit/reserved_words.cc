@@ -431,6 +431,11 @@ constexpr cc::string_view k_wgsl[] = {
     "mix",
     "normalize",
     "saturate",
+    "textureDimensions",
+    "textureLoad",
+    "textureSample",
+    "textureSampleLevel",
+    "textureStore",
 };
 
 #undef SGL_WGSL_ALIASES

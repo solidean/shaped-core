@@ -49,15 +49,15 @@ struct sgl::described_binding_member
 {
     cc::string name;
     described_member_kind kind = described_member_kind::constant;
-    /// The value's type; for a buffer, its element.
+    /// A constant's type, a buffer's element, and any other resource's whole spelling: `out image2d[.rgba8_unorm]`.
     cc::string type;
-    /// A buffer the shader may write: `mut buffer[T]`.
+    /// A resource the shader may write: `mut buffer[T]`, or an `out` or `mut` image.
     bool is_mut = false;
-    /// A constant's byte offset in its block; -1 for a buffer.
+    /// A constant's byte offset in its block; -1 for a resource.
     i32 offset = -1;
-    /// A constant's size in bytes; 0 for a buffer.
+    /// A constant's size in bytes; 0 for a resource.
     i32 size = 0;
-    /// A buffer's position among its binding's resources; -1 for a constant.
+    /// A resource's position among its binding's resources; -1 for a constant.
     i32 slot = -1;
     /// What the host binds a resource by, `binding.member`; empty for a constant.
     /// slib renames the compiled shader's reflected binding to it, so it is the name sg sees.

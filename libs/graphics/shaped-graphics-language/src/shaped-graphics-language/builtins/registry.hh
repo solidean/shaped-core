@@ -147,6 +147,9 @@ struct sgl::builtins::function_record
     cc::string doc;
     evaluator evaluate = nullptr;
     spelling write;
+    /// Takes screen-space derivatives implicitly, as a sample that picks its own level does.
+    /// WGSL then judges the control flow around every call by its uniformity rules, which HLSL and MSL do not have.
+    bool uses_derivatives = false;
 
     /// Read back from the signature by `finalize`.
     cc::string name;

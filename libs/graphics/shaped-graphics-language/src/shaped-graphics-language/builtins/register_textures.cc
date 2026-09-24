@@ -210,6 +210,7 @@ void add_family(registry& r, cc::string_view stem, bool samples)
                                     texel, texel),
             .evaluate = zeros<Width, Kind>,
             .write = custom(write_sample<Width>),
+            .uses_derivatives = true,
         });
     if (samples)
         r.add(function_record{
@@ -230,8 +231,11 @@ void add_family(registry& r, cc::string_view stem, bool samples)
         .evaluate = zeros<Width, Kind>,
         .write = custom(write_image_load<Width>),
     });
+    // Core WebGPU has no writable storage in a vertex stage.
     r.add(function_record{
-        .signature = cc::format("fun DEBUG_store(i: out image2d[{}], xy: int2, value: {})", texel, texel),
+        .signature = cc::format("@stages(.pixel, .compute) fun DEBUG_store(i: out image2d[{}], xy: int2, "
+                                "value: {})",
+                                texel, texel),
         .evaluate = nothing,
         .write = custom(write_image_store<Width, Kind>),
     });

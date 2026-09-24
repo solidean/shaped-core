@@ -117,7 +117,7 @@ described_binding describe_binding(check::checked_module const& m, check::symbol
         return result;
     }
 
-    // Numbered as the emitter numbers them: the constant block first when there is one, then the buffers in
+    // Numbered as the emitter numbers them: the constant block first when there is one, then the resources in
     // declaration order, each the next slot of its group.
     auto const plain = emit_impl::plain_members_of(m, b);
     auto const placed = emit_impl::place_block(m, plain);
@@ -132,28 +132,27 @@ described_binding describe_binding(check::checked_module const& m, check::symbol
     for (auto const& member : members)
     {
         auto const& t = m.at(member.type);
-        if (t.kind == check::type_kind::texture || t.kind == check::type_kind::image
-            || t.kind == check::type_kind::sampler)
+        if (t.kind == check::type_kind::buffer)
+        {
+            result.members.push_back({.name = member.name,
+                                      .kind = described_member_kind::buffer,
+                                      .type = cc::string(m.name_of(t.element)),
+                                      .is_mut = t.is_mut,
+                                      .slot = slot++,
+                                      .host_name = cc::format("{}.{}", s.name, member.name)});
+            continue;
+        }
+        if (check::is_resource(t.kind))
         {
             result.members.push_back(describe_resource(m, member, slot++, cc::format("{}.{}", s.name, member.name)));
             continue;
         }
-        if (t.kind != check::type_kind::buffer)
-        {
-            result.members.push_back({.name = member.name,
-                                      .kind = described_member_kind::constant,
-                                      .type = cc::string(m.name_of(member.type)),
-                                      .offset = placed.offsets[next_constant],
-                                      .size = placed.sizes[next_constant]});
-            ++next_constant;
-            continue;
-        }
         result.members.push_back({.name = member.name,
-                                  .kind = described_member_kind::buffer,
-                                  .type = cc::string(m.name_of(t.element)),
-                                  .is_mut = t.is_mut,
-                                  .slot = slot++,
-                                  .host_name = cc::format("{}.{}", s.name, member.name)});
+                                  .kind = described_member_kind::constant,
+                                  .type = cc::string(m.name_of(member.type)),
+                                  .offset = placed.offsets[next_constant],
+                                  .size = placed.sizes[next_constant]});
+        ++next_constant;
     }
     return result;
 }

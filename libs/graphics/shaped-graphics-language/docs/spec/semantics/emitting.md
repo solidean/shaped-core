@@ -102,7 +102,8 @@ const light_kind_sun: i32 = 2;
 * **EMIT-92** A vertex input member's **stream** is the name `@stream` gives it, else `per_instance` where it carries `@per_instance`, else `per_vertex`.
 * **EMIT-93** The members of one stream agree on `@per_instance`, or the struct is `unsupported`.
 * **EMIT-94** A stream changes nothing in the text: it is which buffer the host reads a member from, and a location stays the member's position ([why](why/emitting.md#emit-94)).
-* **EMIT-95** The text of an entry point comes with the pair of every buffer and constant buffer it declares: the name it minted, and the host name CHK-171 gives ([why](why/emitting.md#emit-95)).
+* **EMIT-95** The text of an entry point comes with the pair of every resource and constant buffer it declares, samplers included.
+  The pair is the name it minted, and the host name CHK-171 gives ([why](why/emitting.md#emit-95)).
 
 | stage | parameter | result |
 |---|---|---|
@@ -150,12 +151,16 @@ A binding that is not `@inline` is a group.
 * **EMIT-96** A texture, an image and a sampler member are each one global minted as a buffer's is, by EMIT-85, and each has its target's own type by the table below.
 * **EMIT-97** HLSL states an image's format as slib's `#pragma sc format`, with sg's name for it.
   slib's pass turns it into `[[vk::image_format]]` on the SPIR-V arm, which DXC makes a typed image of, and records it as the binding's `storage_format`.
-* **EMIT-98** A static sampler of a group is its `SamplerState` preceded by slib's `#pragma sc static`, which carries every filter and address and each other setting that is not its default.
+* **EMIT-98** A static sampler of a group is its `SamplerState`, or `SamplerComparisonState` where it has a `compare`, preceded by slib's `#pragma sc static`.
+  The pragma carries every filter and address and each other setting that is not its default.
   WGSL has no static sampler, and writes it as it writes a sampler the host binds: the layout says it is static.
 * **EMIT-99** WGSL writes a 1D texture or image as a 2D one and a 1D array as a 2D array, since sg's webgpu backend creates every 1D texture that way (the bindings file, "Shapes").
 * **EMIT-100** A call of a builtin that gives nothing is a statement as it stands, with no `_ =` in WGSL.
 * **EMIT-101** A builtin a target cannot write as one expression declares a helper function ahead of the entry point, once per text, and the call names it.
   HLSL's `GetDimensions` writes through out parameters, so `DEBUG_size` is an overload of `sgl_size` per texture type the entry point passes.
+* **EMIT-102** WGSL text whose entry point calls a builtin that takes derivatives implicitly, `DEBUG_sample`, opens with `diagnostic(off, derivative_uniformity);`, and other WGSL text does not.
+  HLSL samples under an `if` that differs between pixels, and Tint refuses it, so without the directive a program would be written for some targets only, against EMIT-13.
+  It is a stopgap: SGL is to judge uniformity itself, as the [incubator](../incubator/uniformity.md) sketches.
 
 | SGL | HLSL | WGSL |
 |---|---|---|
@@ -276,7 +281,6 @@ So `{float3; float}` is `layout-mismatch`: the `float` is at byte 12 in HLSL and
 ## Open
 
 * GLSL, which comes through the same seam.
-* HLSL with final registers, one emission for dx12 and one for vulkan, so that no binding pass reads SGL's text and EMIT-3 holds for every target.
 * HLSL with final registers, one emission for dx12 and one for vulkan, so that no binding pass reads SGL's text and EMIT-3 holds for every target.
 * A Metal compiler for the MSL text, and the buffer index of EMIT-58, which sg's metal backend has yet to adopt.
 * Whether a block member becomes `packed_float3` in MSL, which would let `{float3; float}` through at the price of a conversion on every read.
