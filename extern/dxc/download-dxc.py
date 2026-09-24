@@ -256,10 +256,14 @@ def main() -> int:
 
     up = deps_manifest.one(DEST)
 
-    # The host has no release at all — macOS today, which the manifest says outright via `unavailable_on`.
+    # The host has no release at all — macOS, and arm64 Linux, which the manifest says outright via `unavailable_on`.
     # Asked rather than inferred from the platform, so the script and the pin cannot disagree about what exists.
+    #
+    # Installing an archive built for another instruction set is worse than installing nothing.
+    # CMake reads the presence of .install as "DXC is available", and every dependent target then fails to link against it.
     if not up.is_available:
-        print(f"dxc: upstream publishes no {deps_manifest.host_os_key()} build — skipping (DXC stays unavailable)")
+        host = f"{deps_manifest.host_os_key()} ({deps_manifest.host_arch_key()})"
+        print(f"dxc: upstream publishes no {host} build — skipping (DXC stays unavailable)")
         return 0
 
     if not args.force and already_installed(up.pin_hash):
@@ -267,13 +271,8 @@ def main() -> int:
         return 0
 
     # The Windows release lays its members out per architecture; the Linux one is flat and ships x86_64 only.
+    # That is why arm64 Linux is declared unavailable above rather than checked again here.
     is_windows = sys.platform == "win32"
-    if not is_windows and host_arch() != "x64":
-        # Upstream publishes no arm64 Linux binary, so there is nothing to install rather than something to fail on.
-        # Installing the x86_64 one anyway is worse than skipping: CMake takes the presence of .install as "DXC is
-        # available" and every dependent target then fails to link against a foreign-architecture .so.
-        print(f"dxc: no {platform.machine()} linux binary published upstream — skipping (DXC stays unavailable)")
-        return 0
     arch = host_arch() if is_windows else "x86_64"
     print(f"downloading {up.name} {up.tag} ({up.asset}, {arch}) ...", flush=True)
     request = urllib.request.Request(up.url, headers={"User-Agent": "shaped-core-dxc-fetch"})

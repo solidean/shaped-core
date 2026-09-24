@@ -15,6 +15,7 @@ This module is imported, not run, so it carries no PEP 723 block — but it need
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import platform
 import sys
 from pathlib import Path
 
@@ -27,6 +28,12 @@ MANIFEST_NAME = "dependency.yml"
 SOURCES = {"git", "github-release", "github-files", "url"}
 TRACKS = {"tags", "default-branch", "github-releases", "sqlite", "none"}
 DIGEST_ALGOS = {"git-commit", "sha256", "sha3-256"}
+# The keys `unavailable_on` may name a host by.
+# A bare OS key covers every architecture, an arch-qualified one exactly one machine.
+# Both spellings are needed because upstreams routinely ship a release for a platform without shipping it for every machine that platform runs on.
+HOST_OS_KEYS = ("windows", "linux", "macos")
+HOST_ARCH_KEYS = ("x64", "arm64")
+HOST_KEYS = HOST_OS_KEYS + tuple(f"{os_key}-{arch}" for os_key in HOST_OS_KEYS for arch in HOST_ARCH_KEYS)
 # `vendored` is committed in-tree; `fetched` hydrates a gitignored .install/ on demand, so it can be absent or stale on a given checkout.
 # `bundled` arrives inside another upstream in the same directory — Zycore, which the Zydis amalgamation folds in — so it has no install state of its own.
 INSTALLS = {"vendored", "fetched", "bundled"}
@@ -53,7 +60,7 @@ class Upstream:
     # For `track: tags`, a regex selecting which tags are versions at all — upstreams tag far more than releases.
     # Empty means the default "looks like a version number" pattern.
     tag_pattern: str = ""
-    # Host keys (`windows` / `linux` / `macos`) this upstream has no release for at all.
+    # Host keys this upstream has no release for at all — see `HOST_KEYS` for the spelling.
     # Distinct from a missing per-OS key, which stays an error: that means nobody has looked, and this means somebody did.
     unavailable_on: list[str] = field(default_factory=list)
     license_files: list[str] = field(default_factory=list)
@@ -91,7 +98,7 @@ class Upstream:
         False means the manifest says so deliberately — see `unavailable_on`.
         Such an upstream carries no pin and no asset here, so every field that would name one is empty.
         """
-        return host_os_key() not in self.unavailable_on
+        return not any(key in self.unavailable_on for key in host_keys())
 
     @property
     def install_dir(self) -> Path:
@@ -174,6 +181,25 @@ def host_os_key() -> str:
     return "linux"
 
 
+def host_arch_key() -> str:
+    """The architecture half of a host key: `x64` or `arm64`.
+
+    Anything that is not a recognised 64-bit ARM machine reads as `x64`, since every target this repo builds is one or the other.
+    A third architecture should fail loudly downstream rather than silently name a key nothing declares.
+    """
+    return "arm64" if platform.machine().lower() in ("arm64", "aarch64") else "x64"
+
+
+def host_keys() -> list[str]:
+    """Every key `unavailable_on` may name this host by, widest first.
+
+    An upstream that ships nothing for the platform lists the bare OS key.
+    One that ships for some of its machines lists the arch-qualified key instead, and matching against both is what lets either spelling mean what it says.
+    """
+    os_key = host_os_key()
+    return [os_key, f"{os_key}-{host_arch_key()}"]
+
+
 def _build(path: Path, directory: Path, entry: object) -> Upstream:
     if not isinstance(entry, dict):
         raise ValueError(f"{path}: each `upstreams` entry must be a mapping")
@@ -194,7 +220,14 @@ def _build(path: Path, directory: Path, entry: object) -> Upstream:
     # Without this an absent key was indistinguishable from an un-ported one, so DXC — which ships no macOS build — took
     # down every consumer of the whole manifest set on a Mac, `deps list` and `deps licenses` included.
     unavailable = [str(x) for x in entry.get("unavailable_on", [])]
-    host_unavailable = suffix in unavailable
+    # An unrecognised key must be refused rather than ignored, since ignoring it silently means "available everywhere" — the opposite of what the manifest says.
+    unknown = [key for key in unavailable if key not in HOST_KEYS]
+    if unknown:
+        raise ValueError(
+            f"{path}: upstream {entry.get('name', '?')!r} lists unknown `unavailable_on` key(s) {unknown} — "
+            f"must be one of {list(HOST_KEYS)}"
+        )
+    host_unavailable = any(key in unavailable for key in host_keys())
 
     def per_os(key: str, *, required: bool) -> str:
         host_key = f"{key}_{suffix}"
