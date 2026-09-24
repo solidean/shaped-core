@@ -1,6 +1,5 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/utility.hh>
-#include <clean-core/fwd.hh> // offsetof
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <shaped-graphics/all.hh>
@@ -16,36 +15,19 @@ using impl::is_set;
 
 namespace
 {
-/// The inline-constants block atrous_denoise.hlsl declares, byte for byte.
-struct atrous_constants_gpu
-{
-    i32 step = 1;
-    u32 flags = 0;
-    f32 luminance_scale = 1.0f;
-    f32 normal_power = 64.0f;
-    f32 depth_sigma = 0.02f;
-    f32 _pad[3] = {};
-};
-
-static_assert(sizeof(atrous_constants_gpu) == sizeof(sr::shaders::atrous_constants),
-              "the à-trous constants are not the size atrous_denoise.hlsl's block states");
-static_assert(offsetof(sr::shaders::atrous_constants, step) == offsetof(atrous_constants_gpu, step),
-              "step moved in atrous_denoise.hlsl");
-static_assert(offsetof(sr::shaders::atrous_constants, flags) == offsetof(atrous_constants_gpu, flags),
-              "flags moved in atrous_denoise.hlsl");
-static_assert(offsetof(sr::shaders::atrous_constants, luminance_scale) == offsetof(atrous_constants_gpu, luminance_scale),
-              "luminance_scale moved in atrous_denoise.hlsl");
-static_assert(offsetof(sr::shaders::atrous_constants, normal_power) == offsetof(atrous_constants_gpu, normal_power),
-              "normal_power moved in atrous_denoise.hlsl");
-static_assert(offsetof(sr::shaders::atrous_constants, depth_sigma) == offsetof(atrous_constants_gpu, depth_sigma),
-              "depth_sigma moved in atrous_denoise.hlsl");
-
 // The flag bits atrous_denoise.hlsl tests.
 constexpr u32 k_has_albedo = 1u << 0;
 constexpr u32 k_has_normal = 1u << 1;
 constexpr u32 k_has_depth = 1u << 2;
 constexpr u32 k_demodulate_in = 1u << 3;
 constexpr u32 k_remodulate_out = 1u << 4;
+
+// Where this member's images live in the history's state slots.
+// à-trous keeps no history, so the two scratch slots are all it ever touches — the rest stay empty under it.
+constexpr int k_scratch = 0; // 0, 1: the passes' ping-pong
+constexpr int k_slots_used = 2;
+
+static_assert(k_scratch + k_slots_used <= 8, "a-trous reaches past the slots denoise_history has");
 
 /// Each pass averages what the last one left, so the noise it has to see through shrinks.
 /// Halving the variance per pass is the usual approximation when no variance estimate is carried along.
@@ -150,9 +132,9 @@ denoise_outcome atrous_denoise_routine::execute(sg::command_list& cmd,
     // rgba32_float to match the accumulator it most often filters: the first pass divides by the albedo, and a half
     // float would lose the dim end of that range.
     if (options.iterations > 1)
-        (void)impl::ensure_image(ctx, history._state[0], extent, sg::pixel_format::rgba32_float);
+        (void)impl::ensure_image(ctx, history._state[k_scratch], extent, sg::pixel_format::rgba32_float);
     if (options.iterations > 2)
-        (void)impl::ensure_image(ctx, history._state[1], extent, sg::pixel_format::rgba32_float);
+        (void)impl::ensure_image(ctx, history._state[k_scratch + 1], extent, sg::pixel_format::rgba32_float);
 
     auto guide_flags = u32(0);
     if (is_set(in.guides.albedo))
@@ -177,8 +159,8 @@ denoise_outcome atrous_denoise_routine::execute(sg::command_list& cmd,
     auto const last = options.iterations - 1;
     for (auto i = 0; i <= last; ++i)
     {
-        auto const& source = i == 0 ? in.color : history._state[(i - 1) % 2];
-        auto const& target = i == last ? in.output : history._state[i % 2];
+        auto const& source = i == 0 ? in.color : history._state[k_scratch + (i - 1) % 2];
+        auto const& target = i == last ? in.output : history._state[k_scratch + i % 2];
 
         auto flags = guide_flags;
         if (demodulate && i == 0)
@@ -186,7 +168,7 @@ denoise_outcome atrous_denoise_routine::execute(sg::command_list& cmd,
         if (demodulate && i == last)
             flags |= k_remodulate_out;
 
-        auto const constants = atrous_constants_gpu{
+        auto const constants = shaders::atrous_constants{
             .step = 1 << i,
             .flags = flags,
             .luminance_scale = luminance_scale,

@@ -12,7 +12,8 @@ struct sr::svgf_options
     int iterations = 4;
 
     /// How many measured noise widths a luminance difference may span and still average.
-    f32 luminance_sigma = 4.0f;
+    /// 5 is what `options_for` produces at the default sharpness, so the two spellings of "default" agree.
+    f32 luminance_sigma = 5.0f;
 
     /// How closely normals must agree, as the exponent on their dot product.
     f32 normal_power = 128.0f;

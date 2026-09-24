@@ -39,6 +39,7 @@ The API admits an output larger than the input, so a vendor member can upscale w
 - A caller never computes a ratio.
   It picks a `render_scale_preset` and asks `sr::denoise_input_extent` what to trace.
   A spatial member answers every preset with the output's own extent, so a caller cannot ask for a ratio a member would reject.
+  So does an upscaling member this device cannot run: the call is about to be refused, and a caller that traced smaller for it would composite a smaller image into its own output.
   A free ratio can join later as one more way to ask.
 - A change of either extent restarts the history, like a resize.
 
@@ -50,6 +51,17 @@ A tracer writes the union for the members it may hand off between, in a few fixe
 **Settings are one flat struct of knobs named for what they do.**
 Each field in `sr::denoise_settings` says which members read it, and a member ignores the rest, so switching members keeps every knob that still means something.
 A member's own options — the full vendor surface — live on the member, never in the shared struct.
+
+**Whether a call carries fresh samples is one of those knobs, not an argument.**
+`denoise_settings::fresh_samples` is what tells `automatic` to pick among the temporal members.
+`sr::denoise_input_extent`, `sr::resolve_denoise_method` and `sr::denoise_routine::execute` all read that one answer.
+It sits in the struct rather than beside each call because planning a frame and running it are three calls apart.
+A caller that said yes to one and nothing to another would have traced for a member the call then does not use.
+
+**A denoised image keeps the alpha it came in with.**
+Every member copies `denoise_inputs::color`'s alpha into `output` and writes only rgb, so a caller compositing with alpha gets the same channel whichever member ran.
+SVGF carries a per-pixel variance in alpha between its own passes and swaps it for the caller's on the last one.
+Whether a vendor member can honour this is open — it may write its own alpha and leave us no say — and that is the point at which the rule is either kept by a copy pass or relaxed in writing.
 
 ## Selection and refusal
 
@@ -66,12 +78,37 @@ Instead the front's `init` prewarms every supported member, so prewarming the fr
 
 ## History belongs to the caller
 
-`sr::denoise_history` is everything a member keeps between calls for one image stream: temporal history, vendor feature handles, and the scratch images a spatial member ping-pongs through.
+`sr::denoise_history` is the images a member keeps between calls for one image stream: a temporal member's history, and the scratch a spatial member ping-pongs through.
 It is move-only, since a copy would fork a history, and the caller holds one per stream.
+
+**It holds textures and nothing else, which is what the next member changes.**
+A vendor member keeps a *feature handle* — an object the SDK creates once for a resolution and a set of options, and that every later call passes back — and that is not an `sg::texture_2d`.
+The successor is one owning pointer to a member-defined state object in place of the fixed array.
+Each member declares its own struct, `_prepare` allocates the one the resolved method wants, and a member reaches its own through a checked cast.
+That is deliberately not built yet.
+It buys nothing for two texture-only members, and the port does not get harder while there are only two.
+The caller's own declaration does not change either way, so it lands with the member that needs it.
+
+**A temporal history is large.**
+svgf holds eight full-screen images — six `rgba32_float` and the moments pair `rg32_float` — which is about 221 MiB per 1080p stream and 886 MiB at 2160p.
+à-trous holds at most two, and only above two wavelet passes.
+That is per stream and on top of whatever the tracer already keeps, so **a caller with several views should drop the history of one nobody is looking at**; dropping it is what frees the images.
 
 A routine is a per-context singleton and cannot know which stream a call belongs to, or when a stream has gone.
 The caller can, which is the same reason sv keeps its accumulators in its per-view store rather than in a routine.
 `reset()` is a camera cut: the next call starts from nothing and reports `restarted`.
+
+**Two alternatives, rejected — recorded here so they are not re-proposed.**
+
+- **A stream id, with each member routine keeping a map from id to state.**
+  Nothing would free a stream, since a routine still cannot see a viewport close.
+  Either the caller calls a release it will eventually forget, or every closed view leaks its images until the context dies.
+  It also puts a map lookup on the render path, and a lock the moment two views are recorded from two threads.
+  The caller-owned object frees itself, which is the whole point.
+- **Members registering themselves with the front through an interface, in place of the enum and its switch.**
+  It would make adding a member a one-file change, and it would cost the two preference orders their readability — they become data spread across members, or a priority number each one asserts.
+  It also turns which members exist into a runtime fact, so the `CC_UNREACHABLE` that catches a member added to the support query and forgotten in the switch has nothing to fire on.
+  The member set is enumerated in one enum, at five; a registry is machinery for a larger set than this will ever be.
 
 ## Meeting a progressive path tracer
 
@@ -115,7 +152,10 @@ sv takes the scene signal from its trace hash with the camera left out; a caller
 
 - The front's policy — what `automatic` picks, that a named member it cannot run writes nothing — runs on WARP through à-trous.
 - à-trous itself: a flat image stays flat, a guide edge does not bleed, and a deep mean is left close to itself.
-- SVGF itself: a static noisy stream converges, and a depth jump or a reset drops the history rather than ghosting it.
+- SVGF itself: a static noisy stream converges, a moving one is followed through its motion vectors, and a depth jump or a reset drops the history rather than ghosting it.
+  The moving test is the one that pins reprojection at all.
+  It runs the same shifting image twice — once with an honest motion vector, once told nothing moved — and requires the honest one to converge at least twice as far.
+  A stream of zero motion alone would pass with the sign flipped, the half-pixel offset missing, or the motion texture bound to the wrong slot.
 - Every member, once it exists, gets the same property test: the error against a converged reference falls.
   A vendor member's version is gated on its hardware and reports "not run" elsewhere rather than passing.
   Reference images from vendor members are never committed, since they change with the driver.

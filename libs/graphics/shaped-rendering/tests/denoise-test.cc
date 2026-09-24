@@ -17,11 +17,14 @@
 
 using namespace cc::primitive_defines;
 
-// sr's denoise front and its à-trous member.
+// sr's denoise front and both of its native members.
 //
 // What these pin is the policy the front applies — which member `automatic` picks, and that a named member it cannot
-// run is refused rather than replaced — and the three properties that make à-trous safe to put on a converging mean:
-// a flat image stays flat, an edge in the guides survives, and a deep mean is left almost alone.
+// run is refused rather than replaced — plus each member's own behaviour.
+// For à-trous, the three properties that make it safe to put on a converging mean: a flat image stays flat, an edge in
+// the guides survives, and a deep mean is left almost alone.
+// For SVGF, that a stream converges, that it follows a moving image through its motion vectors, and that a depth jump
+// or an explicit reset drops the history rather than ghosting it.
 
 static_assert(!std::is_copy_constructible_v<sr::denoise_history>, "copying a history would fork it");
 static_assert(std::is_nothrow_move_constructible_v<sr::denoise_history>, "a history lives in per-view records that move");
@@ -179,20 +182,30 @@ ASYNC_INVOCABLE_TEST("sr - denoise automatic resolves to a supported member", (s
     // A caller feeding fresh frames gets the best temporal member.
     // One denoising a converging mean never does, since a temporal member's history would double-count what the mean
     // already averaged.
-    auto const automatic = sr::denoise_settings{.method = sr::denoise_method::automatic};
+    auto const on_a_mean = sr::denoise_settings{.method = sr::denoise_method::automatic};
+    auto const on_fresh_frames = sr::denoise_settings{.method = sr::denoise_method::automatic, .fresh_samples = true};
     CHECK(support.svgf);
-    CHECK(sr::resolve_denoise_method(ctx, automatic, false) == sr::denoise_method::atrous);
-    CHECK(sr::resolve_denoise_method(ctx, automatic, true) == sr::denoise_method::svgf);
+    CHECK(sr::resolve_denoise_method(ctx, on_a_mean) == sr::denoise_method::atrous);
+    CHECK(sr::resolve_denoise_method(ctx, on_fresh_frames) == sr::denoise_method::svgf);
 
     // A named member resolves to itself whether or not it is supported: refusing it is execute's job, and it must
     // not be quietly exchanged for another.
     auto const dlss = sr::denoise_settings{.method = sr::denoise_method::dlss_rr};
-    CHECK(sr::resolve_denoise_method(ctx, dlss, false) == sr::denoise_method::dlss_rr);
+    CHECK(sr::resolve_denoise_method(ctx, dlss) == sr::denoise_method::dlss_rr);
 
     // Only the vendor members trace smaller than they output; every other member answers the output's own size.
     auto const scaled
         = sr::denoise_settings{.method = sr::denoise_method::atrous, .scale = sr::render_scale_preset::performance};
-    CHECK(sr::denoise_input_extent(ctx, scaled, tg::vec2i(640, 480), false) == tg::vec2i(640, 480));
+    CHECK(sr::denoise_input_extent(ctx, scaled, tg::vec2i(640, 480)) == tg::vec2i(640, 480));
+
+    // ...and an upscaling member this device cannot run answers the output's own size too.
+    // Otherwise a caller would trace at half resolution for a call that is about to be refused, and then composite
+    // that half-resolution image into a full-resolution output.
+    auto const dlss_scaled = sr::denoise_settings{.method = sr::denoise_method::dlss_rr,
+                                                  .scale = sr::render_scale_preset::performance,
+                                                  .fresh_samples = true};
+    CHECK(!support.dlss_rr);
+    CHECK(sr::denoise_input_extent(ctx, dlss_scaled, tg::vec2i(640, 480)) == tg::vec2i(640, 480));
     co_return;
 }
 
@@ -336,6 +349,51 @@ namespace
     return pixels;
 }
 
+/// A fixed per-column value in [0.15, 0.85], the same on every run and different for every column.
+///
+/// High spatial frequency on purpose: a moving-stream test needs an image where following the motion actually
+/// changes which value a pixel finds, and two flat halves do not — a pixel deep inside one of them has the same
+/// value before and after a shift, so a reprojection that went nowhere would look identical.
+[[nodiscard]] f32 clean_column(int x)
+{
+    auto h = u32(x + 4096) * 2654435761u;
+    h ^= h >> 15;
+    h *= 0x2545f491u;
+    h ^= h >> 13;
+    return 0.15f + 0.7f * f32(h & 0xffffu) / 65535.0f;
+}
+
+/// The column pattern translated `shift` pixels right, with fresh noise for `frame`.
+[[nodiscard]] cc::vector<tg::vec4f> shifted_columns(int frame, int shift, f32 amplitude)
+{
+    auto pixels = cc::vector<tg::vec4f>();
+    for (auto y = 0; y < k_size; ++y)
+        for (auto x = 0; x < k_size; ++x)
+        {
+            auto const v = clean_column(x - shift) + amplitude * noise_at(x + frame * 101, y + frame * 57);
+            pixels.push_back(tg::vec4f(v, v, v, 1));
+        }
+    return pixels;
+}
+
+/// The error of a shifted stream's output against the pattern it should have converged to.
+///
+/// The columns a shift has pulled in from off-screen are skipped: they have no history behind them yet, however
+/// correct the reprojection is.
+[[nodiscard]] f32 rmse_against_shifted(cc::span<tg::vec4f const> pixels, int shift)
+{
+    auto sum = 0.0f;
+    auto count = 0;
+    for (auto y = 0; y < k_size; ++y)
+        for (auto x = shift; x < k_size; ++x)
+        {
+            auto const d = pixels[y * k_size + x][0] - clean_column(x - shift);
+            sum += d * d;
+            ++count;
+        }
+    return tg::sqrt(sum / f32(count));
+}
+
 /// A texture's worth of one value everywhere.
 [[nodiscard]] cc::vector<tg::vec4f> filled(tg::vec4f v)
 {
@@ -362,22 +420,30 @@ struct svgf_stream
             .output = make_image(ctx)};
 }
 
-/// One frame of `stream`: uploads `color` with the split normal, the given depth and zero motion, denoises through the
-/// front as a temporal caller, and reads the output back.
-cc::shared_async<denoise_run> stream_frame(sg::context& ctx, svgf_stream& stream, cc::span<tg::vec4f const> color, f32 depth)
+/// One frame of `stream`: uploads `color` with the given normals, depth and motion, denoises through the front as a
+/// caller feeding fresh samples, and reads the output back.
+cc::shared_async<denoise_run> stream_frame(sg::context& ctx,
+                                           svgf_stream& stream,
+                                           cc::span<tg::vec4f const> color,
+                                           f32 depth,
+                                           tg::vec2f motion = tg::vec2f(0, 0),
+                                           cc::span<tg::vec4f const> normals = {})
 {
+    auto const own_normals = normals.empty() ? split_normals() : cc::vector<tg::vec4f>();
+    auto const guide_normals = normals.empty() ? cc::span<tg::vec4f const>(own_normals) : normals;
+
     auto cmd = ctx.create_command_list();
     upload(*cmd, stream.color, color);
-    upload(*cmd, stream.normal, split_normals());
+    upload(*cmd, stream.normal, guide_normals);
     upload(*cmd, stream.depth, filled(tg::vec4f(depth, 0, 0, 0)));
-    upload(*cmd, stream.motion, filled(tg::vec4f(0, 0, 0, 0)));
+    upload(*cmd, stream.motion, filled(tg::vec4f(motion[0], motion[1], 0, 0)));
 
     auto const outcome = sr::denoise_routine::execute(
         *cmd,
         {.color = stream.color,
          .guides = {.normal = stream.normal, .depth = stream.depth, .motion = stream.motion},
          .output = stream.output},
-        stream.history, {.method = sr::denoise_method::svgf}, true);
+        stream.history, {.method = sr::denoise_method::svgf, .fresh_samples = true});
     auto const readback = sg::data_future<tg::vec4f>(cmd->download.bytes_from_texture(stream.output.raw()));
     ctx.submit_command_list(cc::move(cmd));
     ctx.advance_epoch();
@@ -427,6 +493,63 @@ ASYNC_INVOCABLE_TEST("sr - svgf converges a static noisy stream", (sg::context_h
     CHECK(last_error < 0.25f * rmse_against_clean(noisy_frame(0, 0.1f)));
 }
 
+ASYNC_INVOCABLE_TEST("sr - svgf follows a moving image through its motion vectors", (sg::context_handle const& ctx_h), )
+{
+    REQUIRE(ctx_h != nullptr);
+    sg::context& ctx = *ctx_h;
+
+    (void)sr_test::shader_fixtures(); // sr's one library, alive for the whole binary
+    co_await prewarm(ctx);
+
+    // A high-frequency column pattern translated one pixel right per frame, with a motion vector saying exactly that.
+    // A motion vector is this frame's pixel minus last frame's, so a surface that moved +1 in x carries (1, 0).
+    //
+    // The normals and the depth are flat everywhere, so the temporal pass's surface test accepts every reprojection
+    // and the ONLY thing separating the two runs below is which texel each pixel reads its history from.
+    //
+    // This is what a stream of zero motion cannot pin: with every pixel reading from its own position, a flipped
+    // sign, a missing half-pixel offset or a mis-wired motion binding all still converge.
+    auto const flat_normals = filled(tg::vec4f(0, 0, 1, 0));
+
+    auto with_motion = make_stream(ctx);
+    auto with_motion_last = 0.0f;
+    for (auto frame = 0; frame < 8; ++frame)
+    {
+        auto const run = co_await stream_frame(ctx, with_motion, shifted_columns(frame, frame, 0.1f), 1.0f,
+                                               tg::vec2f(1, 0), flat_normals);
+        REQUIRE(run.outcome.status == sr::denoise_status::denoised);
+        CHECK(run.outcome.restarted == (frame == 0));
+        with_motion_last = rmse_against_shifted(run.output, frame);
+    }
+
+    // The same stream told nothing moved: each pixel then blends the history of the column that used to be under it,
+    // which is a different column's value, and the result is an average across the pattern rather than a mean of it.
+    auto without_motion = make_stream(ctx);
+    auto without_motion_last = 0.0f;
+    for (auto frame = 0; frame < 8; ++frame)
+    {
+        auto const run = co_await stream_frame(ctx, without_motion, shifted_columns(frame, frame, 0.1f), 1.0f,
+                                               tg::vec2f(0, 0), flat_normals);
+        REQUIRE(run.outcome.status == sr::denoise_status::denoised);
+        without_motion_last = rmse_against_shifted(run.output, frame);
+    }
+
+    // Following the motion is the whole mechanism, so it must converge substantially further.
+    CHECK(with_motion_last < 0.5f * without_motion_last);
+
+    // And it must reach the same place a stream that never moved does: that is what reprojection buys.
+    auto still = make_stream(ctx);
+    auto still_last = 0.0f;
+    for (auto frame = 0; frame < 8; ++frame)
+    {
+        auto const run
+            = co_await stream_frame(ctx, still, shifted_columns(frame, 0, 0.1f), 1.0f, tg::vec2f(0, 0), flat_normals);
+        REQUIRE(run.outcome.status == sr::denoise_status::denoised);
+        still_last = rmse_against_shifted(run.output, 0);
+    }
+    CHECK(with_motion_last < 2.0f * still_last);
+}
+
 ASYNC_INVOCABLE_TEST("sr - svgf drops the history where the depth jumped, and after a reset",
                      (sg::context_handle const& ctx_h), )
 {
@@ -469,8 +592,8 @@ ASYNC_INVOCABLE_TEST("sr - denoise refuses svgf without a motion guide", (sg::co
 
     // A required guide that is missing is refused at the front, before the member would assert on it.
     auto history = sr::denoise_history();
-    auto const run
-        = co_await run_once(ctx, noisy_halves(0.1f), split_normals(), {.method = sr::denoise_method::svgf}, 1, history);
+    auto const run = co_await run_once(ctx, noisy_halves(0.1f), split_normals(),
+                                       {.method = sr::denoise_method::svgf, .fresh_samples = true}, 1, history);
     CHECK(run.outcome.status == sr::denoise_status::unsupported);
     CHECK(run.outcome.method == sr::denoise_method::svgf);
     CHECK(run.output[0][0] == -7.0f);

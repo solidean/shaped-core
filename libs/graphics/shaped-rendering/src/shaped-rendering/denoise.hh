@@ -86,6 +86,14 @@ struct sr::denoise_settings
     denoise_method method = denoise_method::automatic;
     render_scale_preset scale = render_scale_preset::native;
 
+    /// Whether this call carries fresh per-frame samples — this frame's own, with motion vectors — rather than a
+    /// converging mean.
+    /// It lives here rather than beside each call so that planning and running a frame cannot disagree about it:
+    /// `denoise_input_extent`, `resolve_denoise_method` and `denoise_routine::execute` all read this one answer.
+    /// False means `automatic` picks among the spatial members only, since a temporal member's history would
+    /// double-count what the mean already averaged.
+    bool fresh_samples = false;
+
     /// Every member reads this.
     /// atrous and svgf: the number of wavelet passes (3, 4, 5).
     denoise_quality quality = denoise_quality::balanced;
@@ -134,6 +142,7 @@ struct sr::denoise_inputs
 {
     /// The noisy radiance, linear and HDR, at the input extent.
     /// Diffuse radiance alone when the guides carry `split_diffuse_specular`.
+    /// No member reads its alpha; every member copies it into `output`.
     sg::texture_2d color;
 
     /// Specular radiance, only under `split_diffuse_specular`.
@@ -143,6 +152,10 @@ struct sr::denoise_inputs
 
     /// Where the result goes: needs `readwrite_texture` usage, and must not be `color`.
     /// Its extent is the output extent; any ratio to the input other than 1 must be one `denoise_input_extent` produced.
+    ///
+    /// Its rgb is the denoised radiance and **its alpha is `color`'s, carried through untouched** — every member
+    /// keeps it rather than writing one of its own, so switching members never changes what a caller composites with.
+    /// Whether a vendor member can honour that is open; see libs/graphics/shaped-rendering/docs/denoising.md.
     sg::texture_2d output;
 
     /// How many samples per pixel `color` already averages — an accumulated mean passes its frame count times its
@@ -184,6 +197,15 @@ struct sr::denoise_outcome
 ///
 /// Move-only: copying would fork a history, and both copies would then believe they are the continuation.
 /// Empty until the first call; a call that sees a different extent or member rebuilds it and reports `restarted`.
+///
+/// **A temporal member's history is large**: svgf holds eight full-screen images, six of them `rgba32_float` and two
+/// `rg32_float`, which is about 221 MiB at 1080p and 886 MiB at 2160p — per stream.
+/// Dropping the history of a view nobody is looking at is how a caller gets that back, and is what a caller with many
+/// views should do.
+///
+/// It holds images and nothing else.
+/// A member needing state that is not a texture — a vendor feature handle, which dlss_rr and fsr_rr both take — is
+/// what replaces the fixed array with a per-member state object; see libs/graphics/shaped-rendering/docs/denoising.md.
 class sr::denoise_history
 {
 public:
@@ -246,12 +268,9 @@ namespace sr
 /// The member `settings.method` resolves to on `ctx`: itself when named, the best supported one for `automatic`.
 /// `none` when nothing is supported or nothing was asked for.
 ///
-/// `temporal` says whether the caller can feed a temporal member this frame — fresh samples, motion vectors and a
-/// history carried from the frame before.
-/// A caller denoising an accumulated mean passes false, and `automatic` then only picks among the spatial members.
-[[nodiscard]] denoise_method resolve_denoise_method(sg::context const& ctx,
-                                                    denoise_settings const& settings,
-                                                    bool temporal);
+/// A named member resolves to itself whether or not `ctx` supports it, so a comparison between two named members
+/// never silently compares one with itself; refusing it is `denoise_routine::execute`'s job.
+[[nodiscard]] denoise_method resolve_denoise_method(sg::context const& ctx, denoise_settings const& settings);
 
 /// Whether a member reads history, and so needs fresh per-frame samples and motion vectors rather than a converging mean.
 [[nodiscard]] bool is_temporal(denoise_method m);
@@ -265,10 +284,11 @@ namespace sr
 /// The input extent to trace so that the member `settings` resolves to produces `output_extent` under `settings.scale`.
 ///
 /// Always ask this rather than scaling by hand: a member supports only its own ratios, and a spatial one only 1.
+/// A member `ctx` cannot run answers `output_extent`, because the call will be refused and a caller that traced
+/// smaller for it would composite a smaller image into its own output.
 [[nodiscard]] tg::vec2i denoise_input_extent(sg::context const& ctx,
                                              denoise_settings const& settings,
-                                             tg::vec2i output_extent,
-                                             bool temporal);
+                                             tg::vec2i output_extent);
 } // namespace sr
 
 /// The front routine: one call for every denoiser.
@@ -282,13 +302,11 @@ class sr::denoise_routine : public sg::render_routine<denoise_routine>
 public:
     /// Denoises `in.color` into `in.output`, carrying `history` from call to call.
     ///
-    /// `temporal` is whether the caller is feeding fresh per-frame samples this call (see `resolve_denoise_method`).
     /// Nothing is written unless the outcome is `denoised`, so a caller composites the raw image otherwise.
     [[nodiscard]] static denoise_outcome execute(sg::command_list& cmd,
                                                  denoise_inputs const& in,
                                                  denoise_history& history,
-                                                 denoise_settings const& settings,
-                                                 bool temporal = false);
+                                                 denoise_settings const& settings);
 
 protected:
     cc::shared_async<cc::unit> init(sg::routine_init_scope scope) override;

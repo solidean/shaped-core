@@ -29,18 +29,18 @@ ConstantBuffer<svgf_temporal_constants> gConstants;
 #pragma sc group 0
 namespace svgf_temporal_bindings
 {
-    Texture2D<float4> gColor;  // this frame's noisy radiance
+    Texture2D<float4> gColor;  // this frame's noisy radiance; its alpha is the caller's and rides through untouched
     Texture2D<float4> gAlbedo; // diffuse albedo, or a stand-in when k_svgf_has_albedo is clear
     Texture2D<float4> gNormal;
     Texture2D<float4> gDepth;
     Texture2D<float4> gMotion; // this frame's pixel minus last frame's, in pixels
 
     Texture2D<float4> gPreviousHistory;      // rgb demodulated colour, a history length
-    Texture2D<float4> gPreviousMoments;      // r mean luminance, g mean squared luminance
+    Texture2D<float2> gPreviousMoments;      // r mean luminance, g mean squared luminance
     Texture2D<float4> gPreviousNormalDepth;  // xyz normal, w depth, as last frame saw them
 
     RWTexture2D<float4> gHistory;
-    RWTexture2D<float4> gMoments;
+    RWTexture2D<float2> gMoments;
     RWTexture2D<float4> gNormalDepth;
 }
 
@@ -98,10 +98,10 @@ using namespace svgf_temporal_bindings;
         float const color_alpha = max(1.0 / history_length, gConstants.color_alpha_min);
         float const moments_alpha = max(1.0 / history_length, gConstants.moments_alpha_min);
         out_color = lerp(prev.rgb, color, color_alpha);
-        out_moments = lerp(gPreviousMoments.Load(int3(q, 0)).rg, moments, moments_alpha);
+        out_moments = lerp(gPreviousMoments.Load(int3(q, 0)), moments, moments_alpha);
     }
 
     gHistory[id.xy] = float4(out_color, history_length);
-    gMoments[id.xy] = float4(out_moments, 0, 0);
+    gMoments[id.xy] = out_moments;
     gNormalDepth[id.xy] = float4(n, d);
 }
