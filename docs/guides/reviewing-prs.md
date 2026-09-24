@@ -508,25 +508,6 @@ One arm called `slib::create_dxc_spirv_compiler()`, and the other called somethi
 The generalization worth keeping beside it: **a change that makes a single-platform library cross-platform doubles the number of arms nobody local compiles.**
 That branch had two of them and its PR body named one, which is the ratio to expect.
 
-### An example that names a backend is RUN on each one, not built
-
-The rule above is about an arm nobody compiles.
-This is the same failure one step further out, and it is worse because the arm *does* compile.
-**A program picks its shader compiler at runtime, so building it for a backend proves nothing about whether it can run there.**
-
-pr-190 is the worked case.
-Its example declared `SUPPORTS dx12 vulkan` in CMake, and I built the vulkan arm and reported it green.
-It could never have run: it registered `slib::create_dxc_compiler` alone, which emits DXIL, and a vulkan context accepts SPIR-V.
-The first vulkan run said `no compiler registered to build it into a format this context accepts`.
-
-Two things made it survive longer than it should have.
-I had separately verified that the library's four denoise shaders compile to SPIR-V, which raised my confidence in the vulkan arm and covered none of this.
-Those shaders are compiled by the test fixtures, which register both compilers.
-And the example reported only "the scene shader did not compile" while holding the reason in `try_error()`, so the first run named a fixable cause as an unexplained failure.
-
-The check is `uv run dev.py example <match> --example-backend <b> --capture`, it is about ten seconds per backend, and it is the only thing that finds this.
-**Its corollary for a review: a failure path that drops the reason it was handed is a finding**, because the arm nobody runs is exactly where a reader has least context to reconstruct it.
-
 ### A review of code nobody here can run says so, and hands verification to the author
 
 Some branches cannot be built on any machine the reviewer has — a Metal backend reviewed from Windows is the case that set this.

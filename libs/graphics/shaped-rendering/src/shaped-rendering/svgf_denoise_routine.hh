@@ -22,7 +22,8 @@ struct sr::svgf_options
     f32 depth_sigma = 0.02f;
 
     /// The smallest weight a new frame gets in the colour history once it is long; higher follows change faster and is noisier.
-    f32 color_alpha_min = 0.2f;
+    /// 0.125 is what `options_for` produces at the default responsiveness, so the two spellings of "default" agree.
+    f32 color_alpha_min = 0.125f;
 
     /// The same for the luminance moments the variance comes from.
     f32 moments_alpha_min = 0.2f;

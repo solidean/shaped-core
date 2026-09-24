@@ -227,46 +227,6 @@ struct camera
     return out;
 }
 
-[[nodiscard]] char const* status_name(sr::denoise_status s)
-{
-    switch (s)
-    {
-    case sr::denoise_status::denoised:
-        return "denoised";
-    case sr::denoise_status::pending:
-        return "pending (compiling)";
-    case sr::denoise_status::unsupported:
-        return "unsupported";
-    case sr::denoise_status::failed:
-        return "failed";
-    }
-    return "?";
-}
-
-[[nodiscard]] char const* method_name(sr::denoise_method m)
-{
-    switch (m)
-    {
-    case sr::denoise_method::none:
-        return "none";
-    case sr::denoise_method::automatic:
-        return "automatic";
-    case sr::denoise_method::atrous:
-        return "atrous";
-    case sr::denoise_method::svgf:
-        return "svgf";
-    case sr::denoise_method::oidn:
-        return "oidn";
-    case sr::denoise_method::dlss_rr:
-        return "dlss_rr";
-    case sr::denoise_method::fsr_rr:
-        return "fsr_rr";
-    case sr::denoise_method::count_:
-        break;
-    }
-    return "?";
-}
-
 constexpr char const* k_method_names[] = {"automatic", "atrous", "svgf", "oidn", "dlss_rr", "fsr_rr"};
 constexpr sr::denoise_method k_method_values[] = {
     sr::denoise_method::automatic, sr::denoise_method::atrous,  sr::denoise_method::svgf,
@@ -342,8 +302,11 @@ void draw_panel(controls& ui,
         history.reset();
 
     ImGui::SeparatorText("what happened");
-    ImGui::Text("status     %s", status_name(outcome.status));
-    ImGui::Text("member     %s", method_name(outcome.method));
+    // A cc::string_view is not null-terminated, so it goes through ImGui as a counted string rather than %s.
+    auto const status = sr::to_string(outcome.status);
+    auto const member = sr::to_string(outcome.method);
+    ImGui::Text("status     %.*s", int(status.size()), status.data());
+    ImGui::Text("member     %.*s", int(member.size()), member.data());
     ImGui::Text("restarted  %s", outcome.restarted ? "yes" : "no");
     ImGui::Text("samples    %u", sample_count);
     ImGui::Text("%.1f fps", double(ImGui::GetIO().Framerate));

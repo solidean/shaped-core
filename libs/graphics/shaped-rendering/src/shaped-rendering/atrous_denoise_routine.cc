@@ -27,7 +27,8 @@ constexpr u32 k_remodulate_out = 1u << 4;
 constexpr int k_scratch = 0; // 0, 1: the passes' ping-pong
 constexpr int k_slots_used = 2;
 
-static_assert(k_scratch + k_slots_used <= 8, "a-trous reaches past the slots denoise_history has");
+static_assert(k_scratch + k_slots_used <= denoise_history::state_slots,
+              "a-trous reaches past the slots denoise_history has");
 
 /// Each pass averages what the last one left, so the noise it has to see through shrinks.
 /// Halving the variance per pass is the usual approximation when no variance estimate is carried along.

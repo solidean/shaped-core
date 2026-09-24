@@ -84,6 +84,36 @@ constexpr auto image_usage = sg::texture_usage::readonly_texture | sg::texture_u
     return pixels;
 }
 
+/// The alpha a denoised image must hand back untouched: distinct per pixel, and nothing any pass computes.
+/// A member that wrote a constant, or leaked SVGF's per-pass variance, disagrees with this everywhere.
+[[nodiscard]] f32 marker_alpha(int x, int y)
+{
+    return f32(x + y * k_size) / f32(k_size * k_size);
+}
+
+/// `pixels` with that marker in alpha.
+[[nodiscard]] cc::vector<tg::vec4f> with_marker_alpha(cc::span<tg::vec4f const> pixels)
+{
+    auto out = cc::vector<tg::vec4f>();
+    for (auto y = 0; y < k_size; ++y)
+        for (auto x = 0; x < k_size; ++x)
+        {
+            auto const p = pixels[y * k_size + x];
+            out.push_back(tg::vec4f(p[0], p[1], p[2], marker_alpha(x, y)));
+        }
+    return out;
+}
+
+/// The worst disagreement between an output's alpha and the marker it was given.
+[[nodiscard]] f32 worst_alpha_drift(cc::span<tg::vec4f const> pixels)
+{
+    auto worst = 0.0f;
+    for (auto y = 0; y < k_size; ++y)
+        for (auto x = 0; x < k_size; ++x)
+            worst = cc::max(worst, tg::abs(pixels[y * k_size + x][3] - marker_alpha(x, y)));
+    return worst;
+}
+
 /// A normal guide with the same split as the halves, so the edge is in the geometry as well as the colour.
 [[nodiscard]] cc::vector<tg::vec4f> split_normals()
 {
@@ -170,6 +200,35 @@ cc::shared_async<denoise_run> run_once(sg::context& ctx,
 
 constexpr auto atrous_settings = sr::denoise_settings{.method = sr::denoise_method::atrous};
 } // namespace
+
+// The two spellings of "default" have to agree: a member called directly with `{}` and the same member reached
+// through the front with default settings must be the same filter.
+// Nothing else notices when they drift — both spellings compile, and each looks right on its own.
+TEST("sr - options_for at default settings equals the member's own defaults")
+{
+    auto const settings = sr::denoise_settings{};
+
+    auto const atrous = sr::atrous_denoise_routine::options_for(settings);
+    auto const atrous_default = sr::atrous_options{};
+    CHECK(atrous.iterations == atrous_default.iterations);
+    CHECK(atrous.luminance_sigma == atrous_default.luminance_sigma);
+    CHECK(atrous.normal_power == atrous_default.normal_power);
+    CHECK(atrous.depth_sigma == atrous_default.depth_sigma);
+    CHECK(atrous.demodulate_albedo == atrous_default.demodulate_albedo);
+
+    auto const svgf = sr::svgf_denoise_routine::options_for(settings);
+    auto const svgf_default = sr::svgf_options{};
+    CHECK(svgf.iterations == svgf_default.iterations);
+    CHECK(svgf.luminance_sigma == svgf_default.luminance_sigma);
+    CHECK(svgf.normal_power == svgf_default.normal_power);
+    CHECK(svgf.depth_sigma == svgf_default.depth_sigma);
+    CHECK(svgf.color_alpha_min == svgf_default.color_alpha_min);
+    CHECK(svgf.moments_alpha_min == svgf_default.moments_alpha_min);
+    CHECK(svgf.max_history == svgf_default.max_history);
+    CHECK(svgf.spatial_variance_below == svgf_default.spatial_variance_below);
+    CHECK(svgf.normal_similarity == svgf_default.normal_similarity);
+    CHECK(svgf.depth_similarity == svgf_default.depth_similarity);
+}
 
 ASYNC_INVOCABLE_TEST("sr - denoise automatic resolves to a supported member", (sg::context_handle const& ctx_h))
 {
@@ -584,6 +643,41 @@ ASYNC_INVOCABLE_TEST("sr - svgf drops the history where the depth jumped, and af
     auto const after_reset = co_await stream_frame(ctx, stream, filled(tg::vec4f(0.3f, 0.3f, 0.3f, 1)), 2.0f);
     CHECK(after_reset.outcome.restarted);
     CHECK(max_distance_from(after_reset.output, 0.3f) < 1e-3f);
+}
+
+ASYNC_INVOCABLE_TEST("sr - a denoised image keeps the alpha it came in with", (sg::context_handle const& ctx_h), )
+{
+    REQUIRE(ctx_h != nullptr);
+    sg::context& ctx = *ctx_h;
+
+    (void)sr_test::shader_fixtures(); // sr's one library, alive for the whole binary
+    co_await prewarm(ctx);
+
+    // `denoise_inputs::output` promises rgb is the denoised radiance and alpha is `color`'s, carried through.
+    // Every other test here feeds alpha 1 and reads only channel 0, so a member writing a constant — or leaking its
+    // own per-pass value — would pass all of them.
+    auto const noisy = with_marker_alpha(noisy_halves(0.1f));
+
+    // a-trous at `fast`: three passes, so both scratch images are used and the alpha is copied through each of them
+    // rather than only surviving a single-pass shortcut.
+    auto atrous_history = sr::denoise_history();
+    auto const atrous_run = co_await run_once(
+        ctx, noisy, {}, {.method = sr::denoise_method::atrous, .quality = sr::denoise_quality::fast}, 1, atrous_history);
+    REQUIRE(atrous_run.outcome.status == sr::denoise_status::denoised);
+    CHECK(worst_alpha_drift(atrous_run.output) == 0.0f);
+
+    // SVGF carries a per-pixel variance in alpha between its own passes and swaps the caller's back only on the last
+    // one, so it is the fragile half.
+    // Checked on a later frame, where a history exists and the earlier passes really did write variance there.
+    auto stream = make_stream(ctx);
+    auto svgf_alpha_drift = -1.0f;
+    for (auto frame = 0; frame < 3; ++frame)
+    {
+        auto const run = co_await stream_frame(ctx, stream, with_marker_alpha(noisy_frame(frame, 0.1f)), 1.0f);
+        REQUIRE(run.outcome.status == sr::denoise_status::denoised);
+        svgf_alpha_drift = worst_alpha_drift(run.output);
+    }
+    CHECK(svgf_alpha_drift == 0.0f);
 }
 
 ASYNC_INVOCABLE_TEST("sr - denoise refuses svgf without a motion guide", (sg::context_handle const& ctx_h), )

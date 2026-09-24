@@ -10,6 +10,7 @@
 #include <shaped-rendering/denoise.hh>
 #include <shaped-rendering/impl/denoise_images.hh>
 #include <shaped-rendering/svgf_denoise_routine.hh>
+#include <sr_shaders.hh>
 
 namespace sr
 {
@@ -44,7 +45,34 @@ constexpr denoise_method temporal_preference[] = {
 };
 constexpr denoise_method spatial_preference[] = {denoise_method::oidn, denoise_method::atrous};
 
-[[nodiscard]] cc::string_view name_of(denoise_method m)
+/// Which refusal a bit stands for, so one reason being logged does not silence the other.
+enum class refusal_reason : u32
+{
+    unsupported,
+    missing_guide,
+
+    count_
+};
+
+/// One bit per (method, reason), set once that pair has been logged.
+/// Per reason and not just per method: a member refused once for a missing guide would otherwise never report that
+/// this build cannot run it either, and the two send a reader to different places.
+/// Process-wide rather than per context: the reason is nearly always the build or the machine, which every context shares.
+static_assert(u32(denoise_method::count_) * u32(refusal_reason::count_) <= 32, "the refusal bitset no longer fits");
+auto g_refusals_logged = cc::atomic<u32>(0);
+
+/// Logs why `m` did not run, the first time it happens for that method and reason in this process.
+/// A refusal repeats every frame, and one line is what a person needs to find out why the image is noisy.
+void log_refusal_once(denoise_method m, refusal_reason reason, cc::string_view why)
+{
+    auto const bit = u32(1) << (u32(m) * u32(refusal_reason::count_) + u32(reason));
+    if ((g_refusals_logged.fetch_or(bit, cc::memory_order_relaxed) & bit) != 0)
+        return;
+    CC_LOG_WARNING("denoiser '{}' did not run: {}", to_string(m), why);
+}
+} // namespace
+
+cc::string_view to_string(denoise_method m)
 {
     switch (m)
     {
@@ -68,20 +96,21 @@ constexpr denoise_method spatial_preference[] = {denoise_method::oidn, denoise_m
     return "?";
 }
 
-/// One bit per method, set once its refusal has been logged.
-/// Process-wide rather than per context: the reason is nearly always the build or the machine, which every context shares.
-auto g_refusals_logged = cc::atomic<u32>(0);
-
-/// Logs why `m` did not run, the first time it happens for `m` in this process.
-/// A refusal repeats every frame, and one line is what a person needs to find out why the image is noisy.
-void log_refusal_once(denoise_method m, cc::string_view why)
+cc::string_view to_string(denoise_status s)
 {
-    auto const bit = u32(1) << u32(m);
-    if ((g_refusals_logged.fetch_or(bit, cc::memory_order_relaxed) & bit) != 0)
-        return;
-    CC_LOG_WARNING("denoiser '{}' did not run: {}", name_of(m), why);
+    switch (s)
+    {
+    case denoise_status::denoised:
+        return "denoised";
+    case denoise_status::pending:
+        return "pending";
+    case denoise_status::unsupported:
+        return "unsupported";
+    case denoise_status::failed:
+        return "failed";
+    }
+    return "?";
 }
-} // namespace
 
 denoise_guide_set denoise_inputs::present_guides() const
 {
@@ -146,12 +175,23 @@ bool denoise_support::supports(denoise_method m) const
 
 denoise_support query_denoise_support(sg::context const& ctx)
 {
-    (void)ctx; // every member so far is native compute; the vendor members will read the adapter here
+    // The native members are HLSL, and slib builds HLSL only through DXC — so a context whose library has no compiler
+    // reaching a format it accepts cannot run them, whatever the backend.
+    // Asking the assets rather than assuming is what keeps the promise `denoise_status::unsupported` makes: without
+    // it, `automatic` picks a member whose init then fails, and every call reports `failed` instead.
+    //
+    // A handle is null until its package has been added to a library, which is the same answer as "cannot build".
+    auto const buildable
+        = [&](slib::shader_asset_handle const& asset) { return asset != nullptr && asset->can_acquire(ctx); };
 
-    // The native members are plain compute, which every backend has.
-    // The others are not implemented yet, and saying so here is what makes `automatic` skip them and a named request
-    // report `unsupported` rather than silently running something else.
-    return {.atrous = true, .svgf = true};
+    // The vendor members will read the adapter here; none of them is implemented yet, and saying so is what makes
+    // `automatic` skip them and a named request report `unsupported` rather than silently running something else.
+    return {
+        .atrous = buildable(sr::shaders::atrous_denoise.compute.main_cs),
+        .svgf = buildable(sr::shaders::svgf_temporal.compute.main_cs)
+             && buildable(sr::shaders::svgf_variance.compute.main_cs)
+             && buildable(sr::shaders::svgf_atrous.compute.main_cs),
+    };
 }
 
 bool is_temporal(denoise_method m)
@@ -267,14 +307,15 @@ denoise_outcome denoise_routine::execute(sg::command_list& cmd,
     {
         // The resolved method rather than what was asked for, so both refusal paths report a member rather than
         // `automatic`, which is not one.
-        log_refusal_once(method, "not supported by this build or device");
+        log_refusal_once(method, refusal_reason::unsupported, "not supported by this build or device");
         return {.status = denoise_status::unsupported, .method = method};
     }
 
     auto const missing = required_guides(method).without(in.present_guides());
     if (!missing.is_empty())
     {
-        log_refusal_once(method, "the call is missing a guide buffer this member requires");
+        log_refusal_once(method, refusal_reason::missing_guide,
+                         "the call is missing a guide buffer this member requires");
         return {.status = denoise_status::unsupported, .method = method};
     }
 

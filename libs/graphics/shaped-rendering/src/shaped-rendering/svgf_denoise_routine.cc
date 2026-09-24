@@ -25,9 +25,10 @@ constexpr int k_scratch = 0;      // 0, 1: the à-trous passes' ping-pong
 constexpr int k_color = 2;        // 2, 3: demodulated colour, history length in alpha
 constexpr int k_moments = 4;      // 4, 5: luminance mean and mean square
 constexpr int k_normal_depth = 6; // 6, 7: the guides as the frame that wrote the history saw them
-constexpr int k_slots_used = 8;   // every slot the history has, so a ninth would have to grow the array
+constexpr int k_slots_used = denoise_history::state_slots; // svgf fills the history, so a ninth would grow it
 
 static_assert(k_normal_depth + 2 == k_slots_used, "svgf's slot map leaves a gap or runs past the history's state");
+static_assert(k_slots_used == denoise_history::state_slots, "svgf no longer fills the history it was sized against");
 
 /// Where a pass's compiled pieces come from, and where they land.
 struct pass_request

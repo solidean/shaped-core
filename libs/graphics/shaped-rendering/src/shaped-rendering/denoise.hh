@@ -1,6 +1,8 @@
 #pragma once
 
 #include <clean-core/common/flags.hh>
+#include <clean-core/container/fixed_array.hh>
+#include <clean-core/string/string_view.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/resource/texture.hh>
 #include <shaped-graphics/routine/render_routine.hh>
@@ -24,7 +26,7 @@ enum class sr::denoise_method : sg::u8
     none,
     automatic, ///< the best member this context supports, preferring the temporal ones while a caller runs temporally
 
-    atrous,  ///< edge-avoiding à-trous wavelet filter; spatial, native, runs on every backend
+    atrous,  ///< edge-avoiding à-trous wavelet filter; spatial, native
     svgf,    ///< à-trous plus reprojected history; temporal, native
     oidn,    ///< Intel Open Image Denoise; spatial
     dlss_rr, ///< NVIDIA DLSS Ray Reconstruction; temporal
@@ -102,7 +104,7 @@ struct sr::denoise_settings
     /// atrous and svgf: how strictly a neighbour must match in luminance to be averaged in.
     f32 sharpness = 0.5f;
 
-    /// In [0, 1]: how quickly history gives way to new frames — 1 reacts at once and is noisier.
+    /// In [0, 1]: 1 gives each new frame at least half the weight, and is noisier.
     /// svgf only; the vendor members decide this themselves.
     f32 temporal_responsiveness = 0.2f;
 
@@ -215,6 +217,10 @@ public:
     denoise_history(denoise_history const&) = delete;
     denoise_history& operator=(denoise_history const&) = delete;
 
+    /// How many images a member may keep here.
+    /// Public because each member asserts its own slot range at namespace scope, where friendship does not reach.
+    static constexpr int state_slots = 8;
+
     /// Makes the next call start from no history, as on a camera cut.
     /// The textures are kept and overwritten, since a cut does not change their size.
     void reset() { _reset_requested = true; }
@@ -242,7 +248,7 @@ private:
 
     /// The images a member keeps from call to call — its history and its scratch — so a steady stream allocates nothing.
     /// Which slot holds what is the member's own business.
-    sg::texture_2d _state[8];
+    cc::fixed_array<sg::texture_2d, state_slots> _state;
 };
 
 /// Which members this context can run.
@@ -259,8 +265,17 @@ struct sr::denoise_support
 
 namespace sr
 {
-/// Which members `ctx` can run: compiled in, implemented on its backend, and present on its device.
-/// Cheap, and the same answer for the life of the context.
+/// The member's name, for a log line or a UI label.
+/// Stable: these are what `sr::denoise_method` spells, not prose.
+[[nodiscard]] cc::string_view to_string(denoise_method m);
+
+/// What a call did, for the same use.
+[[nodiscard]] cc::string_view to_string(denoise_status s);
+
+/// Which members `ctx` can run: compiled in, buildable by the shader library this process registered, and present
+/// on its device.
+/// Cheap.
+/// The native members are HLSL, so their answer depends on the compilers the library has — adding one can change it.
 ///
 /// A supported member can still be `pending` for its first frames, and `failed` if its shader does not build.
 [[nodiscard]] denoise_support query_denoise_support(sg::context const& ctx);

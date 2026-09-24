@@ -1,5 +1,7 @@
 {
-    // The default view: the split, the panel, and enough frames for the accumulating mean to be worth looking at.
+    // The default view: the split and the panel, and enough frames to fill SVGF's history on the default
+    // fresh-samples view — which `svgf_options::max_history` caps at 32, so 96 is comfortably past it.
+    // Nothing accumulates here: `fresh_samples` forces `accum_frame` to 0.
     "shaped-rendering/denoise-playground": {
         "mechanism": "custom",
         "size": "1600x900",

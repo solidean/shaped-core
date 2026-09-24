@@ -11,8 +11,8 @@ This is the design, including the parts not built yet.
 
 | member | kind | where it runs | status |
 |---|---|---|---|
-| `atrous` | spatial | every sg backend, WARP included | done |
-| `svgf` | temporal | every sg backend | done |
+| `atrous` | spatial | dx12, vulkan (HLSL through DXC); WARP included | done |
+| `svgf` | temporal | dx12, vulkan (HLSL through DXC) | done |
 | `oidn` | spatial | CPU; NVIDIA, AMD, Intel and Apple GPUs | planned |
 | `dlss_rr` | temporal, upscales | NVIDIA RTX; dx12, vulkan | planned |
 | `fsr_rr` | temporal, upscales | AMD RDNA 4; dx12 | planned |
