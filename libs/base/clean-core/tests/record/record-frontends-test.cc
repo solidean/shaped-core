@@ -33,6 +33,21 @@ struct logs_while_formatted
         return "VALUE";
     }
 };
+
+/// Logs from a helper rather than from the formatter itself, and that message's own argument logs too.
+void log_from_helper()
+{
+    CC_LOG_INFO("middle-head {} middle-tail", logs_while_formatted{});
+}
+
+struct logs_through_a_helper
+{
+    cc::string_view to_string() const
+    {
+        log_from_helper();
+        return "OUTER-VALUE";
+    }
+};
 } // namespace
 
 //
@@ -94,6 +109,30 @@ REC_TEST("record/log - a message logged from inside a formatter leaves the outer
     auto const outer = c.first_named("outer-head {} outer-tail");
     REQUIRE(outer.has_value());
     CHECK(outer.value().text == "outer-head VALUE outer-tail");
+}
+
+REC_TEST("record/log - messages nested two deep through a helper each keep their own text")
+{
+    rec_fixture const fixture(deterministic_config());
+
+    collector c;
+    {
+        scoped_listener const reg(c);
+        CC_LOG_INFO("outer-head {} outer-tail", logs_through_a_helper{});
+        cc::rec::flush_blocking();
+    }
+
+    auto const inner = c.first_named("inner {}");
+    REQUIRE(inner.has_value());
+    CHECK(inner.value().text == "inner 42");
+
+    auto const middle = c.first_named("middle-head {} middle-tail");
+    REQUIRE(middle.has_value());
+    CHECK(middle.value().text == "middle-head VALUE middle-tail");
+
+    auto const outer = c.first_named("outer-head {} outer-tail");
+    REQUIRE(outer.has_value());
+    CHECK(outer.value().text == "outer-head OUTER-VALUE outer-tail");
 }
 
 REC_TEST("record/log - levels gate independently, and the gate is the domain's")
