@@ -189,6 +189,8 @@ struct checker
 
     /// True for the prelude's `int3`, the type a dispatch reports a thread's id as.
     [[nodiscard]] bool is_int3(type_id type) const;
+    /// The stages a `@stages` attribute names, as `function_info::stages`; every stage without one or after a bad one.
+    [[nodiscard]] u8 stages_of(i32 file, ast::attribute const* a);
     /// The grid of a `@compute` attribute; `{1, 1, 1}` without one, and after a bad argument it reports.
     [[nodiscard]] cc::fixed_array<i32, 3> workgroup_of(i32 file, ast::attribute const* a);
     /// The name of a `@stream(name)`; empty without one, and after a bad argument it reports.

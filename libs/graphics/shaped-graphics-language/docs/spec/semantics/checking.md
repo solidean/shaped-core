@@ -227,6 +227,11 @@ let color = float4(..lit, 1.0)
 * **CHK-91** A `@pixel fun` returns a `@pixel struct`.
 * **CHK-92** An entry point is neither `@builtin` nor `@operator`.
 * **CHK-173** `@per_instance` and `@stream(name)` are attributes of a struct field, recorded on the member; `@stream` takes one bare name.
+* **CHK-187** `@stages(.pixel)` on a function, builtin or not, names the stages it may be reached from, each an enum case of `.vertex`, `.pixel` and `.compute`.
+  A function without it may be reached from every stage, and any other argument is `invalid-attribute-arguments`.
+* **CHK-188** An entry point whose inlined body reaches a function whose `@stages` leaves out the entry point's stage is `stage-not-allowed`, at that call.
+  It is judged per entry point once everything is inlined, since a function in between says nothing about where it is reached from.
+  `DEBUG_sample` is `@stages(.pixel)`: its level comes from derivatives, which only a pixel stage has on every target.
 * **CHK-93** Breaking one of CHK-88 to CHK-92 is `invalid-entry-point`, and its detail names the rule.
 
 ## The flat tree
@@ -390,6 +395,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `duplicate-case-pattern` | CHK-161 |
 | `missing-value-in-arm` | CHK-168 |
 | `needs-feature` | CHK-180 |
+| `stage-not-allowed` | CHK-188 |
 | `ambiguous-overload` | CHK-72 |
 | `missing-field`, `unknown-field`, `duplicate-field` | CHK-84 |
 | `invalid-entry-point` | CHK-87, CHK-93 |

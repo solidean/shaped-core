@@ -28,3 +28,33 @@ binding sampled:
     let xy = int2(id.x, id.y)
     let uv = ((xy as float2) + float2(0.5, 0.5)) * float2(0.0625, 0.0625)
     DEBUG_store(sampled.dst, xy, DEBUG_sample_level(sampled.src, uv, 0.0, sampled.smp))
+
+// A full-screen quad whose pixel stage samples a texture: `DEBUG_sample` picks its level from derivatives,
+// which only a pixel stage has, so it is @stages(.pixel) and a compute entry point may not reach it.
+@vertex struct screen_vertex:
+    corner: float3
+    uv: float2
+
+struct textured_input:
+    @position position: hpos4
+    uv: float2
+
+@pixel struct textured_target:
+    color: float4
+
+binding material:
+    albedo: texture2d[float4]
+    sampler nearest:
+        filter = .nearest
+        address = .clamp_edge
+
+@vertex fun screen_vs(v: screen_vertex){material} -> textured_input:
+    return {
+        position = hpos4(v.corner.x, v.corner.y, 0.0, 1.0)
+        uv = v.uv
+    }
+
+@pixel fun textured_ps(p: textured_input){material} -> textured_target:
+    return {
+        color = DEBUG_sample(material.albedo, p.uv, material.nearest)
+    }

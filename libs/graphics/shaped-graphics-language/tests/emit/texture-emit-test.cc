@@ -113,3 +113,25 @@ TEST("sgl emit - MSL declines a group of textures as it declines one of buffers"
 {
     CHECK(sgl::emit::dump_errors(emit_source(k_blur, 0, target::msl)).contains("unsupported"));
 }
+
+TEST("sgl emit - a pixel stage samples with the level its derivatives pick")
+{
+    constexpr auto lit = "binding material:\n"
+                         "    albedo: texture2d[float3]\n"
+                         "    smp: sampler\n"
+                         "\n"
+                         "struct pixel_input:\n"
+                         "    @position position: hpos4\n"
+                         "    uv: float2\n"
+                         "\n"
+                         "@pixel struct target:\n"
+                         "    color: float4\n"
+                         "\n"
+                         "@pixel fun ps(p: pixel_input){material} -> target:\n"
+                         "    let c = DEBUG_sample(material.albedo, p.uv, material.smp)\n"
+                         "    return {color = float4(c.x, c.y, c.z, 1.0)}\n";
+    CHECK(text_of(lit, target::wgsl).contains("let c: vec3f = textureSample(material_albedo, material_smp, p.uv).xyz;\n"));
+    CHECK(text_of(lit, target::hlsl_dx12)
+              .contains("const float3 c = material_bindings::material_albedo.Sample(material_bindings::material_smp, "
+                        "p.uv);\n"));
+}

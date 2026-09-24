@@ -138,3 +138,74 @@ ASYNC_INVOCABLE_TEST("sg - an SGL shader samples through a sampler the group bin
         mismatches += copied[i] != texels[i] ? 1 : 0;
     CHECK(mismatches == 0);
 }
+
+ASYNC_INVOCABLE_TEST("sg - an SGL pixel shader samples a texture at the level its derivatives pick",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+
+    auto const& vs = co_await shaders::textures.vertex.screen_vs->acquire(*ctx);
+    auto const& ps = co_await shaders::textures.pixel.textured_ps->acquire(*ctx);
+    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline({
+        .layout = shaders::textures.vertex.screen_vs.acquire_layout(*ctx),
+        .vertex_shader = vs,
+        .fragment_shader = ps,
+        .vertex_input = shaders::screen_vertex::layout(),
+        .rasterization = {.cull = sg::cull_mode::none},
+        .color_targets = shaders::textured_target::states{.color = {.format = sg::pixel_format::rgba8_unorm}},
+        .target_set = shaders::textured_target::name,
+    });
+
+    // A 4 by 4 texture drawn onto a 4 by 4 target: each pixel's centre is a texel's, so the level is 0 and nothing filters in.
+    // Every row is alike, so which way up a backend draws does not matter.
+    constexpr int extent = 4;
+    auto texels = cc::vector<byte>();
+    for (auto y = 0; y < extent; ++y)
+        for (auto x = 0; x < extent; ++x)
+            texels.push_back_range(cc::span<byte const>({byte(40 + 60 * x), byte(200 - 50 * x), byte(10 * x), byte(255)}));
+    auto const albedo = sg::texture_2d::from_raw(ctx->persistent.create_raw_texture({
+        .format = sg::pixel_format::rgba8_unorm,
+        .dimension = sg::texture_dimension::d2,
+        .width = extent,
+        .height = extent,
+        .usage = sg::texture_usage::readonly_texture | sg::texture_usage::copy_dst,
+    }));
+    auto const image
+        = ctx->persistent.create_texture_2d({.format = sg::pixel_format::rgba8_unorm,
+                                             .width = extent,
+                                             .height = extent,
+                                             .usage = sg::texture_usage::render_target | sg::texture_usage::copy_src});
+
+    auto const corner = [](float x, float y, float u, float v)
+    { return shaders::screen_vertex{.corner = tg::vec3f(x, y, 0.0f), .uv = tg::vec2f(u, v)}; };
+    shaders::screen_vertex const quad[] = {
+        corner(-1, -1, 0, 1), corner(1, -1, 1, 1), corner(1, 1, 1, 0),
+        corner(-1, -1, 0, 1), corner(1, 1, 1, 0),  corner(-1, 1, 0, 0),
+    };
+    auto const vertices = ctx->persistent.create_buffer_from_data(quad, sg::buffer_usage::vertex_buffer);
+
+    auto cmd = ctx->create_command_list();
+    cmd->upload.bytes_to_texture(albedo.raw(), cc::span<byte const>(texels));
+    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::material>();
+    auto const group
+        = ctx->transient.create_binding_group(*cmd, layout, shaders::material{.albedo = albedo.as_readonly_view()});
+    {
+        auto pass = cmd->raster.render_to(
+            shaders::textured_target{.color = image.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 1))});
+        pass.bind_pipeline(*pipeline);
+        pass.bind_group(0, *group);
+        pass.bind_vertex_buffer(vertices.as_vertex_buffer());
+        pass.draw({.vertex_range = {.offset = 0, .size = 6}});
+    }
+    auto const future = cmd->download.bytes_from_texture(image.raw());
+    ctx->submit_command_list(cc::move(cmd));
+
+    auto const pixels = co_await future.bytes();
+    REQUIRE(pixels.size() == texels.size());
+    auto mismatches = 0;
+    for (auto i = isize(0); i < texels.size(); ++i)
+        mismatches += pixels[i] != texels[i] ? 1 : 0;
+    CHECK(mismatches == 0);
+}

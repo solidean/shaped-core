@@ -26,6 +26,40 @@ bool checker::is_int3(type_id type) const
 }
 
 /// `@compute(64)` or `@compute(8, 8, 1)`: the axes nobody wrote are 1, and a bad argument reports and stays 1.
+sgl::u8 checker::stages_of(i32 file, ast::attribute const* a)
+{
+    if (a == nullptr)
+        return k_every_stage;
+
+    // CHK-187: each argument is one stage as an enum case; the function is reached only from an entry point of one.
+    auto result = u8(0);
+    auto const arguments = ast_of(file).at(a->arguments);
+    for (auto const& argument : arguments)
+    {
+        auto const* const dot
+            = ast::is_valid(argument.value) ? ast_of(file).at(argument.value).node.try_as<ast::leading_dot>() : nullptr;
+        auto const name = dot != nullptr ? text_of(file, dot->name) : cc::string_view();
+        auto const s = name == "vertex"  ? stage::vertex
+                     : name == "pixel"   ? stage::pixel
+                     : name == "compute" ? stage::compute
+                                         : stage::none;
+        if (!argument.name.empty() || argument.is_splat || s == stage::none)
+        {
+            report(diagnostic_kind::invalid_attribute_arguments, file, a->name,
+                   "@stages takes the stages a function may be reached from: `@stages(.pixel)`, `@stages(.vertex, "
+                   ".pixel)`");
+            return k_every_stage;
+        }
+        result = u8(result | stage_bit(s));
+    }
+    if (arguments.empty())
+    {
+        report(diagnostic_kind::invalid_attribute_arguments, file, a->name, "@stages names at least one stage");
+        return k_every_stage;
+    }
+    return result;
+}
+
 cc::fixed_array<sgl::i32, 3> checker::workgroup_of(i32 file, ast::attribute const* a)
 {
     auto result = cc::fixed_array<i32, 3>{1, 1, 1};
@@ -498,7 +532,7 @@ void checker::compile_function(symbol_id id)
     auto const& f = d.node.as<ast::fun_decl>();
     auto is_failed = false;
 
-    cc::string_view const known[] = {"builtin", "pure", "operator", "vertex", "pixel", "compute"};
+    cc::string_view const known[] = {"builtin", "pure", "operator", "vertex", "pixel", "compute", "stages"};
     judge_attributes(file, d.attributes, known, "a function");
 
     if (!f.type_parameters.empty())
@@ -648,6 +682,7 @@ void checker::compile_function(symbol_id id)
         .entry_stage = stage_of(is_vertex, is_pixel, compute != nullptr),
         .workgroup = {workgroup[0], workgroup[1], workgroup[2]},
         .is_pure = find_attribute(file, d.attributes, "pure") != nullptr,
+        .stages = stages_of(file, find_attribute(file, d.attributes, "stages")),
     });
     out.parameters.push_back_range(parameters);
     out.binding_lists.push_back_range(bindings);

@@ -262,6 +262,7 @@ if(SC_BUILD_TESTS)
         tests/check/case-check-test.cc
         tests/check/control-flow-check-test.cc
         tests/check/cube-test.cc
+        tests/check/stage-check-test.cc
         tests/check/declaration-check-test.cc
         tests/check/enum-check-test.cc
         tests/check/expression-check-test.cc

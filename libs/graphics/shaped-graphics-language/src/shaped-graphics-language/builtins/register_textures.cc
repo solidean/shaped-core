@@ -53,6 +53,22 @@ written write_sample_level(call_context const& c)
 }
 
 template <int Width>
+written write_sample(call_context const& c)
+{
+    auto const& a = c.arguments;
+    switch (c.target)
+    {
+    case language::hlsl:
+        return {.text = cc::format("{}.Sample({}, {})", a[0].text, a[2].text, a[1].text)};
+    case language::wgsl:
+        return {.text = wgsl_narrowed<Width>(cc::format("textureSample({}, {}, {})", a[0].text, a[2].text, a[1].text))};
+    case language::msl:
+        return {.text = cc::format("{}.sample({}, {})", a[0].text, a[2].text, a[1].text)};
+    }
+    return {};
+}
+
+template <int Width>
 written write_texture_load(call_context const& c)
 {
     auto const& a = c.arguments;
@@ -121,6 +137,15 @@ void add_family(registry& r, cc::string_view stem, bool samples)
     auto const texel = type_name(stem, Width);
     auto const custom = [](custom_writer w) { return spelling{.kind = spelling_kind::custom, .custom = w}; };
 
+    // The level comes from screen-space derivatives, which only a pixel stage has on every target.
+    if (samples)
+        r.add(function_record{
+            .signature = cc::format("@pure @stages(.pixel) fun DEBUG_sample(t: texture2d[{}], coord: float2, "
+                                    "s: sampler) -> {}",
+                                    texel, texel),
+            .evaluate = zeros<Width, Kind>,
+            .write = custom(write_sample<Width>),
+        });
     if (samples)
         r.add(function_record{
             .signature = cc::format("@pure fun DEBUG_sample_level(t: texture2d[{}], coord: float2, level: float, "

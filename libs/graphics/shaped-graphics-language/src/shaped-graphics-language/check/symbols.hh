@@ -41,6 +41,16 @@ namespace sgl::check
 }
 } // namespace sgl::check
 
+namespace sgl::check
+{
+/// The bit of `s` in a set of stages, as `function_info::stages` holds one.
+[[nodiscard]] constexpr u8 stage_bit(stage s)
+{
+    return u8(1u << u8(s));
+}
+inline constexpr u8 k_every_stage = 0xFF;
+} // namespace sgl::check
+
 /// What a shader may do with an image: unmarked, `mut` and `out` (the spec's bindings file, "Access").
 enum class sgl::check::image_access : sgl::u8
 {
@@ -223,6 +233,8 @@ struct sgl::check::function_info
     /// Carries `@pure`: a call of it has no effect, so nobody can tell whether or when it ran.
     /// A `@builtin` without it is assumed to have one.
     bool is_pure = false;
+    /// The stages an entry point may be of to reach it, one bit per `stage` (`stage_bit`); every stage without `@stages`.
+    u8 stages = k_every_stage;
 
     constexpr bool operator==(function_info const&) const = default;
 };

@@ -155,6 +155,8 @@ enum class sgl::diagnostic_kind : sgl::u8
     missing_value_in_arm,
     /// A form some backend lacks, which only a function that opts into its feature may use (the bindings spec, "Features").
     needs_feature,
+    /// A function reached from an entry point of a stage its `@stages` leaves out, `DEBUG_sample` in a compute shader.
+    stage_not_allowed,
 };
 
 namespace sgl
