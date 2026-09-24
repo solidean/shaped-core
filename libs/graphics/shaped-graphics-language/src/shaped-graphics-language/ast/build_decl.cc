@@ -423,6 +423,7 @@ decl_id builder::pipeline_declaration(statement_head const& head, keyword_parts 
             report(diagnostic_kind::expected_name, parts.arguments[0]);
     }
 
+    auto settings_block = parts.block;
     if (is_valid(head.assign_value))
     {
         if (token_text_of(head.assign_operator) != "=")
@@ -430,17 +431,29 @@ decl_id builder::pipeline_declaration(statement_head const& head, keyword_parts 
         if (is_valid(parts.block))
             report(diagnostic_kind::too_many_arguments, parts.block);
         result.is_short_form = true;
-        if (is_kind(head.assign_value, form_kind::round_list))
-            result.stages = list_elements(head.assign_value, false, false);
+
+        // `pipeline = (a, b):` hangs its settings block off the list, the rightmost form of the line (FORM-34).
+        auto stages = head.assign_value;
+        settings_block = form_id::none;
+        if (is_kind(stages, form_kind::keyword_form))
+        {
+            auto const inner = keyword_parts_of(stages);
+            if (inner.keywords.empty() && inner.arguments.size() == 1 && is_valid(inner.block))
+            {
+                stages = inner.arguments[0];
+                settings_block = inner.block;
+            }
+        }
+        if (is_kind(stages, form_kind::round_list))
+            result.stages = list_elements(stages, false, false);
         else
-            report(diagnostic_kind::expected_expression, head.assign_value);
-        return make_decl(head.whole, attributes, result);
+            report(diagnostic_kind::expected_expression, stages);
     }
 
     auto collected = cc::vector<setting>();
-    if (is_valid(parts.block))
+    if (is_valid(settings_block))
     {
-        for (auto const line : lines_of(parts.block))
+        for (auto const line : lines_of(settings_block))
         {
             if (!is_binary_run(line, "="))
             {

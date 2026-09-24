@@ -30,6 +30,7 @@ The host then acquires it by name, and states nothing the shader already said: n
   The stage slots are named after SGL's stages ([terminology](terminology.md)), since what fills one is an SGL entry point.
 * **The short form lists them instead**: `pipeline shadow = (shadow_vs, shadow_ps)`.
   Each entry point goes to the slot its stage attribute names, so their order is free, and two of one stage are an error.
+  Settings go in a block under the list, `pipeline shadow = (shadow_vs, shadow_ps):`, the same ones a declaration takes.
 * **A pipeline without a name is named `pipeline`**, which is the one a file with a single pipeline usually has.
   A pipeline shares its file's names with the file's entry points, so it cannot be called like one.
 * **The kind is an attribute**: `@raster`, which is the default, `@compute` and `@raytracing`.

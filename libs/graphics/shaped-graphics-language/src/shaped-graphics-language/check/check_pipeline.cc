@@ -677,6 +677,14 @@ void checker::compile_pipeline(symbol_id id)
             }
             (void)place_stage(element.value, stage::none, span_of(file, element.form));
         }
+        // Its list names the stages, so a stage line in its settings block would be a second one.
+        for (auto const& s : ast.at(p.settings))
+        {
+            auto path = cc::vector<path_name>();
+            if (pc.names_of(file, s.path, path) && path.size() == 1
+                && (path[0].name == "vertex" || path[0].name == "pixel"))
+                pc.fail(file, span_of(file, s.form), "the short form names its stages in its list");
+        }
     }
     else
     {

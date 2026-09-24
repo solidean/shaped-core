@@ -110,7 +110,8 @@ struct sgl::ast::sampler_decl
     constexpr bool operator==(sampler_decl const&) const = default;
 };
 
-/// `pipeline name:` with one `path = value` per line, or the short form `pipeline name = (entry, entry)`.
+/// `pipeline name:` with one `path = value` per line, or the short form `pipeline name = (entry, entry)`, which may carry
+/// the same settings in a block of its own.
 struct sgl::ast::pipeline_decl
 {
     /// Empty for `pipeline:` without a name, which a later phase names `pipeline`.

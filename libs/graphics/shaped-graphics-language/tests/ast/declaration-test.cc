@@ -197,6 +197,9 @@ TEST("sgl ast - a pipeline is a list of settings whose left side is a path")
     // The short form lists entry points.
     CHECK(ast_of("pipeline cube = (main_vs, main_ps)\n") == "(pipeline:short cube main_vs main_ps)");
     CHECK(ast_of("@raster pipeline = (main_vs, main_ps)\n") == "(pipeline:short{@raster} <unnamed> main_vs main_ps)");
+    // A block under the list holds its settings, as it would under `pipeline:`.
+    CHECK(ast_of("pipeline = (main_vs, main_ps):\n    cull = .back\n")
+          == "(pipeline:short <unnamed> main_vs main_ps\n  (setting cull = .back))");
 
     // A left side that is no path, and a line that is no setting.
     CHECK(ast_of("pipeline p:\n    f(x) = 1\n    cull\n")

@@ -289,6 +289,13 @@ TEST("sgl check - the short form places each entry point by its stage")
              "invalid-pipeline user:[pipeline quick = (ps, vs)] the target normal has no format: set "
              "`color_targets.normal.format`, or leave it to the host with `.host`\n");
     CHECK(reports("pipeline twice = (vs, vs)\n") == "invalid-pipeline user:[vs] a pipeline has one vertex stage\n");
+    // The short form takes the settings a long one would, in a block of its own.
+    CHECK(settings_of(cc::string("pipeline quick = (ps, vs):\n    cull = .back\n") + formats)
+          == "rasterization.cull = .back\n"
+             "color_targets.albedo.format = .rgba8_unorm\n"
+             "color_targets.normal.format = .rgba16_float\n");
+    CHECK(reports(cc::string("pipeline quick = (ps, vs):\n    vertex = vs\n") + formats)
+          == "invalid-pipeline user:[vertex = vs] the short form names its stages in its list\n");
     // The long form holds to the same rule, rather than letting a later stage line override.
     CHECK(reports(cc::string("pipeline:\n    vertex = vs\n    pixel = ps\n    vertex = vs\n") + formats)
           == "invalid-pipeline user:[vs] a pipeline has one vertex stage\n");

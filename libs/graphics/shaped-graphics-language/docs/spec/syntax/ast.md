@@ -618,6 +618,7 @@ fun shade_sky(v: basic_vertex){frame} -> vec3:
   The path is a name or a member chain, and the value is an expression.
 * **AST-132** The name of a `pipeline` is optional, so `pipeline:` is a pipeline without one ([pipelines](../pipelines.md) names it).
 * **AST-133** A `pipeline` with `=` is the **short form**: its right side is a round list, whose elements are the pipeline's entry points.
+  A block under the list holds settings, as AST-131's block does; the block hangs off the list, the rightmost form of the line (FORM-34).
 * **AST-134** A setting whose left side is neither a name nor a member chain is the normal error `expected-name`, and a line that is no `=` is `expected-member`.
   Both are still read.
 

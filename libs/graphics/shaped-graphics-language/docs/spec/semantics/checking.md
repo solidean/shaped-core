@@ -216,6 +216,7 @@ let color = float4(..lit, 1.0)
 
 * **CHK-174** A `pipeline` declares a symbol of the module scope, named `pipeline` where it has no name of its own; it shares that scope with the file's functions (CHK-12).
 * **CHK-175** Its stages are the settings `vertex` and `pixel`, each the name of one entry point of that stage; in the short form each entry point takes the stage its attribute names.
+  A short form's settings block names no stage.
   A pipeline has one vertex stage and at most one pixel stage, and a compute entry point is in none.
 * **CHK-176** Every other setting assigns one field of the prelude's `raster_pipeline_description`, and the settings apply in source order, each over the ones before it.
 * **CHK-177** The left side of a setting is a path of field names; its first name, where it is no field of the description, stands for the one field of that name below it.
