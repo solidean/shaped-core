@@ -631,6 +631,11 @@ Two corollaries a review should check:
 
 - **Keep the code paths.** Rejecting the feature at the API door is not the same as deleting the plumbing; the point is that conditional or full support later needs no redesign.
 - **Say why, and where.** The rejection must point at the portability reason in a doc, not just assert "not supported yet".
+- **Refuse by feature, never by target.** A form one backend lacks is refused everywhere unless the code opts into the feature that grants it.
+  The non-portability is then declared rather than discovered.
+  The SGL textures design proposed accepting `texture2d_ms_array` in the checker and refusing it only when writing for webgpu.
+  The maintainer's correction: "we technically do not refuse by target _ever_, we only refuse by feature level".
+  An option shaped as a per-target refusal is therefore not a candidate, and a design entry should offer the feature-gated form in its place.
 
 **A known issue recorded in a TODO is not an accepted failure mode**, and finding it already written down does not close the question.
 What the entry settles is that the *capability* is missing; what it usually leaves open is what happens when someone hits it.
@@ -642,6 +647,14 @@ The worked example is sv's per-permutation samplers.
 The viewer's TODO records it honestly: two materials sampling with different filters silently share the first one's sampler.
 The missing capability is a per-hit-group local root signature, and that genuinely waits for sg.
 Asserting on a *conflicting* state for an already-claimed register does not, costs nothing, and turns an unexplainable image into a message.
+
+### A design option is priced on the design, never on what is built so far
+
+**What an in-progress implementation happens to support is not an argument for or against a shape.**
+The SGL texture-functions design recommended free functions over methods because the checker had no method calls yet.
+The maintainer called that "a bad habit": "we can postpone or stub if we want to use things that are not implemented yet".
+So price each option on the language or API itself — discoverability, how it composes with features that are planned — and state the build plan separately.
+The plan has three honest forms: implement it, stub it behind a marked temporary (SGL marks one `DEBUG_`), or defer it to the incubator.
 
 ### A change that touches an example is reviewed by looking at the example
 

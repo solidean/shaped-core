@@ -914,6 +914,20 @@ def test_sgl_is_highlighted_by_its_line_tree(root: Path) -> None:
     assert "pg-nf" in html, "an `sgl` fence must reach this lexer rather than fall through as plain text"
 
 
+def test_sgl_type_positions_survive_qualifiers_and_arguments(root: Path) -> None:
+    """`mut` and `out` qualify a type without ending the type position, and a type's `[...]` arguments are types.
+
+    An index into a value keeps its operands as plain names, which is what tells the two square lists apart.
+    """
+    source = "    a: mut buffer[float]\n    b: out image2d[rgba8unorm]\n    x = v[i]\n"
+    tokens = [(str(kind), value) for _, kind, value in SglLexer(stripnl=False).get_tokens_unprocessed(source)]
+    kinds = {value: kind for kind, value in tokens}
+    assert kinds["mut"] == kinds["out"] == "Token.Keyword"
+    assert kinds["buffer"] == kinds["image2d"] == "Token.Name.Class", "a qualified type is still a type"
+    assert kinds["float"] == kinds["rgba8unorm"] == "Token.Name.Class", "a type's arguments are types"
+    assert kinds["v"] == kinds["i"] == "Token.Name", "an index into a value is not a type argument"
+
+
 def test_a_file_is_classified_before_anything_reads_it_as_text(root: Path) -> None:
     """Every viewer here used to assume text, so a committed JPEG went through the highlighter as replacement chars.
 
