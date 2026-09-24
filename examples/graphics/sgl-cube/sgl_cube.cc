@@ -196,7 +196,7 @@ struct orbit_camera
                                                                                       sg::pixel_format color_format)
 {
     // The target's format is the one part cube.sgl leaves to the host, so it is the one thing stated here.
-    auto const built = shaders::cube.pipeline.acquire(ctx, {.color = color_format});
+    auto const built = ctx.cached.acquire_raster_pipeline(shaders::cube.pipeline, {.color = color_format});
     // Settled rather than awaited for its value: the compiler's diagnostics ride the async's failure channel, and
     // "it did not build" alone throws away the one thing worth reading.
     co_await cc::async_settled(built);

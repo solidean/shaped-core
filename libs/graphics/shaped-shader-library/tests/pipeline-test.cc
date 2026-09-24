@@ -1,16 +1,16 @@
 #include <clean-core/container/vector.hh>
+#include <clean-core/memory/unique_ptr.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/string.hh>
 #include <nexus/test.hh>
 #include <nexus/tests/logs.hh>
-#include <shaped-graphics-language/ast/build.hh>
-#include <shaped-graphics-language/check/check.hh>
-#include <shaped-graphics-language/driver/prelude.hh>
-#include <shaped-graphics-language/syntax/parsed_file.hh>
+#include <shaped-graphics-language/driver/describe.hh>
+#include <shaped-graphics-language/driver/pipeline_fields.hh>
 #include <shaped-graphics/raster/raster_pipeline.hh>
 #include <shaped-shader-library/compiler/sgl_compiler.hh>
 #include <shaped-shader-library/compiler/wgsl_compiler.hh>
 #include <shaped-shader-library/filesystem/memory_filesystem.hh>
+#include <shaped-shader-library/filesystem/real_filesystem.hh>
 #include <shaped-shader-library/pipeline.hh>
 #include <shaped-shader-library/shader_asset.hh>
 #include <shaped-shader-library/shader_library.hh>
@@ -20,116 +20,18 @@
 
 using namespace cc::primitive_defines;
 
-// Three things spell sg's raster pipeline description: sg's structs, the SGL prelude's mirror of them, and the table
+// Three things spell sg's raster pipeline description: sg's structs, the SGL prelude's mirror of them, and the setters
 // slib writes one into the other with.
-// Nothing makes them agree but the tests here.
+// The setters are generated from the mirror and name sg's fields, so the first two are held together by the compiler;
+// the tests below hold the rest.
 
-namespace
+TEST("slib pipeline - the committed field setters are what the prelude's mirror of sg's description generates")
 {
-/// The library's prelude, checked alone, so its mirror of the description can be walked.
-struct checked_prelude
-{
-    cc::vector<sgl::parsed_file> files;
-    cc::vector<sgl::ast::file_ast> asts;
-    sgl::check::checked_module module;
-};
-
-checked_prelude check_prelude()
-{
-    auto result = checked_prelude();
-    for (auto const& p : sgl::prelude_files())
-        result.files.push_back(sgl::parse(p.source));
-    for (auto const& f : result.files)
-        result.asts.push_back(sgl::ast::build(f));
-    auto prelude = cc::vector<sgl::check::module_file>();
-    for (auto i = isize(0); i < result.files.size(); ++i)
-        prelude.push_back({.file = result.files[i], .ast = result.asts[i]});
-    // An empty program behind the prelude: the prelude's own symbols are what is read.
-    static auto const empty = sgl::parse("");
-    static auto const empty_ast = sgl::ast::build(empty);
-    result.module = sgl::check::check(prelude, {.file = empty, .ast = empty_ast});
-    return result;
-}
-
-sgl::check::symbol const* symbol_named(sgl::check::checked_module const& m, cc::string_view name)
-{
-    for (auto const& s : m.symbols)
-        if (s.name == name)
-            return &s;
-    return nullptr;
-}
-
-/// Every leaf path below `type`, with `*` for a target, as the SGL compiler writes a setting's path.
-void leaves_of(sgl::check::checked_module const& m, sgl::check::type_id type, cc::string prefix, cc::vector<cc::string>& out)
-{
-    auto const& t = m.at(type);
-    auto const is_struct = t.kind == sgl::check::type_kind::structure && m.builtin_type_of(type) == nullptr;
-    if (!is_struct)
-    {
-        out.push_back(cc::move(prefix));
-        return;
-    }
-    for (auto const& member : m.at(t.members))
-    {
-        auto path = prefix.empty() ? cc::string(member.name) : cc::format("{}.{}", prefix, member.name);
-        if (member.name == "color_targets")
-            path += ".*";
-        leaves_of(m, member.type, cc::move(path), out);
-    }
-}
-} // namespace
-
-TEST("slib pipeline - the settings table takes exactly the leaves of the prelude's description")
-{
-    auto const p = check_prelude();
-    REQUIRE(p.module.diagnostics.empty());
-    auto const* const description = symbol_named(p.module, "raster_pipeline_description");
-    REQUIRE(description != nullptr);
-
-    auto leaves = cc::vector<cc::string>();
-    leaves_of(p.module, description->type, {}, leaves);
-    // `blend = .none` is the one path that is no leaf: the optional part itself.
-    leaves.push_back("color_targets.*.blend");
-
-    auto const table = slib::settable_paths();
-    auto drift = cc::string();
-    for (auto const& leaf : leaves)
-    {
-        auto is_in_table = false;
-        for (auto const path : table)
-            is_in_table = is_in_table || path == leaf;
-        if (!is_in_table)
-            drift.appendf("the prelude has {}, and slib's table does not\n", leaf);
-    }
-    for (auto const path : table)
-    {
-        auto is_in_prelude = false;
-        for (auto const& leaf : leaves)
-            is_in_prelude = is_in_prelude || leaf == path;
-        if (!is_in_prelude)
-            drift.appendf("slib's table has {}, and the prelude does not\n", path);
-    }
-    CHECK(drift == "");
-}
-
-TEST("slib pipeline - every enum of the prelude's description names sg's enumerators, in their order")
-{
-    auto const p = check_prelude();
-    auto drift = cc::string();
-    for (auto const name : {"primitive_topology", "fill_mode", "cull_mode", "front_face", "compare_op", "stencil_op",
-                            "blend_factor", "blend_op", "pixel_format"})
-    {
-        auto const* const s = symbol_named(p.module, name);
-        REQUIRE(s != nullptr);
-        auto const cases = p.module.at(p.module.at(s->type).cases);
-        auto const names = slib::enum_case_names(name);
-        if (cases.size() != names.size())
-            drift.appendf("{}: the prelude has {} cases and sg {}\n", name, cases.size(), names.size());
-        for (auto i = isize(0); i < cases.size() && i < names.size(); ++i)
-            if (cases[i].name != names[i])
-                drift.appendf("{}: case {} is {} in the prelude and {} in sg\n", name, i, cases[i].name, names[i]);
-    }
-    CHECK(drift == "");
+    // `uv run dev.py check sgl-prelude --fix` rewrites the file; this is the same comparison, for a tree without the tool.
+    auto const committed
+        = slib::real_filesystem(SLIB_SOURCE_DIR).read_text("src/shaped-shader-library/impl/pipeline_fields.hh");
+    REQUIRE(committed.has_value());
+    CHECK(committed.value() == sgl::pipeline_fields_text());
 }
 
 TEST("slib pipeline - sg's mirrored structs keep the fields the prelude mirrors")
@@ -243,6 +145,28 @@ cc::string text_of(cc::span<slib::pipeline_setting const> settings)
     }
     return out;
 }
+
+/// The frozen part `source`'s one pipeline has, as the generator bakes it; kept for the life of the process.
+cc::span<cc::string_view const> frozen_of(cc::string_view source)
+{
+    static auto storage = cc::vector<cc::unique_ptr<cc::vector<cc::string>>>();
+    static auto views = cc::vector<cc::unique_ptr<cc::vector<cc::string_view>>>();
+    auto const described = sgl::describe({.source = source, .source_name = "pipeline.sgl"});
+    REQUIRE(described.has_value());
+    REQUIRE(described.value().pipelines.size() == 1);
+    storage.push_back(cc::make_unique<cc::vector<cc::string>>(described.value().pipelines[0].frozen));
+    views.push_back(cc::make_unique<cc::vector<cc::string_view>>());
+    for (auto const& line : *storage.back())
+        views.back()->push_back(line);
+    return *views.back();
+}
+
+/// Configured settings as text, or `<build>` while the build's own hold.
+cc::string text_of(cc::optional<cc::vector<slib::pipeline_setting>> const& settings)
+{
+    return settings.has_value() ? text_of(cc::span<slib::pipeline_setting const>(settings.value()))
+                                : cc::string("<build>");
+}
 } // namespace
 
 TEST("slib pipeline - a reload moves a pipeline's configuration, and never its frozen part",
@@ -263,18 +187,15 @@ TEST("slib pipeline - a reload moves a pipeline's configuration, and never its f
     lib.start_hot_reload({.unthreaded = true});
 
     // What the generator writes for this source: the definition the host's code was built against.
-    cc::string_view const targets[] = {"color"};
-    slib::pipeline_setting const baked[] = {
-        {.path = "color_targets.color.format", .kind = slib::setting_kind::host},
-    };
-    auto const definition = slib::pipeline_definition{.file = "pipeline.sgl",
-                                                      .name = "pipeline",
-                                                      .vertex = &vs,
-                                                      .pixel = &ps,
-                                                      .targets = targets,
-                                                      .settings = baked,
-                                                      .vertex_input_name = "vin",
-                                                      .target_struct = "target"};
+    // Static like a generated one, since slib keys a pipeline's reload state by its definition's address.
+    static cc::string_view const targets[] = {"color"};
+    static auto definition = slib::pipeline_definition();
+    definition = {.file = "pipeline.sgl",
+                  .name = "pipeline",
+                  .vertex = &vs,
+                  .pixel = &ps,
+                  .targets = targets,
+                  .frozen = frozen_of(reload_source(""))};
 
     // A WGSL compile settles at once, so acquiring is what compiles, and after a reload what promotes.
     auto const compile = [&]
@@ -292,8 +213,8 @@ TEST("slib pipeline - a reload moves a pipeline's configuration, and never its f
     compile();
     // The watcher's first scan is its baseline, so an edit before it would read as the file it already knew.
     lib.poll_hot_reload();
-    // Nothing reloaded: the build's own settings, and nothing read.
-    CHECK(text_of(slib::configuration_of(definition).settings) == "color_targets.color.format = .host\n");
+    // Nothing reloaded: the build's own settings, which its generated code writes, and nothing read.
+    CHECK(text_of(slib::configuration_of(definition).settings) == "<build>");
 
     // Configuration follows the source.
     edit("    cull = .front\n");
@@ -302,7 +223,7 @@ TEST("slib pipeline - a reload moves a pipeline's configuration, and never its f
     CHECK(text_of(followed.settings) == "color_targets.color.format = .host\nrasterization.cull = .front\n");
 
     // A format is frozen: the host created its targets in it, so the configuration stays where it last matched.
-    nx::expect_warning("keeps its last good build");
+    nx::expect_warning("keeps what it was last built with");
     edit("    cull = .none\n    sample_count = 4\n");
     auto const kept = slib::configuration_of(definition);
     CHECK(kept.frozen_moved == "sample_count: <unset> -> 4\n");
@@ -315,8 +236,20 @@ TEST("slib pipeline - a reload moves a pipeline's configuration, and never its f
     CHECK(text_of(slib::configuration_of(definition).settings)
           == "color_targets.color.format = .host\nrasterization.cull = .none\n");
 
+    // A member added to the vertex input keeps its name and moves its shape, which the host's vertex buffers were
+    // written against.
+    nx::expect_warning("keeps what it was last built with");
+    auto const source = reload_source("    cull = .back\n");
+    auto const after_vin = source.subview(isize(32)); // `@vertex struct vin:\n    p: pos3\n` is its first 32 bytes
+    fs->write("pipeline.sgl", cc::string("@vertex struct vin:\n    p: pos3\n    q: float4\n") + after_vin);
+    lib.poll_hot_reload();
+    compile();
+    auto const reshaped = slib::configuration_of(definition);
+    CHECK(reshaped.frozen_moved.starts_with("vertex input: vin@"));
+    CHECK(text_of(reshaped.settings) == "color_targets.color.format = .host\nrasterization.cull = .none\n");
+
     // A group the host has no generated type for moves the layout, which is frozen like a format.
-    nx::expect_warning("keeps its last good build");
+    nx::expect_warning("keeps what it was last built with");
     fs->write("pipeline.sgl", "binding frame:\n    scale: float\n"
                               "@vertex struct vin:\n    p: pos3\n"
                               "struct link:\n    @position p: hpos4\n"
@@ -327,7 +260,7 @@ TEST("slib pipeline - a reload moves a pipeline's configuration, and never its f
     lib.poll_hot_reload();
     compile();
     auto const regrouped = slib::configuration_of(definition);
-    CHECK(regrouped.frozen_moved == "layout:  -> frame\n");
+    CHECK(regrouped.frozen_moved.starts_with("layout:  -> frame@"));
     CHECK(text_of(regrouped.settings) == "color_targets.color.format = .host\nrasterization.cull = .none\n");
 }
 
@@ -351,17 +284,12 @@ TEST("slib pipeline - a reload promoted before a pipeline's first acquire is rea
     lib.start_hot_reload({.unthreaded = true});
 
     static cc::string_view const targets[] = {"color"};
-    static slib::pipeline_setting const baked[] = {
-        {.path = "color_targets.color.format", .kind = slib::setting_kind::host},
-    };
     static auto const definition = slib::pipeline_definition{.file = "early.sgl",
                                                              .name = "pipeline",
                                                              .vertex = &vs,
                                                              .pixel = &ps,
                                                              .targets = targets,
-                                                             .settings = baked,
-                                                             .vertex_input_name = "vin",
-                                                             .target_struct = "target"};
+                                                             .frozen = frozen_of(reload_source(""))};
     auto const compile = [&]
     {
         REQUIRE(vs->acquire(sg::shader_format::wgsl)->has_value());

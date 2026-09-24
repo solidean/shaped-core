@@ -96,7 +96,8 @@ ASYNC_INVOCABLE_TEST("sg - a pipeline declared in SGL draws what the hand-built 
         SKIP("no compiler builds this binary's shaders into a format this context accepts");
 
     // Everything the hand-built description above states is in quads.sgl's `pipeline drawn`.
-    auto const pipeline = co_await shaders::quads.drawn.acquire(*ctx);
+    // A declared pipeline is a source `ctx.cached` acquires, like a description.
+    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::quads.drawn);
     auto const desc = co_await shaders::quads.drawn.description(*ctx);
     CHECK(desc.rasterization.cull == sg::cull_mode::none);
     REQUIRE(desc.color_targets.size() == 1);
@@ -108,8 +109,8 @@ ASYNC_INVOCABLE_TEST("sg - a pipeline declared in SGL draws what the hand-built 
     CHECK(hosted.color_targets[0].format == sg::pixel_format::rgba16_float);
     CHECK(hosted.rasterization.cull == sg::cull_mode::none);
     // `customize` runs last, over what the declaration and the host stated: here over the host's format.
-    auto const customized = co_await shaders::quads.hosted.acquire(
-        *ctx, {.color = sg::pixel_format::rgba8_unorm},
+    auto const customized = co_await ctx->cached.acquire_raster_pipeline(
+        shaders::quads.hosted, {.color = sg::pixel_format::rgba8_unorm},
         [](sg::raster_pipeline_description& d) { d.color_targets[0].format = sg::pixel_format::rgba16_float; });
     REQUIRE(customized->target_formats().has_value());
     CHECK(customized->target_formats().value().color[0] == sg::pixel_format::rgba16_float);

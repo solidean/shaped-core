@@ -306,11 +306,16 @@ auto const layout = shaders::cube.main_vs.acquire_layout(ctx);                  
 auto const pipeline = co_await shaders::double_values.main.acquire_pipeline(ctx); // compute: needs nothing else
 // a raster pipeline whose stages list different groups takes their union instead: acquire_pipeline_layout<frame, work>().
 // a `pipeline` declaration -> shaders::<file>.<name> (an unnamed `pipeline:` is `.pipeline`), built from ITS stages,
-//   layout, vertex input, targets and settings; the host states only what the declaration left `.host`:
-auto const p = co_await shaders::cube.pipeline.acquire(ctx, {.color = swapchain_format});  // open: one field per `.host` part
-//   nothing `.host` -> acquire(ctx); an optional last argument customize(sg::raster_pipeline_description&) runs on every build
-//   acquire_latest(ctx, ...)  the newest valid build, even one whose frozen part moved; description(ctx, ...) to build it yourself
+//   layout, vertex input, targets and settings; the host states only what the declaration left `.host`.
+//   It is an sg::raster_pipeline_source, so ctx.cached acquires it like a description:
+auto const p = co_await ctx.cached.acquire_raster_pipeline(shaders::cube.pipeline, {.color = swapchain_format}); // open: one field per `.host` part
+//   nothing `.host` -> acquire_raster_pipeline(shaders::cube.pipeline); a last argument customize(sg::raster_pipeline_description&) runs last
+//   .description(ctx, parts)          the description itself, to build or inspect
+//   .description_latest(ctx, parts)   the newest stages and settings even where the frozen part moved; acquire it yourself
 //   an open field left unset (a format still `undefined`, a sample count still 0) asserts: the declaration said the host would state it
+//   the build's settings are generated field writes (slib::impl::fields, from impl/pipeline_fields.hh, which `sgl pipeline-fields` writes)
+//   hot reload: cull, depth, blend… follow the source; a moved frozen part (layout, vertex input, targets, formats, samples,
+//   each struct by name AND shape) keeps the stages and settings this context last built with, and logs what moved
 // `@vertex struct v` -> shaders::v and v::layout(): attributes in the shader's order, no semantic or offset by hand.
 //   members marked `@per_instance` / `@stream(name)` split it over buffers: then v::<stream> per buffer, in slot order,
 //   and v::buffers{.per_vertex = verts, .per_instance = insts}.views() for bind_vertex_buffers — typed, so a

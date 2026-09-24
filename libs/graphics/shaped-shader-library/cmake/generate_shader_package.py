@@ -802,6 +802,8 @@ def emit_source(manifest: Manifest, files: list[ShaderFile], bindings: list[Bind
     if sgl_host_code.entry_wrappers(sgl, {f.path: f.stem for f in files}) or sgl.pipelines:
         out.append("#include <clean-core/thread/async_coroutine.hh>\n")
         out.append("#include <shaped-shader-library/shader_asset.hh> // slib::reflection_mismatch\n")
+    if sgl.pipelines:
+        out.append("#include <shaped-shader-library/impl/pipeline_fields.hh> // a pipeline's settings, as field writes\n")
     out.append("\n")
 
     for file in files:
