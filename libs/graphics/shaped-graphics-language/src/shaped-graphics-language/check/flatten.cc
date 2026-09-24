@@ -288,6 +288,15 @@ struct flattener
         }
         if (auto const* const call = e.node.try_as<ast::call>())
             return flatten_call(id, type, where, *call);
+        if (auto const* const cast = e.node.try_as<ast::cast>())
+        {
+            auto const value = flatten_expr(cast->value);
+            // A cast to the type the value already has is the value itself.
+            if (where.kind != target_kind::overload)
+                return value;
+            flat_expr_id const arguments[] = {value};
+            return builtin_call(id, where.symbol, arguments);
+        }
         if (auto const* const chain = e.node.try_as<ast::comparison_chain>())
             return flatten_chain(id, type, *chain);
         if (auto const* const loop = e.node.try_as<ast::loop_expr>())

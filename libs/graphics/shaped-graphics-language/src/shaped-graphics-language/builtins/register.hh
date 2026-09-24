@@ -11,14 +11,16 @@ namespace sgl::builtins
 /// Every topic below, in the order the generated file shows them; `r` is not finalized.
 void register_builtins(registry& r);
 
-/// `float`, the vectors, `mat4`, `int` and `bool`; first, since every signature names them.
+/// `float`, `int`, `uint` and `bool` with their vectors, and `mat4`; first, since every signature names them.
 void register_types(registry& r);
-/// Arithmetic, comparisons and the scalar functions of `float`, `int` and `bool`.
+/// Arithmetic, comparisons and the scalar functions of `float`, `int`, `uint` and `bool`.
 void register_scalar_math(registry& r);
-/// The componentwise families of `float3`, `float4` and `vec3`, and what `pos3` and `vec3` mean together.
+/// The componentwise families of the vectors, and what `pos3` and `vec3` mean together.
 void register_vector_math(registry& r);
 /// `mat4` times a matrix, a position, a direction and a plain four-vector.
 void register_transforms(registry& r);
+/// `x as T` between `float`, `int` and `uint` of one width, as operator functions of `as`.
+void register_conversions(registry& r);
 } // namespace sgl::builtins
 
 /// What the topic files share.
@@ -48,5 +50,5 @@ void add_function(registry& r,
 
 /// The suffix an operator function of `type` carries in its name: none for `float`, `_int`, `_color` for `float3`.
 /// An operator function is found through its operator alone, so the name is documentation and shows in a dump.
-[[nodiscard]] cc::string_view suffix_of(cc::string_view type);
+[[nodiscard]] cc::string suffix_of(cc::string_view type);
 } // namespace sgl::builtins::impl

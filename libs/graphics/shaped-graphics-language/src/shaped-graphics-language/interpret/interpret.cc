@@ -782,6 +782,8 @@ cc::string sgl::check::dump(outcome const& o)
                 out.appendf(" {}", leaf.as_float());
             else if (leaf.kind == value_kind::scalar_int)
                 out.appendf(" {}", leaf.as_int());
+            else if (leaf.kind == value_kind::scalar_uint)
+                out.appendf(" {}u", leaf.as_uint());
             else
                 out.appendf(" {}", leaf.as_bool() ? "true" : "false");
         }

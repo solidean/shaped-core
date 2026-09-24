@@ -11,6 +11,7 @@ void sgl::builtins::register_builtins(registry& r)
     register_scalar_math(r);
     register_vector_math(r);
     register_transforms(r);
+    register_conversions(r);
 }
 
 void impl::add_infix(registry& r,
@@ -56,21 +57,11 @@ void impl::add_function(registry& r,
     });
 }
 
-cc::string_view impl::suffix_of(cc::string_view type)
+cc::string impl::suffix_of(cc::string_view type)
 {
     if (type == "float")
         return "";
     if (type == "float3")
         return "_color";
-    if (type == "int")
-        return "_int";
-    if (type == "bool")
-        return "_bool";
-    if (type == "float4")
-        return "_float4";
-    if (type == "vec3")
-        return "_vec3";
-    if (type == "pos3")
-        return "_pos3";
-    return "_other";
+    return cc::format("_{}", type);
 }

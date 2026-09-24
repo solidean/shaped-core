@@ -213,6 +213,8 @@ struct checker
     void convert_object(function_scope& scope, ast::expr_id object, type_id to);
     /// `values[i]`, which today is a buffer element and nothing else; the error type where it is not one.
     [[nodiscard]] type_id check_index(function_scope& scope, ast::expr_id id, ast::index const& node);
+    /// `x as T`, which is the operator function of `as` that takes `x` and gives `T`; the error type where none does.
+    [[nodiscard]] type_id check_cast(function_scope& scope, ast::expr_id id, ast::cast const& node);
 
     // ---- statements and control flow (check_stmt.cc) ----------------------------------------------------------------
 

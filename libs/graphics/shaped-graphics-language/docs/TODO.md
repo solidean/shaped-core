@@ -9,3 +9,5 @@ Work that is decided and not built, as opposed to [spec/incubator/](spec/_index.
   The intended shape is methods through UFCS, with default and named arguments ([texture-methods.md](spec/incubator/texture-methods.md)).
 * **Feature opt-in.** Every form [bindings.md](spec/bindings.md#features) refuses by feature is waiting for it.
   A function declares the features it needs ([feature-levels.md](spec/incubator/feature-levels.md)).
+* **Unsigned literals.** A `uint` is reached through `as` today, `1 as uint`, since a literal with a suffix is `unsupported-yet` (CHK-61).
+  Whether `1u` exists or a literal takes the type it is asked for is the question [literal-types.md](spec/incubator/literal-types.md) holds.

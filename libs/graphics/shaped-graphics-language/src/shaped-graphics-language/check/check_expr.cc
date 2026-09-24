@@ -171,6 +171,36 @@ void checker::convert_object(function_scope& scope, ast::expr_id object, type_id
 
 // ---- expressions ----------------------------------------------------------------------------------------------------
 
+type_id checker::check_cast(function_scope& scope, ast::expr_id id, ast::cast const& node)
+{
+    auto const file = scope.file;
+    auto const where = span_of(file, id);
+    auto const from = check_expr(scope, node.value);
+    auto const to = resolve_value_type(file, node.type);
+    if (from == error_type || to == error_type)
+        return error_type;
+    if (from == to)
+        return to;
+
+    // Overloads of `as` differ in their result as well, so the one that matches both ends is the conversion.
+    auto const* const candidates = operators.get_ptr("as");
+    if (candidates != nullptr)
+        for (auto const candidate : *candidates)
+        {
+            if (demand(candidate, file, where) != symbol_state::checked)
+                continue;
+            auto const& info = out.functions[out.at(candidate).info];
+            auto const parameters = out.at(info.parameters);
+            if (parameters.size() != 1 || parameters[0].type != from || info.result != to)
+                continue;
+            set_target(file, id, {.kind = target_kind::overload, .symbol = candidate});
+            return to;
+        }
+    report(diagnostic_kind::no_matching_overload, file, where,
+           cc::format("{} as {}: no conversion", out.name_of(from), out.name_of(to)));
+    return error_type;
+}
+
 type_id checker::check_expr(function_scope& scope, ast::expr_id expr)
 {
     if (!ast::is_valid(expr))
@@ -200,8 +230,8 @@ type_id checker::check_expr(function_scope& scope, ast::expr_id expr)
         [&](ast::qualified_type const&) { return not_yet("a resource type"); },
         [&](ast::tuple const&) { return not_yet("a tuple"); }, [&](ast::array const&) { return not_yet("an array"); },
         [&](ast::object const&) { return not_yet("an object with no struct to convert to"); },
-        [&](ast::comparison_chain const& chain) { return check_chain(scope, expr, chain); },
-        [&](ast::cast const&) { return not_yet("as"); }, [&](ast::membership const&) { return not_yet("in"); },
+        [&](ast::comparison_chain const& chain) { return check_chain(scope, expr, chain); }, [&](ast::cast const& node)
+        { return check_cast(scope, expr, node); }, [&](ast::membership const&) { return not_yet("in"); },
         [&](ast::ascription const&) { return not_yet("a type ascription"); },
         [&](ast::range const&) { return not_yet("a range"); }, [&](ast::lambda const&) { return not_yet("a lambda"); },
         [&](ast::case_expr const& c) { return check_case(scope, expr, c, true); },

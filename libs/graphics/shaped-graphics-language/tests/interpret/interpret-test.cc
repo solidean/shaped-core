@@ -127,6 +127,21 @@ TEST("sgl interpret - a member of a var is assigned in place, and int arithmetic
     CHECK(run(b) == "ok 20 | print 1 20 3 | print -2147483648");
 }
 
+TEST("sgl interpret - a conversion truncates and saturates a float, and keeps the bits between int and uint")
+{
+    auto const checked = flat_test_module();
+    auto b = float_function(checked.module);
+    b.set_body({
+        b.print(b.call("convert_float_to_int", {b.literal(-3.75)})),
+        b.print(b.call("convert_float_to_int", {b.literal(1e20)})),
+        b.print(b.call("convert_float_to_uint", {b.literal(-2.0)})),
+        b.print(b.call("convert_int_to_uint", {b.int_literal(-1)})),
+        b.print(b.call("convert_int_to_float", {b.int_literal(7)})),
+        b.leave(b.e.root, b.literal(0.0)),
+    });
+    CHECK(run(b) == "ok 0 | print -3 | print 2147483647 | print 0u | print 4294967295u | print 7");
+}
+
 TEST("sgl interpret - every way a run ends without a result is a status")
 {
     auto const checked = flat_test_module();

@@ -180,6 +180,12 @@ enum light_kind:
 * **CHK-78** A splat in any other call, a named argument, a call of a local, a method call and type arguments are `unsupported-yet`.
 * **CHK-79** A callee that names a binding is `wrong-kind-of-name`.
 * **CHK-80** `and`, `or` and `not` are no functions: CHK-116.
+* **CHK-174** `x as T` is a call of the `@operator("as")` function whose one parameter is the type of `x` and whose result is `T`.
+  The result takes part in the match, since the overloads of `as` differ in it; no such function is `no-matching-overload`.
+* **CHK-175** `x as T` where `x` already has the type `T` is `x`.
+* **CHK-176** The prelude converts between `float`, `int` and `uint` of one width, and nothing else.
+  A float becomes an integer by truncating toward zero and saturating at the integer's bounds, and a NaN becomes 0.
+  Between `int` and `uint` the bits stay.
 
 ```sgl
 let n = normalize p.normal

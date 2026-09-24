@@ -33,6 +33,7 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/ast/dump.cc
 
     src/shaped-graphics-language/builtins/register.cc
+    src/shaped-graphics-language/builtins/register_conversions.cc
     src/shaped-graphics-language/builtins/register_scalar_math.cc
     src/shaped-graphics-language/builtins/register_transforms.cc
     src/shaped-graphics-language/builtins/register_types.cc
