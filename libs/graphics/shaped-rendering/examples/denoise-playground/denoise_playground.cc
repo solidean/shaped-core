@@ -362,6 +362,11 @@ ASYNC_EXAMPLE("shaped-rendering/denoise-playground")
     // the upload lands relative to them.
     nx::allow_warnings("an async transfer found a texture in a layout its transfer queue cannot use");
 
+    // Picking a member this build cannot run is the refusal path, and the method dropdown offers three of them on
+    // purpose — so the one line each of them logs is expected here rather than a surprise.
+    // Showing what a refusal does is a thing this example is FOR, and it would otherwise fail the moment it is used.
+    nx::allow_warnings("did not run: not supported by this build or device");
+
     auto const capture = sr::capture_request::from_environment();
     if (capture.active && !capture.name.empty())
     {
