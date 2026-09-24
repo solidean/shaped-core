@@ -16,16 +16,17 @@ from pygments.lexer import Lexer
 from pygments.token import Comment, Error, Keyword, Name, Number, Operator, Punctuation, String, Whitespace
 
 _DECLARATION_KEYWORDS = frozenset({
-    "fun", "let", "mut", "out", "struct", "enum", "binding", "sampler", "const", "use", "module", "type", "notation", "assert", "print",
+    "fun", "let", "mut", "out", "struct", "enum", "binding", "sampler", "pipeline", "const", "use", "module", "type",
+    "notation", "assert", "print",
 })
-# `mut buffer[float]`, `out image2d[rgba8unorm]`: an access word at the top of a type position leaves the position a type.
+# `mut buffer[float]`, `out image2d[.rgba8_unorm]`: an access word at the top of a type position leaves the position a type.
 _TYPE_QUALIFIERS = frozenset({"mut", "out"})
 _CONTROL_KEYWORDS = frozenset({"if", "else", "for", "while", "loop", "return", "yield", "continue", "break", "case"})
 _WORD_OPERATORS = frozenset({"and", "or", "not", "in", "as"})
 _CONSTANTS = frozenset({"true", "false"})
 # A symbol directly after one of these names a function or a type.
 _NAMES_FUNCTION = frozenset({"fun"})
-_NAMES_TYPE = frozenset({"struct", "enum", "binding", "sampler", "type", "module"})
+_NAMES_TYPE = frozenset({"struct", "enum", "binding", "sampler", "pipeline", "type", "module"})
 
 # Everything past ASCII counts as a symbol character for now; the spec will narrow it to identifier ranges.
 _NON_ASCII = "\x80-\U0010ffff"

@@ -50,7 +50,7 @@ ASYNC_INVOCABLE_TEST("sg - an SGL shader samples a texture through a static samp
     if (!sg_test::shaders_reach(*ctx))
         SKIP("no compiler builds this binary's shaders into a format this context accepts");
 
-    auto const pipeline = co_await shaders::textures.compute.copy_accumulate.acquire_pipeline(*ctx);
+    auto const pipeline = co_await shaders::textures.copy_accumulate.acquire_pipeline(*ctx);
     auto const layout = ctx->cached.acquire_binding_group_layout<shaders::post>();
 
     auto const src = make_texture(ctx, sg::pixel_format::rgba8_unorm, sg::texture_usage::readonly_texture);
@@ -106,7 +106,7 @@ ASYNC_INVOCABLE_TEST("sg - an SGL shader samples through a sampler the group bin
     if (!sg_test::shaders_reach(*ctx))
         SKIP("no compiler builds this binary's shaders into a format this context accepts");
 
-    auto const pipeline = co_await shaders::textures.compute.copy_dynamic.acquire_pipeline(*ctx);
+    auto const pipeline = co_await shaders::textures.copy_dynamic.acquire_pipeline(*ctx);
     auto const layout = ctx->cached.acquire_binding_group_layout<shaders::sampled>();
 
     auto const src = make_texture(ctx, sg::pixel_format::rgba8_unorm, sg::texture_usage::readonly_texture);
@@ -147,10 +147,10 @@ ASYNC_INVOCABLE_TEST("sg - an SGL pixel shader samples a texture at the level it
     if (!sg_test::shaders_reach(*ctx))
         SKIP("no compiler builds this binary's shaders into a format this context accepts");
 
-    auto const& vs = co_await shaders::textures.vertex.screen_vs->acquire(*ctx);
-    auto const& ps = co_await shaders::textures.pixel.textured_ps->acquire(*ctx);
+    auto const& vs = co_await shaders::textures.screen_vs->acquire(*ctx);
+    auto const& ps = co_await shaders::textures.textured_ps->acquire(*ctx);
     auto const pipeline = co_await ctx->cached.acquire_raster_pipeline({
-        .layout = shaders::textures.vertex.screen_vs.acquire_layout(*ctx),
+        .layout = shaders::textures.screen_vs.acquire_layout(*ctx),
         .vertex_shader = vs,
         .fragment_shader = ps,
         .vertex_input = shaders::screen_vertex::layout(),

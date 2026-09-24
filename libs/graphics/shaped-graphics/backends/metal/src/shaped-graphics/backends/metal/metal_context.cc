@@ -132,6 +132,9 @@ bool metal_context::supports(sg::feature f) const
     case sg::feature::tessellation_shader:
         // Metal has never had either stage; a caller asking gets a permanent answer rather than a temporary one.
         return false;
+    case sg::feature::unaligned_block_compression:
+        // Not yet checked against a Metal device, so the portable answer: sg refuses rather than a driver.
+        return false;
     }
     return false;
 }

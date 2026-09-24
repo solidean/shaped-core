@@ -16,6 +16,7 @@ Definitions:
 * `enum` - defines a new enum type
 * `binding` - defines a new binding group
 * `sampler` - declares a static sampler, at file scope or in a binding; in a type position it denotes the sampler type ([bindings](bindings.md#samplers))
+* `pipeline` - declares a pipeline: its stages and the configuration compiled into it ([pipelines](pipelines.md))
 * `const` - real constants
 * `use` - import other modules
 * `module` - declares a module

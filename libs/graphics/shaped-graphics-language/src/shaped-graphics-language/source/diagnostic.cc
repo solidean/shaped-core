@@ -184,6 +184,8 @@ cc::string_view sgl::to_string(diagnostic_kind kind)
         return "needs-feature";
     case diagnostic_kind::stage_not_allowed:
         return "stage-not-allowed";
+    case diagnostic_kind::invalid_pipeline:
+        return "invalid-pipeline";
     }
     CC_UNREACHABLE("unknown diagnostic_kind");
 }
@@ -277,6 +279,7 @@ sgl::severity sgl::default_severity_of(diagnostic_kind kind)
     case diagnostic_kind::missing_value_in_arm:
     case diagnostic_kind::needs_feature:
     case diagnostic_kind::stage_not_allowed:
+    case diagnostic_kind::invalid_pipeline:
         return severity::normal_error;
     case diagnostic_kind::spaced_attribute_arguments:
     case diagnostic_kind::no_effect:

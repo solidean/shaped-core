@@ -52,7 +52,7 @@ ASYNC_INVOCABLE_TEST("sg - an SGL package's generated group is what its compiled
         SKIP("no compiler builds this binary's shaders into a format this context accepts");
 
     // The asset picks the format by asking the context what it accepts, so this names no backend.
-    auto const& compiled = co_await shaders::double_values.compute.main->acquire(*ctx);
+    auto const& compiled = co_await shaders::double_values.main->acquire(*ctx);
 
     CHECK(compiled.stage == sg::shader_stage::compute);
     REQUIRE(compiled.workgroup_size.has_value());
@@ -98,7 +98,7 @@ ASYNC_TEST("sg - the WGSL an SGL group becomes reflects every fact its generated
     if (!has_wgsl)
         SKIP("no WGSL compiler is registered in this build");
 
-    auto const& compiled = co_await shaders::textures.compute.copy_accumulate->acquire(sg::shader_format::wgsl);
+    auto const& compiled = co_await shaders::textures.copy_accumulate->acquire(sg::shader_format::wgsl);
     auto const declared = shaders::post::declared_bindings();
     REQUIRE(compiled.bindings.size() == declared.size());
     for (auto const& want : declared)

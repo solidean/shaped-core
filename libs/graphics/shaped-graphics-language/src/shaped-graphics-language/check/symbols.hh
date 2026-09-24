@@ -168,6 +168,8 @@ enum class sgl::check::symbol_kind : sgl::u8
     enumeration,
     function,
     binding,
+    /// A `pipeline` declaration; an unnamed one is named `pipeline`.
+    pipeline,
     /// A named declaration this phase has no meaning for yet: `const`, `type`, `sampler`.
     /// It is always `failed`, and it exists so its name resolves to the error type and not to `unknown-name`.
     unsupported,
@@ -201,7 +203,7 @@ struct sgl::check::symbol
     cc::string operator_spelling;
     /// A struct's type.
     type_id type = type_id::none;
-    /// A position in `checked_module::functions` or `checked_module::bindings`, by `kind`; -1 before it is compiled.
+    /// A position in `checked_module::functions`, `bindings` or `pipelines`, by `kind`; -1 before it is compiled.
     i32 info = -1;
 
     bool operator==(symbol const&) const = default;
@@ -247,6 +249,80 @@ struct sgl::check::binding_info
     ast::range_of<member_info> members;
 
     constexpr bool operator==(binding_info const&) const = default;
+};
+
+/// What a pipeline setting's value is.
+enum class sgl::check::setting_kind : sgl::u8
+{
+    boolean,
+    integer,
+    real,
+    /// A case of the enum the setting's field has, by name: sg's enum of the same name is what it becomes.
+    enum_case,
+    /// `.host`: the host states it when it acquires the pipeline.
+    host,
+    /// `blend = .none`: the optional part is switched off.
+    none,
+};
+
+/// Where a pipeline setting was written, which is the order the settings apply in.
+enum class sgl::check::setting_source : sgl::u8
+{
+    /// An attribute of the vertex input or of the `@pixel struct`, or of one of its members.
+    edge_struct,
+    /// An attribute of an entry point.
+    stage,
+    /// A line of the `pipeline` declaration.
+    declaration,
+};
+
+/// One field of a pipeline's description, written once.
+/// A whole struct written at once is one of these per field it has, so every setting is a leaf.
+struct sgl::check::pipeline_setting
+{
+    /// From the description down, with a target's member name where sg has an index: `color_targets.albedo.format`.
+    cc::string path;
+    setting_kind kind = setting_kind::boolean;
+    /// 0 or 1 for a `boolean`, the value of an `integer`.
+    i64 integer = 0;
+    f64 real = 0;
+    /// The case name of an `enum_case`, and the enum it is a case of, which is sg's enum of the same name.
+    cc::string enum_case;
+    cc::string enum_name;
+    setting_source source = setting_source::declaration;
+    /// Where it was written, in that file.
+    i32 file = 0;
+    source_span where;
+
+    bool operator==(pipeline_setting const&) const = default;
+};
+
+enum class sgl::check::pipeline_kind : sgl::u8
+{
+    raster,
+    compute,
+    raytracing,
+};
+
+/// A `pipeline` declaration that checked: its stages, its layout, and its configuration.
+struct sgl::check::pipeline_info
+{
+    symbol_id symbol = symbol_id::none;
+    pipeline_kind kind = pipeline_kind::raster;
+    symbol_id vertex = symbol_id::none;
+    /// `none` for a pipeline without a pixel stage, which writes depth alone.
+    symbol_id pixel = symbol_id::none;
+    /// The binding layout: the longest binding list of its stages with `@inline` left out; a range of `binding_lists`.
+    ast::range_of<symbol_id> layout;
+    /// The one `@inline` binding its stages list, or `none`.
+    symbol_id inline_constants = symbol_id::none;
+    /// The vertex stage's parameter, and the pixel stage's result; `none` without a pixel stage.
+    type_id vertex_input = type_id::none;
+    type_id target_set = type_id::none;
+    /// In the order they apply, each over the ones before it and all over sg's defaults.
+    ast::range_of<pipeline_setting> settings;
+
+    constexpr bool operator==(pipeline_info const&) const = default;
 };
 
 enum class sgl::check::target_kind : sgl::u8

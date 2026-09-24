@@ -157,6 +157,8 @@ enum class sgl::diagnostic_kind : sgl::u8
     needs_feature,
     /// A function reached from an entry point of a stage its `@stages` leaves out, `DEBUG_sample` in a compute shader.
     stage_not_allowed,
+    /// A `pipeline` whose stages do not fit together, or a setting that names no field or has a value it cannot.
+    invalid_pipeline,
 };
 
 namespace sgl

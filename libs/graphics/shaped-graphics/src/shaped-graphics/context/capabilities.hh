@@ -49,6 +49,11 @@ enum class sg::feature
     /// A storage texture may use a format outside `sg::is_portable_storage_format`, such as `r8_unorm` or `rgb10a2_unorm`.
     /// WebGPU grants them with `texture-formats-tier1` and `bgra8unorm-storage`, Vulkan with `shaderStorageImageExtendedFormats`.
     extended_storage_formats,
+
+    /// A block-compressed texture may have a width or height that is no multiple of its block (4 for BC).
+    /// WebGPU core refuses one unless the device has `texture-compression-unaligned`, and D3D12 reports it as an option.
+    /// Where this is false, creating one is a refusal naming the size, which a loader of user textures can pad against.
+    unaligned_block_compression,
 };
 
 /// Whether the thread driving this context may block at all.

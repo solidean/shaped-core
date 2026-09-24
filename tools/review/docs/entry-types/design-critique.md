@@ -40,11 +40,11 @@ Each decision the entry covers gets the same shape:
 - **Each option**, as *how it works / pro / con / verdict*, in that order and every time.
   *How it works* says what would actually happen, in a sentence or three a reader can picture, and what a caller would write under it.
   An option whose mechanism is only named is not yet an option the reader can weigh.
-- **Every symbol and term is introduced where it is first used**, or once in `context/repo` as a short list of the words the sections lean on.
+- **Every symbol and term is introduced where it is first used**, or once in an opening `prose` block as a short list of the words the sections lean on.
   A bare entry id (`030`) never carries a sentence on its own; say what it found.
 - **Bullets over paragraphs**, with one point per bullet; a sub-bullet where a point has parts.
 
-The `context/*` tiers of a critique teach the mechanisms being compared, not the change as a whole.
+That introduction teaches the mechanisms being compared, not the change as a whole.
 
 **Then check it with a reader who has nothing else.**
 Before the round is handed over, give a subagent only the entry text — no diff, no repository.

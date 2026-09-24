@@ -110,6 +110,21 @@ struct sgl::ast::sampler_decl
     constexpr bool operator==(sampler_decl const&) const = default;
 };
 
+/// `pipeline name:` with one `path = value` per line, or the short form `pipeline name = (entry, entry)`, which may carry
+/// the same settings in a block of its own.
+struct sgl::ast::pipeline_decl
+{
+    /// Empty for `pipeline:` without a name, which a later phase names `pipeline`.
+    source_span name;
+    range_of<setting> settings;
+    /// The short form's entry points; empty for the block form.
+    range_of<argument> stages;
+    /// Whether the short form was written, so `pipeline p = ()` is told apart from an empty block.
+    bool is_short_form = false;
+
+    constexpr bool operator==(pipeline_decl const&) const = default;
+};
+
 /// `notation pattern => replacement`
 struct sgl::ast::notation_decl
 {
@@ -166,6 +181,7 @@ struct sgl::ast::decl
                 const_decl,
                 binding_decl,
                 sampler_decl,
+                pipeline_decl,
                 notation_decl,
                 field_decl,
                 property_decl,

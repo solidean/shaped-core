@@ -120,6 +120,8 @@ cc::result<raw_texture_handle> context_transient_scope::try_create_raw_texture(t
     // Placed/bump-allocated transient textures wait on a texture-capable transient memory_heap; see the header note.
     if (auto unsupported = impl::find_unsupported_texture(_ctx, desc); unsupported.has_value())
         return cc::error(cc::move(unsupported.value()));
+    if (auto error = desc.unaligned_block_error(_ctx.supports(feature::unaligned_block_compression)); !error.empty())
+        return cc::error(cc::move(error));
     allocation_info alloc;
     alloc.scope = lifetime_scope::transient;
     auto created = _ctx.try_create_raw_texture(desc, alloc);

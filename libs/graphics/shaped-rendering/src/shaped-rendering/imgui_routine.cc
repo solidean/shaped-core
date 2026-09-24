@@ -191,18 +191,14 @@ cc::shared_async<cc::unit> imgui_routine::init(sg::routine_init_scope scope)
     // imgui emits both windings so culling is off, and it is drawn in list order so there is no depth test.
     // Alpha blending is imgui's standard straight-alpha equation;
     // the alpha channel uses one/inv-src-alpha so compositing onto a transparent target accumulates coverage correctly rather than saturating.
-    _pipeline = ctx.cached.acquire_raster_pipeline(sg::raster_pipeline_description{
-        .layout = pipeline_layout,
-        .vertex_shader = *compiled_vs,
-        .fragment_shader = *compiled_ps,
-        .vertex_input = sg::vertex_input_layout::create<ImDrawVert>(),
-        .topology = sg::primitive_topology::triangle_list,
-        .rasterization = {.cull = sg::cull_mode::none},
-        .color_targets
-        = {{.format = params(),
-            .blend = sg::blend_state{
-                .color = {.source = sg::blend_factor::src_alpha, .target = sg::blend_factor::one_minus_src_alpha},
-                .alpha = {.source = sg::blend_factor::one, .target = sg::blend_factor::one_minus_src_alpha}}}}});
+    _pipeline = ctx.cached.acquire_raster_pipeline(
+        sg::raster_pipeline_description{.layout = pipeline_layout,
+                                        .vertex_shader = *compiled_vs,
+                                        .fragment_shader = *compiled_ps,
+                                        .vertex_input = sg::vertex_input_layout::create<ImDrawVert>(),
+                                        .topology = sg::primitive_topology::triangle_list,
+                                        .rasterization = {.cull = sg::cull_mode::none},
+                                        .color_targets = {{.format = params(), .blend = sg::blend_alpha}}});
 
     // Awaited here rather than polled in execute, so `ready` means ready.
     co_await cc::async_settled(_pipeline);

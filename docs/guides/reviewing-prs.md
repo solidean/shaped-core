@@ -298,6 +298,20 @@ The drafted comment ended in the harness's attribution line, and the maintainer'
 do not add "🤖 Generated with Claude Code". we keep it professional here and only want a summary of the changes in that comment.
 ```
 
+### An entry carries no `context/*` blocks
+
+**An entry introduces what it needs in its own prose; the review tool has no background block to put it in.**
+Entries once carried three collapsed tiers of background, one each for a reader new to the codebase, new to the change, and caught up on the entries above.
+`validate` required all three, and after more than ten reviews they had not earned their place.
+The maintainer's answer, verbatim:
+
+```raw
+after using the review tool 10+ times, I don't think context/* is useful. let's just rip this out completely in this change. whenever i wanted to get more context for an entry and opened it, it never really contained what I needed. so it doesnt pull its weight
+```
+
+What the tiers were for still holds: every entry is read on its own, so a term is introduced where it is first used.
+A `## context/...` heading is now an unknown block type, and fails to parse like any other.
+
 ### Price work in what it improves and how long an agent takes, never in human hours
 
 **The author hands a comment to an agent, so the work in it is effectively free.**
