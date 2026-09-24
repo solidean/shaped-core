@@ -168,4 +168,7 @@ The notification wakes the actor's mailbox, so a watched watcher has no interval
 - **A generated group struct holds only its fields.**
   `constants_size`, `constants_slot`, `write_constants`, `declared_bindings`, `declared_samplers` and `gather` belong in a specialization outside it.
   The type a caller fills then reads as its members alone.
+- **A generated entry point carries no `acquire_layout` or `acquire_pipeline` of its own.**
+  Where one only forwards, it belongs on `ctx.cached` as a protocol the generated symbol satisfies.
+  A declared pipeline already works that way: it is an `sg::raster_pipeline_source`, and `ctx.cached.acquire_raster_pipeline` acquires it.
 - **Promoting the VFS to clean-core.** This library's `filesystem` is the deliberate trial run for a future `cc` virtual filesystem; `real_filesystem` is the only piece that would have to move.
