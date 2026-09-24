@@ -68,21 +68,55 @@ depth_stencil_target depth_stencil_view::discarded() &&
 void command_list::open_rendering(rendering_info const& info)
 {
     _rendering_target_set = info.target_set;
+
+    auto formats = raster_target_formats();
+    for (auto const& target : info.color_targets)
+        formats.color.push_back(target.view.format());
+    if (info.depth_stencil_target.has_value())
+        formats.depth_stencil = info.depth_stencil_target.value().view.format();
+    // Every target of a rendering has one sample count, so the first one says it.
+    if (!info.color_targets.empty())
+        formats.sample_count = info.color_targets[0].view.texture()->sample_count();
+    else if (info.depth_stencil_target.has_value())
+        formats.sample_count = info.depth_stencil_target.value().view.texture()->sample_count();
+    _rendering_formats = formats;
+
     raster_begin_rendering(info);
 }
 
 void command_list::close_rendering()
 {
     _rendering_target_set.clear();
+    _rendering_formats = {};
     raster_end_rendering();
 }
 
 void command_list::bind_raster_pipeline(raster_pipeline const& pipeline)
 {
-    // Empty on either side is a hand-built description, which the backend still checks by format.
+    // A name empty on either side is a hand-built description, which the formats below still check.
     CC_ASSERTF(
         pipeline.target_set().empty() || _rendering_target_set.empty() || pipeline.target_set() == _rendering_target_set,
         "this pipeline draws into '{}', and the open rendering is '{}'", pipeline.target_set(), _rendering_target_set);
+
+    // Backends bake the formats into the PSO, and none of them checks a rendering against it.
+    if (pipeline.target_formats().has_value() && _rendering_formats.has_value())
+    {
+        auto const& built = pipeline.target_formats().value();
+        auto const& open = _rendering_formats.value();
+        CC_ASSERTF(built.color.size() == open.color.size(),
+                   "this pipeline writes {} color targets, and the open rendering has {}", built.color.size(),
+                   open.color.size());
+        for (auto i = 0; i < built.color.size(); ++i)
+            CC_ASSERTF(built.color[i] == open.color[i],
+                       "color target {} of this pipeline is pixel_format {}, and the open rendering's is {}", i,
+                       int(built.color[i]), int(open.color[i]));
+        CC_ASSERTF(built.depth_stencil == open.depth_stencil,
+                   "this pipeline's depth-stencil pixel_format is {}, and the open rendering's is {}",
+                   int(built.depth_stencil), int(open.depth_stencil));
+        CC_ASSERTF(built.sample_count == open.sample_count,
+                   "this pipeline is built for {} samples, and the open rendering has {}", built.sample_count,
+                   open.sample_count);
+    }
     raster_bind_pipeline(pipeline);
 }
 

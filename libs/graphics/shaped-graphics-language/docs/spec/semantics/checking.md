@@ -23,9 +23,17 @@ Back to the [semantics](_index.md); the reasons are in [why/checking.md](why/che
 
 * **CHK-10** A **symbol** is a `fun`, a `struct`, an `enum` or a `binding` declared at the top level of a file, named by its file and its declaration.
 * **CHK-11** The module scope is unordered: a symbol may be used above its declaration.
-* **CHK-12** A name is declared once in the module scope, unless every declaration of it is a function; a later declaration is the normal error `duplicate-declaration`.
+* **CHK-12** A name is declared once in one scope, unless every declaration of it is a function; a later declaration is the normal error `duplicate-declaration`.
 * **CHK-13** Several functions of one name are an **overload set**.
-* **CHK-14** A `const`, a `type` alias and a `sampler` are `unsupported-yet`, and each still owns its name, so a use of it is silent.
+* **CHK-188** The module scope is two: the files of the prelude share the outer one, and the program's file has the inner one ([why](why/checking.md#chk-188)).
+  A declaration of the program's file **shadows** what the prelude declares of its name, so a `struct vec3` there is no duplicate.
+* **CHK-189** Where both scopes declare nothing but functions of one name, the functions of both are one overload set.
+* **CHK-192** Where a call matches functions of both scopes, those of the program's file are its only candidates ([why](why/checking.md#chk-192)).
+  Two matches in one scope are still CHK-72.
+* **CHK-190** A lookup from a prelude file sees the prelude's scope alone, and never a name of the program's file.
+* **CHK-191** What the check pass needs of the prelude by name is always the prelude's, whatever the program's file shadows.
+  That is the type of a literal, of a condition and of a `for`, and `raster_pipeline_description`.
+* **CHK-14** A `const`, a `type` alias and a file-scope `sampler` are `unsupported-yet`, and each still owns its name, so a use of it is silent.
   An `enum` is a symbol of its own, by CHK-142.
 * **CHK-15** `use` and `notation` are `unsupported-yet`.
 * **CHK-16** A symbol is in one of four states: untouched, in compilation, checked, or failed.
@@ -90,14 +98,17 @@ enum light_kind:
 * **CHK-37** An `@operator` function is found through its operator alone: its own name is in no scope ([why](why/checking.md#chk-37)).
 * **CHK-38** The pass knows the attributes of the table below, each on the node kind the table names.
 * **CHK-39** Any other attribute, anywhere, is `unsupported-yet`, and arguments on a known attribute that takes none are `invalid-attribute-arguments`.
+  An attribute that names a pipeline setting is known where CHK-181 says, and takes its value.
 * **CHK-106** `@pure` on a function says that a call of it has no [effect](evaluation.md#effects); a `@builtin` without it is assumed to have one ([why](why/checking.md#chk-106)).
 
 | on | the known attributes |
 |---|---|
-| a function | `@builtin`, `@pure`, `@operator`, `@vertex`, `@pixel` |
+| a function | `@builtin`, `@pure`, `@operator`, `@vertex`, `@pixel`, `@compute`, `@stages` |
 | a struct | `@builtin`, `@vertex`, `@pixel` |
 | a binding | `@inline` |
-| a struct field | `@position` |
+| a binding member | `@unfilterable`, `@non_filtering` |
+| a struct field | `@position`, `@thread_id`, `@per_instance`, `@stream` |
+| a pipeline | `@raster`, `@compute`, `@raytracing` |
 
 ```sgl
 @builtin struct float
@@ -121,6 +132,32 @@ enum light_kind:
 * **CHK-45** In any other function it is the normal error `binding-not-listed`.
 * **CHK-46** A binding is no value: its bare name in an expression is `unsupported-yet`.
 * **CHK-171** A buffer member is known to the host by its path, `binding.member`, and a group's constant block by the binding's name ([why](why/checking.md#chk-171)).
+* **CHK-198** A texture, an image and a sampler are types of a binding member, as a buffer is, and none is a value: [bindings.md](../bindings.md) is the model.
+  Two mentions of one such type are one type, and a member names each of them as its spelling does: `texture2d[float4]`, `out image2d[.rgba8_unorm]`.
+* **CHK-199** A texture's argument is `float`, `int` or `uint`, one to four wide, and a texture without its argument is `wrong-kind-of-name`.
+  Another type as the argument is `wrong-kind-of-name` too, and a name that is no type is `unknown-name` by CHK-24, so `texture2d[rgba8]` is the latter.
+* **CHK-200** An image's argument is exactly one enum case naming one of sg's storage formats, `.rgba8_unorm`.
+  It is the one value type argument SGL reads, until value type arguments exist in general.
+* **CHK-201** A form some backend lacks is the normal error `needs-feature`, naming the feature, on every target alike:
+  `texture2d_ms_array`, an image outside the portable storage formats, and a `mut` image outside the three `r32` formats.
+* **CHK-202** `@unfilterable` stands on a texture member of floats, and on any other binding member is `wrong-kind-of-name`.
+  Elsewhere it is an attribute the pass does not know, by CHK-39.
+* **CHK-203** `@non_filtering` stands on a `sampler` member, and on any other binding member is `wrong-kind-of-name`.
+  Elsewhere it is an attribute the pass does not know, by CHK-39.
+* **CHK-204** A `sampler name:` block in a binding is a member whose type is `comparison_sampler` where it sets `compare`, and `sampler` otherwise.
+  Its settings are `sg::sampler`'s fields, each an enum case or a number; an unknown setting or value is `invalid-attribute-arguments`.
+  The settings apply in source order, and a later one overrides what an earlier one set, `filter` over `mip_filter` included.
+  An attribute on the block is judged as on any other binding member.
+* **CHK-205** A static sampler in an `@inline` binding is `wrong-kind-of-name`, since such a binding holds constants only.
+* **CHK-206** A `@builtin` function alone may take a texture, an image or a sampler; for any other function each is `unsupported-yet`, as it is anywhere a value stands.
+* **CHK-207** A builtin's image parameter names the texel it loads or stores instead of a format, `out image2d[float4]`, and is a pattern:
+  it takes every image of that shape whose format's texel is that type, and which the shader may read where the pattern reads, or write where it writes.
+* **CHK-194** A builtin's bare `texture2d` or `image2d` parameter is a pattern too, which takes every texture, or every image, of that shape, whatever it holds and however it is read.
+  It is for what depends on neither, such as a size.
+* **CHK-210** A call that hands a builtin an `@unfilterable` texture member and a sampler member that filters is `type-mismatch`, and its detail names both.
+  A `sampler` member filters unless it is `@non_filtering`, and a static sampler filters unless every filter is `.nearest`.
+* **CHK-211** `max_anisotropy` is an `int` literal from 1 to 16, and anything else is `invalid-attribute-arguments`.
+* **CHK-212** A static sampler whose `max_anisotropy` is above 1 has every filter `.linear` once its settings are applied, or it is `invalid-attribute-arguments`.
 
 ```sgl
 @inline binding constants:
@@ -144,7 +181,9 @@ enum light_kind:
 * **CHK-52** `let name : type = value` needs `value` to be of `type`, or it is the normal error `type-mismatch`.
 * **CHK-53** A local **shadows** every earlier local and parameter of its name, in its own block or an enclosing one, from the statement after its `let`, as in Rust ([why](why/checking.md#chk-53)).
   The value it is given still sees the one it hides, and its type may differ.
-* **CHK-54** A local or a parameter that has the name of a module-level symbol is `unsupported-yet` ([why](why/checking.md#chk-54)).
+* **CHK-54** A local or a parameter may have the name of a module-level symbol, and shadows it as it shadows a local ([why](why/checking.md#chk-54)).
+  Types and values share one namespace, so behind it the name is the local wherever it stands: a call of it is CHK-78, and a type position holding it is the normal error `wrong-kind-of-name`.
+  A parameter's type is resolved before any parameter is in scope, so `light: light` is fine.
 * **CHK-55** A pattern in a `let` and a `let` without a value are `unsupported-yet`; `let mut` is CHK-111.
 * **CHK-56** `return value` needs `value` to be of the function's return type, or it is `type-mismatch`.
 * **CHK-57** An arrow body `=> value` is `return value`.
@@ -160,7 +199,7 @@ enum light_kind:
 * **CHK-63** A name that stands for a struct, a function or a binding is no value by itself: it is `unsupported-yet`.
 * **CHK-64** `value.name` is the field `name` of the struct type of `value`; a type without that field is the normal error `unknown-member`.
 * **CHK-65** `(x)` is `x`.
-* **CHK-152** `.name` is the case `name` of the enum the context expects, which today is the scrutinee of a `case` and nothing else.
+* **CHK-152** `.name` is the case `name` of the enum the context expects, which today is the scrutinee of a `case` and the field a pipeline setting assigns (CHK-178).
   A leading dot where no type is expected is `unsupported-yet`, and one whose expected type is no enum, or has no such case, is `unknown-member`.
 * **CHK-66** Every expression kind not named in this section is `unsupported-yet`.
 
@@ -180,6 +219,14 @@ enum light_kind:
 * **CHK-78** A splat in any other call, a named argument, a call of a local, a method call and type arguments are `unsupported-yet`.
 * **CHK-79** A callee that names a binding is `wrong-kind-of-name`.
 * **CHK-80** `and`, `or` and `not` are no functions: CHK-116.
+* **CHK-195** `x as T` is a call of the `@operator("as")` function whose one parameter is the type of `x` and whose result is `T`.
+  The result takes part in the match, since the overloads of `as` differ in it; no such function is `no-matching-overload`.
+* **CHK-196** `x as T` where `x` already has the type `T` is `x`.
+* **CHK-197** The prelude converts between `float`, `int` and `uint` of one width, and nothing else ([why](why/checking.md#chk-197)).
+  A float whose truncation the integer holds becomes that integer, truncated toward zero.
+  A float out of the integer's range, and a NaN, become a value the language does not specify, and it may differ between targets.
+  Between `int` and `uint` the bits stay.
+  The interpreter's choice of the unspecified value is saturation at the integer's bounds, and 0 for a NaN.
 
 ```sgl
 let n = normalize p.normal
@@ -206,7 +253,42 @@ let color = float4(..lit, 1.0)
 * **CHK-91** A `@pixel fun` returns a `@pixel struct`.
 * **CHK-92** An entry point is neither `@builtin` nor `@operator`.
 * **CHK-173** `@per_instance` and `@stream(name)` are attributes of a struct field, recorded on the member; `@stream` takes one bare name.
+* **CHK-208** `@stages(.pixel)` on a function, builtin or not, names the stages it may be reached from, each an enum case of `.vertex`, `.pixel` and `.compute`.
+  A function without it may be reached from every stage, and any other argument is `invalid-attribute-arguments`.
+* **CHK-193** An entry point whose inlined body reaches a function whose `@stages` leaves out the entry point's stage is `stage-not-allowed`, at that call.
+  It is judged per entry point once everything is inlined, since a function in between says nothing about where it is reached from.
+  `DEBUG_sample` is `@stages(.pixel)`: its level comes from derivatives, which only a pixel stage has on every target.
 * **CHK-93** Breaking one of CHK-88 to CHK-92 is `invalid-entry-point`, and its detail names the rule.
+
+## Pipelines
+
+[pipelines](../pipelines.md) is the model; these are its rules.
+
+* **CHK-174** A `pipeline` declares a symbol of the module scope, named `pipeline` where it has no name of its own; it shares that scope with the file's functions (CHK-12).
+* **CHK-175** Its stages are the settings `vertex` and `pixel`, each the name of one entry point of that stage; in the short form each entry point takes the stage its attribute names.
+  A short form's settings block names no stage.
+  A pipeline has one vertex stage and at most one pixel stage, and a compute entry point is in none.
+* **CHK-176** Every other setting assigns one field of the prelude's `raster_pipeline_description`, and the settings apply in source order, each over the ones before it.
+* **CHK-177** The left side of a setting is a path of field names; its first name, where it is no field of the description, stands for the one field of that name below it.
+  A name that is no field anywhere, or two, is `invalid-pipeline`, and the detail names both paths.
+* **CHK-178** A value is `true` or `false` for a `bool`, a number literal for an `int` or a `float`, and a case for an enum (CHK-152).
+  A paren literal writes a struct whole and names each of its fields once, or it is `missing-field`, `unknown-field` or `duplicate-field`.
+  An `int` is held to the range sg keeps its field in: a stencil mask is 0 to 255, `sample_count` a power of two from 1 to 64, and `patch_control_points` 0 to 32.
+* **CHK-179** Under `color_targets` stands one entry per member of the pixel stage's `@pixel struct`; a setting whose path names no member there is one per member.
+* **CHK-180** `.host` stands only for a target's `format`, the `depth_stencil_format` and the `sample_count`, and `.none` only for a target's `blend`.
+* **CHK-181** An attribute of an entry point, of a `@vertex struct` or of a `@pixel struct` is a setting when its name alone is one field.
+  On a member of a `@pixel struct` it is one of that target's fields.
+  Such an attribute takes one value.
+  One whose name is two fields is `invalid-pipeline`, and the detail names both and says to set it in the pipeline, since an attribute has no path.
+* **CHK-182** A pipeline's settings apply in this order: the attributes of its vertex input, then of its `@pixel struct` and its members, then of its vertex and its pixel stage, then its own.
+  Two sources of one step that set one field differently are `invalid-pipeline`, unless the pipeline sets that field itself.
+  A part and a field inside it count as one field here, so `blend = .none` meets every field of another source's blend, and the pipeline's own `blend = .none` settles them.
+* **CHK-183** What the vertex stage returns has the members the pixel stage takes: as many, with the same names and types, in the same order, and `@position` on the same one.
+* **CHK-184** Its stages' binding lists, `@inline` bindings left out, name the same binding at every position they share.
+  The longest is the pipeline's layout, and the stages list one `@inline` binding at most.
+* **CHK-185** Every target has a format at the end: a case other than `.undefined`, or `.host`.
+* **CHK-186** `@compute` and `@raytracing` on a pipeline are `unsupported-yet`.
+* **CHK-187** Breaking one of CHK-175 to CHK-185 is `invalid-pipeline`, unless a rule names another kind, and its detail says what broke.
 
 ## The flat tree
 
@@ -226,6 +308,8 @@ let color = float4(..lit, 1.0)
   A splatted value that is no local is bound to a temporary local where its first member stands, so it is evaluated once and no earlier than written.
 * **CHK-104** Every name an emitter writes comes from one **mint**, which hands out a desired name when it is free and `name_1`, `name_2`, … otherwise ([why](why/checking.md#chk-104)).
 * **CHK-105** An entry point keeps its name, and every module-level name is taken in the mint before the first local is minted.
+* **CHK-213** An entry point whose flat tree the pass cannot write, though nothing it reaches reported an error, is `unsupported-yet` at its name.
+  A gap of the pass is never a silent loss of the entry point.
 
 ## Control flow
 
@@ -245,7 +329,7 @@ let color = float4(..lit, 1.0)
 * **CHK-119** `break` and `continue` name the innermost loop around them.
 * **CHK-120** `return`, `break` and `continue` are statements; one that stands as the result of a `case` arm leaves as it says, and that arm produces no value (CHK-165).
   One that stands as a value anywhere else is `unsupported-yet`.
-* **CHK-135** `print value` takes a value of any type; a string is `unsupported-yet`.
+* **CHK-209** `print value` takes a value of any type; a string is `unsupported-yet`.
 
 ```sgl
 fun falloff(d: float, steps: int) -> float:
@@ -347,18 +431,18 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 
 | kind | reported by |
 |---|---|
-| `unsupported-yet` | CHK-8 |
+| `unsupported-yet` | CHK-8, CHK-213 |
 | `duplicate-declaration` | CHK-12, CHK-28 |
 | `dependency-cycle` | CHK-18, CHK-136 |
 | `unknown-name` | CHK-24, CHK-62 |
-| `wrong-kind-of-name` | CHK-24, CHK-79 |
+| `wrong-kind-of-name` | CHK-24, CHK-54, CHK-79, CHK-199, CHK-200, CHK-202, CHK-203, CHK-205 |
 | `missing-type` | CHK-26 |
 | `unknown-builtin` | CHK-31 |
 | `expected-body` | CHK-32 |
 | `opaque-struct-needs-builtin` | CHK-34 |
-| `invalid-attribute-arguments` | CHK-36, CHK-39 |
+| `invalid-attribute-arguments` | CHK-36, CHK-39, CHK-204, CHK-208, CHK-211, CHK-212 |
 | `binding-not-listed` | CHK-45, CHK-131 |
-| `type-mismatch` | CHK-52, CHK-56, CHK-77, CHK-84, CHK-112 to CHK-118, CHK-121, CHK-139, CHK-167 |
+| `type-mismatch` | CHK-52, CHK-56, CHK-77, CHK-84, CHK-112 to CHK-118, CHK-121, CHK-139, CHK-167, CHK-210 |
 | `not-assignable` | CHK-112 |
 | `missing-return` | CHK-125 |
 | `unreachable-code` | CHK-126, CHK-162 |
@@ -368,17 +452,19 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `non-exhaustive-case` | CHK-160 |
 | `duplicate-case-pattern` | CHK-161 |
 | `missing-value-in-arm` | CHK-168 |
+| `needs-feature` | CHK-201 |
+| `stage-not-allowed` | CHK-193 |
 | `ambiguous-overload` | CHK-72 |
 | `missing-field`, `unknown-field`, `duplicate-field` | CHK-84 |
 | `invalid-entry-point` | CHK-87, CHK-93 |
+| `invalid-pipeline` | CHK-175 to CHK-185, CHK-187 |
 
 ## Open
 
 * Whether `@builtin` is allowed outside the prelude; today it is.
 * Whether a builtin's declaration is checked against its record beyond the key; today its result type and its attributes are not.
-* Whether a local may shadow a module-level name ([scopes](../incubator/scopes.md)); shadowing a local or a parameter is CHK-53.
 * Whether a body is checked once or where it is inlined, once a generic makes the two differ ([why](why/checking.md#chk-129)).
-* `true` and `false`, which are names nothing declares yet.
+* `true` and `false`, which are names nothing declares yet, beyond the value of a pipeline setting (CHK-178).
 * Whether a second function with the parameter types of another is an error where it is declared.
 * Whether a pattern may bind a name, which is the pattern language of [patterns](../incubator/patterns.md) and the thing that would make exhaustiveness a real analysis.
 * Whether an enum reaches `int` through a cast, and what an `int` that names no case then is ([enum futures](../incubator/enum-futures.md)).

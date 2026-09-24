@@ -147,8 +147,8 @@ TEST("slib sgl compiler - the cube becomes WGSL that slib's own reader reflects"
     add_sgl_compilers(lib);
     lib.add_package(slib_test::sgl_shaders::package());
 
-    auto const& vs = value_of(slib_test::sgl_shaders::cube.vertex.main_vs->acquire(sg::shader_format::wgsl));
-    auto const& ps = value_of(slib_test::sgl_shaders::cube.pixel.main_ps->acquire(sg::shader_format::wgsl));
+    auto const& vs = value_of(slib_test::sgl_shaders::cube.main_vs->acquire(sg::shader_format::wgsl));
+    auto const& ps = value_of(slib_test::sgl_shaders::cube.main_ps->acquire(sg::shader_format::wgsl));
 
     CHECK(vs.stage == sg::shader_stage::vertex);
     CHECK(vs.format == sg::shader_format::wgsl);
@@ -174,7 +174,7 @@ TEST("slib sgl compiler - a compute entry point reaches WGSL with its buffer ref
     add_sgl_compilers(lib);
     lib.add_package(slib_test::sgl_shaders::package());
 
-    auto const& cs = value_of(slib_test::sgl_shaders::double_values.compute.main->acquire(sg::shader_format::wgsl));
+    auto const& cs = value_of(slib_test::sgl_shaders::double_values.main->acquire(sg::shader_format::wgsl));
 
     CHECK(cs.stage == sg::shader_stage::compute);
     CHECK(cs.entry_point == "main");
@@ -199,8 +199,8 @@ ASYNC_TEST("slib sgl compiler - the cube becomes SPIR-V with a push-constant blo
     add_sgl_compilers(lib);
     lib.add_package(slib_test::sgl_shaders::package());
 
-    auto const vs_node = slib_test::sgl_shaders::cube.vertex.main_vs->acquire(sg::shader_format::spirv);
-    auto const ps_node = slib_test::sgl_shaders::cube.pixel.main_ps->acquire(sg::shader_format::spirv);
+    auto const vs_node = slib_test::sgl_shaders::cube.main_vs->acquire(sg::shader_format::spirv);
+    auto const ps_node = slib_test::sgl_shaders::cube.main_ps->acquire(sg::shader_format::spirv);
     co_await cc::async_settled(vs_node);
     co_await cc::async_settled(ps_node);
     auto const& vs = value_of(vs_node);
@@ -227,8 +227,8 @@ ASYNC_TEST("slib sgl compiler - the cube becomes DXIL with its block at b0 of th
     add_sgl_compilers(lib);
     lib.add_package(slib_test::sgl_shaders::package());
 
-    auto const vs_node = slib_test::sgl_shaders::cube.vertex.main_vs->acquire(sg::shader_format::dxil);
-    auto const ps_node = slib_test::sgl_shaders::cube.pixel.main_ps->acquire(sg::shader_format::dxil);
+    auto const vs_node = slib_test::sgl_shaders::cube.main_vs->acquire(sg::shader_format::dxil);
+    auto const ps_node = slib_test::sgl_shaders::cube.main_ps->acquire(sg::shader_format::dxil);
     co_await cc::async_settled(vs_node);
     co_await cc::async_settled(ps_node);
     auto const& vs = value_of(vs_node);

@@ -34,14 +34,15 @@ sc_add_shader_package(
 # stages are spelled as sg::shader_stage: compute vertex fragment tessellation_control
 #   tessellation_evaluation geometry raygen closest_hit any_hit miss intersection callable
 # an SGL package spells its stages as SGL does: `cube.sgl:vertex:main_vs`, `cube.sgl:pixel:main_ps`.
-#   `pixel` is the symbol too (cube.pixel.main_ps) and reaches sg as shader_stage::fragment.
+#   `pixel` reaches sg as shader_stage::fragment; the symbol has no stage in it (cube.main_ps), since the entry point carries one.
 #   ONE file holds both stages, and ONE package serves dx12, vulkan and webgpu.
 #   payload / constants entries are HLSL's alone, and a WGSL package names no generating entry at all.
 #   `binding` and `vertex_input` mean an SGL declaration in an SGL package, below.
 # an SGL package has its own generating kinds, read by the COMPILER (`sgl describe`), never by a parser here:
-#   cube.sgl:*                          # every entry point, binding and @vertex / @pixel struct the file declares
+#   cube.sgl:*                          # every entry point, binding, @vertex / @pixel struct and pipeline the file declares
 #   cube.sgl:binding:frame              # a `binding` block;  cube.sgl:vertex_input:v  a `@vertex struct`
 #   cube.sgl:render_target:target       # a `@pixel struct`; a name the file does not declare is a build error
+#   cube.sgl:pipeline:pipeline          # a `pipeline` declaration
 #   `*` needs no stage word: an SGL entry point carries its stage in the source.
 #   those need a runnable `sgl` while building: the tree's own natively, SC_SGL_TOOL otherwise (a cross build,
 #   SC_BUILD_TOOLS=OFF). dev.py builds the host one for a cross preset itself. Entry points alone need neither.
@@ -237,6 +238,8 @@ namespace frame_bindings
 // `#pragma sc static <sg::sampler field>=<value>` before a sampler bakes it into the layout;
 //   `filter=linear` sets all three filters, `address=clamp_edge` all three axes, and a tuple form
 //   `filter=(linear, linear, nearest)` addresses them individually, in sg::sampler's declaration order.
+// `#pragma sc format <sg::pixel_format>` before an RWTexture* states its storage_format, and on SPIR-V
+//   writes [[vk::image_format]] too; it is how SGL's HLSL states an image's format.
 // `#pragma sc push_constants` before a ConstantBuffer makes it inline constants: register(b0, space9) on
 //   DXIL, [[vk::push_constant]] on SPIR-V. NO arguments -- the space is slib::inline_constants_space,
 //   reserved, and a group numbered 9 is refused rather than the block naming a space to avoid.
@@ -284,7 +287,7 @@ scope.bind<shaders::frame_bindings>(*g);   // binds at G::group_index, on raster
 ### an SGL package's generated types
 
 ```cpp
-// `binding work` -> shaders::work: one field per member, in the shader's order, plus declared_bindings(), gather().
+// `binding work` -> shaders::work: one field per member, in the shader's order, plus declared_bindings(), declared_samplers(), gather().
 //   a buffer member is a TYPED view: `mut buffer[float]` -> sg::readwrite_buffer_view<float>, so a read-only view or
 //   a buffer<int> does not compile. A plain member is a plain field (`scale: float` -> float): the group's own
 //   constant buffer, which create_binding_group allocates with the scope's lifetime: a transient one is uploaded
@@ -294,6 +297,11 @@ scope.bind<shaders::frame_bindings>(*g);   // binds at G::group_index, on raster
 auto const layout = ctx.cached.acquire_binding_group_layout<shaders::work>();
 auto const group = ctx.transient.create_binding_group(cmd, layout, shaders::work{.scale = 2.0f, .values = buf.as_readwrite_buffer()});
 cmd.compute.bind_group(0, *group);        // group 0 of `main`, group 1 of an entry point listing {factor, work}
+// a texture or image member is a typed view too, its traits from the shape (`sg::tv_2d`, `sg::tv_cube`, `sg::tv_2d_array`…):
+//   `albedo: texture2d[float4]`        -> sg::readonly_texture_view<sg::tv_2d> albedo
+//   `dst: out image2d[.rgba8_unorm]`   -> sg::readwrite_texture_view<sg::tv_2d> dst   (any access: read, out, mut)
+//   `user_smp: sampler`                -> sg::sampler user_smp, which gather() hands sg by its host name (`work.user_smp`)
+//   `sampler albedo_smp:` block        -> NO field: an sg::named_sampler in declared_samplers(), which the layout carries
 // `@inline binding constants` -> shaders::constants: plain fields in C++'s layout, and the block the shader reads:
 pass.set_inline_constants(shaders::constants{.view_projection = vp}.to_block());
 // every name lives in the package namespace, so two files declaring one name is a generator error.
@@ -301,16 +309,27 @@ pass.set_inline_constants(shaders::constants{.view_projection = vp}.to_block());
 //   slib renames what the target's compiler reflected, which stays on each binding as `reflected_name`.
 // `@inline binding constants` also gives constants::inline_binding(): the pipeline layout's inline block, no reflection.
 // an entry point of a `*`-declared file is a small wrapper: `->acquire(ctx)` as before, plus the layout its list states:
-auto const layout = shaders::cube.vertex.main_vs.acquire_layout(ctx);                  // {constants}, nothing reflected
-auto const pipeline = co_await shaders::double_values.compute.main.acquire_pipeline(ctx); // compute: needs nothing else
+auto const layout = shaders::cube.main_vs.acquire_layout(ctx);                  // {constants}, nothing reflected
+auto const pipeline = co_await shaders::double_values.main.acquire_pipeline(ctx); // compute: needs nothing else
 // a raster pipeline whose stages list different groups takes their union instead: acquire_pipeline_layout<frame, work>().
+// a `pipeline` declaration -> shaders::<file>.<name> (an unnamed `pipeline:` is `.pipeline`), built from ITS stages,
+//   layout, vertex input, targets and settings; the host states only what the declaration left `.host`.
+//   It is an sg::raster_pipeline_source, so ctx.cached acquires it like a description:
+auto const p = co_await ctx.cached.acquire_raster_pipeline(shaders::cube.pipeline, {.color = swapchain_format}); // open: one field per `.host` part
+//   nothing `.host` -> acquire_raster_pipeline(shaders::cube.pipeline); a last argument customize(sg::raster_pipeline_description&) runs last
+//   .description(ctx, parts)          the description itself, to build or inspect
+//   .description_latest(ctx, parts)   the newest stages and settings even where the frozen part moved; acquire it yourself
+//   an open field left unset (a format still `undefined`, a sample count still 0) asserts: the declaration said the host would state it
+//   the build's settings are generated field writes (slib::impl::fields, from impl/pipeline_fields.hh, which `sgl pipeline-fields` writes)
+//   hot reload: cull, depth, blend… follow the source; a moved frozen part (layout, vertex input, targets, formats, samples,
+//   each struct by name AND shape) keeps the stages and settings this context last built with, and logs what moved
 // `@vertex struct v` -> shaders::v and v::layout(): attributes in the shader's order, no semantic or offset by hand.
 //   members marked `@per_instance` / `@stream(name)` split it over buffers: then v::<stream> per buffer, in slot order,
 //   and v::buffers{.per_vertex = verts, .per_instance = insts}.views() for bind_vertex_buffers — typed, so a
 //   buffer of the wrong stream does not compile.
 // `@pixel struct target` -> shaders::target: one sg::color_target per member, by name, plus an optional depth_stencil.
 cmd.raster.render_to(shaders::target{.color = rt.cleared(c), .depth_stencil = depth.cleared(1.0f)}); // -> rendering_info
-//   the pipeline side: .color_targets = shaders::target::states{.color = {.format = f}}, .target_set = shaders::target::name
+//   the pipeline side, for one built by hand: .color_targets = shaders::target::states{.color = {.format = f}}, .target_set = shaders::target::name
 //   sg then refuses to bind that pipeline in a rendering of another target set, even one of the same shape.
 //   .target_set may be left out: a compiled SGL pixel shader states its own (and its target count), which sg takes.
 // a package with wrapped entry points also gets check_reflection(ctx) -> shared_async<string>: empty while every

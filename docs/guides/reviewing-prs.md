@@ -122,6 +122,11 @@ They are options the maintainer likes to **see beside the recommendation**, and 
   The async-tests design review is the worked case: letting an async invocable take a lock its driver did not hold was going to need a name-ordering constraint to stay deadlock-free.
   The maintainer's counter-proposal was "the driver may hold tags, or the child may, never both".
   It is deadlock-free by the same argument top-level exclusion is, and relaxable later without breaking anything it accepted.
+  **It loses on a high-level wrapper's public surface.**
+  There the maintainer prefers the complete shape on day one, because widening a wrapper later is friction for every caller even when it is additive.
+  The denoising design review is the worked case: denoise-only at one resolution was recommended over a reconstruct contract that admits upscaling.
+  The answer, verbatim: "if we don't have api for this day 1 (in the high-level wrapper) we might have friction adding it in the future".
+  The strict rule still won inside that surface, where a relaxation reaches no caller — ratios are named presets the routine resolves, with a free ratio left to add later.
 - **Deleting a legacy spelling, beside accommodating it.**
   When a new design has to grow a rule only to keep an old spelling working, removing the spelling is an alternative in its own right.
   The same review spent a round designing how `main_thread` should treat an `ASYNC_TEST` body that returns a raw graph instead of being a coroutine.
@@ -297,6 +302,20 @@ The drafted comment ended in the harness's attribution line, and the maintainer'
 ```raw
 do not add "🤖 Generated with Claude Code". we keep it professional here and only want a summary of the changes in that comment.
 ```
+
+### An entry carries no `context/*` blocks
+
+**An entry introduces what it needs in its own prose; the review tool has no background block to put it in.**
+Entries once carried three collapsed tiers of background, one each for a reader new to the codebase, new to the change, and caught up on the entries above.
+`validate` required all three, and after more than ten reviews they had not earned their place.
+The maintainer's answer, verbatim:
+
+```raw
+after using the review tool 10+ times, I don't think context/* is useful. let's just rip this out completely in this change. whenever i wanted to get more context for an entry and opened it, it never really contained what I needed. so it doesnt pull its weight
+```
+
+What the tiers were for still holds: every entry is read on its own, so a term is introduced where it is first used.
+A `## context/...` heading is now an unknown block type, and fails to parse like any other.
 
 ### Price work in what it improves and how long an agent takes, never in human hours
 
@@ -631,6 +650,11 @@ Two corollaries a review should check:
 
 - **Keep the code paths.** Rejecting the feature at the API door is not the same as deleting the plumbing; the point is that conditional or full support later needs no redesign.
 - **Say why, and where.** The rejection must point at the portability reason in a doc, not just assert "not supported yet".
+- **Refuse by feature, never by target.** A form one backend lacks is refused everywhere unless the code opts into the feature that grants it.
+  The non-portability is then declared rather than discovered.
+  The SGL textures design proposed accepting `texture2d_ms_array` in the checker and refusing it only when writing for webgpu.
+  The maintainer's correction: "we technically do not refuse by target _ever_, we only refuse by feature level".
+  An option shaped as a per-target refusal is therefore not a candidate, and a design entry should offer the feature-gated form in its place.
 
 **A known issue recorded in a TODO is not an accepted failure mode**, and finding it already written down does not close the question.
 What the entry settles is that the *capability* is missing; what it usually leaves open is what happens when someone hits it.
@@ -642,6 +666,14 @@ The worked example is sv's per-permutation samplers.
 The viewer's TODO records it honestly: two materials sampling with different filters silently share the first one's sampler.
 The missing capability is a per-hit-group local root signature, and that genuinely waits for sg.
 Asserting on a *conflicting* state for an already-claimed register does not, costs nothing, and turns an unexplainable image into a message.
+
+### A design option is priced on the design, never on what is built so far
+
+**What an in-progress implementation happens to support is not an argument for or against a shape.**
+The SGL texture-functions design recommended free functions over methods because the checker had no method calls yet.
+The maintainer called that "a bad habit": "we can postpone or stub if we want to use things that are not implemented yet".
+So price each option on the language or API itself — discoverability, how it composes with features that are planned — and state the build plan separately.
+The plan has three honest forms: implement it, stub it behind a marked temporary (SGL marks one `DEBUG_`), or defer it to the incubator.
 
 ### A change that touches an example is reviewed by looking at the example
 
@@ -778,6 +810,11 @@ pr-185 found metal leaving a fragment-stage write unordered against a later draw
 So every resource shared by two draws already looked like that write, and the assert would have fired on imgui's font texture in every frame.
 The finding survived; the fix had to start with declaring real per-binding access, the way dx12's `hazard_views` do.
 Before prescribing a check on a declared property, read the one function that declares it.
+
+**"This guard becomes unreachable, make it an assert" is a claim about every path into it.**
+pr-188's first draft said a raised floor on `cc::rec::open_event` made a pinned value's short-capacity guard dead code.
+It is dead on the normal path and not during shutdown: `writer_rotate` returns early without clearing the cursor once the pool is gone, so a short capacity can still come back.
+Trace the early returns of whatever the fix relies on before calling a branch unreachable.
 
 **A member of the right type is not the mechanism wired.**
 A helper that notifies, retires or releases usually needs a call that connects it, and holding the helper proves nothing about that call.
@@ -974,6 +1011,11 @@ pr-164's comment introduced a sentence with "Q14 measured it as portable" and th
 Q14 is a test; the sentence was the author's own doc, on the branch under review.
 That also made it the second failure below — quoting someone's documentation back at them to establish a point they wrote — where a pointer to the line would have carried the whole argument.
 
+**One phrase cited against two files is two quotes.**
+pr-188's first draft told the author to cut two phrases from "`log_write`'s doc and the matching paragraph in `recording.md`".
+Both phrases were in `log.hh`, and `recording.md` said the same things in different words, so the author would have searched one file for text it does not contain.
+Quote each file separately, with its own line.
+
 ### A rename's call-site list comes from a grep of the name
 
 Listing the sites you happened to read while forming the finding is not the same as listing the sites.
@@ -993,6 +1035,12 @@ Removing the `Buffer` row would have broken the corpus's every-type case, which 
 Giving `sg::binding_group_layout` a new constructor argument also reaches both backends' subclasses and `fake_group_layout` in `layout_hash-test.cc`.
 Replacing `create_binding_group(G const&)` left five docs still spelling the old call.
 Renaming a CMake custom target missed the `add_dependencies` naming it and the property that records it.
+
+**Removing a default argument owes the prose that explains the default, not only the calls that rely on it.**
+pr-188's first draft told the author to drop `min_payload = 1` from `cc::rec::open_event` and listed every call site correctly.
+It missed three places a grep for "default" finds and a grep for the call does not.
+The comment above `open_event`'s rotate check argued from "the default of one byte", and a test's comment said it exercised "the whole point of the default".
+A benchmark was labelled with the two-argument spelling.
 
 ### An instruction to "both halves" is checked against each half separately
 

@@ -176,8 +176,8 @@ cc::result<dx12_raster_pipeline_handle> dx12_raster_pipeline::create(ID3D12Devic
     pso.DepthStencilState.StencilEnable = ds.stencil_test ? TRUE : FALSE;
     pso.DepthStencilState.StencilReadMask = ds.stencil_read_mask;
     pso.DepthStencilState.StencilWriteMask = ds.stencil_write_mask;
-    pso.DepthStencilState.FrontFace = to_stencil_face(ds.front);
-    pso.DepthStencilState.BackFace = to_stencil_face(ds.back);
+    pso.DepthStencilState.FrontFace = to_stencil_face(ds.stencil_front);
+    pso.DepthStencilState.BackFace = to_stencil_face(ds.stencil_back);
 
     pso.PrimitiveTopologyType = to_d3d12_topology_type(sg::topology_type(desc.topology));
     pso.NumRenderTargets = UINT(desc.color_targets.size());

@@ -14,6 +14,7 @@ Those produce different entries and different end artifacts, so guessing one wou
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 
 import tools.review as review
@@ -77,6 +78,25 @@ def _resolve_range(ctx: Context, spec: str | None) -> tuple[str, str, str, str]:
     return merge_base, head, base_spec, head_spec
 
 
+def _warn_checkout_not_head(ctx: Context, name: str, head: str, head_spec: str) -> None:
+    """Warn when the checkout is not the head under review.
+
+    **Every backticked path in an entry resolves against the working tree, not against `head`.**
+    A file the range adds then fails `validate` as missing, and a `file:line` link opens some other branch's version.
+    The usual cause is reviewing someone's `pr-<n>` from whatever branch happens to be checked out.
+    """
+    checkout = ctx.git.rev_parse("HEAD")
+    if checkout is None or checkout == head:
+        return
+    print(review.console.yellow(
+        f"WARNING: the checkout is at {checkout[:12]}, not at {head_spec} ({head[:12]}), and every path an entry names resolves "
+        f"against the checkout.\n"
+        f"  review from a worktree of the head instead:\n"
+        f"    git worktree add .tmp/worktrees/{name} {head_spec}\n"
+        f"    uv run review.py init {name} --repo .tmp/worktrees/{name} --range <base>..{head_spec} --goal <goal> --force"
+    ), file=sys.stderr)
+
+
 def run(args: argparse.Namespace, ctx: Context) -> None:
     goals = [g.strip() for spec in args.goal for g in spec.split(",") if g.strip()]
     if not goals:
@@ -115,6 +135,8 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
     review.save(paths.config, cfg)
     review.record(paths.log, "init", goals=goals, base=base, head=head)
     ctx.warn_gitignore(paths)
+    if head:
+        _warn_checkout_not_head(ctx, args.name, head, head_spec)
 
     print(f"review {args.name} at {ctx.rel(paths.root)}")
     print(f"  goals   {', '.join(goals)}")

@@ -16,6 +16,11 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   OIDN's GPU devices run on their own API (CUDA, HIP, SYCL, Metal) and share memory with ours through an OS handle.
   That wants an "exportable" usage on buffer and texture creation, a way to read the handle, and a fence shared both ways.
   Not needed for OIDN on the CPU, which goes through the existing download and upload; built with the OIDN member.
+- **A pipeline-level static sampler (`bound_sampler`) is bound by dx12 and webgpu only.**
+  vulkan created the `VkSampler`s and bound them to no set, and metal read `static_samplers` not at all, so a shader sampling through one read nothing.
+  Both now refuse a pipeline layout that carries one, rather than building a pipeline that samples garbage.
+  Closing it is a reserved descriptor set of immutable samplers on vulkan, at `sg::reserved_binding_group` as webgpu has it, and the same argument buffer slot on metal.
+  SGL's file-scope `sampler name:` waits on this, and a group's name-matched static sampler is what works everywhere meanwhile.
 
 - **The metal backend serializes no pipeline blob.**
   `compute_pipeline::cached_pipeline_data()` returns empty there and `used_cached_pipeline()` is always false, so a

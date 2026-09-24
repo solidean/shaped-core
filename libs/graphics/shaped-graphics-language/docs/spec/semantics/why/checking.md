@@ -73,9 +73,21 @@ Every local is a local of its own, so the flat tree never sees a name twice: the
 
 ## CHK-54
 
-Whether a local may shadow a module-level name is open in [scopes](../../incubator/scopes.md).
-Both answers are easy to give later and neither is easy to take back, so the tracer gives none.
-Shadowing another local is settled, by CHK-53.
+`let length = length v` is the same refinement CHK-53 allows, and the prelude holds enough common words that forbidding it would forbid the idiom.
+An ordered scope cannot be ambiguous: the newest declaration is the one in effect, so there is nothing to report.
+One namespace keeps that rule whole — a local does not hide a name in one position and leave it visible in the next.
+
+## CHK-188
+
+A new function or type in the prelude must never break a program that already used its name.
+With one shared scope, every prelude addition would be a `duplicate-declaration` somewhere.
+Only a clash inside one unordered scope is an error, since there no order says which declaration is meant.
+Overload sets still join across the two, so declaring `dot` for a struct of the program's own adds to the prelude's `dot` rather than hiding it.
+
+## CHK-192
+
+Joined overload sets would otherwise reopen CHK-188's problem for functions: a prelude that gains a signature the program already declares makes every call of it `ambiguous-overload`.
+The rule is special to the prelude because the prelude is special: nobody writes it into the program, it is placed around every file implicitly.
 
 ## CHK-110
 
@@ -197,3 +209,11 @@ No target binds by name: HLSL by register, SPIR-V by set and binding, WGSL by `@
 So the host name need not be an identifier of any target, and the path is the one name that is injective and needs no rule for a reader to learn.
 `a_b.c` and `a.b_c` stay two buffers, where any identifier built from them would clash.
 The identifier a target writes is the emitter's to mint (EMIT-85), and the text reports the pair (EMIT-95).
+
+## CHK-197
+
+SGL's semantics are the intersection of what the targets' fast native operations guarantee, and no operation pays a tax on every target to be defined where one target leaves it open.
+Each target writes `x as int` as its own native conversion, and those agree only where the truncated value fits: SPIR-V, for one, leaves every other float undefined.
+Defining saturation and a NaN of 0 would mean a clamp and a compare around every conversion on the targets that do not do it natively, in shaders where a conversion sits in the inner loop.
+A program that needs a defined result clamps before it converts, and pays for it only where it asks.
+The interpreter still has to give some value, and saturation is the choice that is right on the most hardware.

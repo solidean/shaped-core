@@ -25,7 +25,6 @@ Each file has the same shape, so an idea can be picked up cold:
 | [members-and-properties.md](members-and-properties.md) | structs and enums carry methods and read-only properties, `self` names the receiver, and no `self` means static |
 | [stage-interfaces.md](stage-interfaces.md) | entry points by stage attribute, stage-to-stage types that must match, and attributes as an open, additive set |
 | [host-code-generation.md](host-code-generation.md) | `@vertex` and `@pixel` structs and `binding` groups, from which the tooling exports C++ vertex setup, render targets and group structs |
-| [pipeline-declarations.md](pipeline-declarations.md) | a `pipeline` declaration that states a whole pipeline in SGL, inferring what its entry points already say |
 | [modules-and-prelude.md](modules-and-prelude.md) | an optional `module` line, export by default, and a standard prelude that is added automatically |
 | [vector-and-format-types.md](vector-and-format-types.md) | weak `float3`-style types beside strong `tg` mirrors, and format types as ordinary prelude types |
 | [shader-logging.md](shader-logging.md) | `print` and `assert` with full interpolation, drained from GPU buffers and formatted on the CPU, with exact stack traces |
@@ -38,4 +37,6 @@ Each file has the same shape, so an idea can be picked up cold:
 | [inferred-comptime.md](inferred-comptime.md) | a function value is a compile-time entity, and a parameter that must be constant is inferred from the body, as Zig's `comptime` without the keyword |
 | [patterns.md](patterns.md) | a real pattern language for `case`, where an arm destructures its scrutinee and binds the pieces it names |
 | [enum-futures.md](enum-futures.md) | ordering, casts to and from `int`, `@bitflags` for a mask enum, and `@exhaustive(false)` for an open one |
+| [texture-methods.md](texture-methods.md) | textures sampled through methods over UFCS, with a default sampler declared on the binding |
+| [uniformity.md](uniformity.md) | SGL's own uniformity analysis after inlining, refusing a derivative sample in divergent control flow with a fix to offer |
 | [beyond-shaders.md](beyond-shaders.md) | SGL as a test run for a general-purpose language, and what that asks of today's decisions |

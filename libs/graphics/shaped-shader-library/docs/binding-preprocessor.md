@@ -83,7 +83,7 @@ Three rules, and they are the whole grammar:
 
 - **An attribute stands on its own line and applies to the declaration after it.**
   A pragma is a line directive, so there is no trailing form: one attachment rule instead of two, and no lookahead in two directions.
-- **The first word is the attribute name**: `group`, `static`, `push_constants`, `payload`, `vertex_input`.
+- **The first word is the attribute name**: `group`, `static`, `format`, `push_constants`, `payload`, `vertex_input`, `attribute`.
   A name the pass does not know is an error naming the line, never a directive nobody reads — which is exactly what a compiler makes of it.
 - **The rest is `key=value`**, values being a bare token or a parenthesised tuple.
   No quotes, no nesting, no expressions.
@@ -153,6 +153,20 @@ The tuple form addresses them individually, in the field order `sg::sampler` dec
 The generated struct exposes what the shader declared as a constant, and `ctx.cached.acquire_binding_group_layout<G>(samplers)` takes runtime samplers for one the shader left undeclared.
 **A declared sampler wins**: passing a runtime sampler for one the shader already declared is an error, not an override.
 The merged list puts the declared samplers first and appends only names they do not already carry, so the shader wins in every build and the assertion is what names the mistake in a checked one.
+[done]
+
+### `format`
+
+```hlsl
+#pragma sc format rgba8_unorm
+RWTexture2D<float4> target;
+```
+
+A storage texture's format, named as `sg::pixel_format` names it, and only one a storage texture can have.
+The binding carries it as `storage_format`, which a WebGPU layout needs before any view exists.
+On the SPIR-V arm the pass also writes `[[vk::image_format]]`, since reading an image of unknown format needs a Vulkan device feature and DXC otherwise declares none.
+DXIL takes the format from the view, so that arm writes nothing more; neither does a format SPIR-V lacks, `bgra8_unorm`.
+It is what SGL writes for an `image2d[.F]` member, and what a hand-written group states the same thing with.
 [done]
 
 ### `push_constants`

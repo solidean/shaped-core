@@ -20,15 +20,6 @@ from .highlight import highlight_code, highlight_diff
 from .markdown import render as render_markdown
 from .markdown import render_inline
 
-_COLLAPSED_TIERS = ("context/cold", "context/repo")
-
-_TIER_LABEL = {
-    "context/cold": "New to this change and the codebase",
-    "context/repo": "Knows the codebase, new to this change",
-    "context/delta": "Since the previous entries",
-}
-
-
 def _esc(text: str) -> str:
     return html.escape(text, quote=True)
 
@@ -90,7 +81,7 @@ def _comment_card(comment: Comment) -> str:
 def _comment_slot(anchor: str, comments: list[Comment]) -> str:
     """The affordance for leaving a remark here, plus whatever has already been left.
 
-    On every block rather than only on an ask: the context tiers are where "why did we do it this way" lands,
+    On every block rather than only on an ask: "why did we do it this way" is asked of prose and evidence,
     and until now that question had nowhere to go but the text box of an unrelated question.
     """
     cards = "".join(_comment_card(c) for c in comments)
@@ -217,16 +208,6 @@ def _example_html(block: Block, ctx: dict) -> str:
 
 def _block_html(entry: Entry, block: Block, ctx: dict) -> str:
     repo: Path = ctx["repo"]
-
-    if block.type in _TIER_LABEL:
-        body = render_markdown(block.prose, repo=repo)
-        label = _TIER_LABEL[block.type]
-        if block.type in _COLLAPSED_TIERS:
-            return (f'<details class="tier tier-{block.type.split("/")[1]}">'
-                    f'<summary>{_esc(label)}</summary><div class="tier-body">{body}</div></details>')
-        # Drawn as a rule rather than a label: this is where a round's new material starts, and it has to be findable by eye.
-        return (f'<div class="tier-delta-rule"><span>{_esc(label)}</span></div>'
-                f'<div class="tier tier-delta">{body}</div>')
 
     if block.type == "changes":
         visible = block.attrs.get("show", "collapsed") == "visible"

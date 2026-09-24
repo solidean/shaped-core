@@ -490,6 +490,7 @@ if(SC_BUILD_TESTS)
         tests/benchmarks/file-stream-benchmark.cc
         tests/benchmarks/sort-benchmark.cc
         tests/benchmarks/compression-benchmark.cc
+        tests/benchmarks/record-open-event-benchmark.cc
 
         # tests grouped by topic, mirroring src/clean-core/
         tests/common/assert-test.cc

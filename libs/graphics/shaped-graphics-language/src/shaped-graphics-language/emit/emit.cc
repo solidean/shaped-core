@@ -121,11 +121,12 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
                                  .detail = "a compute entry point, which MSL writes as a kernel"});
         return result;
     }
-    if (t == target::msl && (!plan.buffers.empty() || !plan.group_blocks.empty()))
+    if (t == target::msl && (!plan.resources.empty() || !plan.group_blocks.empty()))
     {
         result.errors.push_back({.kind = error_kind::unsupported,
                                  .symbol = e.function,
-                                 .detail = "a buffer binding, which MSL takes as an entry-point argument"});
+                                 .detail = "a binding group, which MSL takes as an argument buffer of the entry "
+                                           "point"});
         return result;
     }
     result.text = impl::write_text(plan, impl::dialect_of(t));
@@ -134,7 +135,7 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
         result.bound_names.push_back({.emitted = plan.constants.value().name, .host = plan.constants.value().host_name});
     for (auto const& block : plan.group_blocks)
         result.bound_names.push_back({.emitted = block.name, .host = block.host_name});
-    for (auto const& buffer : plan.buffers)
+    for (auto const& buffer : plan.resources)
         result.bound_names.push_back({.emitted = buffer.name, .host = buffer.host_name});
     if (e.entry_stage == check::stage::pixel && e.result != check::type_id::none)
     {

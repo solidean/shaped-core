@@ -14,8 +14,9 @@ namespace
 {
 /// The optional features a context asks for wherever the adapter offers them.
 constexpr WGPUFeatureName k_optional_features[] = {
-    WGPUFeatureName_TimestampQuery,   WGPUFeatureName_TextureCompressionBC, WGPUFeatureName_Depth32FloatStencil8,
-    WGPUFeatureName_DepthClipControl, WGPUFeatureName_TextureFormatsTier1,  WGPUFeatureName_TextureFormatsTier2,
+    WGPUFeatureName_TimestampQuery,    WGPUFeatureName_TextureCompressionBC, WGPUFeatureName_Depth32FloatStencil8,
+    WGPUFeatureName_DepthClipControl,  WGPUFeatureName_TextureFormatsTier1,  WGPUFeatureName_TextureFormatsTier2,
+    WGPUFeatureName_Float32Filterable, WGPUFeatureName_BGRA8UnormStorage,
 };
 
 void on_uncaptured_error(WGPUDevice const*, WGPUErrorType type, WGPUStringView message, void* userdata1, void*)
@@ -70,8 +71,13 @@ void finish_creation(webgpu_context& ctx)
     if (wgpuDeviceGetLimits(ctx.device(), &limits) == WGPUStatus_Success && limits.minUniformBufferOffsetAlignment > 0)
         alignment = isize(limits.minUniformBufferOffsetAlignment);
 
-    ctx.set_limits(alignment, wgpuDeviceHasFeature(ctx.device(), WGPUFeatureName_TimestampQuery) != WGPU_FALSE,
-                   wgpuDeviceHasFeature(ctx.device(), WGPUFeatureName_TextureFormatsTier2) != WGPU_FALSE);
+    auto const has = [&](WGPUFeatureName f) { return wgpuDeviceHasFeature(ctx.device(), f) != WGPU_FALSE; };
+    ctx.set_limits(alignment, {.timestamps = has(WGPUFeatureName_TimestampQuery),
+                               .readwrite_storage_formats = has(WGPUFeatureName_TextureFormatsTier2),
+                               .float32_filtering = has(WGPUFeatureName_Float32Filterable),
+                               // sg's extended set holds bgra8_unorm, which WebGPU grants with a feature of its own.
+                               .extended_storage_formats
+                               = has(WGPUFeatureName_TextureFormatsTier1) && has(WGPUFeatureName_BGRA8UnormStorage)});
 }
 
 struct request_state

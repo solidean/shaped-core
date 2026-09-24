@@ -151,6 +151,15 @@ def _build_checks(ctx: Context) -> list[dev.Check]:
         if not result.ok:
             return False
 
+        # The host code SGL groups generate, fed describe-shaped input directly, so every arm runs without a package.
+        result = dev.run_step(
+            ["uv", "run", str(runner.with_name("sgl-host-code-self-test.py"))],
+            step_type="lint", name="sgl-host-code-self-test",
+            build_dir=ctx.root / "build", cwd=ctx.root, mirror=mirror, verbose=verbose,
+        )
+        if not result.ok:
+            return False
+
         presets = ctx.resolve_presets([ctx.default_preset_name()])
         builds = dev.build(presets, ["shaped-shader-library-test"], root=ctx.root, auto_configure=True,
                            mirror=mirror, verbose=verbose)
@@ -178,13 +187,18 @@ def _build_checks(ctx: Context) -> list[dev.Check]:
 
     def check_sgl_prelude(*, fix: bool, scope: dev.ChangeScope | None, mirror: bool, verbose: bool) -> bool:
         # SGL's builtins live in a C++ registry, and prelude/builtins.sgl is that registry written out and committed.
-        # The `sgl` tool compares the two, so this gate builds it -- like `shader-grammar`, and placed beside it for
+        # slib's impl/pipeline_fields.hh is the prelude's mirror of sg's raster pipeline description, written out the same way.
+        # The `sgl` tool compares each pair, so this gate builds it -- like `shader-grammar`, and placed beside it for
         # the same reason: after every static gate, before `test`.
         # --fix rewrites the file instead.
         # That fixer stands behind `format` and breaks nothing by it: what it writes is SGL, which no other gate reads,
         # so the ordering argument about fixers and `format` does not reach it.
         # Repo-wide by nature, so scope is ignored.
         prelude = ctx.root / "libs" / "graphics" / "shaped-graphics-language" / "prelude" / "builtins.sgl"
+        fields = (ctx.root / "libs" / "graphics" / "shaped-shader-library" / "src" / "shaped-shader-library" / "impl"
+                  / "pipeline_fields.hh")
+        generated = [("prelude", prelude, "the builtin registry"),
+                     ("pipeline-fields", fields, "the prelude's mirror of sg's raster pipeline description")]
         presets = ctx.resolve_presets([ctx.default_preset_name()])
         preset = presets[0]
 
@@ -207,23 +221,26 @@ def _build_checks(ctx: Context) -> list[dev.Check]:
             dev.ui.write_line(console.red(f"sgl-prelude: target 'sgl' has no built artifact for preset {preset.name!r}"))
             return False
 
-        result = dev.run_step(
-            [str(artifact), "prelude", "--write" if fix else "--check", str(prelude)],
-            step_type="lint", name="sgl-prelude",
-            build_dir=preset.build_dir, cwd=ctx.root, mirror=mirror, verbose=verbose,
-        )
-        if result.ok:
-            rel = prelude.relative_to(ctx.root).as_posix()
-            dev.ui.write_line(f"sgl-prelude: {rel} {'written from' if fix else 'is in sync with'} the builtin registry")
-            return True
+        ok = True
+        for command, path, source in generated:
+            result = dev.run_step(
+                [str(artifact), command, "--write" if fix else "--check", str(path)],
+                step_type="lint", name=f"sgl-{command}",
+                build_dir=preset.build_dir, cwd=ctx.root, mirror=mirror, verbose=verbose,
+            )
+            rel = path.relative_to(ctx.root).as_posix()
+            if result.ok:
+                dev.ui.write_line(f"sgl-prelude: {rel} {'written from' if fix else 'is in sync with'} {source}")
+                continue
 
-        # The tool's own message says where the texts part; it was captured to the step log, so it is repeated here.
-        for log in (result.stdout_log, result.stderr_log):
-            text = log.read_text(encoding="utf-8", errors="replace").rstrip() if log.exists() else ""
-            if text and not mirror:
-                dev.ui.write_line(text)
-        dev.ui.write_line(console.red("sgl-prelude: run `uv run dev.py check sgl-prelude --fix` to regenerate the file"))
-        return False
+            # The tool's own message says where the texts part; it was captured to the step log, so it is repeated here.
+            for log in (result.stdout_log, result.stderr_log):
+                text = log.read_text(encoding="utf-8", errors="replace").rstrip() if log.exists() else ""
+                if text and not mirror:
+                    dev.ui.write_line(text)
+            dev.ui.write_line(console.red(f"sgl-prelude: run `uv run dev.py check sgl-prelude --fix` to regenerate {rel}"))
+            ok = False
+        return ok
 
     def check_tests(*, fix: bool, scope: dev.ChangeScope | None, mirror: bool, verbose: bool) -> bool:
         # The variants come from dev.py's Policy tables, and a platform with no sibling for one of them simply contributes none.
@@ -284,7 +301,7 @@ def _build_checks(ctx: Context) -> list[dev.Check]:
                   "run the shared binding corpus against both halves of the binding pass",
                   False, check_shader_grammar),
         dev.Check("sgl-prelude",
-                  "SGL's prelude/builtins.sgl is what the C++ builtin registry generates (--fix rewrites it)",
+                  "SGL's prelude/builtins.sgl and slib's impl/pipeline_fields.hh are what `sgl` generates (--fix rewrites them)",
                   True, check_sgl_prelude),
         dev.Check("test",
                   "build + run the full suite on the debug, default, release, single-threaded "

@@ -26,6 +26,14 @@ sampler bilinear:
     address = .clamp
     max_anisotropy = 16
 
+pipeline:
+    vertex = main_vs
+    pixel = main_ps
+    cull = .back
+    color_targets.color.format = .rgba8_unorm
+
+pipeline quick = (main_vs, main_ps)
+
 enum curve_kind:
     linear = 0
     reinhard = 1

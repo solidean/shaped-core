@@ -1,5 +1,7 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/utility.hh>
+#include <shaped-graphics/binding/binding_group_layout.hh>
+#include <shaped-graphics/binding/impl/portability.hh>
 #include <shaped-graphics/command_list/command_list.hh>
 #include <shaped-graphics/context/context.hh>
 #include <shaped-graphics/context/transient.hh>
@@ -117,6 +119,11 @@ cc::result<raw_texture_handle> context_transient_scope::try_create_raw_texture(t
 {
     // WORKAROUND: the transient bump-heap is buffers-only, so a transient texture is a dedicated allocation tagged transient, which the backend auto-expires at the next epoch.
     // Placed/bump-allocated transient textures wait on a texture-capable transient memory_heap; see the header note.
+    if (auto unsupported = impl::find_unsupported_texture(_ctx.supports(feature::extended_storage_formats), desc);
+        unsupported.has_value())
+        return cc::error(cc::move(unsupported.value()));
+    if (auto error = desc.unaligned_block_error(_ctx.supports(feature::unaligned_block_compression)); !error.empty())
+        return cc::error(cc::move(error));
     allocation_info alloc;
     alloc.scope = lifetime_scope::transient;
     auto created = _ctx.try_create_raw_texture(desc, alloc);
@@ -141,6 +148,11 @@ cc::result<binding_group_handle> context_transient_scope::try_create_binding_gro
                                                                                    cc::span<named_view const> views,
                                                                                    cc::span<named_sampler const> samplers)
 {
+    CC_ASSERT(layout != nullptr, "binding_group requires a binding_group_layout");
+    if (auto unsupported
+        = impl::find_unsupported_view(_ctx.supports(feature::float32_filtering), layout->bindings(), views);
+        unsupported.has_value())
+        return cc::error(cc::move(unsupported.value()));
     return _ctx.try_create_binding_group(cc::move(layout), views, samplers, lifetime_scope::transient);
 }
 
@@ -160,6 +172,11 @@ cc::result<binding_group_handle> context_transient_scope::try_create_binding_gro
                                                                                    cc::span<slotted_view const> views,
                                                                                    cc::span<named_sampler const> samplers)
 {
+    CC_ASSERT(layout != nullptr, "binding_group requires a binding_group_layout");
+    if (auto unsupported
+        = impl::find_unsupported_view(_ctx.supports(feature::float32_filtering), layout->bindings(), views);
+        unsupported.has_value())
+        return cc::error(cc::move(unsupported.value()));
     return _ctx.try_create_binding_group(cc::move(layout), views, samplers, lifetime_scope::transient);
 }
 } // namespace sg

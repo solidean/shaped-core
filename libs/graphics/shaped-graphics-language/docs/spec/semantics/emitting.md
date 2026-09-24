@@ -40,6 +40,8 @@ Back to the [semantics](_index.md); the reasons are in [why/emitting.md](why/emi
 * **EMIT-15** Each target has a list of **reserved words**: its keywords and its predeclared types, together with every function name a builtin is written as in that target (EMIT-74).
 * **EMIT-16** The reserved words of the target are taken in the mint before anything else is minted.
 * **EMIT-17** A struct, a binding or a local whose name is reserved in a target is minted from that name and a trailing underscore, in that target only.
+* **EMIT-96** Two structs of one name, which the program's file shadowing one of the prelude's gives ([CHK-188](checking.md#symbols)), are written under two names: the one written later is minted.
+  The same holds for the cases of two enums of one name.
 * **EMIT-18** A member whose name is reserved gets trailing underscores until it is free among its siblings, in that target only.
 * **EMIT-19** A `@builtin` declaration is never written by its name: each target spells it as its record in the builtin registry says (EMIT-74).
 * **EMIT-20** An entry point keeps its name where the target allows it, and where the target reserves it, it is minted like any other name (EMIT-17); the text reports the name it declares.
@@ -102,7 +104,8 @@ const light_kind_sun: i32 = 2;
 * **EMIT-92** A vertex input member's **stream** is the name `@stream` gives it, else `per_instance` where it carries `@per_instance`, else `per_vertex`.
 * **EMIT-93** The members of one stream agree on `@per_instance`, or the struct is `unsupported`.
 * **EMIT-94** A stream changes nothing in the text: it is which buffer the host reads a member from, and a location stays the member's position ([why](why/emitting.md#emit-94)).
-* **EMIT-95** The text of an entry point comes with the pair of every buffer and constant buffer it declares: the name it minted, and the host name CHK-171 gives ([why](why/emitting.md#emit-95)).
+* **EMIT-95** The text of an entry point comes with the pair of every resource and constant buffer it declares, samplers included.
+  The pair is the name it minted, and the host name CHK-171 gives ([why](why/emitting.md#emit-95)).
 
 | stage | parameter | result |
 |---|---|---|
@@ -145,7 +148,32 @@ A binding that is not `@inline` is a group.
 * **EMIT-87** The struct of a group's constant buffer stands ahead of that namespace, and `hlsl-vulkan` states no offset on its members ([why](why/emitting.md#emit-87)).
 * **EMIT-88** WGSL writes each resource of a group as `@group(N) @binding(slot)`: the constant buffer as `var<uniform>`, a buffer as a `var<storage>` array, `read` or `read_write`.
 * **EMIT-89** MSL writes no group and no compute entry point yet: an entry point that lists a group, or is `@compute`, is `unsupported`.
-* **EMIT-90** A group's buffers take the slots after its constant buffer, from 1, or from 0 when it has no plain member.
+  How a group will read in MSL is in [bindings.md](../bindings.md#how-a-group-reaches-sg).
+* **EMIT-90** A group's resources — buffers, textures, images and samplers — take the slots after its constant buffer, in declaration order, from 1, or from 0 when it has no plain member.
+* **EMIT-97** A texture, an image and a sampler member are each one global minted as a buffer's is, by EMIT-85, and each has its target's own type by the table below.
+* **EMIT-98** HLSL states an image's format as slib's `#pragma sc format`, with sg's name for it.
+  slib's pass turns it into `[[vk::image_format]]` on the SPIR-V arm, which DXC makes a typed image of, and records it as the binding's `storage_format`.
+* **EMIT-99** A static sampler of a group is its `SamplerState`, or `SamplerComparisonState` where it has a `compare`, preceded by slib's `#pragma sc static`.
+  The pragma carries every filter and address and each other setting that is not its default.
+  WGSL has no static sampler, and writes it as it writes a sampler the host binds: the layout says it is static.
+* **EMIT-100** WGSL writes a 1D texture or image as a 2D one and a 1D array as a 2D array, since sg's webgpu backend creates every 1D texture that way (the bindings file, "Shapes").
+* **EMIT-101** A call of a builtin that gives nothing is a statement as it stands, with no `_ =` in WGSL.
+* **EMIT-102** A builtin a target cannot write as one expression declares a helper function ahead of the entry point, once per text, and the call names it.
+  HLSL's `GetDimensions` writes through out parameters, so `DEBUG_size` is an overload of `sgl_size` per texture type the entry point passes.
+* **EMIT-103** WGSL text whose entry point calls a builtin that takes derivatives implicitly, `DEBUG_sample`, opens with `diagnostic(off, derivative_uniformity);`, and other WGSL text does not.
+  HLSL samples under an `if` that differs between pixels, and Tint refuses it, so without the directive a program would be written for some targets only, against EMIT-13.
+  It is a stopgap: SGL is to judge uniformity itself, as the [incubator](../incubator/uniformity.md) sketches.
+
+| SGL | HLSL | WGSL |
+|---|---|---|
+| `texture2d[float4]` | `Texture2D<float4>` | `texture_2d<f32>` |
+| `texture2d_depth` | `Texture2D<float>` | `texture_depth_2d` |
+| `image2d[.rgba8_unorm]` | `RWTexture2D<float4>` | `texture_storage_2d<rgba8unorm, read>` |
+| `out image2d[.r32_float]` | `RWTexture2D<float>` | `texture_storage_2d<r32float, write>` |
+| `sampler`, `comparison_sampler` | `SamplerState`, `SamplerComparisonState` | `sampler`, `sampler_comparison` |
+
+The other shapes follow the same pattern: HLSL's `Texture2DArray`, `TextureCube`, `Texture2DMS`, and WGSL's `texture_2d_array`, `texture_cube`, `texture_multisampled_2d`.
+An image's HLSL element is the texel of its format, one to four wide, and a load gives that; WGSL always loads and stores four channels, so its writer narrows a load and pads a store.
 
 ```sgl
 binding affine:
@@ -255,7 +283,6 @@ So `{float3; float}` is `layout-mismatch`: the `float` is at byte 12 in HLSL and
 ## Open
 
 * GLSL, which comes through the same seam.
-* HLSL with final registers, one emission for dx12 and one for vulkan, so that no binding pass reads SGL's text and EMIT-3 holds for every target.
 * HLSL with final registers, one emission for dx12 and one for vulkan, so that no binding pass reads SGL's text and EMIT-3 holds for every target.
 * A Metal compiler for the MSL text, and the buffer index of EMIT-58, which sg's metal backend has yet to adopt.
 * Whether a block member becomes `packed_float3` in MSL, which would let `{float3; float}` through at the price of a conversion on every read.

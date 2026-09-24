@@ -52,6 +52,14 @@ Consequences of that rule:
 
 When in doubt, leave a format out until a concrete need plus a capability query justify it.
 
+## 1D is a 2D polyfill on WebGPU
+
+WebGPU's 1D texture has no mips, no arrays, no storage and no render use, so sg's webgpu backend creates every 1D texture as a 2D one, one texel high.
+It is a polyfill for the whole kind rather than a rule per texture.
+"1D without mips, 2D with them" would be a runtime rule nobody could predict, and removing 1D would remove it everywhere, since the portable floor allows no partial support.
+Drivers are understood to promote 1D the same way, so no cost is expected.
+A shader for webgpu therefore declares a 1D texture as `texture_2d`, which is what SGL writes.
+
 ## What exists today
 
 Creation: `ctx.persistent.create_raw_texture(desc)` and `ctx.transient.create_raw_texture(desc)`
