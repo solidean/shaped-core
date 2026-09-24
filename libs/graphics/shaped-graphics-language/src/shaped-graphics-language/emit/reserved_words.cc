@@ -194,6 +194,8 @@ constexpr cc::string_view k_hlsl[] = {
     "mul",
     "normalize",
     "saturate",
+    // a helper the text declares for a builtin HLSL cannot write as one expression
+    "sgl_size",
 };
 
 #undef SGL_HLSL_FAMILY
@@ -429,6 +431,11 @@ constexpr cc::string_view k_wgsl[] = {
     "mix",
     "normalize",
     "saturate",
+    "textureDimensions",
+    "textureLoad",
+    "textureSample",
+    "textureSampleLevel",
+    "textureStore",
 };
 
 #undef SGL_WGSL_ALIASES

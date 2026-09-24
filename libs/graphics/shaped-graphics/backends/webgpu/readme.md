@@ -30,7 +30,8 @@ So `ctx.execution()` is `never_block`, and every internal wait is unreachable.
 | inline constants | no push constants | group 3 binding 0: a uniform bound with a dynamic offset into a 64 KiB page leased per list |
 | `bound_sampler` | no pipeline-level samplers | group 3 binding `index + 1`; two at one index are refused |
 | static samplers | none | a sampler entry in the declaring group, whose object the group inserts |
-| 1D textures | 1D allows no mips, arrays, storage or render use | every sg 1D texture is a 2D texture of height 1 |
+| 1D textures | 1D allows no mips, arrays, storage or render use | a polyfill: every sg 1D texture is a 2D texture of height 1, and a shader declares it `texture_2d` |
+| float32 filtering, extended storage formats | optional features | granted where the adapter offers them; without one, sg refuses the form on every backend |
 | memory heaps | none | a heap that places nothing: a placed buffer gets its own allocation, silently |
 | binding arrays, staging groups, bindless | none in core | refused; `ctx.supports(sg::feature::binding_arrays)` is false |
 | ray tracing, geometry, tessellation | none | refused; the matching features are false |

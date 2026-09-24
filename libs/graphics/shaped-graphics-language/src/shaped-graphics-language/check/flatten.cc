@@ -9,18 +9,52 @@ using namespace sgl::check::impl;
 
 namespace
 {
+/// A call reached from an entry point of a stage its callee's `@stages` leaves out (CHK-193).
+struct stage_violation
+{
+    i32 file = 0;
+    ast::expr_id call = ast::expr_id::none;
+    symbol_id callee = symbol_id::none;
+};
+
 /// Reads the checked ASTs through the side tables and writes the STRUCTURED form of one entry point's flat tree.
 ///
 /// A call of a function of the program is inlined where it stands: a block named after the callee, whose `return`s are
 /// leaves of that block.
 /// Nothing here hoists and nothing reorders; evaluation order is the legalizer's job alone.
-/// Every body is known to be sound, so an unexpected shape is a gap of this pass: it sets `is_failed` and the entry
-/// point is dropped, which keeps a half-built tree away from every emitter.
+/// Every body is known to be sound, so an unexpected shape is a gap of this pass: it sets `is_failed`, and the entry
+/// point is dropped with an `unsupported-yet` at its name (CHK-213), which keeps a half-built tree away from every
+/// emitter.
+/// A value of the error type is not a gap: whatever gave it that type reported already.
 struct flattener
 {
     checker const& c;
+    cc::vector<stage_violation> stage_violations;
+
+    /// Notes a call of `callee` whose `@stages` leaves out the stage of the entry point being flattened.
+    void judge_stage(ast::expr_id call, symbol_id callee)
+    {
+        auto const& s = c.out.at(callee);
+        if (s.info >= 0 && (c.out.functions[s.info].stages & stage_bit(entry.entry_stage)) == 0)
+            stage_violations.push_back({.file = file(), .call = call, .callee = callee});
+    }
     flat_entry_point entry;
     bool is_failed = false;
+    /// The tree met the error type somewhere, so a failure has a diagnostic already (CHK-7).
+    bool meets_error = false;
+
+    /// True where the error type stands in `type` at any depth.
+    [[nodiscard]] bool holds_error(type_id type) const
+    {
+        if (type == checked_module::error_type)
+            return true;
+        if (!is_valid(type))
+            return false;
+        for (auto const& m : c.out.at(c.out.at(type).members))
+            if (holds_error(m.type))
+                return true;
+        return false;
+    }
 
     /// What a name of the source stands for, keyed the way `target_of` names it.
     struct bound_name
@@ -108,6 +142,7 @@ struct flattener
     local_id add_local(local_kind kind, cc::string_view desired, type_id type)
     {
         is_failed = is_failed || !c.is_sound(type);
+        meets_error = meets_error || holds_error(type);
         // `_` is a name nobody reads, and no name at all in WGSL
         entry.locals.push_back({.kind = kind,
                                 .name = entry.names.mint(desired == "_" ? cc::string_view("unused") : desired),
@@ -135,7 +170,9 @@ struct flattener
     template <class Node>
     flat_expr_id add_expr(type_id type, ast::expr_id from, Node node)
     {
-        is_failed = is_failed || !c.is_sound(type);
+        // A builtin with an effect may give nothing, `DEBUG_store`, and its call is only ever an `eval`'s value.
+        auto const is_effect_call = std::is_same_v<Node, flat_call> && type == checked_module::nothing_type;
+        is_failed = is_failed || (!c.is_sound(type) && !is_effect_call);
         entry.exprs.push_back({.type = type,
                                .from = {.file = file(), .expr = from},
                                .inlined_through = current()->chain,
@@ -249,6 +286,7 @@ struct flattener
         auto const& e = ast().at(id);
         auto const type = tables().type_at(id);
         auto const& where = tables().target_at(id);
+        meets_error = meets_error || holds_error(type);
         if (!is_valid(type))
             return fail();
 
@@ -289,6 +327,21 @@ struct flattener
         }
         if (auto const* const call = e.node.try_as<ast::call>())
             return flatten_call(id, type, where, *call);
+        if (auto const* const cast = e.node.try_as<ast::cast>())
+        {
+            auto const value = flatten_expr(cast->value);
+            // A cast to the type the value already has is the value itself.
+            if (where.kind != target_kind::overload)
+                return value;
+            flat_expr_id const arguments[] = {value};
+            // A conversion the program declares is inlined like any call of it (CHK-195).
+            if (!is_valid(c.out.at(where.symbol).intrinsic))
+            {
+                auto const inlined = inline_call(id, where.symbol, arguments);
+                return add_expr(type, id, flat_block{.label = inlined.label, .body = inlined.body});
+            }
+            return builtin_call(id, where.symbol, arguments);
+        }
         if (auto const* const chain = e.node.try_as<ast::comparison_chain>())
             return flatten_chain(id, type, *chain);
         if (auto const* const loop = e.node.try_as<ast::loop_expr>())
@@ -344,6 +397,7 @@ struct flattener
 
     flat_expr_id builtin_call(ast::expr_id id, symbol_id callee, cc::span<flat_expr_id const> arguments)
     {
+        judge_stage(id, callee);
         auto const& s = c.out.at(callee);
         if (!is_valid(s.intrinsic) || s.info < 0)
             return fail();
@@ -588,6 +642,7 @@ struct flattener
     /// `arguments` were written in the caller's frame, left to right, and are bound at the top of the block in that order.
     inlined_body inline_call(ast::expr_id call, symbol_id callee, cc::span<flat_expr_id const> arguments)
     {
+        judge_stage(call, callee);
         auto const& s = c.out.at(callee);
         auto is_open = s.info < 0 || frames.size() > k_max_inline_depth;
         for (auto const& f : frames)
@@ -1022,12 +1077,29 @@ void checker::flatten_entry_point(symbol_id id)
     for (auto const stmt : ast_of(s.file).at(body.statements))
         f.flatten_stmt(stmt);
 
-    if (f.is_failed)
+    // CHK-193: known only now, since only the whole inlined body says what an entry point reaches.
+    auto const stage_name = [](stage st)
+    {
+        return st == stage::vertex ? "vertex" : st == stage::pixel ? "pixel" : "compute";
+    };
+    for (auto const& v : f.stage_violations)
+        report(diagnostic_kind::stage_not_allowed, v.file, span_of(v.file, v.call),
+               cc::format("{} is a {} entry point, and {} is @stages without it", s.name, stage_name(info.entry_stage),
+                          out.at(v.callee).name));
+    if ((info.stages & stage_bit(info.entry_stage)) == 0)
+        report(diagnostic_kind::stage_not_allowed, s.file, ast_of(s.file).at(s.declaration).node.as<ast::fun_decl>().name,
+               cc::format("{} is a {} entry point, and its own @stages leaves that out", s.name,
+                          stage_name(info.entry_stage)));
+    // CHK-213: a gap of this pass is reported, so an entry point never vanishes without a word.
+    if (f.is_failed && !f.meets_error)
+        unsupported(s.file, ast_of(s.file).at(s.declaration).node.as<ast::fun_decl>().name,
+                    cc::format("{}: its body reaches a construct the flat tree cannot hold yet", s.name));
+    if (f.is_failed || !f.stage_violations.empty() || (info.stages & stage_bit(info.entry_stage)) == 0)
         return;
     f.entry.body = f.add_list(f.block);
 
     // Every later walk stops descending at the limit and leaves a hole where it stopped, so a tree past it must never
-    // reach them: the hole would surface as a missing id rather than as the limit (CHK-200).
+    // reach them: the hole would surface as a missing id rather than as the limit (CHK-214).
     auto probe = depth_probe{.e = f.entry};
     probe.body(f.entry.body, 0);
     if (probe.found.has_value())

@@ -82,8 +82,10 @@ cmake/
                                                 and the typed struct a `path:binding:namespace` entry declares
   binding_grammar.py              [done]        the binding pass again, in Python -- what the generator parses
                                                 a registered file with; kept in step by the shared corpus
-  binding-grammar-self-test.py    [done]        that corpus against the Python half; `dev.py check`'s
-                                                `shader-grammar` gate
+  binding-grammar-self-test.py    [done]        that corpus against the Python half, and the two halves'
+                                                storage-format lists as sets; `dev.py check`'s `shader-grammar` gate
+  sgl-host-code-self-test.py      [done]        the C++ sgl_host_code.py writes for a group's textures, images
+                                                and samplers, fed describe entries directly
 ```
 
 Each embedded source is emitted as a run of ~8 KB adjacent raw string literals rather than as one literal.
@@ -109,6 +111,8 @@ The shape the seam is built for, and what is still `[planned]`:
   It is not a chain in the sense below, since the hop is inside one edge: `preprocess` writes the target's text, and that text is what is cached, hashed and compiled.
   It carries [examples/graphics/sgl-cube](../../../../examples/graphics/sgl-cube/shaders/cube.sgl) and the tier-1 compute and raster fixtures.
   A package generates host types from it: groups, `@inline` constants, vertex inputs and render targets.
+  A group's textures and images are typed views, a bound sampler an `sg::sampler` field, and a `sampler name:` block of the binding one of its `declared_samplers()`.
+  Its table carries every fact sg's layouts take from a binding, from `sgl describe`, so the WebGPU layout agrees with the WGSL the group becomes.
   **The MSL arm runs too**: `create_metal_compiler()` is the `metal_lib` inner compiler that `create_sgl_compiler` maps to the `msl` target.
   `sgl-cube` draws on metal from the same `cube.sgl` every other backend reads, and `sg metal - a draw from an SGL shader writes what the shader computed` pins the path with a pixel readback.
   What SGL's own MSL emitter still refuses is a binding **group** and a compute entry point, both of which it deferred while no Metal compiler existed to test them against.

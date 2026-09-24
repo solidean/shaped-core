@@ -56,7 +56,7 @@ So a render target member has the type the shader computes, and the format is an
     @format(rgba16f) normal: float4   // this one is pinned
 ```
 
-In `texture2d[rgba8]` the argument is a format and not a type.
+A storage format is an enum case with `sg`'s name, `image2d[.rgba8_unorm]` ([bindings.md](../bindings.md#storage-formats)).
 This is the spelling that is simplest to change later, and the sketches above predate it.
 
 The same holds further down.
@@ -87,5 +87,5 @@ The transformation hierarchy that `tg` has might be modelled later as well, inst
 * Which conversions are implicit, if any: between `float3` and `vec3`, and from a computation type to a format type at a `return`.
 * What `color as rgba8` does to the value: clamp, quantize, or only retype while the target quantizes on write.
 * What arithmetic a format type has, or whether it must be converted before any use.
-* The naming scheme of the format types, and whether it follows the format names of `sg`.
+* The naming scheme of format types, should they exist beside the storage formats, which [bindings.md](../bindings.md#storage-formats) settles as enum cases with `sg`'s names.
 * Whether the transformation hierarchy of `tg` is modelled, so that `mvp * v.pos` is typed by spaces.

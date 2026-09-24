@@ -154,7 +154,7 @@ Every "why" is mirrored in a `why/` folder beside its rules, and ideas that are 
 Generics, methods and lambdas.
 GLSL, and in MSL a compute entry point and a group.
 Iterative walks: `interpret`'s `eval` and the legalizer's expression walks recurse, so the smallest stack a walk runs on bounds `k_max_depth`.
-That makes a 40-term sum `nesting-too-deep` (CHK-200).
+That makes a 40-term sum `nesting-too-deep` (CHK-214).
 Over an explicit work stack, with a cycle caught by an on-path bit rather than by depth, the limit could be far higher.
 HLSL with final registers, one emission for dx12 and one for vulkan, so that SGL's text feeds no binding pass.
 A binding member that is neither a buffer nor a plain value, such as a texture or a sampler.

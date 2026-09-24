@@ -30,7 +30,8 @@ That is the right default for a failure and the wrong one for a warning, so warn
 ## The format string is the site's name
 
 A message with no arguments costs the stream **nothing**: the text lives in the site's descriptor, so the event is a header and no payload at all.
-A message with arguments is formatted directly into the chunk, with no temporary buffer and no allocation.
+A message with arguments is formatted once into a per-thread buffer, then copied into the stream whole.
+A formatter that logs a message of its own is fine: the nested message formats into a buffer of its own, and neither text bleeds into the other.
 
 The format string doubles as the site's name, which is what lets every message from one site group under one string whatever it formatted to.
 That is what makes "how often does this fire" a question anyone can answer.

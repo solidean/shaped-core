@@ -127,8 +127,8 @@ TEST("sgl check - what the tracer does not carry is unsupported-yet, and names t
     CHECK(reports_for("struct a:\n    x: float\n    len => x\n") == "unsupported-yet user:[len => x] a property\n");
     CHECK(reports_for("struct a:\n    x: float = 1.0\n") == "unsupported-yet user:[1.0] a default value\n");
     CHECK(reports_for("binding b = constants\n") == "unsupported-yet user:[constants] a binding composition\n");
-    CHECK(reports_for("binding b:\n    t: texture2d[rgba8]\n")
-          == "unsupported-yet user:[texture2d[rgba8]] type arguments\n");
+    // CHK-25: a format is no type, so a texture takes what it samples to and an image takes a format as a case.
+    CHECK(reports_for("binding b:\n    t: texture2d[rgba8]\n") == "unknown-name user:[rgba8] rgba8\n");
     CHECK(reports_for("@format(rgba8) struct a:\n    x: float\n")
           == "unsupported-yet user:[format] the attribute @format on a struct\n");
 

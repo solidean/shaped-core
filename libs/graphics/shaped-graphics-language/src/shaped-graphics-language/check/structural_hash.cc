@@ -10,6 +10,22 @@ namespace
 {
 void fold_type(cc::byte_stream_builder& b, checked_module const& m, type_id type);
 
+// By value: which slot of `checked_module::samplers` a sampler landed in is no part of its shape.
+void fold_sampler(cc::byte_stream_builder& b, sampler_state const& s)
+{
+    b.add_pod(s.min_filter);
+    b.add_pod(s.mag_filter);
+    b.add_pod(s.mip_filter);
+    b.add_pod(s.address_u);
+    b.add_pod(s.address_v);
+    b.add_pod(s.address_w);
+    b.add_pod(s.compare);
+    b.add_pod(s.max_anisotropy);
+    b.add_pod(s.min_lod);
+    b.add_pod(s.max_lod);
+    b.add_pod(s.mip_lod_bias);
+}
+
 void fold_members(cc::byte_stream_builder& b, checked_module const& m, cc::span<member_info const> members)
 {
     b.add_pod(u64(members.size()));
@@ -20,6 +36,11 @@ void fold_members(cc::byte_stream_builder& b, checked_module const& m, cc::span<
         b.add_bool(member.is_thread_id);
         b.add_bool(member.is_per_instance);
         b.add_string(member.stream);
+        b.add_bool(member.is_unfilterable);
+        b.add_bool(member.is_non_filtering);
+        b.add_bool(member.static_sampler >= 0);
+        if (member.static_sampler >= 0)
+            fold_sampler(b, m.samplers[member.static_sampler]);
         fold_type(b, m, member.type);
     }
 }
@@ -48,6 +69,18 @@ void fold_type(cc::byte_stream_builder& b, checked_module const& m, type_id type
             b.add_string(m.name_of(type));
         else
             fold_members(b, m, m.at(t.members));
+        return;
+    case type_kind::texture:
+    case type_kind::image:
+    case type_kind::sampler:
+        b.add_pod(u8(t.shape));
+        b.add_bool(t.is_depth);
+        b.add_pod(t.format);
+        b.add_pod(u8(t.access));
+        b.add_bool(t.is_comparison);
+        b.add_bool(t.element != type_id::none);
+        if (t.element != type_id::none)
+            fold_type(b, m, t.element);
         return;
     default:
         return;

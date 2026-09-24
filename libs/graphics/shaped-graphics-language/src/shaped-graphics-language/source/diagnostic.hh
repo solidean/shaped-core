@@ -153,6 +153,10 @@ enum class sgl::diagnostic_kind : sgl::u8
     duplicate_case_pattern,
     /// An arm of a `case` that is a value and that neither produces one nor exits.
     missing_value_in_arm,
+    /// A form some backend lacks, which only a function that opts into its feature may use (the bindings spec, "Features").
+    needs_feature,
+    /// A function reached from an entry point of a stage its `@stages` leaves out, `DEBUG_sample` in a compute shader.
+    stage_not_allowed,
     /// A `pipeline` whose stages do not fit together, or a setting that names no field or has a value it cannot.
     invalid_pipeline,
     /// An entry point whose flat tree, with every call inlined, nests deeper than the compiler walks.

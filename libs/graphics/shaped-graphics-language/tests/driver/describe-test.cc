@@ -293,3 +293,97 @@ TEST("sgl describe - a struct's shape is its members, and not its name")
     CHECK(binding_shape("    scale: float\n") == binding_shape("    scale: float\n"));
     CHECK(binding_shape("    scale: float\n") != binding_shape("    scale: float\n    bias: float\n"));
 }
+
+TEST("sgl describe - a group's shape holds every fact of its textures, images and samplers")
+{
+    // A reload that missed one of these would keep a layout the new shader no longer matches.
+    auto const shape_of
+        = [](cc::string_view name, cc::string_view t, cc::string_view i, cc::string_view s, cc::string_view filter)
+    {
+        auto const d = described(cc::format(
+            "binding {}:\n    {}\n    {}\n    {}\n    sampler st:\n        filter = .{}\n", name, t, i, s, filter));
+        REQUIRE(d.bindings.size() == 1);
+        return d.bindings[0].shape;
+    };
+    auto const t = "t: texture2d[float4]";
+    auto const i = "i: out image2d[.r32_float]";
+    auto const s = "s: sampler";
+    auto const base = shape_of("set", t, i, s, "linear");
+    CHECK(base.size() == 32);
+    CHECK(shape_of("set", t, i, s, "linear") == base);
+    // The binding's name is no part of it, as a struct's is not.
+    CHECK(shape_of("other", t, i, s, "linear") == base);
+
+    CHECK(shape_of("set", "t: texture2d[float2]", i, s, "linear") != base);
+    CHECK(shape_of("set", "t: texture2d_array[float4]", i, s, "linear") != base);
+    CHECK(shape_of("set", "t: texture2d_depth", i, s, "linear") != base);
+    CHECK(shape_of("set", "@unfilterable t: texture2d[float4]", i, s, "linear") != base);
+    CHECK(shape_of("set", t, "i: out image2d[.rgba8_unorm]", s, "linear") != base);
+    CHECK(shape_of("set", t, "i: mut image2d[.r32_float]", s, "linear") != base);
+    CHECK(shape_of("set", t, i, "s: comparison_sampler", "linear") != base);
+    CHECK(shape_of("set", t, i, "@non_filtering s: sampler", "linear") != base);
+    CHECK(shape_of("set", t, i, s, "nearest") != base);
+}
+
+TEST("sgl describe - a texture's sample type and a sampler's binding type, as the declaration states them")
+{
+    auto const d = described(R"(binding set:
+    f: texture2d[float4]
+    u: texture2d[uint4]
+    n: texture2d[int]
+    z: texture2d_depth
+    @unfilterable r: texture2d[float4]
+    ms: texture2d_ms[float4]
+    strip: texture1d[float]
+    bound: sampler
+    compares: comparison_sampler
+    sampler crisp:
+        filter = .nearest
+    sampler shadow:
+        compare = .less
+)");
+    REQUIRE(d.bindings.size() == 1);
+    auto const& set = d.bindings[0];
+    REQUIRE(set.members.size() == 11);
+    CHECK(set.members[0].sample_type == "filterable_float");
+    CHECK(set.members[1].sample_type == "uint");
+    CHECK(set.members[2].sample_type == "sint");
+    CHECK(set.members[3].sample_type == "depth");
+    CHECK(set.members[4].sample_type == "unfilterable_float");
+    CHECK(set.members[5].sample_type == "unfilterable_float");
+    CHECK(set.members[5].texture_dimension == "tex_2d_ms");
+    // WGSL writes a 1D texture as a 2D one, and the host still creates a 1D one: sg's backend makes it 2D.
+    CHECK(set.members[6].texture_dimension == "tex_1d");
+    CHECK(set.members[7].sampler_type == "filtering");
+    CHECK(set.members[8].sampler_type == "comparison");
+    CHECK(set.members[9].sampler_type == "non_filtering");
+    CHECK(set.members[9].static_sampler.has_value());
+    CHECK(set.members[10].sampler_type == "comparison");
+    REQUIRE(set.members[10].static_sampler.has_value());
+    CHECK(set.members[10].static_sampler.value().compare == "less");
+
+    // No plain member, so no constant block: the resources number from slot 0.
+    CHECK(set.block_slot == -1);
+    CHECK(set.members[0].slot == 0);
+    CHECK(set.members[10].slot == 10);
+    CHECK(set.members[0].host_name == "set.f");
+}
+
+TEST("sgl describe - an image store is refused in a vertex stage, which core WebGPU gives no writable storage")
+{
+    auto const error = error_of(R"(binding tex:
+    dst: out image2d[.rgba8_unorm]
+
+@vertex struct vin:
+    p: pos3
+
+struct link:
+    @position p: hpos4
+
+@vertex fun vs(v: vin){tex} -> link:
+    DEBUG_store(tex.dst, int2(0, 0), float4(1.0, 1.0, 1.0, 1.0))
+    return { p = hpos4(..v.p, 1.0) }
+)");
+    CHECK(error.contains("stage-not-allowed"));
+    CHECK(error.contains("DEBUG_store is @stages without it"));
+}

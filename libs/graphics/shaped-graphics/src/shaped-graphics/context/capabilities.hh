@@ -41,6 +41,18 @@ enum class sg::feature
     /// WebGPU core allows read-write on those three alone, and its `texture-formats-tier2` lifts that; write-only and read-only work everywhere.
     readwrite_storage_formats,
 
+    /// A sampled texture of `r32_float`, `rg32_float` or `rgba32_float` may be filtered.
+    /// Core WebGPU makes those three unfilterable and its `float32-filterable` lifts that, and Vulkan reports it per format.
+    /// Without it, binding such a view to a `filterable_float` binding is refused on every backend.
+    float32_filtering,
+
+    /// A storage texture may use a format outside `sg::is_portable_storage_format`, such as `r8_unorm` or `rgb10a2_unorm`.
+    /// `bgra8_unorm` is among them, and it is the one each API asks for on its own.
+    /// WebGPU grants them with `texture-formats-tier1` and `bgra8unorm-storage`.
+    /// Vulkan grants them with `shaderStorageImageExtendedFormats` plus `VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT` on `B8G8R8A8_UNORM`.
+    /// D3D12 grants them with a typed UAV on `DXGI_FORMAT_B8G8R8A8_UNORM`, the rest being required at feature level 11_0.
+    extended_storage_formats,
+
     /// A block-compressed texture may have a width or height that is no multiple of its block (4 for BC).
     /// WebGPU core refuses one unless the device has `texture-compression-unaligned`, and D3D12 reports it as an option.
     /// Where this is false, creating one is a refusal naming the size, which a loader of user textures can pad against.

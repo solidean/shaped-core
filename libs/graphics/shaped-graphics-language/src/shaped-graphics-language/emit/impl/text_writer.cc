@@ -229,9 +229,9 @@ struct writer
             [&](flat_binding_member const& b)
             {
                 // A buffer is a global of its own; every other member is a field of a block, `@inline` or its group's.
-                if (auto const found = buffer_of(p, b.binding, b.member); found >= 0)
+                if (auto const found = resource_of(p, b.binding, b.member); found >= 0)
                 {
-                    result = {.text = d.buffer_reference(p.buffers[found])};
+                    result = {.text = d.resource_reference(p.resources[found])};
                     return;
                 }
                 auto const& block = *block_of(p, b.binding);
@@ -405,8 +405,12 @@ struct writer
                      [&](flat_print const&) {}, //
                      [&](flat_eval const& v)
                      {
+                         // A call that gives nothing is a statement as it stands, in every target.
                          auto text = cc::string();
-                         d.write_eval(text, expr(v.value).text);
+                         if (p.e.at(v.value).type == checked_module::nothing_type)
+                             text = cc::format("{};", expr(v.value).text);
+                         else
+                             d.write_eval(text, expr(v.value).text);
                          line(text);
                      },
                      [&](flat_if const& i) { branch(i, false); },
@@ -465,18 +469,18 @@ void sgl::emit::impl::write_enum_constants(cc::string& out, plan const& p, diale
 
 void sgl::emit::impl::write_buffers(cc::string& out, plan const& p, dialect const& d)
 {
-    // `p.buffers` is in group then slot order, so one binding's buffers are one run.
+    // `p.resources` is in group then slot order, so one binding's resources are one run.
     auto first = isize(0);
     for (auto const id : p.e.bindings)
     {
         auto last = first;
-        while (last < p.buffers.size() && p.buffers[last].binding == id)
+        while (last < p.resources.size() && p.resources[last].binding == id)
             ++last;
         auto const* const block = block_of(p, id);
         auto const is_group_block = block != nullptr && block->group >= 0;
         if (is_group_block || last > first)
             d.write_group(out, p, is_group_block ? block : nullptr,
-                          cc::span<planned_buffer const>(p.buffers).subspan({.offset = first, .size = last - first}));
+                          cc::span<planned_resource const>(p.resources).subspan({.offset = first, .size = last - first}));
         first = last;
     }
 }
@@ -511,6 +515,46 @@ cc::string_view sgl::emit::impl::stage_name(check::stage s)
     return "";
 }
 
+void sgl::emit::impl::write_helpers(cc::string& out, plan const& p, dialect const& d)
+{
+    // EMIT-102: each helper the entry point's builtin calls need, once, in the order first needed.
+    auto written = cc::vector<cc::string>();
+    for (auto const& x : p.e.exprs)
+    {
+        auto const* const call = x.node.try_as<check::flat_call>();
+        auto const* const record = call != nullptr ? p.m.builtin_function(call->intrinsic) : nullptr;
+        if (record == nullptr || record->write.helper == nullptr)
+            continue;
+        auto types = cc::vector<cc::string>();
+        for (auto const argument : p.e.at(call->arguments))
+        {
+            auto const type = p.e.at(argument).type;
+            types.push_back(check::is_resource(p.m.at(type).kind) ? d.resource_text(p, type)
+                                                                  : cc::string(type_text(p, d, type)));
+        }
+        auto text = record->write.helper({.target = d.language(), .argument_types = types});
+        auto is_known = text.empty();
+        for (auto const& w : written)
+            is_known = is_known || w == text;
+        if (!is_known)
+            written.push_back(cc::move(text));
+    }
+    for (auto const& w : written)
+        out.appendf("{}\n", w);
+}
+
+bool sgl::emit::impl::uses_derivatives(plan const& p)
+{
+    for (auto const& x : p.e.exprs)
+    {
+        auto const* const call = x.node.try_as<check::flat_call>();
+        auto const* const record = call != nullptr ? p.m.builtin_function(call->intrinsic) : nullptr;
+        if (record != nullptr && record->uses_derivatives)
+            return true;
+    }
+    return false;
+}
+
 cc::string sgl::emit::impl::write_text(plan& p, dialect const& d)
 {
     auto w = writer{.p = p, .d = d};
@@ -518,6 +562,7 @@ cc::string sgl::emit::impl::write_text(plan& p, dialect const& d)
                   d.description());
     w.out += "// Generated: the SGL source is what to edit.\n\n";
     d.write_declarations(w.out, p);
+    write_helpers(w.out, p, d);
     d.write_function_head(w.out, p);
     for (auto const id : p.e.at(p.e.body))
         w.statement(p.e.at(id));

@@ -267,9 +267,20 @@ TEST("sgl check - statements and expressions the tracer does not carry")
     CHECK(body_reports("k\nreturn k\n") == "unsupported-yet user:[k] an expression statement\n");
     CHECK(body_reports("let h = x => x\nreturn k\n") == "unsupported-yet user:[x => x] a lambda\n");
     CHECK(body_reports("let t = (k, k)\nreturn k\n") == "unsupported-yet user:[(k, k)] a tuple\n");
-    CHECK(body_reports("let t = k as vec3\nreturn k\n") == "unsupported-yet user:[k as vec3] as\n");
     CHECK(body_reports("fun g(x: float) -> float => x\nreturn k\n")
           == "unsupported-yet user:[fun g(x: float) -> float => x] a declaration inside a function\n");
+}
+
+TEST("sgl check - `as` converts between float, int and uint of one width, and nothing else")
+{
+    CHECK(body_reports("let i = k as int\nlet u = i as uint\nreturn u as float\n") == "");
+    CHECK(body_reports("let w = float2(k, k) as int2\nreturn k\n") == "");
+    // A cast to the type the value has is the value.
+    CHECK(body_reports("return k as float\n") == "");
+    CHECK(body_reports("let t = k as vec3\nreturn k\n")
+          == "no-matching-overload user:[k as vec3] float as vec3: no conversion\n");
+    CHECK(body_reports("let t = c as int2\nreturn k\n")
+          == "no-matching-overload user:[c as int2] float3 as int2: no conversion\n");
 }
 
 TEST("sgl check - the side tables name what an editor asks for")

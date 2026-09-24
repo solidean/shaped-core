@@ -17,6 +17,7 @@ TEST("sgl check - the cube checks without a diagnostic, and its whole dump is pi
     // The prelude's symbols stand in front, and the prelude grows: what is pinned whole is the program's share.
     auto const dump = sgl::check::dump(checked.module);
     CHECK(dump.starts_with("(struct float builtin opaque)\n"
+                           "(struct float2 builtin (x : float) (y : float))\n"
                            "(struct float3 builtin (x : float) (y : float) (z : float))\n"));
     CHECK(dump.contains("(fun dot builtin pure (a : vec3) (b : vec3) -> float)\n"));
     CHECK(dump.contains("(fun transform_position builtin pure operator:* (m : mat4) (p : pos3) -> hpos4)\n"));

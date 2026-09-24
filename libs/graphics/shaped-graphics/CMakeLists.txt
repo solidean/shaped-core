@@ -22,6 +22,7 @@ add_library(shaped-graphics
     src/shaped-graphics/barrier/command_list_slot.cc
     src/shaped-graphics/binding/binding.cc
     src/shaped-graphics/binding/impl/binding_conflicts.cc
+    src/shaped-graphics/binding/impl/portability.cc
     src/shaped-graphics/binding/layout_fit.cc
     src/shaped-graphics/binding/binding_group_layout.cc
     src/shaped-graphics/binding/pipeline_layout.cc
@@ -243,6 +244,7 @@ if(SC_BUILD_TESTS)
         tests/binding/binding-test.cc
         tests/binding/binding_conflicts-test.cc
         tests/binding/layout_hash-test.cc
+        tests/binding/portability-test.cc
         tests/binding/slot-table-test.cc
         tests/binding/shader_codec-test.cc
         tests/pipeline/raster_pipeline-test.cc
@@ -271,6 +273,7 @@ if(SC_BUILD_TESTS)
             tests/context/cold-caches-test.cc
             tests/buffer/buffer-test.cc
             tests/texture/texture-create-test.cc
+            tests/texture/texture-feature-test.cc
             tests/command_list/command_list-test.cc
             tests/command_list/index_buffer_alignment-test.cc
             tests/transfer/transfer-test.cc
@@ -373,6 +376,7 @@ if(SC_BUILD_TESTS)
             tests/shaders/shader_fixtures.cc
             tests/shaders/sgl-package-test.cc
             tests/compute/compute-test.cc
+            tests/compute/compute-texture-test.cc
             tests/raster/raster-test.cc
         )
         sc_add_shader_package(
@@ -384,6 +388,7 @@ if(SC_BUILD_TESTS)
             SHADERS
                 double_values.sgl:*
                 quads.sgl:*
+                textures.sgl:*
         )
     endif()
 

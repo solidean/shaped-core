@@ -247,6 +247,8 @@ namespace frame_bindings
 // `#pragma sc static <sg::sampler field>=<value>` before a sampler bakes it into the layout;
 //   `filter=linear` sets all three filters, `address=clamp_edge` all three axes, and a tuple form
 //   `filter=(linear, linear, nearest)` addresses them individually, in sg::sampler's declaration order.
+// `#pragma sc format <sg::pixel_format>` before an RWTexture* states its storage_format, and on SPIR-V
+//   writes [[vk::image_format]] too; it is how SGL's HLSL states an image's format.
 // `#pragma sc push_constants` before a ConstantBuffer makes it inline constants: register(b0, space9) on
 //   DXIL, [[vk::push_constant]] on SPIR-V. NO arguments -- the space is slib::inline_constants_space,
 //   reserved, and a group numbered 9 is refused rather than the block naming a space to avoid.
@@ -294,7 +296,7 @@ scope.bind<shaders::frame_bindings>(*g);   // binds at G::group_index, on raster
 ### an SGL package's generated types
 
 ```cpp
-// `binding work` -> shaders::work: one field per member, in the shader's order, plus declared_bindings(), gather().
+// `binding work` -> shaders::work: one field per member, in the shader's order, plus declared_bindings(), declared_samplers(), gather().
 //   a buffer member is a TYPED view: `mut buffer[float]` -> sg::readwrite_buffer_view<float>, so a read-only view or
 //   a buffer<int> does not compile. A plain member is a plain field (`scale: float` -> float): the group's own
 //   constant buffer, which create_binding_group allocates with the scope's lifetime: a transient one is uploaded
@@ -304,6 +306,11 @@ scope.bind<shaders::frame_bindings>(*g);   // binds at G::group_index, on raster
 auto const layout = ctx.cached.acquire_binding_group_layout<shaders::work>();
 auto const group = ctx.transient.create_binding_group(cmd, layout, shaders::work{.scale = 2.0f, .values = buf.as_readwrite_buffer()});
 cmd.compute.bind_group(0, *group);        // group 0 of `main`, group 1 of an entry point listing {factor, work}
+// a texture or image member is a typed view too, its traits from the shape (`sg::tv_2d`, `sg::tv_cube`, `sg::tv_2d_array`…):
+//   `albedo: texture2d[float4]`        -> sg::readonly_texture_view<sg::tv_2d> albedo
+//   `dst: out image2d[.rgba8_unorm]`   -> sg::readwrite_texture_view<sg::tv_2d> dst   (any access: read, out, mut)
+//   `user_smp: sampler`                -> sg::sampler user_smp, which gather() hands sg by its host name (`work.user_smp`)
+//   `sampler albedo_smp:` block        -> NO field: an sg::named_sampler in declared_samplers(), which the layout carries
 // `@inline binding constants` -> shaders::constants: plain fields in C++'s layout, and the block the shader reads:
 pass.set_inline_constants(shaders::constants{.view_projection = vp}.to_block());
 // every name lives in the package namespace, so two files declaring one name is a generator error.

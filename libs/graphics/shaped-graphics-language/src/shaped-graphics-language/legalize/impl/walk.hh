@@ -13,7 +13,7 @@ namespace sgl::check::impl
 /// Raise it only against that budget.
 ///
 /// It is a language limit as well: a top-level `let x = a + b + …` of 40 terms is past it.
-/// The check pass refuses such an entry point as `nesting-too-deep` (CHK-200), so no walk here ever meets the hole it
+/// The check pass refuses such an entry point as `nesting-too-deep` (CHK-214), so no walk here ever meets the hole it
 /// would leave behind.
 /// The real fix is iterative walks over an explicit work stack for `interpret`'s `eval` and the legalizer's expression
 /// walks, with a cycle caught by an on-path bit rather than by depth; the limit could then be far higher.

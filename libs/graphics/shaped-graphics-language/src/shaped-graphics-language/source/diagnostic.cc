@@ -180,6 +180,10 @@ cc::string_view sgl::to_string(diagnostic_kind kind)
         return "duplicate-case-pattern";
     case diagnostic_kind::missing_value_in_arm:
         return "missing-value-in-arm";
+    case diagnostic_kind::needs_feature:
+        return "needs-feature";
+    case diagnostic_kind::stage_not_allowed:
+        return "stage-not-allowed";
     case diagnostic_kind::invalid_pipeline:
         return "invalid-pipeline";
     case diagnostic_kind::nesting_too_deep:
@@ -275,6 +279,8 @@ sgl::severity sgl::default_severity_of(diagnostic_kind kind)
     case diagnostic_kind::non_exhaustive_case:
     case diagnostic_kind::duplicate_case_pattern:
     case diagnostic_kind::missing_value_in_arm:
+    case diagnostic_kind::needs_feature:
+    case diagnostic_kind::stage_not_allowed:
     case diagnostic_kind::invalid_pipeline:
     case diagnostic_kind::nesting_too_deep:
         return severity::normal_error;

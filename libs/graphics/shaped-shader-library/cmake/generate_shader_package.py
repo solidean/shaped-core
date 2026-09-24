@@ -895,6 +895,8 @@ def emit_binding_table(entry: BindingEntry, embedded: list[str]) -> str:
         out.append(f"     .type = sg::binding_type::{binding.type},\n")
         if binding.dimension is not None:
             out.append(f"     .texture_dimension = sg::texture_view_dimension::{binding.dimension},\n")
+        if binding.storage_format is not None:
+            out.append(f"     .storage_format = sg::pixel_format::{binding.storage_format},\n")
         out.append("    },\n")
     out.append("};\n")
 
@@ -939,7 +941,8 @@ def emit_self_check(manifest: Manifest, entry: BindingEntry, embedded: list[str]
     out.append("            auto const& a = parsed.bindings[i];\n")
     out.append("            auto const& b = table[i];\n")
     out.append("            if (a.name != b.name || a.index != b.index || a.count != b.count || a.type != b.type\n")
-    out.append("                || a.texture_dimension != b.texture_dimension || a.group_index != b.group_index\n")
+    out.append("                || a.texture_dimension != b.texture_dimension || a.storage_format != b.storage_format\n")
+    out.append("                || a.group_index != b.group_index\n")
     out.append("                || a.space != b.space)\n")
     out.append(f'                return cc::format("{group.name}: binding {{}} reads as \'{{}}\', the table says \'{{}}\'",\n')
     out.append("                                  i, a.name, b.name);\n")
