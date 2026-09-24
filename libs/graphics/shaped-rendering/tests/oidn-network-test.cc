@@ -324,9 +324,9 @@ ASYNC_INVOCABLE_TEST("sr - the OIDN member denoises through the denoise front", 
     // A named member resolves to itself, and it is spatial — so it is what `automatic` reaches for on a converging
     // mean, ahead of a-trous.
     auto const settings = sr::denoise_settings{.method = sr::denoise_method::oidn};
-    CHECK(sr::resolve_denoise_method(ctx, settings, false) == sr::denoise_method::oidn);
+    CHECK(sr::resolve_denoise_method(ctx, settings) == sr::denoise_method::oidn);
     CHECK(!sr::is_temporal(sr::denoise_method::oidn));
-    CHECK(sr::resolve_denoise_method(ctx, {.method = sr::denoise_method::automatic}, false) == sr::denoise_method::oidn)
+    CHECK(sr::resolve_denoise_method(ctx, {.method = sr::denoise_method::automatic}) == sr::denoise_method::oidn)
         .context("automatic should prefer the trained spatial member over a-trous");
 
     sr::oidn_denoise_routine::prewarm(ctx);
@@ -382,7 +382,7 @@ ASYNC_INVOCABLE_TEST("sr - the OIDN member denoises through the denoise front", 
             .guides = {.albedo = albedo, .normal = normal},
             .output = output,
         };
-        return sr::denoise_routine::execute(cmd, in, history, settings, false);
+        return sr::denoise_routine::execute(cmd, in, history, settings);
     };
 
     auto outcome = sr::denoise_outcome{};

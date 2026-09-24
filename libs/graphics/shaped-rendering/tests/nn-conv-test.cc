@@ -145,11 +145,12 @@ ASYNC_INVOCABLE_TEST("sr - the network's convolution matches a reference impleme
     REQUIRE(source4.has_value());
 
     auto const group = ctx.transient.create_binding_group(
-        group_layout, sr::shaders::nn_conv_bindings{.gSourceA = source4.value().as_readonly_buffer(),
-                                                    // Nothing reads B here: every channel is below in_channels_a.
-                                                    .gSourceB = source4.value().as_readonly_buffer(),
-                                                    .gWeights = weight_buffer.as_readonly_buffer(),
-                                                    .gTarget = target_buffer.as_readwrite_buffer()});
+        *cmd, group_layout,
+        sr::shaders::nn_conv_bindings{.gSourceA = source4.value().as_readonly_buffer(),
+                                      // Nothing reads B here: every channel is below in_channels_a.
+                                      .gSourceB = source4.value().as_readonly_buffer(),
+                                      .gWeights = weight_buffer.as_readonly_buffer(),
+                                      .gTarget = target_buffer.as_readwrite_buffer()});
 
     auto const constants = sr::shaders::nn_conv_constants{
         .width = u32(k_width),

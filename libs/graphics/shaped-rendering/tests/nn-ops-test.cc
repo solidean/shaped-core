@@ -162,11 +162,12 @@ ASYNC_INVOCABLE_TEST("sr - the network's transfer curve round-trips across the H
         width * 12, sg::buffer_usage::readonly_buffer | sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
 
     cmd->compute.bind_pipeline(*input_pipeline);
-    cmd->compute.bind<sr::shaders::nn_input_bindings>(*ctx.transient.create_binding_group(
-        input_layout, sr::shaders::nn_input_bindings{.gColor = color.as_readonly_view(),
-                                                     .gAlbedo = albedo.as_readonly_view(),
-                                                     .gNormal = normal.as_readonly_view(),
-                                                     .gTarget = packed.as_readwrite_buffer()}));
+    cmd->compute.bind<sr::shaders::nn_input_bindings>(
+        *ctx.transient.create_binding_group(*cmd, input_layout,
+                                            sr::shaders::nn_input_bindings{.gColor = color.as_readonly_view(),
+                                                                           .gAlbedo = albedo.as_readonly_view(),
+                                                                           .gNormal = normal.as_readonly_view(),
+                                                                           .gTarget = packed.as_readwrite_buffer()}));
     cmd->compute.set_inline_constants(sr::shaders::nn_input_constants{.width = u32(width),
                                                                       .height = 1,
                                                                       .source_width = u32(width),
@@ -201,7 +202,7 @@ ASYNC_INVOCABLE_TEST("sr - the network's transfer curve round-trips across the H
     cmd2->upload.data_to_buffer(three, compacted);
     cmd2->compute.bind_pipeline(*output_pipeline);
     cmd2->compute.bind<sr::shaders::nn_output_bindings>(*ctx.transient.create_binding_group(
-        output_layout,
+        *cmd2, output_layout,
         sr::shaders::nn_output_bindings{.gSource = three.as_readonly_buffer(), .gTarget = result.as_readwrite_view()}));
     cmd2->compute.set_inline_constants(sr::shaders::nn_output_constants{.width = u32(width),
                                                                         .height = 1,
@@ -285,7 +286,7 @@ ASYNC_INVOCABLE_TEST("sr - the network's pool and upsample move the texels they 
 
     cmd->compute.bind_pipeline(*pool_pipeline);
     cmd->compute.bind<sr::shaders::nn_pool_bindings>(*ctx.transient.create_binding_group(
-        pool_layout,
+        *cmd, pool_layout,
         sr::shaders::nn_pool_bindings{.gSource = src.as_readonly_buffer(), .gTarget = pooled.as_readwrite_buffer()}));
     cmd->compute.set_inline_constants(
         sr::shaders::nn_pool_constants{.width = src_w / 2, .height = src_h / 2, .channels = channels, ._pad = 0});
@@ -296,7 +297,7 @@ ASYNC_INVOCABLE_TEST("sr - the network's pool and upsample move the texels they 
 
     cmd->compute.bind_pipeline(*up_pipeline);
     cmd->compute.bind<sr::shaders::nn_upsample_bindings>(*ctx.transient.create_binding_group(
-        up_layout,
+        *cmd, up_layout,
         sr::shaders::nn_upsample_bindings{.gSource = pooled.as_readonly_buffer(), .gTarget = up.as_readwrite_buffer()}));
     cmd->compute.set_inline_constants(
         sr::shaders::nn_upsample_constants{.width = src_w / 2, .height = src_h / 2, .channels = channels, ._pad = 0});

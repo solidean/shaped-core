@@ -611,13 +611,15 @@ bool oidn_network::execute(sg::command_list& cmd,
     // The two groups that name the CALLER's textures, built once per call rather than once per tile.
     // Everything else was built with the network, because a tile changes push constants and nothing a group names.
     auto const input_group = ctx.transient.create_binding_group(
-        _programs.input_layout, shaders::nn_input_bindings{.gColor = color.as_readonly_view(),
-                                                           .gAlbedo = albedo.as_readonly_view(),
-                                                           .gNormal = normal.as_readonly_view(),
-                                                           .gTarget = _features[f_input].as_readwrite_buffer()});
+        cmd, _programs.input_layout,
+        shaders::nn_input_bindings{.gColor = color.as_readonly_view(),
+                                   .gAlbedo = albedo.as_readonly_view(),
+                                   .gNormal = normal.as_readonly_view(),
+                                   .gTarget = _features[f_input].as_readwrite_buffer()});
     auto const output_group = ctx.transient.create_binding_group(
-        _programs.output_layout, shaders::nn_output_bindings{.gSource = _features[f_out].as_readonly_buffer(),
-                                                             .gTarget = output.as_readwrite_view()});
+        cmd, _programs.output_layout,
+        shaders::nn_output_bindings{.gSource = _features[f_out].as_readonly_buffer(),
+                                    .gTarget = output.as_readwrite_view()});
 
     // One pass per tile, each writing only its interior.
     // The tensors are reused across tiles, which is the point: they are sized for one tile and never for the image.
