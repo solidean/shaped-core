@@ -157,6 +157,18 @@ void checker::judge_attributes(i32 file,
         // A setting's value is judged by each pipeline that reads it.
         if (!is_known && scope != setting_scope::none && is_setting_attribute(name, scope == setting_scope::target))
             continue;
+        if (!is_known && scope != setting_scope::none)
+        {
+            // An attribute has no path to disambiguate with, so the pipeline has to set the field itself.
+            auto const paths = setting_attribute_paths(name, scope == setting_scope::target);
+            if (paths.size() > 1)
+            {
+                report(diagnostic_kind::invalid_pipeline, file, a.name,
+                       cc::format("@{} names both {} and {}: set it in the pipeline by its whole path", name, paths[0],
+                                  paths[1]));
+                continue;
+            }
+        }
         if (!is_known)
             unsupported(file, a.name, cc::format("the attribute @{} on {}", name, owner));
         else if (sgl::is_valid(a.list) && name != "operator" && name != "compute" && name != "stream")

@@ -232,6 +232,8 @@ struct checker
     /// True when `name` alone is one field of the description, or of one target's part when `is_on_target`.
     /// A stage name never is: it marks an entry point.
     [[nodiscard]] bool is_setting_attribute(cc::string_view name, bool is_on_target);
+    /// Every field an attribute of that name could set, as full paths; more than one means it is ambiguous.
+    [[nodiscard]] cc::vector<cc::string> setting_attribute_paths(cc::string_view name, bool is_on_target);
 
     // ---- bodies and expressions (check_expr.cc) ---------------------------------------------------------------------
 

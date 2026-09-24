@@ -228,8 +228,10 @@ let color = float4(..lit, 1.0)
 * **CHK-181** An attribute of an entry point, of a `@vertex struct` or of a `@pixel struct` is a setting when its name alone is one field.
   On a member of a `@pixel struct` it is one of that target's fields.
   Such an attribute takes one value.
+  One whose name is two fields is `invalid-pipeline`, and the detail names both and says to set it in the pipeline, since an attribute has no path.
 * **CHK-182** A pipeline's settings apply in this order: the attributes of its vertex input, then of its `@pixel struct` and its members, then of its vertex and its pixel stage, then its own.
   Two sources of one step that set one field differently are `invalid-pipeline`, unless the pipeline sets that field itself.
+  A part and a field inside it count as one field here, so `blend = .none` meets every field of another source's blend, and the pipeline's own `blend = .none` settles them.
 * **CHK-183** What the vertex stage returns has the members the pixel stage takes: as many, with the same names and types, in the same order, and `@position` on the same one.
 * **CHK-184** Its stages' binding lists, `@inline` bindings left out, name the same binding at every position they share.
   The longest is the pipeline's layout, and the stages list one `@inline` binding at most.

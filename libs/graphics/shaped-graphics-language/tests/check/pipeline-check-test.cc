@@ -166,6 +166,8 @@ TEST("sgl check - a setting's value has the type of its field")
     CHECK(bad("    depth_test = 1\n")
           == "invalid-pipeline user:[1] depth_stencil.depth_test is a bool: `true` or `false`\n");
     CHECK(bad("    sample_count = 1.5\n") == "invalid-pipeline user:[1.5] sample_count is an int: write a number\n");
+    // A hex literal is a number, which the checker cannot read yet: unsupported, not "write a number".
+    CHECK(bad("    stencil_read_mask = 0xFF\n") == "unsupported-yet user:[0xFF] a hex literal\n");
     // `.host` is only for what the host knows better: a format, and the sample count.
     CHECK(bad("    cull = .host\n")
           == "invalid-pipeline user:[.host] rasterization.cull is no format and no sample count, so the host cannot "
@@ -255,6 +257,24 @@ TEST("sgl check - attributes on the code are settings too, and the declaration h
              "to decide\n");
     CHECK(reports(disagreeing + "pipeline:\n    vertex = avs\n    pixel = back_ps\n    cull = .front\n") == "");
 
+    // `blend = .none` writes the blend itself, so it meets every field another stage's whole blend writes.
+    auto const whole = cc::string_view("@blend((color = (source = .one, target = .one, op = .add), alpha = (source = "
+                                       ".one, target = .one, op = .add)))");
+    auto const blending = cc::string(attributed) + "@blend(.none) @vertex fun none_vs(v: avin) -> link:\n"
+                        + "    return { p = hpos4(..v.p, 1.0), n = vec3(0.0, 1.0, 0.0) }\n" + whole
+                        + " @pixel fun add_ps(l: link) -> single:\n    return { c = float4(..l.n, 1.0) }\n";
+    CHECK(reports(blending + "pipeline:\n    vertex = none_vs\n    pixel = add_ps\n")
+          == "invalid-pipeline user:[blend] color_targets.c.blend is set differently by two stages; the pipeline sets "
+             "it to decide\n");
+    // And the pipeline's own `blend = .none` writes the whole blend, which settles it.
+    CHECK(reports(blending + "pipeline:\n    vertex = none_vs\n    pixel = add_ps\n    blend = .none\n") == "");
+
+    // An attribute has no path to name one of two fields by, so an ambiguous one says where to set it instead.
+    CHECK(reports("@compare(.less) @pixel fun cmp_ps(l: link) -> single:\n    return { c = float4(..l.n, 1.0) }\n"
+                  "@pixel struct single:\n    c: float4\n")
+          == "invalid-pipeline user:[compare] @compare names both depth_stencil.stencil_front.compare and "
+             "depth_stencil.stencil_back.compare: set it in the pipeline by its whole path\n");
+
     // An attribute that names no setting is still the compiler's to judge.
     CHECK(reports("@culling(.none) @pixel fun bad_ps(l: link) -> gbuffer:\n"
                   "    return { albedo = float4(..l.n, 1.0), normal = float4(..l.n, 0.0) }\n")
@@ -269,6 +289,9 @@ TEST("sgl check - the short form places each entry point by its stage")
              "invalid-pipeline user:[pipeline quick = (ps, vs)] the target normal has no format: set "
              "`color_targets.normal.format`, or leave it to the host with `.host`\n");
     CHECK(reports("pipeline twice = (vs, vs)\n") == "invalid-pipeline user:[vs] a pipeline has one vertex stage\n");
+    // The long form holds to the same rule, rather than letting a later stage line override.
+    CHECK(reports(cc::string("pipeline:\n    vertex = vs\n    pixel = ps\n    vertex = vs\n") + formats)
+          == "invalid-pipeline user:[vs] a pipeline has one vertex stage\n");
     CHECK(reports("pipeline:\n    pixel = ps\n")
           == "invalid-pipeline user:[pipeline:] a pipeline has a vertex stage: `vertex = <entry point>`\n");
     CHECK(reports("pipeline:\n    vertex = ps\n") == "invalid-pipeline user:[ps] ps is no @vertex entry point\n");

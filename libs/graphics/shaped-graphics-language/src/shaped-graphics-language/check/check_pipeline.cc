@@ -69,6 +69,15 @@ struct settings_source
     return names.size() == 3 && names[0] == k_color_targets && names[2] == "blend";
 }
 
+/// Whether two setting paths write one field: they are equal, or one is a part the other lies in.
+/// `color_targets.color.blend = .none` and `color_targets.color.blend.color.source` are the case this exists for.
+[[nodiscard]] bool overlaps(cc::string_view a, cc::string_view b)
+{
+    auto const& shorter = a.size() <= b.size() ? a : b;
+    auto const& longer = a.size() <= b.size() ? b : a;
+    return longer.starts_with(shorter) && (longer.size() == shorter.size() || longer[shorter.size()] == '.');
+}
+
 /// Why `value` is out of range for the int field at `path`, or empty where it is in range.
 /// sg holds these narrower than SGL's `int`, so a value outside is truncated or refused past this point.
 [[nodiscard]] cc::string range_error(cc::string_view path, i64 value)
@@ -138,20 +147,28 @@ void find_fields(checked_module const& out,
 }
 } // namespace
 
-bool checker::is_setting_attribute(cc::string_view name, bool is_on_target)
+cc::vector<cc::string> checker::setting_attribute_paths(cc::string_view name, bool is_on_target)
 {
     // A stage marks an entry point or an edge struct, and fills a stage slot; it is never a field.
     if (name == "vertex" || name == "pixel" || name == "compute")
-        return false;
+        return {};
     auto const description = pipeline_description_type();
     if (description == checked_module::error_type)
-        return false;
+        return {};
     auto const* const targets = field_named(out, description, k_color_targets);
     auto const root = is_on_target && targets != nullptr ? targets->type : description;
     auto prefix = cc::vector<cc::string>();
     auto found = cc::vector<resolved_path>();
     find_fields(out, root, name, prefix, found);
-    return found.size() == 1;
+    auto paths = cc::vector<cc::string>();
+    for (auto const& f : found)
+        paths.push_back(joined(f.names));
+    return paths;
+}
+
+bool checker::is_setting_attribute(cc::string_view name, bool is_on_target)
+{
+    return setting_attribute_paths(name, is_on_target).size() == 1;
 }
 
 // ---- a pipeline -----------------------------------------------------------------------------------------------------
@@ -388,6 +405,16 @@ struct pipeline_compiler
                     into.push_back(cc::move(setting));
                     return true;
                 }
+            }
+            // A prefixed or suffixed literal is a number whose meaning needs literal types, which the checker has not.
+            if (is_literal && kind == number_class::other)
+            {
+                c.unsupported(in_file, at,
+                              text.starts_with("0x") || text.starts_with("0X")   ? "a hex literal"
+                              : text.starts_with("0b") || text.starts_with("0B") ? "a binary literal"
+                                                                                 : "a number literal of this spelling");
+                is_failed = true;
+                return false;
             }
             fail(in_file, at,
                  cc::format("{} is {} {}: write a number", field, builtin->name == "int" ? "an" : "a", builtin->name));
@@ -629,7 +656,7 @@ void checker::compile_pipeline(symbol_id id)
             return false;
         }
         auto& into = actual == stage::vertex ? vertex : pixel;
-        if (slot == stage::none && is_valid(into))
+        if (is_valid(into))
         {
             pc.fail(file, n->where,
                     cc::format("a pipeline has one {} stage", actual == stage::vertex ? "vertex" : "pixel"));
@@ -806,6 +833,8 @@ void checker::compile_pipeline(symbol_id id)
     }
 
     // Two sources of one step disagree only where the declaration does not decide it.
+    // A path overlaps the parts it lies in, so `blend = .none` meets every leaf of another source's blend.
+    auto reported = cc::vector<cc::string>();
     for (auto a = isize(0); a < sources.size(); ++a)
         for (auto b = a + 1; b < sources.size(); ++b)
         {
@@ -814,15 +843,22 @@ void checker::compile_pipeline(symbol_id id)
             for (auto const& x : sources[a].settings)
                 for (auto const& y : sources[b].settings)
                 {
-                    if (x.path != y.path || same_value(x, y))
+                    if (!overlaps(x.path, y.path) || (x.path == y.path && same_value(x, y)))
                         continue;
+                    // The pipeline settles it by writing into both, whichever order the two sources applied in.
                     auto is_decided = false;
                     for (auto const& z : declared.settings)
-                        is_decided = is_decided || z.path == x.path;
-                    if (!is_decided)
-                        pc.fail(y.file, y.where,
-                                cc::format("{} is set differently by two {}; the pipeline sets it to decide", x.path,
-                                           x.source == setting_source::stage ? "stages" : "edge structs"));
+                        is_decided = is_decided || (overlaps(z.path, x.path) && overlaps(z.path, y.path));
+                    auto const& part = x.path.size() <= y.path.size() ? x.path : y.path;
+                    auto is_reported = false;
+                    for (auto const& r : reported)
+                        is_reported = is_reported || r == part;
+                    if (is_decided || is_reported)
+                        continue;
+                    reported.push_back(part);
+                    pc.fail(y.file, y.where,
+                            cc::format("{} is set differently by two {}; the pipeline sets it to decide", part,
+                                       x.source == setting_source::stage ? "stages" : "edge structs"));
                 }
         }
 
