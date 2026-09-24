@@ -91,6 +91,8 @@ ctx.accepts_shader_format(f)                       // bool — hand this to slib
 ctx.supports(sg::feature::raytracing)              // bool — THE capability question; feature is deliberately coarse (see context/capabilities.hh)
                                                    //   raytracing | timestamp_query | headless_present | geometry_shader | tessellation_shader | binding_arrays
                                                    //   | readwrite_storage_formats (false on core webgpu: read_write storage only in r32 formats)
+                                                   //   | unaligned_block_compression (false on webgpu and metal: a BC texture needs whole 4x4 blocks,
+                                                   //     and create_texture THROWS on one that has not; desc.unaligned_block_error(supports) asks first)
                                                    //   binding_arrays false (webgpu) = no count > 1 bindings, no staging_binding_group, no bindless_array
                                                    //   the per-scope bools (cmd.raytracing.is_supported(), cmd.query.is_supported(),
                                                    //   ctx.supports_headless_present()) all forward here, so there is one answer per question
@@ -719,7 +721,8 @@ cmd.compute.declare_array_texture_access(name, elements) // void — same for a 
                                                          // (scalar bindings are inferred; arrays can't be — declare them; cmd.raytracing has the same pair)
                                                          // ACCOUNTED FOR: dispatch asserts every bound array binding was declared; empty span = "unused"
 
-// raster_pipeline — a graphics PSO. Owns its shaders; formats/state baked in (must match the rendering scope). Draws via cmd.raster (above).
+// raster_pipeline — a graphics PSO. Owns its shaders; formats/state baked in. Draws via cmd.raster (above).
+//   bind_pipeline ASSERTS the rendering's color count/formats, depth format and sample count equal pipeline.target_formats()
 sg::raster_pipeline_description   // { pipeline_layout_handle layout; compiled_shader vertex_shader; optional<compiled_shader> fragment_shader;
                                   //   optional<compiled_shader> tessellation_control_shader/tessellation_evaluation_shader (both-or-neither, need patch_list); optional<compiled_shader> geometry_shader;
                                   //   vertex_input_layout vertex_input; primitive_topology topology=triangle_list; int patch_control_points=0 (1..32, patch_list only); rasterization_state; depth_stencil_state;
@@ -733,6 +736,8 @@ sg::vertex_input_layout           // { small_vector<vertex_input_slot,8> slots; 
 // state vocab (backend-neutral enums; primitive_topology.hh / rasterization_state.hh / blend_state.hh / depth_stencil_state.hh):
 //   primitive_topology {point_list,line_list,line_strip,triangle_list,triangle_strip,patch_list}  fill_mode{solid,wireframe}  cull_mode{none,front,back}  front_face{counter_clockwise,clockwise}
 //   blend_factor / blend_op / color_channel {r,g,b,a} with color_write_mask = cc::flags<color_channel> and color_write_mask_all  stencil_op  depth_stencil_state reuses sg::compare_op (from sampler.hh)
+//   depth_stencil_state { depth_test, depth_write, depth_compare, stencil_test, stencil_read_mask, stencil_write_mask, stencil_front, stencil_back }
+//   blend presets: sg::blend_alpha, sg::blend_premultiplied_alpha, sg::blend_additive — opaque is an unset `blend`
 //   vertex_attribute_format {f32,vec2f,vec3f,vec4f, i32.., u32.., rgba8_unorm, rgba8_uint}   index_format {uint16, uint32}
 raster_pipeline.cached_pipeline_data()  // -> pinned_data<byte const> — serialized PSO blob; persist + feed back via desc.cached_pipeline (empty if unsupported)
 // Access is inferred from each op (upload⇒copy_write, dispatch⇒bound views' access); no public
@@ -811,6 +816,10 @@ ctx.cached.acquire_pipeline_layout({.groups={gl0, ...}})       // -> pipeline_la
 ctx.cached.acquire_compute_pipeline({.shader=, .layout=})      // -> sg::async_compute_pipeline  async PSO build; identical (shader, pipeline layout) => one node
                                                                //   drive: cc::async_blocking_get(p) -> compute_pipeline_handle; or poll p->is_ready()/try_value()
 ctx.cached.acquire_raster_pipeline(raster_desc)               // -> sg::async_raster_pipeline  async PSO build; keyed on all shaders + layout + vertex input + every fixed-function state
+ctx.cached.acquire_raster_pipeline(source, parts, customize)  // any sg::raster_pipeline_source: `source.description(ctx, parts, customize)` is acquired
+                                                              //   — a generated SGL pipeline is one: acquire_raster_pipeline(shaders::cube.pipeline, {.color = f})
+                                                              //   parts is `S::open`, not deduced, so a braced {.field = …} works; customize edits the description last
+ctx.cached.acquire_raster_pipeline(shared_async<desc>)       // the same once a description arrives; its failure is the result's
                                                                //   NOT keyed on .cached_pipeline — that blob only accelerates a build
 ctx.cached.acquire_raytracing_pipeline(rt_desc)               // -> sg::async_raytracing_pipeline  async state-object build; keyed on all shaders + layout + limits
 ctx.cached.cache()                                             // -> pipeline_cache&  to install extra tiers / run bookkeeping

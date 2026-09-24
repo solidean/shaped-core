@@ -40,8 +40,11 @@ struct sgl::check::checked_module
     cc::vector<function_info> functions;
     cc::vector<parameter> parameters;
     cc::vector<binding_info> bindings;
-    /// The binding lists of the functions.
+    /// The binding lists of the functions, and the layouts of the pipelines.
     cc::vector<symbol_id> binding_lists;
+    /// Only the pipelines that checked without an error.
+    cc::vector<pipeline_info> pipelines;
+    cc::vector<pipeline_setting> pipeline_settings;
 
     /// One entry per file `check` was given, in that order.
     cc::vector<file_tables> files;
@@ -77,6 +80,10 @@ struct sgl::check::checked_module
     [[nodiscard]] cc::span<symbol_id const> at(ast::range_of<symbol_id> r) const
     {
         return ast::impl::slice(binding_lists, r);
+    }
+    [[nodiscard]] cc::span<pipeline_setting const> at(ast::range_of<pipeline_setting> r) const
+    {
+        return ast::impl::slice(pipeline_settings, r);
     }
 
     /// The registry record behind a type the prelude declares `@builtin`; null for every other type and for an id that names none.
@@ -114,7 +121,8 @@ struct sgl::check::checked_module
         return is_equal(symbols, rhs.symbols) && is_equal(types, rhs.types) && is_equal(members, rhs.members)
             && is_equal(enum_cases, rhs.enum_cases) && is_equal(functions, rhs.functions)
             && is_equal(parameters, rhs.parameters) && is_equal(bindings, rhs.bindings)
-            && is_equal(binding_lists, rhs.binding_lists) && is_equal(files, rhs.files)
+            && is_equal(binding_lists, rhs.binding_lists) && is_equal(pipelines, rhs.pipelines)
+            && is_equal(pipeline_settings, rhs.pipeline_settings) && is_equal(files, rhs.files)
             && is_equal(entry_points, rhs.entry_points) && is_equal(diagnostics, rhs.diagnostics)
             && builtins == rhs.builtins;
     }

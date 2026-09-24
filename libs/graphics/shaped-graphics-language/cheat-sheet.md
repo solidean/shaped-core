@@ -37,6 +37,9 @@ auto const d = sgl::describe({.source = text, .source_name = "cube.sgl"});
 d.value().bindings                         // name, is_inline, members (constant: offset + size; buffer: slot + host_name `work.values`), block_size
 d.value().structs                          // the @vertex / @pixel structs: name, edge, members with their location
 d.value().entry_points                     // name, stage, workgroup, bindings (the list as written)
+d.value().pipelines                        // name, stages, layout, vertex_input, target_set, targets, settings, open (the `.host` paths)
+                                           // bindings and structs carry `shape`: check::structural_hash of their members,
+                                           // 32 hex digits; the type's own name is not in it. What a hot reload compares.
                                            // types are SGL spellings (`float3`, `mat4`); mapping them to a host is the reader's job
                                            // only the file's own declarations, and only what the emitter would build
 

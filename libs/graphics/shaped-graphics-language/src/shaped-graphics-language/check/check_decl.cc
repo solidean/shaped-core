@@ -218,7 +218,10 @@ type_id checker::type_of_builtin(cc::string_view name, i32 file, source_span whe
 
 // ---- structs and bindings -------------------------------------------------------------------------------------------
 
-ast::range_of<member_info> checker::compile_members(i32 file, ast::range_of<ast::decl_id> members, bool is_struct)
+ast::range_of<member_info> checker::compile_members(i32 file,
+                                                    ast::range_of<ast::decl_id> members,
+                                                    bool is_struct,
+                                                    bool is_target_struct)
 {
     auto const& ast = ast_of(file);
     auto const owner = is_struct ? cc::string_view("a struct field") : cc::string_view("a binding member");
@@ -248,7 +251,7 @@ ast::range_of<member_info> checker::compile_members(i32 file, ast::range_of<ast:
         cc::string_view const known_on_field[] = {"position", "thread_id", "per_instance", "stream"};
         judge_attributes(file, f.attributes,
                          is_struct ? cc::span<cc::string_view const>(known_on_field) : cc::span<cc::string_view const>(),
-                         owner);
+                         owner, is_target_struct ? setting_scope::target : setting_scope::none);
         judge_attributes(file, d.attributes, {}, owner);
         if (f.is_mut)
             unsupported(file, f.name, "a mut member");
@@ -293,8 +296,13 @@ void checker::compile_struct(symbol_id id)
     auto const& d = ast_of(file).at(decl);
     auto const& s = d.node.as<ast::struct_decl>();
 
+    auto const is_vertex = find_attribute(file, d.attributes, "vertex") != nullptr;
+    auto const is_pixel = find_attribute(file, d.attributes, "pixel") != nullptr;
+
+    // An edge struct's attributes may be pipeline settings, which every pipeline it is an edge of starts from.
     cc::string_view const known[] = {"builtin", "vertex", "pixel"};
-    judge_attributes(file, d.attributes, known, "a struct");
+    judge_attributes(file, d.attributes, known, "a struct",
+                     is_vertex || is_pixel ? setting_scope::description : setting_scope::none);
 
     auto const is_builtin = find_attribute(file, d.attributes, "builtin") != nullptr;
     if (is_builtin)
@@ -308,12 +316,10 @@ void checker::compile_struct(symbol_id id)
     else if (s.is_opaque)
         report(diagnostic_kind::opaque_struct_needs_builtin, file, s.name, out.at(id).name);
 
-    auto const is_vertex = find_attribute(file, d.attributes, "vertex") != nullptr;
-    auto const is_pixel = find_attribute(file, d.attributes, "pixel") != nullptr;
     if (is_vertex && is_pixel)
         unsupported(file, s.name, "a struct of two stages");
 
-    auto const members = compile_members(file, s.members, true);
+    auto const members = compile_members(file, s.members, true, is_pixel);
 
     // The type exists only now, so a field that needs its own struct found a cycle and not a type.
     auto const type = type_id(out.types.size());
@@ -449,8 +455,12 @@ void checker::compile_function(symbol_id id)
     auto const& f = d.node.as<ast::fun_decl>();
     auto is_failed = false;
 
+    // An entry point's attributes may be pipeline settings, which every pipeline it is a stage of starts from.
+    auto const is_raster_entry = find_attribute(file, d.attributes, "vertex") != nullptr
+                              || find_attribute(file, d.attributes, "pixel") != nullptr;
     cc::string_view const known[] = {"builtin", "pure", "operator", "vertex", "pixel", "compute"};
-    judge_attributes(file, d.attributes, known, "a function");
+    judge_attributes(file, d.attributes, known, "a function",
+                     is_raster_entry ? setting_scope::description : setting_scope::none);
 
     if (!f.type_parameters.empty())
     {

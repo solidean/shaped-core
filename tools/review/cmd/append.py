@@ -80,8 +80,9 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
     text = review.append_text(entry, addition)
 
     # Parsed before it is written, so a bad block is an error with a line number rather than a broken page.
+    # Parsed as the round it is about to be stamped with, or a clash would name the wrong round and find false ones.
     try:
-        merged = review.parse_entry_text(text, target)
+        merged = review.parse_entry_text(text, target, pending_round=cfg.next_round)
     except review.ReviewParseError as e:
         ctx.die(f"the result would not parse: {e}")
 
@@ -105,6 +106,3 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
     print(f"{target.stem}: appended {added} block(s) as round {cfg.next_round}")
     for name in new_asks:
         print(f"  ask {name}")
-
-    for warning in review.word_warnings(review.parse_entry_file(target)):
-        print(review.console.yellow(f"warning: {warning}"), file=sys.stderr)

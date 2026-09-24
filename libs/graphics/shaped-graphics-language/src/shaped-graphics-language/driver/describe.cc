@@ -1,6 +1,7 @@
 #include "describe.hh"
 
 #include <clean-core/string/format.hh>
+#include <shaped-graphics-language/check/structural_hash.hh>
 #include <shaped-graphics-language/driver/impl/front_end.hh>
 #include <shaped-graphics-language/emit/impl/plan.hh>
 #include <shaped-graphics-language/legalize/legalize.hh>
@@ -15,7 +16,9 @@ described_binding describe_binding(check::checked_module const& m, check::symbol
 {
     auto const& b = m.bindings[s.info];
     auto const members = m.at(b.members);
-    auto result = described_binding{.name = s.name, .is_inline = b.is_inline};
+    auto result = described_binding{.name = s.name,
+                                    .is_inline = b.is_inline,
+                                    .shape = check::hex_of(check::structural_hash(m, members))};
 
     if (b.is_inline)
     {
@@ -67,7 +70,9 @@ described_binding describe_binding(check::checked_module const& m, check::symbol
 
 described_struct describe_struct(check::checked_module const& m, check::type_info const& t)
 {
-    auto result = described_struct{.name = m.at(t.symbol).name, .edge = t.edge};
+    auto result = described_struct{.name = m.at(t.symbol).name,
+                                   .edge = t.edge,
+                                   .shape = check::hex_of(check::structural_hash(m, m.at(t.members)))};
     auto location = 0;
     for (auto const& member : m.at(t.members))
         result.members.push_back({.name = member.name,
@@ -85,6 +90,76 @@ described_entry_point describe_entry_point(check::checked_module const& m, check
         result.workgroup[axis] = e.workgroup[axis];
     for (auto const id : e.bindings)
         result.bindings.push_back(m.at(id).name);
+    return result;
+}
+described_pipeline describe_pipeline(check::checked_module const& m, check::pipeline_info const& p)
+{
+    auto result = described_pipeline{.name = m.at(p.symbol).name, .vertex = m.at(p.vertex).name};
+    if (check::is_valid(p.pixel))
+        result.pixel = m.at(p.pixel).name;
+    for (auto const b : m.at(p.layout))
+        result.layout.push_back(m.at(b).name);
+    if (check::is_valid(p.inline_constants))
+        result.inline_constants = m.at(p.inline_constants).name;
+    result.vertex_input = m.name_of(p.vertex_input);
+    if (check::is_valid(p.target_set))
+    {
+        result.target_set = m.name_of(p.target_set);
+        for (auto const& member : m.at(m.at(p.target_set).members))
+            result.targets.push_back(member.name);
+    }
+
+    auto const settings = m.at(p.settings);
+    for (auto const& s : settings)
+        result.settings.push_back({.path = s.path,
+                                   .kind = s.kind,
+                                   .integer = s.integer,
+                                   .real = s.real,
+                                   .enum_case = s.enum_case,
+                                   .enum_name = s.enum_name});
+
+    // The frozen part, which a reload compares line by line: a declaration by its name and its shape.
+    auto const shaped = [&](check::type_id type)
+    { return cc::format("{}@{}", m.name_of(type), check::hex_of(check::structural_hash(m, type))); };
+    auto const bound = [&](check::symbol_id b)
+    {
+        return cc::format("{}@{}", m.at(b).name,
+                          check::hex_of(check::structural_hash(m, m.at(m.bindings[m.at(b).info].members))));
+    };
+    auto layout = cc::string();
+    for (auto const b : m.at(p.layout))
+        layout += cc::format("{}{}", layout.empty() ? "" : ", ", bound(b));
+    result.frozen.push_back(cc::format("layout = {}", layout));
+    result.frozen.push_back(
+        cc::format("inline constants = {}", check::is_valid(p.inline_constants) ? bound(p.inline_constants) : ""));
+    result.frozen.push_back(cc::format("vertex input = {}", shaped(p.vertex_input)));
+    result.frozen.push_back(
+        cc::format("target set = {}", check::is_valid(p.target_set) ? shaped(p.target_set) : cc::string()));
+    for (auto i = isize(0); i < settings.size(); ++i)
+    {
+        auto const& s = settings[i];
+        auto const is_frozen
+            = s.path.ends_with(".format") || s.path == "depth_stencil_format" || s.path == "sample_count";
+        auto is_last = true;
+        for (auto j = i + 1; j < settings.size(); ++j)
+            is_last = is_last && settings[j].path != s.path;
+        if (!is_frozen || !is_last)
+            continue;
+        auto const value = s.kind == check::setting_kind::host      ? cc::string(".host")
+                         : s.kind == check::setting_kind::enum_case ? cc::format(".{}", s.enum_case)
+                                                                    : cc::format("{}", s.integer);
+        result.frozen.push_back(cc::format("{} = {}", s.path, value));
+    }
+
+    // Open is where the last word is `.host`: a later setting of that field takes it back.
+    for (auto i = isize(0); i < settings.size(); ++i)
+    {
+        auto is_last = true;
+        for (auto j = i + 1; j < settings.size(); ++j)
+            is_last = is_last && settings[j].path != settings[i].path;
+        if (is_last && settings[i].kind == check::setting_kind::host)
+            result.open.push_back(settings[i].path);
+    }
     return result;
 }
 } // namespace
@@ -136,6 +211,10 @@ cc::result<sgl::module_description, cc::string> sgl::describe(describe_request c
         if (errors.size() == before)
             result.entry_points.push_back(describe_entry_point(m, e));
     }
+
+    for (auto const& p : m.pipelines)
+        if (m.at(p.symbol).file == front.program_file())
+            result.pipelines.push_back(describe_pipeline(m, p));
 
     if (!errors.empty())
     {

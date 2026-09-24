@@ -24,6 +24,20 @@ struct pixel_input:
         color = p.color
     }
 
+// What the hand-built description of raster-test.cc states, declared instead.
+pipeline drawn:
+    vertex = main_vs
+    pixel = main_ps
+    cull = .none
+    format = .rgba8_unorm
+
+// The same, with the target's format left to the host.
+pipeline hosted:
+    vertex = main_vs
+    pixel = main_ps
+    cull = .none
+    format = .host
+
 // The same shape under another name, which is another target set to the host.
 @pixel struct overlay:
     color: float4

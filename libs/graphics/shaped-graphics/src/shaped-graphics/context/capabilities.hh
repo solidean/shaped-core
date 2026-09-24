@@ -40,6 +40,11 @@ enum class sg::feature
     /// A storage texture may be `read_write` in any storage format, not only r32float / r32uint / r32sint.
     /// WebGPU core allows read-write on those three alone, and its `texture-formats-tier2` lifts that; write-only and read-only work everywhere.
     readwrite_storage_formats,
+
+    /// A block-compressed texture may have a width or height that is no multiple of its block (4 for BC).
+    /// WebGPU core refuses one unless the device has `texture-compression-unaligned`, and D3D12 reports it as an option.
+    /// Where this is false, creating one is a refusal naming the size, which a loader of user textures can pad against.
+    unaligned_block_compression,
 };
 
 /// Whether the thread driving this context may block at all.

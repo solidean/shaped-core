@@ -22,6 +22,7 @@ add_library(shaped-shader-library
     src/shaped-shader-library/binding/impl/hlsl_value_types.cc
     src/shaped-shader-library/binding/impl/hlsl_tokens.cc
     src/shaped-shader-library/shader_asset.cc
+    src/shaped-shader-library/pipeline.cc
     src/shaped-shader-library/shader_library.cc
     src/shaped-shader-library/impl/reload_watcher.cc
 )
@@ -51,6 +52,9 @@ target_sources(shaped-shader-library
     src/shaped-shader-library/shader_package.hh
     src/shaped-shader-library/shader_asset.hh
     src/shaped-shader-library/shader_library.hh
+    src/shaped-shader-library/pipeline.hh
+    src/shaped-shader-library/impl/pipeline_field_support.hh
+    src/shaped-shader-library/impl/pipeline_fields.hh
 )
 
 # The OS file-watch backend behind real_filesystem::watch.
@@ -122,6 +126,7 @@ if(SC_BUILD_TESTS)
         tests/dxc_compiler-test.cc
         tests/wgsl_compiler-test.cc
         tests/sgl_compiler-test.cc
+        tests/pipeline-test.cc
         tests/binding/binding_groups-test.cc
         tests/binding/wgsl_declarations-test.cc
     )
@@ -181,8 +186,11 @@ if(SC_BUILD_TESTS)
 )
     target_sources(shaped-shader-library-test PRIVATE "${_slib_corpus_generated}")
     target_include_directories(shaped-shader-library-test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/tests")
+    # The pipeline test compares the committed impl/pipeline_fields.hh against what the SGL compiler generates now.
+    target_compile_definitions(shaped-shader-library-test PRIVATE SLIB_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 
-    target_link_libraries(shaped-shader-library-test PRIVATE shaped-shader-library nexus)
+    # The pipeline test walks the SGL prelude, which slib itself links privately.
+    target_link_libraries(shaped-shader-library-test PRIVATE shaped-shader-library shaped-graphics-language nexus)
 
     sc_target_pch(shaped-shader-library-test SG NEXUS)
 

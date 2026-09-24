@@ -117,6 +117,8 @@ cc::result<raw_texture_handle> context_transient_scope::try_create_raw_texture(t
 {
     // WORKAROUND: the transient bump-heap is buffers-only, so a transient texture is a dedicated allocation tagged transient, which the backend auto-expires at the next epoch.
     // Placed/bump-allocated transient textures wait on a texture-capable transient memory_heap; see the header note.
+    if (auto error = desc.unaligned_block_error(_ctx.supports(feature::unaligned_block_compression)); !error.empty())
+        return cc::error(cc::move(error));
     allocation_info alloc;
     alloc.scope = lifetime_scope::transient;
     auto created = _ctx.try_create_raw_texture(desc, alloc);
