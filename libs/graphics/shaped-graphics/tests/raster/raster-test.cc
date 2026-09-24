@@ -107,11 +107,12 @@ ASYNC_INVOCABLE_TEST("sg - a pipeline declared in SGL draws what the hand-built 
     auto const hosted = co_await shaders::quads.hosted.description(*ctx, {.color = sg::pixel_format::rgba16_float});
     CHECK(hosted.color_targets[0].format == sg::pixel_format::rgba16_float);
     CHECK(hosted.rasterization.cull == sg::cull_mode::none);
-    // `customize` runs last, over what the declaration and the host stated.
-    auto const customized = co_await shaders::quads.hosted.acquire(*ctx, {.color = sg::pixel_format::rgba8_unorm},
-                                                                   [](sg::raster_pipeline_description& d)
-                                                                   { d.rasterization.fill = sg::fill_mode::solid; });
-    CHECK(customized != nullptr);
+    // `customize` runs last, over what the declaration and the host stated: here over the host's format.
+    auto const customized = co_await shaders::quads.hosted.acquire(
+        *ctx, {.color = sg::pixel_format::rgba8_unorm},
+        [](sg::raster_pipeline_description& d) { d.color_targets[0].format = sg::pixel_format::rgba16_float; });
+    REQUIRE(customized->target_formats().has_value());
+    CHECK(customized->target_formats().value().color[0] == sg::pixel_format::rgba16_float);
 
     auto const corner = [](float x, float y) { return shaders::quad::per_vertex{.corner = tg::vec3f(x, y, 0.0f)}; };
     shaders::quad::per_vertex const quad[] = {
