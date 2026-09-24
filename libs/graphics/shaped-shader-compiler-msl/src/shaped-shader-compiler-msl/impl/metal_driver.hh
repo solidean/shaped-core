@@ -13,6 +13,12 @@
 /// Nothing in shaped-core has one today — `tools/instruction-tracer`'s `mca_runner.cc` hand-rolled a Windows-only,
 /// text-only version for the same reason — so this file is the second hand-rolled copy and should be the last.
 /// It is POSIX-only and does exactly what this library needs; replace it with the clean-core API when that exists.
+///
+/// Known defects, left here on purpose and recorded as requirements in clean-core's docs/TODO.md:
+///   - SIGPIPE is not ignored, so a child that exits before reading all of stdin kills this process on the next write
+///   - `pipe` then `fcntl(FD_CLOEXEC)` races another thread's `posix_spawn`, which can inherit the ends in between
+///   - a failed second or third `pipe` leaks the ends already made, and `drain` takes `EINTR` for end-of-stream
+///   - without the MetalToolchain component `xcrun -f metal` may still resolve, and then every metallib compile fails
 
 namespace ssc::msl::impl
 {
