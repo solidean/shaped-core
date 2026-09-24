@@ -369,6 +369,8 @@ sr::svgf_denoise_routine::execute(cmd, inputs, history, {.max_history = 32.0f}) 
 - **A denoised image keeps `color`'s alpha.** Every member writes rgb and copies the alpha, so switching members never changes what you composite with.
 - **A temporal history is big**: svgf holds eight full-screen images, ~221 MiB per 1080p stream.
   Drop the history of a view nobody is looking at.
+- **`uv run dev.py example shaped-rendering/denoise-playground`** puts all of it on screen: a tiny path tracer, every
+  knob live, and the raw image beside the denoised one.
 
 ## Writing a concrete routine
 

@@ -1,0 +1,12 @@
+{
+    // The default view: the split, the panel, and enough frames for the accumulating mean to be worth looking at.
+    "shaped-rendering/denoise-playground": {
+        "mechanism": "custom",
+        "size": "1600x900",
+        "format": "jpg",
+        "accumulate": 96,
+        "captures": [
+            {}
+        ]
+    }
+}

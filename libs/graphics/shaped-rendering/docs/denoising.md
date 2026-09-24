@@ -148,6 +148,14 @@ sv takes the scene signal from its trace hash with the camera left out; a caller
   DLSS and FSR sit in sr behind `SR_HAS_<VENDOR>` and link PRIVATE, like SDL3.
   Whether OIDN is fetched by default — its CPU build is the one non-native member CI could run — waits on measuring its size.
 
+## Seeing it
+
+`uv run dev.py example shaped-rendering/denoise-playground` is the whole thing on screen.
+A small analytic path tracer writes the noisy colour and the guides beside it, the panel switches member, quality, sharpness and guides live, and a split puts the raw image next to the denoised one.
+
+It opens on the temporal half — one sample a pixel, svgf, permanently noisy on the left of the split — because that is the half that shows what a denoiser is for.
+Turning `fresh samples` off switches to the accumulating half, where `samples` climbs and a spatial member backs off as the mean converges.
+
 ## Testing
 
 - The front's policy — what `automatic` picks, that a named member it cannot run writes nothing — runs on WARP through à-trous.
