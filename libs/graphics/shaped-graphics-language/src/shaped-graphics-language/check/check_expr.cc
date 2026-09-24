@@ -381,6 +381,17 @@ type_id checker::check_member(function_scope& scope, ast::expr_id id, ast::membe
                 unsupported(file, span_of(file, id), "a buffer as a value; read an element of it, as in `values[i]`");
                 return error_type;
             }
+            auto is_handed = false;
+            for (auto const h : handed)
+                is_handed = is_handed || h == id;
+            if (type != error_type && is_resource(out.at(type).kind) && out.at(type).kind != type_kind::buffer
+                && !is_handed)
+            {
+                unsupported(
+                    file, span_of(file, id),
+                    cc::format("{} as a value; hand it to a builtin, as in `DEBUG_load(t, xy, 0)`", out.name_of(type)));
+                return error_type;
+            }
             return type;
         }
 
@@ -446,7 +457,9 @@ call_arguments checker::check_arguments(function_scope& scope, ast::range_of<ast
             result.is_poisoned = true;
         }
 
+        handed.push_back(a.value);
         auto const type = check_expr(scope, a.value);
+        handed.pop_back();
         if (type == error_type)
         {
             result.is_poisoned = true;
@@ -644,7 +657,7 @@ type_id checker::resolve_overload(function_scope& scope,
         auto const parameters = out.at(out.functions[out.at(candidate).info].parameters);
         auto is_match = !arguments.is_poisoned && parameters.size() == arguments.types.size();
         for (auto i = isize(0); is_match && i < parameters.size(); ++i)
-            is_match = parameters[i].type == arguments.types[i];
+            is_match = takes(parameters[i].type, arguments.types[i]);
         if (is_match)
             matches.push_back(candidate);
     }
@@ -742,7 +755,7 @@ bool checker::is_out_of_the_running(symbol_id candidate, cc::span<type_id const>
     auto const parameters = out.at(out.functions[s.info].parameters);
     auto is_match = parameters.size() == types.size();
     for (auto i = isize(0); is_match && i < parameters.size(); ++i)
-        is_match = parameters[i].type == types[i];
+        is_match = takes(parameters[i].type, types[i]);
     return !is_match;
 }
 

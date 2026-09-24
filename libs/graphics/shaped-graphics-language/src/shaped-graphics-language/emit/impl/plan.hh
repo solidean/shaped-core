@@ -76,19 +76,24 @@ struct planned_constants
     cc::string group_name;
 };
 
-/// A `buffer[T]` member of a binding, which is a resource of its own rather than a field of a block.
+/// A resource member of a binding — a buffer, a texture, an image or a sampler — rather than a field of a block.
 /// Its address is the group its binding is listed at and the slot it takes among that binding's resources.
-struct planned_buffer
+struct planned_resource
 {
     check::symbol_id binding = check::symbol_id::none;
     /// A position in the binding's `members`.
     i32 member = -1;
     /// The global the shader reads and writes through, minted like any other name.
     cc::string name;
-    /// What the host binds the buffer by: `binding.member`, which no target can spell.
+    /// What the host binds the resource by: `binding.member`, which no target can spell.
     cc::string host_name;
+    /// The member's type, whose kind says which resource it is.
+    check::type_id type = check::type_id::none;
+    /// The element of a buffer; `none` for every other kind.
     check::type_id element = check::type_id::none;
     bool is_mut = false;
+    /// A static sampler of the group, as a position in `checked_module::samplers`; -1 for any other resource.
+    i32 static_sampler = -1;
     i32 group = 0;
     i32 slot = 0;
     /// What HLSL declares the group as, which is what slib's binding pass reads: `<binding>_bindings`.
@@ -114,8 +119,8 @@ struct plan
     cc::optional<planned_constants> constants;
     /// The constant blocks of the entry point's groups, one per group with a plain member, in group order.
     cc::vector<planned_constants> group_blocks;
-    /// The buffers the entry point's bindings declare, in group then slot order.
-    cc::vector<planned_buffer> buffers;
+    /// The resources the entry point's bindings declare, in group then slot order.
+    cc::vector<planned_resource> resources;
     /// Parallel to `e.locals`.
     cc::vector<cc::string> locals;
     /// A compute entry point's parameter as the dispatch hands it over, unsigned, ahead of the `int3` the body reads;
@@ -125,19 +130,21 @@ struct plan
     check::name_mint names;
 };
 
-/// The position in `buffers` of the buffer `binding.member` names, or -1 where that member is no buffer.
-[[nodiscard]] i32 buffer_of(plan const& p, check::symbol_id binding, i32 member);
+/// The position in `resources` of the resource `binding.member` names, or -1 where that member is no resource.
+[[nodiscard]] i32 resource_of(plan const& p, check::symbol_id binding, i32 member);
 
 /// The block `binding` is read through: the `@inline` one, or its group's; null for a group with no plain member.
 [[nodiscard]] planned_constants const* block_of(plan const& p, check::symbol_id binding);
 
-/// The members of a binding that are values rather than buffers, which is every member of an `@inline` one.
+/// The members of a binding that are values rather than resources, which is every member of an `@inline` one.
 [[nodiscard]] cc::vector<check::member_info> plain_members_of(check::checked_module const& m,
                                                               check::binding_info const& b);
 
-/// The slot a group's first buffer takes: 1 behind a constant block, which takes 0, and 0 without one.
-[[nodiscard]] i32 first_buffer_slot(check::checked_module const& m, check::binding_info const& b);
+/// The slot a group's first resource takes: 1 behind a constant block, which takes 0, and 0 without one.
+[[nodiscard]] i32 first_resource_slot(check::checked_module const& m, check::binding_info const& b);
 
+/// How the target of `p` spells the builtin type named `name`, such as the texel of a storage format.
+[[nodiscard]] cc::string_view builtin_spelling(plan const& p, cc::string_view name);
 /// The column of a builtin's record `t` reads; the two HLSL targets share one.
 [[nodiscard]] builtins::language language_of(target t);
 

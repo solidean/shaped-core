@@ -145,7 +145,25 @@ A binding that is not `@inline` is a group.
 * **EMIT-87** The struct of a group's constant buffer stands ahead of that namespace, and `hlsl-vulkan` states no offset on its members ([why](why/emitting.md#emit-87)).
 * **EMIT-88** WGSL writes each resource of a group as `@group(N) @binding(slot)`: the constant buffer as `var<uniform>`, a buffer as a `var<storage>` array, `read` or `read_write`.
 * **EMIT-89** MSL writes no group and no compute entry point yet: an entry point that lists a group, or is `@compute`, is `unsupported`.
-* **EMIT-90** A group's buffers take the slots after its constant buffer, from 1, or from 0 when it has no plain member.
+  How a group will read in MSL is in [bindings.md](../bindings.md#how-a-group-reaches-sg).
+* **EMIT-90** A group's resources — buffers, textures, images and samplers — take the slots after its constant buffer, in declaration order, from 1, or from 0 when it has no plain member.
+* **EMIT-96** A texture, an image and a sampler member are each one global minted as a buffer's is, by EMIT-85, and each has its target's own type by the table below.
+* **EMIT-97** `hlsl-vulkan` states an image's format as `[[vk::image_format]]`, which DXC turns into a typed SPIR-V image; an image whose format SPIR-V lacks, `bgra8_unorm`, states none.
+* **EMIT-98** A static sampler of a group is its `SamplerState` preceded by slib's `#pragma sc static`, which carries every filter and address and each other setting that is not its default.
+  WGSL has no static sampler, and writes it as it writes a sampler the host binds: the layout says it is static.
+* **EMIT-99** WGSL writes a 1D texture or image as a 2D one and a 1D array as a 2D array, since sg's webgpu backend creates every 1D texture that way (the bindings file, "Shapes").
+* **EMIT-100** A call of a builtin that gives nothing is a statement as it stands, with no `_ =` in WGSL.
+
+| SGL | HLSL | WGSL |
+|---|---|---|
+| `texture2d[float4]` | `Texture2D<float4>` | `texture_2d<f32>` |
+| `texture2d_depth` | `Texture2D<float>` | `texture_depth_2d` |
+| `image2d[.rgba8_unorm]` | `RWTexture2D<float4>` | `texture_storage_2d<rgba8unorm, read>` |
+| `out image2d[.r32_float]` | `RWTexture2D<float>` | `texture_storage_2d<r32float, write>` |
+| `sampler`, `comparison_sampler` | `SamplerState`, `SamplerComparisonState` | `sampler`, `sampler_comparison` |
+
+The other shapes follow the same pattern: HLSL's `Texture2DArray`, `TextureCube`, `Texture2DMS`, and WGSL's `texture_2d_array`, `texture_cube`, `texture_multisampled_2d`.
+An image's HLSL element is the texel of its format, one to four wide, and a load gives that; WGSL always loads and stores four channels, so its writer narrows a load and pads a store.
 
 ```sgl
 binding affine:

@@ -38,6 +38,13 @@ expr_id builder::type_expression(form_id form)
             return result;
         }
     }
+    // AST-131: `sampler` is a keyword, and in a type position that keyword denotes the sampler type.
+    if (is_keyword_led(form, "sampler"))
+    {
+        auto const parts = keyword_parts_of(form);
+        if (parts.keywords.size() == 1 && parts.arguments.empty() && !is_valid(parts.block))
+            return make_expr(form, name{.where = at(parts.keywords[0]).where});
+    }
     return expression(form, attribute_mode::keep);
 }
 

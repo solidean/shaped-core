@@ -141,6 +141,8 @@ struct checker
     cc::vector<call_edge> calls;
     /// The object `check_index` is checking right now: the one place a buffer may stand as an expression.
     ast::expr_id subscripted = ast::expr_id::none;
+    /// The arguments of the call being checked, which a texture, an image or a sampler may stand as (CHK-187).
+    cc::vector<ast::expr_id> handed;
 
     // ---- shared helpers (check.cc) ----------------------------------------------------------------------------------
 
@@ -204,6 +206,22 @@ struct checker
     [[nodiscard]] type_id buffer_type(type_id element, bool is_mut);
     /// `buffer[T]` in a type position, which is the `index` node `buffer` heads.
     [[nodiscard]] type_id resolve_buffer(i32 file, ast::expr_id expr, ast::index const& node);
+    /// A texture, image or sampler type, interned like `buffer_type`; `info` needs no `spelled`.
+    [[nodiscard]] type_id resource_type(type_info info);
+    /// The resource type a bare name in a type position names — a depth texture or a sampler — and `none` otherwise.
+    [[nodiscard]] type_id resolve_resource_name(i32 file, ast::expr_id expr, cc::string_view text);
+    /// `texture2d[float4]` or `image2d[.rgba8_unorm]`; `none` where `node` heads with no texture or image name.
+    [[nodiscard]] type_id resolve_resource_applied(i32 file, ast::expr_id expr, ast::index const& node);
+    /// `mut` or `out` in front of `inner`, which only a buffer and an image take.
+    [[nodiscard]] type_id qualify_resource(i32 file, ast::expr_id expr, type_id inner, ast::type_access access);
+    /// The settings of a `sampler name:` block; a setting that is wrong is reported and left at its default.
+    [[nodiscard]] sampler_state compile_sampler(i32 file, ast::sampler_decl const& s);
+    /// A builtin's parameter type, where an image names the texel it reads or writes: `out image2d[float4]`.
+    [[nodiscard]] type_id resolve_pattern_type(i32 file, ast::expr_id expr);
+    /// True where an argument of type `argument` may stand for a parameter of type `parameter` (CHK-70, CHK-186).
+    [[nodiscard]] bool takes(type_id parameter, type_id argument) const;
+    /// Reports `form` as `needs-feature`, naming the feature that would grant it.
+    void judge_feature(i32 file, source_span where, cc::string_view form, cc::string_view feature);
     /// True where `expr` is the bare name `name`, which is how a resource type is recognized before lookup.
     [[nodiscard]] bool is_named(i32 file, ast::expr_id expr, cc::string_view name) const;
 

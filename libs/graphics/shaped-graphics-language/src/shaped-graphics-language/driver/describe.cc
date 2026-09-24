@@ -1,6 +1,7 @@
 #include "describe.hh"
 
 #include <clean-core/string/format.hh>
+#include <shaped-graphics-language/check/resources.hh>
 #include <shaped-graphics-language/driver/impl/front_end.hh>
 #include <shaped-graphics-language/emit/impl/plan.hh>
 #include <shaped-graphics-language/legalize/legalize.hh>
@@ -10,6 +11,89 @@ using namespace sgl;
 namespace
 {
 namespace emit_impl = sgl::emit::impl;
+
+/// What kind of sampler `member` is to a layout: a static one says so by its settings, a bound one by its declaration.
+cc::string_view sampler_type_of(check::checked_module const& m, check::member_info const& member)
+{
+    auto const& t = m.at(member.type);
+    if (t.is_comparison)
+        return "comparison";
+    if (member.is_non_filtering)
+        return "non_filtering";
+    if (member.static_sampler >= 0)
+    {
+        auto const& state = m.samplers[member.static_sampler];
+        if (state.min_filter == 0 && state.mag_filter == 0 && state.mip_filter == 0)
+            return "non_filtering";
+    }
+    return "filtering";
+}
+
+/// A texture's `sg::texture_sample_type`, which the declaration states whole (the spec's bindings file, "Sample types").
+cc::string_view sample_type_of(check::checked_module const& m, check::member_info const& member)
+{
+    auto const& t = m.at(member.type);
+    if (t.is_depth)
+        return "depth";
+    auto const element = m.name_of(t.element);
+    if (element.starts_with("uint"))
+        return "uint";
+    if (element.starts_with("int"))
+        return "sint";
+    return member.is_unfilterable || t.shape == check::texture_shape::d2_ms ? "unfilterable_float" : "filterable_float";
+}
+
+described_binding_member describe_resource(check::checked_module const& m,
+                                           check::member_info const& member,
+                                           i32 slot,
+                                           cc::string host_name)
+{
+    auto const& t = m.at(member.type);
+    auto result = described_binding_member{.name = member.name, .slot = slot, .host_name = cc::move(host_name)};
+    switch (t.kind)
+    {
+    case check::type_kind::texture:
+        result.kind = described_member_kind::texture;
+        result.type = cc::string(m.name_of(member.type));
+        result.texture_dimension = cc::string(check::info_of(t.shape).sg_name);
+        result.sample_type = cc::string(sample_type_of(m, member));
+        break;
+    case check::type_kind::image:
+    {
+        cc::string_view const accesses[] = {"read", "read_write", "write"};
+        result.kind = described_member_kind::image;
+        result.type = cc::string(m.name_of(member.type));
+        result.is_mut = t.access != check::image_access::read;
+        result.texture_dimension = cc::string(check::info_of(t.shape).sg_name);
+        result.storage_format = cc::string(check::k_storage_formats[t.format].name);
+        result.storage_access = cc::string(accesses[isize(t.access)]);
+        break;
+    }
+    default:
+        result.kind = described_member_kind::sampler;
+        result.type = cc::string(m.name_of(member.type));
+        result.sampler_type = cc::string(sampler_type_of(m, member));
+        if (member.static_sampler >= 0)
+        {
+            auto const& state = m.samplers[member.static_sampler];
+            result.static_sampler = described_sampler{
+                .min_filter = cc::string(check::k_sampler_filters[state.min_filter]),
+                .mag_filter = cc::string(check::k_sampler_filters[state.mag_filter]),
+                .mip_filter = cc::string(check::k_sampler_filters[state.mip_filter]),
+                .address_u = cc::string(check::k_sampler_addresses[state.address_u]),
+                .address_v = cc::string(check::k_sampler_addresses[state.address_v]),
+                .address_w = cc::string(check::k_sampler_addresses[state.address_w]),
+                .compare = state.compare >= 0 ? cc::string(check::k_compare_ops[state.compare]) : cc::string(),
+                .max_anisotropy = state.max_anisotropy,
+                .min_lod = state.min_lod,
+                .max_lod = state.max_lod,
+                .mip_lod_bias = state.mip_lod_bias,
+            };
+        }
+        break;
+    }
+    return result;
+}
 
 described_binding describe_binding(check::checked_module const& m, check::symbol const& s)
 {
@@ -40,11 +124,17 @@ described_binding describe_binding(check::checked_module const& m, check::symbol
         result.block_slot = 0;
         result.block_host_name = s.name;
     }
-    auto slot = emit_impl::first_buffer_slot(m, b);
+    auto slot = emit_impl::first_resource_slot(m, b);
     auto next_constant = isize(0);
     for (auto const& member : members)
     {
         auto const& t = m.at(member.type);
+        if (t.kind == check::type_kind::texture || t.kind == check::type_kind::image
+            || t.kind == check::type_kind::sampler)
+        {
+            result.members.push_back(describe_resource(m, member, slot++, cc::format("{}.{}", s.name, member.name)));
+            continue;
+        }
         if (t.kind != check::type_kind::buffer)
         {
             result.members.push_back({.name = member.name,

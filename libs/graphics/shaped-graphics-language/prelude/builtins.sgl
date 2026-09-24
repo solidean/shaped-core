@@ -298,3 +298,46 @@
 @builtin @pure @operator("as") fun convert_int4_to_uint4(x: int4) -> uint4
 @builtin @pure @operator("as") fun convert_uint4_to_float4(x: uint4) -> float4
 @builtin @pure @operator("as") fun convert_uint4_to_int4(x: uint4) -> int4
+
+// DEBUG: stand-ins for the texture methods, in the order the methods will take their arguments.
+// A texture samples and loads, an image loads where the shader may read it and stores where it may write it.
+@builtin @pure fun DEBUG_sample_level(t: texture2d[float], coord: float2, level: float, s: sampler) -> float
+@builtin @pure fun DEBUG_load(t: texture2d[float], xy: int2, level: int) -> float
+@builtin fun DEBUG_load(i: image2d[float], xy: int2) -> float
+@builtin fun DEBUG_store(i: out image2d[float], xy: int2, value: float)
+@builtin @pure fun DEBUG_sample_level(t: texture2d[float2], coord: float2, level: float, s: sampler) -> float2
+@builtin @pure fun DEBUG_load(t: texture2d[float2], xy: int2, level: int) -> float2
+@builtin fun DEBUG_load(i: image2d[float2], xy: int2) -> float2
+@builtin fun DEBUG_store(i: out image2d[float2], xy: int2, value: float2)
+@builtin @pure fun DEBUG_sample_level(t: texture2d[float3], coord: float2, level: float, s: sampler) -> float3
+@builtin @pure fun DEBUG_load(t: texture2d[float3], xy: int2, level: int) -> float3
+@builtin fun DEBUG_load(i: image2d[float3], xy: int2) -> float3
+@builtin fun DEBUG_store(i: out image2d[float3], xy: int2, value: float3)
+@builtin @pure fun DEBUG_sample_level(t: texture2d[float4], coord: float2, level: float, s: sampler) -> float4
+@builtin @pure fun DEBUG_load(t: texture2d[float4], xy: int2, level: int) -> float4
+@builtin fun DEBUG_load(i: image2d[float4], xy: int2) -> float4
+@builtin fun DEBUG_store(i: out image2d[float4], xy: int2, value: float4)
+@builtin @pure fun DEBUG_load(t: texture2d[int], xy: int2, level: int) -> int
+@builtin fun DEBUG_load(i: image2d[int], xy: int2) -> int
+@builtin fun DEBUG_store(i: out image2d[int], xy: int2, value: int)
+@builtin @pure fun DEBUG_load(t: texture2d[int2], xy: int2, level: int) -> int2
+@builtin fun DEBUG_load(i: image2d[int2], xy: int2) -> int2
+@builtin fun DEBUG_store(i: out image2d[int2], xy: int2, value: int2)
+@builtin @pure fun DEBUG_load(t: texture2d[int3], xy: int2, level: int) -> int3
+@builtin fun DEBUG_load(i: image2d[int3], xy: int2) -> int3
+@builtin fun DEBUG_store(i: out image2d[int3], xy: int2, value: int3)
+@builtin @pure fun DEBUG_load(t: texture2d[int4], xy: int2, level: int) -> int4
+@builtin fun DEBUG_load(i: image2d[int4], xy: int2) -> int4
+@builtin fun DEBUG_store(i: out image2d[int4], xy: int2, value: int4)
+@builtin @pure fun DEBUG_load(t: texture2d[uint], xy: int2, level: int) -> uint
+@builtin fun DEBUG_load(i: image2d[uint], xy: int2) -> uint
+@builtin fun DEBUG_store(i: out image2d[uint], xy: int2, value: uint)
+@builtin @pure fun DEBUG_load(t: texture2d[uint2], xy: int2, level: int) -> uint2
+@builtin fun DEBUG_load(i: image2d[uint2], xy: int2) -> uint2
+@builtin fun DEBUG_store(i: out image2d[uint2], xy: int2, value: uint2)
+@builtin @pure fun DEBUG_load(t: texture2d[uint3], xy: int2, level: int) -> uint3
+@builtin fun DEBUG_load(i: image2d[uint3], xy: int2) -> uint3
+@builtin fun DEBUG_store(i: out image2d[uint3], xy: int2, value: uint3)
+@builtin @pure fun DEBUG_load(t: texture2d[uint4], xy: int2, level: int) -> uint4
+@builtin fun DEBUG_load(i: image2d[uint4], xy: int2) -> uint4
+@builtin fun DEBUG_store(i: out image2d[uint4], xy: int2, value: uint4)

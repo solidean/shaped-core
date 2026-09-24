@@ -137,7 +137,11 @@ type_id checker::resolve_type(i32 file, ast::expr_id expr)
     if (!e.attributes.empty())
         unsupported(file, where, "an attribute on a type");
 
-    if (auto const* const n = e.node.try_as<ast::name>())
+    auto const* const n = e.node.try_as<ast::name>();
+    auto const resource = n != nullptr ? resolve_resource_name(file, expr, text_of(file, n->where)) : type_id::none;
+    if (resource != type_id::none)
+        result = resource;
+    else if (n != nullptr)
     {
         auto const text = text_of(file, n->where);
         auto const* const found = names.get_ptr(text);
@@ -163,6 +167,9 @@ type_id checker::resolve_type(i32 file, ast::expr_id expr)
     {
         if (is_named(file, applied->object, "buffer"))
             result = resolve_buffer(file, expr, *applied);
+        else if (auto const applied_resource = resolve_resource_applied(file, expr, *applied);
+                 applied_resource != type_id::none)
+            result = applied_resource;
         else
             unsupported(file, where, "type arguments");
     }
@@ -177,14 +184,8 @@ type_id checker::resolve_type(i32 file, ast::expr_id expr)
     else if (auto const* const q = e.node.try_as<ast::qualified_type>())
     {
         auto const inner = resolve_type(file, q->type);
-        auto const is_buffer = inner != checked_module::error_type && out.at(inner).kind == type_kind::buffer;
-        if (q->access == ast::type_access::write_only)
-            // No target has a write-only buffer, and only a storage texture needs one, which is unbuilt.
-            unsupported(file, where, "an `out` resource");
-        else if (is_buffer)
-            result = buffer_type(out.at(inner).element, true);
-        else if (inner != checked_module::error_type)
-            report(diagnostic_kind::wrong_kind_of_name, file, where, "only a resource may be `mut`, and this is a value");
+        if (inner != checked_module::error_type)
+            result = qualify_resource(file, expr, inner, q->access);
     }
     else if (!e.node.is<ast::invalid_expr>())
         unsupported(file, where, "this expression as a type");
@@ -196,9 +197,12 @@ type_id checker::resolve_type(i32 file, ast::expr_id expr)
 type_id checker::resolve_value_type(i32 file, ast::expr_id expr)
 {
     auto const type = resolve_type(file, expr);
-    if (type == checked_module::error_type || out.at(type).kind != type_kind::buffer)
+    if (type == checked_module::error_type || !is_resource(out.at(type).kind))
         return type;
-    unsupported(file, span_of(file, expr), "a buffer as a value; a buffer is a binding member, read as `values[i]`");
+    unsupported(file, span_of(file, expr),
+                out.at(type).kind == type_kind::buffer
+                    ? "a buffer as a value; a buffer is a binding member, read as `values[i]`"
+                    : "a texture, an image or a sampler as a value; each is a binding member, handed to a builtin");
     return checked_module::error_type;
 }
 
@@ -229,6 +233,27 @@ ast::range_of<member_info> checker::compile_members(i32 file, ast::range_of<ast:
         auto const& d = ast.at(member);
         auto const where = span_of(file, member);
 
+        if (auto const* const smp = d.node.try_as<ast::sampler_decl>(); smp != nullptr && !is_struct)
+        {
+            // CHK-183: a static sampler of the group, a member whose type is the sampler its settings make.
+            auto const name = text_of(file, smp->name);
+            auto is_duplicate = false;
+            for (auto const& other : collected)
+                is_duplicate = is_duplicate || other.name == name;
+            if (is_duplicate)
+            {
+                report(diagnostic_kind::duplicate_declaration, file, smp->name, name);
+                continue;
+            }
+            auto const state = compile_sampler(file, *smp);
+            collected.push_back({
+                .name = name,
+                .type = resource_type({.kind = type_kind::sampler, .is_comparison = state.compare >= 0}),
+                .static_sampler = i32(out.samplers.size()),
+            });
+            out.samplers.push_back(state);
+            continue;
+        }
         if (d.node.is<ast::property_decl>())
             unsupported(file, where, "a property");
         else if (d.node.is<ast::fun_decl>())
@@ -246,8 +271,10 @@ ast::range_of<member_info> checker::compile_members(i32 file, ast::range_of<ast:
         auto const name = text_of(file, f.name);
 
         cc::string_view const known_on_field[] = {"position", "thread_id", "per_instance", "stream"};
+        cc::string_view const known_on_member[] = {"unfilterable", "non_filtering"};
         judge_attributes(file, f.attributes,
-                         is_struct ? cc::span<cc::string_view const>(known_on_field) : cc::span<cc::string_view const>(),
+                         is_struct ? cc::span<cc::string_view const>(known_on_field)
+                                   : cc::span<cc::string_view const>(known_on_member),
                          owner);
         judge_attributes(file, d.attributes, {}, owner);
         if (f.is_mut)
@@ -270,6 +297,19 @@ ast::range_of<member_info> checker::compile_members(i32 file, ast::range_of<ast:
         else
             report(diagnostic_kind::missing_type, file, f.name, name);
 
+        // CHK-181 and CHK-182: each attribute names what only one kind of member can be.
+        auto const* const unfilterable = find_attribute(file, f.attributes, "unfilterable");
+        auto const* const non_filtering = find_attribute(file, f.attributes, "non_filtering");
+        auto const& t = out.at(type);
+        if (unfilterable != nullptr && type != checked_module::error_type
+            && (t.kind != type_kind::texture || t.is_depth || !out.name_of(t.element).starts_with("float")))
+            report(diagnostic_kind::wrong_kind_of_name, file, unfilterable->name,
+                   "only a texture of floats is filtered, so only one can be @unfilterable");
+        if (non_filtering != nullptr && type != checked_module::error_type
+            && (t.kind != type_kind::sampler || t.is_comparison))
+            report(diagnostic_kind::wrong_kind_of_name, file, non_filtering->name,
+                   "only a `sampler` member can be @non_filtering");
+
         collected.push_back({
             .name = name,
             .type = type,
@@ -278,6 +318,8 @@ ast::range_of<member_info> checker::compile_members(i32 file, ast::range_of<ast:
             .is_thread_id = find_attribute(file, f.attributes, "thread_id") != nullptr,
             .is_per_instance = find_attribute(file, f.attributes, "per_instance") != nullptr,
             .stream = stream_of(file, find_attribute(file, f.attributes, "stream")),
+            .is_unfilterable = unfilterable != nullptr,
+            .is_non_filtering = non_filtering != nullptr,
         });
     }
 
@@ -430,10 +472,17 @@ void checker::compile_binding(symbol_id id)
     }
 
     auto const members = compile_members(file, b.members, false);
+    auto const is_inline = find_attribute(file, d.attributes, "inline") != nullptr;
+    // CHK-184: an `@inline` binding holds constants only, so a static sampler in one has nowhere to go.
+    if (is_inline)
+        for (auto const member : ast_of(file).at(b.members))
+            if (auto const* const smp = ast_of(file).at(member).node.try_as<ast::sampler_decl>())
+                report(diagnostic_kind::wrong_kind_of_name, file, smp->name,
+                       "an @inline binding holds constants only, and a sampler is none");
     out.symbols[index_of(id)].info = i32(out.bindings.size());
     out.bindings.push_back({
         .symbol = id,
-        .is_inline = find_attribute(file, d.attributes, "inline") != nullptr,
+        .is_inline = is_inline,
         .members = members,
     });
 }
@@ -463,6 +512,7 @@ void checker::compile_function(symbol_id id)
         is_failed = true;
     }
 
+    auto const is_builtin = find_attribute(file, d.attributes, "builtin") != nullptr;
     auto parameters = cc::vector<parameter>();
     for (auto const& p : ast.at(f.parameters))
     {
@@ -484,9 +534,10 @@ void checker::compile_function(symbol_id id)
                 is_failed = true;
             }
 
+        // CHK-185: a builtin alone may take a resource, and its parameter is then a pattern of one (CHK-186).
         auto type = checked_module::error_type;
         if (ast::is_valid(p.type))
-            type = resolve_value_type(file, p.type);
+            type = is_builtin ? resolve_pattern_type(file, p.type) : resolve_value_type(file, p.type);
         else if (f.receiver == ast::receiver_kind::none || &p != &ast.at(f.parameters).front())
             report(diagnostic_kind::missing_type, file, span_of(file, p.form), name);
         is_failed = is_failed || type == checked_module::error_type;
@@ -550,13 +601,12 @@ void checker::compile_function(symbol_id id)
     if (find_attribute(file, d.attributes, "builtin") != nullptr)
     {
         // The record is the overload: the name and the parameter types together, as the registry read them from its own text.
-        auto types = cc::vector<builtin_type_id>();
+        auto types = cc::vector<cc::string_view>();
         auto is_silent = false;
         for (auto const& p : parameters)
         {
             is_silent = is_silent || p.type == checked_module::error_type;
-            auto const& type = out.at(p.type);
-            types.push_back(is_valid(type.symbol) ? out.at(type.symbol).intrinsic_type : builtin_type_id::none);
+            types.push_back(out.name_of(p.type));
         }
         auto const intrinsic = builtins.find_function(out.at(id).name, types);
         if (is_valid(intrinsic))

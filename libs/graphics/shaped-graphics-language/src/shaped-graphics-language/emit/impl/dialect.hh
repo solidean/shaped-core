@@ -60,7 +60,7 @@ public:
     virtual void write_declarations(cc::string& out, plan const& p) const = 0;
 
     /// How the body names a buffer, which is the bare global everywhere but HLSL, where it stands in a namespace.
-    [[nodiscard]] virtual cc::string buffer_reference(planned_buffer const& b) const { return b.name; }
+    [[nodiscard]] virtual cc::string resource_reference(planned_resource const& b) const { return b.name; }
 
     /// How a group's constant block is named where a member is read through it.
     [[nodiscard]] virtual cc::string block_reference(planned_constants const& b) const { return b.name; }
@@ -70,7 +70,7 @@ public:
     virtual void write_group(cc::string& out,
                              plan const& p,
                              planned_constants const* block,
-                             cc::span<planned_buffer const> buffers) const = 0;
+                             cc::span<planned_resource const> buffers) const = 0;
 
     /// Everything of the function up to and including the line that opens its body.
     virtual void write_function_head(cc::string& out, plan const& p) const = 0;

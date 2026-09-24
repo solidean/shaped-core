@@ -35,6 +35,8 @@ sgl::text_request                          // source, source_name ("<sgl>"), ent
 auto const d = sgl::describe({.source = text, .source_name = "cube.sgl"});
                                            // -> cc::result<module_description, cc::string>: what the host side is generated from
 d.value().bindings                         // name, is_inline, members (constant: offset + size; buffer: slot + host_name `work.values`), block_size
+                                           // texture / image / sampler members also carry the sg enum values of their binding:
+                                           // texture_dimension, sample_type, storage_format + storage_access, sampler_type, static_sampler
 d.value().structs                          // the @vertex / @pixel structs: name, edge, members with their location
 d.value().entry_points                     // name, stage, workgroup, bindings (the list as written)
                                            // types are SGL spellings (`float3`, `mat4`); mapping them to a host is the reader's job
@@ -204,6 +206,9 @@ m.types  m.members                         // canonical types; types[0] is the e
                                            // `-> T` returns; fields and binding members
 m.functions  m.parameters  m.binding_lists // signatures; symbol::info is the position in functions / bindings
 m.bindings                                 // binding_info { symbol, is_inline, members }
+m.samplers                                 // sampler_state per `sampler name:` block of a binding; member_info::static_sampler indexes it
+                                           // resource types (texture / image / sampler) are interned like buffers; name_of spells them
+                                           // `out image2d[.rgba8_unorm]`; check/resources.hh holds the shapes and the storage formats
 m.files[f].type_at(expr_id)                // side table: type_id, none for what nothing checked
 m.files[f].target_at(expr_id)              // side table: { kind, symbol, index } — local / parameter / symbol / overload /
                                            // constructor / field / binding_member

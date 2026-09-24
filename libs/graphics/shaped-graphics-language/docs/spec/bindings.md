@@ -256,16 +256,21 @@ Everything not named here is the diagnostic `unsupported-yet`, never a guess.
 
 * `buffer[T]` and `mut buffer[T]`, for a `T` that is a scalar or a vector.
 * A subscript on a buffer, as a value and as the place of an assignment.
+* Every texture, depth texture, image and sampler form above, with `@unfilterable` and `@non_filtering`.
+* A static sampler in a binding, and the `needs-feature` refusals.
+* A texture, an image or a sampler handed to a builtin, which is the only way one is used ([CHK-185](semantics/checking.md#bindings)).
+  The builtins that take one are the `DEBUG_` stand-ins in `prelude/builtins.sgl`, until textures have methods ([texture-methods.md](incubator/texture-methods.md)).
 * A plain member of a group, as a field of the constant buffer the group owns, for a type whose place in a block every target agrees on.
 * The positional group numbering, and `@inline` last.
-* A buffer's host name, its path `binding.member` ([CHK-171](semantics/checking.md#bindings)), which the text reports beside the identifier it minted.
+* A resource's host name, its path `binding.member` ([CHK-171](semantics/checking.md#bindings)), which the text reports beside the identifier it minted.
 
 Three targets write a group, and the fourth declines rather than guessing.
 WGSL gives each resource its own `@group`/`@binding`, and HLSL writes `#pragma sc group n` and a namespace, so that every register stays slib's binding pass's to assign.
-A group's plain members are one constant buffer at the group's slot 0, named after the binding, and its buffers follow it.
+A group's plain members are one constant buffer at the group's slot 0, named after the binding, and its resources follow it in declaration order.
 MSL declines every group until slib has a compiler that turns its text into a metallib.
 
-A struct element type, `bytes`, `constants[T]`, every texture, image and sampler form all parse and are then reported.
+A struct element type, `bytes`, `constants[T]` and a file-scope `sampler` all parse and are then reported.
+A file-scope sampler waits for slib to carry a pipeline layout's static samplers, which it has no spelling for yet.
 That is deliberate.
 The shape is decided, so it is written down here and the AST constructs it.
 A shader using one then gets a diagnostic that names the feature, rather than a parse error that names nothing.

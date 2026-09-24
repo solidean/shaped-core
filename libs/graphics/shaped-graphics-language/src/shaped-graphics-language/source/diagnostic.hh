@@ -153,6 +153,8 @@ enum class sgl::diagnostic_kind : sgl::u8
     duplicate_case_pattern,
     /// An arm of a `case` that is a value and that neither produces one nor exits.
     missing_value_in_arm,
+    /// A form some backend lacks, which only a function that opts into its feature may use (the bindings spec, "Features").
+    needs_feature,
 };
 
 namespace sgl

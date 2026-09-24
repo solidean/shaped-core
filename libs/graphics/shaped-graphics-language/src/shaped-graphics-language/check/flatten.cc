@@ -134,7 +134,9 @@ struct flattener
     template <class Node>
     flat_expr_id add_expr(type_id type, ast::expr_id from, Node node)
     {
-        is_failed = is_failed || !c.is_sound(type);
+        // A builtin with an effect may give nothing, `DEBUG_store`, and its call is only ever an `eval`'s value.
+        auto const is_effect_call = std::is_same_v<Node, flat_call> && type == checked_module::nothing_type;
+        is_failed = is_failed || (!c.is_sound(type) && !is_effect_call);
         entry.exprs.push_back({.type = type,
                                .from = {.file = file(), .expr = from},
                                .inlined_through = current()->chain,

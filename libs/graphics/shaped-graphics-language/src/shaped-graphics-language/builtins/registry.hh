@@ -139,7 +139,10 @@ struct sgl::builtins::function_record
 
     /// Read back from the signature by `finalize`.
     cc::string name;
-    cc::vector<builtin_type_id> parameters;
+    /// Each parameter's type as the signature spells it: a builtin type's name, or a resource pattern such as
+    /// `out image2d[float4]`, which the check pass matches by the same spelling.
+    cc::vector<cc::string> parameters;
+    /// `none` for a function that gives nothing, which only one with an effect can be.
     builtin_type_id result = builtin_type_id::none;
 
     /// The name a `call` has in `l`.
@@ -185,7 +188,7 @@ struct sgl::builtins::registry
     /// `none` for a name no type was registered under.
     [[nodiscard]] builtin_type_id find_type(cc::string_view name) const;
     /// The overload of `name` that takes exactly `parameters`; `none` when there is none.
-    [[nodiscard]] builtin_id find_function(cc::string_view name, cc::span<builtin_type_id const> parameters) const;
+    [[nodiscard]] builtin_id find_function(cc::string_view name, cc::span<cc::string_view const> parameters) const;
     [[nodiscard]] bool has_function_named(cc::string_view name) const;
 
     /// The whole of `prelude/builtins.sgl`, byte for byte, in registration order.

@@ -3,7 +3,7 @@
 using namespace sgl_test;
 
 // The binding model of libs/graphics/shaped-graphics-language/docs/spec/bindings.md, as far as the compiler carries it.
-// A buffer is built; every other resource parses and is reported by the feature it needs.
+// Buffers, textures, images and samplers are built; bytes and separate constant buffers parse and are reported.
 
 namespace
 {
@@ -45,14 +45,75 @@ TEST("sgl check - what a buffer's element may be")
     CHECK(reports_for(listing("    x: buffer[not_a_type]\n")).contains("unknown-name"));
 }
 
-TEST("sgl check - a resource that is not a buffer is reported by the feature it needs")
+TEST("sgl check - bytes and a separate constant buffer are not built yet")
 {
     CHECK(reports_for(listing("    raw: bytes\n")).contains("unknown-name"));
     CHECK(reports_for(listing("    params: constants[dispatch_params]\n")).contains("type arguments"));
-    CHECK(reports_for(listing("    result: out texture2d[rgba8unorm]\n")).contains("an `out` resource"));
 
     // `mut` says a resource may be written, so it says nothing about a value.
     CHECK(reports_for(listing("    wrong: mut float\n")).contains("only a resource may be `mut`"));
+}
+
+TEST("sgl check - every texture, image and sampler form sg binds is a binding member")
+{
+    constexpr auto members = "    src: texture2d[float4]\n"
+                             "    ids: texture2d_array[uint]\n"
+                             "    sky: texture_cube[float3]\n"
+                             "    shadow: texture2d_depth\n"
+                             "    @unfilterable positions: texture2d[float4]\n"
+                             "    ro: image2d[.rgba16_float]\n"
+                             "    acc: mut image2d[.r32_float]\n"
+                             "    dst: out image3d[.rgba8_unorm]\n"
+                             "    smp: sampler\n"
+                             "    cmp: comparison_sampler\n"
+                             "    @non_filtering near: sampler\n"
+                             "    sampler bilinear:\n"
+                             "        filter = .linear\n"
+                             "        address = .clamp_edge\n"
+                             "        max_anisotropy = 8\n";
+    CHECK(reports_for(listing(members)) == "");
+}
+
+TEST("sgl check - a resource that some backend lacks needs a feature, and a misplaced word is an error")
+{
+    // CHK-180: refused by the feature that would grant it, on every target alike.
+    CHECK(reports_for(listing("    a: mut image2d[.rgba8_unorm]\n")).contains("needs-feature"));
+    CHECK(reports_for(listing("    a: mut image2d[.rgba8_unorm]\n")).contains("readwrite_storage_formats"));
+    CHECK(reports_for(listing("    a: out image2d[.r8_unorm]\n")).contains("extended_storage_formats"));
+    CHECK(reports_for(listing("    a: texture2d_ms_array[float4]\n")).contains("multisampled arrays"));
+
+    CHECK(reports_for(listing("    a: out texture2d[float4]\n")).contains("a texture is only ever read"));
+    CHECK(reports_for(listing("    a: out buffer[float]\n")).contains("a buffer is never `out`"));
+    CHECK(reports_for(listing("    a: image2d[float4]\n")).contains("one of sg's storage formats"));
+    CHECK(reports_for(listing("    a: image2d[.rgba7_unorm]\n")).contains("one of sg's storage formats"));
+    CHECK(reports_for(listing("    a: texture2d[vec3]\n")).contains("a float, an int or a uint"));
+    CHECK(reports_for(listing("    a: texture2d\n")).contains("`texture2d[float4]`"));
+    CHECK(reports_for(listing("    @unfilterable a: texture2d[uint]\n")).contains("only a texture of floats"));
+    CHECK(reports_for(listing("    @non_filtering a: comparison_sampler\n")).contains("only a `sampler` member"));
+    CHECK(reports_for(listing("    sampler s:\n        filter = .cubic\n"))
+              .contains("filter takes one of .nearest, .linear"));
+    CHECK(reports_for(listing("    sampler s:\n        border = .black\n")).contains("border is no sampler setting"));
+    CHECK(reports_for("@inline binding c:\n    x: float\n    sampler s:\n        filter = .linear\n")
+              .contains("an @inline binding holds constants only"));
+}
+
+TEST("sgl check - a texture, an image or a sampler is handed to a builtin and is no value otherwise")
+{
+    constexpr auto members = "    src: texture2d[float4]\n"
+                             "    ro: image2d[.rgba8_unorm]\n"
+                             "    dst: out image2d[.rgba8_unorm]\n"
+                             "    smp: sampler\n";
+    CHECK(reports_for(listing(members, "    let c = DEBUG_sample_level(work.src, float2(0.5, 0.5), 0.0, work.smp)\n"
+                                       "    DEBUG_store(work.dst, int2(0, 0), c + DEBUG_load(work.ro, int2(0, 0)))\n"))
+          == "");
+
+    CHECK(reports_for(listing(members, "    let t = work.src\n")).contains("texture2d[float4] as a value"));
+    // CHK-186: a read-only image cannot be stored to, and a write-only one cannot be loaded.
+    CHECK(reports_for(listing(members, "    DEBUG_store(work.ro, int2(0, 0), float4(1.0, 1.0, 1.0, 1.0))\n"))
+              .contains("no-matching-overload"));
+    CHECK(reports_for(listing(members, "    let v = DEBUG_load(work.dst, int2(0, 0))\n")).contains("no-matching-overload"));
+    // A texel of four floats is what an rgba8 image holds, and nothing narrower.
+    CHECK(reports_for(listing(members, "    DEBUG_store(work.dst, int2(0, 0), 1.0)\n")).contains("no-matching-overload"));
 }
 
 TEST("sgl check - a buffer element is read by subscript and written where the buffer is mut")

@@ -23,7 +23,52 @@ enum class sgl::check::type_kind : sgl::u8
     /// A `buffer[T]`: an array of `element` a shader indexes, and `mut` where it may be written (the spec's bindings file).
     /// It is a resource rather than a value: it stands in a binding, and nothing loads or copies one.
     buffer,
+    /// A sampled texture of one `shape`, whose samples are `element`, or a depth texture where `is_depth`.
+    texture,
+    /// A storage texture of one `shape` and `format`, which the shader reads, writes or both by its `access`.
+    image,
+    /// A sampler, filtering or `is_comparison`; a resource like a texture, never a value.
+    sampler,
     // Tuples, function types and anonymous struct types come later, each as a kind that is deduplicated by structure.
+};
+
+namespace sgl::check
+{
+/// True for a kind that stands in a binding and is never a value: a buffer, a texture, an image or a sampler.
+[[nodiscard]] constexpr bool is_resource(type_kind k)
+{
+    return k == type_kind::buffer || k == type_kind::texture || k == type_kind::image || k == type_kind::sampler;
+}
+} // namespace sgl::check
+
+/// What a shader may do with an image: unmarked, `mut` and `out` (the spec's bindings file, "Access").
+enum class sgl::check::image_access : sgl::u8
+{
+    read,
+    read_write,
+    write,
+};
+
+/// A static sampler's settings, each a field of `sg::sampler`; an enum setting is a position in its table of names.
+struct sgl::check::sampler_state
+{
+    /// Positions in `k_sampler_filters`: nearest 0, linear 1.
+    u8 min_filter = 1;
+    u8 mag_filter = 1;
+    u8 mip_filter = 1;
+    /// Positions in `k_sampler_addresses`: repeat 0.
+    u8 address_u = 0;
+    u8 address_v = 0;
+    u8 address_w = 0;
+    /// A position in `k_compare_ops`, or -1 for a sampler that compares nothing.
+    i32 compare = -1;
+    i32 max_anisotropy = 1;
+    f32 min_lod = 0.0f;
+    /// Absent is unclamped.
+    f32 max_lod = 3.4028235e38f;
+    f32 mip_lod_bias = 0.0f;
+
+    constexpr bool operator==(sampler_state const&) const = default;
 };
 
 /// A pipeline stage, on an entry point and on the struct that describes its edge of the pipeline.
@@ -54,8 +99,19 @@ struct sgl::check::type_info
     type_id element = type_id::none;
     /// Whether a `buffer` may be written: `mut buffer[T]` against `buffer[T]`.
     bool is_mut = false;
+    /// The shape of a `texture` or an `image`.
+    texture_shape shape = {};
+    /// A `texture` that holds depth, which takes no `element`.
+    bool is_depth = false;
+    /// A position in `k_storage_formats` for an `image`; -1 for every other kind.
+    i32 format = -1;
+    image_access access = image_access::read;
+    /// A `sampler` that compares.
+    bool is_comparison = false;
+    /// How a resource type is written, `out image2d[.rgba8_unorm]`; empty for a declared type, which its symbol names.
+    cc::string spelled;
 
-    constexpr bool operator==(type_info const&) const = default;
+    bool operator==(type_info const&) const = default;
 };
 
 /// A field of a struct or a member of a binding.
@@ -74,6 +130,12 @@ struct sgl::check::member_info
     bool is_per_instance = false;
     /// The name `@stream(name)` gives; empty without one.
     cc::string stream;
+    /// Carries `@unfilterable`: a texture whose samples are never filtered.
+    bool is_unfilterable = false;
+    /// Carries `@non_filtering`: a sampler that never filters.
+    bool is_non_filtering = false;
+    /// A `sampler name:` block of a binding, as a position in `checked_module::samplers`; -1 for any other member.
+    i32 static_sampler = -1;
 
     bool operator==(member_info const&) const = default;
 };

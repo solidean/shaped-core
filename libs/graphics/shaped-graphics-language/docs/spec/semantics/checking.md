@@ -25,7 +25,7 @@ Back to the [semantics](_index.md); the reasons are in [why/checking.md](why/che
 * **CHK-11** The module scope is unordered: a symbol may be used above its declaration.
 * **CHK-12** A name is declared once in the module scope, unless every declaration of it is a function; a later declaration is the normal error `duplicate-declaration`.
 * **CHK-13** Several functions of one name are an **overload set**.
-* **CHK-14** A `const`, a `type` alias and a `sampler` are `unsupported-yet`, and each still owns its name, so a use of it is silent.
+* **CHK-14** A `const`, a `type` alias and a file-scope `sampler` are `unsupported-yet`, and each still owns its name, so a use of it is silent.
   An `enum` is a symbol of its own, by CHK-142.
 * **CHK-15** `use` and `notation` are `unsupported-yet`.
 * **CHK-16** A symbol is in one of four states: untouched, in compilation, checked, or failed.
@@ -121,6 +121,21 @@ enum light_kind:
 * **CHK-45** In any other function it is the normal error `binding-not-listed`.
 * **CHK-46** A binding is no value: its bare name in an expression is `unsupported-yet`.
 * **CHK-171** A buffer member is known to the host by its path, `binding.member`, and a group's constant block by the binding's name ([why](why/checking.md#chk-171)).
+* **CHK-177** A texture, an image and a sampler are types of a binding member, as a buffer is, and none is a value: [bindings.md](../bindings.md) is the model.
+  Two mentions of one such type are one type, and a member names each of them as its spelling does: `texture2d[float4]`, `out image2d[.rgba8_unorm]`.
+* **CHK-178** A texture's argument is `float`, `int` or `uint`, one to four wide; anything else is `wrong-kind-of-name`, and a texture without its argument is too.
+* **CHK-179** An image's argument is exactly one enum case naming one of sg's storage formats, `.rgba8_unorm`.
+  It is the one value type argument SGL reads, until value type arguments exist in general.
+* **CHK-180** A form some backend lacks is the normal error `needs-feature`, naming the feature, on every target alike:
+  `texture2d_ms_array`, an image outside the portable storage formats, and a `mut` image outside the three `r32` formats.
+* **CHK-181** `@unfilterable` stands on a texture member of floats, and anywhere else is `wrong-kind-of-name`.
+* **CHK-182** `@non_filtering` stands on a `sampler` member, and anywhere else is `wrong-kind-of-name`.
+* **CHK-183** A `sampler name:` block in a binding is a member whose type is `comparison_sampler` where it sets `compare`, and `sampler` otherwise.
+  Its settings are `sg::sampler`'s fields, each an enum case or a number; an unknown setting or value is `invalid-attribute-arguments`.
+* **CHK-184** A static sampler in an `@inline` binding is `wrong-kind-of-name`, since such a binding holds constants only.
+* **CHK-185** A `@builtin` function alone may take a texture, an image or a sampler; for any other function each is `unsupported-yet`, as it is anywhere a value stands.
+* **CHK-186** A builtin's image parameter names the texel it loads or stores instead of a format, `out image2d[float4]`, and is a pattern:
+  it takes every image of that shape whose format's texel is that type, and which the shader may read where the pattern reads, or write where it writes.
 
 ```sgl
 @inline binding constants:
@@ -374,6 +389,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `non-exhaustive-case` | CHK-160 |
 | `duplicate-case-pattern` | CHK-161 |
 | `missing-value-in-arm` | CHK-168 |
+| `needs-feature` | CHK-180 |
 | `ambiguous-overload` | CHK-72 |
 | `missing-field`, `unknown-field`, `duplicate-field` | CHK-84 |
 | `invalid-entry-point` | CHK-87, CHK-93 |
