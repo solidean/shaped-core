@@ -59,6 +59,11 @@ constant T& / constant T*-> uniform_buffer
 device T*                -> readwrite_structured_buffer              (a `const` pointee -> readonly_structured_buffer)
 raytracing::*_acceleration_structure -> acceleration_structure
 T name[k]                -> count = k, occupying k CONSECUTIVE indices
+constant T& x [[buffer(4)]] on the entry point -> the INLINE-CONSTANTS block: uniform_buffer, no group, no space
+// GOTCHA: any other [[buffer]] / [[texture]] / [[sampler]] on the entry point itself is an ERROR — the backend binds
+//   only argument buffers (group N at [[buffer(N)]], N <= sg::reserved_binding_group) and the inline block.
+// GOTCHA: `#pragma sc numthreads x y z` counts only in the lines DIRECTLY above the signature (blank, pragma and
+//   [[attribute]] lines between are fine); a kernel never inherits the pragma of one above it.
 // GOTCHA: every `device T*` is STRUCTURED. MSL spells a raw byte-addressed buffer identically, so the text cannot
 //   tell them apart — a shader needing a raw buffer is a reason to grow the rule, not to guess.
 // GOTCHA: a declared-but-unreferenced binding IS reported, unlike DXIL reflection, because the text declares it.

@@ -3,6 +3,7 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/string.hh>
+#include <shaped-graphics/fwd.hh>
 
 namespace
 {
@@ -269,6 +270,10 @@ struct argument_buffer
 
 namespace
 {
+/// The buffer index sg's metal backend binds inline constants at, one past the reserved group.
+/// It must equal `sg::backend::metal::k_inline_constants_buffer_index`, which ssc::msl cannot include.
+constexpr auto k_inline_constants_buffer_index = isize(sg::reserved_binding_group + 1);
+
 /// The texture kind a `texture*` type names, with `tex_2d` standing for the plain one.
 [[nodiscard]] cc::optional<sg::texture_view_dimension> texture_dimension_of(cc::string_view type)
 {
@@ -348,6 +353,75 @@ namespace
 
     return cc::error(cc::format("'{}' in {} is of a kind sg has no binding_type for: '{}'", decl.name, where, type));
 }
+
+[[nodiscard]] isize start_of_line(cc::string_view text, isize at)
+{
+    while (at > 0 && text[at - 1] != '\n')
+        --at;
+    return at;
+}
+
+/// The three numbers of `numthreads x y z`, with `text` starting just past the word; absent unless all three are there.
+[[nodiscard]] cc::optional<sg::compute_dimensions> parse_numthreads(cc::string_view text)
+{
+    auto values = cc::vector<i32>();
+    auto i = isize(0);
+    while (i < text.size() && values.size() < 3)
+    {
+        while (i < text.size() && (text[i] == ' ' || text[i] == '\t'))
+            ++i;
+        auto value = 0;
+        auto digits = 0;
+        while (i < text.size() && text[i] >= '0' && text[i] <= '9')
+        {
+            value = value * 10 + (text[i] - '0');
+            ++i;
+            ++digits;
+        }
+        if (digits == 0)
+            break;
+        values.push_back(value);
+    }
+    if (values.size() != 3)
+        return {};
+    return sg::compute_dimensions{.x = values[0], .y = values[1], .z = values[2]};
+}
+
+/// The `#pragma sc numthreads x y z` among the lines directly above `signature_start`.
+/// The search stops at the first line that is neither blank, a pragma nor an attribute, so a kernel never inherits the
+/// shape of one declared before it.
+[[nodiscard]] cc::optional<sg::compute_dimensions> numthreads_above(cc::string_view text, isize signature_start)
+{
+    auto next = signature_start;
+    while (next > 0)
+    {
+        auto const start = start_of_line(text, next - 1);
+        auto const line = trimmed(text.subview({.start = start, .end = next - 1}));
+        next = start;
+
+        if (line.empty() || line.starts_with("[["))
+            continue;
+        if (!line.starts_with("#"))
+            break;
+
+        // A preprocessor line: `#`, then `pragma`, `sc` and `numthreads` as words, any spacing between them.
+        auto rest = trimmed(line.subview({.start = 1, .end = line.size()}));
+        cc::string_view const words[] = {"pragma", "sc", "numthreads"};
+        auto matched = true;
+        for (auto const word : words)
+        {
+            if (!rest.starts_with(word) || (rest.size() > word.size() && is_identifier_char(rest[word.size()])))
+            {
+                matched = false;
+                break;
+            }
+            rest = trimmed(rest.subview({.start = word.size(), .end = rest.size()}));
+        }
+        if (matched)
+            return parse_numthreads(rest);
+    }
+    return {};
+}
 } // namespace
 
 cc::result<cc::string_view> ssc::msl::impl::entry_qualifier_for(sg::shader_stage stage)
@@ -409,12 +483,11 @@ cc::result<ssc::msl::impl::reflection> ssc::msl::impl::reflect(cc::string_view s
         return cc::error(cc::format("the source declares no entry point named '{}'", entry_point));
 
     // What precedes the name carries the qualifier, and it must be the one this stage implies.
-    auto const preamble = text.subview({.start = 0, .end = entry_at});
     auto const line_start = [&]
     {
         auto i = entry_at;
         auto seen = 0;
-        // Two newlines back, so an attribute or a pragma on its own line above the signature is still in view.
+        // The signature's own line and the two above it, so a qualifier on a line of its own is still in view.
         while (i > 0 && seen < 3)
         {
             --i;
@@ -425,37 +498,16 @@ cc::result<ssc::msl::impl::reflection> ssc::msl::impl::reflect(cc::string_view s
     }();
 
     auto const signature_head = text.subview({.start = line_start, .end = entry_at});
-    if (!has_word(signature_head, qualifier.value()))
+    auto qualifier_at = isize(-1);
+    for (auto at = find_word(signature_head, qualifier.value()); at >= 0;
+         at = find_word(signature_head, qualifier.value(), at + 1))
+        qualifier_at = line_start + at;
+    if (qualifier_at < 0)
         return cc::error(cc::format("'{}' is not declared as a `{}` function, which stage {} requires", entry_point,
                                     qualifier.value(), int(stage)));
 
     auto result = reflection();
-
-    // `#pragma sc numthreads x y z` above the entry point, which is the only way MSL text states a threadgroup shape.
-    if (auto const pragma_at = find_word(preamble, "numthreads"); pragma_at >= 0)
-    {
-        auto i = pragma_at + isize(10);
-        auto values = cc::vector<i32>();
-        while (i < preamble.size() && values.size() < 3)
-        {
-            while (i < preamble.size() && (preamble[i] == ' ' || preamble[i] == '\t'))
-                ++i;
-            auto value = 0;
-            auto digits = 0;
-            while (i < preamble.size() && preamble[i] >= '0' && preamble[i] <= '9')
-            {
-                value = value * 10 + (preamble[i] - '0');
-                ++i;
-                ++digits;
-            }
-            if (digits == 0)
-                break;
-            values.push_back(value);
-        }
-
-        if (values.size() == 3)
-            result.workgroup_size = sg::compute_dimensions{.x = values[0], .y = values[1], .z = values[2]};
-    }
+    result.workgroup_size = numthreads_above(text, start_of_line(text, qualifier_at));
 
     // The parameters: each either binds a resource directly, or names an argument buffer whose members do.
     auto const params_open = entry_at + entry_point.size();
@@ -493,6 +545,12 @@ cc::result<ssc::msl::impl::reflection> ssc::msl::impl::reflect(cc::string_view s
 
             if (group != nullptr)
             {
+                if (buffer_index > sg::reserved_binding_group)
+                    return cc::error(
+                        cc::format("'{}' of '{}' is an argument buffer at [[buffer({})]], and no group has "
+                                   "that index: the groups are 0 to {}",
+                                   param.value().name, entry_point, buffer_index, sg::reserved_binding_group));
+
                 for (auto i = isize(0); i < group->members.size(); ++i)
                 {
                     auto binding = binding_of(group->members[i], cc::string_view(group->name));
@@ -508,16 +566,41 @@ cc::result<ssc::msl::impl::reflection> ssc::msl::impl::reflect(cc::string_view s
             }
         }
 
-        // A resource bound directly on the parameter, which is how a shader with no groups is written.
-        auto binding = binding_of(param.value(), cc::string_view(entry_point));
-        if (binding.has_error())
-            return cc::error(cc::move(binding).error());
+        // The one address the backend binds outside an argument buffer: the inline-constants block.
+        // It reflects with no group and no space, which is how sg recognizes an inline block whatever its name.
+        if (buffer_index == k_inline_constants_buffer_index)
+        {
+            auto binding = binding_of(param.value(), cc::string_view(entry_point));
+            if (binding.has_error())
+                return cc::error(cc::move(binding).error());
+            if (binding.value().type != sg::binding_type::uniform_buffer)
+                return cc::error(cc::format("'{}' of '{}' sits at the inline-constants index [[buffer({})]], so it "
+                                            "must "
+                                            "be a `constant T&`",
+                                            param.value().name, entry_point, buffer_index));
 
-        binding.value().group_index = u32(buffer_index >= 0 ? buffer_index : 0);
-        binding.value().index
-            = u32(buffer_index >= 0 ? buffer_index : (texture_index >= 0 ? texture_index : sampler_index));
-        binding.value().visibility = stage;
-        result.bindings.push_back(cc::move(binding.value()));
+            binding.value().visibility = stage;
+            result.bindings.push_back(cc::move(binding.value()));
+            continue;
+        }
+
+        // Anything else bound straight on the entry point is an address the backend never sets.
+        auto kind = cc::string_view("sampler");
+        auto index = sampler_index;
+        if (texture_index >= 0)
+        {
+            kind = "texture";
+            index = texture_index;
+        }
+        if (buffer_index >= 0)
+        {
+            kind = "buffer";
+            index = buffer_index;
+        }
+        return cc::error(cc::format("'{}' of '{}' is bound directly at [[{}({})]], and metal binds resources through "
+                                    "argument buffers only: make it a member of a struct bound at [[buffer(N)]], N "
+                                    "being its group",
+                                    param.value().name, entry_point, kind, index));
     }
 
     return result;

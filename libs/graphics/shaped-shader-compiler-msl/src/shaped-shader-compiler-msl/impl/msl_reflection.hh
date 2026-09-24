@@ -20,6 +20,10 @@
 ///
 ///   - an argument buffer is a struct whose members carry `[[id(n)]]`, bound as a whole at `[[buffer(N)]]`;
 ///     N is the binding group and n is the binding index, which is the layout metal_common.hh fixes
+///   - a `constant T&` at `[[buffer(4)]]`, one past `sg::reserved_binding_group`, is the inline-constants block, and it
+///     reflects with no group and no space
+///   - any other `[[buffer]]`, `[[texture]]` or `[[sampler]]` on the entry point itself is an error, since the backend
+///     binds nothing there
 ///   - `constant T&` and `constant T*` are uniform buffers, `device T*` is a structured buffer, and a `const` pointee
 ///     makes it readonly
 ///   - `texture*<...>` is a texture, readwrite when its access is `read_write` or `write`
@@ -37,7 +41,8 @@ struct reflection
 {
     cc::vector<sg::binding> bindings;
 
-    /// From `#pragma sc numthreads x y z` above the entry point, and absent when the shader does not state one.
+    /// From `#pragma sc numthreads x y z` in the lines directly above the entry point's signature, and absent when the
+    /// shader does not state one there.
     /// MSL has no `[numthreads]` of its own, so a kernel that depends on its threadgroup shape has to say so here.
     cc::optional<sg::compute_dimensions> workgroup_size;
 };

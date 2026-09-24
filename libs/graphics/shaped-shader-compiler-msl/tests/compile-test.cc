@@ -105,10 +105,16 @@ TEST("ssc::msl compile - a shader the Metal compiler rejects carries its diagnos
     if (!comp.value().toolchain().is_available)
         return;
 
-    auto shader = comp.value().compile(
-        {.source = "kernel void broken(device float* d [[buffer(0)]]) { no_such_function(d); }", .entry_point = "broken"},
-        {.artifact = ssc::msl::artifact_kind::metallib});
+    // Reflection accepts this, so the error is the Metal compiler's.
+    constexpr char const* source = R"(
+struct work { device float* d [[id(0)]]; };
+kernel void broken(constant work& w [[buffer(0)]]) { no_such_function(w.d); }
+)";
+
+    auto shader = comp.value().compile({.source = source, .entry_point = "broken"},
+                                       {.artifact = ssc::msl::artifact_kind::metallib});
     REQUIRE(shader.has_error());
+    CHECK(shader.error().to_string().contains("the Metal compiler rejected")).context(shader.error().to_string());
 }
 
 TEST("ssc::msl compile - an entry point the text does not declare fails before a compiler is spawned")

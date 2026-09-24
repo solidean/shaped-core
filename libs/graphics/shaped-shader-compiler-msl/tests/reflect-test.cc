@@ -134,31 +134,103 @@ kernel void blur(constant outputs& o [[buffer(0)]]) { (void)o; }
     CHECK(r.value().bindings[0].storage_access == sg::storage_access::read_write);
 }
 
-TEST("ssc::msl reflect - resources bound straight on the entry point, with no group at all")
+TEST("ssc::msl reflect - a resource bound straight on the entry point is refused, since the backend binds none")
+{
+    // The metal backend sets group N's argument buffer at [[buffer(N)]] and never a texture or a sampler slot.
+    char const* const sources[] = {
+        "kernel void k(device float* data [[buffer(0)]]) { (void)data; }",
+        "kernel void k(texture2d<float> tex [[texture(0)]]) { (void)tex; }",
+        "kernel void k(sampler s [[sampler(0)]]) { (void)s; }",
+    };
+
+    for (auto const* const source : sources)
+    {
+        auto r = ssc::msl::impl::reflect(source, "k", sg::shader_stage::compute);
+        REQUIRE(r.has_error());
+        CHECK(r.error().to_string().contains("argument buffers only")).context(r.error().to_string());
+    }
+}
+
+TEST("ssc::msl reflect - a built-in parameter is a value the hardware supplies, never a binding")
 {
     constexpr char const* source = R"(
-kernel void direct(device float* data [[buffer(0)]],
-                   texture2d<float> tex [[texture(0)]],
-                   sampler s [[sampler(0)]],
-                   uint i [[thread_position_in_grid]]) { (void)data; (void)tex; (void)s; (void)i; }
+struct work { device float* data [[id(0)]]; };
+kernel void k(constant work& w [[buffer(0)]], uint i [[thread_position_in_grid]]) { (void)w; (void)i; }
 )";
 
-    auto r = ssc::msl::impl::reflect(source, "direct", sg::shader_stage::compute);
+    auto r = ssc::msl::impl::reflect(source, "k", sg::shader_stage::compute);
     REQUIRE(r.has_value());
-    REQUIRE(r.value().bindings.size() == 3);
-
-    // A built-in like thread_position_in_grid is a value the hardware supplies, never something a group binds.
+    REQUIRE(r.value().bindings.size() == 1);
     CHECK(binding_named(r.value().bindings, "i") == nullptr);
-    CHECK(binding_named(r.value().bindings, "data")->type == sg::binding_type::readwrite_structured_buffer);
-    CHECK(binding_named(r.value().bindings, "tex")->type == sg::binding_type::readonly_texture);
-    CHECK(binding_named(r.value().bindings, "s")->type == sg::binding_type::sampler);
+}
+
+TEST("ssc::msl reflect - an argument buffer past the reserved group names no group, and is refused")
+{
+    constexpr char const* source = R"(
+struct work { device float* data [[id(0)]]; };
+kernel void k(constant work& w [[buffer(4)]]) { (void)w; }
+)";
+
+    CHECK(ssc::msl::impl::reflect(source, "k", sg::shader_stage::compute).has_error());
+}
+
+TEST("ssc::msl reflect - the inline-constants block has no group and no space, whatever it is called")
+{
+    // SGL's cube vertex shader, as `sgl emit --target msl` writes it: the test binary links no sgl, so it is text here.
+    constexpr char const* source = R"(
+#include <metal_stdlib>
+using namespace metal;
+
+struct cube_vertex
+{
+    float3 position [[attribute(0)]];
+    float3 color [[attribute(1)]];
+};
+
+struct pixel_input
+{
+    float4 position [[position]];
+    float3 color [[user(sgl0)]];
+};
+
+struct constants_data
+{
+    float4x4 view_projection;
+};
+
+vertex pixel_input main_vs(cube_vertex v [[stage_in]], constant constants_data& constants [[buffer(4)]])
+{
+    pixel_input result;
+    result.position = constants.view_projection * float4(v.position, 1.0);
+    result.color = v.color;
+    return result;
+}
+)";
+
+    auto r = ssc::msl::impl::reflect(source, "main_vs", sg::shader_stage::vertex);
+    REQUIRE(r.has_value()).context(r.has_error() ? r.error().to_string() : cc::string());
+    REQUIRE(r.value().bindings.size() == 1);
+
+    // No group and no space is what sg's layout fit recognizes as the inline block, by that clause and not its name.
+    auto const& constants = r.value().bindings[0];
+    CHECK(constants.name == "constants");
+    CHECK(constants.type == sg::binding_type::uniform_buffer);
+    CHECK(!constants.group_index.has_value());
+    CHECK(!constants.space.has_value());
+}
+
+TEST("ssc::msl reflect - only a constant block may sit at the inline-constants index")
+{
+    constexpr char const* source = "kernel void k(device float* data [[buffer(4)]]) { (void)data; }";
+    CHECK(ssc::msl::impl::reflect(source, "k", sg::shader_stage::compute).has_error());
 }
 
 TEST("ssc::msl reflect - the threadgroup shape comes from the pragma, since MSL states none")
 {
     constexpr char const* source = R"(
+struct work { device float* d [[id(0)]]; };
 #pragma sc numthreads 64 2 1
-kernel void reduce(device float* d [[buffer(0)]]) { (void)d; }
+kernel void reduce(constant work& w [[buffer(0)]]) { (void)w; }
 )";
 
     auto r = ssc::msl::impl::reflect(source, "reduce", sg::shader_stage::compute);
@@ -171,9 +243,56 @@ kernel void reduce(device float* d [[buffer(0)]]) { (void)d; }
 
 TEST("ssc::msl reflect - a kernel that states no shape leaves it absent rather than guessing 1x1x1")
 {
-    constexpr char const* source = "kernel void flat(device float* d [[buffer(0)]]) { (void)d; }";
+    constexpr char const* source = R"(
+struct work { device float* d [[id(0)]]; };
+kernel void flat(constant work& w [[buffer(0)]]) { (void)w; }
+)";
 
     auto r = ssc::msl::impl::reflect(source, "flat", sg::shader_stage::compute);
+    REQUIRE(r.has_value());
+    CHECK(!r.value().workgroup_size.has_value());
+}
+
+TEST("ssc::msl reflect - each kernel of a file takes its own pragma, never the one above another kernel")
+{
+    constexpr char const* source = R"(
+struct work { device float* d [[id(0)]]; };
+
+#pragma sc numthreads 64 1 1
+kernel void first(constant work& w [[buffer(0)]]) { (void)w; }
+
+kernel void second(constant work& w [[buffer(0)]]) { (void)w; }
+
+#pragma sc numthreads 8 8 1
+kernel void third(constant work& w [[buffer(0)]]) { (void)w; }
+)";
+
+    auto const first = ssc::msl::impl::reflect(source, "first", sg::shader_stage::compute);
+    REQUIRE(first.has_value());
+    REQUIRE(first.value().workgroup_size.has_value());
+    CHECK(first.value().workgroup_size.value().x == 64);
+
+    // `second` states none, so it has none: the pragma above `first` is not its own.
+    auto const second = ssc::msl::impl::reflect(source, "second", sg::shader_stage::compute);
+    REQUIRE(second.has_value());
+    CHECK(!second.value().workgroup_size.has_value());
+
+    auto const third = ssc::msl::impl::reflect(source, "third", sg::shader_stage::compute);
+    REQUIRE(third.has_value());
+    REQUIRE(third.value().workgroup_size.has_value());
+    CHECK(third.value().workgroup_size.value().x == 8);
+    CHECK(third.value().workgroup_size.value().y == 8);
+}
+
+TEST("ssc::msl reflect - the shape needs `#pragma sc`, and a bare `numthreads` elsewhere is no pragma")
+{
+    constexpr char const* source = R"(
+struct work { device float* numthreads [[id(0)]]; };
+#pragma numthreads 64 1 1
+kernel void k(constant work& w [[buffer(0)]]) { (void)w; }
+)";
+
+    auto r = ssc::msl::impl::reflect(source, "k", sg::shader_stage::compute);
     REQUIRE(r.has_value());
     CHECK(!r.value().workgroup_size.has_value());
 }
