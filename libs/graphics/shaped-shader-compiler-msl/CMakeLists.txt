@@ -12,6 +12,7 @@ add_library(shaped-shader-compiler-msl
     src/shaped-shader-compiler-msl/compiler.cc
     src/shaped-shader-compiler-msl/impl/metal_driver.cc
     src/shaped-shader-compiler-msl/impl/msl_reflection.cc
+    src/shaped-shader-compiler-msl/shader_cache.cc
 )
 
 # Public headers (co-located in src/). impl/ headers are internal — reachable via the src/ include
@@ -26,6 +27,7 @@ target_sources(shaped-shader-compiler-msl
     src/shaped-shader-compiler-msl/compile_options.hh
     src/shaped-shader-compiler-msl/shader_description.hh
     src/shaped-shader-compiler-msl/compiler.hh
+    src/shaped-shader-compiler-msl/shader_cache.hh
     src/shaped-shader-compiler-msl/all.hh
 )
 
@@ -49,6 +51,7 @@ if(SC_BUILD_TESTS)
         tests/metal_driver-test.cc
         tests/reflect-test.cc
         tests/compile-test.cc
+        tests/shader_cache-test.cc
     )
     sc_nexus_binary(shaped-shader-compiler-msl-test KINDS tests)
 

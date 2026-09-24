@@ -51,8 +51,10 @@ public:
     /// The error carries the Metal compiler's own diagnostics where it ran, and this wrapper's where it did not —
     /// an entry point the text does not declare, a stage Metal has no shape for, or a binding declaration sg has no
     /// `binding_type` for.
+    ///
+    /// Const, and it only reads what `create()` resolved, so one compiler serves every thread.
     [[nodiscard]] cc::result<sg::compiled_shader> compile(shader_description const& desc,
-                                                          compile_options const& options = {});
+                                                          compile_options const& options = {}) const;
 
     /// What `create()` found.
     /// A caller deciding whether to ask for a metallib reads this first.

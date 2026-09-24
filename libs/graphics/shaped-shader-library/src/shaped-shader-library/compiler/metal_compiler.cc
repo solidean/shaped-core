@@ -2,28 +2,16 @@
 
 #if SLIB_HAS_METAL
 
-#include <clean-core/string/format.hh>
 #include <clean-core/thread/async.hh> // sg::async_compiled_shader is a cc::shared_async
-#include <shaped-shader-compiler-msl/compiler.hh>
+#include <shaped-shader-compiler-msl/shader_cache.hh>
 
 namespace
 {
-sg::async_compiled_shader make_failed_shader(cc::string message)
-{
-    return cc::make_async_from_error<sg::compiled_shader>(cc::async_error::make_error(cc::any_error(cc::move(message))));
-}
-
-/// One compiler per thread, as slib compiles from the reload watcher and from whichever thread acquires.
-/// `ssc::msl::compiler` resolves the toolchain once in `create`, so sharing one per thread also shares that lookup.
-ssc::msl::compiler* thread_local_compiler()
-{
-    static thread_local auto compiler = ssc::msl::compiler::create();
-    return compiler.has_value() ? &compiler.value() : nullptr;
-}
-
 class metal_shader_compiler final : public slib::shader_compiler
 {
 public:
+    metal_shader_compiler() { _cache.add_default_in_memory_provider(); }
+
     [[nodiscard]] slib::shader_language source_language() const override { return slib::shader_language::metal; }
 
     /// `metal_lib` is the edge, whichever artifact a compile produced.
@@ -38,18 +26,15 @@ public:
         return slib::preprocessed_source{.source = desc.source};
     }
 
+    /// The node runs later, on the scheduler, never inside the `acquire` that asked for it.
     [[nodiscard]] sg::async_compiled_shader compile(slib::shader_source_description const& desc) const override
     {
-        auto* const compiler = thread_local_compiler();
-        if (compiler == nullptr)
-            return make_failed_shader("failed to create the metal shader compiler");
-
-        auto shader = compiler->compile({.source = desc.source, .entry_point = desc.entry_point, .stage = desc.stage});
-        if (shader.has_error())
-            return make_failed_shader(shader.error().to_string());
-
-        return cc::make_async_from_value(cc::move(shader.value()));
+        return _cache.compile({.source = desc.source, .entry_point = desc.entry_point, .stage = desc.stage});
     }
+
+private:
+    // Mutable: compile() is const on the seam (it must be callable from several threads), and the cache is itself thread-safe.
+    mutable ssc::msl::shader_cache _cache;
 };
 } // namespace
 

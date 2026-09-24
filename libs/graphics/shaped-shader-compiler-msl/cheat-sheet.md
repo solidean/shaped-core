@@ -38,12 +38,28 @@ ssc::msl::shader_description // { cc::string source; cc::string entry_point="mai
 ```cpp
 #include <shaped-shader-compiler-msl/compiler.hh>
 ssc::msl::toolchain_info     // { bool is_available; cc::string version; cc::string driver_path }
-ssc::msl::compiler           // move-only; holds what `xcrun -f metal` resolved. One per thread.
+ssc::msl::compiler           // move-only; holds what `xcrun -f metal` resolved. One serves every thread.
 ssc::msl::compiler::create() // -> cc::result<compiler>; NEVER fails for want of a toolchain
-c.compile(desc, opts={})     // -> cc::result<sg::compiled_shader>
+c.compile(desc, opts={})     // -> cc::result<sg::compiled_shader>; const, and synchronous: it may spawn `metal`
 c.toolchain()                // -> toolchain_info const&; version belongs in any persistent cache key
 // compile() output: stage/entry_point set; format = metal_lib or msl per the arm that ran;
 // bindings + workgroup_size from the SOURCE; compiler = {"metal", version, "<arm> <args>"}
+```
+
+## shader_cache (async + cached)
+
+```cpp
+#include <shaped-shader-compiler-msl/shader_cache.hh>
+ssc::msl::shader_cache cache;            // the metal counterpart of ssc::dxc::shader_cache
+cache.add_default_in_memory_provider();  // in-memory tier (4096 entries by default)
+cache.compile(desc, opts={})             // -> sg::async_compiled_shader; runs on the scheduler, NEVER inside this call
+                                         //   same key -> the SAME node, in flight or finished
+cache.set_blob_cache(&c)                 // persistent tier; defaults to bcache::default_cache(), nullptr = off
+                                         //   SC_SG_COLD=shaders runs it cold
+cache.backlog()                          // -> cc::async_backlog const&; every compile this cache started
+// key = source + entry_point + stage + workgroup_size + every option + the ARM that will run + the toolchain VERSION
+// One ssc::msl::compiler for the whole process sits behind every cache, so `xcrun` runs once.
+// GOTCHA: read a node only once it is settled — `co_await cc::async_settled(node)` in an ASYNC_TEST.
 ```
 
 ## reflection mapping (MSL -> sg::binding)

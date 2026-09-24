@@ -147,6 +147,7 @@ slib::create_wgsl_compiler()       // -> std::unique_ptr<shader_compiler>; wgsl 
 slib::create_metal_compiler()      // -> std::unique_ptr<shader_compiler>; metal -> metal_lib
                                    //   the artifact is a metallib, or MSL source where Apple's Metal toolchain is not
                                    //   installed — target_format() is metal_lib either way, and the shader says which
+                                   //   compiles through an ssc::msl::shader_cache: async, in memory and in the blob cache
                                    //   preprocess hands the text back: MSL here has no #include to flatten
                                    //   reflection reads the SOURCE (see shaped-shader-compiler-msl/cheat-sheet.md)
 

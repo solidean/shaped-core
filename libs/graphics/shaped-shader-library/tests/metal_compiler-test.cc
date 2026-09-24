@@ -1,4 +1,7 @@
 #include <clean-core/string/string_view.hh>
+#include <clean-core/thread/async.hh>
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-shader-library/compiler/metal_compiler.hh>
 #include <shaped-shader-library/compiler/sgl_compiler.hh>
@@ -10,9 +13,11 @@
 // The metal edge, and the one thing it exists for: an SGL package reaching metal.
 // Both arms of the compiler behind it produce something the metal backend accepts, so these assert what the edge
 // resolves and what comes out, not which arm ran — that is a property of the host, not of the package.
+// A compile runs on the scheduler rather than inside the call that asked for it, so every node is settled before it is read.
 
 namespace
 {
+/// The value of a SETTLED node.
 sg::compiled_shader const& value_of(sg::async_compiled_shader const& shader)
 {
     REQUIRE(shader != nullptr);
@@ -42,7 +47,7 @@ TEST("slib metal compiler - preprocess hands the text back, because MSL needs no
     CHECK(text.value().source == "kernel void k() {}");
 }
 
-TEST("slib metal compiler - MSL compiles, and its bindings are reflected out of the text")
+ASYNC_TEST("slib metal compiler - MSL compiles, and its bindings are reflected out of the text")
 {
     auto const compiler = slib::create_metal_compiler();
     REQUIRE(compiler != nullptr);
@@ -55,6 +60,7 @@ kernel void main0(device frame& f [[buffer(0)]], uint t [[thread_position_in_gri
 )",
                                            .entry_point = "main0",
                                            .stage = sg::shader_stage::compute});
+    co_await cc::async_settled(shader);
 
     auto const& compiled = value_of(shader);
     CHECK(compiled.entry_point == "main0");
@@ -68,18 +74,42 @@ kernel void main0(device frame& f [[buffer(0)]], uint t [[thread_position_in_gri
     CHECK(is_metal_format);
 }
 
-TEST("slib metal compiler - the sgl edge carries a package to metal", exclusive("slib-shader-library"))
+ASYNC_TEST("slib metal compiler - the same source twice is one node, not a second compile")
+{
+    auto const compiler = slib::create_metal_compiler();
+    REQUIRE(compiler != nullptr);
+
+    auto const desc = slib::shader_source_description{.source = "struct w { device uint* v [[id(0)]]; };
+                                                      kernel void k(constant w & b [[buffer(0)]]){(void)b;
+}
+",
+    .entry_point = "k",
+  .stage = sg::shader_stage::compute
+}
+;
+auto const first = compiler->compile(desc);
+auto const second = compiler->compile(desc);
+CHECK(first.get() == second.get());
+co_await cc::async_settled(first);
+}
+
+ASYNC_TEST("slib metal compiler - the sgl edge carries a package to metal", exclusive("slib-shader-library"))
 {
     // The point of the whole arm: one SGL source, compiled for metal like any other target.
     slib::shader_library lib;
     lib.add_compiler(slib::create_sgl_compiler(slib::create_metal_compiler()));
     lib.add_package(slib_test::sgl_shaders::package());
 
-    auto const& vs = value_of(slib_test::sgl_shaders::cube.vertex.main_vs->acquire(sg::shader_format::metal_lib));
+    auto const vs_node = slib_test::sgl_shaders::cube.main_vs->acquire(sg::shader_format::metal_lib);
+    auto const ps_node = slib_test::sgl_shaders::cube.main_ps->acquire(sg::shader_format::metal_lib);
+    co_await cc::async_settled(vs_node);
+    co_await cc::async_settled(ps_node);
+
+    auto const& vs = value_of(vs_node);
     CHECK(vs.stage == sg::shader_stage::vertex);
     CHECK(vs.entry_point == "main_vs");
 
-    auto const& ps = value_of(slib_test::sgl_shaders::cube.pixel.main_ps->acquire(sg::shader_format::metal_lib));
+    auto const& ps = value_of(ps_node);
     CHECK(ps.stage == sg::shader_stage::fragment);
 }
 

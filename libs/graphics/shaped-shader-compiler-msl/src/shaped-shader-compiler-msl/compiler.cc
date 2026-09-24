@@ -132,7 +132,8 @@ ssc::msl::toolchain_info const& ssc::msl::compiler::toolchain() const
     return _state->toolchain;
 }
 
-cc::result<sg::compiled_shader> ssc::msl::compiler::compile(shader_description const& desc, compile_options const& options)
+cc::result<sg::compiled_shader> ssc::msl::compiler::compile(shader_description const& desc,
+                                                            compile_options const& options) const
 {
     if (desc.source.empty())
         return cc::error("compile: the shader description carries no source");

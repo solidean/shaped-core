@@ -5,4 +5,5 @@
 #include <shaped-shader-compiler-msl/compile_options.hh>
 #include <shaped-shader-compiler-msl/compiler.hh>
 #include <shaped-shader-compiler-msl/fwd.hh>
+#include <shaped-shader-compiler-msl/shader_cache.hh>
 #include <shaped-shader-compiler-msl/shader_description.hh>

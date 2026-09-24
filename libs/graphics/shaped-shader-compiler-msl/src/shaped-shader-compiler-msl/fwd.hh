@@ -12,6 +12,7 @@ namespace ssc::msl
 using namespace cc::primitive_defines;
 
 class compiler;
+class shader_cache;
 
 struct shader_description;
 struct compile_options;
