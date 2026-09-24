@@ -20,7 +20,7 @@ class sr::impl::imgui_texture_routine : public sg::render_routine<imgui_texture_
 {
 public:
     /// Creates, updates and destroys GPU textures to match what imgui is asking for this frame.
-    void service_requests(sg::context& ctx, ImDrawData* draw_data) { _textures.service_requests(ctx, draw_data); }
+    void service_requests(sg::command_list& cmd, ImDrawData* draw_data) { _textures.service_requests(cmd, draw_data); }
 
     /// The texture behind an ImDrawCmd's id, or an error if imgui named one the registry never created.
     [[nodiscard]] cc::result<sg::texture_2d> try_texture_of(ImTextureID id) const

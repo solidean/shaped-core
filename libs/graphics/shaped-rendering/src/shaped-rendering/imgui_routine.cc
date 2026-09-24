@@ -254,9 +254,11 @@ sg::routine_outcome imgui_routine::execute(sg::rendering_scope& scope, ImDrawDat
 
     // Textures first, and BEFORE any refusal below: a draw may sample an atlas imgui only just grew, and imgui's own
     // bookkeeping has to keep up whether or not we can draw this frame.
-    // These go out on ctx.upload's copy queue, and the barrier tracker makes this list wait on them at submit.
+    // A new texture's bytes go out on ctx.upload's copy queue, and the barrier tracker makes this list wait on them
+    // at submit; an update is recorded straight onto this list, because by then the atlas has been sampled and the
+    // copy queue cannot move it out of `shader_readonly` for itself.
     auto textures = self.acquire_exclusive(self->_textures);
-    textures->service_requests(ctx, draw_data);
+    textures->service_requests(cmd, draw_data);
 
     // Polled rather than waited on: execute runs inside the caller's rendering scope, so nothing here may block, and
     // a throw would leave their command list unsubmitted.
