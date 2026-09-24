@@ -43,16 +43,20 @@ struct ssc::msl::compile_options
     bool debug_info = false;
 
     /// -Werror.
+    /// The source arm refuses it, since the driver compiles with its default options.
     bool warnings_as_errors = false;
 
     /// The MSL version, as the `-std=` value spells it — "metal3.2", "metal4.0".
     /// Empty takes whatever the installed toolchain prefers, which moves when Apple ships a new one.
+    /// The source arm refuses a non-empty one.
     cc::string language_version;
 
     /// -D entries, each "NAME" or "NAME=value".
+    /// The source arm writes them as `#define` lines in front of the text instead.
     cc::vector<cc::string> defines;
 
     /// Passed through verbatim, after everything above.
     /// Where a hand-written shader's `-I` goes: this wrapper resolves no includes of its own.
+    /// The source arm refuses a non-empty list.
     cc::vector<cc::string> extra_args;
 };

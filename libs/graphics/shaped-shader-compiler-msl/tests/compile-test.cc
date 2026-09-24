@@ -51,6 +51,38 @@ TEST("ssc::msl compile - the source arm needs no toolchain and carries the text 
     CHECK(shader.value().workgroup_size.value().x == 32);
 }
 
+TEST("ssc::msl compile - the source arm carries the defines as #define lines in front of the text")
+{
+    auto comp = ssc::msl::compiler::create();
+    REQUIRE(comp.has_value());
+
+    auto shader = comp.value().compile({.source = k_kernel, .entry_point = "scale_it"},
+                                       {.artifact = ssc::msl::artifact_kind::msl_source, .defines = {"K=3", "FLAG"}});
+    REQUIRE(shader.has_value());
+
+    auto const text = as_text(shader.value().bytecode);
+    CHECK(text.starts_with("#define K 3\n#define FLAG\n#line 1\n")).context(cc::string(text));
+    CHECK(text.ends_with(k_kernel));
+}
+
+TEST("ssc::msl compile - the source arm refuses what only the Metal compiler takes, rather than dropping it")
+{
+    auto comp = ssc::msl::compiler::create();
+    REQUIRE(comp.has_value());
+
+    auto const refused = [&](ssc::msl::compile_options options)
+    {
+        options.artifact = ssc::msl::artifact_kind::msl_source;
+        return comp.value().compile({.source = k_kernel, .entry_point = "scale_it"}, options).has_error();
+    };
+    CHECK(refused({.language_version = "metal3.2"}));
+    CHECK(refused({.extra_args = {"-I/tmp"}}));
+    CHECK(refused({.warnings_as_errors = true}));
+
+    // What the source arm documents as ignored stays accepted.
+    CHECK(!refused({.optimization = ssc::msl::optimization_level::disabled, .debug_info = true}));
+}
+
 TEST("ssc::msl compile - the metallib arm produces a metallib")
 {
     auto comp = ssc::msl::compiler::create();

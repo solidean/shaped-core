@@ -30,6 +30,9 @@
 ///   - `sampler` is a sampler, and an acceleration structure is one of the `raytracing::` handles
 ///   - a member declared `T name[k]` is an array binding of count k, which occupies k consecutive indices
 ///
+/// **The text is read before preprocessing**, so an `#if` does not hide a binding and a `defines` entry changes nothing
+/// here: a declaration inside a disabled branch is still reported.
+///
 /// **Every `device T*` is a structured buffer.** MSL writes a raw byte-addressed buffer the same way it writes a
 /// structured one, so the two cannot be told apart from the text, and structured is what our shaders use.
 /// A shader needing a raw buffer is a reason to grow this rule, not to guess between them.
