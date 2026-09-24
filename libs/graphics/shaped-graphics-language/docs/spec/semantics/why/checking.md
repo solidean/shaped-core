@@ -197,3 +197,11 @@ No target binds by name: HLSL by register, SPIR-V by set and binding, WGSL by `@
 So the host name need not be an identifier of any target, and the path is the one name that is injective and needs no rule for a reader to learn.
 `a_b.c` and `a.b_c` stay two buffers, where any identifier built from them would clash.
 The identifier a target writes is the emitter's to mint (EMIT-85), and the text reports the pair (EMIT-95).
+
+## CHK-192
+
+SGL's semantics are the intersection of what the targets' fast native operations guarantee, and no operation pays a tax on every target to be defined where one target leaves it open.
+Each target writes `x as int` as its own native conversion, and those agree only where the truncated value fits: SPIR-V, for one, leaves every other float undefined.
+Defining saturation and a NaN of 0 would mean a clamp and a compare around every conversion on the targets that do not do it natively, in shaders where a conversion sits in the inner loop.
+A program that needs a defined result clamps before it converts, and pays for it only where it asks.
+The interpreter still has to give some value, and saturation is the choice that is right on the most hardware.

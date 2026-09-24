@@ -152,7 +152,7 @@ struct checker
     cc::vector<call_edge> calls;
     /// The object `check_index` is checking right now: the one place a buffer may stand as an expression.
     ast::expr_id subscripted = ast::expr_id::none;
-    /// The arguments of the call being checked, which a texture, an image or a sampler may stand as (CHK-187).
+    /// The arguments of the call being checked, which a texture, an image or a sampler may stand as (CHK-201).
     cc::vector<ast::expr_id> handed;
 
     // ---- shared helpers (check.cc) ----------------------------------------------------------------------------------
@@ -235,9 +235,11 @@ struct checker
     [[nodiscard]] type_id qualify_resource(i32 file, ast::expr_id expr, type_id inner, ast::type_access access);
     /// The settings of a `sampler name:` block; a setting that is wrong is reported and left at its default.
     [[nodiscard]] sampler_state compile_sampler(i32 file, ast::sampler_decl const& s);
+    /// Reports a call that hands over an `@unfilterable` texture member together with a sampler member that filters.
+    void judge_filtering(i32 file, source_span call, ast::range_of<ast::argument> arguments);
     /// A builtin's parameter type, where an image names the texel it reads or writes: `out image2d[float4]`.
     [[nodiscard]] type_id resolve_pattern_type(i32 file, ast::expr_id expr);
-    /// True where an argument of type `argument` may stand for a parameter of type `parameter` (CHK-70, CHK-186).
+    /// True where an argument of type `argument` may stand for a parameter of type `parameter` (CHK-70, CHK-202).
     [[nodiscard]] bool takes(type_id parameter, type_id argument) const;
     /// Reports `form` as `needs-feature`, naming the feature that would grant it.
     void judge_feature(i32 file, source_span where, cc::string_view form, cc::string_view feature);
@@ -340,6 +342,9 @@ struct checker
                                            call_arguments const& arguments,
                                            cc::string_view spelling);
     [[nodiscard]] cc::string signature_text(cc::string_view spelling, cc::span<type_id const> types) const;
+    /// Records a call of `callee`, a function of the program, as an edge of the call graph, and reports each binding it
+    /// reads that the caller does not list.
+    void note_program_call(function_scope const& scope, symbol_id callee, source_span where);
 
     // ---- the flat tree (flatten.cc) ---------------------------------------------------------------------------------
 

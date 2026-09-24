@@ -170,7 +170,8 @@ binding material:
 A static sampler's kind needs no spelling: it follows from its settings, `comparison` when `compare` is set, and `non_filtering` when every filter is nearest.
 
 **A sampler's settings** are one `name = value` per line ([AST-76](syntax/ast.md#bindings-and-samplers)), and each sets a field of `sg::sampler`.
-They are the names slib's `#pragma sc static` reads in HLSL, so both languages say the same thing:
+They are the names slib's `#pragma sc static` reads in HLSL, so both languages say the same thing.
+They apply in order, so a later setting overrides what an earlier one set, `filter` included:
 
 | setting | sets |
 |---|---|
@@ -179,7 +180,7 @@ They are the names slib's `#pragma sc static` reads in HLSL, so both languages s
 | `address` | `address_u`, `address_v` and `address_w` at once |
 | `address_u`, `address_v`, `address_w` | one of them: `.repeat`, `.mirror_repeat` or `.clamp_edge` |
 | `compare` | the compare op, which makes it a comparison sampler: `.less`, `.less_equal`, … |
-| `max_anisotropy` | 1 is off |
+| `max_anisotropy` | an int from 1 to 16, where 1 is off; above 1 every filter is `.linear`, since WebGPU refuses anything else |
 | `min_lod`, `max_lod`, `mip_lod_bias` | the mip clamp and bias |
 
 ## Features
@@ -230,6 +231,8 @@ The generated group's table is what the host builds its layout from, so that is 
 A compiled shader only has to fit that layout, and sg's fit check compares a binding's name, slot, count and kind — never the facts beyond them.
 The WGSL SGL writes states all of them, which a test holds to the generated table; HLSL states the dimension, and an image's format through slib's `#pragma sc format`.
 HLSL cannot say `unfilterable` at all, which costs nothing, since dx12 and vulkan read none of it.
+Building the layout by reflecting the WGSL instead was declined: that text is written from the same declaration, so reading it back is `sgl describe` with a parser in between.
+And `texture_2d<f32>` fits a filterable and an unfilterable layout alike, so the reflection could not even recover `@unfilterable`.
 
 **MSL, as it is intended.**
 sg's metal backend makes a group one argument buffer at `[[buffer(group)]]`, whose member `[[id(n)]]` is slot `n` of the group.
@@ -259,7 +262,7 @@ Everything not named here is the diagnostic `unsupported-yet`, never a guess.
 * A subscript on a buffer, as a value and as the place of an assignment.
 * Every texture, depth texture, image and sampler form above, with `@unfilterable` and `@non_filtering`.
 * A static sampler in a binding, and the `needs-feature` refusals.
-* A texture, an image or a sampler handed to a builtin, which is the only way one is used ([CHK-185](semantics/checking.md#bindings)).
+* A texture, an image or a sampler handed to a builtin, which is the only way one is used ([CHK-201](semantics/checking.md#bindings)).
   The builtins that take one are the `DEBUG_` stand-ins in `prelude/builtins.sgl`, until textures have methods ([texture-methods.md](incubator/texture-methods.md)).
 * A plain member of a group, as a field of the constant buffer the group owns, for a type whose place in a block every target agrees on.
 * The positional group numbering, and `@inline` last.

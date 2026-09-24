@@ -95,9 +95,10 @@ enum light_kind:
 
 | on | the known attributes |
 |---|---|
-| a function | `@builtin`, `@pure`, `@operator`, `@vertex`, `@pixel`, `@compute` |
+| a function | `@builtin`, `@pure`, `@operator`, `@vertex`, `@pixel`, `@compute`, `@stages` |
 | a struct | `@builtin`, `@vertex`, `@pixel` |
 | a binding | `@inline` |
+| a binding member | `@unfilterable`, `@non_filtering` |
 | a struct field | `@position`, `@thread_id`, `@per_instance`, `@stream` |
 | a pipeline | `@raster`, `@compute`, `@raytracing` |
 
@@ -123,23 +124,32 @@ enum light_kind:
 * **CHK-45** In any other function it is the normal error `binding-not-listed`.
 * **CHK-46** A binding is no value: its bare name in an expression is `unsupported-yet`.
 * **CHK-171** A buffer member is known to the host by its path, `binding.member`, and a group's constant block by the binding's name ([why](why/checking.md#chk-171)).
-* **CHK-177** A texture, an image and a sampler are types of a binding member, as a buffer is, and none is a value: [bindings.md](../bindings.md) is the model.
+* **CHK-193** A texture, an image and a sampler are types of a binding member, as a buffer is, and none is a value: [bindings.md](../bindings.md) is the model.
   Two mentions of one such type are one type, and a member names each of them as its spelling does: `texture2d[float4]`, `out image2d[.rgba8_unorm]`.
-* **CHK-178** A texture's argument is `float`, `int` or `uint`, one to four wide; anything else is `wrong-kind-of-name`, and a texture without its argument is too.
-* **CHK-179** An image's argument is exactly one enum case naming one of sg's storage formats, `.rgba8_unorm`.
+* **CHK-194** A texture's argument is `float`, `int` or `uint`, one to four wide, and a texture without its argument is `wrong-kind-of-name`.
+  Another type as the argument is `wrong-kind-of-name` too, and a name that is no type is `unknown-name` by CHK-24, so `texture2d[rgba8]` is the latter.
+* **CHK-195** An image's argument is exactly one enum case naming one of sg's storage formats, `.rgba8_unorm`.
   It is the one value type argument SGL reads, until value type arguments exist in general.
-* **CHK-180** A form some backend lacks is the normal error `needs-feature`, naming the feature, on every target alike:
+* **CHK-196** A form some backend lacks is the normal error `needs-feature`, naming the feature, on every target alike:
   `texture2d_ms_array`, an image outside the portable storage formats, and a `mut` image outside the three `r32` formats.
-* **CHK-181** `@unfilterable` stands on a texture member of floats, and anywhere else is `wrong-kind-of-name`.
-* **CHK-182** `@non_filtering` stands on a `sampler` member, and anywhere else is `wrong-kind-of-name`.
-* **CHK-183** A `sampler name:` block in a binding is a member whose type is `comparison_sampler` where it sets `compare`, and `sampler` otherwise.
+* **CHK-197** `@unfilterable` stands on a texture member of floats, and on any other binding member is `wrong-kind-of-name`.
+  Elsewhere it is an attribute the pass does not know, by CHK-39.
+* **CHK-198** `@non_filtering` stands on a `sampler` member, and on any other binding member is `wrong-kind-of-name`.
+  Elsewhere it is an attribute the pass does not know, by CHK-39.
+* **CHK-199** A `sampler name:` block in a binding is a member whose type is `comparison_sampler` where it sets `compare`, and `sampler` otherwise.
   Its settings are `sg::sampler`'s fields, each an enum case or a number; an unknown setting or value is `invalid-attribute-arguments`.
-* **CHK-184** A static sampler in an `@inline` binding is `wrong-kind-of-name`, since such a binding holds constants only.
-* **CHK-185** A `@builtin` function alone may take a texture, an image or a sampler; for any other function each is `unsupported-yet`, as it is anywhere a value stands.
-* **CHK-186** A builtin's image parameter names the texel it loads or stores instead of a format, `out image2d[float4]`, and is a pattern:
+  The settings apply in source order, and a later one overrides what an earlier one set, `filter` over `mip_filter` included.
+  An attribute on the block is judged as on any other binding member.
+* **CHK-200** A static sampler in an `@inline` binding is `wrong-kind-of-name`, since such a binding holds constants only.
+* **CHK-201** A `@builtin` function alone may take a texture, an image or a sampler; for any other function each is `unsupported-yet`, as it is anywhere a value stands.
+* **CHK-202** A builtin's image parameter names the texel it loads or stores instead of a format, `out image2d[float4]`, and is a pattern:
   it takes every image of that shape whose format's texel is that type, and which the shader may read where the pattern reads, or write where it writes.
 * **CHK-189** A builtin's bare `texture2d` or `image2d` parameter is a pattern too, which takes every texture, or every image, of that shape, whatever it holds and however it is read.
   It is for what depends on neither, such as a size.
+* **CHK-205** A call that hands a builtin an `@unfilterable` texture member and a sampler member that filters is `type-mismatch`, and its detail names both.
+  A `sampler` member filters unless it is `@non_filtering`, and a static sampler filters unless every filter is `.nearest`.
+* **CHK-206** `max_anisotropy` is an `int` literal from 1 to 16, and anything else is `invalid-attribute-arguments`.
+* **CHK-207** A static sampler whose `max_anisotropy` is above 1 has every filter `.linear` once its settings are applied, or it is `invalid-attribute-arguments`.
 
 ```sgl
 @inline binding constants:
@@ -199,12 +209,14 @@ enum light_kind:
 * **CHK-78** A splat in any other call, a named argument, a call of a local, a method call and type arguments are `unsupported-yet`.
 * **CHK-79** A callee that names a binding is `wrong-kind-of-name`.
 * **CHK-80** `and`, `or` and `not` are no functions: CHK-116.
-* **CHK-174** `x as T` is a call of the `@operator("as")` function whose one parameter is the type of `x` and whose result is `T`.
+* **CHK-190** `x as T` is a call of the `@operator("as")` function whose one parameter is the type of `x` and whose result is `T`.
   The result takes part in the match, since the overloads of `as` differ in it; no such function is `no-matching-overload`.
-* **CHK-175** `x as T` where `x` already has the type `T` is `x`.
-* **CHK-176** The prelude converts between `float`, `int` and `uint` of one width, and nothing else.
-  A float becomes an integer by truncating toward zero and saturating at the integer's bounds, and a NaN becomes 0.
+* **CHK-191** `x as T` where `x` already has the type `T` is `x`.
+* **CHK-192** The prelude converts between `float`, `int` and `uint` of one width, and nothing else ([why](why/checking.md#chk-192)).
+  A float whose truncation the integer holds becomes that integer, truncated toward zero.
+  A float out of the integer's range, and a NaN, become a value the language does not specify, and it may differ between targets.
   Between `int` and `uint` the bits stay.
+  The interpreter's choice of the unspecified value is saturation at the integer's bounds, and 0 for a NaN.
 
 ```sgl
 let n = normalize p.normal
@@ -231,7 +243,7 @@ let color = float4(..lit, 1.0)
 * **CHK-91** A `@pixel fun` returns a `@pixel struct`.
 * **CHK-92** An entry point is neither `@builtin` nor `@operator`.
 * **CHK-173** `@per_instance` and `@stream(name)` are attributes of a struct field, recorded on the member; `@stream` takes one bare name.
-* **CHK-187** `@stages(.pixel)` on a function, builtin or not, names the stages it may be reached from, each an enum case of `.vertex`, `.pixel` and `.compute`.
+* **CHK-203** `@stages(.pixel)` on a function, builtin or not, names the stages it may be reached from, each an enum case of `.vertex`, `.pixel` and `.compute`.
   A function without it may be reached from every stage, and any other argument is `invalid-attribute-arguments`.
 * **CHK-188** An entry point whose inlined body reaches a function whose `@stages` leaves out the entry point's stage is `stage-not-allowed`, at that call.
   It is judged per entry point once everything is inlined, since a function in between says nothing about where it is reached from.
@@ -286,6 +298,8 @@ let color = float4(..lit, 1.0)
   A splatted value that is no local is bound to a temporary local where its first member stands, so it is evaluated once and no earlier than written.
 * **CHK-104** Every name an emitter writes comes from one **mint**, which hands out a desired name when it is free and `name_1`, `name_2`, … otherwise ([why](why/checking.md#chk-104)).
 * **CHK-105** An entry point keeps its name, and every module-level name is taken in the mint before the first local is minted.
+* **CHK-208** An entry point whose flat tree the pass cannot write, though nothing it reaches reported an error, is `unsupported-yet` at its name.
+  A gap of the pass is never a silent loss of the entry point.
 
 ## Control flow
 
@@ -305,7 +319,7 @@ let color = float4(..lit, 1.0)
 * **CHK-119** `break` and `continue` name the innermost loop around them.
 * **CHK-120** `return`, `break` and `continue` are statements; one that stands as the result of a `case` arm leaves as it says, and that arm produces no value (CHK-165).
   One that stands as a value anywhere else is `unsupported-yet`.
-* **CHK-135** `print value` takes a value of any type; a string is `unsupported-yet`.
+* **CHK-204** `print value` takes a value of any type; a string is `unsupported-yet`.
 
 ```sgl
 fun falloff(d: float, steps: int) -> float:
@@ -407,18 +421,18 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 
 | kind | reported by |
 |---|---|
-| `unsupported-yet` | CHK-8 |
+| `unsupported-yet` | CHK-8, CHK-208 |
 | `duplicate-declaration` | CHK-12, CHK-28 |
 | `dependency-cycle` | CHK-18, CHK-136 |
 | `unknown-name` | CHK-24, CHK-62 |
-| `wrong-kind-of-name` | CHK-24, CHK-79 |
+| `wrong-kind-of-name` | CHK-24, CHK-79, CHK-194, CHK-195, CHK-197, CHK-198, CHK-200 |
 | `missing-type` | CHK-26 |
 | `unknown-builtin` | CHK-31 |
 | `expected-body` | CHK-32 |
 | `opaque-struct-needs-builtin` | CHK-34 |
-| `invalid-attribute-arguments` | CHK-36, CHK-39 |
+| `invalid-attribute-arguments` | CHK-36, CHK-39, CHK-199, CHK-203, CHK-206, CHK-207 |
 | `binding-not-listed` | CHK-45, CHK-131 |
-| `type-mismatch` | CHK-52, CHK-56, CHK-77, CHK-84, CHK-112 to CHK-118, CHK-121, CHK-139, CHK-167 |
+| `type-mismatch` | CHK-52, CHK-56, CHK-77, CHK-84, CHK-112 to CHK-118, CHK-121, CHK-139, CHK-167, CHK-205 |
 | `not-assignable` | CHK-112 |
 | `missing-return` | CHK-125 |
 | `unreachable-code` | CHK-126, CHK-162 |
@@ -428,7 +442,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `non-exhaustive-case` | CHK-160 |
 | `duplicate-case-pattern` | CHK-161 |
 | `missing-value-in-arm` | CHK-168 |
-| `needs-feature` | CHK-180 |
+| `needs-feature` | CHK-196 |
 | `stage-not-allowed` | CHK-188 |
 | `ambiguous-overload` | CHK-72 |
 | `missing-field`, `unknown-field`, `duplicate-field` | CHK-84 |

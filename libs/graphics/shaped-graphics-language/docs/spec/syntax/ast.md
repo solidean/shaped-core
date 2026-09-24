@@ -163,7 +163,7 @@ let v = {1 + 2}
 * **AST-129** A `qualified_type` says what a shader does with a resource, and [bindings.md](../bindings.md) is what the words mean.
   The AST checks neither the word against the type nor the type against anything.
 * **AST-130** `mut` or `out` outside a type position is read as it is elsewhere, so `mut` keeps AST-45 and `out` in an expression is a normal error.
-* **AST-131** `sampler` alone in a type position reads as the name `sampler`: the keyword denotes the sampler type there, `smp: sampler`.
+* **AST-135** `sampler` alone in a type position reads as the name `sampler`: the keyword denotes the sampler type there, `smp: sampler`.
 
 ```sgl
 type blend = (vec3, vec3) -> vec3
@@ -668,7 +668,7 @@ pipeline shadow = (shadow_vs, shadow_ps)
 | `struct_type` | yes | yes | no | no | no | no |
 
 * **AST-86** A member that its owner does not allow is a normal error, and it is still read.
-* **AST-132** A `sampler` declaration stands at file scope or in a `binding`, and anywhere else is `declaration-not-allowed-here`; in a binding it is a member, the group's static sampler.
+* **AST-136** A `sampler` declaration stands at file scope or in a `binding`, and anywhere else is `declaration-not-allowed-here`; in a binding it is a member, the group's static sampler.
 * **AST-125** A `struct` line without a block is an **opaque struct**: it has no member that can be named, which a block without members does not say ([why](why/ast.md#ast-125)).
 * **AST-126** The AST accepts an opaque struct wherever a `struct` stands, and a later phase allows it for a small set of `@builtin` types only.
 * **AST-115** A case may carry a value, which is an expression: `red = 1`.

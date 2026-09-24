@@ -52,7 +52,7 @@ decl_id builder::declaration(statement_head const& head, scope_kind scope, bool 
         report(diagnostic_kind::misplaced_module, head.keyword_form);
     else if (keyword == "sampler")
     {
-        // AST-132: a static sampler stands at file scope, or in a binding, whose group layout it then belongs to.
+        // AST-136: a static sampler stands at file scope, or in a binding, whose group layout it then belongs to.
         if (scope != scope_kind::file && scope != scope_kind::binding_body)
             report(diagnostic_kind::declaration_not_allowed_here, head.keyword_form);
     }

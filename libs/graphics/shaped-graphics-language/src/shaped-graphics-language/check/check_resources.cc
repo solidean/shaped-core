@@ -39,7 +39,7 @@ cc::string_view access_prefix(image_access access)
     return "";
 }
 
-cc::string spelling_of(type_info const& t, checked_module const& m)
+cc::string spelling_of(check::type_info const& t, checked_module const& m)
 {
     auto const& shape = info_of(t.shape);
     switch (t.kind)
@@ -51,7 +51,7 @@ cc::string spelling_of(type_info const& t, checked_module const& m)
         return t.element == type_id::none ? cc::string(shape.texture)
                                           : cc::format("{}[{}]", shape.texture, m.name_of(t.element));
     case type_kind::image:
-        // A builtin's pattern names the texel it reads or writes where an image names its format (CHK-186),
+        // A builtin's pattern names the texel it reads or writes where an image names its format (CHK-202),
         // and a bare one takes every image of the shape (CHK-189).
         if (t.format < 0 && t.element == type_id::none)
             return cc::string(shape.image);
@@ -66,7 +66,7 @@ cc::string spelling_of(type_info const& t, checked_module const& m)
 }
 } // namespace
 
-type_id checker::resource_type(type_info info)
+type_id checker::resource_type(check::type_info info)
 {
     info.spelled = spelling_of(info, out);
     // Interned, as a buffer is: two mentions of `texture2d[float4]` are one type.
@@ -156,7 +156,7 @@ type_id checker::resolve_resource_applied(i32 file, ast::expr_id expr, ast::inde
         return resource_type({.kind = type_kind::texture, .element = element, .shape = texture->shape});
     }
 
-    // CHK-179 (temporary): the argument is read as exactly an enum case of sg's formats.
+    // CHK-195 (temporary): the argument is read as exactly an enum case of sg's formats.
     // Values as type arguments in general are in libs/graphics/shaped-graphics-language/docs/TODO.md.
     auto const* const dot = ast_of(file).at(arguments[0].value).node.try_as<ast::leading_dot>();
     auto const format = dot != nullptr ? find_storage_format(text_of(file, dot->name)) : -1;
@@ -203,9 +203,13 @@ type_id checker::qualify_resource(i32 file, ast::expr_id expr, type_id inner, as
                "a texture is only ever read; a storage texture the shader writes is an image, such as `image2d`");
         return checked_module::error_type;
     }
-    report(diagnostic_kind::wrong_kind_of_name, file, where,
-           is_write_only ? "only an image may be `out`, and this is no image"
-                         : "only a resource may be `mut`, and this is a value");
+    if (is_write_only)
+        report(diagnostic_kind::wrong_kind_of_name, file, where, "only an image may be `out`, and this is no image");
+    else if (t.kind == type_kind::sampler)
+        report(diagnostic_kind::wrong_kind_of_name, file, where,
+               "a sampler is never `mut`: only a buffer and an image are written");
+    else
+        report(diagnostic_kind::wrong_kind_of_name, file, where, "only a resource may be `mut`, and this is a value");
     return checked_module::error_type;
 }
 
@@ -225,6 +229,7 @@ sampler_state checker::compile_sampler(i32 file, ast::sampler_decl const& s)
 {
     auto state = sampler_state{};
     auto const& ast = ast_of(file);
+    auto anisotropy_where = source_span{};
     for (auto const& setting : ast.at(s.settings))
     {
         if (setting.name.empty() || !ast::is_valid(setting.value))
@@ -285,8 +290,19 @@ sampler_state checker::compile_sampler(i32 file, ast::sampler_decl const& s)
             state.compare = enum_setting(k_compare_ops);
         else if (key == "max_anisotropy")
         {
-            if (auto const n = number_setting(); n.has_value())
-                state.max_anisotropy = i32(n.value());
+            // CHK-206: a plain int from 1 to 16, the range every backend takes as it is.
+            auto const text = text_of(file, where);
+            auto const n = value.node.is<ast::literal>() && classify_number(text) == number_class::plain_integer
+                             ? parse_plain_integer(text)
+                             : cc::optional<i32>();
+            if (!n.has_value() || n.value() < 1 || n.value() > 16)
+            {
+                report(diagnostic_kind::invalid_attribute_arguments, file, where,
+                       "max_anisotropy takes an int from 1 to 16, and 1 is off");
+                continue;
+            }
+            state.max_anisotropy = n.value();
+            anisotropy_where = where;
         }
         else if (key == "min_lod" || key == "max_lod" || key == "mip_lod_bias")
         {
@@ -300,7 +316,45 @@ sampler_state checker::compile_sampler(i32 file, ast::sampler_decl const& s)
             report(diagnostic_kind::invalid_attribute_arguments, file, setting.name,
                    cc::format("{} is no sampler setting; the settings are sg::sampler's fields", key));
     }
+
+    // CHK-207: judged on the final settings, since a later one overrides an earlier one (CHK-199).
+    auto const is_all_linear = state.min_filter == 1 && state.mag_filter == 1 && state.mip_filter == 1;
+    if (state.max_anisotropy > 1 && !is_all_linear)
+        report(diagnostic_kind::invalid_attribute_arguments, file, anisotropy_where,
+               "max_anisotropy above 1 needs every filter .linear, since WebGPU refuses it otherwise");
     return state;
+}
+
+void checker::judge_filtering(i32 file, source_span call, ast::range_of<ast::argument> arguments)
+{
+    // CHK-205: an @unfilterable texture is sampled through a sampler that never filters.
+    auto texture = cc::string();
+    auto sampler = cc::string();
+    for (auto const& a : ast_of(file).at(arguments))
+    {
+        if (!ast::is_valid(a.value))
+            continue;
+        auto const& where = out.files[file].target_at(a.value);
+        if (where.kind != target_kind::binding_member)
+            continue;
+        auto const& m = out.at(out.bindings[out.at(where.symbol).info].members)[where.index];
+        auto const& t = out.at(m.type);
+        auto const path = cc::format("{}.{}", out.at(where.symbol).name, m.name);
+        if (t.kind == type_kind::texture && m.is_unfilterable)
+            texture = path;
+        if (t.kind != type_kind::sampler || t.is_comparison)
+            continue;
+        auto const* const fixed = m.static_sampler >= 0 ? &out.samplers[m.static_sampler] : nullptr;
+        auto const is_linear_anywhere
+            = fixed != nullptr && (fixed->min_filter == 1 || fixed->mag_filter == 1 || fixed->mip_filter == 1);
+        if (fixed != nullptr ? is_linear_anywhere : !m.is_non_filtering)
+            sampler = path;
+    }
+    if (!texture.empty() && !sampler.empty())
+        report(diagnostic_kind::type_mismatch, file, call,
+               cc::format("{} is @unfilterable, and {} filters: sample it through a @non_filtering sampler, or a "
+                          "static one whose filters are all .nearest",
+                          texture, sampler));
 }
 
 cc::string sgl::check::texel_name_of(i32 format)

@@ -26,7 +26,8 @@ constexpr numeric k_numerics[] = {
     {.name = "uint", .wgsl_scalar = "u32", .wgsl_vector_suffix = "u", .kind = value_kind::scalar_uint},
 };
 
-/// A float to an integer truncates toward zero and saturates, as WGSL defines it; a NaN is 0.
+/// A float to an integer truncates toward zero; out of range, and for a NaN, the value is unspecified (CHK-192).
+/// This is the interpreter's choice of it: saturation at the integer's bounds, and 0 for a NaN.
 /// The 2^31 and 2^32 bounds are exact floats, so a value at or past one saturates rather than overflows.
 i32 saturated_int(f32 x)
 {

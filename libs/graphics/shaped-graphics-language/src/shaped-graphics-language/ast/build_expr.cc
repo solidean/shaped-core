@@ -37,8 +37,16 @@ expr_id builder::type_expression(form_id form)
                 node.attributes = attributes;
             return result;
         }
+        // `mut sampler` is two keywords, so the qualified type is read by AST-135 rather than as an argument.
+        if (parts.keywords.size() == 2 && parts.arguments.empty() && !is_valid(parts.block)
+            && token_text_of(parts.keywords[1]) == "sampler")
+        {
+            auto const access = is_mut ? type_access::read_write : type_access::write_only;
+            auto const inner = make_expr(form, name{.where = at(parts.keywords[1]).where});
+            return make_expr(form, qualified_type{.access = access, .type = inner});
+        }
     }
-    // AST-131: `sampler` is a keyword, and in a type position that keyword denotes the sampler type.
+    // AST-135: `sampler` is a keyword, and in a type position that keyword denotes the sampler type.
     if (is_keyword_led(form, "sampler"))
     {
         auto const parts = keyword_parts_of(form);

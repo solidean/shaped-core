@@ -194,6 +194,9 @@ type_id checker::check_cast(function_scope& scope, ast::expr_id id, ast::cast co
             if (parameters.size() != 1 || parameters[0].type != from || info.result != to)
                 continue;
             set_target(file, id, {.kind = target_kind::overload, .symbol = candidate});
+            // A conversion the program declares is a call like any other, inlined where it stands.
+            if (!is_valid(out.at(candidate).intrinsic))
+                note_program_call(scope, candidate, where);
             return to;
         }
     report(diagnostic_kind::no_matching_overload, file, where,
@@ -580,7 +583,13 @@ type_id checker::check_call(function_scope& scope, ast::expr_id id, ast::call co
     case symbol_kind::structure:
         return construct(scope, id, call.callee, first, check_arguments(scope, call.arguments, true));
     case symbol_kind::function:
-        return resolve_overload(scope, id, call.callee, *found, check_arguments(scope, call.arguments, false), text);
+    {
+        auto const result
+            = resolve_overload(scope, id, call.callee, *found, check_arguments(scope, call.arguments, false), text);
+        if (result != error_type)
+            judge_filtering(file, where, call.arguments);
+        return result;
+    }
     case symbol_kind::binding:
         (void)check_arguments(scope, call.arguments, false);
         set_target(file, call.callee, {.kind = target_kind::symbol, .symbol = first});
@@ -694,22 +703,28 @@ type_id checker::resolve_overload(function_scope& scope,
     if (is_valid(out.at(chosen).intrinsic))
         return out.functions[out.at(chosen).info].result;
 
+    note_program_call(scope, chosen, where);
+    return out.functions[out.at(chosen).info].result;
+}
+
+void checker::note_program_call(function_scope const& scope, symbol_id callee, source_span where)
+{
+    auto const file = scope.file;
     // A call of a function of the program is inlined, so it is an edge recursion is looked for along.
-    calls.push_back({.caller = scope.function, .callee = chosen, .file = file, .where = where});
+    calls.push_back({.caller = scope.function, .callee = callee, .file = file, .where = where});
 
     // Bindings are an effect: what the callee reads, the caller has to list, and so on up to the entry point.
     auto const listed = out.at(out.functions[out.at(scope.function).info].bindings);
-    for (auto const needed : out.at(out.functions[out.at(chosen).info].bindings))
+    for (auto const needed : out.at(out.functions[out.at(callee).info].bindings))
     {
         auto is_listed = false;
         for (auto const l : listed)
             is_listed = is_listed || l == needed;
         if (!is_listed)
             report(diagnostic_kind::binding_not_listed, file, where,
-                   cc::format("{} needs {}, which is not in the binding list of {}", out.at(chosen).name,
+                   cc::format("{} needs {}, which is not in the binding list of {}", out.at(callee).name,
                               out.at(needed).name, out.at(scope.function).name));
     }
-    return out.functions[out.at(chosen).info].result;
 }
 
 type_id checker::check_logical(function_scope& scope, ast::expr_id id, ast::call const& call)
