@@ -97,8 +97,9 @@ struct sgl::described_pipeline_setting
     /// 0 or 1 for a boolean, the value of an integer.
     i64 integer = 0;
     f64 real = 0;
-    /// A case of the enum of the same name in sg.
+    /// A case of `enum_name`, the enum of the same name in sg.
     cc::string enum_case;
+    cc::string enum_name;
 };
 
 /// A `pipeline` declaration: its stages, its layout, and its settings over sg's defaults.
@@ -120,6 +121,11 @@ struct sgl::described_pipeline
     cc::vector<described_pipeline_setting> settings;
     /// The paths the host states at acquire, whose last setting is `.host`, in the order first set so.
     cc::vector<cc::string> open;
+    /// What the host's generated code is built against, one `key = value` line each, in a fixed order:
+    /// the layout, the inline constants, the vertex input and the target set, each as `name@shape`, then the last
+    /// setting of every format and of the sample count.
+    /// A build bakes these, and a hot reload that finds any of them changed keeps what it had.
+    cc::vector<cc::string> frozen;
 };
 
 struct sgl::module_description

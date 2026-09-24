@@ -111,8 +111,45 @@ described_pipeline describe_pipeline(check::checked_module const& m, check::pipe
 
     auto const settings = m.at(p.settings);
     for (auto const& s : settings)
-        result.settings.push_back(
-            {.path = s.path, .kind = s.kind, .integer = s.integer, .real = s.real, .enum_case = s.enum_case});
+        result.settings.push_back({.path = s.path,
+                                   .kind = s.kind,
+                                   .integer = s.integer,
+                                   .real = s.real,
+                                   .enum_case = s.enum_case,
+                                   .enum_name = s.enum_name});
+
+    // The frozen part, which a reload compares line by line: a declaration by its name and its shape.
+    auto const shaped = [&](check::type_id type)
+    { return cc::format("{}@{}", m.name_of(type), check::hex_of(check::structural_hash(m, type))); };
+    auto const bound = [&](check::symbol_id b)
+    {
+        return cc::format("{}@{}", m.at(b).name,
+                          check::hex_of(check::structural_hash(m, m.at(m.bindings[m.at(b).info].members))));
+    };
+    auto layout = cc::string();
+    for (auto const b : m.at(p.layout))
+        layout += cc::format("{}{}", layout.empty() ? "" : ", ", bound(b));
+    result.frozen.push_back(cc::format("layout = {}", layout));
+    result.frozen.push_back(
+        cc::format("inline constants = {}", check::is_valid(p.inline_constants) ? bound(p.inline_constants) : ""));
+    result.frozen.push_back(cc::format("vertex input = {}", shaped(p.vertex_input)));
+    result.frozen.push_back(
+        cc::format("target set = {}", check::is_valid(p.target_set) ? shaped(p.target_set) : cc::string()));
+    for (auto i = isize(0); i < settings.size(); ++i)
+    {
+        auto const& s = settings[i];
+        auto const is_frozen
+            = s.path.ends_with(".format") || s.path == "depth_stencil_format" || s.path == "sample_count";
+        auto is_last = true;
+        for (auto j = i + 1; j < settings.size(); ++j)
+            is_last = is_last && settings[j].path != s.path;
+        if (!is_frozen || !is_last)
+            continue;
+        auto const value = s.kind == check::setting_kind::host      ? cc::string(".host")
+                         : s.kind == check::setting_kind::enum_case ? cc::format(".{}", s.enum_case)
+                                                                    : cc::format("{}", s.integer);
+        result.frozen.push_back(cc::format("{} = {}", s.path, value));
+    }
 
     // Open is where the last word is `.host`: a later setting of that field takes it back.
     for (auto i = isize(0); i < settings.size(); ++i)

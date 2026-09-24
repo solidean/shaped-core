@@ -339,6 +339,7 @@ struct pipeline_compiler
                 {
                     setting.kind = setting_kind::enum_case;
                     setting.enum_case = k.name;
+                    setting.enum_name = c.out.name_of(leaf);
                     into.push_back(cc::move(setting));
                     return true;
                 }

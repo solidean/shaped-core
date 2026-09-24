@@ -139,6 +139,7 @@ void write_pipeline(babel::json::object_writer& o, sgl::described_pipeline const
             case sgl::check::setting_kind::enum_case:
                 so.write("kind", "case");
                 so.write("value", cc::string_view(s.enum_case));
+                so.write("enum", cc::string_view(s.enum_name));
                 break;
             case sgl::check::setting_kind::host:
                 so.write("kind", "host");
@@ -149,9 +150,14 @@ void write_pipeline(babel::json::object_writer& o, sgl::described_pipeline const
             }
         }
     }
-    auto open = o.write_array("open", babel::json::layout::compact);
-    for (auto const& path : p.open)
-        open.write(cc::string_view(path));
+    {
+        auto open = o.write_array("open", babel::json::layout::compact);
+        for (auto const& path : p.open)
+            open.write(cc::string_view(path));
+    }
+    auto frozen = o.write_array("frozen");
+    for (auto const& line : p.frozen)
+        frozen.write(cc::string_view(line));
 }
 
 cc::result<cc::string> to_json(sgl::module_description const& d)

@@ -68,6 +68,7 @@ add_library(shaped-graphics-language
 
     src/shaped-graphics-language/driver/compile_to_text.cc
     src/shaped-graphics-language/driver/describe.cc
+    src/shaped-graphics-language/driver/pipeline_fields.cc
     src/shaped-graphics-language/driver/impl/front_end.cc
     src/shaped-graphics-language/driver/prelude.cc
 )
@@ -203,6 +204,7 @@ target_sources(shaped-graphics-language
 
     src/shaped-graphics-language/driver/compile_to_text.hh
     src/shaped-graphics-language/driver/describe.hh
+    src/shaped-graphics-language/driver/pipeline_fields.hh
     src/shaped-graphics-language/driver/impl/front_end.hh
     src/shaped-graphics-language/driver/prelude.hh
 )

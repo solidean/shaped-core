@@ -107,12 +107,13 @@ A few parts of a pipeline are only known when the program runs, such as the form
 
 ## What the host sees
 
-Everything a pipeline states reaches the host as one generated symbol per pipeline, which acquires it; slib's [cheat sheet](../../../shaped-shader-library/cheat-sheet.md) has its spelling.
+Everything a pipeline states reaches the host as one generated symbol per pipeline, which `ctx.cached` acquires; slib's [cheat sheet](../../../shaped-shader-library/cheat-sheet.md) has its spelling.
 
 * **The frozen part is what the host's own code was built against**: the binding layout, the vertex input, the target set, every format, and the sample count.
+  A struct or binding in it is compared by its name and its shape, the structural hash of its members, so a member added under the same name is a change.
   It never changes under a hot reload.
 * **The rest reloads**: topology, rasterization, the depth and stencil tests, blending, write masks.
-* A reload that changes the frozen part keeps the pipeline as it was, and says what changed.
+* A reload that changes the frozen part keeps the stages and settings it last built with, and says what changed.
 
 ## What the compiler carries today
 

@@ -212,8 +212,9 @@ struct sgl::check::pipeline_setting
     /// 0 or 1 for a `boolean`, the value of an `integer`.
     i64 integer = 0;
     f64 real = 0;
-    /// The case name of an `enum_case`.
+    /// The case name of an `enum_case`, and the enum it is a case of, which is sg's enum of the same name.
     cc::string enum_case;
+    cc::string enum_name;
     setting_source source = setting_source::declaration;
     /// Where it was written, in that file.
     i32 file = 0;
