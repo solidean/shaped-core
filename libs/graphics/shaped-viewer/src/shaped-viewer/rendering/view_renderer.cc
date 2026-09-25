@@ -695,8 +695,19 @@ sr::denoise_status view_renderer::_denoise(sg::command_list& cmd,
     // and a temporal member's history is what makes up the difference.
     // Once the mean has more frames than that, a spatial member on the mean takes over, which keeps the converged image
     // unbiased.
+    // `fresh_samples` says which of the two a call carries, and it lives in the settings so that resolving a method and
+    // running it cannot disagree — so each member takes its own settings value rather than a flag per call.
+    auto const with_fresh_samples = [&settings](bool fresh)
+    {
+        auto copy = settings.denoise;
+        copy.fresh_samples = fresh;
+        return copy;
+    };
+    auto const temporal_settings = with_fresh_samples(true);
+    auto const spatial_settings = with_fresh_samples(false);
+
     auto const may_run_temporally = ds.frame != nullptr && ds.motion != nullptr
-                                 && sr::is_temporal(sr::resolve_denoise_method(cmd.context(), settings.denoise, true));
+                                 && sr::is_temporal(sr::resolve_denoise_method(cmd.context(), temporal_settings));
 
     // 0 while the temporal member owns the frame, 1 once the spatial one does, and the fade in between — so `temporal`
     // and `spatial` below are never both false.
@@ -724,7 +735,7 @@ sr::denoise_status view_renderer::_denoise(sg::command_list& cmd,
         };
         // Its own history, not the spatial member's: each would otherwise throw the other's away on every switch, and
         // the temporal one must survive a still period to be worth anything when the camera moves again.
-        outcome = sr::denoise_routine::execute(cmd, inputs, ds.frame->denoise, settings.denoise, true);
+        outcome = sr::denoise_routine::execute(cmd, inputs, ds.frame->denoise, temporal_settings);
     }
 
     if (spatial)
@@ -740,7 +751,7 @@ sr::denoise_status view_renderer::_denoise(sg::command_list& cmd,
             .output = target,
             .sample_count = u32(cc::max(1, settings.samples_per_pixel)) * accumulator.accum_frame,
         };
-        auto const spatial_outcome = sr::denoise_routine::execute(cmd, inputs, denoised.denoise, settings.denoise, false);
+        auto const spatial_outcome = sr::denoise_routine::execute(cmd, inputs, denoised.denoise, spatial_settings);
 
         // Mid-fade the frame is only as good as its worse half: a spatial member that declined leaves the crossfade
         // slot holding an older image, and mixing that in would be a visible jump backwards.

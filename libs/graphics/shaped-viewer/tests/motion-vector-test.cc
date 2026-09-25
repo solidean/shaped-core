@@ -81,8 +81,9 @@ cc::shared_async<cc::vector<probe_result>> run_probe(sg::context& ctx, cc::span<
         cases.size(), sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
 
     auto const group = ctx.transient.create_binding_group(
-        group_layout, sv_test::shaders::camera_probe_bindings{.Cases = case_buffer.as_readonly_buffer(),
-                                                              .Results = result_buffer.as_readwrite_buffer()});
+        *cmd, group_layout,
+        sv_test::shaders::camera_probe_bindings{.Cases = case_buffer.as_readonly_buffer(),
+                                                .Results = result_buffer.as_readwrite_buffer()});
 
     cmd->compute.bind_pipeline(*built);
     cmd->compute.bind<sv_test::shaders::camera_probe_bindings>(*group);

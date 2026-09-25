@@ -51,6 +51,7 @@ sv::perspective_projection       // { angle_d vertical_fov; f64 aspect_ratio; f6
 sv::camera_gpu::from(cam)        // -> camera_gpu (the GPU basis: forward/right_scaled/up_scaled); aspect comes from projection.aspect_ratio
 sv::render_settings              // { int samples_per_pixel, max_bounces; sr::denoise_settings denoise; } — per-layer integration controls (no light/sky: those are on the view)
                                  //   denoise defaults to method none; NOTHING in it restarts accumulation (see "Denoising" below)
+                                 //   sv owns denoise.fresh_samples and overwrites whatever a caller set: each half of the hand-off runs with its own value
 sv::scene_item                   // { scene_item_kind kind; mesh_id mesh; instance_id instance; hash128 permutation; tg::affine_transform3f transform; } — triangle_mesh only for now
                                  //   mint one with resources.acquire_scene_item(mesh); the three ids have to come from ONE material resolution
                                  //   build the placement with tg's factories (make_rotation(quat), make_translation(vec), make_from_linear_mat(mat3)) and tg::compose
@@ -787,9 +788,6 @@ A layer with no lights falls back to `layer::fallback_light` — `sv::default_fa
   One that cannot run presents the raw mean and logs once.
 - **Only the plan path denoises.** `view_renderer::execute`, the single-view entry point, still returns the raw accumulator.
 
-The `view_renderer` builds `pt_frame_constants_gpu` from the view's first `area_light` plus `render_settings::samples_per_pixel` / `max_bounces`.
-A view with an empty `area_lights` list falls back to an overhead rect facing down, so the scene is lit even without matching emissive geometry.
-That is unlike a Cornell box, whose light rect must match the emitter.
 The view's `background` (RGB SH) is packed to `background_gpu` and bound at b1.
 The flat and path-tracer misses both reconstruct from it the environment radiance an escaped ray sees; the shadow miss carries visibility only.
 
