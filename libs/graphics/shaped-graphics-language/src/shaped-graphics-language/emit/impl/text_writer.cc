@@ -446,8 +446,16 @@ struct writer
                      [&](flat_once const& o) { once(o); },             //
                      [&](flat_break const&) { line("break;"); },       //
                      [&](flat_switch const& sw) { switch_(sw); },
+                     // a core tree holds none, and the plan refuses one that is not core (EMIT-66)
+                     [&](flat_check const&) {},
                      [&](flat_return const& r)
                      {
+                         // A void result was erased by LEGAL-52, and a compute entry point has none either.
+                         if (!is_valid(r.value))
+                         {
+                             line("return;");
+                             return;
+                         }
                          auto const& value = p.e.at(r.value);
                          if (needs_member_assignment(value))
                          {

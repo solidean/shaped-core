@@ -317,6 +317,8 @@ struct checker
     void add_member_tests(i32 file, ast::range_of<ast::decl_id> members, cc::string_view scope_path);
     /// Checks test `index` as a function of no parameter and no binding, and its last-line rule (CHK-226).
     void check_test(i32 index);
+    /// The flat tree of test `index`, when it checked soundly and all it reaches inlines whole (flatten.cc).
+    void flatten_test(i32 index);
     /// The statement that is the last code line of `statements`, through the last branch of an `if`, a loop's body and
     /// the last arm of a `case`; `none` for an empty list.
     [[nodiscard]] ast::stmt_id last_code_line(i32 file, ast::range_of<ast::stmt_id> statements) const;

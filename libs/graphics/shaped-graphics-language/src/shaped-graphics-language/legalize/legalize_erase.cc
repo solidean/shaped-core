@@ -3,8 +3,8 @@
 #include <shaped-graphics-language/legalize/impl/legalizer.hh>
 #include <shaped-graphics-language/legalize/impl/walk.hh>
 
-// Rule V1 (LEGAL-52): void has one value and no representation, so no target holds one.
-// What a void value did is kept as an effect, and the value itself is gone.
+// What no target writes, erased: rule V0 (LEGAL-53), checks and asserts, first, and rule V1 (LEGAL-52), void, last.
+// Void has one value and no representation, so what a void value did is kept as an effect, and the value itself is gone.
 
 using namespace sgl;
 using namespace sgl::check;
@@ -15,6 +15,8 @@ namespace
 struct void_eraser
 {
     flat_builder& out;
+    /// False for rule V0, which drops the checks and changes nothing else.
+    bool erases_void = true;
 
     [[nodiscard]] bool is_void(flat_expr_id id) const
     {
@@ -37,7 +39,7 @@ struct void_eraser
     /// `id` with every read of a void local, and every void field of a value without an effect, as void's value.
     flat_expr_id expr(flat_expr_id id, int depth)
     {
-        if (!is_known(out.e, id) || depth > k_max_depth)
+        if (!is_known(out.e, id) || depth > k_max_depth || !erases_void)
             return id;
         auto copy = out.e.at(id);
         if (copy.type == checked_module::void_type && copy.node.is<flat_local_ref>())
@@ -116,6 +118,33 @@ struct void_eraser
         return out.arm_list(list);
     }
 
+    /// V1 for one statement that declares, assigns, drops or returns a void value; false for any other.
+    bool erase_void_statement(flat_stmt& s, stmt_list& into)
+    {
+        auto value = flat_expr_id::none;
+        if (auto const* const let = s.node.try_as<flat_let>(); let != nullptr && is_void(let->local))
+            value = let->value;
+        else if (auto const* const var = s.node.try_as<flat_var>(); var != nullptr && is_void(var->local))
+            value = var->value;
+        else if (auto const* const assign = s.node.try_as<flat_assign>(); assign != nullptr && is_void(assign->value))
+            value = assign->value;
+        else if (auto const* const eval = s.node.try_as<flat_eval>();
+                 eval != nullptr && is_void(eval->value) && !out.e.at(eval->value).node.is<flat_call>())
+            value = eval->value;
+        else if (auto const* const ret = s.node.try_as<flat_return>(); ret != nullptr && is_void(ret->value))
+        {
+            effect_of(s, ret->value, into);
+            s.node = flat_return{};
+            out.e.stmts.push_back(cc::move(s));
+            into.push_back(flat_stmt_id(out.e.stmts.size() - 1));
+            return true;
+        }
+        else
+            return false;
+        effect_of(s, value, into);
+        return true;
+    }
+
     stmt_list erase(stmt_list const& list, int depth)
     {
         auto result = stmt_list();
@@ -127,35 +156,11 @@ struct void_eraser
                 continue;
             }
             auto copy = out.e.at(id);
-            if (auto const* const let = copy.node.try_as<flat_let>(); let != nullptr && is_void(let->local))
-            {
-                effect_of(copy, let->value, result);
+            // V0: a check and its body are gone, whatever they compute
+            if (copy.node.is<flat_check>())
                 continue;
-            }
-            if (auto const* const var = copy.node.try_as<flat_var>(); var != nullptr && is_void(var->local))
-            {
-                effect_of(copy, var->value, result);
+            if (erases_void && erase_void_statement(copy, result))
                 continue;
-            }
-            if (auto const* const assign = copy.node.try_as<flat_assign>(); assign != nullptr && is_void(assign->value))
-            {
-                effect_of(copy, assign->value, result);
-                continue;
-            }
-            if (auto const* const eval = copy.node.try_as<flat_eval>();
-                eval != nullptr && is_void(eval->value) && !out.e.at(eval->value).node.is<flat_call>())
-            {
-                effect_of(copy, eval->value, result);
-                continue;
-            }
-            if (auto const* const ret = copy.node.try_as<flat_return>(); ret != nullptr && is_void(ret->value))
-            {
-                effect_of(copy, ret->value, result);
-                copy.node = flat_return{};
-                out.e.stmts.push_back(cc::move(copy));
-                result.push_back(flat_stmt_id(out.e.stmts.size() - 1));
-                continue;
-            }
 
             copy.node.visit([&](flat_let& n) { n.value = expr(n.value, 0); }, //
                             [&](flat_var& n) { n.value = expr(n.value, 0); },
@@ -199,7 +204,9 @@ struct void_eraser
                                 n.arms = arms(n.arms, depth);
                                 n.default_body = body(n.default_body, depth);
                             },
-                            [&](flat_return& n) { n.value = expr(n.value, 0); });
+                            [&](flat_return& n) { n.value = expr(n.value, 0); },
+                            // dropped above
+                            [&](flat_check&) {});
             out.e.stmts.push_back(cc::move(copy));
             result.push_back(flat_stmt_id(out.e.stmts.size() - 1));
         }
@@ -207,6 +214,11 @@ struct void_eraser
     }
 };
 } // namespace
+
+stmt_list sgl::check::impl::erase_checks(flat_builder& out, stmt_list const& body)
+{
+    return void_eraser{.out = out, .erases_void = false}.erase(body, 0);
+}
 
 stmt_list sgl::check::impl::erase_void(flat_builder& out, stmt_list const& body)
 {

@@ -231,6 +231,7 @@ struct core_checker
                 current = id;
                 breakable_body({.is_switch = true}, s.default_body, depth + 1);
             },
+            [&](flat_check const&) { violation("a check or an assert, which legalization removes (LEGAL-53)"); },
             [&](flat_return const& s)
             {
                 if (is_void_value(s.value))

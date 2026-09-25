@@ -165,6 +165,13 @@ fun graded(a: float) -> float:
   An evaluator is given the scalars of its arguments and gives the scalars of its result.
   The machine checks the number and the kind of both against the record's parameter and result types, so an ill-typed call is a type error by EVAL-43 and never reaches an evaluator.
 
+## Checks
+
+* **EVAL-75** `check` runs its body, then reads its condition: a false one is recorded with the value of every node that ran, and the run goes on.
+  A node that did not run, the right side of an `and` whose left side was false, is recorded as not evaluated.
+* **EVAL-76** An `assert` is a `check` that stops the run where it is false.
+* **EVAL-77** A run that reaches the end of a function returning `void` ends with `void`'s value, which is how a test and a compute entry point end.
+
 ## Errors of the program
 
 * **EVAL-41** A run that reads a `var` holding nothing, or ends a block expression or the root block without a value, has no behaviour.

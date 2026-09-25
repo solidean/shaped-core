@@ -59,7 +59,7 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/legalize/legalize_cases.cc
     src/shaped-graphics-language/legalize/legalize_exits.cc
     src/shaped-graphics-language/legalize/legalize_exprs.cc
-    src/shaped-graphics-language/legalize/legalize_void.cc
+    src/shaped-graphics-language/legalize/legalize_erase.cc
 
     src/shaped-graphics-language/interpret/interpret.cc
 
@@ -277,6 +277,7 @@ if(SC_BUILD_TESTS)
         tests/check/test-check-test.cc
         tests/check/source-flat-test-support.hh
 
+        tests/interpret/check-run-test.cc
         tests/interpret/interpret-test.cc
 
         tests/legalize/flat-test-support.hh

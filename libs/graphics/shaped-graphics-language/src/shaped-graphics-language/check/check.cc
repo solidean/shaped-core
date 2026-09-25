@@ -231,6 +231,8 @@ void checker::run()
     for (auto i = isize(0); i < out.symbols.size(); ++i)
         if (out.symbols[i].kind == symbol_kind::function && out.symbols[i].state == symbol_state::checked)
             flatten_entry_point(symbol_id(i));
+    for (auto i = isize(0); i < out.tests.size(); ++i)
+        flatten_test(i32(i));
 }
 
 void checker::declare_file(i32 file)

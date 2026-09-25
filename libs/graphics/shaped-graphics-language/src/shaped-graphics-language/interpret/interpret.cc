@@ -65,6 +65,7 @@ struct machine
     checked_module const& m;
     flat_entry_point const& e;
     run_inputs const& inputs;
+    run_limits const& limits;
     i64 fuel = 0;
     outcome out;
 
@@ -525,6 +526,51 @@ struct machine
         return after::propagate;
     }
 
+    /// EVAL-75: the body leaves every node's value in its `var`, and a false condition is recorded with all of them.
+    flow check(flat_check const& k)
+    {
+        if (!limits.run_checks)
+            return {};
+        if (k.site < 0 || k.site >= e.check_sites.size())
+            return type_error("a check whose site the tree does not have");
+        if (auto const f = run_body(k.body); !f.is_normal())
+            return f;
+
+        auto const& site = e.check_sites[k.site];
+        auto const nodes = e.at(site.nodes);
+        if (nodes.empty() || !is_known(e, nodes[0].value) || !is_set[index_of(nodes[0].value)])
+            return type_error("a check whose condition has no value");
+        auto const& condition = locals[index_of(nodes[0].value)];
+        if (condition.leaves.size() != 1 || condition.leaves[0].kind != value_kind::boolean)
+            return type_error("a check whose condition is no bool");
+        ++out.checks_run;
+        if (condition.leaves[0].as_bool())
+            return {};
+
+        if (out.failures.size() < limits.max_failures)
+        {
+            auto failure = check_failure{.site = k.site};
+            for (auto const& node : nodes)
+            {
+                auto const known = is_known(e, node.value) && is_set[index_of(node.value)];
+                failure.values.push_back(known ? locals[index_of(node.value)] : value{.type = e.at(node.value).type});
+                failure.is_evaluated.push_back(known);
+            }
+            if (is_known(e, site.loop_variables))
+                for (auto const id : e.at(site.loop_variables))
+                {
+                    auto v = value();
+                    if (auto const f = eval(id, v); !f.is_normal())
+                        return f;
+                    failure.loop_values.push_back(cc::move(v));
+                }
+            out.failures.push_back(cc::move(failure));
+        }
+        else
+            ++out.failures_dropped;
+        return site.stops ? fail(run_status::assertion_failed, "an assert was false") : flow();
+    }
+
     flow run(flat_stmt_id id)
     {
         if (!is_known(e, id))
@@ -681,11 +727,14 @@ struct machine
         if (auto const* const r = s.node.try_as<flat_return>())
         {
             auto v = value();
-            if (auto const f = eval(r->value, v); !f.is_normal())
-                return f;
+            if (is_valid(r->value))
+                if (auto const f = eval(r->value, v); !f.is_normal())
+                    return f;
             carried = cc::move(v);
             return {.kind = flow_kind::return_};
         }
+        if (auto const* const k = s.node.try_as<flat_check>())
+            return check(*k);
         return type_error("a statement of a kind the machine does not know");
     }
 };
@@ -725,6 +774,8 @@ cc::string_view sgl::check::to_string(run_status s)
         return "type-error";
     case run_status::uninitialized_read:
         return "uninitialized-read";
+    case run_status::assertion_failed:
+        return "assertion-failed";
     }
     return "";
 }
@@ -748,12 +799,13 @@ outcome sgl::check::interpret(checked_module const& m,
                               run_inputs const& inputs,
                               run_limits const& limits)
 {
-    auto run = machine{.m = m, .e = e, .inputs = inputs, .fuel = limits.fuel};
+    auto run = machine{.m = m, .e = e, .inputs = inputs, .limits = limits, .fuel = limits.fuel};
     run.out.buffers = inputs.buffers;
     run.is_stored.resize_to_filled(inputs.buffers.size(), false);
     run.locals.resize_to_defaulted(e.locals.size());
     run.is_set.resize_to_filled(e.locals.size(), false);
-    if (!e.locals.empty())
+    // A test has no parameter, and its first local is one of its own.
+    if (!e.locals.empty() && e.locals[0].kind == local_kind::parameter)
     {
         run.locals[0] = inputs.parameter;
         run.is_set[0] = true;
@@ -768,7 +820,11 @@ outcome sgl::check::interpret(checked_module const& m,
         run.out.result.type = e.result;
     }
     else if (f.is_normal())
-        run.fail(run_status::fell_off_the_end, "the function");
+    {
+        // A test and a compute entry point return void, whose one value a run has however it ends.
+        if (e.result != checked_module::void_type)
+            run.fail(run_status::fell_off_the_end, "the function");
+    }
     else if (f.kind != flow_kind::failed)
         run.type_error("an exit that nothing encloses");
 

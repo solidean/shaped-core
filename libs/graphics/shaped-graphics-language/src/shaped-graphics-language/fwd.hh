@@ -241,6 +241,10 @@ struct flat_continue;
 struct flat_once;
 struct flat_break;
 struct flat_return;
+enum class check_node_kind : u8;
+struct flat_check_node;
+struct flat_check_site;
+struct flat_check;
 struct flat_stmt;
 struct flat_entry_point;
 struct flat_builder;
@@ -254,6 +258,7 @@ struct buffer_contents;
 enum class run_status : u8;
 struct run_inputs;
 struct run_limits;
+struct check_failure;
 struct outcome;
 
 struct legalize_options;
