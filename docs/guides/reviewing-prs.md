@@ -610,6 +610,39 @@ That is a schedule, not ossification.
 So **asking to down-pay debt in code the PR is already touching is a good finding**, and worth making concrete: name the call sites and the replacement.
 Asking to clean up code the PR does not touch is not.
 
+### A surface still being filled in is trimmed once it is complete, not before
+
+**When follow-up PRs will add the readers of an API, fields nothing reads yet are not a finding.**
+Trimming them now is its own kind of speculation: it guesses which fields the later members will want, and the next PR re-adds what the guess dropped.
+The reorganization happens once the whole surface exists and its real shape is visible.
+
+pr-190 is the worked case.
+sr's denoise front carried everything the planned vendor denoisers need: jitter, both projection matrices, exposure, a render-scale preset, split specular radiance.
+Only à-trous and SVGF were live, and neither read any of it.
+The review recommended trimming to what the live members read, and the answer was, verbatim:
+
+```raw
+there are a few other PRs in the pipeline for more denoisers. I would say we keep it this way and trim/reorg once we have the full surface. less speculation
+```
+
+What still applies is the correctness half: a field whose presence *changes the meaning* of another input is worth naming even when it is kept.
+Offer the refusal as an option, not as the price of keeping the field.
+
+### Improving HLSL-only machinery waits for the SGL port
+
+**SGL is where shaders are going, so growing HLSL-specific infrastructure is deferred rather than done.**
+A finding whose fix is "teach the HLSL path what the SGL path already does" is recorded as a TODO beside the port, never prescribed in the PR.
+
+pr-190 is the worked case, twice.
+The branch added four copies of a loop that scans reflection for the inline-constants binding.
+The review recommended teaching slib's HLSL package generator to emit `inline_binding()`, as the SGL generator already does.
+The answer was "defer until we rewrite to sgl (which does everything better)".
+The same review found the HLSL denoisers reported as supported on webgpu and metal, and beside the fix the maintainer asked for a TODO:
+
+```raw
+and record it in TODO that we want to port this to sgl once it becomes sufficiently feature complete. that solves a lot of the compat issues
+```
+
 ### A local helper is either a duplicate or a recorded gap, and it has to say which
 
 Every codec, parser and backend grows a handful of small private helpers — is this character whitespace, read four bytes in a stated byte order, append a string to a byte buffer.
@@ -1004,6 +1037,11 @@ The file has two lines, and the second ends `..., and reading it must never depe
 The truncation landed exactly where the quote stopped supporting the point being made, which is the shape a reader notices.
 
 Paste it, keep its line breaks, and cite the line the paste starts at.
+
+**Take line numbers from a read of that one file.**
+`cat -n` over several files numbers them as one stream, so every file after the first reports an offset rather than a line.
+pr-190's draft cited `svgf_atrous.hlsl:293-299` for a swap at lines 106-111 of a 115-line file.
+The number came from a numbered dump of three shaders in a row.
 
 **And cite where it is actually from.**
 A quote attributed to the wrong source is wrong twice: the sentence is unfindable where the review says it is, and the authority the attribution borrowed was never lent.
