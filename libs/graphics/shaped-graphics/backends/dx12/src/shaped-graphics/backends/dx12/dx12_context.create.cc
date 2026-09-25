@@ -438,6 +438,18 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
     if (SUCCEEDED(device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS5, &options5, sizeof(options5))))
         raytracing_tier = options5.RaytracingTier;
 
+    // A failed query is an older runtime, which requires block-aligned sizes.
+    D3D12_FEATURE_DATA_D3D12_OPTIONS8 options8 = {};
+    auto const unaligned_block_textures
+        = SUCCEEDED(device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS8, &options8, sizeof(options8)))
+       && options8.UnalignedBlockTexturesSupported;
+
+    // Of the storage formats beyond the portable set, bgra8_unorm is the one whose typed UAV D3D12 leaves optional.
+    auto bgra8 = D3D12_FEATURE_DATA_FORMAT_SUPPORT{.Format = DXGI_FORMAT_B8G8R8A8_UNORM};
+    auto const extended_storage_formats
+        = SUCCEEDED(device->CheckFeatureSupport(D3D12_FEATURE_FORMAT_SUPPORT, &bgra8, sizeof(bgra8)))
+       && (bgra8.Support1 & D3D12_FORMAT_SUPPORT1_TYPED_UNORDERED_ACCESS_VIEW) != 0;
+
     auto ctx = std::make_shared<dx12_context>();
     ctx->set_adapter_info(describe_adapter(adapter.Get()));
     // IDXGIAdapter3 is where QueryVideoMemoryInfo lives; an older runtime leaves this null and the query then refuses.
@@ -447,6 +459,8 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
     ctx->_device = cc::move(device);
     ctx->_queue = cc::move(queue);
     ctx->_raytracing_tier = raytracing_tier;
+    ctx->_unaligned_block_textures = unaligned_block_textures;
+    ctx->_extended_storage_formats = extended_storage_formats;
     ctx->_epoch_fence = cc::move(epoch_fence);
     ctx->_submission_fence = cc::move(submission_fence);
 

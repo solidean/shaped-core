@@ -1,4 +1,5 @@
 #include <clean-core/common/utility.hh>
+#include <clean-core/container/map.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/streams/file_stream.hh>
 #include <clean-core/string/format.hh>
@@ -19,6 +20,7 @@ constexpr cc::string_view spec_files[] = {
     "_index.md",
     "keywords.md",
     "notation.md",
+    "pipelines.md",
     "syntax/_index.md",
     "syntax/line-tree.md",
     "syntax/tokens.md",
@@ -182,6 +184,71 @@ TEST("sgl spec - every checked example in the spec parses the way its fence says
 
 namespace
 {
+/// The rule id a line of the spec defines, `CHK-12`, or empty for any other line.
+/// A definition is a bullet that starts with the id in bold; a bold id anywhere else is a mention of it.
+cc::string_view defined_rule_of(cc::string_view line)
+{
+    if (!line.starts_with("* **"))
+        return {};
+    auto const rest = line.subview({.start = 4, .end = line.size()});
+    auto const end = rest.find(cc::string_view("**"), 0);
+    if (end < 0)
+        return {};
+    auto const id = rest.subview({.start = 0, .end = end});
+    auto const dash = id.find('-');
+    if (dash < 1 || dash + 1 == id.size())
+        return {};
+    for (auto i = isize(0); i < id.size(); ++i)
+    {
+        auto const ch = id[i];
+        auto const is_expected = i < dash ? ch >= 'A' && ch <= 'Z' : i == dash || (ch >= '0' && ch <= '9');
+        if (!is_expected)
+            return {};
+    }
+    return id;
+}
+} // namespace
+
+TEST("sgl spec - every rule id is defined exactly once")
+{
+    // Rules live in the files of the syntax and the semantics; a why file and the incubator only mention them.
+    auto first_seen = cc::map<cc::string, cc::string>();
+    auto failures = cc::string();
+    for (auto const file : spec_files)
+    {
+        if (!(file.starts_with("syntax/") || file.starts_with("semantics/")) || file.contains("/why/"))
+            continue;
+        auto const text = read_text(cc::string(SGL_SPEC_DIR) + "/" + file);
+        auto line_number = 0;
+        auto at = isize(0);
+        while (at < text.size())
+        {
+            auto end = text.find('\n', at);
+            if (end < 0)
+                end = text.size();
+            auto line = cc::string_view(text).subview({.start = at, .end = end});
+            if (line.ends_with('\r'))
+                line.remove_suffix(1);
+            at = end + 1;
+            ++line_number;
+
+            auto const id = defined_rule_of(line);
+            if (id.empty())
+                continue;
+            auto const where = cc::format("{}:{}", file, line_number);
+            if (auto const* const earlier = first_seen.get_ptr(id))
+                failures.appendf("{}: {} is defined again, first at {}\n", where, id, *earlier);
+            else
+                first_seen[cc::string(id)] = where;
+        }
+    }
+    CHECK(failures == "");
+    // A reader that recognized no rule at all would pass the check above.
+    CHECK(first_seen.size() > 500);
+}
+
+namespace
+{
 /// The names after `fun` on every line that declares an entry point, which is what `compile_to_text` is asked for.
 /// A scan rather than a parse: a source that does not check still has entry points to ask for, and each must fail cleanly.
 cc::vector<cc::string> entry_points_of(cc::string_view source)
@@ -240,8 +307,8 @@ TEST("sgl spec - every example of the spec and every sample compiles for every t
             require_total(e.source, cc::format("{}:{}", file, e.line), failures);
         }
     }
-    for (auto const sample :
-         {"basic-raster.sgl", "control-flow.sgl", "cube.sgl", "helpers.sgl", "matrices.sgl", "members-and-bindings.sgl"})
+    for (auto const sample : {"basic-raster.sgl", "control-flow.sgl", "cube.sgl", "helpers.sgl", "matrices.sgl",
+                              "members-and-bindings.sgl", "pipeline.sgl"})
     {
         ++sources;
         require_total(read_text(cc::string(SGL_SAMPLES_DIR) + "/" + sample), sample, failures);

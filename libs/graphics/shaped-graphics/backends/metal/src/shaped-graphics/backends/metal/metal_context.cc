@@ -11,9 +11,6 @@
 
 #include <thread>
 
-// Seams the milestone order has not reached; see libs/graphics/shaped-graphics/docs/writing-a-backend.md.
-#define SG_METAL_UNIMPLEMENTED(what) CC_UNREACHABLE(what " is not implemented in the metal backend yet")
-
 namespace sg::backend::metal
 {
 CC_REC_DEFINE_DOMAIN(g_rec_domain, "sg.metal");
@@ -126,9 +123,17 @@ bool metal_context::supports(sg::feature f) const
         // Asked of the device rather than assumed: tier 2 is what lifts read-write past r32, and Metal reports the
         // tier directly instead of leaving it to be inferred from the family.
         return _device != nullptr && _device->readWriteTextureSupport() >= MTL::ReadWriteTextureTier2;
+    case sg::feature::float32_filtering:
+        return _device != nullptr && _device->supports32BitFloatFiltering();
+    case sg::feature::extended_storage_formats:
+        // Apple silicon writes every uncompressed color format from a shader, which is this backend's floor.
+        return true;
     case sg::feature::geometry_shader:
     case sg::feature::tessellation_shader:
         // Metal has never had either stage; a caller asking gets a permanent answer rather than a temporary one.
+        return false;
+    case sg::feature::unaligned_block_compression:
+        // Not yet checked against a Metal device, so the portable answer: sg refuses rather than a driver.
         return false;
     }
     return false;
@@ -914,6 +919,11 @@ cc::result<sg::binding_group_layout_handle> metal_context::try_create_binding_gr
 cc::result<sg::pipeline_layout_handle> metal_context::try_create_pipeline_layout(pipeline_layout_description const& desc,
                                                                                  lifetime_scope scope)
 {
+    // Refused rather than accepted: nothing here places the samplers where a shader could read them.
+    // The gap is libs/graphics/shaped-graphics/docs/TODO.md's, and a group's name-matched static sampler is the working form.
+    if (!desc.static_samplers.empty())
+        return cc::error("pipeline_layout: a pipeline-level static sampler (bound_sampler) is not bound by the metal "
+                         "backend yet; declare it a group's static sampler instead");
     return cc::result<sg::pipeline_layout_handle>(create_metal_pipeline_layout(desc, scope));
 }
 

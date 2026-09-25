@@ -174,6 +174,23 @@ TEST("slib - can_compile reports the registered edges", exclusive("slib-shader-l
     CHECK(lib.supported_formats(slib::shader_language::hlsl).size() == 1);
 }
 
+TEST("slib - can_build answers for an asset before anyone acquires it", exclusive("slib-shader-library"))
+{
+    // What a support query needs: "will acquiring this work", asked without acquiring — so a caller can report
+    // `unsupported` rather than handing back a shader that failed to compile.
+    //
+    // By format rather than by context, because slib's tests have no context to ask.
+    slib::shader_library lib;
+    test_package pkg;
+    lib.add_package(pkg.package(), make_sources());
+
+    CHECK(!pkg.invert->can_build(sg::shader_format::dxil));
+
+    lib.add_compiler(std::make_unique<fake_compiler>(slib::shader_language::hlsl, sg::shader_format::dxil));
+    CHECK(pkg.invert->can_build(sg::shader_format::dxil));
+    CHECK(!pkg.invert->can_build(sg::shader_format::spirv));
+}
+
 TEST("slib - a second compiler for the same edge replaces the first", exclusive("slib-shader-library"))
 {
     slib::shader_library lib;

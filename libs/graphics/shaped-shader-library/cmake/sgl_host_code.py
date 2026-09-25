@@ -18,6 +18,13 @@ from sgl_description import SglEntries, SglFile
 HOST_TYPES: dict[str, tuple[str, int, str | None]] = {
     "float": ("float", 4, "f32"),
     "int": ("cc::i32", 4, "i32"),
+    "uint": ("cc::u32", 4, "u32"),
+    "float2": ("tg::vec2f", 8, "vec2f"),
+    "int2": ("tg::vec2i", 8, "vec2i"),
+    "int4": ("tg::vec4i", 16, "vec4i"),
+    "uint2": ("tg::vec<2, cc::u32>", 8, "vec2u"),
+    "uint3": ("tg::vec<3, cc::u32>", 12, "vec3u"),
+    "uint4": ("tg::vec<4, cc::u32>", 16, "vec4u"),
     "float3": ("tg::vec3f", 12, "vec3f"),
     "vec3": ("tg::vec3f", 12, "vec3f"),
     "pos3": ("tg::pos3f", 12, "vec3f"),
@@ -77,10 +84,12 @@ def includes(entries: SglEntries) -> list[str]:
     # Every type a field names: a constant's own, a buffer's element, and a vertex attribute's.
     types = {m["type"] for _, b in entries.bindings for m in b["members"]}
     types |= {m["type"] for _, v in entries.vertex_inputs for m in v["members"]}
-    if "int" in types:
+    if types & {"int", "uint"}:
         out.append("<clean-core/fwd.hh>")
-    if types & {"float3", "vec3", "float4", "int3"}:
+    if types & {"float2", "float3", "vec3", "float4", "int2", "int3", "int4", "uint2", "uint3", "uint4"}:
         out.append("<typed-geometry/linalg/vec.hh>")
+    if any(m["kind"] == "sampler" for _, b in entries.bindings for m in b["members"]):
+        out.append("<shaped-graphics/binding/sampler.hh>")
     if "pos3" in types:
         out.append("<typed-geometry/linalg/pos.hh>")
     if "mat4" in types:
@@ -100,7 +109,7 @@ def emit_group(package: str, namespace: str, file: SglFile, binding: dict) -> st
     out.append("/// with `bind_group(index, group)` at the index the pipeline has it at.\n")
     out.append("///\n")
     out.append(f"///     auto const layout = ctx.cached.acquire_binding_group_layout<{namespace}::{name}>();\n")
-    out.append(f"///     auto const g = ctx.transient.create_binding_group(layout, {namespace}::{name}{{...}});\n")
+    out.append(f"///     auto const g = ctx.transient.create_binding_group(cmd, layout, {namespace}::{name}{{...}});\n")
     out.append(f"struct {name}\n{{\n")
     # One field per member, in the shader's order.
     # A buffer's field is the view its access takes, of the element the shader reads, so a read-only view of a `mut`
@@ -111,6 +120,17 @@ def emit_group(package: str, namespace: str, file: SglFile, binding: dict) -> st
         if member["kind"] == "constant":
             out.append(f"    {host_type(package, where, member['type'])} {member['name']}; ///< `{member['type']}`, "
                        f"at byte {member['offset']} of the group's constant buffer\n")
+            continue
+        if member["kind"] == "texture":
+            out.append(f"    sg::readonly_texture_view<{view_traits(member)}> {member['name']}; ///< `{member['type']}`\n")
+            continue
+        if member["kind"] == "image":
+            out.append(f"    sg::readwrite_texture_view<{view_traits(member)}> {member['name']}; ///< `{member['type']}`\n")
+            continue
+        if member["kind"] == "sampler":
+            # A static sampler is the layout's, so the group has no field for it.
+            if "static_sampler" not in member:
+                out.append(f"    sg::sampler {member['name']}; ///< `{member['type']}`, which the group binds\n")
             continue
         element = host_type(package, where, member["type"])
         access = "readwrite" if member["mut"] else "readonly"
@@ -127,7 +147,7 @@ def emit_group(package: str, namespace: str, file: SglFile, binding: dict) -> st
     out.append("    /// The group's bindings in slot order, as the compiled shader reflects them.\n")
     out.append("    [[nodiscard]] static cc::span<sg::binding const> declared_bindings();\n")
     out.append("\n")
-    out.append("    /// Empty: an SGL group declares no static sampler yet.\n")
+    out.append("    /// The group's static samplers, the `sampler name:` blocks of the binding, which the layout carries.\n")
     out.append("    [[nodiscard]] static cc::span<sg::named_sampler const> declared_samplers();\n")
     out.append("\n")
     out.append("    /// The slot-keyed views the fields above amount to.\n")
@@ -145,10 +165,69 @@ def has_block(binding: dict) -> bool:
     return binding.get("block_slot", -1) >= 0
 
 
+def view_traits(member: dict) -> str:
+    """The typed view traits of a texture or an image: `sg::tv_2d` for `tex_2d`, `sg::tv_cube` for `cube`."""
+    return "sg::tv_" + member["texture_dimension"].removeprefix("tex_")
+
+
+# sg::sampler's fields in its own declaration order, which a designated initializer has to follow, and their C++ spelling.
+SAMPLER_FIELDS: tuple[tuple[str, str], ...] = (
+    ("min_filter", "sg::sampler_filter::{}"),
+    ("mag_filter", "sg::sampler_filter::{}"),
+    ("mip_filter", "sg::sampler_filter::{}"),
+    ("address_u", "sg::sampler_address_mode::{}"),
+    ("address_v", "sg::sampler_address_mode::{}"),
+    ("address_w", "sg::sampler_address_mode::{}"),
+    ("mip_lod_bias", "{}f"),
+    ("max_anisotropy", "{}u"),
+    ("min_lod", "{}f"),
+    ("max_lod", "{}f"),
+    ("compare", "sg::compare_op::{}"),
+)
+
+
+def sampler_initializer(state: dict) -> str:
+    """One sg::sampler as a designated initializer, every field the description carries."""
+    fields = []
+    for key, pattern in SAMPLER_FIELDS:
+        if key not in state:
+            continue
+        value = state[key]
+        if key == "max_lod" and value >= 3.4e38:
+            fields.append(".max_lod = sg::sampler::lod_max")
+            continue
+        # A JSON number may arrive as an int, and `0f` is no C++ literal.
+        if pattern == "{}f":
+            value = repr(float(value))
+        fields.append(f".{key} = {pattern.format(value)}")
+    return "{" + ", ".join(fields) + "}"
+
+
+def binding_entry(member: dict) -> str:
+    """The sg::binding a resource member is, its fields in sg::binding's declaration order."""
+    head = f'{{.name = "{member["host_name"]}", .index = {member["slot"]}u, .count = 1u, '
+    kind = member["kind"]
+    if kind == "buffer":
+        return head + f".type = sg::binding_type::{'readwrite' if member['mut'] else 'readonly'}_structured_buffer}}"
+    if kind == "texture":
+        return head + (f".type = sg::binding_type::readonly_texture, "
+                       f".texture_dimension = sg::texture_view_dimension::{member['texture_dimension']}, "
+                       f".sample_type = sg::texture_sample_type::{member['sample_type']}}}")
+    if kind == "image":
+        return head + (f".type = sg::binding_type::readwrite_texture, "
+                       f".texture_dimension = sg::texture_view_dimension::{member['texture_dimension']}, "
+                       f".storage_format = sg::pixel_format::{member['storage_format']}, "
+                       f".storage_access = sg::storage_access::{member['storage_access']}}}")
+    return head + f".type = sg::binding_type::sampler, .sampler_type = sg::sampler_binding_type::{member['sampler_type']}}}"
+
+
 def emit_group_impl(package: str, namespace: str, file: SglFile, binding: dict) -> str:
     name = binding["name"]
     qualified = f"{namespace}::{name}"
-    buffers = [m for m in binding["members"] if m["kind"] == "buffer"]
+    resources = [m for m in binding["members"] if m["kind"] != "constant"]
+    views = [m for m in resources if m["kind"] in ("buffer", "texture", "image")]
+    statics = [m for m in resources if m["kind"] == "sampler" and "static_sampler" in m]
+    dynamic = [m for m in resources if m["kind"] == "sampler" and "static_sampler" not in m]
     out = [f"\n// `binding {name}` of {file.path}: the table the shader's resources were numbered from.\n"]
     out.append(f"namespace\n{{\nsg::binding const k_sgl_bindings_{name}[] = {{\n")
     if has_block(binding):
@@ -156,23 +235,32 @@ def emit_group_impl(package: str, namespace: str, file: SglFile, binding: dict) 
         size = (binding["block_size"] + 15) // 16 * 16
         out.append(f'    {{.name = "{binding["block_host_name"]}", .index = {binding["block_slot"]}u, .count = 1u, '
                    f".type = sg::binding_type::uniform_buffer, .block_size = {size}}},\n")
-    for member in buffers:
-        kind = "readwrite_structured_buffer" if member["mut"] else "readonly_structured_buffer"
-        out.append(f'    {{.name = "{member["host_name"]}", .index = {member["slot"]}u, .count = 1u, '
-                   f".type = sg::binding_type::{kind}}},\n")
-    out.append("};\n} // namespace\n")
+    for member in resources:
+        out.append(f"    {binding_entry(member)},\n")
+    out.append("};\n")
+    if statics:
+        # A static sampler matches its sampler binding by name, which is the host name the shader's binding is renamed to.
+        out.append(f"sg::named_sampler const k_sgl_samplers_{name}[] = {{\n")
+        for member in statics:
+            out.append(f'    {{.name = "{member["host_name"]}", .sampler = {sampler_initializer(member["static_sampler"])}}},\n')
+        out.append("};\n")
+    out.append("} // namespace\n")
 
     out.append(f"\ncc::span<sg::binding const> {qualified}::declared_bindings()\n{{\n")
     out.append(f"    return k_sgl_bindings_{name};\n}}\n")
-    out.append(f"\ncc::span<sg::named_sampler const> {qualified}::declared_samplers()\n{{\n    return {{}};\n}}\n")
+    out.append(f"\ncc::span<sg::named_sampler const> {qualified}::declared_samplers()\n{{\n")
+    out.append(f"    return k_sgl_samplers_{name};\n}}\n" if statics else "    return {};\n}\n")
 
     out.append(f"\nvoid {qualified}::gather(cc::vector<sg::slotted_view>& views,\n")
     out.append(" " * (len("void ") + len(qualified) + len("::gather(")))
     out.append("cc::vector<sg::named_sampler>& samplers) const\n{\n")
-    out.append("    (void)samplers;\n")
-    out.append(f"    views.reserve({len(buffers)});\n")
-    for member in buffers:
+    if not dynamic:
+        out.append("    (void)samplers;\n")
+    out.append(f"    views.reserve({len(views)});\n")
+    for member in views:
         out.append(f"    views.push_back({{.slot = sg::binding_slot({member['slot']}), .view = {member['name']}}});\n")
+    for member in dynamic:
+        out.append(f'    samplers.push_back({{.name = "{member["host_name"]}", .sampler = {member["name"]}}});\n')
     out.append("}\n")
 
     if has_block(binding):
@@ -492,6 +580,171 @@ def emit_render_target_impl(namespace: str, struct: dict) -> str:
     return "".join(out)
 
 
+# ---- a pipeline -------------------------------------------------------------------------------------------------------
+
+
+def pipeline_type(stem: str, name: str) -> str:
+    return f"{stem}_{name}_t"
+
+
+def open_fields(pipeline: dict) -> list[tuple[str, str, str]]:
+    """The open struct's fields: (C++ type and default, field name, the path it states), in the order first left open."""
+    out = []
+    for path in pipeline["open"]:
+        if path == "sample_count":
+            out.append(("int", "sample_count", path))
+        elif path == "depth_stencil_format":
+            out.append(("sg::pixel_format", "depth_stencil_format", path))
+        else:
+            # color_targets.<target>.format: the field is the target's own name.
+            out.append(("sg::pixel_format", path.split(".")[1], path))
+    return out
+
+
+def pipeline_includes(entries: SglEntries) -> list[str]:
+    if not entries.pipelines:
+        return []
+    return ["<shaped-shader-library/pipeline.hh>", "<shaped-graphics/fwd.hh>", "<clean-core/thread/async.hh>"]
+
+
+def emit_pipelines(entries: SglEntries, stems: dict[str, str]) -> str:
+    """One type per `pipeline` declaration: an `sg::raster_pipeline_source`, so `ctx.cached` acquires it."""
+    out = []
+    for file, p in entries.pipelines:
+        stem = stems[file.path]
+        type_name = pipeline_type(stem, p["name"])
+        fields = open_fields(p)
+        stages = p["vertex"] + (f" and {p['pixel']}" if p["pixel"] else "")
+        writes = f", writing `{p['target_set']}`" if p["target_set"] else ", writing depth alone"
+        out.append(f"/// `pipeline {p['name']}` of {file.path}: {stages}{writes}. Generated; do not edit.\n")
+        out.append(f"/// Acquired as `ctx.cached.acquire_raster_pipeline({stem}.{p['name']}, …)`.\n")
+        # Outside the pipeline's type: a nested struct with member initializers cannot be a default argument within it.
+        out.append(f"/// What `pipeline {p['name']}` leaves to the host with `.host`, stated when it is acquired; every field must be.\n")
+        out.append(f"struct {type_name}_open\n{{\n")
+        for cpp, name, path in fields:
+            default = "0" if cpp == "int" else "sg::pixel_format::undefined"
+            out.append(f"    {cpp} {name} = {default}; ///< `{path}`\n")
+        out.append("};\n")
+        out.append(f"struct {type_name}\n{{\n")
+        out.append(f"    using open = {type_name}_open;\n\n")
+        out.append("    /// The description the build states, with `parts` stated and `customize` applied last.\n")
+        out.append("    [[nodiscard]] cc::shared_async<sg::raster_pipeline_description> description("
+                   "sg::context& ctx, open const& parts = {}, sg::raster_pipeline_customize customize = {}) const;\n")
+        out.append("    /// The source's newest stages and settings, even where they moved what this code was built against.\n")
+        out.append("    [[nodiscard]] cc::shared_async<sg::raster_pipeline_description> description_latest("
+                   "sg::context& ctx, open const& parts = {}, sg::raster_pipeline_customize customize = {}) const;\n")
+        out.append("    /// What slib describes it from: the stages, the layout, the settings as code, and the frozen part.\n")
+        out.append("    [[nodiscard]] static slib::pipeline_definition const& definition();\n")
+        out.append("};\n\n")
+    return "".join(out)
+
+
+def setter_call(s: dict, targets: list[str]) -> str:
+    """One setting as a call of its generated setter in `slib::impl::fields`."""
+    path = s["path"].split(".")
+    target = ""
+    if path[0] == "color_targets":
+        target = f", {targets.index(path[1])}"
+        path = ["color_targets"] + path[2:]
+    name = "_".join(path)
+    kind = s["kind"]
+    if kind == "none":
+        return f"f::{name}_none(d{target});"
+    if kind == "bool":
+        value = "true" if s["value"] else "false"
+    elif kind == "int":
+        value = str(s["value"])
+    elif kind == "float":
+        value = f"float({float(s['value'])!r})"
+    else:
+        value = f"sg::{s['enum']}::{s['value']}"
+    return f"f::{name}(d{target}, {value});"
+
+
+def open_call(path: str, index: int, targets: list[str]) -> str:
+    """The host's value for one open part, as a call of its setter."""
+    if path == "sample_count":
+        return f"f::sample_count(d, int(open[{index}].value));"
+    if path == "depth_stencil_format":
+        return f"f::depth_stencil_format(d, sg::pixel_format(open[{index}].value));"
+    target = targets.index(path.split(".")[1])
+    return f"f::color_targets_format(d, {target}, sg::pixel_format(open[{index}].value));"
+
+
+def emit_pipelines_impl(package: str, namespace: str, entries: SglEntries, stems: dict[str, str],
+                        wrappers: dict[tuple[str, str], str]) -> str:
+    out = []
+    generated = {b["name"] for _, b in entries.bindings}
+    vertex_inputs = {v["name"] for _, v in entries.vertex_inputs}
+    for file, p in entries.pipelines:
+        stem = stems[file.path]
+        type_name = pipeline_type(stem, p["name"])
+        qualified = f"{namespace}::{type_name}"
+        key = f"{stem}_{p['name']}"
+        groups = p["layout"] + ([p["inline"]] if p["inline"] else [])
+        missing = [g for g in groups if g not in generated]
+        if p["vertex_input"] not in vertex_inputs:
+            missing.append(p["vertex_input"])
+        if missing:
+            raise HostCodeError(
+                f"shader package '{package}': `pipeline {p['name']}` of '{file.path}' is built from generated types, and "
+                f"{', '.join(missing)} has none; declare the file as '{file.path}:*'")
+
+        def handle(entry: str) -> str:
+            return f"&{namespace}::{stem}.{entry}" + (".asset" if (file.path, entry) in wrappers else "")
+
+        out.append("\nnamespace\n{\n")
+        if p["targets"]:
+            names = ", ".join(f'"{t}"' for t in p["targets"])
+            out.append(f"constexpr cc::string_view k_{key}_targets[] = {{{names}}};\n")
+        frozen = ",\n".join(f'    "{line}"' for line in p["frozen"])
+        out.append(f"constexpr cc::string_view k_{key}_frozen[] = {{\n{frozen},\n}};\n")
+        group_types = ", ".join(f"{namespace}::{g}" for g in groups)
+        out.append(f"sg::pipeline_layout_handle {key}_layout(sg::context& ctx)\n{{\n")
+        out.append(f"    return ctx.cached.acquire_pipeline_layout<{group_types}>();\n}}\n")
+
+        # The build's settings as code, in the order they apply, and then what the host stated.
+        out.append(f"void {key}_apply(sg::raster_pipeline_description& d, cc::span<slib::open_part const> open)\n{{\n")
+        out.append("    namespace f = slib::impl::fields;\n")
+        if not p["open"]:
+            out.append("    (void)open;\n")
+        for s in p["settings"]:
+            if s["kind"] != "host":
+                out.append(f"    {setter_call(s, p['targets'])}\n")
+        for index, path in enumerate(p["open"]):
+            out.append(f"    {open_call(path, index, p['targets'])}\n")
+        out.append("}\n")
+        out.append("} // namespace\n")
+
+        out.append(f"\nslib::pipeline_definition const& {qualified}::definition()\n{{\n")
+        out.append("    static slib::pipeline_definition const d = {\n")
+        out.append(f'        .file = "{file.path}",\n')
+        out.append(f'        .name = "{p["name"]}",\n')
+        out.append(f"        .vertex = {handle(p['vertex'])},\n")
+        if p["pixel"]:
+            out.append(f"        .pixel = {handle(p['pixel'])},\n")
+        out.append(f"        .acquire_layout = &{key}_layout,\n")
+        out.append(f"        .vertex_input = &{namespace}::{p['vertex_input']}::layout,\n")
+        if p["target_set"]:
+            out.append(f"        .target_set = {namespace}::{p['target_set']}::name,\n")
+        if p["targets"]:
+            out.append(f"        .targets = k_{key}_targets,\n")
+        out.append(f"        .apply = &{key}_apply,\n")
+        out.append(f"        .frozen = k_{key}_frozen,\n")
+        out.append("    };\n    return d;\n}\n")
+
+        fields = open_fields(p)
+        stated = "{" + ", ".join(f'{{.path = "{path}", .value = cc::i64(parts.{name})}}' for _, name, path in fields) + "}"
+        for verb, latest in (("description", "false"), ("description_latest", "true")):
+            out.append(f"\ncc::shared_async<sg::raster_pipeline_description> {qualified}::{verb}("
+                       "sg::context& ctx, open const& parts, sg::raster_pipeline_customize customize) const\n{\n")
+            if not fields:
+                out.append("    (void)parts;\n")
+            out.append(f"    return slib::describe_raster_pipeline(&ctx, &definition(), cc::vector<slib::open_part>{stated}, "
+                       f"cc::move(customize), {latest});\n}}\n")
+    return "".join(out)
+
+
 # ---- the reflection check ----------------------------------------------------------------------------------------------
 
 
@@ -516,7 +769,7 @@ def emit_check_reflection(namespace: str, entries: SglEntries, stems: dict[str, 
         groups = [b for b in listed if b not in inline]
         inline_block = next((b for b in listed if b in inline), None)
         out.append("    {\n")
-        out.append(f"        auto const& compiled = co_await {stems[path]}.{described['stage']}.{name}->acquire(ctx);\n")
+        out.append(f"        auto const& compiled = co_await {stems[path]}.{name}->acquire(ctx);\n")
         if groups:
             out.append("        slib::listed_group const listed[] = {\n")
             for position, group in enumerate(groups):

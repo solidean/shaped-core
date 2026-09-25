@@ -56,7 +56,7 @@ public:
     static constexpr UINT space_of_slot = ~UINT(0);
 
     // Descriptor ranges, in this group's table space, plus static sampler descs — assembled into the root signature by dx12_pipeline_layout.
-    // A range may carry `space_of_slot`, so the pipeline layout copies them rather than pointing at these.
+    // A range or a static sampler may carry `space_of_slot`, so the pipeline layout copies them rather than pointing at these.
     cc::vector<D3D12_DESCRIPTOR_RANGE> view_ranges;
     cc::vector<D3D12_DESCRIPTOR_RANGE> sampler_ranges;
     cc::vector<D3D12_STATIC_SAMPLER_DESC> static_sampler_descs;

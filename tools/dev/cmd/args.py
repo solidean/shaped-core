@@ -10,6 +10,7 @@ import argparse
 
 from tools import dev
 from tools.dev.lib.toolchain import jsruntime as jsr
+from tools.dev.lib.toolchain import toolset
 
 
 def preset(p: argparse.ArgumentParser) -> None:
@@ -37,6 +38,12 @@ def build_overrides(p: argparse.ArgumentParser) -> None:
         "--build-dir", metavar="PATH", default=None,
         help="Use this build directory instead of build/<preset> (relative to the repo root, "
              "or absolute). For a fully custom layout; single preset only.",
+    )
+    p.add_argument(
+        "--example-backend", choices=toolset.EXAMPLE_BACKENDS, default=None,
+        help="Graphics backend the *-example binaries build against (SC_EXAMPLE_BACKEND). "
+             "'auto' takes each example's own first choice, so this is how the other arms are "
+             "reached. Auto-redirects the build dir, like --toolset.",
     )
 
 

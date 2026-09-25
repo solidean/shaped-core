@@ -147,19 +147,25 @@ struct machine
         auto is_typed = args.size() == record->parameters.size();
         for (auto k = isize(0); is_typed && k < args.size(); ++k)
         {
-            auto const& parameter = m.builtins->at(record->parameters[k]);
-            is_typed = args[k].leaves.size() == parameter.leaf_count;
+            // A resource parameter names no builtin type, and a resource is a value of no scalars.
+            auto const type = m.builtins->find_type(record->parameters[k]);
+            auto const leaf_count = is_valid(type) ? m.builtins->at(type).leaf_count : 0;
+            is_typed = args[k].leaves.size() == leaf_count;
             for (auto const& leaf : args[k].leaves)
-                is_typed = is_typed && leaf.kind == parameter.leaf_kind;
+                is_typed = is_typed && leaf.kind == m.builtins->at(type).leaf_kind;
             in.push_back_range(args[k].leaves);
         }
         if (is_typed)
             record->evaluate(in, result.leaves);
 
-        auto const& returned = m.builtins->at(record->result);
-        auto is_result_typed = result.leaves.size() == returned.leaf_count;
-        for (auto const& leaf : result.leaves)
-            is_result_typed = is_result_typed && leaf.kind == returned.leaf_kind;
+        auto is_result_typed = is_valid(record->result) || result.leaves.empty();
+        if (is_valid(record->result))
+        {
+            auto const& returned = m.builtins->at(record->result);
+            is_result_typed = result.leaves.size() == returned.leaf_count;
+            for (auto const& leaf : result.leaves)
+                is_result_typed = is_result_typed && leaf.kind == returned.leaf_kind;
+        }
         if (!is_typed || !is_result_typed || result.leaves.size() != leaf_count_of(m, x.type))
             return type_error(cc::format("a call of '{}' with arguments or a result of the wrong type", record->name));
         // The one way to see WHEN a call with an effect ran: its value joins the trace where the call happened.
@@ -782,6 +788,8 @@ cc::string sgl::check::dump(outcome const& o)
                 out.appendf(" {}", leaf.as_float());
             else if (leaf.kind == value_kind::scalar_int)
                 out.appendf(" {}", leaf.as_int());
+            else if (leaf.kind == value_kind::scalar_uint)
+                out.appendf(" {}u", leaf.as_uint());
             else
                 out.appendf(" {}", leaf.as_bool() ? "true" : "false");
         }

@@ -1,5 +1,6 @@
 #include "shader_fixtures.hh"
 
+#include <shaped-graphics/context/context.hh>
 #include <shaped-shader-library/compiler/sgl_compiler.hh>
 #include <shaped-shader-library/compiler/wgsl_compiler.hh>
 #include <shaped-shader-library/shader_library.hh>
@@ -58,4 +59,18 @@ slib::shader_library& sg_test::shader_fixtures()
     // The inner static is only ever reached through this one, so the guard here is what makes the fill run once.
     static slib::shader_library& lib = create_library();
     return lib;
+}
+
+bool sg_test::shaders_reach(sg::context const& ctx)
+{
+    auto& lib = shader_fixtures();
+
+    // Both fixture languages, because which packages this build has is a build property: the HLSL one is absent
+    // without DXC, and `supported_formats` then simply answers with nothing.
+    for (auto const language : {slib::shader_language::sgl, slib::shader_language::hlsl})
+        for (auto const format : lib.supported_formats(language))
+            if (ctx.accepts_shader_format(format))
+                return true;
+
+    return false;
 }

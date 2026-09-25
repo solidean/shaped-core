@@ -35,8 +35,13 @@ sgl::text_request                          // source, source_name ("<sgl>"), ent
 auto const d = sgl::describe({.source = text, .source_name = "cube.sgl"});
                                            // -> cc::result<module_description, cc::string>: what the host side is generated from
 d.value().bindings                         // name, is_inline, members (constant: offset + size; buffer: slot + host_name `work.values`), block_size
+                                           // texture / image / sampler members also carry the sg enum values of their binding:
+                                           // texture_dimension, sample_type, storage_format + storage_access, sampler_type, static_sampler
 d.value().structs                          // the @vertex / @pixel structs: name, edge, members with their location
 d.value().entry_points                     // name, stage, workgroup, bindings (the list as written)
+d.value().pipelines                        // name, stages, layout, vertex_input, target_set, targets, settings, open (the `.host` paths)
+                                           // bindings and structs carry `shape`: check::structural_hash of their members,
+                                           // 32 hex digits; the type's own name is not in it. What a hot reload compares.
                                            // types are SGL spellings (`float3`, `mat4`); mapping them to a host is the reader's job
                                            // only the file's own declarations, and only what the emitter would build
 
@@ -204,6 +209,9 @@ m.types  m.members                         // canonical types; types[0] is the e
                                            // `-> T` returns; fields and binding members
 m.functions  m.parameters  m.binding_lists // signatures; symbol::info is the position in functions / bindings
 m.bindings                                 // binding_info { symbol, is_inline, members }
+m.samplers                                 // sampler_state per `sampler name:` block of a binding; member_info::static_sampler indexes it
+                                           // resource types (texture / image / sampler) are interned like buffers; name_of spells them
+                                           // `out image2d[.rgba8_unorm]`; check/resources.hh holds the shapes and the storage formats
 m.files[f].type_at(expr_id)                // side table: type_id, none for what nothing checked
 m.files[f].target_at(expr_id)              // side table: { kind, symbol, index } — local / parameter / symbol / overload /
                                            // constructor / field / binding_member
@@ -396,7 +404,11 @@ sgl::print_source(file)      // == file.source for EVERY input: the lossless inv
 - **A block is a scope.** A local ends with its block, and two blocks beside each other may reuse a name.
 - **A later local shadows an earlier one**, in the same block or an enclosing one, parameters included, as in Rust (CHK-53).
   Its value still sees the one it hides; each is a local of its own, minted `x`, `x_1`, … in the text.
-  Shadowing a module-level name is `unsupported-yet`.
+- **A local or a parameter may shadow a module-level or prelude name** (CHK-54), and behind it the name is the local everywhere.
+  So `let length = length v` is fine, and `length w` after it is a call of a local; a type position holding it is `wrong-kind-of-name`.
+- **The program's file may shadow a prelude name** (CHK-188): its `struct vec3` is no duplicate, and its `fun dot` joins the prelude's overloads.
+  Where both have a function a call matches, the program's wins (CHK-192), so a prelude release adding its signature breaks nothing.
+  Only two non-functions of one name in one file are `duplicate-declaration`.
 - **`and`, `or` and `not` are no functions**, and a comparison chain evaluates each inner operand once: it is bound where it first stands.
 - **Still `unsupported-yet`:** generics, `self` and methods, `mut` parameters, lambdas and function values, nested functions, `const`, `use`,
   a `for` over anything but `a ..< b`, a `let` without a value, an expression statement that is no call, `assert`.

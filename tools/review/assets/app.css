@@ -175,27 +175,6 @@ button:hover { border-color: var(--accent); }
 .sev-design { color: var(--warn); border-color: var(--warn); }
 .sev-lgtm { color: var(--good); border-color: var(--good); }
 
-/* ---- context tiers ------------------------------------------------------- */
-
-.tier { margin: 0 0 1.1rem; border-left: 3px solid var(--line); padding: 0.1rem 0 0.1rem 0.85rem; }
-.tier summary { cursor: pointer; color: var(--text-dim); font-size: 0.82rem; }
-.tier-body { margin-top: 0.4rem; color: var(--text-dim); }
-.tier-delta { border-left-color: var(--accent); }
-.tier-label { color: var(--accent); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; }
-/* Where a round's new material starts. Same shape as the round divider, in the accent colour, because it is the same question:
-   what have I not read yet. */
-.tier-delta-rule {
-  display: flex;
-  align-items: center;
-  gap: 0.7rem;
-  margin: 1.8rem 0 0.9rem;
-  color: var(--accent);
-  font-size: 0.75rem;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-.tier-delta-rule::before, .tier-delta-rule::after { content: ""; flex: 1; height: 2px; background: var(--accent); opacity: 0.45; }
-
 /* What the entry is about and what is on the table: the first thing read in a round, so it is drawn as a lead
    rather than as another paragraph. */
 .intro {
@@ -761,7 +740,7 @@ body.file-page pre { margin: 0; padding: 12px 0; overflow-x: auto; }
   margin-right: 0.5rem;
 }
 
-/* The nav's own round divider, matching `.tier-delta-rule` inside an entry because it answers the same question.
+/* The nav's own round divider, matching `.round-divider` inside an entry because it answers the same question.
    Sticky, so scrolling away from the new material still says where it starts — the list is long and the rule is
    the only thing that says which part of it the reader has not seen. */
 .nav-round-rule {

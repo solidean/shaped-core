@@ -63,10 +63,12 @@ webgpu_context::~webgpu_context()
     shutdown();
 }
 
-void webgpu_context::set_limits(isize uniform_offset_alignment, bool timestamps, bool readwrite_storage_formats)
+void webgpu_context::set_limits(isize uniform_offset_alignment, granted_features const& features)
 {
     _uniform_offset_alignment = uniform_offset_alignment;
-    _readwrite_storage_formats = readwrite_storage_formats;
+    _readwrite_storage_formats = features.readwrite_storage_formats;
+    _float32_filtering = features.float32_filtering;
+    _extended_storage_formats = features.extended_storage_formats;
     _limits.max_sample_count = 4;
 
     _upload_ring.initialize(*this, _config.upload_ring_bytes);
@@ -74,7 +76,7 @@ void webgpu_context::set_limits(isize uniform_offset_alignment, bool timestamps,
     _constant_pages.initialize(*this, _config.constant_page_bytes, _uniform_offset_alignment);
     _samplers.initialize(device());
     _streams.initialize(*this, _config.stream_window_bytes);
-    _queries.initialize(*this, timestamps);
+    _queries.initialize(*this, features.timestamps);
 }
 
 void webgpu_context::shutdown()

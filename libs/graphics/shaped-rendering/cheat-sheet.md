@@ -338,20 +338,20 @@ One front over several members; the design is [docs/denoising.md](docs/denoising
 
 auto history = sr::denoise_history();                  // caller-owned, MOVE-ONLY, one per image stream
 auto const out = sr::denoise_routine::execute(cmd,     // -> sr::denoise_outcome
-    {.color = noisy,                                   // linear HDR, input extent
+    {.color = noisy,                                   // linear HDR, input extent; its ALPHA rides through to output
      .guides = {.albedo = a, .normal = n, .depth = d}, // all optional for atrous; empty texture = not there
      .output = denoised,                               // readwrite_texture usage, never the same texture as color
      .sample_count = spp * accumulated_frames},        // spatial members back off as it grows; 0 means 1
     history,
-    {.method = sr::denoise_method::automatic},         // sr::denoise_settings: flat knobs, each says who reads it
-    /*temporal=*/false);                               // true only when feeding fresh per-frame samples
+    {.method = sr::denoise_method::automatic,          // sr::denoise_settings: flat knobs, each says who reads it
+     .fresh_samples = false});                         // true only when feeding this frame's own samples + motion
 out.status                                             // denoised | pending | unsupported | failed — output untouched unless denoised
 out.method / out.restarted                             // the member that ran; whether it started from no history
 history.reset()                                        // a camera cut: the next call restarts
 
 sr::query_denoise_support(ctx)                         // -> sr::denoise_support {atrous, svgf, oidn, dlss_rr, fsr_rr}
-sr::resolve_denoise_method(ctx, settings, temporal)    // -> the member `automatic` (or a named method) means here
-sr::denoise_input_extent(ctx, settings, out_extent, temporal)  // -> tg::vec2i to trace; ALWAYS ask, never scale by hand
+sr::resolve_denoise_method(ctx, settings)              // -> the member `automatic` (or a named method) means here
+sr::denoise_input_extent(ctx, settings, out_extent)    // -> tg::vec2i to trace; ALWAYS ask, never scale by hand
 sr::required_guides(m) / sr::optional_guides(m)        // -> sr::denoise_guide_set (cc::flags<sr::denoise_guide>)
 
 sr::atrous_denoise_routine::execute(cmd, inputs, history, {.iterations = 5, .luminance_sigma = 2.0f})  // the member, directly
@@ -365,6 +365,13 @@ sr::mix_routine::execute(cmd, dst, src, w)             // -> bool; dst = lerp(ds
   One per view or layer, dropped with it.
 - **The front's readiness gates nothing.** Acquiring it registers it, and its init prewarms every supported member.
   `sr::denoise_routine::prewarm(ctx)` at startup starts their compiles before the first call.
+- **`fresh_samples` lives in the settings, not beside the call**, so planning a frame and running it read one answer.
+  False (the default) is a converging mean and picks among the spatial members; true is this frame's own samples plus motion vectors.
+- **A denoised image keeps `color`'s alpha.** Every member writes rgb and copies the alpha, so switching members never changes what you composite with.
+- **A temporal history is big**: svgf holds eight full-screen images, ~221 MiB per 1080p stream.
+  Drop the history of a view nobody is looking at.
+- **`uv run dev.py example shaped-rendering/denoise-playground`** puts all of it on screen: a tiny path tracer, every
+  knob live, and the raw image beside the denoised one.
 
 ## Writing a concrete routine
 

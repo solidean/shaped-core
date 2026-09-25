@@ -33,13 +33,34 @@ TEST("sgl check - an opaque struct needs @builtin")
 TEST("sgl check - a name is declared once, unless every declaration of it is a function")
 {
     CHECK(reports_for("struct a:\n    x: float\nstruct a:\n    y: float\n") == "duplicate-declaration user:[a] a\n");
-    CHECK(reports_for("struct vec3:\n    x: float\n") == "duplicate-declaration user:[vec3] vec3\n");
-    CHECK(reports_for("binding dot:\n    x: float\n") == "duplicate-declaration user:[dot] dot\n");
+    CHECK(reports_for("struct a:\n    x: float\nfun a(k: float) -> float => k\n") == "duplicate-declaration user:[a] a\n");
     CHECK(reports_for("struct a:\n    x: float\n    x: float\n") == "duplicate-declaration user:[x] x\n");
     CHECK(reports_for("@builtin fun dot(a: float3, a: float3) -> float\n") == "duplicate-declaration user:[a] a\n");
 
     // two functions of one name are an overload set
     CHECK(reports_for("@builtin fun dot(a: float3, b: float3) -> float\n") == "");
+}
+
+TEST("sgl check - the prelude is a scope around the user file's, which may shadow its names")
+{
+    // the user file's struct is the one its lookups find: the prelude's vec3 has no member `weight`
+    CHECK(reports_for("struct vec3:\n    weight: float\nfun g(v: vec3) -> float:\n    return v.weight\n") == "");
+    CHECK(reports_for("binding dot:\n    x: float\n") == "");
+    // a function hides a struct of the prelude, and a struct the prelude's functions, unless both are functions
+    CHECK(reports_for("fun vec3(k: float) -> float => k\nfun g(k: float) -> float:\n    return vec3(k)\n") == "");
+    CHECK(reports_for("struct dot:\n    a: float\nfun g(d: dot) -> float:\n    return d.a\n") == "");
+    // what the checker needs of the prelude by name stays the prelude's: a for runs over its int
+    CHECK(reports_for("struct int:\n    a: float\nfun g(k: float) -> float:\n    for i in 0 ..< 3:\n        return k\n"
+                      "    return k\n")
+          == "");
+
+    // a prelude file never sees the user file's names
+    cc::string_view const hidden[] = {"@builtin struct float\n", "struct u:\n    y: t\n", "struct t:\n    x: u\n"};
+    CHECK(reports_of(check_files(hidden)) == "unknown-name prelude.1:[t] t\n");
+    // the files of the prelude share one scope, as the user file has one
+    cc::string_view const twice[] = {"@builtin struct float\n", "struct a:\n    x: float\n",
+                                     "struct a:\n    y: float\n", "struct a:\n    z: float\n"};
+    CHECK(reports_of(check_files(twice)) == "duplicate-declaration prelude.2:[a] a\n");
 }
 
 TEST("sgl check - a symbol that needs itself is a dependency cycle that names the loop")
@@ -106,8 +127,8 @@ TEST("sgl check - what the tracer does not carry is unsupported-yet, and names t
     CHECK(reports_for("struct a:\n    x: float\n    len => x\n") == "unsupported-yet user:[len => x] a property\n");
     CHECK(reports_for("struct a:\n    x: float = 1.0\n") == "unsupported-yet user:[1.0] a default value\n");
     CHECK(reports_for("binding b = constants\n") == "unsupported-yet user:[constants] a binding composition\n");
-    CHECK(reports_for("binding b:\n    t: texture2d[rgba8]\n")
-          == "unsupported-yet user:[texture2d[rgba8]] type arguments\n");
+    // CHK-25: a format is no type, so a texture takes what it samples to and an image takes a format as a case.
+    CHECK(reports_for("binding b:\n    t: texture2d[rgba8]\n") == "unknown-name user:[rgba8] rgba8\n");
     CHECK(reports_for("@format(rgba8) struct a:\n    x: float\n")
           == "unsupported-yet user:[format] the attribute @format on a struct\n");
 

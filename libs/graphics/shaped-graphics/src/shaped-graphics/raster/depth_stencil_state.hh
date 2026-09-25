@@ -43,6 +43,6 @@ struct sg::depth_stencil_state
     bool stencil_test = false;    ///< enable the stencil test
     u8 stencil_read_mask = 0xFF;  ///< masks the value read for the comparison
     u8 stencil_write_mask = 0xFF; ///< masks the value written back
-    stencil_face front = {};
-    stencil_face back = {};
+    stencil_face stencil_front = {};
+    stencil_face stencil_back = {};
 };

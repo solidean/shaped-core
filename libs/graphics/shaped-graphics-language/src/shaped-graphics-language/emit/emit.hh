@@ -59,7 +59,7 @@ struct sgl::emit::bound_name
 {
     /// As the text spells it, which is what the target's compiler reflects.
     cc::string emitted;
-    /// `binding.member` for a buffer, the binding's own name for a block of constants.
+    /// `binding.member` for a resource, the binding's own name for a block of constants.
     cc::string host;
 
     bool operator==(bound_name const&) const = default;
@@ -73,7 +73,8 @@ struct sgl::emit::emitted_text
     /// The name the text actually declares the entry point under, which is the source's unless this target reserves it.
     /// A caller compiling the text has to ask for THIS name, not the one it requested.
     cc::string entry_point;
-    /// Every buffer and block of constants the text declares, so a caller can rename what the compiler reflects.
+    /// Every resource and block of constants the text declares, samplers included.
+    /// A caller renames what the compiler reflects by it.
     cc::vector<bound_name> bound_names;
     /// A pixel entry point's render targets: how many, and the `@pixel struct` it returns; -1 and empty otherwise.
     i32 color_targets = -1;

@@ -144,7 +144,8 @@ ast::attribute const* checker::find_attribute(i32 file, ast::range_of<ast::attri
 void checker::judge_attributes(i32 file,
                                ast::range_of<ast::attribute> range,
                                cc::span<cc::string_view const> known,
-                               cc::string_view owner)
+                               cc::string_view owner,
+                               setting_scope scope)
 {
     for (auto const& a : ast_of(file).at(range))
     {
@@ -153,9 +154,24 @@ void checker::judge_attributes(i32 file,
         for (auto const k : known)
             is_known = is_known || k == name;
 
+        // A setting's value is judged by each pipeline that reads it.
+        if (!is_known && scope != setting_scope::none && is_setting_attribute(name, scope == setting_scope::target))
+            continue;
+        if (!is_known && scope != setting_scope::none)
+        {
+            // An attribute has no path to disambiguate with, so the pipeline has to set the field itself.
+            auto const paths = setting_attribute_paths(name, scope == setting_scope::target);
+            if (paths.size() > 1)
+            {
+                report(diagnostic_kind::invalid_pipeline, file, a.name,
+                       cc::format("@{} names both {} and {}: set it in the pipeline by its whole path", name, paths[0],
+                                  paths[1]));
+                continue;
+            }
+        }
         if (!is_known)
             unsupported(file, a.name, cc::format("the attribute @{} on {}", name, owner));
-        else if (sgl::is_valid(a.list) && name != "operator" && name != "compute" && name != "stream")
+        else if (sgl::is_valid(a.list) && name != "operator" && name != "compute" && name != "stream" && name != "stages")
             report(diagnostic_kind::invalid_attribute_arguments, file, span_of(file, a.list),
                    cc::format("@{} takes no arguments", name));
     }
@@ -190,6 +206,7 @@ void checker::run()
 
     for (auto file = i32(0); file < i32(files.size()); ++file)
         declare_file(file);
+    merge_scopes();
 
     // Source order is only the order of the first demand: whatever a symbol needs is compiled from inside it.
     for (auto i = isize(0); i < out.symbols.size(); ++i)
@@ -232,17 +249,36 @@ void checker::add_symbol(symbol s, source_span name_where)
         return;
     }
 
-    auto& declared = names[name];
-    auto is_overload_set = is_function;
-    for (auto const other : declared)
-        is_overload_set = is_overload_set && out.at(other).kind == symbol_kind::function;
-    if (!declared.empty() && !is_overload_set)
+    // CHK-12 holds within one scope; the user file's may shadow the prelude's.
+    auto& declared = is_prelude_file(file) ? prelude_names[name] : file_names[name];
+    if (!declared.empty() && !(is_function && is_all_functions(declared)))
     {
         // The later declaration is compiled like any other and no lookup finds it.
         report(diagnostic_kind::duplicate_declaration, file, name_where, name);
         return;
     }
     declared.push_back(id);
+}
+
+bool checker::is_all_functions(cc::span<symbol_id const> ids) const
+{
+    auto result = true;
+    for (auto const id : ids)
+        result = result && out.at(id).kind == symbol_kind::function;
+    return result;
+}
+
+void checker::merge_scopes()
+{
+    names = prelude_names;
+    for (auto const& [name, ids] : file_names)
+    {
+        auto& seen = names[name];
+        // Two overload sets are one; anything else of the user file hides what the prelude has of that name.
+        if (!is_all_functions(seen) || !is_all_functions(ids))
+            seen.clear();
+        seen.push_back_range(ids);
+    }
 }
 
 void checker::declare(i32 file, ast::decl_id decl)
@@ -318,6 +354,14 @@ void checker::declare(i32 file, ast::decl_id decl)
         [&](ast::type_decl const& t) { unsupported_symbol(t.name, "type alias"); },
         [&](ast::const_decl const& c) { unsupported_symbol(c.name, "const"); },
         [&](ast::sampler_decl const& s) { unsupported_symbol(s.name, "sampler"); },
+        [&](ast::pipeline_decl const& p)
+        {
+            // Without a name it is the file's pipeline, named `pipeline`; a second one is a duplicate like any other.
+            auto s = symbol{.file = file, .declaration = decl, .kind = symbol_kind::pipeline, .name = "pipeline"};
+            if (!p.name.empty())
+                s.name = text_of(file, p.name);
+            add_symbol(cc::move(s), p.name.empty() ? span_of(file, decl) : p.name);
+        },
         [&](ast::notation_decl const&) { unsupported(file, span_of(file, decl), "notation"); },
         // A member line at module level and an `invalid` declaration were reported by the AST pass.
         [&](ast::field_decl const&) {}, //
@@ -367,6 +411,9 @@ void checker::compile(symbol_id id)
         break;
     case symbol_kind::function:
         compile_function(id);
+        break;
+    case symbol_kind::pipeline:
+        compile_pipeline(id);
         break;
     case symbol_kind::unsupported:
         out.symbols[index_of(id)].state = symbol_state::failed;
