@@ -41,7 +41,7 @@ So an agent writing one cannot leave the file unbalanced; the worst it can do is
 ## Front matter
 
 `id` and `title` are required.
-`group`, `state`, `severity` and `resolved-by` are known; anything else is preserved verbatim, so a review can carry fields the tool has no opinion on.
+`group`, `state`, `severity`, `resolved-by` and `context` are known; anything else is preserved verbatim, so a review can carry fields the tool has no opinion on.
 
 `state` is `open`, `obsolete` or `superseded`.
 `severity` is `bug`, `design`, `api`, `docs`, `nit`, `question` or `lgtm`.
@@ -196,6 +196,32 @@ against each other and the shape of the argument has to be legible before the wo
 Nothing stops another block using it, and an entry that prices nothing should not.
 
 Only the first line of a list item is matched, and only inside a list: a paragraph opening `pro:` is left alone.
+
+## `context:` — where a short path looks first
+
+A backticked path resolves three ways: the exact path, a unique suffix, a unique basename.
+In a tree whose tests mirror its sources, or that holds several trees shadowing each other, a bare `mod.rs` or `compile.rs` is ambiguous almost everywhere, and every writer spends a fix round on it.
+
+`context:` names the folder an entry is about, and a short path is looked for under it first.
+
+```markdown
+---
+id: 240
+title: stage 8 records its decisions
+context: src/stages/08_ring_ir/
+---
+```
+
+- **Under the folder first, then everywhere.**
+  A path with exactly one match under the context resolves to it; one with several there is ambiguous among those.
+  One with none there resolves repository-wide exactly as without a context, so `src/lib.rs` still works from an entry about stage 8.
+- **A block can narrow it again** with its own `context:`, which replaces the entry's for that block — the one block about the tests, say.
+- **The folder is itself a reference**, resolved the same three ways, so `08_ring_ir/` is enough where it is unique.
+  One that names no folder, or several, is a validation error rather than a context silently doing nothing.
+- The default is the repository root, which is what an entry without the key gets.
+- A literal is resolved once per entry, by the first block that names it, because the page matches literals entry-wide.
+
+An ambiguous reference lists every candidate as a full path in backticks, ready to paste, and names `context:` as the other remedy.
 
 ## `raw:` — a span that is not a reference
 

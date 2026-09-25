@@ -131,6 +131,8 @@ The maintainer answers whenever, says so, and the agent runs `delta <name> --fin
   An ask that has already been answered cannot be — that is what `follows:` is for.
 - **Every file an entry names becomes a link**, resolved three ways: the exact path, a unique suffix, a bare basename.
   Ambiguous is a validation error, and so is unresolved — mark the exceptions `new:` (a file this change will create) or `old:` (one it removes).
+  An ambiguous one lists every candidate as a path to paste.
+  `context: <folder>` in an entry's front matter, or on one block, is where a short path is looked for first, which is the fix for a tree whose tests mirror its sources.
   **A reference in a finalized round never fails `validate`**, ambiguity included: a finalized ask is immutable, so nothing could fix it there.
   Carrying out what the round decided is what breaks it — a `new:` path now exists and links like any other, and a path that is gone is drawn as removed.
   Where the round's head is on record the text is read against that tree, which follows a file that moved and names the commit on hover.

@@ -1536,6 +1536,56 @@ def test_an_ambiguous_reference_is_a_problem(root: Path) -> None:
     assert tokens[0].problem and "names 2 files" in tokens[0].problem, tokens[0].problem
 
 
+MIRRORED = [
+    "src/stages/08_ring_ir/mod.rs",
+    "src/stages/09_reg_ir/mod.rs",
+    "tests/stages/08_ring_ir/mod.rs",
+    "src/stages/08_ring_ir/compile.rs",
+    "tests/stages/08_ring_ir/compile.rs",
+    "src/lib.rs",
+]
+
+
+def _context_tokens(root: Path, front: str, blocks: str, paths: list[str] = MIRRORED):
+    text = f"---\nid: 040\ntitle: t\n{front}---\n\n{blocks}"
+    return build_tokens(parse_text(text, Path("entry.md")), _index_of(root, paths))
+
+
+def test_an_entry_s_context_folder_is_where_a_short_path_looks_first(root: Path) -> None:
+    """A tree whose tests mirror its sources makes every bare basename ambiguous, so an entry says where it lives.
+
+    The context folder is looked in first; a path found nowhere under it resolves repository-wide exactly as before,
+    so naming `src/lib.rs` from an entry about stage 8 still works.
+    """
+    blocks = "## prose\n\nSee `compile.rs`, `mod.rs` and `lib.rs`.\n"
+    by_text = {t.text: t for t in _context_tokens(root, "context: src/stages/08_ring_ir/\n", blocks)}
+    assert by_text["compile.rs"].path == "src/stages/08_ring_ir/compile.rs", by_text["compile.rs"]
+    assert by_text["mod.rs"].path == "src/stages/08_ring_ir/mod.rs", by_text["mod.rs"]
+    assert by_text["lib.rs"].path == "src/lib.rs" and not by_text["lib.rs"].problem, by_text["lib.rs"]
+    assert not any(t.problem for t in by_text.values()), [t.problem for t in by_text.values()]
+
+    # A block narrows it further, for the one block about the tests.
+    blocks = "## prose\ncontext: tests/\n\nSee `compile.rs`.\n"
+    token = _context_tokens(root, "context: src/\n", blocks)[0]
+    assert token.path == "tests/stages/08_ring_ir/compile.rs" and not token.problem, token
+
+
+def test_a_context_folder_that_resolves_nowhere_is_a_problem(root: Path) -> None:
+    """A typo'd context would otherwise quietly leave every short path to the repository-wide lookup."""
+    tokens = _context_tokens(root, "context: src/stages/99_nope/\n", "## prose\n\nSee `lib.rs`.\n")
+    problems = [t.problem for t in tokens if t.problem]
+    assert any("99_nope" in p and "context" in p for p in problems), problems
+
+
+def test_an_ambiguous_reference_names_its_candidates_ready_to_paste(root: Path) -> None:
+    """The fix is always a longer path, so the message carries every one of them as something to copy."""
+    tokens = _context_tokens(root, "", "## prose\n\nSee `mod.rs`.\n")
+    problem = tokens[0].problem
+    for path in ("src/stages/08_ring_ir/mod.rs", "src/stages/09_reg_ir/mod.rs", "tests/stages/08_ring_ir/mod.rs"):
+        assert f"`{path}`" in problem, problem
+    assert "context:" in problem, f"the message should name the context folder as the other remedy: {problem}"
+
+
 def test_prose_that_merely_holds_a_dot_is_not_a_reference(root: Path) -> None:
     """`git.has_merges` is prose about code.
 

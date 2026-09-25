@@ -83,6 +83,7 @@ class FileProvider:
     `history` is the tree at the head that round was read at, where one is recorded.
     It says where a path that moved went, and puts the commit into the removed note.
     A design review carries its decisions out uncommitted and has no such tree, which is why leniency cannot hang on it.
+    `context` is the resolved folder the text's entry or block names, looked in first — see RepoIndex.resolve.
     """
 
     index: RepoIndex
@@ -92,6 +93,7 @@ class FileProvider:
     answered: bool = False
     history: RepoIndex | None = None
     history_rev: str = ""
+    context: str = ""
 
     def tokens(self, text: str) -> list[Token]:
         out: list[Token] = []
@@ -118,13 +120,13 @@ class FileProvider:
                 intent, ref = (NEW if prefix == "new:" else OLD), ref[len(prefix):]
                 break
 
-        resolution = self.index.resolve(ref)
+        resolution = self.index.resolve(ref, self.context)
         line = int(start) if start else 0
         end_line = int(end) if end else 0
         shown = literal[len(intent) + 1:] if intent != PLAIN else literal
 
         if self.answered:
-            then = self.history.resolve(ref) if self.history is not None else None
+            then = self.history.resolve(ref, self.context) if self.history is not None else None
             if intent == NEW:
                 # Created since: the decision this text recorded was carried out, so it links like any other path.
                 intent = PLAIN if resolution.state == RESOLVED else NEW
@@ -135,8 +137,7 @@ class FileProvider:
                                  note=_gone_since(self.history_rev))
 
         if resolution.state == AMBIGUOUS:
-            listed = ", ".join(resolution.candidates[:4]) + ("…" if len(resolution.candidates) > 4 else "")
-            names = f"{ref} names {len(resolution.candidates)} files: {listed}"
+            names = _ambiguity(ref, resolution.candidates, "files")
             if self.answered:
                 return Token(text=literal, kind=self.kind, css="ref", regions=self.regions, label=shown, note=names)
             return Token(text=literal, kind=self.kind, css="ref-bad", regions=self.regions, label=shown, problem=names)
@@ -160,6 +161,22 @@ class FileProvider:
             css="ref-old" if intent == OLD else "ref", regions=self.regions,
             href=f"/file/{resolution.path}" + (f"#L{line}" if line else ""),
         )
+
+
+# How many candidates an ambiguity lists in full before it counts the rest.
+_CANDIDATES_SHOWN = 8
+
+
+def _ambiguity(ref: str, candidates: tuple[str, ...], what: str) -> str:
+    """What an ambiguous reference says: every candidate as a path to paste, and the other remedy.
+
+    A mirrored tree makes a bare basename ambiguous nearly everywhere, and the fix is always one of these paths —
+    so the message carries them whole, where the reader copies one, instead of trimmed to a hint.
+    """
+    shown = ", ".join(f"`{c}`" for c in candidates[:_CANDIDATES_SHOWN])
+    more = f" and {len(candidates) - _CANDIDATES_SHOWN} more" if len(candidates) > _CANDIDATES_SHOWN else ""
+    return (f"{ref} names {len(candidates)} {what} — write one of {shown}{more}, "
+            f"or give the entry a `context:` folder to look in first")
 
 
 def _missing_note(history: RepoIndex | None, rev: str) -> str:
@@ -196,7 +213,7 @@ class DirProvider:
     Narrowing what counts as a reference would trade a loud false positive for a silent one: a typo'd path
     quietly staying plain text, which is the failure this strictness exists to catch.
     `raw:` is the per-span escape for something that only looks like a reference.
-    `answered` and `history` are judged exactly as FileProvider's are.
+    `answered`, `history` and `context` are judged exactly as FileProvider's are.
     """
 
     index: RepoIndex
@@ -206,6 +223,7 @@ class DirProvider:
     answered: bool = False
     history: RepoIndex | None = None
     history_rev: str = ""
+    context: str = ""
 
     def tokens(self, text: str) -> list[Token]:
         out: list[Token] = []
@@ -224,10 +242,10 @@ class DirProvider:
                 continue
             self.seen.add(literal)
             shown = literal[len(intent) + 1:] if intent != PLAIN else literal
-            resolution = self.index.resolve_dir(ref)
+            resolution = self.index.resolve_dir(ref, self.context)
 
             if self.answered:
-                then = self.history.resolve_dir(ref) if self.history is not None else None
+                then = self.history.resolve_dir(ref, self.context) if self.history is not None else None
                 if intent == NEW:
                     intent = PLAIN if resolution.state == RESOLVED else NEW
                 elif then is not None and then.state == RESOLVED:
@@ -238,8 +256,7 @@ class DirProvider:
                         continue
 
             if resolution.state == AMBIGUOUS:
-                listed = ", ".join(resolution.candidates[:4]) + ("…" if len(resolution.candidates) > 4 else "")
-                names = f"{ref} names {len(resolution.candidates)} folders: {listed}"
+                names = _ambiguity(ref, resolution.candidates, "folders")
                 if self.answered:
                     out.append(Token(text=literal, kind=self.kind, css="ref", regions=self.regions, label=shown,
                                      note=names))
