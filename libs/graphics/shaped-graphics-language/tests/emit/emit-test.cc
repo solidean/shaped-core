@@ -207,6 +207,31 @@ TEST("sgl emit - a group's plain member is a field of the constant buffer the gr
     CHECK(e.errors[0].detail == "a member of type 'bool' in a binding: 'scene.lit'");
 }
 
+TEST("sgl emit - a group's constant buffer states every member's offset on vulkan, so no compiler flag lays it out")
+{
+    auto const source
+        = with_edges("binding scene:\n"
+                     "    exposure: float\n"
+                     "    gamma: float\n"
+                     "    jitter: float2\n"
+                     "    tint: float3\n"
+                     "\n"
+                     "@pixel fun main_ps(p: pixel_input){scene} -> frame:\n"
+                     "    return {\n"
+                     "        color = float4(..scene.tint, scene.exposure + scene.gamma + scene.jitter.x)\n"
+                     "    }\n");
+    CHECK(emit_source(source, 0, target::hlsl_vulkan)
+              .text.contains("struct scene_data\n"
+                             "{\n"
+                             "    [[vk::offset(0)]] float exposure;\n"
+                             "    [[vk::offset(4)]] float gamma;\n"
+                             "    [[vk::offset(8)]] float2 jitter;\n"
+                             "    [[vk::offset(16)]] float3 tint;\n"
+                             "};\n"));
+    // dx12 gets none, as the push-constant block does not (EMIT-40): it packs a constant buffer this way by itself.
+    CHECK(!emit_source(source, 0, target::hlsl_dx12).text.contains("vk::offset"));
+}
+
 TEST("sgl emit - an inline block whose members would sit elsewhere in one target than in another is an error")
 {
     CHECK(errors_of(with_edges("@inline binding look:\n"

@@ -314,8 +314,7 @@ sgl::emit::all_targets()                   // -> cc::span<target const>
 auto const r = sgl::emit::emit(m, 0, sgl::emit::target::wgsl);   // -> emitted_text; the isize is a position in m.entry_points
                                            // LEGALIZES that entry point first, since the check pass writes the structured form
                                            // ONE entry point per call: it, and exactly the structs and the binding it needs
-                                           // TOTAL and deterministic; WGSL and MSL carry FINAL addresses, and HLSL leaves the
-                                           // registers to slib's binding pass (`#pragma sc group N`)
+                                           // TOTAL and deterministic; every target carries FINAL addresses, HLSL's registers too
 sgl::emit::emit_entry_point(m, e, t)       // the same for a tree that is no entry point of m: a legalized one, a hand-built one
                                            // e must be CORE, or the result is the error `not-core` with the first violation
 r.has_text()  r.text                       // text is empty when there are errors
@@ -444,7 +443,9 @@ sgl::print_source(file)      // == file.source for EVERY input: the lossless inv
 - **A name is renamed per target where the target reserves it**: `target` is `target_` in WGSL only, and an entry point named `main` is `main_` in MSL.
   `emitted_text::entry_point` is the name the text declares.
 - **An `@inline binding`** is `register(b0, space9)`, `[[vk::push_constant]]`, `@group(3) @binding(0)`.
-  **Any other binding is a group**, numbered by its place in the entry point's list: `#pragma sc group N` in HLSL, `@group(N) @binding(slot)` in WGSL, refused in MSL.
+  **Any other binding is a group**, numbered by its place in the entry point's list, and refused in MSL.
+  Its resource at `slot` is `register(<class>slot, spaceN)` in dx12, `[[vk::binding(slot, N)]]` in vulkan, `@group(N) @binding(slot)` in WGSL.
+  An entry point lists at most three groups besides its `@inline` binding, as sg binds; a fourth is `too-many-groups` on every target.
   MSL has no globals, so there it is the entry point's parameter `constant T& name [[buffer(4)]]`.
   Its members must land on the same offsets in HLSL, WGSL and MSL, so `{float; float3}` is `layout-mismatch`.
   **So is `{float3; float}`**: MSL's `float3` is 16 bytes, so nothing fits into its tail, and `{float3; mat4; float}` is fine.
