@@ -32,9 +32,14 @@ flow checker::check_statements(function_scope& scope, ast::range_of<ast::stmt_id
 {
     auto result = flow::falls_through;
     auto is_reported = false;
-    for (auto const s : ast_of(scope.file).at(statements))
+    auto const& ast = ast_of(scope.file);
+    for (auto const s : ast.at(statements))
     {
-        if (result == flow::exits && !is_reported)
+        // A test never runs where it stands, so it is no code a jump in front of it makes unreachable.
+        auto const* const d = ast.at(s).node.try_as<ast::decl_stmt>();
+        auto const is_test
+            = d != nullptr && ast::is_valid(d->declaration) && ast.at(d->declaration).node.is<ast::test_decl>();
+        if (result == flow::exits && !is_reported && !is_test)
         {
             report(diagnostic_kind::unreachable_code, scope.file, span_of(scope.file, s), "");
             is_reported = true;
@@ -120,12 +125,38 @@ flow checker::check_stmt(function_scope& scope, ast::stmt_id stmt)
                          // A call is evaluated and its value dropped: it may have been written for its effect.
                          // Whether a PURE one is worth a statement is the AST pass's `no-effect` warning, and no business of this pass.
                          auto const type = check_expr(scope, e.value);
-                         if (type != error_type && type != void_type && !value.node.is<ast::call>())
+                         auto const* const call = value.node.try_as<ast::call>();
+                         auto const is_application = call != nullptr
+                                                  && (call->spelling == ast::call_spelling::paren
+                                                      || call->spelling == ast::call_spelling::juxtaposition);
+                         // CHK-225: in a test a line of type bool is a check; the AST pass left every other line to this one.
+                         if (scope.is_test && type == type_of_builtin(builtins::k_bool, file, where))
+                             return;
+                         if (scope.is_test && !is_application && type != error_type && type != void_type)
+                             report(diagnostic_kind::no_effect, file, where, "");
+                         else if (type != error_type && type != void_type && call == nullptr)
                              unsupported(file, where, "an expression statement");
                      }
                  },
-                 [&](ast::assert_stmt const&) { unsupported(file, where, "assert"); },
-                 [&](ast::decl_stmt const&) { unsupported(file, where, "a declaration inside a function"); },
+                 [&](ast::assert_stmt const& a)
+                 {
+                     // CHK-227: a bool condition; the run stops where it is false, and a target writes nothing of it
+                     check_condition(scope, a.condition);
+                     if (ast::is_valid(a.message))
+                         unsupported(file, span_of(file, a.message), "an assert message");
+                 },
+                 [&](ast::decl_stmt const& d)
+                 {
+                     // CHK-224: a test in a function body is checked on its own, with the function's names visible and unusable
+                     if (ast::is_valid(d.declaration) && ast.at(d.declaration).node.is<ast::test_decl>())
+                     {
+                         // one inside another test was reported by the AST pass
+                         if (!scope.is_test)
+                             add_test(file, d.declaration, cc::format("fun {}", out.at(scope.function).name), &scope);
+                         return;
+                     }
+                     unsupported(file, where, "a declaration inside a function");
+                 },
                  [&](ast::invalid_stmt const&) { result = flow::unknown; });
     return result;
 }

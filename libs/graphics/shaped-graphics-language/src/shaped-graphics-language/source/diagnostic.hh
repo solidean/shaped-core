@@ -161,6 +161,10 @@ enum class sgl::diagnostic_kind : sgl::u8
     invalid_pipeline,
     /// A declaration, a local or a parameter whose name would hide a `@shadowable(false)` symbol.
     shadows_unshadowable,
+    /// A test that reads a parameter, a local or a binding member of the function it stands in; it runs on its own.
+    test_captures_runtime_value,
+    /// A test whose last code line is no check, so it could pass without having checked anything.
+    test_must_end_in_check,
 };
 
 namespace sgl

@@ -38,6 +38,24 @@ struct sgl::check::located_diagnostic
     }
 };
 
+/// One `test` of the module, wherever it stands.
+struct sgl::check::test_info
+{
+    symbol_id symbol = symbol_id::none;
+    i32 file = 0;
+    ast::decl_id declaration = ast::decl_id::none;
+    /// The `test` keyword, which is where the test is named in a report.
+    source_span where;
+    /// What stands around it, for a reader: empty at file scope, `struct light`, `fun shade`.
+    cc::string scope_path;
+    /// The text of a `//` comment on the `test` line or on the line above it, which says what the test is for.
+    cc::string comment;
+    /// A position in `checked_module::test_units`, -1 for a test with no flat tree.
+    i32 unit = -1;
+
+    bool operator==(test_info const&) const = default;
+};
+
 /// One module after name resolution, type checking and evaluation, as one value beside the ASTs it was checked from.
 ///
 /// It has two readers.
@@ -71,6 +89,11 @@ struct sgl::check::checked_module
 
     /// Only the entry points that checked without an error; a broken one has diagnostics and no flat tree.
     cc::vector<flat_entry_point> entry_points;
+
+    /// Every test, in the order the pass found them: file scope and type bodies first, then the tests of function bodies.
+    cc::vector<test_info> tests;
+    /// The flat trees of the tests that checked without an error, each of stage `none` and without a parameter.
+    cc::vector<flat_entry_point> test_units;
 
     /// In the order the demand-driven pass found them, which is deterministic and not source order.
     cc::vector<located_diagnostic> diagnostics;
@@ -155,7 +178,8 @@ struct sgl::check::checked_module
             && is_equal(binding_lists, rhs.binding_lists) && is_equal(samplers, rhs.samplers)
             && is_equal(pipelines, rhs.pipelines) && is_equal(pipeline_settings, rhs.pipeline_settings)
             && is_equal(constants, rhs.constants) && is_equal(files, rhs.files)
-            && is_equal(entry_points, rhs.entry_points) && is_equal(diagnostics, rhs.diagnostics)
+            && is_equal(entry_points, rhs.entry_points) && is_equal(tests, rhs.tests)
+            && is_equal(test_units, rhs.test_units) && is_equal(diagnostics, rhs.diagnostics)
             && builtins == rhs.builtins;
     }
 };

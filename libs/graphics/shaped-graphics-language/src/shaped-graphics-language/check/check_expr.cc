@@ -288,6 +288,11 @@ type_id checker::check_name(function_scope& scope, ast::expr_id id, ast::name co
     if (auto const* const local = scope.find_local(text))
     {
         set_target(file, id, local->where);
+        if (local->is_captured)
+        {
+            report_capture(scope, where, *local);
+            return error_type;
+        }
         return local->type;
     }
 
@@ -365,7 +370,19 @@ type_id checker::check_member(function_scope& scope, ast::expr_id id, ast::membe
             auto is_listed = false;
             for (auto const listed : out.at(out.functions[out.at(scope.function).info].bindings))
                 is_listed = is_listed || listed == binding;
-            if (!is_listed)
+            // CHK-228: a test lists no binding, and one its function lists is a value of the function's run
+            auto is_captured = false;
+            if (scope.is_test && is_valid(scope.enclosing))
+                for (auto const listed : out.at(out.functions[out.at(scope.enclosing).info].bindings))
+                    is_captured = is_captured || listed == binding;
+            if (is_captured)
+                report(diagnostic_kind::test_captures_runtime_value, file, object_where,
+                       cc::format("{} is a binding of {}, and a test runs on its own", out.at(binding).name,
+                                  out.at(scope.enclosing).name));
+            else if (!is_listed && scope.is_test)
+                report(diagnostic_kind::binding_not_listed, file, object_where,
+                       cc::format("{} is a binding, and a test lists none", out.at(binding).name));
+            else if (!is_listed)
                 report(diagnostic_kind::binding_not_listed, file, object_where,
                        cc::format("{} is not in the binding list of {}", out.at(binding).name,
                                   out.at(scope.function).name));
@@ -566,7 +583,10 @@ type_id checker::check_call(function_scope& scope, ast::expr_id id, ast::call co
     {
         set_target(file, call.callee, local->where);
         (void)check_arguments(scope, call.arguments, false);
-        unsupported(file, callee_where, "a call of a local value");
+        if (local->is_captured)
+            report_capture(scope, callee_where, *local);
+        else
+            unsupported(file, callee_where, "a call of a local value");
         return error_type;
     }
 
@@ -730,7 +750,19 @@ void checker::note_program_call(function_scope const& scope, symbol_id callee, s
         auto is_listed = false;
         for (auto const l : listed)
             is_listed = is_listed || l == needed;
-        if (!is_listed)
+        if (!is_listed && scope.is_test)
+        {
+            // CHK-228: a test gives a callee its bindings through a local binding, which delegation will carry
+            auto& d = report(
+                diagnostic_kind::binding_not_listed, file, where,
+                cc::format("{} needs {}, and a test lists no binding", out.at(callee).name, out.at(needed).name));
+            d.notes.push_back({.file = file,
+                               .where = where,
+                               .message = cc::format("a `binding {}:` declared in the test gives {} its values, "
+                                                     "once local bindings are carried",
+                                                     out.at(needed).name, out.at(callee).name)});
+        }
+        else if (!is_listed)
             report(diagnostic_kind::binding_not_listed, file, where,
                    cc::format("{} needs {}, which is not in the binding list of {}", out.at(callee).name,
                               out.at(needed).name, out.at(scope.function).name));

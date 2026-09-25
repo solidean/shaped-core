@@ -308,7 +308,7 @@ ast::range_of<member_info> checker::compile_members(i32 file,
             unsupported(file, where, "a property");
         else if (d.node.is<ast::fun_decl>())
             unsupported(file, where, "a method");
-        else if (!d.node.is<ast::field_decl>() && !d.node.is<ast::invalid_decl>())
+        else if (!d.node.is<ast::field_decl>() && !d.node.is<ast::invalid_decl>() && !d.node.is<ast::test_decl>())
             unsupported(file, where, "this member");
 
         auto const* const line = d.node.try_as<ast::field_decl>();
@@ -466,7 +466,7 @@ void checker::compile_enum(symbol_id id)
                 unsupported(file, where, "a property");
             else if (d.node.is<ast::fun_decl>())
                 unsupported(file, where, "a method");
-            else if (!d.node.is<ast::field_decl>() && !d.node.is<ast::invalid_decl>())
+            else if (!d.node.is<ast::field_decl>() && !d.node.is<ast::invalid_decl>() && !d.node.is<ast::test_decl>())
                 unsupported(file, where, "a declaration in an enum");
             continue;
         }

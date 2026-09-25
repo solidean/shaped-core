@@ -48,6 +48,7 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/check/check_expr.cc
     src/shaped-graphics-language/check/check_resources.cc
     src/shaped-graphics-language/check/check_stmt.cc
+    src/shaped-graphics-language/check/check_test.cc
     src/shaped-graphics-language/check/dump.cc
     src/shaped-graphics-language/check/flat.cc
     src/shaped-graphics-language/check/flat_builder.cc
@@ -273,6 +274,7 @@ if(SC_BUILD_TESTS)
         tests/check/pipeline-check-test.cc
         tests/check/enum-check-test.cc
         tests/check/expression-check-test.cc
+        tests/check/test-check-test.cc
         tests/check/source-flat-test-support.hh
 
         tests/interpret/interpret-test.cc

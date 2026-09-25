@@ -122,6 +122,14 @@ inline cc::string reports_of(checked_sources const& s)
         if (!d.detail.empty())
             out.appendf(" {}", d.detail);
         out += "\n";
+        // A related note stands under its diagnostic, indented: `  note user:[let x = k] x is declared here`.
+        for (auto const& n : d.notes)
+        {
+            auto note_text = s.files[n.file].text_of(n.where);
+            if (auto const end = note_text.find('\n'); end >= 0)
+                note_text = note_text.subview({.offset = 0, .size = end});
+            out.appendf("  note {}:[{}] {}\n", n.file == s.user_file() ? "user" : "prelude", note_text, n.message);
+        }
     }
     return out;
 }

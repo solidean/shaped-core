@@ -110,13 +110,14 @@ source_span checker::span_of(i32 file, ast::stmt_id stmt) const
     return ast::is_valid(stmt) ? span_of(file, ast_of(file).at(stmt).form) : source_span{};
 }
 
-void checker::report(diagnostic_kind kind, i32 file, source_span where, cc::string detail)
+located_diagnostic& checker::report(diagnostic_kind kind, i32 file, source_span where, cc::string detail)
 {
     out.diagnostics.push_back({
         .what = {.kind = kind, .level = default_severity_of(kind), .where = where},
         .file = file,
         .detail = cc::move(detail),
     });
+    return out.diagnostics.back();
 }
 
 void checker::unsupported(i32 file, source_span where, cc::string_view construct)
@@ -220,6 +221,10 @@ void checker::run()
     for (auto i = isize(0); i < out.symbols.size(); ++i)
         if (out.symbols[i].kind == symbol_kind::function && out.symbols[i].state == symbol_state::checked)
             check_body(symbol_id(i));
+
+    // Last, since a test in a function body is found while that body is checked (CHK-224).
+    for (auto i = isize(0); i < out.tests.size(); ++i)
+        check_test(i32(i));
 
     find_recursion();
 
@@ -353,6 +358,7 @@ void checker::declare(i32 file, ast::decl_id decl)
         {
             if (!s.name.empty())
                 add_symbol(named(symbol_kind::structure, s.name), s.name);
+            add_member_tests(file, s.members, cc::format("struct {}", text_of(file, s.name)));
         },
         [&](ast::binding_decl const& b)
         {
@@ -366,6 +372,7 @@ void checker::declare(i32 file, ast::decl_id decl)
         {
             if (!e.name.empty())
                 add_symbol(named(symbol_kind::enumeration, e.name), e.name);
+            add_member_tests(file, e.members, cc::format("enum {}", text_of(file, e.name)));
         },
         [&](ast::type_decl const& t) { unsupported_symbol(t.name, "type alias"); },
         [&](ast::const_decl const& c)
@@ -383,7 +390,7 @@ void checker::declare(i32 file, ast::decl_id decl)
             add_symbol(cc::move(s), p.name.empty() ? span_of(file, decl) : p.name);
         },
         [&](ast::notation_decl const&) { unsupported(file, span_of(file, decl), "notation"); },
-        [&](ast::test_decl const&) { unsupported(file, span_of(file, decl), "test"); },
+        [&](ast::test_decl const&) { add_test(file, decl, ""); },
         // A member line at module level and an `invalid` declaration were reported by the AST pass.
         [&](ast::field_decl const&) {}, //
         [&](ast::property_decl const&) {}, [&](ast::enum_case_decl const&) {}, [&](ast::invalid_decl const&) {});
@@ -438,6 +445,9 @@ void checker::compile(symbol_id id)
         break;
     case symbol_kind::constant:
         compile_const(id);
+        break;
+    case symbol_kind::test:
+        // A test's signature is made where it is found, and its body is checked with the others.
         break;
     case symbol_kind::unsupported:
         out.symbols[index_of(id)].state = symbol_state::failed;

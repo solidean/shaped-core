@@ -119,6 +119,32 @@ enum light_kind:
     sun
 ```
 
+## Tests
+
+* **CHK-224** A `test` is checked as a function of no parameter and no binding that returns `void`, on its own, wherever it stands: at file scope, in a struct or an enum, or in a function body.
+  One in a function body is checked after that body, and it never runs where it stands, so no jump in front of it makes it unreachable.
+* **CHK-225** In a test, and not in a function nested in one, an expression statement of type `bool` is a **check**: it must be true when it runs.
+  Any other expression statement there that is no paren or juxtaposition call is the warning `no-effect`, which the AST pass leaves to this one (AST-140).
+* **CHK-226** The last code line of a test is a check, or it is `test-must-end-in-check`.
+  The last code line is the last statement of its body, through the last branch of an `if`, the body of a loop and the last arm of a `case`.
+  A test whose asserts are what it checks ends in `true // why`.
+* **CHK-227** `assert condition` takes a `bool`, in a test or anywhere else; a message is `unsupported-yet`.
+* **CHK-228** A test reads nothing of the function it stands in: a parameter, a local or a binding member of it is `test-captures-runtime-value`, since the test runs on its own.
+  Those names are still visible, so they hide what the module has of the name; a `const` is no value of a run and may be read.
+  A test lists no binding, so a callee that needs one is `binding-not-listed` by CHK-131, with a note that a local binding in the test will give it.
+
+```sgl
+fun square(x: float) -> float => x * x
+
+test square 3.0 == 9.0
+
+fun shade(k: float) -> float:
+    test:
+        let x = square 2.0
+        x == 4.0
+    return k
+```
+
 ## Builtins and the prelude
 
 * **CHK-29** The prelude is SGL source, and each of its files is checked like the program's file; CHK-138 says which files it has.
@@ -228,7 +254,8 @@ enum light_kind:
 * **CHK-56** `return value` needs `value` to be of the function's return type, or it is `type-mismatch`.
 * **CHK-57** An arrow body `=> value` is `return value`.
 * **CHK-58** A block body that returns a value does so on every path, by CHK-123 to CHK-125.
-* **CHK-59** `assert` and a declaration inside a function are `unsupported-yet`; a call is a statement by CHK-137, and every other statement is [control flow](#control-flow).
+* **CHK-59** A declaration inside a function is `unsupported-yet`, a `test` excepted (CHK-224).
+  `assert` is CHK-227, a call is a statement by CHK-137, and every other statement is [control flow](#control-flow).
 
 ## Expressions
 
@@ -466,7 +493,7 @@ fun make_mvp(model: mat4){frame} => frame.proj * frame.view * model
 
 ## Diagnostic kinds
 
-Every kind below is a normal error by [DIAG-4](../syntax/diagnostics.md#rules), except `unreachable-code`, which is a warning.
+Every kind below is a normal error by [DIAG-4](../syntax/diagnostics.md#rules), except `unreachable-code` and `no-effect`, which are warnings.
 A diagnostic of this pass has a kind, a file, a byte span in that file, and a detail.
 
 | kind | reported by |
@@ -481,11 +508,12 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `expected-body` | CHK-32 |
 | `opaque-struct-needs-builtin` | CHK-34 |
 | `invalid-attribute-arguments` | CHK-36, CHK-39, CHK-204, CHK-208, CHK-211, CHK-212 |
-| `binding-not-listed` | CHK-45, CHK-131 |
+| `binding-not-listed` | CHK-45, CHK-131, CHK-228 |
 | `type-mismatch` | CHK-52, CHK-56, CHK-77, CHK-84, CHK-112 to CHK-118, CHK-121, CHK-167, CHK-210, CHK-214, CHK-219 |
 | `not-assignable` | CHK-112 |
 | `missing-return` | CHK-125 |
 | `unreachable-code` | CHK-126, CHK-162 |
+| `no-effect` | CHK-225 |
 | `recursive-call` | CHK-130 |
 | `unknown-member` | CHK-64, CHK-147, CHK-152 |
 | `no-matching-overload` | CHK-71, CHK-76, CHK-155 |
@@ -499,6 +527,8 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `invalid-entry-point` | CHK-87, CHK-93 |
 | `invalid-pipeline` | CHK-175 to CHK-185, CHK-187 |
 | `shadows-unshadowable` | CHK-220 |
+| `test-captures-runtime-value` | CHK-228 |
+| `test-must-end-in-check` | CHK-226 |
 
 ## Open
 

@@ -70,6 +70,9 @@ struct dumper
         case symbol_kind::constant:
             out += "(const ";
             break;
+        case symbol_kind::test:
+            out += "(test ";
+            break;
         case symbol_kind::unsupported:
             out += "(unsupported ";
             break;

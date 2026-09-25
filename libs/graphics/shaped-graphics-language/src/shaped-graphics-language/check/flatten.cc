@@ -936,6 +936,13 @@ struct flattener
         }
         if (auto const* const print = s.node.try_as<ast::print_stmt>())
             return add_stmt(from, flat_print{.value = flatten_expr(print->message)});
+        // A test in a function body never runs where it stands (CHK-224).
+        if (auto const* const d = s.node.try_as<ast::decl_stmt>();
+            d != nullptr && ast::is_valid(d->declaration) && ast().at(d->declaration).node.is<ast::test_decl>())
+            return;
+        // TEMPORARY until the check statement lands: an `assert` is compiled out, as every target writes it anyway.
+        if (s.node.is<ast::assert_stmt>())
+            return;
 
         auto const* const e = s.node.try_as<ast::expr_stmt>();
         if (e == nullptr || !ast::is_valid(e->value))

@@ -41,6 +41,8 @@ struct local_name
     bool is_mut = false;
     /// How many blocks deep its declaration stands; the parameters and the function's own block are 0.
     int depth = 0;
+    /// A name of the function a test stands in: visible, so it hides what the module has of that name, and unusable.
+    bool is_captured = false;
 };
 
 /// A loop around the statement being checked.
@@ -84,13 +86,23 @@ struct function_scope
     cc::vector<loop_scope> loops;
     /// The value blocks a `yield` can name, innermost last; a `case` arm that is a value pushes one.
     cc::vector<value_block_scope> value_blocks;
+    /// The body of a `test`, which runs on its own: no parameter, no binding, and nothing of what stands around it.
+    bool is_test = false;
+    /// For a test in a function body: the parameters and locals visible where it stands, each `is_captured`.
+    cc::vector<local_name> captured;
+    /// For a test in a function body: that function.
+    symbol_id enclosing = symbol_id::none;
 
     /// The newest visible local or parameter of that name, which hides every module-level symbol of it.
+    /// In a test, a name of the function around it is found last, and is `is_captured`.
     [[nodiscard]] local_name const* find_local(cc::string_view name) const
     {
         for (auto i = locals.size() - 1; i >= 0; --i)
             if (locals[i].name == name)
                 return &locals[i];
+        for (auto i = captured.size() - 1; i >= 0; --i)
+            if (captured[i].name == name)
+                return &captured[i];
         return nullptr;
     }
 };
@@ -168,6 +180,9 @@ struct checker
     ast::expr_id subscripted = ast::expr_id::none;
     /// The arguments of the call being checked, which a texture, an image or a sampler may stand as (CHK-206).
     cc::vector<ast::expr_id> handed;
+    /// Parallel to `out.tests`: what a test in a function body sees of that function, and the function.
+    cc::vector<cc::vector<local_name>> test_captures;
+    cc::vector<symbol_id> test_enclosing;
 
     // ---- shared helpers (check.cc) ----------------------------------------------------------------------------------
 
@@ -186,7 +201,8 @@ struct checker
     [[nodiscard]] source_span span_of(i32 file, ast::decl_id decl) const;
     [[nodiscard]] source_span span_of(i32 file, ast::stmt_id stmt) const;
 
-    void report(diagnostic_kind kind, i32 file, source_span where, cc::string detail);
+    /// The diagnostic it appended, which a caller may give related notes.
+    located_diagnostic& report(diagnostic_kind kind, i32 file, source_span where, cc::string detail);
     void unsupported(i32 file, source_span where, cc::string_view construct);
     [[nodiscard]] isize error_count() const;
 
@@ -292,6 +308,22 @@ struct checker
     // ---- bodies and expressions (check_expr.cc) ---------------------------------------------------------------------
 
     void check_body(symbol_id id);
+
+    // ---- tests (check_test.cc) --------------------------------------------------------------------------------------
+
+    /// Records the `test` `decl` stands for, with the names of `enclosing` it can see and must not use.
+    void add_test(i32 file, ast::decl_id decl, cc::string scope_path, function_scope const* enclosing = nullptr);
+    /// Every `test` a struct or an enum declares among its members.
+    void add_member_tests(i32 file, ast::range_of<ast::decl_id> members, cc::string_view scope_path);
+    /// Checks test `index` as a function of no parameter and no binding, and its last-line rule (CHK-226).
+    void check_test(i32 index);
+    /// The statement that is the last code line of `statements`, through the last branch of an `if`, a loop's body and
+    /// the last arm of a `case`; `none` for an empty list.
+    [[nodiscard]] ast::stmt_id last_code_line(i32 file, ast::range_of<ast::stmt_id> statements) const;
+    /// The text of a `//` comment on the line of `where`, or alone on the line above it; empty without one.
+    [[nodiscard]] cc::string comment_of(i32 file, source_span where) const;
+    /// Reports a use of what a test cannot reach: a name `local` of the function around it.
+    void report_capture(function_scope const& scope, source_span where, local_name const& local);
     void convert_object(function_scope& scope, ast::expr_id object, type_id to);
     /// `values[i]`, which today is a buffer element and nothing else; the error type where it is not one.
     [[nodiscard]] type_id check_index(function_scope& scope, ast::expr_id id, ast::index const& node);
