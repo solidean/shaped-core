@@ -45,11 +45,13 @@ void checker::add_test(i32 file, ast::decl_id decl, cc::string scope_path, funct
     auto const at = text_of(file, where).find("test");
     if (at >= 0)
         where = {.offset = where.offset + u32(at), .length = 4};
+    auto const whole = span_of(file, decl);
     out.tests.push_back({
         .symbol = id,
         .file = file,
         .declaration = decl,
         .where = where,
+        .extent = {.offset = where.offset, .length = whole.offset + whole.length - where.offset},
         .scope_path = cc::move(scope_path),
         .comment = comment_of(file, where),
     });
@@ -86,7 +88,9 @@ void checker::check_test(i32 index)
     auto const& body = d.node.as<ast::test_decl>().body;
     auto const info = out.at(test.symbol).info;
 
-    judge_attributes(file, d.attributes, {}, "a test");
+    cc::string_view const known[] = {"expect"};
+    judge_attributes(file, d.attributes, known, "a test");
+    out.tests[index].expectations = expectations_of(file, d.attributes);
     notes[info].is_body_checked = true;
     auto scope = function_scope{
         .function = test.symbol,
@@ -109,6 +113,50 @@ void checker::check_test(i32 index)
                "the last line of a test is a check; end in `true // why` where its asserts are what it checks");
 
     notes[info].is_body_sound = error_count() == errors_before;
+}
+
+cc::vector<test_expectation> checker::expectations_of(i32 file, ast::range_of<ast::attribute> attributes)
+{
+    auto const& ast = ast_of(file);
+    auto result = cc::vector<test_expectation>();
+    for (auto const& a : ast.at(attributes))
+    {
+        if (text_of(file, a.name) != "expect")
+            continue;
+        auto const arguments = ast.at(a.arguments);
+        if (arguments.empty())
+            report(diagnostic_kind::invalid_attribute_arguments, file, a.name,
+                   "@expect names what the test does: .fail, .assert, error = \"kind\" or warning = \"kind\"");
+        for (auto const& argument : arguments)
+        {
+            auto const where = ast::is_valid(argument.value) ? span_of(file, argument.value) : a.name;
+            auto const* const dot
+                = ast::is_valid(argument.value) ? ast.at(argument.value).node.try_as<ast::leading_dot>() : nullptr;
+            auto const* const literal
+                = ast::is_valid(argument.value) ? ast.at(argument.value).node.try_as<ast::literal>() : nullptr;
+            auto const name = argument.name.empty() ? cc::string_view() : text_of(file, argument.name);
+            auto const case_name = dot != nullptr ? text_of(file, dot->name) : cc::string_view();
+
+            // CHK-231: a run it fails, or a kind of diagnostic, with `*` for any run of characters
+            if (name.empty() && (case_name == "fail" || case_name == "assert"))
+                result.push_back(
+                    {.kind = case_name == "fail" ? expectation_kind::fail : expectation_kind::assert_, .where = where});
+            else if ((name == "error" || name == "warning") && literal != nullptr
+                     && literal->kind == ast::literal_kind::quoted)
+            {
+                auto pattern = text_of(file, where);
+                if (pattern.size() >= 2)
+                    pattern = pattern.subview({.offset = 1, .size = pattern.size() - 2});
+                result.push_back({.kind = name == "error" ? expectation_kind::error : expectation_kind::warning,
+                                  .pattern = cc::string(pattern),
+                                  .where = where});
+            }
+            else
+                report(diagnostic_kind::invalid_attribute_arguments, file, where,
+                       "@expect names what the test does: .fail, .assert, error = \"kind\" or warning = \"kind\"");
+        }
+    }
+    return result;
 }
 
 ast::stmt_id checker::last_code_line(i32 file, ast::range_of<ast::stmt_id> statements) const

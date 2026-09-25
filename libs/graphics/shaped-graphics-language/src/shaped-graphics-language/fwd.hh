@@ -263,6 +263,8 @@ struct outcome;
 
 struct legalize_options;
 
+enum class expectation_kind : u8;
+struct test_expectation;
 struct test_info;
 struct related_note;
 struct located_diagnostic;

@@ -167,6 +167,8 @@ enum class sgl::diagnostic_kind : sgl::u8
     test_must_end_in_check,
     /// A test that ran, and did not pass: a false check, a false assert, or a run that ended another way.
     test_failed,
+    /// An `@expect` whose diagnostic did not occur in its test.
+    unmet_expectation,
 };
 
 namespace sgl

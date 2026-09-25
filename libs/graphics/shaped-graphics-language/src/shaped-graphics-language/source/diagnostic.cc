@@ -194,6 +194,8 @@ cc::string_view sgl::to_string(diagnostic_kind kind)
         return "test-must-end-in-check";
     case diagnostic_kind::test_failed:
         return "test-failed";
+    case diagnostic_kind::unmet_expectation:
+        return "unmet-expectation";
     }
     CC_UNREACHABLE("unknown diagnostic_kind");
 }
@@ -292,6 +294,7 @@ sgl::severity sgl::default_severity_of(diagnostic_kind kind)
     case diagnostic_kind::test_captures_runtime_value:
     case diagnostic_kind::test_must_end_in_check:
     case diagnostic_kind::test_failed:
+    case diagnostic_kind::unmet_expectation:
         return severity::normal_error;
     case diagnostic_kind::spaced_attribute_arguments:
     case diagnostic_kind::no_effect:

@@ -135,6 +135,19 @@ enum light_kind:
 * **CHK-229** In the flat tree a check or an `assert` is a `check` statement, whose body leaves every node of the condition in a `var` of its own.
   A node is an `and`, an `or`, a `not`, a comparison, a comparison chain, or a leaf any other expression is; it runs in the order and under the conditions the condition itself would run it.
 * **CHK-230** A test whose body checked clean, and whose every callee inlines whole, has a flat tree of its own, of no stage and without a parameter.
+* **CHK-231** `@expect` on a test names what it does, one argument each: `.fail`, `.assert`, `error = "kind"` or `warning = "kind"`, where `*` in a kind stands for any run of characters.
+  Any other argument is `invalid-attribute-arguments`.
+* **CHK-232** A diagnostic of any phase that stands inside a test, from its keyword to the end of its body, and that an `error` or a `warning` expectation names is the test's, and is reported nowhere.
+  An expectation nothing met is `unmet-expectation`, and a test that expects a diagnostic is judged by that alone and never run.
+  A test that expects `.fail` passes where its run fails, and one that expects `.assert` where its run stops at a false `assert`.
+
+```sgl sketch
+fun shade(k: float) -> float:
+    @expect(error = "test-captures-runtime-value") test k > 0.0
+    return k
+
+@expect(.fail) test 1 > 2
+```
 
 ```sgl
 fun square(x: float) -> float => x * x
@@ -172,6 +185,7 @@ fun shade(k: float) -> float:
 | a struct | `@builtin`, `@vertex`, `@pixel`, `@shadowable` |
 | an enum | `@builtin`, `@shadowable` |
 | a const | `@shadowable` |
+| a test | `@expect` |
 | a binding | `@inline`, `@shadowable` |
 | a binding member | `@unfilterable`, `@non_filtering` |
 | a struct field | `@position`, `@thread_id`, `@per_instance`, `@stream` |
@@ -510,7 +524,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `unknown-builtin` | CHK-31 |
 | `expected-body` | CHK-32 |
 | `opaque-struct-needs-builtin` | CHK-34 |
-| `invalid-attribute-arguments` | CHK-36, CHK-39, CHK-204, CHK-208, CHK-211, CHK-212 |
+| `invalid-attribute-arguments` | CHK-36, CHK-39, CHK-204, CHK-208, CHK-211, CHK-212, CHK-231 |
 | `binding-not-listed` | CHK-45, CHK-131, CHK-228 |
 | `type-mismatch` | CHK-52, CHK-56, CHK-77, CHK-84, CHK-112 to CHK-118, CHK-121, CHK-167, CHK-210, CHK-214, CHK-219 |
 | `not-assignable` | CHK-112 |
@@ -532,6 +546,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `shadows-unshadowable` | CHK-220 |
 | `test-captures-runtime-value` | CHK-228 |
 | `test-must-end-in-check` | CHK-226 |
+| `unmet-expectation` | CHK-232 |
 
 ## Open
 

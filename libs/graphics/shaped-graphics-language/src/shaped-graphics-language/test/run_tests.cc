@@ -188,6 +188,8 @@ cc::vector<test_result> sgl::test::run_tests(checked_module const& m,
         auto const& test = m.tests[t];
         if (options.file >= 0 && test.file != options.file)
             continue;
+        if (test.expects_diagnostics())
+            continue;
         auto result = test_result{.test = i32(t)};
         if (test.unit < 0)
         {
@@ -246,9 +248,87 @@ cc::vector<test_result> sgl::test::run_tests(checked_module const& m,
             result.status = test_status::internal_error;
             break;
         }
+
+        // CHK-232: a test that is to fail passes by failing, and one that is to stop at an assert by stopping there
+        for (auto const& e : test.expectations)
+        {
+            if (e.kind != expectation_kind::fail && e.kind != expectation_kind::assert_)
+                continue;
+            auto const is_met = e.kind == expectation_kind::fail ? result.status == test_status::failed
+                                                                       || result.status == test_status::assertion_failed
+                                                                 : result.status == test_status::assertion_failed;
+            if (is_met)
+            {
+                result.status = test_status::passed;
+                result.failures.clear();
+                result.failures_dropped = 0;
+            }
+            else if (result.status == test_status::passed)
+            {
+                result.status = test_status::failed;
+                result.detail = e.kind == expectation_kind::fail ? "it was to fail, and it passed"
+                                                                 : "it was to stop at an assert, and it ran to its end";
+            }
+        }
         results.push_back(cc::move(result));
     }
     return results;
+}
+
+bool sgl::test::matches_glob(cc::string_view pattern, cc::string_view text)
+{
+    if (pattern.empty())
+        return text.empty();
+    if (pattern.front() == '*')
+    {
+        for (auto i = isize(0); i <= text.size(); ++i)
+            if (matches_glob(pattern.subview({.start = 1, .end = pattern.size()}),
+                             text.subview({.start = i, .end = text.size()})))
+                return true;
+        return false;
+    }
+    return !text.empty() && pattern.front() == text.front()
+        && matches_glob(pattern.subview({.start = 1, .end = pattern.size()}),
+                        text.subview({.start = 1, .end = text.size()}));
+}
+
+void sgl::test::contain_expected(checked_module const& m, cc::vector<located_diagnostic>& diagnostics)
+{
+    for (auto const& test : m.tests)
+    {
+        if (!test.expects_diagnostics())
+            continue;
+        auto const begin = test.extent.offset;
+        auto const end = test.extent.offset + test.extent.length;
+        auto const is_inside = [&](located_diagnostic const& d)
+        { return d.file == test.file && d.what.where.offset >= begin && d.what.where.offset < end; };
+
+        for (auto const& e : test.expectations)
+        {
+            if (e.kind != expectation_kind::error && e.kind != expectation_kind::warning)
+                continue;
+            auto const wants_warning = e.kind == expectation_kind::warning;
+            auto const is_expected = [&](located_diagnostic const& d)
+            {
+                return is_inside(d) && (d.what.level == severity::warning) == wants_warning
+                    && matches_glob(e.pattern, to_string(d.what.kind));
+            };
+            auto is_met = false;
+            for (auto const& d : diagnostics)
+                is_met = is_met || is_expected(d);
+            if (is_met)
+                diagnostics.remove_all_where(is_expected);
+            else
+                diagnostics.push_back({
+                    .what = {.kind = diagnostic_kind::unmet_expectation,
+                             .level = default_severity_of(diagnostic_kind::unmet_expectation),
+                             .where = e.where},
+                    .file = test.file,
+                    .detail
+                    = cc::format("no {} of kind {} stands in this test", wants_warning ? "warning" : "error", e.pattern),
+                });
+        }
+    }
 }
 
 located_diagnostic sgl::test::diagnostic_of(checked_module const& m, test_result const& r)
@@ -258,7 +338,9 @@ located_diagnostic sgl::test::diagnostic_of(checked_module const& m, test_result
     switch (r.status)
     {
     case test_status::failed:
-        detail = cc::format("{} of {} checks failed", r.failures.size() + r.failures_dropped, r.checks_run);
+        detail = r.failures.empty() && !r.detail.empty()
+                   ? r.detail
+                   : cc::format("{} of {} checks failed", r.failures.size() + r.failures_dropped, r.checks_run);
         break;
     case test_status::assertion_failed:
         detail = "an assert failed, and the run stopped there";

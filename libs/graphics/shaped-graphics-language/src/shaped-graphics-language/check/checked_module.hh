@@ -38,6 +38,30 @@ struct sgl::check::located_diagnostic
     }
 };
 
+/// What an `@expect` argument says a test does.
+enum class sgl::check::expectation_kind : sgl::u8
+{
+    /// `.fail`: the run fails, by a check or an assert.
+    fail,
+    /// `.assert`: the run stops at a false `assert`.
+    assert_,
+    /// `error = "kind"`: a diagnostic of that kind, a normal or a fatal error, stands in the test.
+    error,
+    /// `warning = "kind"`: the same, of a warning.
+    warning,
+};
+
+struct sgl::check::test_expectation
+{
+    expectation_kind kind = expectation_kind::fail;
+    /// The kind name a diagnostic must have, where `*` stands for any run of characters: `type-*`.
+    cc::string pattern;
+    /// The argument, which an unmet expectation is reported at.
+    source_span where;
+
+    bool operator==(test_expectation const&) const = default;
+};
+
 /// One `test` of the module, wherever it stands.
 struct sgl::check::test_info
 {
@@ -46,14 +70,32 @@ struct sgl::check::test_info
     ast::decl_id declaration = ast::decl_id::none;
     /// The `test` keyword, which is where the test is named in a report.
     source_span where;
+    /// From the keyword to the end of the body: a diagnostic inside it is the test's, which `@expect` may name.
+    source_span extent;
     /// What stands around it, for a reader: empty at file scope, `struct light`, `fun shade`.
     cc::string scope_path;
     /// The text of a `//` comment on the `test` line or on the line above it, which says what the test is for.
     cc::string comment;
     /// A position in `checked_module::test_units`, -1 for a test with no flat tree.
     i32 unit = -1;
+    /// Its `@expect` arguments, in the order written.
+    cc::vector<test_expectation> expectations;
 
-    bool operator==(test_info const&) const = default;
+    /// True where an expectation names a diagnostic, which makes the test one that is judged by them and never run.
+    [[nodiscard]] bool expects_diagnostics() const
+    {
+        for (auto const& e : expectations)
+            if (e.kind == expectation_kind::error || e.kind == expectation_kind::warning)
+                return true;
+        return false;
+    }
+
+    [[nodiscard]] bool operator==(test_info const& rhs) const
+    {
+        return symbol == rhs.symbol && file == rhs.file && declaration == rhs.declaration && where == rhs.where
+            && extent == rhs.extent && scope_path == rhs.scope_path && comment == rhs.comment && unit == rhs.unit
+            && ast::impl::is_equal(expectations, rhs.expectations);
+    }
 };
 
 /// One module after name resolution, type checking and evaluation, as one value beside the ASTs it was checked from.

@@ -282,6 +282,7 @@ if(SC_BUILD_TESTS)
         tests/check/source-flat-test-support.hh
 
         tests/interpret/check-run-test.cc
+        tests/interpret/expect-test.cc
         tests/interpret/interpret-test.cc
         tests/interpret/run-tests-test.cc
 

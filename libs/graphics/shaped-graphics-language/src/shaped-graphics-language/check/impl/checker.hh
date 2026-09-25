@@ -322,6 +322,8 @@ struct checker
     /// The statement that is the last code line of `statements`, through the last branch of an `if`, a loop's body and
     /// the last arm of a `case`; `none` for an empty list.
     [[nodiscard]] ast::stmt_id last_code_line(i32 file, ast::range_of<ast::stmt_id> statements) const;
+    /// The arguments of every `@expect` among `attributes`; a malformed one is reported and left out.
+    [[nodiscard]] cc::vector<test_expectation> expectations_of(i32 file, ast::range_of<ast::attribute> attributes);
     /// The text of a `//` comment on the line of `where`, or alone on the line above it; empty without one.
     [[nodiscard]] cc::string comment_of(i32 file, source_span where) const;
     /// Reports a use of what a test cannot reach: a name `local` of the function around it.
