@@ -1,9 +1,13 @@
+#include <clean-core/string/format.hh>
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
+#include <shaped-graphics-language/check/resources.hh>
+#include <shaped-graphics-language/emit/impl/plan.hh>
 #include <shaped-graphics/binding/compiled_shader.hh>
-#include <shaped-shader-library/binding/binding_groups.hh> // slib::inline_constants_space
+#include <shaped-graphics/fwd.hh>                          // sg::max_binding_groups
+#include <shaped-shader-library/binding/binding_groups.hh> // slib::inline_constants_space, slib::rewrite_binding_groups
 #include <shaped-shader-library/compiler/dxc_compiler.hh>
 #include <shaped-shader-library/compiler/sgl_compiler.hh>
 #include <shaped-shader-library/compiler/wgsl_compiler.hh>
@@ -316,6 +320,89 @@ ASYNC_TEST("slib sgl compiler - the control flow the legalizer writes is accepte
                                              {.language = slib::shader_language::sgl, .label = "control-flow.sgl"});
         co_await cc::async_settled(node);
         CHECK(value_of(node).bytecode.size() > 0);
+    }
+}
+
+namespace
+{
+/// Two groups, and in the second one resource of every kind, so a register class, a slot or a space off by one shows.
+constexpr auto k_two_groups_source
+    = cc::string_view("binding frame:\n"
+                      "    values: buffer[float]\n"
+                      "\n"
+                      "binding post:\n"
+                      "    texel_size: float2\n"
+                      "    src: texture2d[float4]\n"
+                      "    dst: out image2d[.rgba8_unorm]\n"
+                      "    acc: mut image2d[.r32_float]\n"
+                      "    sampler bilinear:\n"
+                      "        filter = .linear\n"
+                      "        address = .clamp_edge\n"
+                      "\n"
+                      "@compute(8, 8) fun blur(@thread_id id: int3){frame, post}:\n"
+                      "    let xy = int2(id.x, id.y)\n"
+                      "    let uv = ((xy as float2) + float2(0.5, 0.5)) * post.texel_size * frame.values[0]\n"
+                      "    let c = DEBUG_sample_level(post.src, uv, 0.0, post.bilinear)\n"
+                      "    DEBUG_store(post.dst, xy, c)\n"
+                      "    DEBUG_store(post.acc, xy, DEBUG_load(post.acc, xy) + c.x)\n");
+} // namespace
+
+ASYNC_TEST("slib sgl compiler - every compiler behind an edge reflects the group and slot SGL wrote",
+           exclusive("slib-shader-library"))
+{
+    // `name group index` per binding, which is what a layout built from `sgl describe` assumes on every backend.
+    constexpr auto expected = cc::string_view("frame.values 0 0\n"
+                                              "post 1 0\n"
+                                              "post.src 1 1\n"
+                                              "post.dst 1 2\n"
+                                              "post.acc 1 3\n"
+                                              "post.bilinear 1 4\n");
+
+    slib::shader_library lib;
+    add_sgl_compilers(lib);
+
+    for (auto const format : lib.supported_formats(slib::shader_language::sgl))
+    {
+        auto const node = lib.compile_source(k_two_groups_source, sg::shader_stage::compute, "blur", format,
+                                             {.language = slib::shader_language::sgl, .label = "two-groups.sgl"});
+        co_await cc::async_settled(node);
+        auto const& cs = value_of(node);
+        auto addresses = cc::string();
+        for (auto const name : {"frame.values", "post", "post.src", "post.dst", "post.acc", "post.bilinear"})
+        {
+            auto const* b = find_binding(cs, name);
+            REQUIRE(b != nullptr);
+            // dx12 reads the group as the register space, vulkan and WebGPU as the set.
+            auto const group = format == sg::shader_format::dxil ? b->space : b->group_index;
+            REQUIRE(group.has_value());
+            addresses.appendf("{} {} {}\n", name, group.value(), b->index);
+        }
+        CHECK(addresses == expected);
+        CHECK(cs.bindings.size() == 6);
+    }
+}
+
+// sgl links neither sg nor slib, so its emitter repeats what they own; these hold each copy to the original.
+static_assert(sgl::emit::impl::k_max_groups == sg::max_binding_groups);
+
+TEST("slib sgl compiler - SGL spells every image format for SPIR-V as slib's pass does")
+{
+    for (auto const& f : sgl::check::k_storage_formats)
+    {
+        auto const hlsl = cc::format("#pragma sc group 0\n"
+                                     "namespace g\n"
+                                     "{{\n"
+                                     "#pragma sc format {}\n"
+                                     "    RWTexture2D<float4> image;\n"
+                                     "}}\n",
+                                     f.name);
+        auto const rewritten = slib::rewrite_binding_groups(hlsl, sg::shader_format::spirv);
+        REQUIRE(rewritten.has_value());
+        auto const text = cc::string_view(rewritten.value());
+        if (f.spirv.empty())
+            CHECK(!text.contains("vk::image_format"));
+        else
+            CHECK(text.contains(cc::format("[[vk::image_format(\"{}\")]]", f.spirv)));
     }
 }
 

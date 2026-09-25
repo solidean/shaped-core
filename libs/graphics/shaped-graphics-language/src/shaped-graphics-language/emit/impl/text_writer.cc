@@ -231,12 +231,11 @@ struct writer
                 // A buffer is a global of its own; every other member is a field of a block, `@inline` or its group's.
                 if (auto const found = resource_of(p, b.binding, b.member); found >= 0)
                 {
-                    result = {.text = d.resource_reference(p.resources[found])};
+                    result = {.text = p.resources[found].name};
                     return;
                 }
                 auto const& block = *block_of(p, b.binding);
-                result = {.text = cc::format("{}.{}", d.block_reference(block),
-                                             block.members[block.block_member_of[b.member]].name)};
+                result = {.text = cc::format("{}.{}", block.name, block.members[block.block_member_of[b.member]].name)};
             },
             [&](flat_buffer_element const& b)
             {

@@ -13,8 +13,7 @@ Back to the [semantics](_index.md); the reasons are in [why/emitting.md](why/emi
 
 * **EMIT-1** A **target** is a text format together with the addressing rules of the backend that reads it.
 * **EMIT-2** The targets are `hlsl-dx12`, `hlsl-vulkan`, `wgsl` and `msl` ([why](why/emitting.md#emit-2)).
-* **EMIT-3** The WGSL and MSL text carries its final addresses: no later pass numbers a binding, a location or an offset.
-  The HLSL text carries every location and offset and the group of each resource, and leaves the register to slib's binding pass (EMIT-86); HLSL with final registers is open.
+* **EMIT-3** Every target's text carries its final addresses: no later pass numbers a binding, a location or an offset.
 * **EMIT-4** No target depends on a flag of the compiler that reads its text ([why](why/emitting.md#emit-4)).
 * **EMIT-5** One emission writes one entry point: that entry point, and exactly the structs and the binding it needs.
 * **EMIT-6** Nothing in the text of one entry point depends on the text of another ([why](why/emitting.md#emit-6)).
@@ -144,18 +143,18 @@ A binding that is not `@inline` is a group.
 * **EMIT-83** A group's plain members are a struct of their own and one constant buffer of it, named after the binding, at slot 0.
 * **EMIT-84** A group's plain members are placed by EMIT-39 to EMIT-41, as the members of an `@inline` binding are.
 * **EMIT-85** A buffer member is one global whose name is minted from `<binding>_<member>`, and a group's constant buffer is named after the binding, as any declaration is.
-* **EMIT-86** HLSL writes a group as `#pragma sc group N` and a namespace `<binding>_bindings`, with no register: slib's binding pass assigns every one ([why](why/emitting.md#emit-86)).
-* **EMIT-87** The struct of a group's constant buffer stands ahead of that namespace, and `hlsl-vulkan` states no offset on its members ([why](why/emitting.md#emit-87)).
+* **EMIT-86** HLSL writes each declaration of a group at file scope, under the name EMIT-85 minted for it, and each carries its address by EMIT-104 ([why](why/emitting.md#emit-86)).
+* **EMIT-87** The struct of a group's constant buffer stands ahead of the group's declarations ([why](why/emitting.md#emit-87)).
+  `hlsl-vulkan` states every member's offset on it, as EMIT-40 does for an `@inline` binding.
 * **EMIT-88** WGSL writes each resource of a group as `@group(N) @binding(slot)`: the constant buffer as `var<uniform>`, a buffer as a `var<storage>` array, `read` or `read_write`.
 * **EMIT-89** MSL writes no group and no compute entry point yet: an entry point that lists a group, or is `@compute`, is `unsupported`.
   How a group will read in MSL is in [bindings.md](../bindings.md#how-a-group-reaches-sg).
 * **EMIT-90** A group's resources — buffers, textures, images and samplers — take the slots after its constant buffer, in declaration order, from 1, or from 0 when it has no plain member.
 * **EMIT-97** A texture, an image and a sampler member are each one global minted as a buffer's is, by EMIT-85, and each has its target's own type by the table below.
-* **EMIT-98** HLSL states an image's format as slib's `#pragma sc format`, with sg's name for it.
-  slib's pass turns it into `[[vk::image_format]]` on the SPIR-V arm, which DXC makes a typed image of, and records it as the binding's `storage_format`.
-* **EMIT-99** A static sampler of a group is its `SamplerState`, or `SamplerComparisonState` where it has a `compare`, preceded by slib's `#pragma sc static`.
-  The pragma carries every filter and address and each other setting that is not its default.
-  WGSL has no static sampler, and writes it as it writes a sampler the host binds: the layout says it is static.
+* **EMIT-98** `hlsl-vulkan` states an image's format as `[[vk::image_format]]`, in DXC's spelling, which DXC makes a typed image of.
+  `hlsl-dx12` states none, since dx12 takes the format from the view, and neither does `bgra8_unorm` on vulkan, which SPIR-V has no name for.
+* **EMIT-99** A static sampler of a group is its `SamplerState`, or `SamplerComparisonState` where it has a `compare`, with its address and nothing else.
+  Its settings reach the layout from `sgl describe`, never from the text, so every target writes it as it writes a sampler the host binds.
 * **EMIT-100** WGSL writes a 1D texture or image as a 2D one and a 1D array as a 2D array, since sg's webgpu backend creates every 1D texture that way (the bindings file, "Shapes").
 * **EMIT-101** A call of a builtin that gives nothing is a statement as it stands, with no `_ =` in WGSL.
 * **EMIT-102** A builtin a target cannot write as one expression declares a helper function ahead of the entry point, once per text, and the call names it.
@@ -163,6 +162,10 @@ A binding that is not `@inline` is a group.
 * **EMIT-103** WGSL text whose entry point calls a builtin that takes derivatives implicitly, `DEBUG_sample`, opens with `diagnostic(off, derivative_uniformity);`, and other WGSL text does not.
   HLSL samples under an `if` that differs between pixels, and Tint refuses it, so without the directive a program would be written for some targets only, against EMIT-13.
   It is a stopgap: SGL is to judge uniformity itself, as the [incubator](../incubator/uniformity.md) sketches.
+* **EMIT-104** A resource at slot i of group N is `register(<class>i, spaceN)` in `hlsl-dx12` and `[[vk::binding(i, N)]]` in `hlsl-vulkan`, which is the address sg's backends give that slot.
+  The class is `b` for the constant buffer, `u` for an image and a `mut` buffer, `s` for a sampler, and `t` for every other resource.
+* **EMIT-105** An entry point that lists more than three groups is `too-many-groups` on every target, since sg binds three besides the inline constants.
+  Only the entry point's list counts: a function that is no entry point takes the groups its caller hands it, which are no addresses of their own.
 
 | SGL | HLSL | WGSL |
 |---|---|---|
@@ -279,11 +282,11 @@ So `{float3; float}` is `layout-mismatch`: the `float` is at byte 12 in HLSL and
 | `non-finite-literal` | EMIT-50 |
 | `malformed-tree` | a flat tree the check pass does not produce |
 | `not-core` | EMIT-66 |
+| `too-many-groups` | EMIT-105 |
 
 ## Open
 
 * GLSL, which comes through the same seam.
-* HLSL with final registers, one emission for dx12 and one for vulkan, so that no binding pass reads SGL's text and EMIT-3 holds for every target.
 * A Metal compiler for the MSL text, and the buffer index of EMIT-58, which sg's metal backend has yet to adopt.
 * Whether a block member becomes `packed_float3` in MSL, which would let `{float3; float}` through at the price of a conversion on every read.
 * Whether an emit error becomes a diagnostic with a span; today it names a symbol and carries a detail.

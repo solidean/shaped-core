@@ -118,8 +118,8 @@ One walker reads the flat tree, and a target is a small spelling layer over it.
 How a builtin is written comes from its record: a call under a name per target, an infix or a prefix operator, or a writer of its own for the few that are neither.
 The size and alignment the `layout-mismatch` check places a member by are fields of the type's record.
 
-* WGSL and MSL carry their **final addresses**: member order is the location, and an `@inline binding` sits where sg expects inline constants.
-  HLSL carries the same locations and names each resource's group with `#pragma sc group N`, and slib's binding pass assigns its registers; final registers for both HLSL targets are open below.
+* Every target carries its **final addresses**: member order is the location, and an `@inline binding` sits where sg expects inline constants.
+  HLSL writes a group's resources at the register or `[[vk::binding]]` sg's backends give its slot, so no binding pass reads SGL's text.
 * A name that is reserved in one target gets a trailing underscore there.
   The function a builtin is called as is reserved from its record, so a local named `lerp` is renamed in HLSL without an entry in any list.
   The exception is a function only a custom writer calls, such as `mul`, which stands in `emit/reserved_words.cc`.
@@ -154,6 +154,4 @@ Every "why" is mirrored in a `why/` folder beside its rules, and ideas that are 
 
 Generics, methods and lambdas.
 GLSL, a Metal toolchain, and in MSL a compute entry point and a group.
-HLSL with final registers, one emission for dx12 and one for vulkan, so that SGL's text feeds no binding pass.
-A binding member that is neither a buffer nor a plain value, such as a texture or a sampler.
 Modules, interfaces and the parallel driver of [the compilation model](spec/incubator/compilation-model.md).
