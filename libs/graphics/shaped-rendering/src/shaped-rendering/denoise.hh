@@ -212,10 +212,19 @@ class sr::denoise_history
 {
 public:
     denoise_history() = default;
-    denoise_history(denoise_history&&) noexcept = default;
-    denoise_history& operator=(denoise_history&&) noexcept = default;
+    denoise_history(denoise_history&&) noexcept;
+    denoise_history& operator=(denoise_history&&) noexcept;
     denoise_history(denoise_history const&) = delete;
     denoise_history& operator=(denoise_history const&) = delete;
+
+    /// Releases whatever a member is holding for this stream.
+    ///
+    /// **The GPU must be done with this history**, which for a member holding device memory is a real requirement
+    /// rather than good manners: state released while a frame that used it is still in flight is a use-after-free
+    /// with no diagnostic.
+    /// A caller dropping a history mid-frame drains first; sv drops one only when its view goes, which is after the
+    /// store has let the epoch complete.
+    ~denoise_history();
 
     /// How many images a member may keep here.
     /// Public because each member asserts its own slot range at namespace scope, where friendship does not reach.
@@ -234,10 +243,22 @@ public:
 private:
     friend class atrous_denoise_routine;
     friend class svgf_denoise_routine;
+    friend class oidn_denoise_routine;
 
     /// Brings this to `method` at `extent`, dropping everything if either changed.
     /// Returns whether the call starts from no history.
     bool _prepare(denoise_method method, tg::vec2i extent);
+
+    /// A member's own per-stream object — for OIDN, the network and its feature maps.
+    ///
+    /// Opaque, with the release function beside it, so this header names no member's type and a history still frees
+    /// what it holds without knowing what that is.
+    /// `_prepare` releases it whenever it drops the rest, since the state is built for one extent.
+    void* _vendor_state = nullptr;
+    void (*_release_vendor_state)(void*) = nullptr;
+
+    /// Drops `_vendor_state` through `_release_vendor_state`, and forgets both.
+    void _release_vendor();
 
     denoise_method _method = denoise_method::none;
     tg::vec2i _extent = tg::vec2i(0, 0);

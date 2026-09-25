@@ -1,0 +1,3 @@
+# The fetched weights; hydrate them with fetch-oidn-weights.py.
+.install/
+.install.staging/

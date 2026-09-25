@@ -232,7 +232,7 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   That matters because the argument-buffer layout was chosen to match what SPIRV-Cross emits, so a hand-written kernel would pin a convention no real pipeline produces.
   **What blocks it is DXC, and only on the host.**
   Microsoft ships no macOS release binary, and building it from source is an LLVM-scale build.
-  [extern/dxc/dependency.yml](../../../../extern/dxc/dependency.yml) records that as `unavailable_on: [macos]`.
+  [extern/dxc/dependency.yml](../../../../extern/dxc/dependency.yml) records that by naming `macos` in `unavailable_on`.
   SPIRV-Cross is not vendored at all, but it is plain CMake and would build here; it is not the constraint.
 
   That splits the work into two pieces with different costs, and they are worth deciding separately.

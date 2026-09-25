@@ -244,7 +244,14 @@ ASYNC_INVOCABLE_TEST("sr - denoise automatic resolves to a supported member", (s
     auto const on_a_mean = sr::denoise_settings{.method = sr::denoise_method::automatic};
     auto const on_fresh_frames = sr::denoise_settings{.method = sr::denoise_method::automatic, .fresh_samples = true};
     CHECK(support.svgf);
-    CHECK(sr::resolve_denoise_method(ctx, on_a_mean) == sr::denoise_method::atrous);
+
+    // The spatial side is written as the whole ORDER rather than as one name: this asserted `atrous` outright until
+    // OIDN arrived, whose weights are fetched on some machines and not others.
+    auto const spatial = sr::resolve_denoise_method(ctx, on_a_mean);
+    CHECK(spatial == (support.oidn ? sr::denoise_method::oidn : sr::denoise_method::atrous))
+        .context(cc::format("supported: oidn {}", support.oidn));
+    CHECK(!sr::is_temporal(spatial));
+
     CHECK(sr::resolve_denoise_method(ctx, on_fresh_frames) == sr::denoise_method::svgf);
 
     // A named member resolves to itself whether or not it is supported: refusing it is execute's job, and it must

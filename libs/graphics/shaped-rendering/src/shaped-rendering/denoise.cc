@@ -9,6 +9,7 @@
 #include <shaped-rendering/atrous_denoise_routine.hh>
 #include <shaped-rendering/denoise.hh>
 #include <shaped-rendering/impl/denoise_images.hh>
+#include <shaped-rendering/oidn_denoise_routine.hh>
 #include <shaped-rendering/svgf_denoise_routine.hh>
 #include <sr_shaders.hh>
 
@@ -126,12 +127,67 @@ denoise_guide_set denoise_inputs::present_guides() const
     return set;
 }
 
+denoise_history::denoise_history(denoise_history&& other) noexcept
+  : _method(other._method),
+    _extent(other._extent),
+    _reset_requested(other._reset_requested),
+    _frame(other._frame),
+    _vendor_state(other._vendor_state),
+    _release_vendor_state(other._release_vendor_state)
+{
+    for (auto i = 0; i < 8; ++i)
+        _state[i] = cc::move(other._state[i]);
+
+    // Moved FROM rather than shared: two histories releasing one object is the double free this exists to prevent,
+    // and the type is move-only precisely so there is one owner.
+    other._vendor_state = nullptr;
+    other._release_vendor_state = nullptr;
+}
+
+denoise_history& denoise_history::operator=(denoise_history&& other) noexcept
+{
+    if (this == &other)
+        return *this;
+
+    // Whatever this held is going away, so it owes its release before it is overwritten.
+    _release_vendor();
+
+    _method = other._method;
+    _extent = other._extent;
+    _reset_requested = other._reset_requested;
+    _frame = other._frame;
+    for (auto i = 0; i < 8; ++i)
+        _state[i] = cc::move(other._state[i]);
+
+    _vendor_state = other._vendor_state;
+    _release_vendor_state = other._release_vendor_state;
+    other._vendor_state = nullptr;
+    other._release_vendor_state = nullptr;
+    return *this;
+}
+
+denoise_history::~denoise_history()
+{
+    _release_vendor();
+}
+
+void denoise_history::_release_vendor()
+{
+    if (_vendor_state != nullptr && _release_vendor_state != nullptr)
+        _release_vendor_state(_vendor_state);
+    _vendor_state = nullptr;
+    _release_vendor_state = nullptr;
+}
+
 bool denoise_history::_prepare(denoise_method method, tg::vec2i extent)
 {
     auto const changed = _method != method || _extent != extent;
     auto const restarted = changed || _reset_requested;
     if (changed)
     {
+        // The state is built for one extent and one member, so it goes with them.
+        _release_vendor();
+
         // Built for another member or size, so nothing in it can be reused.
         for (auto& t : _state)
             t = {};
@@ -184,13 +240,16 @@ denoise_support query_denoise_support(sg::context const& ctx)
     auto const buildable
         = [&](slib::shader_asset_handle const& asset) { return asset != nullptr && asset->can_acquire(ctx); };
 
-    // The vendor members will read the adapter here; none of them is implemented yet, and saying so is what makes
-    // `automatic` skip them and a named request report `unsupported` rather than silently running something else.
+    // A member answers for itself: whether its shaders build, whether it is compiled in, and whether this device
+    // can run it.
+    // The ones still unimplemented stay false, which is what makes `automatic` skip them and a named request report
+    // `unsupported` rather than silently running something else.
     return {
         .atrous = buildable(sr::shaders::atrous_denoise.compute.main_cs),
         .svgf = buildable(sr::shaders::svgf_temporal.compute.main_cs)
              && buildable(sr::shaders::svgf_variance.compute.main_cs)
              && buildable(sr::shaders::svgf_atrous.compute.main_cs),
+        .oidn = oidn_denoise_routine::is_available(ctx),
     };
 }
 
@@ -210,8 +269,10 @@ denoise_guide_set required_guides(denoise_method m)
         return g::albedo | g::specular_albedo | g::normal | g::roughness | g::depth | g::motion;
     case denoise_method::fsr_rr:
         return g::albedo | g::normal | g::roughness | g::depth | g::motion;
-    case denoise_method::atrous:
     case denoise_method::oidn:
+        // Six of the network's nine input channels are these two, so a call without them is not a degraded run.
+        return g::albedo | g::normal;
+    case denoise_method::atrous:
     case denoise_method::none:
     case denoise_method::automatic:
     case denoise_method::count_:
@@ -230,7 +291,7 @@ denoise_guide_set optional_guides(denoise_method m)
     case denoise_method::svgf:
         return g::albedo;
     case denoise_method::oidn:
-        return g::albedo | g::normal;
+        return {};
     case denoise_method::dlss_rr:
         return g::hit_distance;
     case denoise_method::fsr_rr:
@@ -288,6 +349,8 @@ cc::shared_async<cc::unit> denoise_routine::init(sg::routine_init_scope scope)
         atrous_denoise_routine::prewarm(ctx);
     if (support.svgf)
         svgf_denoise_routine::prewarm(ctx);
+    if (support.oidn)
+        oidn_denoise_routine::prewarm(ctx);
     co_return;
 }
 
@@ -326,6 +389,7 @@ denoise_outcome denoise_routine::execute(sg::command_list& cmd,
     case denoise_method::svgf:
         return svgf_denoise_routine::execute(cmd, in, history, svgf_denoise_routine::options_for(settings));
     case denoise_method::oidn:
+        return oidn_denoise_routine::execute(cmd, in, history, oidn_denoise_routine::options_for(settings));
     case denoise_method::dlss_rr:
     case denoise_method::fsr_rr:
     case denoise_method::none:

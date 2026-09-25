@@ -50,6 +50,8 @@ def _ensure_prereqs(root: Path, preset: Preset, emsdk_path: str | None = None) -
     prereqs.ensure_sdl3(root, preset.name)
     prereqs.ensure_node_webgpu(root, preset.name, emsdk_path)
     prereqs.ensure_sqlite(root, preset.name)
+    prereqs.ensure_oidn(root, preset.name)
+    prereqs.ensure_oidn_weights(root, preset.name)
 
 
 def _configure_one(

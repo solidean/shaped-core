@@ -4,10 +4,20 @@ Running list of known follow-ups.
 Bigger design intent lives in [structure.md](structure.md).
 
 - First routines on the framework: texture compression, tonemapping.
-- Denoising, beyond à-trous and SVGF — [denoising.md](denoising.md) is the design and the order:
-  sg's declared native scope and DLSS Ray Reconstruction next; then FSR Ray Regeneration.
-  OIDN alongside, once its shipped size is measured, which decides whether its CPU build is fetched by default.
-  NRD waits for a tracer that splits diffuse from specular radiance and writes hit distances.
+- The OIDN weights are found through a compile-time path, which is fine for a test and not for a shipped binary.
+  `SR_OIDN_WEIGHTS_DIR` points into the source tree; the member will want the blob staged beside the executable the way OIDN's own runtime is, or embedded.
+- Denoising: `fsr_rr` is the one member left — [denoising.md](denoising.md) is the design.
+  It waits for a tracer that splits diffuse from specular radiance and writes hit distances, which is what NRD wants too, so the tracer work buys both.
+- Half precision for the OIDN network, which is the one acceleration it could take that is portable.
+  DX12 has it as SM 6.2 with `-enable-16bit-types`, Vulkan as `VK_KHR_shader_float16_int8` with `VK_KHR_16bit_storage`, Metal has `half` outright, and WebGPU has the optional `shader-f16` feature.
+  Optional on all four rather than guaranteed, so it wants a feature level rather than an assumption — but a shipped one, unlike the matrix instructions this network would really like.
+  Three pieces, none of them in sr: slib passes DXC no flag and has no option to (ssc has a raw `extra_args`, hashed into the shader cache key, that nothing plumbs);
+  sg has no capability to gate on, though the webgpu backend already has the shape for one in `k_optional_features`;
+  and the C++ mirror problem in [binding-preprocessor.md](../../shaped-shader-library/docs/binding-preprocessor.md) is about constant blocks, which this network does not use.
+  Its weights already arrive as fp16, and `from_half` widens them on load.
+  **Expect memory rather than speed.**
+  The convolution is bound by cache lines rather than bytes, which is why reading four channels at once bought 1.4x and not 4x, and an 8-byte `half4` costs the same line as a 16-byte `float4`.
+  What the memory buys is a larger tile, and tile size is the lever that still pays.
 - à-trous estimates noise from the sample count alone, assuming one noise width per sample equal to the pixel's luminance.
   A tracer that accumulates the second moment would give it a measured per-pixel variance instead, which is what SVGF uses.
 - Port the native denoise members to SGL once it is feature-complete enough for them.

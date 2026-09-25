@@ -14,6 +14,9 @@ add_library(shaped-rendering
     src/shaped-rendering/denoise.cc
     src/shaped-rendering/atrous_denoise_routine.cc
     src/shaped-rendering/svgf_denoise_routine.cc
+    src/shaped-rendering/oidn_denoise_routine.cc
+    src/shaped-rendering/impl/tza.cc
+    src/shaped-rendering/impl/oidn_network.cc
     src/shaped-rendering/raster_box_filter_mipmap_routine.cc
     src/shaped-rendering/imgui_context.cc
     src/shaped-rendering/imgui_routine.cc
@@ -39,6 +42,7 @@ target_sources(shaped-rendering
     src/shaped-rendering/denoise.hh
     src/shaped-rendering/atrous_denoise_routine.hh
     src/shaped-rendering/svgf_denoise_routine.hh
+    src/shaped-rendering/oidn_denoise_routine.hh
     src/shaped-rendering/impl/denoise_images.hh
     src/shaped-rendering/raster_box_filter_mipmap_routine.hh
     src/shaped-rendering/window.hh
@@ -95,6 +99,29 @@ else()
     target_compile_definitions(shaped-rendering PUBLIC SR_HAS_WINDOW=0)
 endif()
 
+# Intel Open Image Denoise, when it has been fetched (extern/oidn/fetch-oidn.py, which dev.py runs on demand).
+#
+# It links PRIVATE and reaches impl/ alone, like every other denoiser SDK here.
+# No backend gate and no device gate: the member downloads, filters on the CPU and uploads, so it runs wherever sg
+# does and needs nobody's hardware — which is what makes it the one non-native member CI can exercise.
+# The trained networks, which are what the member actually runs.
+# A path rather than a target: nothing links them, and the member reads the blob at run time.
+# Empty when they were not fetched, which is what makes the member and its tests report that rather than fail to build.
+set(SR_OIDN_WEIGHTS_DIR_VALUE "")
+if(OIDN_WEIGHTS_DIR)
+    set(SR_OIDN_WEIGHTS_DIR_VALUE "${OIDN_WEIGHTS_DIR}")
+endif()
+target_compile_definitions(shaped-rendering PRIVATE SR_OIDN_WEIGHTS_DIR="${SR_OIDN_WEIGHTS_DIR_VALUE}")
+
+if(TARGET oidn)
+    target_sources(shaped-rendering PRIVATE src/shaped-rendering/impl/oidn_device.cc)
+    target_link_libraries(shaped-rendering PRIVATE oidn)
+    target_compile_definitions(shaped-rendering PUBLIC SR_HAS_OIDN=1)
+else()
+    target_sources(shaped-rendering PRIVATE src/shaped-rendering/impl/oidn_null.cc)
+    target_compile_definitions(shaped-rendering PUBLIC SR_HAS_OIDN=0)
+endif()
+
 # sr's own shader package.
 # Must be declared here, in the CMakeLists that defines the target: the generated sources are added as PRIVATE sources and add_custom_command(OUTPUT) is directory-scoped.
 # Routines that need shaders add their entry points to this one package.
@@ -135,6 +162,21 @@ sc_add_shader_package(
         svgf_atrous.hlsl:compute:main_cs
         svgf_atrous.hlsl:binding:svgf_atrous_bindings
         svgf_atrous.hlsl:constants:gConstants
+        nn_conv.hlsl:compute:main_cs
+        nn_conv.hlsl:binding:nn_conv_bindings
+        nn_conv.hlsl:constants:gConstants
+        nn_input.hlsl:compute:main_cs
+        nn_input.hlsl:binding:nn_input_bindings
+        nn_input.hlsl:constants:gConstants
+        nn_output.hlsl:compute:main_cs
+        nn_output.hlsl:binding:nn_output_bindings
+        nn_output.hlsl:constants:gConstants
+        nn_pool.hlsl:compute:main_cs
+        nn_pool.hlsl:binding:nn_pool_bindings
+        nn_pool.hlsl:constants:gConstants
+        nn_upsample.hlsl:compute:main_cs
+        nn_upsample.hlsl:binding:nn_upsample_bindings
+        nn_upsample.hlsl:constants:gConstants
 )
 
 # Test executable.
@@ -194,12 +236,25 @@ if(SC_BUILD_TESTS)
             tests/box-filter-mipmap-test.cc
             tests/raster-box-filter-mipmap-test.cc
             tests/denoise-test.cc
+        tests/oidn-test.cc
+        tests/tza-test.cc
+        tests/nn-conv-test.cc
+        tests/nn-ops-test.cc
+        tests/oidn-network-test.cc
         )
         target_link_libraries(shaped-rendering-test PRIVATE shaped-graphics-dx12)
 
         # These import dxcompiler.dll, so the binary does not start without it, and dxil.dll signs what it emits.
         # Staged here rather than left to the SDL3 block's $<TARGET_RUNTIME_DLLS>, which a build without SDL3 never runs.
         sc_stage_runtime_dlls(shaped-rendering-test TAG shaped-rendering-test-dxc DLLS ${DXC_RUNTIME_DLLS})
+    endif()
+
+    # OIDN's facade loads its core and its CPU device module by name out of its own directory, so all of them have to
+    # sit beside the binary rather than only the one the link names.
+    target_compile_definitions(shaped-rendering-test PRIVATE SR_OIDN_WEIGHTS_DIR="${SR_OIDN_WEIGHTS_DIR_VALUE}")
+
+    if(OIDN_RUNTIME_LIBRARIES)
+        sc_stage_runtime_dlls(shaped-rendering-test DLLS ${OIDN_RUNTIME_LIBRARIES} TAG oidn)
     endif()
 
     # The one test that crosses sr's window into metal's windowed presentation, which nothing else covers.

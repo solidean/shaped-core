@@ -56,6 +56,18 @@ Upstreams tag far more than they release, and GitHub's tags endpoint has no usef
 The default matches a plain version number.
 Dear ImGui needs `^v\d+(\.\d+)*-docking$`, because we track its docking branch rather than mainline.
 
+**`unavailable_on` names the machines an upstream publishes nothing for**, and it is the field a missing platform must go through rather than a check inside the fetch script.
+The keys are `windows`, `linux` and `macos`, each also spellable with an architecture — `windows-arm64`, `linux-arm64`, `macos-x64` and their `-x64` / `-arm64` siblings.
+A bare OS key covers every machine that system runs on; an arch-qualified one covers exactly that machine, which is what an upstream shipping x64 Linux but not arm64 Linux needs.
+An unrecognised key is refused at load, because ignoring it would silently mean "available everywhere" — the opposite of what the manifest says.
+
+Declaring it is not optional politeness.
+A missing per-OS key stays a hard error, since that means nobody has looked; `unavailable_on` is how the manifest says somebody did.
+And an upstream left undeclared is fetched anyway, with the archive for another instruction set installing perfectly cleanly.
+CMake then reads `.install/` as "the dependency is here", and the first sign of trouble is the linker refusing it.
+OIDN publishes x64 Windows, x86_64 Linux and arm64 macOS, so it declares the other three; DXC ships no macOS build and no arm64 Linux one, so it declares those.
+[extern/manifest-self-test.py](../../extern/manifest-self-test.py) pins both against all six hosts, and runs in `check`'s `dev-selftest` gate.
+
 **`license` is an SPDX identifier or expression**, `license_files` are paths relative to the dependency directory, and `used_by` is the one-line answer to "why do we have this".
 An upstream that ships no license file of its own carries the text inline as `license_text` — the SQLite amalgamation is the only one.
 
