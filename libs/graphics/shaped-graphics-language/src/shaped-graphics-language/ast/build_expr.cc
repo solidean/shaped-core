@@ -77,6 +77,8 @@ expr_id builder::expression_node(form_id form)
     case form_kind::identifier:
         if (text_of(form) == "self")
             return make_expr(form, self_ref{});
+        if (text_of(form) == "void")
+            return make_expr(form, void_ref{});
         return make_expr(form, name{.where = f.where});
     case form_kind::wildcard:
         return make_expr(form, wildcard{});

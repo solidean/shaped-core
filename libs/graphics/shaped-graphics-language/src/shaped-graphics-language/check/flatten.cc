@@ -291,6 +291,9 @@ struct flattener
 
         if (e.node.is<ast::literal>())
             return flatten_number(id, type);
+        // void's one value is the construction of no fields.
+        if (e.node.is<ast::void_ref>())
+            return add_expr(type, id, flat_construct{});
         if (e.node.is<ast::leading_dot>())
         {
             return where.kind == target_kind::enum_case ? add_expr(type, id, flat_enum_value{.case_index = where.index})
@@ -379,6 +382,10 @@ struct flattener
             }
             if (spelling == "not" || call.is_short_circuit)
                 return fail();
+            if ((spelling == "==" || spelling == "!=") && arguments.size() == 2
+                && tables().type_at(arguments[0].value) == checked_module::void_type
+                && tables().type_at(arguments[1].value) == checked_module::void_type)
+                return flatten_void_equality(id, type, spelling == "==", arguments[0].value, arguments[1].value);
         }
 
         auto const arguments = flatten_arguments(call.arguments);
@@ -392,6 +399,22 @@ struct flattener
             return add_expr(type, id, flat_block{.label = inlined.label, .body = inlined.body});
         }
         return builtin_call(id, where.symbol, arguments);
+    }
+
+    /// `a == b` over void: both sides run for their effects, in order, and the answer is known before either does.
+    flat_expr_id flatten_void_equality(ast::expr_id id, type_id type, bool is_equal, ast::expr_id lhs, ast::expr_id rhs)
+    {
+        auto const label = add_label("void_equality");
+        auto const where = origin{.file = file(), .expr = id};
+        auto const left = flatten_expr(lhs);
+        auto const right = flatten_expr(rhs);
+        flat_stmt_id const body[] = {
+            make_stmt(where, flat_eval{.value = left}),
+            make_stmt(where, flat_eval{.value = right}),
+            make_stmt(where,
+                      flat_leave{.target = label, .value = add_expr(type, id, flat_bool_literal{.value = is_equal})}),
+        };
+        return add_expr(type, id, flat_block{.label = label, .body = add_list(body)});
     }
 
     flat_expr_id builtin_call(ast::expr_id id, symbol_id callee, cc::span<flat_expr_id const> arguments)
@@ -976,7 +999,7 @@ struct flattener
 
 bool checker::is_sound(type_id type) const
 {
-    if (!is_valid(type) || type == checked_module::error_type || type == checked_module::void_type)
+    if (!is_valid(type) || type == checked_module::error_type)
         return false;
     for (auto const& m : out.at(out.at(type).members))
         if (!is_sound(m.type))

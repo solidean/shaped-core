@@ -209,7 +209,7 @@ struct dumper
                 out += file.text_of(file.at(e.form).where);
             },
             [&](name const& n) { out += file.text_of(n.where); }, [&](self_ref const&) { out += "self"; },
-            [&](wildcard const&) { out += "_"; },
+            [&](void_ref const&) { out += "void"; }, [&](wildcard const&) { out += "_"; },
             [&](leading_dot const& n)
             {
                 out += ".";

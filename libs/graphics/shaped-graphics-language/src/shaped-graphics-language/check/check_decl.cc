@@ -174,7 +174,9 @@ type_id checker::resolve_type(i32 file, ast::expr_id expr, function_scope const*
 
     auto const* const n = e.node.try_as<ast::name>();
     auto const resource = n != nullptr ? resolve_resource_name(file, expr, text_of(file, n->where)) : type_id::none;
-    if (resource != type_id::none)
+    if (e.node.is<ast::void_ref>())
+        result = checked_module::void_type;
+    else if (resource != type_id::none)
         result = resource;
     else if (n != nullptr)
     {
@@ -342,6 +344,14 @@ ast::range_of<member_info> checker::compile_members(i32 file,
             type = is_struct ? resolve_value_type(file, f.type) : resolve_type(file, f.type);
         else
             report(diagnostic_kind::missing_type, file, f.name, name);
+
+        // CHK-214: a binding member is a slot of the group's layout, and a void one fills none.
+        if (!is_struct && type == checked_module::void_type)
+        {
+            report(diagnostic_kind::type_mismatch, file, span_of(file, f.type),
+                   cc::format("{} is void, and a binding member has to hold something", name));
+            type = checked_module::error_type;
+        }
 
         // CHK-202 and CHK-203: each attribute names what only one kind of member can be.
         auto const* const unfilterable = find_attribute(file, f.attributes, "unfilterable");

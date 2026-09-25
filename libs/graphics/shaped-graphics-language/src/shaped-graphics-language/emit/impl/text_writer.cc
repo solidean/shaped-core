@@ -132,10 +132,11 @@ struct writer
         d.write_local(declaration, {.name = name, .type = type_text(p, d, x.type), .is_mut = true});
         line(declaration);
 
-        auto const& members = p.structs[p.struct_of_type[index_of(x.type)]].members;
+        auto const& planned = p.structs[p.struct_of_type[index_of(x.type)]];
         auto const arguments = p.e.at(x.node.as<flat_construct>().arguments);
-        for (auto i = isize(0); i < arguments.size() && i < members.size(); ++i)
-            line(cc::format("{}.{} = {};", name, members[i].name, expr(arguments[i]).text));
+        for (auto i = isize(0); i < arguments.size() && i < planned.member_of.size(); ++i)
+            if (planned.member_of[i] >= 0)
+                line(cc::format("{}.{} = {};", name, planned.members[planned.member_of[i]].name, expr(arguments[i]).text));
     }
 
     /// `is_broken` gives every argument a line of its own, which is how a struct built as a statement's value reads.
@@ -149,7 +150,11 @@ struct writer
             return {.text = cc::move(name)};
         }
 
-        auto const arguments = p.e.at(x.node.as<flat_construct>().arguments);
+        // A void argument stands for a field no target declares, and its value is no value to write (EMIT-106).
+        auto arguments = cc::vector<flat_expr_id>();
+        for (auto const a : p.e.at(x.node.as<flat_construct>().arguments))
+            if (p.e.at(a).type != checked_module::void_type)
+                arguments.push_back(a);
         // a vector stays on its line: its arguments are short, and `vec3f(0.45, 0.8, -0.4)` is how a shader reads
         auto const is_split = is_broken && arguments.size() > 1 && !is_builtin_type(p.m, x.type);
         auto text = cc::string(type_text(p, d, x.type));
@@ -247,11 +252,14 @@ struct writer
                 auto const object_type = p.e.at(member.object).type;
                 auto object = wrapped(expr(member.object), level::primary);
                 // A builtin's fields are spelled alike everywhere: x, y, z, w.
-                auto const name
-                    = is_builtin_type(p.m, object_type)
-                        ? cc::string_view(p.m.at(p.m.at(object_type).members)[member.member].name)
-                        : cc::string_view(p.structs[p.struct_of_type[index_of(object_type)]].members[member.member].name);
-                result = {.text = cc::format("{}.{}", object, name)};
+                if (is_builtin_type(p.m, object_type))
+                {
+                    result
+                        = {.text = cc::format("{}.{}", object, p.m.at(p.m.at(object_type).members)[member.member].name)};
+                    return;
+                }
+                auto const& planned = p.structs[p.struct_of_type[index_of(object_type)]];
+                result = {.text = cc::format("{}.{}", object, planned.members[planned.member_of[member.member]].name)};
             },
             [&](flat_construct const&) { result = construct(x, is_broken); },
             [&](flat_call const& c) { result = call(c); }, [&](flat_not const& n)

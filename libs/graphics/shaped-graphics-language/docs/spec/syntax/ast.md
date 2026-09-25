@@ -33,6 +33,7 @@ Back to the [phases](_index.md); the reasons are in [why/ast.md](why/ast.md).
 | `literal` | a number literal, a quoted literal or a hash literal |
 | `name` | an identifier |
 | `self_ref` | the identifier `self` |
+| `void_ref` | the identifier `void` |
 | `wildcard` | `_` |
 | `leading_dot` | a leading-dot form: `.point`, `.0` |
 | `member` | a member access: `a.b` |
@@ -58,6 +59,7 @@ Back to the [phases](_index.md); the reasons are in [why/ast.md](why/ast.md).
 
 * **AST-12** A quoted literal keeps its form, and its pieces and interpolations are reached through that form.
 * **AST-13** `self` is a **reserved name**: the identifier `self` reads as `self_ref` wherever it stands, and it is no keyword ([why](why/ast.md#ast-13)).
+* **AST-137** `void` is a reserved name too: the identifier `void` reads as `void_ref` wherever it stands, the type in a type position and its value elsewhere ([why](why/ast.md#ast-137)).
 * **AST-14** An applied square group reads as `index`, which is a subscript or type arguments, and its elements are arguments ([why](why/ast.md#ast-14)).
 
 ```sgl

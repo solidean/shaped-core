@@ -58,6 +58,7 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/legalize/legalize_cases.cc
     src/shaped-graphics-language/legalize/legalize_exits.cc
     src/shaped-graphics-language/legalize/legalize_exprs.cc
+    src/shaped-graphics-language/legalize/legalize_void.cc
 
     src/shaped-graphics-language/interpret/interpret.cc
 

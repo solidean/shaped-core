@@ -21,6 +21,8 @@ The worked examples are WGSL, since it is the strictest target: no `do … while
 * **LEGAL-7** The `end` of a `for` has no effect and reads no mutable local and no buffer element, since a target evaluates it before every iteration.
 * **LEGAL-8** A tree that is core already is left as it is.
 * **LEGAL-9** An emitter refuses a tree that is not core with the error `not-core`, whose detail names the first violation; it never asserts.
+* **LEGAL-52** (V1) A core tree holds no `void` local, and no `let`, `var`, assignment, `return` or read of a `void` value: what evaluating one does stays as an `eval`, and the value itself is gone.
+  It is the last rule, since the others introduce locals for results and a `void` result is one of them.
 
 ## The table
 

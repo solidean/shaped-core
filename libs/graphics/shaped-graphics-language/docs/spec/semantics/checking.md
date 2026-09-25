@@ -56,12 +56,29 @@ struct b:
 
 * **CHK-21** A type is canonical: two expressions name the same type exactly when they resolve to the same type, and nothing converts implicitly.
 * **CHK-22** Each `struct` declaration is one type, whatever its fields.
-* **CHK-23** A type position holds a name that resolves to a `struct`; every other expression there is `unsupported-yet`.
+* **CHK-23** A type position holds a name that resolves to a `struct` or an `enum`, or `void` (CHK-215); every other expression there is `unsupported-yet`.
 * **CHK-24** A name in a type position that is not declared is the normal error `unknown-name`, and one that stands for a function or a binding is `wrong-kind-of-name`.
 * **CHK-25** A format is not a type: nothing such as `rgba8` exists.
 * **CHK-26** A field, a binding member and a parameter have a type; one without is the normal error `missing-type`.
 * **CHK-27** A default value, a `mut` member, a property and a method are `unsupported-yet`.
 * **CHK-28** Two fields of one struct, two members of one binding and two parameters of one function differ in name, or the later one is `duplicate-declaration`.
+
+## Void
+
+* **CHK-215** `void` is a reserved name ([AST-137](../syntax/ast.md#atoms)): in a type position it is the type `void`, and anywhere else it is that type's one value.
+* **CHK-216** `void` is a type like any other: a local, a parameter, a field and a result may be of it, and `let`, `return` and `print` take its value.
+* **CHK-217** `==` and `!=` over two `void` values are the language's own and give `true` and `false`: both operands run, and the answer is known before either does.
+* **CHK-214** A binding member of type `void` is `type-mismatch`: a member is a slot of the group's layout, and a void one fills none.
+
+```sgl
+fun note(x: float) -> void:
+    print x
+
+fun f(x: float) -> float:
+    let done = note x
+    if done == void => return x
+    return 0.0
+```
 
 ## Enums
 
@@ -173,7 +190,7 @@ enum light_kind:
 
 ## Functions
 
-* **CHK-47** A function has typed parameters, and its return type stands behind `->`; one without returns nothing, by CHK-121.
+* **CHK-47** A function has typed parameters, and its return type stands behind `->`; one without returns `void`, by CHK-121.
 * **CHK-48** A function with type parameters, with `self`, or with a default argument is `unsupported-yet`, and it fails as a whole.
 * **CHK-49** A function whose signature holds the error type is failed.
 * **CHK-50** A function body is an ordered scope: a parameter is visible from the start, and a local from the statement after its `let`.
@@ -375,9 +392,9 @@ fun shade(kind: light_kind, base: float) -> float:
 
 ## Returning
 
-* **CHK-121** A function without `-> T` returns nothing: its `return` carries no value, and a call of it is a statement.
+* **CHK-121** A function without `-> T` returns `void`, exactly as one with `-> void` does: its `return` carries no value or a `void` one.
 * **CHK-122** An arrow body without a written return type returns what its expression is: the function's return type is the type of that expression.
-  A block body without `-> T` still returns nothing, by CHK-121.
+  A block body without `-> T` still returns `void`, by CHK-121.
 * **CHK-123** A statement list **exits** when it holds a `return`, a `break` or a `continue`, an `if` with an `else` whose every branch exits, or a `loop:` that holds no `break` of its own.
   So does an exhaustive `case` (CHK-159) whose every arm exits.
 * **CHK-124** A `while` and a `for` never make their list exit, whatever their condition is ([why](why/checking.md#chk-124)).
@@ -410,9 +427,9 @@ fun grade(x: float) -> float:
 * **CHK-136** So needing such a function from inside its own body, directly or through other inferred functions, is `dependency-cycle` by CHK-18.
   One written return type on the loop makes it the `recursive-call` of CHK-130.
   A call does not need an overload whose parameter types cannot take it, since parameters are known before a result is: an overload set stays usable from inside one of its inferred members.
-* **CHK-139** An arrow body whose expression is nothing, which is a call of a function that returns nothing, is `type-mismatch`: the body of such a function is its result.
+* **CHK-139** An arrow body whose expression is `void`, such as a call of a function that returns `void`, makes its function return `void` by CHK-122.
 * **CHK-137** A call that stands as a statement is evaluated and its value dropped, whatever it calls; any other expression as a statement is `unsupported-yet` ([why](why/checking.md#chk-137)).
-  In the flat tree it is an `eval` of the call, and a call of a function that returns nothing is the block of CHK-133 as a statement.
+  In the flat tree it is an `eval` of the call, and a call of a function that returns `void` is the block of CHK-133 as a statement.
 
 ```sgl
 fun make_mvp(model: mat4){frame} => frame.proj * frame.view * model
@@ -442,7 +459,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `opaque-struct-needs-builtin` | CHK-34 |
 | `invalid-attribute-arguments` | CHK-36, CHK-39, CHK-204, CHK-208, CHK-211, CHK-212 |
 | `binding-not-listed` | CHK-45, CHK-131 |
-| `type-mismatch` | CHK-52, CHK-56, CHK-77, CHK-84, CHK-112 to CHK-118, CHK-121, CHK-139, CHK-167, CHK-210 |
+| `type-mismatch` | CHK-52, CHK-56, CHK-77, CHK-84, CHK-112 to CHK-118, CHK-121, CHK-167, CHK-210, CHK-214 |
 | `not-assignable` | CHK-112 |
 | `missing-return` | CHK-125 |
 | `unreachable-code` | CHK-126, CHK-162 |

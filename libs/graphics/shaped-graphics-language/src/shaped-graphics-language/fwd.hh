@@ -86,6 +86,7 @@ struct invalid_expr;
 struct literal;
 struct name;
 struct self_ref;
+struct void_ref;
 struct wildcard;
 struct leading_dot;
 struct member;

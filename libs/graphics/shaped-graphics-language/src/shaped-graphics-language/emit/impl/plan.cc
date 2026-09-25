@@ -165,6 +165,19 @@ struct validator
             else if (x.node.is<flat_construct>() && m.at(x.type).is_opaque)
                 report(error_kind::malformed_tree, e.function,
                        cc::format("a construction of the opaque '{}'", m.name_of(x.type)));
+
+            // EMIT-107: every field of it is void, and a struct of no member is no struct in WGSL.
+            auto const& t = m.at(x.type);
+            auto is_all_void = t.kind == type_kind::structure && t.members.count > 0 && !is_builtin_type(m, x.type);
+            if (is_all_void)
+                for (auto const& member : m.at(t.members))
+                    is_all_void = is_all_void && member.type == checked_module::void_type;
+            if (is_all_void)
+            {
+                report(error_kind::unsupported, e.function,
+                       cc::format("the struct '{}', whose every field is void", m.name_of(x.type)));
+                break;
+            }
         }
     }
 };
@@ -245,15 +258,23 @@ struct planner
         p.struct_of_type[index_of(type)] = -2;
 
         auto const& info = p.m.at(type);
+        auto written = cc::vector<member_info>();
+        auto member_of = cc::vector<i32>();
         for (auto const& member : p.m.at(info.members))
+        {
             need(member.type, struct_role::plain);
+            member_of.push_back(member.type == check::checked_module::void_type ? -1 : i32(written.size()));
+            if (member.type != check::checked_module::void_type)
+                written.push_back(member);
+        }
 
         p.struct_of_type[index_of(type)] = i32(p.structs.size());
         p.structs.push_back({
             .type = type,
             .name = spell_type(p.m.at(info.symbol).name),
             .role = role,
-            .members = members_of(info.members, role != struct_role::plain),
+            .members = members_of(written, role != struct_role::plain),
+            .member_of = cc::move(member_of),
         });
     }
 

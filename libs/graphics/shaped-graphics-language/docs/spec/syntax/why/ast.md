@@ -38,6 +38,13 @@ It cannot be a keyword of the form parser either.
 A keyword that leads a line starts a keyword form, so `self.x = 0` would read as the keyword `self` with an argument, and not as an assignment.
 A reserved name gets both: the form parser sees an identifier, and the AST gives that identifier its one meaning.
 
+## AST-137
+
+`void` is a reserved name rather than a keyword for the reason `self` is.
+It leads a line as a value, `void == f()`, and a keyword there would start a keyword form.
+It is also both a type and a value, and which one is decided by the position it stands in, which only the check pass knows.
+Types as values would make the second reading follow from the first: the value `void` in a type position is its own type.
+
 ## AST-14
 
 Square brackets were chosen for type arguments so that parsing needs no lookup ([FORM-22](forms.md#form-22)).

@@ -19,6 +19,7 @@ A listing here is the dump of a flat tree, shortened: a label is `$name`, and a 
 * **EVAL-6** A `float` is a 32-bit IEEE number, an `int` is 32 bits, signed, and its arithmetic wraps, and a `bool` is true or false.
 * **EVAL-7** A struct value is one value per field, in field order.
 * **EVAL-64** An enum value is the `int` value of one of its type's cases, and `==` and `!=` over two of them compare those `int`s.
+* **EVAL-74** A `void` value is the one value of its type: a struct value of no fields, and a field of type `void` adds nothing to a struct value.
 
 ## Locals and places
 
@@ -61,6 +62,7 @@ This prints 11: the left operand is read while `x` is 1, and the block to its ri
 * **EVAL-26** `leave $b` ends the block `$b` from any depth inside it: through `if`s, loops and other blocks, and out of the middle of an expression.
 * **EVAL-27** `leave $b value` evaluates `value` first, and a block expression then IS that value.
 * **EVAL-28** A block expression whose statements end without a leave has no value, which is an error of the program.
+  A `void` block is the exception: it is `void`'s one value however it ends (EVAL-74).
 * **EVAL-29** An inlined call, a value block of a `case` arm or a lambda, and a `loop:` with a value are all this one construct ([why](why/evaluation.md#eval-29)).
 * **EVAL-30** The body of the entry point is the **root block**, and `leave $root value` returns `value` from the function.
 * **EVAL-31** A root block whose statements end without a leave returns nothing, which is an error of the program.

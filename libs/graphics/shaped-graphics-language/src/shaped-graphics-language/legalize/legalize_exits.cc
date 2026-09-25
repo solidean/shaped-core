@@ -647,5 +647,6 @@ flat_entry_point sgl::check::legalize(checked_module const& m, flat_entry_point 
     // Again, for the conditions the chain form of C1 wrote; on a tree that holds no block it changes nothing.
     auto const without_blocks = lower_expressions(out, options);
     auto const without_leaves = lower_exits(out, without_blocks, options);
-    return compacted(m, out.e, without_leaves);
+    auto const without_void = erase_void(out, without_leaves);
+    return compacted(m, out.e, without_void);
 }

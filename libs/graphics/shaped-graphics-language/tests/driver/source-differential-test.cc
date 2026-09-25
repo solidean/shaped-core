@@ -126,6 +126,28 @@ constexpr auto quiet_drops_body = cc::string_view("let x = half p.a\n"
                                                   "graded p.b\n"
                                                   "saturate(x + graded(p.a))\n");
 
+/// void as a value: a local, a parameter, a field, a result and an operand of `==`, each written nowhere (LEGAL-52).
+constexpr auto void_values = cc::string_view("struct tagged:\n"
+                                             "    tag: void\n"
+                                             "    v: float\n"
+                                             "fun note(x: float):\n"
+                                             "    print x\n"
+                                             "fun unit(x: float) -> void => note x\n"
+                                             "fun keep(t: tagged, extra: void) -> float => t.v\n");
+constexpr auto quiet_void_values = cc::string_view("struct tagged:\n"
+                                                   "    tag: void\n"
+                                                   "    v: float\n"
+                                                   "fun note(x: float):\n"
+                                                   "    let doubled = x * 2.0\n"
+                                                   "fun unit(x: float) -> void => note x\n"
+                                                   "fun keep(t: tagged, extra: void) -> float => t.v\n");
+constexpr auto void_values_body = cc::string_view("let u = unit p.a\n"
+                                                  "let w: void = u\n"
+                                                  "let mut y = p.b\n"
+                                                  "if w == void => y += 1.0\n"
+                                                  "let t = tagged(unit(p.b), p.a + y)\n"
+                                                  "let x = keep(t, t.tag)\n");
+
 struct program
 {
     cc::string_view name;
@@ -144,6 +166,8 @@ constexpr program programs[] = {
     {.name = "dropped values", .helpers = dropped_values, .body = dropped_values_body},
     {.name = "quiet drops", .helpers = quiet_drops, .body = quiet_drops_body},
     {.name = "cases", .helpers = cases, .body = cases_body},
+    {.name = "void values", .helpers = void_values, .body = void_values_body},
+    {.name = "quiet void values", .helpers = quiet_void_values, .body = void_values_body},
 };
 
 run_inputs inputs_of(checked_module const& m, f32 a, f32 b)
@@ -579,6 +603,19 @@ TEST("sgl source - a dropped value: the call's statements stay, and a rest that 
               .contains("    saturate(x + graded_1_result);\n"));
     CHECK(function_text(quiet_drops, quiet_drops_body, sgl::emit::target::msl)
               .contains("    (void)(saturate(x + graded_1_result));\n"));
+}
+
+TEST("sgl source - void is written nowhere: no local, no field and no argument holds it")
+{
+    for (auto const t : sgl::emit::all_targets())
+    {
+        auto const text = function_text(quiet_void_values, void_values_body, t);
+        CHECK(!text.contains(" u"));
+        CHECK(!text.contains(" w"));
+        CHECK(!text.contains(".tag"));
+    }
+    CHECK(function_text(quiet_void_values, void_values_body, sgl::emit::target::wgsl)
+              .contains("let t: tagged = tagged(p.a + y);\n"));
 }
 
 TEST("sgl source - every program without a print is written for every target")

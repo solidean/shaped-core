@@ -354,16 +354,18 @@ struct machine
         if (auto const* const block = x.node.try_as<flat_block>())
         {
             auto const f = run_body(block->body);
+            // A void block has its one value however it ends, which is no scalars at all.
+            auto const is_void = leaf_count_of(m, x.type) == 0;
             if (f.kind == flow_kind::leave && f.label == block->label)
             {
-                if (carried.leaves.empty())
+                if (carried.leaves.empty() && !is_void)
                     return type_error("a block expression left without a value");
                 result.leaves = cc::move(carried.leaves);
                 carried = {};
                 return {};
             }
             if (f.is_normal())
-                return fail(run_status::fell_off_the_end, "a block expression");
+                return is_void ? flow{} : fail(run_status::fell_off_the_end, "a block expression");
             return f;
         }
         return type_error("an expression of a kind the machine does not know");

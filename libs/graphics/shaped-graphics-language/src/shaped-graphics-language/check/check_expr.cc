@@ -42,14 +42,7 @@ void checker::check_body(symbol_id id)
     auto ending = check_statements(scope, f.body.statements);
     if (ast::is_valid(f.body.value) && notes[index].infers_result)
     {
-        auto type = check_expr(scope, f.body.value);
-        if (type == void_type)
-        {
-            report(diagnostic_kind::type_mismatch, file, span_of(file, f.body.value),
-                   cc::format("the body of {} is its result, and this is nothing", out.at(id).name));
-            type = error_type;
-        }
-        out.functions[index].result = type;
+        out.functions[index].result = check_expr(scope, f.body.value);
         ending = flow::exits;
     }
     else if (ast::is_valid(f.body.value))
@@ -214,8 +207,9 @@ type_id checker::check_expr(function_scope& scope, ast::expr_id expr)
     auto const type = e.node.visit(
         [&](ast::invalid_expr const&) { return error_type; }, [&](ast::literal const& l)
         { return check_literal(scope, expr, l); }, [&](ast::name const& n) { return check_name(scope, expr, n); },
-        [&](ast::member const& m) { return check_member(scope, expr, m); }, [&](ast::call const& c)
-        { return check_call(scope, expr, c); }, [&](ast::self_ref const&) { return not_yet("self"); },
+        [&](ast::member const& m) { return check_member(scope, expr, m); },
+        [&](ast::call const& c) { return check_call(scope, expr, c); },
+        [&](ast::self_ref const&) { return not_yet("self"); }, [&](ast::void_ref const&) { return void_type; },
         [&](ast::wildcard const&) { return not_yet("a wildcard as a value"); },
         // CHK-152: a leading dot needs a type the context expects, which today only a `case` pattern gives it
         [&](ast::leading_dot const&) { return not_yet("a leading-dot name outside a case pattern"); },
@@ -526,6 +520,10 @@ type_id checker::check_call(function_scope& scope, ast::expr_id id, ast::call co
             arguments.types[0] = as_int;
             arguments.types[1] = as_int;
         }
+        // `==` and `!=` over void are the language's own as well: void has one value, so the answer is known.
+        if ((spelling == "==" || spelling == "!=") && arguments.types.size() == 2 && arguments.types[0] == void_type
+            && arguments.types[1] == void_type)
+            return type_of_builtin(builtins::k_bool, file, where);
         auto const* const found = operators.get_ptr(spelling);
         auto const none = cc::span<symbol_id const>();
         return resolve_overload(scope, id, ast::expr_id::none,

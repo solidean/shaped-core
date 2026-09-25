@@ -57,6 +57,7 @@ A reserved name is no keyword: the form parser reads it as an identifier, and it
 It never starts a keyword form, so `self.x = 0` is an assignment.
 
 * `self` - the receiver of a method or a property; the AST reads it as `self_ref` ([AST-13](syntax/ast.md#atoms))
+* `void` - the unit type in a type position, and its one value anywhere else; the AST reads it as `void_ref` ([AST-137](syntax/ast.md#atoms))
 
 ## Open
 
