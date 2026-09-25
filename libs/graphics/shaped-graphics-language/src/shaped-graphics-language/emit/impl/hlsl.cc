@@ -158,7 +158,7 @@ public:
     }
 
     /// dx12's register class: `u` for what the shader writes, `s` for a sampler, `t` for every other resource.
-    [[nodiscard]] static char register_class_of(type_info const& t)
+    [[nodiscard]] static char register_class_of(check::type_info const& t)
     {
         if (t.kind == type_kind::sampler)
             return 's';
