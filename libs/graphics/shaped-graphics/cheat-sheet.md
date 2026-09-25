@@ -497,7 +497,7 @@ sg::readwrite_buffer_view<T>        // rw array of T        (UAV / rw SSBO)     
 sg::texture_view<VT>         // sampled texture (SRV); VT = texture_view_traits<Dim>  — view_class::texture
 sg::image_view<VT>           // storage image (UAV); VT constrained to image_view_dimension (no cube/MS) — view_class::image
 // each holds { raw_texture_handle, pixel_format, subresource_range }, plus depth_slice_range on the image view (3D).
-// an image's read / write / read_write is the BINDING's storage_access, never the view's.
+// an image's read / write / read_write is the BINDING's access, never the view's.
 //   Made via texture<Traits>.as_*_view() (returns the precise VT).
 // view traits: tv_1d / tv_1d_array / tv_2d / tv_2d_array / tv_2d_ms / tv_2d_ms_array / tv_3d / tv_cube / tv_cube_array
 sg::buffer_view<T>           // access-erased middle: any access of a buffer of T (access is a runtime field); leaves convert implicitly
@@ -584,23 +584,26 @@ sg::compare_op              // never|less|equal|less_equal|greater|not_equal|gre
 
 ```cpp
 #include <shaped-graphics/binding/binding.hh>
-sg::binding_type            // uniform_buffer | read{only,write}_structured_buffer | read{only,write}_raw_buffer
-                            //   | read{only,write}_texture | sampler | acceleration_structure   (replaces D3D_SHADER_INPUT_TYPE)
-sg::binding                 // { cc::string name, reflected_name (diagnostics only; set where a compiler edge renamed it); cc::optional<u32> group_index, space; u32 index, count; binding_type type; cc::optional<isize> block_size;
+sg::binding_type            // uniform_buffer | buffer | bytes | texture | image | sampler | acceleration_structure
+                            //   the resource kind, as SGL names it   (replaces D3D_SHADER_INPUT_TYPE)
+sg::access_mode             // read | write | read_write — SGL's unmarked / out / mut; write only on an image
+sg::is_valid_access(type, access) // bool — image: all three; buffer/bytes: read|read_write; everything else: read
+sg::binding                 // { cc::string name, reflected_name (diagnostics only; set where a compiler edge renamed it); cc::optional<u32> group_index, space; u32 index, count; binding_type type; access_mode access = read; cc::optional<isize> block_size;
                             //   cc::optional<texture_view_dimension> texture_dimension }  — reflected for texture kinds; hand-written array bindings must set it
                             //   + what a WebGPU bind group layout needs and dx12/vulkan ignore:
                             //   shader_stages visibility        — EMPTY = not known (treated as every stage), never "no stage"
-                            //   cc::optional<pixel_format> image_format   — readwrite_texture only; WGSL declares it, HLSL does not
-                            //   storage_access storage_access = read_write  — readwrite_texture only: read|write|read_write; WGSL declares it, HLSL leaves the default
-                            //   cc::optional<texture_sample_type> sample_type  — readonly_texture: filterable_float|unfilterable_float|depth|sint|uint
+                            //   cc::optional<pixel_format> image_format   — image only; WGSL and SGL declare it, HLSL via #pragma sc format
+                            //   cc::optional<texture_sample_type> sample_type  — texture: filterable_float|unfilterable_float|depth|sint|uint
                             //   cc::optional<sampler_binding_type> sampler_type // sampler: filtering|non_filtering|comparison
                             //   index = SPIR-V/WGSL @binding, HLSL register; count > 1 = bounded array (.is_array()); count 0 = unbounded -> layout creation ERRORS (no WebGPU equivalent)
                             //   group_index = descriptor set / @group (SPIR-V) — PINS the bind slot: every bind_group asserts it matches
                             //   space = HLSL register space (DXC reflection only) — a register-numbering namespace, never a bind slot
                             //     absent = "no register spaces in this language", NOT space 0 (distinct layout hashes); dx12 REQUIRES one -> hand-written bindings say .space = 0
 sg::group_index_of(bindings) // -> cc::optional<u32>  the one group index they agree on (they must); what a group layout inherits
-sg::view_class_of(type)         // view_class the type expects   |  sg::shape_of(type) // view_shape it expects
-sg::accepts(type, raw_view) // bool — a bound view satisfies a binding of this type (access & shape match)
+sg::view_class_of(binding)  // view_class it expects (a buffer's access picks readonly|readwrite)  |  sg::shape_of(type) // view_shape
+sg::accepts(binding, raw_view) // bool — a bound view satisfies the binding (view class & shape match)
+sg::is_same_kind(a, b)      // bool — same kind, and same access unless an image (one UAV serves an image's three)
+b.is_writable()             // bool — access != read; WebGPU forbids it in the vertex stage
 sg::is_sampler(type)        // bool — a sampler binding (bound as a sampler, not a view)
 sg::apply_stage_visibility(bindings, stage)  // void — stamp one stage into every binding's visibility; a compiler calls it once, reflection never knows the stage
 sg::merge_bindings({s0.bindings, s1.bindings, ...})  // -> cc::vector<binding>  union by name, first-seen order — one root sig must cover every stage

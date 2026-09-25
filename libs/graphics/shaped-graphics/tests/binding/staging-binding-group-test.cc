@@ -39,7 +39,7 @@ namespace
             .space = 0,
             .index = 0,
             .count = count,
-            .type = sg::binding_type::readonly_texture,
+            .type = sg::binding_type::texture,
             .texture_dimension = sg::texture_view_dimension::tex_2d};
 }
 

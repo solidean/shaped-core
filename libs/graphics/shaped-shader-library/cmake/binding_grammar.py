@@ -77,7 +77,8 @@ class Binding:
     type_offset: int
     semicolon_offset: int
     template_argument: str = ""
-    image_format: str | None = None  # an sg::pixel_format enumerator a `format` attribute named, for storage textures
+    image_format: str | None = None  # an sg::pixel_format enumerator a `format` attribute named, for images
+    access: str = "read"  # an sg::access_mode enumerator: `read_write` for every `u` register
 
 
 @dataclass
@@ -182,31 +183,32 @@ class Bindings:
 # ---------------------------------------------------------------------------------------------------
 
 # HLSL type -> (register class, sg::binding_type, sg::texture_view_dimension or None).
+# A `u` register is sg::access_mode::read_write and every other one is `read`, since HLSL cannot narrow a UAV.
 # The single most important piece of shared state in the design: the rewriter and the generator must agree
 # on it exactly, because a divergence binds a resource to the wrong descriptor with nothing to catch it.
 # Keep in step with impl/hlsl_binding_types.cc.
 BINDING_TYPES: dict[str, tuple[str, str, str | None]] = {
-    "Texture1D": ("t", "readonly_texture", "tex_1d"),
-    "Texture1DArray": ("t", "readonly_texture", "tex_1d_array"),
-    "Texture2D": ("t", "readonly_texture", "tex_2d"),
-    "Texture2DArray": ("t", "readonly_texture", "tex_2d_array"),
-    "Texture2DMS": ("t", "readonly_texture", "tex_2d_ms"),
-    "Texture2DMSArray": ("t", "readonly_texture", "tex_2d_ms_array"),
-    "Texture3D": ("t", "readonly_texture", "tex_3d"),
-    "TextureCube": ("t", "readonly_texture", "cube"),
-    "TextureCubeArray": ("t", "readonly_texture", "cube_array"),
-    # A storage view has no cube and no multisampling, which is why this half of the table is shorter.
-    "RWTexture1D": ("u", "readwrite_texture", "tex_1d"),
-    "RWTexture1DArray": ("u", "readwrite_texture", "tex_1d_array"),
-    "RWTexture2D": ("u", "readwrite_texture", "tex_2d"),
-    "RWTexture2DArray": ("u", "readwrite_texture", "tex_2d_array"),
-    "RWTexture3D": ("u", "readwrite_texture", "tex_3d"),
+    "Texture1D": ("t", "texture", "tex_1d"),
+    "Texture1DArray": ("t", "texture", "tex_1d_array"),
+    "Texture2D": ("t", "texture", "tex_2d"),
+    "Texture2DArray": ("t", "texture", "tex_2d_array"),
+    "Texture2DMS": ("t", "texture", "tex_2d_ms"),
+    "Texture2DMSArray": ("t", "texture", "tex_2d_ms_array"),
+    "Texture3D": ("t", "texture", "tex_3d"),
+    "TextureCube": ("t", "texture", "cube"),
+    "TextureCubeArray": ("t", "texture", "cube_array"),
+    # An image has no cube and no multisampling, which is why this half of the table is shorter.
+    "RWTexture1D": ("u", "image", "tex_1d"),
+    "RWTexture1DArray": ("u", "image", "tex_1d_array"),
+    "RWTexture2D": ("u", "image", "tex_2d"),
+    "RWTexture2DArray": ("u", "image", "tex_2d_array"),
+    "RWTexture3D": ("u", "image", "tex_3d"),
     # `Buffer` and `RWBuffer` are deliberately absent: they are TYPED (texel) buffers, which both reflection
     # paths already refuse, and mapping them onto the structured types said sg could bind something it cannot.
-    "StructuredBuffer": ("t", "readonly_structured_buffer", None),
-    "RWStructuredBuffer": ("u", "readwrite_structured_buffer", None),
-    "ByteAddressBuffer": ("t", "readonly_raw_buffer", None),
-    "RWByteAddressBuffer": ("u", "readwrite_raw_buffer", None),
+    "StructuredBuffer": ("t", "buffer", None),
+    "RWStructuredBuffer": ("u", "buffer", None),
+    "ByteAddressBuffer": ("t", "bytes", None),
+    "RWByteAddressBuffer": ("u", "bytes", None),
     "ConstantBuffer": ("b", "uniform_buffer", None),
     "SamplerState": ("s", "sampler", None),
     "SamplerComparisonState": ("s", "sampler", None),
@@ -1352,7 +1354,7 @@ class _Parser:
             binding = self.parse_binding(next_index)
 
             if pending is not None and pending.name == "format":
-                if binding.type != "readwrite_texture":
+                if binding.type != "image":
                     raise BindingError(
                         f"{pending.location}: 'format' describes a storage texture, and '{binding.name}' is not one")
                 binding.image_format = parse_image_format(pending)
@@ -1438,7 +1440,7 @@ class _Parser:
 
         register_class, binding_type, dimension = entry
         return Binding(name, index, count, binding_type, dimension, register_class, type_offset, semicolon_offset,
-                       template_argument)
+                       template_argument, access="read_write" if register_class == "u" else "read")
 
 
 def parse_binding_groups(hlsl: str) -> Bindings:

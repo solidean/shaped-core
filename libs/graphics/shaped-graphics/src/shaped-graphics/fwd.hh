@@ -222,7 +222,7 @@ enum class shader_stage;
 enum class shader_format;
 enum class texture_sample_type;
 enum class sampler_binding_type;
-enum class storage_access;
+enum class access_mode;
 struct binding;
 struct compiler_info;
 struct compute_dimensions;

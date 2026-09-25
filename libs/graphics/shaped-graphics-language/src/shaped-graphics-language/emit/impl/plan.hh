@@ -143,7 +143,7 @@ struct plan
 /// The slot a group's first resource takes: 1 behind a constant block, which takes 0, and 0 without one.
 [[nodiscard]] i32 first_resource_slot(check::checked_module const& m, check::binding_info const& b);
 
-/// How the target of `p` spells the builtin type named `name`, such as the texel of a image format.
+/// How the target of `p` spells the builtin type named `name`, such as the texel of an image format.
 [[nodiscard]] cc::string_view builtin_spelling(plan const& p, cc::string_view name);
 /// The column of a builtin's record `t` reads; the two HLSL targets share one.
 [[nodiscard]] builtins::language language_of(target t);

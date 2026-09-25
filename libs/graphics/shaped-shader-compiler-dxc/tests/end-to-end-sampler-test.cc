@@ -77,11 +77,11 @@ ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - end to end: reflect a texture+sampler, s
     for (auto const& b : sample.bindings)
     {
         if (b.name == cc::string_view("Src"))
-            tex_ok = b.type == sg::binding_type::readonly_texture;
+            tex_ok = b.type == sg::binding_type::texture;
         else if (b.name == cc::string_view("Samp"))
             samp_ok = b.type == sg::binding_type::sampler;
         else if (b.name == cc::string_view("Out"))
-            out_ok = b.type == sg::binding_type::readwrite_structured_buffer;
+            out_ok = b.type == sg::binding_type::buffer && b.access == sg::access_mode::read_write;
     }
     CHECK(tex_ok);
     CHECK(samp_ok);

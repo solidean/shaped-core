@@ -58,10 +58,12 @@ cc::string sg::describe_layout_misfit(cc::string_view entry,
         if (r.space.has_value() && r.space.value() != space)
             out += cc::format("{}: '{}' is in space {}, and the layout places it in space {}\n", entry, r.name,
                               r.space.value(), space);
-        if (r.index != declared->index || r.count != declared->count || r.type != declared->type)
-            out += cc::format("{}: '{}' reflects as index {}, count {}, kind {}, and the layout declares {}, {}, {}\n",
-                              entry, r.name, r.index, r.count, int(r.type), declared->index, declared->count,
-                              int(declared->type));
+        if (r.index != declared->index || r.count != declared->count || !is_same_kind(r, *declared))
+            out += cc::format("{}: '{}' reflects as index {}, count {}, kind {}, access {}, and the layout declares "
+                              "{}, "
+                              "{}, {}, {}\n",
+                              entry, r.name, r.index, r.count, int(r.type), int(r.access), declared->index,
+                              declared->count, int(declared->type), int(declared->access));
     }
     return out;
 }

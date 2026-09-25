@@ -20,27 +20,39 @@ namespace
     case D3D_SIT_CBUFFER:
         return sg::binding_type::uniform_buffer;
     case D3D_SIT_STRUCTURED:
-        return sg::binding_type::readonly_structured_buffer;
-    case D3D_SIT_BYTEADDRESS:
-        return sg::binding_type::readonly_raw_buffer;
     case D3D_SIT_UAV_RWSTRUCTURED:
-        return sg::binding_type::readwrite_structured_buffer;
+        return sg::binding_type::buffer;
+    case D3D_SIT_BYTEADDRESS:
     case D3D_SIT_UAV_RWBYTEADDRESS:
-        return sg::binding_type::readwrite_raw_buffer;
+        return sg::binding_type::bytes;
     case D3D_SIT_SAMPLER:
         return sg::binding_type::sampler;
     case D3D_SIT_TEXTURE:
         if (bd.Dimension == D3D_SRV_DIMENSION_BUFFER)
             return {}; // Buffer<T> — a typed/texel buffer, not a texture
-        return sg::binding_type::readonly_texture;
+        return sg::binding_type::texture;
     case D3D_SIT_UAV_RWTYPED:
         if (bd.Dimension == D3D_SRV_DIMENSION_BUFFER)
             return {}; // RWBuffer<T> — a typed/texel buffer, not a storage texture
-        return sg::binding_type::readwrite_texture;
+        return sg::binding_type::image;
     case D3D_SIT_RTACCELERATIONSTRUCTURE:
         return sg::binding_type::acceleration_structure; // RaytracingAccelerationStructure (SRV, VA-addressed)
     default:
         return {};
+    }
+}
+
+/// A UAV kind is `read_write`, since HLSL cannot declare a read-only or write-only one; everything else is read.
+[[nodiscard]] sg::access_mode map_access(D3D_SHADER_INPUT_TYPE t)
+{
+    switch (t)
+    {
+    case D3D_SIT_UAV_RWSTRUCTURED:
+    case D3D_SIT_UAV_RWBYTEADDRESS:
+    case D3D_SIT_UAV_RWTYPED:
+        return sg::access_mode::read_write;
+    default:
+        return sg::access_mode::read;
     }
 }
 
@@ -102,10 +114,11 @@ template <class ReflectionT>
         b.index = bd.BindPoint;
         b.count = bd.BindCount;
         b.type = type.value();
+        b.access = map_access(bd.Type);
 
         // Texture bindings carry their shader-declared dimension, which is what lets a backend synthesize a
         // dimension-correct null descriptor for a vacant array element.
-        if (b.type == sg::binding_type::readonly_texture || b.type == sg::binding_type::readwrite_texture)
+        if (b.type == sg::binding_type::texture || b.type == sg::binding_type::image)
             b.texture_dimension = map_texture_dimension(bd.Dimension);
 
         if (bd.Type == D3D_SIT_CBUFFER)

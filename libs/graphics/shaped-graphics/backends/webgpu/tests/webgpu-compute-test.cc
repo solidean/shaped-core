@@ -74,7 +74,8 @@ fn main() {
         .group_index = 0,
         .index = index,
         .count = 1,
-        .type = sg::binding_type::readwrite_structured_buffer,
+        .type = sg::binding_type::buffer,
+        .access = sg::access_mode::read_write,
     };
 }
 
@@ -257,7 +258,7 @@ ASYNC_INVOCABLE_TEST("sg webgpu - a bound sampler is group 3 binding index + 1",
                                         sg::binding{.name = "source",
                                                     .group_index = 0,
                                                     .index = 0,
-                                                    .type = sg::binding_type::readonly_texture,
+                                                    .type = sg::binding_type::texture,
                                                     .texture_dimension = sg::texture_view_dimension::tex_2d,
                                                     .sample_type = sg::texture_sample_type::filterable_float},
                                         storage_binding("Output", 1),

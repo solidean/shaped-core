@@ -196,13 +196,10 @@ WGPUTextureAspect to_wgpu_copy_aspect(sg::pixel_format format, sg::texture_aspec
     return aspect == sg::texture_aspect::stencil ? WGPUTextureAspect_StencilOnly : WGPUTextureAspect_DepthOnly;
 }
 
-WGPUShaderStage to_wgpu_visibility(sg::shader_stages visibility, sg::binding_type type)
+WGPUShaderStage to_wgpu_visibility(sg::shader_stages visibility, bool writable)
 {
     if (visibility.is_empty())
     {
-        auto const writable = type == sg::binding_type::readwrite_raw_buffer
-                           || type == sg::binding_type::readwrite_structured_buffer
-                           || type == sg::binding_type::readwrite_texture;
         return writable ? WGPUShaderStage_Fragment | WGPUShaderStage_Compute
                         : WGPUShaderStage_Vertex | WGPUShaderStage_Fragment | WGPUShaderStage_Compute;
     }

@@ -25,15 +25,15 @@ bool is_sample_element(cc::string_view name)
     return false;
 }
 
-cc::string_view access_prefix(image_access access)
+cc::string_view access_prefix(access_mode access)
 {
     switch (access)
     {
-    case image_access::read:
+    case access_mode::read:
         return "";
-    case image_access::read_write:
+    case access_mode::read_write:
         return "mut ";
-    case image_access::write:
+    case access_mode::write:
         return "out ";
     }
     return "";
@@ -191,7 +191,7 @@ type_id checker::qualify_resource(i32 file, ast::expr_id expr, type_id inner, as
     if (t.kind == type_kind::image)
     {
         auto qualified = t;
-        qualified.access = is_write_only ? image_access::write : image_access::read_write;
+        qualified.access = is_write_only ? access_mode::write : access_mode::read_write;
         if (!is_write_only && !k_image_formats[t.format].is_readwrite_portable)
             judge_feature(file, where, cc::format("a `mut` image of .{}", k_image_formats[t.format].name),
                           "sg::feature::readwrite_image_formats");
@@ -378,7 +378,7 @@ type_id checker::resolve_pattern_type(i32 file, ast::expr_id expr)
         if (inner == checked_module::error_type || out.at(inner).kind != type_kind::image || out.at(inner).format >= 0)
             return inner == checked_module::error_type ? inner : qualify_resource(file, expr, inner, q->access);
         auto qualified = out.at(inner);
-        qualified.access = q->access == ast::type_access::write_only ? image_access::write : image_access::read_write;
+        qualified.access = q->access == ast::type_access::write_only ? access_mode::write : access_mode::read_write;
         auto const result = resource_type(cc::move(qualified));
         set_type(file, expr, result);
         return result;
@@ -435,12 +435,12 @@ bool checker::takes(type_id parameter, type_id argument) const
     // A pattern that reads takes an image the shader may read, one that writes an image it may write.
     switch (p.access)
     {
-    case image_access::read:
-        return a.access != image_access::write;
-    case image_access::write:
-        return a.access != image_access::read;
-    case image_access::read_write:
-        return a.access == image_access::read_write;
+    case access_mode::read:
+        return a.access != access_mode::write;
+    case access_mode::write:
+        return a.access != access_mode::read;
+    case access_mode::read_write:
+        return a.access == access_mode::read_write;
     }
     return false;
 }

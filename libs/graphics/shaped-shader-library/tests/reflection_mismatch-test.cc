@@ -7,8 +7,8 @@
 namespace
 {
 sg::binding const work[] = {
-    {.name = "work_src", .index = 0, .type = sg::binding_type::readonly_structured_buffer},
-    {.name = "work_dst", .index = 1, .type = sg::binding_type::readwrite_structured_buffer},
+    {.name = "work_src", .index = 0, .type = sg::binding_type::buffer},
+    {.name = "work_dst", .index = 1, .type = sg::binding_type::buffer, .access = sg::access_mode::read_write},
 };
 
 sg::compiled_shader reflecting(std::initializer_list<sg::binding> bindings)
@@ -29,24 +29,20 @@ cc::string mismatch_of(sg::compiled_shader const& compiled, cc::optional<sg::bin
 TEST("slib - reflection fits the listed groups by name, position, index, count and kind")
 {
     // A descriptor set and a register space both say the position, and a binding the shader never reads may be missing.
-    CHECK(mismatch_of(reflecting(
-              {{.name = "work_dst", .group_index = 1u, .index = 1, .type = sg::binding_type::readwrite_structured_buffer}}))
+    CHECK(mismatch_of(reflecting({{.name = "work_dst",
+                                   .group_index = 1u,
+                                   .index = 1,
+                                   .type = sg::binding_type::buffer,
+                                   .access = sg::access_mode::read_write}}))
           == "");
-    CHECK(mismatch_of(reflecting(
-              {{.name = "work_src", .space = 1u, .index = 0, .type = sg::binding_type::readonly_structured_buffer}}))
+    CHECK(mismatch_of(reflecting({{.name = "work_src", .space = 1u, .index = 0, .type = sg::binding_type::buffer}}))
           == "");
 
     CHECK(mismatch_of(reflecting({{.name = "stray", .group_index = 1u}}))
               .contains("reflects 'stray', which no group of the layout declares"));
-    CHECK(mismatch_of(reflecting({{.name = "work_src",
-                                   .group_index = 0u,
-                                   .index = 0,
-                                   .type = sg::binding_type::readonly_structured_buffer}}))
+    CHECK(mismatch_of(reflecting({{.name = "work_src", .group_index = 0u, .index = 0, .type = sg::binding_type::buffer}}))
               .contains("'work_src' is in set 0, and the layout has its group at slot 1"));
-    CHECK(mismatch_of(reflecting({{.name = "work_dst",
-                                   .group_index = 1u,
-                                   .index = 1,
-                                   .type = sg::binding_type::readonly_structured_buffer}}))
+    CHECK(mismatch_of(reflecting({{.name = "work_dst", .group_index = 1u, .index = 1, .type = sg::binding_type::buffer}}))
               .contains("'work_dst' reflects as index 1"));
 }
 

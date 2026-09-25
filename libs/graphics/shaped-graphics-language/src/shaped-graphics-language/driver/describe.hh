@@ -68,9 +68,9 @@ struct sgl::described_binding_member
     cc::string texture_dimension;
     /// A texture's `sg::texture_sample_type`: `filterable_float`, `depth`, ….
     cc::string sample_type;
-    /// An image's `sg::pixel_format` and `sg::storage_access`: `rgba8_unorm`, `write`.
+    /// An image's `sg::pixel_format` and `sg::access_mode`: `rgba8_unorm`, `write`.
     cc::string image_format;
-    cc::string storage_access;
+    cc::string access;
     /// A sampler's `sg::sampler_binding_type`: `filtering`, `non_filtering` or `comparison`.
     cc::string sampler_type;
     /// A static sampler of the group; absent for one the host binds.

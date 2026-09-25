@@ -13,7 +13,7 @@
 #   --- hlsl            the snippet, verbatim, its first line being line 1 of every error message below
 #   --- groups          the expected parse, or nothing at all when the snippet declares no group
 #   <namespace> group=<n>
-#     <name> index=<i> type=<sg::binding_type> count=<n> [dim=<sg::texture_view_dimension>] [format=<sg::pixel_format>]
+#     <name> index=<i> type=<sg::binding_type> [access=<sg::access_mode, read if absent>] count=<n> [dim=<sg::texture_view_dimension>] [format=<sg::pixel_format>]
 #     static <name> [<sg::sampler field>=<value>]...   every field that differs from sg::sampler's default,
 #                                                      in the order sg::sampler declares them
 #   inline_constants <name> space=<n> type=<T> size=<bytes>   the space is always the reserved one,
@@ -37,7 +37,7 @@ namespace frame_bindings
 }
 --- groups
 frame_bindings group=0
-  albedo index=0 type=readonly_texture count=1 dim=tex_2d
+  albedo index=0 type=texture count=1 dim=tex_2d
   linear_sampler index=1 type=sampler count=1
 
 
@@ -59,8 +59,8 @@ namespace material
 frame group=0
   constants index=0 type=uniform_buffer count=1
 material group=2
-  base_color index=0 type=readonly_texture count=1 dim=tex_2d
-  counters index=1 type=readwrite_structured_buffer count=1
+  base_color index=0 type=texture count=1 dim=tex_2d
+  counters index=1 type=buffer access=read_write count=1
 
 
 --- case the attribute's own spacing does not matter, since the flatten reprints its tokens
@@ -73,7 +73,7 @@ namespace shadow
 }
 --- groups
 shadow group=1
-  maps index=0 type=readonly_texture count=1 dim=tex_2d_array
+  maps index=0 type=texture count=1 dim=tex_2d_array
   compare_sampler index=1 type=sampler count=1
 
 
@@ -87,7 +87,7 @@ namespace bindless
 }
 --- groups
 bindless group=3
-  textures index=0 type=readonly_texture count=8 dim=tex_2d
+  textures index=0 type=texture count=8 dim=tex_2d
   samp index=8 type=sampler count=1
 
 
@@ -100,7 +100,7 @@ namespace ms
 }
 --- groups
 ms group=0
-  color index=0 type=readonly_texture count=1 dim=tex_2d_ms
+  color index=0 type=texture count=1 dim=tex_2d_ms
 
 
 --- case text carrying no attribute is left alone, a comment's directive included
@@ -121,7 +121,7 @@ namespace frame
 }
 --- groups
 frame group=0
-  albedo index=0 type=readonly_texture count=1 dim=tex_2d
+  albedo index=0 type=texture count=1 dim=tex_2d
 
 
 --- case a hand-written register is an error once the file uses the dialect at all
@@ -161,7 +161,7 @@ namespace frame
 }
 --- groups
 frame group=0
-  albedo index=0 type=readonly_texture count=1 dim=tex_2d
+  albedo index=0 type=texture count=1 dim=tex_2d
 
 
 --- case an address inside a plain struct body is seen, not skipped with it
@@ -203,7 +203,7 @@ namespace frame
 }
 --- groups
 frame group=0
-  albedo index=0 type=readonly_texture count=1 dim=tex_2d
+  albedo index=0 type=texture count=1 dim=tex_2d
 
 
 --- case a string literal is skipped whole, so a marker inside one is not a directive
@@ -220,7 +220,7 @@ namespace frame
 }
 --- groups
 frame group=0
-  albedo index=0 type=readonly_texture count=1 dim=tex_2d
+  albedo index=0 type=texture count=1 dim=tex_2d
 
 
 --- case a file with no attribute anywhere declares no group
@@ -263,24 +263,24 @@ namespace everything
 }
 --- groups
 everything group=7
-  t1d index=0 type=readonly_texture count=1 dim=tex_1d
-  t1da index=1 type=readonly_texture count=1 dim=tex_1d_array
-  t2d index=2 type=readonly_texture count=1 dim=tex_2d
-  t2da index=3 type=readonly_texture count=1 dim=tex_2d_array
-  t2dms index=4 type=readonly_texture count=1 dim=tex_2d_ms
-  t2dmsa index=5 type=readonly_texture count=1 dim=tex_2d_ms_array
-  t3d index=6 type=readonly_texture count=1 dim=tex_3d
-  tcube index=7 type=readonly_texture count=1 dim=cube
-  tcubea index=8 type=readonly_texture count=1 dim=cube_array
-  u1d index=9 type=readwrite_texture count=1 dim=tex_1d
-  u1da index=10 type=readwrite_texture count=1 dim=tex_1d_array
-  u2d index=11 type=readwrite_texture count=1 dim=tex_2d
-  u2da index=12 type=readwrite_texture count=1 dim=tex_2d_array
-  u3d index=13 type=readwrite_texture count=1 dim=tex_3d
-  sbuf index=14 type=readonly_structured_buffer count=1
-  rwsbuf index=15 type=readwrite_structured_buffer count=1
-  rawbuf index=16 type=readonly_raw_buffer count=1
-  rwrawbuf index=17 type=readwrite_raw_buffer count=1
+  t1d index=0 type=texture count=1 dim=tex_1d
+  t1da index=1 type=texture count=1 dim=tex_1d_array
+  t2d index=2 type=texture count=1 dim=tex_2d
+  t2da index=3 type=texture count=1 dim=tex_2d_array
+  t2dms index=4 type=texture count=1 dim=tex_2d_ms
+  t2dmsa index=5 type=texture count=1 dim=tex_2d_ms_array
+  t3d index=6 type=texture count=1 dim=tex_3d
+  tcube index=7 type=texture count=1 dim=cube
+  tcubea index=8 type=texture count=1 dim=cube_array
+  u1d index=9 type=image access=read_write count=1 dim=tex_1d
+  u1da index=10 type=image access=read_write count=1 dim=tex_1d_array
+  u2d index=11 type=image access=read_write count=1 dim=tex_2d
+  u2da index=12 type=image access=read_write count=1 dim=tex_2d_array
+  u3d index=13 type=image access=read_write count=1 dim=tex_3d
+  sbuf index=14 type=buffer count=1
+  rwsbuf index=15 type=buffer access=read_write count=1
+  rawbuf index=16 type=bytes count=1
+  rwrawbuf index=17 type=bytes access=read_write count=1
   cbuf index=18 type=uniform_buffer count=1
   samp index=19 type=sampler count=1
   samp_cmp index=20 type=sampler count=1
@@ -343,7 +343,7 @@ namespace frame
 }
 --- groups
 frame group=0
-  albedo index=0 type=readonly_texture count=1 dim=tex_2d
+  albedo index=0 type=texture count=1 dim=tex_2d
   linear_sampler index=1 type=sampler count=1
   static linear_sampler address_u=clamp_edge address_v=clamp_edge address_w=clamp_edge
 
@@ -1306,8 +1306,8 @@ namespace post
 }
 --- groups
 post group=0
-  dst index=0 type=readwrite_texture count=1 dim=tex_2d format=rgba8_unorm
-  acc index=1 type=readwrite_texture count=1 dim=tex_2d
+  dst index=0 type=image access=read_write count=1 dim=tex_2d format=rgba8_unorm
+  acc index=1 type=image access=read_write count=1 dim=tex_2d
 
 
 --- case a format attribute describes a storage texture and nothing else

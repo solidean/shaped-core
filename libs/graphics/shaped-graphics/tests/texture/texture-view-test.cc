@@ -328,10 +328,10 @@ TEST("sg - texture binding types accept the matching texture view")
     auto const d = desc_2d(sg::texture_usage::texture | sg::texture_usage::image);
     auto tex = sg::texture_2d::from_raw(std::make_shared<test_texture>(d));
 
-    CHECK(sg::accepts(sg::binding_type::readonly_texture, tex.as_texture_view().to_raw()));
-    CHECK(sg::accepts(sg::binding_type::readwrite_texture, tex.as_image_view().to_raw()));
-    CHECK(!sg::accepts(sg::binding_type::readonly_texture, tex.as_image_view().to_raw()));             // wrong kind
-    CHECK(!sg::accepts(sg::binding_type::readonly_structured_buffer, tex.as_texture_view().to_raw())); // wrong shape
+    CHECK(sg::accepts({.type = sg::binding_type::texture}, tex.as_texture_view().to_raw()));
+    CHECK(sg::accepts({.type = sg::binding_type::image}, tex.as_image_view().to_raw()));
+    CHECK(!sg::accepts({.type = sg::binding_type::texture}, tex.as_image_view().to_raw()));  // wrong kind
+    CHECK(!sg::accepts({.type = sg::binding_type::buffer}, tex.as_texture_view().to_raw())); // wrong shape
 }
 
 TEST("sg - typed texture views carry the view dimension at compile time")

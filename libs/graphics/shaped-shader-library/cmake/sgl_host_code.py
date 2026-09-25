@@ -208,16 +208,16 @@ def binding_entry(member: dict) -> str:
     head = f'{{.name = "{member["host_name"]}", .index = {member["slot"]}u, .count = 1u, '
     kind = member["kind"]
     if kind == "buffer":
-        return head + f".type = sg::binding_type::{'readwrite' if member['mut'] else 'readonly'}_structured_buffer}}"
+        access = ", .access = sg::access_mode::read_write" if member["mut"] else ""
+        return head + f".type = sg::binding_type::buffer{access}}}"
     if kind == "texture":
-        return head + (f".type = sg::binding_type::readonly_texture, "
+        return head + (f".type = sg::binding_type::texture, "
                        f".texture_dimension = sg::texture_view_dimension::{member['texture_dimension']}, "
                        f".sample_type = sg::texture_sample_type::{member['sample_type']}}}")
     if kind == "image":
-        return head + (f".type = sg::binding_type::readwrite_texture, "
+        return head + (f".type = sg::binding_type::image, .access = sg::access_mode::{member['access']}, "
                        f".texture_dimension = sg::texture_view_dimension::{member['texture_dimension']}, "
-                       f".image_format = sg::pixel_format::{member['image_format']}, "
-                       f".storage_access = sg::storage_access::{member['storage_access']}}}")
+                       f".image_format = sg::pixel_format::{member['image_format']}}}")
     return head + f".type = sg::binding_type::sampler, .sampler_type = sg::sampler_binding_type::{member['sampler_type']}}}"
 
 

@@ -241,7 +241,7 @@ INVOCABLE_TEST("sg error handling - an unbounded binding array is an error, not 
         .space = 0,
         .index = 0,
         .count = 0,
-        .type = sg::binding_type::readonly_texture,
+        .type = sg::binding_type::texture,
         .texture_dimension = sg::texture_view_dimension::tex_2d,
     };
     auto const bindings = cc::span<sg::binding const>(&unbounded, 1);
@@ -265,7 +265,8 @@ INVOCABLE_TEST("sg error handling - binding group wiring errors throw", (sg::con
         .space = 0,
         .index = 0,
         .count = 1,
-        .type = sg::binding_type::readwrite_structured_buffer,
+        .type = sg::binding_type::buffer,
+        .access = sg::access_mode::read_write,
     };
     auto layout = ctx->cached.acquire_binding_group_layout(cc::span<sg::binding const>(&b, 1));
     REQUIRE(layout != nullptr);

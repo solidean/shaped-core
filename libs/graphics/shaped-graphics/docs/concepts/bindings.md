@@ -11,10 +11,12 @@ A backend-specific binding vocabulary would be HLSL/D3D12 verbatim: a bind-type 
 sg's baseline shading language is undecided, so the vocabulary is drawn instead from concepts common to HLSL / GLSL / Slang / MSL / WGSL:
 
 - **`binding_type`** — the kind of resource a slot expects, and the backend-agnostic replacement for `D3D_SHADER_INPUT_TYPE`.
-  `uniform_buffer`, `readonly_structured_buffer`, `readwrite_structured_buffer`, `readonly_raw_buffer`, `readwrite_raw_buffer`.
-  Then `readonly_texture`, `readwrite_texture`, `sampler`, `acceleration_structure`.
+  `uniform_buffer`, `buffer`, `bytes`, `texture`, `image`, `sampler`, `acceleration_structure` — SGL's own resource types.
+- **`access`** — what the shader does with the resource, an `access_mode`: `read`, `write` or `read_write`, SGL's unmarked, `out` and `mut`.
+  Only an image is ever `write`, only a buffer, bytes or an image is ever written, and `is_valid_access` says which pairs exist.
+  A buffer's access picks SRV or UAV; an image is a UAV whatever its access, which reaches only WebGPU's layout and the hazards.
 - **`index` + `count`** — the address within the group, following SPIR-V (`binding`), WGSL (`@binding`) and Metal argument buffers.
-  A D3D12 backend derives its `(register-type, register)` at layout build: register-type from `binding_type` → `t`/`u`/`b`/`s`, register = `index`.
+  A D3D12 backend derives its `(register-type, register)` at layout build: register-type from the kind and access → `t`/`u`/`b`/`s`, register = `index`.
   `count == 0` is an unbounded array, which sg rejects — see [Array bindings](#array-bindings) for why.
 - **`group_index`** and **`space`** — the two ways a shading language namespaces that address, each optional and each reflected by the languages that have it.
   They are kept apart because only one of them is hardware-visible; the section below is what that costs a caller.
@@ -22,7 +24,6 @@ sg's baseline shading language is undecided, so the vocabulary is drawn instead 
 - **`visibility`** — the set of stages that declared this binding, as a `shader_stages`.
   **Empty means not known**, not "no stage": a hand-written binding that never says is treated as visible everywhere.
 - **`image_format`**, **`sample_type`**, **`sampler_type`** — the three optionals a WebGPU bind group layout entry needs and dx12 and vulkan do not ask for.
-- **`storage_access`** — whether a storage texture is read, written or both, defaulting to both; WebGPU needs it too, and the other two treat every UAV as read-write.
 
 ## Visibility is accumulated, not reflected
 
@@ -39,7 +40,7 @@ Vulkan consumes the real mask today — an empty set still means `VK_SHADER_STAG
 So an HLSL shader package states it beside the declaration, with slib's `#pragma sc format`, and the binding table generated for the package carries it as `.image_format`.
 WGSL declares one itself (`texture_storage_2d<rgba8unorm, write>`), and an SGL `image2d[.F]` member does too, so both of those paths fill it from the source.
 A binding reflected by DXC alone, outside a package's table, leaves it absent.
-The access mode is the same story without the pragma: WGSL and SGL state it, HLSL's `RWTexture` is always read-write, so the HLSL path leaves `storage_access` at its default.
+The access mode is the same story without the pragma: WGSL and SGL state it, and HLSL's `RWTexture` is always read-write, so the HLSL path says `read_write`.
 
 ## A group index binds, a space only numbers
 
@@ -97,9 +98,10 @@ A pairwise range test over every pair of bindings is a cost every correct layout
 ## Bindings and views speak the same vocabulary
 
 A `binding` describes what the shader *expects*, and a [`raw_view`](../../src/shaped-graphics/resource/views.hh) describes what is *bound*.
-For buffer and texture kinds they line up exactly: `view_class_of(binding_type)` and `shape_of(binding_type)` give the `(view_class, view_shape)` a satisfying view must have.
-`accepts(binding_type, raw_view)` is the check.
-That equivalence is what lets a binding validate a bound view with no backend involved, and it is why `binding_type`'s view kinds mirror the view `(access, shape)` combinations one-to-one.
+For buffer and texture kinds they line up exactly: `view_class_of(binding)` and `shape_of(binding_type)` give the `(view_class, view_shape)` a satisfying view must have.
+`accepts(binding, raw_view)` is the check.
+A buffer's access picks its view class, `readonly` or `readwrite`; an image is `view_class::image` whatever its access, since its view carries none.
+That equivalence is what lets a binding validate a bound view with no backend involved, and it is why a binding's kind and access mirror the view's `(view_class, view_shape)` one-to-one.
 
 ## Features
 

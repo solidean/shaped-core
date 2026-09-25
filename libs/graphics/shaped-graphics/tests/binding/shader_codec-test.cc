@@ -22,7 +22,7 @@ sg::compiled_shader make_shader()
     shader.bytecode = cc::make_pinned_data(cc::span<byte const>(code));
 
     shader.bindings.push_back(
-        {.name = "Output", .index = 1, .count = 2, .type = sg::binding_type::readwrite_structured_buffer});
+        {.name = "Output", .index = 1, .count = 2, .type = sg::binding_type::buffer, .access = sg::access_mode::read_write});
     shader.bindings.push_back(
         {.name = "Params", .space = 1, .index = 0, .count = 1, .type = sg::binding_type::uniform_buffer, .block_size = 64});
     shader.bindings.push_back({.name = "Albedo",
@@ -30,7 +30,7 @@ sg::compiled_shader make_shader()
                                .space = 0,
                                .index = 2,
                                .count = 1,
-                               .type = sg::binding_type::readonly_texture,
+                               .type = sg::binding_type::texture,
                                .texture_dimension = sg::texture_view_dimension::cube_array});
 
     // Every field the encoder writes has to appear on some binding here, or "round-trips every field" is a claim the
@@ -39,7 +39,7 @@ sg::compiled_shader make_shader()
                                .space = 0,
                                .index = 2,
                                .count = 1,
-                               .type = sg::binding_type::readonly_texture,
+                               .type = sg::binding_type::texture,
                                .texture_dimension = sg::texture_view_dimension::cube_array,
                                .visibility = sg::shader_stage::fragment | sg::shader_stage::compute,
                                .sample_type = sg::texture_sample_type::unfilterable_float});
@@ -47,11 +47,11 @@ sg::compiled_shader make_shader()
                                .space = 0,
                                .index = 3,
                                .count = 1,
-                               .type = sg::binding_type::readwrite_texture,
+                               .type = sg::binding_type::image,
+                               .access = sg::access_mode::write,
                                .texture_dimension = sg::texture_view_dimension::tex_2d,
                                .visibility = sg::shader_stages(sg::shader_stage::compute),
-                               .image_format = sg::pixel_format::rgba8_unorm,
-                               .storage_access = sg::storage_access::write});
+                               .image_format = sg::pixel_format::rgba8_unorm});
     shader.bindings.push_back({.name = "Shadow",
                                .space = 0,
                                .index = 4,
@@ -88,7 +88,7 @@ bool same(sg::compiled_shader const& a, sg::compiled_shader const& b)
             return false;
         // A field left out here is a field the encoder may silently drop, which is what this comparison is for.
         if (x.texture_dimension != y.texture_dimension || x.image_format != y.image_format
-            || x.sample_type != y.sample_type || x.sampler_type != y.sampler_type || x.storage_access != y.storage_access)
+            || x.sample_type != y.sample_type || x.sampler_type != y.sampler_type || x.access != y.access)
             return false;
         if (x.visibility != y.visibility)
             return false;

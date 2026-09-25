@@ -42,7 +42,8 @@ TEST("slib wgsl - a compute module reports its entry point, workgroup size and b
 
     auto const* values = find(d, "values");
     REQUIRE(values != nullptr);
-    CHECK(values->type == sg::binding_type::readwrite_structured_buffer);
+    CHECK(values->type == sg::binding_type::buffer);
+    CHECK(values->access == sg::access_mode::read_write);
     CHECK(values->group_index == 0u);
     CHECK(values->index == 0u);
     CHECK(!values->space.has_value());
@@ -50,7 +51,8 @@ TEST("slib wgsl - a compute module reports its entry point, workgroup size and b
 
     auto const* input = find(d, "input");
     REQUIRE(input != nullptr);
-    CHECK(input->type == sg::binding_type::readonly_structured_buffer); // storage defaults to read
+    CHECK(input->type == sg::binding_type::buffer); // storage defaults to read
+    CHECK(input->access == sg::access_mode::read);
 }
 
 TEST("slib wgsl - a workgroup size may name module-scope consts")
@@ -176,7 +178,7 @@ TEST("slib wgsl - sampled textures report dimension and sample type")
     )");
     REQUIRE(r.has_value());
     auto const& d = r.value();
-    CHECK(find(d, "a")->type == sg::binding_type::readonly_texture);
+    CHECK(find(d, "a")->type == sg::binding_type::texture);
     CHECK(find(d, "a")->texture_dimension == sg::texture_view_dimension::tex_2d);
     CHECK(find(d, "a")->sample_type == sg::texture_sample_type::filterable_float);
     CHECK(find(d, "b")->texture_dimension == sg::texture_view_dimension::tex_2d_array);
@@ -200,15 +202,15 @@ TEST("slib wgsl - a storage texture reports the format WGSL declares, which HLSL
     REQUIRE(r.has_value());
     auto const* color = find(r.value(), "out_color");
     REQUIRE(color != nullptr);
-    CHECK(color->type == sg::binding_type::readwrite_texture);
+    CHECK(color->type == sg::binding_type::image);
     CHECK(color->image_format == sg::pixel_format::rgba16_float);
     CHECK(color->texture_dimension == sg::texture_view_dimension::tex_2d);
     CHECK(find(r.value(), "out_mask")->image_format == sg::pixel_format::r32_uint);
     CHECK(find(r.value(), "out_mask")->texture_dimension == sg::texture_view_dimension::tex_3d);
 
     // The access mode is part of what a WebGPU layout entry must match, so `write` must not come back as read-write.
-    CHECK(color->storage_access == sg::storage_access::write);
-    CHECK(find(r.value(), "out_mask")->storage_access == sg::storage_access::read_write);
+    CHECK(color->access == sg::access_mode::write);
+    CHECK(find(r.value(), "out_mask")->access == sg::access_mode::read_write);
 }
 
 TEST("slib wgsl - a read-only storage texture reports read access")
@@ -219,8 +221,8 @@ TEST("slib wgsl - a read-only storage texture reports read access")
     )");
     REQUIRE(r.has_value());
     REQUIRE(find(r.value(), "src") != nullptr);
-    CHECK(find(r.value(), "src")->type == sg::binding_type::readwrite_texture);
-    CHECK(find(r.value(), "src")->storage_access == sg::storage_access::read);
+    CHECK(find(r.value(), "src")->type == sg::binding_type::image);
+    CHECK(find(r.value(), "src")->access == sg::access_mode::read);
 }
 
 TEST("slib wgsl - a storage texture format sg has no pixel format for is refused by name")
@@ -287,7 +289,7 @@ TEST("slib wgsl - aliases resolve before layout and binding kind")
     )");
     REQUIRE(r.has_value());
     CHECK(find(r.value(), "tint")->block_size == isize(16));
-    CHECK(find(r.value(), "source")->type == sg::binding_type::readonly_texture);
+    CHECK(find(r.value(), "source")->type == sg::binding_type::texture);
 }
 
 TEST("slib wgsl - the reserved group's binding 0 is the inline-constants block")

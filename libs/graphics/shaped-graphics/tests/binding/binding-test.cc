@@ -42,41 +42,77 @@ std::shared_ptr<test_buffer> make_buffer(isize size, sg::buffer_usages usage)
 TEST("sg bindings - binding_type maps to view (access/shape)")
 {
     using bt = sg::binding_type;
-    CHECK(sg::view_class_of(bt::uniform_buffer) == sg::view_class::uniform);
+    CHECK(sg::view_class_of(bt::uniform_buffer, sg::access_mode::read) == sg::view_class::uniform);
     CHECK(sg::shape_of(bt::uniform_buffer) == sg::view_shape::uniform_block);
 
-    CHECK(sg::view_class_of(bt::readonly_structured_buffer) == sg::view_class::readonly);
-    CHECK(sg::shape_of(bt::readonly_structured_buffer) == sg::view_shape::structured);
+    CHECK(sg::view_class_of(bt::buffer, sg::access_mode::read) == sg::view_class::readonly);
+    CHECK(sg::shape_of(bt::buffer) == sg::view_shape::structured);
 
-    CHECK(sg::view_class_of(bt::readwrite_structured_buffer) == sg::view_class::readwrite);
-    CHECK(sg::shape_of(bt::readwrite_structured_buffer) == sg::view_shape::structured);
+    CHECK(sg::view_class_of(bt::buffer, sg::access_mode::read_write) == sg::view_class::readwrite);
+    CHECK(sg::shape_of(bt::buffer) == sg::view_shape::structured);
 
-    CHECK(sg::view_class_of(bt::readonly_raw_buffer) == sg::view_class::readonly);
-    CHECK(sg::shape_of(bt::readonly_raw_buffer) == sg::view_shape::raw);
+    CHECK(sg::view_class_of(bt::bytes, sg::access_mode::read) == sg::view_class::readonly);
+    CHECK(sg::shape_of(bt::bytes) == sg::view_shape::raw);
 
-    CHECK(sg::view_class_of(bt::readwrite_raw_buffer) == sg::view_class::readwrite);
-    CHECK(sg::shape_of(bt::readwrite_raw_buffer) == sg::view_shape::raw);
+    CHECK(sg::view_class_of(bt::bytes, sg::access_mode::read_write) == sg::view_class::readwrite);
+    CHECK(sg::shape_of(bt::bytes) == sg::view_shape::raw);
+}
+
+TEST("sg bindings - only an image is write-only, and only buffers, bytes and images write")
+{
+    using bt = sg::binding_type;
+    using am = sg::access_mode;
+    for (auto const a : {am::read, am::write, am::read_write})
+        CHECK(sg::is_valid_access(bt::image, a));
+
+    CHECK(sg::is_valid_access(bt::buffer, am::read_write));
+    CHECK(sg::is_valid_access(bt::bytes, am::read_write));
+    CHECK(!sg::is_valid_access(bt::buffer, am::write)); // no target has a write-only buffer
+    CHECK(!sg::is_valid_access(bt::bytes, am::write));
+
+    for (auto const t : {bt::uniform_buffer, bt::texture, bt::sampler, bt::acceleration_structure})
+    {
+        CHECK(sg::is_valid_access(t, am::read));
+        CHECK(!sg::is_valid_access(t, am::read_write));
+        CHECK(!sg::is_valid_access(t, am::write));
+    }
+}
+
+TEST("sg bindings - an image is one view class and one kind whatever its access")
+{
+    using am = sg::access_mode;
+    for (auto const a : {am::read, am::write, am::read_write})
+        CHECK(sg::view_class_of(sg::binding_type::image, a) == sg::view_class::image);
+
+    // One UAV serves an image's three accesses, so two stages disagreeing on it still share a descriptor.
+    CHECK(sg::is_same_kind({.type = sg::binding_type::image, .access = am::read},
+                           {.type = sg::binding_type::image, .access = am::write}));
+    // A buffer's access picks SRV or UAV, so there it is part of the kind.
+    CHECK(!sg::is_same_kind({.type = sg::binding_type::buffer, .access = am::read},
+                            {.type = sg::binding_type::buffer, .access = am::read_write}));
 }
 
 TEST("sg bindings - accepts matches a bound view")
 {
     auto const buf = make_buffer(256, sg::buffer_usage::readonly_buffer | sg::buffer_usage::readwrite_buffer);
 
-    // A rw-structured view satisfies exactly a readwrite_structured_buffer binding.
+    // A rw-structured view satisfies exactly a read_write buffer binding.
     sg::raw_view const rw_structured = sg::buffer<particle>::from_raw(buf).as_readwrite_buffer();
-    CHECK(sg::accepts(sg::binding_type::readwrite_structured_buffer, rw_structured));
-    CHECK(!sg::accepts(sg::binding_type::readonly_structured_buffer, rw_structured)); // access mismatch
-    CHECK(!sg::accepts(sg::binding_type::readwrite_raw_buffer, rw_structured));       // shape mismatch
+    CHECK(sg::accepts({.type = sg::binding_type::buffer, .access = sg::access_mode::read_write}, rw_structured));
+    CHECK(!sg::accepts({.type = sg::binding_type::buffer}, rw_structured)); // access mismatch
+    CHECK(!sg::accepts({.type = sg::binding_type::bytes, .access = sg::access_mode::read_write},
+                       rw_structured)); // shape mismatch
 
-    // A raw rw view satisfies readwrite_raw_buffer, not the structured one.
+    // A raw rw view satisfies read_write bytes, not a buffer.
     sg::raw_view const rw_raw = buf->as_raw_readwrite();
-    CHECK(sg::accepts(sg::binding_type::readwrite_raw_buffer, rw_raw));
-    CHECK(!sg::accepts(sg::binding_type::readwrite_structured_buffer, rw_raw)); // shape mismatch
+    CHECK(sg::accepts({.type = sg::binding_type::bytes, .access = sg::access_mode::read_write}, rw_raw));
+    CHECK(!sg::accepts({.type = sg::binding_type::buffer, .access = sg::access_mode::read_write}, rw_raw)); // shape mismatch
 
     // A read-only structured view.
     sg::raw_view const ro_structured = sg::buffer<particle>::from_raw(buf).as_readonly_buffer();
-    CHECK(sg::accepts(sg::binding_type::readonly_structured_buffer, ro_structured));
-    CHECK(!sg::accepts(sg::binding_type::readwrite_structured_buffer, ro_structured)); // access mismatch
+    CHECK(sg::accepts({.type = sg::binding_type::buffer}, ro_structured));
+    CHECK(!sg::accepts({.type = sg::binding_type::buffer, .access = sg::access_mode::read_write},
+                       ro_structured)); // access mismatch
 }
 
 TEST("sg bindings - compiled_shader holds reflection")
@@ -91,7 +127,8 @@ TEST("sg bindings - compiled_shader holds reflection")
         .name = "Output",
         .index = 0,
         .count = 1,
-        .type = sg::binding_type::readwrite_structured_buffer,
+        .type = sg::binding_type::buffer,
+        .access = sg::access_mode::read_write,
     });
 
     // The behavioral payload of reflection: the declared binding accepts a matching bound view (a
@@ -101,33 +138,32 @@ TEST("sg bindings - compiled_shader holds reflection")
     CHECK(!b.block_size.has_value());
 
     auto const buf = make_buffer(256, sg::buffer_usage::readwrite_buffer);
-    CHECK(sg::accepts(b.type, sg::buffer<particle>::from_raw(buf).as_readwrite_buffer()));
+    CHECK(sg::accepts(b, sg::buffer<particle>::from_raw(buf).as_readwrite_buffer()));
 }
 
 TEST("sg bindings - group_index_of agrees or is absent")
 {
     // Nothing declares a group index: the bind slot alone decides, which is the HLSL path.
-    auto const spaced = cc::vector<sg::binding>{
-        {.name = "Tex", .space = 3, .index = 0, .type = sg::binding_type::readonly_texture},
-        {.name = "Buf", .space = 7, .index = 0, .type = sg::binding_type::readonly_raw_buffer}};
+    auto const spaced
+        = cc::vector<sg::binding>{{.name = "Tex", .space = 3, .index = 0, .type = sg::binding_type::texture},
+                                  {.name = "Buf", .space = 7, .index = 0, .type = sg::binding_type::bytes}};
     CHECK(!sg::group_index_of(spaced).has_value()); // a space is a register namespace, never a bind slot
 
     // A declaring binding pins the group even when its neighbours stay silent.
-    auto const mixed = cc::vector<sg::binding>{
-        {.name = "Tex", .index = 0, .type = sg::binding_type::readonly_texture},
-        {.name = "Buf", .group_index = 2, .index = 1, .type = sg::binding_type::readonly_raw_buffer}};
+    auto const mixed
+        = cc::vector<sg::binding>{{.name = "Tex", .index = 0, .type = sg::binding_type::texture},
+                                  {.name = "Buf", .group_index = 2, .index = 1, .type = sg::binding_type::bytes}};
     CHECK(sg::group_index_of(mixed) == 2u);
 }
 
 TEST("sg bindings - merge_bindings unions stages by name")
 {
     // Two stages of one pipeline: they share "frame", so the union has three entries.
-    auto const raygen
-        = cc::vector<sg::binding>{{.name = "frame", .index = 0, .type = sg::binding_type::uniform_buffer},
-                                  {.name = "Output", .index = 0, .type = sg::binding_type::readwrite_texture}};
-    auto const hit = cc::vector<sg::binding>{
-        {.name = "frame", .index = 7, .type = sg::binding_type::uniform_buffer},
-        {.name = "Vertices", .index = 1, .type = sg::binding_type::readonly_structured_buffer}};
+    auto const raygen = cc::vector<sg::binding>{
+        {.name = "frame", .index = 0, .type = sg::binding_type::uniform_buffer},
+        {.name = "Output", .index = 0, .type = sg::binding_type::image, .access = sg::access_mode::read_write}};
+    auto const hit = cc::vector<sg::binding>{{.name = "frame", .index = 7, .type = sg::binding_type::uniform_buffer},
+                                             {.name = "Vertices", .index = 1, .type = sg::binding_type::buffer}};
 
     auto const merged = sg::merge_bindings({raygen, hit});
     REQUIRE(merged.size() == 3);
@@ -152,7 +188,7 @@ TEST("sg bindings - merge_bindings unions stages by name")
 
 TEST("sg bindings - split_off_sampler_bindings partitions in order")
 {
-    auto bindings = cc::vector<sg::binding>{{.name = "Albedo", .index = 0, .type = sg::binding_type::readonly_texture},
+    auto bindings = cc::vector<sg::binding>{{.name = "Albedo", .index = 0, .type = sg::binding_type::texture},
                                             {.name = "sPoint", .index = 0, .type = sg::binding_type::sampler},
                                             {.name = "frame", .index = 0, .type = sg::binding_type::uniform_buffer},
                                             {.name = "sLinear", .index = 1, .type = sg::binding_type::sampler}};
@@ -182,7 +218,7 @@ TEST("sg bindings - named_view pairs a name with bound views")
     CHECK(nv.view.size() == 1);
     CHECK(sg::view_class_of(nv.view.span()[0]) == sg::view_class::readwrite);
     CHECK(sg::shape_of(nv.view.span()[0]) == sg::view_shape::structured);
-    CHECK(sg::accepts(sg::binding_type::readwrite_structured_buffer, nv.view.span()[0]));
+    CHECK(sg::accepts({.type = sg::binding_type::buffer, .access = sg::access_mode::read_write}, nv.view.span()[0]));
 
     // An array binding carries a vector, one view per element; a vacant element is the sg::vacant_view
     // marker, which satisfies every view kind — the backend synthesizes its null descriptor from the binding.
@@ -192,14 +228,14 @@ TEST("sg bindings - named_view pairs a name with bound views")
     sg::named_view const array = {.name = "Textures", .view = cc::move(elements)};
     CHECK(array.view.size() == 3);
     CHECK(sg::is_vacant(array.view.span()[1]));
-    CHECK(sg::accepts(sg::binding_type::readonly_texture, array.view.span()[1]));
-    CHECK(sg::accepts(sg::binding_type::readonly_raw_buffer, array.view.span()[1]));
-    CHECK(!sg::accepts(sg::binding_type::sampler, array.view.span()[1]));
+    CHECK(sg::accepts({.type = sg::binding_type::texture}, array.view.span()[1]));
+    CHECK(sg::accepts({.type = sg::binding_type::bytes}, array.view.span()[1]));
+    CHECK(!sg::accepts({.type = sg::binding_type::sampler}, array.view.span()[1]));
 
     // is_array and the reflected texture dimension are what a backend reads off an array binding.
     auto const b = sg::binding{.name = "Textures",
                                .count = 4,
-                               .type = sg::binding_type::readonly_texture,
+                               .type = sg::binding_type::texture,
                                .texture_dimension = sg::texture_view_dimension::cube};
     CHECK(b.is_array());
     auto const scalar = sg::binding{.name = "One", .count = 1};
@@ -218,7 +254,7 @@ TEST("sg::binding - visibility unions across stages")
 
     auto ps = cc::vector<sg::binding>();
     ps.push_back({.name = "camera", .index = 0, .type = sg::binding_type::uniform_buffer});
-    ps.push_back({.name = "albedo", .index = 1, .type = sg::binding_type::readonly_texture});
+    ps.push_back({.name = "albedo", .index = 1, .type = sg::binding_type::texture});
     sg::apply_stage_visibility(ps, sg::shader_stage::fragment);
 
     CHECK(vs[0].visibility.has(sg::shader_stage::vertex));

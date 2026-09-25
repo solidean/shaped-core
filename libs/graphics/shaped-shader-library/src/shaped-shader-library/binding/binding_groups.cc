@@ -1037,7 +1037,7 @@ struct parser
 
             if (pending.has_value() && pending.value().name == "format")
             {
-                if (binding.value().binding.type != sg::binding_type::readwrite_texture)
+                if (binding.value().binding.type != sg::binding_type::image)
                     return cc::error(cc::format("{}: 'format' describes a storage texture, and '{}' is not one",
                                                 to_string(pending.value().location), binding.value().binding.name));
                 auto format = slib::impl::parse_image_format(pending.value());
@@ -1149,6 +1149,7 @@ struct parser
                                           .index = index,
                                           .count = count,
                                           .type = type.value().type,
+                                          .access = type.value().access,
                                           .texture_dimension = type.value().dimension},
                               .template_argument = template_argument,
                               .register_class = type.value().register_class,

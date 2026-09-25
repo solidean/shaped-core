@@ -11,7 +11,7 @@ namespace sg
 {
 /// The access a shader performs on a bound view of this class — the inferred replacement for an explicit per-binding declaration.
 /// Uniform blocks read, readonly buffers and textures read, readwrite buffers and images write.
-/// An image counts as written whatever its binding's `storage_access` says; libs/graphics/shaped-graphics/docs/TODO.md tracks narrowing that.
+/// An image counts as written whatever its binding's `access` says; libs/graphics/shaped-graphics/docs/TODO.md tracks narrowing that.
 [[nodiscard]] constexpr access_flags shader_access_of(view_class c)
 {
     switch (c)

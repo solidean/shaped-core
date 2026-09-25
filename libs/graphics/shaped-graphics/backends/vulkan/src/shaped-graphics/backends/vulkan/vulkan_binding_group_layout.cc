@@ -18,16 +18,14 @@ VkDescriptorType to_vk_descriptor_type(sg::binding_type t)
     {
     case sg::binding_type::uniform_buffer:
         return VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    case sg::binding_type::readonly_structured_buffer:
-    case sg::binding_type::readwrite_structured_buffer:
-    case sg::binding_type::readonly_raw_buffer:
-    case sg::binding_type::readwrite_raw_buffer:
+    case sg::binding_type::buffer:
+    case sg::binding_type::bytes:
         // Vulkan has one storage-buffer type; read-only versus read-write is the shader's declaration and the
         // barrier's access, not a different descriptor.
         return VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    case sg::binding_type::readonly_texture:
+    case sg::binding_type::texture:
         return VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-    case sg::binding_type::readwrite_texture:
+    case sg::binding_type::image:
         return VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
     case sg::binding_type::sampler:
         return VK_DESCRIPTOR_TYPE_SAMPLER;

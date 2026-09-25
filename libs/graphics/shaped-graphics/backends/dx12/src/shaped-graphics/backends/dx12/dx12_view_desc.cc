@@ -406,13 +406,11 @@ void create_null_view(ID3D12Device* device, sg::binding const& binding, D3D12_CP
     // every vacant element; only the SRV/UAV dimension has to match the shader's declaration.
     switch (binding.type)
     {
-    case sg::binding_type::readonly_raw_buffer:
-    case sg::binding_type::readonly_structured_buffer:
-    case sg::binding_type::readwrite_raw_buffer:
-    case sg::binding_type::readwrite_structured_buffer:
+    case sg::binding_type::bytes:
+    case sg::binding_type::buffer:
     {
         bool const is_raw = sg::shape_of(binding.type) == sg::view_shape::raw;
-        auto const view = sg::raw_buffer_view{.access = sg::view_class_of(binding.type),
+        auto const view = sg::raw_buffer_view{.access = sg::view_class_of(binding),
                                               .shape = sg::shape_of(binding.type),
                                               .buffer = nullptr,
                                               .stride_in_bytes = is_raw ? 0 : 4};
@@ -439,15 +437,15 @@ void create_null_view(ID3D12Device* device, sg::binding const& binding, D3D12_CP
         }
         return;
     }
-    case sg::binding_type::readonly_texture:
-    case sg::binding_type::readwrite_texture:
+    case sg::binding_type::texture:
+    case sg::binding_type::image:
     {
         CC_ASSERT(binding.texture_dimension.has_value(), "a vacant texture element needs the binding's "
                                                          "texture_dimension (reflection fills it; hand-written "
                                                          "bindings must set it)");
         // Reuse the dimension mapping through a synthetic null-handle view; the default subresource range
         // (one mip, one slice) is inert on a null descriptor.
-        auto const view = sg::raw_texture_view{.kind = sg::view_class_of(binding.type),
+        auto const view = sg::raw_texture_view{.kind = sg::view_class_of(binding),
                                                .texture = nullptr,
                                                .view_dimension = binding.texture_dimension.value(),
                                                .format = sg::pixel_format::rgba8_unorm};

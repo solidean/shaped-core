@@ -22,6 +22,7 @@ struct expected_binding
     u32 index = 0;
     u32 count = 1;
     sg::binding_type type = sg::binding_type::uniform_buffer;
+    sg::access_mode access = sg::access_mode::read;
     cc::optional<sg::texture_view_dimension> dimension;
     cc::optional<sg::pixel_format> image_format;
 };
@@ -69,12 +70,10 @@ struct name_of_binding_type
 
 constexpr name_of_binding_type k_binding_types[] = {
     {"uniform_buffer", sg::binding_type::uniform_buffer},
-    {"readonly_structured_buffer", sg::binding_type::readonly_structured_buffer},
-    {"readwrite_structured_buffer", sg::binding_type::readwrite_structured_buffer},
-    {"readonly_raw_buffer", sg::binding_type::readonly_raw_buffer},
-    {"readwrite_raw_buffer", sg::binding_type::readwrite_raw_buffer},
-    {"readonly_texture", sg::binding_type::readonly_texture},
-    {"readwrite_texture", sg::binding_type::readwrite_texture},
+    {"buffer", sg::binding_type::buffer},
+    {"bytes", sg::binding_type::bytes},
+    {"texture", sg::binding_type::texture},
+    {"image", sg::binding_type::image},
     {"sampler", sg::binding_type::sampler},
     {"acceleration_structure", sg::binding_type::acceleration_structure},
 };
@@ -402,6 +401,13 @@ constexpr name_of_dimension k_dimensions[] = {
                         if (entry.name == t.value())
                             binding.type = entry.value;
                 }
+                else if (auto const a = value_of(word, "access"); a.has_value())
+                {
+                    if (a.value() == "write")
+                        binding.access = sg::access_mode::write;
+                    else if (a.value() == "read_write")
+                        binding.access = sg::access_mode::read_write;
+                }
                 else if (auto const d = value_of(word, "dim"); d.has_value())
                 {
                     for (auto const& entry : k_dimensions)
@@ -592,7 +598,8 @@ TEST("slib - the binding corpus parses as it says it does")
                 auto const& want = expected.bindings[b];
 
                 if (binding.name != want.name || binding.index != want.index || binding.count != want.count
-                    || binding.type != want.type || binding.texture_dimension != want.dimension)
+                    || binding.type != want.type || binding.access != want.access
+                    || binding.texture_dimension != want.dimension)
                     CC_LOG_ERROR("[corpus] '{}' binding {} is '{}' index={} count={} type={} dim={}, expected '{}' "
                                  "index={} count={} type={} dim={}",
                                  c.name, b, binding.name, binding.index, binding.count, name_of(binding.type),
@@ -603,6 +610,7 @@ TEST("slib - the binding corpus parses as it says it does")
                 CHECK(binding.index == want.index);
                 CHECK(binding.count == want.count);
                 CHECK(binding.type == want.type);
+                CHECK(binding.access == want.access);
                 CHECK(binding.texture_dimension == want.dimension);
                 CHECK(binding.image_format == want.image_format);
 

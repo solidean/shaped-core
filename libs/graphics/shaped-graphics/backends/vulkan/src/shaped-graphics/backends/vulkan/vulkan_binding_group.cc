@@ -174,7 +174,7 @@ cc::result<vulkan_binding_group_handle> vulkan_binding_group::create_resolved(vu
         for (isize element = 0; element < element_views.size(); ++element)
         {
             auto const& view = element_views[element];
-            if (!sg::accepts(b.type, view))
+            if (!sg::accepts(b, view))
                 return cc::error(
                     cc::format("binding_group: element {} of '{}' does not match its declared kind", element, nv.name));
 

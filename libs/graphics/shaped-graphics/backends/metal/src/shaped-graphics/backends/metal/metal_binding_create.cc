@@ -186,7 +186,7 @@ cc::result<metal_binding_group_handle> metal_context::create_metal_binding_group
                 continue;
             }
 
-            if (!sg::accepts(b.type, view))
+            if (!sg::accepts(b, view))
                 return cc::error(
                     cc::format("binding_group: '{}' — the bound view does not match the binding's type", b.name));
 

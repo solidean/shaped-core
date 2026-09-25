@@ -180,7 +180,7 @@ cc::result<dx12_binding_group_handle> dx12_binding_group::create_resolved(dx12_c
         for (isize element = 0; element < element_views.size(); ++element)
         {
             auto const& view = element_views[element];
-            if (!sg::accepts(s.binding.type, view))
+            if (!sg::accepts(s.binding, view))
                 return cc::error(
                     cc::format("binding_group: element {} of '{}' does not match its declared kind", element, nv.name));
 

@@ -22,7 +22,7 @@ constexpr cc::string_view k_image_names[] = {"texture_storage_2d",
                                              "texture_storage_3d",
                                              "",
                                              ""};
-/// Parallel to `image_access`.
+/// Parallel to `access_mode`.
 constexpr cc::string_view k_accesses[] = {"read", "read_write", "write"};
 
 using namespace sgl;

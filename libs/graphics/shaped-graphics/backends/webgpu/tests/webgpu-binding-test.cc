@@ -55,7 +55,8 @@ fn main() {
         .group_index = 0,
         .index = index,
         .count = 1,
-        .type = sg::binding_type::readwrite_structured_buffer,
+        .type = sg::binding_type::buffer,
+        .access = sg::access_mode::read_write,
     };
 }
 } // namespace
@@ -72,10 +73,10 @@ ASYNC_INVOCABLE_TEST("sg webgpu - a write-only storage texture is written by a d
                                     {sg::binding{.name = "canvas",
                                                  .group_index = 0,
                                                  .index = 0,
-                                                 .type = sg::binding_type::readwrite_texture,
+                                                 .type = sg::binding_type::image,
+                                                 .access = sg::access_mode::write,
                                                  .texture_dimension = sg::texture_view_dimension::tex_2d,
-                                                 .image_format = sg::pixel_format::rgba8_unorm,
-                                                 .storage_access = sg::storage_access::write}},
+                                                 .image_format = sg::pixel_format::rgba8_unorm}},
                                     sg::compute_dimensions{.x = 4, .y = 4});
 
     auto texture = ctx.persistent.create_texture_2d({.format = sg::pixel_format::rgba8_unorm,
@@ -123,7 +124,7 @@ ASYNC_INVOCABLE_TEST("sg webgpu - a multisampled float texture is laid out unfil
                                         sg::binding{.name = "source",
                                                     .group_index = 0,
                                                     .index = 0,
-                                                    .type = sg::binding_type::readonly_texture,
+                                                    .type = sg::binding_type::texture,
                                                     .texture_dimension = sg::texture_view_dimension::tex_2d_ms,
                                                     .sample_type = sg::texture_sample_type::filterable_float},
                                         storage_binding("Output", 1),
@@ -143,7 +144,7 @@ ASYNC_INVOCABLE_TEST("sg webgpu - a multisampled array texture is refused at lay
     sg::binding const binding = {.name = "source",
                                  .group_index = 0,
                                  .index = 0,
-                                 .type = sg::binding_type::readonly_texture,
+                                 .type = sg::binding_type::texture,
                                  .texture_dimension = sg::texture_view_dimension::tex_2d_ms_array};
 
     auto const layout = ctx.uncached.try_create_binding_group_layout(cc::span<sg::binding const>(&binding, 1));
@@ -240,10 +241,10 @@ ASYNC_INVOCABLE_TEST("sg webgpu - a read_write rgba8 storage texture needs readw
     auto& ctx = *handle;
     auto bindings = cc::vector<sg::binding>();
     bindings.push_back(sg::binding{.name = "Target", .group_index = 0, .index = 0, .count = 1});
-    bindings[0].type = sg::binding_type::readwrite_texture;
+    bindings[0].type = sg::binding_type::image, .access = sg::access_mode::read_write;
     bindings[0].texture_dimension = sg::texture_view_dimension::tex_2d;
     bindings[0].image_format = sg::pixel_format::rgba8_unorm;
-    bindings[0].storage_access = sg::storage_access::read_write;
+    bindings[0].access = sg::access_mode::read_write;
     sg::apply_stage_visibility(bindings, sg::shader_stage::compute);
 
     // Refused where the device lacks texture-formats-tier2, built where it has it: never a later validation error.

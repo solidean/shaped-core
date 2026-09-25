@@ -26,7 +26,8 @@ struct particle
         .space = 0,
         .index = index,
         .count = 1,
-        .type = sg::binding_type::readwrite_structured_buffer,
+        .type = sg::binding_type::buffer,
+        .access = sg::access_mode::read_write,
     };
 }
 } // namespace
@@ -66,7 +67,7 @@ TEST("sg metal - an array binding occupies consecutive argument slots")
     // `[[id(n)]]` array addresses.
     auto const bindings = cc::array<sg::binding>{
         structured_binding("First", 0),
-        {.name = "Table", .space = 0, .index = 1, .count = 4, .type = sg::binding_type::readonly_structured_buffer},
+        {.name = "Table", .space = 0, .index = 1, .count = 4, .type = sg::binding_type::buffer},
     };
 
     auto layout = ctx->create_metal_binding_group_layout(bindings, {}, sg::lifetime_scope::persistent);

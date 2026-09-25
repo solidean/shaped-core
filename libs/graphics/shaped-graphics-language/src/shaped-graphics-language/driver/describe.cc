@@ -64,10 +64,10 @@ described_binding_member describe_resource(check::checked_module const& m,
         cc::string_view const accesses[] = {"read", "read_write", "write"};
         result.kind = described_member_kind::image;
         result.type = cc::string(m.name_of(member.type));
-        result.is_mut = t.access != check::image_access::read;
+        result.is_mut = t.access != check::access_mode::read;
         result.texture_dimension = cc::string(check::info_of(t.shape).sg_name);
         result.image_format = cc::string(check::k_image_formats[t.format].name);
-        result.storage_access = cc::string(accesses[isize(t.access)]);
+        result.access = cc::string(accesses[isize(t.access)]);
         break;
     }
     default:

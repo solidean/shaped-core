@@ -45,8 +45,8 @@ namespace sg::backend::webgpu
 [[nodiscard]] WGPUTextureAspect to_wgpu_copy_aspect(sg::pixel_format format, sg::texture_aspect aspect);
 
 /// The stages a binding is visible to.
-/// An empty set means the binding never said, and then it is every stage its kind is legal in: WebGPU refuses a read-write storage binding visible to the vertex stage.
-[[nodiscard]] WGPUShaderStage to_wgpu_visibility(sg::shader_stages visibility, sg::binding_type type);
+/// An empty set means the binding never said, and then it is every stage it is legal in: WebGPU refuses a writable storage binding visible to the vertex stage.
+[[nodiscard]] WGPUShaderStage to_wgpu_visibility(sg::shader_stages visibility, bool writable);
 
 /// How the texels of `format` are sampled when a binding does not say.
 [[nodiscard]] WGPUTextureSampleType default_sample_type(sg::pixel_format format);

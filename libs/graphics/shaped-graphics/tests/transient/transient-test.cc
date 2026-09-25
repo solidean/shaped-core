@@ -248,7 +248,8 @@ INVOCABLE_TEST("sg - transient binding group instantiates a persistent layout", 
         .space = 0,
         .index = 0,
         .count = 1,
-        .type = sg::binding_type::readwrite_structured_buffer,
+        .type = sg::binding_type::buffer,
+        .access = sg::access_mode::read_write,
     };
     auto layout = ctx->cached.acquire_binding_group_layout(cc::span<sg::binding const>(&b, 1));
     REQUIRE(layout != nullptr);
@@ -271,7 +272,8 @@ INVOCABLE_TEST("sg - transient binding group rejects an unknown binding name", (
         .space = 0,
         .index = 0,
         .count = 1,
-        .type = sg::binding_type::readwrite_structured_buffer,
+        .type = sg::binding_type::buffer,
+        .access = sg::access_mode::read_write,
     };
     auto layout = ctx->cached.acquire_binding_group_layout(cc::span<sg::binding const>(&b, 1));
     REQUIRE(layout != nullptr);

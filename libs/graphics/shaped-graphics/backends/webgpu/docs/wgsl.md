@@ -52,7 +52,7 @@ WebGPU's own `texture_1d` allows no mips, no arrays and no storage or render use
 
 WebGPU fixes some facts at layout creation that dx12 and vulkan take from the bound view, so the parser reads them from the declaration:
 
-- a **storage texture's** texel format and access mode, from `texture_storage_2d<rgba8unorm, write>`, into `image_format` and `storage_access`.
+- a **storage texture's** texel format and access mode, from `texture_storage_2d<rgba8unorm, write>`, into `image_format` and `access`.
   Core WebGPU allows `read_write` only for `r32float`, `r32uint` and `r32sint`; any other format is `write` or `read`;
 - a **sampled texture's** sample type, from `texture_2d<f32>`, `texture_depth_2d`, `texture_2d<u32>` and so on.
   An `f32` texture is filterable, so a 32-bit float texture that is only loaded should be bound through an unfilterable layout;

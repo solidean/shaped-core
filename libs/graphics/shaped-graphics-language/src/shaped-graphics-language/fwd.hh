@@ -174,7 +174,7 @@ enum class label_id : i32;
 
 enum class type_kind : u8;
 enum class texture_shape : u8;
-enum class image_access : u8;
+enum class access_mode : u8;
 struct sampler_state;
 struct shape_info;
 struct image_format_info;

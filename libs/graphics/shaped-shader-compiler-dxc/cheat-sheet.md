@@ -86,9 +86,9 @@ D3D12_SHADER_INPUT_BIND_DESC        ->  sg::binding
   BindCount  -> count                                       //   (see shaped-graphics binding.hh)
   (no descriptor set in HLSL, so `group_index` stays absent — the bind slot alone places the group)
   Name       -> name
-  Type -> binding_type: CBUFFER->uniform_buffer(+block_size); STRUCTURED->readonly_structured;
-          BYTEADDRESS->readonly_raw; UAV_RWSTRUCTURED->readwrite_structured; UAV_RWBYTEADDRESS->readwrite_raw;
-          TEXTURE->readonly_texture; UAV_RWTYPED->readwrite_texture; SAMPLER->sampler;
+  Type -> binding_type: CBUFFER->uniform_buffer(+block_size); STRUCTURED/UAV_RWSTRUCTURED->buffer;
+          BYTEADDRESS/UAV_RWBYTEADDRESS->bytes; TEXTURE->texture; UAV_RWTYPED->image; SAMPLER->sampler;
+          every UAV kind -> access read_write (HLSL cannot narrow one), everything else read;
           RTACCELERATIONSTRUCTURE->acceleration_structure
           (TEXTURE/RWTYPED with a BUFFER dimension = a typed/texel buffer -> unsupported, see below)
 // no remapping — each backend reinterprets (set,index,type). Recorded faithfully.

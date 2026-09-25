@@ -59,7 +59,7 @@ TEST("sg binding-group-layout hash separates every field it covers")
     CHECK(sg::impl::binding_group_layout_hash(moved, {}) != key);
 
     auto retyped = base[0];
-    retyped.type = sg::binding_type::readonly_structured_buffer;
+    retyped.type = sg::binding_type::buffer;
     CHECK(sg::impl::binding_group_layout_hash(cc::span<sg::binding const>(&retyped, 1), {}) != key);
 
     auto counted = base[0];
@@ -71,7 +71,7 @@ TEST("sg binding-group-layout hash separates every field it covers")
     CHECK(sg::impl::binding_group_layout_hash(cc::span<sg::binding const>(&dimensioned, 1), {}) != key);
 
     auto write_only = base[0];
-    write_only.storage_access = sg::storage_access::write;
+    write_only.access = sg::access_mode::write;
     CHECK(sg::impl::binding_group_layout_hash(cc::span<sg::binding const>(&write_only, 1), {}) != key);
 
     // Order is part of the layout: slot i is a different slot from slot j.

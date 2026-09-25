@@ -25,12 +25,17 @@ pixel_format read_format_of(raw_texture_view const& view)
 
 cc::optional<cc::string> impl::find_unsupported_binding(bool extended_image_formats, cc::span<binding const> bindings)
 {
+    for (auto const& b : bindings)
+        if (!is_valid_access(b.type, b.access))
+            return cc::format("binding_group_layout: '{}' carries an access its kind cannot: only an image is ever "
+                              "write-only, and only a buffer, bytes or an image is ever written",
+                              b.name);
     if (extended_image_formats)
         return {};
     for (auto const& b : bindings)
-        if (b.type == binding_type::readwrite_texture && b.image_format.has_value()
+        if (b.type == binding_type::image && b.image_format.has_value()
             && needs_extended_image_format(b.image_format.value()))
-            return cc::format("binding_group_layout: storage texture '{}' declares a format outside the portable "
+            return cc::format("binding_group_layout: image '{}' declares a format outside the portable "
                               "image formats, which needs sg::feature::extended_image_formats (webgpu's "
                               "texture-formats-tier1), and this device lacks it",
                               b.name);
@@ -43,7 +48,7 @@ cc::optional<cc::string> impl::find_unsupported_texture(bool extended_image_form
         return {};
     if (extended_image_formats)
         return {};
-    return cc::string("texture: a storage texture in a format outside the portable image formats needs "
+    return cc::string("texture: image usage in a format outside the portable image formats needs "
                       "sg::feature::extended_image_formats (webgpu's texture-formats-tier1), and this device lacks "
                       "it");
 }
@@ -54,7 +59,7 @@ cc::optional<cc::string> impl::find_unsupported_view(bool float32_filtering,
 {
     if (float32_filtering)
         return {};
-    if (b.type != binding_type::readonly_texture || b.sample_type != texture_sample_type::filterable_float)
+    if (b.type != binding_type::texture || b.sample_type != texture_sample_type::filterable_float)
         return {};
     for (auto const& view : views)
         if (auto const* const texture = try_as_texture_view(view);

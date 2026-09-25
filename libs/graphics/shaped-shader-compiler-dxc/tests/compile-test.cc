@@ -57,7 +57,8 @@ TEST("ssc::dxc compile - compute shader -> DXIL + reflection")
     REQUIRE(shader.bindings.size() == 1);
     sg::binding const& b = shader.bindings[0];
     CHECK(b.name == cc::string_view("Output"));
-    CHECK(b.type == sg::binding_type::readwrite_structured_buffer);
+    CHECK(b.type == sg::binding_type::buffer);
+    CHECK(b.access == sg::access_mode::read_write);
     CHECK(b.space == 0u); // DXC always reflects a register space, even the default one
     CHECK(b.index == 0u);
     CHECK(b.count == 1u);
@@ -107,8 +108,8 @@ TEST("ssc::dxc compile - texture / sampler / storage-texture bindings reflect to
 
     auto const* tex = find_binding(shader, "Tex");
     REQUIRE(tex != nullptr);
-    CHECK(tex->type == sg::binding_type::readonly_texture); // Texture2D -> sampled texture SRV
-    CHECK(tex->index == 0u);                                // t0
+    CHECK(tex->type == sg::binding_type::texture); // Texture2D -> sampled texture SRV
+    CHECK(tex->index == 0u);                       // t0
 
     auto const* samp = find_binding(shader, "Samp");
     REQUIRE(samp != nullptr);
@@ -118,8 +119,8 @@ TEST("ssc::dxc compile - texture / sampler / storage-texture bindings reflect to
 
     auto const* out = find_binding(shader, "Output");
     REQUIRE(out != nullptr);
-    CHECK(out->type == sg::binding_type::readwrite_texture); // RWTexture2D -> storage texture UAV
-    CHECK(out->index == 0u);                                 // u0
+    CHECK(out->type == sg::binding_type::image); // RWTexture2D -> storage texture UAV
+    CHECK(out->index == 0u);                     // u0
 }
 
 #endif // CC_OS_WINDOWS
@@ -349,7 +350,8 @@ TEST("ssc::dxc compile - compute shader -> SPIR-V")
     auto const& b = shader.bindings[0];
     CHECK(b.name == "Out");
     CHECK(b.index == 0);
-    CHECK(b.type == sg::binding_type::readwrite_structured_buffer);
+    CHECK(b.type == sg::binding_type::buffer);
+    CHECK(b.access == sg::access_mode::read_write);
 
     // The set fills group_index and `space` stays absent, which is the opposite of what the DXIL arm reports for the
     // same source, and what a vulkan group layout needs.

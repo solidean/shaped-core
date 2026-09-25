@@ -11,11 +11,12 @@
 // See libs/graphics/shaped-graphics/docs/concepts/bindings.md, "Features".
 namespace sg::impl
 {
-/// A storage binding whose format needs `feature::extended_image_formats`, as a message, where `extended_image_formats` is false.
+/// A binding whose access its kind cannot carry, as a message — refused whatever the device.
+/// Otherwise an image whose format needs `feature::extended_image_formats`, where `extended_image_formats` is false.
 [[nodiscard]] cc::optional<cc::string> find_unsupported_binding(bool extended_image_formats,
                                                                 cc::span<binding const> bindings);
 
-/// A storage texture whose format needs `feature::extended_image_formats`, as a message, where `extended_image_formats` is false.
+/// A texture with image usage whose format needs `feature::extended_image_formats`, as a message, where `extended_image_formats` is false.
 [[nodiscard]] cc::optional<cc::string> find_unsupported_texture(bool extended_image_formats,
                                                                 texture_description const& desc);
 

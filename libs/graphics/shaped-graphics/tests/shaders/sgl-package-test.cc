@@ -112,7 +112,7 @@ ASYNC_TEST("sg - the WGSL an SGL group becomes reflects every fact its generated
         CHECK(got->texture_dimension == want.texture_dimension);
         CHECK(got->sample_type == want.sample_type);
         CHECK(got->image_format == want.image_format);
-        CHECK(got->storage_access == want.storage_access);
+        CHECK(got->access == want.access);
         CHECK(got->sampler_type == want.sampler_type);
     }
 }

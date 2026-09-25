@@ -44,14 +44,12 @@ namespace
     {
     case sg::binding_type::uniform_buffer:
         return VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    case sg::binding_type::readonly_structured_buffer:
-    case sg::binding_type::readwrite_structured_buffer:
-    case sg::binding_type::readonly_raw_buffer:
-    case sg::binding_type::readwrite_raw_buffer:
+    case sg::binding_type::buffer:
+    case sg::binding_type::bytes:
         return VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    case sg::binding_type::readonly_texture:
+    case sg::binding_type::texture:
         return VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-    case sg::binding_type::readwrite_texture:
+    case sg::binding_type::image:
         return VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
     case sg::binding_type::sampler:
         return VK_DESCRIPTOR_TYPE_SAMPLER;
@@ -211,14 +209,12 @@ isize descriptor_size_of(vulkan_context const& ctx, sg::binding_type type)
     {
     case sg::binding_type::uniform_buffer:
         return isize(p.uniformBufferDescriptorSize);
-    case sg::binding_type::readonly_structured_buffer:
-    case sg::binding_type::readwrite_structured_buffer:
-    case sg::binding_type::readonly_raw_buffer:
-    case sg::binding_type::readwrite_raw_buffer:
+    case sg::binding_type::buffer:
+    case sg::binding_type::bytes:
         return isize(p.storageBufferDescriptorSize);
-    case sg::binding_type::readonly_texture:
+    case sg::binding_type::texture:
         return isize(p.sampledImageDescriptorSize);
-    case sg::binding_type::readwrite_texture:
+    case sg::binding_type::image:
         return isize(p.storageImageDescriptorSize);
     case sg::binding_type::sampler:
         return isize(p.samplerDescriptorSize);

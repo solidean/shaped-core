@@ -850,8 +850,10 @@ private:
             b.block_size = layout.value().size.value();
         }
         else if (p.address_space == "storage")
-            b.type = p.access == "read_write" ? sg::binding_type::readwrite_structured_buffer
-                                              : sg::binding_type::readonly_structured_buffer;
+        {
+            b.type = sg::binding_type::buffer;
+            b.access = p.access == "read_write" ? sg::access_mode::read_write : sg::access_mode::read;
+        }
         else if (!p.address_space.empty())
             return cc::error(cc::format("line {}: '{}' is in the {} address space, which is not a resource sg binds",
                                         p.line, p.name, p.address_space));
@@ -869,7 +871,7 @@ private:
             return cc::error(cc::format("line {}: '{}' is a texture_external, which sg has no view for", p.line, p.name));
         else if (n.starts_with("texture_storage_"))
         {
-            b.type = sg::binding_type::readwrite_texture;
+            b.type = sg::binding_type::image;
             b.texture_dimension = texture_dimension_of(n);
             if (type.args.empty())
                 return cc::error(cc::format("line {}: storage texture '{}' declares no format", p.line, p.name));
@@ -880,15 +882,15 @@ private:
                                             p.line, p.name, type.args[0].name));
             // WGSL requires the access mode on a storage texture, so an absent one is a shader naga will refuse anyway.
             if (type.access == "read")
-                b.storage_access = sg::storage_access::read;
+                b.access = sg::access_mode::read;
             else if (type.access == "write")
-                b.storage_access = sg::storage_access::write;
+                b.access = sg::access_mode::write;
             else
-                b.storage_access = sg::storage_access::read_write;
+                b.access = sg::access_mode::read_write;
         }
         else if (n.starts_with("texture_"))
         {
-            b.type = sg::binding_type::readonly_texture;
+            b.type = sg::binding_type::texture;
             b.texture_dimension = texture_dimension_of(n);
             if (!b.texture_dimension.has_value())
                 return cc::error(cc::format("line {}: '{}' is not a texture type sg knows", p.line, n));

@@ -567,7 +567,7 @@ struct sg::texture_view
 
 /// A storage (UAV) image view of dimension `Traits::dimension`, over a single mip level.
 /// The dimension must be an `image_view_dimension` — no cube, no MSAA.
-/// Whether the shader reads, writes or both is the binding's `storage_access`, not the view's.
+/// Whether the shader reads, writes or both is the binding's `access`, not the view's.
 /// Built via `texture<Traits>::as_image_view()` and friends.
 template <class Traits>
     requires sg::image_view_dimension<Traits::dimension>

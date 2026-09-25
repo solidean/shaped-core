@@ -31,25 +31,24 @@ That is the common case, and it is why `constants[T]` below is rarer than it loo
 The table is the one sg already commits to.
 `sg::binding_type` in [binding.hh](../../../shaped-graphics/src/shaped-graphics/binding/binding.hh) is the portable set every backend maps to, and SGL spells it rather than deciding it again.
 
-| SGL | `sg::binding_type` | what it is |
-|---|---|---|
-| a plain value type | `uniform_buffer` | a field of the group's implicit constant buffer |
-| `constants[T]` | `uniform_buffer` | a constant buffer that comes from somewhere else, already laid out |
-| `buffer[T]` | `readonly_structured_buffer` | an array of `T` the shader reads |
-| `mut buffer[T]` | `readwrite_structured_buffer` | an array of `T` the shader reads and writes |
-| `bytes` | `readonly_raw_buffer` | raw bytes, addressed by offset |
-| `mut bytes` | `readwrite_raw_buffer` | raw bytes the shader also writes |
-| `texture2d[T]` and its neighbours | `readonly_texture` | a texture the shader samples or loads |
-| `texture2d_depth` and its neighbours | `readonly_texture` | a depth texture, sample type `depth` |
-| `image2d[.F]` and its neighbours | `readwrite_texture`, `storage_access::read` | a storage texture the shader only reads |
-| `mut image2d[.F]` | `readwrite_texture`, `storage_access::read_write` | a storage texture the shader reads and writes |
-| `out image2d[.F]` | `readwrite_texture`, `storage_access::write` | a storage texture the shader only writes |
-| `sampler`, `comparison_sampler` | `sampler` | a sampler the host binds |
-| `sampler name:` with settings | a static sampler of the group's layout | a sampler nobody binds |
+| SGL | `sg::binding_type` | `sg::access_mode` | what it is |
+|---|---|---|---|
+| a plain value type | `uniform_buffer` | `read` | a field of the group's implicit constant buffer |
+| `constants[T]` | `uniform_buffer` | `read` | a constant buffer that comes from somewhere else, already laid out |
+| `buffer[T]` | `buffer` | `read` | an array of `T` the shader reads |
+| `mut buffer[T]` | `buffer` | `read_write` | an array of `T` the shader reads and writes |
+| `bytes` | `bytes` | `read` | raw bytes, addressed by offset |
+| `mut bytes` | `bytes` | `read_write` | raw bytes the shader also writes |
+| `texture2d[T]` and its neighbours | `texture` | `read` | a texture the shader samples or loads |
+| `texture2d_depth` and its neighbours | `texture` | `read` | a depth texture, sample type `depth` |
+| `image2d[.F]` and its neighbours | `image` | `read` | a storage texture the shader only reads |
+| `mut image2d[.F]` | `image` | `read_write` | a storage texture the shader reads and writes |
+| `out image2d[.F]` | `image` | `write` | a storage texture the shader only writes |
+| `sampler`, `comparison_sampler` | `sampler` | `read` | a sampler the host binds |
+| `sampler name:` with settings | a static sampler of the group's layout | — | a sampler nobody binds |
 
-**sg names the descriptor class, SGL names the resource.**
-sg's `readwrite_texture` is every storage texture, whatever its access, because its axis is SRV against UAV.
-SGL's `image` is the same object, and its access word says what the shader does with it.
+**sg and SGL name the same two things: the resource, and what the shader does with it.**
+The type is the kind, and the access word is `sg::access_mode`, so every row above is one-to-one.
 
 ## Access
 
@@ -62,7 +61,7 @@ Three spellings, and a resource takes the ones it has.
 **A buffer is never `out`.**
 No target has a write-only buffer, and WGSL refuses one in as many words: *access mode 'write' is not valid for the 'storage' address space*.
 **A texture is never `mut` or `out`**, since a sampled texture is read-only on every target.
-An image has all three, exactly as `sg::storage_access` has three.
+An image has all three, exactly as `sg::access_mode` has three.
 
 The asymmetry is WebGPU's rather than ours.
 Core WebGPU allows read-write storage only for the `r32` formats, so an image of any other format is unmarked or `out` there, and `mut` needs a feature ([Features](#features)).

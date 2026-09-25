@@ -34,7 +34,7 @@ sg::raw_view view_of(sg::pixel_format texture_format, sg::pixel_format view_form
 
 sg::binding sampled_binding(cc::optional<sg::texture_sample_type> sample_type)
 {
-    auto b = sg::binding{.name = "source", .type = sg::binding_type::readonly_texture};
+    auto b = sg::binding{.name = "source", .type = sg::binding_type::texture};
     b.texture_dimension = sg::texture_view_dimension::tex_2d;
     b.sample_type = sample_type;
     return b;
@@ -47,7 +47,7 @@ bool refused(sg::binding const& b, sg::raw_view const& view)
 }
 } // namespace
 
-TEST("sg::portability - a image format outside the portable set is refused without extended_image_formats")
+TEST("sg::portability - an image format outside the portable set is refused without extended_image_formats")
 {
     auto const storage = sg::texture_usage::image;
     CHECK(sg::impl::find_unsupported_texture(false, texture_of(sg::pixel_format::r8_unorm, storage)).has_value());
@@ -58,16 +58,26 @@ TEST("sg::portability - a image format outside the portable set is refused witho
     CHECK(!sg::impl::find_unsupported_texture(false, texture_of(sg::pixel_format::r8_unorm, sg::texture_usage::texture))
                .has_value());
 
-    auto b = sg::binding{.name = "target", .type = sg::binding_type::readwrite_texture};
+    auto b = sg::binding{.name = "target", .type = sg::binding_type::image, .access = sg::access_mode::read_write};
     b.texture_dimension = sg::texture_view_dimension::tex_2d;
     b.image_format = sg::pixel_format::r8_unorm;
-    b.storage_access = sg::storage_access::write;
+    b.access = sg::access_mode::write;
     auto const bindings = cc::span<sg::binding const>(&b, 1);
     CHECK(sg::impl::find_unsupported_binding(false, bindings).has_value());
     CHECK(!sg::impl::find_unsupported_binding(true, bindings).has_value());
 
     b.image_format = sg::pixel_format::rgba8_unorm;
     CHECK(!sg::impl::find_unsupported_binding(false, bindings).has_value());
+}
+
+TEST("sg::portability - an access a kind cannot carry is refused whatever the device")
+{
+    auto const write_only_buffer
+        = sg::binding{.name = "out", .type = sg::binding_type::buffer, .access = sg::access_mode::write};
+    auto const read_write_texture
+        = sg::binding{.name = "in", .type = sg::binding_type::texture, .access = sg::access_mode::read_write};
+    CHECK(sg::impl::find_unsupported_binding(true, cc::span<sg::binding const>(&write_only_buffer, 1)).has_value());
+    CHECK(sg::impl::find_unsupported_binding(true, cc::span<sg::binding const>(&read_write_texture, 1)).has_value());
 }
 
 TEST("sg::portability - a 32-bit float view is refused on a filterable binding without float32_filtering")

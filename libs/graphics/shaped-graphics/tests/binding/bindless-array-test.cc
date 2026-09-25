@@ -49,12 +49,12 @@ namespace
 [[nodiscard]] sg::staging_binding_group_handle make_group(sg::context_handle const& ctx, u32 count)
 {
     sg::binding const bindings[]
-        = {{.name = "Buffers", .space = 1, .index = 0, .count = count, .type = sg::binding_type::readonly_raw_buffer},
+        = {{.name = "Buffers", .space = 1, .index = 0, .count = count, .type = sg::binding_type::bytes},
            {.name = "Textures",
             .space = 2,
             .index = 1,
             .count = count,
-            .type = sg::binding_type::readonly_texture,
+            .type = sg::binding_type::texture,
             .texture_dimension = sg::texture_view_dimension::tex_2d}};
     return ctx->persistent.create_staging_binding_group(ctx->uncached.create_binding_group_layout(bindings));
 }

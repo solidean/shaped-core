@@ -371,18 +371,18 @@ There the pass reads scalars, vectors and the `float4xC` matrices, and anything 
 
 ## The type table
 
-One table maps an HLSL type name to a register class and an `sg::binding_type`.
+One table maps an HLSL type name to a register class and an `sg::binding_type`, and a `u` register is `sg::access_mode::read_write`.
 It is the single most important piece of shared state in this design, because the rewriter and the C++ generator must agree on it exactly.
 A divergence is a resource bound to the wrong descriptor, with nothing to catch it.
 
 | HLSL | class | `sg::binding_type` |
 |---|---|---|
-| `Texture1D/2D/3D/Cube` and `*Array`, `Texture2DMS` | `t` | `readonly_texture` |
-| `RWTexture1D/2D/3D` and `*Array` | `u` | `readwrite_texture` |
-| `StructuredBuffer` | `t` | `readonly_structured_buffer` |
-| `RWStructuredBuffer` | `u` | `readwrite_structured_buffer` |
-| `ByteAddressBuffer` | `t` | `readonly_raw_buffer` |
-| `RWByteAddressBuffer` | `u` | `readwrite_raw_buffer` |
+| `Texture1D/2D/3D/Cube` and `*Array`, `Texture2DMS` | `t` | `texture` |
+| `RWTexture1D/2D/3D` and `*Array` | `u` | `image` |
+| `StructuredBuffer` | `t` | `buffer` |
+| `RWStructuredBuffer` | `u` | `buffer` |
+| `ByteAddressBuffer` | `t` | `bytes` |
+| `RWByteAddressBuffer` | `u` | `bytes` |
 | `ConstantBuffer` | `b` | `uniform_buffer` |
 | `SamplerState` | `s` | `sampler` |
 | `SamplerComparisonState` | `s` | `sampler` |

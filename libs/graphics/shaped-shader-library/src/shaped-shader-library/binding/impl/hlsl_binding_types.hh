@@ -17,7 +17,8 @@ namespace slib::impl
 struct hlsl_binding_type
 {
     char register_class = 't'; ///< the DXIL register class letter: 't', 'u', 'b' or 's'
-    sg::binding_type type = sg::binding_type::readonly_texture;
+    sg::binding_type type = sg::binding_type::texture;
+    sg::access_mode access = sg::access_mode::read; ///< `read_write` for every `u` register, which HLSL cannot narrow
     cc::optional<sg::texture_view_dimension> dimension; ///< set for texture types, absent for everything else
 };
 

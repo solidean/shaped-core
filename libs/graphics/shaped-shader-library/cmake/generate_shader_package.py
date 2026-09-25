@@ -893,6 +893,8 @@ def emit_binding_table(entry: BindingEntry, embedded: list[str]) -> str:
         out.append(f"     .index = {binding.index}u,\n")
         out.append(f"     .count = {binding.count}u,\n")
         out.append(f"     .type = sg::binding_type::{binding.type},\n")
+        if binding.access != "read":
+            out.append(f"     .access = sg::access_mode::{binding.access},\n")
         if binding.dimension is not None:
             out.append(f"     .texture_dimension = sg::texture_view_dimension::{binding.dimension},\n")
         if binding.image_format is not None:

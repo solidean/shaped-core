@@ -69,10 +69,11 @@ ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - array bindings: partial fill, declared a
     REQUIRE(set2.size() == 1);
     CHECK(set1[0].name == "Bufs");
     CHECK(set1[0].count == 4);
-    CHECK(set1[0].type == sg::binding_type::readonly_raw_buffer);
+    CHECK(set1[0].type == sg::binding_type::bytes);
+    CHECK(set1[0].access == sg::access_mode::read);
     CHECK(set2[0].name == "Texs");
     CHECK(set2[0].count == 4);
-    CHECK(set2[0].type == sg::binding_type::readonly_texture);
+    CHECK(set2[0].type == sg::binding_type::texture);
     // The declared dimension rides the binding — what the backend builds vacant elements' null SRVs from.
     CHECK(set2[0].texture_dimension == sg::texture_view_dimension::tex_2d);
 

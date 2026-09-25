@@ -76,7 +76,7 @@ INVOCABLE_TEST("sg dx12 - a layout with static + dynamic samplers and a group bu
 
     // A sampled texture (t0), one dynamic sampler (s0), and one static sampler (s1).
     sg::binding const bindings[] = {
-        {.name = "Tex", .space = 0, .index = 0, .count = 1, .type = sg::binding_type::readonly_texture},
+        {.name = "Tex", .space = 0, .index = 0, .count = 1, .type = sg::binding_type::texture},
         {.name = "Dyn", .space = 0, .index = 0, .count = 1, .type = sg::binding_type::sampler},
         {.name = "Static", .space = 0, .index = 1, .count = 1, .type = sg::binding_type::sampler},
     };
@@ -144,7 +144,7 @@ INVOCABLE_TEST("sg dx12 - a pipeline-level static sampler bakes into the root si
 
     // A group layout with just a texture SRV — no samplers of its own.
     sg::binding const bindings[] = {
-        {.name = "Tex", .space = 0, .index = 0, .count = 1, .type = sg::binding_type::readonly_texture},
+        {.name = "Tex", .space = 0, .index = 0, .count = 1, .type = sg::binding_type::texture},
     };
     auto group_layout = c.create_dx12_binding_group_layout(bindings, {}, sg::lifetime_scope::persistent);
     REQUIRE(group_layout.has_value());
@@ -172,9 +172,14 @@ INVOCABLE_TEST("sg dx12 - a group built by slot survives a sampler interleaved w
     // position 2 in bindings() and position 1 in view_slots.
     // A slot is defined as the former, so binding by slot has to cross that gap.
     sg::binding const bindings[] = {
-        {.name = "Tex", .space = 0, .index = 0, .count = 1, .type = sg::binding_type::readonly_texture},
+        {.name = "Tex", .space = 0, .index = 0, .count = 1, .type = sg::binding_type::texture},
         {.name = "Static", .space = 0, .index = 0, .count = 1, .type = sg::binding_type::sampler},
-        {.name = "Buf", .space = 0, .index = 1, .count = 1, .type = sg::binding_type::readwrite_structured_buffer},
+        {.name = "Buf",
+         .space = 0,
+         .index = 1,
+         .count = 1,
+         .type = sg::binding_type::buffer,
+         .access = sg::access_mode::read_write},
     };
     sg::named_sampler const statics[] = {{.name = "Static", .sampler = {}}};
 

@@ -56,7 +56,7 @@ So a render target member has the type the shader computes, and the format is an
     @format(rgba16f) normal: float4   // this one is pinned
 ```
 
-A image format is an enum case with `sg`'s name, `image2d[.rgba8_unorm]` ([bindings.md](../bindings.md#image-formats)).
+An image format is an enum case with `sg`'s name, `image2d[.rgba8_unorm]` ([bindings.md](../bindings.md#image-formats)).
 This is the spelling that is simplest to change later, and the sketches above predate it.
 
 The same holds further down.
@@ -69,7 +69,7 @@ The transformation hierarchy that `tg` has might be modelled later as well, inst
 * The prelude: it declares both families and the format types, in SGL where that is possible.
 * The type system: which operators each family has, and which conversions `as` offers between and within the families.
 * `@builtin`: the annotation that ties a prelude declaration to something the compiler and the targets know.
-* The transpiler: a format type needs a image format and a computation type in every target.
+* The transpiler: a format type needs an image format and a computation type in every target.
 * [Host code generation](host-code-generation.md): a `tg` mirror maps to its `tg` type, and a format type to a format the host knows.
 * [Stage interfaces](stage-interfaces.md): framebuffer members are format types.
 

@@ -183,7 +183,8 @@ TEST("slib sgl compiler - a compute entry point reaches WGSL with its buffer ref
 
     // The buffer is a group of its own, unlike the inline constants, so it carries a group index.
     REQUIRE(cs.bindings.size() == 1);
-    CHECK(cs.bindings[0].type == sg::binding_type::readwrite_structured_buffer);
+    CHECK(cs.bindings[0].type == sg::binding_type::buffer);
+    CHECK(cs.bindings[0].access == sg::access_mode::read_write);
     REQUIRE(cs.bindings[0].group_index.has_value());
     CHECK(cs.bindings[0].group_index.value() == 0);
 

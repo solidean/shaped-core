@@ -42,7 +42,7 @@ namespace
             .space = 0,
             .index = 0,
             .count = count,
-            .type = sg::binding_type::readonly_texture,
+            .type = sg::binding_type::texture,
             .texture_dimension = sg::texture_view_dimension::tex_2d};
 }
 } // namespace
@@ -119,8 +119,7 @@ INVOCABLE_TEST("sg - buffer array binding accepts bound and vacant elements", (s
     if (!ctx->supports(sg::feature::binding_arrays))
         SKIP("this backend has no binding arrays");
 
-    sg::binding const b
-        = {.name = "Buffers", .space = 0, .index = 0, .count = 4, .type = sg::binding_type::readonly_raw_buffer};
+    sg::binding const b = {.name = "Buffers", .space = 0, .index = 0, .count = 4, .type = sg::binding_type::bytes};
     auto layout = ctx->uncached.create_binding_group_layout(cc::span<sg::binding const>(&b, 1));
     REQUIRE(layout != nullptr);
 

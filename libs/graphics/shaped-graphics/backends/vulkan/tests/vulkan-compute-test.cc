@@ -42,7 +42,8 @@ sg::compiled_shader make_double_shader()
         .group_index = 0,
         .index = 0,
         .count = 1,
-        .type = sg::binding_type::readwrite_structured_buffer,
+        .type = sg::binding_type::buffer,
+        .access = sg::access_mode::read_write,
     });
     return shader;
 }

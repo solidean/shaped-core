@@ -303,7 +303,8 @@ ASYNC_TEST("sg metal - a draw reads the vertex buffer a dispatch in the same lis
         .space = 0,
         .index = 0,
         .count = 1,
-        .type = sg::binding_type::readwrite_structured_buffer,
+        .type = sg::binding_type::buffer,
+        .access = sg::access_mode::read_write,
     });
 
     auto group_layout = ctx->create_metal_binding_group_layout(emit.bindings, {}, sg::lifetime_scope::persistent);
@@ -380,8 +381,7 @@ TEST("sg metal - a draw refuses a bound array binding")
     // Routing a draw through the compute path's accounting instead would demand a declare nothing can give.
     // libs/graphics/shaped-graphics/docs/TODO.md carries the feature that would lift this.
     auto bindings = cc::vector<sg::binding>();
-    bindings.push_back(
-        {.name = "inputs", .space = 0, .index = 0, .count = 4, .type = sg::binding_type::readonly_structured_buffer});
+    bindings.push_back({.name = "inputs", .space = 0, .index = 0, .count = 4, .type = sg::binding_type::buffer});
 
     auto group_layout = ctx->create_metal_binding_group_layout(bindings, {}, sg::lifetime_scope::persistent);
     REQUIRE(group_layout.has_value());
@@ -443,8 +443,7 @@ TEST("sg metal - a rendering scope leaves no bound-group state behind")
     // A group bound in one scope must not still be bound in the next, or the array refusal above fires on a draw that
     // bound nothing — which is what `_group_arrays` outliving its scope would cause.
     auto bindings = cc::vector<sg::binding>();
-    bindings.push_back(
-        {.name = "inputs", .space = 0, .index = 0, .count = 4, .type = sg::binding_type::readonly_structured_buffer});
+    bindings.push_back({.name = "inputs", .space = 0, .index = 0, .count = 4, .type = sg::binding_type::buffer});
 
     auto group_layout = ctx->create_metal_binding_group_layout(bindings, {}, sg::lifetime_scope::persistent);
     REQUIRE(group_layout.has_value());
@@ -521,10 +520,13 @@ TEST("sg metal - a compute-bound group is not bound at the first draw of a rende
     // draw reads, which is the same bug spending barriers instead of asserting.
     // dx12 and vulkan both draw this.
     auto kernel = mtl::test::mesh_kernel("array_sum_main");
-    kernel.bindings.push_back(
-        {.name = "inputs", .space = 0, .index = 0, .count = 4, .type = sg::binding_type::readonly_structured_buffer});
-    kernel.bindings.push_back(
-        {.name = "output", .space = 0, .index = 4, .count = 1, .type = sg::binding_type::readwrite_structured_buffer});
+    kernel.bindings.push_back({.name = "inputs", .space = 0, .index = 0, .count = 4, .type = sg::binding_type::buffer});
+    kernel.bindings.push_back({.name = "output",
+                               .space = 0,
+                               .index = 4,
+                               .count = 1,
+                               .type = sg::binding_type::buffer,
+                               .access = sg::access_mode::read_write});
 
     auto group_layout = ctx->create_metal_binding_group_layout(kernel.bindings, {}, sg::lifetime_scope::persistent);
     REQUIRE(group_layout.has_value());

@@ -9,9 +9,9 @@ namespace sg::backend::dx12
 {
 namespace
 {
-[[nodiscard]] D3D12_DESCRIPTOR_RANGE_TYPE range_type_of(sg::binding_type t)
+[[nodiscard]] D3D12_DESCRIPTOR_RANGE_TYPE range_type_of(sg::binding const& b)
 {
-    switch (sg::view_class_of(t))
+    switch (sg::view_class_of(b))
     {
     case sg::view_class::uniform:
         return D3D12_DESCRIPTOR_RANGE_TYPE_CBV;
@@ -92,7 +92,7 @@ cc::result<dx12_binding_group_layout_handle> dx12_binding_group_layout::create(
         }
 
         D3D12_DESCRIPTOR_RANGE range = {};
-        range.RangeType = range_type_of(b.type);
+        range.RangeType = range_type_of(b);
         range.NumDescriptors = b.count;
         range.BaseShaderRegister = b.index; // (space, index) -> (register space, register); register-type from the kind
         range.RegisterSpace = space;
