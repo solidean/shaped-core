@@ -2339,6 +2339,88 @@ def test_a_collapsed_changes_block_is_fetched_when_opened(root: Path) -> None:
         server.shutdown()
 
 
+def _counting(module, name: str):
+    """Wrap `module.name` so calls to it are counted; returns (counter, restore)."""
+    original = getattr(module, name)
+    calls = [0]
+
+    def counted(*args, **kwargs):
+        calls[0] += 1
+        return original(*args, **kwargs)
+
+    setattr(module, name, counted)
+    return calls, lambda: setattr(module, name, original)
+
+
+def test_an_answer_re_renders_only_its_own_entry(root: Path) -> None:
+    """An autosave changes one entry's answers, so the warm-up after it renders that entry and nothing else.
+
+    The rendered cache used to be keyed on the whole folder, so every autosave threw away every entry and the
+    watcher's prebuild rendered the review again — seconds of work per keystroke pause on a large review.
+    """
+    from tools.review.lib.serve import app as app_module
+
+    server, _, app = serve_fixture(root)
+    server.shutdown()
+    for number in ("050", "060"):
+        (app.paths.entries_dir / f"{number}-x.md").write_text(
+            f"---\nid: {number}\ntitle: x\n---\n\n## ask  q\n\nWhich?\n\n- radio: this\n- radio: that\n",
+            encoding="utf-8",
+        )
+    app.prebuild()
+    renders, restore = _counting(app_module, "render_entry")
+    try:
+        app.prebuild()
+        assert renders[0] == 0, f"nothing changed, yet the warm-up rendered {renders[0]} entries"
+        status, _ = app.save_answer({"entry": "050-x", "ask": "q", "selected": ["this"], "text": "because",
+                                     "round": app.config().next_round})
+        assert status == 200
+        app.prebuild()
+        assert renders[0] == 1, f"one answer re-rendered {renders[0]} entries"
+        _, payload = app.entry_html("050-x")
+        assert "because" in payload["html"], "the re-render must show the answer just saved"
+    finally:
+        restore()
+
+
+def test_a_state_refresh_re_parses_only_the_entry_that_changed(root: Path) -> None:
+    """The nav's state is asked for after every autosave, and it used to parse every entry each time."""
+    from tools.review.lib.entry import parse as parse_module
+
+    server, _, app = serve_fixture(root)
+    server.shutdown()
+    app.state()
+    parses, restore = _counting(parse_module, "parse_text")
+    try:
+        app.state()
+        assert parses[0] == 0, f"nothing changed, yet state parsed {parses[0]} entries"
+        target = app.paths.entry_files()[0]
+        target.write_text(target.read_text(encoding="utf-8") + "\n## prose\n\nMore.\n", encoding="utf-8")
+        app.state()
+        assert parses[0] == 1, f"one edited entry cost {parses[0]} parses"
+    finally:
+        restore()
+
+
+def test_a_sha_is_asked_about_once_per_server(root: Path) -> None:
+    """Whether a hex string names a commit is a git process on every entry render unless it is remembered."""
+    server, _, app = serve_fixture(root)
+    server.shutdown()
+    sha = Git(app.repo).rev_parse("HEAD")
+    for number in ("050", "060"):
+        (app.paths.entries_dir / f"{number}-x.md").write_text(
+            f"---\nid: {number}\ntitle: x\n---\n\n## prose\n\nLanded in {sha[:10]}.\n", encoding="utf-8")
+    asked, restore = _counting(Git, "which_are_commits")
+    try:
+        _, first = app.entry_html("050-x")
+        _, second = app.entry_html("060-x")
+        assert any(t["kind"] == "commit" for t in first["tokens"]), "the sha must be recognised at all"
+        assert any(t["kind"] == "commit" for t in second["tokens"]), "and recognised the second time too"
+        assert asked[0] == 1, f"git was asked {asked[0]} times about one sha"
+    finally:
+        restore()
+
+
 def test_a_dev_py_example_runs_with_its_output_mirrored(root: Path) -> None:
     """dev.py is quiet on a pipe, so a capture that does not ask for a mirror holds a trace instead of the example."""
     assert executed_command("uv run dev.py example clean-core/vector") \
