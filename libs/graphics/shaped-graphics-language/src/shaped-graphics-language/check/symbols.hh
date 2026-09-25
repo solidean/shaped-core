@@ -14,8 +14,8 @@ enum class sgl::check::type_kind : sgl::u8
     /// The type of whatever did not check.
     /// It equals every type for the purpose of reporting, so one error never causes a second diagnostic.
     error,
-    /// What a function without a return type returns: no value, so nothing can hold it.
-    nothing,
+    /// `void`, what a function without a return type returns.
+    void_,
     /// A declared `struct`, builtin or not; two declarations are two types, whatever their fields.
     structure,
     /// A declared `enum`: a closed set of named `int` values that converts to nothing (CHK-142, CHK-150).

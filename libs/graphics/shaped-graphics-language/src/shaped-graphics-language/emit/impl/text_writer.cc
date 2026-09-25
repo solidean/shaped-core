@@ -406,7 +406,7 @@ struct writer
                      {
                          // A call that gives nothing is a statement as it stands, in every target.
                          auto text = cc::string();
-                         if (p.e.at(v.value).type == checked_module::nothing_type)
+                         if (p.e.at(v.value).type == checked_module::void_type)
                              text = cc::format("{};", expr(v.value).text);
                          else
                              d.write_eval(text, expr(v.value).text);

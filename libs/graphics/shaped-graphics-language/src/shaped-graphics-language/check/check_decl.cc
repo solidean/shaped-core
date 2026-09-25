@@ -642,7 +642,7 @@ void checker::compile_function(symbol_id id)
     }
 
     // Without `-> T` a block body returns nothing, and an arrow body returns what its expression is.
-    auto result = checked_module::nothing_type;
+    auto result = checked_module::void_type;
     auto const infers_result = !ast::is_valid(f.return_type) && f.body.kind == ast::body_kind::arrow;
     if (ast::is_valid(f.return_type))
         result = resolve_value_type(file, f.return_type);
@@ -750,7 +750,7 @@ void checker::judge_entry_point(symbol_id id)
     if (info.entry_stage == stage::compute)
     {
         // A compute entry point is dispatched over a grid and hands nothing back.
-        if (info.result != checked_module::nothing_type)
+        if (info.result != checked_module::void_type)
             invalid("a @compute fun returns nothing");
 
         // Its one parameter is the thread id itself, or a struct whose fields are system values.

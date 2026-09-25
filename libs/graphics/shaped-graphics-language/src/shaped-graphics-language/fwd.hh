@@ -254,6 +254,7 @@ struct outcome;
 
 struct legalize_options;
 
+struct related_note;
 struct located_diagnostic;
 struct checked_module;
 struct module_file;

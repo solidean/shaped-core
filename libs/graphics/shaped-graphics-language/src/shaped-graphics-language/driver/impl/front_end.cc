@@ -35,7 +35,16 @@ sgl::driver::impl::front_end sgl::driver::impl::run_front_end(cc::string_view so
         modules.push_back({.file = result.files[i], .ast = result.asts[i]});
     result.module = check::check(modules, {.file = result.files.back(), .ast = result.asts.back()});
     for (auto const& d : result.module.diagnostics)
+    {
+        if (d.what.level == severity::warning)
+            continue;
         add(d.file, d.what, d.detail);
+        for (auto const& n : d.notes)
+        {
+            result.errors += format_note(result.name_of(n.file), result.files[n.file].source, n.where, n.message);
+            result.errors += "\n";
+        }
+    }
 
     return result;
 }

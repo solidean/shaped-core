@@ -9,7 +9,7 @@ using namespace sgl::check::impl;
 namespace
 {
 constexpr auto error_type = checked_module::error_type;
-constexpr auto nothing_type = checked_module::nothing_type;
+constexpr auto void_type = checked_module::void_type;
 } // namespace
 
 // ---- bodies ---------------------------------------------------------------------------------------------------------
@@ -43,7 +43,7 @@ void checker::check_body(symbol_id id)
     if (ast::is_valid(f.body.value) && notes[index].infers_result)
     {
         auto type = check_expr(scope, f.body.value);
-        if (type == nothing_type)
+        if (type == void_type)
         {
             report(diagnostic_kind::type_mismatch, file, span_of(file, f.body.value),
                    cc::format("the body of {} is its result, and this is nothing", out.at(id).name));
@@ -59,7 +59,7 @@ void checker::check_body(symbol_id id)
     }
     // a block without a statement was reported where it was parsed
     auto const has_statements = !f.body.statements.empty() || ast::is_valid(f.body.value);
-    if (has_statements && ending == flow::falls_through && info.result != nothing_type && info.result != error_type)
+    if (has_statements && ending == flow::falls_through && info.result != void_type && info.result != error_type)
         report(diagnostic_kind::missing_return, file, f.name,
                cc::format("{} returns {}, and a path through its body ends without a return", out.at(id).name,
                           out.name_of(info.result)));

@@ -53,6 +53,7 @@ sgl::prelude_files()                       // -> cc::span<prelude_file const> { 
 #include <shaped-graphics-language/source/format_diagnostic.hh>
 sgl::line_column_of(source, offset)        // -> sgl::line_column { line, column }, both 1-based, columns in bytes
 sgl::format_diagnostic(name, source, d, detail = {})   // `a.sgl:2:2: error: unknown-name: foo`; warning / error from d.level
+sgl::format_note(name, source, where, message)         // `a.sgl:3:1: note: declared here`, the line after a diagnostic
 ```
 
 ## Parsing a file
@@ -205,7 +206,7 @@ m.symbols                                  // every top-level fun / struct / bin
                                            // intrinsic (builtin_id) / intrinsic_type (builtin_type_id), operator_spelling, type, info
 m.builtins                                 // the registry those ids are positions in; m.builtin_type_of(type_id) / m.builtin_function(id)
                                            // -> the record, or null
-m.types  m.members                         // canonical types; types[0] is the error type, types[1] (nothing_type) what a fun without
+m.types  m.members                         // canonical types; types[0] is the error type, types[1] (void_type) what a fun without
                                            // `-> T` returns; fields and binding members
 m.functions  m.parameters  m.binding_lists // signatures; symbol::info is the position in functions / bindings
 m.bindings                                 // binding_info { symbol, is_inline, members }
@@ -217,7 +218,8 @@ m.files[f].target_at(expr_id)              // side table: { kind, symbol, index 
                                            // constructor / field / binding_member
 m.entry_points                             // flat_entry_point per SOUND entry point, in the STRUCTURED form; what an emitter reads
                                            // sound means: its body and the body of every function it reaches reported no error
-m.diagnostics                              // located_diagnostic { what, file, detail }, in the order they were found
+m.diagnostics                              // located_diagnostic { what, file, detail, notes }, in the order they were found; a related_note
+                                           // { file, where, message } is a second place a diagnostic points at
 m.at(symbol_id)  m.at(type_id)  m.at(range)  m.name_of(type_id)   // name_of gives "<error>" for the error type
 
 #include <shaped-graphics-language/check/flat.hh>

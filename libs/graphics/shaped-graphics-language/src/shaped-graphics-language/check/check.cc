@@ -194,7 +194,7 @@ void checker::set_target(i32 file, ast::expr_id expr, target where)
 void checker::run()
 {
     out.types.push_back({.kind = type_kind::error});
-    out.types.push_back({.kind = type_kind::nothing});
+    out.types.push_back({.kind = type_kind::void_});
     for (auto file = i32(0); file < i32(files.size()); ++file)
     {
         auto const count = ast_of(file).exprs.size();

@@ -170,7 +170,7 @@ struct flattener
     flat_expr_id add_expr(type_id type, ast::expr_id from, Node node)
     {
         // A builtin with an effect may give nothing, `DEBUG_store`, and its call is only ever an `eval`'s value.
-        auto const is_effect_call = std::is_same_v<Node, flat_call> && type == checked_module::nothing_type;
+        auto const is_effect_call = std::is_same_v<Node, flat_call> && type == checked_module::void_type;
         is_failed = is_failed || (!c.is_sound(type) && !is_effect_call);
         entry.exprs.push_back({.type = type,
                                .from = {.file = file(), .expr = from},
@@ -959,7 +959,7 @@ struct flattener
         }
         auto const& where = tables().target_at(value);
         if (where.kind == target_kind::overload && !is_valid(c.out.at(where.symbol).intrinsic)
-            && tables().type_at(value) == checked_module::nothing_type)
+            && tables().type_at(value) == checked_module::void_type)
         {
             auto const arguments = flatten_arguments(call->arguments);
             auto const inlined = inline_call(value, where.symbol, arguments);
@@ -976,7 +976,7 @@ struct flattener
 
 bool checker::is_sound(type_id type) const
 {
-    if (!is_valid(type) || type == checked_module::error_type || type == checked_module::nothing_type)
+    if (!is_valid(type) || type == checked_module::error_type || type == checked_module::void_type)
         return false;
     for (auto const& m : out.at(out.at(type).members))
         if (!is_sound(m.type))

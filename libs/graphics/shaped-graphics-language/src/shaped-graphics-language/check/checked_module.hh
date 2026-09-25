@@ -8,6 +8,17 @@
 #include <shaped-graphics-language/check/symbols.hh>
 #include <shaped-graphics-language/source/diagnostic.hh>
 
+/// A second place a diagnostic points at, with what to read there: the declaration a use conflicts with, a way to fix it.
+struct sgl::check::related_note
+{
+    /// A position in the files `check` was given, as `located_diagnostic::file` is.
+    i32 file = 0;
+    source_span where;
+    cc::string message;
+
+    bool operator==(related_note const&) const = default;
+};
+
 /// A diagnostic of the check pass.
 /// A module has several files, so the span alone does not say where it points.
 struct sgl::check::located_diagnostic
@@ -18,8 +29,13 @@ struct sgl::check::located_diagnostic
     /// What the kind alone cannot say: the construct that is unsupported, the name that is unknown, the loop of a cycle.
     /// For a reader; the kind and the span are what a tool keys on.
     cc::string detail;
+    /// In the order they should be read, each printed as a `note:` line after the diagnostic.
+    cc::vector<related_note> notes;
 
-    bool operator==(located_diagnostic const&) const = default;
+    [[nodiscard]] bool operator==(located_diagnostic const& rhs) const
+    {
+        return what == rhs.what && file == rhs.file && detail == rhs.detail && ast::impl::is_equal(notes, rhs.notes);
+    }
 };
 
 /// One module after name resolution, type checking and evaluation, as one value beside the ASTs it was checked from.
@@ -63,7 +79,7 @@ struct sgl::check::checked_module
 
     static constexpr type_id error_type = type_id(0);
     /// `types[1]`: what a function without a return type returns.
-    static constexpr type_id nothing_type = type_id(1);
+    static constexpr type_id void_type = type_id(1);
 
     [[nodiscard]] symbol const& at(symbol_id id) const { return symbols[index_of(id)]; }
     [[nodiscard]] type_info const& at(type_id id) const { return types[index_of(id)]; }
@@ -110,8 +126,8 @@ struct sgl::check::checked_module
     [[nodiscard]] cc::string_view name_of(type_id id) const
     {
         auto const& t = at(id);
-        if (t.kind == type_kind::nothing)
-            return "nothing";
+        if (t.kind == type_kind::void_)
+            return "void";
         if (t.kind == type_kind::structure || t.kind == type_kind::enumeration)
             return at(t.symbol).name;
         if (!t.spelled.empty())

@@ -55,6 +55,8 @@ TEST("sgl driver - a diagnostic is one line with its place, its level and its ki
                                    .where = {.offset = 4, .length = 3}};
     CHECK(sgl::format_diagnostic("a.sgl", "ab\ncd", d, "foo") == "a.sgl:2:2: error: unknown-name: foo");
     CHECK(sgl::format_diagnostic("a.sgl", "ab\ncd", d) == "a.sgl:2:2: error: unknown-name");
+    CHECK(sgl::format_note("a.sgl", "ab\ncd", {.offset = 1, .length = 1}, "declared here")
+          == "a.sgl:1:2: note: declared here");
 }
 
 TEST("sgl driver - an entry point is found by its name, and the text is the emitter's")

@@ -9,7 +9,7 @@ using namespace sgl::check::impl;
 namespace
 {
 constexpr auto error_type = checked_module::error_type;
-constexpr auto nothing_type = checked_module::nothing_type;
+constexpr auto void_type = checked_module::void_type;
 
 /// What a list that holds `a` and then `b` ends in, where `b` only runs when `a` falls through.
 flow then(flow a, flow b)
@@ -87,7 +87,7 @@ flow checker::check_stmt(function_scope& scope, ast::stmt_id stmt)
         },
         [&](ast::print_stmt const& print)
         {
-            if (check_expr(scope, print.message) == nothing_type)
+            if (check_expr(scope, print.message) == void_type)
                 report(diagnostic_kind::type_mismatch, file, span_of(file, print.message), "print takes a value");
         },
         [&](ast::expr_stmt const& e)
@@ -125,7 +125,7 @@ flow checker::check_stmt(function_scope& scope, ast::stmt_id stmt)
                 // A call is evaluated and its value dropped: it may have been written for its effect.
                 // Whether a PURE one is worth a statement is the AST pass's `no-effect` warning, and no business of this pass.
                 auto const type = check_expr(scope, e.value);
-                if (type != error_type && type != nothing_type && !value.node.is<ast::call>())
+                if (type != error_type && type != void_type && !value.node.is<ast::call>())
                     unsupported(file, where, "an expression statement");
             }
         },
@@ -146,7 +146,7 @@ void checker::check_let(function_scope& scope, ast::stmt_id id, ast::let_stmt co
         type = check_expr(scope, let.value);
     else
         unsupported(file, where, "a let without a value");
-    if (type == nothing_type)
+    if (type == void_type)
     {
         report(diagnostic_kind::type_mismatch, file, span_of(file, let.value),
                "a let takes a value, and this is nothing");
@@ -342,7 +342,7 @@ type_id checker::check_loop(function_scope& scope,
 
     has_break = done.has_break;
     if (!yields_value)
-        return nothing_type;
+        return void_type;
     if (!done.has_break)
     {
         unsupported(scope.file, span_of(scope.file, id), "a loop without a break as a value");
@@ -398,12 +398,12 @@ void checker::check_return(function_scope& scope, source_span where, ast::expr_i
     auto const name = cc::string_view(out.at(scope.function).name);
     if (!ast::is_valid(value))
     {
-        if (scope.result != error_type && scope.result != nothing_type)
+        if (scope.result != error_type && scope.result != void_type)
             report(diagnostic_kind::type_mismatch, file, where,
                    cc::format("{} returns {}, and this return has no value", name, out.name_of(scope.result)));
         return;
     }
-    if (scope.result == nothing_type)
+    if (scope.result == void_type)
     {
         (void)check_expr(scope, value);
         report(diagnostic_kind::type_mismatch, file, span_of(file, value),

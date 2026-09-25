@@ -11,7 +11,7 @@ using namespace sgl::check::impl;
 namespace
 {
 constexpr auto error_type = checked_module::error_type;
-constexpr auto nothing_type = checked_module::nothing_type;
+constexpr auto void_type = checked_module::void_type;
 
 /// True for an expression that leaves its arm rather than giving it a value: the jumps of AST-40.
 bool is_jump(ast::file_ast const& ast, ast::expr_id id)
@@ -161,7 +161,7 @@ type_id checker::check_case(function_scope& scope, ast::expr_id id, ast::case_ex
     auto named_cases = cc::vector<i32>();
     auto is_all_constant = true;
     auto has_wildcard = false;
-    auto result = yields_value ? type_id::none : nothing_type;
+    auto result = yields_value ? type_id::none : void_type;
     auto is_failed = false;
     auto reported_unreachable = false;
     // CHK-123: whether every arm leaves the list the `case` stands in
@@ -213,7 +213,7 @@ type_id checker::check_case(function_scope& scope, ast::expr_id id, ast::case_ex
                     check_return(scope, jump_where, r->value);
                 else if (auto const* const b = jump.node.try_as<ast::break_expr>())
                     check_break(scope, jump_where, b->value);
-                set_type(file, arm.result.value, nothing_type);
+                set_type(file, arm.result.value, void_type);
             }
             else
                 arm_type = check_expr(scope, arm.result.value);
@@ -308,6 +308,6 @@ type_id checker::check_case(function_scope& scope, ast::expr_id id, ast::case_ex
     if (is_failed)
         return error_type;
     if (!yields_value)
-        return nothing_type;
+        return void_type;
     return is_valid(result) ? result : error_type;
 }
