@@ -126,7 +126,7 @@ So HLSL writes the same pair, and the text DXC compiles is the text `sgl emit` p
 slib's binding pass exists so that hand-written HLSL serves dx12 and vulkan at once, and it stays HLSL-only.
 SGL knows every address and writes each one explicitly, so it has no use for the pass.
 Growing the pass to WGSL and MSL would cost more than SGL does and pay off less.
-The namespace keeps a group's names apart from the program's, and is no address.
+No namespace wraps a group: every name in it is minted, so nothing collides, and WGSL declares the same names at file scope too.
 
 ## EMIT-87
 

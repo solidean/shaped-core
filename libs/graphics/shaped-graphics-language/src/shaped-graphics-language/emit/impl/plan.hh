@@ -76,8 +76,6 @@ struct planned_constants
     /// A group's block is the first resource of its group, at slot 0; -1 for the `@inline` block, which takes no group.
     i32 group = -1;
     i32 slot = -1;
-    /// What HLSL declares the group as, as for a buffer.
-    cc::string group_name;
 };
 
 /// A resource member of a binding — a buffer, a texture, an image or a sampler — rather than a field of a block.
@@ -98,8 +96,6 @@ struct planned_resource
     bool is_mut = false;
     i32 group = 0;
     i32 slot = 0;
-    /// The namespace HLSL declares the group in: `<binding>_bindings`.
-    cc::string group_name;
 };
 
 struct plan

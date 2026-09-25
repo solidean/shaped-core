@@ -299,8 +299,7 @@ struct planner
                                        .element = t.element,
                                        .is_mut = t.is_mut,
                                        .group = group,
-                                       .slot = slot++,
-                                       .group_name = cc::format("{}_bindings", s.name)});
+                                       .slot = slot++});
             }
             ++group;
         }
@@ -328,7 +327,6 @@ struct planner
                     .members = members_of(plain, false),
                     .group = group,
                     .slot = 0,
-                    .group_name = cc::format("{}_bindings", s.name),
                 };
                 auto const placed = place_block(p.m, plain);
                 for (auto i = isize(0); i < planned.members.size(); ++i)

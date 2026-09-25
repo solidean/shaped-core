@@ -102,9 +102,9 @@ public:
         out.appendf("static const int {} = {};\n", name, value);
     }
 
-    /// A group is a namespace, and each of its resources carries its final address: `space` is the group and
-    /// the register is the slot on dx12, `[[vk::binding(slot, group)]]` on vulkan.
-    /// A group's block is a `ConstantBuffer` of a struct declared ahead of the namespace.
+    /// Each resource of a group carries its final address: `space` is the group and the register is the slot on
+    /// dx12, `[[vk::binding(slot, group)]]` on vulkan.
+    /// A group's block is a `ConstantBuffer` of a struct declared ahead of it.
     void write_group(cc::string& out,
                      plan const& p,
                      planned_constants const* block,
@@ -119,13 +119,12 @@ public:
                 write_member(out, nullptr, member, p);
             out += "};\n\n";
         }
-        out.appendf("namespace {}\n{{\n", block != nullptr ? block->group_name : buffers[0].group_name);
         if (block != nullptr)
             write_addressed(out, cc::format("ConstantBuffer<{}>", block->block_name), block->name, 'b', block->group,
                             block->slot, {});
         for (auto const& b : buffers)
             write_resource(out, p, b);
-        out += "}\n\n";
+        out += "\n";
     }
 
     void write_resource(cc::string& out, plan const& p, planned_resource const& b) const
@@ -145,7 +144,6 @@ public:
                          i32 slot,
                          cc::string_view format) const
     {
-        out += k_indent;
         if (_is_vulkan)
         {
             out.appendf("[[vk::binding({}, {})]] ", slot, group);
@@ -185,16 +183,6 @@ public:
         default:
             return {};
         }
-    }
-
-    [[nodiscard]] cc::string resource_reference(planned_resource const& b) const override
-    {
-        return cc::format("{}::{}", b.group_name, b.name);
-    }
-
-    [[nodiscard]] cc::string block_reference(planned_constants const& b) const override
-    {
-        return b.group >= 0 ? cc::format("{}::{}", b.group_name, b.name) : b.name;
     }
 
     void write_declarations(cc::string& out, plan const& p) const override

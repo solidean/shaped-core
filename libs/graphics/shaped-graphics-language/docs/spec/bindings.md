@@ -269,7 +269,7 @@ Everything not named here is the diagnostic `unsupported-yet`, never a guess.
 * A resource's host name, its path `binding.member` ([CHK-171](semantics/checking.md#bindings)), which the text reports beside the identifier it minted.
 
 Three targets write a group, and the fourth declines rather than guessing.
-WGSL gives each resource its own `@group`/`@binding`, and HLSL a namespace per group whose resources carry `register(<class>slot, spaceN)` on dx12 and `[[vk::binding(slot, N)]]` on vulkan.
+WGSL gives each resource its own `@group`/`@binding`, and HLSL declares each at file scope with `register(<class>slot, spaceN)` on dx12 and `[[vk::binding(slot, N)]]` on vulkan.
 A group's plain members are one constant buffer at the group's slot 0, named after the binding, and its resources follow it in declaration order.
 MSL declines every group until slib has a compiler that turns its text into a metallib.
 

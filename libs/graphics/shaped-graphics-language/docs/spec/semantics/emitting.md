@@ -143,8 +143,8 @@ A binding that is not `@inline` is a group.
 * **EMIT-83** A group's plain members are a struct of their own and one constant buffer of it, named after the binding, at slot 0.
 * **EMIT-84** A group's plain members are placed by EMIT-39 to EMIT-41, as the members of an `@inline` binding are.
 * **EMIT-85** A buffer member is one global whose name is minted from `<binding>_<member>`, and a group's constant buffer is named after the binding, as any declaration is.
-* **EMIT-86** HLSL writes a group as a namespace `<binding>_bindings`, and each declaration in it carries its address by EMIT-104 ([why](why/emitting.md#emit-86)).
-* **EMIT-87** The struct of a group's constant buffer stands ahead of that namespace ([why](why/emitting.md#emit-87)).
+* **EMIT-86** HLSL writes each declaration of a group at file scope, under the name EMIT-85 minted for it, and each carries its address by EMIT-104 ([why](why/emitting.md#emit-86)).
+* **EMIT-87** The struct of a group's constant buffer stands ahead of the group's declarations ([why](why/emitting.md#emit-87)).
   `hlsl-vulkan` states every member's offset on it, as EMIT-40 does for an `@inline` binding.
 * **EMIT-88** WGSL writes each resource of a group as `@group(N) @binding(slot)`: the constant buffer as `var<uniform>`, a buffer as a `var<storage>` array, `read` or `read_write`.
 * **EMIT-89** MSL writes no group and no compute entry point yet: an entry point that lists a group, or is `@compute`, is `unsupported`.
