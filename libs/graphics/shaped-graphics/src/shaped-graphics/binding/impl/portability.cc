@@ -10,9 +10,9 @@ using namespace sg;
 
 namespace
 {
-bool needs_extended_storage(pixel_format f)
+bool needs_extended_image_format(pixel_format f)
 {
-    return supports_typed_uav(f) && !is_portable_storage_format(f);
+    return supports_typed_uav(f) && !is_portable_image_format(f);
 }
 
 pixel_format read_format_of(raw_texture_view const& view)
@@ -23,28 +23,28 @@ pixel_format read_format_of(raw_texture_view const& view)
 }
 } // namespace
 
-cc::optional<cc::string> impl::find_unsupported_binding(bool extended_storage_formats, cc::span<binding const> bindings)
+cc::optional<cc::string> impl::find_unsupported_binding(bool extended_image_formats, cc::span<binding const> bindings)
 {
-    if (extended_storage_formats)
+    if (extended_image_formats)
         return {};
     for (auto const& b : bindings)
-        if (b.type == binding_type::readwrite_texture && b.storage_format.has_value()
-            && needs_extended_storage(b.storage_format.value()))
+        if (b.type == binding_type::readwrite_texture && b.image_format.has_value()
+            && needs_extended_image_format(b.image_format.value()))
             return cc::format("binding_group_layout: storage texture '{}' declares a format outside the portable "
-                              "storage formats, which needs sg::feature::extended_storage_formats (webgpu's "
+                              "image formats, which needs sg::feature::extended_image_formats (webgpu's "
                               "texture-formats-tier1), and this device lacks it",
                               b.name);
     return {};
 }
 
-cc::optional<cc::string> impl::find_unsupported_texture(bool extended_storage_formats, texture_description const& desc)
+cc::optional<cc::string> impl::find_unsupported_texture(bool extended_image_formats, texture_description const& desc)
 {
-    if (!desc.usage.has(texture_usage::image) || !needs_extended_storage(desc.format))
+    if (!desc.usage.has(texture_usage::image) || !needs_extended_image_format(desc.format))
         return {};
-    if (extended_storage_formats)
+    if (extended_image_formats)
         return {};
-    return cc::string("texture: a storage texture in a format outside the portable storage formats needs "
-                      "sg::feature::extended_storage_formats (webgpu's texture-formats-tier1), and this device lacks "
+    return cc::string("texture: a storage texture in a format outside the portable image formats needs "
+                      "sg::feature::extended_image_formats (webgpu's texture-formats-tier1), and this device lacks "
                       "it");
 }
 

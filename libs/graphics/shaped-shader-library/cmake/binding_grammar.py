@@ -77,7 +77,7 @@ class Binding:
     type_offset: int
     semicolon_offset: int
     template_argument: str = ""
-    storage_format: str | None = None  # an sg::pixel_format enumerator a `format` attribute named, for storage textures
+    image_format: str | None = None  # an sg::pixel_format enumerator a `format` attribute named, for storage textures
 
 
 @dataclass
@@ -383,8 +383,8 @@ def rejection_reason_for(hlsl_type: str) -> str:
     return NARROW_COLUMN if is_matrix_type(hlsl_type) else ""
 
 
-# Every format sg::supports_typed_uav allows, by sg's name; keep in step with impl/hlsl_storage_format.cc.
-STORAGE_FORMATS = (
+# Every format sg::supports_typed_uav allows, by sg's name; keep in step with impl/hlsl_image_format.cc.
+IMAGE_FORMATS = (
     "r8_unorm", "r8_snorm", "r8_uint", "r8_sint", "rg8_unorm", "rg8_snorm", "rg8_uint", "rg8_sint",
     "rgba8_unorm", "rgba8_snorm", "rgba8_uint", "rgba8_sint", "bgra8_unorm",
     "r16_float", "r16_uint", "r16_sint", "rg16_float", "rg16_uint", "rg16_sint", "rgba16_float", "rgba16_uint",
@@ -393,14 +393,14 @@ STORAGE_FORMATS = (
 )
 
 
-def parse_storage_format(attribute: Annotation) -> str:
-    """The sg::pixel_format a `format` attribute names; keep in step with impl/hlsl_storage_format.cc, messages included."""
+def parse_image_format(attribute: Annotation) -> str:
+    """The sg::pixel_format a `format` attribute names; keep in step with impl/hlsl_image_format.cc, messages included."""
     args = attribute.arguments
     if len(args) != 1 or args[0][0] or len(args[0][1]) != 1:
-        raise BindingError(f"{attribute.location}: 'format' takes one storage format, as sg::pixel_format names it: "
+        raise BindingError(f"{attribute.location}: 'format' takes one image format, as sg::pixel_format names it: "
                            "`#pragma sc format rgba8_unorm`")
     name = args[0][1][0]
-    if name not in STORAGE_FORMATS:
+    if name not in IMAGE_FORMATS:
         raise BindingError(f"{attribute.location}: '{name}' is no format a storage texture can have")
     return name
 
@@ -1355,7 +1355,7 @@ class _Parser:
                 if binding.type != "readwrite_texture":
                     raise BindingError(
                         f"{pending.location}: 'format' describes a storage texture, and '{binding.name}' is not one")
-                binding.storage_format = parse_storage_format(pending)
+                binding.image_format = parse_image_format(pending)
                 pending = None
             if pending is not None:
                 if binding.type != "sampler":

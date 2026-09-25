@@ -134,11 +134,11 @@ def a_texture_entry_carries_its_sample_type():
 
 @test
 def an_image_entry_carries_its_format_and_access():
-    got = sgl_host_code.binding_entry(resource("image", texture_dimension="tex_2d_array", storage_format="r32_uint",
+    got = sgl_host_code.binding_entry(resource("image", texture_dimension="tex_2d_array", image_format="r32_uint",
                                                storage_access="write"))
     expect_equal(got, '{.name = "g_r", .index = 3u, .count = 1u, .type = sg::binding_type::readwrite_texture, '
                       ".texture_dimension = sg::texture_view_dimension::tex_2d_array, "
-                      ".storage_format = sg::pixel_format::r32_uint, .storage_access = sg::storage_access::write}",
+                      ".image_format = sg::pixel_format::r32_uint, .storage_access = sg::storage_access::write}",
                  "an image")
 
 
@@ -161,7 +161,7 @@ GROUP = {
         {"kind": "texture", "name": "depth_map", "type": "texture_cube[float]", "host_name": "shadow_depth_map",
          "slot": 0, "texture_dimension": "cube", "sample_type": "depth"},
         {"kind": "image", "name": "counts", "type": "image_3d[uint]", "host_name": "shadow_counts", "slot": 1,
-         "texture_dimension": "tex_3d", "storage_format": "r32_uint", "storage_access": "read_write"},
+         "texture_dimension": "tex_3d", "image_format": "r32_uint", "storage_access": "read_write"},
         {"kind": "sampler", "name": "picked", "type": "sampler", "host_name": "shadow_picked", "slot": 2,
          "sampler_type": "non_filtering"},
         {"kind": "sampler", "name": "compare", "type": "sampler", "host_name": "shadow_compare", "slot": 3,

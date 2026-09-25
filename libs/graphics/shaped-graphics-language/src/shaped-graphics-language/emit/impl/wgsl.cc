@@ -121,7 +121,7 @@ public:
                 return cc::string(k_depth_names[isize(t.shape)]);
             return cc::format("{}<{}>", k_texture_names[isize(t.shape)], scalar_of(p, t.element));
         case type_kind::image:
-            return cc::format("{}<{}, {}>", k_image_names[isize(t.shape)], k_storage_formats[t.format].wgsl,
+            return cc::format("{}<{}, {}>", k_image_names[isize(t.shape)], k_image_formats[t.format].wgsl,
                               k_accesses[isize(t.access)]);
         case type_kind::sampler:
             return t.is_comparison ? "sampler_comparison" : "sampler";

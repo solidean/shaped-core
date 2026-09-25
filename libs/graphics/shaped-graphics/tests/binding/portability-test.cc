@@ -47,7 +47,7 @@ bool refused(sg::binding const& b, sg::raw_view const& view)
 }
 } // namespace
 
-TEST("sg::portability - a storage format outside the portable set is refused without extended_storage_formats")
+TEST("sg::portability - a image format outside the portable set is refused without extended_image_formats")
 {
     auto const storage = sg::texture_usage::image;
     CHECK(sg::impl::find_unsupported_texture(false, texture_of(sg::pixel_format::r8_unorm, storage)).has_value());
@@ -60,13 +60,13 @@ TEST("sg::portability - a storage format outside the portable set is refused wit
 
     auto b = sg::binding{.name = "target", .type = sg::binding_type::readwrite_texture};
     b.texture_dimension = sg::texture_view_dimension::tex_2d;
-    b.storage_format = sg::pixel_format::r8_unorm;
+    b.image_format = sg::pixel_format::r8_unorm;
     b.storage_access = sg::storage_access::write;
     auto const bindings = cc::span<sg::binding const>(&b, 1);
     CHECK(sg::impl::find_unsupported_binding(false, bindings).has_value());
     CHECK(!sg::impl::find_unsupported_binding(true, bindings).has_value());
 
-    b.storage_format = sg::pixel_format::rgba8_unorm;
+    b.image_format = sg::pixel_format::rgba8_unorm;
     CHECK(!sg::impl::find_unsupported_binding(false, bindings).has_value());
 }
 

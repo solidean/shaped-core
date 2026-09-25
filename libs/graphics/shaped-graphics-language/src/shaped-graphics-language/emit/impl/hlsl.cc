@@ -135,7 +135,7 @@ public:
         auto const& t = p.m.at(b.type);
         if (t.kind == type_kind::image)
             // slib's `#pragma sc format` states the format, which vulkan's SPIR-V wants and dx12 leaves to the view.
-            out.appendf("#pragma sc format {}\n", k_storage_formats[t.format].name);
+            out.appendf("#pragma sc format {}\n", k_image_formats[t.format].name);
         if (t.kind == type_kind::sampler && b.static_sampler >= 0)
             write_static_sampler(out, p.m.samplers[b.static_sampler]);
         out.appendf("    {} {};\n", resource_text(p, b.type), b.name);

@@ -31,7 +31,7 @@ The prefix `..` is the splat, which spreads the elements of `normal` into the li
 
 **The format types are not a special mechanism.**
 `rgba8` and `vec4f16` will probably be prelude type defines, potentially `@builtin`.
-So they are ordinary types that are also storage formats, and one name serves in both roles:
+So they are ordinary types that are also image formats, and one name serves in both roles:
 
 ```sgl sketch
 binding instance:
@@ -56,7 +56,7 @@ So a render target member has the type the shader computes, and the format is an
     @format(rgba16f) normal: float4   // this one is pinned
 ```
 
-A storage format is an enum case with `sg`'s name, `image2d[.rgba8_unorm]` ([bindings.md](../bindings.md#storage-formats)).
+A image format is an enum case with `sg`'s name, `image2d[.rgba8_unorm]` ([bindings.md](../bindings.md#image-formats)).
 This is the spelling that is simplest to change later, and the sketches above predate it.
 
 The same holds further down.
@@ -69,7 +69,7 @@ The transformation hierarchy that `tg` has might be modelled later as well, inst
 * The prelude: it declares both families and the format types, in SGL where that is possible.
 * The type system: which operators each family has, and which conversions `as` offers between and within the families.
 * `@builtin`: the annotation that ties a prelude declaration to something the compiler and the targets know.
-* The transpiler: a format type needs a storage format and a computation type in every target.
+* The transpiler: a format type needs a image format and a computation type in every target.
 * [Host code generation](host-code-generation.md): a `tg` mirror maps to its `tg` type, and a format type to a format the host knows.
 * [Stage interfaces](stage-interfaces.md): framebuffer members are format types.
 
@@ -87,5 +87,5 @@ The transformation hierarchy that `tg` has might be modelled later as well, inst
 * Which conversions are implicit, if any: between `float3` and `vec3`, and from a computation type to a format type at a `return`.
 * What `color as rgba8` does to the value: clamp, quantize, or only retype while the target quantizes on write.
 * What arithmetic a format type has, or whether it must be converted before any use.
-* The naming scheme of format types, should they exist beside the storage formats, which [bindings.md](../bindings.md#storage-formats) settles as enum cases with `sg`'s names.
+* The naming scheme of format types, should they exist beside the image formats, which [bindings.md](../bindings.md#image-formats) settles as enum cases with `sg`'s names.
 * Whether the transformation hierarchy of `tg` is modelled, so that `mvp * v.pos` is typed by spaces.

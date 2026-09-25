@@ -152,7 +152,7 @@ A binding that is not `@inline` is a group.
 * **EMIT-90** A group's resources — buffers, textures, images and samplers — take the slots after its constant buffer, in declaration order, from 1, or from 0 when it has no plain member.
 * **EMIT-97** A texture, an image and a sampler member are each one global minted as a buffer's is, by EMIT-85, and each has its target's own type by the table below.
 * **EMIT-98** HLSL states an image's format as slib's `#pragma sc format`, with sg's name for it.
-  slib's pass turns it into `[[vk::image_format]]` on the SPIR-V arm, which DXC makes a typed image of, and records it as the binding's `storage_format`.
+  slib's pass turns it into `[[vk::image_format]]` on the SPIR-V arm, which DXC makes a typed image of, and records it as the binding's `image_format`.
 * **EMIT-99** A static sampler of a group is its `SamplerState`, or `SamplerComparisonState` where it has a `compare`, preceded by slib's `#pragma sc static`.
   The pragma carries every filter and address and each other setting that is not its default.
   WGSL has no static sampler, and writes it as it writes a sampler the host binds: the layout says it is static.

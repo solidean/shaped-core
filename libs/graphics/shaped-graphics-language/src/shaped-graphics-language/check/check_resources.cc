@@ -57,7 +57,7 @@ cc::string spelling_of(check::type_info const& t, checked_module const& m)
             return cc::string(shape.image);
         return t.format < 0
                  ? cc::format("{}{}[{}]", access_prefix(t.access), shape.image, m.name_of(t.element))
-                 : cc::format("{}{}[.{}]", access_prefix(t.access), shape.image, k_storage_formats[t.format].name);
+                 : cc::format("{}{}[.{}]", access_prefix(t.access), shape.image, k_image_formats[t.format].name);
     case type_kind::sampler:
         return t.is_comparison ? cc::string("comparison_sampler") : cc::string("sampler");
     default:
@@ -159,16 +159,16 @@ type_id checker::resolve_resource_applied(i32 file, ast::expr_id expr, ast::inde
     // CHK-200 (temporary): the argument is read as exactly an enum case of sg's formats.
     // Values as type arguments in general are in libs/graphics/shaped-graphics-language/docs/TODO.md.
     auto const* const dot = ast_of(file).at(arguments[0].value).node.try_as<ast::leading_dot>();
-    auto const format = dot != nullptr ? find_storage_format(text_of(file, dot->name)) : -1;
+    auto const format = dot != nullptr ? find_image_format(text_of(file, dot->name)) : -1;
     if (format < 0)
     {
         report(diagnostic_kind::wrong_kind_of_name, file, span_of(file, arguments[0].value),
-               "an image takes one of sg's storage formats as an enum case: `.rgba8_unorm`");
+               "an image takes one of sg's image formats as an enum case: `.rgba8_unorm`");
         return checked_module::error_type;
     }
-    if (!k_storage_formats[format].is_portable)
-        judge_feature(file, where, cc::format("an image of .{}", k_storage_formats[format].name),
-                      "sg::feature::extended_storage_formats");
+    if (!k_image_formats[format].is_portable)
+        judge_feature(file, where, cc::format("an image of .{}", k_image_formats[format].name),
+                      "sg::feature::extended_image_formats");
     return resource_type({.kind = type_kind::image, .shape = image->shape, .format = format});
 }
 
@@ -192,9 +192,9 @@ type_id checker::qualify_resource(i32 file, ast::expr_id expr, type_id inner, as
     {
         auto qualified = t;
         qualified.access = is_write_only ? image_access::write : image_access::read_write;
-        if (!is_write_only && !k_storage_formats[t.format].is_readwrite_portable)
-            judge_feature(file, where, cc::format("a `mut` image of .{}", k_storage_formats[t.format].name),
-                          "sg::feature::readwrite_storage_formats");
+        if (!is_write_only && !k_image_formats[t.format].is_readwrite_portable)
+            judge_feature(file, where, cc::format("a `mut` image of .{}", k_image_formats[t.format].name),
+                          "sg::feature::readwrite_image_formats");
         return resource_type(cc::move(qualified));
     }
     if (t.kind == type_kind::texture)
@@ -359,7 +359,7 @@ void checker::judge_filtering(i32 file, source_span call, ast::range_of<ast::arg
 
 cc::string sgl::check::texel_name_of(i32 format)
 {
-    auto const& f = k_storage_formats[format];
+    auto const& f = k_image_formats[format];
     auto const stem = f.component == value_kind::scalar_float ? "float"
                     : f.component == value_kind::scalar_int   ? "int"
                                                               : "uint";

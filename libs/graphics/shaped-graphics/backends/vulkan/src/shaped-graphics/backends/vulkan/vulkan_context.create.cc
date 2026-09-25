@@ -687,7 +687,7 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     // `fragmentStoresAndAtomics` is the one sg needs — without it a fragment shader may not write a storage buffer,
     // which is a binding group sg's raster scope accepts.
     // `shaderStorageImageExtendedFormats` is enabled wherever the device has it.
-    // sg::feature::extended_storage_formats reports it together with bgra8_unorm's per-format storage support.
+    // sg::feature::extended_image_formats reports it together with bgra8_unorm's per-format storage support.
     auto supported = VkPhysicalDeviceFeatures{};
     vkGetPhysicalDeviceFeatures(best_device, &supported);
     auto core_features = VkPhysicalDeviceFeatures2{

@@ -83,7 +83,7 @@ cmake/
   binding_grammar.py              [done]        the binding pass again, in Python -- what the generator parses
                                                 a registered file with; kept in step by the shared corpus
   binding-grammar-self-test.py    [done]        that corpus against the Python half, and the two halves'
-                                                storage-format lists as sets; `dev.py check`'s `shader-grammar` gate
+                                                image-format lists as sets; `dev.py check`'s `shader-grammar` gate
   sgl-host-code-self-test.py      [done]        the C++ sgl_host_code.py writes for a group's textures, images
                                                 and samplers, fed describe entries directly
 ```

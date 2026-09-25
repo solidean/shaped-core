@@ -129,15 +129,15 @@ binding lighting:
 SGL never sees a sampled texture's format, so it cannot know that a view bound later is 32-bit float.
 That refusal is sg's: binding such a view to a `filterable_float` layout is an error on every backend unless the device has the feature ([Features](#features)).
 
-### Storage formats
+### Image formats
 
 **An image's argument is a value of sg's format enum**, spelled as an enum case: `image2d[.rgba8_unorm]`.
 A format is not a type, and its name is sg's `sg::pixel_format` name, so the shader, the generated host code and every diagnostic say the same word.
 The WGSL writer maps it to WGSL's spelling (`rgba8unorm`, and `rg11b10ufloat` for `rg11b10_float`).
 
-The portable formats are core WebGPU's storage formats:
+The portable formats are core WebGPU's image formats:
 `rgba8_unorm`, `rgba8_snorm`, `rgba8_uint`, `rgba8_sint`, `rgba16_uint`, `rgba16_sint`, `rgba16_float`, and the `r32`, `rg32` and `rgba32` formats in `float`, `uint` and `sint`.
-Every other storage format needs a feature.
+Every other image format needs a feature.
 
 ## Samplers
 
@@ -193,8 +193,8 @@ The opt-in itself is unbuilt ([feature-levels.md](incubator/feature-levels.md)),
 | form | the feature that grants it |
 |---|---|
 | `texture2d_ms_array` | multisampled arrays, which WebGPU lacks |
-| `mut image*[.F]` with `F` not `r32_float`, `r32_uint` or `r32_sint` | `sg::feature::readwrite_storage_formats`, WebGPU's `texture-formats-tier2` |
-| `image*[.F]` with `F` outside the portable storage formats | the tier-1 storage formats, WebGPU's `texture-formats-tier1` |
+| `mut image*[.F]` with `F` not `r32_float`, `r32_uint` or `r32_sint` | `sg::feature::readwrite_image_formats`, WebGPU's `texture-formats-tier2` |
+| `image*[.F]` with `F` outside the portable image formats | the tier-1 image formats, WebGPU's `texture-formats-tier1` |
 | filtering a 32-bit float texture | float32 filtering, WebGPU's `float32-filterable`; refused by sg at bind time |
 
 ## Which group a binding is
@@ -226,7 +226,7 @@ An `@inline` binding anywhere but the last position of a list is a normal error,
 A group-scope static sampler takes a slot like any sampler, since sg matches it by name to a sampler binding.
 
 **SGL states every fact of a binding itself.**
-Dimension, sample type, storage format, storage access and sampler kind are in the declaration, and `sgl describe` hands each to the host.
+Dimension, sample type, image format, storage access and sampler kind are in the declaration, and `sgl describe` hands each to the host.
 The generated group's table is what the host builds its layout from, so that is where every fact reaches sg.
 A compiled shader only has to fit that layout, and sg's fit check compares a binding's name, slot, count and kind — never the facts beyond them.
 The WGSL SGL writes states all of them, which a test holds to the generated table; HLSL states the dimension, and an image's format through slib's `#pragma sc format`.

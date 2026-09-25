@@ -134,13 +134,13 @@ public:
 
         auto features = VkPhysicalDeviceFeatures{};
         vkGetPhysicalDeviceFeatures(_physical_device, &features);
-        _extended_storage_formats = features.shaderStorageImageExtendedFormats == VK_TRUE;
+        _extended_image_formats = features.shaderStorageImageExtendedFormats == VK_TRUE;
 
         // shaderStorageImageExtendedFormats does not cover bgra8_unorm, whose storage is asked per format.
         auto bgra8 = VkFormatProperties{};
         vkGetPhysicalDeviceFormatProperties(_physical_device, VK_FORMAT_B8G8R8A8_UNORM, &bgra8);
         if ((bgra8.optimalTilingFeatures & VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT) == 0)
-            _extended_storage_formats = false;
+            _extended_image_formats = false;
 
         // Linear filtering of the three 32-bit float formats is optional in Vulkan, so it is asked per format.
         _float32_filtering = true;
@@ -242,13 +242,13 @@ public:
         case sg::feature::geometry_shader:
         case sg::feature::binding_arrays:
         case sg::feature::tessellation_shader:
-        case sg::feature::readwrite_storage_formats:
+        case sg::feature::readwrite_image_formats:
         case sg::feature::unaligned_block_compression:
             return true;
         case sg::feature::float32_filtering:
             return _float32_filtering;
-        case sg::feature::extended_storage_formats:
-            return _extended_storage_formats;
+        case sg::feature::extended_image_formats:
+            return _extended_image_formats;
         }
         return false;
     }
@@ -775,7 +775,7 @@ public:
     VkInstance _instance = VK_NULL_HANDLE;
     VkPhysicalDevice _physical_device = VK_NULL_HANDLE; // owned by the instance, not destroyed
     bool _float32_filtering = false;
-    bool _extended_storage_formats = false;
+    bool _extended_image_formats = false;
 
     // The device's memory types, read once at construction: they never change, and a staging ring allocates far too
     // often to re-query them per allocation.

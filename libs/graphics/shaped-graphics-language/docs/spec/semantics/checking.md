@@ -136,10 +136,10 @@ enum light_kind:
   Two mentions of one such type are one type, and a member names each of them as its spelling does: `texture2d[float4]`, `out image2d[.rgba8_unorm]`.
 * **CHK-199** A texture's argument is `float`, `int` or `uint`, one to four wide, and a texture without its argument is `wrong-kind-of-name`.
   Another type as the argument is `wrong-kind-of-name` too, and a name that is no type is `unknown-name` by CHK-24, so `texture2d[rgba8]` is the latter.
-* **CHK-200** An image's argument is exactly one enum case naming one of sg's storage formats, `.rgba8_unorm`.
+* **CHK-200** An image's argument is exactly one enum case naming one of sg's image formats, `.rgba8_unorm`.
   It is the one value type argument SGL reads, until value type arguments exist in general.
 * **CHK-201** A form some backend lacks is the normal error `needs-feature`, naming the feature, on every target alike:
-  `texture2d_ms_array`, an image outside the portable storage formats, and a `mut` image outside the three `r32` formats.
+  `texture2d_ms_array`, an image outside the portable image formats, and a `mut` image outside the three `r32` formats.
 * **CHK-202** `@unfilterable` stands on a texture member of floats, and on any other binding member is `wrong-kind-of-name`.
   Elsewhere it is an attribute the pass does not know, by CHK-39.
 * **CHK-203** `@non_filtering` stands on a `sampler` member, and on any other binding member is `wrong-kind-of-name`.

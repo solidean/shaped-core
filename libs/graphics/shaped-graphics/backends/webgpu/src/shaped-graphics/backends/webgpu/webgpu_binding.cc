@@ -90,7 +90,7 @@ namespace
     }
     case sg::binding_type::readwrite_texture:
         entry.storageTexture.access = to_wgpu_storage_access(b.storage_access);
-        entry.storageTexture.format = to_wgpu_format(b.storage_format.value_or(sg::pixel_format::undefined));
+        entry.storageTexture.format = to_wgpu_format(b.image_format.value_or(sg::pixel_format::undefined));
         entry.storageTexture.viewDimension
             = to_wgpu_view_dimension(b.texture_dimension.value_or(sg::texture_view_dimension::tex_2d));
         break;
@@ -153,21 +153,21 @@ cc::result<webgpu_binding_group_layout_handle> webgpu_binding_group_layout::crea
                                         "ray tracing",
                                         b.name));
         if (b.type == sg::binding_type::readwrite_texture
-            && b.storage_format.value_or(sg::pixel_format::undefined) == sg::pixel_format::undefined)
-            return cc::error(cc::format("binding_group_layout: storage texture '{}' declares no storage_format, which "
+            && b.image_format.value_or(sg::pixel_format::undefined) == sg::pixel_format::undefined)
+            return cc::error(cc::format("binding_group_layout: storage texture '{}' declares no image_format, which "
                                         "a "
                                         "webgpu layout needs before any view exists",
                                         b.name));
         if (b.type == sg::binding_type::readwrite_texture && b.storage_access == sg::storage_access::read_write
-            && !ctx.supports(sg::feature::readwrite_storage_formats))
+            && !ctx.supports(sg::feature::readwrite_image_formats))
         {
-            auto const format = b.storage_format.value_or(sg::pixel_format::undefined);
+            auto const format = b.image_format.value_or(sg::pixel_format::undefined);
             if (format != sg::pixel_format::r32_float && format != sg::pixel_format::r32_uint
                 && format != sg::pixel_format::r32_sint)
                 return cc::error(cc::format("binding_group_layout: storage texture '{}' is read_write in a format "
                                             "other "
                                             "than r32float / r32uint / r32sint, which needs "
-                                            "sg::feature::readwrite_storage_formats (webgpu's texture-formats-tier2), "
+                                            "sg::feature::readwrite_image_formats (webgpu's texture-formats-tier2), "
                                             "and this device lacks it; declare it write or read instead",
                                             b.name));
         }

@@ -9,7 +9,7 @@
 namespace slib::impl
 {
 /// A storage texture's format, as `#pragma sc format rgba8_unorm` names it before an `RWTexture*`.
-struct storage_format
+struct image_format
 {
     sg::pixel_format format = sg::pixel_format::undefined;
     /// What DXC's `[[vk::image_format]]` takes; empty where SPIR-V has no such format, as for `bgra8_unorm`.
@@ -18,5 +18,5 @@ struct storage_format
 
 /// The format a `#pragma sc format ...` attribute names: one positional argument, `sg::pixel_format`'s own name.
 /// Only a format a storage texture can have is accepted, `sg::supports_typed_uav`.
-[[nodiscard]] cc::result<storage_format> parse_storage_format(annotation const& attribute);
+[[nodiscard]] cc::result<image_format> parse_image_format(annotation const& attribute);
 } // namespace slib::impl

@@ -169,9 +169,9 @@ namespace sg
     return f != pixel_format::undefined && !is_depth_format(f) && !is_compressed_format(f) && !is_srgb_format(f);
 }
 
-/// True for a storage format every backend accepts without asking: core WebGPU's storage formats.
-/// Every other format `supports_typed_uav` allows needs `sg::feature::extended_storage_formats`.
-[[nodiscard]] constexpr bool is_portable_storage_format(pixel_format f)
+/// True for a image format every backend accepts without asking: core WebGPU's image formats.
+/// Every other format `supports_typed_uav` allows needs `sg::feature::extended_image_formats`.
+[[nodiscard]] constexpr bool is_portable_image_format(pixel_format f)
 {
     switch (f)
     {

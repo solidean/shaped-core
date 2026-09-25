@@ -8,8 +8,8 @@
 #include <shaped-graphics/binding/compiled_shader.hh>
 #include <shaped-shader-library/binding/binding_groups.hh>
 #include <shaped-shader-library/binding/impl/hlsl_binding_types.hh>
+#include <shaped-shader-library/binding/impl/hlsl_image_format.hh>
 #include <shaped-shader-library/binding/impl/hlsl_sampler_state.hh>
-#include <shaped-shader-library/binding/impl/hlsl_storage_format.hh>
 #include <shaped-shader-library/binding/impl/hlsl_tokens.hh>
 #include <shaped-shader-library/binding/impl/hlsl_value_types.hh>
 
@@ -1040,9 +1040,9 @@ struct parser
                 if (binding.value().binding.type != sg::binding_type::readwrite_texture)
                     return cc::error(cc::format("{}: 'format' describes a storage texture, and '{}' is not one",
                                                 to_string(pending.value().location), binding.value().binding.name));
-                auto format = slib::impl::parse_storage_format(pending.value());
+                auto format = slib::impl::parse_image_format(pending.value());
                 CC_RETURN_IF_ERROR(format);
-                binding.value().binding.storage_format = format.value().format;
+                binding.value().binding.image_format = format.value().format;
                 binding.value().vulkan_format = format.value().vulkan;
                 pending = cc::nullopt;
             }

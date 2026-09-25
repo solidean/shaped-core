@@ -118,12 +118,12 @@ public:
             return _queries.is_supported();
         case sg::feature::headless_present:
             return true;
-        case sg::feature::readwrite_storage_formats:
-            return _readwrite_storage_formats;
+        case sg::feature::readwrite_image_formats:
+            return _readwrite_image_formats;
         case sg::feature::float32_filtering:
             return _float32_filtering;
-        case sg::feature::extended_storage_formats:
-            return _extended_storage_formats;
+        case sg::feature::extended_image_formats:
+            return _extended_image_formats;
         case sg::feature::raytracing:
         case sg::feature::geometry_shader:
         case sg::feature::tessellation_shader:
@@ -430,9 +430,9 @@ public:
     struct granted_features
     {
         bool timestamps = false;
-        bool readwrite_storage_formats = false; ///< texture-formats-tier2
-        bool float32_filtering = false;         ///< float32-filterable
-        bool extended_storage_formats = false;  ///< texture-formats-tier1 and bgra8unorm-storage
+        bool readwrite_image_formats = false; ///< texture-formats-tier2
+        bool float32_filtering = false;       ///< float32-filterable
+        bool extended_image_formats = false;  ///< texture-formats-tier1 and bgra8unorm-storage
     };
 
     // Set once at creation.
@@ -448,9 +448,9 @@ private:
     wgpu_queue _queue;
     webgpu_config _config;
     isize _uniform_offset_alignment = 256;
-    bool _readwrite_storage_formats = false; // texture-formats-tier2 was granted
+    bool _readwrite_image_formats = false; // texture-formats-tier2 was granted
     bool _float32_filtering = false;
-    bool _extended_storage_formats = false;
+    bool _extended_image_formats = false;
 
     sg::epoch _current_epoch = sg::epoch::first;
     u64 _next_submission = u64(sg::submission_token::first);

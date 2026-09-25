@@ -773,7 +773,7 @@ private:
         return {};
     }
 
-    static cc::optional<sg::pixel_format> storage_format_of(cc::string_view f)
+    static cc::optional<sg::pixel_format> image_format_of(cc::string_view f)
     {
         struct entry
         {
@@ -873,8 +873,8 @@ private:
             b.texture_dimension = texture_dimension_of(n);
             if (type.args.empty())
                 return cc::error(cc::format("line {}: storage texture '{}' declares no format", p.line, p.name));
-            b.storage_format = storage_format_of(type.args[0].name);
-            if (!b.storage_format.has_value())
+            b.image_format = image_format_of(type.args[0].name);
+            if (!b.image_format.has_value())
                 return cc::error(cc::format("line {}: storage texture '{}' uses format '{}', which has no "
                                             "sg::pixel_format",
                                             p.line, p.name, type.args[0].name));

@@ -6,7 +6,7 @@
 #include <shaped-graphics-language/fwd.hh>
 #include <shaped-graphics-language/interpret/scalar.hh>
 
-/// What the texture, image and sampler types of a binding are made of: their shapes and an image's storage formats.
+/// What the texture, image and sampler types of a binding are made of: their shapes and an image's image formats.
 /// One table each, read by the check pass, every emitter and the host description alike (the spec's bindings file).
 
 /// The shape of a texture or an image, which is sg's `texture_view_dimension` member for member.
@@ -61,8 +61,8 @@ inline constexpr shape_info k_shapes[] = {
 
 } // namespace sgl::check
 
-/// One storage format an image may take, named as `sg::pixel_format` names it.
-struct sgl::check::storage_format_info
+/// One image format an image may take, named as `sg::pixel_format` names it.
+struct sgl::check::image_format_info
 {
     cc::string_view name;
     /// WGSL's spelling, which drops the underscore and calls one float format `ufloat`.
@@ -84,7 +84,7 @@ inline constexpr auto k_float = value_kind::scalar_float;
 inline constexpr auto k_sint = value_kind::scalar_int;
 inline constexpr auto k_uint = value_kind::scalar_uint;
 
-inline constexpr storage_format_info k_storage_formats[] = {
+inline constexpr image_format_info k_image_formats[] = {
     {"r8_unorm", "r8unorm", 1, k_float, false, false},
     {"r8_snorm", "r8snorm", 1, k_float, false, false},
     {"r8_uint", "r8uint", 1, k_uint, false, false},
@@ -123,11 +123,11 @@ inline constexpr storage_format_info k_storage_formats[] = {
 /// The type a texel of `format` loads as and stores from: `float4` for `rgba8_unorm`, `float` for `r32_float`.
 [[nodiscard]] cc::string texel_name_of(i32 format);
 
-/// A position in `k_storage_formats`, or -1 for a name that is no storage format.
-[[nodiscard]] constexpr i32 find_storage_format(cc::string_view name)
+/// A position in `k_image_formats`, or -1 for a name that is no image format.
+[[nodiscard]] constexpr i32 find_image_format(cc::string_view name)
 {
-    for (auto i = 0; i < i32(sizeof(k_storage_formats) / sizeof(k_storage_formats[0])); ++i)
-        if (k_storage_formats[i].name == name)
+    for (auto i = 0; i < i32(sizeof(k_image_formats) / sizeof(k_image_formats[0])); ++i)
+        if (k_image_formats[i].name == name)
             return i;
     return -1;
 }

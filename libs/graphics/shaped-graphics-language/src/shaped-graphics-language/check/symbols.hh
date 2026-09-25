@@ -113,7 +113,7 @@ struct sgl::check::type_info
     texture_shape shape = {};
     /// A `texture` that holds depth, which takes no `element`.
     bool is_depth = false;
-    /// A position in `k_storage_formats` for an `image`; -1 for every other kind.
+    /// A position in `k_image_formats` for an `image`; -1 for every other kind.
     i32 format = -1;
     image_access access = image_access::read;
     /// A `sampler` that compares.

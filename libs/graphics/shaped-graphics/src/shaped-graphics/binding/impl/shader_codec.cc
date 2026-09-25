@@ -85,7 +85,7 @@ void put_binding(cc::vector<byte>& out, binding const& b)
     // from the one that was compiled.
     put_optional_enum(out, b.texture_dimension);
     put_u32(out, u32(b.visibility.bits));
-    put_optional_enum(out, b.storage_format);
+    put_optional_enum(out, b.image_format);
     put_optional_enum(out, b.sample_type);
     put_optional_enum(out, b.sampler_type);
     put_u32(out, u32(b.storage_access));
@@ -203,7 +203,7 @@ struct reader
 
         b.texture_dimension = get_optional_enum<texture_view_dimension>(k_texture_view_dimension_count);
         b.visibility = shader_stages::create_from_bits(u16(get_u32()));
-        b.storage_format = get_optional_enum<pixel_format>(k_pixel_format_count);
+        b.image_format = get_optional_enum<pixel_format>(k_pixel_format_count);
         b.sample_type = get_optional_enum<texture_sample_type>(k_texture_sample_type_count);
         b.sampler_type = get_optional_enum<sampler_binding_type>(k_sampler_binding_type_count);
 

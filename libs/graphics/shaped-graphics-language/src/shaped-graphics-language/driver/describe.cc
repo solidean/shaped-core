@@ -66,7 +66,7 @@ described_binding_member describe_resource(check::checked_module const& m,
         result.type = cc::string(m.name_of(member.type));
         result.is_mut = t.access != check::image_access::read;
         result.texture_dimension = cc::string(check::info_of(t.shape).sg_name);
-        result.storage_format = cc::string(check::k_storage_formats[t.format].name);
+        result.image_format = cc::string(check::k_image_formats[t.format].name);
         result.storage_access = cc::string(accesses[isize(t.access)]);
         break;
     }

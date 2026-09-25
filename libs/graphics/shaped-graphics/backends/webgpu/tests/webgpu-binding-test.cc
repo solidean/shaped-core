@@ -74,7 +74,7 @@ ASYNC_INVOCABLE_TEST("sg webgpu - a write-only storage texture is written by a d
                                                  .index = 0,
                                                  .type = sg::binding_type::readwrite_texture,
                                                  .texture_dimension = sg::texture_view_dimension::tex_2d,
-                                                 .storage_format = sg::pixel_format::rgba8_unorm,
+                                                 .image_format = sg::pixel_format::rgba8_unorm,
                                                  .storage_access = sg::storage_access::write}},
                                     sg::compute_dimensions{.x = 4, .y = 4});
 
@@ -234,7 +234,7 @@ ASYNC_INVOCABLE_TEST("sg webgpu - inline constants overflowing one page land on 
     CHECK(mismatches == 0);
 }
 
-ASYNC_INVOCABLE_TEST("sg webgpu - a read_write rgba8 storage texture needs readwrite_storage_formats",
+ASYNC_INVOCABLE_TEST("sg webgpu - a read_write rgba8 storage texture needs readwrite_image_formats",
                      (webgpu::webgpu_context_handle const& handle))
 {
     auto& ctx = *handle;
@@ -242,17 +242,17 @@ ASYNC_INVOCABLE_TEST("sg webgpu - a read_write rgba8 storage texture needs readw
     bindings.push_back(sg::binding{.name = "Target", .group_index = 0, .index = 0, .count = 1});
     bindings[0].type = sg::binding_type::readwrite_texture;
     bindings[0].texture_dimension = sg::texture_view_dimension::tex_2d;
-    bindings[0].storage_format = sg::pixel_format::rgba8_unorm;
+    bindings[0].image_format = sg::pixel_format::rgba8_unorm;
     bindings[0].storage_access = sg::storage_access::read_write;
     sg::apply_stage_visibility(bindings, sg::shader_stage::compute);
 
     // Refused where the device lacks texture-formats-tier2, built where it has it: never a later validation error.
     auto const layout = ctx.uncached.try_create_binding_group_layout(bindings);
-    CHECK(layout.has_value() == ctx.supports(sg::feature::readwrite_storage_formats));
+    CHECK(layout.has_value() == ctx.supports(sg::feature::readwrite_image_formats));
 
     // An r32 format is read_write in core, whatever the device offers.
     auto r32 = bindings;
-    r32[0].storage_format = sg::pixel_format::r32_float;
+    r32[0].image_format = sg::pixel_format::r32_float;
     CHECK(ctx.uncached.try_create_binding_group_layout(r32).has_value());
     co_return;
 }

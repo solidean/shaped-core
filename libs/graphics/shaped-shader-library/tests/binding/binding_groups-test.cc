@@ -23,7 +23,7 @@ struct expected_binding
     u32 count = 1;
     sg::binding_type type = sg::binding_type::uniform_buffer;
     cc::optional<sg::texture_view_dimension> dimension;
-    cc::optional<sg::pixel_format> storage_format;
+    cc::optional<sg::pixel_format> image_format;
 };
 
 struct expected_group
@@ -421,7 +421,7 @@ constexpr name_of_dimension k_dimensions[] = {
                                                         {"bgra8_unorm", sg::pixel_format::bgra8_unorm}};
                     for (auto const& entry : formats)
                         if (entry.name == f.value())
-                            binding.storage_format = entry.value;
+                            binding.image_format = entry.value;
                 }
             }
             current.groups.back().bindings.push_back(binding);
@@ -604,7 +604,7 @@ TEST("slib - the binding corpus parses as it says it does")
                 CHECK(binding.count == want.count);
                 CHECK(binding.type == want.type);
                 CHECK(binding.texture_dimension == want.dimension);
-                CHECK(binding.storage_format == want.storage_format);
+                CHECK(binding.image_format == want.image_format);
 
                 // The group number is both the SPIR-V set and the HLSL space, so every binding carries it twice.
                 REQUIRE(binding.group_index.has_value());

@@ -119,7 +119,7 @@ cc::result<raw_texture_handle> context_transient_scope::try_create_raw_texture(t
 {
     // WORKAROUND: the transient bump-heap is buffers-only, so a transient texture is a dedicated allocation tagged transient, which the backend auto-expires at the next epoch.
     // Placed/bump-allocated transient textures wait on a texture-capable transient memory_heap; see the header note.
-    if (auto unsupported = impl::find_unsupported_texture(_ctx.supports(feature::extended_storage_formats), desc);
+    if (auto unsupported = impl::find_unsupported_texture(_ctx.supports(feature::extended_image_formats), desc);
         unsupported.has_value())
         return cc::error(cc::move(unsupported.value()));
     if (auto error = desc.unaligned_block_error(_ctx.supports(feature::unaligned_block_compression)); !error.empty())

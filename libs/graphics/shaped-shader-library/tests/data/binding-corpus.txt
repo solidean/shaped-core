@@ -1355,7 +1355,7 @@ namespace post
     RWTexture2D<float4> dst;
 }
 --- error
-line 4: 'format' takes one storage format, as sg::pixel_format names it: `#pragma sc format rgba8_unorm`
+line 4: 'format' takes one image format, as sg::pixel_format names it: `#pragma sc format rgba8_unorm`
 
 
 --- case a format attribute names its format bare, never as a key
@@ -1367,7 +1367,7 @@ namespace post
     RWTexture2D<float4> dst;
 }
 --- error
-line 4: 'format' takes one storage format, as sg::pixel_format names it: `#pragma sc format rgba8_unorm`
+line 4: 'format' takes one image format, as sg::pixel_format names it: `#pragma sc format rgba8_unorm`
 
 
 --- case a format attribute naming no format is an error
@@ -1379,7 +1379,7 @@ namespace post
     RWTexture2D<float4> dst;
 }
 --- error
-line 4: 'format' takes one storage format, as sg::pixel_format names it: `#pragma sc format rgba8_unorm`
+line 4: 'format' takes one image format, as sg::pixel_format names it: `#pragma sc format rgba8_unorm`
 
 
 --- case a format at file scope is an error, even standing before a storage texture

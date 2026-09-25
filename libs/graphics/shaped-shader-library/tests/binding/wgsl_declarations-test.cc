@@ -201,9 +201,9 @@ TEST("slib wgsl - a storage texture reports the format WGSL declares, which HLSL
     auto const* color = find(r.value(), "out_color");
     REQUIRE(color != nullptr);
     CHECK(color->type == sg::binding_type::readwrite_texture);
-    CHECK(color->storage_format == sg::pixel_format::rgba16_float);
+    CHECK(color->image_format == sg::pixel_format::rgba16_float);
     CHECK(color->texture_dimension == sg::texture_view_dimension::tex_2d);
-    CHECK(find(r.value(), "out_mask")->storage_format == sg::pixel_format::r32_uint);
+    CHECK(find(r.value(), "out_mask")->image_format == sg::pixel_format::r32_uint);
     CHECK(find(r.value(), "out_mask")->texture_dimension == sg::texture_view_dimension::tex_3d);
 
     // The access mode is part of what a WebGPU layout entry must match, so `write` must not come back as read-write.

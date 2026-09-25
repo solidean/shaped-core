@@ -32,10 +32,10 @@ bool creates(auto&& create)
 }
 } // namespace
 
-INVOCABLE_TEST("sg - a storage format outside the portable set needs extended_storage_formats",
+INVOCABLE_TEST("sg - a image format outside the portable set needs extended_image_formats",
                (sg::context_handle const& ctx))
 {
-    auto const extended = ctx->supports(sg::feature::extended_storage_formats);
+    auto const extended = ctx->supports(sg::feature::extended_image_formats);
     auto const storage = sg::texture_usage::image;
 
     auto const persistent = [&](sg::pixel_format f, sg::texture_usages usage)
@@ -50,7 +50,7 @@ INVOCABLE_TEST("sg - a storage format outside the portable set needs extended_st
     auto bindings = cc::vector<sg::binding>();
     bindings.push_back({.name = "target", .type = sg::binding_type::readwrite_texture});
     bindings[0].texture_dimension = sg::texture_view_dimension::tex_2d;
-    bindings[0].storage_format = sg::pixel_format::r8_unorm;
+    bindings[0].image_format = sg::pixel_format::r8_unorm;
     bindings[0].storage_access = sg::storage_access::write;
     sg::apply_stage_visibility(bindings, sg::shader_stage::compute);
     CHECK(ctx->uncached.try_create_binding_group_layout(bindings).has_value() == extended);

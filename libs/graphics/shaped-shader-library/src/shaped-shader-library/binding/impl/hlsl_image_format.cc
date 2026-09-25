@@ -1,4 +1,4 @@
-#include "hlsl_storage_format.hh"
+#include "hlsl_image_format.hh"
 
 #include <clean-core/string/format.hh>
 
@@ -49,16 +49,16 @@ constexpr named_format k_formats[] = {
 };
 } // namespace
 
-cc::result<slib::impl::storage_format> slib::impl::parse_storage_format(annotation const& attribute)
+cc::result<slib::impl::image_format> slib::impl::parse_image_format(annotation const& attribute)
 {
     auto const& args = attribute.arguments;
     if (args.size() != 1 || !args[0].key.empty() || args[0].values.size() != 1)
-        return cc::error(cc::format("{}: 'format' takes one storage format, as sg::pixel_format names it: "
+        return cc::error(cc::format("{}: 'format' takes one image format, as sg::pixel_format names it: "
                                     "`#pragma sc format rgba8_unorm`",
                                     to_string(attribute.location)));
     for (auto const& f : k_formats)
         if (f.name == args[0].values[0])
-            return storage_format{.format = f.format, .vulkan = f.vulkan};
+            return image_format{.format = f.format, .vulkan = f.vulkan};
     return cc::error(cc::format("{}: '{}' is no format a storage texture can have", to_string(attribute.location),
                                 args[0].values[0]));
 }

@@ -248,7 +248,7 @@ TEST("sg::binding - visibility defaults to empty")
 {
     auto const b = sg::binding{.name = "hand_written", .index = 0, .type = sg::binding_type::uniform_buffer};
     CHECK(b.visibility.is_empty());
-    CHECK(!b.storage_format.has_value());
+    CHECK(!b.image_format.has_value());
     CHECK(!b.sample_type.has_value());
     CHECK(!b.sampler_type.has_value());
 }

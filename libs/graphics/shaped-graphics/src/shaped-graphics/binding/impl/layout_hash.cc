@@ -37,7 +37,7 @@ void add_binding(cc::byte_stream_builder& b, binding const& bnd)
     // They are part of the identity anyway: two layouts that differ only here are different layouts on some backend,
     // and this hash is what a persistent pipeline cache keys on across processes.
     b.add_pod(bnd.visibility.bits);
-    b.add_optional(bnd.storage_format);
+    b.add_optional(bnd.image_format);
     b.add_pod(bnd.storage_access);
     b.add_optional(bnd.sample_type);
     b.add_optional(bnd.sampler_type);

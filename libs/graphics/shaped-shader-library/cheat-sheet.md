@@ -238,7 +238,7 @@ namespace frame_bindings
 // `#pragma sc static <sg::sampler field>=<value>` before a sampler bakes it into the layout;
 //   `filter=linear` sets all three filters, `address=clamp_edge` all three axes, and a tuple form
 //   `filter=(linear, linear, nearest)` addresses them individually, in sg::sampler's declaration order.
-// `#pragma sc format <sg::pixel_format>` before an RWTexture* states its storage_format, and on SPIR-V
+// `#pragma sc format <sg::pixel_format>` before an RWTexture* states its image_format, and on SPIR-V
 //   writes [[vk::image_format]] too; it is how SGL's HLSL states an image's format.
 // `#pragma sc push_constants` before a ConstantBuffer makes it inline constants: register(b0, space9) on
 //   DXIL, [[vk::push_constant]] on SPIR-V. NO arguments -- the space is slib::inline_constants_space,

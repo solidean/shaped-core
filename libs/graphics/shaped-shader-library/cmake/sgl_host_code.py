@@ -216,7 +216,7 @@ def binding_entry(member: dict) -> str:
     if kind == "image":
         return head + (f".type = sg::binding_type::readwrite_texture, "
                        f".texture_dimension = sg::texture_view_dimension::{member['texture_dimension']}, "
-                       f".storage_format = sg::pixel_format::{member['storage_format']}, "
+                       f".image_format = sg::pixel_format::{member['image_format']}, "
                        f".storage_access = sg::storage_access::{member['storage_access']}}}")
     return head + f".type = sg::binding_type::sampler, .sampler_type = sg::sampler_binding_type::{member['sampler_type']}}}"
 

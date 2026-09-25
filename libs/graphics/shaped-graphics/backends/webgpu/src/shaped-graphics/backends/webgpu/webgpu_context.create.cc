@@ -73,10 +73,10 @@ void finish_creation(webgpu_context& ctx)
 
     auto const has = [&](WGPUFeatureName f) { return wgpuDeviceHasFeature(ctx.device(), f) != WGPU_FALSE; };
     ctx.set_limits(alignment, {.timestamps = has(WGPUFeatureName_TimestampQuery),
-                               .readwrite_storage_formats = has(WGPUFeatureName_TextureFormatsTier2),
+                               .readwrite_image_formats = has(WGPUFeatureName_TextureFormatsTier2),
                                .float32_filtering = has(WGPUFeatureName_Float32Filterable),
                                // sg's extended set holds bgra8_unorm, which WebGPU grants with a feature of its own.
-                               .extended_storage_formats
+                               .extended_image_formats
                                = has(WGPUFeatureName_TextureFormatsTier1) && has(WGPUFeatureName_BGRA8UnormStorage)});
 }
 

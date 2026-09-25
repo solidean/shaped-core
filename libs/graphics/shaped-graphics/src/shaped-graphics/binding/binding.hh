@@ -185,7 +185,7 @@ struct sg::binding
     /// For `readwrite_texture` bindings: the texel format the shader declared (`RWTexture2D<float4>`).
     /// A WebGPU storage-texture layout entry requires it, and a layout is built before any view exists — so it
     /// cannot be taken from the bound view the way dx12 and vulkan take it.
-    cc::optional<pixel_format> storage_format;
+    cc::optional<pixel_format> image_format;
 
     /// For `readwrite_texture` bindings: whether the shader reads, writes or both.
     /// See storage_access; ignored for every other kind.

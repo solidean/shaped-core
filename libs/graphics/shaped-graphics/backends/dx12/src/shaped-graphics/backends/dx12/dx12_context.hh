@@ -197,11 +197,11 @@ public:
         case sg::feature::geometry_shader:
         case sg::feature::binding_arrays:
         case sg::feature::tessellation_shader:
-        case sg::feature::readwrite_storage_formats:
+        case sg::feature::readwrite_image_formats:
         case sg::feature::float32_filtering:
             return true;
-        case sg::feature::extended_storage_formats:
-            return _extended_storage_formats;
+        case sg::feature::extended_image_formats:
+            return _extended_image_formats;
         case sg::feature::unaligned_block_compression:
             return _unaligned_block_textures;
         }
@@ -605,7 +605,7 @@ public:
     // NOT_SUPPORTED until set.
     D3D12_RAYTRACING_TIER _raytracing_tier = D3D12_RAYTRACING_TIER_NOT_SUPPORTED;
     bool _unaligned_block_textures = false; // D3D12_OPTIONS8, cached at creation
-    bool _extended_storage_formats = false; // bgra8_unorm's typed UAV, cached at creation
+    bool _extended_image_formats = false;   // bgra8_unorm's typed UAV, cached at creation
 
     // Where debug-layer messages go; empty means stderr.
     // See set_message_callback.

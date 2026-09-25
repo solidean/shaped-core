@@ -90,8 +90,8 @@ ctx.accepted_shader_formats()                      // span<shader_format const>,
 ctx.accepts_shader_format(f)                       // bool — hand this to slib's acquire(ctx) rather than assuming a format; see docs/shaders.md
 ctx.supports(sg::feature::raytracing)              // bool — THE capability question; feature is deliberately coarse (see context/capabilities.hh)
                                                    //   raytracing | timestamp_query | headless_present | geometry_shader | tessellation_shader | binding_arrays
-                                                   //   | readwrite_storage_formats (false on core webgpu: read_write storage only in r32 formats)
-                                                   //   | float32_filtering (filter r32/rg32/rgba32_float) | extended_storage_formats (storage beyond is_portable_storage_format)
+                                                   //   | readwrite_image_formats (false on core webgpu: read_write storage only in r32 formats)
+                                                   //   | float32_filtering (filter r32/rg32/rgba32_float) | extended_image_formats (storage beyond is_portable_image_format)
                                                    //   | unaligned_block_compression (false on webgpu and metal: a BC texture needs whole 4x4 blocks,
                                                    //     and create_texture THROWS on one that has not; desc.unaligned_block_error(supports) asks first)
                                                    //   binding_arrays false (webgpu) = no count > 1 bindings, no staging_binding_group, no bindless_array
@@ -421,8 +421,8 @@ sg::is_srgb_format(f)           // bool  — hardware applies the sRGB transfer 
 sg::is_compressed_format(f)     // bool  — BC block-compressed (4x4 blocks)
 sg::supports_typed_uav(f)       // bool  — can carry a typed UAV, i.e. texture_usage::image; false for sRGB, BC and depth
                                 //         an sRGB format is still RENDERABLE, so a raster pass is how you write one (sr::raster_box_filter_mipmap_routine)
-sg::is_portable_storage_format(f) // bool — storage every device takes (core WebGPU's set); any other typed-UAV format needs
-                                  //         feature::extended_storage_formats, so gate compute writes on both
+sg::is_portable_image_format(f) // bool — storage every device takes (core WebGPU's set); any other typed-UAV format needs
+                                  //         feature::extended_image_formats, so gate compute writes on both
 sg::is_float32_format(f)        // bool  — r32/rg32/rgba32_float: filtering one needs feature::float32_filtering
 sg::format_block_size(f)        // int   — bytes per texel, or per 4x4 block for BC (0 for undefined)
 sg::format_block_extent(f)      // int   — 1 (uncompressed) or 4 (BC)
@@ -590,7 +590,7 @@ sg::binding                 // { cc::string name, reflected_name (diagnostics on
                             //   cc::optional<texture_view_dimension> texture_dimension }  — reflected for texture kinds; hand-written array bindings must set it
                             //   + what a WebGPU bind group layout needs and dx12/vulkan ignore:
                             //   shader_stages visibility        — EMPTY = not known (treated as every stage), never "no stage"
-                            //   cc::optional<pixel_format> storage_format   — readwrite_texture only; WGSL declares it, HLSL does not
+                            //   cc::optional<pixel_format> image_format   — readwrite_texture only; WGSL declares it, HLSL does not
                             //   storage_access storage_access = read_write  — readwrite_texture only: read|write|read_write; WGSL declares it, HLSL leaves the default
                             //   cc::optional<texture_sample_type> sample_type  — readonly_texture: filterable_float|unfilterable_float|depth|sint|uint
                             //   cc::optional<sampler_binding_type> sampler_type // sampler: filtering|non_filtering|comparison
