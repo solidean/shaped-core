@@ -146,8 +146,7 @@ The size and alignment the `layout-mismatch` check places a member by are fields
 
 ```bash
 uv run dev.py run sgl -- emit <file> --entry <name> --target <hlsl-dx12|hlsl-vulkan|wgsl|msl> [--run-tests]
-uv run dev.py run sgl -- test <file>...                 # the tests of each file, on the interpreter
-uv run dev.py run sgl -- describe <file>             # what slib's generator reads: bindings, edge structs, entry points
+uv run dev.py run sgl -- test <file>...              # the tests of each file, on the interpreter
 uv run dev.py run sgl -- describe <file>             # what slib's generator reads: bindings, edge structs, entry points
 uv run dev.py run sgl -- prelude --check <path>      # exit 2, and where the texts part, when the file differs
 uv run dev.py run sgl -- prelude --write <path>      # what `uv run dev.py check sgl-prelude --fix` runs
