@@ -360,7 +360,7 @@ TEST("ssc::dxc + dx12 - raytraced spinning cube in a window", nx::config::manual
 
     // Per-frame camera constants; the contents are refreshed each frame, the buffer is not.
     auto const cam_buf
-        = ctx.persistent.create_buffer<camera_data>(1, sg::buffer_usage::uniform_buffer | sg::buffer_usage::copy_dst);
+        = ctx.persistent.create_buffer<camera_data>(1, sg::buffer_usage::constants_buffer | sg::buffer_usage::copy_dst);
 
     auto const start = cc::current_time_steady_secs();
     constexpr auto max_duration_secs = 30.0;
@@ -395,7 +395,7 @@ TEST("ssc::dxc + dx12 - raytraced spinning cube in a window", nx::config::manual
         auto rt_group = ctx.transient.create_binding_group(
             rt_group_layout, {{.name = "scene", .view = tlas->as_view()},
                               {.name = "Output", .view = image.as_image_view<sg::pixel_format::rgba16_float>()},
-                              {.name = "Camera", .view = cam_buf.as_uniform_buffer()}});
+                              {.name = "Camera", .view = cam_buf.as_constants_buffer()}});
         cmd->raytracing.bind_pipeline(*rt_pipeline);
         cmd->raytracing.bind_group(0, *rt_group);
         cmd->raytracing.dispatch_rays(*rt_table, raygen_idx, size[0], size[1]);

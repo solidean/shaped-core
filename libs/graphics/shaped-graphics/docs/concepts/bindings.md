@@ -11,7 +11,7 @@ A backend-specific binding vocabulary would be HLSL/D3D12 verbatim: a bind-type 
 sg's baseline shading language is undecided, so the vocabulary is drawn instead from concepts common to HLSL / GLSL / Slang / MSL / WGSL:
 
 - **`binding_type`** — the kind of resource a slot expects, and the backend-agnostic replacement for `D3D_SHADER_INPUT_TYPE`.
-  `uniform_buffer`, `buffer`, `bytes`, `texture`, `image`, `sampler`, `acceleration_structure` — SGL's own resource types.
+  `constants_buffer`, `buffer`, `bytes`, `texture`, `image`, `sampler`, `acceleration_structure` — SGL's own resource types.
 - **`access`** — what the shader does with the resource, an `access_mode`: `read`, `write` or `read_write`, SGL's unmarked, `out` and `mut`.
   Only an image is ever `write`, only a buffer, bytes or an image is ever written, and `is_valid_access` says which pairs exist.
   A buffer's access picks SRV or UAV; an image is a UAV whatever its access, which reaches only WebGPU's layout and the hazards.
@@ -20,7 +20,7 @@ sg's baseline shading language is undecided, so the vocabulary is drawn instead 
   `count == 0` is an unbounded array, which sg rejects — see [Array bindings](#array-bindings) for why.
 - **`group_index`** and **`space`** — the two ways a shading language namespaces that address, each optional and each reflected by the languages that have it.
   They are kept apart because only one of them is hardware-visible; the section below is what that costs a caller.
-- **`block_size`** — a uniform block's declared byte size, used to validate a bound view's size.
+- **`block_size`** — a constants block's declared byte size, used to validate a bound view's size.
 - **`visibility`** — the set of stages that declared this binding, as a `shader_stages`.
   **Empty means not known**, not "no stage": a hand-written binding that never says is treated as visible everywhere.
 - **`image_format`**, **`sample_type`**, **`sampler_type`** — the three optionals a WebGPU bind group layout entry needs and dx12 and vulkan do not ask for.
@@ -149,7 +149,7 @@ Three rules distinguish an array binding from a scalar one:
   A missing declaration is a bug, never "no access"; an empty element span is the way to say "unused this dispatch".
 
 Element resources are still kept alive by the group, exactly like scalar bindings.
-Arrays of samplers, uniform buffers or acceleration structures are not supported.
+Arrays of samplers, constants buffers or acceleration structures are not supported.
 Raster draws do not support array bindings yet.
 
 ## Staging a group instead of rebuilding it
@@ -270,7 +270,7 @@ compiled_shader.bindings ─▶ binding_group_layout ─▶ binding_group (name 
 ```
 
 A `pipeline_layout` composes an ordered list of `binding_group_layout`s, index = bind slot, so an entire group can be rebound at one slot without disturbing the others.
-It may also carry an optional **inline-constants** block — a single uniform-buffer binding, excluded from the group layouts.
+It may also carry an optional **inline-constants** block — a single constants-buffer binding, excluded from the group layouts.
 That one is written directly on the command list via `cmd.compute.set_inline_constants(...)`.
 Those are fast per-dispatch parameters needing no descriptor allocation — dx12 root constants, vulkan push constants.
 

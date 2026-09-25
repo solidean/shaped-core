@@ -69,10 +69,10 @@ INVOCABLE_TEST("sg - transient buffer has the requested shape", (sg::context_han
 {
     REQUIRE(ctx != nullptr);
 
-    auto buf = ctx->transient.create_raw_buffer(1024, sg::buffer_usage::uniform_buffer);
+    auto buf = ctx->transient.create_raw_buffer(1024, sg::buffer_usage::constants_buffer);
     REQUIRE(buf != nullptr);
     CHECK(buf->size_in_bytes() == 1024);
-    CHECK(buf->usage().has(sg::buffer_usage::uniform_buffer));
+    CHECK(buf->usage().has(sg::buffer_usage::constants_buffer));
     CHECK(buf->is_valid()); // fresh: created in the current epoch
 }
 
@@ -137,7 +137,7 @@ INVOCABLE_TEST("sg - transient buffers of different usages in one epoch each lan
 
     auto const usages = {
         sg::buffer_usages(sg::buffer_usage::copy_src),
-        sg::buffer_usage::uniform_buffer | sg::buffer_usage::copy_dst,
+        sg::buffer_usage::constants_buffer | sg::buffer_usage::copy_dst,
         sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src,
         sg::buffer_usage::vertex_buffer | sg::buffer_usage::copy_dst,
         sg::buffer_usage::index_buffer | sg::buffer_usage::copy_dst,

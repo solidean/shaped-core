@@ -401,7 +401,7 @@ ASYNC_EXAMPLE("shaped-rendering/denoise-playground")
     }
     auto const* scene_constants_binding = static_cast<sg::binding const*>(nullptr);
     for (auto const& b : scene_compiled->bindings)
-        if (b.type == sg::binding_type::uniform_buffer)
+        if (b.type == sg::binding_type::constants_buffer)
             scene_constants_binding = &b;
     if (scene_constants_binding == nullptr)
     {
@@ -433,7 +433,7 @@ ASYNC_EXAMPLE("shaped-rendering/denoise-playground")
     }
     auto const* compose_constants_binding = static_cast<sg::binding const*>(nullptr);
     for (auto const& b : compose_compiled->bindings)
-        if (b.type == sg::binding_type::uniform_buffer)
+        if (b.type == sg::binding_type::constants_buffer)
             compose_constants_binding = &b;
     if (compose_constants_binding == nullptr)
     {

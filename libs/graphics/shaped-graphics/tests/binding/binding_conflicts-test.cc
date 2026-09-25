@@ -54,8 +54,8 @@ TEST("sg::binding - an image's register class is u even when only read")
 
 TEST("sg::binding - stages that agree carry no conflict")
 {
-    auto const vs = make_shader("main_vs", {spirv_binding("frame", sg::binding_type::uniform_buffer, 0, 0)});
-    auto const ps = make_shader("main_ps", {spirv_binding("frame", sg::binding_type::uniform_buffer, 0, 0),
+    auto const vs = make_shader("main_vs", {spirv_binding("frame", sg::binding_type::constants_buffer, 0, 0)});
+    auto const ps = make_shader("main_ps", {spirv_binding("frame", sg::binding_type::constants_buffer, 0, 0),
                                             spirv_binding("albedo", sg::binding_type::texture, 0, 1)});
 
     sg::compiled_shader const* const stages[] = {&vs, &ps};
@@ -65,7 +65,7 @@ TEST("sg::binding - stages that agree carry no conflict")
 TEST("sg::binding - two stages numbering one group differently is a conflict")
 {
     // The failure the shared-header rule exists to prevent: each file counted from zero on its own.
-    auto const vs = make_shader("main_vs", {spirv_binding("frame", sg::binding_type::uniform_buffer, 0, 0)});
+    auto const vs = make_shader("main_vs", {spirv_binding("frame", sg::binding_type::constants_buffer, 0, 0)});
     auto const ps = make_shader("main_ps", {spirv_binding("albedo", sg::binding_type::texture, 0, 0)});
 
     sg::compiled_shader const* const stages[] = {&vs, &ps};
@@ -92,7 +92,7 @@ TEST("sg::binding - HLSL register classes share an index without colliding")
 {
     // b0 and t0 are different addresses that both reflect as index 0, which is why the class is part of a DXIL address.
     // Without that, every raster pipeline with inline constants would report a conflict.
-    auto const vs = make_shader("main_vs", {dxil_binding("frame", sg::binding_type::uniform_buffer, 0)});
+    auto const vs = make_shader("main_vs", {dxil_binding("frame", sg::binding_type::constants_buffer, 0)});
     auto const ps = make_shader("main_ps", {dxil_binding("albedo", sg::binding_type::texture, 0),
                                             dxil_binding("linear_sampler", sg::binding_type::sampler, 0)});
 
@@ -103,7 +103,7 @@ TEST("sg::binding - HLSL register classes share an index without colliding")
 TEST("sg::binding - a null stage is skipped rather than dereferenced")
 {
     // The raster description carries optional stages, and the caller passes them straight through.
-    auto const vs = make_shader("main_vs", {spirv_binding("frame", sg::binding_type::uniform_buffer, 0, 0)});
+    auto const vs = make_shader("main_vs", {spirv_binding("frame", sg::binding_type::constants_buffer, 0, 0)});
 
     sg::compiled_shader const* const stages[] = {&vs, nullptr};
     CHECK(!sg::impl::find_binding_conflict(stages).has_value());

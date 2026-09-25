@@ -72,7 +72,7 @@ sg::bytes_wait_gate                 // deadlock guard: an inline readback is onl
 sg::backend_kind          // dx12, vulkan, metal, webgpu, opengl, webgl
 sg::thread_model          // main_thread | single_threaded | multi_threaded — binds all but asyncs, layouts, samplers (docs/concepts/threading.md)
 sg::buffer_usage          // ONE usage named by operation: copy_src/copy_dst/vertex_buffer/index_buffer/
-                          //   uniform_buffer/readonly_buffer/readwrite_buffer/indirect_command_buffer/
+                          //   constants_buffer/readonly_buffer/readwrite_buffer/indirect_command_buffer/
                           //   accel_structure_{storage,build_input}
                           //   (granularity set by Vulkan; DX12 typeless, Metal untyped — they consume a subset)
 sg::buffer_usages         // cc::flags<buffer_usage> — the SET, which is what every API takes and reports
@@ -350,7 +350,7 @@ b.is_expired() / b.is_valid()      // bool    — storage reclaimed? transient a
 b.expire()                         // void    — free storage now (deferred); explicit early-free for persistent
 // shape metadata (_size_in_bytes/_usage) is protected in the base; backend buffers inherit it
 // view factories are BYTE-LEVEL only (no C++ element type); the buffer's usage must cover the access.
-// For the ergonomic, element-typed views (as_readonly_buffer(), as_uniform_buffer(), …) wrap in buffer<T>.
+// For the ergonomic, element-typed views (as_readonly_buffer(), as_constants_buffer(), …) wrap in buffer<T>.
 b.as_raw_readonly({.offset=,.size=})       // -> raw_buffer_view (byte-addressed SRV, shape=bytes; range in bytes; default = whole)
 b.as_raw_readonly({.offset=,.size=}, stride)// -> raw_buffer_view (STRUCTURED SRV; explicit byte stride; element_count = size/stride)
 b.as_raw_readwrite({.offset=,.size=})      // -> raw_buffer_view (byte-addressed UAV, shape=bytes)
@@ -362,10 +362,10 @@ b.as_raw_readwrite({.offset=,.size=}, stride)// -> raw_buffer_view (STRUCTURED U
 //   as are the draw-input views (as_vertex_buffer / as_index_buffer).
 // Bypass: build the raw_buffer_view aggregate yourself. For a heterogeneous buffer: one WHOLE-buffer raw view
 //   + in-shader Load<T>(byteOffset) does per-object addressing — see docs/concepts/views.md.
-// try_ TWINS: every storage/uniform factory above has one (try_as_raw_readonly/readwrite -> both overloads + whole-buffer;
-//   try_as_raw_uniform_buffer -> its one byte-range overload) -> cc::optional, nullopt when the RANGE is bad (bounds / 256 / %4 / stride).
+// try_ TWINS: every storage/constants factory above has one (try_as_raw_readonly/readwrite -> both overloads + whole-buffer;
+//   try_as_raw_constants_buffer -> its one byte-range overload) -> cc::optional, nullopt when the RANGE is bad (bounds / 256 / %4 / stride).
 //   A missing buffer_usage flag still ASSERTS (you chose usage at creation). Draw-input views have no twin.
-b.as_raw_uniform_buffer({.offset=,.size=}) // -> sg::raw_buffer_view (uniform_block; offset 256-aligned; size <= 64 KiB)
+b.as_raw_constants_buffer({.offset=,.size=}) // -> sg::raw_buffer_view (constants_block; offset 256-aligned; size <= 64 KiB)
 b.as_raw_vertex_buffer({.offset=,.size=}, stride_in_bytes)  // -> vertex_buffer_view (explicit stride)
 b.as_index_buffer(format=uint16)           // -> index_buffer_view (whole buffer)
 b.as_raw_index_buffer(format, {.offset=,.size=})            // -> index_buffer_view (byte range; width from format)
@@ -396,11 +396,11 @@ buf.try_reinterpret_as<U>()                 // -> cc::optional<buffer<U>>; gener
 buf.element_count()                        // isize — size_in_bytes / sizeof(T) (truncates)
 buf.size_in_bytes() / buf.usage()          // isize / sg::buffer_usages
 // view factories infer the element type from T (no <T> spelled), else identical to raw_buffer's:
-buf.as_uniform_buffer(element_index=0)     // -> uniform_buffer_view<T>    (binds ONE element as a cbuffer; byte offset element_index*sizeof(T) must be 256-aligned; only where T is a uniform_element)
+buf.as_constants_buffer(element_index=0)     // -> constants_buffer_view<T>    (binds ONE element as a cbuffer; byte offset element_index*sizeof(T) must be 256-aligned; only where T is a constants_element)
 buf.as_readonly_buffer({.offset=,.size=})  // -> readonly_buffer_view<T>   (only where T is a view_element; range in elements of T)
 buf.as_readwrite_buffer({.offset=,.size=}) // -> readwrite_buffer_view<T>  (only where T is a view_element)
 //   these are SUBRANGES: byte offset (= range.offset * sizeof(T)) must be 256-aligned, byte size a multiple of 4
-buf.try_as_readonly_buffer(...) / try_as_readwrite_buffer(...) / try_as_uniform_buffer(idx)  // -> cc::optional<view>
+buf.try_as_readonly_buffer(...) / try_as_readwrite_buffer(...) / try_as_constants_buffer(idx)  // -> cc::optional<view>
 //   nullopt on a bad range (bounds / 256 / %4); missing usage still asserts. Whole-buffer overloads have twins too.
 buf.as_vertex_buffer() / (range)           // -> vertex_buffer_view (stride = sizeof(T); range in vertices of T)
                                            //   stride only for now — not yet tied to the pipeline's vertex_input_layout
@@ -490,8 +490,8 @@ tex.as_render_target_2d_view({.slice=2})       // array/cube -> one layer/face a
 ```cpp
 #include <shaped-graphics/resource/views.hh>
 sg::view_element<T>          // concept: T is `byte`, or sizeof(T) % 4 == 0 (GPUs load DWORD-aligned)
-sg::uniform_element<T>       // concept: view_element + size multiple of 16 and <= 64 KiB (excludes byte)
-sg::uniform_buffer_view<T>          // uniform block of T   (cbuffer/UBO)          — view_class::uniform
+sg::constants_element<T>       // concept: view_element + size multiple of 16 and <= 64 KiB (excludes byte)
+sg::constants_buffer_view<T>          // constants block of T   (cbuffer/UBO)          — view_class::constants
 sg::readonly_buffer_view<T>         // read array of T      (SRV / read SSBO)      — view_class::readonly  (T=byte → raw)
 sg::readwrite_buffer_view<T>        // rw array of T        (UAV / rw SSBO)        — view_class::readwrite (T=byte → raw)
 // each holds a raw_buffer_handle + range; pure value (no GPU alloc). Made via buffer.as_*() above.
@@ -505,8 +505,8 @@ sg::image_view<VT, F>        // storage image (UAV) of texel format F (the bindi
 sg::buffer_view<T>           // access-erased middle: any access of a buffer of T (bound_as is a runtime field); leaves convert implicitly
 sg::any_texture_view<VT>     // kind-erased middle: a texture or an image of dimension VT::dimension (bound_as is a runtime field)
 sg::tlas_view                // ray-tracing TLAS (SRV, VA-addressed) — view_class::acceleration_structure. Via tlas.as_view()
-sg::view_class               // uniform | readonly | readwrite (buffers) | texture | image | acceleration_structure
-sg::view_shape               // uniform_block | structured | bytes | texture | acceleration_structure   (layout)
+sg::view_class               // constants | readonly | readwrite (buffers) | texture | image | acceleration_structure
+sg::view_shape               // constants_block | structured | bytes | texture | acceleration_structure   (layout)
 sg::raw_view                 // = cc::variant<raw_buffer_view, raw_texture_view, raw_tlas_view, vacant_view> — erased sum every typed view converts into
 sg::vacant_view              // {} — a vacant ARRAY element (no view); the backend synthesizes its null descriptor from the binding
 sg::is_vacant(rv)            // bool — gate on it before view_class_of / shape_of (a vacancy has neither)
@@ -515,11 +515,11 @@ sg::try_as_buffer_view(rv)   // -> raw_buffer_view const*, null on a different a
 // backends visit the arm (raw_buffer_view | raw_texture_view | raw_tlas_view | vacant_view) to build the native descriptor
 // raw arms are also the directly-usable "raw" binding vocabulary for tooling
 // INVERSE (erased -> typed leaf): as_* asserts (view class, +dimension for textures); try_as_* -> cc::optional (nullopt on mismatch / wrong arm)
-mid.as_readonly() / as_readwrite() / as_uniform()   // buffer_view<T> middle -> the leaf (only the runtime access is pinned)
+mid.as_readonly() / as_readwrite() / as_constants()   // buffer_view<T> middle -> the leaf (only the runtime access is pinned)
 mid.as_texture() / as_image<F>()                    // any_texture_view<VT> middle -> the leaf (as_image: image VT only; checks F)
-arm.as_readonly<T>() / as_readwrite<T>() / as_uniform<T>()   // raw_buffer_view arm -> leaf (you supply T)
+arm.as_readonly<T>() / as_readwrite<T>() / as_constants<T>()   // raw_buffer_view arm -> leaf (you supply T)
 arm.as_texture<VT>() / as_image<VT, F>()                     // raw_texture_view arm -> leaf (you supply VT; checks view dimension)
-sg::as_readonly_buffer<T>(rv) / as_readwrite_buffer<T> / as_uniform_buffer<T>    // raw_view -> buffer leaf in one call (+ try_ twins)
+sg::as_readonly_buffer<T>(rv) / as_readwrite_buffer<T> / as_constants_buffer<T>    // raw_view -> buffer leaf in one call (+ try_ twins)
 sg::as_texture<VT>(rv) / as_image<VT, F>                                         // raw_view -> texture / image leaf in one call (+ try_ twins)
 // deferred: texel buffers (typed linear buffers). samplers: see sampler.hh
 ```
@@ -586,7 +586,7 @@ sg::compare_op              // never|less|equal|less_equal|greater|not_equal|gre
 
 ```cpp
 #include <shaped-graphics/binding/binding.hh>
-sg::binding_type            // uniform_buffer | buffer | bytes | texture | image | sampler | acceleration_structure
+sg::binding_type            // constants_buffer | buffer | bytes | texture | image | sampler | acceleration_structure
                             //   the resource kind, as SGL names it   (replaces D3D_SHADER_INPUT_TYPE)
 sg::access_mode             // read | write | read_write — SGL's unmarked / out / mut; write only on an image
 sg::is_valid_access(type, access) // bool — image: all three; buffer/bytes: read|read_write; everything else: read

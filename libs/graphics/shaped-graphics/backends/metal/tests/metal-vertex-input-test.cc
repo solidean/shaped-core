@@ -67,7 +67,7 @@ struct tint_constants
         .space = 0,
         .index = 0,
         .count = 1,
-        .type = sg::binding_type::uniform_buffer,
+        .type = sg::binding_type::constants_buffer,
         .block_size = isize(sizeof(tint_constants)),
     };
 
@@ -391,7 +391,7 @@ TEST("sg metal - a draw refuses a bound array binding")
     desc.inline_constants = sg::binding{.space = 0,
                                         .index = 0,
                                         .count = 1,
-                                        .type = sg::binding_type::uniform_buffer,
+                                        .type = sg::binding_type::constants_buffer,
                                         .block_size = isize(sizeof(tint_constants))};
     auto pipeline_layout = ctx->create_metal_pipeline_layout(desc, sg::lifetime_scope::persistent);
     REQUIRE(pipeline_layout.has_value());
@@ -453,7 +453,7 @@ TEST("sg metal - a rendering scope leaves no bound-group state behind")
     array_desc.inline_constants = sg::binding{.space = 0,
                                               .index = 0,
                                               .count = 1,
-                                              .type = sg::binding_type::uniform_buffer,
+                                              .type = sg::binding_type::constants_buffer,
                                               .block_size = isize(sizeof(tint_constants))};
     auto array_layout = ctx->create_metal_pipeline_layout(array_desc, sg::lifetime_scope::persistent);
     REQUIRE(array_layout.has_value());

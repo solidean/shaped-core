@@ -15,7 +15,7 @@ namespace sg
 /// or the slot where the declaration states none, which is the slot dx12 then puts it in.
 /// A declared binding the shader never reads may be missing from the reflection, since compilers strip those.
 /// A reflected sampler no group declares is a static sampler, which the layout places itself, and is not judged.
-/// `inline_constants` is the layout's inline block, which a target reflects as a uniform buffer or not at all.
+/// `inline_constants` is the layout's inline block, which a target reflects as a constants buffer or not at all.
 ///
 /// `groups[i]` is the bindings of the group at slot `i`.
 [[nodiscard]] cc::string describe_layout_misfit(cc::string_view entry,

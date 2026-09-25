@@ -263,7 +263,7 @@ TEST("slib wgsl - a uniform's block size follows WGSL's layout rules")
     CHECK(find(r.value(), "f")->block_size == isize(144));
     CHECK(find(r.value(), "scalar")->block_size == isize(4));
     CHECK(find(r.value(), "v3")->block_size == isize(12));
-    CHECK(find(r.value(), "f")->type == sg::binding_type::uniform_buffer);
+    CHECK(find(r.value(), "f")->type == sg::binding_type::constants_buffer);
 }
 
 TEST("slib wgsl - explicit @size and @align are honored")
@@ -302,7 +302,7 @@ TEST("slib wgsl - the reserved group's binding 0 is the inline-constants block")
     REQUIRE(r.has_value());
     auto const* c = find(r.value(), "constants");
     REQUIRE(c != nullptr);
-    CHECK(c->type == sg::binding_type::uniform_buffer);
+    CHECK(c->type == sg::binding_type::constants_buffer);
     CHECK(!c->group_index.has_value()); // reported the way SPIR-V reports a push-constant block
     CHECK(c->block_size == isize(80));
 }

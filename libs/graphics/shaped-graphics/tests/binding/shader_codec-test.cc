@@ -24,7 +24,7 @@ sg::compiled_shader make_shader()
     shader.bindings.push_back(
         {.name = "Output", .index = 1, .count = 2, .type = sg::binding_type::buffer, .access = sg::access_mode::read_write});
     shader.bindings.push_back(
-        {.name = "Params", .space = 1, .index = 0, .count = 1, .type = sg::binding_type::uniform_buffer, .block_size = 64});
+        {.name = "Params", .space = 1, .index = 0, .count = 1, .type = sg::binding_type::constants_buffer, .block_size = 64});
     shader.bindings.push_back({.name = "Albedo",
                                .group_index = 0,
                                .space = 0,

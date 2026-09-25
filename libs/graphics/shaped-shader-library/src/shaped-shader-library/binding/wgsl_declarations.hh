@@ -25,7 +25,7 @@ struct slib::wgsl_declarations
     ///
     /// **Group 3 is sg's reserved group**, and reads differently from groups 0 to 2:
     ///   - `@group(3) @binding(0) var<uniform>` is the pipeline's inline-constants block.
-    ///     It is reported the way SPIR-V reports a push-constant block: a `uniform_buffer` with no group index.
+    ///     It is reported the way SPIR-V reports a push-constant block: a `constants_buffer` with no group index.
     ///   - `@group(3) @binding(k)` with k ≥ 1 is a register-bound static sampler, reported as a sampler at group 3 and index k - 1.
     ///     That is the `bound_sampler` binding a WebGPU backend places back at k.
     ///   - anything else there is refused.

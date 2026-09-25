@@ -9,7 +9,7 @@ using namespace cc::primitive_defines;
 
 namespace
 {
-// A representative GPU element: 32 bytes, so a view_element (multiple of 4) and a uniform_element (of 16).
+// A representative GPU element: 32 bytes, so a view_element (multiple of 4) and a constants_element (of 16).
 struct particle
 {
     float position[4];
@@ -41,7 +41,7 @@ INVOCABLE_TEST("sg - allocates buffers across usages", (sg::context_handle const
     sg::buffer_usages const usages[] = {
         sg::buffer_usage::vertex_buffer,
         sg::buffer_usage::index_buffer,
-        sg::buffer_usage::uniform_buffer,
+        sg::buffer_usage::constants_buffer,
         sg::buffer_usage::readonly_buffer | sg::buffer_usage::readwrite_buffer,
         sg::buffer_usage::copy_src | sg::buffer_usage::readonly_buffer,
     };
@@ -159,14 +159,14 @@ INVOCABLE_TEST("sg - typed buffer<T> vertex-buffer subrange is in vertices of T"
     CHECK(sub.size_in_bytes == 20 * isize(sizeof(particle)));
 }
 
-INVOCABLE_TEST("sg - typed buffer<T>.as_uniform_buffer binds one element by index", (sg::context_handle const& ctx))
+INVOCABLE_TEST("sg - typed buffer<T>.as_constants_buffer binds one element by index", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
 
     // 16 elements of 32 bytes; the argument is an element index, and the view is a single block of T.
-    sg::buffer<particle> ub = ctx->persistent.create_buffer<particle>(16, sg::buffer_usage::uniform_buffer);
+    sg::buffer<particle> ub = ctx->persistent.create_buffer<particle>(16, sg::buffer_usage::constants_buffer);
 
-    auto v = ub.as_uniform_buffer(8); // element 8 -> byte offset 8 * sizeof(particle) = 256 (256-aligned)
+    auto v = ub.as_constants_buffer(8); // element 8 -> byte offset 8 * sizeof(particle) = 256 (256-aligned)
     CHECK(v.offset_in_bytes == 8 * isize(sizeof(particle)));
     CHECK(v.size_in_bytes == isize(sizeof(particle)));
 }

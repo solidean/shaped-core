@@ -242,7 +242,7 @@ ASYNC_INVOCABLE_TEST("sv - a group is created against a layout whose static samp
     auto const* const constants_binding = [&]() -> sg::binding const*
     {
         for (auto const& b : compiled_vs->bindings)
-            if (b.type == sg::binding_type::uniform_buffer)
+            if (b.type == sg::binding_type::constants_buffer)
                 return &b;
         return nullptr;
     }();

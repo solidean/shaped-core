@@ -42,7 +42,7 @@ namespace
 {
     switch (t)
     {
-    case sg::binding_type::uniform_buffer:
+    case sg::binding_type::constants_buffer:
         return VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     case sg::binding_type::buffer:
     case sg::binding_type::bytes:
@@ -207,7 +207,7 @@ isize descriptor_size_of(vulkan_context const& ctx, sg::binding_type type)
     auto const& p = ctx.descriptor_buffer_properties();
     switch (type)
     {
-    case sg::binding_type::uniform_buffer:
+    case sg::binding_type::constants_buffer:
         return isize(p.uniformBufferDescriptorSize);
     case sg::binding_type::buffer:
     case sg::binding_type::bytes:

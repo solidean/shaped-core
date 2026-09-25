@@ -15,7 +15,7 @@ namespace
     switch (b.descriptor_type)
     {
     case SPV_REFLECT_DESCRIPTOR_TYPE_UNIFORM_BUFFER:
-        return sg::binding_type::uniform_buffer;
+        return sg::binding_type::constants_buffer;
     case SPV_REFLECT_DESCRIPTOR_TYPE_SAMPLER:
         return sg::binding_type::sampler;
     case SPV_REFLECT_DESCRIPTOR_TYPE_SAMPLED_IMAGE:
@@ -138,7 +138,7 @@ cc::result<reflected_shader> reflect_spirv(cc::span<byte const> spirv, sg::shade
 
     // A push-constant block is sg's `inline_constants`, and it is NOT a descriptor — it lives in no set, so the
     // enumeration above never sees it.
-    // Reported as a uniform_buffer binding with neither a group_index nor a space, which is what tells a caller
+    // Reported as a constants_buffer binding with neither a group_index nor a space, which is what tells a caller
     // apart from a `cbuffer` in a descriptor set: that one always carries its set.
     //
     // Without this an HLSL shader written for both backends cannot use inline constants at all — the DXIL arm
@@ -166,7 +166,7 @@ cc::result<reflected_shader> reflect_spirv(cc::span<byte const> spirv, sg::shade
 
         sg::binding out_binding;
         out_binding.name = block->name != nullptr ? cc::string(block->name) : cc::string();
-        out_binding.type = sg::binding_type::uniform_buffer;
+        out_binding.type = sg::binding_type::constants_buffer;
         out_binding.block_size = isize(block->size);
         out.bindings.push_back(cc::move(out_binding));
     }

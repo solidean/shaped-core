@@ -442,7 +442,7 @@ struct parser
         auto binding = parse_binding(0);
         CC_RETURN_IF_ERROR(binding);
 
-        if (binding.value().binding.type != sg::binding_type::uniform_buffer)
+        if (binding.value().binding.type != sg::binding_type::constants_buffer)
             return cc::error(cc::format("{}: 'push_constants' describes a ConstantBuffer, and '{}' is not one",
                                         to_string(location), binding.value().binding.name));
         if (binding.value().binding.count != 1)

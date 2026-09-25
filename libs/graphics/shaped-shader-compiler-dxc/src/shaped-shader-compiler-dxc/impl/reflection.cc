@@ -18,7 +18,7 @@ namespace
     switch (bd.Type)
     {
     case D3D_SIT_CBUFFER:
-        return sg::binding_type::uniform_buffer;
+        return sg::binding_type::constants_buffer;
     case D3D_SIT_STRUCTURED:
     case D3D_SIT_UAV_RWSTRUCTURED:
         return sg::binding_type::buffer;

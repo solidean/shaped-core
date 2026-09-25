@@ -25,15 +25,15 @@
 
 namespace sg
 {
-/// A view's element (`readonly` / `readwrite`) or block (`uniform`) type.
+/// A view's element (`readonly` / `readwrite`) or block (`constants`) type.
 /// Must be `byte`, the byte-addressed path, or a multiple of 4 bytes, since GPUs load at DWORD alignment.
 template <class T>
 concept view_element = std::is_same_v<T, byte> || (sizeof(T) % 4 == 0);
 
-/// Placement rules a uniform (constant) buffer view must satisfy.
-/// Its byte offset must be a multiple of `uniform_buffer_offset_alignment`, and its size a multiple of 16 (std140 packing) and at most `max_uniform_buffer_size`.
-constexpr isize uniform_buffer_offset_alignment = 256; // Vk minUniformBufferOffsetAlignment / WGPU / DX12 CBV placement
-constexpr isize max_uniform_buffer_size = 65536;       // 64 KiB — DX12 max CBV / WGPU max uniform binding
+/// Placement rules a constants buffer view must satisfy.
+/// Its byte offset must be a multiple of `constants_buffer_offset_alignment`, and its size a multiple of 16 (std140 packing) and at most `max_constants_buffer_size`.
+constexpr isize constants_buffer_offset_alignment = 256; // Vk minUniformBufferOffsetAlignment / WGPU / DX12 CBV placement
+constexpr isize max_constants_buffer_size = 65536;       // 64 KiB — DX12 max CBV / WGPU max uniform binding
 
 /// Placement rules a shader-facing *storage* buffer view — readonly or readwrite, bytes or structured — must satisfy.
 /// A view is a subrange, so it carries the binding-offset rules; `buffer<T>` is a whole buffer recast like a span and carries none of them.
@@ -42,19 +42,19 @@ constexpr isize storage_buffer_offset_alignment
     = 256; // WGPU minStorageBufferOffsetAlignment; Vk lets an implementation require up to 256
 constexpr isize storage_buffer_size_alignment = 4; // a WGPU storage binding's size must be a multiple of 4
 
-/// A `uniform_buffer_view` block type: a `view_element` whose size obeys the uniform block rules above.
-/// `byte` is excluded — a uniform block of raw bytes is meaningless.
+/// A `constants_buffer_view` block type: a `view_element` whose size obeys the constants block rules above.
+/// `byte` is excluded — a constants block of raw bytes is meaningless.
 template <class T>
-concept uniform_element = view_element<T> && (sizeof(T) % 16 == 0) && (isize(sizeof(T)) <= max_uniform_buffer_size);
+concept constants_element = view_element<T> && (sizeof(T) % 16 == 0) && (isize(sizeof(T)) <= max_constants_buffer_size);
 
 } // namespace sg
 
 /// How a shader reads a view.
-/// A buffer view is `uniform`, `readonly` or `readwrite`, mirroring `buffer_usage`; a texture view is a `texture` or an `image`.
+/// A buffer view is `constants`, `readonly` or `readwrite`, mirroring `buffer_usage`; a texture view is a `texture` or an `image`.
 /// An image's access — read, write or both — belongs to the binding, not the view, since every backend builds the same descriptor for all three.
 enum class sg::view_class
 {
-    uniform,                ///< uniform block — constant buffer / UBO (read-only)
+    constants,              ///< a constants block — constant buffer / UBO (read-only)
     readonly,               ///< read-only storage buffer — SRV / read SSBO
     readwrite,              ///< read-write storage buffer — UAV / read-write SSBO
     texture,                ///< sampled texture — SRV / sampled image
@@ -64,11 +64,11 @@ enum class sg::view_class
 };
 
 /// How a view's bytes are laid out.
-/// `bytes` is byte-addressed (element type `byte`), `structured` an array strided by the element type, `uniform_block` a single struct block.
+/// `bytes` is byte-addressed (element type `byte`), `structured` an array strided by the element type, `constants_block` a single struct block.
 /// `texture` is a texel grid, whose dimension / array / cube / sample count come from the bound raw_texture's description.
 enum class sg::view_shape
 {
-    uniform_block,
+    constants_block,
     structured,
     bytes,
     texture,
@@ -109,8 +109,8 @@ concept image_view_dimension
 // The three payload arms are also the raw binding vocabulary, for tooling that builds bindings without the typed wrappers.
 
 // The typed views below are defined qualified, and a constrained template can only be declared where its concept is — here, rather than in fwd.hh.
-template <uniform_element T>
-struct uniform_buffer_view;
+template <constants_element T>
+struct constants_buffer_view;
 template <view_element T>
 struct readonly_buffer_view;
 template <view_element T>
@@ -130,14 +130,14 @@ struct any_texture_view;
 } // namespace sg
 
 /// A buffer view's erased payload: how it is bound, its byte layout and buffer, which a backend reads to build a CBV / SRV / UAV.
-/// `shape` picks the interpretation — uniform block, structured array, or bytes.
+/// `shape` picks the interpretation — constants block, structured array, or bytes.
 struct sg::raw_buffer_view
 {
-    view_class bound_as = view_class::readonly; ///< uniform / readonly / readwrite
-    view_shape shape = view_shape::structured;  ///< uniform_block / structured / bytes
+    view_class bound_as = view_class::readonly; ///< constants / readonly / readwrite
+    view_shape shape = view_shape::structured;  ///< constants_block / structured / bytes
     raw_buffer_handle buffer;                   ///< the viewed buffer
     isize offset_in_bytes = 0;                  ///< start of the view within the buffer
-    isize size_in_bytes = 0;                    ///< [uniform_block, bytes] visible byte size
+    isize size_in_bytes = 0;                    ///< [constants_block, bytes] visible byte size
     isize element_count = 0;                    ///< [structured] number of elements
     isize stride_in_bytes = 0;                  ///< [structured] element stride (= sizeof(T))
 
@@ -161,14 +161,14 @@ struct sg::raw_buffer_view
     [[nodiscard]] auto as_readonly() const; // -> readonly_buffer_view<T>
     template <view_element T>
     [[nodiscard]] auto as_readwrite() const; // -> readwrite_buffer_view<T>
-    template <uniform_element T>
-    [[nodiscard]] auto as_uniform() const; // -> uniform_buffer_view<T>
+    template <constants_element T>
+    [[nodiscard]] auto as_constants() const; // -> constants_buffer_view<T>
     template <view_element T>
     [[nodiscard]] auto try_as_readonly() const; // -> cc::optional<readonly_buffer_view<T>>
     template <view_element T>
     [[nodiscard]] auto try_as_readwrite() const; // -> cc::optional<readwrite_buffer_view<T>>
-    template <uniform_element T>
-    [[nodiscard]] auto try_as_uniform() const; // -> cc::optional<uniform_buffer_view<T>>
+    template <constants_element T>
+    [[nodiscard]] auto try_as_constants() const; // -> cc::optional<constants_buffer_view<T>>
 };
 
 /// A vacant array element: no view at all, marked explicitly.
@@ -293,7 +293,7 @@ using raw_view = cc::variant<raw_buffer_view, raw_texture_view, raw_tlas_view, v
                    [](vacant_view const&)
                    {
                        CC_UNREACHABLE("a vacant element has no view class — gate on is_vacant() first");
-                       return view_class::uniform;
+                       return view_class::constants;
                    });
 }
 
@@ -307,17 +307,17 @@ using raw_view = cc::variant<raw_buffer_view, raw_texture_view, raw_tlas_view, v
                    [](vacant_view const&)
                    {
                        CC_UNREACHABLE("a vacant element has no shape — gate on is_vacant() first");
-                       return view_shape::uniform_block;
+                       return view_shape::constants_block;
                    });
 }
 
 } // namespace sg
 
-/// A uniform block of `T` — a constant buffer / UBO binding, read-only.
-template <sg::uniform_element T>
-struct sg::uniform_buffer_view
+/// A constants block of `T` — a constant buffer / UBO binding, read-only.
+template <sg::constants_element T>
+struct sg::constants_buffer_view
 {
-    static constexpr view_class bound_as = view_class::uniform;
+    static constexpr view_class bound_as = view_class::constants;
 
     raw_buffer_handle buffer;
     isize offset_in_bytes = 0;
@@ -327,7 +327,7 @@ struct sg::uniform_buffer_view
     {
         return raw_buffer_view{
             .bound_as = bound_as,
-            .shape = view_shape::uniform_block,
+            .shape = view_shape::constants_block,
             .buffer = buffer,
             .offset_in_bytes = offset_in_bytes,
             .size_in_bytes = size_in_bytes,
@@ -399,11 +399,11 @@ struct sg::readwrite_buffer_view
 template <sg::view_element T>
 struct sg::buffer_view
 {
-    view_class bound_as = view_class::readonly; ///< uniform / readonly / readwrite — runtime, unlike the leaves
-    view_shape shape = view_shape::structured;  ///< uniform_block / structured / bytes
+    view_class bound_as = view_class::readonly; ///< constants / readonly / readwrite — runtime, unlike the leaves
+    view_shape shape = view_shape::structured;  ///< constants_block / structured / bytes
     raw_buffer_handle buffer;
     isize offset_in_bytes = 0;
-    isize size_in_bytes = 0;   ///< [uniform_block, bytes]
+    isize size_in_bytes = 0;   ///< [constants_block, bytes]
     isize element_count = 0;   ///< [structured]
     isize stride_in_bytes = 0; ///< [structured] = sizeof(T)
 
@@ -425,11 +425,11 @@ struct sg::buffer_view
     buffer_view(readonly_buffer_view<T> const& v) : buffer_view(sg::as_buffer_view(v.to_raw())) {}
     buffer_view(readwrite_buffer_view<T> const& v) : buffer_view(sg::as_buffer_view(v.to_raw())) {}
 
-    // Only where `T` is a uniform_element.
-    // The `U = T` template defers that, so `buffer_view<T>` stays well-formed for a non-uniform `T`, where naming `uniform_buffer_view<T>` would be ill-formed.
+    // Only where `T` is a constants_element.
+    // The `U = T` template defers that, so `buffer_view<T>` stays well-formed for a non-uniform `T`, where naming `constants_buffer_view<T>` would be ill-formed.
     template <class U = T>
-        requires(std::is_same_v<U, T> && uniform_element<U>)
-    buffer_view(uniform_buffer_view<U> const& v) : buffer_view(sg::as_buffer_view(v.to_raw()))
+        requires(std::is_same_v<U, T> && constants_element<U>)
+    buffer_view(constants_buffer_view<U> const& v) : buffer_view(sg::as_buffer_view(v.to_raw()))
     {
     }
 
@@ -464,14 +464,15 @@ struct sg::buffer_view
                 .offset_in_bytes = offset_in_bytes,
                 .element_count = std::is_same_v<T, byte> ? size_in_bytes : element_count};
     }
-    // uniform only where `T` obeys the uniform block rules.
+    // constants only where `T` obeys the constants block rules.
     // `U = T` defers that, so `buffer_view<T>` stays valid for a non-uniform `T`.
     template <class U = T>
-        requires(std::is_same_v<U, T> && uniform_element<U>)
-    [[nodiscard]] uniform_buffer_view<U> as_uniform() const
+        requires(std::is_same_v<U, T> && constants_element<U>)
+    [[nodiscard]] constants_buffer_view<U> as_constants() const
     {
-        CC_ASSERT(bound_as == view_class::uniform && shape == view_shape::uniform_block, "buffer_view is not bound as "
-                                                                                         "uniform");
+        CC_ASSERT(bound_as == view_class::constants && shape == view_shape::constants_block,
+                  "buffer_view is not bound as "
+                  "constants");
         return {.buffer = buffer, .offset_in_bytes = offset_in_bytes, .size_in_bytes = size_in_bytes};
     }
     [[nodiscard]] cc::optional<readonly_buffer_view<T>> try_as_readonly() const
@@ -487,12 +488,12 @@ struct sg::buffer_view
         return as_readwrite();
     }
     template <class U = T>
-        requires(std::is_same_v<U, T> && uniform_element<U>)
-    [[nodiscard]] cc::optional<uniform_buffer_view<U>> try_as_uniform() const
+        requires(std::is_same_v<U, T> && constants_element<U>)
+    [[nodiscard]] cc::optional<constants_buffer_view<U>> try_as_constants() const
     {
-        if (bound_as != view_class::uniform || shape != view_shape::uniform_block)
+        if (bound_as != view_class::constants || shape != view_shape::constants_block)
             return {};
-        return as_uniform();
+        return as_constants();
     }
 
 private:
@@ -829,10 +830,10 @@ auto raw_buffer_view::as_readwrite() const
 {
     return buffer_view<T>(*this).as_readwrite();
 }
-template <sg::uniform_element T>
-auto raw_buffer_view::as_uniform() const
+template <sg::constants_element T>
+auto raw_buffer_view::as_constants() const
 {
-    return buffer_view<T>(*this).as_uniform();
+    return buffer_view<T>(*this).as_constants();
 }
 template <sg::view_element T>
 auto raw_buffer_view::try_as_readonly() const
@@ -844,10 +845,10 @@ auto raw_buffer_view::try_as_readwrite() const
 {
     return buffer_view<T>(*this).try_as_readwrite();
 }
-template <sg::uniform_element T>
-auto raw_buffer_view::try_as_uniform() const
+template <sg::constants_element T>
+auto raw_buffer_view::try_as_constants() const
 {
-    return buffer_view<T>(*this).try_as_uniform();
+    return buffer_view<T>(*this).try_as_constants();
 }
 
 template <class Traits>
@@ -897,12 +898,12 @@ template <sg::view_element T>
     CC_ASSERT(a != nullptr, "raw_view does not hold a buffer arm");
     return a->as_readwrite<T>();
 }
-template <sg::uniform_element T>
-[[nodiscard]] uniform_buffer_view<T> as_uniform_buffer(raw_view const& v)
+template <sg::constants_element T>
+[[nodiscard]] constants_buffer_view<T> as_constants_buffer(raw_view const& v)
 {
     auto const* a = sg::try_as_buffer_view(v);
     CC_ASSERT(a != nullptr, "raw_view does not hold a buffer arm");
-    return a->as_uniform<T>();
+    return a->as_constants<T>();
 }
 template <sg::view_element T>
 [[nodiscard]] cc::optional<readonly_buffer_view<T>> try_as_readonly_buffer(raw_view const& v)
@@ -918,11 +919,11 @@ template <sg::view_element T>
         return a->try_as_readwrite<T>();
     return {};
 }
-template <sg::uniform_element T>
-[[nodiscard]] cc::optional<uniform_buffer_view<T>> try_as_uniform_buffer(raw_view const& v)
+template <sg::constants_element T>
+[[nodiscard]] cc::optional<constants_buffer_view<T>> try_as_constants_buffer(raw_view const& v)
 {
     if (auto const* a = sg::try_as_buffer_view(v))
-        return a->try_as_uniform<T>();
+        return a->try_as_constants<T>();
     return {};
 }
 

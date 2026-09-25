@@ -42,37 +42,37 @@ static_assert(!sg::view_element<two_bytes>);
 static_assert(!sg::view_element<u16>); // 2 bytes
 
 // uniform blocks are stricter: 16-byte aligned size, not `byte`.
-static_assert(sg::uniform_element<particle>); // 16 bytes
-static_assert(!sg::uniform_element<byte>);    // 1 byte — a uniform block of raw bytes is meaningless
-static_assert(!sg::uniform_element<u32>);     // 4 bytes — not a multiple of 16
+static_assert(sg::constants_element<particle>); // 16 bytes
+static_assert(!sg::constants_element<byte>);    // 1 byte — a uniform block of raw bytes is meaningless
+static_assert(!sg::constants_element<u32>);     // 4 bytes — not a multiple of 16
 
 TEST("sg views - uniform view")
 {
-    auto const buf = make_buffer(1024, sg::buffer_usage::uniform_buffer);
+    auto const buf = make_buffer(1024, sg::buffer_usage::constants_buffer);
     auto const b = sg::buffer<particle>::from_raw(buf);
 
-    auto const v = b.as_uniform_buffer();
+    auto const v = b.as_constants_buffer();
     CHECK(v.buffer == buf);
     CHECK(v.offset_in_bytes == 0);
     CHECK(v.size_in_bytes == sizeof(particle));
-    CHECK(sg::uniform_buffer_view<particle>::bound_as == sg::view_class::uniform);
+    CHECK(sg::constants_buffer_view<particle>::bound_as == sg::view_class::constants);
 
     auto const raw = sg::as_buffer_view(v.to_raw());
-    CHECK(raw.bound_as == sg::view_class::uniform);
-    CHECK(raw.shape == sg::view_shape::uniform_block);
+    CHECK(raw.bound_as == sg::view_class::constants);
+    CHECK(raw.shape == sg::view_shape::constants_block);
     CHECK(raw.buffer == buf);
     CHECK(raw.size_in_bytes == sizeof(particle));
 
     // element_index selects one block of a UBO array; byte offset = index * sizeof(particle) (must be 256-aligned).
-    auto const at = b.as_uniform_buffer(16); // element 16 -> byte 256
+    auto const at = b.as_constants_buffer(16); // element 16 -> byte 256
     CHECK(at.offset_in_bytes == 256);
     CHECK(at.size_in_bytes == sizeof(particle));
 
     // element 1 -> byte 16, not 256-aligned -> asserts.
-    CHECK_ASSERTS(b.as_uniform_buffer(1));
+    CHECK_ASSERTS(b.as_constants_buffer(1));
 
     // element 64 -> byte 1024, aligned but past the end -> asserts.
-    CHECK_ASSERTS(b.as_uniform_buffer(64));
+    CHECK_ASSERTS(b.as_constants_buffer(64));
 }
 
 TEST("sg views - readonly structured view")
@@ -165,8 +165,8 @@ TEST("sg views - empty buffer yields empty view")
 TEST("sg views - misuse asserts")
 {
     // Wrong usage: a readonly view over a buffer that lacks readonly_buffer usage.
-    auto const uniform_only = make_buffer(64, sg::buffer_usage::uniform_buffer);
-    CHECK_ASSERTS(sg::buffer<u32>::from_raw(uniform_only).as_readonly_buffer());
+    auto const constants_only = make_buffer(64, sg::buffer_usage::constants_buffer);
+    CHECK_ASSERTS(sg::buffer<u32>::from_raw(constants_only).as_readonly_buffer());
 
     // Out-of-bounds range.
     auto const small = make_buffer(16, sg::buffer_usage::readonly_buffer);
@@ -189,11 +189,11 @@ TEST("sg views - access-erased buffer_view<T> middle")
     sg::buffer_view<particle> const rw = sg::buffer<particle>::from_raw(buf).as_readwrite_buffer();
     CHECK(rw.bound_as == sg::view_class::readwrite);
 
-    // Uniform too — particle is a uniform_element.
-    auto const ubuf = make_buffer(256, sg::buffer_usage::uniform_buffer);
-    sg::buffer_view<particle> const u = sg::buffer<particle>::from_raw(ubuf).as_uniform_buffer();
-    CHECK(u.bound_as == sg::view_class::uniform);
-    CHECK(u.shape == sg::view_shape::uniform_block);
+    // Uniform too — particle is a constants_element.
+    auto const ubuf = make_buffer(256, sg::buffer_usage::constants_buffer);
+    sg::buffer_view<particle> const u = sg::buffer<particle>::from_raw(ubuf).as_constants_buffer();
+    CHECK(u.bound_as == sg::view_class::constants);
+    CHECK(u.shape == sg::view_shape::constants_block);
     CHECK(u.size_in_bytes == sizeof(particle));
 }
 
@@ -253,7 +253,7 @@ TEST("sg views - buffer_view<T> middle -> typed leaf (as_ / try_as_)")
 
     sg::buffer_view<particle> const rw = sg::buffer<particle>::from_raw(buf).as_readwrite_buffer();
     CHECK(rw.as_readwrite().element_count == 4);
-    CHECK(!rw.try_as_uniform().has_value());
+    CHECK(!rw.try_as_constants().has_value());
 
     // Raw (byte) views carry their count in size_in_bytes; the leaf recovers it as element_count.
     sg::buffer_view<byte> const raw_bytes = sg::buffer<byte>::from_raw(buf).as_readonly_buffer();
@@ -278,22 +278,22 @@ TEST("sg views - raw_buffer_view arm + raw_view -> typed leaf")
     CHECK_ASSERTS(sg::as_readwrite_buffer<particle>(rv));          // wrong access asserts
 
     // A uniform round-trip through raw_view.
-    auto const ubuf = make_buffer(256, sg::buffer_usage::uniform_buffer);
-    sg::raw_view const urv = sg::buffer<particle>::from_raw(ubuf).as_uniform_buffer();
-    CHECK(sg::as_uniform_buffer<particle>(urv).size_in_bytes == sizeof(particle));
+    auto const ubuf = make_buffer(256, sg::buffer_usage::constants_buffer);
+    sg::raw_view const urv = sg::buffer<particle>::from_raw(ubuf).as_constants_buffer();
+    CHECK(sg::as_constants_buffer<particle>(urv).size_in_bytes == sizeof(particle));
     CHECK(!sg::try_as_readonly_buffer<particle>(urv).has_value()); // wrong access
 }
 
 TEST("sg views - raw byte-level as_* variants")
 {
-    // Raw uniform: an explicit byte range -> the erased raw_buffer_view (uniform_block).
-    auto const ubuf = make_buffer(1024, sg::buffer_usage::uniform_buffer);
-    auto const u = ubuf->as_raw_uniform_buffer({.offset = 256, .size = 64});
-    CHECK(u.bound_as == sg::view_class::uniform);
-    CHECK(u.shape == sg::view_shape::uniform_block);
+    // Raw uniform: an explicit byte range -> the erased raw_buffer_view (constants_block).
+    auto const ubuf = make_buffer(1024, sg::buffer_usage::constants_buffer);
+    auto const u = ubuf->as_raw_constants_buffer({.offset = 256, .size = 64});
+    CHECK(u.bound_as == sg::view_class::constants);
+    CHECK(u.shape == sg::view_shape::constants_block);
     CHECK(u.offset_in_bytes == 256);
     CHECK(u.size_in_bytes == 64);
-    CHECK_ASSERTS(ubuf->as_raw_uniform_buffer({.offset = 16, .size = 64})); // offset not 256-aligned
+    CHECK_ASSERTS(ubuf->as_raw_constants_buffer({.offset = 16, .size = 64})); // offset not 256-aligned
 
     // Raw vertex: explicit byte range + explicit stride.
     auto const vbuf = make_buffer(256, sg::buffer_usage::vertex_buffer);
@@ -346,20 +346,20 @@ TEST("sg views - try_ twins: nullopt on a bad range, still assert on missing usa
     CHECK_ASSERTS(sg::buffer<particle>::from_raw(ro_only).try_as_readwrite_buffer());
 }
 
-TEST("sg views - try_as_uniform_buffer")
+TEST("sg views - try_as_constants_buffer")
 {
-    auto const ubuf = make_buffer(1024, sg::buffer_usage::uniform_buffer);
+    auto const ubuf = make_buffer(1024, sg::buffer_usage::constants_buffer);
     auto const b = sg::buffer<particle>::from_raw(ubuf); // particle = 16 bytes
 
     // element 16 -> byte 256 (256-aligned); element 1 -> byte 16 (not aligned).
-    CHECK(b.try_as_uniform_buffer().has_value()); // element 0 -> byte 0
-    CHECK(b.try_as_uniform_buffer(16).value().offset_in_bytes == 256);
-    CHECK(!b.try_as_uniform_buffer(1).has_value());
-    CHECK(!b.try_as_uniform_buffer(64).has_value()); // byte 1024 — aligned but past the end
+    CHECK(b.try_as_constants_buffer().has_value()); // element 0 -> byte 0
+    CHECK(b.try_as_constants_buffer(16).value().offset_in_bytes == 256);
+    CHECK(!b.try_as_constants_buffer(1).has_value());
+    CHECK(!b.try_as_constants_buffer(64).has_value()); // byte 1024 — aligned but past the end
 
     // The raw twin works in bytes.
-    CHECK(ubuf->try_as_raw_uniform_buffer({.offset = 256, .size = 64}).has_value());
-    CHECK(!ubuf->try_as_raw_uniform_buffer({.offset = 16, .size = 64}).has_value()); // not 256-aligned
+    CHECK(ubuf->try_as_raw_constants_buffer({.offset = 256, .size = 64}).has_value());
+    CHECK(!ubuf->try_as_raw_constants_buffer({.offset = 16, .size = 64}).has_value()); // not 256-aligned
 }
 
 TEST("sg views - structured views need a stride-aligned offset; recovery needs sizeof(T) == stride")

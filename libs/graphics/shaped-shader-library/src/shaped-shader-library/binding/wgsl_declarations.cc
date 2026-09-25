@@ -842,7 +842,7 @@ private:
 
         if (p.address_space == "uniform")
         {
-            b.type = sg::binding_type::uniform_buffer;
+            b.type = sg::binding_type::constants_buffer;
             auto layout = layout_of(type, p.line);
             CC_RETURN_IF_ERROR(layout);
             if (!layout.value().size.has_value())
@@ -913,7 +913,7 @@ private:
         {
             if (index == 0)
             {
-                if (b.type != sg::binding_type::uniform_buffer)
+                if (b.type != sg::binding_type::constants_buffer)
                     return cc::error(cc::format("line {}: @group({}) @binding(0) is the inline-constants block, so "
                                                 "'{}' must be a var<uniform>",
                                                 p.line, group, p.name));

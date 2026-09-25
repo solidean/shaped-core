@@ -34,7 +34,7 @@ VkPipelineStageFlags2 vk_stage2_from(sg::pipeline_stage_flags stages)
 VkAccessFlags2 vk_access2_from(sg::access_flags access)
 {
     VkAccessFlags2 out = VK_ACCESS_2_NONE;
-    if (access.has(sg::access_flag::uniform_read))
+    if (access.has(sg::access_flag::constants_read))
         out |= VK_ACCESS_2_UNIFORM_READ_BIT;
     if (access.has(sg::access_flag::index_read))
         out |= VK_ACCESS_2_INDEX_READ_BIT;

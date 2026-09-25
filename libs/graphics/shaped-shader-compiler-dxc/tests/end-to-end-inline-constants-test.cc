@@ -65,7 +65,7 @@ ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - inline constants drive Out[i] = i*scale 
     // to 16 bytes, but root constants have no such alignment requirement.
     cc::vector<sg::binding> out_bindings;
     for (auto const& b : shader.bindings)
-        if (b.type != sg::binding_type::uniform_buffer)
+        if (b.type != sg::binding_type::constants_buffer)
             out_bindings.push_back(b);
     REQUIRE(out_bindings.size() == 1);
 
@@ -79,7 +79,7 @@ ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - inline constants drive Out[i] = i*scale 
         .space = 0,
         .index = 0,
         .count = 1,
-        .type = sg::binding_type::uniform_buffer,
+        .type = sg::binding_type::constants_buffer,
         .block_size = isize(sizeof(params)),
     };
     auto pipeline_layout = ctx.cached.acquire_pipeline_layout(pld);

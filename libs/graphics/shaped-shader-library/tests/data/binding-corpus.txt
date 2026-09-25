@@ -57,7 +57,7 @@ namespace material
 }
 --- groups
 frame group=0
-  constants index=0 type=uniform_buffer count=1
+  constants index=0 type=constants_buffer count=1
 material group=2
   base_color index=0 type=texture count=1 dim=tex_2d
   counters index=1 type=buffer access=read_write count=1
@@ -281,7 +281,7 @@ everything group=7
   rwsbuf index=15 type=buffer access=read_write count=1
   rawbuf index=16 type=bytes count=1
   rwrawbuf index=17 type=bytes access=read_write count=1
-  cbuf index=18 type=uniform_buffer count=1
+  cbuf index=18 type=constants_buffer count=1
   samp index=19 type=sampler count=1
   samp_cmp index=20 type=sampler count=1
   scene index=21 type=acceleration_structure count=1

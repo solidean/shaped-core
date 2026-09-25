@@ -199,7 +199,7 @@ ASYNC_INVOCABLE_TEST("sg webgpu - inline constants overflowing one page land on 
     auto pipeline_layout = ctx.uncached.create_pipeline_layout({
         .groups = {group_layout},
         .inline_constants
-        = sg::binding{.name = "constants", .index = 0, .type = sg::binding_type::uniform_buffer, .block_size = 8},
+        = sg::binding{.name = "constants", .index = 0, .type = sg::binding_type::constants_buffer, .block_size = 8},
     });
     auto pipeline = ctx.uncached.create_compute_pipeline({.shader = shader, .layout = pipeline_layout});
     REQUIRE(pipeline != nullptr);

@@ -181,7 +181,7 @@ ASYNC_TEST("sg metal - compute inline constants reach the kernel")
         .space = 0,
         .index = 0,
         .count = 1,
-        .type = sg::binding_type::uniform_buffer,
+        .type = sg::binding_type::constants_buffer,
         .block_size = isize(sizeof(scale_constants)),
     };
     auto pipeline_layout = ctx->create_metal_pipeline_layout(layout_desc, sg::lifetime_scope::persistent);

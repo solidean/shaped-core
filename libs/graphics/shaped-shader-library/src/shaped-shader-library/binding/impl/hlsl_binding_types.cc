@@ -39,7 +39,7 @@ constexpr table_entry k_table[] = {
     {"RWStructuredBuffer", 'u', binding_type::buffer},
     {"ByteAddressBuffer", 't', binding_type::bytes},
     {"RWByteAddressBuffer", 'u', binding_type::bytes},
-    {"ConstantBuffer", 'b', binding_type::uniform_buffer},
+    {"ConstantBuffer", 'b', binding_type::constants_buffer},
 
     {"SamplerState", 's', binding_type::sampler},
     {"SamplerComparisonState", 's', binding_type::sampler},

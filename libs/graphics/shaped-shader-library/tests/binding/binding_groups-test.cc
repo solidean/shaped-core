@@ -21,7 +21,7 @@ struct expected_binding
     cc::string_view name;
     u32 index = 0;
     u32 count = 1;
-    sg::binding_type type = sg::binding_type::uniform_buffer;
+    sg::binding_type type = sg::binding_type::constants_buffer;
     sg::access_mode access = sg::access_mode::read;
     cc::optional<sg::texture_view_dimension> dimension;
     cc::optional<sg::pixel_format> image_format;
@@ -69,7 +69,7 @@ struct name_of_binding_type
 };
 
 constexpr name_of_binding_type k_binding_types[] = {
-    {"uniform_buffer", sg::binding_type::uniform_buffer},
+    {"constants_buffer", sg::binding_type::constants_buffer},
     {"buffer", sg::binding_type::buffer},
     {"bytes", sg::binding_type::bytes},
     {"texture", sg::binding_type::texture},

@@ -12,7 +12,7 @@ namespace
 {
 [[nodiscard]] bool is_inline_block(sg::binding const& reflected, cc::optional<sg::binding> const& inline_constants)
 {
-    if (!inline_constants.has_value() || reflected.type != sg::binding_type::uniform_buffer)
+    if (!inline_constants.has_value() || reflected.type != sg::binding_type::constants_buffer)
         return false;
     auto const& block = inline_constants.value();
     // A push-constant block lives in no set and no space, whatever it is called.

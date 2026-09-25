@@ -501,11 +501,11 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     fc.seed = slot->accum_frame + 1;
 
     auto const frame = ctx.transient.create_buffer<pt_frame_constants_gpu>(
-        1, sg::buffer_usage::uniform_buffer | sg::buffer_usage::copy_dst);
+        1, sg::buffer_usage::constants_buffer | sg::buffer_usage::copy_dst);
     cmd.upload.pod_to_buffer(frame, fc);
 
-    auto const background
-        = ctx.transient.create_buffer<background_gpu>(1, sg::buffer_usage::uniform_buffer | sg::buffer_usage::copy_dst);
+    auto const background = ctx.transient.create_buffer<background_gpu>(
+        1, sg::buffer_usage::constants_buffer | sg::buffer_usage::copy_dst);
     cmd.upload.pod_to_buffer(background, bg);
 
     auto const instance_table = upload_instances(cmd, resolved);
@@ -602,13 +602,13 @@ sg::texture_2d view_renderer::execute(sg::command_list& cmd,
     fc.seed = slot.accum_frame + 1;
 
     auto const frame = ctx.transient.create_buffer<pt_frame_constants_gpu>(
-        1, sg::buffer_usage::uniform_buffer | sg::buffer_usage::copy_dst);
+        1, sg::buffer_usage::constants_buffer | sg::buffer_usage::copy_dst);
     cmd.upload.pod_to_buffer(frame, fc);
 
     // The view's SH environment probe, packed into its GPU lane layout.
     // The miss reconstructs the radiance an escaped ray sees from it.
-    auto const background
-        = ctx.transient.create_buffer<background_gpu>(1, sg::buffer_usage::uniform_buffer | sg::buffer_usage::copy_dst);
+    auto const background = ctx.transient.create_buffer<background_gpu>(
+        1, sg::buffer_usage::constants_buffer | sg::buffer_usage::copy_dst);
     cmd.upload.pod_to_buffer(background, bg);
 
     auto const instance_table = upload_instances(cmd, resolved);

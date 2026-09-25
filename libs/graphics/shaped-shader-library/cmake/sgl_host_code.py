@@ -232,10 +232,10 @@ def emit_group_impl(package: str, namespace: str, file: SglFile, binding: dict) 
     out = [f"\n// `binding {name}` of {file.path}: the table the shader's resources were numbered from.\n"]
     out.append(f"namespace\n{{\nsg::binding const k_sgl_bindings_{name}[] = {{\n")
     if has_block(binding):
-        # A uniform block is read in rows of 16 bytes, so that is what the shader reflects its size as.
+        # A constants block is read in rows of 16 bytes, so that is what the shader reflects its size as.
         size = (binding["block_size"] + 15) // 16 * 16
         out.append(f'    {{.name = "{binding["block_host_name"]}", .index = {binding["block_slot"]}u, .count = 1u, '
-                   f".type = sg::binding_type::uniform_buffer, .block_size = {size}}},\n")
+                   f".type = sg::binding_type::constants_buffer, .block_size = {size}}},\n")
     for member in resources:
         out.append(f"    {binding_entry(member)},\n")
     out.append("};\n")
@@ -340,7 +340,7 @@ def emit_inline_impl(package: str, namespace: str, file: SglFile, binding: dict)
     out.append("            .space = slib::inline_constants_space,\n")
     out.append("            .index = 0u,\n")
     out.append("            .count = 1u,\n")
-    out.append("            .type = sg::binding_type::uniform_buffer,\n")
+    out.append("            .type = sg::binding_type::constants_buffer,\n")
     out.append(f"            .block_size = {words}}};\n}}\n")
     return "".join(out)
 

@@ -17,7 +17,7 @@
 /// A kind and an access together map 1:1 to a view's (view_class, view_shape); see view_class_of / shape_of.
 enum class sg::binding_type
 {
-    uniform_buffer,         ///< uniform block    — CBV / UBO
+    constants_buffer,       ///< constants block    — CBV / UBO
     buffer,                 ///< array of T       — structured SRV / UAV, SSBO
     bytes,                  ///< raw bytes        — byte-addressed SRV / UAV
     texture,                ///< sampled texture  — SRV
@@ -91,8 +91,8 @@ namespace sg
 {
     switch (t)
     {
-    case binding_type::uniform_buffer:
-        return view_class::uniform;
+    case binding_type::constants_buffer:
+        return view_class::constants;
     case binding_type::buffer:
     case binding_type::bytes:
         return access == access_mode::read ? view_class::readonly : view_class::readwrite;
@@ -105,7 +105,7 @@ namespace sg
     case binding_type::sampler:
         break; // a sampler is not a view — callers gate on is_sampler() first
     }
-    return view_class::uniform; // unreachable for the view kinds above
+    return view_class::constants; // unreachable for the view kinds above
 }
 
 /// The layout a bound view must have to satisfy a binding of this type.
@@ -113,8 +113,8 @@ namespace sg
 {
     switch (t)
     {
-    case binding_type::uniform_buffer:
-        return view_shape::uniform_block;
+    case binding_type::constants_buffer:
+        return view_shape::constants_block;
     case binding_type::buffer:
         return view_shape::structured;
     case binding_type::bytes:
@@ -127,7 +127,7 @@ namespace sg
     case binding_type::sampler:
         break; // a sampler is not a view — callers gate on is_sampler() first
     }
-    return view_shape::uniform_block; // unreachable for the view kinds above
+    return view_shape::constants_block; // unreachable for the view kinds above
 }
 
 } // namespace sg
@@ -160,13 +160,13 @@ struct sg::binding
 
     u32 index = 0; ///< binding within the group / @binding / HLSL register number
     u32 count = 1; ///< array length; 0 = unbounded array
-    binding_type type = binding_type::uniform_buffer;
+    binding_type type = binding_type::constants_buffer;
 
     /// What the shader does with the resource; must be `is_valid_access(type, access)`.
     /// For an image it reaches WebGPU's layout and the hazards; for a buffer or bytes it also picks SRV or UAV.
     access_mode access = access_mode::read;
 
-    /// For `uniform_buffer` bindings: the declared block size in bytes, used to validate a bound view's size.
+    /// For `constants_buffer` bindings: the declared block size in bytes, used to validate a bound view's size.
     /// Absent for other kinds.
     cc::optional<isize> block_size;
 

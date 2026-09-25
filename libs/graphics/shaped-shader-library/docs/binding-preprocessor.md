@@ -383,7 +383,7 @@ A divergence is a resource bound to the wrong descriptor, with nothing to catch 
 | `RWStructuredBuffer` | `u` | `buffer` |
 | `ByteAddressBuffer` | `t` | `bytes` |
 | `RWByteAddressBuffer` | `u` | `bytes` |
-| `ConstantBuffer` | `b` | `uniform_buffer` |
+| `ConstantBuffer` | `b` | `constants_buffer` |
 | `SamplerState` | `s` | `sampler` |
 | `SamplerComparisonState` | `s` | `sampler` |
 | `RaytracingAccelerationStructure` | `t` | `acceleration_structure` |
@@ -701,7 +701,7 @@ The port asked for two things the sketch above had and the generator did not, an
 - **`create` takes a lifetime scope.** imgui rebuilds its group on every texture switch, so `persistent` would leak a descriptor allocation per frame.
 - **`bind` is generated.** It was in the sketch from the start and simply had not been emitted.
 - **An inline-constants block still reaches `pipeline_layout_description` through reflection.**
-  The generator emits the block's *mirror struct*, not its `sg::binding`, so a routine that wants the binding still scans a compiled stage for the one `uniform_buffer`.
+  The generator emits the block's *mirror struct*, not its `sg::binding`, so a routine that wants the binding still scans a compiled stage for the one `constants_buffer`.
   Worth closing, and not in the way of anything: the address is already a constant the pass wrote.
 
 Steps 2 and 3 are worth landing before the rest is designed in detail.

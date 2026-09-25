@@ -17,7 +17,7 @@ namespace
 
     switch (b.type)
     {
-    case sg::binding_type::uniform_buffer:
+    case sg::binding_type::constants_buffer:
         return 1; // b
     case sg::binding_type::sampler:
         return 2; // s

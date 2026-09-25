@@ -141,12 +141,12 @@ ASYNC_INVOCABLE_TEST("sv - a quadric sphere is traced through a procedural BLAS"
         auto const frame = ctx.transient.create_buffer_from_pod(
             cmd,
             sv::pt_frame_constants_gpu{.camera = sv::camera_gpu::from(camera), .samples_per_pixel = 8, .max_bounces = 2},
-            sg::buffer_usage::uniform_buffer);
+            sg::buffer_usage::constants_buffer);
 
         // A uniform environment, so the background is a known constant and anything darker than it was HIT.
         auto const background = ctx.transient.create_buffer_from_pod(
             cmd, sv::background_gpu::from(sv::background::uniform(tg::vec3f(env_radiance, env_radiance, env_radiance))),
-            sg::buffer_usage::uniform_buffer);
+            sg::buffer_usage::constants_buffer);
 
         auto const target = ctx.transient.create_texture_2d(
             {.format = sg::pixel_format::rgba32_float,
@@ -523,11 +523,11 @@ ASYNC_INVOCABLE_TEST("sv - the traced silhouette agrees with the CPU reference",
 
         auto const frame = ctx.transient.create_buffer_from_pod(
             cmd, sv::pt_frame_constants_gpu{.camera = gpu_camera, .samples_per_pixel = 4, .max_bounces = 1},
-            sg::buffer_usage::uniform_buffer);
+            sg::buffer_usage::constants_buffer);
 
         auto const background = ctx.transient.create_buffer_from_pod(
             cmd, sv::background_gpu::from(sv::background::uniform(tg::vec3f(env_radiance, env_radiance, env_radiance))),
-            sg::buffer_usage::uniform_buffer);
+            sg::buffer_usage::constants_buffer);
 
         auto const target = ctx.transient.create_texture_2d(
             {.format = sg::pixel_format::rgba32_float,
@@ -773,11 +773,11 @@ ASYNC_INVOCABLE_TEST("sv - a quadric batch still draws while its own permutation
 
         auto const frame = ctx.transient.create_buffer_from_pod(
             cmd, sv::pt_frame_constants_gpu{.camera = gpu_camera, .samples_per_pixel = 2, .max_bounces = 1},
-            sg::buffer_usage::uniform_buffer);
+            sg::buffer_usage::constants_buffer);
 
         auto const background = ctx.transient.create_buffer_from_pod(
             cmd, sv::background_gpu::from(sv::background::uniform(tg::vec3f(env_radiance, env_radiance, env_radiance))),
-            sg::buffer_usage::uniform_buffer);
+            sg::buffer_usage::constants_buffer);
 
         auto const target = ctx.transient.create_texture_2d(
             {.format = sg::pixel_format::rgba32_float,

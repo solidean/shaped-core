@@ -337,9 +337,9 @@ void create_buffer_view(ID3D12Device* device, sg::raw_buffer_view const& view, D
 
     switch (view.bound_as)
     {
-    case sg::view_class::uniform:
+    case sg::view_class::constants:
     {
-        CC_ASSERT(resource != nullptr, "uniform buffer view over an empty buffer");
+        CC_ASSERT(resource != nullptr, "constants buffer view over an empty buffer");
         D3D12_CONSTANT_BUFFER_VIEW_DESC desc = {};
         desc.BufferLocation = resource->GetGPUVirtualAddress() + UINT64(view.offset_in_bytes);
         desc.SizeInBytes = UINT((view.size_in_bytes + 255) & ~isize(255)); // CBV size is 256-aligned
@@ -461,7 +461,7 @@ void create_null_view(ID3D12Device* device, sg::binding const& binding, D3D12_CP
         }
         return;
     }
-    case sg::binding_type::uniform_buffer:
+    case sg::binding_type::constants_buffer:
     {
         // A null CBV: BufferLocation 0, size 0 — a legal descriptor whose loads read zero.
         D3D12_CONSTANT_BUFFER_VIEW_DESC const desc = {};

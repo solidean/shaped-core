@@ -209,7 +209,7 @@ BINDING_TYPES: dict[str, tuple[str, str, str | None]] = {
     "RWStructuredBuffer": ("u", "buffer", None),
     "ByteAddressBuffer": ("t", "bytes", None),
     "RWByteAddressBuffer": ("u", "bytes", None),
-    "ConstantBuffer": ("b", "uniform_buffer", None),
+    "ConstantBuffer": ("b", "constants_buffer", None),
     "SamplerState": ("s", "sampler", None),
     "SamplerComparisonState": ("s", "sampler", None),
     "RaytracingAccelerationStructure": ("t", "acceleration_structure", None),
@@ -1021,7 +1021,7 @@ class _Parser:
         location = self.current().location
         binding = self.parse_binding(0)
 
-        if binding.type != "uniform_buffer":
+        if binding.type != "constants_buffer":
             raise BindingError(
                 f"{location}: 'push_constants' describes a ConstantBuffer, and '{binding.name}' is not one")
         if binding.count != 1:

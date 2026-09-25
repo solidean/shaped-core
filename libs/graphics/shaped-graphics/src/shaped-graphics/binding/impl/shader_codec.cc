@@ -194,7 +194,7 @@ struct reader
         auto const type = get_u32();
         if (type >= k_binding_type_count)
             ok = false;
-        b.type = ok ? binding_type(type) : binding_type::uniform_buffer;
+        b.type = ok ? binding_type(type) : binding_type::constants_buffer;
 
         auto const has_block_size = get_bool();
         auto const block_size = get_i64();

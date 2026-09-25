@@ -156,10 +156,10 @@ TEST("slib sgl compiler - the cube becomes WGSL that slib's own reader reflects"
     CHECK(ps.stage == sg::shader_stage::fragment); // `pixel` is the package's word, and sg has one stage for it
     CHECK(ps.entry_point == "main_ps");
 
-    // Group 3, binding 0 reads as the inline-constants block: a uniform buffer in no group.
+    // Group 3, binding 0 reads as the inline-constants block: a constants buffer in no group.
     REQUIRE(vs.bindings.size() == 1);
     CHECK(vs.bindings[0].name == "constants");
-    CHECK(vs.bindings[0].type == sg::binding_type::uniform_buffer);
+    CHECK(vs.bindings[0].type == sg::binding_type::constants_buffer);
     CHECK(!vs.bindings[0].group_index.has_value());
     CHECK(ps.bindings.empty());
 
@@ -212,7 +212,7 @@ ASYNC_TEST("slib sgl compiler - the cube becomes SPIR-V with a push-constant blo
 
     auto const* constants = find_binding(vs, "constants");
     REQUIRE(constants != nullptr);
-    CHECK(constants->type == sg::binding_type::uniform_buffer);
+    CHECK(constants->type == sg::binding_type::constants_buffer);
     CHECK(!constants->group_index.has_value());
     CHECK(!constants->space.has_value());
     REQUIRE(constants->block_size.has_value());
@@ -239,7 +239,7 @@ ASYNC_TEST("slib sgl compiler - the cube becomes DXIL with its block at b0 of th
 
     auto const* constants = find_binding(vs, "constants");
     REQUIRE(constants != nullptr);
-    CHECK(constants->type == sg::binding_type::uniform_buffer);
+    CHECK(constants->type == sg::binding_type::constants_buffer);
     CHECK(constants->index == 0);
     REQUIRE(constants->space.has_value());
     CHECK(constants->space.value() == slib::inline_constants_space);

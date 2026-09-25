@@ -49,7 +49,7 @@ namespace
 
     switch (b.type)
     {
-    case sg::binding_type::uniform_buffer:
+    case sg::binding_type::constants_buffer:
         entry.buffer.type = WGPUBufferBindingType_Uniform;
         entry.buffer.minBindingSize = u64(b.block_size.value_or(0));
         break;
@@ -251,7 +251,7 @@ cc::result<webgpu_pipeline_layout_handle> webgpu_pipeline_layout::create(webgpu_
     if (desc.inline_constants.has_value())
     {
         auto const& b = desc.inline_constants.value();
-        CC_ASSERT(b.type == sg::binding_type::uniform_buffer, "inline constants must be a uniform_buffer binding");
+        CC_ASSERT(b.type == sg::binding_type::constants_buffer, "inline constants must be a constants_buffer binding");
         CC_ASSERT(b.block_size.has_value() && b.block_size.value() > 0 && b.block_size.value() % 4 == 0,
                   "inline constants need a block_size that is a positive multiple of 4");
         layout->_inline_constants_bytes = b.block_size.value();
@@ -453,11 +453,11 @@ struct resolved_view
             auto const buffer = std::dynamic_pointer_cast<webgpu_buffer const>(bv->buffer);
             CC_ASSERT(buffer != nullptr, "bound buffer is not a webgpu buffer");
             CC_ASSERT(!buffer->is_expired(), "binding_group names an expired buffer");
-            CC_ASSERTF(
-                b.type != sg::binding_type::uniform_buffer || bv->offset_in_bytes % ctx.uniform_offset_alignment() == 0,
-                "binding_group: uniform buffer '{}' is bound at offset {}, which is not a multiple of the "
-                "device's minUniformBufferOffsetAlignment ({})",
-                rv.name, bv->offset_in_bytes, ctx.uniform_offset_alignment());
+            CC_ASSERTF(b.type != sg::binding_type::constants_buffer
+                           || bv->offset_in_bytes % ctx.uniform_offset_alignment() == 0,
+                       "binding_group: uniform buffer '{}' is bound at offset {}, which is not a multiple of the "
+                       "device's minUniformBufferOffsetAlignment ({})",
+                       rv.name, bv->offset_in_bytes, ctx.uniform_offset_alignment());
             auto const size
                 = bv->shape == sg::view_shape::structured ? bv->element_count * bv->stride_in_bytes : bv->size_in_bytes;
             entry.buffer = buffer->raw();

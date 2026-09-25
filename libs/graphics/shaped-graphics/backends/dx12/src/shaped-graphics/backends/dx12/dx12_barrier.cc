@@ -30,7 +30,7 @@ D3D12_BARRIER_SYNC d3d12_sync_from(sg::pipeline_stage_flags stages)
 D3D12_BARRIER_ACCESS d3d12_access_from(sg::access_flags access)
 {
     D3D12_BARRIER_ACCESS out = D3D12_BARRIER_ACCESS_COMMON; // 0
-    if (access.has(sg::access_flag::uniform_read))
+    if (access.has(sg::access_flag::constants_read))
         out |= D3D12_BARRIER_ACCESS_CONSTANT_BUFFER;
     if (access.has(sg::access_flag::index_read))
         out |= D3D12_BARRIER_ACCESS_INDEX_BUFFER;
@@ -81,7 +81,7 @@ namespace
         return sync | D3D12_BARRIER_SYNC_INDEX_INPUT;
 
     auto const vertex_stage_access
-        = sg::access_flag::vertex_read | sg::access_flag::uniform_read | sg::access_flag::shader_read;
+        = sg::access_flag::vertex_read | sg::access_flag::constants_read | sg::access_flag::shader_read;
     auto const also_shades = access.has_any(vertex_stage_access);
 
     sync &= ~D3D12_BARRIER_SYNC_VERTEX_SHADING;

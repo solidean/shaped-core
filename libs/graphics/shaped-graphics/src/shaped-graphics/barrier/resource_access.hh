@@ -20,14 +20,14 @@
 /// Color/depth *target* writes are ROP-ordered by the hardware, and are not unordered.
 enum class sg::access_flag : sg::u32
 {
-    uniform_read,  // constant-buffer read:   DX12 CONSTANT_BUFFER / Vk UNIFORM_READ
-    index_read,    // index-buffer fetch:      DX12 INDEX_BUFFER    / Vk INDEX_READ
-    vertex_read,   // vertex-buffer fetch:     DX12 VERTEX_BUFFER   / Vk VERTEX_ATTRIBUTE_READ
-    shader_read,   // SRV / sampled+storage:   DX12 SHADER_RESOURCE / Vk SHADER_READ
-    shader_write,  // UAV / storage write:     DX12 UNORDERED_ACCESS/ Vk SHADER_WRITE
-    copy_read,     // copy/resolve source:     DX12 COPY_SOURCE     / Vk TRANSFER_READ
-    copy_write,    // copy/resolve dest:       DX12 COPY_DEST       / Vk TRANSFER_WRITE
-    indirect_read, // indirect args:           DX12 INDIRECT_ARGUMENT / Vk INDIRECT_COMMAND_READ
+    constants_read, // constant-buffer read:   DX12 CONSTANT_BUFFER / Vk UNIFORM_READ
+    index_read,     // index-buffer fetch:      DX12 INDEX_BUFFER    / Vk INDEX_READ
+    vertex_read,    // vertex-buffer fetch:     DX12 VERTEX_BUFFER   / Vk VERTEX_ATTRIBUTE_READ
+    shader_read,    // SRV / sampled+storage:   DX12 SHADER_RESOURCE / Vk SHADER_READ
+    shader_write,   // UAV / storage write:     DX12 UNORDERED_ACCESS/ Vk SHADER_WRITE
+    copy_read,      // copy/resolve source:     DX12 COPY_SOURCE     / Vk TRANSFER_READ
+    copy_write,     // copy/resolve dest:       DX12 COPY_DEST       / Vk TRANSFER_WRITE
+    indirect_read,  // indirect args:           DX12 INDIRECT_ARGUMENT / Vk INDIRECT_COMMAND_READ
 
     // Texture / render-target / raytracing families.
     // A buffer only ever uses the accel_* pair, through cmd.raytracing.
@@ -118,7 +118,7 @@ inline constexpr access_flags unordered_write_accesses
 /// Every access that only observes the resource.
 /// An op can carry both halves at once — a copy whose source and destination are the same resource does.
 inline constexpr access_flags read_accesses
-    = access_flag::uniform_read | access_flag::index_read | access_flag::vertex_read | access_flag::shader_read
+    = access_flag::constants_read | access_flag::index_read | access_flag::vertex_read | access_flag::shader_read
     | access_flag::copy_read | access_flag::indirect_read | access_flag::depth_read | access_flag::accel_read;
 
 /// True if `a` observes the resource at all, whatever else it does to it.

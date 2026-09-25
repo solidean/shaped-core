@@ -46,15 +46,16 @@ TEST("slib - reflection fits the listed groups by name, position, index, count a
               .contains("'work_dst' reflects as index 1"));
 }
 
-TEST("slib - the listed @inline block is the one uniform buffer no group needs to declare")
+TEST("slib - the listed @inline block is the one constants buffer no group needs to declare")
 {
-    auto const block = sg::binding{.name = "constants", .space = 9u, .type = sg::binding_type::uniform_buffer};
+    auto const block = sg::binding{.name = "constants", .space = 9u, .type = sg::binding_type::constants_buffer};
     // dx12 reflects it in the reserved space, whatever it calls it; another target may call it by the binding's name.
-    CHECK(mismatch_of(reflecting({{.name = "constants_cb", .space = 9u, .type = sg::binding_type::uniform_buffer}}), block)
-          == "");
-    CHECK(mismatch_of(reflecting({{.name = "constants", .group_index = 0u, .type = sg::binding_type::uniform_buffer}}),
+    CHECK(mismatch_of(reflecting({{.name = "constants_cb", .space = 9u, .type = sg::binding_type::constants_buffer}}),
                       block)
           == "");
+    CHECK(mismatch_of(
+              reflecting({{.name = "constants", .group_index = 0u, .type = sg::binding_type::constants_buffer}}), block)
+          == "");
     // Without one listed, it is a binding like any other.
-    CHECK(mismatch_of(reflecting({{.name = "constants", .space = 9u, .type = sg::binding_type::uniform_buffer}})) != "");
+    CHECK(mismatch_of(reflecting({{.name = "constants", .space = 9u, .type = sg::binding_type::constants_buffer}})) != "");
 }

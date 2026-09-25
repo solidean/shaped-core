@@ -42,8 +42,8 @@ std::shared_ptr<test_buffer> make_buffer(isize size, sg::buffer_usages usage)
 TEST("sg bindings - binding_type maps to view (access/shape)")
 {
     using bt = sg::binding_type;
-    CHECK(sg::view_class_of(bt::uniform_buffer, sg::access_mode::read) == sg::view_class::uniform);
-    CHECK(sg::shape_of(bt::uniform_buffer) == sg::view_shape::uniform_block);
+    CHECK(sg::view_class_of(bt::constants_buffer, sg::access_mode::read) == sg::view_class::constants);
+    CHECK(sg::shape_of(bt::constants_buffer) == sg::view_shape::constants_block);
 
     CHECK(sg::view_class_of(bt::buffer, sg::access_mode::read) == sg::view_class::readonly);
     CHECK(sg::shape_of(bt::buffer) == sg::view_shape::structured);
@@ -70,7 +70,7 @@ TEST("sg bindings - only an image is write-only, and only buffers, bytes and ima
     CHECK(!sg::is_valid_access(bt::buffer, am::write)); // no target has a write-only buffer
     CHECK(!sg::is_valid_access(bt::bytes, am::write));
 
-    for (auto const t : {bt::uniform_buffer, bt::texture, bt::sampler, bt::acceleration_structure})
+    for (auto const t : {bt::constants_buffer, bt::texture, bt::sampler, bt::acceleration_structure})
     {
         CHECK(sg::is_valid_access(t, am::read));
         CHECK(!sg::is_valid_access(t, am::read_write));
@@ -160,9 +160,9 @@ TEST("sg bindings - merge_bindings unions stages by name")
 {
     // Two stages of one pipeline: they share "frame", so the union has three entries.
     auto const raygen = cc::vector<sg::binding>{
-        {.name = "frame", .index = 0, .type = sg::binding_type::uniform_buffer},
+        {.name = "frame", .index = 0, .type = sg::binding_type::constants_buffer},
         {.name = "Output", .index = 0, .type = sg::binding_type::image, .access = sg::access_mode::read_write}};
-    auto const hit = cc::vector<sg::binding>{{.name = "frame", .index = 7, .type = sg::binding_type::uniform_buffer},
+    auto const hit = cc::vector<sg::binding>{{.name = "frame", .index = 7, .type = sg::binding_type::constants_buffer},
                                              {.name = "Vertices", .index = 1, .type = sg::binding_type::buffer}};
 
     auto const merged = sg::merge_bindings({raygen, hit});
@@ -190,7 +190,7 @@ TEST("sg bindings - split_off_sampler_bindings partitions in order")
 {
     auto bindings = cc::vector<sg::binding>{{.name = "Albedo", .index = 0, .type = sg::binding_type::texture},
                                             {.name = "sPoint", .index = 0, .type = sg::binding_type::sampler},
-                                            {.name = "frame", .index = 0, .type = sg::binding_type::uniform_buffer},
+                                            {.name = "frame", .index = 0, .type = sg::binding_type::constants_buffer},
                                             {.name = "sLinear", .index = 1, .type = sg::binding_type::sampler}};
 
     auto const samplers = sg::split_off_sampler_bindings(bindings);
@@ -249,11 +249,11 @@ TEST("sg bindings - named_view pairs a name with bound views")
 TEST("sg::binding - visibility unions across stages")
 {
     auto vs = cc::vector<sg::binding>();
-    vs.push_back({.name = "camera", .index = 0, .type = sg::binding_type::uniform_buffer});
+    vs.push_back({.name = "camera", .index = 0, .type = sg::binding_type::constants_buffer});
     sg::apply_stage_visibility(vs, sg::shader_stage::vertex);
 
     auto ps = cc::vector<sg::binding>();
-    ps.push_back({.name = "camera", .index = 0, .type = sg::binding_type::uniform_buffer});
+    ps.push_back({.name = "camera", .index = 0, .type = sg::binding_type::constants_buffer});
     ps.push_back({.name = "albedo", .index = 1, .type = sg::binding_type::texture});
     sg::apply_stage_visibility(ps, sg::shader_stage::fragment);
 
@@ -282,7 +282,7 @@ TEST("sg::binding - visibility unions across stages")
 // not by this vocabulary pretending to know.
 TEST("sg::binding - visibility defaults to empty")
 {
-    auto const b = sg::binding{.name = "hand_written", .index = 0, .type = sg::binding_type::uniform_buffer};
+    auto const b = sg::binding{.name = "hand_written", .index = 0, .type = sg::binding_type::constants_buffer};
     CHECK(b.visibility.is_empty());
     CHECK(!b.image_format.has_value());
     CHECK(!b.sample_type.has_value());

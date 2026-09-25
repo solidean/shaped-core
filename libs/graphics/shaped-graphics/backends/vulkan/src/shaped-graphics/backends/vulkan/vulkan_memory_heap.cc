@@ -17,7 +17,7 @@ cc::result<vulkan_memory_heap_handle> vulkan_memory_heap::create(vulkan_context&
     // narrows as usages are added, so a type serving all of them serves any subset.
     constexpr auto every_usage = sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst
                                | sg::buffer_usage::vertex_buffer | sg::buffer_usage::index_buffer
-                               | sg::buffer_usage::uniform_buffer | sg::buffer_usage::readonly_buffer
+                               | sg::buffer_usage::constants_buffer | sg::buffer_usage::readonly_buffer
                                | sg::buffer_usage::readwrite_buffer | sg::buffer_usage::indirect_command_buffer;
     auto const probe_info = VkBufferCreateInfo{
         .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,

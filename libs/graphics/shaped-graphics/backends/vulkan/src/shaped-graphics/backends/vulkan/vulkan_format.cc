@@ -174,7 +174,7 @@ VkBufferUsageFlags to_vk_buffer_usage(sg::buffer_usages usage)
         flags |= VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
     if (usage.has(sg::buffer_usage::index_buffer))
         flags |= VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
-    if (usage.has(sg::buffer_usage::uniform_buffer))
+    if (usage.has(sg::buffer_usage::constants_buffer))
         flags |= VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
     // Vulkan does not distinguish read-only from read-write storage at the usage-bit level — that is a descriptor/access concern.
     // So both map to the same STORAGE_BUFFER_BIT.

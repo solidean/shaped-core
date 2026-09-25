@@ -11,7 +11,7 @@ There is no public `declare_access`. What a resource is used as follows from the
 - `cmd.upload` ⇒ `copy_write` on the destination; `cmd.download` ⇒ `copy_read` on the source.
 - `cmd.copy` ⇒ `copy_read` on src plus `copy_write` on dst, and a self-copy is one combined access.
 - A compute `dispatch` ⇒ each bound view's class: `readonly` and `texture` ⇒ `shader_read`, `readwrite` and `image` ⇒ `shader_write`.
-  `uniform` ⇒ `uniform_read`, and `acceleration_structure` ⇒ `accel_read`.
+  `constants` ⇒ `constants_read`, and `acceleration_structure` ⇒ `accel_read`.
 
 The mapping lives in [access_inference.hh](../../src/shaped-graphics/barrier/access_inference.hh), so every backend agrees on the semantics.
 

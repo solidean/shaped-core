@@ -9,13 +9,13 @@
 #include <type_traits>
 
 /// A strongly-typed view onto a raw_buffer whose element type is fixed at compile time by `T` — think a GPU-side `span<T>`.
-/// The view factories (`as_readonly_buffer()`, `as_uniform_buffer()`, …) drop the element-type argument the raw API needs and infer it from `T`.
-/// Each is `requires`-gated, so a nonsensical one — a uniform block of `byte`, a storage view of a non-DWORD type — is a compile error.
+/// The view factories (`as_readonly_buffer()`, `as_constants_buffer()`, …) drop the element-type argument the raw API needs and infer it from `T`.
+/// Each is `requires`-gated, so a nonsensical one — a constants block of `byte`, a storage view of a non-DWORD type — is a compile error.
 /// `raw()` reaches the underlying resource for the general, byte-addressed API.
 /// A value type: copying is a cheap handle copy.
 /// Prefer `ctx.{persistent,transient}.create_buffer<T>(count, usage)` over building one directly.
 ///
-/// `T` must be trivially copyable, since a buffer is raw GPU bytes, but is otherwise open — a vertex struct, an index type, a uniform block, `byte`, ….
+/// `T` must be trivially copyable, since a buffer is raw GPU bytes, but is otherwise open — a vertex struct, an index type, a constants block, `byte`, ….
 /// Each view factory imposes its own further constraint, and every element count or range is in units of `T`.
 template <class T>
 class sg::buffer
@@ -103,25 +103,25 @@ public:
     //
     // The `template <class U = T> requires std::is_same_v<U, T>` shape is a deferral trick, not a reinterpretation hook.
     // A constrained return type must not be *formed* until the view is actually used.
-    // `readonly_buffer_view<T>` requires `view_element<T>`, and `uniform_buffer_view<T>` requires `uniform_element<T>`.
+    // `readonly_buffer_view<T>` requires `view_element<T>`, and `constants_buffer_view<T>` requires `constants_element<T>`.
     // Otherwise a `buffer<u16>`, a perfectly valid index buffer, would be ill-formed just for naming `readonly_buffer_view<u16>`.
     // Making the member a template defers that, and pinning `U == T` keeps it T-only; `reinterpret_as` is the explicit element-type change.
 
-    /// Binds one element of the buffer as a uniform block (constant buffer / UBO), `element_index` picking which — by default the first.
-    /// A uniform_buffer_view is a single block, not a range.
+    /// Binds one element of the buffer as a constants block (constant buffer / UBO), `element_index` picking which — by default the first.
+    /// A constants_buffer_view is a single block, not a range.
     /// The element's byte offset (`element_index * sizeof(T)`) must be 256-byte aligned, so addressing past the first element needs `T` sized to a multiple of 256.
     /// Drop to `raw()` for an arbitrary byte offset.
-    /// Only where `T` obeys the uniform block rules.
+    /// Only where `T` obeys the constants block rules.
     template <class U = T>
-    [[nodiscard]] uniform_buffer_view<U> as_uniform_buffer(isize element_index = 0) const
-        requires(std::is_same_v<U, T> && uniform_element<U>)
+    [[nodiscard]] constants_buffer_view<U> as_constants_buffer(isize element_index = 0) const
+        requires(std::is_same_v<U, T> && constants_element<U>)
     {
-        CC_ASSERT(_raw->usage().has(buffer_usage::uniform_buffer), "buffer lacks uniform_buffer usage");
+        CC_ASSERT(_raw->usage().has(buffer_usage::constants_buffer), "buffer lacks constants_buffer usage");
         auto const offset = element_index * isize(sizeof(U));
-        CC_ASSERT(offset % uniform_buffer_offset_alignment == 0, "uniform block offset must be 256-byte aligned");
-        CC_ASSERT(offset >= 0 && offset + isize(sizeof(U)) <= _raw->size_in_bytes(), "uniform block does not fit in "
+        CC_ASSERT(offset % constants_buffer_offset_alignment == 0, "constants block offset must be 256-byte aligned");
+        CC_ASSERT(offset >= 0 && offset + isize(sizeof(U)) <= _raw->size_in_bytes(), "constants block does not fit in "
                                                                                      "buffer");
-        return uniform_buffer_view<U>{.buffer = _raw, .offset_in_bytes = offset, .size_in_bytes = isize(sizeof(U))};
+        return constants_buffer_view<U>{.buffer = _raw, .offset_in_bytes = offset, .size_in_bytes = isize(sizeof(U))};
     }
 
     // A storage view is a subrange, so unlike `buffer<T>` itself it carries the portable binding rules — see `storage_buffer_offset_alignment`.
@@ -169,8 +169,8 @@ public:
         return readwrite_buffer_view<U>{.buffer = _raw, .offset_in_bytes = offset, .element_count = range.size};
     }
 
-    // Checked twins of the storage / uniform view factories: nullopt when the range breaks the placement rules.
-    // That is bounds, the 256-byte offset, the 4-byte size, and the uniform block rules.
+    // Checked twins of the storage / constants view factories: nullopt when the range breaks the placement rules.
+    // That is bounds, the 256-byte offset, the 4-byte size, and the constants block rules.
     // Those are the conditions a caller computing an offset at runtime can genuinely hit.
     // A missing buffer_usage flag still asserts, since you chose the usage at creation.
 
@@ -220,18 +220,18 @@ public:
         return as_readwrite_buffer(range);
     }
 
-    /// Checked as_uniform_buffer — nullopt when the block's byte offset is not 256-byte aligned or does not fit.
+    /// Checked as_constants_buffer — nullopt when the block's byte offset is not 256-byte aligned or does not fit.
     template <class U = T>
-    [[nodiscard]] cc::optional<uniform_buffer_view<U>> try_as_uniform_buffer(isize element_index = 0) const
-        requires(std::is_same_v<U, T> && uniform_element<U>)
+    [[nodiscard]] cc::optional<constants_buffer_view<U>> try_as_constants_buffer(isize element_index = 0) const
+        requires(std::is_same_v<U, T> && constants_element<U>)
     {
-        CC_ASSERT(_raw->usage().has(buffer_usage::uniform_buffer), "buffer lacks uniform_buffer usage");
+        CC_ASSERT(_raw->usage().has(buffer_usage::constants_buffer), "buffer lacks constants_buffer usage");
         auto const offset = element_index * isize(sizeof(U));
-        if (offset % uniform_buffer_offset_alignment != 0)
+        if (offset % constants_buffer_offset_alignment != 0)
             return {};
         if (offset < 0 || offset + isize(sizeof(U)) > _raw->size_in_bytes())
             return {};
-        return as_uniform_buffer(element_index);
+        return as_constants_buffer(element_index);
     }
 
     // Draw-input views, bound at draw time and not shader-visible.

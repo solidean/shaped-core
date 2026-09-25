@@ -59,9 +59,9 @@ INVOCABLE_TEST("sg error handling - buffer view factories validate usage and bou
     auto buf = ctx->persistent.create_raw_buffer(256, copy_both);
     REQUIRE(buf != nullptr);
 
-    CHECK_ASSERTS(sg::buffer<u32[4]>::from_raw(buf).as_uniform_buffer()); // lacks uniform_buffer usage
-    CHECK_ASSERTS(sg::buffer<u32>::from_raw(buf).as_readonly_buffer());   // lacks readonly_buffer usage
-    CHECK_ASSERTS(sg::buffer<u32>::from_raw(buf).as_readwrite_buffer());  // lacks readwrite_buffer usage
+    CHECK_ASSERTS(sg::buffer<u32[4]>::from_raw(buf).as_constants_buffer()); // lacks constants_buffer usage
+    CHECK_ASSERTS(sg::buffer<u32>::from_raw(buf).as_readonly_buffer());     // lacks readonly_buffer usage
+    CHECK_ASSERTS(sg::buffer<u32>::from_raw(buf).as_readwrite_buffer());    // lacks readwrite_buffer usage
 
     // A readonly buffer accepts a readonly view but must still reject an out-of-range or negative range.
     auto ro = ctx->persistent.create_raw_buffer(256, sg::buffer_usage::readonly_buffer);
@@ -74,11 +74,11 @@ INVOCABLE_TEST("sg error handling - uniform view requires 256-byte-aligned offse
 {
     REQUIRE(ctx != nullptr);
 
-    auto ub = ctx->persistent.create_raw_buffer(1024, sg::buffer_usage::uniform_buffer);
+    auto ub = ctx->persistent.create_raw_buffer(1024, sg::buffer_usage::constants_buffer);
     REQUIRE(ub != nullptr);
 
     // A uniform block offset must be 256-byte aligned (element 8 of a 16-byte block -> byte 128).
-    CHECK_ASSERTS(sg::buffer<u32[4]>::from_raw(ub).as_uniform_buffer(8));
+    CHECK_ASSERTS(sg::buffer<u32[4]>::from_raw(ub).as_constants_buffer(8));
 }
 
 INVOCABLE_TEST("sg error handling - texture creation validates its shape", (sg::context_handle const& ctx))

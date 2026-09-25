@@ -9,8 +9,8 @@ It is a pure value, produced by a `buffer.as_*()` factory.
 ## Typed by the element type
 
 A buffer view is `<access>_buffer_view<T>`.
-The **access class** is the type: `uniform_buffer_view` / `readonly_buffer_view` / `readwrite_buffer_view`.
-`T` is the array's element type (`readonly_buffer_view<particle>`) or the block type (`uniform_buffer_view<globals>`).
+The **access class** is the type: `constants_buffer_view` / `readonly_buffer_view` / `readwrite_buffer_view`.
+`T` is the array's element type (`readonly_buffer_view<particle>`) or the block type (`constants_buffer_view<globals>`).
 There is no intermediate "shape" wrapper: the byte-addressed case is simply `T = byte`, the degenerate element at stride 1.
 `T` must satisfy the `view_element` concept — `byte`, or `sizeof(T) % 4 == 0` — because GPUs load at 4-byte (DWORD) alignment.
 Ranges passed to the factories are in **elements of `T`**.
@@ -21,11 +21,11 @@ So `T` is *validated* against reflection rather than replaced by it: `sizeof(T)`
 Because the call site already fixed `T`, much of that check is compile-time.
 The validation itself is still deferred — see [TODO](../TODO.md).
 
-**Uniform blocks are stricter.**
-Constant buffers / UBOs have placement rules storage buffers do not, so `uniform_buffer_view<T>` uses a tighter `uniform_element` concept.
+**Constants blocks are stricter.**
+Constant buffers / UBOs have placement rules storage buffers do not, so `constants_buffer_view<T>` uses a tighter `constants_element` concept.
 It asserts the portable limits — the strictest across backends, so a satisfying view binds everywhere.
 A block's size must be a **multiple of 16** (std140 / HLSL cbuffer packing) and **at most 64 KiB** (D3D12 max CBV, WebGPU default max binding).
-Both are compile-time from `sizeof(T)`, which is also what rejects `uniform_buffer_view<byte>`.
+Both are compile-time from `sizeof(T)`, which is also what rejects `constants_buffer_view<byte>`.
 Its byte **offset must be 256-byte aligned** — D3D12 CBV placement and the WebGPU default, and Vulkan's is ≤256 so 256 is always valid.
 That one is a runtime assert, since the offset is a value.
 
@@ -34,18 +34,18 @@ That one is a runtime assert, since the offset is a value.
 The vocabulary is grounded in concepts common to HLSL / GLSL / Slang / MSL / WGSL, since our baseline shading language is undecided and no one API's names should leak into the surface.
 A buffer binding varies on two axes the view captures:
 
-- **Access class** (`view_class`): `uniform` (a small read-only block — cbuffer / UBO), `readonly`
+- **Access class** (`view_class`): `constants` (a small read-only block — cbuffer / UBO), `readonly`
   (read storage — SRV / read SSBO), `readwrite` (read-write storage — UAV / read-write SSBO). Mirrors
-  [`buffer_usage`](../../src/shaped-graphics/types.hh)'s `uniform_buffer` / `readonly_buffer` /
+  [`buffer_usage`](../../src/shaped-graphics/types.hh)'s `constants_buffer` / `readonly_buffer` /
   `readwrite_buffer`.
-- **Layout** (`view_shape`, derived from `T`): `uniform_block`, `structured` (array strided by
+- **Layout** (`view_shape`, derived from `T`): `constants_block`, `structured` (array strided by
   `sizeof(T)`), or `bytes` (byte-addressed, `T = byte`).
 
 Per-language mapping:
 
 | view | HLSL / Slang | GLSL / Vulkan | MSL | WGSL |
 |---|---|---|---|---|
-| `uniform_buffer_view<T>` | `ConstantBuffer<T>` | std140 UBO | `constant T&` | `var<uniform>` |
+| `constants_buffer_view<T>` | `ConstantBuffer<T>` | std140 UBO | `constant T&` | `var<uniform>` |
 | `readonly_buffer_view<T>` | `StructuredBuffer<T>` | `readonly buffer{ T[] }` | `const device T*` | `var<storage, read>` |
 | `readwrite_buffer_view<T>` | `RWStructuredBuffer<T>` | `buffer{ T[] }` | `device T*` | `var<storage, read_write>` |
 | `readonly_buffer_view<byte>` | `ByteAddressBuffer` | `readonly buffer{ uint[] }` | `const device uchar*` | `array<u32>` |
@@ -82,7 +82,7 @@ bindings without the wrappers.
 Between the fully-typed leaves and the erased `raw_view` sits an optional **erased middle**.
 `buffer_view<T>` and `any_texture_view<Traits>` keep the resource typing — element type, view dimension — but carry `bound_as`, the view class, as a runtime field.
 **Every view names its view class `bound_as`**, since the word `access` belongs to a binding's `access_mode`.
-A buffer is bound as `uniform`, `readonly` or `readwrite`, and a texture as a `texture` or an `image`.
+A buffer is bound as `constants`, `readonly` or `readwrite`, and a texture as a `texture` or an `image`.
 Each leaf converts to it implicitly and it erases on to `raw_view`, which suits code taking "any access" of a given buffer, or "a texture or an image" of a given dimension.
 
 ### Recovering a typed view from the erased form
@@ -94,14 +94,15 @@ A `try_` tolerates the runtime **view class** being wrong, and on a texture arm 
 A mismatched buffer element type `T` still asserts, since a wrong element size is a caller's claim the view's stride can disprove rather than a runtime condition.
 
 - **Erased middle → leaf.**
-  `buffer_view<T>::as_readonly()` / `as_readwrite()` / `as_uniform()` and `any_texture_view<Traits>::as_texture()` / `as_image<Format>()` pin the runtime view class to the matching compile-time leaf.
+  `buffer_view<T>::as_readonly()` / `as_readwrite()` / `as_constants()` pin the runtime view class to the matching compile-time leaf.
+  So do `any_texture_view<Traits>::as_texture()` / `as_image<Format>()`, the latter checking the format too.
   The resource typing is already fixed, so only the view class is being committed.
 - **Erased arm → leaf.**
   `raw_buffer_view::as_readonly<T>()`, where you supply the element `T`.
   And `raw_texture_view::as_texture<Traits>()` / `as_image<Traits, Format>()`, where you supply `Traits` and it also checks the runtime `view_dimension` matches `Traits::dimension`.
   Both delegate to the middle for the view-class check and the field mapping.
 - **`raw_view` → leaf in one call.**
-  The free functions `as_readonly_buffer<T>(rv)` / `as_readwrite_buffer<T>` / `as_uniform_buffer<T>` and `as_texture<Traits>` / `as_image<Traits, Format>`, each with a `try_` twin.
+  The free functions `as_readonly_buffer<T>(rv)` / `as_readwrite_buffer<T>` / `as_constants_buffer<T>` and `as_texture<Traits>` / `as_image<Traits, Format>`, each with a `try_` twin.
   Each `try_as_*_view`s the matching arm and then re-types it.
   The `try_` twin fails both when the variant holds a *different* resource arm and when the view class does not match — the two ways a genuinely-erased binding can be the wrong thing.
 
@@ -129,16 +130,16 @@ It addresses by *element index* rather than byte offset, and D3D12 literally com
 So its offset must **also** be a multiple of the stride, and its size a whole number of elements.
 A structured view therefore cannot start partway into an element, and the two rules together mean `offset % lcm(256, stride) == 0`.
 
-The 256 rule is deliberately the *portable floor*, hardcoded rather than queried per device, the same approach as `uniform_buffer_offset_alignment`.
+The 256 rule is deliberately the *portable floor*, hardcoded rather than queried per device, the same approach as `constants_buffer_offset_alignment`.
 It fails loudly on a dx12 dev box rather than surfacing later on WebGPU.
 Exempt are `buffer<T>` itself, and the draw-input views `as_vertex_buffer` / `as_index_buffer`, which are not storage bindings and have their own rules.
 **Escape hatch:** build the erased `raw_buffer_view` aggregate yourself if you knowingly target only backends with looser rules.
 
 A subrange can legitimately fail these rules on an offset a caller computed at runtime — out of a suballocator, say.
-So every storage and uniform factory has a **`try_` twin** returning `cc::optional`.
-`try_as_raw_readonly` and `try_as_raw_readwrite` on each overload including the whole-buffer form, and `try_as_raw_uniform_buffer` on its ranged one.
-There is no whole-buffer uniform overload.
-Plus `buffer<T>::try_as_readonly_buffer` / `try_as_readwrite_buffer` / `try_as_uniform_buffer`.
+So every storage and constants factory has a **`try_` twin** returning `cc::optional`.
+`try_as_raw_readonly` and `try_as_raw_readwrite` on each overload including the whole-buffer form, and `try_as_raw_constants_buffer` on its ranged one.
+There is no whole-buffer constants overload.
+Plus `buffer<T>::try_as_readonly_buffer` / `try_as_readwrite_buffer` / `try_as_constants_buffer`.
 The split follows the rest of the API: a bad **range** — bounds, alignment, size, stride — is a runtime condition and yields nullopt.
 A missing `buffer_usage` flag stays a hard assert, since the usage was chosen at creation and getting it wrong is a contract bug.
 Even the whole-buffer overloads can fail: `as_raw_readonly()` on a 70-byte buffer trips `size % 4`.

@@ -33,8 +33,8 @@ The table is the one sg already commits to.
 
 | SGL | `sg::binding_type` | `sg::access_mode` | what it is |
 |---|---|---|---|
-| a plain value type | `uniform_buffer` | `read` | a field of the group's implicit constant buffer |
-| `constants[T]` | `uniform_buffer` | `read` | a constant buffer that comes from somewhere else, already laid out |
+| a plain value type | `constants_buffer` | `read` | a field of the group's implicit constant buffer |
+| `constants[T]` | `constants_buffer` | `read` | a constant buffer that comes from somewhere else, already laid out |
 | `buffer[T]` | `buffer` | `read` | an array of `T` the shader reads |
 | `mut buffer[T]` | `buffer` | `read_write` | an array of `T` the shader reads and writes |
 | `bytes` | `bytes` | `read` | raw bytes, addressed by offset |

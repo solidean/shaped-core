@@ -13,7 +13,7 @@ namespace
 {
     switch (sg::view_class_of(b))
     {
-    case sg::view_class::uniform:
+    case sg::view_class::constants:
         return D3D12_DESCRIPTOR_RANGE_TYPE_CBV;
     case sg::view_class::readonly:
     case sg::view_class::texture:

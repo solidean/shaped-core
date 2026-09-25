@@ -16,7 +16,7 @@ VkDescriptorType to_vk_descriptor_type(sg::binding_type t)
 {
     switch (t)
     {
-    case sg::binding_type::uniform_buffer:
+    case sg::binding_type::constants_buffer:
         return VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     case sg::binding_type::buffer:
     case sg::binding_type::bytes:

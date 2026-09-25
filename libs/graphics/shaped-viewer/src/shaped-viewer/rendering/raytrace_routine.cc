@@ -83,8 +83,8 @@ sg::routine_outcome pbr_raytrace_routine::execute(sg::command_list& cmd, trace_d
         = ctx.transient.create_binding_group(cmd, self->_group_layout,
                                              shaders::flat_bindings{.scene = tlas->as_view(),
                                                                     .Output = d.output.as_any_image_view(),
-                                                                    .frame = d.frame.as_uniform_buffer(),
-                                                                    .background = d.background.as_uniform_buffer(),
+                                                                    .frame = d.frame.as_constants_buffer(),
+                                                                    .background = d.background.as_constants_buffer(),
                                                                     .Materials = d.materials.as_readonly_buffer(),
                                                                     .Vertices = d.vertices.as_readonly_buffer(),
                                                                     .Indices = d.indices.as_readonly_buffer()});

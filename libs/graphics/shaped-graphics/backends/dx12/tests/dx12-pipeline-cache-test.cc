@@ -216,7 +216,7 @@ INVOCABLE_TEST("sg pipeline_cache - inline constants participate in the pipeline
                                          .space = 0,
                                          .index = 0,
                                          .count = 1,
-                                         .type = sg::binding_type::uniform_buffer,
+                                         .type = sg::binding_type::constants_buffer,
                                          .block_size = block_size};
         return d;
     };
