@@ -96,8 +96,6 @@ struct planned_resource
     /// The element of a buffer; `none` for every other kind.
     check::type_id element = check::type_id::none;
     bool is_mut = false;
-    /// A static sampler of the group, as a position in `checked_module::samplers`; -1 for any other resource.
-    i32 static_sampler = -1;
     i32 group = 0;
     i32 slot = 0;
     /// The namespace HLSL declares the group in: `<binding>_bindings`.

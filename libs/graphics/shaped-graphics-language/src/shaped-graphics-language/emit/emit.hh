@@ -9,7 +9,7 @@
 /// The text a graphics API compiles, written from one flat entry point of a checked module.
 ///
 /// A target is a text format together with the addressing rules of the backend that reads it.
-/// So the two HLSL targets are two outputs: they differ in how a location and the inline constants are addressed.
+/// So the two HLSL targets are two outputs: they differ in how a location, a group resource and the inline constants are addressed.
 /// Every target carries its final addresses, so no later pass numbers what the text declares.
 enum class sgl::emit::target : sgl::u8
 {

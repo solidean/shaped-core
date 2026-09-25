@@ -1,9 +1,13 @@
+#include <clean-core/string/format.hh>
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
+#include <shaped-graphics-language/check/resources.hh>
+#include <shaped-graphics-language/emit/impl/plan.hh>
 #include <shaped-graphics/binding/compiled_shader.hh>
-#include <shaped-shader-library/binding/binding_groups.hh> // slib::inline_constants_space
+#include <shaped-graphics/fwd.hh>                          // sg::max_binding_groups
+#include <shaped-shader-library/binding/binding_groups.hh> // slib::inline_constants_space, slib::rewrite_binding_groups
 #include <shaped-shader-library/compiler/dxc_compiler.hh>
 #include <shaped-shader-library/compiler/sgl_compiler.hh>
 #include <shaped-shader-library/compiler/wgsl_compiler.hh>
@@ -375,6 +379,30 @@ ASYNC_TEST("slib sgl compiler - every compiler behind an edge reflects the group
         }
         CHECK(addresses == expected);
         CHECK(cs.bindings.size() == 6);
+    }
+}
+
+// sgl links neither sg nor slib, so its emitter repeats what they own; these hold each copy to the original.
+static_assert(sgl::emit::impl::k_max_groups == sg::max_binding_groups);
+
+TEST("slib sgl compiler - SGL spells every image format for SPIR-V as slib's pass does")
+{
+    for (auto const& f : sgl::check::k_storage_formats)
+    {
+        auto const hlsl = cc::format("#pragma sc group 0\n"
+                                     "namespace g\n"
+                                     "{{\n"
+                                     "#pragma sc format {}\n"
+                                     "    RWTexture2D<float4> image;\n"
+                                     "}}\n",
+                                     f.name);
+        auto const rewritten = slib::rewrite_binding_groups(hlsl, sg::shader_format::spirv);
+        REQUIRE(rewritten.has_value());
+        auto const text = cc::string_view(rewritten.value());
+        if (f.spirv.empty())
+            CHECK(!text.contains("vk::image_format"));
+        else
+            CHECK(text.contains(cc::format("[[vk::image_format(\"{}\")]]", f.spirv)));
     }
 }
 

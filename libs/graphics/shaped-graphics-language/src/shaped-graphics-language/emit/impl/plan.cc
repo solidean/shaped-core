@@ -298,7 +298,6 @@ struct planner
                                        .type = members[i].type,
                                        .element = t.element,
                                        .is_mut = t.is_mut,
-                                       .static_sampler = members[i].static_sampler,
                                        .group = group,
                                        .slot = slot++,
                                        .group_name = cc::format("{}_bindings", s.name)});
