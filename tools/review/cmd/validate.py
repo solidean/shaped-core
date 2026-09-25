@@ -164,7 +164,9 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
         )
 
     total = len(paths.entry_files())
-    scope = f"{len(entries)} of {total} entries" if args.entries else f"{len(entries)} entries"
+    # A broken entry was still checked, so it counts toward what the problems were found across.
+    checked = len(entries) + len(broken)
+    scope = f"{checked} of {total} entries" if args.entries else f"{checked} entries"
     groups = set(review.groups_for(cfg.goals))
     unplaced = sorted({e.group for e in entries} - groups)
     if unplaced:
