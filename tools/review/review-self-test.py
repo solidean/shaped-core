@@ -2210,6 +2210,44 @@ def test_a_blank_line_that_turns_an_asks_attributes_into_prose_is_reported(root:
     assert "030-fine" not in out, f"an ask opening on prose must not be reported: {out}"
 
 
+def test_an_ask_answered_only_in_the_text_box_is_answered(root: Path) -> None:
+    """Typing in the free-text box and picking no option is an answer, on the page and in every command.
+
+    A round appended after it asks only the synthetic acknowledgement, so it owes no intro either.
+    Driven end to end — saved through the server, frozen by `delta --finalize`, appended to — because each of those
+    has its own idea of what answered means.
+    """
+    from tools.review.lib.core.paths import ReviewPaths
+    from tools.review.lib.serve.app import ReviewApp
+    from tools.review.lib.serve.watch import Watcher
+
+    entry = ("---\nid: 010\ntitle: t\ngroup: topics\n---\n\n## intro\n\nWhich way, and the options.\n\n"
+             "## ask  which\n\nWhich way?\n\n- radio: this\n- radio: that\n")
+    run = design_review(root, {"010-x": entry})
+    paths = ReviewPaths(root / "repo" / ".tmp" / "reviews" / "d")
+    app = ReviewApp(root / "repo", paths, Watcher(paths))
+
+    status, _ = app.save_answer({"entry": "010-x", "ask": "which", "selected": [], "text": "neither, do X",
+                                 "round": app.config().next_round})
+    assert status == 200
+    row = next(r for r in app.state()["entries"] if r["slug"] == "010-x")
+    assert row["answered"] == row["asks"] == 1, row
+    code, out = run("delta", "d", "--finalize")
+    assert code == 0 and "neither, do X" in out, out
+
+    addition = root / "more.md"
+    addition.write_text("## prose\n\nHow the answer was carried out.\n", encoding="utf-8")
+    code, out = run("append", "d", "010", "--file", str(addition))
+    assert code == 0, out
+
+    code, out = run("validate", "d")
+    assert "no `intro`" not in out, f"a text-only answer left its round open: {out}"
+    code, out = run("status", "d", "--json")
+    assert code == 0 and '"which"' not in out, f"status still lists the ask as open: {out}"
+    row = next(r for r in app.state()["entries"] if r["slug"] == "010-x")
+    assert row["answered"] == 1, f"the nav counts the text-only answer as missing: {row}"
+
+
 def test_validate_checks_only_the_entries_it_is_given(root: Path) -> None:
     """Parallel writers each own a number range, and each grepped one shared report for their own lines.
 
