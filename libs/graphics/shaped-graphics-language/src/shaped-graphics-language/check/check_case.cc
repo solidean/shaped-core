@@ -99,6 +99,10 @@ void checker::check_pattern(function_scope& scope,
     auto const& target = out.files[file].target_at(pattern);
     if (target.kind == target_kind::enum_case)
         named_cases.push_back(target.index);
+    // CHK-221: a const whose value is a case names that case, which is what makes `true` and `false` exhaustive.
+    else if (target.kind == target_kind::symbol && out.at(target.symbol).kind == symbol_kind::constant
+             && out.constants[out.at(target.symbol).info].kind == constant_kind::enum_case)
+        named_cases.push_back(out.constants[out.at(target.symbol).info].case_index);
     else
         is_all_constant = false;
 }

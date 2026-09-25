@@ -33,7 +33,7 @@ Back to the [semantics](_index.md); the reasons are in [why/checking.md](why/che
 * **CHK-190** A lookup from a prelude file sees the prelude's scope alone, and never a name of the program's file.
 * **CHK-191** What the check pass needs of the prelude by name is always the prelude's, whatever the program's file shadows.
   That is the type of a literal, of a condition and of a `for`, and `raster_pipeline_description`.
-* **CHK-14** A `const`, a `type` alias and a file-scope `sampler` are `unsupported-yet`, and each still owns its name, so a use of it is silent.
+* **CHK-14** A `type` alias and a file-scope `sampler` are `unsupported-yet`, and each still owns its name, so a use of it is silent; a `const` is carried by CHK-219.
   An `enum` is a symbol of its own, by CHK-142.
 * **CHK-15** `use` and `notation` are `unsupported-yet`.
 * **CHK-16** A symbol is in one of four states: untouched, in compilation, checked, or failed.
@@ -80,6 +80,23 @@ fun f(x: float) -> float:
     return 0.0
 ```
 
+## Consts
+
+* **CHK-219** A `const` at file scope stands for its value wherever it is named: an `int` or `float` literal, `-` in front of one, an enum case, or another `const`.
+  Any other value is `unsupported-yet`, and a written type the value does not have is `type-mismatch`.
+* **CHK-221** A `const` whose value is an enum case names that case as a `case` pattern, so it counts for exhaustiveness as `e.case` does (CHK-159).
+* **CHK-222** `true` and `false` are `@shadowable(false)` consts of `core.sgl`, whose values are the cases of `bool` (CHK-218).
+
+```sgl
+const steps = 4
+const scale = -0.5
+
+fun sign(b: bool) -> float:
+    return case b:
+        true => 1.0
+        false => scale
+```
+
 ## Enums
 
 * **CHK-142** An `enum` declaration is a symbol and one type, whose kind is `enumeration`; two declarations are two types, as CHK-22 says of a `struct`.
@@ -122,10 +139,11 @@ enum light_kind:
 
 | on | the known attributes |
 |---|---|
-| a function | `@builtin`, `@pure`, `@operator`, `@vertex`, `@pixel`, `@compute`, `@stages` |
-| a struct | `@builtin`, `@vertex`, `@pixel` |
-| an enum | `@builtin` |
-| a binding | `@inline` |
+| a function | `@builtin`, `@pure`, `@operator`, `@vertex`, `@pixel`, `@compute`, `@stages`, `@shadowable` |
+| a struct | `@builtin`, `@vertex`, `@pixel`, `@shadowable` |
+| an enum | `@builtin`, `@shadowable` |
+| a const | `@shadowable` |
+| a binding | `@inline`, `@shadowable` |
 | a binding member | `@unfilterable`, `@non_filtering` |
 | a struct field | `@position`, `@thread_id`, `@per_instance`, `@stream` |
 | a pipeline | `@raster`, `@compute`, `@raytracing` |
@@ -204,6 +222,8 @@ enum light_kind:
 * **CHK-54** A local or a parameter may have the name of a module-level symbol, and shadows it as it shadows a local ([why](why/checking.md#chk-54)).
   Types and values share one namespace, so behind it the name is the local wherever it stands: a call of it is CHK-78, and a type position holding it is the normal error `wrong-kind-of-name`.
   A parameter's type is resolved before any parameter is in scope, so `light: light` is fine.
+* **CHK-220** A symbol that carries `@shadowable(false)` is hidden by nothing, and it stays what its name means.
+  A declaration of the program, a local, a parameter or a `for` variable of its name is `shadows-unshadowable`.
 * **CHK-55** A pattern in a `let` and a `let` without a value are `unsupported-yet`; `let mut` is CHK-111.
 * **CHK-56** `return value` needs `value` to be of the function's return type, or it is `type-mismatch`.
 * **CHK-57** An arrow body `=> value` is `return value`.
@@ -462,7 +482,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `opaque-struct-needs-builtin` | CHK-34 |
 | `invalid-attribute-arguments` | CHK-36, CHK-39, CHK-204, CHK-208, CHK-211, CHK-212 |
 | `binding-not-listed` | CHK-45, CHK-131 |
-| `type-mismatch` | CHK-52, CHK-56, CHK-77, CHK-84, CHK-112 to CHK-118, CHK-121, CHK-167, CHK-210, CHK-214 |
+| `type-mismatch` | CHK-52, CHK-56, CHK-77, CHK-84, CHK-112 to CHK-118, CHK-121, CHK-167, CHK-210, CHK-214, CHK-219 |
 | `not-assignable` | CHK-112 |
 | `missing-return` | CHK-125 |
 | `unreachable-code` | CHK-126, CHK-162 |
@@ -478,13 +498,13 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `missing-field`, `unknown-field`, `duplicate-field` | CHK-84 |
 | `invalid-entry-point` | CHK-87, CHK-93 |
 | `invalid-pipeline` | CHK-175 to CHK-185, CHK-187 |
+| `shadows-unshadowable` | CHK-220 |
 
 ## Open
 
 * Whether `@builtin` is allowed outside the prelude; today it is.
 * Whether a builtin's declaration is checked against its record beyond the key; today its result type and its attributes are not.
 * Whether a body is checked once or where it is inlined, once a generic makes the two differ ([why](why/checking.md#chk-129)).
-* `true` and `false`, which are names nothing declares yet, beyond the value of a pipeline setting (CHK-178).
 * Whether a second function with the parameter types of another is an error where it is declared.
 * Whether a pattern may bind a name, which is the pattern language of [patterns](../incubator/patterns.md) and the thing that would make exhaustiveness a real analysis.
 * Whether an enum reaches `int` through a cast, and what an `int` that names no case then is ([enum futures](../incubator/enum-futures.md)).

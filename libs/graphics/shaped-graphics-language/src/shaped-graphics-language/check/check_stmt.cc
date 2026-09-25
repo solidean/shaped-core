@@ -164,6 +164,7 @@ void checker::check_let(function_scope& scope, ast::stmt_id id, ast::let_stmt co
     auto const self = target{.kind = target_kind::local, .index = i32(id)};
     set_type(file, let.pattern, type);
     set_target(file, let.pattern, self);
+    judge_shadowing(file, text_of(file, n->where), n->where);
     // only now: the value of `let x = x` does not see the `x` it declares
     declare_local(scope, {.name = text_of(file, n->where), .where = self, .type = type, .is_mut = let.is_mut});
 }
@@ -309,6 +310,7 @@ void checker::check_for(function_scope& scope, ast::stmt_id id, ast::for_stmt co
         auto const self = target{.kind = target_kind::local, .index = i32(id)};
         set_type(file, loop.variable, int_type);
         set_target(file, loop.variable, self);
+        judge_shadowing(file, text_of(file, n->where), n->where);
         declare_local(scope, {.name = text_of(file, n->where), .where = self, .type = int_type});
     }
     scope.loops.push_back({});

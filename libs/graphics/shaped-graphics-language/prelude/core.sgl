@@ -10,6 +10,14 @@
 // Every overload family needs generics to be written once, and until SGL has them the registry's C++ loops write them out.
 // A function written here is inlined like any other, so it costs an emitter nothing and an editor can jump into it.
 
+// ---- the values of bool ---------------------------------------------------------------------------------------------
+//
+// `bool` is a builtin enum of builtins.sgl, and its two cases are its two values, under the names every program writes.
+// Neither may be hidden: a local named `true` would change what every `x == true` below it means.
+
+@shadowable(false) const false = bool.false
+@shadowable(false) const true = bool.true
+
 // ---- the raster pipeline description --------------------------------------------------------------------------------
 //
 // What a `pipeline` declaration's settings are paths into: sg::raster_pipeline_description, with sg's names and nesting.

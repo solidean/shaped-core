@@ -156,6 +156,14 @@ constexpr auto bool_cases = cc::string_view("fun pick(b: bool) -> float:\n"
 constexpr auto bool_cases_body
     = cc::string_view("let x = pick(p.a < 0.5) + pick(bool.false) + pick(bool.true == (p.b > 0.5))\n");
 
+/// A const is its value where it is named, `true` and `false` included.
+constexpr auto consts = cc::string_view("const scale = 2.0\n"
+                                        "const limit = 3\n"
+                                        "const also_limit = limit\n");
+constexpr auto consts_body = cc::string_view("let mut x = p.a * scale\n"
+                                             "for i in 0 ..< also_limit:\n"
+                                             "    if (i < limit) == true and not false => x += 1.0\n");
+
 struct program
 {
     cc::string_view name;
@@ -177,6 +185,7 @@ constexpr program programs[] = {
     {.name = "void values", .helpers = void_values, .body = void_values_body},
     {.name = "quiet void values", .helpers = quiet_void_values, .body = void_values_body},
     {.name = "bool cases", .helpers = bool_cases, .body = bool_cases_body},
+    {.name = "consts", .helpers = consts, .body = consts_body},
 };
 
 run_inputs inputs_of(checked_module const& m, f32 a, f32 b)

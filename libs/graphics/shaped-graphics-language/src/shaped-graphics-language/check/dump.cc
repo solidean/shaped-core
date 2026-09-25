@@ -67,6 +67,9 @@ struct dumper
         case symbol_kind::pipeline:
             out += "(pipeline ";
             break;
+        case symbol_kind::constant:
+            out += "(const ";
+            break;
         case symbol_kind::unsupported:
             out += "(unsupported ";
             break;

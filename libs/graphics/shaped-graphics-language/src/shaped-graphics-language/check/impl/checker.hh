@@ -221,6 +221,12 @@ struct checker
     void compile(symbol_id id);
     void compile_struct(symbol_id id);
     void compile_enum(symbol_id id);
+    /// A `const`: its value is a number literal, an enum case or another `const`, and anything else is `unsupported-yet`.
+    void compile_const(symbol_id id);
+    /// False where `attributes` hold `@shadowable(false)`; a malformed one is reported when its declaration is compiled.
+    [[nodiscard]] bool is_shadowable_by(i32 file, ast::range_of<ast::attribute> attributes) const;
+    /// Reports `shadows-unshadowable` where a local or a parameter named `name` would hide a `@shadowable(false)` symbol.
+    void judge_shadowing(i32 file, cc::string_view name, source_span where);
     void compile_binding(symbol_id id);
     void compile_function(symbol_id id);
     void judge_entry_point(symbol_id id);

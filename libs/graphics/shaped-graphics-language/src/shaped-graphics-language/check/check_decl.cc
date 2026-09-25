@@ -203,7 +203,9 @@ type_id checker::resolve_type(i32 file, ast::expr_id expr, function_scope const*
             else if (kind != symbol_kind::unsupported)
                 report(diagnostic_kind::wrong_kind_of_name, file, where,
                        cc::format("{} is a {}, and a type stands here", text,
-                                  kind == symbol_kind::function ? "function" : "binding"));
+                                  kind == symbol_kind::function   ? "function"
+                                  : kind == symbol_kind::constant ? "const"
+                                                                  : "binding"));
         }
     }
     else if (auto const* const applied = e.node.try_as<ast::index>())
@@ -395,7 +397,7 @@ void checker::compile_struct(symbol_id id)
     auto const is_pixel = find_attribute(file, d.attributes, "pixel") != nullptr;
 
     // An edge struct's attributes may be pipeline settings, which every pipeline it is an edge of starts from.
-    cc::string_view const known[] = {"builtin", "vertex", "pixel"};
+    cc::string_view const known[] = {"builtin", "vertex", "pixel", "shadowable"};
     judge_attributes(file, d.attributes, known, "a struct",
                      is_vertex || is_pixel ? setting_scope::description : setting_scope::none);
 
@@ -436,7 +438,7 @@ void checker::compile_enum(symbol_id id)
     auto const& ast = ast_of(file);
     auto const& e = ast.at(decl).node.as<ast::enum_decl>();
 
-    cc::string_view const known[] = {"builtin"};
+    cc::string_view const known[] = {"builtin", "shadowable"};
     judge_attributes(file, ast.at(decl).attributes, known, "an enum");
     // A builtin enum is written as its record says, `bool` as the target's bool, and not as the `int` of its cases.
     if (find_attribute(file, ast.at(decl).attributes, "builtin") != nullptr)
@@ -523,6 +525,144 @@ void checker::compile_enum(symbol_id id)
     out.symbols[index_of(id)].type = type;
 }
 
+bool checker::is_shadowable_by(i32 file, ast::range_of<ast::attribute> attributes) const
+{
+    auto const* const a = find_attribute(file, attributes, "shadowable");
+    if (a == nullptr)
+        return true;
+    auto const arguments = ast_of(file).at(a->arguments);
+    return !(arguments.size() == 1 && ast::is_valid(arguments[0].value)
+             && text_of(file, span_of(file, arguments[0].value)) == "false");
+}
+
+void checker::judge_shadowing(i32 file, cc::string_view name, source_span where)
+{
+    // CHK-220: a local or a parameter hides a module-level symbol of its name (CHK-54), unless that one says it may not.
+    auto const* const found = names_seen_from(file).get_ptr(name);
+    if (found == nullptr)
+        return;
+    for (auto const s : *found)
+        if (!out.at(s).is_shadowable)
+        {
+            report(diagnostic_kind::shadows_unshadowable, file, where, cc::format("{} is @shadowable(false)", name));
+            return;
+        }
+}
+
+void checker::compile_const(symbol_id id)
+{
+    auto const file = out.at(id).file;
+    auto const decl = out.at(id).declaration;
+    auto const& ast = ast_of(file);
+    auto const& d = ast.at(decl);
+    auto const& c = d.node.as<ast::const_decl>();
+    constexpr auto error_type = checked_module::error_type;
+
+    cc::string_view const known[] = {"shadowable"};
+    judge_attributes(file, d.attributes, known, "a const");
+    if (auto const* const a = find_attribute(file, d.attributes, "shadowable"))
+    {
+        auto const arguments = ast.at(a->arguments);
+        auto const text = arguments.size() == 1 && ast::is_valid(arguments[0].value)
+                            ? text_of(file, span_of(file, arguments[0].value))
+                            : cc::string_view();
+        if (text != "false" && text != "true")
+            report(diagnostic_kind::invalid_attribute_arguments, file, a->name,
+                   "@shadowable takes `false` or `true`, as in @shadowable(false)");
+    }
+
+    auto const fail = [&] { out.symbols[index_of(id)].state = symbol_state::failed; };
+    if (!ast::is_valid(c.value))
+    {
+        unsupported(file, c.name, "a const without a value");
+        return fail();
+    }
+
+    // CHK-219: a literal, an enum case or another const, which is all a value known before the program runs is yet.
+    auto const& value = ast.at(c.value);
+    auto const where = span_of(file, c.value);
+    auto info = constant_info{.symbol = id};
+    auto is_negated = false;
+    auto literal = c.value;
+    if (auto const* const call = value.node.try_as<ast::call>();
+        call != nullptr && call->spelling == ast::call_spelling::prefix && sgl::is_valid(call->op)
+        && text_of(file, file_of(file).at(call->op).where) == "-" && ast.at(call->arguments).size() == 1)
+    {
+        is_negated = true;
+        literal = ast.at(call->arguments)[0].value;
+    }
+
+    if (ast::is_valid(literal) && ast.at(literal).node.is<ast::literal>())
+    {
+        auto const text = text_of(file, span_of(file, literal));
+        auto const number = classify_number(text);
+        if (number == number_class::plain_integer && parse_plain_integer(text).has_value())
+        {
+            info.kind = constant_kind::integer;
+            info.integer = is_negated ? -parse_plain_integer(text).value() : parse_plain_integer(text).value();
+            info.type = type_of_builtin(builtins::k_int, file, where);
+        }
+        else if (number == number_class::plain_float && parse_plain_float(text).has_value())
+        {
+            info.kind = constant_kind::real;
+            info.real = is_negated ? -parse_plain_float(text).value() : parse_plain_float(text).value();
+            info.type = type_of_builtin(builtins::k_float, file, where);
+        }
+        else
+        {
+            unsupported(file, where, "a const whose literal is no plain int or float");
+            return fail();
+        }
+    }
+    else if (value.node.is<ast::member>() || value.node.is<ast::name>())
+    {
+        auto scope = function_scope{.file = file};
+        auto const type = check_expr(scope, c.value);
+        if (type == error_type)
+            return fail();
+        auto const& target = out.files[file].target_at(c.value);
+        if (target.kind == target_kind::enum_case)
+        {
+            info.kind = constant_kind::enum_case;
+            info.case_index = target.index;
+            info.type = type;
+        }
+        else if (target.kind == target_kind::symbol && out.at(target.symbol).kind == symbol_kind::constant)
+        {
+            info = out.constants[out.at(target.symbol).info];
+            info.symbol = id;
+        }
+        else
+        {
+            unsupported(file, where, "a const whose value is no literal, no enum case and no const");
+            return fail();
+        }
+    }
+    else
+    {
+        unsupported(file, where, "a const whose value is no literal, no enum case and no const");
+        return fail();
+    }
+    if (info.type == error_type)
+        return fail();
+
+    if (ast::is_valid(c.type))
+    {
+        auto const declared = resolve_value_type(file, c.type);
+        if (declared != error_type && declared != info.type)
+        {
+            report(diagnostic_kind::type_mismatch, file, where,
+                   cc::format("expected {}, got {}", out.name_of(declared), out.name_of(info.type)));
+            return fail();
+        }
+    }
+
+    set_type(file, c.value, info.type);
+    out.symbols[index_of(id)].type = info.type;
+    out.symbols[index_of(id)].info = i32(out.constants.size());
+    out.constants.push_back(info);
+}
+
 void checker::compile_binding(symbol_id id)
 {
     auto const file = out.at(id).file;
@@ -530,7 +670,7 @@ void checker::compile_binding(symbol_id id)
     auto const& d = ast_of(file).at(decl);
     auto const& b = d.node.as<ast::binding_decl>();
 
-    cc::string_view const known[] = {"inline"};
+    cc::string_view const known[] = {"inline", "shadowable"};
     judge_attributes(file, d.attributes, known, "a binding");
 
     if (ast::is_valid(b.composition))
@@ -570,7 +710,8 @@ void checker::compile_function(symbol_id id)
     // An entry point's attributes may be pipeline settings, which every pipeline it is a stage of starts from.
     auto const is_raster_entry = find_attribute(file, d.attributes, "vertex") != nullptr
                               || find_attribute(file, d.attributes, "pixel") != nullptr;
-    cc::string_view const known[] = {"builtin", "pure", "operator", "vertex", "pixel", "compute", "stages"};
+    cc::string_view const known[]
+        = {"builtin", "pure", "operator", "vertex", "pixel", "compute", "stages", "shadowable"};
     judge_attributes(file, d.attributes, known, "a function",
                      is_raster_entry ? setting_scope::description : setting_scope::none);
 

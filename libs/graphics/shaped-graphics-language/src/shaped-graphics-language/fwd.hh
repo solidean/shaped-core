@@ -187,6 +187,8 @@ enum class stage : u8;
 enum class symbol_kind : u8;
 enum class symbol_state : u8;
 struct symbol;
+enum class constant_kind : u8;
+struct constant_info;
 struct parameter;
 struct function_info;
 struct binding_info;

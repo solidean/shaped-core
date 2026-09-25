@@ -61,10 +61,11 @@ It never starts a keyword form, so `self.x = 0` is an assignment.
 
 ## Open
 
-* Whether `true` and `false` are keywords or constants of the prelude; until that is decided the AST reads them as ordinary names, and they are not reserved.
+Nothing is open today.
 
 Settled:
 
+* `true` and `false` are no keywords: they are `@shadowable(false)` consts of the prelude over the cases of `bool` ([CHK-222](semantics/checking.md#consts)).
 * `out` is a keyword and `in` / `inout` / `ref` are not: the only access a resource needs beyond read and `mut` is write-only.
 * `buffer`, `bytes`, `constants`, the texture types and the image types are types rather than keywords, since they take type arguments like any other type.
 * `sampler` stays a keyword even where it names a type, since the word is one concept: a sampler, static or bound.

@@ -170,6 +170,8 @@ enum class sgl::check::symbol_kind : sgl::u8
     binding,
     /// A `pipeline` declaration; an unnamed one is named `pipeline`.
     pipeline,
+    /// A file-scope `const`, whose value is known before anything runs.
+    constant,
     /// A named declaration this phase has no meaning for yet: `const`, `type`, `sampler`.
     /// It is always `failed`, and it exists so its name resolves to the error type and not to `unknown-name`.
     unsupported,
@@ -203,10 +205,34 @@ struct sgl::check::symbol
     cc::string operator_spelling;
     /// A struct's type.
     type_id type = type_id::none;
-    /// A position in `checked_module::functions`, `bindings` or `pipelines`, by `kind`; -1 before it is compiled.
+    /// A position in `checked_module::functions`, `bindings`, `pipelines` or `constants`, by `kind`; -1 before it is compiled.
     i32 info = -1;
+    /// False under `@shadowable(false)`: a declaration or a local of its name is then an error rather than hiding it.
+    bool is_shadowable = true;
 
     bool operator==(symbol const&) const = default;
+};
+
+enum class sgl::check::constant_kind : sgl::u8
+{
+    integer,
+    real,
+    /// A case of an enum; for `bool`, whose cases are its two values, the case is the value.
+    enum_case,
+};
+
+/// The value of a `const`, which is known before anything runs.
+struct sgl::check::constant_info
+{
+    symbol_id symbol = symbol_id::none;
+    type_id type = type_id::none;
+    constant_kind kind = constant_kind::integer;
+    i32 integer = 0;
+    f64 real = 0;
+    /// A position in the `cases` of `type`, for an `enum_case`.
+    i32 case_index = -1;
+
+    bool operator==(constant_info const&) const = default;
 };
 
 struct sgl::check::parameter

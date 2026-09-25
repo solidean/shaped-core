@@ -186,6 +186,8 @@ cc::string_view sgl::to_string(diagnostic_kind kind)
         return "stage-not-allowed";
     case diagnostic_kind::invalid_pipeline:
         return "invalid-pipeline";
+    case diagnostic_kind::shadows_unshadowable:
+        return "shadows-unshadowable";
     }
     CC_UNREACHABLE("unknown diagnostic_kind");
 }
@@ -280,6 +282,7 @@ sgl::severity sgl::default_severity_of(diagnostic_kind kind)
     case diagnostic_kind::needs_feature:
     case diagnostic_kind::stage_not_allowed:
     case diagnostic_kind::invalid_pipeline:
+    case diagnostic_kind::shadows_unshadowable:
         return severity::normal_error;
     case diagnostic_kind::spaced_attribute_arguments:
     case diagnostic_kind::no_effect:

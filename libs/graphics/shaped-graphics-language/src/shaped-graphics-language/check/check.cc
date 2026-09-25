@@ -171,7 +171,8 @@ void checker::judge_attributes(i32 file,
         }
         if (!is_known)
             unsupported(file, a.name, cc::format("the attribute @{} on {}", name, owner));
-        else if (sgl::is_valid(a.list) && name != "operator" && name != "compute" && name != "stream" && name != "stages")
+        else if (sgl::is_valid(a.list) && name != "operator" && name != "compute" && name != "stream"
+                 && name != "stages" && name != "shadowable" && name != "expect")
             report(diagnostic_kind::invalid_attribute_arguments, file, span_of(file, a.list),
                    cc::format("@{} takes no arguments", name));
     }
@@ -239,6 +240,7 @@ void checker::add_symbol(symbol s, source_span name_where)
     auto const id = symbol_id(out.symbols.size());
     auto const file = s.file;
     auto const is_function = s.kind == symbol_kind::function;
+    s.is_shadowable = !ast::is_valid(s.declaration) || is_shadowable_by(file, ast_of(file).at(s.declaration).attributes);
     auto const name = s.name;
     auto const spelling = s.operator_spelling;
     out.symbols.push_back(cc::move(s));
@@ -276,7 +278,21 @@ void checker::merge_scopes()
         auto& seen = names[name];
         // Two overload sets are one; anything else of the user file hides what the prelude has of that name.
         if (!is_all_functions(seen) || !is_all_functions(ids))
+        {
+            // CHK-220: unless the prelude's may not be hidden, which keeps the prelude's and reports the user's.
+            auto is_sealed = false;
+            for (auto const s : seen)
+                is_sealed = is_sealed || !out.at(s).is_shadowable;
+            if (is_sealed)
+            {
+                for (auto const s : ids)
+                    report(diagnostic_kind::shadows_unshadowable, out.at(s).file,
+                           span_of(out.at(s).file, out.at(s).declaration),
+                           cc::format("{} is @shadowable(false) in the prelude", name));
+                continue;
+            }
             seen.clear();
+        }
         seen.push_back_range(ids);
     }
 }
@@ -352,7 +368,11 @@ void checker::declare(i32 file, ast::decl_id decl)
                 add_symbol(named(symbol_kind::enumeration, e.name), e.name);
         },
         [&](ast::type_decl const& t) { unsupported_symbol(t.name, "type alias"); },
-        [&](ast::const_decl const& c) { unsupported_symbol(c.name, "const"); },
+        [&](ast::const_decl const& c)
+        {
+            if (!c.name.empty())
+                add_symbol(named(symbol_kind::constant, c.name), c.name);
+        },
         [&](ast::sampler_decl const& s) { unsupported_symbol(s.name, "sampler"); },
         [&](ast::pipeline_decl const& p)
         {
@@ -414,6 +434,9 @@ void checker::compile(symbol_id id)
         break;
     case symbol_kind::pipeline:
         compile_pipeline(id);
+        break;
+    case symbol_kind::constant:
+        compile_const(id);
         break;
     case symbol_kind::unsupported:
         out.symbols[index_of(id)].state = symbol_state::failed;

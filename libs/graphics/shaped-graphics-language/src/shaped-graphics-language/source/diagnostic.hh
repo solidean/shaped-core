@@ -159,6 +159,8 @@ enum class sgl::diagnostic_kind : sgl::u8
     stage_not_allowed,
     /// A `pipeline` whose stages do not fit together, or a setting that names no field or has a value it cannot.
     invalid_pipeline,
+    /// A declaration, a local or a parameter whose name would hide a `@shadowable(false)` symbol.
+    shadows_unshadowable,
 };
 
 namespace sgl

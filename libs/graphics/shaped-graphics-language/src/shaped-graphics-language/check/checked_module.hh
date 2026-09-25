@@ -63,6 +63,8 @@ struct sgl::check::checked_module
     /// Only the pipelines that checked without an error.
     cc::vector<pipeline_info> pipelines;
     cc::vector<pipeline_setting> pipeline_settings;
+    /// The value of every `const` that checked.
+    cc::vector<constant_info> constants;
 
     /// One entry per file `check` was given, in that order.
     cc::vector<file_tables> files;
@@ -152,7 +154,8 @@ struct sgl::check::checked_module
             && is_equal(parameters, rhs.parameters) && is_equal(bindings, rhs.bindings)
             && is_equal(binding_lists, rhs.binding_lists) && is_equal(samplers, rhs.samplers)
             && is_equal(pipelines, rhs.pipelines) && is_equal(pipeline_settings, rhs.pipeline_settings)
-            && is_equal(files, rhs.files) && is_equal(entry_points, rhs.entry_points)
-            && is_equal(diagnostics, rhs.diagnostics) && builtins == rhs.builtins;
+            && is_equal(constants, rhs.constants) && is_equal(files, rhs.files)
+            && is_equal(entry_points, rhs.entry_points) && is_equal(diagnostics, rhs.diagnostics)
+            && builtins == rhs.builtins;
     }
 };

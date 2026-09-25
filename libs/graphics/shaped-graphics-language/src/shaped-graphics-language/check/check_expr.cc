@@ -30,6 +30,7 @@ void checker::check_body(symbol_id id)
     for (auto const& p : out.at(info.parameters))
     {
         // CHK-54: a parameter may have the name of a module-level symbol, which it hides in the body.
+        judge_shadowing(file, text_of(file, ast.at(p.field).name), ast.at(p.field).name);
         scope.locals.push_back({
             .name = text_of(file, ast.at(p.field).name),
             .where = {.kind = target_kind::parameter, .index = i32(p.field)},
@@ -315,6 +316,11 @@ type_id checker::check_name(function_scope& scope, ast::expr_id id, ast::name co
         report(diagnostic_kind::wrong_kind_of_name, file, where,
                cc::format("{} is a pipeline, which the host acquires and no shader reads", text));
         break;
+    case symbol_kind::constant:
+        // CHK-219: a const is its value, and one that did not check is silent here, as a failed symbol always is.
+        if (demand(symbol, file, where) == symbol_state::checked)
+            return out.at(symbol).type;
+        break;
     case symbol_kind::unsupported:
         break;
     }
@@ -349,6 +355,12 @@ type_id checker::check_member(function_scope& scope, ast::expr_id id, ast::membe
             set_target(file, member.object, {.kind = target_kind::symbol, .symbol = binding});
             if (demand(binding, file, object_where) != symbol_state::checked)
                 return error_type;
+            // A const's value is checked outside every function, and a binding member is read only inside one.
+            if (!is_valid(scope.function))
+            {
+                unsupported(file, span_of(file, id), "a binding member outside a function");
+                return error_type;
+            }
 
             auto is_listed = false;
             for (auto const listed : out.at(out.functions[out.at(scope.function).info].bindings))
@@ -587,11 +599,14 @@ type_id checker::check_call(function_scope& scope, ast::expr_id id, ast::call co
         return error_type;
     case symbol_kind::enumeration:
     case symbol_kind::pipeline:
+    case symbol_kind::constant:
         (void)check_arguments(scope, call.arguments, false);
         set_target(file, call.callee, {.kind = target_kind::symbol, .symbol = first});
         report(diagnostic_kind::wrong_kind_of_name, file, callee_where,
                cc::format("{} is {}, and a call needs a function or a struct", text,
-                          out.at(first).kind == symbol_kind::pipeline ? "a pipeline" : "an enum"));
+                          out.at(first).kind == symbol_kind::pipeline   ? "a pipeline"
+                          : out.at(first).kind == symbol_kind::constant ? "a const"
+                                                                        : "an enum"));
         return error_type;
     case symbol_kind::unsupported:
         (void)check_arguments(scope, call.arguments, false);

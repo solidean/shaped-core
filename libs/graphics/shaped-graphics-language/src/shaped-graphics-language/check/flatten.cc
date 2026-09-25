@@ -303,6 +303,8 @@ struct flattener
             for (auto const& b : current()->bound)
                 if (b.where == where)
                     return is_valid(b.literal) ? again(b.literal, id) : local_ref(b.local, id);
+            if (where.kind == target_kind::symbol && c.out.at(where.symbol).kind == symbol_kind::constant)
+                return constant_value(type, id, c.out.constants[c.out.at(where.symbol).info]);
             return fail();
         }
         if (auto const* const m = e.node.try_as<ast::member>())
@@ -360,6 +362,21 @@ struct flattener
         auto const cases = c.out.at(c.out.at(type).cases);
         auto const is_known_case = case_index >= 0 && case_index < cases.size();
         return is_known_case ? add_expr(type, from, flat_bool_literal{.value = cases[case_index].value != 0}) : fail();
+    }
+
+    /// A const stands for its value, written where the name stood.
+    flat_expr_id constant_value(type_id type, ast::expr_id from, constant_info const& info)
+    {
+        switch (info.kind)
+        {
+        case constant_kind::integer:
+            return add_expr(type, from, flat_int_literal{.value = info.integer});
+        case constant_kind::real:
+            return add_expr(type, from, flat_literal{.value = info.real});
+        case constant_kind::enum_case:
+            return enum_value(type, from, info.case_index);
+        }
+        return fail();
     }
 
     flat_expr_id flatten_number(ast::expr_id id, type_id type)
