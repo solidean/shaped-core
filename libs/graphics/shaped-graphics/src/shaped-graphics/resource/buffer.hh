@@ -61,7 +61,7 @@ public:
     }
 
     /// The underlying raw resource, never null unless default-constructed.
-    /// Use it to reach the raw, byte-addressed API; there is no implicit conversion to `raw_buffer_handle`.
+    /// Use it to reach the untyped `raw_buffer` API; there is no implicit conversion to `raw_buffer_handle`.
     [[nodiscard]] raw_buffer_handle const& raw() const { return _raw; }
 
     [[nodiscard]] isize size_in_bytes() const { return _raw->size_in_bytes(); }

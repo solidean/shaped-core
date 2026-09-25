@@ -101,7 +101,7 @@ TEST("sg metal - a binding group refuses a view of the wrong kind")
         = ctx->create_metal_binding_group_layout(cc::span<sg::binding const>(&b, 1), {}, sg::lifetime_scope::persistent);
     REQUIRE(layout.has_value());
 
-    // A raw view where the binding wants a structured one: the shapes are what `sg::accepts` separates, and binding
+    // A bytes view where the binding wants a structured one: the shapes are what `sg::accepts` separates, and binding
     // the wrong one would have the shader read through a pointer of the wrong stride.
     auto const buffer = ctx->persistent.create_raw_buffer(256, sg::buffer_usage::readwrite_buffer);
     auto const nv = sg::named_view{.name = "Data", .view = buffer->as_raw_readwrite({.offset = 0, .size = 256})};

@@ -26,7 +26,7 @@
 namespace sg
 {
 /// A view's element (`readonly` / `readwrite`) or block (`uniform`) type.
-/// Must be `byte`, the raw byte-addressed path, or a multiple of 4 bytes, since GPUs load at DWORD alignment.
+/// Must be `byte`, the byte-addressed path, or a multiple of 4 bytes, since GPUs load at DWORD alignment.
 template <class T>
 concept view_element = std::is_same_v<T, byte> || (sizeof(T) % 4 == 0);
 
@@ -35,7 +35,7 @@ concept view_element = std::is_same_v<T, byte> || (sizeof(T) % 4 == 0);
 constexpr isize uniform_buffer_offset_alignment = 256; // Vk minUniformBufferOffsetAlignment / WGPU / DX12 CBV placement
 constexpr isize max_uniform_buffer_size = 65536;       // 64 KiB — DX12 max CBV / WGPU max uniform binding
 
-/// Placement rules a shader-facing *storage* buffer view — readonly or readwrite, raw or structured — must satisfy.
+/// Placement rules a shader-facing *storage* buffer view — readonly or readwrite, bytes or structured — must satisfy.
 /// A view is a subrange, so it carries the binding-offset rules; `buffer<T>` is a whole buffer recast like a span and carries none of them.
 /// Both values are portable floors, hardcoded rather than queried per device, so a violation fails on a dx12 dev box rather than later on WebGPU.
 constexpr isize storage_buffer_offset_alignment
@@ -64,13 +64,13 @@ enum class sg::view_class
 };
 
 /// How a view's bytes are laid out.
-/// `raw` is byte-addressed (element type `byte`), `structured` an array strided by the element type, `uniform_block` a single struct block.
+/// `bytes` is byte-addressed (element type `byte`), `structured` an array strided by the element type, `uniform_block` a single struct block.
 /// `texture` is a texel grid, whose dimension / array / cube / sample count come from the bound raw_texture's description.
 enum class sg::view_shape
 {
     uniform_block,
     structured,
-    raw,
+    bytes,
     texture,
     acceleration_structure, ///< a ray-tracing TLAS bound as an SRV — no byte layout, addressed by the AS's GPU VA
     // Future (with formats): texel (a typed buffer view).
@@ -130,14 +130,14 @@ struct any_texture_view;
 } // namespace sg
 
 /// A buffer view's erased payload: the access class, byte layout and buffer a backend reads to build a CBV / SRV / UAV.
-/// `shape` picks the interpretation — uniform block, structured array, or raw bytes.
+/// `shape` picks the interpretation — uniform block, structured array, or bytes.
 struct sg::raw_buffer_view
 {
     view_class access = view_class::readonly;  ///< uniform / readonly / readwrite
-    view_shape shape = view_shape::structured; ///< uniform_block / structured / raw
+    view_shape shape = view_shape::structured; ///< uniform_block / structured / bytes
     raw_buffer_handle buffer;                  ///< the viewed buffer
     isize offset_in_bytes = 0;                 ///< start of the view within the buffer
-    isize size_in_bytes = 0;                   ///< [uniform_block, raw] visible byte size
+    isize size_in_bytes = 0;                   ///< [uniform_block, bytes] visible byte size
     isize element_count = 0;                   ///< [structured] number of elements
     isize stride_in_bytes = 0;                 ///< [structured] element stride (= sizeof(T))
 
@@ -338,7 +338,7 @@ struct sg::uniform_buffer_view
 };
 
 /// A read-only storage view of an array of `T` — SRV / read SSBO.
-/// With `T == byte` it is a raw, byte-addressed view; otherwise a structured array strided by `sizeof(T)`.
+/// With `T == byte` it is a byte-addressed view, shape `bytes`; otherwise a structured array strided by `sizeof(T)`.
 template <sg::view_element T>
 struct sg::readonly_buffer_view
 {
@@ -350,15 +350,15 @@ struct sg::readonly_buffer_view
 
     [[nodiscard]] raw_view to_raw() const
     {
-        constexpr bool is_raw = std::is_same_v<T, byte>;
+        constexpr bool is_bytes = std::is_same_v<T, byte>;
         return raw_buffer_view{
             .access = access,
-            .shape = is_raw ? view_shape::raw : view_shape::structured,
+            .shape = is_bytes ? view_shape::bytes : view_shape::structured,
             .buffer = buffer,
             .offset_in_bytes = offset_in_bytes,
-            .size_in_bytes = is_raw ? element_count : 0,
-            .element_count = is_raw ? 0 : element_count,
-            .stride_in_bytes = is_raw ? 0 : isize(sizeof(T)),
+            .size_in_bytes = is_bytes ? element_count : 0,
+            .element_count = is_bytes ? 0 : element_count,
+            .stride_in_bytes = is_bytes ? 0 : isize(sizeof(T)),
         };
     }
 
@@ -366,7 +366,7 @@ struct sg::readonly_buffer_view
 };
 
 /// A read-write storage view of an array of `T` — UAV / read-write SSBO.
-/// With `T == byte` it is a raw, byte-addressed view; otherwise a structured array strided by `sizeof(T)`.
+/// With `T == byte` it is a byte-addressed view, shape `bytes`; otherwise a structured array strided by `sizeof(T)`.
 template <sg::view_element T>
 struct sg::readwrite_buffer_view
 {
@@ -378,15 +378,15 @@ struct sg::readwrite_buffer_view
 
     [[nodiscard]] raw_view to_raw() const
     {
-        constexpr bool is_raw = std::is_same_v<T, byte>;
+        constexpr bool is_bytes = std::is_same_v<T, byte>;
         return raw_buffer_view{
             .access = access,
-            .shape = is_raw ? view_shape::raw : view_shape::structured,
+            .shape = is_bytes ? view_shape::bytes : view_shape::structured,
             .buffer = buffer,
             .offset_in_bytes = offset_in_bytes,
-            .size_in_bytes = is_raw ? element_count : 0,
-            .element_count = is_raw ? 0 : element_count,
-            .stride_in_bytes = is_raw ? 0 : isize(sizeof(T)),
+            .size_in_bytes = is_bytes ? element_count : 0,
+            .element_count = is_bytes ? 0 : element_count,
+            .stride_in_bytes = is_bytes ? 0 : isize(sizeof(T)),
         };
     }
 
@@ -400,10 +400,10 @@ template <sg::view_element T>
 struct sg::buffer_view
 {
     view_class access = view_class::readonly;  ///< uniform / readonly / readwrite — runtime, unlike the leaves
-    view_shape shape = view_shape::structured; ///< uniform_block / structured / raw
+    view_shape shape = view_shape::structured; ///< uniform_block / structured / bytes
     raw_buffer_handle buffer;
     isize offset_in_bytes = 0;
-    isize size_in_bytes = 0;   ///< [uniform_block, raw]
+    isize size_in_bytes = 0;   ///< [uniform_block, bytes]
     isize element_count = 0;   ///< [structured]
     isize stride_in_bytes = 0; ///< [structured] = sizeof(T)
 
@@ -496,12 +496,12 @@ struct sg::buffer_view
     }
 
 private:
-    // `byte` is the raw, byte-addressed shape; any other `T` is a structured array whose stride is exactly `sizeof(T)`.
+    // `byte` is the byte-addressed `bytes` shape; any other `T` is a structured array whose stride is exactly `sizeof(T)`.
     // A mismatch means the caller picked the wrong element type, which the stride can prove, so it asserts even through `try_as_*`.
     void _assert_element_matches() const
     {
         if constexpr (std::is_same_v<T, byte>)
-            CC_ASSERT(shape == view_shape::raw, "recovering a buffer_view<byte> needs a raw (byte-addressed) view");
+            CC_ASSERT(shape == view_shape::bytes, "recovering a buffer_view<byte> needs a bytes (byte-addressed) view");
         else
         {
             CC_ASSERT(shape == view_shape::structured, "recovering a buffer_view<T> (non-byte) needs a structured "

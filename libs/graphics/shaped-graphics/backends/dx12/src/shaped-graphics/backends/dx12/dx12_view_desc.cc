@@ -351,7 +351,7 @@ void create_buffer_view(ID3D12Device* device, sg::raw_buffer_view const& view, D
         D3D12_SHADER_RESOURCE_VIEW_DESC desc = {};
         desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
         desc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
-        if (view.shape == sg::view_shape::raw)
+        if (view.shape == sg::view_shape::bytes)
         {
             desc.Format = DXGI_FORMAT_R32_TYPELESS;
             desc.Buffer.FirstElement = UINT64(view.offset_in_bytes / 4);
@@ -373,7 +373,7 @@ void create_buffer_view(ID3D12Device* device, sg::raw_buffer_view const& view, D
     {
         D3D12_UNORDERED_ACCESS_VIEW_DESC desc = {};
         desc.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
-        if (view.shape == sg::view_shape::raw)
+        if (view.shape == sg::view_shape::bytes)
         {
             desc.Format = DXGI_FORMAT_R32_TYPELESS;
             desc.Buffer.FirstElement = UINT64(view.offset_in_bytes / 4);
@@ -409,19 +409,19 @@ void create_null_view(ID3D12Device* device, sg::binding const& binding, D3D12_CP
     case sg::binding_type::bytes:
     case sg::binding_type::buffer:
     {
-        bool const is_raw = sg::shape_of(binding.type) == sg::view_shape::raw;
+        bool const is_bytes = sg::shape_of(binding.type) == sg::view_shape::bytes;
         auto const view = sg::raw_buffer_view{.access = sg::view_class_of(binding),
                                               .shape = sg::shape_of(binding.type),
                                               .buffer = nullptr,
-                                              .stride_in_bytes = is_raw ? 0 : 4};
+                                              .stride_in_bytes = is_bytes ? 0 : 4};
         if (view.access == sg::view_class::readonly)
         {
             D3D12_SHADER_RESOURCE_VIEW_DESC desc = {};
             desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
             desc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
-            desc.Format = is_raw ? DXGI_FORMAT_R32_TYPELESS : DXGI_FORMAT_UNKNOWN;
+            desc.Format = is_bytes ? DXGI_FORMAT_R32_TYPELESS : DXGI_FORMAT_UNKNOWN;
             desc.Buffer.StructureByteStride = UINT(view.stride_in_bytes);
-            if (is_raw)
+            if (is_bytes)
                 desc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_RAW;
             device->CreateShaderResourceView(nullptr, &desc, dst);
         }
@@ -429,9 +429,9 @@ void create_null_view(ID3D12Device* device, sg::binding const& binding, D3D12_CP
         {
             D3D12_UNORDERED_ACCESS_VIEW_DESC desc = {};
             desc.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
-            desc.Format = is_raw ? DXGI_FORMAT_R32_TYPELESS : DXGI_FORMAT_UNKNOWN;
+            desc.Format = is_bytes ? DXGI_FORMAT_R32_TYPELESS : DXGI_FORMAT_UNKNOWN;
             desc.Buffer.StructureByteStride = UINT(view.stride_in_bytes);
-            if (is_raw)
+            if (is_bytes)
                 desc.Buffer.Flags = D3D12_BUFFER_UAV_FLAG_RAW;
             device->CreateUnorderedAccessView(nullptr, nullptr, &desc, dst);
         }

@@ -52,10 +52,10 @@ TEST("sg bindings - binding_type maps to view (access/shape)")
     CHECK(sg::shape_of(bt::buffer) == sg::view_shape::structured);
 
     CHECK(sg::view_class_of(bt::bytes, sg::access_mode::read) == sg::view_class::readonly);
-    CHECK(sg::shape_of(bt::bytes) == sg::view_shape::raw);
+    CHECK(sg::shape_of(bt::bytes) == sg::view_shape::bytes);
 
     CHECK(sg::view_class_of(bt::bytes, sg::access_mode::read_write) == sg::view_class::readwrite);
-    CHECK(sg::shape_of(bt::bytes) == sg::view_shape::raw);
+    CHECK(sg::shape_of(bt::bytes) == sg::view_shape::bytes);
 }
 
 TEST("sg bindings - only an image is write-only, and only buffers, bytes and images write")

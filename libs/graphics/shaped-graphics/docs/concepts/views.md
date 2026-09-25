@@ -11,7 +11,7 @@ It is a pure value, produced by a `buffer.as_*()` factory.
 A buffer view is `<access>_buffer_view<T>`.
 The **access class** is the type: `uniform_buffer_view` / `readonly_buffer_view` / `readwrite_buffer_view`.
 `T` is the array's element type (`readonly_buffer_view<particle>`) or the block type (`uniform_buffer_view<globals>`).
-There is no intermediate "shape" wrapper: the raw / byte-addressed case is simply `T = byte`, the degenerate element at stride 1.
+There is no intermediate "shape" wrapper: the byte-addressed case is simply `T = byte`, the degenerate element at stride 1.
 `T` must satisfy the `view_element` concept — `byte`, or `sizeof(T) % 4 == 0` — because GPUs load at 4-byte (DWORD) alignment.
 Ranges passed to the factories are in **elements of `T`**.
 
@@ -39,7 +39,7 @@ A buffer binding varies on two axes the view captures:
   [`buffer_usage`](../../src/shaped-graphics/types.hh)'s `uniform_buffer` / `readonly_buffer` /
   `readwrite_buffer`.
 - **Layout** (`view_shape`, derived from `T`): `uniform_block`, `structured` (array strided by
-  `sizeof(T)`), or `raw` (byte-addressed, `T = byte`).
+  `sizeof(T)`), or `bytes` (byte-addressed, `T = byte`).
 
 Per-language mapping:
 
@@ -49,7 +49,7 @@ Per-language mapping:
 | `readonly_buffer_view<T>` | `StructuredBuffer<T>` | `readonly buffer{ T[] }` | `const device T*` | `var<storage, read>` |
 | `readwrite_buffer_view<T>` | `RWStructuredBuffer<T>` | `buffer{ T[] }` | `device T*` | `var<storage, read_write>` |
 | `readonly_buffer_view<byte>` | `ByteAddressBuffer` | `readonly buffer{ uint[] }` | `const device uchar*` | `array<u32>` |
-| `readwrite_buffer_view<byte>` | `RWByteAddressBuffer` | `buffer{ uint[] }` | `device uchar*` | (raw storage) |
+| `readwrite_buffer_view<byte>` | `RWByteAddressBuffer` | `buffer{ uint[] }` | `device uchar*` | (bytes storage) |
 
 Two things this factoring settles:
 
@@ -58,7 +58,7 @@ Two things this factoring settles:
   makes it a *separate descriptor* (SRV vs UAV). Vulkan/GLSL collapse both to one `STORAGE_BUFFER` and
   carry the difference in the qualifier + barrier state — but every backend needs the distinction for
   hazard tracking, so the view always carries it and each backend narrows as it likes.
-- **structured vs raw is a *view* decision, not a hardware one.** Both are storage buffers everywhere
+- **structured vs bytes is a *view* decision, not a hardware one.** Both are storage buffers everywhere
   except HLSL; the only difference is whether the view imposes an element type (`T`) or reads bytes
   (`T = byte`). `ByteAddressBuffer`-style (RAW, no stride) and `StructuredBuffer<T>` (stride
   `sizeof(T)`) *are* different backend descriptors, so the distinction survives — derived from `T`,
@@ -107,7 +107,7 @@ A mismatched buffer element type `T` still asserts, since a wrong element size i
 The re-type is a reinterpret: `T` / `Traits` are caller-asserted, since no element or dimension tag is stored to cross-check against.
 So it is the deliberate, checked counterpart of the free erasure in the other direction.
 The one thing it *can* cross-check is the byte layout — a buffer recovery asserts `T` matches the view's shape.
-`byte` ⇔ a raw (byte-addressed) view; any other `T` ⇔ a structured view whose stride is exactly `sizeof(T)`.
+`byte` ⇔ a `bytes` (byte-addressed) view; any other `T` ⇔ a structured view whose stride is exactly `sizeof(T)`.
 So picking the wrong element size is a loud error, not a silently wrong element count.
 
 For the raw *resource* rather than a view, the same inverse exists at the wrapper level.
@@ -117,7 +117,7 @@ For the raw *resource* rather than a view, the same inverse exists at the wrappe
 
 `buffer<T>` is a *whole buffer* recast like a `span`, so it has essentially no placement constraints — which is why a `buffer<u16>` index buffer is perfectly legal.
 A **view**, by contrast, is a *subrange*, so it inherits the portable binding rules.
-Every shader-facing storage view — readonly or readwrite, raw or structured — asserts:
+Every shader-facing storage view — readonly or readwrite, bytes or structured — asserts:
 
 - **`offset % 256 == 0`** — WebGPU's `minStorageBufferOffsetAlignment` is 256, and Vulkan permits an implementation to require up to 256 (its required-limit *maximum*, which real hardware hits).
   256 is therefore the only portable start; see `storage_buffer_offset_alignment`.
@@ -143,18 +143,18 @@ A missing `buffer_usage` flag stays a hard assert, since the usage was chosen at
 Even the whole-buffer overloads can fail: `as_raw_readonly()` on a 70-byte buffer trips `size % 4`.
 Draw-input views have no twin, since they can only fail bounds.
 
-### Use raw + in-shader `Load<T>` for heterogeneous buffers
+### Use bytes + in-shader `Load<T>` for heterogeneous buffers
 
 Because a structured view cannot start partway into an element, it is the wrong tool for a **heterogeneous buffer**.
 That is one packing different objects at hand-chosen byte offsets — a header, then an array, then something else.
-For it, use a **raw** (byte-addressed) view.
+For it, use a **bytes** (byte-addressed) view.
 `as_raw_readonly({.offset, .size})` with no stride yields a byte-addressed `raw_buffer_view` — a `ByteAddressBuffer`.
 `buffer<byte>::as_readonly_buffer(range)` is the typed `readonly_buffer_view<byte>` form of the same thing.
 Either is typed per access in the shader with `buf.Load<T>(byteOffset)`.
 The per-access `Load` offset only needs 4-byte alignment, so each object sits at its own byte offset with no `sizeof(T)` constraint: `byte` at the view, `T` at the load.
 
-The *view's* start still obeys the 256-byte rule, so the usual shape is **one raw view over the whole buffer** — start 0, trivially aligned — with *all* per-object addressing done by `Load`.
-The view-start alignment then never bites, and offsetting the raw view itself is only for coarse 256-aligned sub-regions.
+The *view's* start still obeys the 256-byte rule, so the usual shape is **one bytes view over the whole buffer** — start 0, trivially aligned — with *all* per-object addressing done by `Load`.
+The view-start alignment then never bites, and offsetting the bytes view itself is only for coarse 256-aligned sub-regions.
 
 Portability note: `ByteAddressBuffer.Load<T>` is a first-class HLSL feature (and Vulkan/Metal have equivalents
 — `buffer_reference`, pointer casts), but **WGSL has no byte-address buffer and no templated load**. On WebGPU

@@ -62,19 +62,19 @@ public:
         return as_raw_uniform_buffer(byte_range);
     }
 
-    /// A raw, byte-addressed read-only view (SRV, `shape == raw`) of the whole buffer.
+    /// A byte-addressed read-only view (SRV, `shape == bytes`) of the whole buffer.
     [[nodiscard]] raw_buffer_view as_raw_readonly() const
     {
         return as_raw_readonly({.offset = 0, .size = _size_in_bytes});
     }
 
-    /// A raw, byte-addressed read-only view of `byte_range` bytes (SRV, `shape == raw`).
+    /// A byte-addressed read-only view of `byte_range` bytes (SRV, `shape == bytes`).
     [[nodiscard]] raw_buffer_view as_raw_readonly(cc::offset_size byte_range) const
     {
         CC_ASSERT(_usage.has(buffer_usage::readonly_buffer), "buffer lacks readonly_buffer usage");
         assert_storage_range(byte_range);
         return raw_buffer_view{.access = view_class::readonly,
-                               .shape = view_shape::raw,
+                               .shape = view_shape::bytes,
                                .buffer = shared_from_this(),
                                .offset_in_bytes = byte_range.offset,
                                .size_in_bytes = byte_range.size};
@@ -118,19 +118,19 @@ public:
         return as_raw_readonly(byte_range, stride_in_bytes);
     }
 
-    /// A raw, byte-addressed read-write view (UAV, `shape == raw`) of the whole buffer.
+    /// A byte-addressed read-write view (UAV, `shape == bytes`) of the whole buffer.
     [[nodiscard]] raw_buffer_view as_raw_readwrite() const
     {
         return as_raw_readwrite({.offset = 0, .size = _size_in_bytes});
     }
 
-    /// A raw, byte-addressed read-write view of `byte_range` bytes (UAV, `shape == raw`).
+    /// A byte-addressed read-write view of `byte_range` bytes (UAV, `shape == bytes`).
     [[nodiscard]] raw_buffer_view as_raw_readwrite(cc::offset_size byte_range) const
     {
         CC_ASSERT(_usage.has(buffer_usage::readwrite_buffer), "buffer lacks readwrite_buffer usage");
         assert_storage_range(byte_range);
         return raw_buffer_view{.access = view_class::readwrite,
-                               .shape = view_shape::raw,
+                               .shape = view_shape::bytes,
                                .buffer = shared_from_this(),
                                .offset_in_bytes = byte_range.offset,
                                .size_in_bytes = byte_range.size};

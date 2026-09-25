@@ -121,19 +121,19 @@ TEST("sg views - raw byte views")
     // The raw shader views return the erased raw_buffer_view directly (raw_buffer is the low-level path).
     auto const ro = buf->as_raw_readonly();
     CHECK(ro.access == sg::view_class::readonly);
-    CHECK(ro.shape == sg::view_shape::raw);
+    CHECK(ro.shape == sg::view_shape::bytes);
     CHECK(ro.size_in_bytes == 1024);
     CHECK(ro.stride_in_bytes == 0);
 
     auto const rw = buf->as_raw_readwrite();
     CHECK(rw.access == sg::view_class::readwrite);
-    CHECK(rw.shape == sg::view_shape::raw);
+    CHECK(rw.shape == sg::view_shape::bytes);
     CHECK(rw.size_in_bytes == 1024);
 
     // Subrange, in bytes — a storage view's offset must be 256-byte aligned.
     auto const sub = buf->as_raw_readonly({.offset = 256, .size = 128});
     CHECK(sub.offset_in_bytes == 256);
-    CHECK(sub.shape == sg::view_shape::raw);
+    CHECK(sub.shape == sg::view_shape::bytes);
     CHECK(sub.size_in_bytes == 128);
 
     // Strided variant -> a structured view with an explicit byte stride (no C++ element type).
@@ -384,14 +384,14 @@ TEST("sg views - structured views need a stride-aligned offset; recovery needs s
 
 TEST("sg views - heterogeneous buffer: whole-buffer raw view + in-shader Load")
 {
-    // The portable tool for a buffer packing different objects at hand-chosen byte offsets is a raw, byte-addressed view.
+    // The portable tool for a buffer packing different objects at hand-chosen byte offsets is a byte-addressed view.
     // Per-object addressing happens in-shader via Load<T>(byteOffset), so the view's element type is byte and each object's placement is decoupled from any T's size.
     // The *view* start still obeys the 256-byte storage rule, which is exactly why the whole-buffer view (start 0) is the norm.
     auto const buf = make_buffer(1024, sg::buffer_usage::readonly_buffer);
 
     // Whole-buffer raw view (start 0) — the base you'd Load<T>(byteOffset) from in a shader.
     sg::raw_view const whole = buf->as_raw_readonly();
-    CHECK(sg::shape_of(whole) == sg::view_shape::raw);
+    CHECK(sg::shape_of(whole) == sg::view_shape::bytes);
     CHECK(sg::as_readonly_buffer<byte>(whole).element_count == 1024);
 
     // A raw sub-view may start at any 256-aligned offset, with no tie to an element size...

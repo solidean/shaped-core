@@ -118,7 +118,7 @@ namespace sg
     case binding_type::buffer:
         return view_shape::structured;
     case binding_type::bytes:
-        return view_shape::raw;
+        return view_shape::bytes;
     case binding_type::texture:
     case binding_type::image:
         return view_shape::texture;

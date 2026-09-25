@@ -351,11 +351,11 @@ b.expire()                         // void    — free storage now (deferred); e
 // shape metadata (_size_in_bytes/_usage) is protected in the base; backend buffers inherit it
 // view factories are BYTE-LEVEL only (no C++ element type); the buffer's usage must cover the access.
 // For the ergonomic, element-typed views (as_readonly_buffer(), as_uniform_buffer(), …) wrap in buffer<T>.
-b.as_raw_readonly({.offset=,.size=})       // -> raw_buffer_view (byte-addressed SRV, shape=raw; range in bytes; default = whole)
+b.as_raw_readonly({.offset=,.size=})       // -> raw_buffer_view (byte-addressed SRV, shape=bytes; range in bytes; default = whole)
 b.as_raw_readonly({.offset=,.size=}, stride)// -> raw_buffer_view (STRUCTURED SRV; explicit byte stride; element_count = size/stride)
-b.as_raw_readwrite({.offset=,.size=})      // -> raw_buffer_view (byte-addressed UAV, shape=raw)
+b.as_raw_readwrite({.offset=,.size=})      // -> raw_buffer_view (byte-addressed UAV, shape=bytes)
 b.as_raw_readwrite({.offset=,.size=}, stride)// -> raw_buffer_view (STRUCTURED UAV; explicit byte stride)
-// EVERY storage view (raw or structured) is a SUBRANGE, so: offset % 256 == 0 (WebGPU minStorageBufferOffset-
+// EVERY storage view (bytes or structured) is a SUBRANGE, so: offset % 256 == 0 (WebGPU minStorageBufferOffset-
 //   Alignment; some Vulkan hw) and size % 4 == 0 (WebGPU). Structured ALSO needs offset % stride == 0 and
 //   size % stride == 0 (D3D12 addresses by element index: FirstElement = offset/stride).
 // buffer<T> itself is exempt — it's a whole buffer recast like a span (so buffer<u16> index buffers are fine),
@@ -506,7 +506,7 @@ sg::buffer_view<T>           // access-erased middle: any access of a buffer of 
 sg::any_texture_view<VT>     // kind-erased middle: a texture or an image of dimension VT::dimension (kind is a runtime field)
 sg::tlas_view                // ray-tracing TLAS (SRV, VA-addressed) — view_class::acceleration_structure. Via tlas.as_view()
 sg::view_class               // uniform | readonly | readwrite (buffers) | texture | image | acceleration_structure
-sg::view_shape               // uniform_block | structured | raw | texture | acceleration_structure   (layout)
+sg::view_shape               // uniform_block | structured | bytes | texture | acceleration_structure   (layout)
 sg::raw_view                 // = cc::variant<raw_buffer_view, raw_texture_view, raw_tlas_view, vacant_view> — erased sum every typed view converts into
 sg::vacant_view              // {} — a vacant ARRAY element (no view); the backend synthesizes its null descriptor from the binding
 sg::is_vacant(rv)            // bool — gate on it before view_class_of / shape_of (a vacancy has neither)
