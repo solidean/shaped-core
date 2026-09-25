@@ -27,6 +27,9 @@ from .glossary import GlossaryProvider, malformed_in, terms_in
 from .index import RepoIndex
 from .providers import CommitProvider, DirProvider, FileProvider, Token
 
+# The kind a bad `context:` is reported under; it has no regions, so the page never draws one.
+CONTEXT = "context"
+
 # Where a file name is actually written: a code span, a markdown link's destination, or inside a fenced block.
 # Bare prose is deliberately not scanned.
 # The repo's own convention backticks a path, and scanning running text turns every sentence containing a dot
@@ -80,6 +83,11 @@ def build(entry: Entry, index: RepoIndex, *, answers: AnswerFile | None = None, 
     A superseded block is scanned last and never raises a problem.
     It still renders, struck, so its references still link where they can; but it is retired text that the block
     replacing it already corrected, and failing on it would leave no way to make `validate` pass.
+
+    A block's `context:`, or else the entry's, is the folder its short paths are looked for under first.
+    It is itself a folder reference, and one that resolves to no single folder is a problem, since every path it
+    was meant to settle would otherwise fall back to the repository-wide lookup without a word.
+    A literal is resolved once per entry, in the first text naming it, because the page matches literals entry-wide.
     """
     seen_files: set[str] = set()
     seen_dirs: set[str] = set()
@@ -87,11 +95,29 @@ def build(entry: Entry, index: RepoIndex, *, answers: AnswerFile | None = None, 
     glossary = GlossaryProvider(terms=terms) if terms else None
     tokens: list[Token] = []
 
-    def scan(text: str, then: tuple[RepoIndex | None, str] | None) -> None:
+    contexts: dict[str, str] = {}
+
+    def context_of(raw: str, answered: bool) -> str:
+        """The folder a `context:` names, recording a problem once when it names none."""
+        if not raw:
+            return ""
+        if raw not in contexts:
+            resolution = index.resolve_dir(raw)
+            contexts[raw] = resolution.path if resolution.ok else ""
+            if not resolution.ok and not answered:
+                what = ("names several folders: " + ", ".join(f"`{c}`" for c in resolution.candidates)
+                        if resolution.candidates else "is not a folder in this repository")
+                tokens.append(Token(text=raw, kind=CONTEXT, regions=(), problem=f"context folder {raw} {what}"))
+        return contexts[raw]
+
+    def scan(text: str, then: tuple[RepoIndex | None, str] | None, context: str = "") -> None:
         past, rev = then if then is not None else (None, "")
         answered = then is not None
-        files = FileProvider(index=index, seen=seen_files, answered=answered, history=past, history_rev=rev)
-        dirs = DirProvider(index=index, seen=seen_dirs, answered=answered, history=past, history_rev=rev)
+        folder = context_of(context, answered)
+        files = FileProvider(index=index, seen=seen_files, answered=answered, history=past, history_rev=rev,
+                             context=folder)
+        dirs = DirProvider(index=index, seen=seen_dirs, answered=answered, history=past, history_rev=rev,
+                           context=folder)
         for fragment in _referencing_text(text):
             # Files first: a folder token is only ever the trailing-slash form, so the two cannot claim the
             # same span, and ordering them keeps the page's longest-first sort from having to break a tie.
@@ -103,28 +129,33 @@ def build(entry: Entry, index: RepoIndex, *, answers: AnswerFile | None = None, 
             # The glossary entry is skipped: underlining a definition inside its own definition says nothing.
             tokens.extend(glossary.tokens(text, skip_entry=entry.slug))
 
-    texts: list[tuple[str, int]] = []
-    retired: list[tuple[str, int]] = []
+    entry_context = entry.front.get("context", "").strip()
+    context_of(entry_context, False)
+    texts: list[tuple[str, int, str]] = []
+    retired: list[tuple[str, int, str]] = []
     for block in entry.blocks:
         into = retired if block.is_superseded else texts
-        into.append((block.prose, block.round))
-        into.append((block.head, block.round))
-        into.extend((option.label, block.round) for option in block.options)
+        context = block.attrs.get("context", "").strip() or entry_context
+        into.append((block.prose, block.round, context))
+        into.append((block.head, block.round, context))
+        into.extend((option.label, block.round, context) for option in block.options)
     if answers is not None:
-        texts.extend((answer.text, 0 if answer.tentative else answer.round) for answer in answers.answers.values())
-        texts.extend((comment.text, 0 if comment.tentative else comment.round) for comment in answers.comments.values())
+        texts.extend((answer.text, 0 if answer.tentative else answer.round, entry_context)
+                     for answer in answers.answers.values())
+        texts.extend((comment.text, 0 if comment.tentative else comment.round, entry_context)
+                     for comment in answers.comments.values())
 
-    then_of = {r: (history(r) if history is not None and r else None) for _, r in [*texts, *retired]}
-    for text, r in texts:
+    then_of = {r: (history(r) if history is not None and r else None) for _, r, _ in [*texts, *retired]}
+    for text, r, context in texts:
         if then_of[r] is None:
-            scan(text, None)
-    for text, r in texts:
+            scan(text, None, context)
+    for text, r, context in texts:
         if then_of[r] is not None:
-            scan(text, then_of[r])
+            scan(text, then_of[r], context)
 
     live = len(tokens)
-    for text, r in retired:
-        scan(text, then_of[r])
+    for text, r, context in retired:
+        scan(text, then_of[r], context)
     tokens[live:] = [replace(token, problem="") if token.problem else token for token in tokens[live:]]
     return tokens
 
@@ -136,8 +167,12 @@ _RAW_REMEDY = "write it as `raw:<path>`, or open the fence as ```raw, to say thi
 
 
 def problems(entry: Entry, tokens: list[Token]) -> list[str]:
-    """What `validate` reports: every reference that does not hold, with the entry it is in."""
-    return [f"{entry.slug}: {token.text} — {token.problem}\n  {_RAW_REMEDY}"
+    """What `validate` reports: every reference that does not hold, with the entry it is in.
+
+    A context folder is not text in the entry, so `raw:` is no remedy for one and is not offered.
+    """
+    return [f"{entry.slug}: {token.problem}" if token.kind == CONTEXT
+            else f"{entry.slug}: {token.text} — {token.problem}\n  {_RAW_REMEDY}"
             for token in tokens if token.problem]
 
 
