@@ -73,6 +73,12 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
                     f"{entry.slug}: round {round_number} asks something with no `intro` — open it with what the entry "
                     f"is about and the options, before any fact or trade-off"
                 )
+        for block, line, key in review.attributes_read_as_prose(entry):
+            if block.name in open_asks:
+                warnings.append(
+                    f"{entry.slug}:{line}: ask {block.name!r} has a blank line above `{key}:`, so it is prose and does "
+                    f"nothing — delete the blank line, or reword a real sentence so it does not open with `{key}:`"
+                )
         # A follow-up belongs under the ask it follows, where the answer it responds to is on screen above it.
         # Naming an ask in another entry usually means a new entry was opened where a round should have been appended,
         # which splits one thread across two files and makes the second restate what the first established.

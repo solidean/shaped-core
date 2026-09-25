@@ -286,6 +286,10 @@ A typo'd `discharge:` degrading into a sentence — dropping the discharge witho
 A body whose first line is blank has no prelude at all.
 That is the escape hatch for prose that genuinely must start with `something:`.
 
+**On an ask the escape is nearly always a slip**, and a silent one: a blank line under `## ask name` turns the `discharges:` below it into a sentence that discharges nothing.
+So `validate` warns about an open ask whose prelude is followed by a blank line and then a key an ask accepts, with the line to fix.
+The `round:` the tool stamps under a heading does not hide it, since the blank line is still where it was.
+
 ## Asks
 
 The ask is the answerable unit, and **discharge sits on it rather than on the entry**.

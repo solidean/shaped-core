@@ -2119,6 +2119,47 @@ def test_append_decodes_stdin_as_utf8(root: Path) -> None:
     assert read_addition(str(path)) == text
 
 
+def design_review(root: Path, entries: dict[str, str], files: dict[str, str] | None = None):
+    """A design review over a one-commit repository holding `files`, with these entries written into it.
+
+    Returns a function running the CLI from the repository, as (exit code, stdout + stderr).
+    """
+    repo = root / "repo"
+    repo.mkdir()
+    git_init(repo)
+    commit(repo, "first", files or {"a.txt": "one\n"})
+    cli = [sys.executable, str(REPO_ROOT / "review.py")]
+
+    def run(*argv: str) -> tuple[int, str]:
+        done = subprocess.run(cli + list(argv), cwd=repo, capture_output=True, text=True, encoding="utf-8")
+        return done.returncode, done.stdout + done.stderr
+
+    code, out = run("init", "d", "--goal", "design")
+    assert code == 0, out
+    folder = repo / ".tmp" / "reviews" / "d" / "entries"
+    for slug, text in entries.items():
+        (folder / f"{slug}.md").write_text(text, encoding="utf-8")
+    return run
+
+
+def test_a_blank_line_that_turns_an_asks_attributes_into_prose_is_reported(root: Path) -> None:
+    """A blank line after `## ask name` makes `discharges:` a sentence, which discharges nothing and said nothing.
+
+    The blank line is the documented escape for prose that must open with `key:`, so this is a warning rather than an error;
+    on an ask, an opening line that is a key the ask accepts is almost always the slip rather than the escape.
+    """
+    front = "---\nid: {n}\ntitle: t\ngroup: topics\n---\n\n## intro\n\nWhat, and the options.\n\n"
+    slipped = front.format(n="010") + "## ask  which\n\ndischarges: CHANGE-AAAA\n\nWhich way?\n\n- radio: this\n"
+    # Stamped: the tool puts `round:` straight under the heading, which leaves the blank line where it was.
+    stamped = front.format(n="020") + "## ask  which\nround: 1\n\nfollows: other\n\nWhich way?\n\n- radio: this\n"
+    fine = front.format(n="030") + "## ask  which\n\nWhich way?\n\n- radio: this\n"
+    run = design_review(root, {"010-slipped": slipped, "020-stamped": stamped, "030-fine": fine})
+    code, out = run("validate", "d")
+    assert "010-slipped:13" in out and "`discharges:`" in out and "blank line" in out, out
+    assert "020-stamped:14" in out and "`follows:`" in out, out
+    assert "030-fine" not in out, f"an ask opening on prose must not be reported: {out}"
+
+
 def test_design_review_refuses_a_range(root: Path) -> None:
     """A design review has no changeset, so a range would be silently ignored rather than honoured."""
     repo = root / "repo"
