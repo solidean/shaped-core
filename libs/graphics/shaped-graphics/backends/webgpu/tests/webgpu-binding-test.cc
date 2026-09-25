@@ -241,7 +241,7 @@ ASYNC_INVOCABLE_TEST("sg webgpu - a read_write rgba8 storage texture needs readw
     auto& ctx = *handle;
     auto bindings = cc::vector<sg::binding>();
     bindings.push_back(sg::binding{.name = "Target", .group_index = 0, .index = 0, .count = 1});
-    bindings[0].type = sg::binding_type::image, .access = sg::access_mode::read_write;
+    bindings[0].type = sg::binding_type::image;
     bindings[0].texture_dimension = sg::texture_view_dimension::tex_2d;
     bindings[0].image_format = sg::pixel_format::rgba8_unorm;
     bindings[0].access = sg::access_mode::read_write;

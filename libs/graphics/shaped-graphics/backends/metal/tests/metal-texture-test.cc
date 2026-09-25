@@ -131,7 +131,7 @@ TEST("sg metal - a one-face view of a cube is a 2D texture")
 
     // Face 2 alone, which is where reusing the texture's own type asks for a one-slice Cube.
     auto* const face = ctx->texture_views().acquire(
-        {.access = sg::view_class::readonly,
+        {.bound_as = sg::view_class::texture,
          .texture = texture,
          .view_dimension = sg::texture_view_dimension::tex_2d,
          .range = {{.start = 0, .end = 1}, {.start = 2, .end = 3}, {.start = 0, .end = 1}}});
@@ -140,7 +140,7 @@ TEST("sg metal - a one-face view of a cube is a 2D texture")
 
     // And the whole cube, in its own format and shape, is the texture itself rather than a minted view.
     auto* const whole = ctx->texture_views().acquire(
-        {.access = sg::view_class::readonly,
+        {.bound_as = sg::view_class::texture,
          .texture = texture,
          .view_dimension = sg::texture_view_dimension::cube,
          .range = {{.start = 0, .end = 1}, {.start = 0, .end = 6}, {.start = 0, .end = 1}}});
@@ -166,7 +166,7 @@ ASYNC_TEST("sg metal - a cached view is evicted with its texture")
         REQUIRE(texture != nullptr);
 
         auto* const mip = ctx->texture_views().acquire(
-            {.access = sg::view_class::readonly,
+            {.bound_as = sg::view_class::texture,
              .texture = texture,
              .view_dimension = sg::texture_view_dimension::tex_2d,
              .range = {{.start = 1, .end = 2}, {.start = 0, .end = 1}, {.start = 0, .end = 1}}});
