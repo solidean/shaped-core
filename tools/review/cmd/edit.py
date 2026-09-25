@@ -12,6 +12,7 @@ have to guess which one, and would be useless in the case that actually motivate
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 
 import tools.review as review
 
@@ -40,16 +41,24 @@ def _matches(entries, needle: str) -> list:
 
 def run(args: argparse.Namespace, ctx: Context) -> None:
     paths, _ = ctx.open(args.name)
-    entries = ctx.entries(paths)
+    entries, broken = ctx.entries_tolerant(paths)
 
     if not args.entry:
         width = max((len(e.id) for e in entries), default=3)
         for entry in entries:
             print(f"{entry.id:<{width}}  {ctx.rel(entry.path)}  {review.console.dim(entry.title)}")
+        # An entry that does not parse is the one most likely to need editing, so it is listed rather than dropped.
+        for e in broken:
+            print(review.console.yellow(f"{Path(e.path).stem:<{width}}  {ctx.rel(Path(e.path))}  does not parse, line {e.line}: {e.message}"))
         return
 
     found = _matches(entries, args.entry)
     if not found:
+        # a broken entry is still found by its file name, which is how anyone gets to it to fix it
+        stems = [e for e in broken if args.entry.lower() in Path(e.path).stem.lower()]
+        if len(stems) == 1:
+            print(ctx.rel(Path(stems[0].path)))
+            return
         ctx.die(f"no entry matches {args.entry!r}")
     if len(found) > 1:
         # Refused rather than resolved to the first: the caller is about to write to whatever comes back.

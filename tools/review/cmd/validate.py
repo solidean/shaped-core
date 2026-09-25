@@ -60,9 +60,10 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
 
 def run(args: argparse.Namespace, ctx: Context) -> None:
     paths, cfg = ctx.open(args.name)
-    entries = ctx.entries(paths)
+    # Every entry that does not parse is a problem of its own, so one broken file does not hide the next.
+    entries, broken = ctx.entries_tolerant(paths)
 
-    problems: list[str] = []
+    problems: list[str] = [str(e) for e in broken]
     warnings: list[str] = []
 
     if cfg.has_changeset:

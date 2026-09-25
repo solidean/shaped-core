@@ -111,6 +111,26 @@ class Context:
                 self.die(str(e))
         return out
 
+    def entries_tolerant(self, paths: review.ReviewPaths) -> tuple[list[review.Entry], list[review.ReviewParseError]]:
+        """Every entry that parses, and the error of each that does not, for a command that only reads.
+
+        One stale entry, written in a grammar the tool has since retired, must not hide every other entry of the review.
+        A command that writes still uses `entries`, which refuses: it would otherwise act on a review it cannot see whole.
+        """
+        out: list[review.Entry] = []
+        broken: list[review.ReviewParseError] = []
+        for file in paths.entry_files():
+            try:
+                out.append(review.parse_entry_file(file))
+            except review.ReviewParseError as e:
+                broken.append(e)
+        return out, broken
+
+    def warn_broken(self, broken: list[review.ReviewParseError]) -> None:
+        """Names every entry `entries_tolerant` left out, so what a command shows is never mistaken for the whole review."""
+        for e in broken:
+            print(review.console.yellow(f"WARNING: left out, it does not parse: {e}"), file=sys.stderr)
+
     def answers(self, paths: review.ReviewPaths, entry: review.Entry) -> review.AnswerFile:
         return review.AnswerFile.load(paths.answers_for(entry.path), entry.slug)
 
