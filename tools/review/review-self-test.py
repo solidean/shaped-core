@@ -2142,6 +2142,28 @@ def test_mojibake_is_reported(root: Path) -> None:
     assert "cp1252" in warnings[0], warnings[0]
 
 
+def test_an_acknowledgement_a_later_ask_replaced_is_no_orphan(root: Path) -> None:
+    """`validate` agrees with `reconcile`: an answered acknowledgement outlives the round that offered it.
+
+    Written after a round-2 ask on an entry acknowledged in round 1 drew "an answer to 'acknowledged-r1' has no ask",
+    which the block grammar doc says is not an orphan.
+    """
+    from tools.review.cmd.validate import orphan_answer_warnings
+
+    front = "---\nid: 012\ntitle: t\ngroup: meta\nstate: open\n---\n\n"
+    first = parse_text(front + "## prose\nround: 1\n\nBody.\n", Path("e.md"), slug="012-t")
+    second = parse_text(
+        front + "## prose\nround: 1\n\nBody.\n\n## ask  next\nround: 2\n\nWell?\n\n- radio: yes\n", Path("e.md"), slug="012-t"
+    )
+    with tempfile.TemporaryDirectory(prefix="review-ack-orphan-") as answer_dir:
+        answers = AnswerFile.load(Path(answer_dir) / "012.json", "012")
+        answers.upsert(first.acknowledgement, selected=["Read and acknowledged"], text="", round_number=1)
+        answers.upsert(second.ask("next"), selected=["yes"], text="", round_number=2)
+        answers.answers["gone"] = answers.answers["next"]
+        warnings = orphan_answer_warnings(second, answers)
+    assert len(warnings) == 1 and "'gone'" in warnings[0], warnings
+
+
 def test_append_decodes_stdin_as_utf8(root: Path) -> None:
     """`append` reads stdin as UTF-8 rather than through the locale, and `-` means stdin.
 

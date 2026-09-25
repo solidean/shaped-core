@@ -376,13 +376,10 @@ void slib::shader_library::_compile_text(compile_outcome& outcome,
     // It also keeps the compiler's cache key honest: everything the rewrite depends on is folded into the source
     // it hashes.
     // The pass reads HLSL's binding attributes, so a WGSL module, which states its own addresses, never goes through it.
-    // SGL does whenever its text is HLSL, which is the dxil and spirv edges: the emitter writes each group as
-    // `#pragma sc group N` and leaves every register to this pass.
+    // Neither does SGL's text, which carries its final addresses on every target.
     // Skipped, DXC numbers the registers itself and puts every group in space 0 and set 0, which a one-group shader
     // cannot tell apart from the right answer.
-    auto const is_hlsl_text = compiler->source_language() == shader_language::hlsl
-                           || (compiler->source_language() == shader_language::sgl
-                               && (format == sg::shader_format::dxil || format == sg::shader_format::spirv));
+    auto const is_hlsl_text = compiler->source_language() == shader_language::hlsl;
     if (is_hlsl_text)
     {
         auto rewritten = rewrite_binding_groups(desc.source, format);

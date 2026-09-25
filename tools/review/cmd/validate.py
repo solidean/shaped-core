@@ -40,6 +40,19 @@ def mojibake_warnings(entry) -> list[str]:
     return out
 
 
+def orphan_answer_warnings(entry, answers) -> list[str]:
+    """One warning per answer whose ask is gone, which `delta` will move aside.
+
+    An acknowledgement is not one: it stops being offered once a later round asks something, and `reconcile` keeps
+    its answer, so warning about it contradicts what the next `delta` does.
+    """
+    return [
+        f"{entry.slug}: an answer to {name!r} has no ask; `delta` will orphan it"
+        for name in sorted(answers.answers)
+        if entry.ask(name) is None and not review.is_ack_name(name)
+    ]
+
+
 def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     p = sub.add_parser(NAME, help="Check every entry parses and every reference resolves")
     a.review_name(p)
@@ -138,9 +151,7 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
                     f"a follow-up usually belongs appended to the entry it follows"
                 )
 
-        for name in sorted(answers.answers):
-            if entry.ask(name) is None:
-                warnings.append(f"{entry.slug}: an answer to {name!r} has no ask; `delta` will orphan it")
+        warnings.extend(orphan_answer_warnings(entry, answers))
 
     # A comment is written expecting an answer, so the agent may not hand back another round while one is unanswered.
     # The gate sits here rather than on the maintainer's send: they wrote the remark, and blocking their own send on it
