@@ -121,7 +121,7 @@ template <texture_view_dimension Dim>
 struct texture_view_traits;
 template <class Traits>
 struct texture_view;
-template <class Traits>
+template <class Traits, pixel_format Format>
     requires image_view_dimension<Traits::dimension>
 struct image_view;
 template <class Traits>
@@ -213,14 +213,14 @@ struct sg::raw_texture_view
     // Adds a check that the runtime `view_dimension` matches `Traits::dimension`.
     template <class Traits>
     [[nodiscard]] auto as_texture() const; // -> texture_view<Traits>
-    template <class Traits>
+    template <class Traits, pixel_format Format>
         requires image_view_dimension<Traits::dimension>
-    [[nodiscard]] auto as_image() const; // -> image_view<Traits>
+    [[nodiscard]] auto as_image() const; // -> image_view<Traits, Format>
     template <class Traits>
     [[nodiscard]] auto try_as_texture() const; // -> cc::optional<texture_view<Traits>>
-    template <class Traits>
+    template <class Traits, pixel_format Format>
         requires image_view_dimension<Traits::dimension>
-    [[nodiscard]] auto try_as_image() const; // -> cc::optional<image_view<Traits>>
+    [[nodiscard]] auto try_as_image() const; // -> cc::optional<image_view<Traits, Format>>
 };
 
 /// An acceleration-structure view's erased payload: the abstract TLAS, which each backend binds its own way.
@@ -565,19 +565,21 @@ struct sg::texture_view
     operator raw_view() const { return to_raw(); }
 };
 
-/// A storage (UAV) image view of dimension `Traits::dimension`, over a single mip level.
+/// A storage (UAV) image view of dimension `Traits::dimension` and texel format `Format`, over a single mip level.
+/// The format is compile-time because it is the binding contract: WebGPU and vulkan require the view to be exactly the shader's declared format.
+/// An image whose format is chosen at runtime is an `any_texture_view` instead, recovered with `as_image<Format>()` where the format is known.
 /// The dimension must be an `image_view_dimension` — no cube, no MSAA.
 /// Whether the shader reads, writes or both is the binding's `access`, not the view's.
-/// Built via `texture<Traits>::as_image_view()` and friends.
-template <class Traits>
+/// Built via `texture<Traits>::as_image_view<Format>()` and friends.
+template <class Traits, sg::pixel_format Format>
     requires sg::image_view_dimension<Traits::dimension>
 struct sg::image_view
 {
     static constexpr view_class kind = view_class::image;
     static constexpr texture_view_dimension dimension = Traits::dimension;
+    static constexpr pixel_format format = Format;
 
     raw_texture_handle texture;
-    pixel_format format = pixel_format::undefined;
     subresource_range range;
 
     /// For a 3D image view: the half-open `[start, end)` window of depth slices the view exposes — D3D12's `FirstWSlice` / `WSize`.
@@ -625,10 +627,10 @@ struct sg::any_texture_view
 
     // An image exists only for an image dimension.
     // The `T = Traits` template defers that, so `any_texture_view<Traits>` stays well-formed for a cube or MS dimension.
-    // Naming `image_view<Traits>` there would be ill-formed.
-    template <class T = Traits>
+    // Naming `image_view<Traits, …>` there would be ill-formed.
+    template <class T = Traits, pixel_format Format>
         requires(std::is_same_v<T, Traits> && image_view_dimension<Traits::dimension>)
-    any_texture_view(image_view<T> const& v) : any_texture_view(sg::as_texture_view(v.to_raw()))
+    any_texture_view(image_view<T, Format> const& v) : any_texture_view(sg::as_texture_view(v.to_raw()))
     {
     }
 
@@ -645,7 +647,7 @@ struct sg::any_texture_view
     operator raw_view() const { return to_raw(); }
 
     // Pin the runtime `kind` to a compile-time leaf — the inverse of the implicit leaf -> any_texture_view conversions above.
-    // The dimension, format and range are already fixed, so only the kind is being committed.
+    // The dimension and range are already fixed, so a texture commits only the kind, and an image its format too.
     [[nodiscard]] texture_view<Traits> as_texture() const
     {
         CC_ASSERT(kind == view_class::texture, "any_texture_view is not a texture");
@@ -657,20 +659,21 @@ struct sg::any_texture_view
             return {};
         return as_texture();
     }
-    template <class T = Traits>
+    template <pixel_format Format, class T = Traits>
         requires(std::is_same_v<T, Traits> && image_view_dimension<Traits::dimension>)
-    [[nodiscard]] image_view<T> as_image() const
+    [[nodiscard]] image_view<T, Format> as_image() const
     {
         CC_ASSERT(kind == view_class::image, "any_texture_view is not an image");
-        return {.texture = texture, .format = format, .range = range, .depth_slice_range = depth_slice_range};
+        CC_ASSERT(format == Format, "any_texture_view is an image of a different format");
+        return {.texture = texture, .range = range, .depth_slice_range = depth_slice_range};
     }
-    template <class T = Traits>
+    template <pixel_format Format, class T = Traits>
         requires(std::is_same_v<T, Traits> && image_view_dimension<Traits::dimension>)
-    [[nodiscard]] cc::optional<image_view<T>> try_as_image() const
+    [[nodiscard]] cc::optional<image_view<T, Format>> try_as_image() const
     {
-        if (kind != view_class::image)
+        if (kind != view_class::image || format != Format)
             return {};
-        return as_image();
+        return as_image<Format>();
     }
 };
 
@@ -853,12 +856,12 @@ auto raw_texture_view::as_texture() const
     CC_ASSERT(view_dimension == Traits::dimension, "raw_texture_view dimension does not match Traits");
     return any_texture_view<Traits>(*this).as_texture();
 }
-template <class Traits>
+template <class Traits, sg::pixel_format Format>
     requires sg::image_view_dimension<Traits::dimension>
 auto raw_texture_view::as_image() const
 {
     CC_ASSERT(view_dimension == Traits::dimension, "raw_texture_view dimension does not match Traits");
-    return any_texture_view<Traits>(*this).as_image();
+    return any_texture_view<Traits>(*this).template as_image<Format>();
 }
 template <class Traits>
 auto raw_texture_view::try_as_texture() const
@@ -867,13 +870,13 @@ auto raw_texture_view::try_as_texture() const
         return cc::optional<texture_view<Traits>>{};
     return any_texture_view<Traits>(*this).try_as_texture();
 }
-template <class Traits>
+template <class Traits, sg::pixel_format Format>
     requires sg::image_view_dimension<Traits::dimension>
 auto raw_texture_view::try_as_image() const
 {
     if (view_dimension != Traits::dimension)
-        return cc::optional<image_view<Traits>>{};
-    return any_texture_view<Traits>(*this).try_as_image();
+        return cc::optional<image_view<Traits, Format>>{};
+    return any_texture_view<Traits>(*this).template try_as_image<Format>();
 }
 
 // -- `raw_view` -> typed leaf, in a single call --
@@ -930,13 +933,13 @@ template <class Traits>
     CC_ASSERT(a != nullptr, "raw_view does not hold a texture arm");
     return a->as_texture<Traits>();
 }
-template <class Traits>
+template <class Traits, sg::pixel_format Format>
     requires sg::image_view_dimension<Traits::dimension>
-[[nodiscard]] image_view<Traits> as_image(raw_view const& v)
+[[nodiscard]] image_view<Traits, Format> as_image(raw_view const& v)
 {
     auto const* a = sg::try_as_texture_view(v);
     CC_ASSERT(a != nullptr, "raw_view does not hold a texture arm");
-    return a->as_image<Traits>();
+    return a->as_image<Traits, Format>();
 }
 template <class Traits>
 [[nodiscard]] cc::optional<texture_view<Traits>> try_as_texture(raw_view const& v)
@@ -945,12 +948,12 @@ template <class Traits>
         return a->try_as_texture<Traits>();
     return {};
 }
-template <class Traits>
+template <class Traits, sg::pixel_format Format>
     requires sg::image_view_dimension<Traits::dimension>
-[[nodiscard]] cc::optional<image_view<Traits>> try_as_image(raw_view const& v)
+[[nodiscard]] cc::optional<image_view<Traits, Format>> try_as_image(raw_view const& v)
 {
     if (auto const* a = sg::try_as_texture_view(v))
-        return a->try_as_image<Traits>();
+        return a->try_as_image<Traits, Format>();
     return {};
 }
 } // namespace sg

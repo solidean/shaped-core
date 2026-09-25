@@ -119,7 +119,7 @@ ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - end to end: reflect a texture+sampler, s
     REQUIRE(sample_pipe != nullptr);
 
     // Groups: pass 1 binds the texture as a UAV; pass 2 binds it as an SRV + a dynamic point/clamp sampler.
-    sg::named_view const fill_views[] = {{.name = "Dst", .view = tex.as_image_view()}};
+    sg::named_view const fill_views[] = {{.name = "Dst", .view = tex.as_image_view<sg::pixel_format::r32_float>()}};
     auto fill_group = ctx.persistent.create_binding_group(fill_group_layout, fill_views);
     REQUIRE(fill_group != nullptr);
 

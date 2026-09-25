@@ -184,7 +184,7 @@ auto const vbuf = ctx.persistent.create_raw_buffer(count * sizeof(tg::pos3f), us
 ```
 
 The typed wrapper counts in elements, not bytes.
-Its view factories (`as_uniform_buffer()`, `as_image_view()`, …) infer the element type and are `requires`-gated.
+Its view factories (`as_uniform_buffer()`, `as_texture_view()`, …) infer the element type and are `requires`-gated.
 A nonsensical binding is then a compile error rather than a driver complaint.
 
 **The transfer API takes typed buffers directly** — `cmd.upload.data_to_buffer(buf, range)`,

@@ -392,10 +392,10 @@ TEST("ssc::dxc + dx12 - raytraced spinning cube in a window", nx::config::manual
 
         // Rebuild the TLAS for this frame's transform (refit isn't implemented), then trace.
         sg::tlas_handle const tlas = cmd->raytracing.build_tlas({make_cube_instance(blas, rot)});
-        auto rt_group = ctx.transient.create_binding_group(rt_group_layout,
-                                                           {{.name = "scene", .view = tlas->as_view()},
-                                                            {.name = "Output", .view = image.as_image_view()},
-                                                            {.name = "Camera", .view = cam_buf.as_uniform_buffer()}});
+        auto rt_group = ctx.transient.create_binding_group(
+            rt_group_layout, {{.name = "scene", .view = tlas->as_view()},
+                              {.name = "Output", .view = image.as_image_view<sg::pixel_format::rgba16_float>()},
+                              {.name = "Camera", .view = cam_buf.as_uniform_buffer()}});
         cmd->raytracing.bind_pipeline(*rt_pipeline);
         cmd->raytracing.bind_group(0, *rt_group);
         cmd->raytracing.dispatch_rays(*rt_table, raygen_idx, size[0], size[1]);

@@ -184,9 +184,9 @@ denoise_outcome svgf_denoise_routine::execute(sg::command_list& cmd,
                                                      .gPreviousHistory = s[k_color + prev].as_texture_view(),
                                                      .gPreviousMoments = s[k_moments + prev].as_texture_view(),
                                                      .gPreviousNormalDepth = s[k_normal_depth + prev].as_texture_view(),
-                                                     .gHistory = s[k_color + cur].as_image_view(),
-                                                     .gMoments = s[k_moments + cur].as_image_view(),
-                                                     .gNormalDepth = s[k_normal_depth + cur].as_image_view(),
+                                                     .gHistory = s[k_color + cur].as_any_image_view(),
+                                                     .gMoments = s[k_moments + cur].as_any_image_view(),
+                                                     .gNormalDepth = s[k_normal_depth + cur].as_any_image_view(),
                                                  });
         cmd.compute.bind_pipeline(*self->_temporal.pipeline);
         cmd.compute.bind<shaders::svgf_temporal_bindings>(*group);
@@ -209,7 +209,7 @@ denoise_outcome svgf_denoise_routine::execute(sg::command_list& cmd,
                                                      .gHistory = s[k_color + cur].as_texture_view(),
                                                      .gMoments = s[k_moments + cur].as_texture_view(),
                                                      .gNormalDepth = s[k_normal_depth + cur].as_texture_view(),
-                                                     .gTarget = s[k_scratch].as_image_view(),
+                                                     .gTarget = s[k_scratch].as_any_image_view(),
                                                  });
         cmd.compute.bind_pipeline(*self->_variance.pipeline);
         cmd.compute.bind<shaders::svgf_variance_bindings>(*group);
@@ -235,7 +235,7 @@ denoise_outcome svgf_denoise_routine::execute(sg::command_list& cmd,
                                                      .gNormalDepth = s[k_normal_depth + cur].as_texture_view(),
                                                      .gAlbedo = albedo,
                                                      .gColor = in.color.as_texture_view(),
-                                                     .gTarget = target.as_image_view(),
+                                                     .gTarget = target.as_any_image_view(),
                                                  });
         cmd.compute.bind_pipeline(*self->_atrous.pipeline);
         cmd.compute.bind<shaders::svgf_atrous_bindings>(*group);

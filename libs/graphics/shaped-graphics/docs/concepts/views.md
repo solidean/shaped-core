@@ -93,14 +93,14 @@ A `try_` tolerates the runtime **view class** being wrong, and on a texture arm 
 A mismatched buffer element type `T` still asserts, since a wrong element size is a caller's claim the view's stride can disprove rather than a runtime condition.
 
 - **Erased middle → leaf.**
-  `buffer_view<T>::as_readonly()` / `as_readwrite()` / `as_uniform()` and `any_texture_view<Traits>::as_texture()` / `as_image()` pin the runtime view class to the matching compile-time leaf.
+  `buffer_view<T>::as_readonly()` / `as_readwrite()` / `as_uniform()` and `any_texture_view<Traits>::as_texture()` / `as_image<Format>()` pin the runtime view class to the matching compile-time leaf.
   The resource typing is already fixed, so only the view class is being committed.
 - **Erased arm → leaf.**
   `raw_buffer_view::as_readonly<T>()`, where you supply the element `T`.
-  And `raw_texture_view::as_texture<Traits>()` / `as_image<Traits>()`, where you supply `Traits` and it also checks the runtime `view_dimension` matches `Traits::dimension`.
+  And `raw_texture_view::as_texture<Traits>()` / `as_image<Traits, Format>()`, where you supply `Traits` and it also checks the runtime `view_dimension` matches `Traits::dimension`.
   Both delegate to the middle for the view-class check and the field mapping.
 - **`raw_view` → leaf in one call.**
-  The free functions `as_readonly_buffer<T>(rv)` / `as_readwrite_buffer<T>` / `as_uniform_buffer<T>` and `as_texture<Traits>` / `as_image<Traits>`, each with a `try_` twin.
+  The free functions `as_readonly_buffer<T>(rv)` / `as_readwrite_buffer<T>` / `as_uniform_buffer<T>` and `as_texture<Traits>` / `as_image<Traits, Format>`, each with a `try_` twin.
   Each `try_as_*_view`s the matching arm and then re-types it.
   The `try_` twin fails both when the variant holds a *different* resource arm and when the view class does not match — the two ways a genuinely-erased binding can be the wrong thing.
 
@@ -163,11 +163,16 @@ you must fall back to a typed storage buffer (i.e. the stride-aligned structured
 ## Texture views
 
 Textures have views too, but instead of an element type `T` they are typed by `Traits`.
-A `texture_view_traits<Dim>` names the shader-facing dimension (`tv_2d` / `tv_cube` / `tv_2d_array` / …), the only compile-time part — the texel `pixel_format` and subresource range stay runtime.
-So the leaves are `texture_view<Traits>`, a sampled texture (SRV), and `image_view<Traits>`, a storage image (UAV) — SGL's `texture2d[T]` and `image2d[.F]`.
+A `texture_view_traits<Dim>` names the shader-facing dimension (`tv_2d` / `tv_cube` / `tv_2d_array` / …), and the subresource range stays runtime.
+So the leaves are `texture_view<Traits>`, a sampled texture (SRV), and `image_view<Traits, Format>`, a storage image (UAV) — SGL's `texture2d[T]` and `image2d[.F]`.
+**An image view is typed on its texel format too**, because the format is the binding contract: WebGPU and vulkan require the view to be exactly the shader's declared format.
+A texture's format stays runtime, since a sampled texture reads any format of its sample type.
+An image whose format is chosen at runtime is an `any_texture_view`, built by the `as_any_image…` factories and committed with `as_image<Format>()` where the format is known.
+`accepts()` checks a bound image's format against a binding that declares one, so the runtime path fails at the group rather than on the GPU.
 **An image's access — read, write or both — belongs to the binding, never to the view**, since every backend builds one descriptor for all three.
 The image leaf constrains `Traits::dimension` to an `image_view_dimension` — no cube, no MSAA.
-Each carries `{raw_texture_handle, pixel_format, subresource_range}`, plus a `depth_slice_range` on the image view for 3D, and erases to a `raw_view` holding a `raw_texture_view`.
+Each carries `{raw_texture_handle, subresource_range}`, plus a runtime `pixel_format` on a texture view and a `depth_slice_range` on an image view for 3D.
+Each erases to a `raw_view` holding a `raw_texture_view`.
 `texture<Traits>::as_*_view()` computes the view dimension at compile time and returns the precisely-typed leaf.
 
 ### The view *dimension* is a reinterpretation, not the texture's shape
@@ -190,7 +195,7 @@ Selecting a nonsensical axis, `.slices` on a non-array say, is a compile error r
 A `view_range` is `{ int start = 0; int count = -1 }` where `count < 0` means "to the end", so the whole-axis default is `{}`.
 
 - **Natural views** — the texture's own dimension: `as_texture_view(params = {})` on any shape,
-  `as_image_view(params = {})` where `!Traits::is_multisampled`. The params carry the in-dimension
+  `as_image_view<Format>(params = {})` where `!Traits::is_multisampled`. The params carry the in-dimension
   sub-selection: a mip range (texture) or single mip (image), an array-slice range, a cube range, or a
   3D depth-slice window (`depth_slices`, D3D12's `FirstWSlice`/`WSize` — tracked outside the subresource
   range since a whole 3D mip is one subresource for hazard purposes).

@@ -133,10 +133,10 @@ private:
     [[nodiscard]] static sg::raw_view _target_of(sg::texture<Traits> const& texture, int level)
     {
         if constexpr (Traits::dimension == sg::texture_dimension::d3)
-            return texture.as_image_view(
+            return texture.as_any_image_view(
                 {.mip = level, .depth_slices = {.start = 0, .count = _mip_extent(texture.depth(), level)}});
         else
-            return texture.as_image_view({.mip = level});
+            return texture.as_any_image_view({.mip = level});
     }
 
     /// One axis of `level`, never below 1.

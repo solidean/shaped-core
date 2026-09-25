@@ -183,7 +183,7 @@ denoise_outcome atrous_denoise_routine::execute(sg::command_list& cmd,
                                                                   .gAlbedo = albedo,
                                                                   .gNormal = normal,
                                                                   .gDepth = depth,
-                                                                  .gTarget = target.as_image_view(),
+                                                                  .gTarget = target.as_any_image_view(),
                                                               });
 
         cmd.compute.bind_pipeline(*self->_pipeline);

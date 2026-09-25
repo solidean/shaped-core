@@ -223,6 +223,8 @@ namespace sg
 }
 
 /// Whether a bound view satisfies binding `b` — its view class and layout must match.
+/// An image binding that declares its `image_format` also needs the view in exactly that format, which WebGPU and vulkan require.
+/// A view of format `undefined` reads as its texture's own format.
 /// The vacant marker satisfies every view kind: what a null descriptor looks like is the binding's to say,
 /// and whether a vacancy is *allowed* there (array elements only) is the group creation's check, not this one.
 [[nodiscard]] inline bool accepts(binding const& b, raw_view const& v)
@@ -231,7 +233,13 @@ namespace sg
         return false; // samplers are bound as samplers, never as views
     if (is_vacant(v))
         return true;
-    return view_class_of(v) == view_class_of(b) && shape_of(v) == shape_of(b.type);
+    if (view_class_of(v) != view_class_of(b) || shape_of(v) != shape_of(b.type))
+        return false;
+    if (b.type != binding_type::image || !b.image_format.has_value())
+        return true;
+    auto const& t = as_texture_view(v);
+    auto const format = t.format != pixel_format::undefined || t.texture == nullptr ? t.format : t.texture->format();
+    return format == b.image_format.value();
 }
 
 /// Stamps `stage` into every binding's `visibility`.

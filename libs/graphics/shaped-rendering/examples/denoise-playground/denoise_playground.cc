@@ -525,11 +525,11 @@ ASYNC_EXAMPLE("shaped-rendering/denoise-playground")
         {
             auto const group = ctx.transient.create_binding_group(*cmd, scene_layout,
                                                                   shaders::scene_bindings{
-                                                                      .gColor = images.color.as_image_view(),
-                                                                      .gAlbedo = images.albedo.as_image_view(),
-                                                                      .gNormal = images.normal.as_image_view(),
-                                                                      .gDepth = images.depth.as_image_view(),
-                                                                      .gMotion = images.motion.as_image_view(),
+                                                                      .gColor = images.color.as_any_image_view(),
+                                                                      .gAlbedo = images.albedo.as_any_image_view(),
+                                                                      .gNormal = images.normal.as_any_image_view(),
+                                                                      .gDepth = images.depth.as_any_image_view(),
+                                                                      .gMotion = images.motion.as_any_image_view(),
                                                                   });
             cmd->compute.bind_pipeline(**scene_pipeline);
             cmd->compute.bind<shaders::scene_bindings>(*group);
@@ -573,7 +573,7 @@ ASYNC_EXAMPLE("shaped-rendering/denoise-playground")
                                                                   shaders::compose_bindings{
                                                                       .gRaw = images.color.as_texture_view(),
                                                                       .gDenoised = shown.as_texture_view(),
-                                                                      .gTarget = images.composed.as_image_view(),
+                                                                      .gTarget = images.composed.as_any_image_view(),
                                                                   });
             cmd->compute.bind_pipeline(**compose_pipeline);
             cmd->compute.bind<shaders::compose_bindings>(*group);

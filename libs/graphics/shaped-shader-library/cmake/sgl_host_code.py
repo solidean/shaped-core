@@ -125,7 +125,8 @@ def emit_group(package: str, namespace: str, file: SglFile, binding: dict) -> st
             out.append(f"    sg::texture_view<{view_traits(member)}> {member['name']}; ///< `{member['type']}`\n")
             continue
         if member["kind"] == "image":
-            out.append(f"    sg::image_view<{view_traits(member)}> {member['name']}; ///< `{member['type']}`\n")
+            view = f"sg::image_view<{view_traits(member)}, sg::pixel_format::{member['image_format']}>"
+            out.append(f"    {view} {member['name']}; ///< `{member['type']}`\n")
             continue
         if member["kind"] == "sampler":
             # A static sampler is the layout's, so the group has no field for it.

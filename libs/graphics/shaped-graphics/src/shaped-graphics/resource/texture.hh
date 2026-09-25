@@ -98,7 +98,8 @@ public:
     }
 
     // Shader-facing views — libs/graphics/shaped-graphics/docs/concepts/views.md has the factory surface in full.
-    // `as_texture_view` / `as_image_view` are the natural views, in the texture's own dimension.
+    // `as_texture_view` / `as_image_view<Format>` are the natural views, in the texture's own dimension.
+    // Every image factory has an `as_any_image…` twin for a format known only at runtime, which returns the kind-erased `any_texture_view`.
     // The `_2d` / `_1d` / `cube` variants reinterpret one slice, face or cube as a lower dimension.
     // Each takes the shape-specific parameter bag its `*_params` typedef above names, and asserts the matching texture_usage.
 
@@ -143,9 +144,16 @@ public:
         return _make_texture<texture_view_dimension::tex_2d_array>(_natural_array_range(params), _mips(params));
     }
 
-    /// Image (UAV) view over the whole texture at one mip level.
+    /// Image (UAV) view over the whole texture at one mip level, of texel format `Format`.
+    /// The texture's format must be `Format`; `as_any_image_view` is the twin for a format known only at runtime.
     /// Not on multisampled textures.
+    template <pixel_format Format>
     [[nodiscard]] auto as_image_view(image_params const& params = {}) const
+        requires(!Traits::is_multisampled)
+    {
+        return as_any_image_view(params).template as_image<Format>();
+    }
+    [[nodiscard]] auto as_any_image_view(image_params const& params = {}) const
         requires(!Traits::is_multisampled)
     {
         return _make_image<_image_whole_dim()>(_natural_array_range(params), params.mip, _depth_slices(params));
@@ -153,7 +161,14 @@ public:
 
     /// Image view of one array slice / cube face, bound as a Texture2D.
     /// Only on non-MS 2D array shapes.
+    template <pixel_format Format>
     [[nodiscard]] auto as_image_2d_view(image_2d_params const& params = {}) const
+        requires(!Traits::is_multisampled && Traits::dimension == texture_dimension::d2
+                 && (Traits::is_array || Traits::is_cube))
+    {
+        return as_any_image_2d_view(params).template as_image<Format>();
+    }
+    [[nodiscard]] auto as_any_image_2d_view(image_2d_params const& params = {}) const
         requires(!Traits::is_multisampled && Traits::dimension == texture_dimension::d2
                  && (Traits::is_array || Traits::is_cube))
     {
@@ -163,7 +178,13 @@ public:
 
     /// Image view of one array slice, bound as a Texture1D.
     /// Only on non-MS 1D array textures.
+    template <pixel_format Format>
     [[nodiscard]] auto as_image_1d_view(image_1d_params const& params = {}) const
+        requires(!Traits::is_multisampled && Traits::dimension == texture_dimension::d1 && Traits::is_array)
+    {
+        return as_any_image_1d_view(params).template as_image<Format>();
+    }
+    [[nodiscard]] auto as_any_image_1d_view(image_1d_params const& params = {}) const
         requires(!Traits::is_multisampled && Traits::dimension == texture_dimension::d1 && Traits::is_array)
     {
         return _make_image<texture_view_dimension::tex_1d>(_single(_pick_slice(params)), params.mip,
@@ -348,9 +369,9 @@ private:
     }
 
     template <texture_view_dimension Dim>
-    [[nodiscard]] image_view<texture_view_traits<Dim>> _make_image(cc::start_end array_range,
-                                                                   int mip,
-                                                                   cc::start_end depth_slice_range) const
+    [[nodiscard]] any_texture_view<texture_view_traits<Dim>> _make_image(cc::start_end array_range,
+                                                                         int mip,
+                                                                         cc::start_end depth_slice_range) const
     {
         CC_ASSERT(_raw->usage().has(texture_usage::image), "texture lacks image usage");
         CC_ASSERT(mip >= 0 && mip < _raw->mip_levels(), "image view mip level out of range");
@@ -358,10 +379,12 @@ private:
         r.mip_range = {.start = mip, .end = mip + 1}; // a UAV targets a single mip level
         r.array_range = array_range;
         r.aspect_range = {.start = 0, .end = format_aspect_count(_raw->format())};
-        return image_view<texture_view_traits<Dim>>{.texture = _raw,
-                                                    .format = _raw->format(),
-                                                    .range = r,
-                                                    .depth_slice_range = depth_slice_range};
+        return any_texture_view<texture_view_traits<Dim>>(raw_texture_view{.kind = view_class::image,
+                                                                           .texture = _raw,
+                                                                           .view_dimension = Dim,
+                                                                           .format = _raw->format(),
+                                                                           .range = r,
+                                                                           .depth_slice_range = depth_slice_range});
     }
 
     [[nodiscard]] render_target_view _make_render_target(texture_view_dimension dim, cc::start_end array_range, int mip) const

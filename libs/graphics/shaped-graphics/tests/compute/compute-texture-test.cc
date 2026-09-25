@@ -67,8 +67,8 @@ ASYNC_INVOCABLE_TEST("sg - an SGL shader samples a texture through a static samp
                                                            shaders::post{
                                                                .texel_size = tg::vec2f(1.0f / k_extent, 1.0f / k_extent),
                                                                .src = src.as_texture_view(),
-                                                               .dst = dst.as_image_view(),
-                                                               .acc = acc.as_image_view(),
+                                                               .dst = dst.as_image_view<sg::pixel_format::rgba8_unorm>(),
+                                                               .acc = acc.as_image_view<sg::pixel_format::r32_float>(),
                                                            });
     cmd->compute.bind_pipeline(*pipeline);
     cmd->compute.bind_group(0, *group);
@@ -124,15 +124,16 @@ ASYNC_INVOCABLE_TEST("sg - one group's static sampler samples at whichever slot 
                                                           shaders::post{
                                                               .texel_size = tg::vec2f(1.0f / k_extent, 1.0f / k_extent),
                                                               .src = src.as_texture_view(),
-                                                              .dst = dst.as_image_view(),
-                                                              .acc = acc.as_image_view(),
+                                                              .dst = dst.as_image_view<sg::pixel_format::rgba8_unorm>(),
+                                                              .acc = acc.as_image_view<sg::pixel_format::r32_float>(),
                                                           });
-    auto const sampled = ctx->transient.create_binding_group(*cmd, sampled_layout,
-                                                             shaders::sampled{
-                                                                 .src = src.as_texture_view(),
-                                                                 .smp = {},
-                                                                 .dst = second.as_image_view(),
-                                                             });
+    auto const sampled
+        = ctx->transient.create_binding_group(*cmd, sampled_layout,
+                                              shaders::sampled{
+                                                  .src = src.as_texture_view(),
+                                                  .smp = {},
+                                                  .dst = second.as_image_view<sg::pixel_format::rgba8_unorm>(),
+                                              });
     cmd->compute.bind_pipeline(*at_slot_0);
     cmd->compute.bind_group(0, *post);
     cmd->compute.dispatch_threads(k_extent, k_extent);
@@ -185,7 +186,7 @@ ASYNC_INVOCABLE_TEST("sg - an SGL shader samples through a sampler the group bin
                                                           .mip_filter = sg::sampler_filter::nearest,
                                                           .address_u = sg::sampler_address_mode::clamp_edge,
                                                           .address_v = sg::sampler_address_mode::clamp_edge},
-                                                  .dst = dst.as_image_view(),
+                                                  .dst = dst.as_image_view<sg::pixel_format::rgba8_unorm>(),
                                               });
     cmd->compute.bind_pipeline(*pipeline);
     cmd->compute.bind_group(0, *group);

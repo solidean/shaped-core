@@ -471,9 +471,10 @@ tex.as_texture_1d_view({.slice=3})            // 1D array -> Texture1D
 tex.as_texture_cube_view({.cube=2})           // cube array -> one TextureCube
 tex.as_texture_2d_array_view({.slices={...}}) // cube / cube array -> Texture2DArray (faces as a flat 2D array)
 // image (storage, UAV) — needs image usage; single mip; not on MS (a cube binds as a 2D-array image):
-tex.as_image_view({.mip=1})                   // -> image_view<VT>  (VT deduced; whole, natural dimension)
+tex.as_image_view<F>({.mip=1})                // -> image_view<VT, F>  (VT deduced; asserts the texture's format is F)
+tex.as_any_image_view({.mip=1})               // -> any_texture_view<VT> of kind image — the twin for a runtime format
 //   image_params fields: .mip always; .slices (arrays/cubes); .depth_slices (3D, the W/Z axis)
-tex.as_image_2d_view({.slice=3,.mip=0})       // array/cube -> Texture2D    tex.as_image_1d_view({.slice=3})
+tex.as_image_2d_view<F>({.slice=3,.mip=0})    // array/cube -> Texture2D    tex.as_image_1d_view<F>({.slice=3})  (+ as_any_ twins)
 // render-target / depth-stencil views (2D-shaped only; single mip; MSAA allowed; NOT shader-facing — no raw_view):
 tex.as_render_target_view({.mip=1})            // -> render_target_view  (needs render_target usage + color format)
 tex.as_depth_stencil_view()                    // -> depth_stencil_view  (needs depth_stencil usage + depth format)
@@ -495,8 +496,9 @@ sg::readonly_buffer_view<T>         // read array of T      (SRV / read SSBO)   
 sg::readwrite_buffer_view<T>        // rw array of T        (UAV / rw SSBO)        — view_class::readwrite (T=byte → raw)
 // each holds a raw_buffer_handle + range; pure value (no GPU alloc). Made via buffer.as_*() above.
 sg::texture_view<VT>         // sampled texture (SRV); VT = texture_view_traits<Dim>  — view_class::texture
-sg::image_view<VT>           // storage image (UAV); VT constrained to image_view_dimension (no cube/MS) — view_class::image
-// each holds { raw_texture_handle, pixel_format, subresource_range }, plus depth_slice_range on the image view (3D).
+sg::image_view<VT, F>        // storage image (UAV) of texel format F (the binding contract); VT: no cube/MS — view_class::image
+// each holds { raw_texture_handle, subresource_range }; a texture view adds a runtime pixel_format, an image view depth_slice_range (3D).
+// sg::accepts checks a bound image's format against a binding that declares its image_format.
 // an image's read / write / read_write is the BINDING's access, never the view's.
 //   Made via texture<Traits>.as_*_view() (returns the precise VT).
 // view traits: tv_1d / tv_1d_array / tv_2d / tv_2d_array / tv_2d_ms / tv_2d_ms_array / tv_3d / tv_cube / tv_cube_array
@@ -514,11 +516,11 @@ sg::try_as_buffer_view(rv)   // -> raw_buffer_view const*, null on a different a
 // raw arms are also the directly-usable "raw" binding vocabulary for tooling
 // INVERSE (erased -> typed leaf): as_* asserts (view class, +dimension for textures); try_as_* -> cc::optional (nullopt on mismatch / wrong arm)
 mid.as_readonly() / as_readwrite() / as_uniform()   // buffer_view<T> middle -> the leaf (only the runtime access is pinned)
-mid.as_texture() / as_image()                       // any_texture_view<VT> middle -> the leaf (as_image: image VT only)
+mid.as_texture() / as_image<F>()                    // any_texture_view<VT> middle -> the leaf (as_image: image VT only; checks F)
 arm.as_readonly<T>() / as_readwrite<T>() / as_uniform<T>()   // raw_buffer_view arm -> leaf (you supply T)
-arm.as_texture<VT>() / as_image<VT>()                        // raw_texture_view arm -> leaf (you supply VT; checks view dimension)
+arm.as_texture<VT>() / as_image<VT, F>()                     // raw_texture_view arm -> leaf (you supply VT; checks view dimension)
 sg::as_readonly_buffer<T>(rv) / as_readwrite_buffer<T> / as_uniform_buffer<T>    // raw_view -> buffer leaf in one call (+ try_ twins)
-sg::as_texture<VT>(rv) / as_image<VT>                                            // raw_view -> texture / image leaf in one call (+ try_ twins)
+sg::as_texture<VT>(rv) / as_image<VT, F>                                         // raw_view -> texture / image leaf in one call (+ try_ twins)
 // deferred: texel buffers (typed linear buffers). samplers: see sampler.hh
 ```
 

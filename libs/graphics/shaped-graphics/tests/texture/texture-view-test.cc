@@ -86,7 +86,7 @@ sg::texture_description desc_2d_fmt(sg::texture_usages usage, sg::pixel_format f
 
 // Which view factories a shape exposes, and which axes its params bag names — a compile-time contract.
 template <class T>
-concept has_rw_view = requires(T t) { t.as_image_view(); };
+concept has_rw_view = requires(T t) { t.as_any_image_view(); };
 template <class T>
 concept has_ro_2d = requires(T t) { t.as_texture_2d_view(); };
 template <class T>
@@ -96,7 +96,7 @@ concept has_ro_cube = requires(T t) { t.as_texture_cube_view(); };
 template <class T>
 concept has_ro_2d_array = requires(T t) { t.as_texture_2d_array_view(); };
 template <class T>
-concept has_rw_2d = requires(T t) { t.as_image_2d_view(); };
+concept has_rw_2d = requires(T t) { t.as_any_image_2d_view(); };
 template <class T>
 concept ro_has_slices = requires(typename T::texture_params p) { p.slices; };
 template <class T>
@@ -260,7 +260,7 @@ TEST("sg - as_image_view builds a storage (UAV) view of one mip")
     auto const d = desc_2d(sg::texture_usage::image, /*mips*/ 3);
     auto tex = sg::texture_2d::from_raw(std::make_shared<test_texture>(d));
 
-    sg::raw_view const rv = tex.as_image_view({.mip = 1}).to_raw();
+    sg::raw_view const rv = tex.as_image_view<sg::pixel_format::rgba8_unorm>({.mip = 1}).to_raw();
     CHECK(sg::view_class_of(rv) == sg::view_class::image);
     CHECK(sg::shape_of(rv) == sg::view_shape::texture);
     auto const t = rtv(rv);
@@ -272,16 +272,16 @@ TEST("sg - as_image_view builds a storage (UAV) view of one mip")
 TEST("sg - storage cube view is a 2D array; single face / slice drop to 2D")
 {
     auto cube = sg::texture_cube::from_raw(std::make_shared<test_texture>(desc_cube(sg::texture_usage::image)));
-    auto const whole = rtv(cube.as_image_view().to_raw());
+    auto const whole = rtv(cube.as_image_view<sg::pixel_format::rgba8_unorm>().to_raw());
     CHECK(whole.view_dimension == sg::texture_view_dimension::tex_2d_array); // no cube UAV
     CHECK(whole.range.array_range.end == 6);
 
-    auto const face = rtv(cube.as_image_2d_view({.face = 2}).to_raw());
+    auto const face = rtv(cube.as_image_2d_view<sg::pixel_format::rgba8_unorm>({.face = 2}).to_raw());
     CHECK(face.view_dimension == sg::texture_view_dimension::tex_2d);
     CHECK(face.range.array_range.start == 2);
 
     auto arr = sg::texture_2d_array::from_raw(std::make_shared<test_texture>(desc_2d_array(sg::texture_usage::image, 4)));
-    auto const slice = rtv(arr.as_image_2d_view({.slice = 3}).to_raw());
+    auto const slice = rtv(arr.as_image_2d_view<sg::pixel_format::rgba8_unorm>({.slice = 3}).to_raw());
     CHECK(slice.view_dimension == sg::texture_view_dimension::tex_2d);
     CHECK(slice.range.array_range.start == 3);
     CHECK(slice.range.array_range.end == 4);
@@ -291,12 +291,13 @@ TEST("sg - storage 3D view carries a depth-slice window")
 {
     auto tex = sg::texture_3d::from_raw(std::make_shared<test_texture>(desc_3d(sg::texture_usage::image, /*depth*/ 8)));
 
-    auto const whole = rtv(tex.as_image_view().to_raw());
+    auto const whole = rtv(tex.as_image_view<sg::pixel_format::rgba8_unorm>().to_raw());
     CHECK(whole.view_dimension == sg::texture_view_dimension::tex_3d);
     CHECK(whole.depth_slice_range.start == 0);
     CHECK(whole.depth_slice_range.end == 8); // all depth slices
 
-    auto const window = rtv(tex.as_image_view({.depth_slices = {.start = 2, .count = 3}}).to_raw());
+    auto const window
+        = rtv(tex.as_image_view<sg::pixel_format::rgba8_unorm>({.depth_slices = {.start = 2, .count = 3}}).to_raw());
     CHECK(window.view_dimension == sg::texture_view_dimension::tex_3d);
     CHECK(window.depth_slice_range.start == 2);
     CHECK(window.depth_slice_range.end == 5);
@@ -308,7 +309,7 @@ TEST("sg - texture views assert on missing usage")
     CHECK_ASSERTS(storage_only.as_texture_view()); // lacks texture usage
 
     auto sampled_only = sg::texture_2d::from_raw(std::make_shared<test_texture>(desc_2d(sg::texture_usage::texture)));
-    CHECK_ASSERTS(sampled_only.as_image_view()); // lacks image usage
+    CHECK_ASSERTS(sampled_only.as_image_view<sg::pixel_format::rgba8_unorm>()); // lacks image usage
 }
 
 TEST("sg - texture views assert on out-of-range selection")
@@ -329,8 +330,9 @@ TEST("sg - texture binding types accept the matching texture view")
     auto tex = sg::texture_2d::from_raw(std::make_shared<test_texture>(d));
 
     CHECK(sg::accepts({.type = sg::binding_type::texture}, tex.as_texture_view().to_raw()));
-    CHECK(sg::accepts({.type = sg::binding_type::image}, tex.as_image_view().to_raw()));
-    CHECK(!sg::accepts({.type = sg::binding_type::texture}, tex.as_image_view().to_raw()));  // wrong kind
+    CHECK(sg::accepts({.type = sg::binding_type::image}, tex.as_image_view<sg::pixel_format::rgba8_unorm>().to_raw()));
+    CHECK(!sg::accepts({.type = sg::binding_type::texture},
+                       tex.as_image_view<sg::pixel_format::rgba8_unorm>().to_raw()));        // wrong kind
     CHECK(!sg::accepts({.type = sg::binding_type::buffer}, tex.as_texture_view().to_raw())); // wrong shape
 }
 
@@ -339,7 +341,8 @@ TEST("sg - typed texture views carry the view dimension at compile time")
     auto tex = sg::texture_2d::from_raw(
         std::make_shared<test_texture>(desc_2d(sg::texture_usage::texture | sg::texture_usage::image)));
     static_assert(std::is_same_v<decltype(tex.as_texture_view()), sg::texture_view<sg::tv_2d>>);
-    static_assert(std::is_same_v<decltype(tex.as_image_view()), sg::image_view<sg::tv_2d>>);
+    static_assert(std::is_same_v<decltype(tex.as_image_view<sg::pixel_format::rgba8_unorm>()),
+                                 sg::image_view<sg::tv_2d, sg::pixel_format::rgba8_unorm>>);
 
     // Reinterpreting factories retype to the reinterpreted dimension.
     auto cube = sg::texture_cube::from_raw(std::make_shared<test_texture>(desc_cube(sg::texture_usage::texture)));
@@ -365,7 +368,7 @@ TEST("sg - kind-erased any_texture_view<Traits> middle")
     CHECK(sg::view_class_of(ro.to_raw()) == sg::view_class::texture);
     CHECK(sg::shape_of(ro.to_raw()) == sg::view_shape::texture);
 
-    sg::any_texture_view<sg::tv_2d> const rw = tex.as_image_view();
+    sg::any_texture_view<sg::tv_2d> const rw = tex.as_image_view<sg::pixel_format::rgba8_unorm>();
     CHECK(rw.kind == sg::view_class::image);
 }
 
@@ -489,24 +492,56 @@ TEST("sg - any_texture_view<Traits> middle + arm + raw_view -> typed leaf")
     sg::any_texture_view<sg::tv_2d> const mid = tex.as_texture_view();
     CHECK(mid.as_texture().range.mip_range.end == 1);
     CHECK(mid.try_as_texture().has_value());
-    CHECK(!mid.try_as_image().has_value()); // kind is texture
-    CHECK_ASSERTS(mid.as_image());
+    CHECK(!mid.try_as_image<sg::pixel_format::rgba8_unorm>().has_value()); // kind is texture
+    CHECK_ASSERTS(mid.as_image<sg::pixel_format::rgba8_unorm>());
 
     // Erased arm -> leaf (you supply Traits); both view dimension and kind are checked.
     auto const arm = rtv(rv);
     CHECK(arm.as_texture<sg::tv_2d>().format == sg::pixel_format::rgba8_unorm);
     CHECK(arm.try_as_texture<sg::tv_2d>().has_value());
-    CHECK(!arm.try_as_texture<sg::tv_2d_array>().has_value()); // wrong view dimension
-    CHECK(!arm.try_as_image<sg::tv_2d>().has_value());         // wrong kind
-    CHECK_ASSERTS(arm.as_texture<sg::tv_2d_array>());          // dimension mismatch asserts
+    CHECK(!arm.try_as_texture<sg::tv_2d_array>().has_value());                          // wrong view dimension
+    CHECK((!arm.try_as_image<sg::tv_2d, sg::pixel_format::rgba8_unorm>().has_value())); // wrong kind
+    CHECK_ASSERTS(arm.as_texture<sg::tv_2d_array>());                                   // dimension mismatch asserts
 
     // raw_view -> leaf in one call.
     CHECK(sg::as_texture<sg::tv_2d>(rv).format == sg::pixel_format::rgba8_unorm);
     CHECK(sg::try_as_texture<sg::tv_2d>(rv).has_value());
-    CHECK(!sg::try_as_image<sg::tv_2d>(rv).has_value()); // wrong kind
+    CHECK((!sg::try_as_image<sg::tv_2d, sg::pixel_format::rgba8_unorm>(rv).has_value())); // wrong kind
 
     // An image (UAV) view round-trips through the image recovery.
-    auto const uav = tex.as_image_view().to_raw();
-    CHECK(sg::as_image<sg::tv_2d>(uav).range.mip_range.end == 1);
-    CHECK(!sg::try_as_texture<sg::tv_2d>(uav).has_value()); // wrong kind
+    auto const uav = tex.as_image_view<sg::pixel_format::rgba8_unorm>().to_raw();
+    CHECK((sg::as_image<sg::tv_2d, sg::pixel_format::rgba8_unorm>(uav).range.mip_range.end == 1));
+    CHECK(!sg::try_as_texture<sg::tv_2d>(uav).has_value());                              // wrong kind
+    CHECK((!sg::try_as_image<sg::tv_2d, sg::pixel_format::r32_float>(uav).has_value())); // wrong format
+}
+
+TEST("sg - an image view is typed on its format, which is the binding's contract")
+{
+    auto tex = sg::texture_2d::from_raw(std::make_shared<test_texture>(desc_2d(sg::texture_usage::image)));
+    using image = decltype(tex.as_image_view<sg::pixel_format::rgba8_unorm>());
+    static_assert(image::format == sg::pixel_format::rgba8_unorm);
+    CHECK(sg::as_texture_view(tex.as_image_view<sg::pixel_format::rgba8_unorm>().to_raw()).format
+          == sg::pixel_format::rgba8_unorm);
+
+    // The format is the texture's, so naming another one is a contract bug, not a reinterpretation.
+    CHECK_ASSERTS(tex.as_image_view<sg::pixel_format::r32_float>());
+
+    // A format known only at runtime goes through the kind-erased middle, and commits there.
+    auto const any = tex.as_any_image_view();
+    CHECK(any.kind == sg::view_class::image);
+    CHECK(any.format == sg::pixel_format::rgba8_unorm);
+    CHECK(any.try_as_image<sg::pixel_format::rgba8_unorm>().has_value());
+    CHECK(!any.try_as_image<sg::pixel_format::r32_float>().has_value());
+
+    // A binding that declares its format accepts only a view of exactly that format; one that does not, any.
+    auto const rgba8 = sg::binding{.type = sg::binding_type::image,
+                                   .access = sg::access_mode::write,
+                                   .image_format = sg::pixel_format::rgba8_unorm};
+    auto const r32 = sg::binding{.type = sg::binding_type::image,
+                                 .access = sg::access_mode::write,
+                                 .image_format = sg::pixel_format::r32_float};
+    auto const undeclared = sg::binding{.type = sg::binding_type::image, .access = sg::access_mode::write};
+    CHECK(sg::accepts(rgba8, any));
+    CHECK(!sg::accepts(r32, any));
+    CHECK(sg::accepts(undeclared, any));
 }

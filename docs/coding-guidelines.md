@@ -407,7 +407,7 @@ A named local earns its name only when it is reused, or when naming it clarifies
 ```cpp
 // prefer — the views exist only for this call
 auto group = ctx.transient.create_binding_group(layout, {{.name = "scene", .view = tlas->as_view()},
-                                                         {.name = "Output", .view = img.as_image_view()}});
+                                                         {.name = "Output", .view = img.as_any_image_view()}});
 ```
 
 Fall back to plain braced initialization where designated initializers don't apply — a container, or a non-aggregate:

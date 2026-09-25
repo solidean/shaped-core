@@ -89,7 +89,7 @@ ASYNC_INVOCABLE_TEST("sg webgpu - a write-only storage texture is written by a d
     auto pipeline = co_await ctx.cached.acquire_compute_pipeline({.shader = shader, .layout = pipeline_layout});
     REQUIRE(pipeline != nullptr);
 
-    sg::named_view const canvas = {.name = "canvas", .view = texture.as_image_view()};
+    sg::named_view const canvas = {.name = "canvas", .view = texture.as_image_view<sg::pixel_format::rgba8_unorm>()};
     auto group = ctx.persistent.create_binding_group(group_layout, cc::span<sg::named_view const>(&canvas, 1));
 
     auto cmd = ctx.create_command_list();

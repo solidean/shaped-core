@@ -469,7 +469,7 @@ sg::routine_outcome pathtrace_routine::execute(sg::command_list& cmd, pt_trace_d
 
     auto const group = ctx.transient.create_binding_group(
         variant->group_layout, {{.name = "scene", .view = tlas->as_view()},
-                                {.name = "Output", .view = d.output.as_image_view()},
+                                {.name = "Output", .view = d.output.as_any_image_view()},
                                 {.name = "frame", .view = d.frame.as_uniform_buffer()},
                                 {.name = "background", .view = d.background.as_uniform_buffer()},
                                 {.name = "Instances", .view = d.instance_table.as_readonly_buffer()},
