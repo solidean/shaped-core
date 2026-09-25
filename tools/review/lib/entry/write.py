@@ -15,8 +15,8 @@ from pathlib import Path
 
 from ..core.atomic import write_atomic
 from .askhash import hash_ask
-from .grammar import ATTR_RE, ReviewParseError
-from .parse import Entry, parse_text
+from .grammar import ATTR_RE, BLOCK_TYPES, ReviewParseError
+from .parse import Block, Entry, parse_text
 
 
 def _splice(text: str, edits: list[tuple[int, int, str]]) -> str:
@@ -143,6 +143,31 @@ def missing_intro_rounds(entry: Entry, open_asks: set[str]) -> list[int]:
     asking = {b.round or latest for b in entry.asks if b.name in open_asks and b.name != acknowledged}
     introduced = {b.round or latest for b in entry.blocks if b.type == "intro"}
     return sorted(asking - introduced)
+
+
+def attributes_read_as_prose(entry: Entry) -> list[tuple[Block, int, str]]:
+    """(ask, line, key) for every ask whose prelude is followed by a blank line and then a key that ask accepts.
+
+    A blank line ends the prelude, so the `discharges:` below it is a sentence that discharges nothing.
+    That is the documented escape into prose, and on an ask it is almost always a slip instead, which was silent.
+    The prelude may be empty or hold only the `round:` the tool stamped in after the heading; the slip is the same.
+    """
+    allowed = BLOCK_TYPES["ask"]
+    out = []
+    for block in entry.blocks:
+        if not block.is_ask:
+            continue
+        lines = block.raw.split("\n")[1:]
+        prelude = 0
+        while prelude < len(lines) and (m := ATTR_RE.match(lines[prelude])) and m.group(1) in allowed:
+            prelude += 1
+        if prelude >= len(lines) or lines[prelude].strip():
+            continue
+        first = next((i for i in range(prelude, len(lines)) if lines[i].strip()), None)
+        match = ATTR_RE.match(lines[first]) if first is not None else None
+        if match and match.group(1) in allowed:
+            out.append((block, block.line + 1 + first, match.group(1)))
+    return out
 
 
 def render_front(front: dict[str, str]) -> str:

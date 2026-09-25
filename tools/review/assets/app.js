@@ -203,7 +203,7 @@ async function selectEntry(slug, { push = true } = {}) {
   if (push) history.replaceState(null, "", "#" + slug);
   state.tokens = result.body.tokens;
   timed("annotate", () => annotate(el("content"), result.body.tokens));
-  timed("lazy-diffs", () => wireLazyDiffs(el("content")));
+  timed("lazy-diffs", () => { wireLazyChangeLists(el("content")); wireLazyDiffs(el("content")); });
   timed("wire", () => { wireForms(); wireComments(); });
   timed("nav", () => renderNav());
 
@@ -595,6 +595,32 @@ function mdInline(text) {
 
 const diffCache = new Map();
 
+// A collapsed `changes` block goes one step further: it arrives as one summary line, and its cards are fetched
+// the first time it is opened. An lgtm entry discharging a hundred changes otherwise draws a hundred rows.
+function wireLazyChangeLists(root) {
+  for (const list of root.querySelectorAll("details.changes-list[data-changes]")) {
+    list.addEventListener("toggle", () => {
+      if (list.open) loadChangeList(list);
+    });
+  }
+}
+
+async function loadChangeList(list) {
+  const slot = list.querySelector(".changes-body");
+  if (!slot || slot.dataset.loaded === "1") return;
+  slot.dataset.loaded = "1";
+  const ids = list.dataset.changes.split(" ").join(",");
+  const result = await getJSON("/api/changes?ids=" + encodeURIComponent(ids));
+  if (!result.ok) {
+    slot.innerHTML = '<span class="change-pending">the changes could not be loaded</span>';
+    slot.dataset.loaded = "";
+    return;
+  }
+  slot.innerHTML = result.body.html;
+  annotate(slot, state.tokens);
+  wireLazyDiffs(slot);
+}
+
 function wireLazyDiffs(root) {
   for (const card of root.querySelectorAll("details.change[data-change]")) {
     // `toggle` rather than a click on the summary: the disclosure can also be opened by keyboard, by find-in-page
@@ -627,8 +653,9 @@ async function loadDiff(card) {
   }
   slot.innerHTML = html;
   // The annotator ran before this existed, so the tokens have to reach it now — a path reference inside a diff
-  // is a link there exactly as it is anywhere else.
+  // is a link there exactly as it is anywhere else. The same goes for the double-click that comments on a line.
   annotate(slot, state.tokens);
+  wireLineComments(card);
 }
 
 // ---- the popover ------------------------------------------------------------
@@ -1040,9 +1067,13 @@ function wireComments() {
     });
   }
 
-  // A line comment anchors on the change id plus the offset into that change's diff, which is stable
-  // for exactly as long as the change id is.
-  for (const table of document.querySelectorAll(".change .difflines")) {
+  wireLineComments(document);
+}
+
+// A line comment anchors on the change id plus the offset into that change's diff, which is stable
+// for exactly as long as the change id is.
+function wireLineComments(root) {
+  for (const table of root.querySelectorAll(".change .difflines")) {
     const change = table.closest(".change").querySelector(".change-head code").textContent;
     for (const row of table.querySelectorAll("tr[data-off]")) {
       row.querySelector(".dl-src").addEventListener("dblclick", () => {

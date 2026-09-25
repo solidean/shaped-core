@@ -65,6 +65,21 @@ That is right while the tool is being built and wrong for a review anyone wants 
 **An export mode** would turn one into a durable artifact: the entries, the answers, the rounds and the attachments, in a form that does not depend on this version of the tool.
 What that form is — a single markdown file, a static page, a zip — is undecided, and so is whether it can be read back.
 
+## Small things
+
+Fixes rather than new capabilities, each a line of work, found by running the tool on another repository at scale.
+
+- **A mistyped change id gets no did-you-mean.**
+  `validate` says the id is not in the ledger and stops there; naming the nearest live id would make the typo a one-line fix.
+- **A bash substitution in a fence reads as a folder.**
+  `raw:${mod//\//.}` inside a shell fence is matched as a folder reference and fails `validate`.
+  The folder matcher should not start inside `${`.
+- **`review.toml` still opens with "A shaped-core review."**
+  The tool reviews any repository, so the header should say what the file is without naming this one.
+- **`round --no-wait` hands back every discharge list.**
+  On a large review its text was 27 KB, mostly `discharges:` ids the agent wrote itself and does not need read back.
+  It should print a count, and the ids only with a flag.
+
 ## Provenance
 
 Everything this file used to hold — comments anywhere, superseding a block, an identity for a review — was designed and built on 2026-08-26.

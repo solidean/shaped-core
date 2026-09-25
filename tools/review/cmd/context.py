@@ -29,6 +29,8 @@ class Context:
     repo: Path
     git: review.Git
     dir_override: Path | None = None
+    # How to run the tool again, as the user just did, for the commands a hint tells them to run next.
+    invocation: str = "uv run review.py"
 
     @classmethod
     def at(cls, home: Path, *, dir_override: Path | None = None) -> "Context":
@@ -101,17 +103,19 @@ class Context:
         except review.GitError as e:
             self.die(str(e))
 
-    def entries(self, paths: review.ReviewPaths) -> list[review.Entry]:
-        """Every entry in navigation order, dying with the file and line on the first malformed one."""
+    def entries(self, paths: review.ReviewPaths, files: list[Path] | None = None) -> list[review.Entry]:
+        """Every entry in navigation order, or just `files`, dying with the file and line on the first malformed one."""
         out = []
-        for file in paths.entry_files():
+        for file in paths.entry_files() if files is None else files:
             try:
                 out.append(review.parse_entry_file(file))
             except review.ReviewParseError as e:
                 self.die(str(e))
         return out
 
-    def entries_tolerant(self, paths: review.ReviewPaths) -> tuple[list[review.Entry], list[review.ReviewParseError]]:
+    def entries_tolerant(
+        self, paths: review.ReviewPaths, files: list[Path] | None = None
+    ) -> tuple[list[review.Entry], list[review.ReviewParseError]]:
         """Every entry that parses, and the error of each that does not, for a command that only reads.
 
         One stale entry, written in a grammar the tool has since retired, must not hide every other entry of the review.
@@ -119,7 +123,7 @@ class Context:
         """
         out: list[review.Entry] = []
         broken: list[review.ReviewParseError] = []
-        for file in paths.entry_files():
+        for file in paths.entry_files() if files is None else files:
             try:
                 out.append(review.parse_entry_file(file))
             except review.ReviewParseError as e:

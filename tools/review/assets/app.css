@@ -210,6 +210,11 @@ button:hover { border-color: var(--accent); }
 .change-file { color: var(--accent); font-weight: 600; }
 .change-reason { padding: 0.4rem 0.7rem; color: var(--text-dim); font-size: 0.85rem; }
 .change.missing { color: var(--bad); padding: 0.4rem 0.7rem; }
+/* A collapsed block is one line until it is opened; its cards are fetched then. */
+.changes-head { color: var(--text-dim); font-size: 0.82rem; cursor: pointer; padding: 0.3rem 0; }
+.changes-missing { color: var(--bad); margin-left: 0.5rem; }
+.changes-body:empty { display: none; }
+details.discharges summary { cursor: pointer; }
 
 .difflines { width: 100%; border-collapse: collapse; display: block; overflow-x: auto; }
 .difflines td { padding: 0 0.4rem; white-space: pre; vertical-align: top; }

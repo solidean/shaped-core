@@ -32,11 +32,12 @@ from ..entry.answers import AnswerFile
 from ..entry.askhash import hash_ask
 from ..entry.generate import POPOVER_ROWS, _tree_html as tree_html
 from ..entry.grammar import ReviewParseError
-from ..entry.parse import Entry, parse_file
+from ..entry import parse as entry_parse
+from ..entry.parse import Entry
 from ..git.run import Git
 from ..goals.skeleton import describe, groups_for
-from ..render.entryview import render_entry
-from ..render.highlight import css as highlight_css, highlight_code, highlight_diff
+from ..render.entryview import change_cards, render_entry
+from ..render.highlight import css as highlight_css, digest as text_digest, highlight_code, highlight_diff
 from ..render.media import BINARY, IMAGE, classify, human_bytes
 from . import timing
 from .watch import Watcher, compute_digest
@@ -63,30 +64,60 @@ class ReviewApp:
         self._index: RepoIndex | None = None
         self._index_key: tuple | None = None
         self._terms: list | None = None
+        self._terms_source: str = ""
         self._terms_digest: str = ""
         self._head_sha: str = ""
         self._trees_at: dict[str, RepoIndex] = {}  # a commit's tree never changes, so this is never invalidated
 
-        # Rendered entry payloads, keyed on the watcher's digest plus that entry's answers file.
-        # An entry's HTML depends on exactly those two — its own text, and what has been answered on it — so a
-        # digest that has not moved means every cached payload is still the folder's own view.
-        self._rendered: dict[str, dict] = {}
-        self._rendered_digest: str = ""
+        # Rendered entry payloads, each keyed on exactly what its HTML depends on — see `_render_key`.
+        # Per entry rather than per folder, so an autosave re-renders the one entry it touched.
+        self._rendered: dict[str, tuple[tuple, dict]] = {}
         self._rendered_guard = threading.Lock()
+
+        # Parsed entries by file, keyed on the text they were parsed from; reading a file is cheap, parsing it is not.
+        self._parsed: dict[Path, tuple[str, str, Entry | None, ReviewParseError | None]] = {}
+        self._parsed_guard = threading.Lock()
+        self._ledger: tuple[tuple, Ledger] | None = None
+        # Whether a hex string names a commit, for the life of the server — the same lifetime `head_sha` has.
+        self._shas: dict[str, bool] = {}
 
     def config(self):
         return config_module.load(self.paths.config)
 
     def ledger(self) -> Ledger:
-        return Ledger.load(self.paths.ledger)
+        """The ledger, re-read only when the file moved; it has one writer, the CLI, and appends are whole records."""
+        key = stat_key(self.paths.ledger)
+        if self._ledger is None or self._ledger[0] != key:
+            self._ledger = (key, Ledger.load(self.paths.ledger))
+        return self._ledger[1]
+
+    def parse(self, file: Path) -> tuple[str, Entry | None, ReviewParseError | None]:
+        """(text digest, entry, error) for one entry file, parsed again only when its text changed.
+
+        Keyed on the text rather than on mtime and size, for the watcher's reason: an agent rewriting an entry
+        within one clock tick, to the same length, is ordinary.
+        The Entry is shared between requests, which is safe because nothing on the server mutates one.
+        """
+        with file.open(encoding="utf-8", newline="") as f:
+            text = f.read()
+        with self._parsed_guard:
+            hit = self._parsed.get(file)
+        if hit is not None and hit[0] == text:
+            return hit[1], hit[2], hit[3]
+        digest = text_digest(text)
+        try:
+            entry, error = entry_parse.parse_text(text, file, slug=file.stem), None
+        except ReviewParseError as e:
+            entry, error = None, e
+        with self._parsed_guard:
+            self._parsed[file] = (text, digest, entry, error)
+        return digest, entry, error
 
     def entries(self) -> list[tuple[Path, Entry | None, ReviewParseError | None]]:
         out = []
         for file in self.paths.entry_files():
-            try:
-                out.append((file, parse_file(file), None))
-            except ReviewParseError as e:
-                out.append((file, None, e))
+            _, entry, error = self.parse(file)
+            out.append((file, entry, error))
         return out
 
     def answers_for(self, entry: Entry) -> AnswerFile:
@@ -160,18 +191,19 @@ class ReviewApp:
         """The tree each finalized round was read at, for text answered back then — see table.history_for."""
         return history_for(self.repo, self.config(), self._trees_at)
 
-    def terms(self) -> list:
-        """Every glossary term in the review, which is what makes one entry's vocabulary reach the others.
+    def terms(self) -> tuple[list, str]:
+        """Every glossary term in the review with a key for them, which is what makes one entry's vocabulary reach the others.
 
-        Keyed on the watcher's digest, unlike `index()` above: the terms come from the entry files, which is
-        exactly what the watcher is watching, while the tracked file set moves independently of this folder.
-        Without a key, fetching one entry re-parses every entry — quadratic in a review's size.
+        Keyed on the entries' own texts rather than on the folder: an answer moves the folder and never a term,
+        and a key that moved with it would re-render every entry on every autosave.
         """
-        digest = self.watcher.digest
-        if self._terms is None or self._terms_digest != digest:
-            self._terms = glossary_terms([e for _, e, err in self.entries() if err is None])
-            self._terms_digest = digest
-        return self._terms
+        found = [(file, *self.parse(file)) for file in self.paths.entry_files()]
+        source = text_digest("\x1f".join(f"{file.name}{d}" for file, d, _, _ in found))
+        if self._terms is None or self._terms_source != source:
+            self._terms = glossary_terms([e for _, _, e, err in found if err is None])
+            self._terms_source = source
+            self._terms_digest = text_digest(repr(self._terms))
+        return self._terms, self._terms_digest
 
     def head_sha(self) -> str:
         """HEAD, resolved once for the life of the server rather than once per entry fetch.
@@ -183,80 +215,93 @@ class ReviewApp:
             self._head_sha = Git(self.repo).rev_parse("HEAD") or ""
         return self._head_sha
 
-    def entry_html(self, slug: str) -> tuple[int, dict]:
-        """One entry's rendered payload, from the cache when the folder has not moved under it.
+    def confirm_shas(self, candidates: list[str]) -> set[str]:
+        """Of these hex strings, the commits — asking git only about the ones this server has not seen.
 
-        The render is pure in the two inputs the key covers, so a hit is not an optimization that risks
-        staleness — it is the same computation, skipped.
-        A miss costs what it always did, so a cold click is never slower than it was.
+        A sha either names a commit or it does not, for as long as HEAD stands still, and `head_sha` already
+        treats that as the server's lifetime; a git process per entry render was most of a cold click.
         """
-        digest = self.watcher.digest
+        unknown = [c for c in candidates if c not in self._shas]
+        if unknown:
+            real = Git(self.repo).which_are_commits(unknown)
+            self._shas.update({c: c in real for c in unknown})
+        return {c for c in candidates if self._shas.get(c)}
+
+    def _render_key(self, file: Path, digest: str, terms: str) -> tuple:
+        """Everything an entry's payload depends on besides the code: its text, its answers, and what it resolves against.
+
+        The answers are read rather than stat'ed, since the server writes them and a same-tick rewrite is its own.
+        """
+        answers = self.paths.answers_for(file)
+        try:
+            answered = text_digest(answers.read_text(encoding="utf-8", errors="replace"))
+        except OSError:
+            answered = ""
+        return (digest, answered, stat_key(self.paths.ledger), stat_key(self.paths.config), terms,
+                self._index_key)
+
+    def entry_html(self, slug: str, *, terms: tuple[list, str] | None = None) -> tuple[int, dict]:
+        """One entry's rendered payload, from the cache when nothing it depends on has moved.
+
+        The render is pure in what `_render_key` covers, so a hit is not an optimization that risks staleness —
+        it is the same computation, skipped.
+        The key is computed from the files at request time, so a write, from the server or from outside it,
+        is seen by the very next request with nothing to invalidate.
+        `terms` is `self.terms()` taken once by a caller rendering many entries, since computing it reads every entry.
+        """
+        file = next((f for f in self.paths.entry_files() if f.stem == slug), None)
+        if file is None:
+            return 404, {"error": f"no entry {slug!r}"}
+        with timing.span("/api/entry/", "parse"):
+            digest, entry, error = self.parse(file)
+        self.index()
+        terms = terms if terms is not None else self.terms()
+        key = self._render_key(file, digest, terms[1])
         with self._rendered_guard:
-            if self._rendered_digest != digest:
-                self._rendered.clear()
-                self._rendered_digest = digest
             hit = self._rendered.get(slug)
-        if hit is not None:
+        if hit is not None and hit[0] == key:
             timing.note("/api/entry/", "cache-hit", 0.0)
-            return 200, hit
+            return 200, hit[1]
 
-        with timing.span("/api/entry/", "parse-all"):
-            found = self.entries()
-        for file, entry, error in found:
-            if file.stem != slug:
-                continue
-            if error is not None:
-                return 200, self._remember(slug, digest, {"slug": slug, "html": _error_panel(error), "broken": True})
-            with timing.span("/api/entry/", "answers"):
-                answers = self.answers_for(entry)
-            with timing.span("/api/entry/", "render"):
-                html = render_entry(
-                    entry, answers,
-                    repo=self.repo, paths=self.paths, ledger=self.ledger(), hash_of=hash_ask,
-                    head=self.head_sha(),
-                )
-            with timing.span("/api/entry/", "tokens"):
-                tokens = build_tokens(entry, self.index(), answers=answers,
-                                      confirm_shas=Git(self.repo).which_are_commits,
-                                      terms=self.terms(), history=self.history())
-            payload = {"slug": slug, "html": html, "broken": False, "tokens": tokens_to_json(tokens)}
-            return 200, self._remember(slug, digest, payload)
-        return 404, {"error": f"no entry {slug!r}"}
+        if error is not None:
+            return 200, self._remember(slug, key, {"slug": slug, "html": _error_panel(error), "broken": True})
+        with timing.span("/api/entry/", "answers"):
+            answers = self.answers_for(entry)
+        with timing.span("/api/entry/", "render"):
+            html = render_entry(
+                entry, answers,
+                repo=self.repo, paths=self.paths, ledger=self.ledger(), hash_of=hash_ask,
+                head=self.head_sha(),
+            )
+        with timing.span("/api/entry/", "tokens"):
+            tokens = build_tokens(entry, self.index(), answers=answers, confirm_shas=self.confirm_shas,
+                                  terms=terms[0], history=self.history())
+        payload = {"slug": slug, "html": html, "broken": False, "tokens": tokens_to_json(tokens)}
+        return 200, self._remember(slug, key, payload)
 
-    def _remember(self, slug: str, digest: str, payload: dict) -> dict:
-        """Files the payload, unless the folder moved while it was being rendered.
+    def _remember(self, slug: str, key: tuple, payload: dict) -> dict:
+        """Files the payload under the key it was rendered from.
 
-        Dropping it in that case rather than storing it is the whole of the invalidation: a render that raced an
-        edit is not wrong to return — the reader asked before the edit — but it must not be handed to the next
-        reader, who asked after.
+        A render that raced an edit is filed under the key from before it, so the next request, which computes
+        the key afresh, misses rather than being handed what the edit replaced.
         """
         with self._rendered_guard:
-            if self._rendered_digest == digest:
-                self._rendered[slug] = payload
+            self._rendered[slug] = (key, payload)
         return payload
-
-    def invalidate(self) -> None:
-        """Drops the rendered cache, for a write that has not reached the watcher yet.
-
-        The digest is polled, so a save and the re-fetch the page fires immediately after it can both land
-        inside one poll interval — and the cache would then hand back the payload from before the save.
-        Every write path calls this, which makes the digest key a staleness guard for edits made *outside*
-        the server rather than the only thing keeping the cache honest.
-        """
-        with self._rendered_guard:
-            self._rendered.clear()
 
     def prebuild(self) -> None:
         """Renders every entry into the cache, so the first click on each is a hit too.
 
         Called off the request path, on a background thread: the point is to spend the cost while the reader is
         still looking at the page they are on, and a prebuild that blocked startup would just move the wait.
+        After a change only the entries whose key moved render again, which after an autosave is one.
         Failures are swallowed on purpose — a broken entry renders as a panel through the normal path, and a
         prebuild that raised would take down a thread nobody is watching.
         """
+        terms = self.terms()
         for file in self.paths.entry_files():
             try:
-                self.entry_html(file.stem)
+                self.entry_html(file.stem, terms=terms)
             except Exception:  # noqa: BLE001 — a warm cache is an optimization, never a correctness input.
                 pass
 
@@ -265,30 +310,33 @@ class ReviewApp:
 
         Served rather than embedded because a review's diffs dwarf everything else in an entry, and most of
         them are never opened — see `_change_card`.
-        Cached under the same digest as an entry, since a diff is only ever regenerated by `ingest`, which
-        rewrites the ledger the digest covers.
+        Keyed on the diff file itself, since only `ingest` ever rewrites one.
         """
         change = self.ledger().resolve(change_id)
         if change is None:
             return 404, {"error": f"{change_id!r} is not in the ledger"}
 
-        digest = self.watcher.digest
-        key = f"diff:{change_id}"
-        with self._rendered_guard:
-            if self._rendered_digest != digest:
-                self._rendered.clear()
-                self._rendered_digest = digest
-            hit = self._rendered.get(key)
-        if hit is not None:
-            timing.note("/api/change", "cache-hit", 0.0)
-            return 200, hit
-
         path = self.paths.change_diff(change.id)
+        slot, key = f"diff:{change_id}", (stat_key(path), change.has_body, change.path)
+        with self._rendered_guard:
+            hit = self._rendered.get(slot)
+        if hit is not None and hit[0] == key:
+            timing.note("/api/change", "cache-hit", 0.0)
+            return 200, hit[1]
+
         if not change.has_body or not path.is_file():
-            return 200, self._remember(key, digest, {"id": change_id, "html": ""})
+            return 200, self._remember(slot, key, {"id": change_id, "html": ""})
         with timing.span("/api/change", "highlight"):
             html = highlight_diff(path.read_text(encoding="utf-8", errors="replace"), path=change.path)
-        return 200, self._remember(key, digest, {"id": change_id, "html": html})
+        return 200, self._remember(slot, key, {"id": change_id, "html": html})
+
+    def change_list(self, ids: list[str]) -> tuple[int, dict]:
+        """The cards of a collapsed `changes` block, fetched when it is first opened — see entryview._lazy_changes.
+
+        An id outside the ledger is drawn as missing rather than refused, which is what the inline rendering does.
+        """
+        html = change_cards(ids, ledger=self.ledger(), paths=self.paths, visible=False)
+        return 200, {"ids": ids, "html": html}
 
     def file_view(self, path: str) -> tuple[int, dict]:
         """One whole file, highlighted — for the peek popover and for the page a click opens alike.
@@ -382,7 +430,6 @@ class ReviewApp:
         return 200, details
 
     def save_answer(self, payload: dict) -> tuple[int, dict]:
-        self.invalidate()
         slug = str(payload.get("entry", ""))
         ask_name = str(payload.get("ask", ""))
         client_hash = str(payload.get("hash", ""))
@@ -392,10 +439,9 @@ class ReviewApp:
             return 410, {"error": "that entry no longer exists"}
 
         with _lock_for(slug):
-            try:
-                entry = parse_file(target)
-            except ReviewParseError as e:
-                return 409, {"error": str(e)}
+            _, entry, error = self.parse(target)
+            if error is not None:
+                return 409, {"error": str(error)}
 
             answers = AnswerFile.load(self.paths.answers_for(target), slug)
             block = entry.ask(ask_name)
@@ -447,7 +493,6 @@ class ReviewApp:
         A comment is maintainer-authored, so it is server-owned and never spliced into an entry file —
         it lives in the answers file, which is the half of the split the server already writes.
         """
-        self.invalidate()
         slug = str(payload.get("entry", ""))
         target = next((f for f in self.paths.entry_files() if f.stem == slug), None)
         if target is None:
@@ -479,9 +524,8 @@ class ReviewApp:
         """
         rows = []
         for file in self.paths.entry_files():
-            try:
-                entry = parse_file(file)
-            except ReviewParseError:
+            _, entry, error = self.parse(file)
+            if error is not None:
                 continue
             answers = AnswerFile.load(self.paths.answers_for(file), file.stem)
             asks = []
@@ -513,7 +557,6 @@ class ReviewApp:
         return 200, {"stopped": True}
 
     def signal(self, payload: dict) -> tuple[int, dict]:
-        self.invalidate()
         action = str(payload.get("action", "send"))
         if action not in ("send", "pause"):
             return 400, {"error": f"unknown action {action!r}"}
@@ -658,6 +701,11 @@ class Handler(BaseHTTPRequestHandler):
             elif route == "/api/change":
                 query = parse_qs(urlparse(self.path).query)
                 code, payload = self.app.change_diff(query.get("id", [""])[0])
+                self._json(code, payload)
+            elif route == "/api/changes":
+                query = parse_qs(urlparse(self.path).query)
+                ids = [i for i in query.get("ids", [""])[0].replace(",", " ").split() if i]
+                code, payload = self.app.change_list(ids)
                 self._json(code, payload)
             elif route.startswith("/api/entry/"):
                 code, payload = self.app.entry_html(unquote(route[len("/api/entry/"):]))

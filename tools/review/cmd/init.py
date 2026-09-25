@@ -93,7 +93,7 @@ def _warn_checkout_not_head(ctx: Context, name: str, head: str, head_spec: str) 
         f"against the checkout.\n"
         f"  review from a worktree of the head instead:\n"
         f"    git worktree add .tmp/worktrees/{name} {head_spec}\n"
-        f"    uv run review.py init {name} --repo .tmp/worktrees/{name} --range <base>..{head_spec} --goal <goal> --force"
+        f"    {ctx.invocation} init {name} --repo .tmp/worktrees/{name} --range <base>..{head_spec} --goal <goal> --force"
     ), file=sys.stderr)
 
 
@@ -150,7 +150,7 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
             print(review.console.dim(
                 f"  merges  {len(merges)} on the first-parent path; each counts as everything it brought in"
             ))
-        print(f"\nnext: uv run review.py ingest {args.name}")
+        print(f"\nnext: {ctx.invocation} ingest {args.name}")
     else:
         print("  range   none (design review)")
         print(f"\nnext: write entries under {ctx.rel(paths.entries_dir)}")

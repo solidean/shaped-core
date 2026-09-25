@@ -8,6 +8,8 @@ that silently does not discharge, and the coverage report would report progress 
 from __future__ import annotations
 
 import argparse
+import re
+from pathlib import Path
 
 import tools.review as review
 
@@ -54,14 +56,48 @@ def orphan_answer_warnings(entry, answers) -> list[str]:
 def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     p = sub.add_parser(NAME, help="Check every entry parses and every reference resolves")
     a.review_name(p)
+    p.add_argument("entries", nargs="*", default=[], metavar="ENTRY",
+                   help="check only these: a slug, a number (`045`), or a number range (`200..299`, either end open)")
     p.add_argument("--quiet", action="store_true", help="report nothing when everything is fine")
     return p
 
 
+_RANGE_RE = re.compile(r"^(\d*)\.\.(\d*)$")
+
+
+def select(files: list[Path], selectors: list[str]) -> tuple[list[Path], list[str]]:
+    """(the entry files the selectors name, in navigation order; the selectors that named none).
+
+    A range compares the numeric prefix, so `200..299` is a writer's block of numbers whatever the slugs say.
+    """
+    chosen: set[Path] = set()
+    unmatched: list[str] = []
+    for selector in selectors:
+        match = _RANGE_RE.match(selector)
+        if match:
+            lo = int(match.group(1)) if match.group(1) else None
+            hi = int(match.group(2)) if match.group(2) else None
+            numbers = [(f, f.stem.split("-")[0]) for f in files]
+            found = [f for f, n in numbers
+                     if n.isdigit() and (lo is None or int(n) >= lo) and (hi is None or int(n) <= hi)]
+        else:
+            found = [f for f in files if f.stem == selector] or [f for f in files if f.stem.split("-")[0] == selector]
+        if not found:
+            unmatched.append(selector)
+        chosen.update(found)
+    return [f for f in files if f in chosen], unmatched
+
+
 def run(args: argparse.Namespace, ctx: Context) -> None:
     paths, cfg = ctx.open(args.name)
+    files = paths.entry_files()
+    if args.entries:
+        # Only the selected files are parsed, so another writer's entry that is broken mid-edit does not stop this check.
+        files, unmatched = select(files, args.entries)
+        if unmatched:
+            ctx.die(f"no entry matches {', '.join(unmatched)} — a slug, a number, or a range like `200..299`")
     # Every entry that does not parse is a problem of its own, so one broken file does not hide the next.
-    entries, broken = ctx.entries_tolerant(paths)
+    entries, broken = ctx.entries_tolerant(paths, files)
 
     problems: list[str] = [str(e) for e in broken]
     warnings: list[str] = []
@@ -86,6 +122,12 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
                 warnings.append(
                     f"{entry.slug}: round {round_number} asks something with no `intro` — open it with what the entry "
                     f"is about and the options, before any fact or trade-off"
+                )
+        for block, line, key in review.attributes_read_as_prose(entry):
+            if block.name in open_asks:
+                warnings.append(
+                    f"{entry.slug}:{line}: ask {block.name!r} has a blank line above `{key}:`, so it is prose and does "
+                    f"nothing — delete the blank line, or reword a real sentence so it does not open with `{key}:`"
                 )
         # A follow-up belongs under the ask it follows, where the answer it responds to is on screen above it.
         # Naming an ask in another entry usually means a new entry was opened where a round should have been appended,
@@ -121,6 +163,8 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
             f"append a block with `addresses: {comment.id}`, which a block that declines to act also satisfies"
         )
 
+    total = len(paths.entry_files())
+    scope = f"{len(entries)} of {total} entries" if args.entries else f"{len(entries)} entries"
     groups = set(review.groups_for(cfg.goals))
     unplaced = sorted({e.group for e in entries} - groups)
     if unplaced:
@@ -135,10 +179,10 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
         print(review.console.red(f"error: {problem}"))
 
     if problems:
-        print(review.console.red(f"\n{len(problems)} problem(s) across {len(entries)} entries"))
+        print(review.console.red(f"\n{len(problems)} problem(s) across {scope}"))
         raise SystemExit(1)
     if not args.quiet:
         # A design review has no ledger, so `check_references` never ran — claiming references resolve would be
         # reporting a check that did not happen.
         changes = ", every change id resolves" if cfg.has_changeset else ""
-        print(review.console.green(f"{len(entries)} entries parse, every file reference resolves{changes}"))
+        print(review.console.green(f"{scope} parse, every file reference resolves{changes}"))
