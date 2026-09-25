@@ -158,7 +158,7 @@ Statements: `invalid_stmt` `let_stmt` `assign_stmt` `if_stmt` (the whole chain, 
 `assert_stmt` `print_stmt` `decl_stmt` `expr_stmt`.
 
 Declarations: `invalid_decl` `module_decl` `use_decl` `fun_decl` `struct_decl` `enum_decl` `type_decl` `const_decl`
-`binding_decl` `sampler_decl` `notation_decl`, and the member lines `field_decl` `property_decl` `enum_case_decl`.
+`binding_decl` `sampler_decl` `notation_decl` `test_decl`, and the member lines `field_decl` `property_decl` `enum_case_decl`.
 
 ## The builtin registry (the ONE place a builtin lives; [docs/adding-a-builtin.md](docs/adding-a-builtin.md))
 

@@ -485,6 +485,7 @@ print "total:", total
 * **AST-60** An expression statement has an effect when it is a paren or a juxtaposition `call`, a jump, a `case`, a `loop`, a `with_bindings` or an `invalid`.
 * **AST-61** Any other expression statement is the warning `no-effect`, and it is still read: an infix or a prefix `call`, a name, a literal, a `member`, a `tuple`.
 * **AST-114** The last statement of a block is no exception to AST-61, since a block has no implicit value ([AST-106](#value-blocks-and-yield)).
+* **AST-140** Inside a `test` body, and not inside a function nested in one, AST-61 does not report: a line of type `bool` is a check there, and only the check pass knows a line's type.
 
 ```sgl
 fun update(state: particle):
@@ -522,10 +523,24 @@ fun update(state: particle):
 | sampler | `sampler name:` and a block of settings | yes | no |
 | pipeline | `pipeline name:` and a block of settings, or `pipeline name = (a, b)` | yes | no |
 | notation | `notation a => b` | yes | yes |
+| test | `test:` and a block, or `test expression` | yes | yes |
 | `let` | see [statements](#let-and-assignment) | no | yes |
 
 * **AST-64** A file holds at most one `module` declaration, and it stands before every other declaration of the file.
 * **AST-65** The type of a constant stands in a type position.
+* **AST-138** `test expression` reads as a `test` whose block holds the one expression statement `expression`; a `test` with both, or with neither, is a normal error.
+* **AST-139** A `test` stands in a struct and an enum as well, and inside another `test` is `declaration-not-allowed-here`.
+  No jump crosses a `test`'s body, so a `return` in it is `jump-without-target`.
+
+```sgl
+fun square(x: float) -> float => x * x
+
+test square 3.0 == 9.0
+
+test:
+    let x = 10
+    x * x > 50
+```
 
 ```sgl
 module example

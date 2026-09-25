@@ -633,6 +633,13 @@ struct dumper
                 out += " => ";
                 dump_expr(n.replacement, depth);
             },
+            [&](test_decl const& n)
+            {
+                // A test has no name, so nothing stands between the tag and its body.
+                out += "(test";
+                attributes(d.attributes);
+                dump_body(n.body, depth);
+            },
             [&](field_decl const& n)
             {
                 // A field closes itself.

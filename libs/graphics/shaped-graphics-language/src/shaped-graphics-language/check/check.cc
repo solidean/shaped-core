@@ -383,6 +383,7 @@ void checker::declare(i32 file, ast::decl_id decl)
             add_symbol(cc::move(s), p.name.empty() ? span_of(file, decl) : p.name);
         },
         [&](ast::notation_decl const&) { unsupported(file, span_of(file, decl), "notation"); },
+        [&](ast::test_decl const&) { unsupported(file, span_of(file, decl), "test"); },
         // A member line at module level and an `invalid` declaration were reported by the AST pass.
         [&](ast::field_decl const&) {}, //
         [&](ast::property_decl const&) {}, [&](ast::enum_case_decl const&) {}, [&](ast::invalid_decl const&) {});

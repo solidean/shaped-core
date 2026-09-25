@@ -134,6 +134,15 @@ struct sgl::ast::notation_decl
     constexpr bool operator==(notation_decl const&) const = default;
 };
 
+/// `test:` with a block, or `test value`, which is the block of that one line (AST-138).
+/// A declaration and no statement: it never runs where it stands, and the check pass runs it on its own.
+struct sgl::ast::test_decl
+{
+    sgl::ast::body body;
+
+    constexpr bool operator==(test_decl const&) const = default;
+};
+
 /// A `field` as a member line; its attributes are on the field.
 struct sgl::ast::field_decl
 {
@@ -183,6 +192,7 @@ struct sgl::ast::decl
                 sampler_decl,
                 pipeline_decl,
                 notation_decl,
+                test_decl,
                 field_decl,
                 property_decl,
                 enum_case_decl>

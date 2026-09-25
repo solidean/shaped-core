@@ -140,6 +140,7 @@ struct binding_decl;
 struct sampler_decl;
 struct pipeline_decl;
 struct notation_decl;
+struct test_decl;
 struct field_decl;
 struct property_decl;
 struct enum_case_decl;

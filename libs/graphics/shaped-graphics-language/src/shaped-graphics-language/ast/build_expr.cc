@@ -584,6 +584,8 @@ void builder::report_jump_target(form_id form, cc::string_view keyword)
         auto const owner = owners[i].owner;
         auto const is_loop = owner == body_owner::value_loop || owner == body_owner::statement_loop;
         auto const is_one_line = owners[i].one_line == form;
+        if (owner == body_owner::test)
+            break;
 
         if (is_loop_jump)
         {
