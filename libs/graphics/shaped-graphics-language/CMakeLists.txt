@@ -63,6 +63,8 @@ add_library(shaped-graphics-language
 
     src/shaped-graphics-language/interpret/interpret.cc
 
+    src/shaped-graphics-language/test/run_tests.cc
+
     src/shaped-graphics-language/emit/emit.cc
     src/shaped-graphics-language/emit/reserved_words.cc
     src/shaped-graphics-language/emit/impl/hlsl.cc
@@ -203,6 +205,8 @@ target_sources(shaped-graphics-language
     src/shaped-graphics-language/interpret/interpret.hh
     src/shaped-graphics-language/interpret/scalar.hh
 
+    src/shaped-graphics-language/test/run_tests.hh
+
     src/shaped-graphics-language/emit/emit.hh
     src/shaped-graphics-language/emit/reserved_words.hh
     src/shaped-graphics-language/emit/impl/dialect.hh
@@ -279,6 +283,7 @@ if(SC_BUILD_TESTS)
 
         tests/interpret/check-run-test.cc
         tests/interpret/interpret-test.cc
+        tests/interpret/run-tests-test.cc
 
         tests/legalize/flat-test-support.hh
         tests/legalize/random-program.hh

@@ -165,6 +165,8 @@ enum class sgl::diagnostic_kind : sgl::u8
     test_captures_runtime_value,
     /// A test whose last code line is no check, so it could pass without having checked anything.
     test_must_end_in_check,
+    /// A test that ran, and did not pass: a false check, a false assert, or a run that ended another way.
+    test_failed,
 };
 
 namespace sgl

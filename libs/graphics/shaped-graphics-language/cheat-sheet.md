@@ -289,12 +289,22 @@ sgl::check::legalize_options               // { skip_pinning, skip_flag_tests }:
 #include <shaped-graphics-language/interpret/interpret.hh>
 auto const o = sgl::check::interpret(m, e, {.parameter = value, .bindings = {…}}, {.fuel = 1'000'000});
                                            // runs BOTH forms; left to right, each operand once; f32 and wrapping i32
-o.status                                   // ok, out_of_fuel, fell_off_the_end, type_error, uninitialized_read: never asserts
+o.status                                   // ok, out_of_fuel, fell_off_the_end, type_error, uninitialized_read,
+                                           // assertion_failed: never asserts
 o.result  o.trace  o.detail                // value { type, leaves }; trace = every print, and every call with an effect
+o.failures  o.checks_run                   // check_failure { site, values, is_evaluated, loop_values } per false check;
+                                           // {.run_checks = false} skips checks as the core form does, {.max_failures = 8}
 o == other                                 // status, result and trace; NOT the detail
 sgl::check::zero_value(m, type)  sgl::check::leaf_count_of(m, type)   // a value is its scalars in field order; mat4 is 16
 sgl::check::scalar::of(0.5f)  .as_float()  .as_int()  .as_bool()      // equality is on the BITS
 sgl::check::dump(o)                        // `ok 1.5 | print 1 | print true`
+
+#include <shaped-graphics-language/test/run_tests.hh>
+m.tests  m.test_units                      // test_info { symbol, file, where, scope_path, comment, unit } and its flat tree
+sgl::test::run_tests(m, files, {.file = f})  // -> vector<test_result { test, status, failures, checks_run }>; files are the
+                                           // module_files m was checked from, since a report quotes the source
+sgl::test::diagnostic_of(m, r)             // `test-failed` at the test, one related note per narrowed part:
+                                           // "`s.z > 0.6` is 0.5 > 0.6, with i = 2"
 ```
 
 ## The `sgl` tool (`tools/sgl/`, a nexus binary of COMMANDs; built under `SC_BUILD_TOOLS`)

@@ -270,6 +270,15 @@ struct checked_module;
 struct module_file;
 } // namespace sgl::check
 
+namespace sgl::test
+{
+enum class test_status : u8;
+struct narrowed_part;
+struct check_report;
+struct test_result;
+struct test_options;
+} // namespace sgl::test
+
 namespace sgl::emit
 {
 enum class target : u8;
