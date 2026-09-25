@@ -29,14 +29,14 @@ public:
     struct bound_buffer
     {
         sg::raw_buffer_handle buffer;
-        sg::view_class access = sg::view_class::uniform;
+        sg::view_class bound_as = sg::view_class::uniform;
     };
 
     /// The texture twin of `bound_buffer`, carried for the same reason.
     struct bound_texture
     {
         sg::raw_texture_handle texture;
-        sg::view_class access = sg::view_class::readonly;
+        sg::view_class bound_as = sg::view_class::readonly;
     };
 
     /// One element of an array binding: whichever resource is bound at that index, or neither where it is vacant.

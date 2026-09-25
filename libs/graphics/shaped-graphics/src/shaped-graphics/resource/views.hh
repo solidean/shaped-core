@@ -129,23 +129,23 @@ struct any_texture_view;
 
 } // namespace sg
 
-/// A buffer view's erased payload: the access class, byte layout and buffer a backend reads to build a CBV / SRV / UAV.
+/// A buffer view's erased payload: how it is bound, its byte layout and buffer, which a backend reads to build a CBV / SRV / UAV.
 /// `shape` picks the interpretation — uniform block, structured array, or bytes.
 struct sg::raw_buffer_view
 {
-    view_class access = view_class::readonly;  ///< uniform / readonly / readwrite
-    view_shape shape = view_shape::structured; ///< uniform_block / structured / bytes
-    raw_buffer_handle buffer;                  ///< the viewed buffer
-    isize offset_in_bytes = 0;                 ///< start of the view within the buffer
-    isize size_in_bytes = 0;                   ///< [uniform_block, bytes] visible byte size
-    isize element_count = 0;                   ///< [structured] number of elements
-    isize stride_in_bytes = 0;                 ///< [structured] element stride (= sizeof(T))
+    view_class bound_as = view_class::readonly; ///< uniform / readonly / readwrite
+    view_shape shape = view_shape::structured;  ///< uniform_block / structured / bytes
+    raw_buffer_handle buffer;                   ///< the viewed buffer
+    isize offset_in_bytes = 0;                  ///< start of the view within the buffer
+    isize size_in_bytes = 0;                    ///< [uniform_block, bytes] visible byte size
+    isize element_count = 0;                    ///< [structured] number of elements
+    isize stride_in_bytes = 0;                  ///< [structured] element stride (= sizeof(T))
 
     /// View-IDENTITY hash (the cc::make_hash protocol's hidden friend): the buffer by address, plus every
     /// field that reaches the descriptor — never the buffer's contents.
     [[nodiscard]] friend u64 hash(raw_buffer_view const& v)
     {
-        return cc::make_hash(v.buffer.get(), v.access, v.shape, v.offset_in_bytes, v.size_in_bytes, v.element_count,
+        return cc::make_hash(v.buffer.get(), v.bound_as, v.shape, v.offset_in_bytes, v.size_in_bytes, v.element_count,
                              v.stride_in_bytes);
     }
 
@@ -172,8 +172,8 @@ struct sg::raw_buffer_view
 };
 
 /// A vacant array element: no view at all, marked explicitly.
-/// The backend synthesizes a null descriptor for it from the *binding* alone — access and shape from
-/// `binding_type`, a texture's dimension from `binding.texture_dimension` — so it carries nothing.
+/// The backend synthesizes a null descriptor for it from the *binding* alone — view class and shape from
+/// its kind and access, a texture's dimension from `binding.texture_dimension` — so it carries nothing.
 /// Only valid as an element of an array binding; a scalar binding must bind a resource.
 struct sg::vacant_view
 {
@@ -188,7 +188,7 @@ struct sg::vacant_view
 /// Dimension and format are a reinterpretation the view chose, not the texture's shape.
 struct sg::raw_texture_view
 {
-    view_class kind = view_class::texture;                                  ///< texture (SRV) / image (UAV)
+    view_class bound_as = view_class::texture;                              ///< texture (SRV) / image (UAV)
     raw_texture_handle texture;                                             ///< the viewed texture
     texture_view_dimension view_dimension = texture_view_dimension::tex_2d; ///< shader-facing SRV/UAV dimension
     pixel_format format = pixel_format::undefined; ///< the format the descriptor reads/writes as
@@ -200,8 +200,8 @@ struct sg::raw_texture_view
     /// field that reaches the descriptor — never the texture's texels.
     [[nodiscard]] friend u64 hash(raw_texture_view const& v)
     {
-        return cc::make_hash(v.texture.get(), v.kind, v.view_dimension, v.format, v.range, v.depth_slice_range.start,
-                             v.depth_slice_range.end);
+        return cc::make_hash(v.texture.get(), v.bound_as, v.view_dimension, v.format, v.range,
+                             v.depth_slice_range.start, v.depth_slice_range.end);
     }
 
     /// View IDENTITY equality over the same fields `hash` above folds — a hash map keyed on views needs the
@@ -224,7 +224,7 @@ struct sg::raw_texture_view
 };
 
 /// An acceleration-structure view's erased payload: the abstract TLAS, which each backend binds its own way.
-/// Its access class is always `acceleration_structure`.
+/// It is always bound as an `acceleration_structure`.
 struct sg::raw_tlas_view
 {
     tlas_handle tlas; ///< the viewed top-level acceleration structure
@@ -287,8 +287,8 @@ using raw_view = cc::variant<raw_buffer_view, raw_texture_view, raw_tlas_view, v
 /// A vacant element has none — it takes whatever the binding says — so gate on is_vacant() first.
 [[nodiscard]] inline view_class view_class_of(raw_view const& v)
 {
-    return v.visit([](raw_buffer_view const& b) { return b.access; }, //
-                   [](raw_texture_view const& t) { return t.kind; },  //
+    return v.visit([](raw_buffer_view const& b) { return b.bound_as; },  //
+                   [](raw_texture_view const& t) { return t.bound_as; }, //
                    [](raw_tlas_view const&) { return view_class::acceleration_structure; },
                    [](vacant_view const&)
                    {
@@ -317,7 +317,7 @@ using raw_view = cc::variant<raw_buffer_view, raw_texture_view, raw_tlas_view, v
 template <sg::uniform_element T>
 struct sg::uniform_buffer_view
 {
-    static constexpr view_class access = view_class::uniform;
+    static constexpr view_class bound_as = view_class::uniform;
 
     raw_buffer_handle buffer;
     isize offset_in_bytes = 0;
@@ -326,7 +326,7 @@ struct sg::uniform_buffer_view
     [[nodiscard]] raw_view to_raw() const
     {
         return raw_buffer_view{
-            .access = access,
+            .bound_as = bound_as,
             .shape = view_shape::uniform_block,
             .buffer = buffer,
             .offset_in_bytes = offset_in_bytes,
@@ -342,7 +342,7 @@ struct sg::uniform_buffer_view
 template <sg::view_element T>
 struct sg::readonly_buffer_view
 {
-    static constexpr view_class access = view_class::readonly;
+    static constexpr view_class bound_as = view_class::readonly;
 
     raw_buffer_handle buffer;
     isize offset_in_bytes = 0;
@@ -352,7 +352,7 @@ struct sg::readonly_buffer_view
     {
         constexpr bool is_bytes = std::is_same_v<T, byte>;
         return raw_buffer_view{
-            .access = access,
+            .bound_as = bound_as,
             .shape = is_bytes ? view_shape::bytes : view_shape::structured,
             .buffer = buffer,
             .offset_in_bytes = offset_in_bytes,
@@ -370,7 +370,7 @@ struct sg::readonly_buffer_view
 template <sg::view_element T>
 struct sg::readwrite_buffer_view
 {
-    static constexpr view_class access = view_class::readwrite;
+    static constexpr view_class bound_as = view_class::readwrite;
 
     raw_buffer_handle buffer;
     isize offset_in_bytes = 0;
@@ -380,7 +380,7 @@ struct sg::readwrite_buffer_view
     {
         constexpr bool is_bytes = std::is_same_v<T, byte>;
         return raw_buffer_view{
-            .access = access,
+            .bound_as = bound_as,
             .shape = is_bytes ? view_shape::bytes : view_shape::structured,
             .buffer = buffer,
             .offset_in_bytes = offset_in_bytes,
@@ -393,14 +393,14 @@ struct sg::readwrite_buffer_view
     operator raw_view() const { return to_raw(); }
 };
 
-/// A buffer view of `T` whose access class is known only at runtime — the access-erased middle between the typed leaves and `raw_view`.
+/// A buffer view of `T` whose `bound_as` is known only at runtime — the erased middle between the typed leaves and `raw_view`.
 /// Each leaf converts to it implicitly, and it erases on to `raw_view`.
 /// For code that takes "any access of a buffer of `T`".
 template <sg::view_element T>
 struct sg::buffer_view
 {
-    view_class access = view_class::readonly;  ///< uniform / readonly / readwrite — runtime, unlike the leaves
-    view_shape shape = view_shape::structured; ///< uniform_block / structured / bytes
+    view_class bound_as = view_class::readonly; ///< uniform / readonly / readwrite — runtime, unlike the leaves
+    view_shape shape = view_shape::structured;  ///< uniform_block / structured / bytes
     raw_buffer_handle buffer;
     isize offset_in_bytes = 0;
     isize size_in_bytes = 0;   ///< [uniform_block, bytes]
@@ -412,7 +412,7 @@ struct sg::buffer_view
     /// From a raw buffer arm, and the entry point for tooling.
     /// The leaf conversions route through here, so the field mapping lives in one place — each leaf's `to_raw()`.
     explicit buffer_view(raw_buffer_view const& a)
-      : access(a.access),
+      : bound_as(a.bound_as),
         shape(a.shape),
         buffer(a.buffer),
         offset_in_bytes(a.offset_in_bytes),
@@ -435,7 +435,7 @@ struct sg::buffer_view
 
     [[nodiscard]] raw_view to_raw() const
     {
-        return raw_buffer_view{.access = access,
+        return raw_buffer_view{.bound_as = bound_as,
                                .shape = shape,
                                .buffer = buffer,
                                .offset_in_bytes = offset_in_bytes,
@@ -446,11 +446,11 @@ struct sg::buffer_view
 
     operator raw_view() const { return to_raw(); }
 
-    // Pin the runtime `access` to a compile-time leaf — the inverse of the implicit leaf -> buffer_view conversions above.
+    // Pin the runtime `bound_as` to a compile-time leaf — the inverse of the implicit leaf -> buffer_view conversions above.
     // Adds a check that `T` matches the view's layout, so a re-type with the wrong element size is a loud error rather than a silently wrong element count.
     [[nodiscard]] readonly_buffer_view<T> as_readonly() const
     {
-        CC_ASSERT(access == view_class::readonly, "buffer_view access is not readonly");
+        CC_ASSERT(bound_as == view_class::readonly, "buffer_view is not bound as readonly");
         _assert_element_matches();
         return {.buffer = buffer,
                 .offset_in_bytes = offset_in_bytes,
@@ -458,7 +458,7 @@ struct sg::buffer_view
     }
     [[nodiscard]] readwrite_buffer_view<T> as_readwrite() const
     {
-        CC_ASSERT(access == view_class::readwrite, "buffer_view access is not readwrite");
+        CC_ASSERT(bound_as == view_class::readwrite, "buffer_view is not bound as readwrite");
         _assert_element_matches();
         return {.buffer = buffer,
                 .offset_in_bytes = offset_in_bytes,
@@ -470,19 +470,19 @@ struct sg::buffer_view
         requires(std::is_same_v<U, T> && uniform_element<U>)
     [[nodiscard]] uniform_buffer_view<U> as_uniform() const
     {
-        CC_ASSERT(access == view_class::uniform && shape == view_shape::uniform_block, "buffer_view access is not "
-                                                                                       "uniform");
+        CC_ASSERT(bound_as == view_class::uniform && shape == view_shape::uniform_block, "buffer_view is not bound as "
+                                                                                         "uniform");
         return {.buffer = buffer, .offset_in_bytes = offset_in_bytes, .size_in_bytes = size_in_bytes};
     }
     [[nodiscard]] cc::optional<readonly_buffer_view<T>> try_as_readonly() const
     {
-        if (access != view_class::readonly)
+        if (bound_as != view_class::readonly)
             return {};
         return as_readonly();
     }
     [[nodiscard]] cc::optional<readwrite_buffer_view<T>> try_as_readwrite() const
     {
-        if (access != view_class::readwrite)
+        if (bound_as != view_class::readwrite)
             return {};
         return as_readwrite();
     }
@@ -490,7 +490,7 @@ struct sg::buffer_view
         requires(std::is_same_v<U, T> && uniform_element<U>)
     [[nodiscard]] cc::optional<uniform_buffer_view<U>> try_as_uniform() const
     {
-        if (access != view_class::uniform || shape != view_shape::uniform_block)
+        if (bound_as != view_class::uniform || shape != view_shape::uniform_block)
             return {};
         return as_uniform();
     }
@@ -546,7 +546,7 @@ using tv_cube_array = texture_view_traits<texture_view_dimension::cube_array>;
 template <class Traits>
 struct sg::texture_view
 {
-    static constexpr view_class kind = view_class::texture;
+    static constexpr view_class bound_as = view_class::texture;
     static constexpr texture_view_dimension dimension = Traits::dimension;
 
     raw_texture_handle texture;
@@ -555,7 +555,7 @@ struct sg::texture_view
 
     [[nodiscard]] raw_view to_raw() const
     {
-        return raw_texture_view{.kind = kind,
+        return raw_texture_view{.bound_as = bound_as,
                                 .texture = texture,
                                 .view_dimension = dimension,
                                 .format = format,
@@ -575,7 +575,7 @@ template <class Traits, sg::pixel_format Format>
     requires sg::image_view_dimension<Traits::dimension>
 struct sg::image_view
 {
-    static constexpr view_class kind = view_class::image;
+    static constexpr view_class bound_as = view_class::image;
     static constexpr texture_view_dimension dimension = Traits::dimension;
     static constexpr pixel_format format = Format;
 
@@ -589,7 +589,7 @@ struct sg::image_view
 
     [[nodiscard]] raw_view to_raw() const
     {
-        return raw_texture_view{.kind = kind,
+        return raw_texture_view{.bound_as = bound_as,
                                 .texture = texture,
                                 .view_dimension = dimension,
                                 .format = format,
@@ -608,7 +608,7 @@ struct sg::any_texture_view
 {
     static constexpr texture_view_dimension dimension = Traits::dimension;
 
-    view_class kind = view_class::texture; ///< texture / image — runtime, unlike the leaves
+    view_class bound_as = view_class::texture; ///< texture / image — runtime, unlike the leaves
     raw_texture_handle texture;
     pixel_format format = pixel_format::undefined;
     subresource_range range;
@@ -619,7 +619,7 @@ struct sg::any_texture_view
     /// From a raw texture arm, and the entry point for tooling.
     /// The leaf conversions route through here.
     explicit any_texture_view(raw_texture_view const& a)
-      : kind(a.kind), texture(a.texture), format(a.format), range(a.range), depth_slice_range(a.depth_slice_range)
+      : bound_as(a.bound_as), texture(a.texture), format(a.format), range(a.range), depth_slice_range(a.depth_slice_range)
     {
     }
 
@@ -636,7 +636,7 @@ struct sg::any_texture_view
 
     [[nodiscard]] raw_view to_raw() const
     {
-        return raw_texture_view{.kind = kind,
+        return raw_texture_view{.bound_as = bound_as,
                                 .texture = texture,
                                 .view_dimension = dimension,
                                 .format = format,
@@ -646,16 +646,16 @@ struct sg::any_texture_view
 
     operator raw_view() const { return to_raw(); }
 
-    // Pin the runtime `kind` to a compile-time leaf — the inverse of the implicit leaf -> any_texture_view conversions above.
-    // The dimension and range are already fixed, so a texture commits only the kind, and an image its format too.
+    // Pin the runtime `bound_as` to a compile-time leaf — the inverse of the implicit leaf -> any_texture_view conversions above.
+    // The dimension and range are already fixed, so a texture commits only `bound_as`, and an image its format too.
     [[nodiscard]] texture_view<Traits> as_texture() const
     {
-        CC_ASSERT(kind == view_class::texture, "any_texture_view is not a texture");
+        CC_ASSERT(bound_as == view_class::texture, "any_texture_view is not a texture");
         return {.texture = texture, .format = format, .range = range};
     }
     [[nodiscard]] cc::optional<texture_view<Traits>> try_as_texture() const
     {
-        if (kind != view_class::texture)
+        if (bound_as != view_class::texture)
             return {};
         return as_texture();
     }
@@ -663,7 +663,7 @@ struct sg::any_texture_view
         requires(std::is_same_v<T, Traits> && image_view_dimension<Traits::dimension>)
     [[nodiscard]] image_view<T, Format> as_image() const
     {
-        CC_ASSERT(kind == view_class::image, "any_texture_view is not an image");
+        CC_ASSERT(bound_as == view_class::image, "any_texture_view is not an image");
         CC_ASSERT(format == Format, "any_texture_view is an image of a different format");
         return {.texture = texture, .range = range, .depth_slice_range = depth_slice_range};
     }
@@ -671,7 +671,7 @@ struct sg::any_texture_view
         requires(std::is_same_v<T, Traits> && image_view_dimension<Traits::dimension>)
     [[nodiscard]] cc::optional<image_view<T, Format>> try_as_image() const
     {
-        if (kind != view_class::image || format != Format)
+        if (bound_as != view_class::image || format != Format)
             return {};
         return as_image<Format>();
     }
@@ -686,7 +686,7 @@ struct sg::any_texture_view
 /// no structure built and nothing allocated, so "nothing to trace" costs nothing rather than needing a stand-in.
 struct sg::tlas_view
 {
-    static constexpr view_class access = view_class::acceleration_structure;
+    static constexpr view_class bound_as = view_class::acceleration_structure;
 
     tlas_handle tlas; ///< the top-level acceleration structure to bind; null binds the null acceleration structure
 

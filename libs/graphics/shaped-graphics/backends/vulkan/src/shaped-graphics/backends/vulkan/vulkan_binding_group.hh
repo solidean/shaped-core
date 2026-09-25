@@ -16,7 +16,7 @@
 struct sg::backend::vulkan::vulkan_hazard_view
 {
     vulkan_buffer_handle buffer;
-    sg::view_class access;
+    sg::view_class bound_as;
 };
 
 /// A bound texture paired with the subresource range + access class it is used as.
@@ -25,7 +25,7 @@ struct sg::backend::vulkan::vulkan_texture_hazard_view
 {
     vulkan_texture_handle texture;
     sg::subresource_range range;
-    sg::view_class access;
+    sg::view_class bound_as;
 };
 
 /// One element of an array binding: the bound resource (exactly one of buffer / texture set, both null when vacant)

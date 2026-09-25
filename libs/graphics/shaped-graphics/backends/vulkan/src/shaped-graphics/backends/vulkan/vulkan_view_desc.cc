@@ -140,7 +140,7 @@ VkImageView vulkan_image_view_cache::acquire(sg::raw_texture_view const& view)
     auto const& texture = static_cast<vulkan_texture const&>(*view.texture);
     auto const key = vulkan_image_view_key{
         .texture_identity = texture._identity,
-        .kind = view.kind,
+        .bound_as = view.bound_as,
         .dimension = view.view_dimension,
         .format = view.format,
         .range = view.range,
@@ -274,7 +274,7 @@ void write_view_descriptor(vulkan_context& ctx,
         // The layout a descriptor is read in.
         // RADV reports descriptorBufferImageLayoutIgnored, but the spec does not guarantee that — so the honest
         // answer is the layout the access tracker actually transitions to for this view class.
-        image.imageLayout = vk_layout_from(sg::shader_layout_of(texture_view->kind));
+        image.imageLayout = vk_layout_from(sg::shader_layout_of(texture_view->bound_as));
 
         if (type == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
             info.data.pStorageImage = &image;

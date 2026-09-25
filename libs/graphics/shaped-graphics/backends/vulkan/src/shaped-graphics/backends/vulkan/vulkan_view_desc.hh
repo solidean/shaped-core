@@ -31,7 +31,7 @@
 struct sg::backend::vulkan::vulkan_image_view_key
 {
     u64 texture_identity = 0;
-    sg::view_class kind = sg::view_class::texture;
+    sg::view_class bound_as = sg::view_class::texture;
     sg::texture_view_dimension dimension = sg::texture_view_dimension::tex_2d;
     sg::pixel_format format = sg::pixel_format::undefined;
     sg::subresource_range range;
@@ -43,7 +43,7 @@ struct sg::backend::vulkan::vulkan_image_view_key
     /// are added.
     [[nodiscard]] friend u64 hash(vulkan_image_view_key const& k)
     {
-        return cc::make_hash(k.texture_identity, k.kind, k.dimension, k.format, k.range, k.depth_slice_range.start,
+        return cc::make_hash(k.texture_identity, k.bound_as, k.dimension, k.format, k.range, k.depth_slice_range.start,
                              k.depth_slice_range.end);
     }
 };

@@ -204,7 +204,7 @@ sg::raw_view sg::context_transient_scope::implicit_constants(command_list& cmd, 
     auto const raw = create_raw_buffer(cc::align_up(view_size, uniform_buffer_offset_alignment),
                                        buffer_usage::uniform_buffer | buffer_usage::copy_dst);
     cmd.upload.bytes_to_buffer(raw, block);
-    return raw_buffer_view{.access = view_class::uniform,
+    return raw_buffer_view{.bound_as = view_class::uniform,
                            .shape = view_shape::uniform_block,
                            .buffer = raw,
                            .offset_in_bytes = 0,

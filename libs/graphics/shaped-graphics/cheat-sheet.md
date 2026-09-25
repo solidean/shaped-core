@@ -502,8 +502,8 @@ sg::image_view<VT, F>        // storage image (UAV) of texel format F (the bindi
 // an image's read / write / read_write is the BINDING's access, never the view's.
 //   Made via texture<Traits>.as_*_view() (returns the precise VT).
 // view traits: tv_1d / tv_1d_array / tv_2d / tv_2d_array / tv_2d_ms / tv_2d_ms_array / tv_3d / tv_cube / tv_cube_array
-sg::buffer_view<T>           // access-erased middle: any access of a buffer of T (access is a runtime field); leaves convert implicitly
-sg::any_texture_view<VT>     // kind-erased middle: a texture or an image of dimension VT::dimension (kind is a runtime field)
+sg::buffer_view<T>           // access-erased middle: any access of a buffer of T (bound_as is a runtime field); leaves convert implicitly
+sg::any_texture_view<VT>     // kind-erased middle: a texture or an image of dimension VT::dimension (bound_as is a runtime field)
 sg::tlas_view                // ray-tracing TLAS (SRV, VA-addressed) — view_class::acceleration_structure. Via tlas.as_view()
 sg::view_class               // uniform | readonly | readwrite (buffers) | texture | image | acceleration_structure
 sg::view_shape               // uniform_block | structured | bytes | texture | acceleration_structure   (layout)

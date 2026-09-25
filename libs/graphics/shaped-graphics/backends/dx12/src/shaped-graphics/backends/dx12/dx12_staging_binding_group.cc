@@ -145,7 +145,7 @@ void dx12_staging_binding_group::write_view_descriptors(int first_descriptor,
                 auto dx = std::dynamic_pointer_cast<dx12_buffer const>(bv.buffer);
                 CC_ASSERT(dx != nullptr, "bound buffer is not a dx12 buffer");
                 res.buffer = cc::move(dx);
-                res.access = bv.access;
+                res.bound_as = bv.bound_as;
             },
             [&](sg::raw_texture_view const& tv)
             {
@@ -154,7 +154,7 @@ void dx12_staging_binding_group::write_view_descriptors(int first_descriptor,
                 CC_ASSERT(dx != nullptr, "bound texture is not a dx12 texture");
                 res.texture = cc::move(dx);
                 res.range = tv.range;
-                res.access = tv.kind;
+                res.bound_as = tv.bound_as;
             },
             [&](sg::raw_tlas_view const& av)
             {
@@ -170,7 +170,7 @@ void dx12_staging_binding_group::write_view_descriptors(int first_descriptor,
                 if (dx_tlas != nullptr)
                 {
                     res.buffer = dx_tlas->_dx12_storage;
-                    res.access = sg::view_class::acceleration_structure;
+                    res.bound_as = sg::view_class::acceleration_structure;
                 }
             },
             [](sg::vacant_view const&)
@@ -260,12 +260,12 @@ cc::result<sg::binding_group_handle> dx12_staging_binding_group::mint()
         if (res.texture != nullptr)
         {
             group->referenced_textures.push_back(res.texture);
-            group->texture_hazard_views.push_back({res.texture, res.range, res.access});
+            group->texture_hazard_views.push_back({res.texture, res.range, res.bound_as});
         }
         else if (res.buffer != nullptr)
         {
             group->referenced.push_back(res.buffer);
-            group->hazard_views.push_back({res.buffer, res.access});
+            group->hazard_views.push_back({res.buffer, res.bound_as});
         }
         // else: a scalar slot with no resource — the null acceleration structure, which tracks nothing.
     }

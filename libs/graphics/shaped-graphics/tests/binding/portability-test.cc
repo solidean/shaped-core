@@ -26,7 +26,7 @@ sg::raw_view view_of(sg::pixel_format texture_format, sg::pixel_format view_form
 {
     auto const texture
         = std::make_shared<shape_only_texture const>(texture_of(texture_format, sg::texture_usage::texture));
-    return sg::raw_texture_view{.kind = sg::view_class::texture,
+    return sg::raw_texture_view{.bound_as = sg::view_class::texture,
                                 .texture = texture,
                                 .view_dimension = sg::texture_view_dimension::tex_2d,
                                 .format = view_format};

@@ -364,12 +364,12 @@ TEST("sg - kind-erased any_texture_view<Traits> middle")
     // The typed leaves convert implicitly to the kind-erased middle (dimension stays compile-time).
     sg::any_texture_view<sg::tv_2d> const ro = tex.as_texture_view();
     static_assert(decltype(ro)::dimension == sg::texture_view_dimension::tex_2d);
-    CHECK(ro.kind == sg::view_class::texture);
+    CHECK(ro.bound_as == sg::view_class::texture);
     CHECK(sg::view_class_of(ro.to_raw()) == sg::view_class::texture);
     CHECK(sg::shape_of(ro.to_raw()) == sg::view_shape::texture);
 
     sg::any_texture_view<sg::tv_2d> const rw = tex.as_image_view<sg::pixel_format::rgba8_unorm>();
-    CHECK(rw.kind == sg::view_class::image);
+    CHECK(rw.bound_as == sg::view_class::image);
 }
 
 // -- Render-target / depth-stencil views (render_target / depth_stencil).
@@ -528,7 +528,7 @@ TEST("sg - an image view is typed on its format, which is the binding's contract
 
     // A format known only at runtime goes through the kind-erased middle, and commits there.
     auto const any = tex.as_any_image_view();
-    CHECK(any.kind == sg::view_class::image);
+    CHECK(any.bound_as == sg::view_class::image);
     CHECK(any.format == sg::pixel_format::rgba8_unorm);
     CHECK(any.try_as_image<sg::pixel_format::rgba8_unorm>().has_value());
     CHECK(!any.try_as_image<sg::pixel_format::r32_float>().has_value());

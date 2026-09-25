@@ -209,7 +209,7 @@ cc::result<vulkan_binding_group_handle> vulkan_binding_group::create_resolved(vu
                 else
                 {
                     group->referenced_textures.push_back(cc::move(texture));
-                    group->texture_hazard_views.push_back({group->referenced_textures.back(), tv->range, tv->kind});
+                    group->texture_hazard_views.push_back({group->referenced_textures.back(), tv->range, tv->bound_as});
                 }
             }
             else if (auto const* bv = sg::try_as_buffer_view(view); bv != nullptr)
@@ -221,7 +221,7 @@ cc::result<vulkan_binding_group_handle> vulkan_binding_group::create_resolved(vu
                 else
                 {
                     group->referenced.push_back(cc::move(buffer));
-                    group->hazard_views.push_back({group->referenced.back(), bv->access});
+                    group->hazard_views.push_back({group->referenced.back(), bv->bound_as});
                 }
             }
             else if (auto const* tv_as = sg::try_as_tlas_view(view); tv_as != nullptr && tv_as->tlas != nullptr)

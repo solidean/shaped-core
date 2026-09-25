@@ -309,13 +309,13 @@ void dx12_command_list::compute_dispatch(int x, int y, int z)
 
         for (auto const& view : bound_group->hazard_views)
             if (view.buffer)
-                track_buffer_access(view.buffer, sg::pipeline_stage_flag::compute, sg::shader_access_of(view.access));
+                track_buffer_access(view.buffer, sg::pipeline_stage_flag::compute, sg::shader_access_of(view.bound_as));
 
         // Bound textures also transition to the layout their access class needs (a sampled texture to
         // shader_texture, a storage texture to shader_image) — the inferred layout is shader_layout_of.
         for (auto const& tv : bound_group->texture_hazard_views)
             track_texture_access(tv.texture, tv.range, sg::pipeline_stage_flag::compute,
-                                 sg::shader_access_of(tv.access), sg::shader_layout_of(tv.access));
+                                 sg::shader_access_of(tv.bound_as), sg::shader_layout_of(tv.bound_as));
     }
 
     // Array bindings are not auto-tracked — apply (and account for) the caller's explicit declarations.
@@ -387,11 +387,12 @@ void dx12_command_list::raytracing_dispatch_rays(sg::raytracing_shader_table con
 
         for (auto const& view : bound_group->hazard_views)
             if (view.buffer)
-                track_buffer_access(view.buffer, sg::pipeline_stage_flag::raytracing, sg::shader_access_of(view.access));
+                track_buffer_access(view.buffer, sg::pipeline_stage_flag::raytracing,
+                                    sg::shader_access_of(view.bound_as));
 
         for (auto const& tv : bound_group->texture_hazard_views)
             track_texture_access(tv.texture, tv.range, sg::pipeline_stage_flag::raytracing,
-                                 sg::shader_access_of(tv.access), sg::shader_layout_of(tv.access));
+                                 sg::shader_access_of(tv.bound_as), sg::shader_layout_of(tv.bound_as));
     }
 
     // Array bindings are not auto-tracked — apply (and account for) the caller's explicit declarations.

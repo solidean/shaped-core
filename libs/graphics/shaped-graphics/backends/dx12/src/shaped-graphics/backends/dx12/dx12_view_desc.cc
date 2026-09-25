@@ -296,7 +296,7 @@ void create_texture_view(ID3D12Device* device, sg::raw_texture_view const& view,
     ID3D12Resource* const resource = tex->_resource.Get();
     DXGI_FORMAT const format = to_dxgi_format(view.format);
 
-    switch (view.kind)
+    switch (view.bound_as)
     {
     case sg::view_class::texture:
     {
@@ -335,7 +335,7 @@ void create_buffer_view(ID3D12Device* device, sg::raw_buffer_view const& view, D
 {
     ID3D12Resource* const resource = resource_of(view);
 
-    switch (view.access)
+    switch (view.bound_as)
     {
     case sg::view_class::uniform:
     {
@@ -410,11 +410,11 @@ void create_null_view(ID3D12Device* device, sg::binding const& binding, D3D12_CP
     case sg::binding_type::buffer:
     {
         bool const is_bytes = sg::shape_of(binding.type) == sg::view_shape::bytes;
-        auto const view = sg::raw_buffer_view{.access = sg::view_class_of(binding),
+        auto const view = sg::raw_buffer_view{.bound_as = sg::view_class_of(binding),
                                               .shape = sg::shape_of(binding.type),
                                               .buffer = nullptr,
                                               .stride_in_bytes = is_bytes ? 0 : 4};
-        if (view.access == sg::view_class::readonly)
+        if (view.bound_as == sg::view_class::readonly)
         {
             D3D12_SHADER_RESOURCE_VIEW_DESC desc = {};
             desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
@@ -445,11 +445,11 @@ void create_null_view(ID3D12Device* device, sg::binding const& binding, D3D12_CP
                                                          "bindings must set it)");
         // Reuse the dimension mapping through a synthetic null-handle view; the default subresource range
         // (one mip, one slice) is inert on a null descriptor.
-        auto const view = sg::raw_texture_view{.kind = sg::view_class_of(binding),
+        auto const view = sg::raw_texture_view{.bound_as = sg::view_class_of(binding),
                                                .texture = nullptr,
                                                .view_dimension = binding.texture_dimension.value(),
                                                .format = sg::pixel_format::rgba8_unorm};
-        if (view.kind == sg::view_class::texture)
+        if (view.bound_as == sg::view_class::texture)
         {
             D3D12_SHADER_RESOURCE_VIEW_DESC const desc = texture_srv_desc(view, DXGI_FORMAT_R8G8B8A8_UNORM);
             device->CreateShaderResourceView(nullptr, &desc, dst);

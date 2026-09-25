@@ -379,7 +379,7 @@ private:
         r.mip_range = {.start = mip, .end = mip + 1}; // a UAV targets a single mip level
         r.array_range = array_range;
         r.aspect_range = {.start = 0, .end = format_aspect_count(_raw->format())};
-        return any_texture_view<texture_view_traits<Dim>>(raw_texture_view{.kind = view_class::image,
+        return any_texture_view<texture_view_traits<Dim>>(raw_texture_view{.bound_as = view_class::image,
                                                                            .texture = _raw,
                                                                            .view_dimension = Dim,
                                                                            .format = _raw->format(),

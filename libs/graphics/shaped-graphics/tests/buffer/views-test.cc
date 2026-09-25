@@ -55,10 +55,10 @@ TEST("sg views - uniform view")
     CHECK(v.buffer == buf);
     CHECK(v.offset_in_bytes == 0);
     CHECK(v.size_in_bytes == sizeof(particle));
-    CHECK(sg::uniform_buffer_view<particle>::access == sg::view_class::uniform);
+    CHECK(sg::uniform_buffer_view<particle>::bound_as == sg::view_class::uniform);
 
     auto const raw = sg::as_buffer_view(v.to_raw());
-    CHECK(raw.access == sg::view_class::uniform);
+    CHECK(raw.bound_as == sg::view_class::uniform);
     CHECK(raw.shape == sg::view_shape::uniform_block);
     CHECK(raw.buffer == buf);
     CHECK(raw.size_in_bytes == sizeof(particle));
@@ -85,7 +85,7 @@ TEST("sg views - readonly structured view")
     CHECK(whole.element_count == 20);
 
     auto const raw = sg::as_buffer_view(whole.to_raw());
-    CHECK(raw.access == sg::view_class::readonly);
+    CHECK(raw.bound_as == sg::view_class::readonly);
     CHECK(raw.shape == sg::view_shape::structured);
     CHECK(raw.element_count == 20);
     CHECK(raw.stride_in_bytes == sizeof(particle));
@@ -109,7 +109,7 @@ TEST("sg views - readwrite structured view")
     CHECK(v.element_count == 4);
 
     auto const raw = sg::as_buffer_view(v.to_raw());
-    CHECK(raw.access == sg::view_class::readwrite);
+    CHECK(raw.bound_as == sg::view_class::readwrite);
     CHECK(raw.shape == sg::view_shape::structured);
     CHECK(raw.stride_in_bytes == sizeof(particle));
 }
@@ -120,13 +120,13 @@ TEST("sg views - raw byte views")
 
     // The raw shader views return the erased raw_buffer_view directly (raw_buffer is the low-level path).
     auto const ro = buf->as_raw_readonly();
-    CHECK(ro.access == sg::view_class::readonly);
+    CHECK(ro.bound_as == sg::view_class::readonly);
     CHECK(ro.shape == sg::view_shape::bytes);
     CHECK(ro.size_in_bytes == 1024);
     CHECK(ro.stride_in_bytes == 0);
 
     auto const rw = buf->as_raw_readwrite();
-    CHECK(rw.access == sg::view_class::readwrite);
+    CHECK(rw.bound_as == sg::view_class::readwrite);
     CHECK(rw.shape == sg::view_shape::bytes);
     CHECK(rw.size_in_bytes == 1024);
 
@@ -180,19 +180,19 @@ TEST("sg views - access-erased buffer_view<T> middle")
 
     // The fully-typed leaves convert implicitly to the access-erased middle (access is a runtime field).
     sg::buffer_view<particle> const ro = sg::buffer<particle>::from_raw(buf).as_readonly_buffer();
-    CHECK(ro.access == sg::view_class::readonly);
+    CHECK(ro.bound_as == sg::view_class::readonly);
     CHECK(ro.shape == sg::view_shape::structured);
     CHECK(ro.element_count == 4);
     CHECK(ro.stride_in_bytes == sizeof(particle));
     CHECK(sg::view_class_of(ro.to_raw()) == sg::view_class::readonly);
 
     sg::buffer_view<particle> const rw = sg::buffer<particle>::from_raw(buf).as_readwrite_buffer();
-    CHECK(rw.access == sg::view_class::readwrite);
+    CHECK(rw.bound_as == sg::view_class::readwrite);
 
     // Uniform too — particle is a uniform_element.
     auto const ubuf = make_buffer(256, sg::buffer_usage::uniform_buffer);
     sg::buffer_view<particle> const u = sg::buffer<particle>::from_raw(ubuf).as_uniform_buffer();
-    CHECK(u.access == sg::view_class::uniform);
+    CHECK(u.bound_as == sg::view_class::uniform);
     CHECK(u.shape == sg::view_shape::uniform_block);
     CHECK(u.size_in_bytes == sizeof(particle));
 }
@@ -244,7 +244,7 @@ TEST("sg views - buffer_view<T> middle -> typed leaf (as_ / try_as_)")
     auto const leaf = ro.as_readonly();
     CHECK(leaf.buffer == buf);
     CHECK(leaf.element_count == 4);
-    CHECK(sg::readonly_buffer_view<particle>::access == sg::view_class::readonly);
+    CHECK(sg::readonly_buffer_view<particle>::bound_as == sg::view_class::readonly);
 
     // try_as_ recovers the matching access, nullopt on a mismatch.
     CHECK(ro.try_as_readonly().has_value());
@@ -289,7 +289,7 @@ TEST("sg views - raw byte-level as_* variants")
     // Raw uniform: an explicit byte range -> the erased raw_buffer_view (uniform_block).
     auto const ubuf = make_buffer(1024, sg::buffer_usage::uniform_buffer);
     auto const u = ubuf->as_raw_uniform_buffer({.offset = 256, .size = 64});
-    CHECK(u.access == sg::view_class::uniform);
+    CHECK(u.bound_as == sg::view_class::uniform);
     CHECK(u.shape == sg::view_shape::uniform_block);
     CHECK(u.offset_in_bytes == 256);
     CHECK(u.size_in_bytes == 64);

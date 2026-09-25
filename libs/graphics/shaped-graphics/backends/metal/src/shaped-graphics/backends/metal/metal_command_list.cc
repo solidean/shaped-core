@@ -1016,10 +1016,10 @@ void metal_command_list::declare_bound_groups(pipeline_stage_flags stages)
     // not order against each other.
     for (auto const& slot_buffers : _group_buffers)
         for (auto const& bound : slot_buffers)
-            declare_buffer(bound.buffer, stages, sg::shader_access_of(bound.access));
+            declare_buffer(bound.buffer, stages, sg::shader_access_of(bound.bound_as));
     for (auto const& slot_textures : _group_textures)
         for (auto const& bound : slot_textures)
-            declare_texture(bound.texture, stages, sg::shader_access_of(bound.access));
+            declare_texture(bound.texture, stages, sg::shader_access_of(bound.bound_as));
 
     // A bound acceleration structure is read and never written by the work that traces it, which is why this one
     // declare is narrower than the two above.

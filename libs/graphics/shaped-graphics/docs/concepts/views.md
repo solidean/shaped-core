@@ -71,7 +71,7 @@ every view's access (a `readwrite_buffer_view` requires `readwrite_buffer`, etc.
 
 Every typed view converts (`to_raw()`, or implicitly) into one
 [`raw_view`](../../src/shaped-graphics/resource/views.hh) — a `cc::variant` over one cohesive payload per
-resource kind: `raw_buffer_view` (access + shape + buffer + byte layout), `raw_texture_view` (kind +
+resource kind: `raw_buffer_view` (`bound_as` + shape + buffer + byte layout), `raw_texture_view` (`bound_as` +
 texture + dimension + format + range), and `raw_tlas_view` (the TLAS). A backend `visit`s the active arm to
 build its native descriptor, or picks one out with `try_as_buffer_view(rv)` / `try_as_texture_view` /
 `try_as_tlas_view` (null on a different arm; each has an asserting `as_*_view` twin); `view_class_of(rv)` /
@@ -80,8 +80,9 @@ the typed views; the raw arms are also the directly-usable "raw" binding vocabul
 bindings without the wrappers.
 
 Between the fully-typed leaves and the erased `raw_view` sits an optional **erased middle**.
-`buffer_view<T>` and `any_texture_view<Traits>` keep the resource typing — element type, view dimension — but carry the view class as a runtime field.
-For a buffer that is its access; for a texture view it is its kind, a texture or an image.
+`buffer_view<T>` and `any_texture_view<Traits>` keep the resource typing — element type, view dimension — but carry `bound_as`, the view class, as a runtime field.
+**Every view names its view class `bound_as`**, since the word `access` belongs to a binding's `access_mode`.
+A buffer is bound as `uniform`, `readonly` or `readwrite`, and a texture as a `texture` or an `image`.
 Each leaf converts to it implicitly and it erases on to `raw_view`, which suits code taking "any access" of a given buffer, or "a texture or an image" of a given dimension.
 
 ### Recovering a typed view from the erased form
@@ -211,7 +212,7 @@ Multisampled textures **are** sampleable (`Texture2DMS…`) — their params jus
 Image views never apply to MSAA (D3D12 forbids MSAA UAVs) and a cube is written as a 2D array (no cube
 UAV).
 
-A bound texture's layout follows from its view's kind, via `shader_layout_of`: a texture → `texture_layout::shader_texture`, an image → `shader_image`.
+A bound texture's layout follows from its view's `bound_as`, via `shader_layout_of`: a texture → `texture_layout::shader_texture`, an image → `shader_image`.
 The [barriers](barriers.md) system transitions it for you.
 
 ### Render-target / depth-stencil views

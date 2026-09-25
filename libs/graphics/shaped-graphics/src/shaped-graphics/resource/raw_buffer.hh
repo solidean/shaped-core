@@ -46,7 +46,7 @@ public:
     {
         CC_ASSERT(_usage.has(buffer_usage::uniform_buffer), "buffer lacks uniform_buffer usage");
         assert_uniform_range(byte_range);
-        return raw_buffer_view{.access = view_class::uniform,
+        return raw_buffer_view{.bound_as = view_class::uniform,
                                .shape = view_shape::uniform_block,
                                .buffer = shared_from_this(),
                                .offset_in_bytes = byte_range.offset,
@@ -73,7 +73,7 @@ public:
     {
         CC_ASSERT(_usage.has(buffer_usage::readonly_buffer), "buffer lacks readonly_buffer usage");
         assert_storage_range(byte_range);
-        return raw_buffer_view{.access = view_class::readonly,
+        return raw_buffer_view{.bound_as = view_class::readonly,
                                .shape = view_shape::bytes,
                                .buffer = shared_from_this(),
                                .offset_in_bytes = byte_range.offset,
@@ -86,7 +86,7 @@ public:
     {
         CC_ASSERT(_usage.has(buffer_usage::readonly_buffer), "buffer lacks readonly_buffer usage");
         assert_strided_range(byte_range, stride_in_bytes);
-        return raw_buffer_view{.access = view_class::readonly,
+        return raw_buffer_view{.bound_as = view_class::readonly,
                                .shape = view_shape::structured,
                                .buffer = shared_from_this(),
                                .offset_in_bytes = byte_range.offset,
@@ -129,7 +129,7 @@ public:
     {
         CC_ASSERT(_usage.has(buffer_usage::readwrite_buffer), "buffer lacks readwrite_buffer usage");
         assert_storage_range(byte_range);
-        return raw_buffer_view{.access = view_class::readwrite,
+        return raw_buffer_view{.bound_as = view_class::readwrite,
                                .shape = view_shape::bytes,
                                .buffer = shared_from_this(),
                                .offset_in_bytes = byte_range.offset,
@@ -142,7 +142,7 @@ public:
     {
         CC_ASSERT(_usage.has(buffer_usage::readwrite_buffer), "buffer lacks readwrite_buffer usage");
         assert_strided_range(byte_range, stride_in_bytes);
-        return raw_buffer_view{.access = view_class::readwrite,
+        return raw_buffer_view{.bound_as = view_class::readwrite,
                                .shape = view_shape::structured,
                                .buffer = shared_from_this(),
                                .offset_in_bytes = byte_range.offset,
