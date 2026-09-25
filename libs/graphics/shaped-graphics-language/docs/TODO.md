@@ -18,4 +18,4 @@ What the compiler carries today is the [spec](spec/_index.md); a construct it do
 - **Unsigned literals.** A `uint` is reached through `as` today, `1 as uint`, since a literal with a suffix is `unsupported-yet` (CHK-61).
   Whether `1u` exists or a literal takes the type it is asked for is the question [literal-types.md](spec/incubator/literal-types.md) holds.
 - **File-scope samplers.** A `sampler name:` at file scope is a pipeline layout's `sg::bound_sampler`, which vulkan and metal do not bind yet (sg's TODO.md).
-  Once they do, it needs slib to spell one in HLSL, `#pragma sc static` outside a group, and the generated `acquire_pipeline` to fill `static_samplers`.
+  Once they do, it needs an HLSL address outside every group's space, and the generated `acquire_pipeline` to fill `static_samplers`.

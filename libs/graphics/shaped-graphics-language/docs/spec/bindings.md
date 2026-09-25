@@ -170,7 +170,7 @@ binding material:
 A static sampler's kind needs no spelling: it follows from its settings, `comparison` when `compare` is set, and `non_filtering` when every filter is nearest.
 
 **A sampler's settings** are one `name = value` per line ([AST-76](syntax/ast.md#bindings-and-samplers)), and each sets a field of `sg::sampler`.
-They are the names slib's `#pragma sc static` reads in HLSL, so both languages say the same thing.
+They are the names slib's `#pragma sc static` takes in hand-written HLSL, so both languages say the same thing.
 They apply in order, so a later setting overrides what an earlier one set, `filter` included:
 
 | setting | sets |
@@ -229,7 +229,7 @@ A group-scope static sampler takes a slot like any sampler, since sg matches it 
 Dimension, sample type, storage format, storage access and sampler kind are in the declaration, and `sgl describe` hands each to the host.
 The generated group's table is what the host builds its layout from, so that is where every fact reaches sg.
 A compiled shader only has to fit that layout, and sg's fit check compares a binding's name, slot, count and kind — never the facts beyond them.
-The WGSL SGL writes states all of them, which a test holds to the generated table; HLSL states the dimension, and an image's format through slib's `#pragma sc format`.
+The WGSL SGL writes states all of them, which a test holds to the generated table; HLSL states the dimension, and the vulkan text an image's format as `[[vk::image_format]]`.
 HLSL cannot say `unfilterable` at all, which costs nothing, since dx12 and vulkan read none of it.
 Building the layout by reflecting the WGSL instead was declined: that text is written from the same declaration, so reading it back is `sgl describe` with a parser in between.
 And `texture_2d<f32>` fits a filterable and an unfilterable layout alike, so the reflection could not even recover `@unfilterable`.
@@ -269,7 +269,7 @@ Everything not named here is the diagnostic `unsupported-yet`, never a guess.
 * A resource's host name, its path `binding.member` ([CHK-171](semantics/checking.md#bindings)), which the text reports beside the identifier it minted.
 
 Three targets write a group, and the fourth declines rather than guessing.
-WGSL gives each resource its own `@group`/`@binding`, and HLSL writes `#pragma sc group n` and a namespace, so that every register stays slib's binding pass's to assign.
+WGSL gives each resource its own `@group`/`@binding`, and HLSL a namespace per group whose resources carry `register(<class>slot, spaceN)` on dx12 and `[[vk::binding(slot, N)]]` on vulkan.
 A group's plain members are one constant buffer at the group's slot 0, named after the binding, and its resources follow it in declaration order.
 MSL declines every group until slib has a compiler that turns its text into a metallib.
 

@@ -10,7 +10,7 @@
 ///
 /// A target is a text format together with the addressing rules of the backend that reads it.
 /// So the two HLSL targets are two outputs: they differ in how a location and the inline constants are addressed.
-/// WGSL and MSL carry their final addresses; HLSL names each resource's group and leaves its register to slib's binding pass.
+/// Every target carries its final addresses, so no later pass numbers what the text declares.
 enum class sgl::emit::target : sgl::u8
 {
     hlsl_dx12,
@@ -41,6 +41,8 @@ enum class sgl::emit::error_kind : sgl::u8
     /// A flat tree in the structured form, which `check::legalize` has to take to the core form first.
     /// The detail is the first violation `check::find_core_violation` names.
     not_core,
+    /// An entry point listing more groups than sg binds, which is three besides the inline constants.
+    too_many_groups,
 };
 
 struct sgl::emit::error

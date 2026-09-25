@@ -98,12 +98,20 @@ struct validator
     {
         auto inline_count = 0;
         auto listed = 0;
+        auto groups = 0;
         for (auto const id : e.bindings)
         {
             ++listed;
             auto const& s = m.at(id);
             if (!m.bindings[s.info].is_inline)
+            {
+                // Refused on every target, so an entry point written for one is written for all of them.
+                if (groups++ == k_max_groups)
+                    report(error_kind::too_many_groups, id,
+                           cc::format("'{}' is group {}, and sg binds {} besides the inline constants", s.name,
+                                      k_max_groups, k_max_groups));
                 continue;
+            }
             // Listed and skipped when numbering, so it has to stand last or a group would move under the host.
             if (listed != e.bindings.size())
                 report(error_kind::unsupported, id,

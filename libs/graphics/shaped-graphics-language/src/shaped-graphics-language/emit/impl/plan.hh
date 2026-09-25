@@ -11,6 +11,10 @@
 
 namespace sgl::emit::impl
 {
+/// How many groups an entry point may list besides its `@inline` binding, `sg::max_binding_groups`.
+/// sgl does not link sg, so the number is repeated here, and the pipeline layout sg builds is what it has to match.
+inline constexpr auto k_max_groups = 3;
+
 /// What a struct is to the entry point, which decides how its members are addressed.
 /// It comes from where the struct stands in the signature, never from the struct's own attribute.
 enum class struct_role : u8
@@ -96,7 +100,7 @@ struct planned_resource
     i32 static_sampler = -1;
     i32 group = 0;
     i32 slot = 0;
-    /// What HLSL declares the group as, which is what slib's binding pass reads: `<binding>_bindings`.
+    /// The namespace HLSL declares the group in: `<binding>_bindings`.
     cc::string group_name;
 };
 

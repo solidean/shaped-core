@@ -119,15 +119,16 @@ A `default` arm also stands for the cases nobody named, and a reader who cannot 
 
 ## EMIT-86
 
-A register is an address the host has to agree with, and in HLSL it is a pair of a class and a space that the two backends read differently.
-slib's binding pass already owns that question for every HLSL shader in the tree, so the emitter states which group a resource belongs to and nothing more.
-The group number is the one address that is SGL's, because it comes from the entry point's list.
+A register is an address the host has to agree with, and the host's side of it is sg's.
+Its dx12 backend reads a group's slot i as register i of the group's space, and its vulkan backend as binding i of the group's set.
+SGL already owns both numbers, the group from the entry point's list and the slot from the binding's members, and writes them in WGSL.
+So HLSL writes the same pair, and the text DXC compiles is the text `sgl emit` prints.
+The namespace keeps a group's names apart from the program's, and is no address.
 
 ## EMIT-87
 
-In a descriptor set, slib compiles vulkan's HLSL with `-fvk-use-dx-layout`, so a constant buffer already has dx12's layout there.
-The push-constant block is the one that flag does not reach, which is why an `@inline` block states its offsets and a group's constant buffer does not.
-slib's pass refuses an offset written by hand in a group, since it states every layout itself.
+In a descriptor set, `-fvk-use-dx-layout` would give a constant buffer dx12's layout by itself, and slib passes it.
+The offsets are stated anyway, so the text says where each member sits whatever flags its compiler was given, which is EMIT-4.
 
 ## EMIT-94
 
