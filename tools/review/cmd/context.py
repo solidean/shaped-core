@@ -101,10 +101,10 @@ class Context:
         except review.GitError as e:
             self.die(str(e))
 
-    def entries(self, paths: review.ReviewPaths) -> list[review.Entry]:
-        """Every entry in navigation order, dying with the file and line on the first malformed one."""
+    def entries(self, paths: review.ReviewPaths, files: list[Path] | None = None) -> list[review.Entry]:
+        """Every entry in navigation order, or just `files`, dying with the file and line on the first malformed one."""
         out = []
-        for file in paths.entry_files():
+        for file in paths.entry_files() if files is None else files:
             try:
                 out.append(review.parse_entry_file(file))
             except review.ReviewParseError as e:

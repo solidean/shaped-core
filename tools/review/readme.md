@@ -62,7 +62,7 @@ Goals combine: `--goal pr-comment --goal land-changes` is a review of someone el
 | `coverage <name>` | gate 1 and the discharge progress, with the uncovered runs listed; also names changes only a meta or orientation entry claims |
 | `changes <name>` | the ledger: every change, and which ask accounts for it. `--undischarged`, `--path` (comma-OR'd prefixes or globs, `!` subtracts), `--ids` |
 | `list` | the reviews in this repository, and where each one stands |
-| `validate <name>` | every entry parses, every change id resolves; run it before serving a round |
+| `validate <name> [ENTRY...]` | every entry parses, every change id resolves; run it before serving a round. Entries narrow it to a slug, a number or a range like `200..299`, and only those are parsed, so parallel writers each check their own block |
 | `generate <name>` | write or refresh the overview and coverage entries |
 | `append <name> <entry>` | add blocks to an entry from stdin or `--file`, stamped with the round; **how a later round answers an earlier one** |
 | `title <name> "<text>"` | name the review after reading it, which is what the tab and the navigation show |

@@ -2210,6 +2210,33 @@ def test_a_blank_line_that_turns_an_asks_attributes_into_prose_is_reported(root:
     assert "030-fine" not in out, f"an ask opening on prose must not be reported: {out}"
 
 
+def test_validate_checks_only_the_entries_it_is_given(root: Path) -> None:
+    """Parallel writers each own a number range, and each grepped one shared report for their own lines.
+
+    A broken entry outside the selection must not stop the check either: it belongs to another writer, mid-edit.
+    """
+    front = "---\nid: {n}\ntitle: t\ngroup: topics\n---\n\n## prose\n\n{body}\n"
+    run = design_review(root, {
+        "010-mine": front.format(n="010", body="See `nope/missing.txt`."),
+        "020-mine-too": front.format(n="020", body="Fine."),
+        "030-theirs": "---\nid: 030\ntitle: t\n---\n\n## bogus\n\nHalf written.\n",
+    })
+
+    code, out = run("validate", "d", "010..020")
+    assert code == 1 and "010-mine" in out and "missing.txt" in out, out
+    assert "030" not in out and "bogus" not in out, f"an entry outside the range was checked: {out}"
+    assert "2 of 3 entries" in out, out
+
+    code, out = run("validate", "d", "020")
+    assert code == 0 and "missing.txt" not in out, out
+
+    code, out = run("validate", "d", "030-theirs")
+    assert code == 1 and "bogus" in out, out
+
+    code, out = run("validate", "d", "040")
+    assert code != 0 and "040" in out, f"a selector matching nothing must say so: {out}"
+
+
 def test_design_review_refuses_a_range(root: Path) -> None:
     """A design review has no changeset, so a range would be silently ignored rather than honoured."""
     repo = root / "repo"
