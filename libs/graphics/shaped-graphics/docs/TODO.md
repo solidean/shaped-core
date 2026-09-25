@@ -12,11 +12,16 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   It is a second member of "access is inferred, never declared (with one exception)", for the same reason the bindless declaration is the first.
   dx12 first, vulkan when a member needs it; sr's [denoising.md](../../shaped-rendering/docs/denoising.md) is the consumer.
   Pin it with a test that clears through the scope and checks sg's next inferred barrier.
-- **An image's hazards follow its view class, not what the shader does with it.**
-  `shader_access_of` counts every image as written, so an image a pipeline only loads still orders against every other access of it.
+- **A dispatch's hazards follow each view's `bound_as`, not what the shader does with it.**
+  `shader_access_of` counts every image and every `readwrite` buffer as written, so one a pipeline only loads still orders against every other access of it.
   The binding's `access` says more, but it is the group's declared access, the union over every pipeline the group is bound to.
-  The fix is the per-pipeline used access SGL can report, [used-access.md](../../shaped-graphics-language/docs/spec/incubator/used-access.md), read by barrier inference in place of the view class.
+  The fix is a pipeline **footprint**: per binding and per stage, the `access_flags` the code really performs, which SGL can compute exactly.
+  Barrier inference then joins the group's bound resources with the footprint at dispatch.
+  The groups' `hazard_views` become plain `bound_buffers` / `bound_textures` carrying no access, as metal already names them.
+  HLSL and WGSL get a conservative footprint from `binding::access` and the stage visibility.
+  An array binding's footprint says only whether and how it is indexed; which elements stays the caller's to declare per dispatch, bounded by it.
   The layout keeps the declared access regardless, since WebGPU validates a bind group against it.
+  The design is [footprint.md](../../shaped-graphics-language/docs/spec/incubator/footprint.md).
 - **Exportable memory and shared fences.**
   OIDN's GPU devices run on their own API (CUDA, HIP, SYCL, Metal) and share memory with ours through an OS handle.
   That wants an "exportable" usage on buffer and texture creation, a way to read the handle, and a fence shared both ways.
