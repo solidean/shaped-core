@@ -89,6 +89,17 @@ Then come `find_core_violation`, both legalizer passes, the interpreter and the 
 The random generator of `tests/legalize/random-program.cc` has to produce it too, or the differential test never meets it.
 The legalizer drops an `eval` whose value was a block once the block has moved in front, since what is left is a read of a local; a call stays, pure or not.
 
+## Tests
+
+**A `test` is a root of the check pass, and it has a flat tree of its own** in `checked_module::test_units`, of no stage and without a parameter.
+Its body is checked after every function body, since a test in a function body is only found while that body is checked.
+A check of a test and an `assert` anywhere flatten to one `check` statement, whose body leaves every node of the condition in a `var` of its own.
+The interpreter reads those `var`s when a check is false, and `sgl::test::run_tests` narrows them into a report.
+`legalize` removes every `check` first, which is all it takes for no target to write one.
+
+`sgl::test_source` is the driver of a whole file's tests, what `sgl test` and the corpus run; `text_request::run_tests` makes a failing test an error of `compile_to_text`.
+`@expect` is judged in the front end, once every phase's diagnostics are in one list.
+
 ## Builtins and the prelude
 
 **A builtin lives in one place, a record of the C++ builtin registry**: its signature as SGL source text, its evaluator, its spelling per target, a type's layout per target.
@@ -134,7 +145,8 @@ The size and alignment the `layout-mismatch` check places a member by are fields
 `sgl` is the toolchain's command line, a nexus binary under `tools/sgl/` whose jobs are `COMMAND`s.
 
 ```bash
-uv run dev.py run sgl -- emit <file> --entry <name> --target <hlsl-dx12|hlsl-vulkan|wgsl|msl>
+uv run dev.py run sgl -- emit <file> --entry <name> --target <hlsl-dx12|hlsl-vulkan|wgsl|msl> [--run-tests]
+uv run dev.py run sgl -- test <file>...                 # the tests of each file, on the interpreter
 uv run dev.py run sgl -- describe <file>             # what slib's generator reads: bindings, edge structs, entry points
 uv run dev.py run sgl -- describe <file>             # what slib's generator reads: bindings, edge structs, entry points
 uv run dev.py run sgl -- prelude --check <path>      # exit 2, and where the texts part, when the file differs

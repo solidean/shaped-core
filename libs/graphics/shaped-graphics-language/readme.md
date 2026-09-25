@@ -15,7 +15,7 @@ Supports:
     * per expression traces
     * assertions
     * logging
-    * CHECK/REQUIRE for testing
+    * `test` declarations, run on the interpreter, whose bool lines are checks
 
 This will also later form the basis of our shader node editing
 
@@ -34,6 +34,8 @@ It is built with the library wherever `SC_BUILD_TOOLS` is on, and run through `d
 uv run dev.py run sgl                                   # what the binary holds
 uv run dev.py run sgl -- emit shader.sgl --entry main_ps --target wgsl
                                                         # the target text, or the diagnostics; hlsl-dx12, hlsl-vulkan, wgsl, msl
+                                                        # --run-tests runs the file's tests first, and writes nothing if one fails
+uv run dev.py run sgl -- test a.sgl b.sgl               # checks the files and runs their tests: what failed, and why
 uv run dev.py run sgl -- prelude                        # prelude/builtins.sgl as the builtin registry generates it
 uv run dev.py run sgl -- prelude --check <path>         # exit 2, and where the texts part, when the file differs
 uv run dev.py run sgl -- prelude --write <path>         # what `uv run dev.py check sgl-prelude --fix` runs

@@ -28,8 +28,14 @@ r.value().color_targets  .target_struct    // a pixel entry point's target count
 r.error()                                  // one line per diagnostic: `cube.sgl:12:5: error: unknown-name: foo`
                                            // one inside the prelude names `builtins.sgl` or `core.sgl`
                                            // a missing entry point names the ones the source holds; a wrong stage says both
-sgl::text_request                          // source, source_name ("<sgl>"), entry_point, stage (none = any), target
+sgl::text_request                          // source, source_name ("<sgl>"), entry_point, stage (none = any), target, run_tests
                                            // the entry point is found by NAME; source_name is never opened
+                                           // run_tests: the source's own tests run, and one that fails is an error
+
+#include <shaped-graphics-language/driver/test_source.hh>
+auto const t = sgl::test_source(text, "colors.sgl");
+                                           // -> tested_source { errors, warnings, test_count, tests_run, tests_passed,
+                                           // tests_expecting_diagnostics, entry_points }; t.is_clean(): nothing to report
 
 #include <shaped-graphics-language/driver/describe.hh>
 auto const d = sgl::describe({.source = text, .source_name = "cube.sgl"});
@@ -311,6 +317,7 @@ sgl::test::diagnostic_of(m, r)             // `test-failed` at the test, one rel
 
 ```bash
 uv run dev.py run sgl -- emit shader.sgl --entry main_ps --target wgsl   # the text, or the diagnostics and exit 2
+uv run dev.py run sgl -- test a.sgl b.sgl                                # the tests of each file; exit 2 when one fails
 uv run dev.py run sgl -- prelude [--check <path> | --write <path>]       # the generated builtins.sgl; --check exits 2 on a difference
 uv run dev.py run sgl -- describe shader.sgl                             # sgl::describe as JSON: what slib's generator reads
 uv run dev.py check sgl-prelude [--fix]                                  # the gate over prelude/builtins.sgl

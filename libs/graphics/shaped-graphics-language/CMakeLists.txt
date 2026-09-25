@@ -74,6 +74,7 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/emit/impl/wgsl.cc
 
     src/shaped-graphics-language/driver/compile_to_text.cc
+    src/shaped-graphics-language/driver/test_source.cc
     src/shaped-graphics-language/driver/describe.cc
     src/shaped-graphics-language/driver/pipeline_fields.cc
     src/shaped-graphics-language/driver/impl/front_end.cc
@@ -213,6 +214,7 @@ target_sources(shaped-graphics-language
     src/shaped-graphics-language/emit/impl/plan.hh
 
     src/shaped-graphics-language/driver/compile_to_text.hh
+    src/shaped-graphics-language/driver/test_source.hh
     src/shaped-graphics-language/driver/describe.hh
     src/shaped-graphics-language/driver/pipeline_fields.hh
     src/shaped-graphics-language/driver/impl/front_end.hh
@@ -241,6 +243,7 @@ if(SC_BUILD_TOOLS)
         tools/sgl/describe_command.cc
         tools/sgl/emit_command.cc
         tools/sgl/prelude_command.cc
+        tools/sgl/test_command.cc
     )
     sc_nexus_binary(sgl KINDS tool)
     # babel-data writes `describe`'s JSON; the tool may take it, and the library must not.
@@ -305,6 +308,7 @@ if(SC_BUILD_TESTS)
         tests/driver/compile-to-text-test.cc
         tests/driver/describe-test.cc
         tests/driver/source-differential-test.cc
+        tests/driver/test-source-test.cc
 
         tests/spec/spec-examples-test.cc
 

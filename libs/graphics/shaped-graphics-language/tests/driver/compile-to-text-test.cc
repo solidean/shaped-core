@@ -108,3 +108,12 @@ TEST("sgl driver - a broken source reports where and what, and gives no text")
     CHECK(error_of({.source = source, .source_name = "broken.sgl", .entry_point = "main_ps", .target = target::hlsl_dx12})
           == "broken.sgl:9:24: error: unknown-name: missing\n");
 }
+
+TEST("sgl driver - a request to run the tests makes one that fails an error, and an untested request ignores them")
+{
+    auto const source = cube_source() + "\ntest 1 < 2\n\n// deliberately false\ntest 2 < 1\n";
+    CHECK(sgl::compile_to_text({.source = source, .entry_point = "main_ps"}).has_value());
+    auto const e = error_of({.source = source, .source_name = "cube.sgl", .entry_point = "main_ps", .run_tests = true});
+    CHECK(e.contains(": error: test-failed: 1 of 1 checks failed (deliberately false)\n"));
+    CHECK(e.contains(": note: `2 < 1` is 2 < 1\n"));
+}

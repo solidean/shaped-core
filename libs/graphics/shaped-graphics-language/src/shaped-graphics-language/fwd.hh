@@ -26,6 +26,7 @@ struct diagnostic;
 struct line_column;
 
 struct text_request;
+struct tested_source;
 struct emitted_source;
 struct prelude_file;
 
