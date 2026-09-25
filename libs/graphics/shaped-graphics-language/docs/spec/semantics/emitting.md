@@ -73,6 +73,7 @@ struct target_ {
 ## Enums
 
 * **EMIT-76** An enum is one named constant per case, minted as `<enum>_<case>`, of the target's `int`, and the constants stand in front of the structs.
+* **EMIT-108** A `@builtin` enum is none of that: it is written as its record spells it, and a case of `bool` is the literal `false` or `true`.
 * **EMIT-77** An entry point writes the whole constant set of every enum it mentions, in declaration order ([why](why/emitting.md#emit-77)).
 * **EMIT-81** An enum member of an edge struct or of an `@inline` binding is `unsupported`, as `int` and `bool` are by EMIT-33 and EMIT-39.
 

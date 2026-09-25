@@ -92,6 +92,8 @@ fun f(x: float) -> float:
 * **CHK-149** `==` and `!=` over two values of one enum are the language's own, as `and` is by CHK-116: no function declares them, and each gives a `bool`.
 * **CHK-150** An enum converts to no type and no type converts to it, `int` included, and it has no other operator ([why](why/checking.md#chk-150)).
 * **CHK-151** A property, a method or a nested declaration in an `enum` block is `unsupported-yet`, as CHK-27 makes each on a `struct`.
+* **CHK-218** `bool` is a `@builtin enum` of the prelude with the cases `false` and `true`, in that order, so `bool.true` is a value like `light_kind.sun`.
+  Its record makes it the targets' bool: CHK-149 and CHK-150 do not hold for it, since its `==` is the prelude's and `and`, `or` and `not` take it (CHK-116).
 
 ```sgl
 enum light_kind:
@@ -104,7 +106,7 @@ enum light_kind:
 
 * **CHK-29** The prelude is SGL source, and each of its files is checked like the program's file; CHK-138 says which files it has.
 * **CHK-30** A declaration that carries `@builtin` stands for one record of the compiler's **builtin registry**.
-  The key of a `struct` is its **name**, and the key of a `fun` is its name together with its parameter types, so every overload is a record of its own ([why](why/checking.md#chk-30)).
+  The key of a `struct` or an `enum` is its **name**, and the key of a `fun` is its name together with its parameter types, so every overload is a record of its own ([why](why/checking.md#chk-30)).
 * **CHK-31** A `@builtin` declaration no record has the key of is the normal error `unknown-builtin`.
   That is a name the registry does not hold, a name it holds as the other kind of declaration, or parameter types no overload of the name takes.
 * **CHK-32** A `@builtin fun` has no body, and every other `fun` has one, or it is the normal error `expected-body`.
@@ -122,6 +124,7 @@ enum light_kind:
 |---|---|
 | a function | `@builtin`, `@pure`, `@operator`, `@vertex`, `@pixel`, `@compute`, `@stages` |
 | a struct | `@builtin`, `@vertex`, `@pixel` |
+| an enum | `@builtin` |
 | a binding | `@inline` |
 | a binding member | `@unfilterable`, `@non_filtering` |
 | a struct field | `@position`, `@thread_id`, `@per_instance`, `@stream` |

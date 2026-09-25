@@ -148,6 +148,14 @@ constexpr auto void_values_body = cc::string_view("let u = unit p.a\n"
                                                   "let t = tagged(unit(p.b), p.a + y)\n"
                                                   "let x = keep(t, t.tag)\n");
 
+/// `bool` is a builtin enum: a `case` over one names its cases, and `bool.false` is a value like `mode.low`.
+constexpr auto bool_cases = cc::string_view("fun pick(b: bool) -> float:\n"
+                                            "    return case b:\n"
+                                            "        .true => 1.0\n"
+                                            "        .false => 2.0\n");
+constexpr auto bool_cases_body
+    = cc::string_view("let x = pick(p.a < 0.5) + pick(bool.false) + pick(bool.true == (p.b > 0.5))\n");
+
 struct program
 {
     cc::string_view name;
@@ -168,6 +176,7 @@ constexpr program programs[] = {
     {.name = "cases", .helpers = cases, .body = cases_body},
     {.name = "void values", .helpers = void_values, .body = void_values_body},
     {.name = "quiet void values", .helpers = quiet_void_values, .body = void_values_body},
+    {.name = "bool cases", .helpers = bool_cases, .body = bool_cases_body},
 };
 
 run_inputs inputs_of(checked_module const& m, f32 a, f32 b)
@@ -616,6 +625,17 @@ TEST("sgl source - void is written nowhere: no local, no field and no argument h
     }
     CHECK(function_text(quiet_void_values, void_values_body, sgl::emit::target::wgsl)
               .contains("let t: tagged = tagged(p.a + y);\n"));
+}
+
+TEST("sgl source - a case of bool is the target's bool, never the int of an enum")
+{
+    for (auto const t : sgl::emit::all_targets())
+    {
+        auto const text = function_text(bool_cases, bool_cases_body, t);
+        CHECK(text.contains("false"));
+        CHECK(!text.contains("bool_false"));
+        CHECK(!text.contains("switch"));
+    }
 }
 
 TEST("sgl source - every program without a print is written for every target")

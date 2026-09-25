@@ -151,8 +151,7 @@ type_id checker::resolve_buffer(i32 file, ast::expr_id expr, ast::index const& n
         return checked_module::error_type;
 
     // A struct element needs a layout rule the four targets agree on, which the spec's bindings file leaves open.
-    auto const& info = out.at(element);
-    if (info.kind != type_kind::structure || !sgl::is_valid(out.at(info.symbol).intrinsic_type))
+    if (out.builtin_type_of(element) == nullptr)
     {
         unsupported(file, span_of(file, arguments[0].value), "a buffer of anything but a scalar or a vector");
         return checked_module::error_type;
@@ -256,8 +255,9 @@ type_id checker::type_of_builtin(cc::string_view name, i32 file, source_span whe
     if (found != nullptr && !found->empty())
     {
         auto const id = found->front();
-        if (out.at(id).kind == symbol_kind::structure && demand(id, file, where) == symbol_state::checked
-            && is_valid(out.at(id).intrinsic_type))
+        auto const kind = out.at(id).kind;
+        if ((kind == symbol_kind::structure || kind == symbol_kind::enumeration)
+            && demand(id, file, where) == symbol_state::checked && is_valid(out.at(id).intrinsic_type))
             return out.at(id).type;
     }
     report(diagnostic_kind::unknown_name, file, where, cc::format("{}, which the prelude must declare @builtin", name));
@@ -436,7 +436,17 @@ void checker::compile_enum(symbol_id id)
     auto const& ast = ast_of(file);
     auto const& e = ast.at(decl).node.as<ast::enum_decl>();
 
-    judge_attributes(file, ast.at(decl).attributes, {}, "an enum");
+    cc::string_view const known[] = {"builtin"};
+    judge_attributes(file, ast.at(decl).attributes, known, "an enum");
+    // A builtin enum is written as its record says, `bool` as the target's bool, and not as the `int` of its cases.
+    if (find_attribute(file, ast.at(decl).attributes, "builtin") != nullptr)
+    {
+        auto const intrinsic = builtins.find_type(out.at(id).name);
+        if (is_valid(intrinsic))
+            out.symbols[index_of(id)].intrinsic_type = intrinsic;
+        else
+            report(diagnostic_kind::unknown_builtin, file, e.name, out.at(id).name);
+    }
 
     auto collected = cc::vector<enum_case_info>();
     auto next_value = cc::optional<i32>(0);

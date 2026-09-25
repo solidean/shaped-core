@@ -47,7 +47,7 @@ struct sgl::check::checked_module
 {
     /// The module-level declarations of every file, in file order and then in source order.
     cc::vector<symbol> symbols;
-    /// Canonical and deduplicated; `types[0]` is the error type and `types[1]` the type of no value.
+    /// Canonical and deduplicated; `types[0]` is the error type and `types[1]` is `void`.
     cc::vector<type_info> types;
     /// The fields of every struct and the members of every binding.
     cc::vector<member_info> members;
@@ -110,10 +110,19 @@ struct sgl::check::checked_module
         if (builtins == nullptr || !is_valid(id) || index_of(id) >= types.size())
             return nullptr;
         auto const& t = at(id);
-        if (t.kind != type_kind::structure || !is_valid(t.symbol) || index_of(t.symbol) >= symbols.size())
+        auto const is_declared = t.kind == type_kind::structure || t.kind == type_kind::enumeration;
+        if (!is_declared || !is_valid(t.symbol) || index_of(t.symbol) >= symbols.size())
             return nullptr;
         auto const record = at(t.symbol).intrinsic_type;
         return builtins->is_known(record) ? &builtins->at(record) : nullptr;
+    }
+
+    /// An enum of the program or the prelude that is no `@builtin`: one whose values are the `int`s of its cases.
+    /// `bool` is a builtin enum, so it is none, and it compares and is written as a bool.
+    [[nodiscard]] bool is_plain_enum(type_id id) const
+    {
+        return is_valid(id) && index_of(id) < types.size() && at(id).kind == type_kind::enumeration
+            && builtin_type_of(id) == nullptr;
     }
 
     /// The registry record behind a call; null when `id` names none.

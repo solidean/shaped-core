@@ -113,6 +113,10 @@ void sgl::builtins::register_types(registry& r)
     add_vectors(r, k_int_family);
     r.add(scalar_of(k_uint_family, "/// 32 bits, unsigned; its arithmetic wraps."));
     add_vectors(r, k_uint_family);
-    r.add(scalar_of(k_bool_family, ""));
+    // A builtin enum: `bool.true` is a case like any other, and the record says the targets write it as their bool.
+    // `false` comes first, so the zero value of a bool is false.
+    auto boolean = scalar_of(k_bool_family, "");
+    boolean.declaration = "enum bool:\n    false\n    true";
+    r.add(cc::move(boolean));
     add_vectors(r, k_bool_family);
 }

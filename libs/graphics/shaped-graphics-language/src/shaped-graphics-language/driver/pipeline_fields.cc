@@ -27,9 +27,7 @@ void leaves_of(check::checked_module const& m, check::type_id type, cc::vector<c
     auto const is_struct = t.kind == check::type_kind::structure && m.builtin_type_of(type) == nullptr;
     if (!is_struct)
     {
-        out.push_back({.names = cc::move(names),
-                       .type = cc::string(m.name_of(type)),
-                       .is_enum = t.kind == check::type_kind::enumeration});
+        out.push_back({.names = cc::move(names), .type = cc::string(m.name_of(type)), .is_enum = m.is_plain_enum(type)});
         return;
     }
     for (auto const& member : m.at(t.members))

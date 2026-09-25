@@ -296,8 +296,7 @@ struct flattener
             return add_expr(type, id, flat_construct{});
         if (e.node.is<ast::leading_dot>())
         {
-            return where.kind == target_kind::enum_case ? add_expr(type, id, flat_enum_value{.case_index = where.index})
-                                                        : fail();
+            return where.kind == target_kind::enum_case ? enum_value(type, id, where.index) : fail();
         }
         if (e.node.is<ast::name>())
         {
@@ -309,7 +308,7 @@ struct flattener
         if (auto const* const m = e.node.try_as<ast::member>())
         {
             if (where.kind == target_kind::enum_case)
-                return add_expr(type, id, flat_enum_value{.case_index = where.index});
+                return enum_value(type, id, where.index);
             if (where.kind == target_kind::binding_member)
                 return add_expr(type, id, flat_binding_member{.binding = where.symbol, .member = where.index});
             if (where.kind != target_kind::field)
@@ -351,6 +350,16 @@ struct flattener
         if (auto const* const c = e.node.try_as<ast::case_expr>())
             return flatten_value_case(id, type, *c);
         return fail();
+    }
+
+    /// A case of `type`; a case of `bool` is a bool literal, since a target writes a bool and not the `int` of a case.
+    flat_expr_id enum_value(type_id type, ast::expr_id from, i32 case_index)
+    {
+        if (c.out.is_plain_enum(type))
+            return add_expr(type, from, flat_enum_value{.case_index = case_index});
+        auto const cases = c.out.at(c.out.at(type).cases);
+        auto const is_known_case = case_index >= 0 && case_index < cases.size();
+        return is_known_case ? add_expr(type, from, flat_bool_literal{.value = cases[case_index].value != 0}) : fail();
     }
 
     flat_expr_id flatten_number(ast::expr_id id, type_id type)
@@ -556,7 +565,7 @@ struct flattener
         if (!is_valid(type))
             return symbol_id::none;
         // An enum compares as the `int` its cases are (EVAL-64).
-        auto const compared = c.out.at(type).kind == type_kind::enumeration ? int_type() : type;
+        auto const compared = c.out.is_plain_enum(type) ? int_type() : type;
         if (!is_valid(compared))
             return symbol_id::none;
         type_id const both[] = {compared, compared};

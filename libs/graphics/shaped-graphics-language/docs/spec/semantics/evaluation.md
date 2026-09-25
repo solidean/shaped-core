@@ -19,6 +19,7 @@ A listing here is the dump of a flat tree, shortened: a label is `$name`, and a 
 * **EVAL-6** A `float` is a 32-bit IEEE number, an `int` is 32 bits, signed, and its arithmetic wraps, and a `bool` is true or false.
 * **EVAL-7** A struct value is one value per field, in field order.
 * **EVAL-64** An enum value is the `int` value of one of its type's cases, and `==` and `!=` over two of them compare those `int`s.
+  `bool` is the exception: it is a `@builtin` enum (CHK-218), and its value is `false` or `true`, compared by the prelude's `==`.
 * **EVAL-74** A `void` value is the one value of its type: a struct value of no fields, and a field of type `void` adds nothing to a struct value.
 
 ## Locals and places

@@ -281,7 +281,7 @@ struct planner
     /// Every case of it, in declaration order, since a reader wants the set and not the subset an arm named.
     void need_enum(type_id type)
     {
-        if (!is_valid(type) || p.m.at(type).kind != type_kind::enumeration)
+        if (!p.m.is_plain_enum(type))
             return;
         if (p.enum_of_type[index_of(type)] != -1)
             return;

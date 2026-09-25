@@ -514,7 +514,7 @@ type_id checker::check_call(function_scope& scope, ast::expr_id id, ast::call co
         // `==` and `!=` over one enum are the language's own (CHK-149), and what they compare is the cases'
         // `int`s (EVAL-64) — so they resolve to the `int` overload, and no later pass needs an enum rule.
         if ((spelling == "==" || spelling == "!=") && arguments.types.size() == 2
-            && arguments.types[0] == arguments.types[1] && out.at(arguments.types[0]).kind == type_kind::enumeration)
+            && arguments.types[0] == arguments.types[1] && out.is_plain_enum(arguments.types[0]))
         {
             auto const as_int = type_of_builtin(builtins::k_int, file, where);
             arguments.types[0] = as_int;
