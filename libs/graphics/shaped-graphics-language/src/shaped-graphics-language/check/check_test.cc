@@ -106,7 +106,15 @@ void checker::check_test(i32 index)
     // CHK-226: a test that could pass without having checked anything is written as one that says so.
     auto const last = last_code_line(file, body.statements);
     auto const* const line = ast::is_valid(last) ? ast.at(last).node.try_as<ast::expr_stmt>() : nullptr;
-    auto const type = line != nullptr ? out.files[file].type_at(line->value) : type_id::none;
+    auto value = line != nullptr ? line->value : ast::expr_id::none;
+    // a `case` whose last arm is `=> value` ends in that value, which is a check where it is a bool
+    while (ast::is_valid(value) && ast.at(value).node.is<ast::case_expr>())
+    {
+        auto const arms = ast.at(ast.at(value).node.as<ast::case_expr>().arms);
+        auto const& result = arms.empty() ? ast::body() : arms[arms.size() - 1].result;
+        value = result.kind == ast::body_kind::arrow ? result.value : ast::expr_id::none;
+    }
+    auto const type = ast::is_valid(value) ? out.files[file].type_at(value) : type_id::none;
     auto const bool_type = type_of_builtin(builtins::k_bool, file, test.where);
     if (type != error_type && (type != bool_type || !is_valid(type)))
         report(diagnostic_kind::test_must_end_in_check, file, ast::is_valid(last) ? span_of(file, last) : test.where,

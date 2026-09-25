@@ -8,6 +8,7 @@
 #include <shaped-graphics-language/debug/dump.hh>
 #include <shaped-graphics-language/driver/compile_to_text.hh>
 #include <shaped-graphics-language/driver/describe.hh>
+#include <shaped-graphics-language/driver/test_source.hh>
 #include <shaped-graphics-language/syntax/parsed_file.hh>
 
 using namespace cc::primitive_defines;
@@ -315,4 +316,57 @@ TEST("sgl spec - every example of the spec and every sample compiles for every t
     }
     CHECK(failures == "");
     CHECK(sources > 50);
+}
+
+namespace
+{
+/// One `sgl` fence of the spec that holds a test.
+struct spec_fence
+{
+    cc::string file;
+    int line = 0;
+    cc::string source;
+};
+
+/// True where a line of `source` declares a test, which is what makes a fence something to run.
+bool holds_test(cc::string_view source)
+{
+    auto at = isize(0);
+    while (at < source.size())
+    {
+        auto end = source.find('\n', at);
+        if (end < 0)
+            end = source.size();
+        auto line = source.subview({.start = at, .end = end});
+        at = end + 1;
+        while (line.starts_with(' '))
+            line.remove_prefix(1);
+        if (line.starts_with("test ") || line.starts_with("test:") || line.starts_with("@expect"))
+            return true;
+    }
+    return false;
+}
+} // namespace
+
+INVOCABLE_TEST("sgl spec - an example that holds a test checks clean and passes it", (spec_fence const& f))
+{
+    auto const tested = sgl::test_source(f.source, cc::format("{}:{}", f.file, f.line));
+    CHECK(tested.errors == "");
+    CHECK(tested.warnings == "");
+}
+
+TEST("sgl spec - the tests of every example run")
+{
+    // A fence without a test is fine here; it is the corpus that holds a file to having one.
+    auto found = 0;
+    for (auto const file : spec_files)
+        for (auto const& e : examples_of(read_text(cc::format("{}/{}", SGL_SPEC_DIR, file))))
+            if (e.kind == fence_kind::valid && holds_test(e.source))
+            {
+                ++found;
+                nx::invoke_tests(cc::format("{}:{}", file, e.line),
+                                 spec_fence{.file = cc::string(file), .line = e.line, .source = e.source});
+            }
+    // the spec shows tests, so finding none means the scan broke
+    REQUIRE(found > 0);
 }

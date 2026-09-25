@@ -130,6 +130,7 @@ Binding verification is a very late step: that every function has its bindings s
 
 ## Open
 
+* A `test` lists no binding, and a local binding in its body is how it will give a callee one ([CHK-228](../semantics/checking.md#tests)); until this lands, such a call is `binding-not-listed`.
 * A call-site spelling that mirrors the declaration, as a shorter way to rebind: `a.sample_sky(v){sky = frame_sky}`; the AST reserves the node for it.
 * What a binding entry other than a bare name means, such as `{sky as other}` or `{sky = other}`.
 * What the composition short form does with two members of one name.

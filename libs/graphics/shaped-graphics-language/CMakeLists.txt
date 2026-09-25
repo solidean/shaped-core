@@ -272,6 +272,7 @@ if(SC_BUILD_TESTS)
         tests/builtins/registry-test.cc
 
         tests/check/check-test-support.hh
+        tests/corpus/corpus-test.cc
         tests/check/binding-check-test.cc
         tests/check/case-check-test.cc
         tests/check/control-flow-check-test.cc
@@ -323,6 +324,8 @@ if(SC_BUILD_TESTS)
         PRIVATE
         SGL_SPEC_DIR="${CMAKE_CURRENT_SOURCE_DIR}/docs/spec"
         SGL_SAMPLES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/samples"
+        # the corpus is walked when the test runs, so a new file needs no entry here
+        SGL_CORPUS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/corpus"
         SGL_PRELUDE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/prelude")
 
     target_link_libraries(shaped-graphics-language-test

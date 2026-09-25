@@ -132,6 +132,15 @@ fun accumulate(weights: span[float], t: tonemapper) -> vec3:
     )
     return (..lit.rgb, 1.0) // a trailing comment ends with its line
 
+// a test runs on the interpreter, and each bool line of it is a check
+fun note(x: float) -> void => void
+
+test note(1.0) == void
+
+@expect(.fail) test:
+    let v = vec3(0.2, 0.5, 0.5)
+    v.x > 0.5 and true
+
 // everything below is reported by the compiler, so it stays at the very end
 // `"""` and a tagged opener are reserved spellings, and the other two quote kinds have no meaning yet
 fun reserved(width: int):

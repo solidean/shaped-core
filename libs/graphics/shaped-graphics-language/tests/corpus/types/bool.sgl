@@ -1,0 +1,19 @@
+// bool is an enum of two cases, and `true` and `false` are its values by name
+
+test bool.true == true and bool.false == false
+
+fun sign(b: bool) -> float:
+    return case b:
+        true => 1.0
+        false => -1.0
+
+test sign(1 < 2) == 1.0 and sign(2 < 1) == -1.0
+
+// a case of bool is named with a leading dot where a case expects one
+fun flip(b: bool) -> bool:
+    return case b:
+        .true => false
+        .false => true
+
+test flip(true) == false
+test (not flip(false)) == false

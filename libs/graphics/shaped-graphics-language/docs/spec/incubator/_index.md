@@ -40,3 +40,4 @@ Each file has the same shape, so an idea can be picked up cold:
 | [texture-methods.md](texture-methods.md) | textures sampled through methods over UFCS, with a default sampler declared on the binding |
 | [uniformity.md](uniformity.md) | SGL's own uniformity analysis after inlining, refusing a derivative sample in divergent control flow with a fix to offer |
 | [beyond-shaders.md](beyond-shaders.md) | SGL as a test run for a general-purpose language, and what that asks of today's decisions |
+| [testing.md](testing.md) | tests on the GPU against the interpreter, resource values in tests, captured constants and message matching |

@@ -1,0 +1,15 @@
+// comparisons, alone and chained, on each scalar type
+
+test 1 < 2 <= 2 < 3
+test not (3 < 2)
+test 0.5 + 0.25 == 0.75
+test 7 - 10 == -3
+
+// a chain runs its middle once, and stops at its first false link
+test:
+    let x = 10
+    0 < x <= 10 and x * x > 50 and x != 11
+
+test:
+    for i in 0 ..< 4:
+        0 <= i < 4

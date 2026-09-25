@@ -1,0 +1,23 @@
+// what a test may not do, each written as a test that expects the error it gets
+
+fun shade(k: float) -> float:
+    // a test runs on its own, so the function's parameters have no value in it
+    @expect(error = "test-captures-runtime-value") test k > 0.0
+    return k
+
+// a test ends in a check, or it could pass without having checked anything
+@expect(error = "test-must-end-in-check") test:
+    let x = 1
+
+binding frame:
+    exposure: float
+
+fun exposed(){frame} -> float => frame.exposure
+
+// a test lists no binding: a local binding will give one, once those are carried
+@expect(error = "binding-not-listed") test exposed() > 0.0
+
+// a line that computes something and checks nothing is no-effect
+@expect(warning = "no-effect") test:
+    1 + 2
+    true

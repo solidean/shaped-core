@@ -159,6 +159,11 @@ It is built wherever `SC_BUILD_TOOLS` is on, and the `sgl-prelude` step skips wi
 ## The spec is tested
 
 Every `sgl` fence in the spec is a test, so the spec and the parser cannot drift apart silently.
+A fence that holds a `test` runs it as well.
+
+**The corpus is how the language's semantics are tested**: one `.sgl` file per topic under `tests/corpus/`, found when the test binary runs, so a new file needs no C++ and no CMake.
+A file passes when it checks with no diagnostic at all, every test in it passes, and every entry point it declares is written for every target.
+A rule is best stated as a test of a corpus file; a C++ `TEST` is for what SGL cannot say, which today is bindings, resources and the emitted text.
 Rules have stable ids and are never renumbered; a new rule is appended.
 Every "why" is mirrored in a `why/` folder beside its rules, and ideas that are not spec yet live under `spec/incubator/`.
 
