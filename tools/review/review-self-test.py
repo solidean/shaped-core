@@ -2296,14 +2296,45 @@ def test_a_collapsed_diff_is_fetched_rather_than_embedded(root: Path) -> None:
         status, _ = get(base, "/api/change?id=CHANGE-NOPE")
         assert status == 404, "a change outside the ledger must 404"
 
-        # And the collapsed card in an entry carries the id rather than the diff.
-        _, state = get(base, "/api/state")
-        for row in state["entries"]:
-            _, entry = get(base, "/api/entry/" + row["slug"])
-            html = entry.get("html", "")
-            if 'class="change" data-change=' in html:
-                assert "difflines" not in html.split('data-change=')[1][:400], \
-                    f"{row['slug']}: a collapsed card must not embed its diff"
+        # And a collapsed card carries the id rather than the diff.
+        _, cards = get(base, "/api/changes?ids=" + with_body[0].id)
+        assert 'class="change" data-change=' in cards["html"], cards["html"]
+        assert "difflines" not in cards["html"], "a collapsed card must not embed its diff"
+    finally:
+        server.shutdown()
+
+
+def test_a_collapsed_changes_block_is_fetched_when_opened(root: Path) -> None:
+    """A collapsed block ships one summary line, and its cards arrive only when it is opened.
+
+    An lgtm entry discharging a hundred changes drew a hundred card rows nobody reads, so the block is the unit
+    that loads lazily rather than each diff inside it.
+    A comment on a diff line stays in the entry, because a remark must never sit behind a click.
+    """
+    server, base, app = serve_fixture(root)
+    try:
+        ids = [c.id for c in app.ledger().live()]
+        assert ids, "the fixture ingests at least one change"
+        (app.paths.entries_dir / "050-lgtm.md").write_text(
+            "---\nid: 050\ntitle: lgtm\n---\n\n"
+            f"## changes  {' '.join(ids)}\nshow: collapsed\n\n"
+            f"## ask  fine\ndischarges: {' '.join(ids)}\n\nFine?\n\n- radio: yes\n",
+            encoding="utf-8",
+        )
+        status, entry = get(base, "/api/entry/050-lgtm")
+        assert status == 200, entry
+        html = entry["html"]
+        assert f'data-changes="{" ".join(ids)}"' in html, "a collapsed block carries its ids for the fetch"
+        assert "change-head" not in html, "a collapsed block must not draw its cards until it is opened"
+
+        status, cards = get(base, "/api/changes?ids=" + ",".join(ids))
+        assert status == 200, cards
+        for change_id in ids:
+            assert change_id in cards["html"], f"{change_id} missing from the fetched cards"
+        assert 'class="change" data-change=' in cards["html"], "each fetched card still fetches its own diff"
+
+        status, _ = get(base, "/api/changes?ids=CHANGE-NOPE")
+        assert status == 200, "an id outside the ledger is drawn as missing, as it is inline"
     finally:
         server.shutdown()
 

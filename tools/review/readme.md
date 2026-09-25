@@ -163,6 +163,7 @@ The maintainer answers whenever, says so, and the agent runs `delta <name> --fin
   It discharges nothing, so filing there costs the coverage gate nothing.
 - **A `changes` block must declare `show: visible` or `show: collapsed`.**
   There is no default, because the choice is about the reader's attention: most entries are decidable without opening the diff.
+  A collapsed block costs the page one line: its cards and their diffs are fetched when it is opened, so an lgtm entry discharging a hundred changes loads as fast as one discharging two.
 - **`finalize` drops nothing by group.** Every answered entry appears, tagged with its group, because the artifact is
   input to a synthesis step rather than something to paste unread.
 - **Only one server per review.** `serve` refuses a taken port rather than sharing it, and says so when another review

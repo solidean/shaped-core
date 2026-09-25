@@ -105,6 +105,8 @@ That is the same reason the attribute whitelist exists.
 ### `show:` is required on a `changes` block
 
 `show: visible` opens the diffs; `show: collapsed` puts them one click away.
+A collapsed block is drawn as one line, `85 changes in 12 files`, and its cards are fetched only when it is opened, each card fetching its own diff in turn.
+A comment on a diff line is drawn outside the fold, where it is seen without opening anything.
 There is no default, on purpose: a default would make the quiet choice the unconsidered one, and this choice is about the reader's attention rather than about formatting.
 
 The question to answer is **can this entry be decided without the code?**

@@ -35,7 +35,7 @@ from ..entry.grammar import ReviewParseError
 from ..entry.parse import Entry, parse_file
 from ..git.run import Git
 from ..goals.skeleton import describe, groups_for
-from ..render.entryview import render_entry
+from ..render.entryview import change_cards, render_entry
 from ..render.highlight import css as highlight_css, highlight_code, highlight_diff
 from ..render.media import BINARY, IMAGE, classify, human_bytes
 from . import timing
@@ -289,6 +289,14 @@ class ReviewApp:
         with timing.span("/api/change", "highlight"):
             html = highlight_diff(path.read_text(encoding="utf-8", errors="replace"), path=change.path)
         return 200, self._remember(key, digest, {"id": change_id, "html": html})
+
+    def change_list(self, ids: list[str]) -> tuple[int, dict]:
+        """The cards of a collapsed `changes` block, fetched when it is first opened — see entryview._lazy_changes.
+
+        An id outside the ledger is drawn as missing rather than refused, which is what the inline rendering does.
+        """
+        html = change_cards(ids, ledger=self.ledger(), paths=self.paths, visible=False)
+        return 200, {"ids": ids, "html": html}
 
     def file_view(self, path: str) -> tuple[int, dict]:
         """One whole file, highlighted — for the peek popover and for the page a click opens alike.
@@ -658,6 +666,11 @@ class Handler(BaseHTTPRequestHandler):
             elif route == "/api/change":
                 query = parse_qs(urlparse(self.path).query)
                 code, payload = self.app.change_diff(query.get("id", [""])[0])
+                self._json(code, payload)
+            elif route == "/api/changes":
+                query = parse_qs(urlparse(self.path).query)
+                ids = [i for i in query.get("ids", [""])[0].replace(",", " ").split() if i]
+                code, payload = self.app.change_list(ids)
                 self._json(code, payload)
             elif route.startswith("/api/entry/"):
                 code, payload = self.app.entry_html(unquote(route[len("/api/entry/"):]))
