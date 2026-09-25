@@ -245,11 +245,10 @@ ASYNC_TEST("sv - path-traced window (manual)", nx::config::manual, main_thread)
         auto const size = tg::vec2i(win->width(), win->height());
         if (size != target_size)
         {
-            color = ctx.persistent.create_texture_2d(
-                {.format = sg::pixel_format::rgba32_float,
-                 .width = size[0],
-                 .height = size[1],
-                 .usage = sg::texture_usage::readonly_texture | sg::texture_usage::readwrite_texture});
+            color = ctx.persistent.create_texture_2d({.format = sg::pixel_format::rgba32_float,
+                                                      .width = size[0],
+                                                      .height = size[1],
+                                                      .usage = sg::texture_usage::texture | sg::texture_usage::image});
 
             target_size = size;
             accum = 0;

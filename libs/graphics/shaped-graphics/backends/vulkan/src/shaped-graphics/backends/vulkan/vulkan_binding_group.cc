@@ -209,7 +209,7 @@ cc::result<vulkan_binding_group_handle> vulkan_binding_group::create_resolved(vu
                 else
                 {
                     group->referenced_textures.push_back(cc::move(texture));
-                    group->texture_hazard_views.push_back({group->referenced_textures.back(), tv->range, tv->access});
+                    group->texture_hazard_views.push_back({group->referenced_textures.back(), tv->range, tv->kind});
                 }
             }
             else if (auto const* bv = sg::try_as_buffer_view(view); bv != nullptr)

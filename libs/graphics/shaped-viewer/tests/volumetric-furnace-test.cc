@@ -131,12 +131,11 @@ image_stats trace_furnace(sg::context& ctx,
     //
     // PERSISTENT rather than transient, because the accumulation is what this test relies on: the target has to survive the
     // epoch advance between frames, and a transient one is expired by the next.
-    auto const target = ctx.persistent.create_texture_2d({.format = sg::pixel_format::rgba32_float,
-                                                          .width = size[0],
-                                                          .height = size[1],
-                                                          .usage = sg::texture_usage::readonly_texture
-                                                                 | sg::texture_usage::readwrite_texture
-                                                                 | sg::texture_usage::copy_src});
+    auto const target = ctx.persistent.create_texture_2d(
+        {.format = sg::pixel_format::rgba32_float,
+         .width = size[0],
+         .height = size[1],
+         .usage = sg::texture_usage::texture | sg::texture_usage::image | sg::texture_usage::copy_src});
 
     // A declined frame integrated nothing, so it must not count as one of the `frames` being accumulated: a trace
     // declines until its DXR state object lands, which is built asynchronously.

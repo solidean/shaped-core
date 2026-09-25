@@ -277,7 +277,7 @@ auto const layout = ctx.cached.acquire_binding_group_layout<shaders::frame_bindi
 auto const layout = ctx.cached.acquire_binding_group_layout<shaders::frame_bindings>(runtime_samplers);
                                     // + static samplers for the ones the shader left undeclared;
                                     //   supplying one it DID declare asserts -- it is a mistake, not an override
-auto const g = ctx.transient.create_binding_group(cmd, layout, shaders::frame_bindings{.albedo = tex.as_readonly_view()});
+auto const g = ctx.transient.create_binding_group(cmd, layout, shaders::frame_bindings{.albedo = tex.as_texture_view()});
                                     // the LAYOUT is passed in: a group is created on the frame path, and
                                     //   acquiring hashes the table and takes the pipeline cache's lock
                                     // a sampler the group gathers that `layout` declares static is dropped
@@ -298,8 +298,8 @@ auto const layout = ctx.cached.acquire_binding_group_layout<shaders::work>();
 auto const group = ctx.transient.create_binding_group(cmd, layout, shaders::work{.scale = 2.0f, .values = buf.as_readwrite_buffer()});
 cmd.compute.bind_group(0, *group);        // group 0 of `main`, group 1 of an entry point listing {factor, work}
 // a texture or image member is a typed view too, its traits from the shape (`sg::tv_2d`, `sg::tv_cube`, `sg::tv_2d_array`…):
-//   `albedo: texture2d[float4]`        -> sg::readonly_texture_view<sg::tv_2d> albedo
-//   `dst: out image2d[.rgba8_unorm]`   -> sg::readwrite_texture_view<sg::tv_2d> dst   (any access: read, out, mut)
+//   `albedo: texture2d[float4]`        -> sg::texture_view<sg::tv_2d> albedo
+//   `dst: out image2d[.rgba8_unorm]`   -> sg::image_view<sg::tv_2d> dst   (any access: read, out, mut)
 //   `user_smp: sampler`                -> sg::sampler user_smp, which gather() hands sg by its host name (`work.user_smp`)
 //   `sampler albedo_smp:` block        -> NO field: an sg::named_sampler in declared_samplers(), which the layout carries
 // `@inline binding constants` -> shaders::constants: plain fields in C++'s layout, and the block the shader reads:

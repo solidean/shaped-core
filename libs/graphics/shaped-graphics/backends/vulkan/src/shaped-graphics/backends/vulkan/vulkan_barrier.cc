@@ -71,9 +71,9 @@ VkImageLayout vk_layout_from(sg::texture_layout layout)
         return VK_IMAGE_LAYOUT_UNDEFINED;
     case sg::texture_layout::general:
         return VK_IMAGE_LAYOUT_GENERAL;
-    case sg::texture_layout::shader_readonly:
+    case sg::texture_layout::shader_texture:
         return VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    case sg::texture_layout::shader_readwrite:
+    case sg::texture_layout::shader_image:
         return VK_IMAGE_LAYOUT_GENERAL; // Vulkan has no storage-image layout; GENERAL is the storage-capable one
     case sg::texture_layout::render_target:
         return VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;

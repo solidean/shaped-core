@@ -78,18 +78,17 @@ ASYNC_INVOCABLE_TEST("sg webgpu - a write-only storage texture is written by a d
                                                  .storage_access = sg::storage_access::write}},
                                     sg::compute_dimensions{.x = 4, .y = 4});
 
-    auto texture
-        = ctx.persistent.create_texture_2d({.format = sg::pixel_format::rgba8_unorm,
-                                            .width = extent,
-                                            .height = extent,
-                                            .usage = sg::texture_usage::readwrite_texture | sg::texture_usage::copy_src});
+    auto texture = ctx.persistent.create_texture_2d({.format = sg::pixel_format::rgba8_unorm,
+                                                     .width = extent,
+                                                     .height = extent,
+                                                     .usage = sg::texture_usage::image | sg::texture_usage::copy_src});
 
     auto group_layout = ctx.cached.acquire_binding_group_layout(shader.bindings);
     auto pipeline_layout = ctx.cached.acquire_pipeline_layout({.groups = {group_layout}});
     auto pipeline = co_await ctx.cached.acquire_compute_pipeline({.shader = shader, .layout = pipeline_layout});
     REQUIRE(pipeline != nullptr);
 
-    sg::named_view const canvas = {.name = "canvas", .view = texture.as_readwrite_view()};
+    sg::named_view const canvas = {.name = "canvas", .view = texture.as_image_view()};
     auto group = ctx.persistent.create_binding_group(group_layout, cc::span<sg::named_view const>(&canvas, 1));
 
     auto cmd = ctx.create_command_list();

@@ -225,8 +225,8 @@ sg::routine_outcome layout_routine::execute(sg::rendering_scope& scope,
                 continue;
             group = ctx.transient.create_binding_group(
                 cmd, self->_group_layout,
-                shaders::layout_bindings{.source_0 = textures.targets[0].as_readonly_view(),
-                                         .source_1 = textures.targets[0].as_readonly_view(),
+                shaders::layout_bindings{.source_0 = textures.targets[0].as_texture_view(),
+                                         .source_1 = textures.targets[0].as_texture_view(),
                                          .source_sampler = {}});
         }
         else
@@ -249,8 +249,8 @@ sg::routine_outcome layout_routine::execute(sg::rendering_scope& scope,
                 = d.sampler == sampler_mode::nearest ? sg::sampler_filter::nearest : sg::sampler_filter::linear;
             group = ctx.transient.create_binding_group(
                 cmd, self->_group_layout,
-                shaders::layout_bindings{.source_0 = primary->as_readonly_view(),
-                                         .source_1 = secondary->as_readonly_view(),
+                shaders::layout_bindings{.source_0 = primary->as_texture_view(),
+                                         .source_1 = secondary->as_texture_view(),
                                          .source_sampler = {.min_filter = filter,
                                                             .mag_filter = filter,
                                                             .mip_filter = sg::sampler_filter::nearest,

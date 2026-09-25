@@ -42,19 +42,19 @@ std::shared_ptr<test_buffer> make_buffer(isize size, sg::buffer_usages usage)
 TEST("sg bindings - binding_type maps to view (access/shape)")
 {
     using bt = sg::binding_type;
-    CHECK(sg::access_of(bt::uniform_buffer) == sg::view_class::uniform);
+    CHECK(sg::view_class_of(bt::uniform_buffer) == sg::view_class::uniform);
     CHECK(sg::shape_of(bt::uniform_buffer) == sg::view_shape::uniform_block);
 
-    CHECK(sg::access_of(bt::readonly_structured_buffer) == sg::view_class::readonly);
+    CHECK(sg::view_class_of(bt::readonly_structured_buffer) == sg::view_class::readonly);
     CHECK(sg::shape_of(bt::readonly_structured_buffer) == sg::view_shape::structured);
 
-    CHECK(sg::access_of(bt::readwrite_structured_buffer) == sg::view_class::readwrite);
+    CHECK(sg::view_class_of(bt::readwrite_structured_buffer) == sg::view_class::readwrite);
     CHECK(sg::shape_of(bt::readwrite_structured_buffer) == sg::view_shape::structured);
 
-    CHECK(sg::access_of(bt::readonly_raw_buffer) == sg::view_class::readonly);
+    CHECK(sg::view_class_of(bt::readonly_raw_buffer) == sg::view_class::readonly);
     CHECK(sg::shape_of(bt::readonly_raw_buffer) == sg::view_shape::raw);
 
-    CHECK(sg::access_of(bt::readwrite_raw_buffer) == sg::view_class::readwrite);
+    CHECK(sg::view_class_of(bt::readwrite_raw_buffer) == sg::view_class::readwrite);
     CHECK(sg::shape_of(bt::readwrite_raw_buffer) == sg::view_shape::raw);
 }
 
@@ -180,7 +180,7 @@ TEST("sg bindings - named_view pairs a name with bound views")
     sg::named_view const nv = {.name = "Output", .view = sg::buffer<particle>::from_raw(buf).as_readwrite_buffer()};
     CHECK(nv.name == "Output");
     CHECK(nv.view.size() == 1);
-    CHECK(sg::access_of(nv.view.span()[0]) == sg::view_class::readwrite);
+    CHECK(sg::view_class_of(nv.view.span()[0]) == sg::view_class::readwrite);
     CHECK(sg::shape_of(nv.view.span()[0]) == sg::view_shape::structured);
     CHECK(sg::accepts(sg::binding_type::readwrite_structured_buffer, nv.view.span()[0]));
 

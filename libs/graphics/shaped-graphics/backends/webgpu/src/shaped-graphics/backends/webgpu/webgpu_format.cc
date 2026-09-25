@@ -144,9 +144,9 @@ WGPUTextureUsage to_wgpu_texture_usage(sg::texture_usages usage)
         out |= WGPUTextureUsage_CopySrc;
     if (usage.has(sg::texture_usage::copy_dst))
         out |= WGPUTextureUsage_CopyDst;
-    if (usage.has(sg::texture_usage::readonly_texture))
+    if (usage.has(sg::texture_usage::texture))
         out |= WGPUTextureUsage_TextureBinding;
-    if (usage.has(sg::texture_usage::readwrite_texture))
+    if (usage.has(sg::texture_usage::image))
         out |= WGPUTextureUsage_StorageBinding;
     if (usage.has_any(sg::texture_usage::render_target | sg::texture_usage::depth_stencil))
         out |= WGPUTextureUsage_RenderAttachment;

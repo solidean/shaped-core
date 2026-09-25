@@ -29,7 +29,7 @@ namespace
     desc.dimension = sg::texture_dimension::d2;
     desc.width = 16;
     desc.height = 16;
-    desc.usage = sg::texture_usage::readonly_texture;
+    desc.usage = sg::texture_usage::texture;
     return sg::texture_2d::from_raw(ctx->persistent.create_raw_texture(desc));
 }
 
@@ -85,9 +85,9 @@ INVOCABLE_TEST("sg - array binding accepts a partially vacant element list", (sg
     auto elements = cc::vector<sg::raw_view>();
     for (isize i = 0; i < 8; ++i)
         elements.push_back(sg::vacant_view{});
-    elements[0] = t0.as_readonly_view();
-    elements[3] = t3.as_readonly_view();
-    elements[7] = t7.as_readonly_view();
+    elements[0] = t0.as_texture_view();
+    elements[3] = t3.as_texture_view();
+    elements[7] = t7.as_texture_view();
     auto const nv = sg::named_view{.name = "Textures", .view = cc::move(elements)};
 
     auto group = ctx->persistent.create_binding_group(layout, cc::span<sg::named_view const>(&nv, 1));
@@ -168,8 +168,8 @@ INVOCABLE_TEST("sg - scalar binding rejects an element list of the wrong size", 
 
     auto const tex = make_texture(ctx);
     auto elements = cc::vector<sg::raw_view>();
-    elements.push_back(tex.as_readonly_view());
-    elements.push_back(tex.as_readonly_view());
+    elements.push_back(tex.as_texture_view());
+    elements.push_back(tex.as_texture_view());
     auto const nv = sg::named_view{.name = "Textures", .view = cc::move(elements)};
 
     CHECK_THROWS_AS(ctx->persistent.create_binding_group(layout, cc::span<sg::named_view const>(&nv, 1)),

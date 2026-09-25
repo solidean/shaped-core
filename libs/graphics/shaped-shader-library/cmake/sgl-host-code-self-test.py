@@ -175,8 +175,8 @@ FILE = SglFile(path="shadow.sgl")
 @test
 def a_group_has_a_field_per_view_and_per_dynamic_sampler():
     header = sgl_host_code.emit_group("pkg", "ns", FILE, GROUP)
-    expect_in("sg::readonly_texture_view<sg::tv_cube> depth_map;", header, "a cube texture's field")
-    expect_in("sg::readwrite_texture_view<sg::tv_3d> counts;", header, "a 3d image's field")
+    expect_in("sg::texture_view<sg::tv_cube> depth_map;", header, "a cube texture's field")
+    expect_in("sg::image_view<sg::tv_3d> counts;", header, "a 3d image's field")
     expect_in("sg::sampler picked;", header, "a dynamic sampler's field")
     # A static sampler is the layout's, so the group the host fills has nothing to set for it.
     expect_not_in(" compare;", header, "a static sampler")

@@ -62,7 +62,7 @@ class sr::svgf_denoise_routine : public sg::render_routine<svgf_denoise_routine>
 public:
     /// Filters `in.color`, a fresh single-frame estimate, into `in.output`, carrying `history` to the next call.
     ///
-    /// `in.output` must match `in.color`'s extent and carry `readwrite_texture` usage; SVGF does not upscale.
+    /// `in.output` must match `in.color`'s extent and carry `image` usage; SVGF does not upscale.
     /// The normal, depth and motion guides are required, and asserted on.
     /// `pending` while the shaders compile, `failed` after a compile that did not build.
     [[nodiscard]] static denoise_outcome execute(sg::command_list& cmd,

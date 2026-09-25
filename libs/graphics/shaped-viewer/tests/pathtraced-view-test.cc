@@ -108,11 +108,11 @@ ASYNC_INVOCABLE_TEST("sv - path-traced Cornell box (headless)", (sg::context_han
                                                                          sg::buffer_usage::uniform_buffer);
 
             // rgba32_float, which the routine asserts on: the raygen reads the target back to blend into it.
-            auto const target = ctx.transient.create_texture_2d(
-                {.format = sg::pixel_format::rgba32_float,
-                 .width = size[0],
-                 .height = size[1],
-                 .usage = sg::texture_usage::readonly_texture | sg::texture_usage::readwrite_texture});
+            auto const target
+                = ctx.transient.create_texture_2d({.format = sg::pixel_format::rgba32_float,
+                                                   .width = size[0],
+                                                   .height = size[1],
+                                                   .usage = sg::texture_usage::texture | sg::texture_usage::image});
 
             // One `sv::instance` per TLAS instance: where this item's material parameters live, and its geometry.
             auto const instance_table
@@ -199,11 +199,11 @@ ASYNC_INVOCABLE_TEST("sv::pathtrace_routine - a material that does not compile c
         auto const background = ctx.transient.create_buffer_from_pod(cmd, sv::background_gpu::from(sv::background{}),
                                                                      sg::buffer_usage::uniform_buffer);
 
-        auto const target = ctx.transient.create_texture_2d(
-            {.format = sg::pixel_format::rgba32_float,
-             .width = size[0],
-             .height = size[1],
-             .usage = sg::texture_usage::readonly_texture | sg::texture_usage::readwrite_texture});
+        auto const target
+            = ctx.transient.create_texture_2d({.format = sg::pixel_format::rgba32_float,
+                                               .width = size[0],
+                                               .height = size[1],
+                                               .usage = sg::texture_usage::texture | sg::texture_usage::image});
 
         auto const instance_table
             = ctx.transient.create_buffer_from_data(cmd, records, sg::buffer_usage::readonly_buffer);
@@ -305,11 +305,11 @@ ASYNC_INVOCABLE_TEST("sv - a path-traced textured material builds its sampler gr
     fc.seed = 1u;
 
     // PERSISTENT rather than transient: the loop below advances an epoch per frame, which expires a transient one.
-    auto const target = ctx.persistent.create_texture_2d(
-        {.format = sg::pixel_format::rgba32_float,
-         .width = size[0],
-         .height = size[1],
-         .usage = sg::texture_usage::readonly_texture | sg::texture_usage::readwrite_texture});
+    auto const target
+        = ctx.persistent.create_texture_2d({.format = sg::pixel_format::rgba32_float,
+                                            .width = size[0],
+                                            .height = size[1],
+                                            .usage = sg::texture_usage::texture | sg::texture_usage::image});
 
     // A root signature the sampler group broke would fail pipeline creation, and the routine would degrade to a
     // no-op rather than say so -- which is exactly what this REQUIRE is here to stop.
@@ -420,12 +420,11 @@ cc::shared_async<cc::vector<cc::vector<tg::vec4f>>> trace_under(sg::context* ctx
             auto const background = ctx->transient.create_buffer_from_pod(
                 *cmd, sv::background_gpu::from(scene.environment), sg::buffer_usage::uniform_buffer);
 
-            auto const target = ctx->transient.create_texture_2d({.format = sg::pixel_format::rgba32_float,
-                                                                  .width = scene.size,
-                                                                  .height = scene.size,
-                                                                  .usage = sg::texture_usage::readonly_texture
-                                                                         | sg::texture_usage::readwrite_texture
-                                                                         | sg::texture_usage::copy_src});
+            auto const target = ctx->transient.create_texture_2d(
+                {.format = sg::pixel_format::rgba32_float,
+                 .width = scene.size,
+                 .height = scene.size,
+                 .usage = sg::texture_usage::texture | sg::texture_usage::image | sg::texture_usage::copy_src});
 
             auto records = cc::vector<sv::instance_gpu>();
             records.push_back(resources->describe_instance(*cmd, scene.item.mesh, scene.item.instance));

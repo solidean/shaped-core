@@ -39,7 +39,7 @@ cc::optional<cc::string> impl::find_unsupported_binding(bool extended_storage_fo
 
 cc::optional<cc::string> impl::find_unsupported_texture(bool extended_storage_formats, texture_description const& desc)
 {
-    if (!desc.usage.has(texture_usage::readwrite_texture) || !needs_extended_storage(desc.format))
+    if (!desc.usage.has(texture_usage::image) || !needs_extended_storage(desc.format))
         return {};
     if (extended_storage_formats)
         return {};

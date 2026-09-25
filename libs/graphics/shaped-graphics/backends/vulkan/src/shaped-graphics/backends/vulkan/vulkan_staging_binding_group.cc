@@ -95,7 +95,7 @@ void vulkan_staging_binding_group::write_view_descriptors(int first_descriptor,
         {
             auto texture = std::dynamic_pointer_cast<vulkan_texture const>(tv->texture);
             CC_ASSERT(texture != nullptr, "bound texture is not a vulkan texture");
-            res = {.buffer = {}, .texture = cc::move(texture), .range = tv->range, .access = tv->access};
+            res = {.buffer = {}, .texture = cc::move(texture), .range = tv->range, .access = tv->kind};
         }
         else if (auto const* bv = sg::try_as_buffer_view(view); bv != nullptr)
         {

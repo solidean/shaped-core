@@ -19,8 +19,7 @@ using namespace cc::primitive_defines;
 
 namespace
 {
-constexpr auto mip_usage
-    = sg::texture_usage::readonly_texture | sg::texture_usage::readwrite_texture | sg::texture_usage::copy_dst;
+constexpr auto mip_usage = sg::texture_usage::texture | sg::texture_usage::image | sg::texture_usage::copy_dst;
 
 /// Brings every variant up before a command list opens.
 ///

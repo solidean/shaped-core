@@ -30,14 +30,14 @@ public:
     static constexpr bool is_multisampled = Traits::is_multisampled;
 
     // The parameter bag each view factory takes, surfaced for call sites and introspection.
-    using read_only_params = typename Traits::read_only_params;
-    using read_write_params = typename Traits::read_write_params;
-    using read_only_2d_params = typename Traits::read_only_2d_params;
-    using read_only_1d_params = typename Traits::read_only_1d_params;
-    using read_only_cube_params = typename Traits::read_only_cube_params;
-    using read_only_2d_array_params = typename Traits::read_only_2d_array_params;
-    using read_write_2d_params = typename Traits::read_write_2d_params;
-    using read_write_1d_params = typename Traits::read_write_1d_params;
+    using texture_params = typename Traits::texture_params;
+    using image_params = typename Traits::image_params;
+    using texture_2d_params = typename Traits::texture_2d_params;
+    using texture_1d_params = typename Traits::texture_1d_params;
+    using texture_cube_params = typename Traits::texture_cube_params;
+    using texture_2d_array_params = typename Traits::texture_2d_array_params;
+    using image_2d_params = typename Traits::image_2d_params;
+    using image_1d_params = typename Traits::image_1d_params;
     using render_target_params = typename Traits::render_target_params;
     using render_target_2d_params = typename Traits::render_target_2d_params;
     using depth_stencil_params = typename Traits::depth_stencil_params;
@@ -98,76 +98,76 @@ public:
     }
 
     // Shader-facing views — libs/graphics/shaped-graphics/docs/concepts/views.md has the factory surface in full.
-    // `as_readonly_view` / `as_readwrite_view` are the natural views, in the texture's own dimension.
+    // `as_texture_view` / `as_image_view` are the natural views, in the texture's own dimension.
     // The `_2d` / `_1d` / `cube` variants reinterpret one slice, face or cube as a lower dimension.
     // Each takes the shape-specific parameter bag its `*_params` typedef above names, and asserts the matching texture_usage.
 
     /// Sampled (SRV) view over the whole texture in its natural dimension.
-    [[nodiscard]] auto as_readonly_view(read_only_params const& params = {}) const
+    [[nodiscard]] auto as_texture_view(texture_params const& params = {}) const
     {
-        return _make_readonly<_srv_whole_dim()>(_natural_array_range(params), _mips(params));
+        return _make_texture<_texture_whole_dim()>(_natural_array_range(params), _mips(params));
     }
 
     /// Sampled view of one array slice, bound as a Texture2D (or Texture2DMS).
     /// Only on 2D array or cube shapes.
-    [[nodiscard]] auto as_readonly_2d_view(read_only_2d_params const& params = {}) const
+    [[nodiscard]] auto as_texture_2d_view(texture_2d_params const& params = {}) const
         requires(Traits::dimension == texture_dimension::d2 && (Traits::is_array || Traits::is_cube))
     {
         constexpr auto dim = Traits::is_multisampled ? texture_view_dimension::tex_2d_ms : texture_view_dimension::tex_2d;
-        return _make_readonly<dim>(_single(_pick_slice(params)), _mips(params));
+        return _make_texture<dim>(_single(_pick_slice(params)), _mips(params));
     }
 
     /// Sampled view of one array slice, bound as a Texture1D.
     /// Only on 1D array textures.
-    [[nodiscard]] auto as_readonly_1d_view(read_only_1d_params const& params = {}) const
+    [[nodiscard]] auto as_texture_1d_view(texture_1d_params const& params = {}) const
         requires(Traits::dimension == texture_dimension::d1 && Traits::is_array)
     {
-        return _make_readonly<texture_view_dimension::tex_1d>(_single(_pick_slice(params)), _mips(params));
+        return _make_texture<texture_view_dimension::tex_1d>(_single(_pick_slice(params)), _mips(params));
     }
 
     /// Sampled view of one cube (all 6 faces) of a cube array, bound as a TextureCube.
     /// Only on cube arrays.
-    [[nodiscard]] auto as_readonly_cube_view(read_only_cube_params const& params = {}) const
+    [[nodiscard]] auto as_texture_cube_view(texture_cube_params const& params = {}) const
         requires(Traits::is_cube && Traits::is_array && !Traits::is_multisampled)
     {
         CC_ASSERT(params.cube >= 0 && params.cube < _raw->array_layers(), "cube index out of range");
-        return _make_readonly<texture_view_dimension::cube>(
+        return _make_texture<texture_view_dimension::cube>(
             {.start = isize(params.cube) * 6, .end = isize(params.cube) * 6 + 6}, _mips(params));
     }
 
     /// Sampled view of a cube's faces as a plain Texture2DArray — all faces, or a slice sub-range.
     /// Only on cubes, as the alternative to the natural TextureCube view.
-    [[nodiscard]] auto as_readonly_2d_array_view(read_only_2d_array_params const& params = {}) const
+    [[nodiscard]] auto as_texture_2d_array_view(texture_2d_array_params const& params = {}) const
         requires(Traits::is_cube && !Traits::is_multisampled)
     {
-        return _make_readonly<texture_view_dimension::tex_2d_array>(_natural_array_range(params), _mips(params));
+        return _make_texture<texture_view_dimension::tex_2d_array>(_natural_array_range(params), _mips(params));
     }
 
-    /// Storage (UAV) view over the whole texture at one mip level.
+    /// Image (UAV) view over the whole texture at one mip level.
     /// Not on multisampled textures.
-    [[nodiscard]] auto as_readwrite_view(read_write_params const& params = {}) const
+    [[nodiscard]] auto as_image_view(image_params const& params = {}) const
         requires(!Traits::is_multisampled)
     {
-        return _make_readwrite<_uav_whole_dim()>(_natural_array_range(params), params.mip, _depth_slices(params));
+        return _make_image<_image_whole_dim()>(_natural_array_range(params), params.mip, _depth_slices(params));
     }
 
-    /// Storage view of one array slice / cube face, bound as a Texture2D.
+    /// Image view of one array slice / cube face, bound as a Texture2D.
     /// Only on non-MS 2D array shapes.
-    [[nodiscard]] auto as_readwrite_2d_view(read_write_2d_params const& params = {}) const
+    [[nodiscard]] auto as_image_2d_view(image_2d_params const& params = {}) const
         requires(!Traits::is_multisampled && Traits::dimension == texture_dimension::d2
                  && (Traits::is_array || Traits::is_cube))
     {
-        return _make_readwrite<texture_view_dimension::tex_2d>(_single(_pick_slice(params)), params.mip,
-                                                               _whole_depth_slice_range());
+        return _make_image<texture_view_dimension::tex_2d>(_single(_pick_slice(params)), params.mip,
+                                                           _whole_depth_slice_range());
     }
 
-    /// Storage view of one array slice, bound as a Texture1D.
+    /// Image view of one array slice, bound as a Texture1D.
     /// Only on non-MS 1D array textures.
-    [[nodiscard]] auto as_readwrite_1d_view(read_write_1d_params const& params = {}) const
+    [[nodiscard]] auto as_image_1d_view(image_1d_params const& params = {}) const
         requires(!Traits::is_multisampled && Traits::dimension == texture_dimension::d1 && Traits::is_array)
     {
-        return _make_readwrite<texture_view_dimension::tex_1d>(_single(_pick_slice(params)), params.mip,
-                                                               _whole_depth_slice_range());
+        return _make_image<texture_view_dimension::tex_1d>(_single(_pick_slice(params)), params.mip,
+                                                           _whole_depth_slice_range());
     }
 
     // Render-target / depth-stencil views — bind the texture as a graphics-pipeline color or depth-stencil target.
@@ -212,8 +212,8 @@ public:
 private:
     // -- Dimension mapping (compile-time from the shape). --
 
-    // The dimension a whole-texture sampled view binds as.
-    [[nodiscard]] static constexpr texture_view_dimension _srv_whole_dim()
+    // The dimension a whole-texture texture view binds as.
+    [[nodiscard]] static constexpr texture_view_dimension _texture_whole_dim()
     {
         using d = texture_view_dimension;
         if constexpr (Traits::dimension == texture_dimension::d1)
@@ -228,8 +228,8 @@ private:
             return Traits::is_array ? d::tex_2d_array : d::tex_2d;
     }
 
-    // The dimension a whole-texture storage view binds as: no cube / no MSAA — a cube UAV is a 2D array.
-    [[nodiscard]] static constexpr texture_view_dimension _uav_whole_dim()
+    // The dimension a whole-texture image view binds as: no cube / no MSAA — a cube binds as a 2D-array image.
+    [[nodiscard]] static constexpr texture_view_dimension _image_whole_dim()
     {
         using d = texture_view_dimension;
         if constexpr (Traits::dimension == texture_dimension::d1)
@@ -241,7 +241,7 @@ private:
     }
 
     // The dimension a whole-texture render-target / depth-stencil view binds as: 2D only, with a cube rendering as a 2D array.
-    // MSAA is allowed, unlike a UAV.
+    // MSAA is allowed, unlike an image.
     // Only instantiated on d2 shapes, since the factories are d2-gated.
     [[nodiscard]] static constexpr texture_view_dimension _target_view_whole_dim()
     {
@@ -304,7 +304,7 @@ private:
         else
             return _whole_array_range();
     }
-    // The depth (W/Z) slice range a 3D storage params bag selects, else the whole depth.
+    // The depth (W/Z) slice range a 3D image params bag selects, else the whole depth.
     template <class P>
     [[nodiscard]] cc::start_end _depth_slices(P const& p) const
     {
@@ -336,32 +336,32 @@ private:
 
     // The shader-facing view dimension is compile-time, constexpr from Traits, so it becomes the view's `Traits` type parameter here rather than a runtime field.
     template <texture_view_dimension Dim>
-    [[nodiscard]] readonly_texture_view<texture_view_traits<Dim>> _make_readonly(cc::start_end array_range,
-                                                                                 cc::start_end mip_range) const
+    [[nodiscard]] texture_view<texture_view_traits<Dim>> _make_texture(cc::start_end array_range,
+                                                                       cc::start_end mip_range) const
     {
-        CC_ASSERT(_raw->usage().has(texture_usage::readonly_texture), "texture lacks readonly_texture usage");
+        CC_ASSERT(_raw->usage().has(texture_usage::texture), "texture lacks texture usage");
         subresource_range r;
         r.mip_range = mip_range;
         r.array_range = array_range;
         r.aspect_range = {.start = 0, .end = format_aspect_count(_raw->format())};
-        return readonly_texture_view<texture_view_traits<Dim>>{.texture = _raw, .format = _raw->format(), .range = r};
+        return texture_view<texture_view_traits<Dim>>{.texture = _raw, .format = _raw->format(), .range = r};
     }
 
     template <texture_view_dimension Dim>
-    [[nodiscard]] readwrite_texture_view<texture_view_traits<Dim>> _make_readwrite(cc::start_end array_range,
-                                                                                   int mip,
-                                                                                   cc::start_end depth_slice_range) const
+    [[nodiscard]] image_view<texture_view_traits<Dim>> _make_image(cc::start_end array_range,
+                                                                   int mip,
+                                                                   cc::start_end depth_slice_range) const
     {
-        CC_ASSERT(_raw->usage().has(texture_usage::readwrite_texture), "texture lacks readwrite_texture usage");
-        CC_ASSERT(mip >= 0 && mip < _raw->mip_levels(), "readwrite view mip level out of range");
+        CC_ASSERT(_raw->usage().has(texture_usage::image), "texture lacks image usage");
+        CC_ASSERT(mip >= 0 && mip < _raw->mip_levels(), "image view mip level out of range");
         subresource_range r;
         r.mip_range = {.start = mip, .end = mip + 1}; // a UAV targets a single mip level
         r.array_range = array_range;
         r.aspect_range = {.start = 0, .end = format_aspect_count(_raw->format())};
-        return readwrite_texture_view<texture_view_traits<Dim>>{.texture = _raw,
-                                                                .format = _raw->format(),
-                                                                .range = r,
-                                                                .depth_slice_range = depth_slice_range};
+        return image_view<texture_view_traits<Dim>>{.texture = _raw,
+                                                    .format = _raw->format(),
+                                                    .range = r,
+                                                    .depth_slice_range = depth_slice_range};
     }
 
     [[nodiscard]] render_target_view _make_render_target(texture_view_dimension dim, cc::start_end array_range, int mip) const

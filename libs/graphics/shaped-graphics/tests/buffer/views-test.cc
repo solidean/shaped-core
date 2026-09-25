@@ -184,7 +184,7 @@ TEST("sg views - access-erased buffer_view<T> middle")
     CHECK(ro.shape == sg::view_shape::structured);
     CHECK(ro.element_count == 4);
     CHECK(ro.stride_in_bytes == sizeof(particle));
-    CHECK(sg::access_of(ro.to_raw()) == sg::view_class::readonly);
+    CHECK(sg::view_class_of(ro.to_raw()) == sg::view_class::readonly);
 
     sg::buffer_view<particle> const rw = sg::buffer<particle>::from_raw(buf).as_readwrite_buffer();
     CHECK(rw.access == sg::view_class::readwrite);

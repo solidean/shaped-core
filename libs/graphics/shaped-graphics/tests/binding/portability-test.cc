@@ -25,8 +25,8 @@ sg::texture_description texture_of(sg::pixel_format format, sg::texture_usages u
 sg::raw_view view_of(sg::pixel_format texture_format, sg::pixel_format view_format)
 {
     auto const texture
-        = std::make_shared<shape_only_texture const>(texture_of(texture_format, sg::texture_usage::readonly_texture));
-    return sg::raw_texture_view{.access = sg::view_class::readonly,
+        = std::make_shared<shape_only_texture const>(texture_of(texture_format, sg::texture_usage::texture));
+    return sg::raw_texture_view{.kind = sg::view_class::texture,
                                 .texture = texture,
                                 .view_dimension = sg::texture_view_dimension::tex_2d,
                                 .format = view_format};
@@ -49,14 +49,13 @@ bool refused(sg::binding const& b, sg::raw_view const& view)
 
 TEST("sg::portability - a storage format outside the portable set is refused without extended_storage_formats")
 {
-    auto const storage = sg::texture_usage::readwrite_texture;
+    auto const storage = sg::texture_usage::image;
     CHECK(sg::impl::find_unsupported_texture(false, texture_of(sg::pixel_format::r8_unorm, storage)).has_value());
     CHECK(sg::impl::find_unsupported_texture(false, texture_of(sg::pixel_format::bgra8_unorm, storage)).has_value());
     CHECK(!sg::impl::find_unsupported_texture(true, texture_of(sg::pixel_format::r8_unorm, storage)).has_value());
     CHECK(!sg::impl::find_unsupported_texture(false, texture_of(sg::pixel_format::rgba8_unorm, storage)).has_value());
     // Only storage asks: the same format sampled is portable everywhere.
-    CHECK(!sg::impl::find_unsupported_texture(
-               false, texture_of(sg::pixel_format::r8_unorm, sg::texture_usage::readonly_texture))
+    CHECK(!sg::impl::find_unsupported_texture(false, texture_of(sg::pixel_format::r8_unorm, sg::texture_usage::texture))
                .has_value());
 
     auto b = sg::binding{.name = "target", .type = sg::binding_type::readwrite_texture};

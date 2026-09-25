@@ -117,7 +117,7 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
 
     ```
     auto cmd = ctx->create_command_list();
-    cmd->ensure_layout(tex, sg::texture_layout::shader_readonly);  // entry requirement recorded
+    cmd->ensure_layout(tex, sg::texture_layout::shader_texture);  // entry requirement recorded
     ctx->upload.bytes_to_texture(tex, pinned);                     // fixup settles COMMON, job enqueued
     ctx->submit_command_list(cc::move(cmd));                       // entry barrier moves it to SHADER_RESOURCE
     ```

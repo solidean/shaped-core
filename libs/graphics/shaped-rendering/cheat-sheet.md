@@ -301,7 +301,7 @@ sr::box_filter_mipmap_routine::prewarm(ctx);                            // warm 
 // EVERY mippable shape: texture_1d/_2d/_3d, arrays, cube, cube array. Templated on the texture, so a multisampled one fails to COMPILE
 //   one HLSL entry point per view dimension (HLSL cannot abstract over them); a cube rides the 2D-array one, since its UAV is already a 2D array
 //   arrays average WITHIN a slice, never across — so cube faces never bleed. 3D is the one shape halving in z, so it is an 8-tap average
-// texture needs readonly_texture | readwrite_texture usage, and the levels ALLOCATED already — this fills a chain, never reshapes one
+// texture needs texture | image usage, and the levels ALLOCATED already — this fills a chain, never reshapes one
 // source is bound as a single-mip view of level N, target as the UAV of N+1, so no level is read and written by one dispatch
 // no-op when that variant's shader did not compile (a broken 3D shader leaves 2D working), or when there is no level to generate
 // NOT for a format `sg::supports_typed_uav` refuses — an sRGB one above all; that is the raster routine below
@@ -317,7 +317,7 @@ sr::raster_box_filter_mipmap_routine::execute(cmd, texture_2d, first_level = 1);
 sr::raster_box_filter_mipmap_routine::level_count(texture_2d, first_level = 1);   // -> int — passes it WOULD record, for a work budget
 // FOR the formats the compute routine cannot touch: a typed UAV over an sRGB format is refused, and D3D12 refuses it by REMOVING THE DEVICE
 //   `sg::supports_typed_uav(format)` is the predicate that picks between the two, and the caller commits at creation time:
-//   this one needs readonly_texture | render_target usage, the compute one readonly_texture | readwrite_texture
+//   this one needs texture | render_target usage, the compute one texture | image
 // an sRGB render target converts on the sample and on the write, so this averages LINEAR values — a different number, and the right one
 // 2D non-array only (a render-target view is 2D-shaped); every other shape stays on the compute routine
 // source is bound as a single-mip view of level N, target as the render-target view of N+1, one scope per level
@@ -340,7 +340,7 @@ auto history = sr::denoise_history();                  // caller-owned, MOVE-ONL
 auto const out = sr::denoise_routine::execute(cmd,     // -> sr::denoise_outcome
     {.color = noisy,                                   // linear HDR, input extent; its ALPHA rides through to output
      .guides = {.albedo = a, .normal = n, .depth = d}, // all optional for atrous; empty texture = not there
-     .output = denoised,                               // readwrite_texture usage, never the same texture as color
+     .output = denoised,                               // image usage, never the same texture as color
      .sample_count = spp * accumulated_frames},        // spatial members back off as it grows; 0 means 1
     history,
     {.method = sr::denoise_method::automatic,          // sr::denoise_settings: flat knobs, each says who reads it

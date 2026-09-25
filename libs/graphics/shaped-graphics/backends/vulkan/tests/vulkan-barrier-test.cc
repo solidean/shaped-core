@@ -51,11 +51,11 @@ TEST("sg vulkan - access flags map one to one")
 
 TEST("sg vulkan - both storage layouts collapse onto GENERAL")
 {
-    // Vulkan has no separate storage-image layout, so shader_readwrite and general are the same image layout.
+    // Vulkan has no separate storage-image layout, so shader_image and general are the same image layout.
     // They stay distinct in sg because D3D12 does separate them.
-    CHECK(vulkan::vk_layout_from(sg::texture_layout::shader_readwrite) == VK_IMAGE_LAYOUT_GENERAL);
+    CHECK(vulkan::vk_layout_from(sg::texture_layout::shader_image) == VK_IMAGE_LAYOUT_GENERAL);
     CHECK(vulkan::vk_layout_from(sg::texture_layout::general) == VK_IMAGE_LAYOUT_GENERAL);
-    CHECK(vulkan::vk_layout_from(sg::texture_layout::shader_readonly) == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    CHECK(vulkan::vk_layout_from(sg::texture_layout::shader_texture) == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     CHECK(vulkan::vk_layout_from(sg::texture_layout::copy_dst) == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
     CHECK(vulkan::vk_layout_from(sg::texture_layout::present) == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
 }
@@ -104,7 +104,7 @@ TEST("sg vulkan - an image barrier carries the range as counts, not endpoints")
     barrier.src_access = sg::access_flag::copy_write;
     barrier.dst_access = sg::access_flag::shader_read;
     barrier.src_layout = sg::texture_layout::copy_dst;
-    barrier.dst_layout = sg::texture_layout::shader_readonly;
+    barrier.dst_layout = sg::texture_layout::shader_texture;
 
     auto const b = vulkan::make_image_barrier(VkImage(nullptr), range, sg::pixel_format::rgba8_unorm, barrier);
     CHECK(b.subresourceRange.baseMipLevel == 2);

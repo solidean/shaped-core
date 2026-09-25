@@ -264,11 +264,10 @@ ASYNC_INVOCABLE_TEST("sg webgpu - a bound sampler is group 3 binding index + 1",
                                     },
                                     sg::compute_dimensions{});
 
-    auto texture
-        = ctx.persistent.create_texture_2d({.format = sg::pixel_format::rgba8_unorm,
-                                            .width = 2,
-                                            .height = 2,
-                                            .usage = sg::texture_usage::readonly_texture | sg::texture_usage::copy_dst});
+    auto texture = ctx.persistent.create_texture_2d({.format = sg::pixel_format::rgba8_unorm,
+                                                     .width = 2,
+                                                     .height = 2,
+                                                     .usage = sg::texture_usage::texture | sg::texture_usage::copy_dst});
     auto out = ctx.persistent.create_raw_buffer(8, sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
 
     auto group_layout = ctx.cached.acquire_binding_group_layout(shader.bindings);
@@ -286,7 +285,7 @@ ASYNC_INVOCABLE_TEST("sg webgpu - a bound sampler is group 3 binding index + 1",
     REQUIRE(pipeline != nullptr);
 
     sg::named_view const views[] = {
-        {.name = "source", .view = texture.as_readonly_view()},
+        {.name = "source", .view = texture.as_texture_view()},
         {.name = "Output", .view = sg::buffer<u32>::from_raw(out).as_readwrite_buffer()},
     };
     auto group = ctx.persistent.create_binding_group(group_layout, cc::span<sg::named_view const>(views));

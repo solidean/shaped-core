@@ -13,7 +13,7 @@
 /// See libs/graphics/shaped-graphics/docs/concepts/bindings.md.
 
 /// The kind of resource a shader binding expects — the backend-agnostic reflection vocabulary, the portable stand-in for HLSL's D3D_SHADER_INPUT_TYPE.
-/// Buffer kinds map 1:1 to a view's (view_class, view_shape); see access_of / shape_of.
+/// Buffer kinds map 1:1 to a view's (view_class, view_shape); see view_class_of / shape_of.
 enum class sg::binding_type
 {
     uniform_buffer,              ///< uniform block   — CBV / UBO
@@ -64,14 +64,14 @@ namespace sg
 {
 
 /// Whether a binding is a sampler rather than a resource view.
-/// A sampler binding carries no view — no access class, no layout — so it is matched to a `sampler`, not a `raw_view`.
+/// A sampler binding carries no view — no view class, no layout — so it is matched to a `sampler`, not a `raw_view`.
 [[nodiscard]] constexpr bool is_sampler(binding_type t)
 {
     return t == binding_type::sampler;
 }
 
-/// The access class a bound view must have to satisfy a binding of this type.
-[[nodiscard]] constexpr view_class access_of(binding_type t)
+/// The view class a bound view must have to satisfy a binding of this type.
+[[nodiscard]] constexpr view_class view_class_of(binding_type t)
 {
     switch (t)
     {
@@ -84,9 +84,9 @@ namespace sg
     case binding_type::readwrite_raw_buffer:
         return view_class::readwrite;
     case binding_type::readonly_texture:
-        return view_class::readonly;
+        return view_class::texture;
     case binding_type::readwrite_texture:
-        return view_class::readwrite;
+        return view_class::image;
     case binding_type::acceleration_structure:
         return view_class::acceleration_structure;
     case binding_type::sampler:
@@ -128,7 +128,7 @@ namespace sg
         return false; // samplers are bound as samplers, never as views
     if (is_vacant(v))
         return true;
-    return access_of(v) == access_of(t) && shape_of(v) == shape_of(t);
+    return view_class_of(v) == view_class_of(t) && shape_of(v) == shape_of(t);
 }
 
 } // namespace sg

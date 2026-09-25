@@ -154,7 +154,7 @@ void dx12_staging_binding_group::write_view_descriptors(int first_descriptor,
                 CC_ASSERT(dx != nullptr, "bound texture is not a dx12 texture");
                 res.texture = cc::move(dx);
                 res.range = tv.range;
-                res.access = tv.access;
+                res.access = tv.kind;
             },
             [&](sg::raw_tlas_view const& av)
             {

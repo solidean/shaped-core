@@ -87,7 +87,7 @@ ASYNC_INVOCABLE_TEST("sg vulkan - a texture written by one concurrently recorded
          .dimension = sg::texture_dimension::d2,
          .width = k_extent,
          .height = k_extent,
-         .usage = sg::texture_usage::copy_src | sg::texture_usage::copy_dst | sg::texture_usage::readonly_texture});
+         .usage = sg::texture_usage::copy_src | sg::texture_usage::copy_dst | sg::texture_usage::texture});
     REQUIRE(tex != nullptr);
 
     auto const bytes = pattern(k_texture_bytes, 17);

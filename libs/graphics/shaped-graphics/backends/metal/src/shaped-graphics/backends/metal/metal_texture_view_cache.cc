@@ -41,7 +41,7 @@ MTL::Texture* metal_texture_view_cache::acquire(sg::raw_texture_view const& view
 
     auto const key = metal_texture_view_key{
         .texture_identity = base.identity(),
-        .access = view.access,
+        .kind = view.kind,
         .dimension = view.view_dimension,
         .format = view.format,
         .range = view.range,

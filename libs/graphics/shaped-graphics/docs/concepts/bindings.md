@@ -97,7 +97,7 @@ A pairwise range test over every pair of bindings is a cost every correct layout
 ## Bindings and views speak the same vocabulary
 
 A `binding` describes what the shader *expects*, and a [`raw_view`](../../src/shaped-graphics/resource/views.hh) describes what is *bound*.
-For buffer and texture kinds they line up exactly: `access_of(binding_type)` and `shape_of(binding_type)` give the `(view_class, view_shape)` a satisfying view must have.
+For buffer and texture kinds they line up exactly: `view_class_of(binding_type)` and `shape_of(binding_type)` give the `(view_class, view_shape)` a satisfying view must have.
 `accepts(binding_type, raw_view)` is the check.
 That equivalence is what lets a binding validate a bound view with no backend involved, and it is why `binding_type`'s view kinds mirror the view `(access, shape)` combinations one-to-one.
 
@@ -309,7 +309,7 @@ Texel/typed buffers (`Buffer<T>` / `RWBuffer<T>`) and append/consume/counter buf
 
 ## See also
 
-- [binding.hh](../../src/shaped-graphics/binding/binding.hh) — `binding`, `binding_type`, `access_of` / `shape_of` / `accepts`.
+- [binding.hh](../../src/shaped-graphics/binding/binding.hh) — `binding`, `binding_type`, `view_class_of` / `shape_of` / `accepts`.
 - [staging_binding_group.hh](../../src/shaped-graphics/binding/staging_binding_group.hh) — the mutable builder and its `binding_slot` addressing.
 - [bindless_array.hh](../../src/shaped-graphics/binding/bindless_array.hh) — view identity → element index over one array binding.
 - [compiled_shader.hh](../../src/shaped-graphics/binding/compiled_shader.hh) — the shader data model.

@@ -10,7 +10,8 @@ There is no public `declare_access`. What a resource is used as follows from the
 
 - `cmd.upload` ⇒ `copy_write` on the destination; `cmd.download` ⇒ `copy_read` on the source.
 - `cmd.copy` ⇒ `copy_read` on src plus `copy_write` on dst, and a self-copy is one combined access.
-- A compute `dispatch` ⇒ each bound view's access class: `readonly` ⇒ `shader_read`, `readwrite` ⇒ `shader_write`, `uniform` ⇒ `uniform_read`, `acceleration_structure` ⇒ `accel_read`.
+- A compute `dispatch` ⇒ each bound view's class: `readonly` and `texture` ⇒ `shader_read`, `readwrite` and `image` ⇒ `shader_write`.
+  `uniform` ⇒ `uniform_read`, and `acceleration_structure` ⇒ `accel_read`.
 
 The mapping lives in [access_inference.hh](../../src/shaped-graphics/barrier/access_inference.hh), so every backend agrees on the semantics.
 
@@ -29,7 +30,7 @@ See [bindings — array bindings](bindings.md#array-bindings).
 `access_flag` says what an op does (`shader_read`, `copy_write`, …), and `pipeline_stage_flag` says where (`compute`, `copy`, …).
 Both are `cc::flags` sets — `access_flags` and `pipeline_stage_flags` — so a declared access carries several of each at once.
 `texture_layout` says how the texels are arranged, and buffers are always `general`.
-A texture uses `shader_readonly` / `shader_readwrite` / `render_target` / `depth_readonly` / `depth_readwrite` / `copy_src` / `copy_dst` / `present`.
+A texture uses `shader_texture` / `shader_image` / `render_target` / `depth_readonly` / `depth_readwrite` / `copy_src` / `copy_dst` / `present`.
 None of it is any one backend's spelling, and each value documents its D3D12 and Vulkan mapping.
 `is_unordered_write` marks the writes that need a hazard barrier — shader, copy and accel writes.
 Color and depth *targets* are ROP-ordered freebies.
@@ -224,7 +225,7 @@ It submits the whole batch in one `Barrier` call, with one `D3D12_BARRIER_GROUP`
 A dispatch binding many resources pays one barrier call, not one per binding.
 And a resource bound *more than once* to the same op — two views of one texture, say — merges its declares into a single barrier carrying the **union** of the accesses.
 
-When those bindings need *different* layouts — a texture bound as both a sampled (`shader_readonly`/SRV) and a storage (`shader_readwrite`/UAV) view — `combine_layouts` picks one that serves both.
+When those bindings need *different* layouts — a texture bound as both a texture (`shader_texture`/SRV) and an image (`shader_image`/UAV) view — `combine_layouts` picks one that serves both.
 No specialized D3D12 layout serves both an SRV and a UAV, so it falls back to `general` (COMMON) and warns once, since sampling in COMMON is slower.
 A genuinely incompatible pair, such as copy-dest plus sampled in one op, asserts.
 

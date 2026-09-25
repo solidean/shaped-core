@@ -87,12 +87,12 @@ using buffer_usages = cc::flags<buffer_usage>;
 /// Vulkan-only `INPUT_ATTACHMENT` / `TRANSIENT_ATTACHMENT` are omitted deliberately, having no D3D12 analogue.
 enum class sg::texture_usage : sg::u32
 {
-    copy_src,          // Vk TRANSFER_SRC / WGPU COPY_SRC; DX12 implicit
-    copy_dst,          // Vk TRANSFER_DST / WGPU COPY_DST; DX12 implicit
-    readonly_texture,  // read-only sampled/SRV: Vk SAMPLED; DX12 no flag (default)
-    readwrite_texture, // read-write UAV / storage image: Vk STORAGE; DX12 ALLOW_UNORDERED_ACCESS
-    render_target,     // color attachment: Vk COLOR_ATTACHMENT; DX12 ALLOW_RENDER_TARGET
-    depth_stencil,     // depth/stencil attachment: Vk DEPTH_STENCIL_ATTACHMENT; DX12 ALLOW_DEPTH_STENCIL
+    copy_src,      // Vk TRANSFER_SRC / WGPU COPY_SRC; DX12 implicit
+    copy_dst,      // Vk TRANSFER_DST / WGPU COPY_DST; DX12 implicit
+    texture,       // bound as a sampled texture: Vk SAMPLED; DX12 no flag (default)
+    image,         // bound as a storage image, whatever its access: Vk STORAGE; DX12 ALLOW_UNORDERED_ACCESS
+    render_target, // color attachment: Vk COLOR_ATTACHMENT; DX12 ALLOW_RENDER_TARGET
+    depth_stencil, // depth/stencil attachment: Vk DEPTH_STENCIL_ATTACHMENT; DX12 ALLOW_DEPTH_STENCIL
 
     // Permits `stream_scope::subresource`: the copy queue may transfer one whole mip / array slice while the graphics
     // queue uses a different one, concurrently.

@@ -377,11 +377,11 @@ TEST("ssc::dxc + dx12 - raytraced spinning cube in a window", nx::config::manual
 
         // Offscreen ray-tracing target: UAV-written by the raygen, then sampled (SRV) by the blit.
         // Transient, so it follows the window size for free and expires with the epoch.
-        auto const image = ctx.transient.create_texture_2d(
-            {.format = sg::pixel_format::rgba16_float, // UAV-storable + samplable
-             .width = size[0],
-             .height = size[1],
-             .usage = sg::texture_usage::readonly_texture | sg::texture_usage::readwrite_texture});
+        auto const image
+            = ctx.transient.create_texture_2d({.format = sg::pixel_format::rgba16_float, // UAV-storable + samplable
+                                               .width = size[0],
+                                               .height = size[1],
+                                               .usage = sg::texture_usage::texture | sg::texture_usage::image});
 
         // Fixed camera looking at the origin; only the cube spins (via the TLAS instance transform).
         auto const cam = make_camera(tg::vec3f(2.2f, 1.8f, -3.2f), rt.aspect_ratio(), 60_deg_f);
@@ -394,7 +394,7 @@ TEST("ssc::dxc + dx12 - raytraced spinning cube in a window", nx::config::manual
         sg::tlas_handle const tlas = cmd->raytracing.build_tlas({make_cube_instance(blas, rot)});
         auto rt_group = ctx.transient.create_binding_group(rt_group_layout,
                                                            {{.name = "scene", .view = tlas->as_view()},
-                                                            {.name = "Output", .view = image.as_readwrite_view()},
+                                                            {.name = "Output", .view = image.as_image_view()},
                                                             {.name = "Camera", .view = cam_buf.as_uniform_buffer()}});
         cmd->raytracing.bind_pipeline(*rt_pipeline);
         cmd->raytracing.bind_group(0, *rt_group);
@@ -402,7 +402,7 @@ TEST("ssc::dxc + dx12 - raytraced spinning cube in a window", nx::config::manual
 
         // Blit the ray-traced image onto the back buffer.
         auto blit_group
-            = ctx.transient.create_binding_group(blit_group_layout, {{.name = "Src", .view = image.as_readonly_view()}},
+            = ctx.transient.create_binding_group(blit_group_layout, {{.name = "Src", .view = image.as_texture_view()}},
                                                  {{.name = "Samp", .sampler = blit_sampler}});
         {
             auto pass = cmd->raster.render_to({.color_targets = {rt.cleared(tg::vec4f(0, 0, 0, 1))}});

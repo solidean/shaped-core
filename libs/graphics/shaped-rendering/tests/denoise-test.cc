@@ -33,8 +33,8 @@ namespace
 {
 constexpr int k_size = 32;
 
-constexpr auto image_usage = sg::texture_usage::readonly_texture | sg::texture_usage::readwrite_texture
-                           | sg::texture_usage::copy_dst | sg::texture_usage::copy_src;
+constexpr auto image_usage
+    = sg::texture_usage::texture | sg::texture_usage::image | sg::texture_usage::copy_dst | sg::texture_usage::copy_src;
 
 /// A per-pixel pseudo-random value in [-1, 1], the same on every run.
 [[nodiscard]] f32 noise_at(int x, int y)

@@ -17,7 +17,7 @@
 struct sg::backend::metal::metal_texture_view_key
 {
     u64 texture_identity = 0;
-    view_class access = view_class::readonly;
+    view_class kind = view_class::texture;
     texture_view_dimension dimension = texture_view_dimension::tex_2d;
     pixel_format format = pixel_format::undefined;
     subresource_range range;
@@ -29,7 +29,7 @@ struct sg::backend::metal::metal_texture_view_key
     /// added.
     [[nodiscard]] friend u64 hash(metal_texture_view_key const& k)
     {
-        return cc::make_hash(k.texture_identity, k.access, k.dimension, k.format, k.range, k.depth_slice_range.start,
+        return cc::make_hash(k.texture_identity, k.kind, k.dimension, k.format, k.range, k.depth_slice_range.start,
                              k.depth_slice_range.end);
     }
 };

@@ -122,10 +122,10 @@ def emit_group(package: str, namespace: str, file: SglFile, binding: dict) -> st
                        f"at byte {member['offset']} of the group's constant buffer\n")
             continue
         if member["kind"] == "texture":
-            out.append(f"    sg::readonly_texture_view<{view_traits(member)}> {member['name']}; ///< `{member['type']}`\n")
+            out.append(f"    sg::texture_view<{view_traits(member)}> {member['name']}; ///< `{member['type']}`\n")
             continue
         if member["kind"] == "image":
-            out.append(f"    sg::readwrite_texture_view<{view_traits(member)}> {member['name']}; ///< `{member['type']}`\n")
+            out.append(f"    sg::image_view<{view_traits(member)}> {member['name']}; ///< `{member['type']}`\n")
             continue
         if member["kind"] == "sampler":
             # A static sampler is the layout's, so the group has no field for it.

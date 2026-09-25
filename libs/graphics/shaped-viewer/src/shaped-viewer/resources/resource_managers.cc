@@ -447,9 +447,9 @@ texture_id texture_manager::acquire(texture_data const& texture)
         = compute_mips || raster_mips ? impl::mip_count_of(texture.width, texture.height) : texture.mip_count;
     CC_ASSERT(texture.mip_count <= total_mips, "more mips supplied than the extent has");
 
-    auto usage = sg::texture_usage::readonly_texture | sg::texture_usage::copy_dst;
+    auto usage = sg::texture_usage::texture | sg::texture_usage::copy_dst;
     if (compute_mips)
-        usage = usage | sg::texture_usage::readwrite_texture;
+        usage = usage | sg::texture_usage::image;
     else if (raster_mips)
         usage = usage | sg::texture_usage::render_target;
 

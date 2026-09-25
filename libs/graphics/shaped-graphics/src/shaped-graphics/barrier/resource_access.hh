@@ -73,16 +73,16 @@ using pipeline_stage_flags = cc::flags<pipeline_stage_flag>;
 /// Live for textures today — dx12 transitions render targets, shader reads and copy destinations through it.
 enum class sg::texture_layout : sg::u32
 {
-    undefined,        // no defined contents (discardable): DX12 LAYOUT_UNDEFINED / Vk IMAGE_LAYOUT_UNDEFINED
-    general,          // buffers, and textures usable by any access: DX12 LAYOUT_COMMON / Vk IMAGE_LAYOUT_GENERAL
-    shader_readonly,  // sampled/SRV: DX12 LAYOUT_SHADER_RESOURCE / Vk SHADER_READ_ONLY_OPTIMAL
-    shader_readwrite, // UAV / storage: DX12 LAYOUT_UNORDERED_ACCESS / Vk IMAGE_LAYOUT_GENERAL
-    render_target,    // color attachment: DX12 LAYOUT_RENDER_TARGET / Vk COLOR_ATTACHMENT_OPTIMAL
-    depth_readonly,   // DX12 LAYOUT_DEPTH_STENCIL_READ / Vk DEPTH_STENCIL_READ_ONLY_OPTIMAL
-    depth_readwrite,  // DX12 LAYOUT_DEPTH_STENCIL_WRITE / Vk DEPTH_STENCIL_ATTACHMENT_OPTIMAL
-    copy_src,         // copy source: DX12 LAYOUT_COPY_SOURCE / Vk TRANSFER_SRC_OPTIMAL
-    copy_dst,         // copy dest: DX12 LAYOUT_COPY_DEST / Vk TRANSFER_DST_OPTIMAL
-    present,          // swapchain present: DX12 LAYOUT_PRESENT / Vk PRESENT_SRC_KHR
+    undefined,       // no defined contents (discardable): DX12 LAYOUT_UNDEFINED / Vk IMAGE_LAYOUT_UNDEFINED
+    general,         // buffers, and textures usable by any access: DX12 LAYOUT_COMMON / Vk IMAGE_LAYOUT_GENERAL
+    shader_texture,  // a texture view (SRV): DX12 LAYOUT_SHADER_RESOURCE / Vk SHADER_READ_ONLY_OPTIMAL
+    shader_image,    // an image view, whatever its access (UAV): DX12 LAYOUT_UNORDERED_ACCESS / Vk IMAGE_LAYOUT_GENERAL
+    render_target,   // color attachment: DX12 LAYOUT_RENDER_TARGET / Vk COLOR_ATTACHMENT_OPTIMAL
+    depth_readonly,  // DX12 LAYOUT_DEPTH_STENCIL_READ / Vk DEPTH_STENCIL_READ_ONLY_OPTIMAL
+    depth_readwrite, // DX12 LAYOUT_DEPTH_STENCIL_WRITE / Vk DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+    copy_src,        // copy source: DX12 LAYOUT_COPY_SOURCE / Vk TRANSFER_SRC_OPTIMAL
+    copy_dst,        // copy dest: DX12 LAYOUT_COPY_DEST / Vk TRANSFER_DST_OPTIMAL
+    present,         // swapchain present: DX12 LAYOUT_PRESENT / Vk PRESENT_SRC_KHR
 };
 
 /// Which way an async / streaming transfer of a texture goes, for `cmd.prepare_for_async`.

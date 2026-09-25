@@ -19,7 +19,7 @@ namespace sr::impl
 /// command list that samples the texture waits on the copy automatically.
 ///
 /// An UPDATE is recorded on the caller's list instead, and that is why service_requests takes one.
-/// By the time imgui asks for one, a draw has sampled the atlas, so it sits in `shader_readonly` — and a transfer
+/// By the time imgui asks for one, a draw has sampled the atlas, so it sits in `shader_texture` — and a transfer
 /// queue cannot move a layout for itself, so the async path would submit a throwaway list to fix it up and warn.
 /// The direct queue transitions it through the ordinary tracker, and an update is a few glyph rects rather than the
 /// bulk data the async path exists for.

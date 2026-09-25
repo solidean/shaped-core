@@ -220,7 +220,7 @@ cc::result<metal_binding_group_handle> metal_context::create_metal_binding_group
                 if (is_array)
                     array.elements.push_back({.texture = texture_view->texture});
                 else
-                    bound_textures.push_back({.texture = texture_view->texture, .access = sg::access_of(view)});
+                    bound_textures.push_back({.texture = texture_view->texture, .access = sg::view_class_of(view)});
                 continue;
             }
 
@@ -239,7 +239,7 @@ cc::result<metal_binding_group_handle> metal_context::create_metal_binding_group
             if (is_array)
                 array.elements.push_back({.buffer = buffer_view->buffer});
             else
-                bound_buffers.push_back({.buffer = buffer_view->buffer, .access = sg::access_of(view)});
+                bound_buffers.push_back({.buffer = buffer_view->buffer, .access = sg::view_class_of(view)});
         }
 
         if (is_array)

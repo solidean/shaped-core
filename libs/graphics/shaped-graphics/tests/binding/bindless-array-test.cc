@@ -30,7 +30,7 @@ namespace
     desc.dimension = sg::texture_dimension::d2;
     desc.width = 16;
     desc.height = 16;
-    desc.usage = sg::texture_usage::readonly_texture;
+    desc.usage = sg::texture_usage::texture;
     return sg::texture_2d::from_raw(ctx->persistent.create_raw_texture(desc));
 }
 
@@ -75,7 +75,7 @@ ASYNC_INVOCABLE_TEST("sg - an unchanged bindless working set serves the same sna
     auto const buf = make_buffer(ctx);
     auto const tex = make_texture(ctx);
     auto const buf_index = buffers.transient.acquire(buf);
-    auto const tex_index = textures.transient.acquire(tex.as_readonly_view());
+    auto const tex_index = textures.transient.acquire(tex.as_texture_view());
     CHECK(buffers.occupied_count() == 1);
 
     auto const snapshot = group->snapshot();
@@ -86,14 +86,14 @@ ASYNC_INVOCABLE_TEST("sg - an unchanged bindless working set serves the same sna
     ctx->advance_epoch();
     co_await ctx->idle_completion();
     CHECK(buffers.transient.acquire(buf) == buf_index);
-    CHECK(textures.transient.acquire(tex.as_readonly_view()) == tex_index);
+    CHECK(textures.transient.acquire(tex.as_texture_view()) == tex_index);
     CHECK(group->snapshot().get() == snapshot.get());
 
     // A new view mints an index and writes its descriptor: the next snapshot is a new group.
     ctx->advance_epoch();
     co_await ctx->idle_completion();
     auto const tex2 = make_texture(ctx);
-    CHECK(textures.transient.acquire(tex2.as_readonly_view()) != tex_index);
+    CHECK(textures.transient.acquire(tex2.as_texture_view()) != tex_index);
     CHECK(group->snapshot().get() != snapshot.get());
 
     ctx->advance_epoch();
@@ -113,10 +113,10 @@ ASYNC_INVOCABLE_TEST("sg - two bindless arrays over one group are independent", 
 
     // Each array indexes its own binding, so the first view of either lands at element 0.
     CHECK(u32(buffers.transient.acquire(make_buffer(ctx))) == 0);
-    CHECK(u32(textures.transient.acquire(make_texture(ctx).as_readonly_view())) == 0);
+    CHECK(u32(textures.transient.acquire(make_texture(ctx).as_texture_view())) == 0);
 
     // Minting into one array leaves the other's numbering alone.
-    CHECK(u32(textures.transient.acquire(make_texture(ctx).as_readonly_view())) == 1);
+    CHECK(u32(textures.transient.acquire(make_texture(ctx).as_texture_view())) == 1);
     CHECK(buffers.occupied_count() == 1);
 
     ctx->advance_epoch();
@@ -138,8 +138,8 @@ ASYNC_INVOCABLE_TEST("sg - a full bindless array clears the descriptors it recla
 
     auto const a = make_texture(ctx);
     auto const b = make_texture(ctx);
-    (void)textures.transient.acquire(a.as_readonly_view());
-    (void)textures.transient.acquire(b.as_readonly_view());
+    (void)textures.transient.acquire(a.as_texture_view());
+    (void)textures.transient.acquire(b.as_texture_view());
     CHECK(textures.occupied_count() == 2);
     auto const before = group->snapshot();
 
@@ -148,7 +148,7 @@ ASYNC_INVOCABLE_TEST("sg - a full bindless array clears the descriptors it recla
     ctx->advance_epoch();
     co_await ctx->idle_completion();
     auto const c = make_texture(ctx);
-    auto const c_index = textures.transient.acquire(c.as_readonly_view());
+    auto const c_index = textures.transient.acquire(c.as_texture_view());
     CHECK(u32(c_index) < textures.capacity());
     CHECK(textures.occupied_count() == 1);
 
@@ -179,13 +179,13 @@ ASYNC_INVOCABLE_TEST("sg - a moved bindless array keeps its binding and its tabl
 
     auto const tex = make_texture(ctx);
     auto const slot = arrays[0].slot();
-    auto const tex_index = arrays[0].transient.acquire(tex.as_readonly_view());
+    auto const tex_index = arrays[0].transient.acquire(tex.as_texture_view());
     CHECK(arrays[0].occupied_count() == 1);
 
     arrays.reserve(64); // relocates both arrays again, after the table has entries in it
     CHECK(arrays[0].slot() == slot);
     CHECK(arrays[0].occupied_count() == 1);
-    CHECK(arrays[0].transient.acquire(tex.as_readonly_view()) == tex_index);
+    CHECK(arrays[0].transient.acquire(tex.as_texture_view()) == tex_index);
 
     ctx->advance_epoch();
     co_await ctx->idle_completion();
@@ -206,14 +206,14 @@ ASYNC_INVOCABLE_TEST("sg - a pinned bindless element outlives the epoch that acq
     (void)sg::bindless_array::for_binding(*ctx, group, "Buffers"); // so the group is fully wired
 
     auto const kept = make_texture(ctx);
-    auto const pin = textures.persistent.acquire(kept.as_readonly_view());
+    auto const pin = textures.persistent.acquire(kept.as_texture_view());
     REQUIRE(pin != nullptr);
     auto const pinned_index = pin->index();
     CHECK(textures.pinned_count() == 1);
 
     // The same view acquires the same element, persistently or transiently.
-    CHECK(textures.persistent.acquire(kept.as_readonly_view()).get() == pin.get());
-    CHECK(u32(textures.transient.acquire(kept.as_readonly_view())) == pinned_index);
+    CHECK(textures.persistent.acquire(kept.as_texture_view()).get() == pin.get());
+    CHECK(u32(textures.transient.acquire(kept.as_texture_view())) == pinned_index);
 
     // Several epochs of churn through the one free slot never reclaim the pinned one.
     for (auto i = 0; i < 4; ++i)
@@ -221,12 +221,12 @@ ASYNC_INVOCABLE_TEST("sg - a pinned bindless element outlives the epoch that acq
         ctx->advance_epoch();
         co_await ctx->idle_completion();
         auto const churn = make_texture(ctx);
-        CHECK(u32(textures.transient.acquire(churn.as_readonly_view())) != pinned_index);
+        CHECK(u32(textures.transient.acquire(churn.as_texture_view())) != pinned_index);
         CHECK(textures.pinned_count() == 1);
     }
 
     // Re-acquiring it after all that churn still lands on the element it was pinned to.
-    CHECK(u32(textures.transient.acquire(kept.as_readonly_view())) == pinned_index);
+    CHECK(u32(textures.transient.acquire(kept.as_texture_view())) == pinned_index);
 
     ctx->advance_epoch();
     co_await ctx->idle_completion();
@@ -245,7 +245,7 @@ ASYNC_INVOCABLE_TEST("sg - releasing the last bindless pin frees the element", (
 
     auto const tex = make_texture(ctx);
     {
-        auto first = textures.persistent.acquire(tex.as_readonly_view());
+        auto first = textures.persistent.acquire(tex.as_texture_view());
         auto second = first; // a second holder of the same element
         CHECK(textures.pinned_count() == 1);
         CHECK(textures.occupied_count() == 1);
@@ -262,9 +262,9 @@ ASYNC_INVOCABLE_TEST("sg - releasing the last bindless pin frees the element", (
     // Next epoch it is an ordinary stale slot again, and the sweep may take it.
     ctx->advance_epoch();
     co_await ctx->idle_completion();
-    auto const pin2 = textures.persistent.acquire(make_texture(ctx).as_readonly_view());
+    auto const pin2 = textures.persistent.acquire(make_texture(ctx).as_texture_view());
     {
-        auto const doomed = textures.persistent.acquire(make_texture(ctx).as_readonly_view());
+        auto const doomed = textures.persistent.acquire(make_texture(ctx).as_texture_view());
         CHECK(textures.pinned_count() == 2);
     }
     ctx->advance_epoch();
@@ -273,7 +273,7 @@ ASYNC_INVOCABLE_TEST("sg - releasing the last bindless pin frees the element", (
     // Dropped in the epoch it was pinned in, so it lingered; a later release frees the slot at once.
     auto const before = textures.occupied_count();
     {
-        auto const short_lived = textures.persistent.acquire(make_texture(ctx).as_readonly_view());
+        auto const short_lived = textures.persistent.acquire(make_texture(ctx).as_texture_view());
         CHECK(textures.occupied_count() == before + 1);
     }
 
@@ -297,7 +297,7 @@ ASYNC_INVOCABLE_TEST("sg - a bindless element survives the array that minted it"
     auto pin = sg::bindless_element_handle();
     {
         auto textures = sg::bindless_array::for_binding(*ctx, group, "Textures");
-        pin = textures.persistent.acquire(tex.as_readonly_view());
+        pin = textures.persistent.acquire(tex.as_texture_view());
         CHECK(textures.pinned_count() == 1);
     }
     REQUIRE(pin != nullptr);

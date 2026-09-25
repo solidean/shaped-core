@@ -26,7 +26,7 @@ sg::texture_description sampled_tex()
     d.dimension = sg::texture_dimension::d2;
     d.width = 16;
     d.height = 16;
-    d.usage = sg::texture_usage::readonly_texture;
+    d.usage = sg::texture_usage::texture;
     return d;
 }
 } // namespace
@@ -92,7 +92,7 @@ INVOCABLE_TEST("sg dx12 - a layout with static + dynamic samplers and a group bu
     REQUIRE(tex.has_value());
     auto const typed = sg::texture_2d::from_raw(tex.value());
 
-    sg::named_view const views[] = {{.name = "Tex", .view = typed.as_readonly_view()}};
+    sg::named_view const views[] = {{.name = "Tex", .view = typed.as_texture_view()}};
     sg::named_sampler const dyn[] = {{.name = "Dyn", .sampler = {.mag_filter = sg::sampler_filter::nearest}}};
 
     auto group = c.create_dx12_binding_group(layout.value(), views, dyn, sg::lifetime_scope::persistent);
@@ -188,17 +188,17 @@ INVOCABLE_TEST("sg dx12 - a group built by slot survives a sampler interleaved w
     auto const buf = c.persistent.create_buffer<u32>(4, sg::buffer_usage::readwrite_buffer);
 
     sg::slotted_view const views[] = {
-        {.slot = sg::binding_slot(0), .view = typed.as_readonly_view()},
+        {.slot = sg::binding_slot(0), .view = typed.as_texture_view()},
         {.slot = sg::binding_slot(2), .view = buf.as_readwrite_buffer()},
     };
 
     CHECK(c.persistent.create_binding_group(layout, views) != nullptr);
 
     // And the failure the type is meant to make loud: a slot naming the sampler is not a view.
-    sg::slotted_view const wrong[] = {{.slot = sg::binding_slot(1), .view = typed.as_readonly_view()}};
+    sg::slotted_view const wrong[] = {{.slot = sg::binding_slot(1), .view = typed.as_texture_view()}};
     CHECK_THROWS_AS(c.persistent.create_binding_group(layout, wrong), sg::binding_group_exception);
 
     // A slot past the end of bindings() is refused rather than read.
-    sg::slotted_view const out_of_range[] = {{.slot = sg::binding_slot(7), .view = typed.as_readonly_view()}};
+    sg::slotted_view const out_of_range[] = {{.slot = sg::binding_slot(7), .view = typed.as_texture_view()}};
     CHECK_THROWS_AS(c.persistent.create_binding_group(layout, out_of_range), sg::binding_group_exception);
 }

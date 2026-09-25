@@ -116,9 +116,9 @@ D3D12_BARRIER_LAYOUT d3d12_layout_from(sg::texture_layout layout)
         return D3D12_BARRIER_LAYOUT_UNDEFINED;
     case sg::texture_layout::general:
         return D3D12_BARRIER_LAYOUT_COMMON;
-    case sg::texture_layout::shader_readonly:
+    case sg::texture_layout::shader_texture:
         return D3D12_BARRIER_LAYOUT_SHADER_RESOURCE;
-    case sg::texture_layout::shader_readwrite:
+    case sg::texture_layout::shader_image:
         return D3D12_BARRIER_LAYOUT_UNORDERED_ACCESS;
     case sg::texture_layout::render_target:
         return D3D12_BARRIER_LAYOUT_RENDER_TARGET;

@@ -71,37 +71,38 @@ every view's access (a `readwrite_buffer_view` requires `readwrite_buffer`, etc.
 
 Every typed view converts (`to_raw()`, or implicitly) into one
 [`raw_view`](../../src/shaped-graphics/resource/views.hh) — a `cc::variant` over one cohesive payload per
-resource kind: `raw_buffer_view` (access + shape + buffer + byte layout), `raw_texture_view` (access +
+resource kind: `raw_buffer_view` (access + shape + buffer + byte layout), `raw_texture_view` (kind +
 texture + dimension + format + range), and `raw_tlas_view` (the TLAS). A backend `visit`s the active arm to
 build its native descriptor, or picks one out with `try_as_buffer_view(rv)` / `try_as_texture_view` /
-`try_as_tlas_view` (null on a different arm; each has an asserting `as_*_view` twin); `access_of(rv)` /
-`shape_of(rv)` read the active arm's access / layout (what `accepts()` checks). The type safety lives in
+`try_as_tlas_view` (null on a different arm; each has an asserting `as_*_view` twin); `view_class_of(rv)` /
+`shape_of(rv)` read the active arm's view class / layout (what `accepts()` checks). The type safety lives in
 the typed views; the raw arms are also the directly-usable "raw" binding vocabulary for tooling that builds
 bindings without the wrappers.
 
-Between the fully-typed leaves and the erased `raw_view` sits an optional **access-erased middle**.
-`buffer_view<T>` and `texture_view<Traits>` keep the resource typing — element type, view dimension — but carry the access class as a runtime field.
-Each leaf converts to it implicitly and it erases on to `raw_view`, which suits code taking "any access" of a given buffer or texture view.
+Between the fully-typed leaves and the erased `raw_view` sits an optional **erased middle**.
+`buffer_view<T>` and `any_texture_view<Traits>` keep the resource typing — element type, view dimension — but carry the view class as a runtime field.
+For a buffer that is its access; for a texture view it is its kind, a texture or an image.
+Each leaf converts to it implicitly and it erases on to `raw_view`, which suits code taking "any access" of a given buffer, or "a texture or an image" of a given dimension.
 
 ### Recovering a typed view from the erased form
 
-Erasure is not one-way: each layer offers `as_<access>()` / `try_as_<access>()` back up toward the leaves.
+Erasure is not one-way: each layer offers `as_<class>()` / `try_as_<class>()` back up toward the leaves.
 `as_*` asserts; `try_*` returns a `cc::optional`, nullopt on mismatch, and is the checked twin for genuinely runtime input.
-A `try_` tolerates the runtime **access class** being wrong, and on a texture arm the view **dimension** too.
-`raw_texture_view::try_as_readonly<Traits>` is nullopt when `view_dimension != Traits::dimension`.
+A `try_` tolerates the runtime **view class** being wrong, and on a texture arm the view **dimension** too.
+`raw_texture_view::try_as_texture<Traits>` is nullopt when `view_dimension != Traits::dimension`.
 A mismatched buffer element type `T` still asserts, since a wrong element size is a caller's claim the view's stride can disprove rather than a runtime condition.
 
-- **Access-erased middle → leaf.**
-  `buffer_view<T>::as_readonly()` / `as_readwrite()` / `as_uniform()` and `texture_view<Traits>::as_readonly()` / `as_readwrite()` pin the runtime access class to the matching compile-time leaf.
-  The resource typing is already fixed, so only the access is being committed.
+- **Erased middle → leaf.**
+  `buffer_view<T>::as_readonly()` / `as_readwrite()` / `as_uniform()` and `any_texture_view<Traits>::as_texture()` / `as_image()` pin the runtime view class to the matching compile-time leaf.
+  The resource typing is already fixed, so only the view class is being committed.
 - **Erased arm → leaf.**
   `raw_buffer_view::as_readonly<T>()`, where you supply the element `T`.
-  And `raw_texture_view::as_readonly<Traits>()`, where you supply `Traits` and it also checks the runtime `view_dimension` matches `Traits::dimension`.
-  Both delegate to the middle for the access check and the field mapping.
+  And `raw_texture_view::as_texture<Traits>()` / `as_image<Traits>()`, where you supply `Traits` and it also checks the runtime `view_dimension` matches `Traits::dimension`.
+  Both delegate to the middle for the view-class check and the field mapping.
 - **`raw_view` → leaf in one call.**
-  The free functions `as_readonly_buffer<T>(rv)` / `as_readwrite_buffer<T>` / `as_uniform_buffer<T>` and `as_readonly_texture<Traits>` / `as_readwrite_texture<Traits>`, each with a `try_` twin.
+  The free functions `as_readonly_buffer<T>(rv)` / `as_readwrite_buffer<T>` / `as_uniform_buffer<T>` and `as_texture<Traits>` / `as_image<Traits>`, each with a `try_` twin.
   Each `try_as_*_view`s the matching arm and then re-types it.
-  The `try_` twin fails both when the variant holds a *different* resource arm and when the access class does not match — the two ways a genuinely-erased binding can be the wrong thing.
+  The `try_` twin fails both when the variant holds a *different* resource arm and when the view class does not match — the two ways a genuinely-erased binding can be the wrong thing.
 
 The re-type is a reinterpret: `T` / `Traits` are caller-asserted, since no element or dimension tag is stored to cross-check against.
 So it is the deliberate, checked counterpart of the free erasure in the other direction.
@@ -163,9 +164,10 @@ you must fall back to a typed storage buffer (i.e. the stride-aligned structured
 
 Textures have views too, but instead of an element type `T` they are typed by `Traits`.
 A `texture_view_traits<Dim>` names the shader-facing dimension (`tv_2d` / `tv_cube` / `tv_2d_array` / …), the only compile-time part — the texel `pixel_format` and subresource range stay runtime.
-So the leaves are `readonly_texture_view<Traits>` (sampled / SRV) and `readwrite_texture_view<Traits>` (storage / UAV).
-The storage leaf constrains `Traits::dimension` to a `storage_view_dimension` — no cube, no MSAA.
-Each carries `{raw_texture_handle, pixel_format, subresource_range}`, plus a `depth_slice_range` on the storage view for 3D, and erases to a `raw_view` holding a `raw_texture_view`.
+So the leaves are `texture_view<Traits>`, a sampled texture (SRV), and `image_view<Traits>`, a storage image (UAV) — SGL's `texture2d[T]` and `image2d[.F]`.
+**An image's access — read, write or both — belongs to the binding, never to the view**, since every backend builds one descriptor for all three.
+The image leaf constrains `Traits::dimension` to an `image_view_dimension` — no cube, no MSAA.
+Each carries `{raw_texture_handle, pixel_format, subresource_range}`, plus a `depth_slice_range` on the image view for 3D, and erases to a `raw_view` holding a `raw_texture_view`.
 `texture<Traits>::as_*_view()` computes the view dimension at compile time and returns the precisely-typed leaf.
 
 ### The view *dimension* is a reinterpretation, not the texture's shape
@@ -182,29 +184,29 @@ D3D12 caveat: the non-array dimensions have no base-slice field, so a *non-zero*
 
 The factories live on the typed `texture<Traits>` wrapper, `requires`-gated by shape so misuse is a compile error, mirroring the wrapper's `height()` / `depth()`.
 Rather than a positional overload set, each factory takes **one shape-specific parameter bag**.
-`Traits::read_only_params`, `Traits::read_write_2d_params`, … — an aggregate naming only the axes that shape has.
-A plain 2D texture's `read_only_params` is `{ view_range mips; }`; a 2D array's adds `slices`; a cube array's adds `cubes`.
+`Traits::texture_params`, `Traits::image_2d_params`, … — an aggregate naming only the axes that shape has.
+A plain 2D texture's `texture_params` is `{ view_range mips; }`; a 2D array's adds `slices`; a cube array's adds `cubes`.
 Selecting a nonsensical axis, `.slices` on a non-array say, is a compile error rather than a silently-ignored field.
 A `view_range` is `{ int start = 0; int count = -1 }` where `count < 0` means "to the end", so the whole-axis default is `{}`.
 
-- **Natural views** — the texture's own dimension: `as_readonly_view(params = {})` on any shape,
-  `as_readwrite_view(params = {})` where `!Traits::is_multisampled`. The params carry the in-dimension
-  sub-selection: a mip range (sampled) or single mip (storage), an array-slice range, a cube range, or a
+- **Natural views** — the texture's own dimension: `as_texture_view(params = {})` on any shape,
+  `as_image_view(params = {})` where `!Traits::is_multisampled`. The params carry the in-dimension
+  sub-selection: a mip range (texture) or single mip (image), an array-slice range, a cube range, or a
   3D depth-slice window (`depth_slices`, D3D12's `FirstWSlice`/`WSize` — tracked outside the subresource
   range since a whole 3D mip is one subresource for hazard purposes).
 - **Reinterpreting views** — bind one slice / face / cube as a lower dimension, each with its own params
-  bag: `as_readonly_2d_view` / `as_readwrite_2d_view` (one slice/face → `Texture2D`), `as_readonly_1d_view`
-  / `as_readwrite_1d_view` (one slice of a 1D array → `Texture1D`), `as_readonly_cube_view` (one cube of a
-  cube array → `TextureCube`), and `as_readonly_2d_array_view` (a cube / cube array's faces as a flat
-  `Texture2DArray` — the sampled counterpart to how a cube's storage view already binds). These are what
+  bag: `as_texture_2d_view` / `as_image_2d_view` (one slice/face → `Texture2D`), `as_texture_1d_view`
+  / `as_image_1d_view` (one slice of a 1D array → `Texture1D`), `as_texture_cube_view` (one cube of a
+  cube array → `TextureCube`), and `as_texture_2d_array_view` (a cube / cube array's faces as a flat
+  `Texture2DArray` — the texture counterpart to how a cube's image view already binds). These are what
   make "slice 3 as `Texture2D`" distinct from a size-1 array window.
 
 Multisampled textures **are** sampleable (`Texture2DMS…`) — their params just have no separate mip axis
 (one mip level), and a multisampled cube samples as a `Texture2DMSArray` (there is no `TextureCubeMS`).
-Storage views never apply to MSAA (D3D12 forbids MSAA UAVs) and a cube is written as a 2D array (no cube
+Image views never apply to MSAA (D3D12 forbids MSAA UAVs) and a cube is written as a 2D array (no cube
 UAV).
 
-A bound texture's layout follows from its access class, via `shader_layout_of`: sampled → `texture_layout::shader_readonly`, storage → `shader_readwrite`.
+A bound texture's layout follows from its view's kind, via `shader_layout_of`: a texture → `texture_layout::shader_texture`, an image → `shader_image`.
 The [barriers](barriers.md) system transitions it for you.
 
 ### Render-target / depth-stencil views
@@ -215,16 +217,16 @@ So it does **not** erase to `raw_view`.
 `render_target_view` / `depth_stencil_view` (in [views.hh](../../src/shaped-graphics/resource/views.hh)) are plain value types holding the `raw_texture_handle`, so they keep the texture alive.
 Their getters are `texture()` / `dimension()` / `format()` / `range()` / `width()` / `height()`, and a backend consumes the typed view directly.
 
-The factories mirror the storage-view shape: a single mip level plus an array-slice range, 2D-shaped only.
+The factories mirror the image-view shape: a single mip level plus an array-slice range, 2D-shaped only.
 `as_render_target_view` / `as_depth_stencil_view` work on any 2D texture, cubes and MSAA included.
 `as_render_target_2d_view` / `as_depth_stencil_2d_view` bind one layer or cube face as a `Texture2D`.
-Unlike storage views, MSAA **is** allowed (`Texture2DMS…`).
+Unlike image views, MSAA **is** allowed (`Texture2DMS…`).
 The factory asserts the texture's usage (`render_target` / `depth_stencil`) and its format.
 A render target must be a renderable color format (`is_render_target_format` — non-depth, non-compressed); a depth-stencil target must be a depth format (`is_depth_format`).
 The rendering scope `cmd.raster.render_to` is what binds them — see [raster-pipeline](raster-pipeline.md).
 A backend lands these descriptors in its own non-shader-visible RTV/DSV heap, which is a bounded resource: creating one can fail where a shader-facing view cannot.
 
-Deferred: **aspect (depth/stencil) selection plus format reinterpretation** on sampled views, since depth-as-SRV needs a typeless resource.
+Deferred: **aspect (depth/stencil) selection plus format reinterpretation** on texture views, since depth-as-SRV needs a typeless resource.
 Also **texel buffers** — `Buffer<T>` / `samplerBuffer`, a format-decoded linear buffer.
 **Samplers** are supported but are not views, so they live outside this concept — see [bindings](bindings.md) and `sampler.hh`.
 

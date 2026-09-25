@@ -338,11 +338,10 @@ struct ensured_slot
     if (resized)
     {
         // UAV-written by whatever fills it, sampled by whatever reads it back — every temporal resource needs both.
-        auto const desc = sg::texture_2d_description{
-            .format = format,
-            .width = resolution[0],
-            .height = resolution[1],
-            .usage = sg::texture_usage::readonly_texture | sg::texture_usage::readwrite_texture};
+        auto const desc = sg::texture_2d_description{.format = format,
+                                                     .width = resolution[0],
+                                                     .height = resolution[1],
+                                                     .usage = sg::texture_usage::texture | sg::texture_usage::image};
 
         if (slot.texture.raw() != nullptr)
             slot.texture.raw()->expire();
@@ -398,7 +397,7 @@ plan_resources view_renderer::resolve(sg::command_list& cmd, render_plan const& 
                 {.format = t.format,
                  .width = t.resolution[0],
                  .height = t.resolution[1],
-                 .usage = sg::texture_usage::readonly_texture | sg::texture_usage::render_target});
+                 .usage = sg::texture_usage::texture | sg::texture_usage::render_target});
         }
         out.targets[i] = rec.composite;
     }

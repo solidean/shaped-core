@@ -103,7 +103,7 @@ ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - array bindings: partial fill, declared a
     tex_desc.dimension = sg::texture_dimension::d2;
     tex_desc.width = 4;
     tex_desc.height = 4;
-    tex_desc.usage = sg::texture_usage::readonly_texture | sg::texture_usage::copy_dst;
+    tex_desc.usage = sg::texture_usage::texture | sg::texture_usage::copy_dst;
     auto tex = ctx.persistent.create_raw_texture(tex_desc);
     REQUIRE(tex != nullptr);
 
@@ -132,7 +132,7 @@ ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - array bindings: partial fill, declared a
     auto tex_elements = cc::vector<sg::raw_view>();
     for (isize i = 0; i < 4; ++i)
         tex_elements.push_back(sg::vacant_view{});
-    tex_elements[1] = sg::texture_2d::from_raw(tex).as_readonly_view();
+    tex_elements[1] = sg::texture_2d::from_raw(tex).as_texture_view();
     auto const texs_nv = sg::named_view{.name = "Texs", .view = cc::move(tex_elements)};
     auto g2 = ctx.persistent.create_binding_group(group_layout2, cc::span<sg::named_view const>(&texs_nv, 1));
     REQUIRE(g2 != nullptr);
@@ -151,7 +151,7 @@ ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - array bindings: partial fill, declared a
         {.index = 1,
          .stages = sg::pipeline_stage_flag::compute,
          .access = sg::access_flag::shader_read,
-         .layout = sg::texture_layout::shader_readonly},
+         .layout = sg::texture_layout::shader_texture},
     };
     disp->compute.declare_array_buffer_access("Bufs", buf_access);
     disp->compute.declare_array_texture_access("Texs", tex_access);

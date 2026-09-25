@@ -240,7 +240,7 @@ cc::result<dx12_binding_group_handle> dx12_binding_group::create_resolved(dx12_c
                 {
                     group->referenced_textures.push_back(cc::move(dx));
                     group->texture_hazard_views.push_back(
-                        {group->referenced_textures.back(), tv->range, tv->access}); // → dispatch hazard declare
+                        {group->referenced_textures.back(), tv->range, tv->kind}); // → dispatch hazard declare
                 }
             }
             else

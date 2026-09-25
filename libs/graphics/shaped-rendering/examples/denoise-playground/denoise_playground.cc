@@ -100,11 +100,10 @@ struct view_images
 
 [[nodiscard]] sg::texture_2d make_image(sg::context& ctx, tg::vec2i extent)
 {
-    return ctx.persistent.create_texture_2d(
-        {.format = k_scene_format,
-         .width = extent[0],
-         .height = extent[1],
-         .usage = sg::texture_usage::readonly_texture | sg::texture_usage::readwrite_texture});
+    return ctx.persistent.create_texture_2d({.format = k_scene_format,
+                                             .width = extent[0],
+                                             .height = extent[1],
+                                             .usage = sg::texture_usage::texture | sg::texture_usage::image});
 }
 
 void resize_images(sg::context& ctx, view_images& v, tg::vec2i extent)
@@ -526,11 +525,11 @@ ASYNC_EXAMPLE("shaped-rendering/denoise-playground")
         {
             auto const group = ctx.transient.create_binding_group(*cmd, scene_layout,
                                                                   shaders::scene_bindings{
-                                                                      .gColor = images.color.as_readwrite_view(),
-                                                                      .gAlbedo = images.albedo.as_readwrite_view(),
-                                                                      .gNormal = images.normal.as_readwrite_view(),
-                                                                      .gDepth = images.depth.as_readwrite_view(),
-                                                                      .gMotion = images.motion.as_readwrite_view(),
+                                                                      .gColor = images.color.as_image_view(),
+                                                                      .gAlbedo = images.albedo.as_image_view(),
+                                                                      .gNormal = images.normal.as_image_view(),
+                                                                      .gDepth = images.depth.as_image_view(),
+                                                                      .gMotion = images.motion.as_image_view(),
                                                                   });
             cmd->compute.bind_pipeline(**scene_pipeline);
             cmd->compute.bind<shaders::scene_bindings>(*group);
@@ -572,9 +571,9 @@ ASYNC_EXAMPLE("shaped-rendering/denoise-playground")
         {
             auto const group = ctx.transient.create_binding_group(*cmd, compose_layout,
                                                                   shaders::compose_bindings{
-                                                                      .gRaw = images.color.as_readonly_view(),
-                                                                      .gDenoised = shown.as_readonly_view(),
-                                                                      .gTarget = images.composed.as_readwrite_view(),
+                                                                      .gRaw = images.color.as_texture_view(),
+                                                                      .gDenoised = shown.as_texture_view(),
+                                                                      .gTarget = images.composed.as_image_view(),
                                                                   });
             cmd->compute.bind_pipeline(**compose_pipeline);
             cmd->compute.bind<shaders::compose_bindings>(*group);
