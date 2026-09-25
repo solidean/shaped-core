@@ -111,6 +111,8 @@ The maintainer answers whenever, says so, and the agent runs `delta <name> --fin
   That is what makes "bulk the merge of `main`" safe on a follow-up review, where the resolutions are the only part of the merge that is the branch's work.
 - **A plain `ingest` never re-creates what a bulk claim covers.**
   It skips a new hunk lying wholly inside one, so re-running it after a head move keeps the decision the bulk recorded.
+- **A command's hint names the tool the way it was invoked.**
+  `next: uv run C:/work/shaped-core/review.py --dir <dir> ingest <name>` is what `init` prints when run from another repository, so a hint pastes as it stands wherever the tool was run from.
 - **A review is scratch, so nothing outside it may cite an entry.**
   Entry numbers, ask names and round numbers are addresses within one folder under `.tmp/` that is deleted, renumbered
   and re-ingested freely.

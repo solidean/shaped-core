@@ -29,6 +29,8 @@ class Context:
     repo: Path
     git: review.Git
     dir_override: Path | None = None
+    # How to run the tool again, as the user just did, for the commands a hint tells them to run next.
+    invocation: str = "uv run review.py"
 
     @classmethod
     def at(cls, home: Path, *, dir_override: Path | None = None) -> "Context":

@@ -2275,6 +2275,51 @@ def test_validate_checks_only_the_entries_it_is_given(root: Path) -> None:
     assert code != 0 and "040" in out, f"a selector matching nothing must say so: {out}"
 
 
+def test_a_hint_names_the_tool_the_way_it_was_invoked(root: Path) -> None:
+    """A `next:` line is pasted as it stands, and `uv run review.py` only works from inside the tool's own repository.
+
+    The tool reviews other repositories from their own checkout, where the script is a path somewhere else.
+    """
+    repo = root / "repo"
+    repo.mkdir()
+    git_init(repo)
+    commit(repo, "first", {"a.txt": "one\n"})
+    commit(repo, "second", {"a.txt": "two\n"})
+    script = REPO_ROOT / "review.py"
+    folder = root / "elsewhere"
+    done = subprocess.run([sys.executable, str(script), "--dir", str(folder), "init", "r", "--goal", "pr-comment",
+                           "--range", "HEAD~1..HEAD"], cwd=repo, capture_output=True, text=True, encoding="utf-8")
+    assert done.returncode == 0, done.stderr or done.stdout
+    hint = next((line for line in done.stdout.splitlines() if line.startswith("next:")), "")
+    assert hint == f"next: uv run {script.as_posix()} --dir {folder.as_posix()} ingest r", hint
+
+
+def test_coverage_reports_discharge_progress(root: Path) -> None:
+    """Gate 1 says every change has an id; the progress says how many an ask has accounted for yet."""
+    repo = root / "repo"
+    repo.mkdir()
+    git_init(repo)
+    commit(repo, "first", {"a.txt": numbered(3), "b.txt": numbered(3)})
+    commit(repo, "second", {"a.txt": numbered(6), "b.txt": numbered(5)})
+    cli = [sys.executable, str(REPO_ROOT / "review.py")]
+    for argv in (["init", "r", "--goal", "pr-comment", "--range", "HEAD~1..HEAD"], ["ingest", "r"]):
+        done = subprocess.run(cli + argv, cwd=repo, capture_output=True, text=True, encoding="utf-8")
+        assert done.returncode == 0, done.stderr or done.stdout
+
+    ledger = Ledger.load(repo / ".tmp" / "reviews" / "r" / "changes" / "ledger.jsonl")
+    ids = sorted(c.id for c in ledger.live())
+    assert len(ids) == 2, f"the fixture should ingest two changes, one per file: {ids}"
+    (repo / ".tmp" / "reviews" / "r" / "entries" / "050-x.md").write_text(
+        f"---\nid: 050\ntitle: x\n---\n\n## ask  ok\ndischarges: {ids[0]}\n\nFine?\n\n- radio: yes\n",
+        encoding="utf-8")
+
+    done = subprocess.run(cli + ["coverage", "r"], cwd=repo, capture_output=True, text=True, encoding="utf-8")
+    assert done.returncode == 0, done.stderr or done.stdout
+    assert "1/2 changes discharged" in done.stdout, done.stdout
+    done = subprocess.run(cli + ["coverage", "r", "--json"], cwd=repo, capture_output=True, text=True, encoding="utf-8")
+    assert json.loads(done.stdout)["discharged"] == 1, done.stdout
+
+
 def test_design_review_refuses_a_range(root: Path) -> None:
     """A design review has no changeset, so a range would be silently ignored rather than honoured."""
     repo = root / "repo"

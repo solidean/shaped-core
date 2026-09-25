@@ -99,6 +99,21 @@ def _home() -> Path:
         sys.exit(2)
 
 
+def _invocation(dir_arg: str | None) -> str:
+    """How to run this tool again from the same shell, for the hints commands print.
+
+    The script path as it was given, since `uv run review.py` only works from inside the tool's own repository,
+    and `--dir` when it was passed, since without it the next command looks for the review somewhere else.
+    """
+    def quoted(text: str) -> str:
+        return f'"{text}"' if any(c.isspace() for c in text) else text
+
+    words = ["uv", "run", quoted(Path(sys.argv[0]).as_posix())]
+    if dir_arg:
+        words += ["--dir", quoted(Path(dir_arg).as_posix())]
+    return " ".join(words)
+
+
 def main() -> None:
     _force_utf8_streams()
 
@@ -119,6 +134,7 @@ def main() -> None:
     review.console.configure("colored" if args.colored else "plain" if args.plain else "auto")
 
     ctx = cmd.Context.at(_home(), dir_override=Path(args.dir).resolve() if args.dir else None)
+    ctx.invocation = _invocation(args.dir)
     commands[args.command].run(args, ctx)
 
 
