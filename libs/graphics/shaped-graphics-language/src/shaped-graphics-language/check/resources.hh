@@ -67,6 +67,8 @@ struct sgl::check::storage_format_info
     cc::string_view name;
     /// WGSL's spelling, which drops the underscore and calls one float format `ufloat`.
     cc::string_view wgsl;
+    /// DXC's spelling for `[[vk::image_format]]`; empty for the one format SPIR-V has no name for.
+    cc::string_view spirv;
     /// How many channels a texel has, which is the width of the vector a load gives.
     i32 channels;
     /// What a channel reads as in the shader: a float for every normalized and float format.
@@ -85,39 +87,39 @@ inline constexpr auto k_sint = value_kind::scalar_int;
 inline constexpr auto k_uint = value_kind::scalar_uint;
 
 inline constexpr storage_format_info k_storage_formats[] = {
-    {"r8_unorm", "r8unorm", 1, k_float, false, false},
-    {"r8_snorm", "r8snorm", 1, k_float, false, false},
-    {"r8_uint", "r8uint", 1, k_uint, false, false},
-    {"r8_sint", "r8sint", 1, k_sint, false, false},
-    {"rg8_unorm", "rg8unorm", 2, k_float, false, false},
-    {"rg8_snorm", "rg8snorm", 2, k_float, false, false},
-    {"rg8_uint", "rg8uint", 2, k_uint, false, false},
-    {"rg8_sint", "rg8sint", 2, k_sint, false, false},
-    {"rgba8_unorm", "rgba8unorm", 4, k_float, true, false},
-    {"rgba8_snorm", "rgba8snorm", 4, k_float, true, false},
-    {"rgba8_uint", "rgba8uint", 4, k_uint, true, false},
-    {"rgba8_sint", "rgba8sint", 4, k_sint, true, false},
-    {"bgra8_unorm", "bgra8unorm", 4, k_float, false, false},
-    {"r16_float", "r16float", 1, k_float, false, false},
-    {"r16_uint", "r16uint", 1, k_uint, false, false},
-    {"r16_sint", "r16sint", 1, k_sint, false, false},
-    {"rg16_float", "rg16float", 2, k_float, false, false},
-    {"rg16_uint", "rg16uint", 2, k_uint, false, false},
-    {"rg16_sint", "rg16sint", 2, k_sint, false, false},
-    {"rgba16_float", "rgba16float", 4, k_float, true, false},
-    {"rgba16_uint", "rgba16uint", 4, k_uint, true, false},
-    {"rgba16_sint", "rgba16sint", 4, k_sint, true, false},
-    {"r32_float", "r32float", 1, k_float, true, true},
-    {"r32_uint", "r32uint", 1, k_uint, true, true},
-    {"r32_sint", "r32sint", 1, k_sint, true, true},
-    {"rg32_float", "rg32float", 2, k_float, true, false},
-    {"rg32_uint", "rg32uint", 2, k_uint, true, false},
-    {"rg32_sint", "rg32sint", 2, k_sint, true, false},
-    {"rgba32_float", "rgba32float", 4, k_float, true, false},
-    {"rgba32_uint", "rgba32uint", 4, k_uint, true, false},
-    {"rgba32_sint", "rgba32sint", 4, k_sint, true, false},
-    {"rgb10a2_unorm", "rgb10a2unorm", 4, k_float, false, false},
-    {"rg11b10_float", "rg11b10ufloat", 3, k_float, false, false},
+    {"r8_unorm", "r8unorm", "r8", 1, k_float, false, false},
+    {"r8_snorm", "r8snorm", "r8snorm", 1, k_float, false, false},
+    {"r8_uint", "r8uint", "r8ui", 1, k_uint, false, false},
+    {"r8_sint", "r8sint", "r8i", 1, k_sint, false, false},
+    {"rg8_unorm", "rg8unorm", "rg8", 2, k_float, false, false},
+    {"rg8_snorm", "rg8snorm", "rg8snorm", 2, k_float, false, false},
+    {"rg8_uint", "rg8uint", "rg8ui", 2, k_uint, false, false},
+    {"rg8_sint", "rg8sint", "rg8i", 2, k_sint, false, false},
+    {"rgba8_unorm", "rgba8unorm", "rgba8", 4, k_float, true, false},
+    {"rgba8_snorm", "rgba8snorm", "rgba8snorm", 4, k_float, true, false},
+    {"rgba8_uint", "rgba8uint", "rgba8ui", 4, k_uint, true, false},
+    {"rgba8_sint", "rgba8sint", "rgba8i", 4, k_sint, true, false},
+    {"bgra8_unorm", "bgra8unorm", "", 4, k_float, false, false},
+    {"r16_float", "r16float", "r16f", 1, k_float, false, false},
+    {"r16_uint", "r16uint", "r16ui", 1, k_uint, false, false},
+    {"r16_sint", "r16sint", "r16i", 1, k_sint, false, false},
+    {"rg16_float", "rg16float", "rg16f", 2, k_float, false, false},
+    {"rg16_uint", "rg16uint", "rg16ui", 2, k_uint, false, false},
+    {"rg16_sint", "rg16sint", "rg16i", 2, k_sint, false, false},
+    {"rgba16_float", "rgba16float", "rgba16f", 4, k_float, true, false},
+    {"rgba16_uint", "rgba16uint", "rgba16ui", 4, k_uint, true, false},
+    {"rgba16_sint", "rgba16sint", "rgba16i", 4, k_sint, true, false},
+    {"r32_float", "r32float", "r32f", 1, k_float, true, true},
+    {"r32_uint", "r32uint", "r32ui", 1, k_uint, true, true},
+    {"r32_sint", "r32sint", "r32i", 1, k_sint, true, true},
+    {"rg32_float", "rg32float", "rg32f", 2, k_float, true, false},
+    {"rg32_uint", "rg32uint", "rg32ui", 2, k_uint, true, false},
+    {"rg32_sint", "rg32sint", "rg32i", 2, k_sint, true, false},
+    {"rgba32_float", "rgba32float", "rgba32f", 4, k_float, true, false},
+    {"rgba32_uint", "rgba32uint", "rgba32ui", 4, k_uint, true, false},
+    {"rgba32_sint", "rgba32sint", "rgba32i", 4, k_sint, true, false},
+    {"rgb10a2_unorm", "rgb10a2unorm", "rgb10a2", 4, k_float, false, false},
+    {"rg11b10_float", "rg11b10ufloat", "r11g11b10f", 3, k_float, false, false},
 };
 
 /// The type a texel of `format` loads as and stores from: `float4` for `rgba8_unorm`, `float` for `r32_float`.

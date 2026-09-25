@@ -58,6 +58,8 @@ cc::string_view sgl::emit::to_string(error_kind kind)
         return "malformed-tree";
     case error_kind::not_core:
         return "not-core";
+    case error_kind::too_many_groups:
+        return "too-many-groups";
     }
     return "";
 }
