@@ -49,6 +49,14 @@ TEST("sg vulkan - access flags map one to one")
           == (VK_ACCESS_2_TRANSFER_READ_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT));
 }
 
+TEST("sg vulkan - a shader write also covers shader reads")
+{
+    // A dispatch writing a view it has just written reads it too, so the barrier between the two must make the
+    // first one's writes visible to reads, not only to writes.
+    CHECK(vulkan::vk_access2_from(sg::access_flag::shader_write)
+          == (VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_SHADER_READ_BIT));
+}
+
 TEST("sg vulkan - both storage layouts collapse onto GENERAL")
 {
     // Vulkan has no separate storage-image layout, so shader_image and general are the same image layout.
