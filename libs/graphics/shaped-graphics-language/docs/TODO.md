@@ -19,6 +19,8 @@ What the compiler carries today is the [spec](spec/_index.md); a construct it do
 - **Features used in a body.** Only a binding member uses a feature today, so a body's `require` can only declare one for its entry point (CHK-262).
   The first builtin or binding array that needs one in a body brings the use into the inlined entry point, and `feature-not-declared` then names the call chain down to it.
   A `require` inside a nested block, and `if feature f:` to branch on one, wait for that too.
+- **Features used through another symbol.** A binding's `required` counts only the uses resolved while its members compile, and `checker::compile` clears the grant around any symbol they demand.
+  No such symbol can hold a resource yet; once a type alias or a struct field can, its use has to reach every binding that names it.
 - **Features across a hot reload outside a `pipeline`.** A declared pipeline freezes its features, so a reload needing another one keeps what it had.
   A compute shader or a stage acquired on its own has no frozen part: its reload compiles, and its pipeline is then refused by the feature's name.
 - **Unsigned literals by suffix.** A literal takes a `uint` wherever one is expected (CHK-253), and `1u` is `unsupported-yet` (CHK-61).

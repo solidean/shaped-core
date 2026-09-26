@@ -458,7 +458,7 @@ A feature is what a device may lack, so using one makes a shader non-portable on
 * **CHK-259** A `require` at file scope grants its features to everything in the file ([why](why/checking.md#chk-259)).
 * **CHK-260** A `require` in a binding grants its features to that binding's members.
 * **CHK-261** A binding requires what its own `require` lines name and what its members use, and an entry point that lists it needs all of that of a device ([why](why/checking.md#chk-261)).
-* **CHK-262** An entry point declares a feature by a `require` of its file, of a binding it lists, or among the lines of its own body.
+* **CHK-262** An entry point declares a feature by a `require` of its file, of a binding it lists, or among the lines of its own body ([why](why/checking.md#chk-262)).
   A `require` inside a nested block is `unsupported-yet`.
 * **CHK-263** What an entry point needs of a device is what the bindings it lists require, never what it merely may use ([why](why/checking.md#chk-263)).
   It is judged once every body is checked, and a use is counted wherever it stands, reached or not.

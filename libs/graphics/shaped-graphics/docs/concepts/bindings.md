@@ -106,12 +106,14 @@ That equivalence is what lets a binding validate a bound view with no backend in
 ## Features
 
 **A form some device lacks is refused where it is lacking, and refused alike on every backend.**
-Three such forms are judged before any backend sees them, in [portability.cc](../../src/shaped-graphics/binding/impl/portability.cc):
+Some features are a grant a device may or may not make at runtime, such as `extended_image_formats`.
+Others no device of a backend has at all, such as `multisampled_array_textures` on webgpu, and a compiler may refuse to write a shader needing one for that backend.
+
+Most judgements are made before any backend sees the request, in [portability.cc](../../src/shaped-graphics/binding/impl/portability.cc), for example:
 
 - A compiled shader whose `required_features` names a feature the device lacks, and the refusal comes at pipeline creation, for every pipeline kind.
   Empty is the portable baseline and nullopt is unknown, which is not judged: a shader read from HLSL cannot say what it needs.
   An SGL shader states it, from the `require`s its entry point needs, and `ctx.missing_features(shader)` asks before building.
-
 - A texture with `image` usage, or an `image` binding, in a format outside `is_portable_image_format` needs `feature::extended_image_formats`.
   The portable set is core WebGPU's image formats, and the refusal comes at texture creation and at layout creation.
 - A 32-bit float view bound to a `filterable_float` binding needs `feature::float32_filtering`, and the refusal comes at group creation.
@@ -122,7 +124,7 @@ Three such forms are judged before any backend sees them, in [portability.cc](..
 
 The refusal is an error from each `try_` creation, and the `sg::exception` its throwing twin raises.
 
-`readwrite_image_formats` is still webgpu's alone to judge, at layout creation, because every other backend has it.
+A feature only one backend lacks may still be judged by that backend alone, at layout creation: `readwrite_image_formats` is webgpu's to judge, because every other backend has it.
 
 ## Array bindings
 

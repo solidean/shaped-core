@@ -301,6 +301,13 @@ The alternative, where the file's `require` is every entry point's floor, would 
 A binding is a layout the host binds whole, so what one of its members needs is needed wherever the binding is listed, read or not.
 Its own `require` is therefore a requirement of the binding and not only a grant to its members: a library that ships a binding says, in the binding, what a device must have to take it.
 
+## CHK-262
+
+A file's `require` grants everything in its file, and declares only for that file's entry points.
+A library whose file requires a feature says the file may use it, not that every shader listing one of its bindings must accept it.
+The binding's own `require` is how a library says that (CHK-261), so a user's entry point is never made non-portable by a line in a file it does not own.
+Letting a listed binding carry its needs to the entry point on its own would erase that difference, and a file-wide permission would silently become every user's requirement.
+
 ## CHK-263
 
 The floor is defined by what the language counts, never by what an optimizer happens to remove.
