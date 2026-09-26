@@ -269,6 +269,17 @@ Asserting on a *conflicting* claim costs nothing and turns an unexplainable imag
 Recommending free functions over methods because the checker had no method calls yet was called "a bad habit": "we can postpone or stub if we want to use things that are not implemented yet".
 Price each option on the language or API itself, and state the build plan separately: implement, stub behind a marked temporary, or defer.
 
+### A default is priced on the path callers actually take
+
+When generated code states a field on every path, the default only matters where a caller writes the value by hand, and that is the escape hatch rather than the design.
+A binding's `access` defaulting to `read` was raised because a hand-written image binding that forgot it would silently turn read-only:
+
+```raw
+hand-writing bindings is a very uncommon escape hatch. part of sgl's purpose is to auto-gen bindings
+```
+
+Name the default's exposure — which paths leave it unset — before offering to change its type or its value.
+
 ### "No callers in the repo" is not evidence of dead code
 
 A symbol in an exported header is reachable by consumers this tree does not contain; an unused-looking member there wants its *correctness* checked, not its existence questioned.
