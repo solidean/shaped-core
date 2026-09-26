@@ -466,9 +466,8 @@ type_id checker::check_member(function_scope& scope, ast::expr_id id, ast::membe
             if (type != error_type && is_resource(out.at(type).kind) && out.at(type).kind != type_kind::buffer
                 && !is_handed)
             {
-                unsupported(
-                    file, span_of(file, id),
-                    cc::format("{} as a value; hand it to a builtin, as in `DEBUG_load(t, xy, 0)`", out.name_of(type)));
+                unsupported(file, span_of(file, id),
+                            cc::format("{} as a value; call a builtin on it, as in `t.load(xy)`", out.name_of(type)));
                 return error_type;
             }
             return type;
@@ -760,7 +759,7 @@ type_id checker::check_call(function_scope& scope, ast::expr_id id, ast::call co
         }
         auto const result = resolve_overload(scope, id, call.callee, candidates, arguments, text);
         if (result != error_type)
-            judge_filtering(file, where, call.arguments);
+            judge_filtering(file, where, arguments.written);
         return result;
     }
 
@@ -879,7 +878,10 @@ type_id checker::check_dot_call(function_scope& scope, ast::expr_id id, ast::cal
                cc::format("{} has no member {}", out.name_of(receiver), name));
         return error_type;
     }
-    return resolve_overload(scope, id, call.callee, candidates, arguments, name, call_spelling::dot_call);
+    auto const result = resolve_overload(scope, id, call.callee, candidates, arguments, name, call_spelling::dot_call);
+    if (result != error_type)
+        judge_filtering(file, span_of(file, id), arguments.written);
+    return result;
 }
 
 type_id checker::resolve_overload(function_scope& scope,

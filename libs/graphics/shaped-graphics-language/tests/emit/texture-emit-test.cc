@@ -18,9 +18,9 @@ constexpr cc::string_view k_blur = "binding post:\n"
                                    "@compute(8, 8) fun blur(@thread_id id: int3){post}:\n"
                                    "    let xy = int2(id.x, id.y)\n"
                                    "    let uv = ((xy as float2) + float2(0.5, 0.5)) * post.texel_size\n"
-                                   "    let c = DEBUG_sample_level(post.src, uv, 0.0, post.bilinear)\n"
-                                   "    DEBUG_store(post.dst, xy, c)\n"
-                                   "    DEBUG_store(post.acc, xy, DEBUG_load(post.acc, xy) + c.x)\n";
+                                   "    let c = post.src.sample(uv, post.bilinear, level = 0.0)\n"
+                                   "    post.dst.store(xy, c)\n"
+                                   "    post.acc.store(xy, post.acc.load(xy) + c.x)\n";
 
 cc::string text_of(cc::string_view source, target t)
 {
@@ -135,7 +135,7 @@ TEST("sgl emit - a pixel stage samples with the level its derivatives pick")
                          "    color: float4\n"
                          "\n"
                          "@pixel fun ps(p: pixel_input){material} -> target:\n"
-                         "    let c = DEBUG_sample(material.albedo, p.uv, material.smp)\n"
+                         "    let c = material.albedo.sample(p.uv, material.smp)\n"
                          "    return {color = float4(c.x, c.y, c.z, 1.0)}\n";
     CHECK(text_of(lit, target::wgsl).contains("let c: vec3f = textureSample(material_albedo, material_smp, p.uv).xyz;\n"));
     CHECK(text_of(lit, target::hlsl_dx12)
@@ -145,15 +145,14 @@ TEST("sgl emit - a pixel stage samples with the level its derivatives pick")
 
 TEST("sgl emit - a size is one HLSL helper per texture type, declared once however often it is called")
 {
-    constexpr auto sized
-        = "binding set:\n"
-          "    a: texture_2d[float4]\n"
-          "    b: texture_2d[uint]\n"
-          "    c: out image_2d[.rgba8_unorm]\n"
-          "\n"
-          "@compute(8, 8) fun cs(@thread_id id: int3){set}:\n"
-          "    let s = DEBUG_size(set.a, 0) + DEBUG_size(set.a, 1) + DEBUG_size(set.b, 0) + DEBUG_size(set.c)\n"
-          "    DEBUG_store(set.c, s, float4(1.0, 1.0, 1.0, 1.0))\n";
+    constexpr auto sized = "binding set:\n"
+                           "    a: texture_2d[float4]\n"
+                           "    b: texture_2d[uint]\n"
+                           "    c: out image_2d[.rgba8_unorm]\n"
+                           "\n"
+                           "@compute(8, 8) fun cs(@thread_id id: int3){set}:\n"
+                           "    let s = set.a.size(0) + set.a.size(1) + set.b.size(0) + set.c.size()\n"
+                           "    set.c.store(s, float4(1.0, 1.0, 1.0, 1.0))\n";
     auto const hlsl = text_of(sized, target::hlsl_dx12);
     CHECK(hlsl.contains("int2 sgl_size(Texture2D<float4> t, int level)\n"
                         "{\n"
@@ -184,10 +183,10 @@ TEST("sgl emit - a helper is declared by the entry point that calls it, and by n
                          "    c: out image_2d[.rgba8_unorm]\n"
                          "\n"
                          "@compute(8, 8) fun sized(@thread_id id: int3){set}:\n"
-                         "    DEBUG_store(set.c, DEBUG_size(set.a, 0), float4(1.0, 1.0, 1.0, 1.0))\n"
+                         "    set.c.store(set.a.size(0), float4(1.0, 1.0, 1.0, 1.0))\n"
                          "\n"
                          "@compute(8, 8) fun plain(@thread_id id: int3){set}:\n"
-                         "    DEBUG_store(set.c, int2(id.x, id.y), float4(1.0, 1.0, 1.0, 1.0))\n";
+                         "    set.c.store(int2(id.x, id.y), float4(1.0, 1.0, 1.0, 1.0))\n";
     CHECK(text_of(two, target::hlsl_dx12).contains("int2 sgl_size(Texture2D<float4> t, int level)\n"));
 
     auto const second = emit_source(two, 1, target::hlsl_dx12);
@@ -206,7 +205,7 @@ TEST("sgl emit - a local named as a builtin the text calls is renamed, and the c
                                "@compute(8, 8) fun cs(@thread_id id: int3){set}:\n"
                                "    let xy = int2(id.x, id.y)\n"
                                "    let textureLoad = id.z\n"
-                               "    DEBUG_store(set.dst, xy, DEBUG_load(set.src, xy, textureLoad))\n";
+                               "    set.dst.store(xy, set.src.load(xy, textureLoad))\n";
     auto const wgsl = text_of(shadowing, target::wgsl);
     CHECK(wgsl.contains("    let textureLoad_: i32 = id.z;\n"));
     CHECK(wgsl.contains("    textureStore(set_dst, xy, vec4f(textureLoad(set_src, xy, textureLoad_)));\n"));
@@ -221,7 +220,7 @@ TEST("sgl emit - a local named as a builtin the text calls is renamed, and the c
                            "\n"
                            "@compute(8, 8) fun cs(@thread_id id: int3){set}:\n"
                            "    let sgl_size = int2(id.x, id.y)\n"
-                           "    DEBUG_store(set.c, DEBUG_size(set.a, 0) + sgl_size, float4(1.0, 1.0, 1.0, 1.0))\n";
+                           "    set.c.store(set.a.size(0) + sgl_size, float4(1.0, 1.0, 1.0, 1.0))\n";
     auto const hlsl = text_of(sized, target::hlsl_dx12);
     CHECK(hlsl.contains("    const int2 sgl_size_ = int2(id.x, id.y);\n"));
     CHECK(hlsl.contains("sgl_size(set_a, 0) + sgl_size_"));
@@ -235,8 +234,8 @@ TEST("sgl emit - an int or a uint image pads a narrow store with zeros of its ow
                               "\n"
                               "@compute(8, 8) fun cs(@thread_id id: int3){set}:\n"
                               "    let xy = int2(id.x, id.y)\n"
-                              "    DEBUG_store(set.i, xy, id.x)\n"
-                              "    DEBUG_store(set.u, xy, id.x as uint)\n";
+                              "    set.i.store(xy, id.x)\n"
+                              "    set.u.store(xy, id.x as uint)\n";
     auto const wgsl = text_of(integers, target::wgsl);
     CHECK(wgsl.contains("    textureStore(set_i, xy, vec4i(id.x, 0, 0, 0));\n"));
     CHECK(wgsl.contains("    textureStore(set_u, xy, vec4u(u32(id.x), 0u, 0u, 0u));\n"));
@@ -282,7 +281,7 @@ TEST("sgl emit - WGSL lets an implicit-derivative sample stand in non-uniform co
                               "@pixel fun ps(p: pixel_input){material} -> target:\n"
                               "    let mut c = float4(0.0, 0.0, 0.0, 1.0)\n"
                               "    if p.uv.x < 0.5:\n"
-                              "        c = DEBUG_sample(material.albedo, p.uv, material.smp)\n"
+                              "        c = material.albedo.sample(p.uv, material.smp)\n"
                               "    return {color = c}\n";
     CHECK(text_of(branched, target::wgsl)
               .contains("// Generated: the SGL source is what to edit.\n"

@@ -381,9 +381,9 @@ struct link:
     @position p: hpos4
 
 @vertex fun vs(v: vin){tex} -> link:
-    DEBUG_store(tex.dst, int2(0, 0), float4(1.0, 1.0, 1.0, 1.0))
+    tex.dst.store(int2(0, 0), float4(1.0, 1.0, 1.0, 1.0))
     return { p = hpos4(..v.p, 1.0) }
 )");
     CHECK(error.contains("stage-not-allowed"));
-    CHECK(error.contains("DEBUG_store is @stages without it"));
+    CHECK(error.contains("store is @stages without it"));
 }

@@ -434,7 +434,7 @@ fun f() -> float:
   A function without it may be reached from every stage, and any other argument is `invalid-attribute-arguments`.
 * **CHK-193** An entry point whose inlined body reaches a function whose `@stages` leaves out the entry point's stage is `stage-not-allowed`, at that call.
   It is judged per entry point once everything is inlined, since a function in between says nothing about where it is reached from.
-  `DEBUG_sample` is `@stages(.pixel)`: its level comes from derivatives, which only a pixel stage has on every target.
+  `sample` without a `level` is `@stages(.pixel)`: its level comes from derivatives, which only a pixel stage has on every target.
 * **CHK-93** Breaking one of CHK-88 to CHK-92 is `invalid-entry-point`, and its detail names the rule.
 
 ## Pipelines

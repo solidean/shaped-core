@@ -38,28 +38,28 @@ cc::string pixel(cc::string_view functions, cc::string_view body)
 
 TEST("sgl check - a pixel-only builtin is refused in any other stage, after inlining")
 {
-    constexpr auto sample = "    let c = DEBUG_sample(tex.src, float2(0.5, 0.5), tex.smp)\n";
+    constexpr auto sample = "    let c = tex.src.sample(float2(0.5, 0.5), tex.smp)\n";
     CHECK(reports_for(pixel("", cc::format("{}    return {{color = c}}\n", sample))) == "");
-    CHECK(reports_for(compute("", cc::format("{}    DEBUG_store(tex.dst, int2(0, 0), c)\n", sample)))
-              .contains("stage-not-allowed"));
-    CHECK(reports_for(compute("", cc::format("{}    DEBUG_store(tex.dst, int2(0, 0), c)\n", sample)))
-              .contains("cs is a compute entry point, and DEBUG_sample is @stages without it"));
+    CHECK(
+        reports_for(compute("", cc::format("{}    tex.dst.store(int2(0, 0), c)\n", sample))).contains("stage-not-allowed"));
+    CHECK(reports_for(compute("", cc::format("{}    tex.dst.store(int2(0, 0), c)\n", sample)))
+              .contains("cs is a compute entry point, and sample is @stages without it"));
 
     // Reached through a function that says nothing about stages, it is still the entry point that decides.
-    constexpr auto shade = "fun shade(){tex} -> float4 => DEBUG_sample(tex.src, float2(0.5, 0.5), tex.smp)\n\n";
+    constexpr auto shade = "fun shade(){tex} -> float4 => tex.src.sample(float2(0.5, 0.5), tex.smp)\n\n";
     CHECK(reports_for(pixel(shade, "    return {color = shade()}\n")) == "");
-    CHECK(reports_for(compute(shade, "    DEBUG_store(tex.dst, int2(0, 0), shade())\n")).contains("stage-not-allowed"));
+    CHECK(reports_for(compute(shade, "    tex.dst.store(int2(0, 0), shade())\n")).contains("stage-not-allowed"));
 }
 
 TEST("sgl check - @stages restricts a program's own function the same way")
 {
     constexpr auto lit = "@stages(.pixel) fun lit(c: float4) -> float4 => c * 0.5\n\n";
     CHECK(reports_for(pixel(lit, "    return {color = lit(float4(1.0, 1.0, 1.0, 1.0))}\n")) == "");
-    CHECK(reports_for(compute(lit, "    DEBUG_store(tex.dst, int2(0, 0), lit(float4(1.0, 1.0, 1.0, 1.0)))\n"))
+    CHECK(reports_for(compute(lit, "    tex.dst.store(int2(0, 0), lit(float4(1.0, 1.0, 1.0, 1.0)))\n"))
               .contains("lit is @stages without it"));
 
     constexpr auto either = "@stages(.vertex, .compute) fun half(c: float4) -> float4 => c * 0.5\n\n";
-    CHECK(reports_for(compute(either, "    DEBUG_store(tex.dst, int2(0, 0), half(float4(1.0, 1.0, 1.0, 1.0)))\n")) == "");
+    CHECK(reports_for(compute(either, "    tex.dst.store(int2(0, 0), half(float4(1.0, 1.0, 1.0, 1.0)))\n")) == "");
 
     CHECK(reports_for(pixel("@stages(pixel) fun f() -> float => 1.0\n\n", "    return {color = float4(1.0, 1.0, 1.0, "
                                                                           "1.0)}\n"))
@@ -92,7 +92,7 @@ TEST("sgl check - @stages is judged wherever the stage comes from")
                           "fun outer(c: float4) -> float4 => inner(c)\n"
                           "\n";
     auto const reports
-        = reports_for(compute(deep, "    DEBUG_store(tex.dst, int2(0, 0), outer(float4(1.0, 1.0, 1.0, 1.0)))\n"));
+        = reports_for(compute(deep, "    tex.dst.store(int2(0, 0), outer(float4(1.0, 1.0, 1.0, 1.0)))\n"));
     CHECK(reports.contains("user:[lit(c)] cs is a compute entry point, and lit is @stages without it"));
     CHECK(reports_for(pixel(deep, "    return {color = outer(float4(1.0, 1.0, 1.0, 1.0))}\n")) == "");
 }

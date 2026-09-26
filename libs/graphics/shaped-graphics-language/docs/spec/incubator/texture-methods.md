@@ -16,8 +16,8 @@ binding frame:
     sky: texture_cube[float3]
 
 let color = frame.sky.sample(dir)
-let base = frame.sky.sample_level(dir, 0.0)
-let other = frame.sky.sample(dir, sampler = point_clamp, level = 0.0)
+let base = frame.sky.sample(dir, level = 0.0)
+let other = frame.sky.sample(dir, smp = point_clamp, level = 0.0)
 ```
 
 **The functions are ordinary builtins, and the methods fall out of UFCS.**
@@ -25,11 +25,8 @@ A default argument reads the texture's default sampler, and a named argument ove
 
 ```sgl sketch
 @builtin fun sample(tex: texture_2d[T], coord: float2, smp: sampler = tex.default_sampler) -> T
-@builtin fun sample(tex: texture_2d[T], coord: float2, level: float, smp: sampler = tex.default_sampler) -> T
+@builtin fun sample(tex: texture_2d[T], coord: float2, smp: sampler = tex.default_sampler, .level: float) -> T
 ```
-
-`level` is probably keyword-only, so `sample(uv, 0.0)` cannot be misread as a sampler or a bias.
-The free spelling `sample(sky, dir)` stays valid, since UFCS is sugar over it.
 
 **Texels have explicit `load` and `store`, and a subscript is sugar on top.**
 A subscript is variadic, and takes named and optional arguments like a call, so a level has a place: `t[xy]`, `t[xy, level = 2]`, `img[xy] = v`.
@@ -39,7 +36,8 @@ A resource is not a runtime value on any target, so a function taking one is ins
 
 ## What it touches
 
-* Nothing of the call model: methods through UFCS, defaults, named and named-only parameters are [CHK-247](../semantics/checking.md#calls-and-overloads) and its neighbours.
+* Nothing of the call model, which is [CHK-247](../semantics/checking.md#calls-and-overloads) and its neighbours.
+* A default that reads another parameter's binding, `tex.default_sampler`.
 * Generics over a texture's component type, `texture_2d[T] -> T`.
 * The builtin registry: records whose parameters are resources, and a default reading another parameter.
 * Bindings: `@sampler(name)` on a texture member, naming a static sampler at file scope or in the same binding ([bindings.md](../bindings.md#samplers)).
@@ -50,14 +48,14 @@ A resource is not a runtime value on any target, so a function taking one is ins
 * A subscript is an index expression whose list may hold any argument, named ones included.
 * `sampler` as a keyword denotes a type in a type position, so `smp: sampler = …` is a parameter like any other.
 
-## Until then
+## What exists
 
-The first texture functions are stubs named `DEBUG_…`, which is SGL's marker for an in-progress stand-in.
-They are free functions in the argument order the methods will have — texture, coordinate, level, sampler — so replacing them is a rename.
+`sample`, `load`, `store` and `size` are builtins of the prelude, for 2D shapes, called as methods through UFCS.
+A sample takes its sampler as an argument, since no texture has a default one yet, and a named-only `level` picks the overload that samples at a level.
+`load` and `size` default their level to 0.
 
 ## Open
 
 * Whether `@sampler` may name a dynamic sampler member, and what the host then binds.
 * What a texture without `@sampler` does when sampled without one: an error at the call, or at the declaration.
-* Whether `sample` and `sample_level` are one function with an optional `level`, since a pixel stage alone may leave it out.
 * The full set: gradients, bias, gathers, comparison, sizes, and what each is called.

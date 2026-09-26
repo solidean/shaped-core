@@ -387,7 +387,7 @@ struct checker
     /// The settings of a `sampler name:` block; a setting that is wrong is reported and left at its default.
     [[nodiscard]] sampler_state compile_sampler(i32 file, ast::sampler_decl const& s);
     /// Reports a call that hands over an `@unfilterable` texture member together with a sampler member that filters.
-    void judge_filtering(i32 file, source_span call, ast::range_of<ast::argument> arguments);
+    void judge_filtering(i32 file, source_span call, cc::span<written_argument const> arguments);
     /// A builtin's parameter type, where an image names the texel it reads or writes: `out image_2d[float4]`.
     [[nodiscard]] type_id resolve_pattern_type(i32 file, ast::expr_id expr);
     /// True where an argument of type `argument` may stand for a parameter of type `parameter` (CHK-70, CHK-207).

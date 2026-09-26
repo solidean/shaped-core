@@ -325,16 +325,16 @@ sampler_state checker::compile_sampler(i32 file, ast::sampler_decl const& s)
     return state;
 }
 
-void checker::judge_filtering(i32 file, source_span call, ast::range_of<ast::argument> arguments)
+void checker::judge_filtering(i32 file, source_span call, cc::span<written_argument const> arguments)
 {
     // CHK-210: an @unfilterable texture is sampled through a sampler that never filters.
     auto texture = cc::string();
     auto sampler = cc::string();
-    for (auto const& a : ast_of(file).at(arguments))
+    for (auto const& a : arguments)
     {
-        if (!ast::is_valid(a.value))
+        if (!ast::is_valid(a.expr) || a.splat_member >= 0)
             continue;
-        auto const& where = out.files[file].target_at(a.value);
+        auto const& where = out.files[file].target_at(a.expr);
         if (where.kind != target_kind::binding_member)
             continue;
         auto const& m = out.at(out.bindings[out.at(where.symbol).info].members)[where.index];

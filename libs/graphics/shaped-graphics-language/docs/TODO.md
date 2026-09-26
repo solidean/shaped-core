@@ -11,12 +11,12 @@ What the compiler carries today is the [spec](spec/_index.md); a construct it do
 - **Binary literals.** `0b1010`, the same way and for the same reason: `unsupported-yet: a binary literal`.
 - **Values as type arguments.** `image_2d[.rgba8_unorm]` takes an enum case, and the checker reads exactly that argument today, as a special case of image types.
   The general feature is a type parameterized on an integer or an enum value, which math templated on a dimension wants as well, and it lets code branch on the value.
-- **Texture methods.** The `DEBUG_sample`, `DEBUG_sample_level`, `DEBUG_load`, `DEBUG_store` and `DEBUG_size` builtins stand in for them, for 2D shapes only.
-  The intended shape is methods through UFCS, with default and named arguments ([texture-methods.md](spec/incubator/texture-methods.md)).
+- **Texture methods past 2D.** `sample`, `load`, `store` and `size` cover 2D shapes, with the sampler always passed.
+  A default sampler per texture, the other shapes and subscripts are [texture-methods.md](spec/incubator/texture-methods.md).
 - **Feature opt-in.** Every form [bindings.md](spec/bindings.md#features) refuses by feature is waiting for it.
   A function declares the features it needs ([feature-levels.md](spec/incubator/feature-levels.md)).
-- **Unsigned literals.** A `uint` is reached through `as` today, `1 as uint`, since a literal with a suffix is `unsupported-yet` (CHK-61).
-  Whether `1u` exists or a literal takes the type it is asked for is the question [literal-types.md](spec/incubator/literal-types.md) holds.
+- **Unsigned literals by suffix.** A literal takes a `uint` wherever one is expected (CHK-253), and `1u` is `unsupported-yet` (CHK-61).
+  Whether the suffix is needed at all is the question [literal-types.md](spec/incubator/literal-types.md) holds.
 - **File-scope samplers.** A `sampler name:` at file scope is a pipeline layout's `sg::bound_sampler`, which vulkan and metal do not bind yet (sg's TODO.md).
   Once they do, it needs an HLSL address outside every group's space, and the generated `acquire_pipeline` to fill `static_samplers`.
   It will join the pipeline layout of every entry point that uses it, transitively; until it lands, it is `unsupported-yet`, never refused as invalid.
