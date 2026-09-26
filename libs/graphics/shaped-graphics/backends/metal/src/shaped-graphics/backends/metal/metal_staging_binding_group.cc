@@ -168,7 +168,7 @@ cc::result<sg::binding_group_handle> metal_staging_binding_group::mint()
         if (!is_array)
         {
             // The bound view is gone by now — a snapshot keeps the resource, not what it was bound through — so the
-            // access class comes from the layout's binding type instead.
+            // view class comes from the layout's binding instead.
             // The two agree by construction: `sg::accepts` is what let the view be staged here at all.
             auto const bound_as = sg::view_class_of(b);
 

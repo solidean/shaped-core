@@ -281,7 +281,7 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   It is load-bearing on the wasm builds without threads, where every one of those atomics keeps its interlock for a concurrency that cannot happen.
 - **Views.** See [concepts/views.md](concepts/views.md). Still deferred:
   - **texel buffer views** — a format-decoded linear buffer (`Buffer<T>` / `samplerBuffer`);
-  - **reflection-driven validation** of a view's `T` and access class against the shader;
+  - **reflection-driven validation** of a view's `T` and view class against the shader;
   - the `raw_view` **name** is provisional (`raw_view` vs `raw_binding`).
 - **An optional clear value on `texture_description`.**
   D3D12 takes a `D3D12_CLEAR_VALUE` at resource creation and uses it to pick a fast-clear path.
@@ -407,7 +407,7 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   - **Per-test attribution of WebGPU errors.**
     One arriving after the test that caused it lands on the driver; an error scope per invocation would name the test.
   - **A stream whose source has nothing ready cannot be waited for** when a list touches its resource, so that list sees what landed so far and a warning.
-  - **Storage views ignore `depth_slice_range`**, which WebGPU cannot express.
+  - **Image views ignore `depth_slice_range`**, which WebGPU cannot express.
   - **emdawnwebgpu passes `WGPU_QUERY_SET_INDEX_UNDEFINED` to JS as 4294967295**, which wgpu refuses and Dawn accepts.
     Each query set's last slot is a discard target until that is fixed — docs/bugs-external/webgpu-timestamp-write-index-sentinel.
   - **A native Dawn build**, an additive CMake gate over the same sources.

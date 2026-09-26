@@ -32,7 +32,7 @@ sg::binding_group_layout_handle group_of(cc::span<sg::binding const> bindings,
                                                cc::move(declared), cc::move(declared_samplers));
 }
 
-sg::binding uniform(cc::string_view name, u32 index)
+sg::binding constants(cc::string_view name, u32 index)
 {
     return {.name = cc::string::create_copy_of(name), .index = index, .type = sg::binding_type::constants_buffer};
 }
@@ -40,8 +40,8 @@ sg::binding uniform(cc::string_view name, u32 index)
 
 TEST("sg binding-group-layout hash is over content, not over identity")
 {
-    sg::binding const a[] = {uniform("Params", 0), uniform("Extra", 1)};
-    sg::binding const same[] = {uniform("Params", 0), uniform("Extra", 1)};
+    sg::binding const a[] = {constants("Params", 0), constants("Extra", 1)};
+    sg::binding const same[] = {constants("Params", 0), constants("Extra", 1)};
 
     // Two independently built descriptions, no shared storage: equal content must give one hash.
     CHECK(sg::impl::binding_group_layout_hash(a, {}) == sg::impl::binding_group_layout_hash(same, {}));
@@ -49,13 +49,13 @@ TEST("sg binding-group-layout hash is over content, not over identity")
 
 TEST("sg binding-group-layout hash separates every field it covers")
 {
-    sg::binding const base[] = {uniform("Params", 0)};
+    sg::binding const base[] = {constants("Params", 0)};
     auto const key = sg::impl::binding_group_layout_hash(base, {});
 
-    sg::binding const renamed[] = {uniform("Other", 0)};
+    sg::binding const renamed[] = {constants("Other", 0)};
     CHECK(sg::impl::binding_group_layout_hash(renamed, {}) != key);
 
-    sg::binding const moved[] = {uniform("Params", 1)};
+    sg::binding const moved[] = {constants("Params", 1)};
     CHECK(sg::impl::binding_group_layout_hash(moved, {}) != key);
 
     auto retyped = base[0];
@@ -75,8 +75,8 @@ TEST("sg binding-group-layout hash separates every field it covers")
     CHECK(sg::impl::binding_group_layout_hash(cc::span<sg::binding const>(&write_only, 1), {}) != key);
 
     // Order is part of the layout: slot i is a different slot from slot j.
-    sg::binding const forward[] = {uniform("A", 0), uniform("B", 1)};
-    sg::binding const backward[] = {uniform("B", 1), uniform("A", 0)};
+    sg::binding const forward[] = {constants("A", 0), constants("B", 1)};
+    sg::binding const backward[] = {constants("B", 1), constants("A", 0)};
     CHECK(sg::impl::binding_group_layout_hash(forward, {}) != sg::impl::binding_group_layout_hash(backward, {}));
 }
 
@@ -96,8 +96,8 @@ TEST("sg binding-group-layout hash covers the static samplers baked into it")
 
 TEST("sg pipeline-layout hash reaches through its groups' content")
 {
-    sg::binding const bindings[] = {uniform("Params", 0)};
-    sg::binding const other[] = {uniform("Params", 3)};
+    sg::binding const bindings[] = {constants("Params", 0)};
+    sg::binding const other[] = {constants("Params", 3)};
 
     // Two DIFFERENT handles over the same content — the case the old pointer-identity key got wrong.
     auto const desc = sg::pipeline_layout_description{.groups = {group_of(bindings)}};
@@ -117,7 +117,7 @@ TEST("sg pipeline-layout hash reaches through its groups' content")
 
 TEST("sg pipeline-layout hash covers static samplers and inline constants")
 {
-    sg::binding const bindings[] = {uniform("Params", 0)};
+    sg::binding const bindings[] = {constants("Params", 0)};
     auto const bare = sg::pipeline_layout_description{.groups = {group_of(bindings)}};
 
     auto sampled = sg::pipeline_layout_description{.groups = {group_of(bindings)}};
@@ -137,7 +137,7 @@ TEST("sg pipeline-layout hash covers static samplers and inline constants")
 
 TEST("sg layout carries the hash it was created with")
 {
-    sg::binding const bindings[] = {uniform("Params", 0)};
+    sg::binding const bindings[] = {constants("Params", 0)};
     auto const layout = group_of(bindings);
 
     CHECK(layout->structural_hash() == sg::impl::binding_group_layout_hash(bindings, {}));
@@ -147,8 +147,8 @@ TEST("sg - a group bound at the wrong slot is refused by naming both layouts' bi
 {
     // Layouts are compatible only if they are the same object, and a hash names no shader.
     // The bindings' names do: an SGL group's are `<binding>_<member>`, so each side says which declaration it came from.
-    auto const frame_bindings = cc::vector<sg::binding>{uniform("frame_camera", 0), uniform("frame_time", 1)};
-    auto const work_bindings = cc::vector<sg::binding>{uniform("work_values", 0)};
+    auto const frame_bindings = cc::vector<sg::binding>{constants("frame_camera", 0), constants("frame_time", 1)};
+    auto const work_bindings = cc::vector<sg::binding>{constants("work_values", 0)};
     auto const frame = group_of(frame_bindings);
     auto const work = group_of(work_bindings);
 

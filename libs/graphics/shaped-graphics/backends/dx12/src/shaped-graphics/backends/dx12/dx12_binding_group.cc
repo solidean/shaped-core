@@ -262,7 +262,7 @@ cc::result<dx12_binding_group_handle> dx12_binding_group::create_resolved(dx12_c
                 {
                     group->referenced.push_back(cc::move(dx));
                     group->hazard_views.push_back(
-                        {group->referenced.back(), bv.bound_as}); // (buffer, access class) → dispatch hazard declare
+                        {group->referenced.back(), bv.bound_as}); // (buffer, view class) → dispatch hazard declare
                 }
             }
         }

@@ -132,7 +132,7 @@ TEST("sg bindings - compiled_shader holds reflection")
     });
 
     // The behavioral payload of reflection: the declared binding accepts a matching bound view (a
-    // structured buffer carries no block_size, unlike a uniform block).
+    // structured buffer carries no block_size, unlike a constants block).
     REQUIRE(shader.bindings.size() == 1);
     auto const& b = shader.bindings[0];
     CHECK(!b.block_size.has_value());

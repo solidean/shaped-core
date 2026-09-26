@@ -225,7 +225,7 @@ An `@inline` binding anywhere but the last position of a list is a normal error,
 A group-scope static sampler takes a slot like any sampler, since sg matches it by name to a sampler binding.
 
 **SGL states every fact of a binding itself.**
-Dimension, sample type, image format, storage access and sampler kind are in the declaration, and `sgl describe` hands each to the host.
+Dimension, sample type, image format, access and sampler kind are in the declaration, and `sgl describe` hands each to the host.
 The generated group's table is what the host builds its layout from, so that is where every fact reaches sg.
 A compiled shader only has to fit that layout, and sg's fit check compares a binding's name, slot, count and kind — never the facts beyond them.
 The WGSL SGL writes states all of them, which a test holds to the generated table; HLSL states the dimension, and the vulkan text an image's format as `[[vk::image_format]]`.

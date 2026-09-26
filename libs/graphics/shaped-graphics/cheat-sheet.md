@@ -492,8 +492,8 @@ tex.as_render_target_2d_view({.slice=2})       // array/cube -> one layer/face a
 sg::view_element<T>          // concept: T is `byte`, or sizeof(T) % 4 == 0 (GPUs load DWORD-aligned)
 sg::constants_element<T>       // concept: view_element + size multiple of 16 and <= 64 KiB (excludes byte)
 sg::constants_buffer_view<T>          // constants block of T   (cbuffer/UBO)          — view_class::constants
-sg::readonly_buffer_view<T>         // read array of T      (SRV / read SSBO)      — view_class::readonly  (T=byte → raw)
-sg::readwrite_buffer_view<T>        // rw array of T        (UAV / rw SSBO)        — view_class::readwrite (T=byte → raw)
+sg::readonly_buffer_view<T>         // read array of T      (SRV / read SSBO)      — view_class::readonly  (T=byte → bytes)
+sg::readwrite_buffer_view<T>        // rw array of T        (UAV / rw SSBO)        — view_class::readwrite (T=byte → bytes)
 // each holds a raw_buffer_handle + range; pure value (no GPU alloc). Made via buffer.as_*() above.
 sg::texture_view<VT>         // sampled texture (SRV); VT = texture_view_traits<Dim>  — view_class::texture
 sg::image_view<VT, F>        // storage image (UAV) of texel format F (the binding contract); VT: no cube/MS — view_class::image

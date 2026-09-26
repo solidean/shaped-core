@@ -1009,7 +1009,7 @@ void metal_command_list::raster_draw_indexed(draw_indexed_config const& config)
 
 void metal_command_list::declare_bound_groups(pipeline_stage_flags stages)
 {
-    // **Each binding is declared under its own access class**, which is what makes a read after a read free.
+    // **Each binding is declared under its own view class**, which is what makes a read after a read free.
     // Declaring `shader_read | shader_write` for everything instead made each op meet the previous one's unordered
     // write, so a draw loop over one readonly group emitted one barrier per draw.
     // libs/graphics/shaped-graphics/docs/concepts/barriers.md is explicit that a bind emits nothing, and that reads do

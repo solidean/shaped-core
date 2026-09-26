@@ -397,7 +397,7 @@ void create_buffer_view(ID3D12Device* device, sg::raw_buffer_view const& view, D
     case sg::view_class::acceleration_structure:
         CC_UNREACHABLE("acceleration-structure views are created via create_accel_view, not create_buffer_view");
     }
-    CC_UNREACHABLE("unhandled view access class");
+    CC_UNREACHABLE("unhandled view view class");
 }
 
 void create_null_view(ID3D12Device* device, sg::binding const& binding, D3D12_CPU_DESCRIPTOR_HANDLE dst)

@@ -98,7 +98,7 @@ VkImageView vulkan_image_view_cache::acquire_attachment(sg::raw_texture_handle c
     auto const& vk_texture = static_cast<vulkan_texture const&>(*texture);
 
     // The identity of an attachment view is its resource plus everything that reaches vkCreateImageView.
-    // An attachment is never a shader view, so the two access-class-carrying fields keep their defaults.
+    // An attachment is never a shader view, so the two view-class-carrying fields keep their defaults.
     auto const key = vulkan_image_view_key{.texture_identity = vk_texture._identity,
                                            .dimension = dimension,
                                            .format = format,

@@ -108,7 +108,7 @@ That equivalence is what lets a binding validate a bound view with no backend in
 **A form some device lacks is refused where it is lacking, and refused alike on every backend.**
 Two such forms are judged before any backend sees them, in [portability.cc](../../src/shaped-graphics/binding/impl/portability.cc):
 
-- A storage texture, or a storage binding, in a format outside `is_portable_image_format` needs `feature::extended_image_formats`.
+- A texture with `image` usage, or an `image` binding, in a format outside `is_portable_image_format` needs `feature::extended_image_formats`.
   The portable set is core WebGPU's image formats, and the refusal comes at texture creation and at layout creation.
 - A 32-bit float view bound to a `filterable_float` binding needs `feature::float32_filtering`, and the refusal comes at group creation.
   A view of format `undefined` reads as its texture's own format, so that is the format judged.

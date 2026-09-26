@@ -21,7 +21,7 @@
 class sg::backend::metal::metal_binding_group final : public sg::binding_group
 {
 public:
-    /// One scalar binding's buffer, under the access class its bound view carries.
+    /// One scalar binding's buffer, under the view class its bound view carries.
     ///
     /// **The class is what keeps a read after a read free.** A declare naming `shader_read | shader_write` for every
     /// bound resource makes each draw meet the previous draw's unordered write, so a loop that only ever reads still

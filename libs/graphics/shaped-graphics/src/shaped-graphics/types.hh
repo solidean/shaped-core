@@ -45,7 +45,7 @@ enum class sg::buffer_usage : sg::u32
     vertex_buffer,           // Vk VERTEX / WGPU VERTEX
     index_buffer,            // Vk INDEX / WGPU INDEX
     constants_buffer,        // constant buffer: Vk UNIFORM / WGPU UNIFORM (size-capped)
-    readonly_buffer,         // read-only structured/raw SRV: Vk STORAGE / WGPU STORAGE; DX12 no flag
+    readonly_buffer,         // read-only structured/bytes SRV: Vk STORAGE / WGPU STORAGE; DX12 no flag
     readwrite_buffer,        // UAV: Vk STORAGE / WGPU STORAGE; DX12 ALLOW_UNORDERED_ACCESS
     indirect_command_buffer, // Vk INDIRECT / WGPU INDIRECT
 

@@ -8,8 +8,8 @@ It is a pure value, produced by a `buffer.as_*()` factory.
 
 ## Typed by the element type
 
-A buffer view is `<access>_buffer_view<T>`.
-The **access class** is the type: `constants_buffer_view` / `readonly_buffer_view` / `readwrite_buffer_view`.
+A buffer view is `<class>_buffer_view<T>`.
+The **view class** is the type: `constants_buffer_view` / `readonly_buffer_view` / `readwrite_buffer_view`.
 `T` is the array's element type (`readonly_buffer_view<particle>`) or the block type (`constants_buffer_view<globals>`).
 There is no intermediate "shape" wrapper: the byte-addressed case is simply `T = byte`, the degenerate element at stride 1.
 `T` must satisfy the `view_element` concept — `byte`, or `sizeof(T) % 4 == 0` — because GPUs load at 4-byte (DWORD) alignment.
@@ -34,10 +34,8 @@ That one is a runtime assert, since the offset is a value.
 The vocabulary is grounded in concepts common to HLSL / GLSL / Slang / MSL / WGSL, since our baseline shading language is undecided and no one API's names should leak into the surface.
 A buffer binding varies on two axes the view captures:
 
-- **Access class** (`view_class`): `constants` (a small read-only block — cbuffer / UBO), `readonly`
-  (read storage — SRV / read SSBO), `readwrite` (read-write storage — UAV / read-write SSBO). Mirrors
-  [`buffer_usage`](../../src/shaped-graphics/types.hh)'s `constants_buffer` / `readonly_buffer` /
-  `readwrite_buffer`.
+- **View class** (`view_class`): `constants` (a small read-only block — cbuffer / UBO), `readonly` (read storage — SRV / read SSBO), `readwrite` (read-write storage — UAV / read-write SSBO).
+  It mirrors [`buffer_usage`](../../src/shaped-graphics/types.hh)'s `constants_buffer` / `readonly_buffer` / `readwrite_buffer`.
 - **Layout** (`view_shape`, derived from `T`): `constants_block`, `structured` (array strided by
   `sizeof(T)`), or `bytes` (byte-addressed, `T = byte`).
 
@@ -242,5 +240,5 @@ Also **texel buffers** — `Buffer<T>` / `samplerBuffer`, a format-decoded linea
 - [views.hh](../../src/shaped-graphics/resource/views.hh) — the view types (shader-facing views plus `render_target_view` / `depth_stencil_view`), `view_class` / `view_shape`, and `raw_view`.
 - [buffer.hh](../../src/shaped-graphics/resource/buffer.hh) — the typed `buffer<T>.as_*()` view factories (raw_buffer itself has only the byte-level `as_raw_*`).
 - [bindings](bindings.md) — the schema half: which `binding_type` a view satisfies.
-- [barriers](barriers.md) — the layout a bound view's access implies.
+- [barriers](barriers.md) — the layout a bound view's class implies.
 - [memory](memory.md) — the resource-backing model views sit on top of.

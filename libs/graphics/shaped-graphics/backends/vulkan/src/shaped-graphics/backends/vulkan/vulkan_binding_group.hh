@@ -12,14 +12,14 @@
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/resource/views.hh> // sg::view_class
 
-/// A bound buffer paired with the access class it is used as — the backend-typed input to the dispatch hazard declares.
+/// A bound buffer paired with the view class it is used as — the backend-typed input to the dispatch hazard declares.
 struct sg::backend::vulkan::vulkan_hazard_view
 {
     vulkan_buffer_handle buffer;
     sg::view_class bound_as;
 };
 
-/// A bound texture paired with the subresource range + access class it is used as.
+/// A bound texture paired with the subresource range + view class it is used as.
 /// The texture analogue of vulkan_hazard_view, declared for layout transitions at dispatch.
 struct sg::backend::vulkan::vulkan_texture_hazard_view
 {
@@ -120,7 +120,7 @@ public:
     vulkan_descriptor_range range;                         // this group's descriptors within the heap
     cc::vector<vulkan_buffer_handle> referenced;           // keeps the bound buffers alive while the group lives
     cc::vector<vulkan_texture_handle> referenced_textures; // keeps the bound textures alive while the group lives
-    cc::vector<vulkan_hazard_view> hazard_views;           // (buffer + access class) — declared for hazards at dispatch
+    cc::vector<vulkan_hazard_view> hazard_views;           // (buffer + view class) — declared for hazards at dispatch
     cc::vector<vulkan_texture_hazard_view> texture_hazard_views; // (texture + range + access) — declared at dispatch
 
     // Array bindings (count > 1) are not auto-tracked: their elements appear here instead of in the hazard vectors,

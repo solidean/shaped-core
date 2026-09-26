@@ -37,7 +37,7 @@ enum class sg::feature
     /// WebGPU core has no binding arrays at all, so a bindless renderer asks once rather than finding out at layout creation.
     binding_arrays,
 
-    /// A storage texture may be `read_write` in any image format, not only r32float / r32uint / r32sint.
+    /// An image may be `read_write` in any image format, not only r32float / r32uint / r32sint.
     /// WebGPU core allows read-write on those three alone, and its `texture-formats-tier2` lifts that; write-only and read-only work everywhere.
     readwrite_image_formats,
 
@@ -46,7 +46,7 @@ enum class sg::feature
     /// Without it, binding such a view to a `filterable_float` binding is refused on every backend.
     float32_filtering,
 
-    /// A storage texture may use a format outside `sg::is_portable_image_format`, such as `r8_unorm` or `rgb10a2_unorm`.
+    /// An image may use a format outside `sg::is_portable_image_format`, such as `r8_unorm` or `rgb10a2_unorm`.
     /// `bgra8_unorm` is among them, and it is the one each API asks for on its own.
     /// WebGPU grants them with `texture-formats-tier1` and `bgra8unorm-storage`.
     /// Vulkan grants them with `shaderStorageImageExtendedFormats` plus `VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT` on `B8G8R8A8_UNORM`.

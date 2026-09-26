@@ -205,7 +205,7 @@ void vulkan_command_list::compute_dispatch(int x, int y, int z)
             if (view.buffer != nullptr)
                 track_buffer_access(*view.buffer, sg::pipeline_stage_flag::compute, sg::shader_access_of(view.bound_as));
 
-        // Bound textures also transition to the layout their access class needs (a sampled texture to
+        // Bound textures also transition to the layout their view class needs (a sampled texture to
         // shader_texture, a storage texture to shader_image) — the inferred layout is shader_layout_of.
         for (auto const& tv : bound_group->texture_hazard_views)
             (void)track_texture_access(*tv.texture, tv.range, sg::pipeline_stage_flag::compute,

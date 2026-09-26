@@ -70,14 +70,14 @@ INVOCABLE_TEST("sg error handling - buffer view factories validate usage and bou
     CHECK_ASSERTS(sg::buffer<u32>::from_raw(ro).as_readonly_buffer({.offset = -1, .size = 1}));   // negative offset
 }
 
-INVOCABLE_TEST("sg error handling - uniform view requires 256-byte-aligned offset", (sg::context_handle const& ctx))
+INVOCABLE_TEST("sg error handling - constants view requires 256-byte-aligned offset", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
 
     auto ub = ctx->persistent.create_raw_buffer(1024, sg::buffer_usage::constants_buffer);
     REQUIRE(ub != nullptr);
 
-    // A uniform block offset must be 256-byte aligned (element 8 of a 16-byte block -> byte 128).
+    // A constants block offset must be 256-byte aligned (element 8 of a 16-byte block -> byte 128).
     CHECK_ASSERTS(sg::buffer<u32[4]>::from_raw(ub).as_constants_buffer(8));
 }
 

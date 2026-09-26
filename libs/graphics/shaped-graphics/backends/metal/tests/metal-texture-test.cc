@@ -58,7 +58,7 @@ TEST("sg metal - copy usage needs no metal bit")
     CHECK(mtl::texture_usage_of(sg::texture_usage::texture) == MTL::TextureUsageShaderRead);
     CHECK(mtl::texture_usage_of(sg::texture_usage::render_target) == MTL::TextureUsageRenderTarget);
 
-    // A read-write texture is readable too — Metal spells the two bits separately where sg has one usage.
+    // An image is readable too — Metal spells the two bits separately where sg has one usage.
     CHECK(mtl::texture_usage_of(sg::texture_usage::image) == (MTL::TextureUsageShaderRead | MTL::TextureUsageShaderWrite));
 }
 
