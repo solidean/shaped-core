@@ -92,14 +92,11 @@ namespace sgl::test
                                                 cc::span<check::module_file const> files,
                                                 test_options const& options = {});
 
-/// Removes from `diagnostics` each one a test's `@expect(error = …)` or `@expect(warning = …)` names, and reports an
-/// expectation nothing met as `unmet-expectation` (CHK-232).
-/// Only a diagnostic inside the test counts, from its keyword to the end of its body, so one outside is never taken.
+/// Removes from `diagnostics` every one inside a test that has an `@expect(error = …)` or `@expect(warning = …)`, and
+/// reports each such expectation that none of them met as `unmet-expectation` (CHK-232).
+/// Inside is from the test's keyword to the end of its body, so a diagnostic outside is never taken.
 /// A test that expects diagnostics is judged by them alone, and `run_tests` leaves it out.
 void contain_expected(check::checked_module const& m, cc::vector<check::located_diagnostic>& diagnostics);
-
-/// True where `text` is `pattern`, in which `*` stands for any run of characters.
-[[nodiscard]] bool matches_glob(cc::string_view pattern, cc::string_view text);
 
 /// A result that is no pass as the diagnostic `test-failed` at its test, with one related note per narrowed part.
 [[nodiscard]] check::located_diagnostic diagnostic_of(check::checked_module const& m, test_result const& r);

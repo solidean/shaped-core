@@ -119,6 +119,22 @@ void checker::check_test(i32 index)
     notes[info].is_body_sound = error_count() == errors_before;
 }
 
+bool checker::has_syntax_error_in(i32 file, source_span extent) const
+{
+    auto const is_inside = [&](diagnostic const& d)
+    {
+        return d.level != severity::warning && d.where.offset >= extent.offset
+            && d.where.offset < extent.offset + extent.length;
+    };
+    for (auto const& d : file_of(file).diagnostics)
+        if (is_inside(d))
+            return true;
+    for (auto const& d : ast_of(file).diagnostics)
+        if (is_inside(d))
+            return true;
+    return false;
+}
+
 cc::vector<test_expectation> checker::expectations_of(i32 file, ast::range_of<ast::attribute> attributes)
 {
     auto const& ast = ast_of(file);
@@ -146,11 +162,10 @@ cc::vector<test_expectation> checker::expectations_of(i32 file, ast::range_of<as
                 result.push_back(
                     {.kind = case_name == "fail" ? expectation_kind::fail : expectation_kind::assert_, .where = where});
             else if ((name == "error" || name == "warning") && literal != nullptr
-                     && literal->kind == ast::literal_kind::quoted)
+                     && literal->kind == ast::literal_kind::quoted && text_of(file, where).size() > 2)
             {
                 auto pattern = text_of(file, where);
-                if (pattern.size() >= 2)
-                    pattern = pattern.subview({.offset = 1, .size = pattern.size() - 2});
+                pattern = pattern.subview({.offset = 1, .size = pattern.size() - 2});
                 result.push_back({.kind = name == "error" ? expectation_kind::error : expectation_kind::warning,
                                   .pattern = cc::string(pattern),
                                   .where = where});

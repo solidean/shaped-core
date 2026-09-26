@@ -1248,6 +1248,10 @@ void checker::flatten_test(i32 index)
     // by value: flattening appends to the module's vectors
     auto const test = out.tests[index];
     auto const info = out.at(test.symbol).info;
+    // A test that expects a diagnostic is never run (CHK-232), and one whose text an earlier phase found an error in has
+    // been reported already: flattening either could only add a second diagnostic to the first.
+    if (test.expects_diagnostics() || has_syntax_error_in(test.file, test.extent))
+        return;
     if (!notes[info].is_body_sound || !inlines_whole(test.symbol))
         return;
 

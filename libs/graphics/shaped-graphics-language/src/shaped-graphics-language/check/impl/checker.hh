@@ -319,6 +319,8 @@ struct checker
     void check_test(i32 index);
     /// The flat tree of test `index`, when it checked soundly and all it reaches inlines whole (flatten.cc).
     void flatten_test(i32 index);
+    /// True where the parser or the AST pass reported an error inside `extent` of `file`.
+    [[nodiscard]] bool has_syntax_error_in(i32 file, source_span extent) const;
     /// The statement that is the last code line of `statements`, through the last branch of an `if`, a loop's body and
     /// the last arm of a `case`; `none` for an empty list.
     [[nodiscard]] ast::stmt_id last_code_line(i32 file, ast::range_of<ast::stmt_id> statements) const;

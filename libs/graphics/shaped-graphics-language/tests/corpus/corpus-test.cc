@@ -1,7 +1,6 @@
 #include "../check/check-test-support.hh"
 
 #include <clean-core/algorithm/sort.hh>
-#include <clean-core/common/utility.hh>
 #include <shaped-graphics-language/driver/compile_to_text.hh>
 #include <shaped-graphics-language/driver/test_source.hh>
 #include <shaped-graphics-language/emit/emit.hh>
@@ -44,17 +43,7 @@ cc::vector<sgl_corpus_file> corpus_files()
         auto const relative = fs::relative(e.path(), root, ec).generic_string();
         out.push_back({.path = cc::string(e.path().string().c_str()), .relative_path = cc::string(relative.c_str())});
     }
-    cc::sort(out,
-             [](sgl_corpus_file const& a, sgl_corpus_file const& b)
-             {
-                 auto const x = cc::string_view(a.relative_path);
-                 auto const y = cc::string_view(b.relative_path);
-                 auto const n = cc::min(x.size(), y.size());
-                 for (auto i = isize(0); i < n; ++i)
-                     if (x[i] != y[i])
-                         return x[i] < y[i];
-                 return x.size() < y.size();
-             });
+    cc::sort(out, [](sgl_corpus_file const& a, sgl_corpus_file const& b) { return a.relative_path < b.relative_path; });
     return out;
 }
 } // namespace

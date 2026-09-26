@@ -47,10 +47,15 @@ TEST("sgl expect - an expectation nothing meets is an error, and a diagnostic ou
     CHECK(outcome_of("fun f() -> int => 1.5\n@expect(error = \"type-mismatch\") test 1 < 2\n")
           == "type-mismatch user:[1.5] expected int, got float\n"
              "unmet-expectation user:[\"type-mismatch\"] no error of kind type-mismatch stands in this test\n");
-    // a warning is no error, and the other way round
+    // a warning is no error, and the other way round; the warning is still the test's, as every diagnostic in it is
     CHECK(outcome_of("@expect(error = \"no-effect\") test:\n    1 + 2\n    true\n")
-          == "no-effect user:[1 + 2]\n"
-             "unmet-expectation user:[\"no-effect\"] no error of kind no-effect stands in this test\n");
+          == "unmet-expectation user:[\"no-effect\"] no error of kind no-effect stands in this test\n");
+    // CHK-232: one expected error brings others with it, and the test takes them all
+    CHECK(outcome_of("@expect(error = \"unknown-name\") test:\n    let x = missing\n    x + 1\n    true\n") == "");
+    // CHK-231: an empty kind can meet nothing, so it is refused where it is written
+    CHECK(outcome_of("@expect(error = \"\") test 1 < 2\n").starts_with("invalid-attribute-arguments"));
+    // `?` stands for one character, as `*` stands for a run of them
+    CHECK(outcome_of("@expect(error = \"unknown-nam?\") test missing < 1\n") == "");
     CHECK(outcome_of("@expect(maybe) test 1 < 2\n")
           == "invalid-attribute-arguments user:[maybe] @expect names what the test does: .fail, .assert, error = "
              "\"kind\" "

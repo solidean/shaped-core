@@ -21,3 +21,8 @@ fun exposed(){frame} -> float => frame.exposure
 @expect(warning = "no-effect") test:
     1 + 2
     true
+
+// a test that expects an error takes every diagnostic in it, and the unreachable line after the jump is among them
+@expect(error = "jump-without-target") test:
+    break
+    true

@@ -1,6 +1,7 @@
 #include "run_tests.hh"
 
 #include <clean-core/string/format.hh>
+#include <clean-core/string/glob.hh>
 #include <shaped-graphics-language/legalize/impl/walk.hh>
 
 using namespace sgl;
@@ -317,23 +318,6 @@ cc::vector<test_result> sgl::test::run_tests(checked_module const& m,
     return results;
 }
 
-bool sgl::test::matches_glob(cc::string_view pattern, cc::string_view text)
-{
-    if (pattern.empty())
-        return text.empty();
-    if (pattern.front() == '*')
-    {
-        for (auto i = isize(0); i <= text.size(); ++i)
-            if (matches_glob(pattern.subview({.start = 1, .end = pattern.size()}),
-                             text.subview({.start = i, .end = text.size()})))
-                return true;
-        return false;
-    }
-    return !text.empty() && pattern.front() == text.front()
-        && matches_glob(pattern.subview({.start = 1, .end = pattern.size()}),
-                        text.subview({.start = 1, .end = text.size()}));
-}
-
 void sgl::test::contain_expected(checked_module const& m, cc::vector<located_diagnostic>& diagnostics)
 {
     for (auto const& test : m.tests)
@@ -345,22 +329,25 @@ void sgl::test::contain_expected(checked_module const& m, cc::vector<located_dia
         auto const is_inside = [&](located_diagnostic const& d)
         { return d.file == test.file && d.what.where.offset >= begin && d.what.where.offset < end; };
 
+        // Every diagnostic inside the test is its own: one expected error usually brings others with it, and the test
+        // exists to show the one it names is reported, whatever else is.
+        auto captured = cc::vector<located_diagnostic>();
+        for (auto const& d : diagnostics)
+            if (is_inside(d))
+                captured.push_back(d);
+        diagnostics.remove_all_where(is_inside);
+
         for (auto const& e : test.expectations)
         {
             if (e.kind != expectation_kind::error && e.kind != expectation_kind::warning)
                 continue;
             auto const wants_warning = e.kind == expectation_kind::warning;
-            auto const is_expected = [&](located_diagnostic const& d)
-            {
-                return is_inside(d) && (d.what.level == severity::warning) == wants_warning
-                    && matches_glob(e.pattern, to_string(d.what.kind));
-            };
             auto is_met = false;
-            for (auto const& d : diagnostics)
-                is_met = is_met || is_expected(d);
-            if (is_met)
-                diagnostics.remove_all_where(is_expected);
-            else
+            for (auto const& d : captured)
+                is_met = is_met
+                      || ((d.what.level == severity::warning) == wants_warning
+                          && cc::glob_matches(e.pattern, to_string(d.what.kind), cc::glob_option::text));
+            if (!is_met)
                 diagnostics.push_back({
                     .what = {.kind = diagnostic_kind::unmet_expectation,
                              .level = default_severity_of(diagnostic_kind::unmet_expectation),

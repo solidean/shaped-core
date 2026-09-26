@@ -58,3 +58,12 @@ TEST("sgl driver - a const that did not check fails what reads it silently, and 
     REQUIRE(entry.has_error());
     CHECK(entry.error() == "e.sgl:1:11: error: unknown-name: nope\n");
 }
+
+TEST("sgl driver - a test an earlier phase found an error in is never run")
+{
+    // CHK-230: it would otherwise pass, beside the error that says its text is not what it seems
+    auto const tested = sgl::test_source("test 1 == 1:\n    true\n", "g.sgl");
+    CHECK(tested.errors == "g.sgl:1:12: error: too-many-arguments\n");
+    CHECK(tested.test_count == 1);
+    CHECK(tested.tests_run == 0);
+}
