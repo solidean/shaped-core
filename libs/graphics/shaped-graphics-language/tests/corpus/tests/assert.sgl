@@ -6,16 +6,15 @@ fun half_of_positive(x: float) -> float:
 
 test half_of_positive(4.0) == 2.0
 
+// a test that is to stop at an assert cannot pass by accident, so it needs no last check
 @expect(.assert) test:
-    half_of_positive(-1.0) < 0.0
-    true // the assert inside is what this test is about
+    half_of_positive(-1.0)
 
 @expect(.fail) test 2 < 1
 
 // several expectations each hold of the one run
 @expect(.fail, .assert) test:
     half_of_positive(-1.0) < 0.0
-    true // the assert inside is what this test is about
 
 // an entry point may assert too, and no target writes it
 struct frag:

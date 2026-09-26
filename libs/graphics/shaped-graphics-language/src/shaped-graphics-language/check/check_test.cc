@@ -112,7 +112,13 @@ void checker::check_test(i32 index)
     }
     auto const type = ast::is_valid(value) ? out.files[file].type_at(value) : type_id::none;
     auto const bool_type = type_of_builtin(builtins::k_bool, file, test.where);
-    if (type != error_type && (type != bool_type || !is_valid(type)))
+    // A test that is to fail or to stop at an assert cannot pass vacuously, so it needs no last check; and a test with
+    // no statement was reported where it was parsed.
+    auto is_fail_closed = false;
+    for (auto const& e : out.tests[index].expectations)
+        is_fail_closed = is_fail_closed || e.kind == expectation_kind::fail || e.kind == expectation_kind::assert_;
+    auto const is_empty = ast.at(body.statements).empty();
+    if (!is_fail_closed && !is_empty && type != error_type && (type != bool_type || !is_valid(type)))
         report(diagnostic_kind::test_must_end_in_check, file, ast::is_valid(last) ? span_of(file, last) : test.where,
                "the last line of a test is a check; end in `true // why` where its asserts are what it checks");
 

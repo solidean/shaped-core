@@ -60,6 +60,10 @@ TEST("sgl check - a test ends in a check")
     CHECK(reports_for("test:\n    let b = 1 < 2\n    if b:\n        b\n    else:\n        let y = 2\n")
               .starts_with("test-must-end-in-check user:[let y = 2]"));
     CHECK(reports_for("test:\n    let b = 1 < 2\n    if b:\n        let y = 2\n    else:\n        not b\n") == "");
+    // a test that is to fail or to stop at an assert cannot pass vacuously, and an empty one was reported already
+    CHECK(reports_for("fun f(x: float) -> float:\n    assert x > 0.0\n    return x\n@expect(.assert) test:\n    f -1.0\n")
+          == "");
+    CHECK(reports_for("test\n") == ""); // `expected-body` is the AST pass's, and the check pass adds nothing
     // a line that does not check is reported once, as what it is
     CHECK(reports_for("test missing == 1\n") == "unknown-name user:[missing] missing\n");
 }

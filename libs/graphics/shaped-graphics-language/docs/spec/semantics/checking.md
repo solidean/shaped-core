@@ -128,6 +128,7 @@ enum light_kind:
 * **CHK-226** The last code line of a test is a check, or it is `test-must-end-in-check`.
   The last code line is the last statement of its body, through the last branch of an `if`, the body of a loop and the last arm of a `case`.
   A test whose asserts are what it checks ends in `true // why`.
+  A test that expects `.fail` or `.assert` is exempt, since it cannot pass without its run failing, and so is a test with no statement, which the AST pass reported.
 * **CHK-227** `assert condition` takes a `bool`, in a test or anywhere else; a message is `unsupported-yet`.
 * **CHK-228** A test reads nothing of the function it stands in: a parameter, a local or a binding member of it is `test-captures-runtime-value`, since the test runs on its own.
   Those names are still visible, so they hide what the module has of the name; a `const` is no value of a run and may be read.
