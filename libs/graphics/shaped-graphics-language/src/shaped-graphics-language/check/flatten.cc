@@ -310,7 +310,9 @@ struct flattener
             for (auto const& b : current()->bound)
                 if (b.where == where)
                     return is_valid(b.literal) ? again(b.literal, id) : local_ref(b.local, id);
-            if (where.kind == target_kind::symbol && c.out.at(where.symbol).kind == symbol_kind::constant)
+            // a const that did not check has no value, and its name already has the error type (CHK-19)
+            if (where.kind == target_kind::symbol && c.out.at(where.symbol).kind == symbol_kind::constant
+                && c.out.at(where.symbol).state == symbol_state::checked)
                 return constant_value(type, id, c.out.constants[c.out.at(where.symbol).info]);
             return fail();
         }
