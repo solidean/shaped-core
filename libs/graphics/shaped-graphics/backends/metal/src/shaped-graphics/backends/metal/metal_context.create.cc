@@ -56,7 +56,8 @@ cc::result<sg::context_handle> sg::create_metal_context(backend::metal::metal_co
     {
         return cc::error(cc::format(
             "the metal backend needs macOS {0} / iOS {0} or newer for the Metal 4 API; this system reports {1}",
-            k_required_macos_major, to_string(NS::ProcessInfo::processInfo()->operatingSystemVersionString())));
+            k_required_macos_major,
+            backend::metal::to_string(NS::ProcessInfo::processInfo()->operatingSystemVersionString())));
     }
 
     auto* device = MTL::CreateSystemDefaultDevice();
@@ -65,7 +66,7 @@ cc::result<sg::context_handle> sg::create_metal_context(backend::metal::metal_co
 
     if (!device->supportsFamily(MTL::GPUFamilyMetal4))
     {
-        auto const name = to_string(device->name());
+        auto const name = backend::metal::to_string(device->name());
         device->release();
         return cc::error(cc::format("'{}' is not in the Metal 4 GPU family, which this backend requires — it needs "
                                     "Apple silicon, M1 or A14 and newer",
