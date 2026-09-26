@@ -41,3 +41,9 @@ fun sum(p: pair) -> float => 0.0
 
 test pair(1.0, 2.0).sum() == 3.0
 test sum(pair(1.0, 2.0)) == 3.0
+
+// an operand between two links of a chain keeps the type its first link gave it
+fun between(x: float) -> bool => x < 1 < 2
+
+test between(0.5)
+test 0.5 < 1 < 2

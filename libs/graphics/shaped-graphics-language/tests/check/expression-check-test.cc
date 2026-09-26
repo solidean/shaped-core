@@ -425,3 +425,23 @@ TEST("sgl check - a call that matches nothing keeps why each candidate did not, 
     CHECK(misses[1].argument == 1);
     CHECK(misses[1].parameter == 1);
 }
+
+TEST("sgl check - a literal argument of a call that matches nothing is reported as a literal")
+{
+    CHECK(reports_for("fun f(a: int) -> int => a\nfun g() -> int => f((1, 2))\n")
+          == "no-matching-overload user:[f((1, 2))] f(a literal)\n");
+    CHECK(reports_for("struct s:\n    a: float\nfun f(x: s, k: bool) -> float => x.a\nfun g() -> float => f({a = 1.0}, "
+                      "2)\n")
+          == "no-matching-overload user:[f({a = 1.0}, 2)] f(a literal, int)\n");
+}
+
+TEST("sgl check - a constructor is an edge of the call graph, so a loop through a field's default is recursion")
+{
+    CHECK(reports_for("struct s:\n    a: int = f()\nfun f() -> int => s().a\n").contains("recursive-call"));
+}
+
+TEST("sgl check - a splat spreads a struct with fields, and a value with none is refused")
+{
+    CHECK(reports_for("struct e:\n    x: float\nfun f() -> float2 => float2(..void, 1.0, 2.0)\n")
+          == "type-mismatch user:[..void] void has no fields a splat could spread\n");
+}

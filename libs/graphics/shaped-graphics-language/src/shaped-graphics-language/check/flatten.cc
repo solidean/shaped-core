@@ -307,7 +307,8 @@ struct flattener
     /// and it stands wherever it is named, since naming one has no effect.
     [[nodiscard]] bool is_resource_member(flat_expr_id id) const
     {
-        return is_valid(id) && entry.at(id).node.is<flat_binding_member>() && is_resource(c.out.at(entry.at(id).type).kind);
+        return is_valid(id) && entry.at(id).node.is<flat_binding_member>()
+            && is_resource(c.out.at(entry.at(id).type).kind);
     }
 
     /// A value that is read more than once and evaluated once, where it stands.

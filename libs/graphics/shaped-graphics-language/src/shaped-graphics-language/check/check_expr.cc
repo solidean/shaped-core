@@ -567,7 +567,7 @@ call_arguments checker::check_arguments(function_scope& scope, ast::range_of<ast
             unsupported(file, where, "a splat outside a constructor call");
             result.is_poisoned = true;
         }
-        else if (out.at(type).is_opaque)
+        else if (out.at(type).is_opaque || out.at(out.at(type).members).empty())
         {
             report(diagnostic_kind::type_mismatch, file, where,
                    cc::format("{} has no fields a splat could spread", out.name_of(type)));
@@ -675,7 +675,11 @@ cc::string checker::call_text(cc::string_view spelling, call_arguments const& ar
             text += ", ";
         if (!arguments.names[i].empty())
             text.appendf("{} = ", arguments.names[i]);
-        text += out.name_of(arguments.types[i]);
+        // a tuple or an object literal has no type until the parameter it meets gives it one
+        if (arguments.literals[i] >= 0)
+            text += "a literal";
+        else
+            text += out.name_of(arguments.types[i]);
     }
     text += ")";
     return text;
@@ -963,9 +967,10 @@ type_id checker::resolve_overload(function_scope& scope,
     commit_literals(scope, arguments, out.at(info.parameters), chosen_match.slots);
     if (chosen_symbol.role == function_role::constructor)
         set_type(file, callee, info.result);
-    if (is_valid(out.at(chosen).intrinsic) || out.at(chosen).role == function_role::constructor)
+    if (is_valid(out.at(chosen).intrinsic))
         return info.result;
 
+    // A construction is written where it stands, and the defaults of its fields with it, so what they call is reached.
     note_program_call(scope, chosen, where);
     return info.result;
 }
@@ -1064,7 +1069,9 @@ cc::optional<i32> checker::literal_chain(i32 file, type_id to, i32 literal, i32&
             continue;
         if (demand(candidate, file, {}) != symbol_state::checked)
             continue;
-        if (auto m = match(file, candidate, literals[literal]); m.has_value())
+        // by value: matching may compile a body that shapes literals of its own, and `literals` then moves
+        auto const arguments = literals[literal];
+        if (auto m = match(file, candidate, arguments); m.has_value())
             matches.push_back(cc::move(m.value()));
     }
     auto const best = best_of(cc::move(matches));
@@ -1372,8 +1379,11 @@ type_id checker::check_chain(function_scope& scope, ast::expr_id id, ast::compar
             continue;
         type_id const pair[] = {types[i], types[i + 1]};
         auto const spelling = text_of(file, file_of(file).at(operators[i]).where);
-        ast::expr_id const both[] = {operands[i], operands[i + 1]};
+        // An operand between two links has the type its first link gave it, so only the new one converts.
+        ast::expr_id const both[] = {i == 0 ? operands[0] : ast::expr_id::none, operands[i + 1]};
         auto const chosen = resolve_operator(file, where, spelling, pair, both);
+        if (is_valid(chosen) && ast::is_valid(operands[i + 1]))
+            types[i + 1] = out.files[file].type_at(operands[i + 1]);
         if (is_valid(chosen) && out.functions[out.at(chosen).info].result != bool_type && bool_type != error_type)
             report(diagnostic_kind::type_mismatch, file, where,
                    cc::format("a comparison in a chain is a bool, and operator {} gives {}", spelling,
