@@ -7,7 +7,7 @@ using namespace cc::primitive_defines;
 namespace
 {
 // The legend: LSP's standard types, so every theme colours them.
-// A custom type would go uncoloured until a theme opted in; the two custom modifiers are styled by the extension instead.
+// A custom type would go uncoloured until a theme opted in; the one custom modifier is styled by the extension instead.
 enum token_type : u32
 {
     t_type,
@@ -40,14 +40,12 @@ enum token_modifier : u32
     m_static = 1u << 2,
     m_default_library = 1u << 3,
     m_documentation = 1u << 4,
-    /// Not LSP's: the extension maps `keyword.controlFlow` to the `keyword.control` scope themes colour apart.
-    m_control_flow = 1u << 5,
     /// Not LSP's: the extension underlines it, as rust-analyzer does for what can change.
-    m_mutable = 1u << 6,
+    m_mutable = 1u << 5,
 };
 
 constexpr cc::string_view token_modifier_names[]
-    = {"declaration", "readonly", "static", "defaultLibrary", "documentation", "controlFlow", "mutable"};
+    = {"declaration", "readonly", "static", "defaultLibrary", "documentation", "mutable"};
 
 struct mapped
 {
@@ -66,7 +64,9 @@ struct mapped
     case token_class::keyword:
         return {true, t_keyword, 0};
     case token_class::control:
-        return {true, t_keyword, m_control_flow};
+        // Left to the grammar, which scopes them `keyword.control`: a semantic token would replace that with the plain
+        // keyword colour, since a theme styles the `keyword` type before any modifier mapping the extension contributes.
+        return {};
     case token_class::number:
         return {true, t_number, 0};
     case token_class::string:
@@ -78,7 +78,7 @@ struct mapped
     case token_class::op:
         return {true, t_operator, 0};
     case token_class::attribute:
-        return {true, t_decorator, 0};
+        return {}; // left to the grammar for the same reason: a theme styles `decorator` as a function
     case token_class::struct_:
         // a builtin struct such as `vec3` reads as a type, a user's as a struct
         if (s.is_from_prelude)

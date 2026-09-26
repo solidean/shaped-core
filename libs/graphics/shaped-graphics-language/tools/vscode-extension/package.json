@@ -82,25 +82,8 @@
         },
         "semanticTokenModifiers": [
             {
-                "id": "controlFlow",
-                "description": "A keyword or word operator that steers control flow."
-            },
-            {
                 "id": "mutable",
                 "description": "A binding that can change: a `let mut` local."
-            }
-        ],
-        "semanticTokenScopes": [
-            {
-                "language": "sgl",
-                "scopes": {
-                    "keyword.controlFlow": [
-                        "keyword.control.sgl"
-                    ],
-                    "decorator": [
-                        "storage.type.annotation.sgl"
-                    ]
-                }
             }
         ]
     },
