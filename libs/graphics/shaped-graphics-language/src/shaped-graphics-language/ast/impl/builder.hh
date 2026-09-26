@@ -80,6 +80,8 @@ struct fun_signature
     range_of<argument> bindings;
     expr_id return_type = expr_id::none;
     bool has_parameter_list = false;
+    /// Any of the three lists; an extension property may have none of them.
+    bool has_any_list = false;
 };
 
 /// A keyword form taken apart.
@@ -293,6 +295,10 @@ struct builder
     decl_id use_declaration(statement_head const& head, keyword_parts const& parts);
     decl_id require_declaration(statement_head const& head, keyword_parts const& parts);
     decl_id fun_declaration(statement_head const& head, keyword_parts const& parts);
+    decl_id extension_property(statement_head const& head,
+                               keyword_parts const& parts,
+                               range_of<attribute> attributes,
+                               fun_decl const& signature);
     /// True when no identifier stands where the name of a `fun` belongs, which in expression position is a lambda.
     [[nodiscard]] bool is_anonymous_fun(keyword_parts const& parts) const;
     /// Reads the lists and the return type, and leaves a missing name or parameter list to the caller to report.

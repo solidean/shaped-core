@@ -58,7 +58,7 @@ decl_id builder::declaration(statement_head const& head, scope_kind scope, bool 
     }
     else if (keyword == "pipeline" && scope != scope_kind::file)
         report(diagnostic_kind::declaration_not_allowed_here, head.keyword_form);
-    // AST-143: a feature is granted to a file, a binding or a body, and a type's members are none of those.
+    // AST-146: a feature is granted to a file, a binding or a body, and a type's members are none of those.
     else if (keyword == "require")
     {
         if (scope == scope_kind::struct_body || scope == scope_kind::enum_body)
@@ -175,6 +175,8 @@ decl_id builder::member_declaration(form_id line, scope_kind owner)
         auto const made = make_field(line, diagnostic_kind::expected_member);
         if (owner == scope_kind::binding_body && is_valid(made.default_value))
             report(diagnostic_kind::default_not_allowed_here, ast.at(made.default_value).form);
+        if (owner == scope_kind::binding_body && made.is_named_only)
+            report(diagnostic_kind::named_only_not_allowed_here, line);
         ast.fields.push_back(made);
         return make_decl(line, {}, field_decl{.field = field_id(i32(ast.fields.size() - 1))});
     }
@@ -256,7 +258,7 @@ decl_id builder::require_declaration(statement_head const& head, keyword_parts c
     reject_arrow(head);
     reject_assignment(head);
 
-    // AST-142: each argument names one feature, and so does each line of the block form.
+    // AST-145: each argument names one feature, and so does each line of the block form.
     auto features = cc::vector<expr_id>();
     auto const add = [&](form_id name)
     {
@@ -355,6 +357,7 @@ fun_signature builder::signature_of(keyword_parts const& parts)
             result.bindings = list_elements(list, false, true);
     }
     result.has_parameter_list = seen[1];
+    result.has_any_list = !lists.empty();
     return result;
 }
 
@@ -367,7 +370,19 @@ decl_id builder::fun_declaration(statement_head const& head, keyword_parts const
                            .bindings = signature.bindings,
                            .return_type = signature.return_type};
 
-    if (!is_kind(signature.name_form, form_kind::identifier))
+    // `fun T.name`: an extension of `T`, and without any list a property of it (AST-142, AST-143).
+    auto const is_extension = is_kind(signature.name_form, form_kind::member)
+                           && is_kind(at(signature.name_form).first_child, form_kind::identifier);
+    if (is_extension)
+    {
+        result.extended_type = at(at(signature.name_form).first_child).where;
+        result.name = file.at(at(signature.name_form).token).where;
+        if (!signature.has_parameter_list && !signature.has_any_list)
+            return extension_property(head, parts, attributes, result);
+        if (!signature.has_parameter_list)
+            report(diagnostic_kind::missing_parameter_list, signature.name_form);
+    }
+    else if (!is_kind(signature.name_form, form_kind::identifier))
     {
         auto const nameless = is_valid(signature.name_form) ? signature.name_form : signature.first_list;
         report(diagnostic_kind::expected_name, is_valid(nameless) ? nameless : head.keyword_form);
@@ -381,7 +396,11 @@ decl_id builder::fun_declaration(statement_head const& head, keyword_parts const
 
     auto const parameters = ast.at(result.parameters);
     if (!parameters.empty() && file.text_of(parameters[0].name) == "self" && !is_valid(parameters[0].type))
+    {
         result.receiver = parameters[0].is_mut ? receiver_kind::mut_self : receiver_kind::self;
+        if (parameters[0].is_named_only)
+            report(diagnostic_kind::named_only_not_allowed_here, parameters[0].form);
+    }
 
     if (is_valid(head.assign_value))
     {
@@ -397,6 +416,30 @@ decl_id builder::fun_declaration(statement_head const& head, keyword_parts const
     }
     else if (is_valid(parts.block))
         result.body = value_body(parts.block, body_owner::function);
+    return make_decl(head.whole, attributes, result);
+}
+
+decl_id builder::extension_property(statement_head const& head,
+                                    keyword_parts const& parts,
+                                    range_of<attribute> attributes,
+                                    fun_decl const& signature)
+{
+    auto result = property_decl{.name = signature.name,
+                                .extended_type = signature.extended_type,
+                                .return_type = signature.return_type};
+    if (is_valid(head.assign_value))
+    {
+        report(diagnostic_kind::expected_body, head.assign_operator);
+        (void)expression(head.assign_value);
+    }
+    if (is_valid(head.arrow))
+    {
+        if (is_valid(parts.block))
+            report(diagnostic_kind::too_many_arguments, parts.block);
+        result.body = value_body(head.arrow, body_owner::value_block);
+    }
+    else if (is_valid(parts.block))
+        result.body = value_body(parts.block, body_owner::value_block);
     return make_decl(head.whole, attributes, result);
 }
 

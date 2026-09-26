@@ -214,7 +214,7 @@ TEST("slib sgl compiler - an SGL shader states the features it needs, and a WGSL
                                             "    values: mut buffer[float]\n"
                                             "\n"
                                             "@compute(8, 8) fun narrow_cs(@thread_id id: int3){narrow}:\n"
-                                            "    DEBUG_store(narrow.r, int2(id.x, id.y), 0.5)\n"
+                                            "    narrow.r.store(int2(id.x, id.y), 0.5)\n"
                                             "\n"
                                             "@compute(64) fun plain_cs(@thread_id id: int3){plain}:\n"
                                             "    plain.values[id.x] = 1.0\n");
@@ -380,9 +380,9 @@ constexpr auto k_two_groups_source
                       "@compute(8, 8) fun blur(@thread_id id: int3){frame, post}:\n"
                       "    let xy = int2(id.x, id.y)\n"
                       "    let uv = ((xy as float2) + float2(0.5, 0.5)) * post.texel_size * frame.values[0]\n"
-                      "    let c = DEBUG_sample_level(post.src, uv, 0.0, post.bilinear)\n"
-                      "    DEBUG_store(post.dst, xy, c)\n"
-                      "    DEBUG_store(post.acc, xy, DEBUG_load(post.acc, xy) + c.x)\n");
+                      "    let c = post.src.sample(uv, post.bilinear, level = 0.0)\n"
+                      "    post.dst.store(xy, c)\n"
+                      "    post.acc.store(xy, post.acc.load(xy) + c.x)\n");
 } // namespace
 
 ASYNC_TEST("slib sgl compiler - every compiler behind an edge reflects the group and slot SGL wrote",

@@ -195,10 +195,12 @@ struct sgl::check::flat_literal
     constexpr bool operator==(flat_literal const&) const = default;
 };
 
-/// Of the prelude's type `int`.
+/// Of the prelude's type `int`, or of `uint` where an integer literal converted to it (CHK-253); a `uint` keeps its
+/// bits in `value`.
 struct sgl::check::flat_int_literal
 {
     i32 value = 0;
+    bool is_unsigned = false;
 
     constexpr bool operator==(flat_int_literal const&) const = default;
 };

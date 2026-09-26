@@ -44,11 +44,15 @@ COMMAND("test")
         auto line = cc::format("{}: {} of {} tests passed", path, tested.tests_passed, tested.tests_run);
         if (tested.tests_expecting_diagnostics > 0)
             line.appendf(", {} judged by the diagnostics they expect", tested.tests_expecting_diagnostics);
-        if (auto const unchecked = tested.test_count - tested.tests_run - tested.tests_expecting_diagnostics;
-            unchecked > 0)
+        auto const unchecked = tested.test_count - tested.tests_run - tested.tests_expecting_diagnostics;
+        if (unchecked > 0)
             line.appendf(", {} did not check", unchecked);
         cc::println("{}", line);
-        if (!tested.is_clean() && code == exit_ok)
+        // a test the compiler dropped without saying why is a failure too, and the one a clean run would hide
+        if (unchecked > 0 && tested.errors.empty())
+            cc::eprintln("{}: {} test(s) did not check, and no diagnostic says why; that is a bug of the compiler",
+                         path, unchecked);
+        if ((!tested.is_clean() || unchecked > 0) && code == exit_ok)
             code = exit_failed;
     }
     cc::flush();

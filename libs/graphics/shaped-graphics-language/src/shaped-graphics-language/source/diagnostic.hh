@@ -70,6 +70,7 @@ enum class sgl::diagnostic_kind : sgl::u8
     /// The owner has no such member: a method in a `binding`, a field in an `enum`, a case in a `struct`.
     member_not_allowed_here,
     default_not_allowed_here,
+    named_only_not_allowed_here,
     missing_parameter_list,
     signature_out_of_order,
     duplicate_signature_list,
@@ -163,7 +164,7 @@ enum class sgl::diagnostic_kind : sgl::u8
     feature_not_declared,
     /// A `require` in a body that nothing needed; a warning.
     unused_require,
-    /// A function reached from an entry point of a stage its `@stages` leaves out, `DEBUG_sample` in a compute shader.
+    /// A function reached from an entry point of a stage its `@stages` leaves out, `sample` in a compute shader.
     stage_not_allowed,
     /// A `pipeline` whose stages do not fit together, or a setting that names no field or has a value it cannot.
     invalid_pipeline,
@@ -177,6 +178,16 @@ enum class sgl::diagnostic_kind : sgl::u8
     test_failed,
     /// An `@expect` whose diagnostic did not occur in its test.
     unmet_expectation,
+    /// A type scope that holds two kinds of thing under one name: a field and a method, a property and a method.
+    member_name_clash,
+    /// `a.foo` whose target is no property, or `a.foo()` whose target is one.
+    call_spelling,
+    /// A number literal where one type is expected that cannot hold it exactly.
+    literal_not_representable,
+    /// A literal converted to `T` by a function of `T`'s name that returns another type.
+    literal_conversion_result,
+    /// An operator over integer literals alone that only an operator of another type takes: `7 / 2` without an int `/`.
+    literal_needs_type,
 };
 
 namespace sgl

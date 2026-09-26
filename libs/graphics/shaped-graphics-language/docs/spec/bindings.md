@@ -278,7 +278,7 @@ Everything not named here is the diagnostic `unsupported-yet`, never a guess.
 * Every texture, depth texture, image and sampler form above, with `@unfilterable` and `@non_filtering`.
 * A static sampler in a binding, and the `needs-feature` refusals.
 * A texture, an image or a sampler handed to a builtin, which is the only way one is used ([CHK-206](semantics/checking.md#bindings)).
-  The builtins that take one are the `DEBUG_` stand-ins in `prelude/builtins.sgl`, until textures have methods ([texture-methods.md](incubator/texture-methods.md)).
+  The builtins that take one are `sample`, `load`, `store` and `size` in `prelude/builtins.sgl`, called as methods of it: `tex.sample(uv, smp)`.
 * A plain member of a group, as a field of the constant buffer the group owns, for a type whose place in a block every target agrees on.
 * The positional group numbering, and `@inline` last.
 * A resource's host name, its path `binding.member` ([CHK-171](semantics/checking.md#bindings)), which the text reports beside the identifier it minted.

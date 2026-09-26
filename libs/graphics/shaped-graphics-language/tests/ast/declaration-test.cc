@@ -38,7 +38,7 @@ TEST("sgl ast - use, with and without an alias, at file level and in a body")
 
 TEST("sgl ast - require names features, at file level, in a binding and in a body")
 {
-    // AST-142
+    // AST-145
     CHECK(ast_of("require raytracing\n") == "(require raytracing)");
     CHECK(ast_of("require extended_image_formats, binding_arrays\n") == "(require extended_image_formats binding_arrays)");
     CHECK(body_of("require raytracing\n") == "(require raytracing)");
@@ -56,7 +56,7 @@ TEST("sgl ast - require names features, at file level, in a binding and in a bod
     CHECK(ast_of("require 5\n") == "(require (invalid \"5\")) !! expected-name @8+1\n");
     CHECK(ast_of("require a.b\n") == "(require (invalid \"a.b\")) !! expected-name @8+3\n");
 
-    // AST-143: a struct or an enum holds members, and a feature is granted to none of them.
+    // AST-146: a struct or an enum holds members, and a feature is granted to none of them.
     CHECK(ast_of("struct s:\n    require raytracing\n").contains("member-not-allowed-here"));
     CHECK(ast_of("enum e:\n    require raytracing\n").contains("member-not-allowed-here"));
 }

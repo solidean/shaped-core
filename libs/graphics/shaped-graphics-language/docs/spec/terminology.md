@@ -116,6 +116,15 @@ Each term links to the rule that defines it.
 | **property** | the member `name => expression`, or `name =>:` and a value block: read-only, no parameter list, no keyword (AST-81) |
 | **method** | the member `fun` and a signature; an instance method when it has a receiver, and static otherwise (AST-82) |
 | **receiver** | the first parameter of a method when it is `self` or `mut self` (AST-83) |
+| **extension** | a `fun` whose name is a type's name, a DOT and a name; it declares a function of that type's scope from outside it (AST-142, CHK-237) |
+| **extended type** | the type an extension names before its DOT (AST-142) |
+| **named-only** | a parameter or a field written with a leading dot, `.level: float`, which a call fills by name alone (AST-144, CHK-244) |
+| **type scope** | the properties and functions of a struct or an enum, its extensions included (CHK-233) |
+| **static** | a function of a type scope without `self` (CHK-235) |
+| **synthesized constructor** | the function of a struct's name whose parameters are its fields (CHK-239) |
+| **candidate** | a function a call collects by its name before any argument is checked against it (CHK-247) |
+| **conversion chain** | how an argument becomes its parameter's type; its length ranks candidates (CHK-70, CHK-254) |
+| **default type** | the type a number literal has where no other is asked of it: `int` or `float` (CHK-60, CHK-61) |
 | **case** | a bare name, or `name = value`, as a member of an `enum`; not the keyword `case` (AST-78, AST-115) |
 | **owner** | the declaration or `struct_type` a member stands in; it decides which members are allowed (AST-85) |
 | **diagnostic** | a kind, a byte span and a message (DIAG-1) |

@@ -50,6 +50,9 @@ struct dumper
 
     void dump_symbol(symbol const& s)
     {
+        // A synthesized constructor is its struct's, which the struct's own line already says.
+        if (s.kind == symbol_kind::function && s.role == function_role::constructor)
+            return;
         switch (s.kind)
         {
         case symbol_kind::structure:
@@ -176,7 +179,13 @@ struct dumper
                          auto const is_whole = !text.contains('.') && !text.contains('e') && !text.contains('n');
                          out.appendf("(lit {}{}", text, is_whole ? ".0" : "");
                      },
-                     [&](flat_int_literal const& l) { out.appendf("(lit {}", l.value); },
+                     [&](flat_int_literal const& l)
+                     {
+                         if (l.is_unsigned)
+                             out.appendf("(lit {}u", u32(l.value));
+                         else
+                             out.appendf("(lit {}", l.value);
+                     },
                      [&](flat_bool_literal const& l) { out.appendf("(lit {}", l.value ? "true" : "false"); },
                      [&](flat_buffer_element const& b) { operands("elem", b.buffer, b.index); },
                      [&](flat_enum_value const& v)

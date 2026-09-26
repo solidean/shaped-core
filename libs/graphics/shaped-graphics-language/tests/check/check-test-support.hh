@@ -134,6 +134,15 @@ inline cc::string reports_of(checked_sources const& s)
     return out;
 }
 
+/// The last symbol of `name` that a declaration wrote, which a synthesized constructor of that name is not.
+inline sgl::check::symbol const& symbol_named(sgl::check::checked_module const& m, cc::string_view name)
+{
+    for (auto i = m.symbols.size() - 1; i >= 0; --i)
+        if (m.symbols[i].name == name && m.symbols[i].role != sgl::check::function_role::constructor)
+            return m.symbols[i];
+    CC_UNREACHABLE("no symbol of that name");
+}
+
 /// `user` checked against the library's prelude, as `reports_of` writes it.
 inline cc::string reports_for(cc::string_view user)
 {

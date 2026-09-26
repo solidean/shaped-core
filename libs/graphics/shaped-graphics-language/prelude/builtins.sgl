@@ -301,51 +301,52 @@
 @builtin @pure @operator("as") fun convert_uint4_to_float4(x: uint4) -> float4
 @builtin @pure @operator("as") fun convert_uint4_to_int4(x: uint4) -> int4
 
-// DEBUG: stand-ins for the texture methods, in the order the methods will take their arguments.
+// Textures and images, called as methods: `tex.sample(uv, smp)` is `sample(tex, uv, smp)`.
 // A texture samples and loads, an image loads where the shader may read it and stores where it may write it.
-@builtin @pure @stages(.pixel) fun DEBUG_sample(t: texture_2d[float], coord: float2, s: sampler) -> float
-@builtin @pure fun DEBUG_sample_level(t: texture_2d[float], coord: float2, level: float, s: sampler) -> float
-@builtin @pure fun DEBUG_load(t: texture_2d[float], xy: int2, level: int) -> float
-@builtin fun DEBUG_load(i: image_2d[float], xy: int2) -> float
-@builtin @stages(.pixel, .compute) fun DEBUG_store(i: out image_2d[float], xy: int2, value: float)
-@builtin @pure @stages(.pixel) fun DEBUG_sample(t: texture_2d[float2], coord: float2, s: sampler) -> float2
-@builtin @pure fun DEBUG_sample_level(t: texture_2d[float2], coord: float2, level: float, s: sampler) -> float2
-@builtin @pure fun DEBUG_load(t: texture_2d[float2], xy: int2, level: int) -> float2
-@builtin fun DEBUG_load(i: image_2d[float2], xy: int2) -> float2
-@builtin @stages(.pixel, .compute) fun DEBUG_store(i: out image_2d[float2], xy: int2, value: float2)
-@builtin @pure @stages(.pixel) fun DEBUG_sample(t: texture_2d[float3], coord: float2, s: sampler) -> float3
-@builtin @pure fun DEBUG_sample_level(t: texture_2d[float3], coord: float2, level: float, s: sampler) -> float3
-@builtin @pure fun DEBUG_load(t: texture_2d[float3], xy: int2, level: int) -> float3
-@builtin fun DEBUG_load(i: image_2d[float3], xy: int2) -> float3
-@builtin @stages(.pixel, .compute) fun DEBUG_store(i: out image_2d[float3], xy: int2, value: float3)
-@builtin @pure @stages(.pixel) fun DEBUG_sample(t: texture_2d[float4], coord: float2, s: sampler) -> float4
-@builtin @pure fun DEBUG_sample_level(t: texture_2d[float4], coord: float2, level: float, s: sampler) -> float4
-@builtin @pure fun DEBUG_load(t: texture_2d[float4], xy: int2, level: int) -> float4
-@builtin fun DEBUG_load(i: image_2d[float4], xy: int2) -> float4
-@builtin @stages(.pixel, .compute) fun DEBUG_store(i: out image_2d[float4], xy: int2, value: float4)
-@builtin @pure fun DEBUG_load(t: texture_2d[int], xy: int2, level: int) -> int
-@builtin fun DEBUG_load(i: image_2d[int], xy: int2) -> int
-@builtin @stages(.pixel, .compute) fun DEBUG_store(i: out image_2d[int], xy: int2, value: int)
-@builtin @pure fun DEBUG_load(t: texture_2d[int2], xy: int2, level: int) -> int2
-@builtin fun DEBUG_load(i: image_2d[int2], xy: int2) -> int2
-@builtin @stages(.pixel, .compute) fun DEBUG_store(i: out image_2d[int2], xy: int2, value: int2)
-@builtin @pure fun DEBUG_load(t: texture_2d[int3], xy: int2, level: int) -> int3
-@builtin fun DEBUG_load(i: image_2d[int3], xy: int2) -> int3
-@builtin @stages(.pixel, .compute) fun DEBUG_store(i: out image_2d[int3], xy: int2, value: int3)
-@builtin @pure fun DEBUG_load(t: texture_2d[int4], xy: int2, level: int) -> int4
-@builtin fun DEBUG_load(i: image_2d[int4], xy: int2) -> int4
-@builtin @stages(.pixel, .compute) fun DEBUG_store(i: out image_2d[int4], xy: int2, value: int4)
-@builtin @pure fun DEBUG_load(t: texture_2d[uint], xy: int2, level: int) -> uint
-@builtin fun DEBUG_load(i: image_2d[uint], xy: int2) -> uint
-@builtin @stages(.pixel, .compute) fun DEBUG_store(i: out image_2d[uint], xy: int2, value: uint)
-@builtin @pure fun DEBUG_load(t: texture_2d[uint2], xy: int2, level: int) -> uint2
-@builtin fun DEBUG_load(i: image_2d[uint2], xy: int2) -> uint2
-@builtin @stages(.pixel, .compute) fun DEBUG_store(i: out image_2d[uint2], xy: int2, value: uint2)
-@builtin @pure fun DEBUG_load(t: texture_2d[uint3], xy: int2, level: int) -> uint3
-@builtin fun DEBUG_load(i: image_2d[uint3], xy: int2) -> uint3
-@builtin @stages(.pixel, .compute) fun DEBUG_store(i: out image_2d[uint3], xy: int2, value: uint3)
-@builtin @pure fun DEBUG_load(t: texture_2d[uint4], xy: int2, level: int) -> uint4
-@builtin fun DEBUG_load(i: image_2d[uint4], xy: int2) -> uint4
-@builtin @stages(.pixel, .compute) fun DEBUG_store(i: out image_2d[uint4], xy: int2, value: uint4)
-@builtin @pure fun DEBUG_size(t: texture_2d, level: int) -> int2
-@builtin @pure fun DEBUG_size(i: image_2d) -> int2
+// A sample takes its level from derivatives, or from a `level` named at the call.
+@builtin @pure @stages(.pixel) fun sample(t: texture_2d[float], coord: float2, smp: sampler) -> float
+@builtin @pure fun sample(t: texture_2d[float], coord: float2, smp: sampler, .level: float) -> float
+@builtin @pure fun load(t: texture_2d[float], xy: int2, level: int = 0) -> float
+@builtin fun load(i: image_2d[float], xy: int2) -> float
+@builtin @stages(.pixel, .compute) fun store(i: out image_2d[float], xy: int2, value: float)
+@builtin @pure @stages(.pixel) fun sample(t: texture_2d[float2], coord: float2, smp: sampler) -> float2
+@builtin @pure fun sample(t: texture_2d[float2], coord: float2, smp: sampler, .level: float) -> float2
+@builtin @pure fun load(t: texture_2d[float2], xy: int2, level: int = 0) -> float2
+@builtin fun load(i: image_2d[float2], xy: int2) -> float2
+@builtin @stages(.pixel, .compute) fun store(i: out image_2d[float2], xy: int2, value: float2)
+@builtin @pure @stages(.pixel) fun sample(t: texture_2d[float3], coord: float2, smp: sampler) -> float3
+@builtin @pure fun sample(t: texture_2d[float3], coord: float2, smp: sampler, .level: float) -> float3
+@builtin @pure fun load(t: texture_2d[float3], xy: int2, level: int = 0) -> float3
+@builtin fun load(i: image_2d[float3], xy: int2) -> float3
+@builtin @stages(.pixel, .compute) fun store(i: out image_2d[float3], xy: int2, value: float3)
+@builtin @pure @stages(.pixel) fun sample(t: texture_2d[float4], coord: float2, smp: sampler) -> float4
+@builtin @pure fun sample(t: texture_2d[float4], coord: float2, smp: sampler, .level: float) -> float4
+@builtin @pure fun load(t: texture_2d[float4], xy: int2, level: int = 0) -> float4
+@builtin fun load(i: image_2d[float4], xy: int2) -> float4
+@builtin @stages(.pixel, .compute) fun store(i: out image_2d[float4], xy: int2, value: float4)
+@builtin @pure fun load(t: texture_2d[int], xy: int2, level: int = 0) -> int
+@builtin fun load(i: image_2d[int], xy: int2) -> int
+@builtin @stages(.pixel, .compute) fun store(i: out image_2d[int], xy: int2, value: int)
+@builtin @pure fun load(t: texture_2d[int2], xy: int2, level: int = 0) -> int2
+@builtin fun load(i: image_2d[int2], xy: int2) -> int2
+@builtin @stages(.pixel, .compute) fun store(i: out image_2d[int2], xy: int2, value: int2)
+@builtin @pure fun load(t: texture_2d[int3], xy: int2, level: int = 0) -> int3
+@builtin fun load(i: image_2d[int3], xy: int2) -> int3
+@builtin @stages(.pixel, .compute) fun store(i: out image_2d[int3], xy: int2, value: int3)
+@builtin @pure fun load(t: texture_2d[int4], xy: int2, level: int = 0) -> int4
+@builtin fun load(i: image_2d[int4], xy: int2) -> int4
+@builtin @stages(.pixel, .compute) fun store(i: out image_2d[int4], xy: int2, value: int4)
+@builtin @pure fun load(t: texture_2d[uint], xy: int2, level: int = 0) -> uint
+@builtin fun load(i: image_2d[uint], xy: int2) -> uint
+@builtin @stages(.pixel, .compute) fun store(i: out image_2d[uint], xy: int2, value: uint)
+@builtin @pure fun load(t: texture_2d[uint2], xy: int2, level: int = 0) -> uint2
+@builtin fun load(i: image_2d[uint2], xy: int2) -> uint2
+@builtin @stages(.pixel, .compute) fun store(i: out image_2d[uint2], xy: int2, value: uint2)
+@builtin @pure fun load(t: texture_2d[uint3], xy: int2, level: int = 0) -> uint3
+@builtin fun load(i: image_2d[uint3], xy: int2) -> uint3
+@builtin @stages(.pixel, .compute) fun store(i: out image_2d[uint3], xy: int2, value: uint3)
+@builtin @pure fun load(t: texture_2d[uint4], xy: int2, level: int = 0) -> uint4
+@builtin fun load(i: image_2d[uint4], xy: int2) -> uint4
+@builtin @stages(.pixel, .compute) fun store(i: out image_2d[uint4], xy: int2, value: uint4)
+@builtin @pure fun size(t: texture_2d, level: int = 0) -> int2
+@builtin @pure fun size(i: image_2d) -> int2

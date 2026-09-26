@@ -31,7 +31,7 @@ cc::string outcome_of(cc::string_view source)
 TEST("sgl expect - a test that expects a diagnostic contains it, and is not run")
 {
     // CHK-232
-    CHECK(outcome_of("@expect(error = \"type-mismatch\") test:\n    let x: int = 1.5\n    true\n") == "");
+    CHECK(outcome_of("@expect(error = \"type-mismatch\") test:\n    let x: int = true\n    true\n") == "");
     CHECK(outcome_of("@expect(warning = \"no-effect\") test:\n    1 + 2\n    true\n") == "");
     // a glob, on a test in a function body
     CHECK(outcome_of("fun f(k: float) -> float:\n"
@@ -44,8 +44,8 @@ TEST("sgl expect - an expectation nothing meets is an error, and a diagnostic ou
 {
     CHECK(outcome_of("@expect(error = \"unknown-name\") test 1 < 2\n")
           == "unmet-expectation user:[\"unknown-name\"] no error of kind unknown-name stands in this test\n");
-    CHECK(outcome_of("fun f() -> int => 1.5\n@expect(error = \"type-mismatch\") test 1 < 2\n")
-          == "type-mismatch user:[1.5] expected int, got float\n"
+    CHECK(outcome_of("fun f() -> int => true\n@expect(error = \"type-mismatch\") test 1 < 2\n")
+          == "type-mismatch user:[true] expected int, got bool\n"
              "unmet-expectation user:[\"type-mismatch\"] no error of kind type-mismatch stands in this test\n");
     // a warning is no error, and the other way round; the warning is still the test's, as every diagnostic in it is
     CHECK(outcome_of("@expect(error = \"no-effect\") test:\n    1 + 2\n    true\n")

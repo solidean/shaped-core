@@ -30,10 +30,15 @@ TEST("sgl check - an opaque struct needs @builtin")
           == "opaque-struct-needs-builtin @0:7+6 handle\n");
 }
 
-TEST("sgl check - a name is declared once, unless every declaration of it is a function")
+TEST("sgl check - a name is declared once, unless it is functions and at most one struct in front of them")
 {
     CHECK(reports_for("struct a:\n    x: float\nstruct a:\n    y: float\n") == "duplicate-declaration user:[a] a\n");
-    CHECK(reports_for("struct a:\n    x: float\nfun a(k: float) -> float => k\n") == "duplicate-declaration user:[a] a\n");
+    CHECK(reports_for("struct a:\n    x: float\nenum a:\n    y\n") == "duplicate-declaration user:[a] a\n");
+    CHECK(reports_for("fun a(k: float) -> float => k\nbinding a:\n    y: float\n")
+          == "duplicate-declaration user:[a] a\n");
+    // CHK-240: functions of a struct's name overload its constructor, whichever of them stands first
+    CHECK(reports_for("struct a:\n    x: float\nfun a(k: float, l: float) -> a => a(k + l)\n") == "");
+    CHECK(reports_for("fun a(k: float, l: float) -> a => a(k + l)\nstruct a:\n    x: float\n") == "");
     CHECK(reports_for("struct a:\n    x: float\n    x: float\n") == "duplicate-declaration user:[x] x\n");
     CHECK(reports_for("@builtin fun dot(a: float3, a: float3) -> float\n") == "duplicate-declaration user:[a] a\n");
 
@@ -91,9 +96,8 @@ TEST("sgl check - compilation is on demand, so a declaration may stand below its
     CHECK(reports_of(checked) == "");
     // `inner` was compiled from inside `outer`, so its type exists first
     auto const& m = checked.module;
-    auto const outer = m.symbols[m.symbols.size() - 2];
-    auto const inner = m.symbols[m.symbols.size() - 1];
-    CHECK(outer.name == "outer");
+    auto const outer = symbol_named(m, "outer");
+    auto const inner = symbol_named(m, "inner");
     CHECK(sgl::check::index_of(inner.type) < sgl::check::index_of(outer.type));
 }
 
@@ -110,7 +114,7 @@ TEST("sgl check - a type is canonical: one id per struct, and the error type is 
     auto const checked = check_sources(read_prelude(), "struct a:\n    x: float\n    y: float\n");
     auto const& m = checked.module;
     CHECK(m.types[0].kind == sgl::check::type_kind::error);
-    auto const& a = m.at(m.symbols.back().type);
+    auto const& a = m.at(symbol_named(m, "a").type);
     auto const fields = m.at(a.members);
     REQUIRE(fields.size() == 2);
     CHECK(fields[0].type == fields[1].type);
@@ -167,8 +171,8 @@ TEST("sgl check - what the tracer does not carry is unsupported-yet, and names t
     CHECK(reports_for("use brdf\n") == "unsupported-yet user:[use brdf] use\n");
     CHECK(reports_for("sampler s:\n    filter = .linear\n") == "unsupported-yet user:[sampler s:] sampler\n");
     CHECK(reports_for("fun id[T](x: T) -> T => x\n").starts_with("unsupported-yet user:[id] a generic function\n"));
-    CHECK(reports_for("struct a:\n    x: float\n    len => x\n") == "unsupported-yet user:[len => x] a property\n");
-    CHECK(reports_for("struct a:\n    x: float = 1.0\n") == "unsupported-yet user:[1.0] a default value\n");
+    CHECK(reports_for("struct a:\n    x: float\n    fun reset(mut self):\n        self.x = 0.0\n")
+          == "unsupported-yet user:[reset] mut self\n");
     CHECK(reports_for("binding b = constants\n") == "unsupported-yet user:[constants] a binding composition\n");
     // CHK-25: a format is no type, so a texture takes what it samples to and an image takes a format as a case.
     CHECK(reports_for("binding b:\n    t: texture_2d[rgba8]\n") == "unknown-name user:[rgba8] rgba8\n");
@@ -187,7 +191,7 @@ TEST("sgl check - a function needs a body unless it is @builtin, and a generic o
     CHECK(reports_for("fun f(x: float) -> float\n") == "expected-body user:[f] f\n");
 
     auto const checked = check_sources(read_prelude(), "fun id[T](x: float) -> float => x\n");
-    CHECK(checked.module.symbols.back().state == symbol_state::failed);
+    CHECK(symbol_named(checked.module, "id").state == symbol_state::failed);
     CHECK(sgl::check::dump(checked.module).ends_with("(fun id failed)\n"));
 }
 
@@ -276,4 +280,42 @@ TEST("sgl check - an entry point with an error has diagnostics and no flat tree"
     auto const invalid = check_sources(
         read_prelude(), cc::string(edges) + "@pixel fun ps(v: vout) -> plain:\n    return { p = pos3(1.0, 1.0, 1.0) }\n");
     CHECK(invalid.module.entry_points.empty());
+}
+
+TEST("sgl check - a default is checked once, where it is declared, and reads only the parameters before it")
+{
+    CHECK(reports_for("fun f(x: float, y: float = true) -> float => x + y\n")
+          == "type-mismatch user:[true] the default of y is float, got bool\n");
+    CHECK(reports_for("fun f(x: float = y, y: float = 1.0) -> float => x + y\n") == "unknown-name user:[y] y\n");
+    // a field's default is its constructor parameter's, and reads the fields before it
+    CHECK(reports_for("struct s:\n    a: float = b\n    b: float = 1.0\n") == "unknown-name user:[b] b\n");
+    CHECK(reports_for("struct s:\n    a: float\n    b: float = a * 2.0\n") == "");
+}
+
+TEST("sgl check - a type scope holds one kind of thing per name, and an extension names a type")
+{
+    CHECK(reports_for("struct s:\n    x: float\n    fun x(self) -> float => 1.0\n")
+          == "member-name-clash user:[x] x is a field of s already\n");
+    CHECK(reports_for("struct s:\n    x: float\n    y => self.x\n    fun y(self, k: float) -> float => k\n")
+          == "member-name-clash user:[y] y is a property of s already\n");
+    CHECK(reports_for("enum e:\n    a\n    a => 1\n") == "member-name-clash user:[a] a is a case of e already\n");
+    // an extension is checked against the type's own members the same way
+    CHECK(reports_for("struct s:\n    x: float\nfun s.x => 1.0\n")
+          == "member-name-clash user:[x] x is a field of s already\n");
+    // methods of one name are an overload set, in the type and through extensions alike
+    CHECK(reports_for("struct s:\n    x: float\n    fun f(self) -> float => self.x\nfun s.f(self, k: float) -> float "
+                      "=> k\n")
+          == "");
+    // CHK-62: a member body reads its receiver's members through `self` alone
+    CHECK(reports_for("struct s:\n    x: float\n    fun f(self) -> float => x\n") == "unknown-name user:[x] x\n");
+    CHECK(reports_for("struct s:\n    x: float\n    y => x\n") == "unknown-name user:[x] x\n");
+
+    // CHK-237: the extended type is a struct or an enum
+    CHECK(reports_for("fun nothing.f(self) -> float => 1.0\n") == "unknown-name user:[nothing] nothing\n");
+    CHECK(reports_for("fun dot.f(self) -> float => 1.0\n")
+          == "wrong-kind-of-name user:[dot] dot is no struct and no enum, and only a type has functions of its own\n");
+    // `self` belongs to a function of a type scope
+    CHECK(reports_for("fun f(self) -> float => 1.0\n")
+          == "wrong-kind-of-name user:[f] self is the receiver of a method, and this function belongs to no type\n");
+    CHECK(reports_for("fun f() -> float => self\n") == "unknown-name user:[self] self\n");
 }

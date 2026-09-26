@@ -125,6 +125,12 @@ void checker::check_yield(function_scope& scope, source_span where, ast::expr_id
         report(diagnostic_kind::type_mismatch, file, where, "a yield carries the value of its block");
         return;
     }
+    // CHK-82: a property's `-> T` is expected of each yield, which a literal converts to
+    if (scope.value_blocks[innermost].is_expected)
+    {
+        (void)check_expected(scope, value, scope.value_blocks[innermost].value);
+        return;
+    }
     auto const type = check_expr(scope, value);
     if (type == error_type)
     {

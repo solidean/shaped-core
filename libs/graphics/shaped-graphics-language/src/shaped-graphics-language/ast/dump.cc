@@ -82,6 +82,8 @@ struct dumper
             out += "..";
         if (!a.name.empty())
         {
+            if (a.is_dotted_name)
+                out += ".";
             out += file.text_of(a.name);
             out += "=";
         }
@@ -109,7 +111,7 @@ struct dumper
             out += " mut";
         if (!f.name.empty())
         {
-            out += " ";
+            out += f.is_named_only ? " ." : " ";
             out += file.text_of(f.name);
         }
         if (is_valid(f.type))
@@ -542,7 +544,14 @@ struct dumper
             [&](fun_decl const& n)
             {
                 open("fun");
-                name_or_missing(n.name);
+                if (!n.extended_type.empty())
+                {
+                    out += file.text_of(n.extended_type);
+                    out += ".";
+                    out += file.text_of(n.name);
+                }
+                else
+                    name_or_missing(n.name);
                 if (!n.type_parameters.empty())
                 {
                     out += " ";
@@ -660,7 +669,19 @@ struct dumper
             [&](property_decl const& n)
             {
                 open("property");
-                name_or_missing(n.name);
+                if (!n.extended_type.empty())
+                {
+                    out += file.text_of(n.extended_type);
+                    out += ".";
+                    out += file.text_of(n.name);
+                }
+                else
+                    name_or_missing(n.name);
+                if (is_valid(n.return_type))
+                {
+                    out += " -> ";
+                    dump_expr(n.return_type, depth);
+                }
                 dump_body(n.body, depth);
             },
             [&](enum_case_decl const& n)

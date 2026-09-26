@@ -4,7 +4,7 @@
 
 using namespace sgl_test;
 
-// CHK-201 and CHK-233 to CHK-240: `require` grants a feature, and an entry point declares what it needs of a device.
+// CHK-201 and CHK-258 to CHK-265: `require` grants a feature, and an entry point declares what it needs of a device.
 
 namespace
 {
@@ -56,7 +56,7 @@ TEST("sgl check - a form some backend lacks is refused unless a require grants i
           == "needs-feature user:[image_2d[.r8_unorm]] an image of .r8_unorm needs extended_image_formats, "
              "which `require extended_image_formats` grants\n");
 
-    // CHK-234 and CHK-235: the file's `require` or the binding's own.
+    // CHK-259 and CHK-260: the file's `require` or the binding's own.
     CHECK(reports_for(listing("require extended_image_formats\n\n", r8)) == "");
     CHECK(reports_for(listing("", cc::format("    require extended_image_formats\n{}", r8))) == "");
 
@@ -72,7 +72,7 @@ TEST("sgl check - a form some backend lacks is refused unless a require grants i
 
 TEST("sgl check - a require names a feature a shader can use, as sg names it")
 {
-    // CHK-233: an sg feature the host alone asks about is no name here.
+    // CHK-258: an sg feature the host alone asks about is no name here.
     CHECK(reports_for("require timestamp_query\n")
           == "unknown-feature user:[timestamp_query] timestamp_query; a shader may require binding_arrays, "
              "extended_image_formats, readwrite_image_formats, multisampled_array_textures, raytracing\n");
@@ -82,7 +82,7 @@ TEST("sgl check - a require names a feature a shader can use, as sg names it")
 
 TEST("sgl check - a require in a body that nothing needs is unused, and one of a file or a binding never is")
 {
-    // CHK-240: a file's and a binding's `require` each declare an intent, whether anything uses the feature or not.
+    // CHK-265: a file's and a binding's `require` each declare an intent, whether anything uses the feature or not.
     CHECK(reports_for("require raytracing\n") == "");
     CHECK(reports_for(listing("", "    require raytracing\n    a: float\n")) == "");
     CHECK(reports_for(listing("", "    require extended_image_formats\n"
@@ -109,13 +109,13 @@ TEST("sgl check - a require in a body that nothing needs is unused, and one of a
 
 TEST("sgl check - a require stands among a body's own lines, and in no struct")
 {
-    // CHK-237: a block-scoped grant is not carried yet.
+    // CHK-262: a block-scoped grant is not carried yet.
     CHECK(reports_for("fun f(c: bool) -> float:\n"
                       "    if c:\n"
                       "        require raytracing\n"
                       "    return 1.0\n")
               .contains("unsupported-yet"));
-    // The AST pass reports one in a struct (AST-143), and this pass says nothing more of it.
+    // The AST pass reports one in a struct (AST-146), and this pass says nothing more of it.
     CHECK(reports_for("struct s:\n    require raytracing\n    x: float\n") == "");
 }
 
@@ -127,13 +127,13 @@ TEST("sgl check - an entry point declares what it needs, by its file, a binding 
                              "binding lib:\n"
                              "    a: out image_2d[.r8_unorm]\n";
 
-    // CHK-239: named at the entry point, with the binding it needs the feature for.
+    // CHK-264: named at the entry point, with the binding it needs the feature for.
     CHECK(reports_with_library(library, lib_user())
           == "feature-not-declared user:[main_ps] main_ps needs extended_image_formats, which neither its file, "
              "a binding it lists nor its body requires\n"
              "  note prelude:[lib] lib needs extended_image_formats\n");
 
-    // CHK-237: each of the three places declares it.
+    // CHK-262: each of the three places declares it.
     CHECK(reports_with_library(library, lib_user("    require extended_image_formats\n")) == "");
     CHECK(reports_with_library(library, cc::format("require extended_image_formats\n\n{}", lib_user())) == "");
     constexpr auto requiring = "binding lib:\n"
@@ -144,7 +144,7 @@ TEST("sgl check - an entry point declares what it needs, by its file, a binding 
 
 TEST("sgl check - an entry point needs what it uses, and a feature its file permits is no floor")
 {
-    // CHK-238: two entry points of one file under one `require`, only one of which lists what needs it.
+    // CHK-263: two entry points of one file under one `require`, only one of which lists what needs it.
     auto const checked
         = check_sources(read_prelude(), cc::format("require extended_image_formats, raytracing\n"
                                                    "\n"

@@ -221,7 +221,12 @@ m.samplers                                 // sampler_state per `sampler name:` 
                                            // `out image_2d[.rgba8_unorm]`; check/resources.hh holds the shapes and the image formats
 m.files[f].type_at(expr_id)                // side table: type_id, none for what nothing checked
 m.files[f].target_at(expr_id)              // side table: { kind, symbol, index } — local / parameter / symbol / overload /
-                                           // constructor / field / binding_member
+                                           // constructor / field / binding_member / enum_case / receiver (`self`)
+m.files[f].call_at(expr_id)                // side table: a position in m.call_records for a call that resolved, -1 otherwise
+m.call_records[i]                          // call_record { callee, written, slots }: the arguments IN THE ORDER WRITTEN, and per
+                                           // parameter which one fills it, -1 for its default; what the flat tree is written from
+m.near_misses                              // near_miss { file, call, candidate, reason, argument, parameter } per candidate of a call
+                                           // that matched nothing: the data a later "did you mean" is written from
 m.entry_points                             // flat_entry_point per SOUND entry point, in the STRUCTURED form; what an emitter reads
                                            // sound means: its body and the body of every function it reaches reported no error
 m.diagnostics                              // located_diagnostic { what, file, detail, notes }, in the order they were found; a related_note
@@ -434,9 +439,18 @@ sgl::print_source(file)      // == file.source for EVERY input: the lossless inv
   So `let length = length v` is fine, and `length w` after it is a call of a local; a type position holding it is `wrong-kind-of-name`.
 - **The program's file may shadow a prelude name** (CHK-188): its `struct vec3` is no duplicate, and its `fun dot` joins the prelude's overloads.
   Where both have a function a call matches, the program's wins (CHK-192), so a prelude release adding its signature breaks nothing.
-  Only two non-functions of one name in one file are `duplicate-declaration`.
+  Only two non-functions of one name in one file are `duplicate-declaration`, a struct beside the functions of its name aside.
 - **`and`, `or` and `not` are no functions**, and a comparison chain evaluates each inner operand once: it is bound where it first stands.
-- **Still `unsupported-yet`:** generics, `self` and methods, `mut` parameters, lambdas and function values, nested functions, `use`,
+- **One call model** (CHK-69): a method, a static, a property, an extension and a struct's constructor are all functions.
+  `a.foo(b)` and `foo(a, b)` collect the same candidates: the functions of that name, and those of `a`'s type scope (CHK-247).
+  `a.foo` is a field where there is one; otherwise the target must be a property, and `a.foo()` must not reach one (CHK-256).
+  A member body reads its receiver through `self` ALONE: a bare `radius` is no field (CHK-62), while a field's default reads earlier fields bare.
+- **Arguments bind by position, then by name** (CHK-250); a positional one after a named one only in its own slot, and `.x: T` is named-only.
+  A default is checked ONCE in its function's scope, and evaluated at each call that leaves it out, after every written argument (EVAL-80).
+- **A literal converts where a type is expected** (CHK-81, CHK-253): `(1, 2)` or `{a = 1}` is a call of the struct's name, `1` meets a float.
+  Leaving its default type is one step of a literal's chain; candidates rank by dominance over those chains, then a type-scope function wins (CHK-254).
+  `7 / 2` is `literal-needs-type` while no `/` takes `int` (CHK-257); an integer literal is held in 64 bits and refused only in a type that cannot hold it.
+- **Still `unsupported-yet`:** generics, `mut self` and `mut` parameters, lambdas and function values, nested functions, `use`,
   a `const` whose value is no literal, enum case or const, a `for` over anything but `a ..< b`, a `let` without a value,
   an expression statement that is no call outside a `test`, an `assert` message, and an `assert` whose condition writes.
 - **An arrow body without `-> T` infers its result**, and a BLOCK body without one returns `void`.

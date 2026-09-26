@@ -38,7 +38,7 @@ feature_set checker::read_require(i32 file, ast::require_decl const& r, require_
         }
         auto const f = feature(index);
         result.set(f);
-        // CHK-240: a file's `require` states what the whole file may do, and a binding's what its listers need,
+        // CHK-265: a file's `require` states what the whole file may do, and a binding's what its listers need,
         // so neither is ever unused.
         if (scope == require_scope::body)
             require_lines.push_back({.file = file, .where = n->where, .what = f, .scope = scope, .owner = owner});
@@ -53,7 +53,7 @@ void checker::judge_entry_features(symbol_id id)
     if (info.entry_stage == stage::none)
         return;
 
-    // CHK-236 and CHK-238: what the listed bindings require is what a device needs, and nothing it merely may use.
+    // CHK-261 and CHK-263: what the listed bindings require is what a device needs, and nothing it merely may use.
     auto needed = feature_set();
     auto declared = file_features[s.file];
     for (auto const b : out.at(info.bindings))
@@ -62,7 +62,7 @@ void checker::judge_entry_features(symbol_id id)
         declared |= out.bindings[out.at(b).info].declared;
     }
 
-    // CHK-240: a body's `require` is used where it declares what nothing else declares; the first of a feature counts.
+    // CHK-265: a body's `require` is used where it declares what nothing else declares; the first of a feature counts.
     auto in_body = feature_set();
     for (auto& line : require_lines)
     {
@@ -74,7 +74,7 @@ void checker::judge_entry_features(symbol_id id)
     declared |= in_body;
     info.features = needed;
 
-    // CHK-239
+    // CHK-264
     auto const where = ast_of(s.file).at(s.declaration).node.as<ast::fun_decl>().name;
     for (auto i = isize(0); i < k_feature_count; ++i)
     {
