@@ -371,9 +371,8 @@ A feature is what a device may lack, so using one makes a shader non-portable on
 * **CHK-238** What an entry point needs of a device is what the bindings it lists require, never what it merely may use ([why](why/checking.md#chk-238)).
   It is judged once every body is checked, and a use is counted wherever it stands, reached or not.
 * **CHK-239** A feature an entry point needs and does not declare is the normal error `feature-not-declared` at its name, with a note at each listed binding that needs it.
-* **CHK-240** A `require` in a binding that no member of it uses is the warning `unused-require`.
-  So is one in a body that is not the declaration an entry point needs, and a second `require` of a feature in one binding or one body.
-  A `require` at file scope is never unused.
+* **CHK-240** A `require` in a body that is not the declaration an entry point needs is the warning `unused-require`, and so is a second `require` of a feature in one body.
+  A `require` of a file or of a binding is never unused: each declares an intent, whether anything uses the feature or not ([why](why/checking.md#chk-240)).
 
 ```sgl
 require extended_image_formats

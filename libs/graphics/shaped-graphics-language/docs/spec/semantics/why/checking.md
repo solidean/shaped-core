@@ -249,3 +249,9 @@ The floor is defined by what the language counts, never by what an optimizer hap
 A floor that followed dead-code elimination would change with a compiler version or an unrelated refactor, and the host would find out on a device that lacks the feature.
 So every use the entry point reaches counts, including one behind a condition that is always false.
 A compile-time branch on a feature, `if feature raytracing:`, is the form that may leave a use out, and it is not built.
+
+## CHK-240
+
+A binding's `require` is how a library says what a device must have to take the binding, and a member need not be what uses it.
+A binding that carries an acceleration structure later, or that a caller's shader reads through a feature, states the need before anything in SGL can show it.
+So only a body's `require` can be unused: it says nothing about any binding, and it is the one place an unneeded line is certainly a mistake.

@@ -673,7 +673,6 @@ void checker::compile_binding(symbol_id id)
     }
 
     // CHK-235: its own `require` lines grant its members what their file does not.
-    auto const first_line = require_lines.size();
     auto declared = feature_set();
     for (auto const member : ast_of(file).at(b.members))
         if (auto const* const r = ast_of(file).at(member).node.try_as<ast::require_decl>())
@@ -689,15 +688,6 @@ void checker::compile_binding(symbol_id id)
     auto const members = compile_members(file, b.members, false);
     granted = {};
     used_features = nullptr;
-
-    // CHK-240: the first `require` of a feature is used where a member uses it, and any later one never is.
-    auto seen = feature_set();
-    for (auto i = first_line; i < require_lines.size(); ++i)
-    {
-        auto& line = require_lines[i];
-        line.is_used = !seen.has(line.what) && used.has(line.what);
-        seen.set(line.what);
-    }
 
     auto const is_inline = find_attribute(file, d.attributes, "inline") != nullptr;
     // CHK-205: an `@inline` binding holds constants only, so a static sampler in one has nowhere to go.

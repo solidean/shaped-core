@@ -211,7 +211,7 @@ struct checker
     feature_set granted;
     /// Where a granted use is recorded; null where nobody collects one.
     feature_set* used_features = nullptr;
-    /// Every `require` of a binding or a body, which is reported at the end where nothing needed it (CHK-240).
+    /// Every `require` of a body, which is reported at the end where nothing needed it (CHK-240).
     cc::vector<require_line> require_lines;
 
     // ---- shared helpers (check.cc) ----------------------------------------------------------------------------------
@@ -330,7 +330,7 @@ struct checker
     feature_set read_require(i32 file, ast::require_decl const& r, require_scope scope, symbol_id owner);
     /// Records which features entry point `id` needs and reports every one it does not declare (CHK-238, CHK-239).
     void judge_entry_features(symbol_id id);
-    /// `unused-require` for every `require` of a binding or a body that nothing needed (CHK-240).
+    /// `unused-require` for every `require` of a body that nothing needed (CHK-240).
     void report_unused_requires();
     /// True where `expr` is the bare name `name`, which is how a resource type is recognized before lookup.
     [[nodiscard]] bool is_named(i32 file, ast::expr_id expr, cc::string_view name) const;

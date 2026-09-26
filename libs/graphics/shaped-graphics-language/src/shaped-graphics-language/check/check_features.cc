@@ -38,8 +38,9 @@ feature_set checker::read_require(i32 file, ast::require_decl const& r, require_
         }
         auto const f = feature(index);
         result.set(f);
-        // CHK-240: a file's `require` is never unused, since it states what the whole file may do.
-        if (scope != require_scope::file)
+        // CHK-240: a file's `require` states what the whole file may do, and a binding's what its listers need,
+        // so neither is ever unused.
+        if (scope == require_scope::body)
             require_lines.push_back({.file = file, .where = n->where, .what = f, .scope = scope, .owner = owner});
     }
     return result;
@@ -100,10 +101,8 @@ void checker::report_unused_requires()
     for (auto const& line : require_lines)
         if (!line.is_used)
             report(diagnostic_kind::unused_require, line.file, line.where,
-                   line.scope == require_scope::binding
-                       ? cc::format("no member of {} uses {}", out.at(line.owner).name, name_of(line.what))
-                       : cc::format("nothing in {} needs {} of it",
-                                    out.at(line.owner).name.empty() ? cc::string_view("the test")
-                                                                    : cc::string_view(out.at(line.owner).name),
-                                    name_of(line.what)));
+                   cc::format("nothing in {} needs {} of it",
+                              out.at(line.owner).name.empty() ? cc::string_view("the test")
+                                                              : cc::string_view(out.at(line.owner).name),
+                              name_of(line.what)));
 }

@@ -161,7 +161,7 @@ enum class sgl::diagnostic_kind : sgl::u8
     unknown_feature,
     /// An entry point that uses a feature it does not declare: not by its file, a binding it lists, or its own body.
     feature_not_declared,
-    /// A `require` in a binding or a body that nothing needed; a warning.
+    /// A `require` in a body that nothing needed; a warning.
     unused_require,
     /// A function reached from an entry point of a stage its `@stages` leaves out, `DEBUG_sample` in a compute shader.
     stage_not_allowed,

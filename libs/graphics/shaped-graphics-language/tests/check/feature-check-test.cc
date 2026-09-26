@@ -80,18 +80,20 @@ TEST("sgl check - a require names a feature a shader can use, as sg names it")
     CHECK(reports_for("require raytracing, binding_arrays\n") == "");
 }
 
-TEST("sgl check - a require in a binding or a body that nothing needs is unused, and one of the file never is")
+TEST("sgl check - a require in a body that nothing needs is unused, and one of a file or a binding never is")
 {
-    // CHK-240
+    // CHK-240: a file's and a binding's `require` each declare an intent, whether anything uses the feature or not.
     CHECK(reports_for("require raytracing\n") == "");
-    CHECK(reports_for(listing("", "    require raytracing\n    a: float\n"))
-          == "unused-require user:[raytracing] no member of work uses raytracing\n");
-
-    // The second `require` of a feature adds nothing, whichever of the two a member would have needed.
+    CHECK(reports_for(listing("", "    require raytracing\n    a: float\n")) == "");
     CHECK(reports_for(listing("", "    require extended_image_formats\n"
                                   "    require extended_image_formats\n"
                                   "    a: out image_2d[.r8_unorm]\n"))
-          == "unused-require user:[extended_image_formats] no member of work uses extended_image_formats\n");
+          == "");
+
+    // What a binding declares is what its listers need, so the floor holds it even where no member uses it.
+    auto const declared_only = check_sources(read_prelude(), listing("", "    require raytracing\n    a: float\n"));
+    REQUIRE(declared_only.module.entry_points.size() == 1);
+    CHECK(declared_only.module.entry_points[0].features == sgl::check::feature_set(sgl::check::feature::raytracing));
 
     // Nothing in a body uses a feature yet, so a helper's `require` grants nothing it could reach.
     constexpr auto helper = "fun helper() -> float:\n"

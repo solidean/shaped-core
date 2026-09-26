@@ -422,7 +422,7 @@ sgl::print_source(file)      // == file.source for EVERY input: the lossless inv
 - **Bindings are an effect.** A call needs the callee's `{…}` list inside the caller's, or it is `binding-not-listed` at the call; so an entry point lists what its shader reads.
 - **`require` permits, and use sets the floor.** `require extended_image_formats` in a file, a binding or a body grants the feature, named as `sg::feature` names it.
   An entry point needs what the bindings it lists use, and must declare each of those by its file, a listed binding or its own body, or it is `feature-not-declared`.
-  A form used without a grant is `needs-feature`, an unknown name `unknown-feature`, and a binding or body `require` nothing needed is the WARNING `unused-require`.
+  A form used without a grant is `needs-feature`, an unknown name `unknown-feature`, and a body `require` nothing needed is the WARNING `unused-require`; a file's or a binding's never is.
   WGSL refuses an entry point needing `binding_arrays`, `multisampled_array_textures` or `raytracing` as `target-lacks-feature`.
 - **Every path of a function that returns a value ends in a `return`**, or it is `missing-return`.
   A `loop:` without a `break` never ends; a `while` always may, whatever its condition.
