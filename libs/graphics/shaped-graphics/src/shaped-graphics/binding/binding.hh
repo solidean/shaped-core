@@ -254,6 +254,7 @@ void apply_stage_visibility(cc::span<binding> bindings, shader_stage stage);
 /// its stages' reflected bindings — merge them stage by stage, then hand the result to a group layout.
 /// A name already in `into` keeps its existing entry, except for `visibility`, which is unioned: accumulating the
 /// stages that declared a binding is the one thing this merge exists to do beyond deduplicating.
+/// An image's `access` is unioned too, since one image may be read in one stage and written in another, and the layout must permit both.
 /// Two stages disagreeing on the address, count or type is a shader bug this does not detect.
 void merge_bindings(cc::vector<binding>& into, cc::span<binding const> from);
 

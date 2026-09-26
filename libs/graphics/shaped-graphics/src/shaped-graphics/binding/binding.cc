@@ -28,9 +28,11 @@ void merge_bindings(cc::vector<binding>& into, cc::span<binding const> from)
             continue;
         }
 
-        // First-seen wins for every field except visibility, which is the one thing the merge exists to accumulate:
+        // First-seen wins for every field except visibility and an image's access, which the merge accumulates:
         // one compiled_shader is one stage, so a binding declared by two stages arrives here twice, once per bit.
         existing->visibility |= b.visibility;
+        if (existing->type == binding_type::image && b.type == binding_type::image && existing->access != b.access)
+            existing->access = access_mode::read_write;
     }
 }
 

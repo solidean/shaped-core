@@ -186,6 +186,26 @@ TEST("sg bindings - merge_bindings unions stages by name")
     CHECK(acc.size() == 3);
 }
 
+TEST("sg bindings - merge_bindings unions an image's access across stages")
+{
+    auto const image = [](sg::access_mode access)
+    {
+        return cc::vector<sg::binding>{{.name = "Target", .index = 0, .type = sg::binding_type::image, .access = access}};
+    };
+    auto const merged_access = [&](sg::access_mode first, sg::access_mode second)
+    { return sg::merge_bindings({image(first), image(second)})[0].access; };
+
+    // A layout must permit what every stage does, so a read in one stage and a write in the next is both.
+    CHECK(merged_access(sg::access_mode::read, sg::access_mode::write) == sg::access_mode::read_write);
+    CHECK(merged_access(sg::access_mode::write, sg::access_mode::read) == sg::access_mode::read_write);
+    CHECK(merged_access(sg::access_mode::read, sg::access_mode::read_write) == sg::access_mode::read_write);
+    CHECK(merged_access(sg::access_mode::read_write, sg::access_mode::write) == sg::access_mode::read_write);
+
+    // Agreement leaves it alone, which is what keeps a write-only image valid on WebGPU for any format.
+    CHECK(merged_access(sg::access_mode::write, sg::access_mode::write) == sg::access_mode::write);
+    CHECK(merged_access(sg::access_mode::read, sg::access_mode::read) == sg::access_mode::read);
+}
+
 TEST("sg bindings - split_off_sampler_bindings partitions in order")
 {
     auto bindings = cc::vector<sg::binding>{{.name = "Albedo", .index = 0, .type = sg::binding_type::texture},
