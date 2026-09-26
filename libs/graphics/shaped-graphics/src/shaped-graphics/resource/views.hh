@@ -540,6 +540,29 @@ using tv_3d = texture_view_traits<texture_view_dimension::tex_3d>;
 using tv_cube = texture_view_traits<texture_view_dimension::cube>;
 using tv_cube_array = texture_view_traits<texture_view_dimension::cube_array>;
 
+// Shape typedefs for the typed leaves — the ergonomic names, one per view dimension.
+// An image's format stays a template argument, since it is the binding contract rather than a shape.
+using texture_view_1d = texture_view<tv_1d>;
+using texture_view_1d_array = texture_view<tv_1d_array>;
+using texture_view_2d = texture_view<tv_2d>;
+using texture_view_2d_array = texture_view<tv_2d_array>;
+using texture_view_2d_ms = texture_view<tv_2d_ms>;
+using texture_view_2d_ms_array = texture_view<tv_2d_ms_array>;
+using texture_view_3d = texture_view<tv_3d>;
+using texture_view_cube = texture_view<tv_cube>;
+using texture_view_cube_array = texture_view<tv_cube_array>;
+
+template <pixel_format Format>
+using image_view_1d = image_view<tv_1d, Format>;
+template <pixel_format Format>
+using image_view_1d_array = image_view<tv_1d_array, Format>;
+template <pixel_format Format>
+using image_view_2d = image_view<tv_2d, Format>;
+template <pixel_format Format>
+using image_view_2d_array = image_view<tv_2d_array, Format>;
+template <pixel_format Format>
+using image_view_3d = image_view<tv_3d, Format>;
+
 } // namespace sg
 
 /// A sampled (SRV) texture view of dimension `Traits::dimension`, over a subresource range.

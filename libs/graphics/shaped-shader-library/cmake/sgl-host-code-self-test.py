@@ -26,7 +26,7 @@ from sgl_description import SglFile  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[4]
 
-# sg's typed view aliases, one per sg::texture_view_dimension: what view_traits must name for every dimension.
+# sg's typed view typedefs, one per sg::texture_view_dimension: what view_shape must name for every dimension.
 VIEWS_HH = REPO / "libs" / "graphics" / "shaped-graphics" / "src" / "shaped-graphics" / "resource" / "views.hh"
 
 TESTS = []
@@ -101,18 +101,23 @@ def an_unclamped_max_lod_is_sg_samplers_own_sentinel():
     expect_equal(got, "{.max_lod = sg::sampler::lod_max}", "FLT_MAX as max_lod")
 
 
-# ---- view_traits ----------------------------------------------------------------------------------------------------
+# ---- view_shape -----------------------------------------------------------------------------------------------------
 
 
 @test
-def every_texture_view_dimension_names_sgs_own_alias():
-    aliases = re.findall(r"using (tv_\w+) = texture_view_traits<texture_view_dimension::(\w+)>;",
-                         VIEWS_HH.read_text(encoding="utf-8"))
-    if len(aliases) < 9:
-        raise AssertionError(f"read only {len(aliases)} tv_ alias(es) from {VIEWS_HH} -- the pattern is stale")
-    for alias, dimension in aliases:
-        expect_equal(sgl_host_code.view_traits({"texture_dimension": dimension}), f"sg::{alias}",
-                     f"view_traits of '{dimension}'")
+def every_texture_view_dimension_names_sgs_own_typedefs():
+    text = VIEWS_HH.read_text(encoding="utf-8")
+    aliases = dict(re.findall(r"using (tv_\w+) = texture_view_traits<texture_view_dimension::(\w+)>;", text))
+    textures = dict(re.findall(r"using texture_view_(\w+) = texture_view<(tv_\w+)>;", text))
+    images = dict(re.findall(r"using image_view_(\w+) = image_view<(tv_\w+), Format>;", text))
+    if len(aliases) < 9 or len(textures) < 9 or len(images) < 5:
+        raise AssertionError(f"read {len(aliases)} tv_ alias(es), {len(textures)} texture and {len(images)} image "
+                             f"typedef(s) from {VIEWS_HH} -- the pattern is stale")
+    for alias, dimension in aliases.items():
+        shape = sgl_host_code.view_shape({"texture_dimension": dimension})
+        expect_equal(textures.get(shape), alias, f"texture_view_{shape} for '{dimension}'")
+        if "cube" not in dimension and "ms" not in dimension:
+            expect_equal(images.get(shape), alias, f"image_view_{shape} for '{dimension}'")
 
 
 # ---- binding_entry --------------------------------------------------------------------------------------------------
@@ -187,8 +192,8 @@ FILE = SglFile(path="shadow.sgl")
 @test
 def a_group_has_a_field_per_view_and_per_dynamic_sampler():
     header = sgl_host_code.emit_group("pkg", "ns", FILE, GROUP)
-    expect_in("sg::texture_view<sg::tv_cube> depth_map;", header, "a cube texture's field")
-    expect_in("sg::image_view<sg::tv_3d, sg::pixel_format::r32_uint> counts;", header, "a 3d image's field, typed on its format")
+    expect_in("sg::texture_view_cube depth_map;", header, "a cube texture's field")
+    expect_in("sg::image_view_3d<sg::pixel_format::r32_uint> counts;", header, "a 3d image's field, typed on its format")
     expect_in("sg::readwrite_buffer_view<float> weights;", header, "a mut buffer's field, its view by access")
     expect_in("sg::sampler picked;", header, "a dynamic sampler's field")
     # A static sampler is the layout's, so the group the host fills has nothing to set for it.

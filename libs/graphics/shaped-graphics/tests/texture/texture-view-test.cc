@@ -344,6 +344,14 @@ TEST("sg - typed texture views carry the view dimension at compile time")
     static_assert(std::is_same_v<decltype(tex.as_image_view<sg::pixel_format::rgba8_unorm>()),
                                  sg::image_view<sg::tv_2d, sg::pixel_format::rgba8_unorm>>);
 
+    // The shape typedefs name the same types, so a field spelled either way takes either.
+    static_assert(std::is_same_v<sg::texture_view_2d, sg::texture_view<sg::tv_2d>>);
+    static_assert(std::is_same_v<sg::texture_view_cube_array, sg::texture_view<sg::tv_cube_array>>);
+    static_assert(std::is_same_v<sg::image_view_2d<sg::pixel_format::rgba8_unorm>,
+                                 sg::image_view<sg::tv_2d, sg::pixel_format::rgba8_unorm>>);
+    static_assert(std::is_same_v<sg::image_view_3d<sg::pixel_format::r32_float>,
+                                 sg::image_view<sg::tv_3d, sg::pixel_format::r32_float>>);
+
     // Reinterpreting factories retype to the reinterpreted dimension.
     auto cube = sg::texture_cube::from_raw(std::make_shared<test_texture>(desc_cube(sg::texture_usage::texture)));
     static_assert(decltype(cube.as_texture_view())::dimension == sg::texture_view_dimension::cube);

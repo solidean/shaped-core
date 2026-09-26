@@ -502,7 +502,8 @@ sg::image_view<VT, F>        // storage image (UAV) of texel format F (the bindi
 // an image's read / write / read_write is the BINDING's access, never the view's.
 //   Made via texture<Traits>.as_*_view() (returns the precise VT).
 // view traits: tv_1d / tv_1d_array / tv_2d / tv_2d_array / tv_2d_ms / tv_2d_ms_array / tv_3d / tv_cube / tv_cube_array
-sg::buffer_view<T>           // access-erased middle: any access of a buffer of T (bound_as is a runtime field); leaves convert implicitly
+sg::texture_view_2d  sg::image_view_2d<F>   // shape typedefs, one per view traits: texture_view_<shape> for all nine, image_view_<shape><F> for 1d / 1d_array / 2d / 2d_array / 3d
+sg::buffer_view<T>           // class-erased middle: any view class of a buffer of T (bound_as is a runtime field); leaves convert implicitly
 sg::any_texture_view<VT>     // kind-erased middle: a texture or an image of dimension VT::dimension (bound_as is a runtime field)
 sg::tlas_view                // ray-tracing TLAS (SRV, VA-addressed) — view_class::acceleration_structure. Via tlas.as_view()
 sg::view_class               // constants | readonly | readwrite (buffers) | texture | image | acceleration_structure
@@ -515,7 +516,7 @@ sg::try_as_buffer_view(rv)   // -> raw_buffer_view const*, null on a different a
 // backends visit the arm (raw_buffer_view | raw_texture_view | raw_tlas_view | vacant_view) to build the native descriptor
 // raw arms are also the directly-usable "raw" binding vocabulary for tooling
 // INVERSE (erased -> typed leaf): as_* asserts (view class, +dimension for textures); try_as_* -> cc::optional (nullopt on mismatch / wrong arm)
-mid.as_readonly() / as_readwrite() / as_constants()   // buffer_view<T> middle -> the leaf (only the runtime access is pinned)
+mid.as_readonly() / as_readwrite() / as_constants()   // buffer_view<T> middle -> the leaf (only the runtime view class is pinned)
 mid.as_texture() / as_image<F>()                    // any_texture_view<VT> middle -> the leaf (as_image: image VT only; checks F)
 arm.as_readonly<T>() / as_readwrite<T>() / as_constants<T>()   // raw_buffer_view arm -> leaf (you supply T)
 arm.as_texture<VT>() / as_image<VT, F>()                     // raw_texture_view arm -> leaf (you supply VT; checks view dimension)

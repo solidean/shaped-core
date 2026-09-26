@@ -122,10 +122,10 @@ def emit_group(package: str, namespace: str, file: SglFile, binding: dict) -> st
                        f"at byte {member['offset']} of the group's constant buffer\n")
             continue
         if member["kind"] == "texture":
-            out.append(f"    sg::texture_view<{view_traits(member)}> {member['name']}; ///< `{member['type']}`\n")
+            out.append(f"    sg::texture_view_{view_shape(member)} {member['name']}; ///< `{member['type']}`\n")
             continue
         if member["kind"] == "image":
-            view = f"sg::image_view<{view_traits(member)}, sg::pixel_format::{member['image_format']}>"
+            view = f"sg::image_view_{view_shape(member)}<sg::pixel_format::{member['image_format']}>"
             out.append(f"    {view} {member['name']}; ///< `{member['type']}`\n")
             continue
         if member["kind"] == "sampler":
@@ -167,9 +167,9 @@ def has_block(binding: dict) -> bool:
     return binding.get("block_slot", -1) >= 0
 
 
-def view_traits(member: dict) -> str:
-    """The typed view traits of a texture or an image: `sg::tv_2d` for `tex_2d`, `sg::tv_cube` for `cube`."""
-    return "sg::tv_" + member["texture_dimension"].removeprefix("tex_")
+def view_shape(member: dict) -> str:
+    """The shape suffix of sg's view typedefs for a texture or an image: `2d` for `tex_2d`, `cube` for `cube`."""
+    return member["texture_dimension"].removeprefix("tex_")
 
 
 # sg::sampler's fields in its own declaration order, which a designated initializer has to follow, and their C++ spelling.
