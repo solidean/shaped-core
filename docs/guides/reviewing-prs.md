@@ -105,6 +105,9 @@ Not preferences that decide a case — options the maintainer wants **beside the
   Price the strict option against the model's consistency, and not only against what it would cost to relax later.
 - **Deleting a legacy spelling, beside accommodating it.**
   When a new design has to grow a rule only to keep an old spelling working, ask whether the spelling is needed at all; removing it deletes the question along with the rule.
+  **The same holds for a convenience a finding runs into.**
+  SGL read a bare field name in a method through `self`, and two lookups that start from a name skipped the receiver, so `frame.x` found a binding.
+  The fix offered was to route both through the receiver; the answer was to require `self.` and delete the convenience, which removed the bug and every lookup that would have had to remember it.
 
 ## A PR arrives red, and fixing it is the review's job
 
@@ -267,6 +270,18 @@ Storage-buffer offsets take WebGPU's 256-byte floor as a hardcoded rule, with a 
 The TODO settles that the capability is missing; it usually leaves open what happens when someone hits it, and silent wrong output is the wrong answer either way.
 Per-permutation samplers let the first permutation claim a register for the whole pipeline, and the TODO recorded it honestly.
 Asserting on a *conflicting* claim costs nothing and turns an unexplainable image into a message.
+
+### A construct the language means to grow into is refused as `unsupported-yet`
+
+In SGL, a refusal is a normal error only where the construct will never mean anything.
+Where the intent is to support it later, the refusal is `unsupported-yet`, even when no design for it is written down yet.
+A review recommended refusing an extension written inside a type's block as `member-not-allowed-here`:
+
+```raw
+but we refuse it with unsupported-yet. the intent is later that it attaches to the type. but you only see it if the extension method itself is in scope
+```
+
+Record the intent where the refusal is specified and in the library's TODO, so the next session does not read the refusal as a ban.
 
 ### A design option is priced on the design, never on what is built so far
 
@@ -520,6 +535,13 @@ The shapes this takes, each seen at least once:
   Name what leaked before naming the remedy.
 - **Look for the configuration that makes the race deterministic before writing the item.** A `singlethreaded-*` preset removes exactly the concurrency a one-run finding depends on.
   Two minutes there convert "I saw it once" into a named mechanism.
+
+### A language change is reviewed by running programs against its numbered rules
+
+Where a change comes with a spec of numbered rules, each rule is a claim a ten-line program can check, and reading the checker finds only some of the gaps.
+A review of SGL's call model confirmed nearly all of its defects this way, half of them by an agent told to write a probe per rule and run it.
+The ones reading alone missed were rules applied in one lookup and skipped in another, such as a literal receiver that `foo(2)` converts and `(2).foo()` does not.
+**Pay attention to a probe that "did not check" with no diagnostic**: a test the compiler dropped silently passes every gate that only counts errors.
 
 ### Check whether the code already does the thing you are asking for
 
