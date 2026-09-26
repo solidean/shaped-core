@@ -67,3 +67,17 @@ TEST("sgl driver - a test an earlier phase found an error in is never run")
     CHECK(tested.test_count == 1);
     CHECK(tested.tests_run == 0);
 }
+
+TEST("sgl driver - every test is run or fails, and none is ever left out")
+{
+    // CHK-224: a function whose signature failed never has its body checked, and its test is still found and run
+    auto const in_failed = sgl::test_source("fun f(x: nope) -> float:\n    test 1 == 2\n    return 1.0\n", "z.sgl");
+    CHECK(in_failed.test_count == 1);
+    CHECK(in_failed.tests_run == 1);
+    CHECK(in_failed.errors.contains("test-failed"));
+
+    // a test inside a test is an error of the AST pass, and is counted as one that did not check
+    auto const nested = sgl::test_source("test:\n    test 1 == 1\n    true\n", "n.sgl");
+    CHECK(nested.test_count == 2);
+    CHECK(nested.errors.contains("declaration-not-allowed-here"));
+}

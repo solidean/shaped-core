@@ -222,6 +222,10 @@ void checker::run()
         if (out.symbols[i].kind == symbol_kind::function && out.symbols[i].state == symbol_state::checked)
             check_body(symbol_id(i));
 
+    // A test in a body that was never checked, a function whose signature failed or a test inside a test, is found
+    // nowhere else, and a test is run or fails: it is never left out (CHK-224).
+    add_unregistered_tests();
+
     // Last, since a test in a function body is found while that body is checked (CHK-224).
     for (auto i = isize(0); i < out.tests.size(); ++i)
         check_test(i32(i));

@@ -5,7 +5,7 @@
 ## The idea
 
 `test` declarations exist ([CHK-224](../semantics/checking.md#tests)), and they run on the interpreter.
-Four directions were agreed when they were designed and left for later, and each builds on what is there without changing it.
+Five directions were agreed when they were designed and left for later, and each builds on what is there without changing it.
 
 **Running tests on the GPU.**
 A test has no stage, no parameter and no binding, so it can be written as a compute shader of one thread.
@@ -22,6 +22,12 @@ The local binding of [binding-effects.md](binding-effects.md) is where it plugs 
 **Capturing what is constant after inlining.**
 A test reads only a `const` of the function it stands in.
 A local such as `let k = 0.5` is constant once the function is inlined, and [inferred-comptime.md](inferred-comptime.md) is the analysis that would let a test read it.
+
+**Tests inside generic functions and types.**
+A test inside a generic reads its generic arguments, so it runs once per instantiation, after one exists.
+The keyword is seen before any instantiation, so the test is registered at once, and a module whose generic is never instantiated fails its tests with "this test was not run".
+That keeps a test fail-closed where it cannot run yet.
+The way out is a module-level test that instantiates the generic and ends in `true // run the generic tests`.
 
 **Matching an expected diagnostic by its message.**
 `@expect(error = "kind")` matches the kind's name only, which is stable where a message is not.

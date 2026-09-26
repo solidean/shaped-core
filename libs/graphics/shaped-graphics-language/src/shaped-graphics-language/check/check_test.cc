@@ -67,6 +67,43 @@ void checker::add_test(i32 file, ast::decl_id decl, cc::string scope_path, funct
     test_enclosing.push_back(enclosing != nullptr ? enclosing->function : symbol_id::none);
 }
 
+void checker::add_unregistered_tests()
+{
+    for (auto file = i32(0); file < i32(files.size()); ++file)
+    {
+        auto const& ast = ast_of(file);
+        for (auto d = isize(0); d < ast.decls.size(); ++d)
+        {
+            auto const decl = ast::decl_id(d);
+            if (!ast.at(decl).node.is<ast::test_decl>())
+                continue;
+            auto is_registered = false;
+            for (auto const& t : out.tests)
+                is_registered = is_registered || (t.file == file && t.declaration == decl);
+            if (is_registered)
+                continue;
+
+            // named after the innermost function around it, for a reader; it sees none of that function's names
+            auto const where = span_of(file, decl);
+            auto scope_path = cc::string();
+            auto innermost = u32(-1);
+            for (auto const& s : out.symbols)
+            {
+                if (s.file != file || s.kind != symbol_kind::function || !ast::is_valid(s.declaration))
+                    continue;
+                auto const around = span_of(file, s.declaration);
+                if (around.offset <= where.offset && where.offset + where.length <= around.offset + around.length
+                    && around.length < innermost)
+                {
+                    innermost = around.length;
+                    scope_path = cc::format("fun {}", s.name);
+                }
+            }
+            add_test(file, decl, cc::move(scope_path));
+        }
+    }
+}
+
 void checker::add_member_tests(i32 file, ast::range_of<ast::decl_id> members, cc::string_view scope_path)
 {
     for (auto const member : ast_of(file).at(members))

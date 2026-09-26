@@ -313,6 +313,8 @@ struct checker
 
     /// Records the `test` `decl` stands for, with the names of `enclosing` it can see and must not use.
     void add_test(i32 file, ast::decl_id decl, cc::string scope_path, function_scope const* enclosing = nullptr);
+    /// Every `test` of every file that no other path found, checked as one at file scope with no names around it.
+    void add_unregistered_tests();
     /// Every `test` a struct or an enum declares among its members.
     void add_member_tests(i32 file, ast::range_of<ast::decl_id> members, cc::string_view scope_path);
     /// Checks test `index` as a function of no parameter and no binding, and its last-line rule (CHK-226).
