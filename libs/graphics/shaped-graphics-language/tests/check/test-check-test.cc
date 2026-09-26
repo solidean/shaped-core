@@ -104,3 +104,14 @@ TEST("sgl check - assert takes a bool, anywhere")
                       "true\n")
           == "");
 }
+
+TEST("sgl check - a test is named at its keyword, whatever its attributes spell")
+{
+    // an @expect pattern holding "test" must not move the test's place, nor where its extent starts (CHK-232)
+    auto const checked = check_sources(read_prelude(), "@expect(error = \"test-*\") test missing < 1\n");
+    REQUIRE(checked.module.tests.size() == 1);
+    auto const& t = checked.module.tests[0];
+    CHECK(checked.user.text_of(t.where) == "test");
+    CHECK(t.extent.offset == t.where.offset);
+    CHECK(checked.user.text_of(t.extent) == "test missing < 1");
+}

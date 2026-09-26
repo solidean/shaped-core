@@ -138,6 +138,8 @@ struct sgl::ast::notation_decl
 /// A declaration and no statement: it never runs where it stands, and the check pass runs it on its own.
 struct sgl::ast::test_decl
 {
+    /// The `test` keyword, which attributes stand in front of: where a report names the test, and where its extent starts.
+    sgl::source_span keyword;
     sgl::ast::body body;
 
     constexpr bool operator==(test_decl const&) const = default;

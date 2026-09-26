@@ -40,11 +40,7 @@ void checker::add_test(i32 file, ast::decl_id decl, cc::string scope_path, funct
     });
     notes.push_back({});
 
-    // Attributes stand in front of the keyword, so the keyword is where the report names the test.
-    auto where = span_of(file, decl);
-    auto const at = text_of(file, where).find("test");
-    if (at >= 0)
-        where = {.offset = where.offset + u32(at), .length = 4};
+    auto const where = ast_of(file).at(decl).node.as<ast::test_decl>().keyword;
     auto const whole = span_of(file, decl);
     out.tests.push_back({
         .symbol = id,

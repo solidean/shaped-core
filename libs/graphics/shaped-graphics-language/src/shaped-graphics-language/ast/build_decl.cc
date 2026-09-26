@@ -98,7 +98,9 @@ decl_id builder::test_declaration(statement_head const& head, keyword_parts cons
         report(diagnostic_kind::too_many_arguments, parts.arguments[1]);
 
     owners.push_back({.owner = body_owner::test});
-    auto result = test_decl{};
+    // the keyword alone: the keyword form spans its arguments too
+    auto const keyword = parts.keywords.empty() ? head.keyword_form : parts.keywords.front();
+    auto result = test_decl{.keyword = file.at(keyword).where};
     if (!parts.arguments.empty())
     {
         // AST-138: `test value` is the block of that one line, so every rule of a test body is stated once.
