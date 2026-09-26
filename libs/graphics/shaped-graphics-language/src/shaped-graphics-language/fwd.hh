@@ -34,6 +34,7 @@ enum class token_class : u8;
 struct classified_span;
 struct classify_options;
 struct unannotated_binding;
+struct inferred_result;
 
 enum class described_member_kind : u8;
 struct described_sampler;

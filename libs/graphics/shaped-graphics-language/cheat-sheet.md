@@ -81,6 +81,8 @@ sgl::token_class                           // keyword number string comment doc_
 #include <shaped-graphics-language/driver/unannotated_bindings.hh>
 sgl::unannotated_bindings(ast, m, f)       // -> vector<unannotated_binding { name, type }>: each `let x = …` that writes no type
                                            // left out: a pattern that is no name, a body the check never reached, the error type
+#include <shaped-graphics-language/driver/inferred_results.hh>
+sgl::inferred_results(pf, ast, m, f)       // -> vector<inferred_result { arrow, type, is_writable }>: each `=> value` without `->`
 ```
 
 ## Parsing a file

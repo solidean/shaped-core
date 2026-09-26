@@ -1,5 +1,6 @@
 #include "features.hh"
 
+#include <shaped-graphics-language/driver/inferred_results.hh>
 #include <shaped-graphics-language/driver/unannotated_bindings.hh>
 
 using namespace cc::primitive_defines;
@@ -27,6 +28,22 @@ cc::vector<lsp::inlay_hint> sgl_lsp::inlay_hints_of(analysis const& a, lsp::rang
             .padding_left = true,
             .text_edits = {{.range = {.start = at, .end = at}, .new_text = cc::string(" : ") + type}},
         });
+    }
+    for (auto const& r : sgl::inferred_results(a.file, a.ast, a.module, user))
+    {
+        if (isize(r.arrow.end()) < first || isize(r.arrow.offset) > last)
+            continue;
+        auto const at = index.position_of(text, r.arrow.offset, e);
+        auto const type = a.module.name_of(r.type);
+        auto hint = lsp::inlay_hint{
+            .position = at,
+            .label = cc::string("-> ") + type,
+            .kind = lsp::inlay_hint_kind::type,
+            .padding_right = true,
+        };
+        if (r.is_writable)
+            hint.text_edits = {{.range = {.start = at, .end = at}, .new_text = cc::string("-> ") + type + " "}};
+        out.push_back(cc::move(hint));
     }
     return out;
 }

@@ -1,6 +1,6 @@
 // a literal converts where a type is expected: a number to a numeric type that holds it, a tuple or an object by a call
 
-fun half(x: float) -> float => x * 0.5
+fun half(x: float) => x * 0.5
 
 // an integer literal converts to a float that holds it exactly, at no cost
 test half(3) == 1.5
@@ -30,7 +30,7 @@ struct span2:
     lo: float
     hi: float = lo + 1.0
 
-fun width(s: span2) -> float => s.hi - s.lo
+fun width(s: span2) => s.hi - s.lo
 
 test width((0.0, 2.0)) == 2.0
 test width({lo = 1.0}) == 1.0
@@ -58,7 +58,7 @@ test:
     width(s.b) == 2.0
 
 // every function of the struct's name takes part, the synthesized constructor among them
-fun span2(.center: float, .radius: float) -> span2 => span2(center - radius, center + radius)
+fun span2(.center: float, .radius: float) => span2(center - radius, center + radius)
 
 test width({center = 1.0, radius = 0.5}) == 1.0
 test span2(center = 1.0, radius = 0.25).hi == 1.25
@@ -67,7 +67,7 @@ test span2(center = 1.0, radius = 0.25).hi == 1.25
 struct handle:
     id: int
 
-fun handle(.name: float) -> int => 7
+fun handle(.name: float) => 7
 
 test handle(name = 1.0) == 7
 

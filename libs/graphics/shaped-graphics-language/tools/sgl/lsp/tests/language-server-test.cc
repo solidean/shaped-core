@@ -155,6 +155,24 @@ TEST("sgl lsp - an unannotated let gets its type as a hint that inserts itself",
     CHECK(hints[0]["textEdits"][0]["newText"].as_string() == " : float");
 }
 
+TEST("sgl lsp - an inferred return type is a hint before the arrow, which inserts itself where it may be written",
+     main_thread)
+{
+    auto s = session("fun half(x: float) => x * 0.5\nstruct box:\n    w: float\n    area => self.w * self.w\n");
+    auto const r = s.ask(
+        5, "textDocument/inlayHint",
+        R"({"textDocument":{"uri":"file:///t.sgl"},"range":{"start":{"line":0,"character":0},"end":{"line":9,"character":0}}})");
+    auto const hints = r["result"];
+    REQUIRE(hints.size() == 2);
+    CHECK(hints[0]["label"].as_string() == "-> float");
+    CHECK(hints[0]["position"]["line"].as_double() == 0);
+    CHECK(hints[0]["position"]["character"].as_double() == 19);
+    CHECK(hints[0]["textEdits"][0]["newText"].as_string() == "-> float ");
+    // a property of a type body takes no `-> type`, so its hint only shows it
+    CHECK(hints[1]["position"]["line"].as_double() == 3);
+    CHECK(!hints[1].has("textEdits"));
+}
+
 TEST("sgl lsp - positions count UTF-16 units unless the client offers UTF-8", main_thread)
 {
     // `é` is two bytes and one UTF-16 unit, so the unknown name sits one character further left in UTF-16

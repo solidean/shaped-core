@@ -2,6 +2,7 @@
 
 #include <shaped-graphics-language/check/checked_module.hh>
 #include <shaped-graphics-language/driver/classify.hh>
+#include <shaped-graphics-language/driver/inferred_results.hh>
 #include <shaped-graphics-language/driver/unannotated_bindings.hh>
 
 using namespace sgl_test;
@@ -123,4 +124,34 @@ TEST("sgl classify - a let whose value is a call of the type's own name says so,
     for (auto const& b : sgl::unannotated_bindings(checked.user_ast, checked.module, checked.user_file()))
         out.appendf("{}{} ", checked.user.text_of(b.name), b.is_type_named ? " named" : "");
     CHECK(out == "v named x ");
+}
+
+TEST("sgl classify - an arrow body without a return type has the one the check inferred, placed before its arrow")
+{
+    auto const source = cc::string_view("fun half(x: float) => x * 0.5\n"
+                                        "fun written(x: float) -> float => x\n"
+                                        "fun block(x: float):\n"
+                                        "    print x\n"
+                                        "fun broken() => nope\n"
+                                        "struct box:\n"
+                                        "    w: float\n"
+                                        "    area => self.w * self.w\n"
+                                        "    fun twice(self) => self.w * 2.0\n"
+                                        "fun box.wide => self.w > 1.0\n");
+    auto const checked = check_sources(read_prelude(), source);
+    auto out = cc::string();
+    for (auto const& r : sgl::inferred_results(checked.user, checked.user_ast, checked.module, checked.user_file()))
+    {
+        // the text up to the arrow, so the place a `-> type` goes is visible
+        auto line_start = isize(r.arrow.offset);
+        while (line_start > 0 && source[line_start - 1] != '\n')
+            --line_start;
+        out.appendf("{}|{} {}{}\n", source.subview({.offset = line_start, .size = r.arrow.offset - line_start}),
+                    checked.user.text_of(r.arrow), checked.module.name_of(r.type), r.is_writable ? "" : " shown");
+    }
+    CHECK(out
+          == "fun half(x: float) |=> float\n"
+             "    area |=> float shown\n"
+             "    fun twice(self) |=> float\n"
+             "fun box.wide |=> bool\n");
 }

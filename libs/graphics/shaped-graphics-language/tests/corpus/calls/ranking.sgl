@@ -1,7 +1,7 @@
 // where several candidates match, the best is no worse at any argument, and a literal leaving its own type costs one step
 
-fun pick(x: int) -> int => 1
-fun pick(x: float) -> int => 2
+fun pick(x: int) => 1
+fun pick(x: float) => 2
 
 // a number literal converts to both, and the one that keeps its default type is shorter
 test pick(1) == 1
@@ -9,15 +9,15 @@ test pick(1.0) == 2
 test pick(2.5) == 2
 
 // each candidate keeps one literal at its default type, so neither is better
-fun mix(a: int, b: float) -> int => 1
-fun mix(a: float, b: int) -> int => 2
+fun mix(a: int, b: float) => 1
+fun mix(a: float, b: int) => 2
 
 @expect(error = "ambiguous-overload")
 test mix(1, 1) == 1
 
 // the literals kept at their type are not counted across the call: each candidate is shorter somewhere, so neither wins
-fun trio(a: int, b: int, c: float) -> int => 1
-fun trio(a: float, b: float, c: int) -> int => 2
+fun trio(a: int, b: int, c: float) => 1
+fun trio(a: float, b: float, c: int) => 2
 
 @expect(error = "ambiguous-overload")
 test trio(1, 2, 3) == 1
@@ -37,7 +37,7 @@ test:
     x == 1.5
 
 // the program's function hides the prelude's where both match
-fun saturate(x: float) -> float => 0.25
+fun saturate(x: float) => 0.25
 
 test saturate(4.0) == 0.25
 
@@ -45,15 +45,15 @@ test saturate(4.0) == 0.25
 struct pair:
     a: float
     b: float
-    fun sum(self) -> float => self.a + self.b
+    fun sum(self) => self.a + self.b
 
-fun sum(p: pair) -> float => 0.0
+fun sum(p: pair) => 0.0
 
 test pair(1.0, 2.0).sum() == 3.0
 test sum(pair(1.0, 2.0)) == 3.0
 
 // an operand between two links of a chain keeps the type its first link gave it
-fun between(x: float) -> bool => x < 1 < 2
+fun between(x: float) => x < 1 < 2
 
 test between(0.5)
 test 0.5 < 1 < 2

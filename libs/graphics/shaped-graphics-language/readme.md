@@ -93,9 +93,10 @@ What the server provides:
 
 * diagnostics, pushed as you type;
 * semantic tokens, which colour what the grammar cannot tell apart;
-* inlay hints showing inferred types;
+* inlay hints showing inferred types: ` : float` after a `let` that writes none, and `-> float` before the `=>` of a function that writes none;
 * test results: a failing `check` is a diagnostic, and every check site gets a gutter mark.
 
+Accepting a hint writes it into the source, except on a property of a type body, which takes no `-> type`.
 An open `prelude/builtins.sgl` or `prelude/core.sgl` is checked as that file of the prelude, so editing `core.sgl` is checked live.
 
 The gutter marks are a green check when every run passed, a red cross when every run failed, and a half-and-half mark for both.
@@ -130,6 +131,7 @@ Changing either restarts the server.
 A manual test after a change, with the extension installed by `uv run dev.py install sgl-vscode` and the window reloaded:
 
 1. Open [tests/samples/control-flow.sgl](tests/samples/control-flow.sgl): names are coloured by the server, and inferred types appear as inlay hints.
+   [tests/corpus/calls/lookup.sgl](tests/corpus/calls/lookup.sgl) shows the `-> float` hints of arrow functions.
 2. Type a deliberate error: a squiggle appears, and its hover names the problem.
 3. Open a file with tests, such as [tests/corpus/calls/defaults.sgl](tests/corpus/calls/defaults.sgl): every check has a green gutter mark.
    Break one so that it fails: its mark turns into a red cross, and the test is a diagnostic.

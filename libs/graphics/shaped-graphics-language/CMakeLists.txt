@@ -80,6 +80,7 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/driver/impl/front_end.cc
     src/shaped-graphics-language/driver/prelude.cc
     src/shaped-graphics-language/driver/classify.cc
+    src/shaped-graphics-language/driver/inferred_results.cc
     src/shaped-graphics-language/driver/unannotated_bindings.cc
 )
 
@@ -222,6 +223,7 @@ target_sources(shaped-graphics-language
     src/shaped-graphics-language/driver/impl/front_end.hh
     src/shaped-graphics-language/driver/prelude.hh
     src/shaped-graphics-language/driver/classify.hh
+    src/shaped-graphics-language/driver/inferred_results.hh
     src/shaped-graphics-language/driver/unannotated_bindings.hh
 )
 

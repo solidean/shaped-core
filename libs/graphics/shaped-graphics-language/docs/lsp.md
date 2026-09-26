@@ -11,7 +11,8 @@ This page is for whoever works on the server.
   A note into the prelude points at a virtual `sgl-prelude:` document, which the client fetches with `sgl/preludeText`.
   An open `prelude/builtins.sgl` or `prelude/core.sgl` is checked in that file's place (`sgl::prelude_file_of`), so an edit of `core.sgl` is checked as the prelude it is.
 * **Semantic tokens**, the whole document at once: what `sgl::classify` says every token is, mapped onto LSP's standard names.
-* **Inlay hints**: ` : type` after every `let` that writes no type, which inserts itself when accepted.
+* **Inlay hints**: ` : type` after every `let` that writes no type, and `-> type` before the `=>` of every function or property whose return type is inferred.
+  Each inserts itself when accepted, except on a property of a type body, which takes no `-> type`.
 * **Tests**: after every check the server runs the document's tests itself.
   It then sends `sgl/checkResults`, every check and assert with how often it held and failed, which the extension draws as gutter marks.
 

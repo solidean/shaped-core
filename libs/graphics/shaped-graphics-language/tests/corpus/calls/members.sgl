@@ -11,13 +11,13 @@ struct span2:
     center => self.lo + self.width * 0.5
 
     // a method names its receiver
-    fun contains(self, x: float) -> bool => self.lo <= x and x <= self.hi
+    fun contains(self, x: float) => self.lo <= x and x <= self.hi
 
     // a method may call another through `self`
-    fun scaled(self, k: float) -> span2 => span2(self.lo * k, self.hi * k)
+    fun scaled(self, k: float) => span2(self.lo * k, self.hi * k)
 
     // a static takes no `self`, and is reached through its type
-    fun unit() -> span2 => span2(0.0, 1.0)
+    fun unit() => span2(0.0, 1.0)
 
     // a property's block has its value through `yield`
     is_empty =>:
@@ -73,6 +73,6 @@ test:
 // so a field named like a binding or a type is still reached through `self`, and never mistaken for it
 struct clock:
     span2: span2
-    fun w(self) -> float => self.span2.width
+    fun w(self) => self.span2.width
 
 test clock(span2(1.0, 3.0)).w() == 2.0
