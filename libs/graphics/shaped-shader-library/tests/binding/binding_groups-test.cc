@@ -397,16 +397,27 @@ constexpr name_of_dimension k_dimensions[] = {
                     binding.count = cc::from_string<u32>(c.value()).value();
                 else if (auto const t = value_of(word, "type"); t.has_value())
                 {
+                    // A misspelled value would otherwise leave the default, and the C++ half would pass a line the Python half rejects.
+                    auto known = false;
                     for (auto const& entry : k_binding_types)
                         if (entry.name == t.value())
+                        {
                             binding.type = entry.value;
+                            known = true;
+                        }
+                    if (!known)
+                        FAIL(cc::format("binding corpus: unknown type '{}'", t.value()));
                 }
                 else if (auto const a = value_of(word, "access"); a.has_value())
                 {
-                    if (a.value() == "write")
+                    if (a.value() == "read")
+                        binding.access = sg::access_mode::read;
+                    else if (a.value() == "write")
                         binding.access = sg::access_mode::write;
                     else if (a.value() == "read_write")
                         binding.access = sg::access_mode::read_write;
+                    else
+                        FAIL(cc::format("binding corpus: unknown access '{}'", a.value()));
                 }
                 else if (auto const d = value_of(word, "dim"); d.has_value())
                 {
