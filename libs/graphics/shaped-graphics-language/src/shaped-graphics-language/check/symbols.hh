@@ -174,7 +174,7 @@ enum class sgl::check::symbol_kind : sgl::u8
     constant,
     /// A `test`, which has no name and which no lookup finds; `info` is its synthesized signature.
     test,
-    /// A named declaration this phase has no meaning for yet: `const`, `type`, `sampler`.
+    /// A named declaration this phase has no meaning for yet: `type`, `sampler`.
     /// It is always `failed`, and it exists so its name resolves to the error type and not to `unknown-name`.
     unsupported,
 };

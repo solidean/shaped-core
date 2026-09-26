@@ -24,3 +24,7 @@ What the compiler carries today is the [spec](spec/_index.md); a construct it do
   The test tokenizes a corpus, `tools/vscode-extension/examples/sample.sgl` at least, with the compiler, the grammar and the lexer.
   It compares the class each assigns to every token: keyword, name, number, string, comment, operator.
   It runs the TextMate grammar through `vscode-textmate`, or through a Python TextMate engine if one is good enough to spare the Node dependency.
+- **`no-effect` in a test, by what can reach an assert.** A line of a test without an effect is still code under test when it can reach an `assert`, since it may trigger one.
+  So CHK-225's warning is too coarse there, and a `void` line is exempt from it today.
+  The precise rule wants the check pass to know more about the effects of an expression and of a function, "could reach an assert" among them.
+  A line of a test is then `no-effect` exactly when it has no effect and cannot reach an assert.

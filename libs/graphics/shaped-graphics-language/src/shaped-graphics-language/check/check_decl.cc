@@ -792,7 +792,7 @@ void checker::compile_function(symbol_id id)
         }
     }
 
-    // Without `-> T` a block body returns nothing, and an arrow body returns what its expression is.
+    // Without `-> T` a block body returns `void`, and an arrow body returns what its expression is.
     auto result = checked_module::void_type;
     auto const infers_result = !ast::is_valid(f.return_type) && f.body.kind == ast::body_kind::arrow;
     if (ast::is_valid(f.return_type))

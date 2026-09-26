@@ -125,9 +125,9 @@ enum light_kind:
   One in a function body is checked after that body, and it never runs where it stands, so no jump in front of it makes it unreachable.
   Every `test` the source spells is run or fails, and none is ever left out.
   One whose surroundings are never checked, a function whose signature failed or a test inside a test, is checked as one at file scope.
-* **CHK-225** In a test, and not in a function nested in one, an expression statement of type `bool` is a **check**: it must be true when it runs.
-  Any other expression statement there that is no paren or juxtaposition call is the warning `no-effect`, which the AST pass leaves to this one (AST-140).
-* **CHK-226** The last code line of a test is a check, or it is `test-must-end-in-check`.
+* **CHK-225** In a test, and not in a function nested in one, an expression statement of type `bool` is a **check**: it must be true when it runs ([why](why/checking.md#chk-225)).
+  Any other expression statement there that is no paren or juxtaposition call, and whose type is not `void`, is the warning `no-effect`, which the AST pass leaves to this one (AST-140).
+* **CHK-226** The last code line of a test is a check, or it is `test-must-end-in-check` ([why](why/checking.md#chk-226)).
   The last code line is the last statement of its body, through the last branch of an `if`, the body of a loop and the last arm of a `case`.
   A test whose asserts are what it checks ends in `true // why`.
   A test that expects `.fail` or `.assert` is exempt, since it cannot pass without its run failing, and so is a test with no statement, which the AST pass reported.

@@ -112,7 +112,7 @@ This prints 11: the left operand is read while `x` is 1, and the block to its ri
 ## Calls
 
 * **EVAL-45** A call of a function of the program IS the callee's body as `block $callee { … }`, where the call stood.
-  It is an expression of the callee's return type, and a statement for a callee that returns nothing.
+  It is an expression of the callee's return type, and a statement for a callee that returns `void`.
 * **EVAL-46** The arguments are evaluated left to right, each exactly once, before any statement of the body.
 * **EVAL-47** A parameter is a value: the callee cannot change it, and the caller's later writes do not reach it.
 * **EVAL-48** An argument that is a literal or an immutable local stands wherever its parameter is read.
@@ -160,7 +160,7 @@ fun graded(a: float) -> float:
 * **EVAL-60** `print value` is `print`.
 * **EVAL-61** `eval value` evaluates `value` and drops it: what the evaluation prints and records happens, in its place, and the value goes nowhere.
 * **EVAL-62** A call that stands as a statement is `eval` of the call ([CHK-137](checking.md#inferred-results-and-dropped-values)).
-  A call of a function that returns nothing is its block as a statement.
+  A call of a function that returns `void` is its block as a statement.
 * **EVAL-63** What a builtin function computes is the evaluator of its registry record ([why](why/evaluation.md#eval-63)).
   An evaluator is given the scalars of its arguments and gives the scalars of its result.
   The machine checks the number and the kind of both against the record's parameter and result types, so an ill-typed call is a type error by EVAL-43 and never reaches an evaluator.

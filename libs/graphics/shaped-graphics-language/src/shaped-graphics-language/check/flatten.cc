@@ -1274,7 +1274,7 @@ struct flattener
         if (is_test && frames.size() == 1 && tables().type_at(value) == bool_type())
             return flatten_check(from, value, false);
 
-        // What is left is a call, and one that returns nothing is a block that is a statement.
+        // What is left is a call, and one that returns `void` is a block that is a statement.
         // A line that is no call computes nothing, which the check pass reported; it is evaluated and dropped.
         auto const* const call = x.node.try_as<ast::call>();
         if (call == nullptr)

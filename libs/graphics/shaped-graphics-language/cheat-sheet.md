@@ -406,10 +406,12 @@ sgl::print_source(file)      // == file.source for EVERY input: the lossless inv
 - **The variable of a `for` may carry a type.** `for i : int in r:` fills `for_stmt::type`, and a pattern on the left is still `for-takes-name-in-range`.
   A `return` looks through `case` arms and properties, so `_ => return false` leaves the function around the `case`.
 - **An attribute's arguments are list elements like any other.** `@slider(0, max = 1)` holds a positional and a named `argument`; `@name()` has a `list` and no arguments.
-- **`no-effect` is a warning, and no statement is exempt.** A paren or juxtaposition call, a jump, a `case`, a `loop` and `invalid` have an effect; nothing else does.
+- **`no-effect` is a warning.** A paren or juxtaposition call, a jump, a `case`, a `loop` and `invalid` have an effect; nothing else does.
+  A `test` body is exempt from the AST pass's warning (AST-140): a `bool` line there is a check, which only the check pass can tell.
 - **An anonymous `fun` is a lambda only in expression position.** As a statement it is a function that lost its name and reports `expected-name`.
 - **`type name = …` is a type position**, like the right sides of `:`, `->` and `as`; the AST dump writes it `(type name : …)`.
-- **`true` and `false` are ordinary names** to every phase here.
+- **`true` and `false` are no keywords**: the AST reads them as names, and the check pass as the `@shadowable(false)` consts of `core.sgl`.
+- **`self` and `void` are reserved names**, read as `self_ref` / `void_ref`; a declaration taking one is `reserved-name` (AST-141).
 - **The check pass is one demand-driven pass.** A symbol is untouched, in compilation, checked or failed, and reaching one in compilation is `dependency-cycle`.
   Compiling a function means its signature; bodies are checked after every signature is known.
 - **Every body is checked ONCE, on its own**, so a broken function nobody calls still reports, and one called three times reports once.
@@ -428,9 +430,10 @@ sgl::print_source(file)      // == file.source for EVERY input: the lossless inv
   Where both have a function a call matches, the program's wins (CHK-192), so a prelude release adding its signature breaks nothing.
   Only two non-functions of one name in one file are `duplicate-declaration`.
 - **`and`, `or` and `not` are no functions**, and a comparison chain evaluates each inner operand once: it is bound where it first stands.
-- **Still `unsupported-yet`:** generics, `self` and methods, `mut` parameters, lambdas and function values, nested functions, `const`, `use`,
-  a `for` over anything but `a ..< b`, a `let` without a value, an expression statement that is no call, `assert`.
-- **An arrow body without `-> T` infers its result**, and a BLOCK body without one still returns nothing.
+- **Still `unsupported-yet`:** generics, `self` and methods, `mut` parameters, lambdas and function values, nested functions, `use`,
+  a `const` whose value is no literal, enum case or const, a `for` over anything but `a ..< b`, a `let` without a value,
+  an expression statement that is no call outside a `test`, an `assert` message, and an `assert` whose condition writes.
+- **An arrow body without `-> T` infers its result**, and a BLOCK body without one returns `void`.
   Its body is checked as part of compiling it, so two such functions that need each other are `dependency-cycle`, not `recursive-call`.
   An overload whose parameters cannot take a call is not demanded by it, so an overload set works from inside one of its inferred members.
 - **A call as a statement is `flat_eval`**: evaluated, its value dropped.
