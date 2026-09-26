@@ -1416,10 +1416,44 @@ def test_finalize_tags_an_answer_a_later_follow_up_replaced(root: Path) -> None:
     pairs = [(entry, answers)]
 
     # an open follow-up has decided nothing, so it replaces nothing
-    assert replaced_asks(pairs) == {"statics": "statics-again"}
+    assert replaced_asks(pairs) == {("140", "statics"): "statics-again"}
     summary = design_summary(ReviewConfig(name="d", goals=["design"]), pairs)
     assert "**candidates / statics (replaced by statics-again)**: no" in summary, summary
     assert "**candidates / statics-again**: yes" in summary, summary
+
+
+def test_finalize_tags_a_replaced_ask_only_in_its_own_entry(root: Path) -> None:
+    """A `follows:` names an ask in its own entry, so a same-named ask in another entry stays untagged.
+
+    Written after `replaced_asks` keyed by ask name alone, and a follow-up in one entry marked every entry's `fix` replaced.
+    """
+    from tools.review.lib.core.config import ReviewConfig
+    from tools.review.lib.goals.finalize import design_summary, pr_comment, replaced_asks, work_order
+
+    followed = parse_text(
+        "---\nid: 150\ntitle: followed\ngroup: topics\nstate: open\n---\n\n"
+        "## ask  fix\nround: 1\n\nFix it?\n\n- radio: no\n- radio: yes\n\n"
+        "## ask  fix-again\nround: 2\nfollows: fix\n\nFix it after all?\n\n- radio: no\n- radio: yes\n",
+        Path("150-followed.md"))
+    plain = parse_text(
+        "---\nid: 160\ntitle: plain\ngroup: topics\nstate: open\n---\n\n"
+        "## ask  fix\nround: 1\n\nFix this one?\n\n- radio: no\n- radio: yes\n",
+        Path("160-plain.md"))
+    followed_answers = AnswerFile(root / "followed.json")
+    followed_answers.upsert(followed.ask("fix"), selected=["no"], text="", round_number=1)
+    followed_answers.upsert(followed.ask("fix-again"), selected=["yes"], text="", round_number=2)
+    plain_answers = AnswerFile(root / "plain.json")
+    plain_answers.upsert(plain.ask("fix"), selected=["yes"], text="", round_number=1)
+    pairs = [(followed, followed_answers), (plain, plain_answers)]
+
+    assert replaced_asks(pairs) == {("150", "fix"): "fix-again"}
+    cfg = ReviewConfig(name="d", goals=["design"])
+    summary = design_summary(cfg, pairs)
+    assert "**followed / fix (replaced by fix-again)**: no" in summary, summary
+    assert "**plain / fix**: yes" in summary, summary
+    assert "plain / fix (replaced" not in summary, summary
+    assert pr_comment(cfg, pairs).count("_replaced by `fix-again` below:_") == 1
+    assert work_order(cfg, pairs).count("replaced by `fix-again`, and done there:") == 1
 
 
 def test_a_read_only_command_sees_past_an_entry_that_does_not_parse(root: Path) -> None:
