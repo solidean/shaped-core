@@ -315,7 +315,7 @@
                     "name": "meta.attribute.sgl",
                     "begin": "((?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])@[0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*)(\\()",
                     "beginCaptures": {
-                        "1": { "name": "storage.type.annotation.sgl" },
+                        "1": { "name": "constant.character.escape.attribute.sgl" },
                         "2": { "name": "punctuation.section.parens.begin.sgl" }
                     },
                     "end": "(\\))|$",
@@ -332,7 +332,8 @@
             ]
         },
         "attribute-name": {
-            "name": "storage.type.annotation.sgl",
+            "comment": "Scoped as an escape for its colour: Dark Modern paints every attribute-like scope as a keyword, and SGL has no escapes to clash with.",
+            "name": "constant.character.escape.attribute.sgl",
             "match": "(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])@[0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*"
         },
         "named-argument": {
