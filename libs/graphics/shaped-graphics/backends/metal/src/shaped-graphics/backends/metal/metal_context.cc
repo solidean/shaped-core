@@ -128,6 +128,8 @@ bool metal_context::supports(sg::feature f) const
     case sg::feature::extended_image_formats:
         // Apple silicon writes every uncompressed color format from a shader, which is this backend's floor.
         return true;
+    case sg::feature::multisampled_array_textures:
+        return true;
     case sg::feature::geometry_shader:
     case sg::feature::tessellation_shader:
         // Metal has never had either stage; a caller asking gets a permanent answer rather than a temporary one.

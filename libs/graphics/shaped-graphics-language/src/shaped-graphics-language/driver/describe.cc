@@ -186,6 +186,15 @@ described_struct describe_struct(check::checked_module const& m, check::type_inf
     return result;
 }
 
+cc::vector<cc::string> feature_names(check::feature_set features)
+{
+    auto result = cc::vector<cc::string>();
+    for (auto i = isize(0); i < check::k_feature_count; ++i)
+        if (features.has(check::feature(i)))
+            result.push_back(cc::string(check::k_feature_names[i]));
+    return result;
+}
+
 described_entry_point describe_entry_point(check::checked_module const& m, check::flat_entry_point const& e)
 {
     auto result = described_entry_point{.name = e.name, .stage = e.entry_stage};
@@ -193,8 +202,10 @@ described_entry_point describe_entry_point(check::checked_module const& m, check
         result.workgroup[axis] = e.workgroup[axis];
     for (auto const id : e.bindings)
         result.bindings.push_back(m.at(id).name);
+    result.features = feature_names(e.features);
     return result;
 }
+
 described_pipeline describe_pipeline(check::checked_module const& m, check::pipeline_info const& p)
 {
     auto result = described_pipeline{.name = m.at(p.symbol).name, .vertex = m.at(p.vertex).name};
@@ -211,6 +222,10 @@ described_pipeline describe_pipeline(check::checked_module const& m, check::pipe
         for (auto const& member : m.at(m.at(p.target_set).members))
             result.targets.push_back(member.name);
     }
+    auto features = m.functions[m.at(p.vertex).info].features;
+    if (check::is_valid(p.pixel))
+        features |= m.functions[m.at(p.pixel).info].features;
+    result.features = feature_names(features);
 
     auto const settings = m.at(p.settings);
     for (auto const& s : settings)
@@ -238,6 +253,11 @@ described_pipeline describe_pipeline(check::checked_module const& m, check::pipe
     result.frozen.push_back(cc::format("vertex input = {}", shaped(p.vertex_input)));
     result.frozen.push_back(
         cc::format("target set = {}", check::is_valid(p.target_set) ? shaped(p.target_set) : cc::string()));
+    // A device lacking a feature a reload now needs would refuse the pipeline, so the build's needs are frozen too.
+    auto needs = cc::string();
+    for (auto const& name : result.features)
+        needs += cc::format("{}{}", needs.empty() ? "" : ", ", name);
+    result.frozen.push_back(cc::format("features = {}", needs));
     for (auto i = isize(0); i < settings.size(); ++i)
     {
         auto const& s = settings[i];

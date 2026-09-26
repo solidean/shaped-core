@@ -4,8 +4,26 @@
 #include <shaped-graphics-language/driver/compile_to_text.hh>
 #include <shaped-shader-library/compiler/sgl_compiler.hh>
 
+using namespace cc::primitive_defines;
+
 namespace
 {
+// SGL links no sg, so it names each feature as sg does, and this is the one file that sees both lists.
+static_assert(
+    []
+    {
+        for (auto const name : sgl::check::k_feature_names)
+        {
+            auto is_known = false;
+            for (auto const f : sg::k_all_features)
+                is_known = is_known || sg::to_string(f) == name;
+            if (!is_known)
+                return false;
+        }
+        return true;
+    }(),
+    "every feature SGL knows is an sg::feature of the same name");
+
 [[nodiscard]] sgl::emit::target target_of(sg::shader_format format)
 {
     switch (format)
@@ -66,6 +84,11 @@ public:
             result.renamed_bindings.push_back({.reflected = cc::move(bound.emitted), .name = cc::move(bound.host)});
         result.color_targets = text.value().color_targets;
         result.target_struct = cc::move(text.value().target_struct);
+        auto features = sg::feature_set();
+        for (auto i = isize(0); i < sgl::check::k_feature_count; ++i)
+            if (text.value().features.has(sgl::check::feature(i)))
+                features.set(sg::feature_from_string(sgl::check::k_feature_names[i]).value());
+        result.required_features = features;
         return result;
     }
 

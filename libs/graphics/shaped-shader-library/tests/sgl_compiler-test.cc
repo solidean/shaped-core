@@ -196,6 +196,43 @@ TEST("slib sgl compiler - a compute entry point reaches WGSL with its buffer ref
     CHECK(text.contains("@compute @workgroup_size(64, 1, 1)"));
 }
 
+TEST("slib sgl compiler - an SGL shader states the features it needs, and a WGSL one cannot say",
+     exclusive("slib-shader-library"))
+{
+    slib::shader_library lib;
+    add_sgl_compilers(lib);
+    lib.add_compiler(slib::create_wgsl_compiler());
+    auto const wgsl = sg::shader_format::wgsl;
+
+    // One entry point uses what its file requires and the other does not, so each states exactly its own.
+    constexpr auto source = cc::string_view("require extended_image_formats\n"
+                                            "\n"
+                                            "binding narrow:\n"
+                                            "    r: out image_2d[.r8_unorm]\n"
+                                            "\n"
+                                            "binding plain:\n"
+                                            "    values: mut buffer[float]\n"
+                                            "\n"
+                                            "@compute(8, 8) fun narrow_cs(@thread_id id: int3){narrow}:\n"
+                                            "    narrow.r.store(int2(id.x, id.y), 0.5)\n"
+                                            "\n"
+                                            "@compute(64) fun plain_cs(@thread_id id: int3){plain}:\n"
+                                            "    plain.values[id.x] = 1.0\n");
+    auto const options = slib::compile_source_options{.language = slib::shader_language::sgl, .label = "narrow.sgl"};
+    auto const narrow_node = lib.compile_source(source, sg::shader_stage::compute, "narrow_cs", wgsl, options);
+    CHECK(value_of(narrow_node).required_features == cc::optional<sg::feature_set>(sg::feature::extended_image_formats));
+    auto const plain_node = lib.compile_source(source, sg::shader_stage::compute, "plain_cs", wgsl, options);
+    auto const& plain = value_of(plain_node);
+    CHECK(plain.required_features == cc::optional<sg::feature_set>(sg::feature_set()));
+
+    // The same text handed in as WGSL has lost what SGL knew: unknown, and never mistaken for portable.
+    auto const text
+        = cc::string(cc::string_view(reinterpret_cast<char const*>(plain.bytecode.data()), plain.bytecode.size()));
+    auto const raw_node = lib.compile_source(text, sg::shader_stage::compute, "plain_cs", wgsl,
+                                             {.language = slib::shader_language::wgsl, .label = "plain.wgsl"});
+    CHECK(!value_of(raw_node).required_features.has_value());
+}
+
 #if SLIB_HAS_DXC
 
 ASYNC_TEST("slib sgl compiler - the cube becomes SPIR-V with a push-constant block", exclusive("slib-shader-library"))

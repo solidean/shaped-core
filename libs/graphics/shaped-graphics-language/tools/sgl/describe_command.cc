@@ -136,8 +136,13 @@ void write_entry_point(babel::json::object_writer& o, sgl::described_entry_point
         for (auto const n : e.workgroup)
             grid.write(n);
     }
-    auto list = o.write_array("bindings", babel::json::layout::compact);
-    for (auto const& name : e.bindings)
+    {
+        auto list = o.write_array("bindings", babel::json::layout::compact);
+        for (auto const& name : e.bindings)
+            list.write(cc::string_view(name));
+    }
+    auto list = o.write_array("features", babel::json::layout::compact);
+    for (auto const& name : e.features)
         list.write(cc::string_view(name));
 }
 
@@ -157,6 +162,11 @@ void write_pipeline(babel::json::object_writer& o, sgl::described_pipeline const
     {
         auto list = o.write_array("targets", babel::json::layout::compact);
         for (auto const& name : p.targets)
+            list.write(cc::string_view(name));
+    }
+    {
+        auto list = o.write_array("features", babel::json::layout::compact);
+        for (auto const& name : p.features)
             list.write(cc::string_view(name));
     }
     {

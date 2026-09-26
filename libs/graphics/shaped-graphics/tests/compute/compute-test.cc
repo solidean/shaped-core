@@ -1,6 +1,7 @@
 #include "../shaders/shader_fixtures.hh"
 
 #include <clean-core/container/vector.hh>
+#include <clean-core/string/format.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <nexus/async-test.hh>
 #include <sg_test_sgl_shaders.hh>
@@ -186,4 +187,32 @@ ASYNC_INVOCABLE_TEST("sg - a compute shader that calls a helper keeps its workgr
     REQUIRE(data.size() == isize(count));
     for (auto i = 0; i < count; ++i)
         CHECK(data[i] == cc::min(float(i), 10.0f));
+}
+
+ASYNC_INVOCABLE_TEST("sg - a pipeline whose shader needs a feature the device lacks is refused by its name",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+
+    // An SGL shader's needs are known: `main` uses nothing, so it is the portable baseline and not unknown.
+    auto const& shader = co_await shaders::double_values.main->acquire(*ctx);
+    REQUIRE(shader.required_features.has_value());
+    CHECK(shader.required_features.value().is_empty());
+    CHECK(ctx->missing_features(shader).is_empty());
+
+    auto const layout = shaders::double_values.main.acquire_layout(*ctx);
+    for (auto const f : sg::k_all_features)
+    {
+        auto needing = shader;
+        needing.required_features = sg::feature_set(f);
+        CHECK(ctx->missing_features(needing) == (ctx->supports(f) ? sg::feature_set() : sg::feature_set(f)));
+
+        auto const built = ctx->uncached.create_compute_pipeline_async({.shader = needing, .layout = layout});
+        co_await cc::async_settled(built);
+        CHECK(built->has_error() == !ctx->supports(f));
+        if (built->has_error())
+            CHECK(built->try_error()->underlying().to_string().contains(cc::format("sg::feature::{}", sg::to_string(f))));
+    }
 }

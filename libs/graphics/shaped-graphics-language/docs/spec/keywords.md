@@ -20,6 +20,7 @@ Definitions:
 * `test` - declares a test: a body the check pass runs on its own, where a line of type `bool` is a check ([AST-138](syntax/ast.md#declarations))
 * `const` - real constants
 * `use` - import other modules
+* `require` - declares the non-portable features a file, a binding or a body may use, as `sg::feature` names them ([Features](semantics/checking.md#features))
 * `module` - declares a module
 * `type` - declares a type alias or a template arg (or denotes the type of types)
 

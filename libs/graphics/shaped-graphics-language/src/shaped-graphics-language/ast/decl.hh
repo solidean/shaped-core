@@ -25,6 +25,15 @@ struct sgl::ast::use_decl
     constexpr bool operator==(use_decl const&) const = default;
 };
 
+/// `require feature`, `require a, b`
+struct sgl::ast::require_decl
+{
+    /// One `name` per feature; an `invalid` expression for an argument that is no name.
+    range_of<expr_id> features;
+
+    constexpr bool operator==(require_decl const&) const = default;
+};
+
 enum class sgl::ast::receiver_kind : sgl::u8
 {
     /// No `self`: a free function, or a static method when it is a member.
@@ -192,6 +201,7 @@ struct sgl::ast::decl
     cc::variant<invalid_decl,
                 module_decl,
                 use_decl,
+                require_decl,
                 fun_decl,
                 struct_decl,
                 enum_decl,

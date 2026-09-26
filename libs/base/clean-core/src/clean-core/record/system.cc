@@ -33,6 +33,10 @@ struct registry
 {
     thread_state* head = nullptr;
     isize count = 0;
+    /// The index the next registered thread takes; it never goes back, unlike `count`.
+    /// A listener keys what it carries per thread by index, so a reaped thread's index handed to a new thread while
+    /// another live thread still held it would merge two threads' attribution.
+    u32 next_index = 0;
 };
 cc::mutex<registry> g_registry;
 
@@ -304,7 +308,7 @@ void cc::rec::impl::register_thread_state(thread_state* s)
     g_registry.lock(
         [&](registry& r)
         {
-            s->index = u32(r.count);
+            s->index = r.next_index++;
             s->registry_next = r.head;
             r.head = s;
             ++r.count;

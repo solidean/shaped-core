@@ -34,6 +34,8 @@ struct sgl::emitted_source
     /// A pixel entry point's render targets: how many, and the `@pixel struct` it returns; -1 and empty otherwise.
     i32 color_targets = -1;
     cc::string target_struct;
+    /// What a device needs to run the entry point, each named as `sg::feature` names it; empty is portable.
+    check::feature_set features;
 };
 
 namespace sgl

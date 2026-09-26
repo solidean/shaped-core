@@ -163,7 +163,7 @@ Expressions: `invalid_expr` `literal` `name` `self_ref` `wildcard` `leading_dot`
 Statements: `invalid_stmt` `let_stmt` `assign_stmt` `if_stmt` (the whole chain, as `if_branch`es) `for_stmt` `while_stmt`
 `assert_stmt` `print_stmt` `decl_stmt` `expr_stmt`.
 
-Declarations: `invalid_decl` `module_decl` `use_decl` `fun_decl` `struct_decl` `enum_decl` `type_decl` `const_decl`
+Declarations: `invalid_decl` `module_decl` `use_decl` `require_decl` `fun_decl` `struct_decl` `enum_decl` `type_decl` `const_decl`
 `binding_decl` `sampler_decl` `notation_decl` `test_decl`, and the member lines `field_decl` `property_decl` `enum_case_decl`.
 
 ## The builtin registry (the ONE place a builtin lives; [docs/adding-a-builtin.md](docs/adding-a-builtin.md))
@@ -235,6 +235,7 @@ m.at(symbol_id)  m.at(type_id)  m.at(range)  m.name_of(type_id)   // name_of giv
 
 #include <shaped-graphics-language/check/flat.hh>
 e.entry_stage  e.name  e.input  e.result  e.bindings   // stage, the name as written, edge structs, the LISTED bindings
+e.features                                 // check::feature_set: what a device needs for it, from the bindings it lists
 e.locals  e.exprs  e.stmts  e.body         // locals[0] is the parameter; at(id) / at(range) like the AST
 sgl::check::flat_expr                      // { type, from (origin), inlined_through, node }: flat_literal (float), flat_int_literal,
                                            // flat_bool_literal, flat_enum_value, flat_local_ref, flat_binding_member, flat_member,
@@ -324,7 +325,8 @@ sgl::test::diagnostic_of(m, r)             // `test-failed` at the test, one rel
 uv run dev.py run sgl -- emit shader.sgl --entry main_ps --target wgsl   # the text, or the diagnostics and exit 2
 uv run dev.py run sgl -- test a.sgl b.sgl                                # the tests of each file; exit 2 when one fails
 uv run dev.py run sgl -- prelude [--check <path> | --write <path>]       # the generated builtins.sgl; --check exits 2 on a difference
-uv run dev.py run sgl -- describe shader.sgl                             # sgl::describe as JSON: what slib's generator reads
+uv run dev.py run sgl -- describe shader.sgl                             # sgl::describe as JSON: what slib's generator reads;
+                                                                         # each entry point and pipeline carries its sg `features`
 uv run dev.py check sgl-prelude [--fix]                                  # the gate over prelude/builtins.sgl
 ```
 
@@ -423,6 +425,10 @@ sgl::print_source(file)      // == file.source for EVERY input: the lossless inv
   Inlining happens afterwards, from the side tables, and only for an entry point whose every reachable body is sound.
 - **Recursion is `recursive-call`**, once per loop of calls, at the call that closes it: `a -> b -> a`.
 - **Bindings are an effect.** A call needs the callee's `{…}` list inside the caller's, or it is `binding-not-listed` at the call; so an entry point lists what its shader reads.
+- **`require` permits, and use sets the floor.** `require extended_image_formats` in a file, a binding or a body grants the feature, named as `sg::feature` names it.
+  An entry point needs what the bindings it lists use, and must declare each of those by its file, a listed binding or its own body, or it is `feature-not-declared`.
+  A form used without a grant is `needs-feature`, an unknown name `unknown-feature`, and a body `require` nothing needed is the WARNING `unused-require`; a file's or a binding's never is.
+  WGSL refuses an entry point needing `binding_arrays`, `multisampled_array_textures` or `raytracing` as `target-lacks-feature`.
 - **Every path of a function that returns a value ends in a `return`**, or it is `missing-return`.
   A `loop:` without a `break` never ends; a `while` always may, whatever its condition.
   What follows a jump in its list is the WARNING `unreachable-code`.

@@ -17,7 +17,7 @@ from pygments.token import Comment, Error, Keyword, Name, Number, Operator, Punc
 
 _DECLARATION_KEYWORDS = frozenset({
     "fun", "let", "mut", "out", "struct", "enum", "binding", "sampler", "pipeline", "const", "use", "module", "type",
-    "notation", "test", "assert", "print",
+    "notation", "test", "assert", "print", "require",
 })
 # `mut buffer[float]`, `out image_2d[.rgba8_unorm]`: an access word at the top of a type position leaves the position a type.
 _TYPE_QUALIFIERS = frozenset({"mut", "out"})

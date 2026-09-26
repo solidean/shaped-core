@@ -49,6 +49,9 @@ struct slib::preprocessed_source
     /// otherwise, and for every compiler but SGL's.
     i32 color_targets = -1;
     cc::string target_struct;
+    /// What a device needs to run the shader, which the library sets on the compiled shader.
+    /// nullopt is unknown, which every compiler but SGL's is: nothing in HLSL or WGSL declares it.
+    cc::optional<sg::feature_set> required_features;
 };
 
 /// One shader to compile.

@@ -36,6 +36,31 @@ TEST("sgl ast - use, with and without an alias, at file level and in a body")
     CHECK(ast_of("use a, b\n") == "(use a) !! too-many-arguments @7+1\n");
 }
 
+TEST("sgl ast - require names features, at file level, in a binding and in a body")
+{
+    // AST-145
+    CHECK(ast_of("require raytracing\n") == "(require raytracing)");
+    CHECK(ast_of("require extended_image_formats, binding_arrays\n") == "(require extended_image_formats binding_arrays)");
+    CHECK(body_of("require raytracing\n") == "(require raytracing)");
+    CHECK(ast_of("binding b:\n    require raytracing\n    x: float\n")
+          == "(binding b\n  (require raytracing)\n  (field x : float))");
+
+    // The block form: one name per line, the same node as the argument form.
+    CHECK(ast_of("require:\n    extended_image_formats\n    binding_arrays\n")
+          == "(require extended_image_formats binding_arrays)");
+    CHECK(body_of("require:\n    raytracing\n") == "(require raytracing)");
+    CHECK(ast_of("require a:\n    b\n").contains("too-many-arguments"));
+    CHECK(ast_of("require:\n    5\n").contains("expected-name"));
+
+    CHECK(ast_of("require\n") == "(require (invalid \"require\")) !! expected-name @0+7\n");
+    CHECK(ast_of("require 5\n") == "(require (invalid \"5\")) !! expected-name @8+1\n");
+    CHECK(ast_of("require a.b\n") == "(require (invalid \"a.b\")) !! expected-name @8+3\n");
+
+    // AST-146: a struct or an enum holds members, and a feature is granted to none of them.
+    CHECK(ast_of("struct s:\n    require raytracing\n").contains("member-not-allowed-here"));
+    CHECK(ast_of("enum e:\n    require raytracing\n").contains("member-not-allowed-here"));
+}
+
 TEST("sgl ast - a function signature: type parameters, parameters, bindings, return type, body")
 {
     CHECK(ast_of("fun make_mvp(model: mat4){frame} => frame.proj * frame.view * model\n")

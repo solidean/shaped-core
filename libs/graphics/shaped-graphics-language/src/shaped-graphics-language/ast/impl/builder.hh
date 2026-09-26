@@ -293,6 +293,7 @@ struct builder
 
     decl_id module_declaration(statement_head const& head, keyword_parts const& parts);
     decl_id use_declaration(statement_head const& head, keyword_parts const& parts);
+    decl_id require_declaration(statement_head const& head, keyword_parts const& parts);
     decl_id fun_declaration(statement_head const& head, keyword_parts const& parts);
     decl_id extension_property(statement_head const& head,
                                keyword_parts const& parts,

@@ -158,6 +158,22 @@ bool context::accepts_shader_format(shader_format format) const
     return false;
 }
 
+feature_set context::supported_features() const
+{
+    auto result = feature_set();
+    for (auto const f : k_all_features)
+        if (supports(f))
+            result.set(f);
+    return result;
+}
+
+feature_set context::missing_features(compiled_shader const& shader) const
+{
+    if (!shader.required_features.has_value())
+        return {};
+    return shader.required_features.value().without(supported_features());
+}
+
 void context::release_cached_pipelines()
 {
     _pipeline_cache->release_at_shutdown();
