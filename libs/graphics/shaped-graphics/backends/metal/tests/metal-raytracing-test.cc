@@ -54,8 +54,12 @@ constexpr float k_triangle[9] = {0, 0, 0, 1, 0, 0, 0, 1, 0};
     auto bindings = cc::vector<sg::binding>();
     bindings.push_back(
         {.name = "scene", .space = 0, .index = 0, .count = 1, .type = sg::binding_type::acceleration_structure});
-    bindings.push_back(
-        {.name = "out", .space = 0, .index = 1, .count = 1, .type = sg::binding_type::readwrite_structured_buffer});
+    bindings.push_back({.name = "out",
+                        .space = 0,
+                        .index = 1,
+                        .count = 1,
+                        .type = sg::binding_type::buffer,
+                        .access = sg::access_mode::read_write});
     return bindings;
 }
 

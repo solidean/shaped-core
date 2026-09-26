@@ -163,10 +163,10 @@ RWTexture2D<float4> target;
 ```
 
 A storage texture's format, named as `sg::pixel_format` names it, and only one a storage texture can have.
-The binding carries it as `storage_format`, which a WebGPU layout needs before any view exists.
+The binding carries it as `image_format`, which a WebGPU layout needs before any view exists.
 On the SPIR-V arm the pass also writes `[[vk::image_format]]`, since reading an image of unknown format needs a Vulkan device feature and DXC otherwise declares none.
 DXIL takes the format from the view, so that arm writes nothing more; neither does a format SPIR-V lacks, `bgra8_unorm`.
-SGL's text never reaches this pass: for an `image2d[.F]` member it writes `[[vk::image_format]]` itself.
+SGL's text never reaches this pass: for an `image_2d[.F]` member it writes `[[vk::image_format]]` itself.
 [done]
 
 ### `push_constants`
@@ -371,19 +371,19 @@ There the pass reads scalars, vectors and the `float4xC` matrices, and anything 
 
 ## The type table
 
-One table maps an HLSL type name to a register class and an `sg::binding_type`.
+One table maps an HLSL type name to a register class and an `sg::binding_type`, and a `u` register is `sg::access_mode::read_write`.
 It is the single most important piece of shared state in this design, because the rewriter and the C++ generator must agree on it exactly.
 A divergence is a resource bound to the wrong descriptor, with nothing to catch it.
 
 | HLSL | class | `sg::binding_type` |
 |---|---|---|
-| `Texture1D/2D/3D/Cube` and `*Array`, `Texture2DMS` | `t` | `readonly_texture` |
-| `RWTexture1D/2D/3D` and `*Array` | `u` | `readwrite_texture` |
-| `StructuredBuffer` | `t` | `readonly_structured_buffer` |
-| `RWStructuredBuffer` | `u` | `readwrite_structured_buffer` |
-| `ByteAddressBuffer` | `t` | `readonly_raw_buffer` |
-| `RWByteAddressBuffer` | `u` | `readwrite_raw_buffer` |
-| `ConstantBuffer` | `b` | `uniform_buffer` |
+| `Texture1D/2D/3D/Cube` and `*Array`, `Texture2DMS` | `t` | `texture` |
+| `RWTexture1D/2D/3D` and `*Array` | `u` | `image` |
+| `StructuredBuffer` | `t` | `buffer` |
+| `RWStructuredBuffer` | `u` | `buffer` |
+| `ByteAddressBuffer` | `t` | `bytes` |
+| `RWByteAddressBuffer` | `u` | `bytes` |
+| `ConstantBuffer` | `b` | `constants_buffer` |
 | `SamplerState` | `s` | `sampler` |
 | `SamplerComparisonState` | `s` | `sampler` |
 | `RaytracingAccelerationStructure` | `t` | `acceleration_structure` |
@@ -701,7 +701,7 @@ The port asked for two things the sketch above had and the generator did not, an
 - **`create` takes a lifetime scope.** imgui rebuilds its group on every texture switch, so `persistent` would leak a descriptor allocation per frame.
 - **`bind` is generated.** It was in the sketch from the start and simply had not been emitted.
 - **An inline-constants block still reaches `pipeline_layout_description` through reflection.**
-  The generator emits the block's *mirror struct*, not its `sg::binding`, so a routine that wants the binding still scans a compiled stage for the one `uniform_buffer`.
+  The generator emits the block's *mirror struct*, not its `sg::binding`, so a routine that wants the binding still scans a compiled stage for the one `constants_buffer`.
   Worth closing, and not in the way of anything: the address is already a constant the pass wrote.
 
 Steps 2 and 3 are worth landing before the rest is designed in detail.

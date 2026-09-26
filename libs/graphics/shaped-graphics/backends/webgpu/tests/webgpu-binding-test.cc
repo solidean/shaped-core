@@ -55,7 +55,8 @@ fn main() {
         .group_index = 0,
         .index = index,
         .count = 1,
-        .type = sg::binding_type::readwrite_structured_buffer,
+        .type = sg::binding_type::buffer,
+        .access = sg::access_mode::read_write,
     };
 }
 } // namespace
@@ -72,24 +73,23 @@ ASYNC_INVOCABLE_TEST("sg webgpu - a write-only storage texture is written by a d
                                     {sg::binding{.name = "canvas",
                                                  .group_index = 0,
                                                  .index = 0,
-                                                 .type = sg::binding_type::readwrite_texture,
+                                                 .type = sg::binding_type::image,
+                                                 .access = sg::access_mode::write,
                                                  .texture_dimension = sg::texture_view_dimension::tex_2d,
-                                                 .storage_format = sg::pixel_format::rgba8_unorm,
-                                                 .storage_access = sg::storage_access::write}},
+                                                 .image_format = sg::pixel_format::rgba8_unorm}},
                                     sg::compute_dimensions{.x = 4, .y = 4});
 
-    auto texture
-        = ctx.persistent.create_texture_2d({.format = sg::pixel_format::rgba8_unorm,
-                                            .width = extent,
-                                            .height = extent,
-                                            .usage = sg::texture_usage::readwrite_texture | sg::texture_usage::copy_src});
+    auto texture = ctx.persistent.create_texture_2d({.format = sg::pixel_format::rgba8_unorm,
+                                                     .width = extent,
+                                                     .height = extent,
+                                                     .usage = sg::texture_usage::image | sg::texture_usage::copy_src});
 
     auto group_layout = ctx.cached.acquire_binding_group_layout(shader.bindings);
     auto pipeline_layout = ctx.cached.acquire_pipeline_layout({.groups = {group_layout}});
     auto pipeline = co_await ctx.cached.acquire_compute_pipeline({.shader = shader, .layout = pipeline_layout});
     REQUIRE(pipeline != nullptr);
 
-    sg::named_view const canvas = {.name = "canvas", .view = texture.as_readwrite_view()};
+    sg::named_view const canvas = {.name = "canvas", .view = texture.as_image_view<sg::pixel_format::rgba8_unorm>()};
     auto group = ctx.persistent.create_binding_group(group_layout, cc::span<sg::named_view const>(&canvas, 1));
 
     auto cmd = ctx.create_command_list();
@@ -124,7 +124,7 @@ ASYNC_INVOCABLE_TEST("sg webgpu - a multisampled float texture is laid out unfil
                                         sg::binding{.name = "source",
                                                     .group_index = 0,
                                                     .index = 0,
-                                                    .type = sg::binding_type::readonly_texture,
+                                                    .type = sg::binding_type::texture,
                                                     .texture_dimension = sg::texture_view_dimension::tex_2d_ms,
                                                     .sample_type = sg::texture_sample_type::filterable_float},
                                         storage_binding("Output", 1),
@@ -144,7 +144,7 @@ ASYNC_INVOCABLE_TEST("sg webgpu - a multisampled array texture is refused at lay
     sg::binding const binding = {.name = "source",
                                  .group_index = 0,
                                  .index = 0,
-                                 .type = sg::binding_type::readonly_texture,
+                                 .type = sg::binding_type::texture,
                                  .texture_dimension = sg::texture_view_dimension::tex_2d_ms_array};
 
     auto const layout = ctx.uncached.try_create_binding_group_layout(cc::span<sg::binding const>(&binding, 1));
@@ -199,7 +199,7 @@ ASYNC_INVOCABLE_TEST("sg webgpu - inline constants overflowing one page land on 
     auto pipeline_layout = ctx.uncached.create_pipeline_layout({
         .groups = {group_layout},
         .inline_constants
-        = sg::binding{.name = "constants", .index = 0, .type = sg::binding_type::uniform_buffer, .block_size = 8},
+        = sg::binding{.name = "constants", .index = 0, .type = sg::binding_type::constants_buffer, .block_size = 8},
     });
     auto pipeline = ctx.uncached.create_compute_pipeline({.shader = shader, .layout = pipeline_layout});
     REQUIRE(pipeline != nullptr);
@@ -235,25 +235,25 @@ ASYNC_INVOCABLE_TEST("sg webgpu - inline constants overflowing one page land on 
     CHECK(mismatches == 0);
 }
 
-ASYNC_INVOCABLE_TEST("sg webgpu - a read_write rgba8 storage texture needs readwrite_storage_formats",
+ASYNC_INVOCABLE_TEST("sg webgpu - a read_write rgba8 storage texture needs readwrite_image_formats",
                      (webgpu::webgpu_context_handle const& handle))
 {
     auto& ctx = *handle;
     auto bindings = cc::vector<sg::binding>();
     bindings.push_back(sg::binding{.name = "Target", .group_index = 0, .index = 0, .count = 1});
-    bindings[0].type = sg::binding_type::readwrite_texture;
+    bindings[0].type = sg::binding_type::image;
     bindings[0].texture_dimension = sg::texture_view_dimension::tex_2d;
-    bindings[0].storage_format = sg::pixel_format::rgba8_unorm;
-    bindings[0].storage_access = sg::storage_access::read_write;
+    bindings[0].image_format = sg::pixel_format::rgba8_unorm;
+    bindings[0].access = sg::access_mode::read_write;
     sg::apply_stage_visibility(bindings, sg::shader_stage::compute);
 
     // Refused where the device lacks texture-formats-tier2, built where it has it: never a later validation error.
     auto const layout = ctx.uncached.try_create_binding_group_layout(bindings);
-    CHECK(layout.has_value() == ctx.supports(sg::feature::readwrite_storage_formats));
+    CHECK(layout.has_value() == ctx.supports(sg::feature::readwrite_image_formats));
 
     // An r32 format is read_write in core, whatever the device offers.
     auto r32 = bindings;
-    r32[0].storage_format = sg::pixel_format::r32_float;
+    r32[0].image_format = sg::pixel_format::r32_float;
     CHECK(ctx.uncached.try_create_binding_group_layout(r32).has_value());
     co_return;
 }

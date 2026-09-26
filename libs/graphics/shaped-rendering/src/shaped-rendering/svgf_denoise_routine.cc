@@ -41,7 +41,7 @@ struct pass_request
 [[nodiscard]] sg::binding const* constants_binding_of(sg::compiled_shader const& compiled)
 {
     for (auto const& b : compiled.bindings)
-        if (b.type == sg::binding_type::uniform_buffer)
+        if (b.type == sg::binding_type::constants_buffer)
             return &b;
     return nullptr;
 }
@@ -168,7 +168,7 @@ denoise_outcome svgf_denoise_routine::execute(sg::command_list& cmd,
     auto const& s = history._state;
 
     auto const has_albedo = is_set(in.guides.albedo);
-    auto const albedo = has_albedo ? in.guides.albedo.as_readonly_view() : in.color.as_readonly_view();
+    auto const albedo = has_albedo ? in.guides.albedo.as_texture_view() : in.color.as_texture_view();
     auto const albedo_flag = has_albedo ? k_has_albedo : 0u;
 
     // -- temporal
@@ -176,17 +176,17 @@ denoise_outcome svgf_denoise_routine::execute(sg::command_list& cmd,
         auto const group
             = ctx.transient.create_binding_group(cmd, self->_temporal.group_layout,
                                                  shaders::svgf_temporal_bindings{
-                                                     .gColor = in.color.as_readonly_view(),
+                                                     .gColor = in.color.as_texture_view(),
                                                      .gAlbedo = albedo,
-                                                     .gNormal = in.guides.normal.as_readonly_view(),
-                                                     .gDepth = in.guides.depth.as_readonly_view(),
-                                                     .gMotion = in.guides.motion.as_readonly_view(),
-                                                     .gPreviousHistory = s[k_color + prev].as_readonly_view(),
-                                                     .gPreviousMoments = s[k_moments + prev].as_readonly_view(),
-                                                     .gPreviousNormalDepth = s[k_normal_depth + prev].as_readonly_view(),
-                                                     .gHistory = s[k_color + cur].as_readwrite_view(),
-                                                     .gMoments = s[k_moments + cur].as_readwrite_view(),
-                                                     .gNormalDepth = s[k_normal_depth + cur].as_readwrite_view(),
+                                                     .gNormal = in.guides.normal.as_texture_view(),
+                                                     .gDepth = in.guides.depth.as_texture_view(),
+                                                     .gMotion = in.guides.motion.as_texture_view(),
+                                                     .gPreviousHistory = s[k_color + prev].as_texture_view(),
+                                                     .gPreviousMoments = s[k_moments + prev].as_texture_view(),
+                                                     .gPreviousNormalDepth = s[k_normal_depth + prev].as_texture_view(),
+                                                     .gHistory = s[k_color + cur].as_any_image_view(),
+                                                     .gMoments = s[k_moments + cur].as_any_image_view(),
+                                                     .gNormalDepth = s[k_normal_depth + cur].as_any_image_view(),
                                                  });
         cmd.compute.bind_pipeline(*self->_temporal.pipeline);
         cmd.compute.bind<shaders::svgf_temporal_bindings>(*group);
@@ -206,10 +206,10 @@ denoise_outcome svgf_denoise_routine::execute(sg::command_list& cmd,
         auto const group
             = ctx.transient.create_binding_group(cmd, self->_variance.group_layout,
                                                  shaders::svgf_variance_bindings{
-                                                     .gHistory = s[k_color + cur].as_readonly_view(),
-                                                     .gMoments = s[k_moments + cur].as_readonly_view(),
-                                                     .gNormalDepth = s[k_normal_depth + cur].as_readonly_view(),
-                                                     .gTarget = s[k_scratch].as_readwrite_view(),
+                                                     .gHistory = s[k_color + cur].as_texture_view(),
+                                                     .gMoments = s[k_moments + cur].as_texture_view(),
+                                                     .gNormalDepth = s[k_normal_depth + cur].as_texture_view(),
+                                                     .gTarget = s[k_scratch].as_any_image_view(),
                                                  });
         cmd.compute.bind_pipeline(*self->_variance.pipeline);
         cmd.compute.bind<shaders::svgf_variance_bindings>(*group);
@@ -231,11 +231,11 @@ denoise_outcome svgf_denoise_routine::execute(sg::command_list& cmd,
         auto const group
             = ctx.transient.create_binding_group(cmd, self->_atrous.group_layout,
                                                  shaders::svgf_atrous_bindings{
-                                                     .gSource = source.as_readonly_view(),
-                                                     .gNormalDepth = s[k_normal_depth + cur].as_readonly_view(),
+                                                     .gSource = source.as_texture_view(),
+                                                     .gNormalDepth = s[k_normal_depth + cur].as_texture_view(),
                                                      .gAlbedo = albedo,
-                                                     .gColor = in.color.as_readonly_view(),
-                                                     .gTarget = target.as_readwrite_view(),
+                                                     .gColor = in.color.as_texture_view(),
+                                                     .gTarget = target.as_any_image_view(),
                                                  });
         cmd.compute.bind_pipeline(*self->_atrous.pipeline);
         cmd.compute.bind<shaders::svgf_atrous_bindings>(*group);

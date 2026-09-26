@@ -119,13 +119,13 @@ bool metal_context::supports(sg::feature f) const
         // An argument buffer holds an array at one `[[id(n)]]` like any other binding, which is what
         // `metal_staging_binding_group` and the bindless tier are built on.
         return true;
-    case sg::feature::readwrite_storage_formats:
+    case sg::feature::readwrite_image_formats:
         // Asked of the device rather than assumed: tier 2 is what lifts read-write past r32, and Metal reports the
         // tier directly instead of leaving it to be inferred from the family.
         return _device != nullptr && _device->readWriteTextureSupport() >= MTL::ReadWriteTextureTier2;
     case sg::feature::float32_filtering:
         return _device != nullptr && _device->supports32BitFloatFiltering();
-    case sg::feature::extended_storage_formats:
+    case sg::feature::extended_image_formats:
         // Apple silicon writes every uncompressed color format from a shader, which is this backend's floor.
         return true;
     case sg::feature::geometry_shader:

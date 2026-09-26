@@ -18,8 +18,7 @@ cc::result<webgpu_swapchain_handle> webgpu_swapchain::create(webgpu_context& ctx
     desc.assert_valid();
     auto chain = std::make_shared<webgpu_swapchain>(ctx, desc);
 
-    auto const usage
-        = sg::texture_usage::render_target | sg::texture_usage::copy_src | sg::texture_usage::readonly_texture;
+    auto const usage = sg::texture_usage::render_target | sg::texture_usage::copy_src | sg::texture_usage::texture;
     if (!desc.is_windowed())
     {
         auto const extent = desc.headless_extent.value();

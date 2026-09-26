@@ -82,7 +82,7 @@ cc::result<dx12_pipeline_layout_handle> dx12_pipeline_layout::create(ID3D12Devic
     if (inline_constants.has_value())
     {
         auto const& ic = inline_constants.value();
-        CC_ASSERT(ic.type == sg::binding_type::uniform_buffer, "inline_constants binding must be a uniform_buffer");
+        CC_ASSERT(ic.type == sg::binding_type::constants_buffer, "inline_constants binding must be a constants_buffer");
         CC_ASSERT(ic.space.has_value(), "dx12 needs an explicit register space (absent != space 0)");
         CC_ASSERT(ic.block_size.has_value(), "inline_constants binding must have a block_size");
         CC_ASSERT(ic.block_size.value() > 0 && ic.block_size.value() % 4 == 0, "inline_constants block_size must be "

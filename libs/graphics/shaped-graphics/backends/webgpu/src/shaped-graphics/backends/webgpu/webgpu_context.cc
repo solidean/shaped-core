@@ -66,9 +66,9 @@ webgpu_context::~webgpu_context()
 void webgpu_context::set_limits(isize uniform_offset_alignment, granted_features const& features)
 {
     _uniform_offset_alignment = uniform_offset_alignment;
-    _readwrite_storage_formats = features.readwrite_storage_formats;
+    _readwrite_image_formats = features.readwrite_image_formats;
     _float32_filtering = features.float32_filtering;
-    _extended_storage_formats = features.extended_storage_formats;
+    _extended_image_formats = features.extended_image_formats;
     _limits.max_sample_count = 4;
 
     _upload_ring.initialize(*this, _config.upload_ring_bytes);

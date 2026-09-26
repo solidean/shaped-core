@@ -20,14 +20,14 @@
 /// Color/depth *target* writes are ROP-ordered by the hardware, and are not unordered.
 enum class sg::access_flag : sg::u32
 {
-    uniform_read,  // constant-buffer read:   DX12 CONSTANT_BUFFER / Vk UNIFORM_READ
-    index_read,    // index-buffer fetch:      DX12 INDEX_BUFFER    / Vk INDEX_READ
-    vertex_read,   // vertex-buffer fetch:     DX12 VERTEX_BUFFER   / Vk VERTEX_ATTRIBUTE_READ
-    shader_read,   // SRV / sampled+storage:   DX12 SHADER_RESOURCE / Vk SHADER_READ
-    shader_write,  // UAV / storage write:     DX12 UNORDERED_ACCESS/ Vk SHADER_WRITE
-    copy_read,     // copy/resolve source:     DX12 COPY_SOURCE     / Vk TRANSFER_READ
-    copy_write,    // copy/resolve dest:       DX12 COPY_DEST       / Vk TRANSFER_WRITE
-    indirect_read, // indirect args:           DX12 INDIRECT_ARGUMENT / Vk INDIRECT_COMMAND_READ
+    constants_read, // constant-buffer read:   DX12 CONSTANT_BUFFER / Vk UNIFORM_READ
+    index_read,     // index-buffer fetch:      DX12 INDEX_BUFFER    / Vk INDEX_READ
+    vertex_read,    // vertex-buffer fetch:     DX12 VERTEX_BUFFER   / Vk VERTEX_ATTRIBUTE_READ
+    shader_read,    // SRV / sampled+storage:   DX12 SHADER_RESOURCE / Vk SHADER_READ
+    shader_write,   // UAV / storage write:     DX12 UNORDERED_ACCESS/ Vk SHADER_WRITE
+    copy_read,      // copy/resolve source:     DX12 COPY_SOURCE     / Vk TRANSFER_READ
+    copy_write,     // copy/resolve dest:       DX12 COPY_DEST       / Vk TRANSFER_WRITE
+    indirect_read,  // indirect args:           DX12 INDIRECT_ARGUMENT / Vk INDIRECT_COMMAND_READ
 
     // Texture / render-target / raytracing families.
     // A buffer only ever uses the accel_* pair, through cmd.raytracing.
@@ -73,16 +73,16 @@ using pipeline_stage_flags = cc::flags<pipeline_stage_flag>;
 /// Live for textures today — dx12 transitions render targets, shader reads and copy destinations through it.
 enum class sg::texture_layout : sg::u32
 {
-    undefined,        // no defined contents (discardable): DX12 LAYOUT_UNDEFINED / Vk IMAGE_LAYOUT_UNDEFINED
-    general,          // buffers, and textures usable by any access: DX12 LAYOUT_COMMON / Vk IMAGE_LAYOUT_GENERAL
-    shader_readonly,  // sampled/SRV: DX12 LAYOUT_SHADER_RESOURCE / Vk SHADER_READ_ONLY_OPTIMAL
-    shader_readwrite, // UAV / storage: DX12 LAYOUT_UNORDERED_ACCESS / Vk IMAGE_LAYOUT_GENERAL
-    render_target,    // color attachment: DX12 LAYOUT_RENDER_TARGET / Vk COLOR_ATTACHMENT_OPTIMAL
-    depth_readonly,   // DX12 LAYOUT_DEPTH_STENCIL_READ / Vk DEPTH_STENCIL_READ_ONLY_OPTIMAL
-    depth_readwrite,  // DX12 LAYOUT_DEPTH_STENCIL_WRITE / Vk DEPTH_STENCIL_ATTACHMENT_OPTIMAL
-    copy_src,         // copy source: DX12 LAYOUT_COPY_SOURCE / Vk TRANSFER_SRC_OPTIMAL
-    copy_dst,         // copy dest: DX12 LAYOUT_COPY_DEST / Vk TRANSFER_DST_OPTIMAL
-    present,          // swapchain present: DX12 LAYOUT_PRESENT / Vk PRESENT_SRC_KHR
+    undefined,       // no defined contents (discardable): DX12 LAYOUT_UNDEFINED / Vk IMAGE_LAYOUT_UNDEFINED
+    general,         // buffers, and textures usable by any access: DX12 LAYOUT_COMMON / Vk IMAGE_LAYOUT_GENERAL
+    shader_texture,  // a texture view (SRV): DX12 LAYOUT_SHADER_RESOURCE / Vk SHADER_READ_ONLY_OPTIMAL
+    shader_image,    // an image view, whatever its access (UAV): DX12 LAYOUT_UNORDERED_ACCESS / Vk IMAGE_LAYOUT_GENERAL
+    render_target,   // color attachment: DX12 LAYOUT_RENDER_TARGET / Vk COLOR_ATTACHMENT_OPTIMAL
+    depth_readonly,  // DX12 LAYOUT_DEPTH_STENCIL_READ / Vk DEPTH_STENCIL_READ_ONLY_OPTIMAL
+    depth_readwrite, // DX12 LAYOUT_DEPTH_STENCIL_WRITE / Vk DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+    copy_src,        // copy source: DX12 LAYOUT_COPY_SOURCE / Vk TRANSFER_SRC_OPTIMAL
+    copy_dst,        // copy dest: DX12 LAYOUT_COPY_DEST / Vk TRANSFER_DST_OPTIMAL
+    present,         // swapchain present: DX12 LAYOUT_PRESENT / Vk PRESENT_SRC_KHR
 };
 
 /// Which way an async / streaming transfer of a texture goes, for `cmd.prepare_for_async`.
@@ -118,7 +118,7 @@ inline constexpr access_flags unordered_write_accesses
 /// Every access that only observes the resource.
 /// An op can carry both halves at once — a copy whose source and destination are the same resource does.
 inline constexpr access_flags read_accesses
-    = access_flag::uniform_read | access_flag::index_read | access_flag::vertex_read | access_flag::shader_read
+    = access_flag::constants_read | access_flag::index_read | access_flag::vertex_read | access_flag::shader_read
     | access_flag::copy_read | access_flag::indirect_read | access_flag::depth_read | access_flag::accel_read;
 
 /// True if `a` observes the resource at all, whatever else it does to it.

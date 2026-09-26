@@ -137,7 +137,7 @@ void bound_resources::declare_raytracing_access(sg::command_list& cmd) const
             textures.push_back({.index = i32(e),
                                 .stages = sg::pipeline_stage_flag::raytracing,
                                 .access = sg::access_flag::shader_read,
-                                .layout = sg::texture_layout::shader_readonly});
+                                .layout = sg::texture_layout::shader_texture});
         cmd.raytracing.declare_array_texture_access(name_of(t.table), textures);
     }
 }
@@ -323,7 +323,7 @@ cc::vector<byte> gpu_resource_manager::build_instance_parameters(instance_record
                                                          : record.texture);
 
             auto index = cc::vector<byte>();
-            append_pod(index, u32(acquire_texture(bindless_table::textures_2d, texture.as_readonly_view())));
+            append_pod(index, u32(acquire_texture(bindless_table::textures_2d, texture.as_texture_view())));
             write(slot.offset, index);
             break;
         }
@@ -917,12 +917,11 @@ sg::texture_2d const& gpu_resource_manager::_placeholder_texture(tg::vec4f texel
     if (auto const* const resident = _placeholder_textures.get_ptr(key); resident != nullptr)
         return *resident;
 
-    auto gpu = _ctx->persistent.create_texture_2d(
-        {.format = format,
-         .width = 1,
-         .height = 1,
-         .mip_levels = 1,
-         .usage = sg::texture_usage::readonly_texture | sg::texture_usage::copy_dst});
+    auto gpu = _ctx->persistent.create_texture_2d({.format = format,
+                                                   .width = 1,
+                                                   .height = 1,
+                                                   .mip_levels = 1,
+                                                   .usage = sg::texture_usage::texture | sg::texture_usage::copy_dst});
 
     // Four bytes, and needed by the very next recording: `ctx.upload`'s automatic wait is exactly right here, which is
     // the same reasoning that puts the bulk traffic on `ctx.stream` instead.
@@ -1007,7 +1006,7 @@ i32 gpu_resource_manager::record_pending_work(sg::command_list& cmd)
         // `texture_manager::acquire` decided already, from the format and the device, and gave this texture the usage
         // the matching routine needs, so the usage is the answer.
         auto const outcome
-            = record->texture.raw()->usage().has(sg::texture_usage::readwrite_texture)
+            = record->texture.raw()->usage().has(sg::texture_usage::image)
                 ? sr::box_filter_mipmap_routine::execute(cmd, record->texture, record->uploaded_mips)
                 : sr::raster_box_filter_mipmap_routine::execute(cmd, record->texture, record->uploaded_mips);
         if (outcome == sg::routine_outcome::declined)

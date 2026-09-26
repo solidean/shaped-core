@@ -26,7 +26,7 @@ from sgl_description import SglFile  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[4]
 
-# sg's typed view aliases, one per sg::texture_view_dimension: what view_traits must name for every dimension.
+# sg's typed view typedefs, one per sg::texture_view_dimension: what view_shape must name for every dimension.
 VIEWS_HH = REPO / "libs" / "graphics" / "shaped-graphics" / "src" / "shaped-graphics" / "resource" / "views.hh"
 
 TESTS = []
@@ -101,18 +101,23 @@ def an_unclamped_max_lod_is_sg_samplers_own_sentinel():
     expect_equal(got, "{.max_lod = sg::sampler::lod_max}", "FLT_MAX as max_lod")
 
 
-# ---- view_traits ----------------------------------------------------------------------------------------------------
+# ---- view_shape -----------------------------------------------------------------------------------------------------
 
 
 @test
-def every_texture_view_dimension_names_sgs_own_alias():
-    aliases = re.findall(r"using (tv_\w+) = texture_view_traits<texture_view_dimension::(\w+)>;",
-                         VIEWS_HH.read_text(encoding="utf-8"))
-    if len(aliases) < 9:
-        raise AssertionError(f"read only {len(aliases)} tv_ alias(es) from {VIEWS_HH} -- the pattern is stale")
-    for alias, dimension in aliases:
-        expect_equal(sgl_host_code.view_traits({"texture_dimension": dimension}), f"sg::{alias}",
-                     f"view_traits of '{dimension}'")
+def every_texture_view_dimension_names_sgs_own_typedefs():
+    text = VIEWS_HH.read_text(encoding="utf-8")
+    aliases = dict(re.findall(r"using (tv_\w+) = texture_view_traits<texture_view_dimension::(\w+)>;", text))
+    textures = dict(re.findall(r"using texture_view_(\w+) = texture_view<(tv_\w+)>;", text))
+    images = dict(re.findall(r"using image_view_(\w+) = image_view<(tv_\w+), Format>;", text))
+    if len(aliases) < 9 or len(textures) < 9 or len(images) < 5:
+        raise AssertionError(f"read {len(aliases)} tv_ alias(es), {len(textures)} texture and {len(images)} image "
+                             f"typedef(s) from {VIEWS_HH} -- the pattern is stale")
+    for alias, dimension in aliases.items():
+        shape = sgl_host_code.view_shape({"texture_dimension": dimension})
+        expect_equal(textures.get(shape), alias, f"texture_view_{shape} for '{dimension}'")
+        if "cube" not in dimension and "ms" not in dimension:
+            expect_equal(images.get(shape), alias, f"image_view_{shape} for '{dimension}'")
 
 
 # ---- binding_entry --------------------------------------------------------------------------------------------------
@@ -126,7 +131,7 @@ def resource(kind: str, **fields) -> dict:
 def a_texture_entry_carries_its_sample_type():
     for sample_type in ("filterable_float", "unfilterable_float", "depth", "sint", "uint"):
         got = sgl_host_code.binding_entry(resource("texture", texture_dimension="cube", sample_type=sample_type))
-        expect_equal(got, '{.name = "g_r", .index = 3u, .count = 1u, .type = sg::binding_type::readonly_texture, '
+        expect_equal(got, '{.name = "g_r", .index = 3u, .count = 1u, .type = sg::binding_type::texture, '
                           ".texture_dimension = sg::texture_view_dimension::cube, "
                           f".sample_type = sg::texture_sample_type::{sample_type}}}",
                      f"a texture of sample type '{sample_type}'")
@@ -134,12 +139,22 @@ def a_texture_entry_carries_its_sample_type():
 
 @test
 def an_image_entry_carries_its_format_and_access():
-    got = sgl_host_code.binding_entry(resource("image", texture_dimension="tex_2d_array", storage_format="r32_uint",
-                                               storage_access="write"))
-    expect_equal(got, '{.name = "g_r", .index = 3u, .count = 1u, .type = sg::binding_type::readwrite_texture, '
-                      ".texture_dimension = sg::texture_view_dimension::tex_2d_array, "
-                      ".storage_format = sg::pixel_format::r32_uint, .storage_access = sg::storage_access::write}",
+    got = sgl_host_code.binding_entry(resource("image", texture_dimension="tex_2d_array", image_format="r32_uint",
+                                               access="write"))
+    expect_equal(got, '{.name = "g_r", .index = 3u, .count = 1u, .type = sg::binding_type::image, '
+                      ".access = sg::access_mode::write, .texture_dimension = sg::texture_view_dimension::tex_2d_array, "
+                      ".image_format = sg::pixel_format::r32_uint}",
                  "an image")
+
+
+@test
+def a_buffer_entry_states_access_only_when_written():
+    got = sgl_host_code.binding_entry(resource("buffer", access="read"))
+    expect_equal(got, '{.name = "g_r", .index = 3u, .count = 1u, .type = sg::binding_type::buffer}', "a read buffer")
+    got = sgl_host_code.binding_entry(resource("buffer", access="read_write"))
+    expect_equal(got, '{.name = "g_r", .index = 3u, .count = 1u, .type = sg::binding_type::buffer, '
+                      ".access = sg::access_mode::read_write}",
+                 "a mut buffer")
 
 
 @test
@@ -161,7 +176,9 @@ GROUP = {
         {"kind": "texture", "name": "depth_map", "type": "texture_cube[float]", "host_name": "shadow_depth_map",
          "slot": 0, "texture_dimension": "cube", "sample_type": "depth"},
         {"kind": "image", "name": "counts", "type": "image_3d[uint]", "host_name": "shadow_counts", "slot": 1,
-         "texture_dimension": "tex_3d", "storage_format": "r32_uint", "storage_access": "read_write"},
+         "texture_dimension": "tex_3d", "image_format": "r32_uint", "access": "read_write"},
+        {"kind": "buffer", "name": "weights", "type": "float", "host_name": "shadow_weights", "slot": 4,
+         "access": "read_write"},
         {"kind": "sampler", "name": "picked", "type": "sampler", "host_name": "shadow_picked", "slot": 2,
          "sampler_type": "non_filtering"},
         {"kind": "sampler", "name": "compare", "type": "sampler", "host_name": "shadow_compare", "slot": 3,
@@ -175,8 +192,9 @@ FILE = SglFile(path="shadow.sgl")
 @test
 def a_group_has_a_field_per_view_and_per_dynamic_sampler():
     header = sgl_host_code.emit_group("pkg", "ns", FILE, GROUP)
-    expect_in("sg::readonly_texture_view<sg::tv_cube> depth_map;", header, "a cube texture's field")
-    expect_in("sg::readwrite_texture_view<sg::tv_3d> counts;", header, "a 3d image's field")
+    expect_in("sg::texture_view_cube depth_map;", header, "a cube texture's field")
+    expect_in("sg::image_view_3d<sg::pixel_format::r32_uint> counts;", header, "a 3d image's field, typed on its format")
+    expect_in("sg::readwrite_buffer_view<float> weights;", header, "a mut buffer's field, its view by access")
     expect_in("sg::sampler picked;", header, "a dynamic sampler's field")
     # A static sampler is the layout's, so the group the host fills has nothing to set for it.
     expect_not_in(" compare;", header, "a static sampler")
@@ -190,7 +208,7 @@ def a_groups_static_sampler_is_declared_and_its_dynamic_one_gathered():
     expect_in("return k_sgl_samplers_shadow;", source, "declared_samplers")
     expect_in('samplers.push_back({.name = "shadow_picked", .sampler = picked});', source, "the dynamic sampler")
     expect_not_in('.sampler = compare}', source, "a static sampler gathered as a dynamic one")
-    expect_in("views.reserve(2);", source, "only views are gathered as views")
+    expect_in("views.reserve(3);", source, "only views are gathered as views")
 
 
 # ---- the runner -----------------------------------------------------------------------------------------------------

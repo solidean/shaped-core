@@ -45,7 +45,7 @@ class vulkan_descriptor_heap;      // host-visible memory descriptors are writte
 struct vulkan_image_view_key;      // the identity one cached VkImageView is keyed on
 class vulkan_image_view_cache;     // VkImageViews for bound texture views, keyed by view identity
 class vulkan_sampler_cache;        // VkSamplers for bound sampler states, keyed by sampler identity
-struct vulkan_hazard_view;         // a bound buffer + the access class it is used as (see vulkan_binding_group.hh)
+struct vulkan_hazard_view;         // a bound buffer + the view class it is used as (see vulkan_binding_group.hh)
 struct vulkan_texture_hazard_view; // the texture analogue
 struct vulkan_array_element;       // one element of an array binding
 struct vulkan_array_binding;       // an array binding's per-element resources

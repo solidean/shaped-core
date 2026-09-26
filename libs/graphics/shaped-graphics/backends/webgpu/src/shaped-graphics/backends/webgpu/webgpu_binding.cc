@@ -11,30 +11,15 @@ namespace sg::backend::webgpu
 {
 namespace
 {
-/// Whether a binding of this kind lets the shader write, which WebGPU forbids in the vertex stage.
-[[nodiscard]] bool is_writable(sg::binding const& b)
-{
-    switch (b.type)
-    {
-    case sg::binding_type::readwrite_structured_buffer:
-    case sg::binding_type::readwrite_raw_buffer:
-        return true;
-    case sg::binding_type::readwrite_texture:
-        return b.storage_access != sg::storage_access::read;
-    default:
-        return false;
-    }
-}
-
-[[nodiscard]] WGPUStorageTextureAccess to_wgpu_storage_access(sg::storage_access access)
+[[nodiscard]] WGPUStorageTextureAccess to_wgpu_storage_access(sg::access_mode access)
 {
     switch (access)
     {
-    case sg::storage_access::read:
+    case sg::access_mode::read:
         return WGPUStorageTextureAccess_ReadOnly;
-    case sg::storage_access::write:
+    case sg::access_mode::write:
         return WGPUStorageTextureAccess_WriteOnly;
-    case sg::storage_access::read_write:
+    case sg::access_mode::read_write:
         return WGPUStorageTextureAccess_ReadWrite;
     }
     return WGPUStorageTextureAccess_ReadWrite;
@@ -51,31 +36,29 @@ namespace
                                                        u32 binding_index,
                                                        cc::optional<WGPUSamplerBindingType> static_sampler_type)
 {
-    CC_ASSERTF(!(b.visibility.has(sg::shader_stage::vertex) && is_writable(b)),
+    CC_ASSERTF(!(b.visibility.has(sg::shader_stage::vertex) && b.is_writable()),
                "'{}' is writable storage marked vertex-visible, and webgpu allows no writable storage in the vertex "
                "stage",
                b.name);
 
     auto entry = WGPUBindGroupLayoutEntry{};
     entry.binding = binding_index;
-    entry.visibility = to_wgpu_visibility(b.visibility, b.type);
+    // An unstated image stays out of the vertex stage even when only read, as it always has.
+    entry.visibility = to_wgpu_visibility(b.visibility, b.is_writable() || b.type == sg::binding_type::image);
     entry.bindingArraySize = 0;
 
     switch (b.type)
     {
-    case sg::binding_type::uniform_buffer:
+    case sg::binding_type::constants_buffer:
         entry.buffer.type = WGPUBufferBindingType_Uniform;
         entry.buffer.minBindingSize = u64(b.block_size.value_or(0));
         break;
-    case sg::binding_type::readonly_structured_buffer:
-    case sg::binding_type::readonly_raw_buffer:
-        entry.buffer.type = WGPUBufferBindingType_ReadOnlyStorage;
+    case sg::binding_type::buffer:
+    case sg::binding_type::bytes:
+        entry.buffer.type
+            = b.access == sg::access_mode::read ? WGPUBufferBindingType_ReadOnlyStorage : WGPUBufferBindingType_Storage;
         break;
-    case sg::binding_type::readwrite_structured_buffer:
-    case sg::binding_type::readwrite_raw_buffer:
-        entry.buffer.type = WGPUBufferBindingType_Storage;
-        break;
-    case sg::binding_type::readonly_texture:
+    case sg::binding_type::texture:
     {
         auto const dim = b.texture_dimension.value_or(sg::texture_view_dimension::tex_2d);
         auto const multisampled = is_multisampled(dim);
@@ -88,9 +71,9 @@ namespace
         entry.texture.multisampled = multisampled ? WGPU_TRUE : WGPU_FALSE;
         break;
     }
-    case sg::binding_type::readwrite_texture:
-        entry.storageTexture.access = to_wgpu_storage_access(b.storage_access);
-        entry.storageTexture.format = to_wgpu_format(b.storage_format.value_or(sg::pixel_format::undefined));
+    case sg::binding_type::image:
+        entry.storageTexture.access = to_wgpu_storage_access(b.access);
+        entry.storageTexture.format = to_wgpu_format(b.image_format.value_or(sg::pixel_format::undefined));
         entry.storageTexture.viewDimension
             = to_wgpu_view_dimension(b.texture_dimension.value_or(sg::texture_view_dimension::tex_2d));
         break;
@@ -152,27 +135,26 @@ cc::result<webgpu_binding_group_layout_handle> webgpu_binding_group_layout::crea
             return cc::error(cc::format("binding_group_layout: '{}' is an acceleration structure, and webgpu has no "
                                         "ray tracing",
                                         b.name));
-        if (b.type == sg::binding_type::readwrite_texture
-            && b.storage_format.value_or(sg::pixel_format::undefined) == sg::pixel_format::undefined)
-            return cc::error(cc::format("binding_group_layout: storage texture '{}' declares no storage_format, which "
+        if (b.type == sg::binding_type::image
+            && b.image_format.value_or(sg::pixel_format::undefined) == sg::pixel_format::undefined)
+            return cc::error(cc::format("binding_group_layout: image '{}' declares no image_format, which "
                                         "a "
                                         "webgpu layout needs before any view exists",
                                         b.name));
-        if (b.type == sg::binding_type::readwrite_texture && b.storage_access == sg::storage_access::read_write
-            && !ctx.supports(sg::feature::readwrite_storage_formats))
+        if (b.type == sg::binding_type::image && b.access == sg::access_mode::read_write
+            && !ctx.supports(sg::feature::readwrite_image_formats))
         {
-            auto const format = b.storage_format.value_or(sg::pixel_format::undefined);
+            auto const format = b.image_format.value_or(sg::pixel_format::undefined);
             if (format != sg::pixel_format::r32_float && format != sg::pixel_format::r32_uint
                 && format != sg::pixel_format::r32_sint)
-                return cc::error(cc::format("binding_group_layout: storage texture '{}' is read_write in a format "
+                return cc::error(cc::format("binding_group_layout: image '{}' is read_write in a format "
                                             "other "
                                             "than r32float / r32uint / r32sint, which needs "
-                                            "sg::feature::readwrite_storage_formats (webgpu's texture-formats-tier2), "
+                                            "sg::feature::readwrite_image_formats (webgpu's texture-formats-tier2), "
                                             "and this device lacks it; declare it write or read instead",
                                             b.name));
         }
-        if (b.type == sg::binding_type::readonly_texture
-            && b.texture_dimension == sg::texture_view_dimension::tex_2d_ms_array)
+        if (b.type == sg::binding_type::texture && b.texture_dimension == sg::texture_view_dimension::tex_2d_ms_array)
             return cc::error(cc::format("binding_group_layout: '{}' is a multisampled array texture, which webgpu does "
                                         "not have",
                                         b.name));
@@ -269,7 +251,7 @@ cc::result<webgpu_pipeline_layout_handle> webgpu_pipeline_layout::create(webgpu_
     if (desc.inline_constants.has_value())
     {
         auto const& b = desc.inline_constants.value();
-        CC_ASSERT(b.type == sg::binding_type::uniform_buffer, "inline constants must be a uniform_buffer binding");
+        CC_ASSERT(b.type == sg::binding_type::constants_buffer, "inline constants must be a constants_buffer binding");
         CC_ASSERT(b.block_size.has_value() && b.block_size.value() > 0 && b.block_size.value() % 4 == 0,
                   "inline constants need a block_size that is a positive multiple of 4");
         layout->_inline_constants_bytes = b.block_size.value();
@@ -458,7 +440,7 @@ struct resolved_view
         auto const& view = elements[0];
         if (sg::is_vacant(view))
             return cc::error(cc::format("binding_group: '{}' is vacant, which only an array element may be", rv.name));
-        if (!sg::accepts(b.type, view))
+        if (!sg::accepts(b, view))
             return cc::error(
                 cc::format("binding_group: the view bound to '{}' does not match its declared kind", rv.name));
 
@@ -471,11 +453,11 @@ struct resolved_view
             auto const buffer = std::dynamic_pointer_cast<webgpu_buffer const>(bv->buffer);
             CC_ASSERT(buffer != nullptr, "bound buffer is not a webgpu buffer");
             CC_ASSERT(!buffer->is_expired(), "binding_group names an expired buffer");
-            CC_ASSERTF(
-                b.type != sg::binding_type::uniform_buffer || bv->offset_in_bytes % ctx.uniform_offset_alignment() == 0,
-                "binding_group: uniform buffer '{}' is bound at offset {}, which is not a multiple of the "
-                "device's minUniformBufferOffsetAlignment ({})",
-                rv.name, bv->offset_in_bytes, ctx.uniform_offset_alignment());
+            CC_ASSERTF(b.type != sg::binding_type::constants_buffer
+                           || bv->offset_in_bytes % ctx.uniform_offset_alignment() == 0,
+                       "binding_group: uniform buffer '{}' is bound at offset {}, which is not a multiple of the "
+                       "device's minUniformBufferOffsetAlignment ({})",
+                       rv.name, bv->offset_in_bytes, ctx.uniform_offset_alignment());
             auto const size
                 = bv->shape == sg::view_shape::structured ? bv->element_count * bv->stride_in_bytes : bv->size_in_bytes;
             entry.buffer = buffer->raw();

@@ -462,10 +462,11 @@ void vulkan_command_list::raytracing_dispatch_rays(sg::raytracing_shader_table c
 
         for (auto const& view : bound_group->hazard_views)
             if (view.buffer != nullptr)
-                track_buffer_access(*view.buffer, sg::pipeline_stage_flag::raytracing, sg::shader_access_of(view.access));
+                track_buffer_access(*view.buffer, sg::pipeline_stage_flag::raytracing,
+                                    sg::shader_access_of(view.bound_as));
         for (auto const& tv : bound_group->texture_hazard_views)
             (void)track_texture_access(*tv.texture, tv.range, sg::pipeline_stage_flag::raytracing,
-                                       sg::shader_access_of(tv.access), sg::shader_layout_of(tv.access));
+                                       sg::shader_access_of(tv.bound_as), sg::shader_layout_of(tv.bound_as));
     }
 
     declare_array_accesses();

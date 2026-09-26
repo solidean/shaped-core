@@ -180,7 +180,7 @@ cc::result<dx12_binding_group_handle> dx12_binding_group::create_resolved(dx12_c
         for (isize element = 0; element < element_views.size(); ++element)
         {
             auto const& view = element_views[element];
-            if (!sg::accepts(s.binding.type, view))
+            if (!sg::accepts(s.binding, view))
                 return cc::error(
                     cc::format("binding_group: element {} of '{}' does not match its declared kind", element, nv.name));
 
@@ -240,7 +240,7 @@ cc::result<dx12_binding_group_handle> dx12_binding_group::create_resolved(dx12_c
                 {
                     group->referenced_textures.push_back(cc::move(dx));
                     group->texture_hazard_views.push_back(
-                        {group->referenced_textures.back(), tv->range, tv->access}); // → dispatch hazard declare
+                        {group->referenced_textures.back(), tv->range, tv->bound_as}); // → dispatch hazard declare
                 }
             }
             else
@@ -262,7 +262,7 @@ cc::result<dx12_binding_group_handle> dx12_binding_group::create_resolved(dx12_c
                 {
                     group->referenced.push_back(cc::move(dx));
                     group->hazard_views.push_back(
-                        {group->referenced.back(), bv.access}); // (buffer, access class) → dispatch hazard declare
+                        {group->referenced.back(), bv.bound_as}); // (buffer, view class) → dispatch hazard declare
                 }
             }
         }

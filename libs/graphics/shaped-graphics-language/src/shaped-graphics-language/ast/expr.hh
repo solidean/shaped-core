@@ -264,7 +264,7 @@ enum class sgl::ast::type_access : sgl::u8
     write_only, ///< `out`
 };
 
-/// `mut buffer[float]`, `out texture2d[rgba8unorm]`: an access word and the type it qualifies (AST-128).
+/// `mut buffer[float]`, `out texture_2d[rgba8unorm]`: an access word and the type it qualifies (AST-128).
 /// Only the top of a type position may carry one, so `buffer[mut float]` is no qualified type.
 struct sgl::ast::qualified_type
 {

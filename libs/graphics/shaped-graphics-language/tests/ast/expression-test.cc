@@ -114,7 +114,7 @@ TEST("sgl ast - arrays, and index as the neutral reading of a fused square list"
     CHECK(expr_of("[]") == "(array)");
     CHECK(expr_of("[1, 2]") == "(array num:1 num:2)");
     CHECK(expr_of("a[i]") == "(index a i)");
-    CHECK(expr_of("texture2d[rgba8]") == "(index texture2d rgba8)");
+    CHECK(expr_of("texture_2d[rgba8]") == "(index texture_2d rgba8)");
     CHECK(expr_of("m[i, j].x") == "(member (index m i j) x)");
 }
 

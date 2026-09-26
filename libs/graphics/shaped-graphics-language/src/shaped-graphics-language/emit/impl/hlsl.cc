@@ -130,7 +130,7 @@ public:
     void write_resource(cc::string& out, plan const& p, planned_resource const& b) const
     {
         auto const& t = p.m.at(b.type);
-        auto const format = t.kind == type_kind::image ? k_storage_formats[t.format].spirv : cc::string_view();
+        auto const format = t.kind == type_kind::image ? k_image_formats[t.format].spirv : cc::string_view();
         write_addressed(out, resource_text(p, b.type), b.name, register_class_of(t), b.group, b.slot, format);
     }
 

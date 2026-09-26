@@ -160,10 +160,10 @@ TEST("slib sgl compiler - the cube becomes WGSL that slib's own reader reflects"
     CHECK(ps.stage == sg::shader_stage::fragment); // `pixel` is the package's word, and sg has one stage for it
     CHECK(ps.entry_point == "main_ps");
 
-    // Group 3, binding 0 reads as the inline-constants block: a uniform buffer in no group.
+    // Group 3, binding 0 reads as the inline-constants block: a constants buffer in no group.
     REQUIRE(vs.bindings.size() == 1);
     CHECK(vs.bindings[0].name == "constants");
-    CHECK(vs.bindings[0].type == sg::binding_type::uniform_buffer);
+    CHECK(vs.bindings[0].type == sg::binding_type::constants_buffer);
     CHECK(!vs.bindings[0].group_index.has_value());
     CHECK(ps.bindings.empty());
 
@@ -187,7 +187,8 @@ TEST("slib sgl compiler - a compute entry point reaches WGSL with its buffer ref
 
     // The buffer is a group of its own, unlike the inline constants, so it carries a group index.
     REQUIRE(cs.bindings.size() == 1);
-    CHECK(cs.bindings[0].type == sg::binding_type::readwrite_structured_buffer);
+    CHECK(cs.bindings[0].type == sg::binding_type::buffer);
+    CHECK(cs.bindings[0].access == sg::access_mode::read_write);
     REQUIRE(cs.bindings[0].group_index.has_value());
     CHECK(cs.bindings[0].group_index.value() == 0);
 
@@ -215,7 +216,7 @@ ASYNC_TEST("slib sgl compiler - the cube becomes SPIR-V with a push-constant blo
 
     auto const* constants = find_binding(vs, "constants");
     REQUIRE(constants != nullptr);
-    CHECK(constants->type == sg::binding_type::uniform_buffer);
+    CHECK(constants->type == sg::binding_type::constants_buffer);
     CHECK(!constants->group_index.has_value());
     CHECK(!constants->space.has_value());
     REQUIRE(constants->block_size.has_value());
@@ -242,7 +243,7 @@ ASYNC_TEST("slib sgl compiler - the cube becomes DXIL with its block at b0 of th
 
     auto const* constants = find_binding(vs, "constants");
     REQUIRE(constants != nullptr);
-    CHECK(constants->type == sg::binding_type::uniform_buffer);
+    CHECK(constants->type == sg::binding_type::constants_buffer);
     CHECK(constants->index == 0);
     REQUIRE(constants->space.has_value());
     CHECK(constants->space.value() == slib::inline_constants_space);
@@ -332,9 +333,9 @@ constexpr auto k_two_groups_source
                       "\n"
                       "binding post:\n"
                       "    texel_size: float2\n"
-                      "    src: texture2d[float4]\n"
-                      "    dst: out image2d[.rgba8_unorm]\n"
-                      "    acc: mut image2d[.r32_float]\n"
+                      "    src: texture_2d[float4]\n"
+                      "    dst: out image_2d[.rgba8_unorm]\n"
+                      "    acc: mut image_2d[.r32_float]\n"
                       "    sampler bilinear:\n"
                       "        filter = .linear\n"
                       "        address = .clamp_edge\n"
@@ -387,7 +388,7 @@ static_assert(sgl::emit::impl::k_max_groups == sg::max_binding_groups);
 
 TEST("slib sgl compiler - SGL spells every image format for SPIR-V as slib's pass does")
 {
-    for (auto const& f : sgl::check::k_storage_formats)
+    for (auto const& f : sgl::check::k_image_formats)
     {
         auto const hlsl = cc::format("#pragma sc group 0\n"
                                      "namespace g\n"

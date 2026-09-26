@@ -176,12 +176,12 @@ TEST("sgl ast - a binding member's type may be qualified by mut or out")
                  "    scale: float\n"
                  "    src: buffer[float]\n"
                  "    dst: mut buffer[float]\n"
-                 "    result: out texture2d[rgba8unorm]\n")
+                 "    result: out texture_2d[rgba8unorm]\n")
           == "(binding work\n"
              "  (field scale : float)\n"
              "  (field src : (index buffer float))\n"
              "  (field dst : (mut (index buffer float)))\n"
-             "  (field result : (out (index texture2d rgba8unorm))))");
+             "  (field result : (out (index texture_2d rgba8unorm))))");
 }
 
 TEST("sgl ast - mut and out qualify a type only at the top of a type position")

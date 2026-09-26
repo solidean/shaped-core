@@ -95,13 +95,13 @@ void vulkan_staging_binding_group::write_view_descriptors(int first_descriptor,
         {
             auto texture = std::dynamic_pointer_cast<vulkan_texture const>(tv->texture);
             CC_ASSERT(texture != nullptr, "bound texture is not a vulkan texture");
-            res = {.buffer = {}, .texture = cc::move(texture), .range = tv->range, .access = tv->access};
+            res = {.buffer = {}, .texture = cc::move(texture), .range = tv->range, .bound_as = tv->bound_as};
         }
         else if (auto const* bv = sg::try_as_buffer_view(view); bv != nullptr)
         {
             auto buffer = std::dynamic_pointer_cast<vulkan_buffer const>(bv->buffer);
             CC_ASSERT(buffer != nullptr, "bound buffer is not a vulkan buffer");
-            res = {.buffer = cc::move(buffer), .texture = {}, .range = {}, .access = bv->access};
+            res = {.buffer = cc::move(buffer), .texture = {}, .range = {}, .bound_as = bv->bound_as};
         }
         else if (auto const* av = sg::try_as_tlas_view(view); av != nullptr && av->tlas != nullptr)
         {
@@ -111,7 +111,7 @@ void vulkan_staging_binding_group::write_view_descriptors(int first_descriptor,
             res = {.buffer = tlas._vulkan_storage,
                    .texture = {},
                    .range = {},
-                   .access = sg::view_class::acceleration_structure};
+                   .bound_as = sg::view_class::acceleration_structure};
         }
     }
 }
@@ -185,12 +185,12 @@ cc::result<sg::binding_group_handle> vulkan_staging_binding_group::mint()
             if (res.texture != nullptr)
             {
                 referenced_textures.push_back(res.texture);
-                texture_hazard_views.push_back({res.texture, res.range, res.access});
+                texture_hazard_views.push_back({res.texture, res.range, res.bound_as});
             }
             else if (res.buffer != nullptr)
             {
                 referenced.push_back(res.buffer);
-                hazard_views.push_back({res.buffer, res.access});
+                hazard_views.push_back({res.buffer, res.bound_as});
             }
             // else: a scalar slot with no resource — the null acceleration structure, which tracks nothing.
         }

@@ -435,10 +435,10 @@ texture_id texture_manager::acquire(texture_data const& texture)
     // is fixed at creation — so the choice is made here rather than where the generation is recorded.
     // An sRGB format carries no typed UAV and a compressed one is neither writable nor renderable, which leaves the
     // compressed case with no path at all; it allocates only the levels its file supplied.
-    // A storage format outside the portable set is writable only where the device grants extended storage formats.
+    // An image format outside the portable set is writable only where the device grants extended image formats.
     auto const compute_mips
         = sg::supports_typed_uav(texture.format)
-       && (sg::is_portable_storage_format(texture.format) || _ctx.supports(sg::feature::extended_storage_formats));
+       && (sg::is_portable_image_format(texture.format) || _ctx.supports(sg::feature::extended_image_formats));
     auto const raster_mips = !compute_mips && sg::is_render_target_format(texture.format);
 
     // The full chain is allocated up front even when only the base level is supplied, so generating the rest
@@ -447,9 +447,9 @@ texture_id texture_manager::acquire(texture_data const& texture)
         = compute_mips || raster_mips ? impl::mip_count_of(texture.width, texture.height) : texture.mip_count;
     CC_ASSERT(texture.mip_count <= total_mips, "more mips supplied than the extent has");
 
-    auto usage = sg::texture_usage::readonly_texture | sg::texture_usage::copy_dst;
+    auto usage = sg::texture_usage::texture | sg::texture_usage::copy_dst;
     if (compute_mips)
-        usage = usage | sg::texture_usage::readwrite_texture;
+        usage = usage | sg::texture_usage::image;
     else if (raster_mips)
         usage = usage | sg::texture_usage::render_target;
 

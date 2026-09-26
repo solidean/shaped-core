@@ -85,7 +85,7 @@ sg::routine_outcome raster_box_filter_mipmap_routine::execute(sg::command_list& 
     {
         auto const group = ctx.transient.create_binding_group(
             self->_group_layout,
-            {{.name = "gSource", .view = texture.as_readonly_view({.mips = {.start = level - 1, .count = 1}})}});
+            {{.name = "gSource", .view = texture.as_texture_view({.mips = {.start = level - 1, .count = 1}})}});
 
         // Discarded rather than preserved: the pass covers the whole level, so loading what is there costs
         // bandwidth for texels every one of which is about to be overwritten.

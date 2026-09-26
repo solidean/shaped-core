@@ -22,11 +22,10 @@ namespace
 /// A texture the routine can sample — the stand-in for a view that already rendered.
 [[nodiscard]] sg::texture_2d make_source(sg::context& ctx, int w, int h)
 {
-    return ctx.persistent.create_texture_2d(
-        {.format = sg::pixel_format::rgba16_float,
-         .width = w,
-         .height = h,
-         .usage = sg::texture_usage::readonly_texture | sg::texture_usage::readwrite_texture});
+    return ctx.persistent.create_texture_2d({.format = sg::pixel_format::rgba16_float,
+                                             .width = w,
+                                             .height = h,
+                                             .usage = sg::texture_usage::texture | sg::texture_usage::image});
 }
 
 [[nodiscard]] tg::aabb2i rect_of(int x0, int y0, int x1, int y1)
@@ -206,7 +205,7 @@ ASYNC_INVOCABLE_TEST("sv - a group is created against a layout whose static samp
     auto cmd = ctx.create_command_list();
     auto const g = ctx.transient.create_binding_group(
         *cmd, layout,
-        group{.source_0 = source.as_readonly_view(), .source_1 = source.as_readonly_view(), .source_sampler = {}});
+        group{.source_0 = source.as_texture_view(), .source_1 = source.as_texture_view(), .source_sampler = {}});
     CHECK(g != nullptr);
 
     // And the layout a bare acquire gives has none, so the same create passes the gathered sampler through.
@@ -217,7 +216,7 @@ ASYNC_INVOCABLE_TEST("sv - a group is created against a layout whose static samp
 
     auto const g2 = ctx.transient.create_binding_group(
         *cmd, plain,
-        group{.source_0 = source.as_readonly_view(), .source_1 = source.as_readonly_view(), .source_sampler = {}});
+        group{.source_0 = source.as_texture_view(), .source_1 = source.as_texture_view(), .source_sampler = {}});
     CHECK(g2 != nullptr);
 
     // And BOUND, which is the half a create alone cannot reach: every backend's bind_group asserts the group's
@@ -243,7 +242,7 @@ ASYNC_INVOCABLE_TEST("sv - a group is created against a layout whose static samp
     auto const* const constants_binding = [&]() -> sg::binding const*
     {
         for (auto const& b : compiled_vs->bindings)
-            if (b.type == sg::binding_type::uniform_buffer)
+            if (b.type == sg::binding_type::constants_buffer)
                 return &b;
         return nullptr;
     }();

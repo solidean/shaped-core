@@ -242,7 +242,7 @@ ASYNC_EXAMPLE("shaped-graphics/metal-cube")
     auto const constants = sg::binding{.space = 0,
                                        .index = 0,
                                        .count = 1,
-                                       .type = sg::binding_type::uniform_buffer,
+                                       .type = sg::binding_type::constants_buffer,
                                        .block_size = isize(sizeof(cube_constants))};
 
     auto const built = ctx->cached.acquire_raster_pipeline(

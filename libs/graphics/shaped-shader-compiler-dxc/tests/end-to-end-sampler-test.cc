@@ -77,11 +77,11 @@ ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - end to end: reflect a texture+sampler, s
     for (auto const& b : sample.bindings)
     {
         if (b.name == cc::string_view("Src"))
-            tex_ok = b.type == sg::binding_type::readonly_texture;
+            tex_ok = b.type == sg::binding_type::texture;
         else if (b.name == cc::string_view("Samp"))
             samp_ok = b.type == sg::binding_type::sampler;
         else if (b.name == cc::string_view("Out"))
-            out_ok = b.type == sg::binding_type::readwrite_structured_buffer;
+            out_ok = b.type == sg::binding_type::buffer && b.access == sg::access_mode::read_write;
     }
     CHECK(tex_ok);
     CHECK(samp_ok);
@@ -94,7 +94,7 @@ ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - end to end: reflect a texture+sampler, s
     td.dimension = sg::texture_dimension::d2;
     td.width = N;
     td.height = N;
-    td.usage = sg::texture_usage::readonly_texture | sg::texture_usage::readwrite_texture;
+    td.usage = sg::texture_usage::texture | sg::texture_usage::image;
     auto tex_h = ctx.persistent.create_raw_texture(td);
     REQUIRE(tex_h != nullptr);
     auto const tex = sg::texture_2d::from_raw(tex_h);
@@ -119,12 +119,12 @@ ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - end to end: reflect a texture+sampler, s
     REQUIRE(sample_pipe != nullptr);
 
     // Groups: pass 1 binds the texture as a UAV; pass 2 binds it as an SRV + a dynamic point/clamp sampler.
-    sg::named_view const fill_views[] = {{.name = "Dst", .view = tex.as_readwrite_view()}};
+    sg::named_view const fill_views[] = {{.name = "Dst", .view = tex.as_image_view<sg::pixel_format::r32_float>()}};
     auto fill_group = ctx.persistent.create_binding_group(fill_group_layout, fill_views);
     REQUIRE(fill_group != nullptr);
 
     sg::named_view const sample_views[] = {
-        {.name = "Src", .view = tex.as_readonly_view()},
+        {.name = "Src", .view = tex.as_texture_view()},
         {.name = "Out", .view = sg::buffer<float>::from_raw(buf).as_readwrite_buffer()},
     };
     sg::named_sampler const sample_samplers[] = {{.name = "Samp",

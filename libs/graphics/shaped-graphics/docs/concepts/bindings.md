@@ -11,18 +11,19 @@ A backend-specific binding vocabulary would be HLSL/D3D12 verbatim: a bind-type 
 sg's baseline shading language is undecided, so the vocabulary is drawn instead from concepts common to HLSL / GLSL / Slang / MSL / WGSL:
 
 - **`binding_type`** — the kind of resource a slot expects, and the backend-agnostic replacement for `D3D_SHADER_INPUT_TYPE`.
-  `uniform_buffer`, `readonly_structured_buffer`, `readwrite_structured_buffer`, `readonly_raw_buffer`, `readwrite_raw_buffer`.
-  Then `readonly_texture`, `readwrite_texture`, `sampler`, `acceleration_structure`.
+  `constants_buffer`, `buffer`, `bytes`, `texture`, `image`, `sampler`, `acceleration_structure` — SGL's own resource types.
+- **`access`** — what the shader does with the resource, an `access_mode`: `read`, `write` or `read_write`, SGL's unmarked, `out` and `mut`.
+  Only an image is ever `write`, only a buffer, bytes or an image is ever written, and `is_valid_access` says which pairs exist.
+  A buffer's access picks SRV or UAV; an image is a UAV whatever its access, which reaches only WebGPU's layout and the hazards.
 - **`index` + `count`** — the address within the group, following SPIR-V (`binding`), WGSL (`@binding`) and Metal argument buffers.
-  A D3D12 backend derives its `(register-type, register)` at layout build: register-type from `binding_type` → `t`/`u`/`b`/`s`, register = `index`.
+  A D3D12 backend derives its `(register-type, register)` at layout build: register-type from the kind and access → `t`/`u`/`b`/`s`, register = `index`.
   `count == 0` is an unbounded array, which sg rejects — see [Array bindings](#array-bindings) for why.
 - **`group_index`** and **`space`** — the two ways a shading language namespaces that address, each optional and each reflected by the languages that have it.
   They are kept apart because only one of them is hardware-visible; the section below is what that costs a caller.
-- **`block_size`** — a uniform block's declared byte size, used to validate a bound view's size.
+- **`block_size`** — a constants block's declared byte size, used to validate a bound view's size.
 - **`visibility`** — the set of stages that declared this binding, as a `shader_stages`.
   **Empty means not known**, not "no stage": a hand-written binding that never says is treated as visible everywhere.
-- **`storage_format`**, **`sample_type`**, **`sampler_type`** — the three optionals a WebGPU bind group layout entry needs and dx12 and vulkan do not ask for.
-- **`storage_access`** — whether a storage texture is read, written or both, defaulting to both; WebGPU needs it too, and the other two treat every UAV as read-write.
+- **`image_format`**, **`sample_type`**, **`sampler_type`** — the three optionals a WebGPU bind group layout entry needs and dx12 and vulkan do not ask for.
 
 ## Visibility is accumulated, not reflected
 
@@ -34,12 +35,12 @@ The reason to carry it at all is that **WebGPU cannot be permissive here**, wher
 Its default limits allow *zero* storage buffers in the vertex stage, so a storage binding wrongly marked vertex-visible fails validation on a conformant device rather than merely costing something.
 Vulkan consumes the real mask today — an empty set still means `VK_SHADER_STAGE_ALL` — which is what keeps the field true rather than aspirational.
 
-**`storage_format` has no source in DXC reflection.**
+**`image_format` has no source in DXC reflection.**
 `RWTexture2D<float4>` declares a component type and count, not a concrete texel format, and DXIL carries no format for a typed UAV.
-So an HLSL shader package states it beside the declaration, with slib's `#pragma sc format`, and the binding table generated for the package carries it as `.storage_format`.
-WGSL declares one itself (`texture_storage_2d<rgba8unorm, write>`), and an SGL `image2d[.F]` member does too, so both of those paths fill it from the source.
+So an HLSL shader package states it beside the declaration, with slib's `#pragma sc format`, and the binding table generated for the package carries it as `.image_format`.
+WGSL declares one itself (`texture_storage_2d<rgba8unorm, write>`), and an SGL `image_2d[.F]` member does too, so both of those paths fill it from the source.
 A binding reflected by DXC alone, outside a package's table, leaves it absent.
-The access mode is the same story without the pragma: WGSL and SGL state it, HLSL's `RWTexture` is always read-write, so the HLSL path leaves `storage_access` at its default.
+The access mode is the same story without the pragma: WGSL and SGL state it, and HLSL's `RWTexture` is always read-write, so the HLSL path says `read_write`.
 
 ## A group index binds, a space only numbers
 
@@ -97,17 +98,18 @@ A pairwise range test over every pair of bindings is a cost every correct layout
 ## Bindings and views speak the same vocabulary
 
 A `binding` describes what the shader *expects*, and a [`raw_view`](../../src/shaped-graphics/resource/views.hh) describes what is *bound*.
-For buffer and texture kinds they line up exactly: `access_of(binding_type)` and `shape_of(binding_type)` give the `(view_class, view_shape)` a satisfying view must have.
-`accepts(binding_type, raw_view)` is the check.
-That equivalence is what lets a binding validate a bound view with no backend involved, and it is why `binding_type`'s view kinds mirror the view `(access, shape)` combinations one-to-one.
+For buffer and texture kinds they line up exactly: `view_class_of(binding)` and `shape_of(binding_type)` give the `(view_class, view_shape)` a satisfying view must have.
+`accepts(binding, raw_view)` is the check.
+A buffer's access picks its view class, `readonly` or `readwrite`; an image is `view_class::image` whatever its access, since its view carries none.
+That equivalence is what lets a binding validate a bound view with no backend involved, and it is why a binding's kind and access mirror the view's `(view_class, view_shape)` one-to-one.
 
 ## Features
 
 **A form some device lacks is refused where it is lacking, and refused alike on every backend.**
 Two such forms are judged before any backend sees them, in [portability.cc](../../src/shaped-graphics/binding/impl/portability.cc):
 
-- A storage texture, or a storage binding, in a format outside `is_portable_storage_format` needs `feature::extended_storage_formats`.
-  The portable set is core WebGPU's storage formats, and the refusal comes at texture creation and at layout creation.
+- A texture with `image` usage, or an `image` binding, in a format outside `is_portable_image_format` needs `feature::extended_image_formats`.
+  The portable set is core WebGPU's image formats, and the refusal comes at texture creation and at layout creation.
 - A 32-bit float view bound to a `filterable_float` binding needs `feature::float32_filtering`, and the refusal comes at group creation.
   A view of format `undefined` reads as its texture's own format, so that is the format judged.
   A binding with no `sample_type` is not judged, since a layout reflected from HLSL states none and only WebGPU reads it.
@@ -116,7 +118,7 @@ Two such forms are judged before any backend sees them, in [portability.cc](../.
 
 The refusal is an error from each `try_` creation, and the `sg::exception` its throwing twin raises.
 
-`readwrite_storage_formats` is still webgpu's alone to judge, at layout creation, because every other backend has it.
+`readwrite_image_formats` is still webgpu's alone to judge, at layout creation, because every other backend has it.
 
 ## Array bindings
 
@@ -147,7 +149,7 @@ Three rules distinguish an array binding from a scalar one:
   A missing declaration is a bug, never "no access"; an empty element span is the way to say "unused this dispatch".
 
 Element resources are still kept alive by the group, exactly like scalar bindings.
-Arrays of samplers, uniform buffers or acceleration structures are not supported.
+Arrays of samplers, constants buffers or acceleration structures are not supported.
 Raster draws do not support array bindings yet.
 
 ## Staging a group instead of rebuilding it
@@ -268,7 +270,7 @@ compiled_shader.bindings ─▶ binding_group_layout ─▶ binding_group (name 
 ```
 
 A `pipeline_layout` composes an ordered list of `binding_group_layout`s, index = bind slot, so an entire group can be rebound at one slot without disturbing the others.
-It may also carry an optional **inline-constants** block — a single uniform-buffer binding, excluded from the group layouts.
+It may also carry an optional **inline-constants** block — a single constants-buffer binding, excluded from the group layouts.
 That one is written directly on the command list via `cmd.compute.set_inline_constants(...)`.
 Those are fast per-dispatch parameters needing no descriptor allocation — dx12 root constants, vulkan push constants.
 
@@ -309,7 +311,7 @@ Texel/typed buffers (`Buffer<T>` / `RWBuffer<T>`) and append/consume/counter buf
 
 ## See also
 
-- [binding.hh](../../src/shaped-graphics/binding/binding.hh) — `binding`, `binding_type`, `access_of` / `shape_of` / `accepts`.
+- [binding.hh](../../src/shaped-graphics/binding/binding.hh) — `binding`, `binding_type`, `view_class_of` / `shape_of` / `accepts`.
 - [staging_binding_group.hh](../../src/shaped-graphics/binding/staging_binding_group.hh) — the mutable builder and its `binding_slot` addressing.
 - [bindless_array.hh](../../src/shaped-graphics/binding/bindless_array.hh) — view identity → element index over one array binding.
 - [compiled_shader.hh](../../src/shaped-graphics/binding/compiled_shader.hh) — the shader data model.

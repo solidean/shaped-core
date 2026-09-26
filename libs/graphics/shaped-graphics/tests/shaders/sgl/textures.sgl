@@ -3,17 +3,17 @@
 
 binding post:
     texel_size: float2
-    src: texture2d[float4]
-    dst: out image2d[.rgba8_unorm]
-    acc: mut image2d[.r32_float]
+    src: texture_2d[float4]
+    dst: out image_2d[.rgba8_unorm]
+    acc: mut image_2d[.r32_float]
     sampler bilinear:
         filter = .linear
         address = .clamp_edge
 
 binding sampled:
-    src: texture2d[float4]
+    src: texture_2d[float4]
     smp: sampler
-    dst: out image2d[.rgba8_unorm]
+    dst: out image_2d[.rgba8_unorm]
 
 // Sampled at texel centres, so a filtering sampler gives each texel back unchanged.
 @compute(8, 8) fun copy_accumulate(@thread_id id: int3){post}:
@@ -50,7 +50,7 @@ struct textured_input:
     color: float4
 
 binding material:
-    albedo: texture2d[float4]
+    albedo: texture_2d[float4]
     sampler nearest:
         filter = .nearest
         address = .clamp_edge

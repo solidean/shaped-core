@@ -80,12 +80,12 @@ TEST("sg dx12 - texture access declares layout transitions")
                             sg::texture_layout::copy_dst);
     CHECK(b0.empty());
 
-    // Then sample it: transition copy_dst → shader_readonly (a read-after-write hazard across layouts).
+    // Then sample it: transition copy_dst → shader_texture (a read-after-write hazard across layouts).
     auto b1 = declare_flush(acc, slot, whole_of(d), sg::pipeline_stage_flag::compute, sg::access_flag::shader_read,
-                            sg::texture_layout::shader_readonly);
+                            sg::texture_layout::shader_texture);
     REQUIRE(b1.size() == 1);
     CHECK(b1[0].barrier.src_layout == sg::texture_layout::copy_dst);
-    CHECK(b1[0].barrier.dst_layout == sg::texture_layout::shader_readonly);
+    CHECK(b1[0].barrier.dst_layout == sg::texture_layout::shader_texture);
 
     // And the entry barrier the submit prepends carries the first use, from where the texture really is.
     auto const entry = acc.finalize(slot);
@@ -106,13 +106,13 @@ TEST("sg dx12 - multiple declares before one flush merge into a single barrier")
 
     // Same texture bound twice: a read and a read-write, both needing the read-write (UAV) layout.
     acc.declare(slot, whole_of(d), sg::pipeline_stage_flag::compute, sg::access_flag::shader_read,
-                sg::texture_layout::shader_readwrite);
+                sg::texture_layout::shader_image);
     acc.declare(slot, whole_of(d), sg::pipeline_stage_flag::compute, sg::access_flag::shader_write,
-                sg::texture_layout::shader_readwrite);
+                sg::texture_layout::shader_image);
     auto b = acc.flush(slot);
 
     REQUIRE(b.size() == 1); // one merged barrier for the box, not two
-    CHECK(b[0].barrier.dst_layout == sg::texture_layout::shader_readwrite);
+    CHECK(b[0].barrier.dst_layout == sg::texture_layout::shader_image);
     CHECK(b[0].barrier.dst_access.has_all(sg::access_flag::shader_read | sg::access_flag::shader_write));
 }
 
@@ -120,25 +120,24 @@ TEST("sg dx12 - combine_layouts folds sampled+storage to COMMON and flags real c
 {
     using sg::texture_layout;
     // Equal layouts combine cleanly.
-    CHECK(dx12::combine_layouts(texture_layout::shader_readonly, texture_layout::shader_readonly).result
+    CHECK(dx12::combine_layouts(texture_layout::shader_texture, texture_layout::shader_texture).result
           == dx12::layout_combine::ok);
     // Sampled (SRV) + storage (UAV): no specialized layout serves both, so COMMON, degraded (order-independent).
-    auto const c = dx12::combine_layouts(texture_layout::shader_readonly, texture_layout::shader_readwrite);
+    auto const c = dx12::combine_layouts(texture_layout::shader_texture, texture_layout::shader_image);
     CHECK(c.layout == texture_layout::general);
     CHECK(c.result == dx12::layout_combine::degraded);
-    CHECK(dx12::combine_layouts(texture_layout::shader_readwrite, texture_layout::shader_readonly).layout
+    CHECK(dx12::combine_layouts(texture_layout::shader_image, texture_layout::shader_texture).layout
           == texture_layout::general);
     // general/COMMON already serves any access.
-    CHECK(dx12::combine_layouts(texture_layout::general, texture_layout::shader_readwrite).result
-          == dx12::layout_combine::ok);
+    CHECK(dx12::combine_layouts(texture_layout::general, texture_layout::shader_image).result == dx12::layout_combine::ok);
     // A copy dest that is also sampled in one op is a real hazard.
-    CHECK(dx12::combine_layouts(texture_layout::copy_dst, texture_layout::shader_readonly).result
+    CHECK(dx12::combine_layouts(texture_layout::copy_dst, texture_layout::shader_texture).result
           == dx12::layout_combine::conflict);
 }
 
 TEST("sg dx12 - a texture bound as sampled + storage in one op transitions to COMMON")
 {
-    // Two views of one texture in the same op — shader_readonly (SRV) and shader_readwrite (UAV) — combine to the COMMON (general) layout.
+    // Two views of one texture in the same op — shader_texture (SRV) and shader_image (UAV) — combine to the COMMON (general) layout.
     // They arrive as a single barrier carrying both accesses, plus a one-time perf warning.
     nx::expect_warning("bound as both a sampled and a storage view", nx::exactly(1));
     auto const d = desc_2d(sg::pixel_format::rgba8_unorm, 64, 64);
@@ -152,9 +151,9 @@ TEST("sg dx12 - a texture bound as sampled + storage in one op transitions to CO
     (void)acc.flush(slot);
 
     acc.declare(slot, whole_of(d), sg::pipeline_stage_flag::compute, sg::access_flag::shader_read,
-                sg::texture_layout::shader_readonly);
+                sg::texture_layout::shader_texture);
     acc.declare(slot, whole_of(d), sg::pipeline_stage_flag::compute, sg::access_flag::shader_write,
-                sg::texture_layout::shader_readwrite);
+                sg::texture_layout::shader_image);
     auto b = acc.flush(slot);
 
     REQUIRE(b.size() == 1);
@@ -172,7 +171,7 @@ TEST("sg dx12 - mark_pending_barrier enqueues a texture for the flush exactly on
     auto const slot = sg::command_list_slot(0);
 
     acc.declare(slot, whole_of(d), sg::pipeline_stage_flag::compute, sg::access_flag::shader_read,
-                sg::texture_layout::shader_readwrite);
+                sg::texture_layout::shader_image);
     CHECK(acc.mark_pending_barrier(slot));  // first binding this op -> enqueue
     CHECK(!acc.mark_pending_barrier(slot)); // already enqueued this op
     (void)acc.flush(slot);                  // flush clears the flag
@@ -217,7 +216,7 @@ TEST("sg dx12 - texture access fragments per subresource range")
                         sg::texture_layout::copy_dst)
               .empty());
     CHECK(declare_flush(acc, slot, mip1, sg::pipeline_stage_flag::compute, sg::access_flag::shader_read,
-                        sg::texture_layout::shader_readonly)
+                        sg::texture_layout::shader_texture)
               .empty());
 
     // The whole texture now spans two differently-laid-out boxes → one barrier each.
@@ -261,12 +260,12 @@ TEST("sg dx12 - a concurrently recorded list enters from what the earlier one le
     auto const s0 = sg::command_list_slot(0);
     auto const s1 = sg::command_list_slot(1);
 
-    // Two concurrent lists touch the same texture: s0 -> copy_dst, s1 -> shader_readonly (active count 2).
+    // Two concurrent lists touch the same texture: s0 -> copy_dst, s1 -> shader_texture (active count 2).
     // Neither can know what the texture will be in when it submits, so neither records a transition into it.
     (void)declare_flush(acc, s0, whole_of(d), sg::pipeline_stage_flag::copy, sg::access_flag::copy_write,
                         sg::texture_layout::copy_dst);
     (void)declare_flush(acc, s1, whole_of(d), sg::pipeline_stage_flag::compute, sg::access_flag::shader_read,
-                        sg::texture_layout::shader_readonly);
+                        sg::texture_layout::shader_texture);
 
     // s0 submits first, entering from the layout the texture starts in and leaving it in copy_dst.
     auto r0 = acc.finalize(s0);
@@ -278,12 +277,12 @@ TEST("sg dx12 - a concurrently recorded list enters from what the earlier one le
     auto r1 = acc.finalize(s1);
     REQUIRE(r1.size() == 1);
     CHECK(r1[0].barrier.src_layout == sg::texture_layout::copy_dst);
-    CHECK(r1[0].barrier.dst_layout == sg::texture_layout::shader_readonly);
+    CHECK(r1[0].barrier.dst_layout == sg::texture_layout::shader_texture);
 
-    // A fresh list now enters from the committed shader_readonly layout: re-declaring it needs no transition.
+    // A fresh list now enters from the committed shader_texture layout: re-declaring it needs no transition.
     auto const s2 = sg::command_list_slot(0);
     (void)declare_flush(acc, s2, whole_of(d), sg::pipeline_stage_flag::compute, sg::access_flag::shader_read,
-                        sg::texture_layout::shader_readonly);
+                        sg::texture_layout::shader_texture);
     for (auto const& sb : acc.finalize(s2))
         CHECK(sb.barrier.src_layout == sb.barrier.dst_layout);
 }
@@ -292,8 +291,8 @@ TEST("sg dx12 - d3d12_layout_from maps the layouts")
 {
     CHECK(dx12::d3d12_layout_from(sg::texture_layout::undefined) == D3D12_BARRIER_LAYOUT_UNDEFINED);
     CHECK(dx12::d3d12_layout_from(sg::texture_layout::general) == D3D12_BARRIER_LAYOUT_COMMON);
-    CHECK(dx12::d3d12_layout_from(sg::texture_layout::shader_readonly) == D3D12_BARRIER_LAYOUT_SHADER_RESOURCE);
-    CHECK(dx12::d3d12_layout_from(sg::texture_layout::shader_readwrite) == D3D12_BARRIER_LAYOUT_UNORDERED_ACCESS);
+    CHECK(dx12::d3d12_layout_from(sg::texture_layout::shader_texture) == D3D12_BARRIER_LAYOUT_SHADER_RESOURCE);
+    CHECK(dx12::d3d12_layout_from(sg::texture_layout::shader_image) == D3D12_BARRIER_LAYOUT_UNORDERED_ACCESS);
     CHECK(dx12::d3d12_layout_from(sg::texture_layout::copy_dst) == D3D12_BARRIER_LAYOUT_COPY_DEST);
     CHECK(dx12::d3d12_layout_from(sg::texture_layout::copy_src) == D3D12_BARRIER_LAYOUT_COPY_SOURCE);
 }
@@ -313,7 +312,7 @@ ASYNC_INVOCABLE_TEST("sg dx12 - emits well-formed texture barriers", (dx12::dx12
     auto const range = whole_of(d);
 
     // Drive the declare → emit path by hand, the way track_texture_access does for a real op.
-    // The list enters at copy_dst and then transitions copy_dst → shader_readonly in its own body; the entry
+    // The list enters at copy_dst and then transitions copy_dst → shader_texture in its own body; the entry
     // transition out of COMMON is finalize's, and goes into the pre-list executed ahead of this one — which is what
     // submit does for a real list.
     auto emit = [&](ID3D12GraphicsCommandList* list, cc::span<dx12::dx12_subresource_barrier const> barriers)
@@ -327,7 +326,7 @@ ASYNC_INVOCABLE_TEST("sg dx12 - emits well-formed texture barriers", (dx12::dx12
                                  sg::texture_layout::copy_dst);
     emit(cmd.value()->_list.Get(), dtex->flush_texture_access(cmd.value()->slot()));
     dtex->declare_texture_access(cmd.value()->slot(), range, sg::pipeline_stage_flag::compute,
-                                 sg::access_flag::shader_read, sg::texture_layout::shader_readonly);
+                                 sg::access_flag::shader_read, sg::texture_layout::shader_texture);
     emit(cmd.value()->_list.Get(), dtex->flush_texture_access(cmd.value()->slot()));
     // The pre-list is created on demand, so a caller recording into it by hand has to ask for one.
     emit(c.acquire_pre_list(*cmd.value()), dtex->finalize_slot(cmd.value()->slot()));

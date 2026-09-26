@@ -57,7 +57,7 @@ TEST("sv - the bindless layout follows the config")
     // table is byte-address and carries none.
     auto const* const tex2d = find(all, "gBindlessTextures2D");
     REQUIRE(tex2d != nullptr);
-    CHECK(tex2d->type == sg::binding_type::readonly_texture);
+    CHECK(tex2d->type == sg::binding_type::texture);
     CHECK(tex2d->texture_dimension.has_value());
     CHECK(tex2d->texture_dimension.value() == sg::texture_view_dimension::tex_2d);
 
@@ -67,7 +67,8 @@ TEST("sv - the bindless layout follows the config")
 
     auto const* const buffers = find(all, "gBindlessBuffers");
     REQUIRE(buffers != nullptr);
-    CHECK(buffers->type == sg::binding_type::readonly_raw_buffer);
+    CHECK(buffers->type == sg::binding_type::bytes);
+    CHECK(buffers->access == sg::access_mode::read);
     CHECK(!buffers->texture_dimension.has_value());
 }
 

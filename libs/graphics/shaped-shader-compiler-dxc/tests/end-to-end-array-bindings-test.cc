@@ -69,10 +69,11 @@ ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - array bindings: partial fill, declared a
     REQUIRE(set2.size() == 1);
     CHECK(set1[0].name == "Bufs");
     CHECK(set1[0].count == 4);
-    CHECK(set1[0].type == sg::binding_type::readonly_raw_buffer);
+    CHECK(set1[0].type == sg::binding_type::bytes);
+    CHECK(set1[0].access == sg::access_mode::read);
     CHECK(set2[0].name == "Texs");
     CHECK(set2[0].count == 4);
-    CHECK(set2[0].type == sg::binding_type::readonly_texture);
+    CHECK(set2[0].type == sg::binding_type::texture);
     // The declared dimension rides the binding — what the backend builds vacant elements' null SRVs from.
     CHECK(set2[0].texture_dimension == sg::texture_view_dimension::tex_2d);
 
@@ -103,7 +104,7 @@ ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - array bindings: partial fill, declared a
     tex_desc.dimension = sg::texture_dimension::d2;
     tex_desc.width = 4;
     tex_desc.height = 4;
-    tex_desc.usage = sg::texture_usage::readonly_texture | sg::texture_usage::copy_dst;
+    tex_desc.usage = sg::texture_usage::texture | sg::texture_usage::copy_dst;
     auto tex = ctx.persistent.create_raw_texture(tex_desc);
     REQUIRE(tex != nullptr);
 
@@ -132,7 +133,7 @@ ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - array bindings: partial fill, declared a
     auto tex_elements = cc::vector<sg::raw_view>();
     for (isize i = 0; i < 4; ++i)
         tex_elements.push_back(sg::vacant_view{});
-    tex_elements[1] = sg::texture_2d::from_raw(tex).as_readonly_view();
+    tex_elements[1] = sg::texture_2d::from_raw(tex).as_texture_view();
     auto const texs_nv = sg::named_view{.name = "Texs", .view = cc::move(tex_elements)};
     auto g2 = ctx.persistent.create_binding_group(group_layout2, cc::span<sg::named_view const>(&texs_nv, 1));
     REQUIRE(g2 != nullptr);
@@ -151,7 +152,7 @@ ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - array bindings: partial fill, declared a
         {.index = 1,
          .stages = sg::pipeline_stage_flag::compute,
          .access = sg::access_flag::shader_read,
-         .layout = sg::texture_layout::shader_readonly},
+         .layout = sg::texture_layout::shader_texture},
     };
     disp->compute.declare_array_buffer_access("Bufs", buf_access);
     disp->compute.declare_array_texture_access("Texs", tex_access);

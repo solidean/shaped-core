@@ -16,7 +16,7 @@ namespace sg
 
 /// The byte alignment every index fetch must start at — the view's own offset, and the first index of each draw.
 ///
-/// **A portable floor, hardcoded rather than queried**, the same approach as `uniform_buffer_offset_alignment`: it is
+/// **A portable floor, hardcoded rather than queried**, the same approach as `constants_buffer_offset_alignment`: it is
 /// what Metal requires, and neither D3D12 nor Vulkan asks for less than a caller obeying it already gives.
 /// Enforced in the portable layer so a violation fails on whichever backend the author develops against, rather than
 /// on the one that happens to mind.

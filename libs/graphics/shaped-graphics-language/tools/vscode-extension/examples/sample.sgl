@@ -17,7 +17,7 @@ binding frame:
 
 binding instance:
     model: mat4
-    albedo_map: texture2d[rgba8]
+    albedo_map: texture_2d[rgba8]
 
 binding scene = (frame, instance)
 

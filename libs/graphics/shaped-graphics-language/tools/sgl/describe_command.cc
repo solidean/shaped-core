@@ -74,7 +74,7 @@ void write_binding(babel::json::object_writer& o, sgl::described_binding const& 
             mo.write("size", m.size);
             continue;
         }
-        mo.write("mut", m.is_mut);
+        mo.write("access", cc::string_view(m.access));
         mo.write("slot", m.slot);
         mo.write("host_name", cc::string_view(m.host_name));
         // The sg enum values a binding of this kind states, each written only where it applies.
@@ -85,8 +85,7 @@ void write_binding(babel::json::object_writer& o, sgl::described_binding const& 
         };
         optional("texture_dimension", m.texture_dimension);
         optional("sample_type", m.sample_type);
-        optional("storage_format", m.storage_format);
-        optional("storage_access", m.storage_access);
+        optional("image_format", m.image_format);
         optional("sampler_type", m.sampler_type);
         if (m.static_sampler.has_value())
         {

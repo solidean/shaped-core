@@ -20,9 +20,9 @@ enum class sgl::described_member_kind : sgl::u8
     constant,
     /// A `buffer[T]`, which the host binds as a resource of its own.
     buffer,
-    /// A sampled texture, `texture2d[float4]` or a depth texture.
+    /// A sampled texture, `texture_2d[float4]` or a depth texture.
     texture,
-    /// A storage texture, `out image2d[.rgba8_unorm]`.
+    /// A storage texture, `out image_2d[.rgba8_unorm]`.
     image,
     /// A sampler: one the host binds, or a static one of the group, which carries `sampler_state`.
     sampler,
@@ -49,10 +49,8 @@ struct sgl::described_binding_member
 {
     cc::string name;
     described_member_kind kind = described_member_kind::constant;
-    /// A constant's type, a buffer's element, and any other resource's whole spelling: `out image2d[.rgba8_unorm]`.
+    /// A constant's type, a buffer's element, and any other resource's whole spelling: `out image_2d[.rgba8_unorm]`.
     cc::string type;
-    /// A resource the shader may write: `mut buffer[T]`, or an `out` or `mut` image.
-    bool is_mut = false;
     /// A constant's byte offset in its block; -1 for a resource.
     i32 offset = -1;
     /// A constant's size in bytes; 0 for a resource.
@@ -68,9 +66,10 @@ struct sgl::described_binding_member
     cc::string texture_dimension;
     /// A texture's `sg::texture_sample_type`: `filterable_float`, `depth`, ….
     cc::string sample_type;
-    /// An image's `sg::pixel_format` and `sg::storage_access`: `rgba8_unorm`, `write`.
-    cc::string storage_format;
-    cc::string storage_access;
+    /// An image's `sg::pixel_format`: `rgba8_unorm`.
+    cc::string image_format;
+    /// Every resource's `sg::access_mode`: `read`, `write` or `read_write`.
+    cc::string access;
     /// A sampler's `sg::sampler_binding_type`: `filtering`, `non_filtering` or `comparison`.
     cc::string sampler_type;
     /// A static sampler of the group; absent for one the host binds.

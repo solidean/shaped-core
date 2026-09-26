@@ -37,7 +37,8 @@ constexpr auto k_copy_both = sg::buffer_usage::copy_src | sg::buffer_usage::copy
         .space = 0,
         .index = 0,
         .count = 1,
-        .type = sg::binding_type::readwrite_structured_buffer,
+        .type = sg::binding_type::buffer,
+        .access = sg::access_mode::read_write,
     });
     return shader;
 }
@@ -167,7 +168,8 @@ ASYNC_TEST("sg metal - compute inline constants reach the kernel")
         .space = 0,
         .index = 0,
         .count = 1,
-        .type = sg::binding_type::readwrite_structured_buffer,
+        .type = sg::binding_type::buffer,
+        .access = sg::access_mode::read_write,
     });
 
     auto group_layout = ctx->create_metal_binding_group_layout(shader.bindings, {}, sg::lifetime_scope::persistent);
@@ -179,7 +181,7 @@ ASYNC_TEST("sg metal - compute inline constants reach the kernel")
         .space = 0,
         .index = 0,
         .count = 1,
-        .type = sg::binding_type::uniform_buffer,
+        .type = sg::binding_type::constants_buffer,
         .block_size = isize(sizeof(scale_constants)),
     };
     auto pipeline_layout = ctx->create_metal_pipeline_layout(layout_desc, sg::lifetime_scope::persistent);
@@ -248,14 +250,15 @@ ASYNC_TEST("sg metal - an array binding's elements are declared one by one")
         .space = 0,
         .index = 0,
         .count = 4,
-        .type = sg::binding_type::readonly_structured_buffer,
+        .type = sg::binding_type::buffer,
     });
     shader.bindings.push_back({
         .name = "output",
         .space = 0,
         .index = 4,
         .count = 1,
-        .type = sg::binding_type::readwrite_structured_buffer,
+        .type = sg::binding_type::buffer,
+        .access = sg::access_mode::read_write,
     });
 
     auto group_layout = ctx->create_metal_binding_group_layout(shader.bindings, {}, sg::lifetime_scope::persistent);

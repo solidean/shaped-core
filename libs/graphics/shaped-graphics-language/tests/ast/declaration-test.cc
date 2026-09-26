@@ -150,10 +150,10 @@ TEST("sgl ast - the right side of a type declaration is a type position")
 
 TEST("sgl ast - binding as a block and as a composition")
 {
-    CHECK(ast_of("binding frame:\n    view: mat4\n    tex: texture2d[rgba8]\n")
+    CHECK(ast_of("binding frame:\n    view: mat4\n    tex: texture_2d[rgba8]\n")
           == "(binding frame\n"
              "  (field view : mat4)\n"
-             "  (field tex : (index texture2d rgba8)))");
+             "  (field tex : (index texture_2d rgba8)))");
     CHECK(ast_of("binding scene = frame\n") == "(binding scene = frame)");
     CHECK(ast_of("binding scene = (frame, instance)\n") == "(binding scene = (tuple frame instance))");
     CHECK(ast_of("binding empty\n") == "(binding empty)");

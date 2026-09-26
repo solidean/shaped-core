@@ -42,7 +42,7 @@ A reserved name gets both: the form parser sees an identifier, and the AST gives
 
 Square brackets were chosen for type arguments so that parsing needs no lookup ([FORM-22](forms.md#form-22)).
 The same holds one phase later.
-`texture2d[rgba8]` applies a type, `weights[3]` reads an element, and `table[float]` could be either until `table` is known.
+`texture_2d[rgba8]` applies a type, `weights[3]` reads an element, and `table[float]` could be either until `table` is known.
 One `index` node with arguments serves both, and resolution relabels nothing: it only decides how the node is evaluated.
 
 ## AST-15

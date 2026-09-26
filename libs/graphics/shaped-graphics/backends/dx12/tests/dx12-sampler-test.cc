@@ -26,7 +26,7 @@ sg::texture_description sampled_tex()
     d.dimension = sg::texture_dimension::d2;
     d.width = 16;
     d.height = 16;
-    d.usage = sg::texture_usage::readonly_texture;
+    d.usage = sg::texture_usage::texture;
     return d;
 }
 } // namespace
@@ -76,7 +76,7 @@ INVOCABLE_TEST("sg dx12 - a layout with static + dynamic samplers and a group bu
 
     // A sampled texture (t0), one dynamic sampler (s0), and one static sampler (s1).
     sg::binding const bindings[] = {
-        {.name = "Tex", .space = 0, .index = 0, .count = 1, .type = sg::binding_type::readonly_texture},
+        {.name = "Tex", .space = 0, .index = 0, .count = 1, .type = sg::binding_type::texture},
         {.name = "Dyn", .space = 0, .index = 0, .count = 1, .type = sg::binding_type::sampler},
         {.name = "Static", .space = 0, .index = 1, .count = 1, .type = sg::binding_type::sampler},
     };
@@ -92,7 +92,7 @@ INVOCABLE_TEST("sg dx12 - a layout with static + dynamic samplers and a group bu
     REQUIRE(tex.has_value());
     auto const typed = sg::texture_2d::from_raw(tex.value());
 
-    sg::named_view const views[] = {{.name = "Tex", .view = typed.as_readonly_view()}};
+    sg::named_view const views[] = {{.name = "Tex", .view = typed.as_texture_view()}};
     sg::named_sampler const dyn[] = {{.name = "Dyn", .sampler = {.mag_filter = sg::sampler_filter::nearest}}};
 
     auto group = c.create_dx12_binding_group(layout.value(), views, dyn, sg::lifetime_scope::persistent);
@@ -144,7 +144,7 @@ INVOCABLE_TEST("sg dx12 - a pipeline-level static sampler bakes into the root si
 
     // A group layout with just a texture SRV — no samplers of its own.
     sg::binding const bindings[] = {
-        {.name = "Tex", .space = 0, .index = 0, .count = 1, .type = sg::binding_type::readonly_texture},
+        {.name = "Tex", .space = 0, .index = 0, .count = 1, .type = sg::binding_type::texture},
     };
     auto group_layout = c.create_dx12_binding_group_layout(bindings, {}, sg::lifetime_scope::persistent);
     REQUIRE(group_layout.has_value());
@@ -172,9 +172,14 @@ INVOCABLE_TEST("sg dx12 - a group built by slot survives a sampler interleaved w
     // position 2 in bindings() and position 1 in view_slots.
     // A slot is defined as the former, so binding by slot has to cross that gap.
     sg::binding const bindings[] = {
-        {.name = "Tex", .space = 0, .index = 0, .count = 1, .type = sg::binding_type::readonly_texture},
+        {.name = "Tex", .space = 0, .index = 0, .count = 1, .type = sg::binding_type::texture},
         {.name = "Static", .space = 0, .index = 0, .count = 1, .type = sg::binding_type::sampler},
-        {.name = "Buf", .space = 0, .index = 1, .count = 1, .type = sg::binding_type::readwrite_structured_buffer},
+        {.name = "Buf",
+         .space = 0,
+         .index = 1,
+         .count = 1,
+         .type = sg::binding_type::buffer,
+         .access = sg::access_mode::read_write},
     };
     sg::named_sampler const statics[] = {{.name = "Static", .sampler = {}}};
 
@@ -188,17 +193,17 @@ INVOCABLE_TEST("sg dx12 - a group built by slot survives a sampler interleaved w
     auto const buf = c.persistent.create_buffer<u32>(4, sg::buffer_usage::readwrite_buffer);
 
     sg::slotted_view const views[] = {
-        {.slot = sg::binding_slot(0), .view = typed.as_readonly_view()},
+        {.slot = sg::binding_slot(0), .view = typed.as_texture_view()},
         {.slot = sg::binding_slot(2), .view = buf.as_readwrite_buffer()},
     };
 
     CHECK(c.persistent.create_binding_group(layout, views) != nullptr);
 
     // And the failure the type is meant to make loud: a slot naming the sampler is not a view.
-    sg::slotted_view const wrong[] = {{.slot = sg::binding_slot(1), .view = typed.as_readonly_view()}};
+    sg::slotted_view const wrong[] = {{.slot = sg::binding_slot(1), .view = typed.as_texture_view()}};
     CHECK_THROWS_AS(c.persistent.create_binding_group(layout, wrong), sg::binding_group_exception);
 
     // A slot past the end of bindings() is refused rather than read.
-    sg::slotted_view const out_of_range[] = {{.slot = sg::binding_slot(7), .view = typed.as_readonly_view()}};
+    sg::slotted_view const out_of_range[] = {{.slot = sg::binding_slot(7), .view = typed.as_texture_view()}};
     CHECK_THROWS_AS(c.persistent.create_binding_group(layout, out_of_range), sg::binding_group_exception);
 }

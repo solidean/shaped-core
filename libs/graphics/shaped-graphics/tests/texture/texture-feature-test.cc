@@ -32,11 +32,11 @@ bool creates(auto&& create)
 }
 } // namespace
 
-INVOCABLE_TEST("sg - a storage format outside the portable set needs extended_storage_formats",
+INVOCABLE_TEST("sg - an image format outside the portable set needs extended_image_formats",
                (sg::context_handle const& ctx))
 {
-    auto const extended = ctx->supports(sg::feature::extended_storage_formats);
-    auto const storage = sg::texture_usage::readwrite_texture;
+    auto const extended = ctx->supports(sg::feature::extended_image_formats);
+    auto const storage = sg::texture_usage::image;
 
     auto const persistent = [&](sg::pixel_format f, sg::texture_usages usage)
     { return creates([&] { return ctx->persistent.create_raw_texture(texture_of(f, usage)); }); };
@@ -45,13 +45,13 @@ INVOCABLE_TEST("sg - a storage format outside the portable set needs extended_st
           == extended);
     CHECK(persistent(sg::pixel_format::rgba8_unorm, storage));
     // Only storage asks: the same format sampled is portable everywhere.
-    CHECK(persistent(sg::pixel_format::r8_unorm, sg::texture_usage::readonly_texture));
+    CHECK(persistent(sg::pixel_format::r8_unorm, sg::texture_usage::texture));
 
     auto bindings = cc::vector<sg::binding>();
-    bindings.push_back({.name = "target", .type = sg::binding_type::readwrite_texture});
+    bindings.push_back({.name = "target", .type = sg::binding_type::image, .access = sg::access_mode::read_write});
     bindings[0].texture_dimension = sg::texture_view_dimension::tex_2d;
-    bindings[0].storage_format = sg::pixel_format::r8_unorm;
-    bindings[0].storage_access = sg::storage_access::write;
+    bindings[0].image_format = sg::pixel_format::r8_unorm;
+    bindings[0].access = sg::access_mode::write;
     sg::apply_stage_visibility(bindings, sg::shader_stage::compute);
     CHECK(ctx->uncached.try_create_binding_group_layout(bindings).has_value() == extended);
 }
@@ -60,13 +60,13 @@ INVOCABLE_TEST("sg - a 32-bit float view on a filterable binding needs float32_f
                (sg::context_handle const& ctx))
 {
     auto bindings = cc::vector<sg::binding>();
-    bindings.push_back({.name = "source", .type = sg::binding_type::readonly_texture});
+    bindings.push_back({.name = "source", .type = sg::binding_type::texture});
     bindings[0].texture_dimension = sg::texture_view_dimension::tex_2d;
     bindings[0].sample_type = sg::texture_sample_type::filterable_float;
     sg::apply_stage_visibility(bindings, sg::shader_stage::compute);
     auto const filterable = ctx->uncached.create_binding_group_layout(bindings);
 
-    auto const sampled = sg::texture_usage::readonly_texture;
+    auto const sampled = sg::texture_usage::texture;
     auto const r32
         = sg::texture_2d::from_raw(ctx->persistent.create_raw_texture(texture_of(sg::pixel_format::r32_float, sampled)));
     auto const rgba8 = sg::texture_2d::from_raw(
@@ -74,7 +74,7 @@ INVOCABLE_TEST("sg - a 32-bit float view on a filterable binding needs float32_f
 
     auto const group_of = [&](sg::binding_group_layout_handle const& layout, sg::texture_2d const& t)
     {
-        auto const views = cc::vector<sg::named_view>{{.name = "source", .view = t.as_readonly_view()}};
+        auto const views = cc::vector<sg::named_view>{{.name = "source", .view = t.as_texture_view()}};
         return creates([&] { return ctx->persistent.create_binding_group(layout, views, {}); });
     };
     CHECK(group_of(filterable, r32) == ctx->supports(sg::feature::float32_filtering));

@@ -927,11 +927,11 @@ def test_sgl_type_positions_survive_qualifiers_and_arguments(root: Path) -> None
 
     An index into a value keeps its operands as plain names, which is what tells the two square lists apart.
     """
-    source = "    a: mut buffer[float]\n    b: out image2d[rgba8unorm]\n    x = v[i]\n"
+    source = "    a: mut buffer[float]\n    b: out image_2d[rgba8unorm]\n    x = v[i]\n"
     tokens = [(str(kind), value) for _, kind, value in SglLexer(stripnl=False).get_tokens_unprocessed(source)]
     kinds = {value: kind for kind, value in tokens}
     assert kinds["mut"] == kinds["out"] == "Token.Keyword"
-    assert kinds["buffer"] == kinds["image2d"] == "Token.Name.Class", "a qualified type is still a type"
+    assert kinds["buffer"] == kinds["image_2d"] == "Token.Name.Class", "a qualified type is still a type"
     assert kinds["float"] == kinds["rgba8unorm"] == "Token.Name.Class", "a type's arguments are types"
     assert kinds["v"] == kinds["i"] == "Token.Name", "an index into a value is not a type argument"
 

@@ -8,8 +8,8 @@
 #include <shaped-graphics/binding/compiled_shader.hh>
 #include <shaped-shader-library/binding/binding_groups.hh>
 #include <shaped-shader-library/binding/impl/hlsl_binding_types.hh>
+#include <shaped-shader-library/binding/impl/hlsl_image_format.hh>
 #include <shaped-shader-library/binding/impl/hlsl_sampler_state.hh>
-#include <shaped-shader-library/binding/impl/hlsl_storage_format.hh>
 #include <shaped-shader-library/binding/impl/hlsl_tokens.hh>
 #include <shaped-shader-library/binding/impl/hlsl_value_types.hh>
 
@@ -442,7 +442,7 @@ struct parser
         auto binding = parse_binding(0);
         CC_RETURN_IF_ERROR(binding);
 
-        if (binding.value().binding.type != sg::binding_type::uniform_buffer)
+        if (binding.value().binding.type != sg::binding_type::constants_buffer)
             return cc::error(cc::format("{}: 'push_constants' describes a ConstantBuffer, and '{}' is not one",
                                         to_string(location), binding.value().binding.name));
         if (binding.value().binding.count != 1)
@@ -1037,12 +1037,12 @@ struct parser
 
             if (pending.has_value() && pending.value().name == "format")
             {
-                if (binding.value().binding.type != sg::binding_type::readwrite_texture)
+                if (binding.value().binding.type != sg::binding_type::image)
                     return cc::error(cc::format("{}: 'format' describes a storage texture, and '{}' is not one",
                                                 to_string(pending.value().location), binding.value().binding.name));
-                auto format = slib::impl::parse_storage_format(pending.value());
+                auto format = slib::impl::parse_image_format(pending.value());
                 CC_RETURN_IF_ERROR(format);
-                binding.value().binding.storage_format = format.value().format;
+                binding.value().binding.image_format = format.value().format;
                 binding.value().vulkan_format = format.value().vulkan;
                 pending = cc::nullopt;
             }
@@ -1149,6 +1149,7 @@ struct parser
                                           .index = index,
                                           .count = count,
                                           .type = type.value().type,
+                                          .access = type.value().access,
                                           .texture_dimension = type.value().dimension},
                               .template_argument = template_argument,
                               .register_class = type.value().register_class,

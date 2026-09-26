@@ -14,7 +14,7 @@ binding frame:
 
 binding instance:
     model: mat4
-    tex_color: texture2d[rgba8]
+    tex_color: texture_2d[rgba8]
 ```
 
 * Members that are not resources are grouped into a single implicit constant buffer.

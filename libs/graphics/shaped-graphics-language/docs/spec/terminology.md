@@ -9,7 +9,8 @@ Back to the [specification](_index.md).
 
 * "inline constants". called push constants or root constants or SetBytes* in other apis
 * "buffer"
-* "texture"
+* "texture" - a sampled texture, read through the texture unit; also sg's word for the resource itself
+* "image" - a storage texture, addressed per texel in a named format, read, written or both
 * "binding" - we have binding groups and these hold descriptors
 * shader types:
     * raster

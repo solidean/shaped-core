@@ -6,7 +6,7 @@
 #include <shaped-graphics-language/fwd.hh>
 #include <shaped-graphics-language/interpret/scalar.hh>
 
-/// What the texture, image and sampler types of a binding are made of: their shapes and an image's storage formats.
+/// What the texture, image and sampler types of a binding are made of: their shapes and an image's image formats.
 /// One table each, read by the check pass, every emitter and the host description alike (the spec's bindings file).
 
 /// The shape of a texture or an image, which is sg's `texture_view_dimension` member for member.
@@ -27,11 +27,11 @@ enum class sgl::check::texture_shape : sgl::u8
 struct sgl::check::shape_info
 {
     texture_shape shape;
-    /// The sampled texture's type name: `texture2d_array`.
+    /// The sampled texture's type name: `texture_2d_array`.
     cc::string_view texture;
-    /// The depth texture's type name, empty where no target has one: `texture2d_array_depth`.
+    /// The depth texture's type name, empty where no target has one: `texture_2d_array_depth`.
     cc::string_view depth;
-    /// The image's type name, empty where no target has one: `image2d_array`.
+    /// The image's type name, empty where no target has one: `image_2d_array`.
     cc::string_view image;
     /// sg's `texture_view_dimension` member, which the host description names.
     cc::string_view sg_name;
@@ -43,13 +43,13 @@ namespace sgl::check
 {
 
 inline constexpr shape_info k_shapes[] = {
-    {texture_shape::d1, "texture1d", "", "image1d", "tex_1d", ""},
-    {texture_shape::d1_array, "texture1d_array", "", "image1d_array", "tex_1d_array", ""},
-    {texture_shape::d2, "texture2d", "texture2d_depth", "image2d", "tex_2d", ""},
-    {texture_shape::d2_array, "texture2d_array", "texture2d_array_depth", "image2d_array", "tex_2d_array", ""},
-    {texture_shape::d2_ms, "texture2d_ms", "texture2d_ms_depth", "", "tex_2d_ms", ""},
-    {texture_shape::d2_ms_array, "texture2d_ms_array", "", "", "tex_2d_ms_array", "multisampled arrays"},
-    {texture_shape::d3, "texture3d", "", "image3d", "tex_3d", ""},
+    {texture_shape::d1, "texture_1d", "", "image_1d", "tex_1d", ""},
+    {texture_shape::d1_array, "texture_1d_array", "", "image_1d_array", "tex_1d_array", ""},
+    {texture_shape::d2, "texture_2d", "texture_2d_depth", "image_2d", "tex_2d", ""},
+    {texture_shape::d2_array, "texture_2d_array", "texture_2d_array_depth", "image_2d_array", "tex_2d_array", ""},
+    {texture_shape::d2_ms, "texture_2d_ms", "texture_2d_ms_depth", "", "tex_2d_ms", ""},
+    {texture_shape::d2_ms_array, "texture_2d_ms_array", "", "", "tex_2d_ms_array", "multisampled arrays"},
+    {texture_shape::d3, "texture_3d", "", "image_3d", "tex_3d", ""},
     {texture_shape::cube, "texture_cube", "texture_cube_depth", "", "cube", ""},
     {texture_shape::cube_array, "texture_cube_array", "texture_cube_array_depth", "", "cube_array", ""},
 };
@@ -61,8 +61,8 @@ inline constexpr shape_info k_shapes[] = {
 
 } // namespace sgl::check
 
-/// One storage format an image may take, named as `sg::pixel_format` names it.
-struct sgl::check::storage_format_info
+/// One image format an image may take, named as `sg::pixel_format` names it.
+struct sgl::check::image_format_info
 {
     cc::string_view name;
     /// WGSL's spelling, which drops the underscore and calls one float format `ufloat`.
@@ -86,7 +86,7 @@ inline constexpr auto k_float = value_kind::scalar_float;
 inline constexpr auto k_sint = value_kind::scalar_int;
 inline constexpr auto k_uint = value_kind::scalar_uint;
 
-inline constexpr storage_format_info k_storage_formats[] = {
+inline constexpr image_format_info k_image_formats[] = {
     {"r8_unorm", "r8unorm", "r8", 1, k_float, false, false},
     {"r8_snorm", "r8snorm", "r8snorm", 1, k_float, false, false},
     {"r8_uint", "r8uint", "r8ui", 1, k_uint, false, false},
@@ -125,11 +125,11 @@ inline constexpr storage_format_info k_storage_formats[] = {
 /// The type a texel of `format` loads as and stores from: `float4` for `rgba8_unorm`, `float` for `r32_float`.
 [[nodiscard]] cc::string texel_name_of(i32 format);
 
-/// A position in `k_storage_formats`, or -1 for a name that is no storage format.
-[[nodiscard]] constexpr i32 find_storage_format(cc::string_view name)
+/// A position in `k_image_formats`, or -1 for a name that is no image format.
+[[nodiscard]] constexpr i32 find_image_format(cc::string_view name)
 {
-    for (auto i = 0; i < i32(sizeof(k_storage_formats) / sizeof(k_storage_formats[0])); ++i)
-        if (k_storage_formats[i].name == name)
+    for (auto i = 0; i < i32(sizeof(k_image_formats) / sizeof(k_image_formats[0])); ++i)
+        if (k_image_formats[i].name == name)
             return i;
     return -1;
 }

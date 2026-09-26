@@ -19,7 +19,7 @@ _DECLARATION_KEYWORDS = frozenset({
     "fun", "let", "mut", "out", "struct", "enum", "binding", "sampler", "pipeline", "const", "use", "module", "type",
     "notation", "assert", "print",
 })
-# `mut buffer[float]`, `out image2d[.rgba8_unorm]`: an access word at the top of a type position leaves the position a type.
+# `mut buffer[float]`, `out image_2d[.rgba8_unorm]`: an access word at the top of a type position leaves the position a type.
 _TYPE_QUALIFIERS = frozenset({"mut", "out"})
 _CONTROL_KEYWORDS = frozenset({"if", "else", "for", "while", "loop", "return", "yield", "continue", "break", "case"})
 _WORD_OPERATORS = frozenset({"and", "or", "not", "in", "as"})

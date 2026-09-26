@@ -147,9 +147,9 @@ VkImageUsageFlags to_vk_image_usage(sg::texture_usages u)
         flags |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
     if (u.has(sg::texture_usage::copy_dst))
         flags |= VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-    if (u.has(sg::texture_usage::readonly_texture))
+    if (u.has(sg::texture_usage::texture))
         flags |= VK_IMAGE_USAGE_SAMPLED_BIT;
-    if (u.has(sg::texture_usage::readwrite_texture))
+    if (u.has(sg::texture_usage::image))
         flags |= VK_IMAGE_USAGE_STORAGE_BIT;
     if (u.has(sg::texture_usage::render_target))
         flags |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
@@ -174,7 +174,7 @@ VkBufferUsageFlags to_vk_buffer_usage(sg::buffer_usages usage)
         flags |= VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
     if (usage.has(sg::buffer_usage::index_buffer))
         flags |= VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
-    if (usage.has(sg::buffer_usage::uniform_buffer))
+    if (usage.has(sg::buffer_usage::constants_buffer))
         flags |= VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
     // Vulkan does not distinguish read-only from read-write storage at the usage-bit level — that is a descriptor/access concern.
     // So both map to the same STORAGE_BUFFER_BIT.

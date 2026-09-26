@@ -13,18 +13,17 @@
 /// See libs/graphics/shaped-graphics/docs/concepts/bindings.md.
 
 /// The kind of resource a shader binding expects — the backend-agnostic reflection vocabulary, the portable stand-in for HLSL's D3D_SHADER_INPUT_TYPE.
-/// Buffer kinds map 1:1 to a view's (view_class, view_shape); see access_of / shape_of.
+/// It names the resource, as SGL does; what the shader does with it is the binding's separate `access`.
+/// A kind and an access together map 1:1 to a view's (view_class, view_shape); see view_class_of / shape_of.
 enum class sg::binding_type
 {
-    uniform_buffer,              ///< uniform block   — CBV / UBO
-    readonly_structured_buffer,  ///< read array of T — SRV structured / read SSBO
-    readwrite_structured_buffer, ///< rw array of T   — UAV structured / rw SSBO
-    readonly_raw_buffer,         ///< read raw bytes  — SRV byte-addressed
-    readwrite_raw_buffer,        ///< rw raw bytes    — UAV byte-addressed
-    readonly_texture,            ///< sampled texture — SRV (readonly, shape texture)
-    readwrite_texture,           ///< storage texture — UAV (readwrite, shape texture)
-    sampler,                     ///< texture sampler — not a view; bound as a static or dynamic sampler
-    acceleration_structure,      ///< ray-tracing TLAS — SRV addressed by GPU VA (HLSL RaytracingAccelerationStructure)
+    constants_buffer,       ///< constants block    — CBV / UBO
+    buffer,                 ///< array of T       — structured SRV / UAV, SSBO
+    bytes,                  ///< raw bytes        — byte-addressed SRV / UAV
+    texture,                ///< sampled texture  — SRV
+    image,                  ///< storage image    — UAV, whatever its access
+    sampler,                ///< texture sampler  — not a view; bound as a static or dynamic sampler
+    acceleration_structure, ///< ray-tracing TLAS — SRV addressed by GPU VA (HLSL RaytracingAccelerationStructure)
 };
 
 /// How a sampled texture binding's texels are read, which decides whether a sampler may filter them.
@@ -40,15 +39,15 @@ enum class sg::texture_sample_type
     uint,               ///< unsigned integer texels, never filtered
 };
 
-/// What a storage texture binding lets the shader do with its texels.
-/// WebGPU requires it on the layout entry and core WebGPU allows `read_write` only for r32float, r32uint and r32sint,
-/// so a storage texture of any other format is `write` (or `read`) there.
-/// dx12 and vulkan do not ask: a UAV is always read-write to them.
-enum class sg::storage_access
+/// What a binding lets the shader do with its resource — SGL's unmarked, `out` and `mut`.
+/// Only an image takes all three; a buffer or bytes is `read` or `read_write`, and every other kind is `read`.
+/// Core WebGPU allows a `read_write` image only in r32float, r32uint and r32sint, so an image of any other format is `write` or `read` there.
+/// dx12 and vulkan build the same UAV for all three, so to them it decides only the hazards.
+enum class sg::access_mode
 {
-    read,       ///< the shader only loads texels
-    write,      ///< the shader only stores texels
-    read_write, ///< both — the default, and what HLSL's RWTexture always declares
+    read,       ///< the shader only loads
+    write,      ///< the shader only stores — an image alone
+    read_write, ///< both, which HLSL's RW types always declare
 };
 
 /// What kind of sampler a sampler binding expects.
@@ -64,35 +63,49 @@ namespace sg
 {
 
 /// Whether a binding is a sampler rather than a resource view.
-/// A sampler binding carries no view — no access class, no layout — so it is matched to a `sampler`, not a `raw_view`.
+/// A sampler binding carries no view — no view class, no layout — so it is matched to a `sampler`, not a `raw_view`.
 [[nodiscard]] constexpr bool is_sampler(binding_type t)
 {
     return t == binding_type::sampler;
 }
 
-/// The access class a bound view must have to satisfy a binding of this type.
-[[nodiscard]] constexpr view_class access_of(binding_type t)
+/// Whether `access` is one a binding of kind `t` may carry.
+/// Only an image is ever write-only, since no target has a write-only buffer; only a buffer, bytes or an image writes at all.
+[[nodiscard]] constexpr bool is_valid_access(binding_type t, access_mode access)
 {
     switch (t)
     {
-    case binding_type::uniform_buffer:
-        return view_class::uniform;
-    case binding_type::readonly_structured_buffer:
-    case binding_type::readonly_raw_buffer:
-        return view_class::readonly;
-    case binding_type::readwrite_structured_buffer:
-    case binding_type::readwrite_raw_buffer:
-        return view_class::readwrite;
-    case binding_type::readonly_texture:
-        return view_class::readonly;
-    case binding_type::readwrite_texture:
-        return view_class::readwrite;
+    case binding_type::image:
+        return true;
+    case binding_type::buffer:
+    case binding_type::bytes:
+        return access != access_mode::write;
+    default:
+        return access == access_mode::read;
+    }
+}
+
+/// The view class a bound view must have to satisfy a binding of kind `t` with `access`.
+/// A buffer's access picks its class; an image is one class whatever its access, since its view carries none.
+[[nodiscard]] constexpr view_class view_class_of(binding_type t, access_mode access)
+{
+    switch (t)
+    {
+    case binding_type::constants_buffer:
+        return view_class::constants;
+    case binding_type::buffer:
+    case binding_type::bytes:
+        return access == access_mode::read ? view_class::readonly : view_class::readwrite;
+    case binding_type::texture:
+        return view_class::texture;
+    case binding_type::image:
+        return view_class::image;
     case binding_type::acceleration_structure:
         return view_class::acceleration_structure;
     case binding_type::sampler:
         break; // a sampler is not a view — callers gate on is_sampler() first
     }
-    return view_class::uniform; // unreachable for the view kinds above
+    return view_class::constants; // unreachable for the view kinds above
 }
 
 /// The layout a bound view must have to satisfy a binding of this type.
@@ -100,35 +113,21 @@ namespace sg
 {
     switch (t)
     {
-    case binding_type::uniform_buffer:
-        return view_shape::uniform_block;
-    case binding_type::readonly_structured_buffer:
-    case binding_type::readwrite_structured_buffer:
+    case binding_type::constants_buffer:
+        return view_shape::constants_block;
+    case binding_type::buffer:
         return view_shape::structured;
-    case binding_type::readonly_raw_buffer:
-    case binding_type::readwrite_raw_buffer:
-        return view_shape::raw;
-    case binding_type::readonly_texture:
-    case binding_type::readwrite_texture:
+    case binding_type::bytes:
+        return view_shape::bytes;
+    case binding_type::texture:
+    case binding_type::image:
         return view_shape::texture;
     case binding_type::acceleration_structure:
         return view_shape::acceleration_structure;
     case binding_type::sampler:
         break; // a sampler is not a view — callers gate on is_sampler() first
     }
-    return view_shape::uniform_block; // unreachable for the view kinds above
-}
-
-/// Whether a bound view satisfies a binding of this type — its access and layout must match.
-/// The vacant marker satisfies every view kind: what a null descriptor looks like is the binding's to say,
-/// and whether a vacancy is *allowed* there (array elements only) is the group creation's check, not this one.
-[[nodiscard]] inline bool accepts(binding_type t, raw_view const& v)
-{
-    if (is_sampler(t))
-        return false; // samplers are bound as samplers, never as views
-    if (is_vacant(v))
-        return true;
-    return access_of(v) == access_of(t) && shape_of(v) == shape_of(t);
+    return view_shape::constants_block; // unreachable for the view kinds above
 }
 
 } // namespace sg
@@ -161,9 +160,13 @@ struct sg::binding
 
     u32 index = 0; ///< binding within the group / @binding / HLSL register number
     u32 count = 1; ///< array length; 0 = unbounded array
-    binding_type type = binding_type::uniform_buffer;
+    binding_type type = binding_type::constants_buffer;
 
-    /// For `uniform_buffer` bindings: the declared block size in bytes, used to validate a bound view's size.
+    /// What the shader does with the resource; must be `is_valid_access(type, access)`.
+    /// For an image it reaches WebGPU's layout and the hazards; for a buffer or bytes it also picks SRV or UAV.
+    access_mode access = access_mode::read;
+
+    /// For `constants_buffer` bindings: the declared block size in bytes, used to validate a bound view's size.
     /// Absent for other kinds.
     cc::optional<isize> block_size;
 
@@ -182,16 +185,12 @@ struct sg::binding
     /// vertex stage, so a storage binding wrongly marked vertex-visible fails validation on a conformant device.
     shader_stages visibility;
 
-    /// For `readwrite_texture` bindings: the texel format the shader declared (`RWTexture2D<float4>`).
+    /// For `image` bindings: the texel format the shader declared (`image_2d[.rgba8_unorm]`).
     /// A WebGPU storage-texture layout entry requires it, and a layout is built before any view exists — so it
     /// cannot be taken from the bound view the way dx12 and vulkan take it.
-    cc::optional<pixel_format> storage_format;
+    cc::optional<pixel_format> image_format;
 
-    /// For `readwrite_texture` bindings: whether the shader reads, writes or both.
-    /// See storage_access; ignored for every other kind.
-    sg::storage_access storage_access = sg::storage_access::read_write;
-
-    /// For `readonly_texture` bindings: how the texels are read.
+    /// For `texture` bindings: how the texels are read.
     /// See texture_sample_type.
     cc::optional<texture_sample_type> sample_type;
 
@@ -202,10 +201,46 @@ struct sg::binding
     /// Whether this is an array binding (count > 1): one descriptor per element, vacant elements as
     /// `sg::vacant_view`, and access declared explicitly per dispatch rather than inferred.
     [[nodiscard]] constexpr bool is_array() const { return count > 1; }
+
+    /// Whether the shader may write the resource, which WebGPU forbids in the vertex stage.
+    [[nodiscard]] constexpr bool is_writable() const { return access != access_mode::read; }
 };
 
 namespace sg
 {
+
+/// The view class a bound view must have to satisfy `b`.
+[[nodiscard]] constexpr view_class view_class_of(binding const& b)
+{
+    return view_class_of(b.type, b.access);
+}
+
+/// Whether `a` and `b` are the same kind of binding, so one descriptor can serve both.
+/// A buffer's or bytes' access is part of that, since it picks SRV or UAV; an image's is not, since one UAV serves all three.
+[[nodiscard]] constexpr bool is_same_kind(binding const& a, binding const& b)
+{
+    return a.type == b.type && (a.type == binding_type::image || a.access == b.access);
+}
+
+/// Whether a bound view satisfies binding `b` — its view class and layout must match.
+/// An image binding that declares its `image_format` also needs the view in exactly that format, which WebGPU and vulkan require.
+/// A view of format `undefined` reads as its texture's own format.
+/// The vacant marker satisfies every view kind: what a null descriptor looks like is the binding's to say,
+/// and whether a vacancy is *allowed* there (array elements only) is the group creation's check, not this one.
+[[nodiscard]] inline bool accepts(binding const& b, raw_view const& v)
+{
+    if (is_sampler(b.type))
+        return false; // samplers are bound as samplers, never as views
+    if (is_vacant(v))
+        return true;
+    if (view_class_of(v) != view_class_of(b) || shape_of(v) != shape_of(b.type))
+        return false;
+    if (b.type != binding_type::image || !b.image_format.has_value())
+        return true;
+    auto const& t = as_texture_view(v);
+    auto const format = t.format != pixel_format::undefined || t.texture == nullptr ? t.format : t.texture->format();
+    return format == b.image_format.value();
+}
 
 /// Stamps `stage` into every binding's `visibility`.
 ///
@@ -219,6 +254,7 @@ void apply_stage_visibility(cc::span<binding> bindings, shader_stage stage);
 /// its stages' reflected bindings — merge them stage by stage, then hand the result to a group layout.
 /// A name already in `into` keeps its existing entry, except for `visibility`, which is unioned: accumulating the
 /// stages that declared a binding is the one thing this merge exists to do beyond deduplicating.
+/// An image's `access` is unioned too, since one image may be read in one stage and written in another, and the layout must permit both.
 /// Two stages disagreeing on the address, count or type is a shader bug this does not detect.
 void merge_bindings(cc::vector<binding>& into, cc::span<binding const> from);
 

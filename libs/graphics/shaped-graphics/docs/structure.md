@@ -117,7 +117,7 @@ src/shaped-graphics/
     texture_traits.hh             [done]        compile-time shape (dimension / array / cube / multisampled) + view-factory parameter bags
     texture_descriptions.hh       [done]        shape-specific description structs feeding the typed create_texture_* calls
     texture_region.hh             [done]        a texel box within one subresource, for host↔device copies
-    views.hh                      [in progress] typed buffer views (uniform/readonly/readwrite<T>, byte=raw) + the erased raw_view;
+    views.hh                      [in progress] typed buffer views (constants/readonly/readwrite<T>, byte=bytes) + the erased raw_view;
                                                 texture SRV/UAV + render_target / depth_stencil views; texel buffer views deferred
     vertex_buffer_view.hh         [done]        buffer + byte range + stride
     index_buffer_view.hh          [done]        buffer + index_format + byte range

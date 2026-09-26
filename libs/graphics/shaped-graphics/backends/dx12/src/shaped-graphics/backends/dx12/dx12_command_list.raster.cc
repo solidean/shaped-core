@@ -356,11 +356,11 @@ void dx12_command_list::declare_raster_draw_barriers(bool indexed)
         for (auto const& view : bound_group->hazard_views)
             if (view.buffer)
                 track_buffer_access(view.buffer, sg::pipeline_stage_flag::vertex | sg::pipeline_stage_flag::fragment,
-                                    sg::shader_access_of(view.access));
+                                    sg::shader_access_of(view.bound_as));
         for (auto const& tv : bound_group->texture_hazard_views)
             track_texture_access(tv.texture, tv.range,
                                  sg::pipeline_stage_flag::vertex | sg::pipeline_stage_flag::fragment,
-                                 sg::shader_access_of(tv.access), sg::shader_layout_of(tv.access));
+                                 sg::shader_access_of(tv.bound_as), sg::shader_layout_of(tv.bound_as));
     }
 
     // The IA vertex fetch reads the bound vertex buffers; an indexed draw also fetches the index buffer.

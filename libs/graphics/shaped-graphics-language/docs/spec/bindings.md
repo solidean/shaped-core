@@ -13,8 +13,8 @@ Back to the [specification](_index.md).
 ```sgl
 binding post:
     texel_size: float2
-    src: texture2d[float4]
-    dst: out image2d[.rgba8_unorm]
+    src: texture_2d[float4]
+    dst: out image_2d[.rgba8_unorm]
     sampler bilinear:
         filter = .linear
         address = .clamp_edge
@@ -31,25 +31,24 @@ That is the common case, and it is why `constants[T]` below is rarer than it loo
 The table is the one sg already commits to.
 `sg::binding_type` in [binding.hh](../../../shaped-graphics/src/shaped-graphics/binding/binding.hh) is the portable set every backend maps to, and SGL spells it rather than deciding it again.
 
-| SGL | `sg::binding_type` | what it is |
-|---|---|---|
-| a plain value type | `uniform_buffer` | a field of the group's implicit constant buffer |
-| `constants[T]` | `uniform_buffer` | a constant buffer that comes from somewhere else, already laid out |
-| `buffer[T]` | `readonly_structured_buffer` | an array of `T` the shader reads |
-| `mut buffer[T]` | `readwrite_structured_buffer` | an array of `T` the shader reads and writes |
-| `bytes` | `readonly_raw_buffer` | raw bytes, addressed by offset |
-| `mut bytes` | `readwrite_raw_buffer` | raw bytes the shader also writes |
-| `texture2d[T]` and its neighbours | `readonly_texture` | a texture the shader samples or loads |
-| `texture2d_depth` and its neighbours | `readonly_texture` | a depth texture, sample type `depth` |
-| `image2d[.F]` and its neighbours | `readwrite_texture`, `storage_access::read` | a storage texture the shader only reads |
-| `mut image2d[.F]` | `readwrite_texture`, `storage_access::read_write` | a storage texture the shader reads and writes |
-| `out image2d[.F]` | `readwrite_texture`, `storage_access::write` | a storage texture the shader only writes |
-| `sampler`, `comparison_sampler` | `sampler` | a sampler the host binds |
-| `sampler name:` with settings | a static sampler of the group's layout | a sampler nobody binds |
+| SGL | `sg::binding_type` | `sg::access_mode` | what it is |
+|---|---|---|---|
+| a plain value type | `constants_buffer` | `read` | a field of the group's implicit constant buffer |
+| `constants[T]` | `constants_buffer` | `read` | a constant buffer that comes from somewhere else, already laid out |
+| `buffer[T]` | `buffer` | `read` | an array of `T` the shader reads |
+| `mut buffer[T]` | `buffer` | `read_write` | an array of `T` the shader reads and writes |
+| `bytes` | `bytes` | `read` | raw bytes, addressed by offset |
+| `mut bytes` | `bytes` | `read_write` | raw bytes the shader also writes |
+| `texture_2d[T]` and its neighbours | `texture` | `read` | a texture the shader samples or loads |
+| `texture_2d_depth` and its neighbours | `texture` | `read` | a depth texture, sample type `depth` |
+| `image_2d[.F]` and its neighbours | `image` | `read` | a storage texture the shader only reads |
+| `mut image_2d[.F]` | `image` | `read_write` | a storage texture the shader reads and writes |
+| `out image_2d[.F]` | `image` | `write` | a storage texture the shader only writes |
+| `sampler`, `comparison_sampler` | `sampler` | `read` | a sampler the host binds |
+| `sampler name:` with settings | a static sampler of the group's layout | — | a sampler nobody binds |
 
-**sg names the descriptor class, SGL names the resource.**
-sg's `readwrite_texture` is every storage texture, whatever its access, because its axis is SRV against UAV.
-SGL's `image` is the same object, and its access word says what the shader does with it.
+**sg and SGL name the same two things: the resource, and what the shader does with it.**
+The type is the kind, and the access word is `sg::access_mode`, so every row above is one-to-one.
 
 ## Access
 
@@ -62,7 +61,7 @@ Three spellings, and a resource takes the ones it has.
 **A buffer is never `out`.**
 No target has a write-only buffer, and WGSL refuses one in as many words: *access mode 'write' is not valid for the 'storage' address space*.
 **A texture is never `mut` or `out`**, since a sampled texture is read-only on every target.
-An image has all three, exactly as `sg::storage_access` has three.
+An image has all three, exactly as `sg::access_mode` has three.
 
 The asymmetry is WebGPU's rather than ours.
 Core WebGPU allows read-write storage only for the `r32` formats, so an image of any other format is unmarked or `out` there, and `mut` needs a feature ([Features](#features)).
@@ -71,33 +70,34 @@ dx12 and vulkan do not ask — a UAV is read-write to them whatever the shader s
 ## Textures and images
 
 **A sampled texture and a storage texture are two families, because every target gives them different type arguments.**
-A sampled texture goes through the texture unit and shows the shader a component type: `texture2d[float4]`.
-A storage texture is addressed per texel, and the shader has to name its memory format: `image2d[.rgba8_unorm]`.
+A sampled texture goes through the texture unit and shows the shader a component type: `texture_2d[float4]`.
+A storage texture is addressed per texel, and the shader has to name its memory format: `image_2d[.rgba8_unorm]`.
 WGSL spells the format inside the type, `texture_storage_2d<rgba8unorm, write>`, and vulkan wants it for a storage image read without `shaderStorageImageReadWithoutFormat`.
 HLSL ignores it, so carrying it costs dx12 nothing.
 
 "image" is Vulkan's and GLSL's word for a storage texture, and the more widely shared of the candidates.
 
 **One family was the alternative, and it lost.**
-`texture2d` alone would take a component type when unmarked and a format under `mut` or `out`.
+`texture_2d` alone would take a component type when unmarked and a format under `mut` or `out`.
 The argument's kind would then depend on the word to its left, and a read-only storage texture would have no spelling at all.
 
 ### Shapes
 
 Every shape sg's `texture_view_dimension` has is a type.
-The digit is fused to the word, as in `float4`, and `_` separates only real words.
+Each is spelled as sg spells its texture of that shape, `texture_2d` for `sg::texture_2d`, so the shader and the host say the same word.
+The digit is set off by `_`, unlike a vector's `float4`, because it names a dimension rather than a count.
 
 | sg `texture_view_dimension` | texture | depth texture | image |
 |---|---|---|---|
-| `tex_1d` | `texture1d` | — | `image1d` |
-| `tex_1d_array` | `texture1d_array` | — | `image1d_array` |
-| `tex_2d` | `texture2d` | `texture2d_depth` | `image2d` |
-| `tex_2d_array` | `texture2d_array` | `texture2d_array_depth` | `image2d_array` |
-| `tex_3d` | `texture3d` | — | `image3d` |
+| `tex_1d` | `texture_1d` | — | `image_1d` |
+| `tex_1d_array` | `texture_1d_array` | — | `image_1d_array` |
+| `tex_2d` | `texture_2d` | `texture_2d_depth` | `image_2d` |
+| `tex_2d_array` | `texture_2d_array` | `texture_2d_array_depth` | `image_2d_array` |
+| `tex_3d` | `texture_3d` | — | `image_3d` |
 | `cube` | `texture_cube` | `texture_cube_depth` | — |
 | `cube_array` | `texture_cube_array` | `texture_cube_array_depth` | — |
-| `tex_2d_ms` | `texture2d_ms` | `texture2d_ms_depth` | — |
-| `tex_2d_ms_array` | `texture2d_ms_array`, feature only | — | — |
+| `tex_2d_ms` | `texture_2d_ms` | `texture_2d_ms_depth` | — |
+| `tex_2d_ms_array` | `texture_2d_ms_array`, feature only | — | — |
 
 No target has a cube or a multisampled storage texture, and no target has a 1D or 3D depth texture.
 A depth texture is its own type, with the sg shape and then `_depth`, because it has functions of its own: comparison sampling.
@@ -120,24 +120,24 @@ WebGPU wants a sampled texture's sample type on the layout before any texture is
 
 ```sgl
 binding lighting:
-    albedo: texture2d[float4]
-    ids: texture2d[uint]
-    shadow: texture2d_depth
-    @unfilterable positions: texture2d[float4]
+    albedo: texture_2d[float4]
+    ids: texture_2d[uint]
+    shadow: texture_2d_depth
+    @unfilterable positions: texture_2d[float4]
 ```
 
 SGL never sees a sampled texture's format, so it cannot know that a view bound later is 32-bit float.
 That refusal is sg's: binding such a view to a `filterable_float` layout is an error on every backend unless the device has the feature ([Features](#features)).
 
-### Storage formats
+### Image formats
 
-**An image's argument is a value of sg's format enum**, spelled as an enum case: `image2d[.rgba8_unorm]`.
+**An image's argument is a value of sg's format enum**, spelled as an enum case: `image_2d[.rgba8_unorm]`.
 A format is not a type, and its name is sg's `sg::pixel_format` name, so the shader, the generated host code and every diagnostic say the same word.
 The WGSL writer maps it to WGSL's spelling (`rgba8unorm`, and `rg11b10ufloat` for `rg11b10_float`).
 
-The portable formats are core WebGPU's storage formats:
+The portable formats are core WebGPU's image formats:
 `rgba8_unorm`, `rgba8_snorm`, `rgba8_uint`, `rgba8_sint`, `rgba16_uint`, `rgba16_sint`, `rgba16_float`, and the `r32`, `rg32` and `rgba32` formats in `float`, `uint` and `sint`.
-Every other storage format needs a feature.
+Every other image format needs a feature.
 
 ## Samplers
 
@@ -149,7 +149,7 @@ sampler linear_clamp:
     address = .clamp_edge
 
 binding material:
-    albedo: texture2d[float4]
+    albedo: texture_2d[float4]
     sampler albedo_smp:
         filter = .linear
         max_anisotropy = 8
@@ -192,9 +192,9 @@ The opt-in itself is unbuilt ([feature-levels.md](incubator/feature-levels.md)),
 
 | form | the feature that grants it |
 |---|---|
-| `texture2d_ms_array` | multisampled arrays, which WebGPU lacks |
-| `mut image*[.F]` with `F` not `r32_float`, `r32_uint` or `r32_sint` | `sg::feature::readwrite_storage_formats`, WebGPU's `texture-formats-tier2` |
-| `image*[.F]` with `F` outside the portable storage formats | the tier-1 storage formats, WebGPU's `texture-formats-tier1` |
+| `texture_2d_ms_array` | multisampled arrays, which WebGPU lacks |
+| `mut image*[.F]` with `F` not `r32_float`, `r32_uint` or `r32_sint` | `sg::feature::readwrite_image_formats`, WebGPU's `texture-formats-tier2` |
+| `image*[.F]` with `F` outside the portable image formats | the tier-1 image formats, WebGPU's `texture-formats-tier1` |
 | filtering a 32-bit float texture | float32 filtering, WebGPU's `float32-filterable`; refused by sg at bind time |
 
 ## Which group a binding is
@@ -226,7 +226,7 @@ An `@inline` binding anywhere but the last position of a list is a normal error,
 A group-scope static sampler takes a slot like any sampler, since sg matches it by name to a sampler binding.
 
 **SGL states every fact of a binding itself.**
-Dimension, sample type, storage format, storage access and sampler kind are in the declaration, and `sgl describe` hands each to the host.
+Dimension, sample type, image format, access and sampler kind are in the declaration, and `sgl describe` hands each to the host.
 The generated group's table is what the host builds its layout from, so that is where every fact reaches sg.
 A compiled shader only has to fit that layout, and sg's fit check compares a binding's name, slot, count and kind — never the facts beyond them.
 The WGSL SGL writes states all of them, which a test holds to the generated table; HLSL states the dimension, and the vulkan text an image's format as `[[vk::image_format]]`.

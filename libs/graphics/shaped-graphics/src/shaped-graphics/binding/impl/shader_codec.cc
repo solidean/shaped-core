@@ -15,7 +15,7 @@ constexpr u32 k_texture_view_dimension_count = u32(texture_view_dimension::cube_
 constexpr u32 k_pixel_format_count = u32(pixel_format::bc7_rgba_unorm_srgb) + 1;
 constexpr u32 k_texture_sample_type_count = u32(texture_sample_type::uint) + 1;
 constexpr u32 k_sampler_binding_type_count = u32(sampler_binding_type::comparison) + 1;
-constexpr u32 k_storage_access_count = u32(storage_access::read_write) + 1;
+constexpr u32 k_access_mode_count = u32(access_mode::read_write) + 1;
 
 void put_u32(cc::vector<byte>& out, u32 value)
 {
@@ -85,10 +85,10 @@ void put_binding(cc::vector<byte>& out, binding const& b)
     // from the one that was compiled.
     put_optional_enum(out, b.texture_dimension);
     put_u32(out, u32(b.visibility.bits));
-    put_optional_enum(out, b.storage_format);
+    put_optional_enum(out, b.image_format);
     put_optional_enum(out, b.sample_type);
     put_optional_enum(out, b.sampler_type);
-    put_u32(out, u32(b.storage_access));
+    put_u32(out, u32(b.access));
 }
 
 /// A cursor that goes sour on the first bad read and stays that way.
@@ -194,7 +194,7 @@ struct reader
         auto const type = get_u32();
         if (type >= k_binding_type_count)
             ok = false;
-        b.type = ok ? binding_type(type) : binding_type::uniform_buffer;
+        b.type = ok ? binding_type(type) : binding_type::constants_buffer;
 
         auto const has_block_size = get_bool();
         auto const block_size = get_i64();
@@ -203,14 +203,14 @@ struct reader
 
         b.texture_dimension = get_optional_enum<texture_view_dimension>(k_texture_view_dimension_count);
         b.visibility = shader_stages::create_from_bits(u16(get_u32()));
-        b.storage_format = get_optional_enum<pixel_format>(k_pixel_format_count);
+        b.image_format = get_optional_enum<pixel_format>(k_pixel_format_count);
         b.sample_type = get_optional_enum<texture_sample_type>(k_texture_sample_type_count);
         b.sampler_type = get_optional_enum<sampler_binding_type>(k_sampler_binding_type_count);
 
         auto const access = get_u32();
-        if (access >= k_storage_access_count)
+        if (access >= k_access_mode_count)
             ok = false;
-        b.storage_access = ok ? sg::storage_access(access) : sg::storage_access::read_write;
+        b.access = ok ? sg::access_mode(access) : sg::access_mode::read;
         return b;
     }
 

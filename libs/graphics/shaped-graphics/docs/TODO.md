@@ -12,6 +12,16 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   It is a second member of "access is inferred, never declared (with one exception)", for the same reason the bindless declaration is the first.
   dx12 first, vulkan when a member needs it; sr's [denoising.md](../../shaped-rendering/docs/denoising.md) is the consumer.
   Pin it with a test that clears through the scope and checks sg's next inferred barrier.
+- **A dispatch's hazards follow each view's `bound_as`, not what the shader does with it.**
+  `shader_access_of` counts every image and every `readwrite` buffer as written, so one a pipeline only loads still orders against every other access of it.
+  The binding's `access` says more, but it is the group's declared access, the union over every pipeline the group is bound to.
+  The fix is a pipeline **footprint**: per binding and per stage, the `access_flags` the code really performs, which SGL can compute exactly.
+  Barrier inference then joins the group's bound resources with the footprint at dispatch.
+  The groups' `hazard_views` become plain `bound_buffers` / `bound_textures` carrying no access, as metal already names them.
+  HLSL and WGSL get a conservative footprint from `binding::access` and the stage visibility.
+  An array binding's footprint says only whether and how it is indexed; which elements stays the caller's to declare per dispatch, bounded by it.
+  The layout keeps the declared access regardless, since WebGPU validates a bind group against it.
+  The design is [footprint.md](../../shaped-graphics-language/docs/spec/incubator/footprint.md).
 - **Exportable memory and shared fences.**
   OIDN's GPU devices run on their own API (CUDA, HIP, SYCL, Metal) and share memory with ours through an OS handle.
   That wants an "exportable" usage on buffer and texture creation, a way to read the handle, and a fence shared both ways.
@@ -117,7 +127,7 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
 
     ```
     auto cmd = ctx->create_command_list();
-    cmd->ensure_layout(tex, sg::texture_layout::shader_readonly);  // entry requirement recorded
+    cmd->ensure_layout(tex, sg::texture_layout::shader_texture);  // entry requirement recorded
     ctx->upload.bytes_to_texture(tex, pinned);                     // fixup settles COMMON, job enqueued
     ctx->submit_command_list(cc::move(cmd));                       // entry barrier moves it to SHADER_RESOURCE
     ```
@@ -271,7 +281,7 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   It is load-bearing on the wasm builds without threads, where every one of those atomics keeps its interlock for a concurrency that cannot happen.
 - **Views.** See [concepts/views.md](concepts/views.md). Still deferred:
   - **texel buffer views** — a format-decoded linear buffer (`Buffer<T>` / `samplerBuffer`);
-  - **reflection-driven validation** of a view's `T` and access class against the shader;
+  - **reflection-driven validation** of a view's `T` and view class against the shader;
   - the `raw_view` **name** is provisional (`raw_view` vs `raw_binding`).
 - **An optional clear value on `texture_description`.**
   D3D12 takes a `D3D12_CLEAR_VALUE` at resource creation and uses it to pick a fast-clear path.
@@ -397,7 +407,7 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   - **Per-test attribution of WebGPU errors.**
     One arriving after the test that caused it lands on the driver; an error scope per invocation would name the test.
   - **A stream whose source has nothing ready cannot be waited for** when a list touches its resource, so that list sees what landed so far and a warning.
-  - **Storage views ignore `depth_slice_range`**, which WebGPU cannot express.
+  - **Image views ignore `depth_slice_range`**, which WebGPU cannot express.
   - **emdawnwebgpu passes `WGPU_QUERY_SET_INDEX_UNDEFINED` to JS as 4294967295**, which wgpu refuses and Dawn accepts.
     Each query set's last slot is a discard target until that is fixed — docs/bugs-external/webgpu-timestamp-write-index-sentinel.
   - **A native Dawn build**, an additive CMake gate over the same sources.

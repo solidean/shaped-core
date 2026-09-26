@@ -24,8 +24,8 @@ let other = frame.sky.sample(dir, sampler = point_clamp, level = 0.0)
 A default argument reads the texture's default sampler, and a named argument overrides it:
 
 ```sgl sketch
-@builtin fun sample(tex: texture2d[T], coord: float2, smp: sampler = tex.default_sampler) -> T
-@builtin fun sample(tex: texture2d[T], coord: float2, level: float, smp: sampler = tex.default_sampler) -> T
+@builtin fun sample(tex: texture_2d[T], coord: float2, smp: sampler = tex.default_sampler) -> T
+@builtin fun sample(tex: texture_2d[T], coord: float2, level: float, smp: sampler = tex.default_sampler) -> T
 ```
 
 `level` is probably keyword-only, so `sample(uv, 0.0)` cannot be misread as a sampler or a bias.
@@ -41,7 +41,7 @@ A resource is not a runtime value on any target, so a function taking one is ins
 
 * Methods and UFCS: a call `x.f(a)` resolving to a free `f(x, a)` ([members-and-properties.md](members-and-properties.md)).
 * Default and named arguments, and keyword-only parameters.
-* Generics over a texture's component type, `texture2d[T] -> T`.
+* Generics over a texture's component type, `texture_2d[T] -> T`.
 * The builtin registry: records whose parameters are resources, and a default reading another parameter.
 * Bindings: `@sampler(name)` on a texture member, naming a static sampler at file scope or in the same binding ([bindings.md](../bindings.md#samplers)).
 

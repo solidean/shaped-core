@@ -8,32 +8,26 @@ namespace ssc::dxc::impl
 namespace
 {
 /// The sg binding kind a SPIR-V descriptor type means, or nothing for one sg has no vocabulary for yet.
-///
-/// The read-only / read-write split is the one place this is not a plain rename.
-/// SPIR-V has a single STORAGE_BUFFER type, because in Vulkan the distinction is the shader's own NonWritable
-/// decoration rather than a different descriptor — so the two sg kinds are told apart by that decoration below, and
-/// the raw / structured split by whether the block has members.
-[[nodiscard]] cc::optional<sg::binding_type> map_descriptor_type(SpvReflectDescriptorBinding const& b, bool writable)
+/// A storage buffer is `bytes` when its block has no members and a `buffer` otherwise.
+/// Its access is the caller's, read from the block's NonWritable decoration, since Vulkan has one descriptor for both.
+[[nodiscard]] cc::optional<sg::binding_type> map_descriptor_type(SpvReflectDescriptorBinding const& b)
 {
     switch (b.descriptor_type)
     {
     case SPV_REFLECT_DESCRIPTOR_TYPE_UNIFORM_BUFFER:
-        return sg::binding_type::uniform_buffer;
+        return sg::binding_type::constants_buffer;
     case SPV_REFLECT_DESCRIPTOR_TYPE_SAMPLER:
         return sg::binding_type::sampler;
     case SPV_REFLECT_DESCRIPTOR_TYPE_SAMPLED_IMAGE:
-        return sg::binding_type::readonly_texture;
+        return sg::binding_type::texture;
     case SPV_REFLECT_DESCRIPTOR_TYPE_STORAGE_IMAGE:
-        return sg::binding_type::readwrite_texture;
+        return sg::binding_type::image;
     case SPV_REFLECT_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR:
         return sg::binding_type::acceleration_structure;
     case SPV_REFLECT_DESCRIPTOR_TYPE_STORAGE_BUFFER:
     {
         // A ByteAddressBuffer reflects as a block with no members; a StructuredBuffer<T> has T's members.
-        bool const raw = b.block.member_count == 0;
-        if (writable)
-            return raw ? sg::binding_type::readwrite_raw_buffer : sg::binding_type::readwrite_structured_buffer;
-        return raw ? sg::binding_type::readonly_raw_buffer : sg::binding_type::readonly_structured_buffer;
+        return b.block.member_count == 0 ? sg::binding_type::bytes : sg::binding_type::buffer;
     }
     default:
         // Texel buffers, input attachments and the dynamic variants have no sg spelling yet.
@@ -111,7 +105,7 @@ cc::result<reflected_shader> reflect_spirv(cc::span<byte const> spirv, sg::shade
 
         // NonWritable on the block is what a read-only storage buffer carries; SPIR-V has no separate descriptor for it.
         bool const writable = (b->block.decoration_flags & SPV_REFLECT_DECORATION_NON_WRITABLE) == 0;
-        auto const type = map_descriptor_type(*b, writable);
+        auto const type = map_descriptor_type(*b);
         if (!type.has_value())
             return cc::error(cc::format("SPIR-V binding '{}' uses a descriptor kind sg has no vocabulary for yet",
                                         b->name != nullptr ? b->name : "<unnamed>"));
@@ -129,11 +123,14 @@ cc::result<reflected_shader> reflect_spirv(cc::span<byte const> spirv, sg::shade
         // An unbounded array reflects as a zero-length dimension, which is sg's `count == 0`.
         out_binding.count = b->count;
         out_binding.type = type.value();
+        // A storage image is read_write, as the HLSL RWTexture it came from always is; a buffer is as its block says.
+        if (out_binding.type == sg::binding_type::image
+            || (writable && (out_binding.type == sg::binding_type::buffer || out_binding.type == sg::binding_type::bytes)))
+            out_binding.access = sg::access_mode::read_write;
 
         if (b->descriptor_type == SPV_REFLECT_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
             out_binding.block_size = isize(b->block.size);
-        if (out_binding.type == sg::binding_type::readonly_texture
-            || out_binding.type == sg::binding_type::readwrite_texture)
+        if (out_binding.type == sg::binding_type::texture || out_binding.type == sg::binding_type::image)
             out_binding.texture_dimension = map_image_dimension(b->image);
 
         out.bindings.push_back(cc::move(out_binding));
@@ -141,7 +138,7 @@ cc::result<reflected_shader> reflect_spirv(cc::span<byte const> spirv, sg::shade
 
     // A push-constant block is sg's `inline_constants`, and it is NOT a descriptor — it lives in no set, so the
     // enumeration above never sees it.
-    // Reported as a uniform_buffer binding with neither a group_index nor a space, which is what tells a caller
+    // Reported as a constants_buffer binding with neither a group_index nor a space, which is what tells a caller
     // apart from a `cbuffer` in a descriptor set: that one always carries its set.
     //
     // Without this an HLSL shader written for both backends cannot use inline constants at all — the DXIL arm
@@ -169,7 +166,7 @@ cc::result<reflected_shader> reflect_spirv(cc::span<byte const> spirv, sg::shade
 
         sg::binding out_binding;
         out_binding.name = block->name != nullptr ? cc::string(block->name) : cc::string();
-        out_binding.type = sg::binding_type::uniform_buffer;
+        out_binding.type = sg::binding_type::constants_buffer;
         out_binding.block_size = isize(block->size);
         out.bindings.push_back(cc::move(out_binding));
     }

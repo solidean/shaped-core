@@ -23,7 +23,7 @@ namespace sg::backend::vulkan
 [[nodiscard]] VkAccessFlags2 vk_access2_from(sg::access_flags access);
 
 /// The image layout an sg texture layout means.
-/// `shader_readwrite` and `general` both map to `VK_IMAGE_LAYOUT_GENERAL` — Vulkan has no separate storage layout.
+/// `shader_image` and `general` both map to `VK_IMAGE_LAYOUT_GENERAL` — Vulkan has no separate storage layout.
 [[nodiscard]] VkImageLayout vk_layout_from(sg::texture_layout layout);
 
 /// The aspect mask a subresource range's aspect span covers.

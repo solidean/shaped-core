@@ -67,7 +67,7 @@ TEST("sg metal - a pure layout transition translates to nothing")
     auto const layout_only = sg::access_barrier{
         .needed = true,
         .src_layout = sg::texture_layout::copy_dst,
-        .dst_layout = sg::texture_layout::shader_readonly,
+        .dst_layout = sg::texture_layout::shader_texture,
     };
     CHECK(!mtl::translate_barrier(layout_only).needed);
 }

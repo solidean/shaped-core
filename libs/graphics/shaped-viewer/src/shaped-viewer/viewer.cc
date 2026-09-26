@@ -255,12 +255,11 @@ cc::result<viewer> viewer::try_create(sg::context& ctx, cc::string_view id_str, 
     {
         // Throws on exhaustion rather than returning an error: there is nothing a headless viewer could do about it
         // that the caller could not do better with the exception.
-        offscreen = ctx.persistent.create_texture_2d({.format = sg::pixel_format::bgra8_unorm,
-                                                      .width = config.width,
-                                                      .height = config.height,
-                                                      .usage = sg::texture_usage::render_target
-                                                             | sg::texture_usage::readonly_texture
-                                                             | sg::texture_usage::copy_src});
+        offscreen = ctx.persistent.create_texture_2d(
+            {.format = sg::pixel_format::bgra8_unorm,
+             .width = config.width,
+             .height = config.height,
+             .usage = sg::texture_usage::render_target | sg::texture_usage::texture | sg::texture_usage::copy_src});
     }
     else
     {

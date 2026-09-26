@@ -52,7 +52,7 @@ inline constexpr u8 k_every_stage = 0xFF;
 } // namespace sgl::check
 
 /// What a shader may do with an image: unmarked, `mut` and `out` (the spec's bindings file, "Access").
-enum class sgl::check::image_access : sgl::u8
+enum class sgl::check::access_mode : sgl::u8
 {
     read,
     read_write,
@@ -113,12 +113,12 @@ struct sgl::check::type_info
     texture_shape shape = {};
     /// A `texture` that holds depth, which takes no `element`.
     bool is_depth = false;
-    /// A position in `k_storage_formats` for an `image`; -1 for every other kind.
+    /// A position in `k_image_formats` for an `image`; -1 for every other kind.
     i32 format = -1;
-    image_access access = image_access::read;
+    access_mode access = access_mode::read;
     /// A `sampler` that compares.
     bool is_comparison = false;
-    /// How a resource type is written, `out image2d[.rgba8_unorm]`; empty for a declared type, which its symbol names.
+    /// How a resource type is written, `out image_2d[.rgba8_unorm]`; empty for a declared type, which its symbol names.
     cc::string spelled;
 
     bool operator==(type_info const&) const = default;

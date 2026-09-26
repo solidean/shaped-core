@@ -122,10 +122,11 @@ def emit_group(package: str, namespace: str, file: SglFile, binding: dict) -> st
                        f"at byte {member['offset']} of the group's constant buffer\n")
             continue
         if member["kind"] == "texture":
-            out.append(f"    sg::readonly_texture_view<{view_traits(member)}> {member['name']}; ///< `{member['type']}`\n")
+            out.append(f"    sg::texture_view_{view_shape(member)} {member['name']}; ///< `{member['type']}`\n")
             continue
         if member["kind"] == "image":
-            out.append(f"    sg::readwrite_texture_view<{view_traits(member)}> {member['name']}; ///< `{member['type']}`\n")
+            view = f"sg::image_view_{view_shape(member)}<sg::pixel_format::{member['image_format']}>"
+            out.append(f"    {view} {member['name']}; ///< `{member['type']}`\n")
             continue
         if member["kind"] == "sampler":
             # A static sampler is the layout's, so the group has no field for it.
@@ -133,8 +134,9 @@ def emit_group(package: str, namespace: str, file: SglFile, binding: dict) -> st
                 out.append(f"    sg::sampler {member['name']}; ///< `{member['type']}`, which the group binds\n")
             continue
         element = host_type(package, where, member["type"])
-        access = "readwrite" if member["mut"] else "readonly"
-        sgl_type = f"mut buffer[{member['type']}]" if member["mut"] else f"buffer[{member['type']}]"
+        is_written = member["access"] == "read_write"
+        access = "readwrite" if is_written else "readonly"
+        sgl_type = f"mut buffer[{member['type']}]" if is_written else f"buffer[{member['type']}]"
         out.append(f"    sg::{access}_buffer_view<{element}> {member['name']}; ///< `{sgl_type}`\n")
     out.append("\n")
     if has_block(binding):
@@ -165,9 +167,9 @@ def has_block(binding: dict) -> bool:
     return binding.get("block_slot", -1) >= 0
 
 
-def view_traits(member: dict) -> str:
-    """The typed view traits of a texture or an image: `sg::tv_2d` for `tex_2d`, `sg::tv_cube` for `cube`."""
-    return "sg::tv_" + member["texture_dimension"].removeprefix("tex_")
+def view_shape(member: dict) -> str:
+    """The shape suffix of sg's view typedefs for a texture or an image: `2d` for `tex_2d`, `cube` for `cube`."""
+    return member["texture_dimension"].removeprefix("tex_")
 
 
 # sg::sampler's fields in its own declaration order, which a designated initializer has to follow, and their C++ spelling.
@@ -208,16 +210,16 @@ def binding_entry(member: dict) -> str:
     head = f'{{.name = "{member["host_name"]}", .index = {member["slot"]}u, .count = 1u, '
     kind = member["kind"]
     if kind == "buffer":
-        return head + f".type = sg::binding_type::{'readwrite' if member['mut'] else 'readonly'}_structured_buffer}}"
+        access = "" if member["access"] == "read" else f", .access = sg::access_mode::{member['access']}"
+        return head + f".type = sg::binding_type::buffer{access}}}"
     if kind == "texture":
-        return head + (f".type = sg::binding_type::readonly_texture, "
+        return head + (f".type = sg::binding_type::texture, "
                        f".texture_dimension = sg::texture_view_dimension::{member['texture_dimension']}, "
                        f".sample_type = sg::texture_sample_type::{member['sample_type']}}}")
     if kind == "image":
-        return head + (f".type = sg::binding_type::readwrite_texture, "
+        return head + (f".type = sg::binding_type::image, .access = sg::access_mode::{member['access']}, "
                        f".texture_dimension = sg::texture_view_dimension::{member['texture_dimension']}, "
-                       f".storage_format = sg::pixel_format::{member['storage_format']}, "
-                       f".storage_access = sg::storage_access::{member['storage_access']}}}")
+                       f".image_format = sg::pixel_format::{member['image_format']}}}")
     return head + f".type = sg::binding_type::sampler, .sampler_type = sg::sampler_binding_type::{member['sampler_type']}}}"
 
 
@@ -231,10 +233,10 @@ def emit_group_impl(package: str, namespace: str, file: SglFile, binding: dict) 
     out = [f"\n// `binding {name}` of {file.path}: the table the shader's resources were numbered from.\n"]
     out.append(f"namespace\n{{\nsg::binding const k_sgl_bindings_{name}[] = {{\n")
     if has_block(binding):
-        # A uniform block is read in rows of 16 bytes, so that is what the shader reflects its size as.
+        # A constants block is read in rows of 16 bytes, so that is what the shader reflects its size as.
         size = (binding["block_size"] + 15) // 16 * 16
         out.append(f'    {{.name = "{binding["block_host_name"]}", .index = {binding["block_slot"]}u, .count = 1u, '
-                   f".type = sg::binding_type::uniform_buffer, .block_size = {size}}},\n")
+                   f".type = sg::binding_type::constants_buffer, .block_size = {size}}},\n")
     for member in resources:
         out.append(f"    {binding_entry(member)},\n")
     out.append("};\n")
@@ -339,7 +341,7 @@ def emit_inline_impl(package: str, namespace: str, file: SglFile, binding: dict)
     out.append("            .space = slib::inline_constants_space,\n")
     out.append("            .index = 0u,\n")
     out.append("            .count = 1u,\n")
-    out.append("            .type = sg::binding_type::uniform_buffer,\n")
+    out.append("            .type = sg::binding_type::constants_buffer,\n")
     out.append(f"            .block_size = {words}}};\n}}\n")
     return "".join(out)
 

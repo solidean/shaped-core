@@ -152,7 +152,7 @@ struct sr::denoise_inputs
 
     denoise_guides guides;
 
-    /// Where the result goes: needs `readwrite_texture` usage, and must not be `color`.
+    /// Where the result goes: needs `image` usage, and must not be `color`.
     /// Its extent is the output extent; any ratio to the input other than 1 must be one `denoise_input_extent` produced.
     ///
     /// Its rgb is the denoised radiance and **its alpha is `color`'s, carried through untouched** — every member

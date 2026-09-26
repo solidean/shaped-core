@@ -72,7 +72,7 @@ sg::bytes_wait_gate                 // deadlock guard: an inline readback is onl
 sg::backend_kind          // dx12, vulkan, metal, webgpu, opengl, webgl
 sg::thread_model          // main_thread | single_threaded | multi_threaded — binds all but asyncs, layouts, samplers (docs/concepts/threading.md)
 sg::buffer_usage          // ONE usage named by operation: copy_src/copy_dst/vertex_buffer/index_buffer/
-                          //   uniform_buffer/readonly_buffer/readwrite_buffer/indirect_command_buffer/
+                          //   constants_buffer/readonly_buffer/readwrite_buffer/indirect_command_buffer/
                           //   accel_structure_{storage,build_input}
                           //   (granularity set by Vulkan; DX12 typeless, Metal untyped — they consume a subset)
 sg::buffer_usages         // cc::flags<buffer_usage> — the SET, which is what every API takes and reports
@@ -90,8 +90,8 @@ ctx.accepted_shader_formats()                      // span<shader_format const>,
 ctx.accepts_shader_format(f)                       // bool — hand this to slib's acquire(ctx) rather than assuming a format; see docs/shaders.md
 ctx.supports(sg::feature::raytracing)              // bool — THE capability question; feature is deliberately coarse (see context/capabilities.hh)
                                                    //   raytracing | timestamp_query | headless_present | geometry_shader | tessellation_shader | binding_arrays
-                                                   //   | readwrite_storage_formats (false on core webgpu: read_write storage only in r32 formats)
-                                                   //   | float32_filtering (filter r32/rg32/rgba32_float) | extended_storage_formats (storage beyond is_portable_storage_format)
+                                                   //   | readwrite_image_formats (false on core webgpu: read_write storage only in r32 formats)
+                                                   //   | float32_filtering (filter r32/rg32/rgba32_float) | extended_image_formats (storage beyond is_portable_image_format)
                                                    //   | unaligned_block_compression (false on webgpu and metal: a BC texture needs whole 4x4 blocks,
                                                    //     and create_texture THROWS on one that has not; desc.unaligned_block_error(supports) asks first)
                                                    //   binding_arrays false (webgpu) = no count > 1 bindings, no staging_binding_group, no bindless_array
@@ -350,22 +350,22 @@ b.is_expired() / b.is_valid()      // bool    — storage reclaimed? transient a
 b.expire()                         // void    — free storage now (deferred); explicit early-free for persistent
 // shape metadata (_size_in_bytes/_usage) is protected in the base; backend buffers inherit it
 // view factories are BYTE-LEVEL only (no C++ element type); the buffer's usage must cover the access.
-// For the ergonomic, element-typed views (as_readonly_buffer(), as_uniform_buffer(), …) wrap in buffer<T>.
-b.as_raw_readonly({.offset=,.size=})       // -> raw_buffer_view (byte-addressed SRV, shape=raw; range in bytes; default = whole)
+// For the ergonomic, element-typed views (as_readonly_buffer(), as_constants_buffer(), …) wrap in buffer<T>.
+b.as_raw_readonly({.offset=,.size=})       // -> raw_buffer_view (byte-addressed SRV, shape=bytes; range in bytes; default = whole)
 b.as_raw_readonly({.offset=,.size=}, stride)// -> raw_buffer_view (STRUCTURED SRV; explicit byte stride; element_count = size/stride)
-b.as_raw_readwrite({.offset=,.size=})      // -> raw_buffer_view (byte-addressed UAV, shape=raw)
+b.as_raw_readwrite({.offset=,.size=})      // -> raw_buffer_view (byte-addressed UAV, shape=bytes)
 b.as_raw_readwrite({.offset=,.size=}, stride)// -> raw_buffer_view (STRUCTURED UAV; explicit byte stride)
-// EVERY storage view (raw or structured) is a SUBRANGE, so: offset % 256 == 0 (WebGPU minStorageBufferOffset-
+// EVERY storage view (bytes or structured) is a SUBRANGE, so: offset % 256 == 0 (WebGPU minStorageBufferOffset-
 //   Alignment; some Vulkan hw) and size % 4 == 0 (WebGPU). Structured ALSO needs offset % stride == 0 and
 //   size % stride == 0 (D3D12 addresses by element index: FirstElement = offset/stride).
 // buffer<T> itself is exempt — it's a whole buffer recast like a span (so buffer<u16> index buffers are fine),
 //   as are the draw-input views (as_vertex_buffer / as_index_buffer).
 // Bypass: build the raw_buffer_view aggregate yourself. For a heterogeneous buffer: one WHOLE-buffer raw view
 //   + in-shader Load<T>(byteOffset) does per-object addressing — see docs/concepts/views.md.
-// try_ TWINS: every storage/uniform factory above has one (try_as_raw_readonly/readwrite -> both overloads + whole-buffer;
-//   try_as_raw_uniform_buffer -> its one byte-range overload) -> cc::optional, nullopt when the RANGE is bad (bounds / 256 / %4 / stride).
+// try_ TWINS: every storage/constants factory above has one (try_as_raw_readonly/readwrite -> both overloads + whole-buffer;
+//   try_as_raw_constants_buffer -> its one byte-range overload) -> cc::optional, nullopt when the RANGE is bad (bounds / 256 / %4 / stride).
 //   A missing buffer_usage flag still ASSERTS (you chose usage at creation). Draw-input views have no twin.
-b.as_raw_uniform_buffer({.offset=,.size=}) // -> sg::raw_buffer_view (uniform_block; offset 256-aligned; size <= 64 KiB)
+b.as_raw_constants_buffer({.offset=,.size=}) // -> sg::raw_buffer_view (constants_block; offset 256-aligned; size <= 64 KiB)
 b.as_raw_vertex_buffer({.offset=,.size=}, stride_in_bytes)  // -> vertex_buffer_view (explicit stride)
 b.as_index_buffer(format=uint16)           // -> index_buffer_view (whole buffer)
 b.as_raw_index_buffer(format, {.offset=,.size=})            // -> index_buffer_view (byte range; width from format)
@@ -396,11 +396,11 @@ buf.try_reinterpret_as<U>()                 // -> cc::optional<buffer<U>>; gener
 buf.element_count()                        // isize — size_in_bytes / sizeof(T) (truncates)
 buf.size_in_bytes() / buf.usage()          // isize / sg::buffer_usages
 // view factories infer the element type from T (no <T> spelled), else identical to raw_buffer's:
-buf.as_uniform_buffer(element_index=0)     // -> uniform_buffer_view<T>    (binds ONE element as a cbuffer; byte offset element_index*sizeof(T) must be 256-aligned; only where T is a uniform_element)
+buf.as_constants_buffer(element_index=0)     // -> constants_buffer_view<T>    (binds ONE element as a cbuffer; byte offset element_index*sizeof(T) must be 256-aligned; only where T is a constants_element)
 buf.as_readonly_buffer({.offset=,.size=})  // -> readonly_buffer_view<T>   (only where T is a view_element; range in elements of T)
 buf.as_readwrite_buffer({.offset=,.size=}) // -> readwrite_buffer_view<T>  (only where T is a view_element)
 //   these are SUBRANGES: byte offset (= range.offset * sizeof(T)) must be 256-aligned, byte size a multiple of 4
-buf.try_as_readonly_buffer(...) / try_as_readwrite_buffer(...) / try_as_uniform_buffer(idx)  // -> cc::optional<view>
+buf.try_as_readonly_buffer(...) / try_as_readwrite_buffer(...) / try_as_constants_buffer(idx)  // -> cc::optional<view>
 //   nullopt on a bad range (bounds / 256 / %4); missing usage still asserts. Whole-buffer overloads have twins too.
 buf.as_vertex_buffer() / (range)           // -> vertex_buffer_view (stride = sizeof(T); range in vertices of T)
                                            //   stride only for now — not yet tied to the pipeline's vertex_input_layout
@@ -419,10 +419,10 @@ sg::is_depth_stencil_format(f)  // bool  — depth AND stencil planes
 sg::has_stencil(f)              // bool  — carries a stencil plane
 sg::is_srgb_format(f)           // bool  — hardware applies the sRGB transfer function on read/write
 sg::is_compressed_format(f)     // bool  — BC block-compressed (4x4 blocks)
-sg::supports_typed_uav(f)       // bool  — can carry a typed UAV, i.e. texture_usage::readwrite_texture; false for sRGB, BC and depth
+sg::supports_typed_uav(f)       // bool  — can carry a typed UAV, i.e. texture_usage::image; false for sRGB, BC and depth
                                 //         an sRGB format is still RENDERABLE, so a raster pass is how you write one (sr::raster_box_filter_mipmap_routine)
-sg::is_portable_storage_format(f) // bool — storage every device takes (core WebGPU's set); any other typed-UAV format needs
-                                  //         feature::extended_storage_formats, so gate compute writes on both
+sg::is_portable_image_format(f) // bool — storage every device takes (core WebGPU's set); any other typed-UAV format needs
+                                  //         feature::extended_image_formats, so gate compute writes on both
 sg::is_float32_format(f)        // bool  — r32/rg32/rgba32_float: filtering one needs feature::float32_filtering
 sg::format_block_size(f)        // int   — bytes per texel, or per 4x4 block for BC (0 for undefined)
 sg::format_block_extent(f)      // int   — 1 (uncompressed) or 4 (BC)
@@ -447,7 +447,7 @@ t->width()/height()/depth()  // int — extents (height/depth per dimension)
 t->mip_levels()/sample_count()/array_layers()  // int
 t->format()                  // sg::pixel_format
 t->is_array()/is_cube()/is_multisampled()      // bool  — derived shape queries
-sg::texture_usage            // ONE usage: copy_src/copy_dst, readonly_texture, readwrite_texture, render_target, depth_stencil
+sg::texture_usage            // ONE usage: copy_src/copy_dst, texture, image, render_target, depth_stencil
 sg::texture_usages           // cc::flags<texture_usage> — the SET a description carries and a texture reports
 // create the raw resource (full desc; untyped handle):
 ctx.persistent.create_raw_texture(desc)        // -> raw_texture_handle  (dedicated; throws sg::allocation_exception; + try_ twin)
@@ -463,17 +463,18 @@ ctx.transient.create_texture_2d({...})         // -> sg::texture_2d  (transient;
 sg::texture_2d::from_raw(raw_handle)           // wrap a raw handle; asserts the raw shape matches (try_from_raw -> optional); .raw() -> raw_texture_handle
 raw->as_texture_2d() / raw->try_as_texture_2d()// same, straight off the handle (one accessor per typedef: as_texture_1d/2d/3d/cube/…/cube_array_ms; try_ -> optional)
 // Each factory takes a shape-specific param bag (Traits::*_params); ranges are view_range{start,count} where count<0 = to the end of the axis.
-// sampled (SRV) — needs readonly_texture usage. Natural dimension:
-tex.as_readonly_view({.mips={.start=1}})       // -> readonly_texture_view<VT>  (VT deduced; whole; params name only this shape's axes)
-//   read_only_params fields: .mips always; .slices (arrays); .cubes (cube arrays)
-tex.as_readonly_2d_view({.slice=3})            // array/cube -> Texture2D: one slice/.face/{.cube,.face}
-tex.as_readonly_1d_view({.slice=3})            // 1D array -> Texture1D
-tex.as_readonly_cube_view({.cube=2})           // cube array -> one TextureCube
-tex.as_readonly_2d_array_view({.slices={...}}) // cube / cube array -> Texture2DArray (faces as a flat 2D array)
-// storage (UAV) — needs readwrite_texture; single mip; not on MS (a cube UAV is a 2D array):
-tex.as_readwrite_view({.mip=1})                // -> readwrite_texture_view<VT>  (VT deduced; whole, natural dimension)
-//   read_write_params fields: .mip always; .slices (arrays/cubes); .depth_slices (3D, the W/Z axis)
-tex.as_readwrite_2d_view({.slice=3,.mip=0})    // array/cube -> Texture2D    tex.as_readwrite_1d_view({.slice=3})
+// texture (sampled, SRV) — needs texture usage. Natural dimension:
+tex.as_texture_view({.mips={.start=1}})       // -> texture_view<VT>  (VT deduced; whole; params name only this shape's axes)
+//   texture_params fields: .mips always; .slices (arrays); .cubes (cube arrays)
+tex.as_texture_2d_view({.slice=3})            // array/cube -> Texture2D: one slice/.face/{.cube,.face}
+tex.as_texture_1d_view({.slice=3})            // 1D array -> Texture1D
+tex.as_texture_cube_view({.cube=2})           // cube array -> one TextureCube
+tex.as_texture_2d_array_view({.slices={...}}) // cube / cube array -> Texture2DArray (faces as a flat 2D array)
+// image (storage, UAV) — needs image usage; single mip; not on MS (a cube binds as a 2D-array image):
+tex.as_image_view<F>({.mip=1})                // -> image_view<VT, F>  (VT deduced; asserts the texture's format is F)
+tex.as_any_image_view({.mip=1})               // -> any_texture_view<VT> of kind image — the twin for a runtime format
+//   image_params fields: .mip always; .slices (arrays/cubes); .depth_slices (3D, the W/Z axis)
+tex.as_image_2d_view<F>({.slice=3,.mip=0})    // array/cube -> Texture2D    tex.as_image_1d_view<F>({.slice=3})  (+ as_any_ twins)
 // render-target / depth-stencil views (2D-shaped only; single mip; MSAA allowed; NOT shader-facing — no raw_view):
 tex.as_render_target_view({.mip=1})            // -> render_target_view  (needs render_target usage + color format)
 tex.as_depth_stencil_view()                    // -> depth_stencil_view  (needs depth_stencil usage + depth format)
@@ -481,7 +482,7 @@ tex.as_render_target_2d_view({.slice=2})       // array/cube -> one layer/face a
 // typedefs: texture_1d/2d/3d, texture_cube, texture_1d_array/2d_array/cube_array,
 //           texture_2d_ms/2d_array_ms/cube_ms/cube_array_ms
 // bind a texture view in a compute dispatch → it auto-transitions via shader_layout_of:
-// sampled → texture_layout::shader_readonly (SRV), storage → shader_readwrite (UAV).
+// texture → texture_layout::shader_texture (SRV), image → shader_image (UAV).
 ```
 
 ## views — strongly-typed resource views  (see docs/concepts/views.md)
@@ -489,35 +490,38 @@ tex.as_render_target_2d_view({.slice=2})       // array/cube -> one layer/face a
 ```cpp
 #include <shaped-graphics/resource/views.hh>
 sg::view_element<T>          // concept: T is `byte`, or sizeof(T) % 4 == 0 (GPUs load DWORD-aligned)
-sg::uniform_element<T>       // concept: view_element + size multiple of 16 and <= 64 KiB (excludes byte)
-sg::uniform_buffer_view<T>          // uniform block of T   (cbuffer/UBO)          — view_class::uniform
-sg::readonly_buffer_view<T>         // read array of T      (SRV / read SSBO)      — view_class::readonly  (T=byte → raw)
-sg::readwrite_buffer_view<T>        // rw array of T        (UAV / rw SSBO)        — view_class::readwrite (T=byte → raw)
+sg::constants_element<T>       // concept: view_element + size multiple of 16 and <= 64 KiB (excludes byte)
+sg::constants_buffer_view<T>          // constants block of T   (cbuffer/UBO)          — view_class::constants
+sg::readonly_buffer_view<T>         // read array of T      (SRV / read SSBO)      — view_class::readonly  (T=byte → bytes)
+sg::readwrite_buffer_view<T>        // rw array of T        (UAV / rw SSBO)        — view_class::readwrite (T=byte → bytes)
 // each holds a raw_buffer_handle + range; pure value (no GPU alloc). Made via buffer.as_*() above.
-sg::readonly_texture_view<VT>  // sampled texture (SRV); VT = texture_view_traits<Dim> — view_class::readonly
-sg::readwrite_texture_view<VT> // storage texture (UAV); VT constrained to storage_view_dimension (no cube/MS)
-// each holds { raw_texture_handle, pixel_format, subresource_range }, plus depth_slice_range on the storage view (3D).
+sg::texture_view<VT>         // sampled texture (SRV); VT = texture_view_traits<Dim>  — view_class::texture
+sg::image_view<VT, F>        // storage image (UAV) of texel format F (the binding contract); VT: no cube/MS — view_class::image
+// each holds { raw_texture_handle, subresource_range }; a texture view adds a runtime pixel_format, an image view depth_slice_range (3D).
+// sg::accepts checks a bound image's format against a binding that declares its image_format.
+// an image's read / write / read_write is the BINDING's access, never the view's.
 //   Made via texture<Traits>.as_*_view() (returns the precise VT).
 // view traits: tv_1d / tv_1d_array / tv_2d / tv_2d_array / tv_2d_ms / tv_2d_ms_array / tv_3d / tv_cube / tv_cube_array
-sg::buffer_view<T>           // access-erased middle: any access of a buffer of T (access is a runtime field); leaves convert implicitly
-sg::texture_view<VT>         // access-erased middle: any access of a texture view of dimension VT::dimension
+sg::texture_view_2d  sg::image_view_2d<F>   // shape typedefs, one per view traits: texture_view_<shape> for all nine, image_view_<shape><F> for 1d / 1d_array / 2d / 2d_array / 3d
+sg::buffer_view<T>           // class-erased middle: any view class of a buffer of T (bound_as is a runtime field); leaves convert implicitly
+sg::any_texture_view<VT>     // kind-erased middle: a texture or an image of dimension VT::dimension (bound_as is a runtime field)
 sg::tlas_view                // ray-tracing TLAS (SRV, VA-addressed) — view_class::acceleration_structure. Via tlas.as_view()
-sg::view_class               // uniform | readonly | readwrite | acceleration_structure   (access)
-sg::view_shape               // uniform_block | structured | raw | texture | acceleration_structure   (layout)
+sg::view_class               // constants | readonly | readwrite (buffers) | texture | image | acceleration_structure
+sg::view_shape               // constants_block | structured | bytes | texture | acceleration_structure   (layout)
 sg::raw_view                 // = cc::variant<raw_buffer_view, raw_texture_view, raw_tlas_view, vacant_view> — erased sum every typed view converts into
 sg::vacant_view              // {} — a vacant ARRAY element (no view); the backend synthesizes its null descriptor from the binding
-sg::is_vacant(rv)            // bool — gate on it before access_of / shape_of (a vacancy has neither)
-v.to_raw()  /  (implicit)    // -> raw_view; sg::access_of(rv) / sg::shape_of(rv) read the active arm's access/shape
+sg::is_vacant(rv)            // bool — gate on it before view_class_of / shape_of (a vacancy has neither)
+v.to_raw()  /  (implicit)    // -> raw_view; sg::view_class_of(rv) / sg::shape_of(rv) read the active arm's class/shape
 sg::try_as_buffer_view(rv)   // -> raw_buffer_view const*, null on a different arm (+ _texture_ / _tlas_; as_*_view asserts instead)
 // backends visit the arm (raw_buffer_view | raw_texture_view | raw_tlas_view | vacant_view) to build the native descriptor
 // raw arms are also the directly-usable "raw" binding vocabulary for tooling
-// INVERSE (erased -> typed leaf): as_* asserts (access, +dimension for textures); try_as_* -> cc::optional (nullopt on mismatch / wrong arm)
-mid.as_readonly() / as_readwrite() / as_uniform()   // buffer_view<T> middle -> the leaf (only the runtime access is pinned)
-mid.as_readonly() / as_readwrite()                  // texture_view<VT> middle -> the leaf (as_readwrite: storage VT only)
-arm.as_readonly<T>() / as_readwrite<T>() / as_uniform<T>()   // raw_buffer_view arm -> leaf (you supply T)
-arm.as_readonly<VT>() / as_readwrite<VT>()                   // raw_texture_view arm -> leaf (you supply VT; checks view dimension)
-sg::as_readonly_buffer<T>(rv) / as_readwrite_buffer<T> / as_uniform_buffer<T>    // raw_view -> buffer leaf in one call (+ try_ twins)
-sg::as_readonly_texture<VT>(rv) / as_readwrite_texture<VT>                       // raw_view -> texture leaf in one call (+ try_ twins)
+// INVERSE (erased -> typed leaf): as_* asserts (view class, +dimension for textures); try_as_* -> cc::optional (nullopt on mismatch / wrong arm)
+mid.as_readonly() / as_readwrite() / as_constants()   // buffer_view<T> middle -> the leaf (only the runtime view class is pinned)
+mid.as_texture() / as_image<F>()                    // any_texture_view<VT> middle -> the leaf (as_image: image VT only; checks F)
+arm.as_readonly<T>() / as_readwrite<T>() / as_constants<T>()   // raw_buffer_view arm -> leaf (you supply T)
+arm.as_texture<VT>() / as_image<VT, F>()                     // raw_texture_view arm -> leaf (you supply VT; checks view dimension)
+sg::as_readonly_buffer<T>(rv) / as_readwrite_buffer<T> / as_constants_buffer<T>    // raw_view -> buffer leaf in one call (+ try_ twins)
+sg::as_texture<VT>(rv) / as_image<VT, F>                                         // raw_view -> texture / image leaf in one call (+ try_ twins)
 // deferred: texel buffers (typed linear buffers). samplers: see sampler.hh
 ```
 
@@ -583,23 +587,26 @@ sg::compare_op              // never|less|equal|less_equal|greater|not_equal|gre
 
 ```cpp
 #include <shaped-graphics/binding/binding.hh>
-sg::binding_type            // uniform_buffer | read{only,write}_structured_buffer | read{only,write}_raw_buffer
-                            //   | read{only,write}_texture | sampler | acceleration_structure   (replaces D3D_SHADER_INPUT_TYPE)
-sg::binding                 // { cc::string name, reflected_name (diagnostics only; set where a compiler edge renamed it); cc::optional<u32> group_index, space; u32 index, count; binding_type type; cc::optional<isize> block_size;
+sg::binding_type            // constants_buffer | buffer | bytes | texture | image | sampler | acceleration_structure
+                            //   the resource kind, as SGL names it   (replaces D3D_SHADER_INPUT_TYPE)
+sg::access_mode             // read | write | read_write — SGL's unmarked / out / mut; write only on an image
+sg::is_valid_access(type, access) // bool — image: all three; buffer/bytes: read|read_write; everything else: read
+sg::binding                 // { cc::string name, reflected_name (diagnostics only; set where a compiler edge renamed it); cc::optional<u32> group_index, space; u32 index, count; binding_type type; access_mode access = read; cc::optional<isize> block_size;
                             //   cc::optional<texture_view_dimension> texture_dimension }  — reflected for texture kinds; hand-written array bindings must set it
                             //   + what a WebGPU bind group layout needs and dx12/vulkan ignore:
                             //   shader_stages visibility        — EMPTY = not known (treated as every stage), never "no stage"
-                            //   cc::optional<pixel_format> storage_format   — readwrite_texture only; WGSL declares it, HLSL does not
-                            //   storage_access storage_access = read_write  — readwrite_texture only: read|write|read_write; WGSL declares it, HLSL leaves the default
-                            //   cc::optional<texture_sample_type> sample_type  — readonly_texture: filterable_float|unfilterable_float|depth|sint|uint
+                            //   cc::optional<pixel_format> image_format   — image only; WGSL and SGL declare it, HLSL via #pragma sc format
+                            //   cc::optional<texture_sample_type> sample_type  — texture: filterable_float|unfilterable_float|depth|sint|uint
                             //   cc::optional<sampler_binding_type> sampler_type // sampler: filtering|non_filtering|comparison
                             //   index = SPIR-V/WGSL @binding, HLSL register; count > 1 = bounded array (.is_array()); count 0 = unbounded -> layout creation ERRORS (no WebGPU equivalent)
                             //   group_index = descriptor set / @group (SPIR-V) — PINS the bind slot: every bind_group asserts it matches
                             //   space = HLSL register space (DXC reflection only) — a register-numbering namespace, never a bind slot
                             //     absent = "no register spaces in this language", NOT space 0 (distinct layout hashes); dx12 REQUIRES one -> hand-written bindings say .space = 0
 sg::group_index_of(bindings) // -> cc::optional<u32>  the one group index they agree on (they must); what a group layout inherits
-sg::access_of(type)         // view_class the type expects   |  sg::shape_of(type) // view_shape it expects
-sg::accepts(type, raw_view) // bool — a bound view satisfies a binding of this type (access & shape match)
+sg::view_class_of(binding)  // view_class it expects (a buffer's access picks readonly|readwrite)  |  sg::shape_of(type) // view_shape
+sg::accepts(binding, raw_view) // bool — a bound view satisfies the binding (view class & shape match)
+sg::is_same_kind(a, b)      // bool — same kind, and same access unless an image (one UAV serves an image's three)
+b.is_writable()             // bool — access != read; WebGPU forbids it in the vertex stage
 sg::is_sampler(type)        // bool — a sampler binding (bound as a sampler, not a view)
 sg::apply_stage_visibility(bindings, stage)  // void — stamp one stage into every binding's visibility; a compiler calls it once, reflection never knows the stage
 sg::merge_bindings({s0.bindings, s1.bindings, ...})  // -> cc::vector<binding>  union by name, first-seen order — one root sig must cover every stage
@@ -627,7 +634,7 @@ sg::compiled_shader_handle  // std::shared_ptr<compiled_shader const>
 sg::binding_group_layout / sg::pipeline_layout / sg::compute_pipeline / sg::binding_group  // abstract; backend subclasses; *_handle = shared_ptr<T const>
 layout->group_index()       // -> cc::optional<u32> — inherited from the bindings; set = bindable at that ONE slot (every backend's bind_group asserts it)
 sg::named_view              // { cc::string name; bound_view view }  — input to create_binding_group (a typed view converts)
-sg::bound_view             // one raw_view (stored inline, `.view = tex.as_readonly_view()`) or a cc::vector<raw_view> for an array binding
+sg::bound_view             // one raw_view (stored inline, `.view = tex.as_texture_view()`) or a cc::vector<raw_view> for an array binding
                             //   scalar binding: exactly 1 view; array binding (count > 1): exactly `count`, one per element (`.view = cc::move(vec)`)
                             //   vacant array element = sg::vacant_view{} -> null descriptor synthesized from the BINDING (type + texture_dimension)
                             //   consumers read both arms via .span() / .size()

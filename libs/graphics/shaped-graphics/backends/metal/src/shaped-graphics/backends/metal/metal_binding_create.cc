@@ -68,8 +68,8 @@ cc::result<metal_pipeline_layout_handle> metal_context::create_metal_pipeline_la
     if (desc.inline_constants.has_value())
     {
         auto const& ic = desc.inline_constants.value();
-        if (ic.type != sg::binding_type::uniform_buffer)
-            return cc::error("pipeline_layout: the inline_constants binding must be a uniform buffer");
+        if (ic.type != sg::binding_type::constants_buffer)
+            return cc::error("pipeline_layout: the inline_constants binding must be a constants buffer");
         if (!ic.block_size.has_value() || ic.block_size.value() <= 0 || ic.block_size.value() % 4 != 0)
             return cc::error("pipeline_layout: the inline_constants binding needs a block_size that is positive and a "
                              "multiple of 4");
@@ -186,7 +186,7 @@ cc::result<metal_binding_group_handle> metal_context::create_metal_binding_group
                 continue;
             }
 
-            if (!sg::accepts(b.type, view))
+            if (!sg::accepts(b, view))
                 return cc::error(
                     cc::format("binding_group: '{}' — the bound view does not match the binding's type", b.name));
 
@@ -220,7 +220,7 @@ cc::result<metal_binding_group_handle> metal_context::create_metal_binding_group
                 if (is_array)
                     array.elements.push_back({.texture = texture_view->texture});
                 else
-                    bound_textures.push_back({.texture = texture_view->texture, .access = sg::access_of(view)});
+                    bound_textures.push_back({.texture = texture_view->texture, .bound_as = sg::view_class_of(view)});
                 continue;
             }
 
@@ -239,7 +239,7 @@ cc::result<metal_binding_group_handle> metal_context::create_metal_binding_group
             if (is_array)
                 array.elements.push_back({.buffer = buffer_view->buffer});
             else
-                bound_buffers.push_back({.buffer = buffer_view->buffer, .access = sg::access_of(view)});
+                bound_buffers.push_back({.buffer = buffer_view->buffer, .bound_as = sg::view_class_of(view)});
         }
 
         if (is_array)

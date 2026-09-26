@@ -51,7 +51,7 @@ struct sr::mipmap_program
 ///
 /// One dispatch per generated level, source bound as a single-mip view of level N and target as the UAV of
 /// N+1, so no level is read and written by the same dispatch.
-/// The texture must carry `readonly_texture | readwrite_texture` usage and have the levels allocated already —
+/// The texture must carry `texture | image` usage and have the levels allocated already —
 /// this fills a chain, it never reshapes one.
 class sr::box_filter_mipmap_routine : public sg::render_routine<box_filter_mipmap_routine, sr::mipmap_variant>
 {
@@ -118,9 +118,9 @@ private:
     [[nodiscard]] static sg::raw_view _source_of(sg::texture<Traits> const& texture, int level)
     {
         if constexpr (Traits::is_cube)
-            return texture.as_readonly_2d_array_view({.mips = {.start = level, .count = 1}});
+            return texture.as_texture_2d_array_view({.mips = {.start = level, .count = 1}});
         else
-            return texture.as_readonly_view({.mips = {.start = level, .count = 1}});
+            return texture.as_texture_view({.mips = {.start = level, .count = 1}});
     }
 
     /// The target (UAV) view of `level`.
@@ -133,10 +133,10 @@ private:
     [[nodiscard]] static sg::raw_view _target_of(sg::texture<Traits> const& texture, int level)
     {
         if constexpr (Traits::dimension == sg::texture_dimension::d3)
-            return texture.as_readwrite_view(
+            return texture.as_any_image_view(
                 {.mip = level, .depth_slices = {.start = 0, .count = _mip_extent(texture.depth(), level)}});
         else
-            return texture.as_readwrite_view({.mip = level});
+            return texture.as_any_image_view({.mip = level});
     }
 
     /// One axis of `level`, never below 1.
