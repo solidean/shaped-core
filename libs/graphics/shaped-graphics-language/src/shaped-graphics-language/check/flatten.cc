@@ -298,7 +298,16 @@ struct flattener
             return add_expr(x.type, from, *l);
         if (auto const* const v = x.node.try_as<flat_enum_value>())
             return add_expr(x.type, from, *v);
+        if (auto const* const m = x.node.try_as<flat_binding_member>())
+            return add_expr(x.type, from, *m);
         return fail();
+    }
+
+    /// True for a texture, an image, a sampler or a buffer read from its binding: it is no value a local could hold,
+    /// and it stands wherever it is named, since naming one has no effect.
+    [[nodiscard]] bool is_resource_member(flat_expr_id id) const
+    {
+        return is_valid(id) && entry.at(id).node.is<flat_binding_member>() && is_resource(c.out.at(entry.at(id).type).kind);
     }
 
     /// A value that is read more than once and evaluated once, where it stands.
@@ -551,7 +560,7 @@ struct flattener
             auto const value = values[i];
             if (!is_valid(value))
                 return fail();
-            if (is_substitutable(value))
+            if (is_substitutable(value) || is_resource_member(value))
             {
                 bound[i] = value;
                 continue;
@@ -571,11 +580,15 @@ struct flattener
         auto filled = cc::vector<bound_name>();
         if (has_default)
         {
+            // the copies are made in the caller's frame, where `id` stands, before the callee's frame is pushed
+            auto copies = cc::vector<flat_expr_id>();
+            for (auto p = isize(0); p < slots.size(); ++p)
+                copies.push_back(slots[p] >= 0 ? again(bound[slots[p]], id) : flat_expr_id::none);
             auto const chain = chain_through(id);
             frames.push_back({.function = callee, .file = s.file, .chain = chain});
             for (auto p = isize(0); p < slots.size(); ++p)
                 if (slots[p] >= 0)
-                    bind_parameter(parameters[p], again(bound[slots[p]], id));
+                    bind_parameter(parameters[p], copies[p]);
             bind_defaults(parameters, slots);
             filled = cc::move(current()->bound);
             frames.remove_back();
@@ -1112,7 +1125,7 @@ struct flattener
         auto const* const ref = x.node.try_as<flat_local_ref>();
         if (ref != nullptr && is_substitutable(value))
             current()->bound.push_back({.where = where, .local = ref->local});
-        else if (is_substitutable(value))
+        else if (is_substitutable(value) || is_resource_member(value))
             current()->bound.push_back({.where = where, .literal = value});
         else
         {

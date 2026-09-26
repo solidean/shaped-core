@@ -294,3 +294,18 @@ TEST("sgl emit - WGSL lets an implicit-derivative sample stand in non-uniform co
     // A sample at an explicit level takes no derivative, so it leaves Tint's analysis on.
     CHECK(!text_of(k_blur, target::wgsl).contains("diagnostic"));
 }
+
+TEST("sgl emit - a builtin's default fills the level a call leaves out, and a texture stays where it is named")
+{
+    // The default makes the call bind its arguments first, and a texture is no value a local could hold.
+    auto const source = cc::string_view("binding frame:\n"
+                                        "    src: texture_2d[float4]\n"
+                                        "@compute(8, 8) fun main_cs(@thread_id id: int3){frame}:\n"
+                                        "    let c = frame.src.load(int2(id.x, id.y))\n"
+                                        "    let s = frame.src.size()\n");
+    auto const wgsl = text_of(source, target::wgsl);
+    CHECK(wgsl.contains("textureLoad(frame_src, xy, 0)"));
+    CHECK(wgsl.contains("textureDimensions(frame_src, 0)"));
+    auto const hlsl = text_of(source, target::hlsl_dx12);
+    CHECK(hlsl.contains("frame_src.Load(int3(xy, 0))"));
+}
