@@ -253,6 +253,11 @@ described_pipeline describe_pipeline(check::checked_module const& m, check::pipe
     result.frozen.push_back(cc::format("vertex input = {}", shaped(p.vertex_input)));
     result.frozen.push_back(
         cc::format("target set = {}", check::is_valid(p.target_set) ? shaped(p.target_set) : cc::string()));
+    // A device lacking a feature a reload now needs would refuse the pipeline, so the build's needs are frozen too.
+    auto needs = cc::string();
+    for (auto const& name : result.features)
+        needs += cc::format("{}{}", needs.empty() ? "" : ", ", name);
+    result.frozen.push_back(cc::format("features = {}", needs));
     for (auto i = isize(0); i < settings.size(); ++i)
     {
         auto const& s = settings[i];

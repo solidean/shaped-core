@@ -109,7 +109,8 @@ A few parts of a pipeline are only known when the program runs, such as the form
 
 Everything a pipeline states reaches the host as one generated symbol per pipeline, which `ctx.cached` acquires; slib's [cheat sheet](../../../shaped-shader-library/cheat-sheet.md) has its spelling.
 
-* **The frozen part is what the host's own code was built against**: the binding layout, the vertex input, the target set, every format, and the sample count.
+* **The frozen part is what the host's own code was built against**: the binding layout, the vertex input, the target set, the features its stages need of a device, every format, and the sample count.
+  The features are frozen because the host chose its device by them: a reload that needs one more could be refused by a device the build ran on.
   A struct or binding in it is compared by its name and its shape, the structural hash of its members, so a member added under the same name is a change.
   It never changes under a hot reload.
 * **The rest reloads**: topology, rasterization, the depth and stencil tests, blending, write masks.

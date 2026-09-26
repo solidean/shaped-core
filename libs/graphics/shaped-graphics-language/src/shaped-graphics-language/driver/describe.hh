@@ -162,8 +162,8 @@ struct sgl::described_pipeline
     /// The paths the host states at acquire, whose last setting is `.host`, in the order first set so.
     cc::vector<cc::string> open;
     /// What the host's generated code is built against, one `key = value` line each, in a fixed order:
-    /// the layout, the inline constants, the vertex input and the target set, each as `name@shape`, then the last
-    /// setting of every format and of the sample count.
+    /// the layout, the inline constants, the vertex input and the target set, each as `name@shape`, then `features`,
+    /// then the last setting of every format and of the sample count.
     /// A build bakes these, and a hot reload that finds any of them changed keeps what it had.
     cc::vector<cc::string> frozen;
 };

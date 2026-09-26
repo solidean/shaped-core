@@ -265,6 +265,65 @@ TEST("slib pipeline - a reload moves a pipeline's configuration, and never its f
 }
 
 
+TEST("slib pipeline - a reload that needs another feature of the device keeps what the build had",
+     exclusive("slib-shader-library"))
+{
+    // The binding's own `require` changes what the pipeline needs and nothing of its shape, so only `features` moves.
+    // A feature WGSL can write, since a reload WebGPU refuses outright never compiles and moves nothing.
+    auto const with = [](cc::string_view requirement)
+    {
+        return cc::format("binding frame:\n{}    scale: float\n"
+                          "@vertex struct vin:\n    p: pos3\n"
+                          "struct link:\n    @position p: hpos4\n"
+                          "@pixel struct target:\n    color: float4\n"
+                          "@vertex fun vs(v: vin){{frame}} -> link:\n    return {{ p = hpos4(..v.p, frame.scale) }}\n"
+                          "@pixel fun ps(l: link) -> target:\n    return {{ color = float4(1.0, 1.0, 1.0, 1.0) }}\n"
+                          "pipeline:\n    vertex = vs\n    pixel = ps\n    format = .host\n",
+                          requirement);
+    };
+    auto const fs = std::make_shared<slib::memory_filesystem>();
+    fs->write("pipeline.sgl", with(""));
+
+    auto lib = slib::shader_library();
+    lib.add_compiler(slib::create_sgl_compiler(slib::create_wgsl_compiler()));
+    auto vs = slib::shader_asset_handle();
+    auto ps = slib::shader_asset_handle();
+    slib::shader_definition const definitions[] = {
+        {.path = "pipeline.sgl", .stage = sg::shader_stage::vertex, .entry_point = "vs", .asset = &vs},
+        {.path = "pipeline.sgl", .stage = sg::shader_stage::fragment, .entry_point = "ps", .asset = &ps},
+    };
+    lib.add_package({.name = "features_pkg", .language = slib::shader_language::sgl, .definitions = definitions}, fs);
+    lib.start_hot_reload({.unthreaded = true});
+
+    static cc::string_view const targets[] = {"color"};
+    static auto definition = slib::pipeline_definition();
+    definition = {.file = "pipeline.sgl",
+                  .name = "pipeline",
+                  .vertex = &vs,
+                  .pixel = &ps,
+                  .targets = targets,
+                  .frozen = frozen_of(with(""))};
+
+    auto const compile = [&]
+    {
+        REQUIRE(vs->acquire(sg::shader_format::wgsl)->has_value());
+        REQUIRE(ps->acquire(sg::shader_format::wgsl)->has_value());
+    };
+    compile();
+    lib.poll_hot_reload();
+
+    nx::expect_warning("keeps what it was last built with");
+    fs->write("pipeline.sgl", with("    require extended_image_formats\n"));
+    lib.poll_hot_reload();
+    compile();
+    CHECK(slib::configuration_of(definition).frozen_moved == "features:  -> extended_image_formats\n");
+
+    // The shader itself follows the source: it is the pipeline built from it that stays where the build was.
+    REQUIRE(vs->acquire(sg::shader_format::wgsl)->has_value());
+    CHECK(vs->acquire(sg::shader_format::wgsl)->try_value()->required_features
+          == cc::optional<sg::feature_set>(sg::feature::extended_image_formats));
+}
+
 TEST("slib pipeline - a reload promoted before a pipeline's first acquire is read by it",
      exclusive("slib-shader-library"))
 {
