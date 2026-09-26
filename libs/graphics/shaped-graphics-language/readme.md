@@ -89,5 +89,7 @@ To uninstall, delete the link and reload.
   A number is several fused tokens there, so the grammar assembles it by the rules of [numbers](docs/spec/syntax/numbers.md).
 * TextMate JSON has no variables, so the symbol character class and the keyword lookahead repeat in many patterns — change every copy.
 * Keywords come from [docs/spec/keywords.md](docs/spec/keywords.md) — a keyword added there needs adding to the grammar too, in `#keywords` and in that lookahead.
+* The review tool's lexer, [sgl_lexer.py](../../../tools/review/lib/render/sgl_lexer.py), is a second copy of the same rules: change it with the grammar.
+  [architecture.md](docs/architecture.md#the-syntactic-half) says what is checked between them.
 * [examples/sample.sgl](tools/vscode-extension/examples/sample.sgl) exercises every construct the grammar knows; extend it with the grammar.
   Its last section holds the spellings the compiler reports, so everything above it stays valid SGL.

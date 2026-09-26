@@ -907,6 +907,15 @@ def test_sgl_is_highlighted_by_its_line_tree(root: Path) -> None:
     assert kinds["..<"] == "Token.Operator", "a range must not be read as the number `0.`"
     assert kinds["+"] == "Token.Operator", "the child of a trailing comment's line is still code"
 
+    # The keywords are the form parser's list, which is what the language adds a keyword to; this lexer is a copy of it.
+    from tools.review.lib.render import sgl_lexer
+    parser = (REPO_ROOT / "libs/graphics/shaped-graphics-language/src/shaped-graphics-language/forms/form_parser.cc").read_text(encoding="utf-8")
+    listed = re.search(r"sgl_keywords\[\] = \{(.*?)\};", parser, re.S)
+    assert listed, "form_parser.cc no longer declares sgl_keywords"
+    keywords = set(re.findall(r'"([a-z_]+)"', listed.group(1)))
+    lexed = sgl_lexer._DECLARATION_KEYWORDS | sgl_lexer._CONTROL_KEYWORDS
+    assert lexed == keywords, f"the lexer draws {sorted(lexed - keywords)} and misses {sorted(keywords - lexed)}"
+
     declared = [(str(kind), value) for _, kind, value in SglLexer(stripnl=False).get_tokens_unprocessed("pipeline shadow:\n")]
     assert ("Token.Keyword.Declaration", "pipeline") in declared or ("Token.Keyword", "pipeline") in declared
     assert ("Token.Name.Class", "shadow") in declared, "a pipeline's name is drawn like a declared type's"

@@ -43,6 +43,12 @@ One flat lossless `sgl::parsed_file` per file: `print_source` gives the bytes ba
 Every tree is a value with typed ids (`enum class … : i32 { none = -1 }`) and a text dump the tests compare against.
 The AST pass is per file and name-free: a name is a span, and nothing is looked up.
 
+**Two highlighters copy the syntax, and a syntax change updates both.**
+One is the VS Code grammar, [sgl.tmLanguage.json](../tools/vscode-extension/syntaxes/sgl.tmLanguage.json).
+The other is the review tool's Pygments lexer, [sgl_lexer.py](../../../../tools/review/lib/render/sgl_lexer.py).
+A new keyword, operator, literal form or line-tree rule is not done until both draw it.
+The review tool's self-test holds the lexer's keywords to the form parser's `sgl_keywords`; nothing else is checked yet ([TODO](TODO.md)).
+
 ## The check pass
 
 **Name resolution, type checking and evaluation are one demand-driven pass** per module.
