@@ -19,6 +19,8 @@
 struct cc::rec::thread_info
 {
     cc::thread_id id = cc::thread_id::invalid;
+    /// Never shared by two threads, not even after one of them exited and was reaped: key per-thread state by it.
+    /// Not dense either, so it is no position in an array.
     u32 index = 0;
 
     /// What cc::rec::set_current_thread_record_name last set, or empty.

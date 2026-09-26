@@ -10,6 +10,8 @@
 #include <clean-core/record/recording.hh>
 #include <clean-core/record/system.hh>
 #include <clean-core/string/string.hh>
+#include <clean-core/thread/atomic.hh>
+#include <clean-core/thread/mutex.hh>
 #include <clean-core/thread/thread.hh>
 #include <nexus/test.hh>
 
@@ -525,6 +527,59 @@ REC_TEST("record - events from a thread that has exited still arrive")
     }
 
     CHECK(c.count_named("from-worker") == 10);
+}
+
+REC_TEST("record - a thread started after another was reaped never shares a live thread's index")
+{
+    if (!threads_available())
+        SKIP("this build has no threads (SC_THREADS=OFF), and this test needs three more");
+
+    rec_fixture const fixture(deterministic_config());
+
+    // Every (thread, index) pair a block arrived under.
+    struct thread_indices final : cc::rec::listener
+    {
+        cc::mutex<cc::vector<cc::rec::thread_info>> seen;
+        void on_chunk(cc::rec::chunk_view const& view) override
+        {
+            seen.lock([&](cc::vector<cc::rec::thread_info>& s) { s.push_back(view.thread); });
+        }
+    };
+    thread_indices indices;
+    {
+        scoped_listener const reg(indices);
+
+        // A listener keys what it carries per thread by index, so a live thread sharing one with a new thread would
+        // merge their attribution: the warning of one test was once filed under another this way.
+        auto release = cc::atomic<bool>(false);
+        std::thread alive(
+            [&]
+            {
+                REC_MARK("alive");
+                while (!release.load(cc::memory_order_acquire))
+                    cc::this_thread_yield();
+            });
+        std::thread exited([] { REC_MARK("exited"); });
+        exited.join();
+        cc::rec::flush_blocking(); // drains the exited thread's last chunk, which is what lets its state be reaped
+
+        std::thread started([] { REC_MARK("started"); });
+        started.join();
+        cc::rec::flush_blocking();
+
+        release.store(true, cc::memory_order_release);
+        alive.join();
+        cc::rec::flush_blocking();
+    }
+
+    indices.seen.lock(
+        [](cc::vector<cc::rec::thread_info>& seen)
+        {
+            for (auto const& a : seen)
+                for (auto const& b : seen)
+                    if (a.id != b.id)
+                        CHECK(a.index != b.index);
+        });
 }
 
 REC_TEST("record - the background thread drains without anyone asking, and its absence is the documented fallback")
