@@ -312,3 +312,22 @@ TEST("sgl ast - the value copies and compares whole, and the parsed file is left
     for (auto const& d : ast.decls)
         CHECK(sgl::is_valid(d.form));
 }
+
+TEST("sgl ast - a reserved name names nothing a program declares")
+{
+    // AST-141: the meaning of `self` and `void` is fixed, so no declaration may take either
+    cc::string_view const refused[] = {
+        "enum void:\n    a\n",      "struct self:\n    x: float\n", "fun void() -> int => 1\n",
+        "struct s:\n    void: int\n", "fun f(void: int) -> int => 1\n", "enum e:\n    self\n",
+        "const void = 1\n",
+    };
+    for (auto const source : refused)
+    {
+        auto const file = sgl::parse(source);
+        auto const ast = sgl::ast::build(file);
+        auto is_reported = false;
+        for (auto const& d : ast.diagnostics)
+            is_reported = is_reported || d.kind == sgl::diagnostic_kind::reserved_name;
+        CHECK(is_reported).dump("source", source);
+    }
+}

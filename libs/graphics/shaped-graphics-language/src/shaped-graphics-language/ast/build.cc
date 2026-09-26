@@ -326,10 +326,35 @@ range_of<field> builder::fields_of(form_id list, diagnostic_kind on_failure)
 
 // ---- entry ----------------------------------------------------------------------------------------------------
 
+void builder::reject_reserved_names()
+{
+    // AST-141: every name a declaration takes, once the whole file is read
+    auto const is_reserved = [&](source_span name, bool allows_self)
+    {
+        auto const text = file.text_of(name);
+        return text == "void" || (!allows_self && text == "self");
+    };
+    for (auto const& d : ast.decls)
+        d.node.visit(
+            [&](auto const& n)
+            {
+                if constexpr (requires { n.name.offset; })
+                {
+                    if (is_reserved(n.name, false))
+                        report(diagnostic_kind::reserved_name, n.name);
+                }
+            });
+    // a parameter may be `self`, the receiver of a method, and is otherwise held like a field
+    for (auto const& f : ast.fields)
+        if (is_reserved(f.name, true))
+            report(diagnostic_kind::reserved_name, f.name);
+}
+
 file_ast sgl::ast::build(parsed_file const& file)
 {
     auto b = builder{.file = file, .ast = {}};
     if (is_valid(file.root_form))
         b.ast.declarations = b.declarations(file.root_form, scope_kind::file);
+    b.reject_reserved_names();
     return cc::move(b.ast);
 }

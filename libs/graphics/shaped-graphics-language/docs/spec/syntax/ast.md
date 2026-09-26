@@ -59,6 +59,8 @@ Back to the [phases](_index.md); the reasons are in [why/ast.md](why/ast.md).
 
 * **AST-12** A quoted literal keeps its form, and its pieces and interpolations are reached through that form.
 * **AST-13** `self` is a **reserved name**: the identifier `self` reads as `self_ref` wherever it stands, and it is no keyword ([why](why/ast.md#ast-13)).
+* **AST-141** No declaration, field or enum case may be named by a reserved name, and no parameter may be named `void`; each is the normal error `reserved-name`.
+  A parameter named `self` is the receiver of a method, which is what the name is reserved for.
 * **AST-137** `void` is a reserved name too: the identifier `void` reads as `void_ref` wherever it stands, the type in a type position and its value elsewhere ([why](why/ast.md#ast-137)).
 * **AST-14** An applied square group reads as `index`, which is a subscript or type arguments, and its elements are arguments ([why](why/ast.md#ast-14)).
 

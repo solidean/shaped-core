@@ -59,6 +59,8 @@ enum class sgl::diagnostic_kind : sgl::u8
     expected_member,
     expected_case_arm,
     expected_name,
+    /// A declaration, a field or a parameter named by a reserved name, whose meaning is fixed: `enum void:`.
+    reserved_name,
     expected_pattern,
     expected_parameter,
     expected_body,

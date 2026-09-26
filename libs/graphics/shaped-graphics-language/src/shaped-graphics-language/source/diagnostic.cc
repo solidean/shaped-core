@@ -72,6 +72,8 @@ cc::string_view sgl::to_string(diagnostic_kind kind)
         return "expected-case-arm";
     case diagnostic_kind::expected_name:
         return "expected-name";
+    case diagnostic_kind::reserved_name:
+        return "reserved-name";
     case diagnostic_kind::expected_pattern:
         return "expected-pattern";
     case diagnostic_kind::expected_parameter:
@@ -236,6 +238,7 @@ sgl::severity sgl::default_severity_of(diagnostic_kind kind)
     case diagnostic_kind::expected_member:
     case diagnostic_kind::expected_case_arm:
     case diagnostic_kind::expected_name:
+    case diagnostic_kind::reserved_name:
     case diagnostic_kind::expected_pattern:
     case diagnostic_kind::expected_parameter:
     case diagnostic_kind::expected_body:

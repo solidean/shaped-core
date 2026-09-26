@@ -144,6 +144,8 @@ struct builder
     [[nodiscard]] cc::vector<form_id> lines_of(form_id block);
 
     void report(diagnostic_kind kind, source_span where);
+    /// AST-141: a declaration, a field or a parameter named by a reserved name.
+    void reject_reserved_names();
     /// A statement that a keyword heads is reported at that keyword, since its own span runs to the end of its block.
     void report(diagnostic_kind kind, form_id where);
 
