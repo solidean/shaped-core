@@ -3,6 +3,7 @@
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/string/string.hh>
+#include <clean-core/thread/atomic.hh>
 #include <shaped-graphics-language/check/checked_module.hh>
 #include <shaped-graphics-language/check/flat.hh>
 #include <shaped-graphics-language/interpret/scalar.hh>
@@ -52,6 +53,8 @@ enum class sgl::check::run_status : sgl::u8
     uninitialized_read,
     /// An `assert` was false; the run stopped there (EVAL-76).
     assertion_failed,
+    /// The caller raised `run_limits::stop`; what the run had found so far means nothing.
+    stopped,
 };
 
 struct sgl::check::run_inputs
@@ -74,6 +77,9 @@ struct sgl::check::run_limits
     bool run_checks = true;
     /// Failures past this many are counted in `outcome::failures_dropped` and not kept.
     i32 max_failures = 8;
+    /// Read every few thousand steps when set, and a raised flag ends the run as `stopped`.
+    /// It is how an editor abandons a test whose document changed, and raising it from another thread is enough.
+    cc::atomic<bool> const* stop = nullptr;
 };
 
 /// One check or `assert` that was false where it ran.

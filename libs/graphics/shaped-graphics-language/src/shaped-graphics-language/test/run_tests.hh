@@ -29,6 +29,8 @@ enum class sgl::test::test_status : sgl::u8
     not_run,
     /// The interpreter met a tree the check pass should not have written; a bug of the compiler, and not of the test.
     internal_error,
+    /// The caller raised `run_limits::stop` while it ran; the result says nothing about the test.
+    stopped,
 };
 
 /// One part of a failing condition that was false, and the values that made it so.
@@ -96,7 +98,8 @@ struct sgl::test::test_options
 namespace sgl::test
 {
 
-/// `passed`, `failed`, `assertion-failed`, `out-of-fuel`, `no-check-ran`, `uninitialized-read`, `not-run`, `internal-error`.
+/// `passed`, `failed`, `assertion-failed`, `out-of-fuel`, `no-check-ran`, `uninitialized-read`, `not-run`, `internal-error`,
+/// `stopped`.
 [[nodiscard]] cc::string_view to_string(test_status s);
 
 /// Every test of `m` the options select, in the order `m.tests` holds them.

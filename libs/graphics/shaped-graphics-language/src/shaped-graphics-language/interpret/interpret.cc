@@ -93,7 +93,15 @@ struct machine
     bool burn()
     {
         if (--fuel >= 0)
+        {
+            // a relaxed load every 4096 steps: a stop is seen within microseconds, and costs the run nothing measurable
+            if (limits.stop != nullptr && (fuel & 4095) == 0 && limits.stop->load(cc::memory_order_relaxed))
+            {
+                fail(run_status::stopped, "");
+                return false;
+            }
             return true;
+        }
         fail(run_status::out_of_fuel, "");
         return false;
     }
@@ -783,6 +791,8 @@ cc::string_view sgl::check::to_string(run_status s)
         return "uninitialized-read";
     case run_status::assertion_failed:
         return "assertion-failed";
+    case run_status::stopped:
+        return "stopped";
     }
     return "";
 }

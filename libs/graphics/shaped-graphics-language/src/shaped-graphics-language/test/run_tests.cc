@@ -169,6 +169,8 @@ cc::string_view sgl::test::to_string(test_status s)
         return "uninitialized-read";
     case test_status::internal_error:
         return "internal-error";
+    case test_status::stopped:
+        return "stopped";
     }
     return "";
 }
@@ -285,6 +287,9 @@ test_result sgl::test::run_test(checked_module const& m, cc::span<module_file co
     case run_status::type_error:
         result.status = test_status::internal_error;
         break;
+    case run_status::stopped:
+        result.status = test_status::stopped;
+        return result; // no expectation is judged against a run that did not finish
     }
 
     // CHK-232: a test that is to fail passes by failing, and one that is to stop at an assert by stopping there.
@@ -407,6 +412,7 @@ located_diagnostic sgl::test::diagnostic_of(checked_module const& m, test_result
         break;
     case test_status::passed:
     case test_status::not_run:
+    case test_status::stopped:
         detail = cc::string(to_string(r.status));
         break;
     }

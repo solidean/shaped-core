@@ -125,3 +125,16 @@ TEST("sgl tests - one test runs alone, and a test that expects diagnostics is ju
     CHECK(sgl::test::run_test(checked.module, files, 0).is_passed());
     CHECK(sgl::test::run_test(checked.module, files, 1).status == sgl::test::test_status::not_run);
 }
+
+TEST("sgl tests - a raised stop flag ends a run as stopped, and nothing is judged against it")
+{
+    auto const checked = check_sources(read_prelude(), "@expect(.fail)\ntest:\n    let mut i = 0\n    while i >= 0:\n  "
+                                                       "      i = i + 1\n    i < 0\n");
+    auto files = cc::vector<sgl::check::module_file>();
+    for (auto i = isize(0); i < checked.files.size(); ++i)
+        files.push_back({.file = checked.files[i], .ast = checked.asts[i]});
+    auto stop = cc::atomic<bool>(true);
+    auto const r = sgl::test::run_test(checked.module, files, 0, {.stop = &stop});
+    CHECK(r.status == sgl::test::test_status::stopped);
+    CHECK(!r.is_passed()); // `@expect(.fail)` would otherwise turn a run that did not pass into a pass
+}

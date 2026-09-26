@@ -171,7 +171,7 @@ Add entries as we discover them, and remove them as they land.
 - **No general cancellation token.**
   `cc::async` can fail with a `cancelled` error, but nothing lets a caller *ask* running work to stop.
   `cnet::cancel_token` is the one token in the repo — copyable, thread-safe, hierarchical — and it is scoped to clean-net's socket operations.
-  The first user outside clean-net is `sgl lsp`, which stops a stale test run between tests with a bare `cc::atomic<bool>`, and would hand the interpreter one the same way.
+  The first user outside clean-net is `sgl lsp`, which stops a stale test run with a bare `cc::atomic<bool>`, read between tests and by SGL's interpreter.
   Generalising cnet's token into clean-core is the candidate; [async.md](systems/async.md) lists cancellation propagation through a graph as a follow-up beside it.
 
 - **The async-vs-direct tax in `tests/benchmarks/async/async-benchmark.cc` is not believable.**
