@@ -48,10 +48,12 @@ SGL's builtins live in a C++ registry, and `prelude/builtins.sgl` is generated f
 ## Editor support (VS Code)
 
 [tools/vscode-extension/](tools/vscode-extension/) is a VS Code extension for `.sgl` files.
-Today it is declarative only — a TextMate grammar plus a language configuration — so there is nothing to build and no `npm install`.
-LSP support will grow in the same folder later.
+It carries a TextMate grammar and a language configuration, and a client for the language server `sgl lsp`.
+The client is committed as an esbuild bundle, `dist/extension.js`, so installing it needs no `npm install`.
 
 ### Install
+
+Build `sgl` first, since the extension runs the binary your build made: `uv run dev.py build -t sgl`.
 
 VS Code loads every folder in its user extensions directory, so installing is linking this folder into it.
 A link rather than a copy means a `git pull` updates the extension.
@@ -75,6 +77,52 @@ Open [examples/sample.sgl](tools/vscode-extension/examples/sample.sgl) to check:
 
 The extensions directory differs for other builds: `.vscode-insiders`, `.vscode-oss`, `.cursor`, and `.vscode-server` when working over Remote / WSL.
 To uninstall, delete the link and reload.
+
+### The language server
+
+The extension starts the server when the first `.sgl` file opens, and its log is the **SGL Language Server** output channel.
+What the server provides:
+
+* diagnostics, pushed as you type;
+* semantic tokens, which colour what the grammar cannot tell apart;
+* inlay hints showing inferred types;
+* test results: a failing `check` is a diagnostic, and every check site gets a gutter mark.
+
+The gutter marks are a green check when every run passed, a red cross when every run failed, and a half-and-half mark for both.
+A grey question mark is a site that never ran, and hovering any mark gives the counts.
+An edit dims the marks to a dashed circle until the server reports on the edited text.
+
+A diagnostic can point into the prelude, and such a link opens a read-only `sgl-prelude:` document the server supplies.
+
+**Which binary runs.**
+The setting `sgl.server.path` wins when it is set.
+Otherwise the extension reads `build/*/nexus-binaries.json` in every workspace folder, whose `paths` object configure writes, and takes the newest `sgl` that exists.
+So with several presets built, the most recently built one runs.
+
+**The server runs from a copy.**
+The binary (with its `.pdb` on Windows) is copied into the extension's global storage first, so a rebuild can replace the original while the server runs.
+When the original changes, the extension offers to restart with "A newer sgl was built."
+**SGL: Restart Language Server** does the same on demand: it stops the server, copies the binary again, and starts it.
+
+**Settings.**
+
+* `sgl.server.path` — the `sgl` binary to run; empty (the default) finds it through the manifests.
+* `sgl.server.logLevel` — `trace`, `debug`, `info` (the default), `warning` or `error`, handed to the server at start.
+
+Changing either restarts the server.
+
+### Working on the client
+
+* The client is [src/extension.js](tools/vscode-extension/src/extension.js), plain CommonJS over `vscode-languageclient`.
+* After changing it, run `npm install && npm run bundle` in `tools/vscode-extension/` and commit `dist/extension.js` with the change.
+* `uv run dev.py check` rebuilds the bundle whenever its sources changed and fails when the committed one differs; `--fix` replaces it.
+
+A manual test after a change, with `sgl` built and the extension linked:
+
+1. Open [tests/samples/control-flow.sgl](tests/samples/control-flow.sgl): names are coloured by the server, and inferred types appear as inlay hints.
+2. Type a deliberate error: a squiggle appears, and its hover names the problem.
+3. Break a `check` in a test so that it fails: its gutter mark turns into a red cross.
+4. Rebuild with `uv run dev.py build -t sgl`: the "A newer sgl was built." prompt appears, and **Restart** brings the new server up.
 
 ### Working on the grammar
 

@@ -12,7 +12,10 @@
 #       It is for a binary whose cost the machine sets rather than the code, such as one that runs WARP on a GPU-less host.
 #
 #   sc_write_nexus_binary_manifest()
-#       Writes <build>/nexus-binaries.json. Called once, at the end of the top-level CMakeLists.
+#       Writes <build>/nexus-binaries.json at generate time, the end of configure.
+#       Called once, at the end of the top-level CMakeLists.
+#       `binaries` holds each binary's kinds and `timeouts` the declared TIMEOUTs.
+#       `paths` maps every nexus binary to its absolute output file, which is how a tool outside dev.py finds one — the SGL editor extension finds `sgl` this way.
 
 function(sc_nexus_binary target)
     cmake_parse_arguments(PARSE_ARGV 1 NB "" "TIMEOUT" "KINDS")
@@ -62,7 +65,16 @@ function(sc_write_nexus_binary_manifest)
     endforeach()
     list(JOIN _timeout_entries ",\n" _timeout_body)
 
-    # file(CONFIGURE) is copy-if-different, so a configure that changes nothing leaves the manifest's mtime alone.
-    file(CONFIGURE OUTPUT "${CMAKE_BINARY_DIR}/nexus-binaries.json"
-        CONTENT "{\n  \"binaries\": {\n${_body}\n  },\n  \"timeouts\": {\n${_timeout_body}\n  }\n}\n" @ONLY)
+    set(_path_entries "")
+    foreach(_binary IN LISTS _binaries)
+        string(REPLACE "=" ";" _parts "${_binary}")
+        list(GET _parts 0 _name)
+        list(APPEND _path_entries "    \"${_name}\": \"$<TARGET_FILE:${_name}>\"")
+    endforeach()
+    list(JOIN _path_entries ",\n" _path_body)
+
+    # file(GENERATE) because the paths are generator expressions; it rewrites the file only when its content changed.
+    # Every preset uses the single-config Ninja generator, so one OUTPUT without $<CONFIG> in its name is fine.
+    file(GENERATE OUTPUT "${CMAKE_BINARY_DIR}/nexus-binaries.json"
+        CONTENT "{\n  \"binaries\": {\n${_body}\n  },\n  \"timeouts\": {\n${_timeout_body}\n  },\n  \"paths\": {\n${_path_body}\n  }\n}\n")
 endfunction()

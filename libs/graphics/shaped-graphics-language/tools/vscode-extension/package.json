@@ -1,15 +1,19 @@
 {
     "name": "sgl",
     "displayName": "Shaped Graphics Language",
-    "description": "Syntax highlighting for the Shaped Graphics Language (.sgl).",
+    "description": "Shaped Graphics Language (.sgl): syntax highlighting, and a client for the `sgl lsp` language server.",
     "version": "0.1.0",
     "publisher": "shapedcode",
     "private": true,
     "engines": {
-        "vscode": "^1.75.0"
+        "vscode": "^1.82.0"
     },
     "categories": [
         "Programming Languages"
+    ],
+    "main": "./dist/extension.js",
+    "activationEvents": [
+        "onLanguage:sgl"
     ],
     "contributes": {
         "languages": [
@@ -39,6 +43,42 @@
                 "editor.tabSize": 4,
                 "editor.detectIndentation": false
             }
+        },
+        "commands": [
+            {
+                "command": "sgl.restartServer",
+                "title": "Restart Language Server",
+                "category": "SGL"
+            }
+        ],
+        "configuration": {
+            "title": "SGL",
+            "properties": {
+                "sgl.server.path": {
+                    "type": "string",
+                    "default": "",
+                    "markdownDescription": "The `sgl` binary to run as the language server. Empty finds the newest one a workspace build's `nexus-binaries.json` names."
+                },
+                "sgl.server.logLevel": {
+                    "type": "string",
+                    "enum": [
+                        "trace",
+                        "debug",
+                        "info",
+                        "warning",
+                        "error"
+                    ],
+                    "default": "info",
+                    "description": "How much the language server logs to the \"SGL Language Server\" output channel."
+                }
+            }
         }
+    },
+    "scripts": {
+        "bundle": "esbuild src/extension.js --bundle --platform=node --format=cjs --external:vscode --minify --outfile=dist/extension.js"
+    },
+    "devDependencies": {
+        "esbuild": "^0.28.2",
+        "vscode-languageclient": "^9.0.1"
     }
 }
