@@ -84,6 +84,9 @@ class FileProvider:
     It says where a path that moved went, and puts the commit into the removed note.
     A design review carries its decisions out uncommitted and has no such tree, which is why leniency cannot hang on it.
     `context` is the resolved folder the text's entry or block names, looked in first — see RepoIndex.resolve.
+    `planned` is a folder the design under review will create, normalized but never resolved, since it need not exist.
+    A path that resolves nowhere is drawn as new rather than failing when it lies under that folder, or is a bare name.
+    A real file always wins, so a planned folder never shadows one — see `_planned`.
     """
 
     index: RepoIndex
@@ -94,6 +97,7 @@ class FileProvider:
     history: RepoIndex | None = None
     history_rev: str = ""
     context: str = ""
+    planned: str = ""
 
     def tokens(self, text: str) -> list[Token]:
         out: list[Token] = []
@@ -107,7 +111,9 @@ class FileProvider:
             # Prose that happens to hold a dot is not a reference, and treating one as a broken reference would
             # make the strictness unusable.
             # The repository decides, by what its own files are actually called.
-            if not self.index.looks_like_a_path(ref):
+            # The planned widening is refused mid-word and before a call, so `obj.size()` stays a member access.
+            widen = bool(self.planned) and not re.match(r"[\w(]", text[match.end():match.end() + 1])
+            if not self.index.looks_like_a_path(ref, planned=widen):
                 continue
             self.seen.add(literal)
             out.append(self._token(literal, match.group(1), match.group(2), match.group(3)))
@@ -150,6 +156,9 @@ class FileProvider:
         if resolution.state == MISSING:
             if intent == OLD:
                 return Token(text=literal, kind=self.kind, css="ref-old", regions=self.regions, label=shown)
+            if _planned(ref, self.planned, bare_ok=True):
+                return Token(text=literal, kind=self.kind, css="ref-new", regions=self.regions, label=shown,
+                             note=_planned_note(self.planned))
             if self.answered:
                 return Token(text=literal, kind=self.kind, css="ref-old", regions=self.regions, label=shown,
                              note=_missing_note(self.history, self.history_rev))
@@ -177,6 +186,31 @@ def _ambiguity(ref: str, candidates: tuple[str, ...], what: str) -> str:
     more = f" and {len(candidates) - _CANDIDATES_SHOWN} more" if len(candidates) > _CANDIDATES_SHOWN else ""
     return (f"{ref} names {len(candidates)} {what} — write one of {shown}{more}, "
             f"or give the entry a `context:` folder to look in first")
+
+
+def _planned(ref: str, planned: str, *, bare_ok: bool) -> bool:
+    """Whether a reference that resolves nowhere names something under the planned folder.
+
+    A bare file name counts, since a design names the files it will create by name far more often than by path.
+    A bare folder does not: a code fence is full of `word/` spans, and each would become a planned folder.
+    """
+    if not planned:
+        return False
+    ref = ref.strip()
+    ref = ref[2:] if ref.startswith("./") else ref
+    ref = ref.rstrip("/")
+    return ref == planned or ref.startswith(planned + "/") or (bare_ok and "/" not in ref)
+
+
+def _planned_note(planned: str) -> str:
+    return f"planned under {planned}/, which this design will create"
+
+
+def planned_folder(raw: str) -> str:
+    """A `planned:` value as the providers compare it: no leading `./`, no trailing slash, never resolved."""
+    raw = raw.strip()
+    raw = raw[2:] if raw.startswith("./") else raw
+    return raw.rstrip("/")
 
 
 def _missing_note(history: RepoIndex | None, rev: str) -> str:
@@ -213,7 +247,8 @@ class DirProvider:
     Narrowing what counts as a reference would trade a loud false positive for a silent one: a typo'd path
     quietly staying plain text, which is the failure this strictness exists to catch.
     `raw:` is the per-span escape for something that only looks like a reference.
-    `answered`, `history` and `context` are judged exactly as FileProvider's are.
+    `answered`, `history`, `context` and `planned` are judged exactly as FileProvider's are,
+    except that a bare folder name is never planned — see `_planned`.
     """
 
     index: RepoIndex
@@ -224,6 +259,7 @@ class DirProvider:
     history: RepoIndex | None = None
     history_rev: str = ""
     context: str = ""
+    planned: str = ""
 
     def tokens(self, text: str) -> list[Token]:
         out: list[Token] = []
@@ -273,6 +309,10 @@ class DirProvider:
                 if intent == OLD:
                     out.append(Token(text=literal, kind=self.kind, css="ref-old", regions=self.regions, label=shown))
                     continue
+                if _planned(ref, self.planned, bare_ok=False):
+                    out.append(Token(text=literal, kind=self.kind, css="ref-new", regions=self.regions, label=shown,
+                                     note=_planned_note(self.planned)))
+                    continue
                 if self.answered:
                     out.append(Token(text=literal, kind=self.kind, css="ref-old", regions=self.regions, label=shown,
                                      note=_missing_note(self.history, self.history_rev)))
@@ -320,5 +360,5 @@ class CommitProvider:
         return out
 
 
-__all__ = ["CODE", "DIFF", "PROSE", "CommitProvider", "DirProvider", "FileProvider", "Token",
+__all__ = ["CODE", "DIFF", "PROSE", "CommitProvider", "DirProvider", "FileProvider", "Token", "planned_folder",
            "AMBIGUOUS", "MISSING", "RESOLVED"]

@@ -41,7 +41,7 @@ So an agent writing one cannot leave the file unbalanced; the worst it can do is
 ## Front matter
 
 `id` and `title` are required.
-`group`, `state`, `severity`, `resolved-by` and `context` are known; anything else is preserved verbatim, so a review can carry fields the tool has no opinion on.
+`group`, `state`, `severity`, `resolved-by`, `context` and `planned` are known; anything else is preserved verbatim, so a review can carry fields the tool has no opinion on.
 
 `state` is `open`, `obsolete` or `superseded`.
 `severity` is `bug`, `design`, `api`, `docs`, `nit`, `question` or `lgtm`.
@@ -222,6 +222,31 @@ context: src/stages/08_ring_ir/
 - A literal is resolved once per entry, by the first block that names it, because the page matches literals entry-wide.
 
 An ambiguous reference lists every candidate as a full path in backticks, ready to paste, and names `context:` as the other remedy.
+
+## `planned:` — files a design will create
+
+A design review names files that do not exist yet, and marking every one `new:` drowns the entry in prefixes.
+`planned:` names the folder the design will create, once, and what the entry names under it is drawn as new.
+
+```markdown
+---
+id: 310
+title: the language server's wire layer
+planned: src/lsp/
+---
+```
+
+- **A path that resolves nowhere is planned when it lies under the folder**, and so is a bare file name such as `framing.hh`.
+  It renders as a `new:` path does, with a hover note naming the folder, and is never a validation error.
+- **A real file always wins.**
+  The plan is consulted only for what resolves nowhere, so it never shadows a file that exists, and an ambiguous name stays ambiguous.
+- **Folders under it are planned too**, `src/lsp/wire/` included.
+  A bare folder name is not: a fence is full of `word/` spans, and each would silently become a planned folder.
+- **A path outside the folder keeps every error**, which is what keeps a typo elsewhere loud.
+- **The folder is never resolved**, since it does not exist yet; a leading `./` and a trailing `/` are ignored.
+- **A block can name its own** with `planned:`, which replaces the entry's for that block, the way `context:` does.
+- **A bare name may carry a suffix no tracked file uses yet**, as long as it is short and lowercase.
+  A call or a longer word right after it keeps `obj.size()` a member access rather than a planned file.
 
 ## `raw:` — a span that is not a reference
 

@@ -1688,6 +1688,58 @@ def test_a_context_folder_that_resolves_nowhere_is_a_problem(root: Path) -> None
     assert any("99_nope" in p and "context" in p for p in problems), problems
 
 
+def test_a_planned_folder_holds_the_files_a_design_will_create(root: Path) -> None:
+    """A design review names files that do not exist yet, and marking each one `new:` would drown the entry.
+
+    `planned:` names the folder once, and a path under it, or a bare name, that resolves nowhere is drawn as new.
+    The folder itself does not exist either, so it is never resolved and never a context problem.
+    """
+    blocks = ("## prose\n\nSee `src/stages/10_lsp/framing.rs`, `server.rs`, `session.wgsl`"
+              " and `src/stages/10_lsp/wire/`.\n")
+    tokens = _context_tokens(root, "planned: ./src/stages/10_lsp/\n", blocks)
+    by_text = {t.text: t for t in tokens}
+    assert not any(t.problem for t in tokens), [(t.text, t.problem) for t in tokens]
+    for text in ("src/stages/10_lsp/framing.rs", "server.rs", "session.wgsl", "src/stages/10_lsp/wire/"):
+        assert by_text[text].css == "ref-new", by_text.get(text)
+        assert "planned under src/stages/10_lsp/" in by_text[text].note, by_text[text]
+    assert not by_text["server.rs"].path, "a planned file links nowhere, since there is nothing to open"
+
+
+def test_a_planned_folder_never_shadows_a_real_file(root: Path) -> None:
+    """A real file resolves as it always does, and only what resolves nowhere is judged against the plan."""
+    blocks = "## prose\n\nSee `lib.rs` and `src/stages/08_ring_ir/compile.rs`.\n"
+    by_text = {t.text: t for t in _context_tokens(root, "planned: src/stages/10_lsp/\n", blocks)}
+    assert by_text["lib.rs"].path == "src/lib.rs" and by_text["lib.rs"].css == "ref", by_text["lib.rs"]
+    assert by_text["src/stages/08_ring_ir/compile.rs"].css == "ref", by_text
+
+
+def test_a_path_outside_the_planned_folder_is_still_a_problem(root: Path) -> None:
+    """The plan excuses one folder, so a typo'd path elsewhere keeps failing, and so does a bare folder name."""
+    blocks = "## prose\n\nSee `src/stages/11_nope/framing.rs` and `wire/`.\n"
+    by_text = {t.text: t for t in _context_tokens(root, "planned: src/stages/10_lsp/\n", blocks)}
+    assert "not a file in this repository" in by_text["src/stages/11_nope/framing.rs"].problem, by_text
+    assert "not a folder in this repository" in by_text["wire/"].problem, by_text
+
+    # Without a plan a bare missing name is the same error it always was.
+    token = _context_tokens(root, "", "## prose\n\nSee `server.rs`.\n")[0]
+    assert "not a file in this repository" in token.problem, token
+
+
+def test_a_block_s_planned_folder_overrides_the_entry_s(root: Path) -> None:
+    blocks = ("## prose\nplanned: src/stages/12_dap/\n\n"
+              "See `src/stages/12_dap/adapter.rs` and `src/stages/10_lsp/framing.rs`.\n")
+    by_text = {t.text: t for t in _context_tokens(root, "planned: src/stages/10_lsp/\n", blocks)}
+    assert by_text["src/stages/12_dap/adapter.rs"].css == "ref-new", by_text
+    assert "not a file in this repository" in by_text["src/stages/10_lsp/framing.rs"].problem, by_text
+
+
+def test_a_planned_folder_does_not_turn_a_member_access_into_a_file(root: Path) -> None:
+    """A planned folder admits unfamiliar suffixes, and a call or a longer word is where that would misfire."""
+    blocks = "## prose\n\nCall `obj.size()` on `sr::window.headless`.\n"
+    tokens = _context_tokens(root, "planned: src/stages/10_lsp/\n", blocks)
+    assert not tokens, tokens
+
+
 def test_an_ambiguous_reference_names_its_candidates_ready_to_paste(root: Path) -> None:
     """The fix is always a longer path, so the message carries every one of them as something to copy."""
     tokens = _context_tokens(root, "", "## prose\n\nSee `mod.rs`.\n")

@@ -17,6 +17,7 @@ the repository under review — which is why a path carries the root it was foun
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -29,6 +30,9 @@ MISSING = "missing"
 
 # What a review folder contributes, relative to its own root.
 _REVIEW_GLOBS = ("review.toml", "entries/*.md", "answers/*.json", "rounds/*.md", "attachments/*")
+
+# A suffix a planned file may carry although no tracked file does — see `looks_like_a_path`.
+_PLANNED_SUFFIX_RE = re.compile(r"[a-z][a-z0-9]{0,4}")
 
 
 @dataclass(frozen=True)
@@ -102,12 +106,16 @@ class RepoIndex:
         except Exception:  # noqa: BLE001 — as in build: an unreadable commit is an empty index, never a failed render.
             return RepoIndex({})
 
-    def looks_like_a_path(self, ref: str) -> bool:
+    def looks_like_a_path(self, ref: str, planned: bool = False) -> bool:
         """Whether this is a reference at all, rather than prose that happens to hold a dot.
 
         A slash settles it.
         Otherwise the suffix has to be one some tracked file really uses, which keeps `sr::window.headless`
         and `git.has_merges` out without a hand-maintained list of extensions.
+        `planned` widens that, for text whose entry names a folder a design will create:
+        a file there may use a suffix nothing in the tree has yet, so a short lowercase suffix counts too.
+        It stays that narrow because whatever it admits and resolves nowhere is drawn as a planned file,
+        so a looser rule would underline `obj.method` in every fence of a design review.
         """
         # A leading slash or a scheme means a URL or a route — `/favicon.ico`, `vscode://file/x` — never a path
         # relative to a repository root.
@@ -116,7 +124,9 @@ class RepoIndex:
         if "/" in ref:
             return True
         _, dot, suffix = ref.rpartition(".")
-        return bool(dot) and suffix.lower() in self.suffixes
+        if not dot:
+            return False
+        return suffix.lower() in self.suffixes or (planned and _PLANNED_SUFFIX_RE.fullmatch(suffix) is not None)
 
     def resolve(self, ref: str, context: str = "") -> Resolution:
         """Resolve one reference, saying which of the three ways it went — or why it did not.
