@@ -28,8 +28,14 @@ r.value().color_targets  .target_struct    // a pixel entry point's target count
 r.error()                                  // one line per diagnostic: `cube.sgl:12:5: error: unknown-name: foo`
                                            // one inside the prelude names `builtins.sgl` or `core.sgl`
                                            // a missing entry point names the ones the source holds; a wrong stage says both
-sgl::text_request                          // source, source_name ("<sgl>"), entry_point, stage (none = any), target
+sgl::text_request                          // source, source_name ("<sgl>"), entry_point, stage (none = any), target, run_tests
                                            // the entry point is found by NAME; source_name is never opened
+                                           // run_tests: the source's own tests run, and one that fails is an error
+
+#include <shaped-graphics-language/driver/test_source.hh>
+auto const t = sgl::test_source(text, "colors.sgl");
+                                           // -> tested_source { errors, warnings, test_count, tests_run, tests_passed,
+                                           // tests_expecting_diagnostics, entry_points }; t.is_clean(): nothing to report
 
 #include <shaped-graphics-language/driver/describe.hh>
 auto const d = sgl::describe({.source = text, .source_name = "cube.sgl"});
@@ -53,6 +59,7 @@ sgl::prelude_files()                       // -> cc::span<prelude_file const> { 
 #include <shaped-graphics-language/source/format_diagnostic.hh>
 sgl::line_column_of(source, offset)        // -> sgl::line_column { line, column }, both 1-based, columns in bytes
 sgl::format_diagnostic(name, source, d, detail = {})   // `a.sgl:2:2: error: unknown-name: foo`; warning / error from d.level
+sgl::format_note(name, source, where, message)         // `a.sgl:3:1: note: declared here`, the line after a diagnostic
 ```
 
 ## Parsing a file
@@ -157,7 +164,7 @@ Statements: `invalid_stmt` `let_stmt` `assign_stmt` `if_stmt` (the whole chain, 
 `assert_stmt` `print_stmt` `decl_stmt` `expr_stmt`.
 
 Declarations: `invalid_decl` `module_decl` `use_decl` `fun_decl` `struct_decl` `enum_decl` `type_decl` `const_decl`
-`binding_decl` `sampler_decl` `notation_decl`, and the member lines `field_decl` `property_decl` `enum_case_decl`.
+`binding_decl` `sampler_decl` `notation_decl` `test_decl`, and the member lines `field_decl` `property_decl` `enum_case_decl`.
 
 ## The builtin registry (the ONE place a builtin lives; [docs/adding-a-builtin.md](docs/adding-a-builtin.md))
 
@@ -205,7 +212,7 @@ m.symbols                                  // every top-level fun / struct / bin
                                            // intrinsic (builtin_id) / intrinsic_type (builtin_type_id), operator_spelling, type, info
 m.builtins                                 // the registry those ids are positions in; m.builtin_type_of(type_id) / m.builtin_function(id)
                                            // -> the record, or null
-m.types  m.members                         // canonical types; types[0] is the error type, types[1] (nothing_type) what a fun without
+m.types  m.members                         // canonical types; types[0] is the error type, types[1] (void_type) what a fun without
                                            // `-> T` returns; fields and binding members
 m.functions  m.parameters  m.binding_lists // signatures; symbol::info is the position in functions / bindings
 m.bindings                                 // binding_info { symbol, is_inline, members }
@@ -217,7 +224,8 @@ m.files[f].target_at(expr_id)              // side table: { kind, symbol, index 
                                            // constructor / field / binding_member
 m.entry_points                             // flat_entry_point per SOUND entry point, in the STRUCTURED form; what an emitter reads
                                            // sound means: its body and the body of every function it reaches reported no error
-m.diagnostics                              // located_diagnostic { what, file, detail }, in the order they were found
+m.diagnostics                              // located_diagnostic { what, file, detail, notes }, in the order they were found; a related_note
+                                           // { file, where, message } is a second place a diagnostic points at
 m.at(symbol_id)  m.at(type_id)  m.at(range)  m.name_of(type_id)   // name_of gives "<error>" for the error type
 
 #include <shaped-graphics-language/check/flat.hh>
@@ -287,18 +295,29 @@ sgl::check::legalize_options               // { skip_pinning, skip_flag_tests }:
 #include <shaped-graphics-language/interpret/interpret.hh>
 auto const o = sgl::check::interpret(m, e, {.parameter = value, .bindings = {…}}, {.fuel = 1'000'000});
                                            // runs BOTH forms; left to right, each operand once; f32 and wrapping i32
-o.status                                   // ok, out_of_fuel, fell_off_the_end, type_error, uninitialized_read: never asserts
+o.status                                   // ok, out_of_fuel, fell_off_the_end, type_error, uninitialized_read,
+                                           // assertion_failed: never asserts
 o.result  o.trace  o.detail                // value { type, leaves }; trace = every print, and every call with an effect
+o.failures  o.checks_run                   // check_failure { site, values, is_evaluated, loop_values } per false check;
+                                           // {.run_checks = false} skips checks as the core form does, {.max_failures = 8}
 o == other                                 // status, result and trace; NOT the detail
 sgl::check::zero_value(m, type)  sgl::check::leaf_count_of(m, type)   // a value is its scalars in field order; mat4 is 16
 sgl::check::scalar::of(0.5f)  .as_float()  .as_int()  .as_bool()      // equality is on the BITS
 sgl::check::dump(o)                        // `ok 1.5 | print 1 | print true`
+
+#include <shaped-graphics-language/test/run_tests.hh>
+m.tests  m.test_units                      // test_info { symbol, file, where, scope_path, comment, unit } and its flat tree
+sgl::test::run_tests(m, files, {.file = f})  // -> vector<test_result { test, status, failures, checks_run }>; files are the
+                                           // module_files m was checked from, since a report quotes the source
+sgl::test::diagnostic_of(m, r)             // `test-failed` at the test, one related note per narrowed part:
+                                           // "`s.z > 0.6` is 0.5 > 0.6, with i = 2"
 ```
 
 ## The `sgl` tool (`tools/sgl/`, a nexus binary of COMMANDs; built under `SC_BUILD_TOOLS`)
 
 ```bash
 uv run dev.py run sgl -- emit shader.sgl --entry main_ps --target wgsl   # the text, or the diagnostics and exit 2
+uv run dev.py run sgl -- test a.sgl b.sgl                                # the tests of each file; exit 2 when one fails
 uv run dev.py run sgl -- prelude [--check <path> | --write <path>]       # the generated builtins.sgl; --check exits 2 on a difference
 uv run dev.py run sgl -- describe shader.sgl                             # sgl::describe as JSON: what slib's generator reads
 uv run dev.py check sgl-prelude [--fix]                                  # the gate over prelude/builtins.sgl
@@ -387,10 +406,12 @@ sgl::print_source(file)      // == file.source for EVERY input: the lossless inv
 - **The variable of a `for` may carry a type.** `for i : int in r:` fills `for_stmt::type`, and a pattern on the left is still `for-takes-name-in-range`.
   A `return` looks through `case` arms and properties, so `_ => return false` leaves the function around the `case`.
 - **An attribute's arguments are list elements like any other.** `@slider(0, max = 1)` holds a positional and a named `argument`; `@name()` has a `list` and no arguments.
-- **`no-effect` is a warning, and no statement is exempt.** A paren or juxtaposition call, a jump, a `case`, a `loop` and `invalid` have an effect; nothing else does.
+- **`no-effect` is a warning.** A paren or juxtaposition call, a jump, a `case`, a `loop` and `invalid` have an effect; nothing else does.
+  A `test` body is exempt from the AST pass's warning (AST-140): a `bool` line there is a check, which only the check pass can tell.
 - **An anonymous `fun` is a lambda only in expression position.** As a statement it is a function that lost its name and reports `expected-name`.
 - **`type name = …` is a type position**, like the right sides of `:`, `->` and `as`; the AST dump writes it `(type name : …)`.
-- **`true` and `false` are ordinary names** to every phase here.
+- **`true` and `false` are no keywords**: the AST reads them as names, and the check pass as the `@shadowable(false)` consts of `core.sgl`.
+- **`self` and `void` are reserved names**, read as `self_ref` / `void_ref`; a declaration taking one is `reserved-name` (AST-141).
 - **The check pass is one demand-driven pass.** A symbol is untouched, in compilation, checked or failed, and reaching one in compilation is `dependency-cycle`.
   Compiling a function means its signature; bodies are checked after every signature is known.
 - **Every body is checked ONCE, on its own**, so a broken function nobody calls still reports, and one called three times reports once.
@@ -409,9 +430,10 @@ sgl::print_source(file)      // == file.source for EVERY input: the lossless inv
   Where both have a function a call matches, the program's wins (CHK-192), so a prelude release adding its signature breaks nothing.
   Only two non-functions of one name in one file are `duplicate-declaration`.
 - **`and`, `or` and `not` are no functions**, and a comparison chain evaluates each inner operand once: it is bound where it first stands.
-- **Still `unsupported-yet`:** generics, `self` and methods, `mut` parameters, lambdas and function values, nested functions, `const`, `use`,
-  a `for` over anything but `a ..< b`, a `let` without a value, an expression statement that is no call, `assert`.
-- **An arrow body without `-> T` infers its result**, and a BLOCK body without one still returns nothing.
+- **Still `unsupported-yet`:** generics, `self` and methods, `mut` parameters, lambdas and function values, nested functions, `use`,
+  a `const` whose value is no literal, enum case or const, a `for` over anything but `a ..< b`, a `let` without a value,
+  an expression statement that is no call outside a `test`, an `assert` message, and an `assert` whose condition writes.
+- **An arrow body without `-> T` infers its result**, and a BLOCK body without one returns `void`.
   Its body is checked as part of compiling it, so two such functions that need each other are `dependency-cycle`, not `recursive-call`.
   An overload whose parameters cannot take a call is not demanded by it, so an overload set works from inside one of its inferred members.
 - **A call as a statement is `flat_eval`**: evaluated, its value dropped.

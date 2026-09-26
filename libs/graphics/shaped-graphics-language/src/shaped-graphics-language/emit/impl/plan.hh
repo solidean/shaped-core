@@ -48,7 +48,10 @@ struct planned_struct
     check::type_id type = check::type_id::none;
     cc::string name;
     struct_role role = struct_role::plain;
+    /// Only the members a target writes: a void one holds nothing, so no target declares it (EMIT-106).
     cc::vector<planned_member> members;
+    /// Parallel to the type's members: the position in `members`, or -1 for a void member.
+    cc::vector<i32> member_of;
 };
 
 /// An enum the entry point mentions, whose every case is declared whether or not an arm names it (EMIT-77).

@@ -336,7 +336,7 @@
             "match": "(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])@[0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*"
         },
         "named-argument": {
-            "match": "(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])(?!(?:fun|let|mut|struct|enum|binding|sampler|pipeline|const|use|module|type|notation|if|else|for|while|loop|return|yield|continue|break|case|assert|print|and|or|not|as|in)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))([A-Za-z_\\\\\\x{80}-\\x{10FFFF}][0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*)(?=[ \\t]*=(?![=>]))",
+            "match": "(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])(?!(?:fun|let|mut|struct|enum|binding|sampler|pipeline|const|use|module|type|notation|test|if|else|for|while|loop|return|yield|continue|break|case|assert|print|and|or|not|as|in)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))([A-Za-z_\\\\\\x{80}-\\x{10FFFF}][0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*)(?=[ \\t]*=(?![=>]))",
             "captures": {
                 "1": { "name": "variable.other.member.sgl" }
             }
@@ -345,28 +345,28 @@
             "patterns": [
                 {
                     "comment": "An anonymous 'fun (x) => …' has no name and falls through to #keywords.",
-                    "match": "(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])(fun)[ \\t]+(?!(?:fun|let|mut|struct|enum|binding|sampler|pipeline|const|use|module|type|notation|if|else|for|while|loop|return|yield|continue|break|case|assert|print|and|or|not|as|in)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))([A-Za-z_\\\\\\x{80}-\\x{10FFFF}][0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*)",
+                    "match": "(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])(fun)[ \\t]+(?!(?:fun|let|mut|struct|enum|binding|sampler|pipeline|const|use|module|type|notation|test|if|else|for|while|loop|return|yield|continue|break|case|assert|print|and|or|not|as|in)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))([A-Za-z_\\\\\\x{80}-\\x{10FFFF}][0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*)",
                     "captures": {
                         "1": { "name": "storage.type.function.sgl" },
                         "2": { "name": "entity.name.function.sgl" }
                     }
                 },
                 {
-                    "match": "(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])(struct|enum|binding|sampler|pipeline|type)[ \\t]+(?!(?:fun|let|mut|struct|enum|binding|sampler|pipeline|const|use|module|type|notation|if|else|for|while|loop|return|yield|continue|break|case|assert|print|and|or|not|as|in)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))([A-Za-z_\\\\\\x{80}-\\x{10FFFF}][0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*)",
+                    "match": "(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])(struct|enum|binding|sampler|pipeline|type)[ \\t]+(?!(?:fun|let|mut|struct|enum|binding|sampler|pipeline|const|use|module|type|notation|test|if|else|for|while|loop|return|yield|continue|break|case|assert|print|and|or|not|as|in)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))([A-Za-z_\\\\\\x{80}-\\x{10FFFF}][0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*)",
                     "captures": {
                         "1": { "name": "storage.type.$1.sgl" },
                         "2": { "name": "entity.name.type.sgl" }
                     }
                 },
                 {
-                    "match": "(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])(module)[ \\t]+(?!(?:fun|let|mut|struct|enum|binding|sampler|pipeline|const|use|module|type|notation|if|else|for|while|loop|return|yield|continue|break|case|assert|print|and|or|not|as|in)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))([A-Za-z_\\\\\\x{80}-\\x{10FFFF}][0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*)",
+                    "match": "(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])(module)[ \\t]+(?!(?:fun|let|mut|struct|enum|binding|sampler|pipeline|const|use|module|type|notation|test|if|else|for|while|loop|return|yield|continue|break|case|assert|print|and|or|not|as|in)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))([A-Za-z_\\\\\\x{80}-\\x{10FFFF}][0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*)",
                     "captures": {
                         "1": { "name": "storage.type.module.sgl" },
                         "2": { "name": "entity.name.namespace.sgl" }
                     }
                 },
                 {
-                    "match": "(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])(use)[ \\t]+(?!(?:fun|let|mut|struct|enum|binding|sampler|pipeline|const|use|module|type|notation|if|else|for|while|loop|return|yield|continue|break|case|assert|print|and|or|not|as|in)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))([A-Za-z_\\\\\\x{80}-\\x{10FFFF}][0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*)(?:[ \\t]+(as)[ \\t]+(?!(?:fun|let|mut|struct|enum|binding|sampler|pipeline|const|use|module|type|notation|if|else|for|while|loop|return|yield|continue|break|case|assert|print|and|or|not|as|in)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))([A-Za-z_\\\\\\x{80}-\\x{10FFFF}][0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*))?",
+                    "match": "(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])(use)[ \\t]+(?!(?:fun|let|mut|struct|enum|binding|sampler|pipeline|const|use|module|type|notation|test|if|else|for|while|loop|return|yield|continue|break|case|assert|print|and|or|not|as|in)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))([A-Za-z_\\\\\\x{80}-\\x{10FFFF}][0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*)(?:[ \\t]+(as)[ \\t]+(?!(?:fun|let|mut|struct|enum|binding|sampler|pipeline|const|use|module|type|notation|test|if|else|for|while|loop|return|yield|continue|break|case|assert|print|and|or|not|as|in)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))([A-Za-z_\\\\\\x{80}-\\x{10FFFF}][0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*))?",
                     "captures": {
                         "1": { "name": "keyword.control.import.sgl" },
                         "2": { "name": "entity.name.namespace.sgl" },
@@ -375,7 +375,7 @@
                     }
                 },
                 {
-                    "match": "(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])(let)(?:[ \\t]+(mut))?[ \\t]+(?!(?:fun|let|mut|struct|enum|binding|sampler|pipeline|const|use|module|type|notation|if|else|for|while|loop|return|yield|continue|break|case|assert|print|and|or|not|as|in)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))(?!_(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))([A-Za-z_\\\\\\x{80}-\\x{10FFFF}][0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*)",
+                    "match": "(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])(let)(?:[ \\t]+(mut))?[ \\t]+(?!(?:fun|let|mut|struct|enum|binding|sampler|pipeline|const|use|module|type|notation|test|if|else|for|while|loop|return|yield|continue|break|case|assert|print|and|or|not|as|in)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))(?!_(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))([A-Za-z_\\\\\\x{80}-\\x{10FFFF}][0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*)",
                     "captures": {
                         "1": { "name": "storage.type.let.sgl" },
                         "2": { "name": "storage.modifier.sgl" },
@@ -383,14 +383,14 @@
                     }
                 },
                 {
-                    "match": "(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])(const)[ \\t]+(?!(?:fun|let|mut|struct|enum|binding|sampler|pipeline|const|use|module|type|notation|if|else|for|while|loop|return|yield|continue|break|case|assert|print|and|or|not|as|in)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))([A-Za-z_\\\\\\x{80}-\\x{10FFFF}][0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*)",
+                    "match": "(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])(const)[ \\t]+(?!(?:fun|let|mut|struct|enum|binding|sampler|pipeline|const|use|module|type|notation|test|if|else|for|while|loop|return|yield|continue|break|case|assert|print|and|or|not|as|in)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))([A-Za-z_\\\\\\x{80}-\\x{10FFFF}][0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*)",
                     "captures": {
                         "1": { "name": "storage.type.const.sgl" },
                         "2": { "name": "variable.other.constant.sgl" }
                     }
                 },
                 {
-                    "match": "(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])(for)[ \\t]+(?!(?:fun|let|mut|struct|enum|binding|sampler|pipeline|const|use|module|type|notation|if|else|for|while|loop|return|yield|continue|break|case|assert|print|and|or|not|as|in)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))(?!_(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))([A-Za-z_\\\\\\x{80}-\\x{10FFFF}][0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*)",
+                    "match": "(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])(for)[ \\t]+(?!(?:fun|let|mut|struct|enum|binding|sampler|pipeline|const|use|module|type|notation|test|if|else|for|while|loop|return|yield|continue|break|case|assert|print|and|or|not|as|in)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))(?!_(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))([A-Za-z_\\\\\\x{80}-\\x{10FFFF}][0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*)",
                     "captures": {
                         "1": { "name": "keyword.control.sgl" },
                         "2": { "name": "variable.other.readwrite.sgl" }
@@ -402,7 +402,7 @@
             "comment": "A simple name after '->', ':' or 'as' stands in a type position; anything more complex is left to the other rules.",
             "patterns": [
                 {
-                    "match": "(?<![!+\\-*/%=<>?&^|~])(->)(?!(?:[!+\\-*%=<>?&^|~]|/(?!/)))[ \\t]*((?:(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])@[0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*[ \\t]+)*)(?!(?:fun|let|mut|struct|enum|binding|sampler|pipeline|const|use|module|type|notation|if|else|for|while|loop|return|yield|continue|break|case|assert|print|and|or|not|as|in)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))([A-Za-z_\\\\\\x{80}-\\x{10FFFF}][0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*)",
+                    "match": "(?<![!+\\-*/%=<>?&^|~])(->)(?!(?:[!+\\-*%=<>?&^|~]|/(?!/)))[ \\t]*((?:(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])@[0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*[ \\t]+)*)(?!(?:fun|let|mut|struct|enum|binding|sampler|pipeline|const|use|module|type|notation|test|if|else|for|while|loop|return|yield|continue|break|case|assert|print|and|or|not|as|in)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))([A-Za-z_\\\\\\x{80}-\\x{10FFFF}][0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*)",
                     "captures": {
                         "1": { "name": "keyword.operator.arrow.sgl" },
                         "2": {
@@ -414,7 +414,7 @@
                     }
                 },
                 {
-                    "match": "(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])(as)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])[ \\t]*((?:(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])@[0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*[ \\t]+)*)(?!(?:fun|let|mut|struct|enum|binding|sampler|pipeline|const|use|module|type|notation|if|else|for|while|loop|return|yield|continue|break|case|assert|print|and|or|not|as|in)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))([A-Za-z_\\\\\\x{80}-\\x{10FFFF}][0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*)",
+                    "match": "(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])(as)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])[ \\t]*((?:(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])@[0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*[ \\t]+)*)(?!(?:fun|let|mut|struct|enum|binding|sampler|pipeline|const|use|module|type|notation|test|if|else|for|while|loop|return|yield|continue|break|case|assert|print|and|or|not|as|in)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))([A-Za-z_\\\\\\x{80}-\\x{10FFFF}][0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*)",
                     "captures": {
                         "1": { "name": "keyword.operator.wordlike.sgl" },
                         "2": {
@@ -426,7 +426,7 @@
                     }
                 },
                 {
-                    "match": "(?<!:)(:)(?!:)[ \\t]*((?:(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])@[0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*[ \\t]+)*)(?!(?:fun|let|mut|struct|enum|binding|sampler|pipeline|const|use|module|type|notation|if|else|for|while|loop|return|yield|continue|break|case|assert|print|and|or|not|as|in)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))([A-Za-z_\\\\\\x{80}-\\x{10FFFF}][0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*)",
+                    "match": "(?<!:)(:)(?!:)[ \\t]*((?:(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])@[0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*[ \\t]+)*)(?!(?:fun|let|mut|struct|enum|binding|sampler|pipeline|const|use|module|type|notation|test|if|else|for|while|loop|return|yield|continue|break|case|assert|print|and|or|not|as|in)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))([A-Za-z_\\\\\\x{80}-\\x{10FFFF}][0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*)",
                     "captures": {
                         "1": { "name": "punctuation.separator.annotation.sgl" },
                         "2": {
@@ -453,20 +453,20 @@
             "patterns": [
                 {
                     "name": "variable.other.member.sgl",
-                    "match": "\\G(?!(?:fun|let|mut|struct|enum|binding|sampler|pipeline|const|use|module|type|notation|if|else|for|while|loop|return|yield|continue|break|case|assert|print|and|or|not|as|in)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))(?!(?:self|_)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))[A-Za-z_\\\\\\x{80}-\\x{10FFFF}][0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*(?=[ \\t]*:(?!:|[ \\t]*(?://.*)?$))"
+                    "match": "\\G(?!(?:fun|let|mut|struct|enum|binding|sampler|pipeline|const|use|module|type|notation|test|if|else|for|while|loop|return|yield|continue|break|case|assert|print|and|or|not|as|in)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))(?!(?:self|void|_)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))[A-Za-z_\\\\\\x{80}-\\x{10FFFF}][0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*(?=[ \\t]*:(?!:|[ \\t]*(?://.*)?$))"
                 },
                 {
                     "name": "variable.other.property.sgl",
-                    "match": "\\G(?!(?:fun|let|mut|struct|enum|binding|sampler|pipeline|const|use|module|type|notation|if|else|for|while|loop|return|yield|continue|break|case|assert|print|and|or|not|as|in)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))(?!(?:self|_)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))[A-Za-z_\\\\\\x{80}-\\x{10FFFF}][0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*(?=[ \\t]*=>(?!(?:[!+\\-*%=<>?&^|~]|/(?!/))))"
+                    "match": "\\G(?!(?:fun|let|mut|struct|enum|binding|sampler|pipeline|const|use|module|type|notation|test|if|else|for|while|loop|return|yield|continue|break|case|assert|print|and|or|not|as|in)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))(?!(?:self|void|_)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))[A-Za-z_\\\\\\x{80}-\\x{10FFFF}][0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*(?=[ \\t]*=>(?!(?:[!+\\-*%=<>?&^|~]|/(?!/))))"
                 },
                 {
                     "name": "variable.parameter.sgl",
-                    "match": "(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])(?!(?:fun|let|mut|struct|enum|binding|sampler|pipeline|const|use|module|type|notation|if|else|for|while|loop|return|yield|continue|break|case|assert|print|and|or|not|as|in)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))(?!(?:self|_)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))[A-Za-z_\\\\\\x{80}-\\x{10FFFF}][0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*(?=[ \\t]*:(?!:|[ \\t]*(?://.*)?$))"
+                    "match": "(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])(?!(?:fun|let|mut|struct|enum|binding|sampler|pipeline|const|use|module|type|notation|test|if|else|for|while|loop|return|yield|continue|break|case|assert|print|and|or|not|as|in)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))(?!(?:self|void|_)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))[A-Za-z_\\\\\\x{80}-\\x{10FFFF}][0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*(?=[ \\t]*:(?!:|[ \\t]*(?://.*)?$))"
                 },
                 {
                     "comment": "The left side of an assignment that leads its line: an object member, an enum case's value, a sampler setting, or a variable. A grammar cannot tell them apart, and they read alike.",
                     "name": "variable.other.member.sgl",
-                    "match": "\\G(?!(?:fun|let|mut|struct|enum|binding|sampler|pipeline|const|use|module|type|notation|if|else|for|while|loop|return|yield|continue|break|case|assert|print|and|or|not|as|in)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))(?!(?:self|_)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))[A-Za-z_\\\\\\x{80}-\\x{10FFFF}][0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*(?=[ \\t]*(?:[+\\-*%&|^]|/(?!/)|<<|>>)?=(?![=>]))"
+                    "match": "\\G(?!(?:fun|let|mut|struct|enum|binding|sampler|pipeline|const|use|module|type|notation|test|if|else|for|while|loop|return|yield|continue|break|case|assert|print|and|or|not|as|in)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))(?!(?:self|void|_)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))[A-Za-z_\\\\\\x{80}-\\x{10FFFF}][0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*(?=[ \\t]*(?:[+\\-*%&|^]|/(?!/)|<<|>>)?=(?![=>]))"
                 }
             ]
         },
@@ -479,7 +479,7 @@
             "comment": "A call by juxtaposition: the head of 'f x', 'f \"s\"', 'f (x)' or 'f -1'. Only the first name of a run is the head, so a name that follows an operand and one space is an argument. After a keyword the lookbehind cannot tell, so that case is matched with its keyword.",
             "patterns": [
                 {
-                    "match": "(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])(return|yield|break|if|else|while|case|assert|print|and|or|not|in)([ \\t]+)(?!(?:bool|int|uint|float|half|double|[iu](?:8|16|32|64)|f(?:16|32|64)|(?:bool|int|uint|float|half|double)[234]|(?:float|half|double)[234]x[234]|(?:vec|pos|dir|hpos|ivec|uvec|bvec|ipos|upos)[234](?:[fiu](?:8|16|32|64))?|mat[234](?:x[234])?|quat|range|span|array|texture(?:1d|2d|3d|_cube)(?:_array)?|buffer|storage_buffer|acceleration_structure)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))(?!(?:fun|let|mut|struct|enum|binding|sampler|pipeline|const|use|module|type|notation|if|else|for|while|loop|return|yield|continue|break|case|assert|print|and|or|not|as|in)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))(?!(?:self|_)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))([A-Za-z_\\\\\\x{80}-\\x{10FFFF}][0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*)(?=[ \\t]+(?!(?:and|or|not|as|in)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))(?:[0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}\\\"`(\\[{]|\\.\\.?[A-Za-z_(\\\\\\x{80}-\\x{10FFFF}]|-[0-9.A-Za-z_(]))",
+                    "match": "(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])(return|yield|break|if|else|while|case|assert|print|test|and|or|not|in)([ \\t]+)(?!(?:bool|int|uint|float|half|double|[iu](?:8|16|32|64)|f(?:16|32|64)|(?:bool|int|uint|float|half|double)[234]|(?:float|half|double)[234]x[234]|(?:vec|pos|dir|hpos|ivec|uvec|bvec|ipos|upos)[234](?:[fiu](?:8|16|32|64))?|mat[234](?:x[234])?|quat|range|span|array|texture(?:1d|2d|3d|_cube)(?:_array)?|buffer|storage_buffer|acceleration_structure)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))(?!(?:fun|let|mut|struct|enum|binding|sampler|pipeline|const|use|module|type|notation|test|if|else|for|while|loop|return|yield|continue|break|case|assert|print|and|or|not|as|in)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))(?!(?:self|void|_)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))([A-Za-z_\\\\\\x{80}-\\x{10FFFF}][0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*)(?=[ \\t]+(?!(?:and|or|not|as|in)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))(?:[0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}\\\"`(\\[{]|\\.\\.?[A-Za-z_(\\\\\\x{80}-\\x{10FFFF}]|-[0-9.A-Za-z_(]))",
                     "captures": {
                         "1": {
                             "patterns": [
@@ -495,7 +495,7 @@
                 },
                 {
                     "name": "entity.name.function.call.sgl",
-                    "match": "(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}')\\]}\\\"`][ \\t])(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])(?<!\\.)(?!(?:bool|int|uint|float|half|double|[iu](?:8|16|32|64)|f(?:16|32|64)|(?:bool|int|uint|float|half|double)[234]|(?:float|half|double)[234]x[234]|(?:vec|pos|dir|hpos|ivec|uvec|bvec|ipos|upos)[234](?:[fiu](?:8|16|32|64))?|mat[234](?:x[234])?|quat|range|span|array|texture(?:1d|2d|3d|_cube)(?:_array)?|buffer|storage_buffer|acceleration_structure)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))(?!(?:fun|let|mut|struct|enum|binding|sampler|pipeline|const|use|module|type|notation|if|else|for|while|loop|return|yield|continue|break|case|assert|print|and|or|not|as|in)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))(?!(?:self|_)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))[A-Za-z_\\\\\\x{80}-\\x{10FFFF}][0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*(?=[ \\t]+(?!(?:and|or|not|as|in)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))(?:[0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}\\\"`(\\[{]|\\.\\.?[A-Za-z_(\\\\\\x{80}-\\x{10FFFF}]|-[0-9.A-Za-z_(]))"
+                    "match": "(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}')\\]}\\\"`][ \\t])(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])(?<!\\.)(?!(?:bool|int|uint|float|half|double|[iu](?:8|16|32|64)|f(?:16|32|64)|(?:bool|int|uint|float|half|double)[234]|(?:float|half|double)[234]x[234]|(?:vec|pos|dir|hpos|ivec|uvec|bvec|ipos|upos)[234](?:[fiu](?:8|16|32|64))?|mat[234](?:x[234])?|quat|range|span|array|texture(?:1d|2d|3d|_cube)(?:_array)?|buffer|storage_buffer|acceleration_structure)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))(?!(?:fun|let|mut|struct|enum|binding|sampler|pipeline|const|use|module|type|notation|test|if|else|for|while|loop|return|yield|continue|break|case|assert|print|and|or|not|as|in)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))(?!(?:self|void|_)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))[A-Za-z_\\\\\\x{80}-\\x{10FFFF}][0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*(?=[ \\t]+(?!(?:and|or|not|as|in)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']))(?:[0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}\\\"`(\\[{]|\\.\\.?[A-Za-z_(\\\\\\x{80}-\\x{10FFFF}]|-[0-9.A-Za-z_(]))"
                 }
             ]
         },
@@ -516,7 +516,7 @@
                 },
                 {
                     "name": "storage.type.sgl",
-                    "match": "(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])(?:fun|let|struct|enum|binding|sampler|pipeline|const|module|type|notation)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])"
+                    "match": "(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])(?:fun|let|struct|enum|binding|sampler|pipeline|const|module|type|notation|test)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])"
                 },
                 {
                     "comment": "Compiled out of production code, so they get a scope of their own to theme.",
@@ -528,9 +528,14 @@
                     "match": "(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])(?:and|or|not|as|in)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])"
                 },
                 {
-                    "comment": "Ordinary names today; whether they become keywords is open in the spec.",
+                    "comment": "Consts of the prelude that nothing may shadow, over the cases of the builtin enum bool.",
                     "name": "constant.language.boolean.sgl",
                     "match": "(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])(?:true|false)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])"
+                },
+                {
+                    "comment": "A reserved name like self: the unit type in a type position, and its one value elsewhere.",
+                    "name": "storage.type.void.sgl",
+                    "match": "(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])(?:void)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])"
                 },
                 {
                     "name": "variable.language.self.sgl",

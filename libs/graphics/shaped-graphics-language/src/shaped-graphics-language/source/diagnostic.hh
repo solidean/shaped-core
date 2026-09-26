@@ -59,6 +59,8 @@ enum class sgl::diagnostic_kind : sgl::u8
     expected_member,
     expected_case_arm,
     expected_name,
+    /// A declaration, a field or a parameter named by a reserved name, whose meaning is fixed: `enum void:`.
+    reserved_name,
     expected_pattern,
     expected_parameter,
     expected_body,
@@ -159,6 +161,16 @@ enum class sgl::diagnostic_kind : sgl::u8
     stage_not_allowed,
     /// A `pipeline` whose stages do not fit together, or a setting that names no field or has a value it cannot.
     invalid_pipeline,
+    /// A declaration, a local or a parameter whose name would hide a `@shadowable(false)` symbol.
+    shadows_unshadowable,
+    /// A test that reads a parameter, a local or a binding member of the function it stands in; it runs on its own.
+    test_captures_runtime_value,
+    /// A test whose last code line is no check, so it could pass without having checked anything.
+    test_must_end_in_check,
+    /// A test that ran, and did not pass: a false check, a false assert, or a run that ended another way.
+    test_failed,
+    /// An `@expect` whose diagnostic did not occur in its test.
+    unmet_expectation,
 };
 
 namespace sgl

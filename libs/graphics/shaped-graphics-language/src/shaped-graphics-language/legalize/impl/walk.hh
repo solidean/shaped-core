@@ -106,7 +106,9 @@ void for_each_expr_of(flat_stmt const& s, Fn&& fn)
                  [&](flat_once const&) {},     //
                  [&](flat_break const&) {},    //
                  [&](flat_case const& n) { visit(n.scrutinee); }, [&](flat_switch const& n) { visit(n.scrutinee); },
-                 [&](flat_return const& n) { visit(n.value); });
+                 [&](flat_return const& n) { visit(n.value); },
+                 // its condition is the statements of its body
+                 [&](flat_check const&) {});
 }
 
 /// Calls `fn(ast::range_of<flat_expr_id>)` for the patterns of every arm of `s`, in the order they are tried.
@@ -145,6 +147,8 @@ void for_each_body_of(flat_entry_point const& e, flat_stmt const& s, Fn&& fn)
         fn(f->body);
     else if (auto const* const o = s.node.try_as<flat_once>())
         fn(o->body);
+    else if (auto const* const k = s.node.try_as<flat_check>())
+        fn(k->body);
     else if (auto const* const c = s.node.try_as<flat_case>())
     {
         if (is_known(e, c->arms))

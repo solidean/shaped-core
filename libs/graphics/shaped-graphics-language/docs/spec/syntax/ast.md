@@ -33,6 +33,7 @@ Back to the [phases](_index.md); the reasons are in [why/ast.md](why/ast.md).
 | `literal` | a number literal, a quoted literal or a hash literal |
 | `name` | an identifier |
 | `self_ref` | the identifier `self` |
+| `void_ref` | the identifier `void` |
 | `wildcard` | `_` |
 | `leading_dot` | a leading-dot form: `.point`, `.0` |
 | `member` | a member access: `a.b` |
@@ -58,6 +59,9 @@ Back to the [phases](_index.md); the reasons are in [why/ast.md](why/ast.md).
 
 * **AST-12** A quoted literal keeps its form, and its pieces and interpolations are reached through that form.
 * **AST-13** `self` is a **reserved name**: the identifier `self` reads as `self_ref` wherever it stands, and it is no keyword ([why](why/ast.md#ast-13)).
+* **AST-141** No declaration, field or enum case may be named by a reserved name, and no parameter may be named `void`; each is the normal error `reserved-name`.
+  A parameter named `self` is the receiver of a method, which is what the name is reserved for.
+* **AST-137** `void` is a reserved name too: the identifier `void` reads as `void_ref` wherever it stands, the type in a type position and its value elsewhere ([why](why/ast.md#ast-137)).
 * **AST-14** An applied square group reads as `index`, which is a subscript or type arguments, and its elements are arguments ([why](why/ast.md#ast-14)).
 
 ```sgl
@@ -483,6 +487,7 @@ print "total:", total
 * **AST-60** An expression statement has an effect when it is a paren or a juxtaposition `call`, a jump, a `case`, a `loop`, a `with_bindings` or an `invalid`.
 * **AST-61** Any other expression statement is the warning `no-effect`, and it is still read: an infix or a prefix `call`, a name, a literal, a `member`, a `tuple`.
 * **AST-114** The last statement of a block is no exception to AST-61, since a block has no implicit value ([AST-106](#value-blocks-and-yield)).
+* **AST-140** Inside a `test` body, and not inside a function nested in one, AST-61 does not report: a line of type `bool` is a check there, and only the check pass knows a line's type.
 
 ```sgl
 fun update(state: particle):
@@ -520,10 +525,24 @@ fun update(state: particle):
 | sampler | `sampler name:` and a block of settings | yes | no |
 | pipeline | `pipeline name:` and a block of settings, or `pipeline name = (a, b)` | yes | no |
 | notation | `notation a => b` | yes | yes |
+| test | `test:` and a block, or `test expression` | yes | yes |
 | `let` | see [statements](#let-and-assignment) | no | yes |
 
 * **AST-64** A file holds at most one `module` declaration, and it stands before every other declaration of the file.
 * **AST-65** The type of a constant stands in a type position.
+* **AST-138** `test expression` reads as a `test` whose block holds the one expression statement `expression`; a `test` with both, or with neither, is a normal error.
+* **AST-139** A `test` stands in a struct and an enum as well, and inside another `test` is `declaration-not-allowed-here`.
+  No jump crosses a `test`'s body, so a `return` in it is `jump-without-target`.
+
+```sgl
+fun square(x: float) -> float => x * x
+
+test square 3.0 == 9.0
+
+test:
+    let x = 10
+    x * x > 50
+```
 
 ```sgl
 module example

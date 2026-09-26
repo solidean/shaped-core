@@ -1,0 +1,12 @@
+// `and`, `or` and `not` are the language's own, on every pair of bools
+
+fun both(a: bool, b: bool) -> bool => a and b
+fun either(a: bool, b: bool) -> bool => a or b
+
+test:
+    for i in 0 ..< 4:
+        let a = i >= 2
+        let b = i == 1 or i == 3
+        both(a, b) == (a and b)
+        either(a, b) == (a or b)
+        (not (a and b)) == ((not a) or (not b))

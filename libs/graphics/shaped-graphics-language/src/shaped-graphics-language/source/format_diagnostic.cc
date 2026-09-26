@@ -32,3 +32,9 @@ cc::string sgl::format_diagnostic(cc::string_view file_name,
         out.appendf(": {}", detail);
     return out;
 }
+
+cc::string sgl::format_note(cc::string_view file_name, cc::string_view source, source_span where, cc::string_view message)
+{
+    auto const at = line_column_of(source, where.offset);
+    return cc::format("{}:{}:{}: note: {}", file_name, at.line, at.column, message);
+}

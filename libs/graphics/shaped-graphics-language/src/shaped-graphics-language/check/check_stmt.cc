@@ -9,7 +9,7 @@ using namespace sgl::check::impl;
 namespace
 {
 constexpr auto error_type = checked_module::error_type;
-constexpr auto nothing_type = checked_module::nothing_type;
+constexpr auto void_type = checked_module::void_type;
 
 /// What a list that holds `a` and then `b` ends in, where `b` only runs when `a` falls through.
 flow then(flow a, flow b)
@@ -32,9 +32,14 @@ flow checker::check_statements(function_scope& scope, ast::range_of<ast::stmt_id
 {
     auto result = flow::falls_through;
     auto is_reported = false;
-    for (auto const s : ast_of(scope.file).at(statements))
+    auto const& ast = ast_of(scope.file);
+    for (auto const s : ast.at(statements))
     {
-        if (result == flow::exits && !is_reported)
+        // A test never runs where it stands, so it is no code a jump in front of it makes unreachable.
+        auto const* const d = ast.at(s).node.try_as<ast::decl_stmt>();
+        auto const is_test
+            = d != nullptr && ast::is_valid(d->declaration) && ast.at(d->declaration).node.is<ast::test_decl>();
+        if (result == flow::exits && !is_reported && !is_test)
         {
             report(diagnostic_kind::unreachable_code, scope.file, span_of(scope.file, s), "");
             is_reported = true;
@@ -73,65 +78,86 @@ flow checker::check_stmt(function_scope& scope, ast::stmt_id stmt)
     judge_attributes(file, s.attributes, {}, "a statement");
 
     auto result = flow::falls_through;
-    s.node.visit(
-        [&](ast::let_stmt const& let) { check_let(scope, stmt, let); }, [&](ast::assign_stmt const& assign)
-        { check_assign(scope, stmt, assign); }, [&](ast::if_stmt const& chain) { result = check_if(scope, chain); },
-        [&](ast::for_stmt const& loop) { check_for(scope, stmt, loop); },
-        [&](ast::while_stmt const& loop)
-        {
-            check_condition(scope, loop.condition);
-            scope.loops.push_back({});
-            // A `while` ends when its condition says so, whatever the condition is, so what follows it is reachable.
-            (void)check_nested(scope, loop.body);
-            scope.loops.remove_back();
-        },
-        [&](ast::print_stmt const& print)
-        {
-            if (check_expr(scope, print.message) == nothing_type)
-                report(diagnostic_kind::type_mismatch, file, span_of(file, print.message), "print takes a value");
-        },
-        [&](ast::expr_stmt const& e)
-        {
-            if (!ast::is_valid(e.value))
-                return;
-            auto const& value = ast.at(e.value);
-            if (auto const* const r = value.node.try_as<ast::return_expr>())
-            {
-                check_return(scope, where, r->value);
-                result = flow::exits;
-            }
-            else if (auto const* const b = value.node.try_as<ast::break_expr>())
-            {
-                check_break(scope, where, b->value);
-                result = flow::exits;
-            }
-            else if (value.node.is<ast::continue_expr>())
-                result = flow::exits;
-            else if (auto const* const y = value.node.try_as<ast::yield_expr>())
-            {
-                check_yield(scope, where, y->value);
-                result = flow::exits;
-            }
-            else if (auto const* const c = value.node.try_as<ast::case_expr>())
-                set_type(file, e.value, check_case(scope, e.value, *c, false, &result));
-            else if (auto const* const loop = value.node.try_as<ast::loop_expr>())
-            {
-                auto has_break = false;
-                set_type(file, e.value, check_loop(scope, e.value, *loop, false, has_break));
-                result = has_break ? flow::falls_through : flow::exits;
-            }
-            else
-            {
-                // A call is evaluated and its value dropped: it may have been written for its effect.
-                // Whether a PURE one is worth a statement is the AST pass's `no-effect` warning, and no business of this pass.
-                auto const type = check_expr(scope, e.value);
-                if (type != error_type && type != nothing_type && !value.node.is<ast::call>())
-                    unsupported(file, where, "an expression statement");
-            }
-        },
-        [&](ast::assert_stmt const&) { unsupported(file, where, "assert"); },
-        [&](ast::decl_stmt const&) { unsupported(file, where, "a declaration inside a function"); },
-        [&](ast::invalid_stmt const&) { result = flow::unknown; });
+    s.node.visit([&](ast::let_stmt const& let) { check_let(scope, stmt, let); }, [&](ast::assign_stmt const& assign)
+                 { check_assign(scope, stmt, assign); }, [&](ast::if_stmt const& chain)
+                 { result = check_if(scope, chain); }, [&](ast::for_stmt const& loop) { check_for(scope, stmt, loop); },
+                 [&](ast::while_stmt const& loop)
+                 {
+                     check_condition(scope, loop.condition);
+                     scope.loops.push_back({});
+                     // A `while` ends when its condition says so, whatever the condition is, so what follows it is reachable.
+                     (void)check_nested(scope, loop.body);
+                     scope.loops.remove_back();
+                 },
+                 [&](ast::print_stmt const& print) { (void)check_expr(scope, print.message); },
+                 [&](ast::expr_stmt const& e)
+                 {
+                     if (!ast::is_valid(e.value))
+                         return;
+                     auto const& value = ast.at(e.value);
+                     if (auto const* const r = value.node.try_as<ast::return_expr>())
+                     {
+                         check_return(scope, where, r->value);
+                         result = flow::exits;
+                     }
+                     else if (auto const* const b = value.node.try_as<ast::break_expr>())
+                     {
+                         check_break(scope, where, b->value);
+                         result = flow::exits;
+                     }
+                     else if (value.node.is<ast::continue_expr>())
+                         result = flow::exits;
+                     else if (auto const* const y = value.node.try_as<ast::yield_expr>())
+                     {
+                         check_yield(scope, where, y->value);
+                         result = flow::exits;
+                     }
+                     else if (auto const* const c = value.node.try_as<ast::case_expr>())
+                         set_type(file, e.value, check_case(scope, e.value, *c, false, &result));
+                     else if (auto const* const loop = value.node.try_as<ast::loop_expr>())
+                     {
+                         auto has_break = false;
+                         set_type(file, e.value, check_loop(scope, e.value, *loop, false, has_break));
+                         result = has_break ? flow::falls_through : flow::exits;
+                     }
+                     else
+                     {
+                         // A call is evaluated and its value dropped: it may have been written for its effect.
+                         // Whether a PURE one is worth a statement is the AST pass's `no-effect` warning, and no business of this pass.
+                         auto const type = check_expr(scope, e.value);
+                         auto const* const call = value.node.try_as<ast::call>();
+                         auto const is_application = call != nullptr
+                                                  && (call->spelling == ast::call_spelling::paren
+                                                      || call->spelling == ast::call_spelling::juxtaposition);
+                         // CHK-225: in a test a line of type bool is a check; the AST pass left every other line to this one.
+                         if (scope.is_test && type == type_of_builtin(builtins::k_bool, file, where))
+                             return;
+                         if (scope.is_test && !is_application && type != error_type && type != void_type)
+                             report(diagnostic_kind::no_effect, file, where, "");
+                         else if (type != error_type && type != void_type && call == nullptr)
+                             unsupported(file, where, "an expression statement");
+                     }
+                 },
+                 [&](ast::assert_stmt const& a)
+                 {
+                     // CHK-227: a bool condition; the run stops where it is false, and a target writes nothing of it
+                     check_condition(scope, a.condition);
+                     if (ast::is_valid(a.message))
+                         unsupported(file, span_of(file, a.message), "an assert message");
+                 },
+                 [&](ast::decl_stmt const& d)
+                 {
+                     // CHK-224: a test in a function body is checked on its own, with the function's names visible and unusable
+                     if (ast::is_valid(d.declaration) && ast.at(d.declaration).node.is<ast::test_decl>())
+                     {
+                         // one inside another test was reported by the AST pass
+                         if (!scope.is_test)
+                             add_test(file, d.declaration, cc::format("fun {}", out.at(scope.function).name), &scope);
+                         return;
+                     }
+                     unsupported(file, where, "a declaration inside a function");
+                 },
+                 [&](ast::invalid_stmt const&) { result = flow::unknown; });
     return result;
 }
 
@@ -146,12 +172,6 @@ void checker::check_let(function_scope& scope, ast::stmt_id id, ast::let_stmt co
         type = check_expr(scope, let.value);
     else
         unsupported(file, where, "a let without a value");
-    if (type == nothing_type)
-    {
-        report(diagnostic_kind::type_mismatch, file, span_of(file, let.value),
-               "a let takes a value, and this is nothing");
-        type = error_type;
-    }
 
     if (ast::is_valid(let.type))
     {
@@ -175,6 +195,7 @@ void checker::check_let(function_scope& scope, ast::stmt_id id, ast::let_stmt co
     auto const self = target{.kind = target_kind::local, .index = i32(id)};
     set_type(file, let.pattern, type);
     set_target(file, let.pattern, self);
+    judge_shadowing(file, text_of(file, n->where), n->where);
     // only now: the value of `let x = x` does not see the `x` it declares
     declare_local(scope, {.name = text_of(file, n->where), .where = self, .type = type, .is_mut = let.is_mut});
 }
@@ -320,6 +341,7 @@ void checker::check_for(function_scope& scope, ast::stmt_id id, ast::for_stmt co
         auto const self = target{.kind = target_kind::local, .index = i32(id)};
         set_type(file, loop.variable, int_type);
         set_target(file, loop.variable, self);
+        judge_shadowing(file, text_of(file, n->where), n->where);
         declare_local(scope, {.name = text_of(file, n->where), .where = self, .type = int_type});
     }
     scope.loops.push_back({});
@@ -342,7 +364,7 @@ type_id checker::check_loop(function_scope& scope,
 
     has_break = done.has_break;
     if (!yields_value)
-        return nothing_type;
+        return void_type;
     if (!done.has_break)
     {
         unsupported(scope.file, span_of(scope.file, id), "a loop without a break as a value");
@@ -398,16 +420,17 @@ void checker::check_return(function_scope& scope, source_span where, ast::expr_i
     auto const name = cc::string_view(out.at(scope.function).name);
     if (!ast::is_valid(value))
     {
-        if (scope.result != error_type && scope.result != nothing_type)
+        if (scope.result != error_type && scope.result != void_type)
             report(diagnostic_kind::type_mismatch, file, where,
                    cc::format("{} returns {}, and this return has no value", name, out.name_of(scope.result)));
         return;
     }
-    if (scope.result == nothing_type)
+    if (scope.result == void_type)
     {
-        (void)check_expr(scope, value);
-        report(diagnostic_kind::type_mismatch, file, span_of(file, value),
-               cc::format("{} has no return type, so its return has no value", name));
+        auto const type = check_expr(scope, value);
+        if (type != error_type && type != void_type)
+            report(diagnostic_kind::type_mismatch, file, span_of(file, value),
+                   cc::format("{} returns void, got {}", name, out.name_of(type)));
         return;
     }
     if (ast_of(file).at(value).node.is<ast::object>())

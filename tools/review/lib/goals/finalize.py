@@ -20,6 +20,7 @@ from ..core.config import ReviewConfig
 from ..entry.answers import AnswerFile
 from ..entry.grammar import is_ack_name
 from ..entry.parse import Entry
+from ..render.markdown import strip_raw
 
 def _decisions(entry: Entry, answers: AnswerFile) -> list[tuple[str, list[str], str]]:
     """(ask name, chosen options, free text) for every question this entry has a real answer to."""
@@ -69,7 +70,7 @@ def pr_comment(cfg: ReviewConfig, pairs: list[tuple[Entry, AnswerFile]]) -> str:
 
     if number == 0:
         lines.append("_No decided points yet._")
-    return "\n".join(lines).rstrip() + "\n"
+    return strip_raw("\n".join(lines).rstrip() + "\n")
 
 
 def work_order(cfg: ReviewConfig, pairs: list[tuple[Entry, AnswerFile]]) -> str:
@@ -99,7 +100,7 @@ def work_order(cfg: ReviewConfig, pairs: list[tuple[Entry, AnswerFile]]) -> str:
 
     if number == 0:
         lines.append("_Nothing decided yet._")
-    return "\n".join(lines).rstrip() + "\n"
+    return strip_raw("\n".join(lines).rstrip() + "\n")
 
 
 def design_summary(cfg: ReviewConfig, pairs: list[tuple[Entry, AnswerFile]]) -> str:
@@ -123,7 +124,7 @@ def design_summary(cfg: ReviewConfig, pairs: list[tuple[Entry, AnswerFile]]) -> 
 
     lines += ["## Settled", ""] + (settled or ["_nothing yet_"])
     lines += ["", "## Still open", ""] + (open_points or ["_nothing_"])
-    return "\n".join(lines).rstrip() + "\n"
+    return strip_raw("\n".join(lines).rstrip() + "\n")
 
 
 ARTIFACTS = {

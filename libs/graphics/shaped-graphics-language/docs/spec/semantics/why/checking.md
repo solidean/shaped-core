@@ -217,3 +217,17 @@ Each target writes `x as int` as its own native conversion, and those agree only
 Defining saturation and a NaN of 0 would mean a clamp and a compare around every conversion on the targets that do not do it natively, in shaders where a conversion sits in the inner loop.
 A program that needs a defined result clamps before it converts, and pays for it only where it asks.
 The interpreter still has to give some value, and saturation is the choice that is right on the most hardware.
+
+## CHK-225
+
+A `bool` line is a check rather than a line under a `check` keyword, because the keyword would sit on every line of every test.
+`assert` already covers the case that stops, so a second keyword would differ from it only in going on.
+The cost is that what a statement means depends on its type, so the AST pass leaves `no-effect` in a test to the check pass (AST-140).
+A call made for its effect that returns a `bool` becomes a check without saying so, which in a test is almost always what its author forgot to write anyway.
+
+## CHK-226
+
+The rule exists so a test cannot pass vacuously by mistake: a last line that computes and checks nothing is almost always a check its author meant to write.
+EVAL-78's `no-check-ran` catches a run that checked nothing too, but only when the test runs; this rule says so when the test is checked, in the editor.
+A test whose asserts are what it checks pays one line for it, `true // why`, which also says why it checks nothing else.
+A test that expects `.fail` or `.assert` is exempt, since it cannot pass without its run failing: it is fail-closed already.

@@ -50,6 +50,8 @@ enum class sgl::check::run_status : sgl::u8
     type_error,
     /// A `var` was read before anything was assigned to it.
     uninitialized_read,
+    /// An `assert` was false; the run stopped there (EVAL-76).
+    assertion_failed,
 };
 
 struct sgl::check::run_inputs
@@ -67,6 +69,29 @@ struct sgl::check::run_limits
 {
     /// One unit per statement, per expression node and per iteration.
     i64 fuel = 1'000'000;
+    /// Checks and asserts run, as the structured form means (EVAL-75).
+    /// False skips each with its body, as the core form does, which is what a comparison of the two forms wants.
+    bool run_checks = true;
+    /// Failures past this many are counted in `outcome::failures_dropped` and not kept.
+    i32 max_failures = 8;
+};
+
+/// One check or `assert` that was false where it ran.
+struct sgl::check::check_failure
+{
+    /// A position in the tree's `check_sites`.
+    i32 site = -1;
+    /// Parallel to the site's nodes: the value each node's `var` held, and whether the node ran at all.
+    cc::vector<value> values;
+    cc::vector<bool> is_evaluated;
+    /// Parallel to the site's `loop_variables`.
+    cc::vector<value> loop_values;
+
+    [[nodiscard]] bool operator==(check_failure const& rhs) const
+    {
+        return site == rhs.site && ast::impl::is_equal(values, rhs.values)
+            && ast::impl::is_equal(is_evaluated, rhs.is_evaluated) && ast::impl::is_equal(loop_values, rhs.loop_values);
+    }
 };
 
 struct sgl::check::outcome
@@ -80,6 +105,14 @@ struct sgl::check::outcome
     cc::vector<buffer_contents> buffers;
     /// For a reader, and no part of what two runs are compared by.
     cc::string detail;
+    /// Every check and `assert` that was false, up to `run_limits::max_failures`, in the order they ran.
+    cc::vector<check_failure> failures;
+    /// How many checks ran, whatever they found, `assert`s included (EVAL-76); a test whose run ran none has checked nothing.
+    i32 checks_run = 0;
+    /// How many of `checks_run` were `assert`s.
+    i32 asserts_run = 0;
+    /// How many failures `max_failures` left out.
+    i32 failures_dropped = 0;
 
     /// Same status, same result, same trace, same buffers.
     [[nodiscard]] bool operator==(outcome const& rhs) const
@@ -91,7 +124,7 @@ struct sgl::check::outcome
 
 namespace sgl::check
 {
-/// `ok`, `out-of-fuel`, `fell-off-the-end`, `type-error`, `uninitialized-read`.
+/// `ok`, `out-of-fuel`, `fell-off-the-end`, `type-error`, `uninitialized-read`, `assertion-failed`.
 [[nodiscard]] cc::string_view to_string(run_status s);
 
 /// How many scalars a value of `type` has; 0 for a type that has no value here.

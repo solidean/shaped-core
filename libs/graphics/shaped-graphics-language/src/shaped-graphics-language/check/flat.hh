@@ -474,6 +474,62 @@ struct sgl::check::flat_return
     constexpr bool operator==(flat_return const&) const = default;
 };
 
+/// What one node of a check's condition is: the operators a report narrows through, and the leaf any other expression is.
+enum class sgl::check::check_node_kind : sgl::u8
+{
+    leaf,
+    and_,
+    or_,
+    not_,
+    /// One comparison, whose operands are the nodes `lhs` and `rhs`.
+    compare,
+    /// `a < b <= c`: an `and` of its comparisons, which share the operands between them.
+    chain,
+};
+
+/// One node of the condition of a check or an `assert`, in the order the condition is written.
+struct sgl::check::flat_check_node
+{
+    check_node_kind kind = check_node_kind::leaf;
+    origin from;
+    /// The spelling of a comparison: `<`, `==`.
+    cc::string op;
+    /// A position among the site's nodes; -1 for the whole condition.
+    i32 parent = -1;
+    /// For a comparison, its operands as positions among the site's nodes.
+    i32 lhs = -1;
+    i32 rhs = -1;
+    /// The `var` a run leaves this node's value in; it holds none where the node did not run (EVAL-11).
+    local_id value = local_id::none;
+
+    bool operator==(flat_check_node const&) const = default;
+};
+
+/// What a failing check is reported from: where it stands, and its condition as a tree of nodes.
+struct sgl::check::flat_check_site
+{
+    origin from;
+    /// An `assert`, which stops the run where it is false; a check of a test goes on.
+    bool stops = false;
+    /// A range of `flat_entry_point::check_nodes`; the first is the whole condition.
+    ast::range_of<flat_check_node> nodes;
+    /// A `flat_local_ref` per `for` of the test around the check, outermost first.
+    ast::range_of<flat_expr_id> loop_variables;
+
+    constexpr bool operator==(flat_check_site const&) const = default;
+};
+
+/// Runs `body`, which leaves the condition's value in the first node's `var`, and records the check when it is false.
+/// Structured form only: `legalize` removes it with its body, which is how no target writes a check or an `assert`.
+struct sgl::check::flat_check
+{
+    /// A position in `flat_entry_point::check_sites`.
+    i32 site = -1;
+    ast::range_of<flat_stmt_id> body;
+
+    constexpr bool operator==(flat_check const&) const = default;
+};
+
 /// One arm: the patterns that select it, and the statements it runs.
 /// In a `flat_case` a pattern is any expression; in a `flat_switch` it is a literal the target compares.
 struct sgl::check::flat_arm
@@ -533,7 +589,8 @@ struct sgl::check::flat_stmt
                 flat_break,
                 flat_case,
                 flat_switch,
-                flat_return>
+                flat_return,
+                flat_check>
         node;
 
     bool operator==(flat_stmt const&) const = default;
@@ -568,6 +625,9 @@ struct sgl::check::flat_entry_point
     /// The arms of every `case` and `switch` of this entry point.
     cc::vector<flat_arm> arms;
     cc::vector<call_site> call_sites;
+    /// Every check and `assert` of the tree, which a `flat_check` names by position; empty once the tree is core.
+    cc::vector<flat_check_site> check_sites;
+    cc::vector<flat_check_node> check_nodes;
     /// The statements of the function, in order.
     ast::range_of<flat_stmt_id> body;
 
@@ -582,6 +642,10 @@ struct sgl::check::flat_entry_point
     [[nodiscard]] tree_view<flat_stmt_id> at(ast::range_of<flat_stmt_id> r) const { return viewed(stmt_lists, r); }
     [[nodiscard]] tree_view<flat_arm> at(ast::range_of<flat_arm> r) const { return viewed(arms, r); }
     [[nodiscard]] tree_view<call_site> at(ast::range_of<call_site> r) const { return viewed(call_sites, r); }
+    [[nodiscard]] tree_view<flat_check_node> at(ast::range_of<flat_check_node> r) const
+    {
+        return viewed(check_nodes, r);
+    }
 
     [[nodiscard]] bool operator==(flat_entry_point const& rhs) const
     {
@@ -592,6 +656,7 @@ struct sgl::check::flat_entry_point
             && takes_thread_id == rhs.takes_thread_id && is_equal(locals, rhs.locals) && is_equal(labels, rhs.labels)
             && root == rhs.root && is_equal(exprs, rhs.exprs) && is_equal(stmts, rhs.stmts)
             && is_equal(expr_lists, rhs.expr_lists) && is_equal(stmt_lists, rhs.stmt_lists) && is_equal(arms, rhs.arms)
-            && is_equal(call_sites, rhs.call_sites) && body == rhs.body && names == rhs.names;
+            && is_equal(call_sites, rhs.call_sites) && is_equal(check_sites, rhs.check_sites)
+            && is_equal(check_nodes, rhs.check_nodes) && body == rhs.body && names == rhs.names;
     }
 };

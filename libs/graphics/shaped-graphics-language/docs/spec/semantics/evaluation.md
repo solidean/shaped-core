@@ -19,6 +19,8 @@ A listing here is the dump of a flat tree, shortened: a label is `$name`, and a 
 * **EVAL-6** A `float` is a 32-bit IEEE number, an `int` is 32 bits, signed, and its arithmetic wraps, and a `bool` is true or false.
 * **EVAL-7** A struct value is one value per field, in field order.
 * **EVAL-64** An enum value is the `int` value of one of its type's cases, and `==` and `!=` over two of them compare those `int`s.
+  `bool` is the exception: it is a `@builtin` enum (CHK-218), and its value is `false` or `true`, compared by the prelude's `==`.
+* **EVAL-74** A `void` value is the one value of its type: a struct value of no fields, and a field of type `void` adds nothing to a struct value.
 
 ## Locals and places
 
@@ -61,6 +63,7 @@ This prints 11: the left operand is read while `x` is 1, and the block to its ri
 * **EVAL-26** `leave $b` ends the block `$b` from any depth inside it: through `if`s, loops and other blocks, and out of the middle of an expression.
 * **EVAL-27** `leave $b value` evaluates `value` first, and a block expression then IS that value.
 * **EVAL-28** A block expression whose statements end without a leave has no value, which is an error of the program.
+  A `void` block is the exception: it is `void`'s one value however it ends (EVAL-74).
 * **EVAL-29** An inlined call, a value block of a `case` arm or a lambda, and a `loop:` with a value are all this one construct ([why](why/evaluation.md#eval-29)).
 * **EVAL-30** The body of the entry point is the **root block**, and `leave $root value` returns `value` from the function.
 * **EVAL-31** A root block whose statements end without a leave returns nothing, which is an error of the program.
@@ -109,7 +112,7 @@ This prints 11: the left operand is read while `x` is 1, and the block to its ri
 ## Calls
 
 * **EVAL-45** A call of a function of the program IS the callee's body as `block $callee { … }`, where the call stood.
-  It is an expression of the callee's return type, and a statement for a callee that returns nothing.
+  It is an expression of the callee's return type, and a statement for a callee that returns `void`.
 * **EVAL-46** The arguments are evaluated left to right, each exactly once, before any statement of the body.
 * **EVAL-47** A parameter is a value: the callee cannot change it, and the caller's later writes do not reach it.
 * **EVAL-48** An argument that is a literal or an immutable local stands wherever its parameter is read.
@@ -157,10 +160,22 @@ fun graded(a: float) -> float:
 * **EVAL-60** `print value` is `print`.
 * **EVAL-61** `eval value` evaluates `value` and drops it: what the evaluation prints and records happens, in its place, and the value goes nowhere.
 * **EVAL-62** A call that stands as a statement is `eval` of the call ([CHK-137](checking.md#inferred-results-and-dropped-values)).
-  A call of a function that returns nothing is its block as a statement.
+  A call of a function that returns `void` is its block as a statement.
 * **EVAL-63** What a builtin function computes is the evaluator of its registry record ([why](why/evaluation.md#eval-63)).
   An evaluator is given the scalars of its arguments and gives the scalars of its result.
   The machine checks the number and the kind of both against the record's parameter and result types, so an ill-typed call is a type error by EVAL-43 and never reaches an evaluator.
+
+## Checks
+
+* **EVAL-75** `check` runs its body, then reads its condition: a false one is recorded with the value of every node that ran, and the run goes on.
+  A node that did not run, the right side of an `and` whose left side was false, is recorded as not evaluated.
+* **EVAL-76** An `assert` is a `check` that stops the run where it is false.
+* **EVAL-77** A run that reaches the end of a function returning `void` ends with `void`'s value, which is how a test and a compute entry point end.
+* **EVAL-78** A test passes when its run ends normally, having run at least one check and found none false.
+  A false check or `assert`, a run out of fuel, a read of a `var` nothing assigned, and a run that ran no check each fail it.
+  A failure is reported as `test-failed`.
+* **EVAL-79** A false check is reported narrowed: through `and`, `or`, `not` and a chain to the parts that were false, a comparison with the values of its operands.
+  A `not` of a comparison that held reports that comparison's values.
 
 ## Errors of the program
 

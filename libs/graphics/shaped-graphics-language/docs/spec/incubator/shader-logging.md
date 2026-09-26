@@ -27,7 +27,8 @@ print "pos: $p.x, $p.y and $(length(p) * 2)"
 assert n_dot_l >= 0.0, "negative cosine for normal $n"
 ```
 
-The same machinery serves the testing keywords the readme names, `CHECK` and `REQUIRE`, and per-expression traces.
+The same machinery serves per-expression traces, and tests on the GPU ([testing.md](testing.md)).
+The `CHECK` and `REQUIRE` this note once planned are settled otherwise: a bool line of a `test` is a check that goes on, and an `assert` stops ([CHK-225](../semantics/checking.md#tests)).
 
 ## What it touches
 

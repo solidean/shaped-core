@@ -48,6 +48,7 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/check/check_expr.cc
     src/shaped-graphics-language/check/check_resources.cc
     src/shaped-graphics-language/check/check_stmt.cc
+    src/shaped-graphics-language/check/check_test.cc
     src/shaped-graphics-language/check/dump.cc
     src/shaped-graphics-language/check/flat.cc
     src/shaped-graphics-language/check/flat_builder.cc
@@ -58,8 +59,11 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/legalize/legalize_cases.cc
     src/shaped-graphics-language/legalize/legalize_exits.cc
     src/shaped-graphics-language/legalize/legalize_exprs.cc
+    src/shaped-graphics-language/legalize/legalize_erase.cc
 
     src/shaped-graphics-language/interpret/interpret.cc
+
+    src/shaped-graphics-language/test/run_tests.cc
 
     src/shaped-graphics-language/emit/emit.cc
     src/shaped-graphics-language/emit/reserved_words.cc
@@ -70,6 +74,7 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/emit/impl/wgsl.cc
 
     src/shaped-graphics-language/driver/compile_to_text.cc
+    src/shaped-graphics-language/driver/test_source.cc
     src/shaped-graphics-language/driver/describe.cc
     src/shaped-graphics-language/driver/pipeline_fields.cc
     src/shaped-graphics-language/driver/impl/front_end.cc
@@ -201,12 +206,15 @@ target_sources(shaped-graphics-language
     src/shaped-graphics-language/interpret/interpret.hh
     src/shaped-graphics-language/interpret/scalar.hh
 
+    src/shaped-graphics-language/test/run_tests.hh
+
     src/shaped-graphics-language/emit/emit.hh
     src/shaped-graphics-language/emit/reserved_words.hh
     src/shaped-graphics-language/emit/impl/dialect.hh
     src/shaped-graphics-language/emit/impl/plan.hh
 
     src/shaped-graphics-language/driver/compile_to_text.hh
+    src/shaped-graphics-language/driver/test_source.hh
     src/shaped-graphics-language/driver/describe.hh
     src/shaped-graphics-language/driver/pipeline_fields.hh
     src/shaped-graphics-language/driver/impl/front_end.hh
@@ -235,6 +243,7 @@ if(SC_BUILD_TOOLS)
         tools/sgl/describe_command.cc
         tools/sgl/emit_command.cc
         tools/sgl/prelude_command.cc
+        tools/sgl/test_command.cc
     )
     sc_nexus_binary(sgl KINDS tool)
     # babel-data writes `describe`'s JSON; the tool may take it, and the library must not.
@@ -263,6 +272,7 @@ if(SC_BUILD_TESTS)
         tests/builtins/registry-test.cc
 
         tests/check/check-test-support.hh
+        tests/corpus/corpus-test.cc
         tests/check/binding-check-test.cc
         tests/check/case-check-test.cc
         tests/check/control-flow-check-test.cc
@@ -272,9 +282,13 @@ if(SC_BUILD_TESTS)
         tests/check/pipeline-check-test.cc
         tests/check/enum-check-test.cc
         tests/check/expression-check-test.cc
+        tests/check/test-check-test.cc
         tests/check/source-flat-test-support.hh
 
+        tests/interpret/check-run-test.cc
+        tests/interpret/expect-test.cc
         tests/interpret/interpret-test.cc
+        tests/interpret/run-tests-test.cc
 
         tests/legalize/flat-test-support.hh
         tests/legalize/random-program.hh
@@ -295,6 +309,7 @@ if(SC_BUILD_TESTS)
         tests/driver/compile-to-text-test.cc
         tests/driver/describe-test.cc
         tests/driver/source-differential-test.cc
+        tests/driver/test-source-test.cc
 
         tests/spec/spec-examples-test.cc
 
@@ -309,6 +324,8 @@ if(SC_BUILD_TESTS)
         PRIVATE
         SGL_SPEC_DIR="${CMAKE_CURRENT_SOURCE_DIR}/docs/spec"
         SGL_SAMPLES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/samples"
+        # the corpus is walked when the test runs, so a new file needs no entry here
+        SGL_CORPUS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/corpus"
         SGL_PRELUDE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/prelude")
 
     target_link_libraries(shaped-graphics-language-test

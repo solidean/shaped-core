@@ -17,6 +17,8 @@ struct sgl::text_request
     /// The stage the caller expects the entry point to be; `none` takes whichever it is.
     check::stage stage = check::stage::none;
     emit::target target = emit::target::hlsl_dx12;
+    /// Runs the source's own tests after it checked, and makes a test that does not pass an error like any other.
+    bool run_tests = false;
 };
 
 /// The text of one entry point, and the name that text declares it under.

@@ -38,7 +38,8 @@ def _select(entries: list[review.Entry], token: str) -> list[review.Entry]:
 
 def run(args: argparse.Namespace, ctx: Context) -> None:
     paths, cfg = ctx.open(args.name)
-    entries = ctx.entries(paths)
+    entries, broken = ctx.entries_tolerant(paths)
+    ctx.warn_broken(broken)
     if not entries:
         print(f"no entries yet under {ctx.rel(paths.entries_dir)}")
         return

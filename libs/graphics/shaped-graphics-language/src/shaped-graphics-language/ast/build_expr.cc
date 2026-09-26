@@ -77,6 +77,8 @@ expr_id builder::expression_node(form_id form)
     case form_kind::identifier:
         if (text_of(form) == "self")
             return make_expr(form, self_ref{});
+        if (text_of(form) == "void")
+            return make_expr(form, void_ref{});
         return make_expr(form, name{.where = f.where});
     case form_kind::wildcard:
         return make_expr(form, wildcard{});
@@ -582,6 +584,8 @@ void builder::report_jump_target(form_id form, cc::string_view keyword)
         auto const owner = owners[i].owner;
         auto const is_loop = owner == body_owner::value_loop || owner == body_owner::statement_loop;
         auto const is_one_line = owners[i].one_line == form;
+        if (owner == body_owner::test)
+            break;
 
         if (is_loop_jump)
         {

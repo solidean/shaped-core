@@ -1,6 +1,7 @@
 #include <clean-core/common/utility.hh>
 #include <clean-core/string/format.hh>
 #include <shaped-graphics-language/check/impl/checker.hh>
+#include <shaped-graphics-language/legalize/impl/walk.hh>
 
 using namespace sgl;
 using namespace sgl::check;
@@ -8,6 +9,49 @@ using namespace sgl::check::impl;
 
 namespace
 {
+bool writes_outside(flat_entry_point const& e, ast::range_of<flat_stmt_id> body, int depth);
+
+/// True where evaluating `id` writes what outlives it: a builtin call that is not pure.
+bool writes_outside(flat_entry_point const& e, flat_expr_id id, int depth)
+{
+    if (!is_known(e, id) || depth > k_max_depth)
+        return false;
+    auto const& x = e.at(id);
+    if (auto const* const call = x.node.try_as<flat_call>(); call != nullptr && !call->is_pure)
+        return true;
+    if (auto const* const block = x.node.try_as<flat_block>())
+        return writes_outside(e, block->body, depth + 1);
+    auto result = false;
+    for_each_operand(e, x, [&](flat_expr_id operand) { result = result || writes_outside(e, operand, depth + 1); });
+    return result;
+}
+
+/// True where running `body` writes what outlives it: a print, a store to a buffer element, or an impure builtin.
+/// A local is no such thing, so an inlined function that only computes a value writes nothing.
+bool writes_outside(flat_entry_point const& e, ast::range_of<flat_stmt_id> body, int depth)
+{
+    if (!is_known(e, body) || depth > k_max_depth)
+        return false;
+    for (auto const id : e.at(body))
+    {
+        if (!is_known(e, id))
+            continue;
+        auto const& s = e.at(id);
+        if (s.node.is<flat_print>())
+            return true;
+        if (auto const* const assign = s.node.try_as<flat_assign>();
+            assign != nullptr && is_known(e, assign->place) && e.at(assign->place).node.is<flat_buffer_element>())
+            return true;
+        auto result = false;
+        for_each_expr_of(s, [&](flat_expr_id x) { result = result || writes_outside(e, x, depth + 1); });
+        for_each_body_of(
+            e, s, [&](ast::range_of<flat_stmt_id> inner) { result = result || writes_outside(e, inner, depth + 1); });
+        if (result)
+            return true;
+    }
+    return false;
+}
+
 /// A call reached from an entry point of a stage its callee's `@stages` leaves out (CHK-193).
 struct stage_violation
 {
@@ -29,15 +73,24 @@ struct flattener
 {
     checker const& c;
     cc::vector<stage_violation> stage_violations;
+    /// The condition of every `assert` whose run would write what outlives it, which its caller reports (CHK-227).
+    cc::vector<origin> effectful_asserts;
 
     /// Notes a call of `callee` whose `@stages` leaves out the stage of the entry point being flattened.
+    /// A test has no stage, so it may reach what any stage may.
     void judge_stage(ast::expr_id call, symbol_id callee)
     {
+        if (entry.entry_stage == stage::none)
+            return;
         auto const& s = c.out.at(callee);
         if (s.info >= 0 && (c.out.functions[s.info].stages & stage_bit(entry.entry_stage)) == 0)
             stage_violations.push_back({.file = file(), .call = call, .callee = callee});
     }
     flat_entry_point entry;
+    /// The tree is a test, whose own lines of type bool are checks (CHK-225); a function it calls has none.
+    bool is_test = false;
+    /// The index of every `for` of the test's own body around the statement being written, outermost first.
+    cc::vector<local_id> test_loops;
     bool is_failed = false;
     /// The tree met the error type somewhere, so a failure has a diagnostic already (CHK-7).
     bool meets_error = false;
@@ -170,7 +223,7 @@ struct flattener
     flat_expr_id add_expr(type_id type, ast::expr_id from, Node node)
     {
         // A builtin with an effect may give nothing, `DEBUG_store`, and its call is only ever an `eval`'s value.
-        auto const is_effect_call = std::is_same_v<Node, flat_call> && type == checked_module::nothing_type;
+        auto const is_effect_call = std::is_same_v<Node, flat_call> && type == checked_module::void_type;
         is_failed = is_failed || (!c.is_sound(type) && !is_effect_call);
         entry.exprs.push_back({.type = type,
                                .from = {.file = file(), .expr = from},
@@ -291,22 +344,28 @@ struct flattener
 
         if (e.node.is<ast::literal>())
             return flatten_number(id, type);
+        // void's one value is the construction of no fields.
+        if (e.node.is<ast::void_ref>())
+            return add_expr(type, id, flat_construct{});
         if (e.node.is<ast::leading_dot>())
         {
-            return where.kind == target_kind::enum_case ? add_expr(type, id, flat_enum_value{.case_index = where.index})
-                                                        : fail();
+            return where.kind == target_kind::enum_case ? enum_value(type, id, where.index) : fail();
         }
         if (e.node.is<ast::name>())
         {
             for (auto const& b : current()->bound)
                 if (b.where == where)
                     return is_valid(b.literal) ? again(b.literal, id) : local_ref(b.local, id);
+            // a const that did not check has no value, and its name already has the error type (CHK-19)
+            if (where.kind == target_kind::symbol && c.out.at(where.symbol).kind == symbol_kind::constant
+                && c.out.at(where.symbol).state == symbol_state::checked)
+                return constant_value(type, id, c.out.constants[c.out.at(where.symbol).info]);
             return fail();
         }
         if (auto const* const m = e.node.try_as<ast::member>())
         {
             if (where.kind == target_kind::enum_case)
-                return add_expr(type, id, flat_enum_value{.case_index = where.index});
+                return enum_value(type, id, where.index);
             if (where.kind == target_kind::binding_member)
                 return add_expr(type, id, flat_binding_member{.binding = where.symbol, .member = where.index});
             if (where.kind != target_kind::field)
@@ -350,6 +409,31 @@ struct flattener
         return fail();
     }
 
+    /// A case of `type`; a case of `bool` is a bool literal, since a target writes a bool and not the `int` of a case.
+    flat_expr_id enum_value(type_id type, ast::expr_id from, i32 case_index)
+    {
+        if (c.out.is_plain_enum(type))
+            return add_expr(type, from, flat_enum_value{.case_index = case_index});
+        auto const cases = c.out.at(c.out.at(type).cases);
+        auto const is_known_case = case_index >= 0 && case_index < cases.size();
+        return is_known_case ? add_expr(type, from, flat_bool_literal{.value = cases[case_index].value != 0}) : fail();
+    }
+
+    /// A const stands for its value, written where the name stood.
+    flat_expr_id constant_value(type_id type, ast::expr_id from, constant_info const& info)
+    {
+        switch (info.kind)
+        {
+        case constant_kind::integer:
+            return add_expr(type, from, flat_int_literal{.value = info.integer});
+        case constant_kind::real:
+            return add_expr(type, from, flat_literal{.value = info.real});
+        case constant_kind::enum_case:
+            return enum_value(type, from, info.case_index);
+        }
+        return fail();
+    }
+
     flat_expr_id flatten_number(ast::expr_id id, type_id type)
     {
         auto const text = c.text_of(file(), c.span_of(file(), id));
@@ -379,6 +463,10 @@ struct flattener
             }
             if (spelling == "not" || call.is_short_circuit)
                 return fail();
+            if ((spelling == "==" || spelling == "!=") && arguments.size() == 2
+                && tables().type_at(arguments[0].value) == checked_module::void_type
+                && tables().type_at(arguments[1].value) == checked_module::void_type)
+                return flatten_void_equality(id, type, spelling == "==", arguments[0].value, arguments[1].value);
         }
 
         auto const arguments = flatten_arguments(call.arguments);
@@ -392,6 +480,22 @@ struct flattener
             return add_expr(type, id, flat_block{.label = inlined.label, .body = inlined.body});
         }
         return builtin_call(id, where.symbol, arguments);
+    }
+
+    /// `a == b` over void: both sides run for their effects, in order, and the answer is known before either does.
+    flat_expr_id flatten_void_equality(ast::expr_id id, type_id type, bool is_equal, ast::expr_id lhs, ast::expr_id rhs)
+    {
+        auto const label = add_label("void_equality");
+        auto const where = origin{.file = file(), .expr = id};
+        auto const left = flatten_expr(lhs);
+        auto const right = flatten_expr(rhs);
+        flat_stmt_id const body[] = {
+            make_stmt(where, flat_eval{.value = left}),
+            make_stmt(where, flat_eval{.value = right}),
+            make_stmt(where,
+                      flat_leave{.target = label, .value = add_expr(type, id, flat_bool_literal{.value = is_equal})}),
+        };
+        return add_expr(type, id, flat_block{.label = label, .body = add_list(body)});
     }
 
     flat_expr_id builtin_call(ast::expr_id id, symbol_id callee, cc::span<flat_expr_id const> arguments)
@@ -533,11 +637,217 @@ struct flattener
         if (!is_valid(type))
             return symbol_id::none;
         // An enum compares as the `int` its cases are (EVAL-64).
-        auto const compared = c.out.at(type).kind == type_kind::enumeration ? int_type() : type;
+        auto const compared = c.out.is_plain_enum(type) ? int_type() : type;
         if (!is_valid(compared))
             return symbol_id::none;
         type_id const both[] = {compared, compared};
         return c.find_operator("==", both);
+    }
+
+    /// The prelude's `bool`, even where the user file shadows the name.
+    [[nodiscard]] type_id bool_type() const
+    {
+        auto const* const found = c.prelude_names.get_ptr(builtins::k_bool);
+        return found == nullptr || found->empty() ? type_id::none : c.out.at(found->front()).type;
+    }
+
+    // ---- checks -----------------------------------------------------------------------------------------------------
+
+    /// A check of a test or an `assert`: every node of `condition` is materialized into a `var` of its own, in the order
+    /// and under the conditions the plain expression would run them, and the report reads those `var`s (CHK-229).
+    void flatten_check(origin from, ast::expr_id condition, bool stops)
+    {
+        auto const site = i32(entry.check_sites.size());
+        entry.check_sites.push_back({.from = from, .stops = stops});
+        auto const outer = cc::move(block);
+        block = {};
+        auto nodes = cc::vector<flat_check_node>();
+        (void)materialize(condition, -1, nodes);
+        auto const body = add_list(block);
+        block = cc::move(outer);
+
+        // CHK-227: a target writes no assert, so what its condition would write happens on the interpreter alone
+        if (stops && writes_outside(entry, body, 0))
+        {
+            effectful_asserts.push_back({.file = file(), .expr = condition});
+            meets_error = true;
+            is_failed = true;
+        }
+
+        auto loop_variables = cc::vector<flat_expr_id>();
+        for (auto const index : test_loops)
+            loop_variables.push_back(add_expr(entry.at(index).type, ast::expr_id::none, flat_local_ref{.local = index}));
+        entry.check_sites[site].nodes = {.first = u32(entry.check_nodes.size()), .count = u32(nodes.size())};
+        entry.check_nodes.push_back_range(nodes);
+        entry.check_sites[site].loop_variables = add_list(loop_variables);
+        add_stmt(from, flat_check{.site = site, .body = body});
+    }
+
+    /// A `var` for node `node` of a check, declared without a value where the node's statements begin.
+    local_id check_var(ast::expr_id id)
+    {
+        auto const local = add_local(local_kind::var, "check", tables().type_at(id));
+        add_stmt({.file = file(), .expr = id}, flat_var{.local = local});
+        return local;
+    }
+
+    void assign_check(local_id local, ast::expr_id from, flat_expr_id value)
+    {
+        add_stmt({.file = file(), .expr = from}, flat_assign{.place = local_ref(local, from), .value = value});
+    }
+
+    /// A node that is only a value.
+    local_id check_leaf(ast::expr_id id, i32 parent, cc::vector<flat_check_node>& nodes)
+    {
+        auto const local = check_var(id);
+        nodes.push_back(
+            {.kind = check_node_kind::leaf, .from = {.file = file(), .expr = id}, .parent = parent, .value = local});
+        assign_check(local, id, flatten_expr(id));
+        return local;
+    }
+
+    /// `callee` called with the values of two nodes, as the comparison the check pass resolved.
+    flat_expr_id compare_call(ast::expr_id id, symbol_id callee, local_id lhs, local_id rhs)
+    {
+        flat_expr_id const arguments[] = {local_ref(lhs, id), local_ref(rhs, id)};
+        if (!is_valid(c.out.at(callee).intrinsic))
+        {
+            auto const inlined = inline_call(id, callee, arguments);
+            return add_expr(c.out.functions[c.out.at(callee).info].result, id,
+                            flat_block{.label = inlined.label, .body = inlined.body});
+        }
+        return builtin_call(id, callee, arguments);
+    }
+
+    [[nodiscard]] static bool is_comparison(cc::string_view op)
+    {
+        return op == "==" || op == "!=" || op == "<" || op == "<=" || op == ">" || op == ">=";
+    }
+
+    local_id materialize(ast::expr_id id, i32 parent, cc::vector<flat_check_node>& nodes)
+    {
+        auto const& e = ast().at(id);
+        auto const* const call = e.node.try_as<ast::call>();
+        auto const spelling
+            = call != nullptr && sgl::is_valid(call->op) ? c.text_of(file(), c.file_of(file()).at(call->op).where) : "";
+        auto const arguments = call != nullptr ? ast().at(call->arguments) : cc::span<ast::argument const>();
+        auto const where = tables().target_at(id);
+        auto const from = origin{.file = file(), .expr = id};
+        auto const index = i32(nodes.size());
+
+        if (spelling == "not" && arguments.size() == 1)
+        {
+            auto const local = check_var(id);
+            nodes.push_back({.kind = check_node_kind::not_, .from = from, .parent = parent, .value = local});
+            auto const operand = materialize(arguments[0].value, index, nodes);
+            assign_check(local, id, add_expr(tables().type_at(id), id, flat_not{.operand = local_ref(operand, id)}));
+            return local;
+        }
+        if (call != nullptr && call->is_short_circuit && arguments.size() == 2)
+        {
+            // `a and b`: b's statements run only where a is true, so a skipped operand's `var` holds nothing.
+            auto const is_and = spelling == "and";
+            auto const local = check_var(id);
+            nodes.push_back({.kind = is_and ? check_node_kind::and_ : check_node_kind::or_,
+                             .from = from,
+                             .parent = parent,
+                             .value = local});
+            auto const lhs = materialize(arguments[0].value, index, nodes);
+            assign_check(local, id, local_ref(lhs, id));
+            auto const outer = cc::move(block);
+            block = {};
+            auto const rhs = materialize(arguments[1].value, index, nodes);
+            assign_check(local, id, local_ref(rhs, id));
+            auto const then_body = add_list(block);
+            block = cc::move(outer);
+            auto const decided = is_and ? local_ref(lhs, id)
+                                        : add_expr(tables().type_at(id), id, flat_not{.operand = local_ref(lhs, id)});
+            add_stmt(from, flat_if{.condition = decided, .then_body = then_body});
+            return local;
+        }
+        if (is_comparison(spelling) && arguments.size() == 2 && where.kind == target_kind::overload)
+        {
+            auto const local = check_var(id);
+            nodes.push_back({.kind = check_node_kind::compare,
+                             .from = from,
+                             .op = cc::string(spelling),
+                             .parent = parent,
+                             .value = local});
+            auto const lhs = check_leaf(arguments[0].value, index, nodes);
+            nodes[index].lhs = i32(nodes.size() - 1);
+            auto const rhs = check_leaf(arguments[1].value, index, nodes);
+            nodes[index].rhs = i32(nodes.size() - 1);
+            assign_check(local, id, compare_call(id, where.symbol, lhs, rhs));
+            return local;
+        }
+        if (auto const* const chain = e.node.try_as<ast::comparison_chain>())
+            return materialize_chain(id, *chain, parent, nodes);
+        return check_leaf(id, parent, nodes);
+    }
+
+    /// `a < b <= c`: each link is a comparison node, and link i + 1 and its new operand run only where link i held.
+    local_id materialize_chain(ast::expr_id id,
+                               ast::comparison_chain const& chain,
+                               i32 parent,
+                               cc::vector<flat_check_node>& nodes)
+    {
+        auto const operands = ast().at(chain.operands);
+        auto const operators = ast().at(chain.operators);
+        auto const local = check_var(id);
+        auto const index = i32(nodes.size());
+        nodes.push_back(
+            {.kind = check_node_kind::chain, .from = {.file = file(), .expr = id}, .parent = parent, .value = local});
+        if (operands.size() < 2 || operators.size() + 1 != operands.size())
+        {
+            is_failed = true;
+            return local;
+        }
+
+        auto left = check_leaf(operands[0], index, nodes);
+        auto left_node = i32(nodes.size() - 1);
+        auto outers = cc::vector<cc::vector<flat_stmt_id>>();
+        auto conditions = cc::vector<flat_expr_id>();
+        for (auto i = isize(0); i < operators.size(); ++i)
+        {
+            auto const link = check_var(id);
+            auto const link_node = i32(nodes.size());
+            auto const spelling = c.text_of(file(), c.file_of(file()).at(operators[i]).where);
+            nodes.push_back({.kind = check_node_kind::compare,
+                             .from = {.file = file(), .expr = id},
+                             .op = cc::string(spelling),
+                             .parent = index,
+                             .lhs = left_node,
+                             .value = link});
+            auto const right = check_leaf(operands[i + 1], index, nodes);
+            nodes[link_node].rhs = i32(nodes.size() - 1);
+
+            type_id const types[] = {entry.at(left).type, entry.at(right).type};
+            auto const callee = c.find_operator(spelling, types);
+            if (!is_valid(callee))
+            {
+                is_failed = true;
+                return local;
+            }
+            assign_check(link, id, compare_call(id, callee, left, right));
+            assign_check(local, id, local_ref(link, id));
+
+            // the next link runs inside an `if` of this one
+            if (i + 1 < operators.size())
+            {
+                conditions.push_back(local_ref(link, id));
+                outers.push_back(cc::move(block));
+                block = {};
+            }
+            left = right;
+            left_node = nodes[link_node].rhs;
+        }
+        for (auto i = outers.size() - 1; i >= 0; --i)
+        {
+            auto const then_body = add_list(block);
+            block = cc::move(outers[i]);
+            add_stmt({.file = file(), .expr = id}, flat_if{.condition = conditions[i], .then_body = then_body});
+        }
+        return local;
     }
 
     /// The prelude's `int`, which an enum's comparison runs on, even where the user file shadows the name.
@@ -841,9 +1151,14 @@ struct flattener
         current()->bound.push_back({.where = {.kind = target_kind::local, .index = i32(id)}, .local = index});
 
         auto const label = add_label("for");
+        auto const is_test_loop = is_test && frames.size() == 1;
+        if (is_test_loop)
+            test_loops.push_back(index);
         current()->loops.push_back({.loop = label});
         auto const body = flatten_body(loop.body);
         current()->loops.remove_back();
+        if (is_test_loop)
+            test_loops.remove_back();
         add_stmt(from, flat_for{.label = label, .index = index, .first = first, .end = end, .body = body});
     }
 
@@ -887,6 +1202,12 @@ struct flattener
         }
         if (auto const* const print = s.node.try_as<ast::print_stmt>())
             return add_stmt(from, flat_print{.value = flatten_expr(print->message)});
+        // A test in a function body never runs where it stands (CHK-224).
+        if (auto const* const d = s.node.try_as<ast::decl_stmt>();
+            d != nullptr && ast::is_valid(d->declaration) && ast().at(d->declaration).node.is<ast::test_decl>())
+            return;
+        if (auto const* const a = s.node.try_as<ast::assert_stmt>())
+            return flatten_check(from, a->condition, true);
 
         auto const* const e = s.node.try_as<ast::expr_stmt>();
         if (e == nullptr || !ast::is_valid(e->value))
@@ -950,16 +1271,18 @@ struct flattener
         if (auto const* const c = x.node.try_as<ast::case_expr>())
             return add_stmt(from, flatten_case_parts(*c, label_id::none));
 
-        // What is left is a call, and one that returns nothing is a block that is a statement.
+        // CHK-225: a line of type bool of the test's own body is a check.
+        if (is_test && frames.size() == 1 && tables().type_at(value) == bool_type())
+            return flatten_check(from, value, false);
+
+        // What is left is a call, and one that returns `void` is a block that is a statement.
+        // A line that is no call computes nothing, which the check pass reported; it is evaluated and dropped.
         auto const* const call = x.node.try_as<ast::call>();
         if (call == nullptr)
-        {
-            is_failed = true;
-            return;
-        }
+            return add_stmt(from, flat_eval{.value = flatten_expr(value)});
         auto const& where = tables().target_at(value);
         if (where.kind == target_kind::overload && !is_valid(c.out.at(where.symbol).intrinsic)
-            && tables().type_at(value) == checked_module::nothing_type)
+            && tables().type_at(value) == checked_module::void_type)
         {
             auto const arguments = flatten_arguments(call->arguments);
             auto const inlined = inline_call(value, where.symbol, arguments);
@@ -974,9 +1297,47 @@ struct flattener
 };
 } // namespace
 
+void checker::flatten_test(i32 index)
+{
+    // by value: flattening appends to the module's vectors
+    auto const test = out.tests[index];
+    auto const info = out.at(test.symbol).info;
+    // A test that expects a diagnostic is never run (CHK-232), and one whose text an earlier phase found an error in has
+    // been reported already: flattening either could only add a second diagnostic to the first.
+    if (test.expects_diagnostics() || has_syntax_error_in(test.file, test.extent))
+        return;
+    if (!notes[info].is_body_sound || !inlines_whole(test.symbol))
+        return;
+
+    auto f = flattener{.c = *this, .is_test = true};
+    f.entry.name = "test";
+    f.entry.function = test.symbol;
+    f.entry.result = checked_module::void_type;
+    for (auto const& other : out.symbols)
+        if (!other.name.empty())
+            f.entry.names.reserve(other.name);
+    f.frames.push_back({.function = test.symbol, .file = test.file, .result = checked_module::void_type});
+
+    auto const& body = ast_of(test.file).at(test.declaration).node.as<ast::test_decl>().body;
+    for (auto const stmt : ast_of(test.file).at(body.statements))
+        f.flatten_stmt(stmt);
+
+    // CHK-227: once, however many trees inline the function the assert stands in
+    for (auto const& a : f.effectful_asserts)
+        report_once(diagnostic_kind::unsupported_yet, a.file, span_of(a.file, a.expr),
+                    "an assert whose condition writes a buffer, prints, or calls a builtin with an effect");
+    if (f.is_failed && !f.meets_error)
+        unsupported(test.file, test.where, "a test whose body reaches a construct the flat tree cannot hold yet");
+    if (f.is_failed)
+        return;
+    f.entry.body = f.add_list(f.block);
+    out.tests[index].unit = i32(out.test_units.size());
+    out.test_units.push_back(cc::move(f.entry));
+}
+
 bool checker::is_sound(type_id type) const
 {
-    if (!is_valid(type) || type == checked_module::error_type || type == checked_module::nothing_type)
+    if (!is_valid(type) || type == checked_module::error_type)
         return false;
     for (auto const& m : out.at(out.at(type).members))
         if (!is_sound(m.type))
@@ -1014,7 +1375,8 @@ void checker::flatten_entry_point(symbol_id id)
     // Every module-level name is taken, so no local can hide a type, a binding or a builtin an emitter writes.
     f.entry.names.reserve(s.name);
     for (auto const& other : out.symbols)
-        f.entry.names.reserve(other.name);
+        if (!other.name.empty())
+            f.entry.names.reserve(other.name);
 
     f.frames.push_back({.function = id, .file = s.file, .result = info.result});
     auto const local = f.add_local(local_kind::parameter, parameter.name, parameter.type);
@@ -1032,6 +1394,10 @@ void checker::flatten_entry_point(symbol_id id)
     {
         return st == stage::vertex ? "vertex" : st == stage::pixel ? "pixel" : "compute";
     };
+    // CHK-227: once, however many trees inline the function the assert stands in
+    for (auto const& a : f.effectful_asserts)
+        report_once(diagnostic_kind::unsupported_yet, a.file, span_of(a.file, a.expr),
+                    "an assert whose condition writes a buffer, prints, or calls a builtin with an effect");
     for (auto const& v : f.stage_violations)
         report(diagnostic_kind::stage_not_allowed, v.file, span_of(v.file, v.call),
                cc::format("{} is a {} entry point, and {} is @stages without it", s.name, stage_name(info.entry_stage),

@@ -148,6 +148,22 @@ def _link_open(self, tokens, index, options, env):
 _MD.add_render_rule("link_open", _link_open)
 
 
+_RAW_SPAN = re.compile(r"(`+)raw:")
+_RAW_LINK = re.compile(r"\]\(raw:")
+_RAW_FENCE = re.compile(r"^([ \t]*(?:```|~~~)[`~]*)[ \t]*raw(?::[ \t]*|(?=[ \t]*$))", re.MULTILINE)
+
+
+def strip_raw(text: str) -> str:
+    """Entry prose with every `raw:` escape dropped, for text that leaves the page.
+
+    The escape only tells the annotation pass to keep its hands off, so a draft, a summary or a posted comment
+    would otherwise carry it to a reader who never sees it rendered.
+    """
+    text = _RAW_FENCE.sub(r"\1", text)
+    text = _RAW_LINK.sub("](", text)
+    return _RAW_SPAN.sub(r"\1", text)
+
+
 def render(text: str, *, repo: Path | None = None) -> str:
     """Entry prose as HTML.
 

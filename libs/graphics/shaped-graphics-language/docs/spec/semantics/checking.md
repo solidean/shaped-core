@@ -33,7 +33,7 @@ Back to the [semantics](_index.md); the reasons are in [why/checking.md](why/che
 * **CHK-190** A lookup from a prelude file sees the prelude's scope alone, and never a name of the program's file.
 * **CHK-191** What the check pass needs of the prelude by name is always the prelude's, whatever the program's file shadows.
   That is the type of a literal, of a condition and of a `for`, and `raster_pipeline_description`.
-* **CHK-14** A `const`, a `type` alias and a file-scope `sampler` are `unsupported-yet`, and each still owns its name, so a use of it is silent.
+* **CHK-14** A `type` alias and a file-scope `sampler` are `unsupported-yet`, and each still owns its name, so a use of it is silent; a `const` is carried by CHK-219.
   An `enum` is a symbol of its own, by CHK-142.
 * **CHK-15** `use` and `notation` are `unsupported-yet`.
 * **CHK-16** A symbol is in one of four states: untouched, in compilation, checked, or failed.
@@ -56,12 +56,46 @@ struct b:
 
 * **CHK-21** A type is canonical: two expressions name the same type exactly when they resolve to the same type, and nothing converts implicitly.
 * **CHK-22** Each `struct` declaration is one type, whatever its fields.
-* **CHK-23** A type position holds a name that resolves to a `struct`; every other expression there is `unsupported-yet`.
+* **CHK-23** A type position holds a name that resolves to a `struct` or an `enum`, or `void` (CHK-215); every other expression there is `unsupported-yet`.
 * **CHK-24** A name in a type position that is not declared is the normal error `unknown-name`, and one that stands for a function or a binding is `wrong-kind-of-name`.
 * **CHK-25** A format is not a type: nothing such as `rgba8` exists.
 * **CHK-26** A field, a binding member and a parameter have a type; one without is the normal error `missing-type`.
 * **CHK-27** A default value, a `mut` member, a property and a method are `unsupported-yet`.
 * **CHK-28** Two fields of one struct, two members of one binding and two parameters of one function differ in name, or the later one is `duplicate-declaration`.
+
+## Void
+
+* **CHK-215** `void` is a reserved name ([AST-137](../syntax/ast.md#atoms)): in a type position it is the type `void`, and anywhere else it is that type's one value.
+* **CHK-216** `void` is a type like any other: a local, a parameter, a field and a result may be of it, and `let`, `return` and `print` take its value.
+* **CHK-217** `==` and `!=` over two `void` values are the language's own and give `true` and `false`: both operands run, and the answer is known before either does.
+* **CHK-214** A binding member of type `void` is `type-mismatch`: a member is a slot of the group's layout, and a void one fills none.
+
+```sgl
+fun note(x: float) -> void:
+    print x
+
+fun f(x: float) -> float:
+    let done = note x
+    if done == void => return x
+    return 0.0
+```
+
+## Consts
+
+* **CHK-219** A `const` at file scope stands for its value wherever it is named: an `int` or `float` literal, `-` in front of one, an enum case, or another `const`.
+  Any other value is `unsupported-yet`, and a written type the value does not have is `type-mismatch`.
+* **CHK-221** A `const` whose value is an enum case names that case as a `case` pattern, so it counts for exhaustiveness as `e.case` does (CHK-159).
+* **CHK-222** `true` and `false` are `@shadowable(false)` consts of `core.sgl`, whose values are the cases of `bool` (CHK-218).
+
+```sgl
+const steps = 4
+const scale = -0.5
+
+fun sign(b: bool) -> float:
+    return case b:
+        true => 1.0
+        false => scale
+```
 
 ## Enums
 
@@ -75,6 +109,8 @@ struct b:
 * **CHK-149** `==` and `!=` over two values of one enum are the language's own, as `and` is by CHK-116: no function declares them, and each gives a `bool`.
 * **CHK-150** An enum converts to no type and no type converts to it, `int` included, and it has no other operator ([why](why/checking.md#chk-150)).
 * **CHK-151** A property, a method or a nested declaration in an `enum` block is `unsupported-yet`, as CHK-27 makes each on a `struct`.
+* **CHK-218** `bool` is a `@builtin enum` of the prelude with the cases `false` and `true`, in that order, so `bool.true` is a value like `light_kind.sun`.
+  Its record makes it the targets' bool: CHK-149 and CHK-150 do not hold for it, since its `==` is the prelude's and `and`, `or` and `not` take it (CHK-116).
 
 ```sgl
 enum light_kind:
@@ -83,11 +119,63 @@ enum light_kind:
     sun
 ```
 
+## Tests
+
+* **CHK-224** A `test` is checked as a function of no parameter and no binding that returns `void`, on its own, wherever it stands: at file scope, in a struct or an enum, or in a function body.
+  One in a function body is checked after that body, and it never runs where it stands, so no jump in front of it makes it unreachable.
+  Every `test` the source spells is run or fails, and none is ever left out.
+  One whose surroundings are never checked, a function whose signature failed or a test inside a test, is checked as one at file scope.
+* **CHK-225** In a test, and not in a function nested in one, an expression statement of type `bool` is a **check**: it must be true when it runs ([why](why/checking.md#chk-225)).
+  Any other expression statement there that is no paren or juxtaposition call, and whose type is not `void`, is the warning `no-effect`, which the AST pass leaves to this one (AST-140).
+* **CHK-226** The last code line of a test is a check, or it is `test-must-end-in-check` ([why](why/checking.md#chk-226)).
+  The last code line is the last statement of its body, through the last branch of an `if`, the body of a loop and the last arm of a `case`.
+  A test whose asserts are what it checks ends in `true // why`.
+  A test that expects `.fail` or `.assert` is exempt, since it cannot pass without its run failing, and so is a test with no statement, which the AST pass reported.
+* **CHK-227** `assert condition` takes a `bool`, in a test or anywhere else; a message is `unsupported-yet`.
+  A condition that writes a buffer, prints, or calls a builtin with an effect is `unsupported-yet`, since no target writes an `assert` (LEGAL-53) and its effect would happen on the interpreter alone.
+* **CHK-228** A test reads nothing of the function it stands in: a parameter, a local or a binding member of it is `test-captures-runtime-value`, since the test runs on its own.
+  Those names are still visible, so they hide what the module has of the name; a `const` is no value of a run and may be read.
+  A test lists no binding, so a callee that needs one is `binding-not-listed` by CHK-131, with a note that a local binding in the test will give it.
+* **CHK-229** In the flat tree a check or an `assert` is a `check` statement, whose body leaves every node of the condition in a `var` of its own.
+  A node is an `and`, an `or`, a `not`, a comparison, a comparison chain, or a leaf any other expression is; it runs in the order and under the conditions the condition itself would run it.
+* **CHK-230** A test whose body checked clean, and whose every callee inlines whole, has a flat tree of its own, of no stage and without a parameter.
+  A test that expects a diagnostic has none, and neither has one in whose text the parser or the AST pass found an error.
+* **CHK-231** `@expect` on a test names what it does, one argument each: `.fail`, `.assert`, `error = "kind"` or `warning = "kind"`.
+  In a kind, `*` stands for any run of characters and `?` for one.
+  An empty kind is `invalid-attribute-arguments`.
+  Any other argument is `invalid-attribute-arguments`.
+* **CHK-232** In a test with an `error` or a `warning` expectation, every diagnostic of any phase inside it is the test's, and is reported nowhere.
+  Inside is from its keyword to the end of its body.
+  One expected diagnostic usually brings others with it, and the test exists to show that the one it names is reported.
+  An expectation none of them meets is `unmet-expectation`, and a test that expects a diagnostic is judged by that alone and never run.
+  A test that expects `.fail` passes where a check or an `assert` of its run is false, and one that expects `.assert` where its run stops at a false `assert`.
+  Several of them on one test must all hold of its one run.
+
+```sgl sketch
+fun shade(k: float) -> float:
+    @expect(error = "test-captures-runtime-value") test k > 0.0
+    return k
+
+@expect(.fail) test 1 > 2
+```
+
+```sgl
+fun square(x: float) -> float => x * x
+
+test square 3.0 == 9.0
+
+fun shade(k: float) -> float:
+    test:
+        let x = square 2.0
+        x == 4.0
+    return k
+```
+
 ## Builtins and the prelude
 
 * **CHK-29** The prelude is SGL source, and each of its files is checked like the program's file; CHK-138 says which files it has.
 * **CHK-30** A declaration that carries `@builtin` stands for one record of the compiler's **builtin registry**.
-  The key of a `struct` is its **name**, and the key of a `fun` is its name together with its parameter types, so every overload is a record of its own ([why](why/checking.md#chk-30)).
+  The key of a `struct` or an `enum` is its **name**, and the key of a `fun` is its name together with its parameter types, so every overload is a record of its own ([why](why/checking.md#chk-30)).
 * **CHK-31** A `@builtin` declaration no record has the key of is the normal error `unknown-builtin`.
   That is a name the registry does not hold, a name it holds as the other kind of declaration, or parameter types no overload of the name takes.
 * **CHK-32** A `@builtin fun` has no body, and every other `fun` has one, or it is the normal error `expected-body`.
@@ -103,9 +191,12 @@ enum light_kind:
 
 | on | the known attributes |
 |---|---|
-| a function | `@builtin`, `@pure`, `@operator`, `@vertex`, `@pixel`, `@compute`, `@stages` |
-| a struct | `@builtin`, `@vertex`, `@pixel` |
-| a binding | `@inline` |
+| a function | `@builtin`, `@pure`, `@operator`, `@vertex`, `@pixel`, `@compute`, `@stages`, `@shadowable` |
+| a struct | `@builtin`, `@vertex`, `@pixel`, `@shadowable` |
+| an enum | `@builtin`, `@shadowable` |
+| a const | `@shadowable` |
+| a test | `@expect` |
+| a binding | `@inline`, `@shadowable` |
 | a binding member | `@unfilterable`, `@non_filtering` |
 | a struct field | `@position`, `@thread_id`, `@per_instance`, `@stream` |
 | a pipeline | `@raster`, `@compute`, `@raytracing` |
@@ -173,7 +264,7 @@ enum light_kind:
 
 ## Functions
 
-* **CHK-47** A function has typed parameters, and its return type stands behind `->`; one without returns nothing, by CHK-121.
+* **CHK-47** A function has typed parameters, and its return type stands behind `->`; one without returns `void`, by CHK-121.
 * **CHK-48** A function with type parameters, with `self`, or with a default argument is `unsupported-yet`, and it fails as a whole.
 * **CHK-49** A function whose signature holds the error type is failed.
 * **CHK-50** A function body is an ordered scope: a parameter is visible from the start, and a local from the statement after its `let`.
@@ -184,11 +275,15 @@ enum light_kind:
 * **CHK-54** A local or a parameter may have the name of a module-level symbol, and shadows it as it shadows a local ([why](why/checking.md#chk-54)).
   Types and values share one namespace, so behind it the name is the local wherever it stands: a call of it is CHK-78, and a type position holding it is the normal error `wrong-kind-of-name`.
   A parameter's type is resolved before any parameter is in scope, so `light: light` is fine.
+* **CHK-220** A symbol that carries `@shadowable(false)` is hidden by nothing, and it stays what its name means.
+  A declaration of the program, a local, a parameter or a `for` variable of its name is `shadows-unshadowable`.
+  Its one argument is `false` or `true`, on any declaration it stands on, and anything else is `invalid-attribute-arguments`.
 * **CHK-55** A pattern in a `let` and a `let` without a value are `unsupported-yet`; `let mut` is CHK-111.
 * **CHK-56** `return value` needs `value` to be of the function's return type, or it is `type-mismatch`.
 * **CHK-57** An arrow body `=> value` is `return value`.
 * **CHK-58** A block body that returns a value does so on every path, by CHK-123 to CHK-125.
-* **CHK-59** `assert` and a declaration inside a function are `unsupported-yet`; a call is a statement by CHK-137, and every other statement is [control flow](#control-flow).
+* **CHK-59** A declaration inside a function is `unsupported-yet`, a `test` excepted (CHK-224).
+  `assert` is CHK-227, a call is a statement by CHK-137, and every other statement is [control flow](#control-flow).
 
 ## Expressions
 
@@ -375,9 +470,9 @@ fun shade(kind: light_kind, base: float) -> float:
 
 ## Returning
 
-* **CHK-121** A function without `-> T` returns nothing: its `return` carries no value, and a call of it is a statement.
+* **CHK-121** A function without `-> T` returns `void`, exactly as one with `-> void` does: its `return` carries no value or a `void` one.
 * **CHK-122** An arrow body without a written return type returns what its expression is: the function's return type is the type of that expression.
-  A block body without `-> T` still returns nothing, by CHK-121.
+  A block body without `-> T` still returns `void`, by CHK-121.
 * **CHK-123** A statement list **exits** when it holds a `return`, a `break` or a `continue`, an `if` with an `else` whose every branch exits, or a `loop:` that holds no `break` of its own.
   So does an exhaustive `case` (CHK-159) whose every arm exits.
 * **CHK-124** A `while` and a `for` never make their list exit, whatever their condition is ([why](why/checking.md#chk-124)).
@@ -410,9 +505,9 @@ fun grade(x: float) -> float:
 * **CHK-136** So needing such a function from inside its own body, directly or through other inferred functions, is `dependency-cycle` by CHK-18.
   One written return type on the loop makes it the `recursive-call` of CHK-130.
   A call does not need an overload whose parameter types cannot take it, since parameters are known before a result is: an overload set stays usable from inside one of its inferred members.
-* **CHK-139** An arrow body whose expression is nothing, which is a call of a function that returns nothing, is `type-mismatch`: the body of such a function is its result.
+* **CHK-139** An arrow body whose expression is `void`, such as a call of a function that returns `void`, makes its function return `void` by CHK-122.
 * **CHK-137** A call that stands as a statement is evaluated and its value dropped, whatever it calls; any other expression as a statement is `unsupported-yet` ([why](why/checking.md#chk-137)).
-  In the flat tree it is an `eval` of the call, and a call of a function that returns nothing is the block of CHK-133 as a statement.
+  In the flat tree it is an `eval` of the call, and a call of a function that returns `void` is the block of CHK-133 as a statement.
 
 ```sgl
 fun make_mvp(model: mat4){frame} => frame.proj * frame.view * model
@@ -426,7 +521,7 @@ fun make_mvp(model: mat4){frame} => frame.proj * frame.view * model
 
 ## Diagnostic kinds
 
-Every kind below is a normal error by [DIAG-4](../syntax/diagnostics.md#rules), except `unreachable-code`, which is a warning.
+Every kind below is a normal error by [DIAG-4](../syntax/diagnostics.md#rules), except `unreachable-code` and `no-effect`, which are warnings.
 A diagnostic of this pass has a kind, a file, a byte span in that file, and a detail.
 
 | kind | reported by |
@@ -440,12 +535,13 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `unknown-builtin` | CHK-31 |
 | `expected-body` | CHK-32 |
 | `opaque-struct-needs-builtin` | CHK-34 |
-| `invalid-attribute-arguments` | CHK-36, CHK-39, CHK-204, CHK-208, CHK-211, CHK-212 |
-| `binding-not-listed` | CHK-45, CHK-131 |
-| `type-mismatch` | CHK-52, CHK-56, CHK-77, CHK-84, CHK-112 to CHK-118, CHK-121, CHK-139, CHK-167, CHK-210 |
+| `invalid-attribute-arguments` | CHK-36, CHK-39, CHK-204, CHK-208, CHK-211, CHK-212, CHK-220, CHK-231 |
+| `binding-not-listed` | CHK-45, CHK-131, CHK-228 |
+| `type-mismatch` | CHK-52, CHK-56, CHK-77, CHK-84, CHK-112 to CHK-118, CHK-121, CHK-167, CHK-210, CHK-214, CHK-219 |
 | `not-assignable` | CHK-112 |
 | `missing-return` | CHK-125 |
 | `unreachable-code` | CHK-126, CHK-162 |
+| `no-effect` | CHK-225 |
 | `recursive-call` | CHK-130 |
 | `unknown-member` | CHK-64, CHK-147, CHK-152 |
 | `no-matching-overload` | CHK-71, CHK-76, CHK-155 |
@@ -458,13 +554,16 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `missing-field`, `unknown-field`, `duplicate-field` | CHK-84 |
 | `invalid-entry-point` | CHK-87, CHK-93 |
 | `invalid-pipeline` | CHK-175 to CHK-185, CHK-187 |
+| `shadows-unshadowable` | CHK-220 |
+| `test-captures-runtime-value` | CHK-228 |
+| `test-must-end-in-check` | CHK-226 |
+| `unmet-expectation` | CHK-232 |
 
 ## Open
 
 * Whether `@builtin` is allowed outside the prelude; today it is.
 * Whether a builtin's declaration is checked against its record beyond the key; today its result type and its attributes are not.
 * Whether a body is checked once or where it is inlined, once a generic makes the two differ ([why](why/checking.md#chk-129)).
-* `true` and `false`, which are names nothing declares yet, beyond the value of a pipeline setting (CHK-178).
 * Whether a second function with the parameter types of another is an error where it is declared.
 * Whether a pattern may bind a name, which is the pattern language of [patterns](../incubator/patterns.md) and the thing that would make exhaustiveness a real analysis.
 * Whether an enum reaches `int` through a cast, and what an `int` that names no case then is ([enum futures](../incubator/enum-futures.md)).

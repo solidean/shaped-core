@@ -21,9 +21,11 @@ struct front_end
     cc::vector<ast::file_ast> asts;
     check::checked_module module;
     cc::string_view source_name;
-    /// Every error of every phase, one formatted diagnostic per line; empty when there is none.
-    /// Warnings are left out: a driver's result is either what it asked for or the reasons there is none.
+    /// Every error of every phase, one formatted diagnostic per line and its notes under it; empty when there is none.
+    /// A diagnostic a test's `@expect` names is in neither this nor `warnings`.
     cc::string errors;
+    /// The warnings, formatted the same way; a driver that returns what it was asked for leaves them out.
+    cc::string warnings;
 
     /// The program's file: the prelude's files come first.
     [[nodiscard]] i32 program_file() const { return i32(prelude.size()); }
@@ -34,6 +36,12 @@ struct front_end
         return file < prelude.size() ? prelude[file].name : source_name;
     }
 };
+
+/// `d` and its notes, one line each: `cube.sgl:12:5: error: unknown-name: foo`.
+[[nodiscard]] cc::string format_located(front_end const& front, check::located_diagnostic const& d);
+
+/// The files of `front` as the check pass takes them, prelude first, which is what a test run quotes.
+[[nodiscard]] cc::vector<check::module_file> module_files_of(front_end const& front);
 
 /// Parses, builds and checks `source` behind the prelude.
 /// A source with errors still yields a module, whose `errors` say why nothing should be read from it.

@@ -1,0 +1,31 @@
+// a case picks the first arm whose pattern matches
+
+enum light_kind:
+    point
+    spot
+    sun
+
+fun falloff(k: light_kind) -> float:
+    return case k:
+        .point => 1.0
+        .spot or .sun => 0.5
+
+test falloff(light_kind.point) == 1.0 and falloff(light_kind.sun) == 0.5
+
+fun stepped(n: int) -> float:
+    return case n:
+        0 => 0.0
+        1 or 2 => 0.5
+        _ => 1.0
+
+test:
+    for n in 0 ..< 4:
+        stepped(n) <= 1.0
+    stepped 2 == 0.5
+
+// an arm of a case in a test may be a check
+test:
+    let k = light_kind.spot
+    case k:
+        .spot => falloff(k) == 0.5
+        _ => false

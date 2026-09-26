@@ -27,4 +27,11 @@ namespace sgl
                                            cc::string_view source,
                                            diagnostic const& d,
                                            cc::string_view detail = {});
+
+/// A second place a diagnostic points at, as the line after it: `cube.sgl:3:1: note: declared here`.
+/// `source` must be the text `where` points into.
+[[nodiscard]] cc::string format_note(cc::string_view file_name,
+                                     cc::string_view source,
+                                     source_span where,
+                                     cc::string_view message);
 } // namespace sgl

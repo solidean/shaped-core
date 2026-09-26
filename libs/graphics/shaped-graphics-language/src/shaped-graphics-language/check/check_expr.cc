@@ -9,7 +9,7 @@ using namespace sgl::check::impl;
 namespace
 {
 constexpr auto error_type = checked_module::error_type;
-constexpr auto nothing_type = checked_module::nothing_type;
+constexpr auto void_type = checked_module::void_type;
 } // namespace
 
 // ---- bodies ---------------------------------------------------------------------------------------------------------
@@ -30,6 +30,7 @@ void checker::check_body(symbol_id id)
     for (auto const& p : out.at(info.parameters))
     {
         // CHK-54: a parameter may have the name of a module-level symbol, which it hides in the body.
+        judge_shadowing(file, text_of(file, ast.at(p.field).name), ast.at(p.field).name);
         scope.locals.push_back({
             .name = text_of(file, ast.at(p.field).name),
             .where = {.kind = target_kind::parameter, .index = i32(p.field)},
@@ -42,14 +43,7 @@ void checker::check_body(symbol_id id)
     auto ending = check_statements(scope, f.body.statements);
     if (ast::is_valid(f.body.value) && notes[index].infers_result)
     {
-        auto type = check_expr(scope, f.body.value);
-        if (type == nothing_type)
-        {
-            report(diagnostic_kind::type_mismatch, file, span_of(file, f.body.value),
-                   cc::format("the body of {} is its result, and this is nothing", out.at(id).name));
-            type = error_type;
-        }
-        out.functions[index].result = type;
+        out.functions[index].result = check_expr(scope, f.body.value);
         ending = flow::exits;
     }
     else if (ast::is_valid(f.body.value))
@@ -59,7 +53,7 @@ void checker::check_body(symbol_id id)
     }
     // a block without a statement was reported where it was parsed
     auto const has_statements = !f.body.statements.empty() || ast::is_valid(f.body.value);
-    if (has_statements && ending == flow::falls_through && info.result != nothing_type && info.result != error_type)
+    if (has_statements && ending == flow::falls_through && info.result != void_type && info.result != error_type)
         report(diagnostic_kind::missing_return, file, f.name,
                cc::format("{} returns {}, and a path through its body ends without a return", out.at(id).name,
                           out.name_of(info.result)));
@@ -214,8 +208,9 @@ type_id checker::check_expr(function_scope& scope, ast::expr_id expr)
     auto const type = e.node.visit(
         [&](ast::invalid_expr const&) { return error_type; }, [&](ast::literal const& l)
         { return check_literal(scope, expr, l); }, [&](ast::name const& n) { return check_name(scope, expr, n); },
-        [&](ast::member const& m) { return check_member(scope, expr, m); }, [&](ast::call const& c)
-        { return check_call(scope, expr, c); }, [&](ast::self_ref const&) { return not_yet("self"); },
+        [&](ast::member const& m) { return check_member(scope, expr, m); },
+        [&](ast::call const& c) { return check_call(scope, expr, c); },
+        [&](ast::self_ref const&) { return not_yet("self"); }, [&](ast::void_ref const&) { return void_type; },
         [&](ast::wildcard const&) { return not_yet("a wildcard as a value"); },
         // CHK-152: a leading dot needs a type the context expects, which today only a `case` pattern gives it
         [&](ast::leading_dot const&) { return not_yet("a leading-dot name outside a case pattern"); },
@@ -293,6 +288,11 @@ type_id checker::check_name(function_scope& scope, ast::expr_id id, ast::name co
     if (auto const* const local = scope.find_local(text))
     {
         set_target(file, id, local->where);
+        if (local->is_captured)
+        {
+            report_capture(scope, where, *local);
+            return error_type;
+        }
         return local->type;
     }
 
@@ -320,6 +320,11 @@ type_id checker::check_name(function_scope& scope, ast::expr_id id, ast::name co
     case symbol_kind::pipeline:
         report(diagnostic_kind::wrong_kind_of_name, file, where,
                cc::format("{} is a pipeline, which the host acquires and no shader reads", text));
+        break;
+    case symbol_kind::constant:
+        // CHK-219: a const is its value, and one that did not check is silent here, as a failed symbol always is.
+        if (demand(symbol, file, where) == symbol_state::checked)
+            return out.at(symbol).type;
         break;
     case symbol_kind::unsupported:
         break;
@@ -355,11 +360,29 @@ type_id checker::check_member(function_scope& scope, ast::expr_id id, ast::membe
             set_target(file, member.object, {.kind = target_kind::symbol, .symbol = binding});
             if (demand(binding, file, object_where) != symbol_state::checked)
                 return error_type;
+            // A const's value is checked outside every function, and a binding member is read only inside one.
+            if (!is_valid(scope.function))
+            {
+                unsupported(file, span_of(file, id), "a binding member outside a function");
+                return error_type;
+            }
 
             auto is_listed = false;
             for (auto const listed : out.at(out.functions[out.at(scope.function).info].bindings))
                 is_listed = is_listed || listed == binding;
-            if (!is_listed)
+            // CHK-228: a test lists no binding, and one its function lists is a value of the function's run
+            auto is_captured = false;
+            if (scope.is_test && is_valid(scope.enclosing))
+                for (auto const listed : out.at(out.functions[out.at(scope.enclosing).info].bindings))
+                    is_captured = is_captured || listed == binding;
+            if (is_captured)
+                report(diagnostic_kind::test_captures_runtime_value, file, object_where,
+                       cc::format("{} is a binding of {}, and a test runs on its own", out.at(binding).name,
+                                  out.at(scope.enclosing).name));
+            else if (!is_listed && scope.is_test)
+                report(diagnostic_kind::binding_not_listed, file, object_where,
+                       cc::format("{} is a binding, and a test lists none", out.at(binding).name));
+            else if (!is_listed)
                 report(diagnostic_kind::binding_not_listed, file, object_where,
                        cc::format("{} is not in the binding list of {}", out.at(binding).name,
                                   out.at(scope.function).name));
@@ -520,12 +543,16 @@ type_id checker::check_call(function_scope& scope, ast::expr_id id, ast::call co
         // `==` and `!=` over one enum are the language's own (CHK-149), and what they compare is the cases'
         // `int`s (EVAL-64) — so they resolve to the `int` overload, and no later pass needs an enum rule.
         if ((spelling == "==" || spelling == "!=") && arguments.types.size() == 2
-            && arguments.types[0] == arguments.types[1] && out.at(arguments.types[0]).kind == type_kind::enumeration)
+            && arguments.types[0] == arguments.types[1] && out.is_plain_enum(arguments.types[0]))
         {
             auto const as_int = type_of_builtin(builtins::k_int, file, where);
             arguments.types[0] = as_int;
             arguments.types[1] = as_int;
         }
+        // `==` and `!=` over void are the language's own as well: void has one value, so the answer is known.
+        if ((spelling == "==" || spelling == "!=") && arguments.types.size() == 2 && arguments.types[0] == void_type
+            && arguments.types[1] == void_type)
+            return type_of_builtin(builtins::k_bool, file, where);
         auto const* const found = operators.get_ptr(spelling);
         auto const none = cc::span<symbol_id const>();
         return resolve_overload(scope, id, ast::expr_id::none,
@@ -556,7 +583,10 @@ type_id checker::check_call(function_scope& scope, ast::expr_id id, ast::call co
     {
         set_target(file, call.callee, local->where);
         (void)check_arguments(scope, call.arguments, false);
-        unsupported(file, callee_where, "a call of a local value");
+        if (local->is_captured)
+            report_capture(scope, callee_where, *local);
+        else
+            unsupported(file, callee_where, "a call of a local value");
         return error_type;
     }
 
@@ -589,11 +619,14 @@ type_id checker::check_call(function_scope& scope, ast::expr_id id, ast::call co
         return error_type;
     case symbol_kind::enumeration:
     case symbol_kind::pipeline:
+    case symbol_kind::constant:
         (void)check_arguments(scope, call.arguments, false);
         set_target(file, call.callee, {.kind = target_kind::symbol, .symbol = first});
         report(diagnostic_kind::wrong_kind_of_name, file, callee_where,
                cc::format("{} is {}, and a call needs a function or a struct", text,
-                          out.at(first).kind == symbol_kind::pipeline ? "a pipeline" : "an enum"));
+                          out.at(first).kind == symbol_kind::pipeline   ? "a pipeline"
+                          : out.at(first).kind == symbol_kind::constant ? "a const"
+                                                                        : "an enum"));
         return error_type;
     case symbol_kind::unsupported:
         (void)check_arguments(scope, call.arguments, false);
@@ -717,7 +750,19 @@ void checker::note_program_call(function_scope const& scope, symbol_id callee, s
         auto is_listed = false;
         for (auto const l : listed)
             is_listed = is_listed || l == needed;
-        if (!is_listed)
+        if (!is_listed && scope.is_test)
+        {
+            // CHK-228: a test gives a callee its bindings through a local binding, which delegation will carry
+            auto& d = report(
+                diagnostic_kind::binding_not_listed, file, where,
+                cc::format("{} needs {}, and a test lists no binding", out.at(callee).name, out.at(needed).name));
+            d.notes.push_back({.file = file,
+                               .where = where,
+                               .message = cc::format("a `binding {}:` declared in the test gives {} its values, "
+                                                     "once local bindings are carried",
+                                                     out.at(needed).name, out.at(callee).name)});
+        }
+        else if (!is_listed)
             report(diagnostic_kind::binding_not_listed, file, where,
                    cc::format("{} needs {}, which is not in the binding list of {}", out.at(callee).name,
                               out.at(needed).name, out.at(scope.function).name));

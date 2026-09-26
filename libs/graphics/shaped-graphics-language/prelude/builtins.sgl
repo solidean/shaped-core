@@ -90,7 +90,9 @@
     z: uint
     w: uint
 
-@builtin struct bool
+@builtin enum bool:
+    false
+    true
 
 @builtin struct bool2:
     x: bool

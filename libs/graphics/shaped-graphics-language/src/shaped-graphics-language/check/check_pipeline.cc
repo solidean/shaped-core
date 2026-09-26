@@ -324,7 +324,7 @@ struct pipeline_compiler
             return true;
         }
 
-        if (type.kind == type_kind::enumeration)
+        if (type.kind == type_kind::enumeration && builtin == nullptr)
         {
             if (dot == nullptr)
             {

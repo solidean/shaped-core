@@ -1,0 +1,38 @@
+// for, loop and while, and the jumps out of them
+
+fun sum_skipping_three(n: int) -> int:
+    let mut total = 0
+    for i in 0 ..< n:
+        if i == 3 => continue
+        total += i
+    return total
+
+// 0 + 1 + 2 + 4
+test sum_skipping_three(5) == 7
+
+fun first_square_over(limit: int) -> int:
+    let mut i = 0
+    loop:
+        if i * i > limit => break
+        i += 1
+    return i
+
+test first_square_over(50) == 8
+
+fun halvings(x: float) -> int:
+    let mut v = x
+    let mut n = 0
+    while v > 1.0:
+        v = v * 0.5
+        n += 1
+    return n
+
+test halvings(8.0) == 3
+
+// an early return from inside a loop leaves the function, not only the loop
+fun first_over(limit: int) -> int:
+    for i in 0 ..< 100:
+        if i > limit => return i
+    return -1
+
+test first_over(7) == 8

@@ -1,0 +1,13 @@
+// a @shadowable(false) symbol is hidden by nothing, `true` and `false` among them
+
+@shadowable(false) const answer = 42
+
+test answer == 42
+
+@expect(error = "shadows-unshadowable") test:
+    let answer = 1
+    answer == 1
+
+@expect(error = "shadows-unshadowable") test:
+    for true in 0 ..< 2:
+        true < 2

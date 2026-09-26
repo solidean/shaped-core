@@ -36,6 +36,12 @@ struct sgl::ast::self_ref
     constexpr bool operator==(self_ref const&) const = default;
 };
 
+/// `void`, which is a reserved name and no keyword: the unit type in a type position, and its one value elsewhere.
+struct sgl::ast::void_ref
+{
+    constexpr bool operator==(void_ref const&) const = default;
+};
+
 struct sgl::ast::wildcard
 {
     constexpr bool operator==(wildcard const&) const = default;
@@ -290,6 +296,7 @@ struct sgl::ast::expr
                 literal,
                 name,
                 self_ref,
+                void_ref,
                 wildcard,
                 leading_dot,
                 member,

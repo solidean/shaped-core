@@ -58,6 +58,8 @@ struct target_ {
 
 * **EMIT-22** A struct of the program keeps its name, and a builtin type is spelled as its record says, which today is the table below.
 * **EMIT-23** A struct is declared after every struct it holds.
+* **EMIT-106** A field of type `void` holds nothing, so no target declares it, and a construction writes no argument for it.
+* **EMIT-107** A struct whose every field is `void` is `unsupported`, since it would be a struct of no member, which WGSL has no spelling for.
 
 | SGL | HLSL | WGSL | MSL |
 |---|---|---|---|
@@ -71,6 +73,7 @@ struct target_ {
 ## Enums
 
 * **EMIT-76** An enum is one named constant per case, minted as `<enum>_<case>`, of the target's `int`, and the constants stand in front of the structs.
+* **EMIT-108** A `@builtin` enum is none of that: it is written as its record spells it, and a case of `bool` is the literal `false` or `true`.
 * **EMIT-77** An entry point writes the whole constant set of every enum it mentions, in declaration order ([why](why/emitting.md#emit-77)).
 * **EMIT-81** An enum member of an edge struct or of an `@inline` binding is `unsupported`, as `int` and `bool` are by EMIT-33 and EMIT-39.
 
@@ -275,7 +278,7 @@ So `{float3; float}` is `layout-mismatch`: the `float` is at byte 12 in HLSL and
 |---|---|
 | `module-has-errors` | EMIT-10 |
 | `unknown-entry-point` | EMIT-11 |
-| `unsupported` | EMIT-12, EMIT-33, EMIT-34, EMIT-38, EMIT-39, EMIT-67, EMIT-81, EMIT-89 |
+| `unsupported` | EMIT-12, EMIT-33, EMIT-34, EMIT-38, EMIT-39, EMIT-67, EMIT-81, EMIT-89, EMIT-107 |
 | `reserved-entry-point-name` | none: retired by EMIT-21 |
 | `system-value-semantic` | EMIT-32 |
 | `layout-mismatch` | EMIT-41 |

@@ -72,6 +72,8 @@ cc::string_view sgl::to_string(diagnostic_kind kind)
         return "expected-case-arm";
     case diagnostic_kind::expected_name:
         return "expected-name";
+    case diagnostic_kind::reserved_name:
+        return "reserved-name";
     case diagnostic_kind::expected_pattern:
         return "expected-pattern";
     case diagnostic_kind::expected_parameter:
@@ -186,6 +188,16 @@ cc::string_view sgl::to_string(diagnostic_kind kind)
         return "stage-not-allowed";
     case diagnostic_kind::invalid_pipeline:
         return "invalid-pipeline";
+    case diagnostic_kind::shadows_unshadowable:
+        return "shadows-unshadowable";
+    case diagnostic_kind::test_captures_runtime_value:
+        return "test-captures-runtime-value";
+    case diagnostic_kind::test_must_end_in_check:
+        return "test-must-end-in-check";
+    case diagnostic_kind::test_failed:
+        return "test-failed";
+    case diagnostic_kind::unmet_expectation:
+        return "unmet-expectation";
     }
     CC_UNREACHABLE("unknown diagnostic_kind");
 }
@@ -226,6 +238,7 @@ sgl::severity sgl::default_severity_of(diagnostic_kind kind)
     case diagnostic_kind::expected_member:
     case diagnostic_kind::expected_case_arm:
     case diagnostic_kind::expected_name:
+    case diagnostic_kind::reserved_name:
     case diagnostic_kind::expected_pattern:
     case diagnostic_kind::expected_parameter:
     case diagnostic_kind::expected_body:
@@ -280,6 +293,11 @@ sgl::severity sgl::default_severity_of(diagnostic_kind kind)
     case diagnostic_kind::needs_feature:
     case diagnostic_kind::stage_not_allowed:
     case diagnostic_kind::invalid_pipeline:
+    case diagnostic_kind::shadows_unshadowable:
+    case diagnostic_kind::test_captures_runtime_value:
+    case diagnostic_kind::test_must_end_in_check:
+    case diagnostic_kind::test_failed:
+    case diagnostic_kind::unmet_expectation:
         return severity::normal_error;
     case diagnostic_kind::spaced_attribute_arguments:
     case diagnostic_kind::no_effect:

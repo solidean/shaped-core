@@ -1,6 +1,7 @@
 #include "core.hh"
 
 #include <clean-core/string/format.hh>
+#include <shaped-graphics-language/check/checked_module.hh>
 #include <shaped-graphics-language/legalize/impl/walk.hh>
 
 namespace
@@ -75,6 +76,8 @@ struct core_checker
             return violation("an expression nested beyond any program", id);
 
         auto const& x = e.at(id);
+        if (x.type == checked_module::void_type && (x.node.is<flat_local_ref>() || x.node.is<flat_member>()))
+            return violation("a read of a void value, which no target holds", id);
         if (auto const* const b = x.node.try_as<flat_block>())
             return violation(
                 cc::format("the block expression ${}, since a core expression holds no statement", label_name(b->label)),
@@ -124,16 +127,37 @@ struct core_checker
             return violation("a statement nested beyond any program");
         current = id;
 
+        auto const is_void_local
+            = [&](local_id local) { return is_known(e, local) && e.at(local).type == checked_module::void_type; };
+        auto const is_void_value
+            = [&](flat_expr_id value) { return is_known(e, value) && e.at(value).type == checked_module::void_type; };
         e.at(id).node.visit(
-            [&](flat_let const& s) { expr(s.value, 0); }, //
-            [&](flat_var const& s) { optional_expr(s.value); },
+            [&](flat_let const& s)
+            {
+                if (is_void_local(s.local))
+                    return violation("a void local, which no target declares");
+                expr(s.value, 0);
+            },
+            [&](flat_var const& s)
+            {
+                if (is_void_local(s.local))
+                    return violation("a void local, which no target declares");
+                optional_expr(s.value);
+            },
             [&](flat_assign const& s)
             {
+                if (is_void_value(s.value))
+                    return violation("an assignment of a void value, which no target holds");
                 expr(s.place, 0);
                 expr(s.value, 0);
             },
             [&](flat_print const& s) { expr(s.value, 0); }, //
-            [&](flat_eval const& s) { expr(s.value, 0); },
+            [&](flat_eval const& s)
+            {
+                if (is_void_value(s.value) && !e.at(s.value).node.is<flat_call>())
+                    return violation("an eval of a void value that is no call", s.value);
+                expr(s.value, 0);
+            },
             [&](flat_if const& s)
             {
                 expr(s.condition, 0);
@@ -207,7 +231,14 @@ struct core_checker
                 current = id;
                 breakable_body({.is_switch = true}, s.default_body, depth + 1);
             },
-            [&](flat_return const& s) { expr(s.value, 0); });
+            [&](flat_check const&) { violation("a check or an assert, which legalization removes (LEGAL-53)"); },
+            [&](flat_return const& s)
+            {
+                if (is_void_value(s.value))
+                    return violation("a return of a void value, which a target writes as `return;`", s.value);
+                if (is_valid(s.value))
+                    expr(s.value, 0);
+            });
     }
 };
 } // namespace

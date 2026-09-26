@@ -117,9 +117,52 @@ TEST("sgl check - a type is canonical: one id per struct, and the error type is 
     CHECK(m.name_of(fields[0].type) == "float");
 }
 
+TEST("sgl check - a const is a literal, an enum case or another const, and stands for its value")
+{
+    // CHK-219
+    CHECK(reports_for("const k = 1.5\nconst n = -3\nconst m = n\nenum e:\n    a\n    b\nconst first = e.a\n"
+                      "fun f(x: float) -> float:\n    if n < m or first == e.b => return x * k\n    return x\n")
+          == "");
+    CHECK(reports_for("const k: int = 1.5\n") == "type-mismatch user:[1.5] expected int, got float\n");
+    CHECK(reports_for("const a = b\nconst b = a\n").contains("dependency-cycle"));
+    CHECK(reports_for("const k = 1.0\nstruct a:\n    x: k\n")
+          == "wrong-kind-of-name user:[k] k is a const, and a type stands here\n");
+    // true and false are consts of the prelude, and a case over a bool that names both is exhaustive (CHK-221)
+    CHECK(reports_for("fun f(b: bool) -> float:\n    if b == true => return 1.0\n    return case b:\n"
+                      "        true => 0.5\n        false => 0.0\n")
+          == "");
+}
+
+TEST("sgl check - a @shadowable(false) symbol is hidden by nothing")
+{
+    // CHK-220: not by a declaration of the program, a local, a parameter or a for variable
+    CHECK(reports_for("const true = 1\n").contains("shadows-unshadowable"));
+    CHECK(reports_for("fun f(k: float) -> float:\n    let true = k\n    return k\n")
+          == "shadows-unshadowable user:[true] true is @shadowable(false)\n");
+    CHECK(reports_for("fun f(false: float) -> float => false\n").contains("shadows-unshadowable user:[false]"));
+    CHECK(reports_for("fun f(k: float) -> float:\n    for true in 0 ..< 3:\n        return k\n    return k\n")
+              .contains("shadows-unshadowable user:[true]"));
+    // a symbol of the program may say so of itself
+    CHECK(reports_for("@shadowable(false) const limit = 4\nfun f(limit: int) -> int => limit\n")
+          == "shadows-unshadowable user:[limit] limit is @shadowable(false)\n");
+    CHECK(reports_for("@shadowable(maybe) const limit = 4\n")
+          == "invalid-attribute-arguments user:[shadowable] @shadowable takes `false` or `true`, as in "
+             "@shadowable(false)\n");
+    // and on every declaration it stands on, where a typo would otherwise leave the symbol hidable
+    cc::string_view const declarations[] = {
+        "@shadowable(flase) struct light:\n    power: float\n", "@shadowable(flase) enum mode:\n    on\n    off\n",
+        "@shadowable(flase) fun f() -> float => 1.0\n",         "@shadowable(flase) binding frame:\n    e: float\n",
+        "@shadowable struct light:\n    power: float\n",
+    };
+    for (auto const d : declarations)
+        CHECK(reports_for(d).starts_with("invalid-attribute-arguments user:[shadowable]")).dump("source", d);
+    CHECK(reports_for("@shadowable(true) struct light:\n    power: float\n") == "");
+}
+
 TEST("sgl check - what the tracer does not carry is unsupported-yet, and names the construct")
 {
-    CHECK(reports_for("const k = 1.0\n") == "unsupported-yet user:[const k = 1.0] const\n");
+    CHECK(reports_for("const k = 2.0 * 1.0\n")
+          == "unsupported-yet user:[2.0 * 1.0] a const whose value is no literal, no enum case and no const\n");
     CHECK(reports_for("type color = float3\n") == "unsupported-yet user:[type color = float3] type alias\n");
     CHECK(reports_for("use brdf\n") == "unsupported-yet user:[use brdf] use\n");
     CHECK(reports_for("sampler s:\n    filter = .linear\n") == "unsupported-yet user:[sampler s:] sampler\n");
@@ -133,7 +176,8 @@ TEST("sgl check - what the tracer does not carry is unsupported-yet, and names t
           == "unsupported-yet user:[format] the attribute @format on a struct\n");
 
     // an unsupported declaration still owns its name, so a use of it is silent
-    CHECK(reports_for("const k = 1.0\nstruct a:\n    x: k\n") == "unsupported-yet user:[const k = 1.0] const\n");
+    CHECK(reports_for("type color = float3\nstruct a:\n    x: color\n")
+          == "unsupported-yet user:[type color = float3] type alias\n");
     // the module line is accepted
     CHECK(reports_for("module cube\nstruct a:\n    x: float\n") == "");
 }

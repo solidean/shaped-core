@@ -43,6 +43,12 @@ One flat lossless `sgl::parsed_file` per file: `print_source` gives the bytes ba
 Every tree is a value with typed ids (`enum class … : i32 { none = -1 }`) and a text dump the tests compare against.
 The AST pass is per file and name-free: a name is a span, and nothing is looked up.
 
+**Two highlighters copy the syntax, and a syntax change updates both.**
+One is the VS Code grammar, [sgl.tmLanguage.json](../tools/vscode-extension/syntaxes/sgl.tmLanguage.json).
+The other is the review tool's Pygments lexer, [sgl_lexer.py](../../../../tools/review/lib/render/sgl_lexer.py).
+A new keyword, operator, literal form or line-tree rule is not done until both draw it.
+The review tool's self-test holds the lexer's keywords to the form parser's `sgl_keywords`; nothing else is checked yet ([TODO](TODO.md)).
+
 ## The check pass
 
 **Name resolution, type checking and evaluation are one demand-driven pass** per module.
@@ -89,6 +95,17 @@ Then come `find_core_violation`, both legalizer passes, the interpreter and the 
 The random generator of `tests/legalize/random-program.cc` has to produce it too, or the differential test never meets it.
 The legalizer drops an `eval` whose value was a block once the block has moved in front, since what is left is a read of a local; a call stays, pure or not.
 
+## Tests
+
+**A `test` is a root of the check pass, and it has a flat tree of its own** in `checked_module::test_units`, of no stage and without a parameter.
+Its body is checked after every function body, since a test in a function body is only found while that body is checked.
+A check of a test and an `assert` anywhere flatten to one `check` statement, whose body leaves every node of the condition in a `var` of its own.
+The interpreter reads those `var`s when a check is false, and `sgl::test::run_tests` narrows them into a report.
+`legalize` removes every `check` first, which is all it takes for no target to write one.
+
+`sgl::test_source` is the driver of a whole file's tests, what `sgl test` and the corpus run; `text_request::run_tests` makes a failing test an error of `compile_to_text`.
+`@expect` is judged in the front end, once every phase's diagnostics are in one list.
+
 ## Builtins and the prelude
 
 **A builtin lives in one place, a record of the C++ builtin registry**: its signature as SGL source text, its evaluator, its spelling per target, a type's layout per target.
@@ -134,8 +151,8 @@ The size and alignment the `layout-mismatch` check places a member by are fields
 `sgl` is the toolchain's command line, a nexus binary under `tools/sgl/` whose jobs are `COMMAND`s.
 
 ```bash
-uv run dev.py run sgl -- emit <file> --entry <name> --target <hlsl-dx12|hlsl-vulkan|wgsl|msl>
-uv run dev.py run sgl -- describe <file>             # what slib's generator reads: bindings, edge structs, entry points
+uv run dev.py run sgl -- emit <file> --entry <name> --target <hlsl-dx12|hlsl-vulkan|wgsl|msl> [--run-tests]
+uv run dev.py run sgl -- test <file>...              # the tests of each file, on the interpreter
 uv run dev.py run sgl -- describe <file>             # what slib's generator reads: bindings, edge structs, entry points
 uv run dev.py run sgl -- prelude --check <path>      # exit 2, and where the texts part, when the file differs
 uv run dev.py run sgl -- prelude --write <path>      # what `uv run dev.py check sgl-prelude --fix` runs
@@ -147,6 +164,11 @@ It is built wherever `SC_BUILD_TOOLS` is on, and the `sgl-prelude` step skips wi
 ## The spec is tested
 
 Every `sgl` fence in the spec is a test, so the spec and the parser cannot drift apart silently.
+A fence that holds a `test` runs it as well.
+
+**The corpus is how the language's semantics are tested**: one `.sgl` file per topic under `tests/corpus/`, found when the test binary runs, so a new file needs no C++ and no CMake.
+A file passes when it checks with no diagnostic at all, every test in it passes, and every entry point it declares is written for every target.
+A rule is best stated as a test of a corpus file; a C++ `TEST` is for what SGL cannot say, which today is bindings, resources and the emitted text.
 Rules have stable ids and are never renumbered; a new rule is appended.
 Every "why" is mirrored in a `why/` folder beside its rules, and ideas that are not spec yet live under `spec/incubator/`.
 

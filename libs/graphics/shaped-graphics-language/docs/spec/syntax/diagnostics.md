@@ -264,6 +264,7 @@ An example of an AST kind is an `sgl sketch`, since examples are checked through
 | `expected-member` | a line of a `struct`, `enum`, `binding` or `sampler` block, or an element of a `struct_type`, that is no member |
 | `expected-case-arm` | a statement of a `case` block that is no `pattern => result` |
 | `expected-name` | a declaration, an import or a named argument that has no identifier where its name stands |
+| `reserved-name` | a declaration, a field, an enum case or a parameter named by a reserved name such as `void` ([AST-141](ast.md#atoms)) |
 | `expected-pattern` | a `let` whose target is no name, no `_` and no round list of patterns |
 | `expected-parameter` | an element of a parameter list, or the left side of an arrow lambda, that is no parameter |
 | `expected-body` | a construct that needs a body and has none, or has `=` where `=>` or a block stands |

@@ -67,6 +67,12 @@ struct dumper
         case symbol_kind::pipeline:
             out += "(pipeline ";
             break;
+        case symbol_kind::constant:
+            out += "(const ";
+            break;
+        case symbol_kind::test:
+            out += "(test ";
+            break;
         case symbol_kind::unsupported:
             out += "(unsupported ";
             break;
@@ -369,6 +375,13 @@ struct dumper
                      {
                          out += "(return ";
                          dump_expr(e, r.value, indent, true);
+                         out += ")";
+                     },
+                     [&](flat_check const& k)
+                     {
+                         auto const is_known_site = k.site >= 0 && k.site < e.check_sites.size();
+                         out += is_known_site && e.check_sites[k.site].stops ? "(assert" : "(check";
+                         dump_body(e, k.body, indent + 2);
                          out += ")";
                      });
     }

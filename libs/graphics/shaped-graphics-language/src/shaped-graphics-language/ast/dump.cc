@@ -209,7 +209,7 @@ struct dumper
                 out += file.text_of(file.at(e.form).where);
             },
             [&](name const& n) { out += file.text_of(n.where); }, [&](self_ref const&) { out += "self"; },
-            [&](wildcard const&) { out += "_"; },
+            [&](void_ref const&) { out += "void"; }, [&](wildcard const&) { out += "_"; },
             [&](leading_dot const& n)
             {
                 out += ".";
@@ -632,6 +632,13 @@ struct dumper
                 dump_expr(n.pattern, depth);
                 out += " => ";
                 dump_expr(n.replacement, depth);
+            },
+            [&](test_decl const& n)
+            {
+                // A test has no name, so nothing stands between the tag and its body.
+                out += "(test";
+                attributes(d.attributes);
+                dump_body(n.body, depth);
             },
             [&](field_decl const& n)
             {

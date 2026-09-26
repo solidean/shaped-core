@@ -569,6 +569,15 @@ An allocation ceiling correct for adaptive RLE would have rejected legal old-for
 The honest conclusion — no linear bound exists, use a sane constant — superseded a recommendation the maintainer had already approved.
 **Catching this after approval is normal; that is what the adversarial pass is for.**
 
+### A summary of what the review landed is checked against its own commits
+
+A `land-changes` comment describes commits the reviewer just wrote, and that is where a summary drifts most.
+The summary is written from what the fix was meant to do, and the commit does slightly less or slightly else.
+One draft said a fix counted "a callee's asserts" when it counted every assert of the run, and said the second of two expectations "always" saw `passed` when that held only if the first was met.
+It also said a doc "no longer" described something that three of its lines still partly did.
+**Read the diff of each commit while writing its bullet, and name every hunk a reader will see.**
+A sort comparator, a `nan` spelling or a nested-test case left out of the comment is a hunk the author cannot account for.
+
 ### A second citation is a second claim
 
 A finding propped on a supporting citation is only as strong as the weaker one, and reaching for a second reference because the first felt thin doubles what a reader can check.

@@ -4,6 +4,7 @@
 #include <shaped-graphics-language/driver/impl/front_end.hh>
 #include <shaped-graphics-language/emit/impl/dialect.hh>
 #include <shaped-graphics-language/legalize/legalize.hh>
+#include <shaped-graphics-language/test/run_tests.hh>
 
 using namespace sgl;
 
@@ -13,6 +14,16 @@ cc::result<sgl::emitted_source, cc::string> sgl::compile_to_text(text_request co
     if (!front.errors.empty())
         return cc::error(front.errors);
     auto const& m = front.module;
+
+    if (request.run_tests)
+    {
+        auto failed = cc::string();
+        for (auto const& r : test::run_tests(m, driver::impl::module_files_of(front), {.file = front.program_file()}))
+            if (!r.is_passed())
+                failed += driver::impl::format_located(front, test::diagnostic_of(m, r));
+        if (!failed.empty())
+            return cc::error(cc::move(failed));
+    }
 
     auto index = isize(-1);
     for (auto i = isize(0); i < m.entry_points.size(); ++i)

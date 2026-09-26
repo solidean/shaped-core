@@ -8,7 +8,7 @@ bool builder::is_declaration_keyword(cc::string_view keyword)
 {
     return keyword == "module" || keyword == "use" || keyword == "fun" || keyword == "struct" || keyword == "enum"
         || keyword == "type" || keyword == "const" || keyword == "binding" || keyword == "sampler"
-        || keyword == "pipeline" || keyword == "notation";
+        || keyword == "pipeline" || keyword == "notation" || keyword == "test";
 }
 
 range_of<decl_id> builder::declarations(form_id block, scope_kind scope)
@@ -58,6 +58,9 @@ decl_id builder::declaration(statement_head const& head, scope_kind scope, bool 
     }
     else if (keyword == "pipeline" && scope != scope_kind::file)
         report(diagnostic_kind::declaration_not_allowed_here, head.keyword_form);
+    // AST-139: a test runs on its own, so one inside another would be a second test the first never runs.
+    else if (keyword == "test" && is_in_test_body())
+        report(diagnostic_kind::declaration_not_allowed_here, head.keyword_form);
     else if (scope == scope_kind::binding_body)
         report(diagnostic_kind::member_not_allowed_here, head.keyword_form);
 
@@ -81,7 +84,50 @@ decl_id builder::declaration(statement_head const& head, scope_kind scope, bool 
         return sampler_declaration(head, parts);
     if (keyword == "pipeline")
         return pipeline_declaration(head, parts);
+    if (keyword == "test")
+        return test_declaration(head, parts);
     return notation_declaration(head, parts);
+}
+
+decl_id builder::test_declaration(statement_head const& head, keyword_parts const& parts)
+{
+    auto const attributes = attributes_of(head.whole);
+    reject_arrow(head);
+    reject_assignment(head);
+    if (parts.arguments.size() > 1)
+        report(diagnostic_kind::too_many_arguments, parts.arguments[1]);
+
+    owners.push_back({.owner = body_owner::test});
+    // the keyword alone: the keyword form spans its arguments too
+    auto const keyword = parts.keywords.empty() ? head.keyword_form : parts.keywords.front();
+    auto result = test_decl{.keyword = file.at(keyword).where};
+    if (!parts.arguments.empty())
+    {
+        // AST-138: `test value` is the block of that one line, so every rule of a test body is stated once.
+        if (is_valid(parts.block))
+            report(diagnostic_kind::too_many_arguments, parts.block);
+        auto const only = expression_statement(parts.arguments[0]);
+        result.body
+            = {.kind = body_kind::arrow, .form = parts.arguments[0], .statements = append_one(ast.stmt_lists, only)};
+    }
+    else if (is_valid(parts.block))
+        result.body = block_body(parts.block);
+    else
+        report(diagnostic_kind::expected_body, head.keyword_form);
+    owners.remove_back();
+    return make_decl(head.whole, attributes, cc::move(result));
+}
+
+bool builder::is_in_test_body() const
+{
+    for (auto i = owners.size() - 1; i >= 0; --i)
+    {
+        if (owners[i].owner == body_owner::test)
+            return true;
+        if (owners[i].owner == body_owner::function || owners[i].owner == body_owner::arrow_lambda)
+            return false;
+    }
+    return false;
 }
 
 decl_id builder::member_declaration(form_id line, scope_kind owner)

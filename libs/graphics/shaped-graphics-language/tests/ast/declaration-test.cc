@@ -186,6 +186,37 @@ TEST("sgl ast - a sampler is a list of settings, at file level only")
           == "(sampler s\n  filter=.linear) !! declaration-not-allowed-here @13+7\n");
 }
 
+TEST("sgl ast - a test is a declaration whose body is a block, or the one line after the keyword")
+{
+    // AST-138, and AST-140: no line of a test body is `no-effect`, since a bool line is a check
+    CHECK(ast_of("test:\n    1 + 2 == 3\n    let x = 10\n    x * x > 50\n")
+          == "(test\n"
+             "  (call:infix == (call:infix + num:1 num:2) num:3)\n"
+             "  (let x = num:10)\n"
+             "  (call:infix > (call:infix * x x) num:50))");
+    CHECK(ast_of("test 1 < 2\n") == "(test => (call:infix < num:1 num:2))");
+    CHECK(ast_of("@expect(fail) test 1 < 2\n") == "(test{@expect(fail)} => (call:infix < num:1 num:2))");
+    CHECK(ast_of("test\n") == "(test) !! expected-body @0+4\n");
+    CHECK(ast_of("test 1 < 2:\n    3 < 4\n") == "(test => (call:infix < num:1 num:2)) !! too-many-arguments @10+11\n");
+
+    // it stands in a struct, an enum and a function body, and not in a binding or another test (AST-139)
+    CHECK(ast_of("struct s:\n    x: float\n    test s(1.0).x == 1.0\n")
+          == "(struct s\n  (field x : float)\n  (test => (call:infix == (member (call:paren s num:1.0) x) num:1.0)))");
+    CHECK(ast_of("fun f():\n    test 1 < 2\n    x + 1\n")
+          == "(fun f (params)\n  (test => (call:infix < num:1 num:2))\n  (call:infix + x num:1)) !! no-effect @28+5\n");
+    CHECK(ast_of("binding b:\n    test 1 < 2\n")
+          == "(binding b\n  (test => (call:infix < num:1 num:2))) !! member-not-allowed-here @15+4\n");
+    CHECK(ast_of("test:\n    test 1 < 2\n    true\n")
+          == "(test\n  (test => (call:infix < num:1 num:2))\n  true) !! declaration-not-allowed-here @10+4\n");
+
+    // no jump leaves a test, and a loop inside one is a loop like any other
+    CHECK(ast_of("test:\n    return\n") == "(test\n  (return)) !! jump-without-target @10+6\n");
+    CHECK(ast_of("test:\n    for i in 0 ..< 3:\n        break\n")
+          == "(test\n  (for i in (range ..< num:0 num:3)\n    (break)))");
+    // a function nested in a test is a function: its lines are no checks
+    CHECK(ast_of("test:\n    fun g():\n        x + 1\n    true\n").contains("!! no-effect"));
+}
+
 TEST("sgl ast - a pipeline is a list of settings whose left side is a path")
 {
     CHECK(ast_of("pipeline cube:\n    vertex = main_vs\n    color_targets.albedo.blend = .alpha\n")
@@ -280,4 +311,23 @@ TEST("sgl ast - the value copies and compares whole, and the parsed file is left
         CHECK(sgl::is_valid(s.form));
     for (auto const& d : ast.decls)
         CHECK(sgl::is_valid(d.form));
+}
+
+TEST("sgl ast - a reserved name names nothing a program declares")
+{
+    // AST-141: the meaning of `self` and `void` is fixed, so no declaration may take either
+    cc::string_view const refused[] = {
+        "enum void:\n    a\n",        "struct self:\n    x: float\n",   "fun void() -> int => 1\n",
+        "struct s:\n    void: int\n", "fun f(void: int) -> int => 1\n", "enum e:\n    self\n",
+        "const void = 1\n",
+    };
+    for (auto const source : refused)
+    {
+        auto const file = sgl::parse(source);
+        auto const ast = sgl::ast::build(file);
+        auto is_reported = false;
+        for (auto const& d : ast.diagnostics)
+            is_reported = is_reported || d.kind == sgl::diagnostic_kind::reserved_name;
+        CHECK(is_reported).dump("source", source);
+    }
 }

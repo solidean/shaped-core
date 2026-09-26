@@ -55,6 +55,14 @@ BLOCK_TYPES: dict[str, set[str]] = {
     "example": _ANY | {"source", "run", "cmd", "capture", "output", "status", "sha", "at"},
 }
 
+# Block types the grammar once had, with what an entry writes today instead.
+# An old review still holds them, and naming the replacement turns a dead end into an edit.
+RETIRED_BLOCK_TYPES: dict[str, str] = {
+    "context/cold": "prose",
+    "context/repo": "prose",
+    "context/delta": "prose",
+}
+
 # What a `capture:` may ask for.
 CAPTURE_KINDS = ("stdout", "screenshot")
 

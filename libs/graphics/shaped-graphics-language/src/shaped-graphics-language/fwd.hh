@@ -26,6 +26,7 @@ struct diagnostic;
 struct line_column;
 
 struct text_request;
+struct tested_source;
 struct emitted_source;
 struct prelude_file;
 
@@ -86,6 +87,7 @@ struct invalid_expr;
 struct literal;
 struct name;
 struct self_ref;
+struct void_ref;
 struct wildcard;
 struct leading_dot;
 struct member;
@@ -139,6 +141,7 @@ struct binding_decl;
 struct sampler_decl;
 struct pipeline_decl;
 struct notation_decl;
+struct test_decl;
 struct field_decl;
 struct property_decl;
 struct enum_case_decl;
@@ -186,6 +189,8 @@ enum class stage : u8;
 enum class symbol_kind : u8;
 enum class symbol_state : u8;
 struct symbol;
+enum class constant_kind : u8;
+struct constant_info;
 struct parameter;
 struct function_info;
 struct binding_info;
@@ -237,6 +242,10 @@ struct flat_continue;
 struct flat_once;
 struct flat_break;
 struct flat_return;
+enum class check_node_kind : u8;
+struct flat_check_node;
+struct flat_check_site;
+struct flat_check;
 struct flat_stmt;
 struct flat_entry_point;
 struct flat_builder;
@@ -250,14 +259,28 @@ struct buffer_contents;
 enum class run_status : u8;
 struct run_inputs;
 struct run_limits;
+struct check_failure;
 struct outcome;
 
 struct legalize_options;
 
+enum class expectation_kind : u8;
+struct test_expectation;
+struct test_info;
+struct related_note;
 struct located_diagnostic;
 struct checked_module;
 struct module_file;
 } // namespace sgl::check
+
+namespace sgl::test
+{
+enum class test_status : u8;
+struct narrowed_part;
+struct check_report;
+struct test_result;
+struct test_options;
+} // namespace sgl::test
 
 namespace sgl::emit
 {

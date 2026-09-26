@@ -96,9 +96,10 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
         files, unmatched = select(files, args.entries)
         if unmatched:
             ctx.die(f"no entry matches {', '.join(unmatched)} — a slug, a number, or a range like `200..299`")
-    entries = ctx.entries(paths, files)
+    # Every entry that does not parse is a problem of its own, so one broken file does not hide the next.
+    entries, broken = ctx.entries_tolerant(paths, files)
 
-    problems: list[str] = []
+    problems: list[str] = [str(e) for e in broken]
     warnings: list[str] = []
 
     if cfg.has_changeset:
@@ -163,7 +164,9 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
         )
 
     total = len(paths.entry_files())
-    scope = f"{len(entries)} of {total} entries" if args.entries else f"{len(entries)} entries"
+    # A broken entry was still checked, so it counts toward what the problems were found across.
+    checked = len(entries) + len(broken)
+    scope = f"{checked} of {total} entries" if args.entries else f"{checked} entries"
     groups = set(review.groups_for(cfg.goals))
     unplaced = sorted({e.group for e in entries} - groups)
     if unplaced:

@@ -140,8 +140,9 @@ void registry::finalize()
         if (item.kind != registry_item::kind_t::type)
             continue;
         auto const* const s = d.node.try_as<ast::struct_decl>();
-        CC_ASSERT(s != nullptr, "a builtin type record that is no struct");
-        types[item.index].name = file.text_of(s->name);
+        auto const* const e = d.node.try_as<ast::enum_decl>();
+        CC_ASSERT(s != nullptr || e != nullptr, "a builtin type record that is no struct and no enum");
+        types[item.index].name = file.text_of(s != nullptr ? s->name : e->name);
     }
     CC_ASSERT(next == declarations.size(), "a builtin record that is more than one declaration");
 

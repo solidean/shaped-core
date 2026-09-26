@@ -907,6 +907,15 @@ def test_sgl_is_highlighted_by_its_line_tree(root: Path) -> None:
     assert kinds["..<"] == "Token.Operator", "a range must not be read as the number `0.`"
     assert kinds["+"] == "Token.Operator", "the child of a trailing comment's line is still code"
 
+    # The keywords are the form parser's list, which is what the language adds a keyword to; this lexer is a copy of it.
+    from tools.review.lib.render import sgl_lexer
+    parser = (REPO_ROOT / "libs/graphics/shaped-graphics-language/src/shaped-graphics-language/forms/form_parser.cc").read_text(encoding="utf-8")
+    listed = re.search(r"sgl_keywords\[\] = \{(.*?)\};", parser, re.S)
+    assert listed, "form_parser.cc no longer declares sgl_keywords"
+    keywords = set(re.findall(r'"([a-z_]+)"', listed.group(1)))
+    lexed = sgl_lexer._DECLARATION_KEYWORDS | sgl_lexer._CONTROL_KEYWORDS
+    assert lexed == keywords, f"the lexer draws {sorted(lexed - keywords)} and misses {sorted(keywords - lexed)}"
+
     declared = [(str(kind), value) for _, kind, value in SglLexer(stripnl=False).get_tokens_unprocessed("pipeline shadow:\n")]
     assert ("Token.Keyword.Declaration", "pipeline") in declared or ("Token.Keyword", "pipeline") in declared
     assert ("Token.Name.Class", "shadow") in declared, "a pipeline's name is drawn like a declared type's"
@@ -1081,6 +1090,7 @@ def test_a_retired_background_block_is_an_unknown_block_type(root: Path) -> None
             parse_text(ENTRY + f"\n## context/{tier}\n\nBackground.\n", Path("entry.md"))
         except ReviewParseError as e:
             assert f"unknown block type 'context/{tier}'" in str(e), e
+            assert "write it as `## prose`" in str(e), "a retired type names what replaced it"
             assert e.line == ENTRY.count("\n") + 2, e.line
         else:
             raise AssertionError(f"`context/{tier}` must not parse")
@@ -1382,6 +1392,45 @@ def test_the_last_artifact_block_is_the_one_that_publishes(root: Path) -> None:
     assert len(blocks) == 2
     assert blocks[-1].prose.strip() == "The redraft.", "the last block wins"
     assert "first draft" not in blocks[-1].prose
+
+
+def test_a_read_only_command_sees_past_an_entry_that_does_not_parse(root: Path) -> None:
+    """One stale entry must not hide the rest of the review from `edit`, `show`, `status` or `validate`.
+
+    Written after a review holding one retired `context/cold` block could not even list its entries,
+    which is exactly the moment someone needs the path of the broken one to fix it.
+    """
+    from tools.review.cmd.context import Context
+    from tools.review.lib.core.paths import ReviewPaths
+
+    paths = ReviewPaths(root)
+    paths.entries_dir.mkdir(parents=True)
+    good = "---\nid: 010\ntitle: good\ngroup: meta\nstate: open\n---\n\n## prose\n\nFine.\n"
+    (paths.entries_dir / "010-good.md").write_text(good, encoding="utf-8")
+    stale = good.replace("010", "020") + "\n## context/cold\n\nOld.\n"
+    (paths.entries_dir / "020-stale.md").write_text(stale, encoding="utf-8")
+
+    entries, broken = Context.__new__(Context).entries_tolerant(paths)
+    assert [e.slug for e in entries] == ["010-good"], [e.slug for e in entries]
+    assert len(broken) == 1 and Path(broken[0].path).name == "020-stale.md", broken
+
+
+def test_text_that_leaves_the_page_carries_no_raw_escape(root: Path) -> None:
+    """`raw:` only steers the annotation pass, so a drafted comment or a summary must not carry it to its reader."""
+    from tools.review.lib.render.markdown import strip_raw
+
+    text = (
+        "See `raw:build/<preset>/x` and ``raw:a `b` c``, [the guide](raw:../guide.md).\n"
+        "```raw:cpp:libs/a.cc\nint raw:x;\n```\n"
+        "```raw\nplain\n```\n"
+        "`rawish` stays, and so does `x raw: y`.\n"
+    )
+    assert strip_raw(text) == (
+        "See `build/<preset>/x` and ``a `b` c``, [the guide](../guide.md).\n"
+        "```cpp:libs/a.cc\nint raw:x;\n```\n"
+        "```\nplain\n```\n"
+        "`rawish` stays, and so does `x raw: y`.\n"
+    ), strip_raw(text)
 
 
 def test_a_change_only_an_orientation_entry_claims_is_reported(root: Path) -> None:

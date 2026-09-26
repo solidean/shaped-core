@@ -1,0 +1,29 @@
+// an assert takes a bool anywhere, and a false one stops the test that reached it
+
+fun half_of_positive(x: float) -> float:
+    assert x >= 0.0
+    return x * 0.5
+
+test half_of_positive(4.0) == 2.0
+
+// a test that is to stop at an assert cannot pass by accident, so it needs no last check
+@expect(.assert) test:
+    half_of_positive(-1.0)
+
+@expect(.fail) test 2 < 1
+
+// several expectations each hold of the one run
+@expect(.fail, .assert) test:
+    half_of_positive(-1.0) < 0.0
+
+// an entry point may assert too, and no target writes it
+struct frag:
+    a: float
+
+@pixel struct target:
+    color: float4
+
+@pixel fun main_ps(p: frag) -> target:
+    assert p.a >= 0.0 and p.a <= 1.0
+    let h = half_of_positive p.a
+    return target(float4(h, h, h, 1.0))

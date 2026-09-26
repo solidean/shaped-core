@@ -110,18 +110,27 @@ source_span checker::span_of(i32 file, ast::stmt_id stmt) const
     return ast::is_valid(stmt) ? span_of(file, ast_of(file).at(stmt).form) : source_span{};
 }
 
-void checker::report(diagnostic_kind kind, i32 file, source_span where, cc::string detail)
+located_diagnostic& checker::report(diagnostic_kind kind, i32 file, source_span where, cc::string detail)
 {
     out.diagnostics.push_back({
         .what = {.kind = kind, .level = default_severity_of(kind), .where = where},
         .file = file,
         .detail = cc::move(detail),
     });
+    return out.diagnostics.back();
 }
 
 void checker::unsupported(i32 file, source_span where, cc::string_view construct)
 {
     report(diagnostic_kind::unsupported_yet, file, where, construct);
+}
+
+void checker::report_once(diagnostic_kind kind, i32 file, source_span where, cc::string_view detail)
+{
+    for (auto const& d : out.diagnostics)
+        if (d.what.kind == kind && d.file == file && d.what.where == where)
+            return;
+    report(kind, file, where, cc::string(detail));
 }
 
 isize checker::error_count() const
@@ -171,7 +180,19 @@ void checker::judge_attributes(i32 file,
         }
         if (!is_known)
             unsupported(file, a.name, cc::format("the attribute @{} on {}", name, owner));
-        else if (sgl::is_valid(a.list) && name != "operator" && name != "compute" && name != "stream" && name != "stages")
+        // CHK-220: its one argument is `false` or `true`, whatever it stands on
+        else if (name == "shadowable")
+        {
+            auto const arguments = ast_of(file).at(a.arguments);
+            auto const text = arguments.size() == 1 && ast::is_valid(arguments[0].value) && arguments[0].name.empty()
+                                ? text_of(file, span_of(file, arguments[0].value))
+                                : cc::string_view();
+            if (text != "false" && text != "true")
+                report(diagnostic_kind::invalid_attribute_arguments, file, a.name,
+                       "@shadowable takes `false` or `true`, as in @shadowable(false)");
+        }
+        else if (sgl::is_valid(a.list) && name != "operator" && name != "compute" && name != "stream"
+                 && name != "stages" && name != "shadowable" && name != "expect")
             report(diagnostic_kind::invalid_attribute_arguments, file, span_of(file, a.list),
                    cc::format("@{} takes no arguments", name));
     }
@@ -194,7 +215,7 @@ void checker::set_target(i32 file, ast::expr_id expr, target where)
 void checker::run()
 {
     out.types.push_back({.kind = type_kind::error});
-    out.types.push_back({.kind = type_kind::nothing});
+    out.types.push_back({.kind = type_kind::void_});
     for (auto file = i32(0); file < i32(files.size()); ++file)
     {
         auto const count = ast_of(file).exprs.size();
@@ -220,11 +241,21 @@ void checker::run()
         if (out.symbols[i].kind == symbol_kind::function && out.symbols[i].state == symbol_state::checked)
             check_body(symbol_id(i));
 
+    // A test in a body that was never checked, a function whose signature failed or a test inside a test, is found
+    // nowhere else, and a test is run or fails: it is never left out (CHK-224).
+    add_unregistered_tests();
+
+    // Last, since a test in a function body is found while that body is checked (CHK-224).
+    for (auto i = isize(0); i < out.tests.size(); ++i)
+        check_test(i32(i));
+
     find_recursion();
 
     for (auto i = isize(0); i < out.symbols.size(); ++i)
         if (out.symbols[i].kind == symbol_kind::function && out.symbols[i].state == symbol_state::checked)
             flatten_entry_point(symbol_id(i));
+    for (auto i = isize(0); i < out.tests.size(); ++i)
+        flatten_test(i32(i));
 }
 
 void checker::declare_file(i32 file)
@@ -239,6 +270,7 @@ void checker::add_symbol(symbol s, source_span name_where)
     auto const id = symbol_id(out.symbols.size());
     auto const file = s.file;
     auto const is_function = s.kind == symbol_kind::function;
+    s.is_shadowable = !ast::is_valid(s.declaration) || is_shadowable_by(file, ast_of(file).at(s.declaration).attributes);
     auto const name = s.name;
     auto const spelling = s.operator_spelling;
     out.symbols.push_back(cc::move(s));
@@ -276,7 +308,21 @@ void checker::merge_scopes()
         auto& seen = names[name];
         // Two overload sets are one; anything else of the user file hides what the prelude has of that name.
         if (!is_all_functions(seen) || !is_all_functions(ids))
+        {
+            // CHK-220: unless the prelude's may not be hidden, which keeps the prelude's and reports the user's.
+            auto is_sealed = false;
+            for (auto const s : seen)
+                is_sealed = is_sealed || !out.at(s).is_shadowable;
+            if (is_sealed)
+            {
+                for (auto const s : ids)
+                    report(diagnostic_kind::shadows_unshadowable, out.at(s).file,
+                           span_of(out.at(s).file, out.at(s).declaration),
+                           cc::format("{} is @shadowable(false) in the prelude", name));
+                continue;
+            }
             seen.clear();
+        }
         seen.push_back_range(ids);
     }
 }
@@ -337,6 +383,7 @@ void checker::declare(i32 file, ast::decl_id decl)
         {
             if (!s.name.empty())
                 add_symbol(named(symbol_kind::structure, s.name), s.name);
+            add_member_tests(file, s.members, cc::format("struct {}", text_of(file, s.name)));
         },
         [&](ast::binding_decl const& b)
         {
@@ -350,9 +397,14 @@ void checker::declare(i32 file, ast::decl_id decl)
         {
             if (!e.name.empty())
                 add_symbol(named(symbol_kind::enumeration, e.name), e.name);
+            add_member_tests(file, e.members, cc::format("enum {}", text_of(file, e.name)));
         },
         [&](ast::type_decl const& t) { unsupported_symbol(t.name, "type alias"); },
-        [&](ast::const_decl const& c) { unsupported_symbol(c.name, "const"); },
+        [&](ast::const_decl const& c)
+        {
+            if (!c.name.empty())
+                add_symbol(named(symbol_kind::constant, c.name), c.name);
+        },
         [&](ast::sampler_decl const& s) { unsupported_symbol(s.name, "sampler"); },
         [&](ast::pipeline_decl const& p)
         {
@@ -363,6 +415,7 @@ void checker::declare(i32 file, ast::decl_id decl)
             add_symbol(cc::move(s), p.name.empty() ? span_of(file, decl) : p.name);
         },
         [&](ast::notation_decl const&) { unsupported(file, span_of(file, decl), "notation"); },
+        [&](ast::test_decl const&) { add_test(file, decl, ""); },
         // A member line at module level and an `invalid` declaration were reported by the AST pass.
         [&](ast::field_decl const&) {}, //
         [&](ast::property_decl const&) {}, [&](ast::enum_case_decl const&) {}, [&](ast::invalid_decl const&) {});
@@ -414,6 +467,12 @@ void checker::compile(symbol_id id)
         break;
     case symbol_kind::pipeline:
         compile_pipeline(id);
+        break;
+    case symbol_kind::constant:
+        compile_const(id);
+        break;
+    case symbol_kind::test:
+        // A test's signature is made where it is found, and its body is checked with the others.
         break;
     case symbol_kind::unsupported:
         out.symbols[index_of(id)].state = symbol_state::failed;
