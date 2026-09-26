@@ -41,7 +41,7 @@ test pick(5, y = 0) == 2
 // a method's `self` stands before every default, which reads it as the method's body does
 struct brush:
     size: float
-    fun stroke(self, width: float = self.size * 2.0, height: float = size) -> float => width * height
+    fun stroke(self, width: float = self.size * 2.0, height: float = self.size) -> float => width * height
 
 test brush(3.0).stroke() == 18.0
 test brush(3.0).stroke(1.0) == 3.0

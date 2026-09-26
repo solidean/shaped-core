@@ -38,7 +38,8 @@ A listing here is the dump of a flat tree, shortened: a label is `$name`, and a 
 * **EVAL-16** Evaluation is as if every expression were sequenced into single steps: no two operands overlap, and nothing is evaluated twice or skipped, except by EVAL-18.
 * **EVAL-17** `not x` evaluates `x`, and a member access evaluates its object.
 * **EVAL-18** `a and b` evaluates `b` only when `a` is true, and `a or b` evaluates `b` only when `a` is false.
-* **EVAL-19** A construction evaluates one argument per field, in field order; a literal converted to a struct is a call by CHK-81, so its elements are evaluated as EVAL-80 says.
+* **EVAL-19** A construction evaluates its arguments as any call does, by EVAL-80, and so does a literal converted to a struct, which is a call by CHK-81.
+  Its value holds one per field, in field order (CHK-102).
 * **EVAL-20** A read of a local gives the value it holds at that step, so a read to the left of a write sees the old value.
 
 ```raw

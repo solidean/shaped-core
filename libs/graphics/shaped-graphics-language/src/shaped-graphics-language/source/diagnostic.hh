@@ -180,6 +180,8 @@ enum class sgl::diagnostic_kind : sgl::u8
     literal_not_representable,
     /// A literal converted to `T` by a function of `T`'s name that returns another type.
     literal_conversion_result,
+    /// An operator over integer literals alone that only an operator of another type takes: `7 / 2` without an int `/`.
+    literal_needs_type,
 };
 
 namespace sgl

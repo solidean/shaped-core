@@ -76,13 +76,18 @@ cc::optional<f64> impl::parse_plain_float(cc::string_view text)
     return cc::from_string<f64>(plain);
 }
 
-cc::optional<i32> impl::parse_plain_integer(cc::string_view text)
+cc::optional<i64> impl::parse_literal_integer(cc::string_view text)
 {
     auto plain = cc::string();
     for (auto const c : text)
         if (c != '\'' && c != '+')
             plain += c;
-    auto const value = cc::from_string<i64>(plain);
+    return cc::from_string<i64>(plain);
+}
+
+cc::optional<i32> impl::parse_plain_integer(cc::string_view text)
+{
+    auto const value = parse_literal_integer(text);
     if (!value.has_value() || value.value() < -2147483647 - 1 || value.value() > 2147483647)
         return cc::nullopt;
     return i32(value.value());
@@ -259,6 +264,7 @@ void checker::run()
     for (auto i = isize(0); i < out.tests.size(); ++i)
         check_test(i32(i));
 
+    judge_wide_literals();
     find_recursion();
 
     for (auto i = isize(0); i < out.symbols.size(); ++i)
@@ -316,6 +322,15 @@ void checker::declare_members(symbol_id owner, i32 file, ast::range_of<ast::decl
     for (auto const member : ast_of(file).at(members))
     {
         auto const& d = ast_of(file).at(member);
+        // An extension inside a type's block is meant to extend the type it names, seen only inside that block.
+        auto const* const ef = d.node.try_as<ast::fun_decl>();
+        auto const* const ep = d.node.try_as<ast::property_decl>();
+        if ((ef != nullptr && !ef->extended_type.empty()) || (ep != nullptr && !ep->extended_type.empty()))
+        {
+            unsupported(file, ef != nullptr ? ef->extended_type : ep->extended_type,
+                        "an extension inside a type's block");
+            continue;
+        }
         if (auto const* const f = d.node.try_as<ast::fun_decl>(); f != nullptr && !f->name.empty())
             add_member({.file = file,
                         .declaration = member,
@@ -430,24 +445,34 @@ cc::vector<symbol_id> checker::candidates_of(i32 file, cc::string_view name, typ
             if (out.at(id).kind == symbol_kind::function)
                 result.push_back(id);
 
-    // CHK-247: the type scope of the first argument's type, extensions visible from `file` among it.
-    // The scope that declares that type is always visible too, while the module is the prelude and one program file.
+    // CHK-247: the type scope of the first argument's type, extensions visible from `file` among it, and the functions
+    // of the name visible where that type is declared.
     if (!is_valid(first) || index_of(first) >= out.types.size())
         return result;
     auto const& type = out.at(first);
     if ((type.kind != type_kind::structure && type.kind != type_kind::enumeration) || !is_valid(type.symbol))
         return result;
+    auto const add = [&](symbol_id id)
+    {
+        auto is_known = false;
+        for (auto const r : result)
+            is_known = is_known || r == id;
+        if (!is_known)
+            result.push_back(id);
+    };
     auto const* const scope = type_scopes.get_ptr(i32(index_of(type.symbol)));
     auto const* const members = scope != nullptr ? scope->get_ptr(name) : nullptr;
     if (members != nullptr)
         for (auto const id : *members)
-        {
-            auto is_known = false;
-            for (auto const r : result)
-                is_known = is_known || r == id;
-            if (is_visible_from(file, id) && !is_known)
-                result.push_back(id);
-        }
+            if (is_visible_from(file, id))
+                add(id);
+    // The program's file sees its own declarations already, so only a prelude type has a declaring scope to add, and
+    // it matters where the program shadows the name with something that is no function (CHK-188).
+    if (is_prelude_file(out.at(type.symbol).file))
+        if (auto const* const declared = prelude_names.get_ptr(name))
+            for (auto const id : *declared)
+                if (out.at(id).kind == symbol_kind::function)
+                    add(id);
     return result;
 }
 

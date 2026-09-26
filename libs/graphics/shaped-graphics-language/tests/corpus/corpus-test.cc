@@ -57,6 +57,8 @@ INVOCABLE_TEST("sgl corpus - a file checks clean, passes its tests, and writes e
     CHECK(tested.warnings == "");
     // a corpus file is there to test something
     CHECK(tested.test_count > 0);
+    // and a test the compiler dropped without a diagnostic would otherwise pass unseen
+    CHECK(tested.tests_run + tested.tests_expecting_diagnostics == tested.test_count);
 
     for (auto const& e : tested.entry_points)
         for (auto const t : sgl::emit::all_targets())

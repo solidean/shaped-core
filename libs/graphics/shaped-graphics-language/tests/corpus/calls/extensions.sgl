@@ -14,12 +14,22 @@ test ray(float3(0.0, 0.0, 0.0), float3(1.0, 0.0, 0.0)).inverted.dir.x == -1.0
 test ray.along(from = float3(1.0, 2.0, 3.0)).dir.z == 1.0
 test ray(float3(0.0, 0.0, 0.0), float3(1.0, 0.0, 0.0)).at(2.0).x == 2.0
 
-// its body sees the members of `self` by name, as a member's does
-fun ray.reach => dir.x + dir.y + dir.z
+// its body reads the members of `self` through it, as a member's does
+fun ray.reach => self.dir.x + self.dir.y + self.dir.z
 
 test ray(float3(0.0, 0.0, 0.0), float3(1.0, 2.0, 3.0)).reach == 6.0
 
 // a prelude type takes extensions from the program like any other
-fun float3.sum => x + y + z
+fun float3.sum => self.x + self.y + self.z
 
 test float3(1.0, 2.0, 3.0).sum == 6.0
+
+// an extension property's block yields on every path, and a `-> T` is expected of each yield
+fun ray.far -> float =>:
+    yield 100
+
+fun ray.flipped -> ray =>:
+    yield (self.origin, -self.dir)
+
+test ray(float3(0.0, 0.0, 0.0), float3(1.0, 0.0, 0.0)).far == 100.0
+test ray(float3(0.0, 0.0, 0.0), float3(1.0, 0.0, 0.0)).flipped.dir.x == -1.0

@@ -3,8 +3,8 @@
 struct pair:
     a: float
     b: float
-    total => a + b
-    fun swapped(self) -> pair => pair(b, a)
+    total => self.a + self.b
+    fun swapped(self) -> pair => pair(self.b, self.a)
 
 fun doubled(p: pair) -> pair => pair(p.a * 2.0, p.b * 2.0)
 

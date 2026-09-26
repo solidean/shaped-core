@@ -208,6 +208,8 @@ cc::string_view sgl::to_string(diagnostic_kind kind)
         return "literal-not-representable";
     case diagnostic_kind::literal_conversion_result:
         return "literal-conversion-result";
+    case diagnostic_kind::literal_needs_type:
+        return "literal-needs-type";
     }
     CC_UNREACHABLE("unknown diagnostic_kind");
 }
@@ -313,6 +315,7 @@ sgl::severity sgl::default_severity_of(diagnostic_kind kind)
     case diagnostic_kind::call_spelling:
     case diagnostic_kind::literal_not_representable:
     case diagnostic_kind::literal_conversion_result:
+    case diagnostic_kind::literal_needs_type:
         return severity::normal_error;
     case diagnostic_kind::spaced_attribute_arguments:
     case diagnostic_kind::no_effect:

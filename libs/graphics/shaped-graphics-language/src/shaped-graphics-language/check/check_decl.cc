@@ -952,6 +952,12 @@ void checker::compile_property(symbol_id id)
     auto const infers_result = !ast::is_valid(p.return_type);
     auto result = infers_result ? checked_module::error_type : resolve_value_type(file, p.return_type);
     is_failed = is_failed || (!infers_result && result == checked_module::error_type);
+    // a member line without a body does not parse as a property, so this is an extension's
+    if (p.body.kind == ast::body_kind::none)
+    {
+        report(diagnostic_kind::expected_body, file, p.name, out.at(id).name);
+        is_failed = true;
+    }
 
     auto const parameters = cc::vector<parameter>{{.name = "self", .type = self}};
     out.symbols[index_of(id)].info = i32(out.functions.size());

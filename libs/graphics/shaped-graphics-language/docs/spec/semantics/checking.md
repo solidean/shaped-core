@@ -72,19 +72,24 @@ struct b:
 * **CHK-234** A `fun` in a type's block whose first parameter is `self` is a **method**, and `self` is a parameter of that type; `mut self` is CHK-48.
 * **CHK-235** A `fun` in a type's block without `self` is a **static**, a function of the type scope like a method.
 * **CHK-236** A property `name => value` is a function of the type scope whose one parameter is `self`, and whose result is the type of `value` by CHK-122.
-  An extension property with `-> T` returns `T`, and its value is of `T` or `type-mismatch`.
+  An extension property with `-> T` returns `T`, and its value is expected to be of `T` by CHK-82.
+  A property's `=>:` block yields on every path, or it is `missing-return`, as CHK-125 has a function return; an extension property without a body is `expected-body`.
+  A property is read-only: an assignment to it, or to a member of it, is `not-assignable`.
 * **CHK-237** An extension `fun T.name` (AST-142) declares a function of the type scope of `T` from outside it: a method with `self`, a static without, and a property without parameters (AST-143).
   It is visible where a name of its file is visible, so one of the program's file is none of the prelude's (CHK-190).
   `T` names a struct or an enum, or it is `wrong-kind-of-name`.
+  An extension inside a type's block is `unsupported-yet`; it is meant to extend `T` where that block alone sees it.
 * **CHK-238** A type scope holds one kind of thing per name: a field, a case, a property and functions of one name are the normal error `member-name-clash`, at the later one.
 * **CHK-239** A `struct` with a block has a **synthesized constructor**: a function of the struct's name, declared where the struct is, which returns the struct.
   Its parameters are the fields in field order, each with the field's type, default and named-only mark.
 * **CHK-240** Functions of a struct's name may be declared wherever a `fun` may stand, and they are one overload set with its synthesized constructor where they are visible.
-* **CHK-241** Two functions of one overload set whose parameters agree in type, name and named-only mark, in order, are `duplicate-declaration`, at the later one.
+* **CHK-241** Two functions of one overload set in one scope whose parameters agree in type, name and named-only mark, in order, are `duplicate-declaration`, at the later one.
   The synthesized constructor is one of them.
+  Across the prelude and the program's file, CHK-192 hides the prelude's instead.
 * **CHK-242** A parameter may carry a default, `= value`, which makes it optional; a field's default is the default of its constructor parameter.
+  So a field's default reads the fields before it bare, `inner: float = radius * 0.5`: they are the constructor's parameters, and no `self` exists yet.
 * **CHK-243** A default may read the parameters before it and what its function's scope sees, and never what the call sees ([why](why/checking.md#chk-243)).
-  A method's `self` is one of them, so a default reads `self.scale`, or `scale` bare by CHK-62.
+  A method's `self` is one of them, so a default reads `self.scale`.
   It is checked once, where it is declared, and it is of its parameter's type or `type-mismatch`.
 * **CHK-244** A named-only parameter (AST-144) binds by name alone, and a named-only field makes its constructor's parameter named-only.
 * **CHK-245** `self` in the body of a method or a property is its receiver, and anywhere else it is `unknown-name`.
@@ -326,12 +331,13 @@ fun shade(k: float) -> float:
 ## Expressions
 
 * **CHK-60** A number literal with a DOT or an exponent, in decimal and without a suffix, is a **float literal**, whose **default type** is the prelude's `float`; a sign directly on it is part of it.
+  At its default type as anywhere else, it is one `float` holds by CHK-253, or `literal-not-representable`.
 * **CHK-61** A decimal literal of digits alone is an **integer literal**, whose default type is the prelude's `int`, and a sign directly on it is part of it.
   A number literal is of its default type wherever no other type is asked of it by CHK-253.
-  One that does not fit 32 bits is `unsupported-yet`, and so is a literal with a prefix, a suffix or a `p` exponent.
-* **CHK-62** A name resolves to a local or a parameter first; in the body of a method or a property, to a field or a property of `self` next; and to a symbol of the module after that.
-  One that resolves to nothing is `unknown-name`.
-  A name found on `self` is read as `self.name`, and no method is ever found this way.
+  An integer literal is held in 64 bits, and one beyond them is `unsupported-yet`, as is a literal with a prefix, a suffix or a `p` exponent.
+  One the type it ends up with does not hold, its default type included, is `literal-not-representable`: `let u: uint = 3000000000` is legal and `let i = 3000000000` is not.
+* **CHK-62** A name resolves to a local or a parameter first, and to a symbol of the module after that; one that resolves to nothing is `unknown-name`.
+  A body reads the members of its receiver through `self` alone: a bare `radius` in a method is no field of `self` ([why](why/checking.md#chk-62)).
 * **CHK-63** A name that stands for a struct, a function or a binding is no value by itself: it is `unsupported-yet`.
 * **CHK-64** `value.name` is the field `name` of the struct type of `value` where it has one, and a call by CHK-249 otherwise.
   A name with neither a field nor a candidate is the normal error `unknown-member`.
@@ -348,6 +354,7 @@ fun shade(k: float) -> float:
 * **CHK-247** The **candidates** of a call of `foo` are the functions named `foo` visible at the call, and those of the type scope of its first argument's type.
   They also include the functions named `foo` visible where that type is declared.
   A dot call `a.foo(…)` has `a` as its first argument, so it and the free call `foo(a, …)` have the same candidates ([why](why/checking.md#chk-247)).
+  A free call has them whatever else `foo` names at the call, a struct or a const included, and is `wrong-kind-of-name` only where it has none.
 * **CHK-248** `T.foo(…)`, where `T` names a struct or an enum, has the functions of the type scope of `T` as its candidates, and `T` is no argument.
 * **CHK-249** `a.foo` without an argument list is the field `foo` where the type of `a` has one, and a call of `foo` with `a` as its one argument otherwise.
   A field takes part in no call: `a.foo(…)` has the candidates of CHK-247 whatever the fields of `a` are.
@@ -359,7 +366,7 @@ fun shade(k: float) -> float:
   A parameter left unfilled takes its default.
 * **CHK-70** A candidate **matches** when it binds, and each argument converts to its parameter's type by a **conversion chain**.
   An argument of the parameter's type does so by a chain of length 0, and so does one a pattern parameter takes (CHK-194, CHK-207); a literal converts by CHK-81 or CHK-253.
-* **CHK-253** A number literal converts to a numeric type that holds it, by a chain of length 0.
+* **CHK-253** A number literal converts to a numeric type that holds it: by a chain of length 0 to its default type, and of length 1 to any other ([why](why/checking.md#chk-253)).
   An integer type takes an integer literal whose value it holds exactly.
   A float type takes a float literal rounded to nearest within its range, and an integer literal it holds exactly.
   A float literal converts to no integer type.
@@ -367,8 +374,9 @@ fun shade(k: float) -> float:
 * **CHK-254** Of two matching candidates, one is **better** when its chain is no longer for any argument and shorter for at least one ([why](why/checking.md#chk-254)).
   The best is better than every other.
   A default costs nothing, so `f(x)` beside `f(x, y = 1)` leaves `f(v)` without a best.
-* **CHK-255** Among matching candidates whose chains are of equal length at every argument, the one that keeps the most number literals at their default type is better.
-  After that, a function of a type scope is better than one found by name at the call.
+* **CHK-255** Among matching candidates whose chains are of equal length at every argument, a function of a type scope is better than one found by name at the call.
+* **CHK-257** An operator whose operands are all integer literals, and whose best candidate converts one of them, is the normal error `literal-needs-type` ([why](why/checking.md#chk-257)).
+  So `7 / 2` is an error while no `/` takes `int`, and `7.0 / 2` is the float one.
 * **CHK-71** No matching candidate is the normal error `no-matching-overload`, and its detail spells the call with its argument types and says why each candidate did not match.
 * **CHK-72** Matching candidates without a best are the normal error `ambiguous-overload` ([why](why/checking.md#chk-72)).
 * **CHK-73** The best matching candidate is the call's target, and its return type is the call's type.
@@ -403,7 +411,8 @@ let color = float4(..lit, 1.0)
 
 * **CHK-81** A tuple or an object literal where a type `T` is expected converts to `T`: it is a call of `T`'s name whose arguments are its elements ([why](why/checking.md#chk-81)).
   A tuple's elements are positional arguments and an object's are named ones, and a round literal may hold both.
-* **CHK-82** A type is expected at an argument, the value of a `return`, a `let` with a type, an assignment and a field's value; a tuple or an object literal anywhere else is `unsupported-yet`.
+* **CHK-82** A type is expected at an argument, the value of a `return`, a `yield` of a property with `-> T`, a `let` with a type, an assignment and a field's value.
+  A tuple or an object literal anywhere else is `unsupported-yet`.
 * **CHK-83** Only a literal written where the type is expected converts, and a value of a structural type converts to nothing.
 * **CHK-84** The chain of a converted literal is 1 longer than the longest chain of its call, and an element that is itself a literal converts to the parameter of the candidate it meets.
   A candidate one of whose literal elements has no target by CHK-73 does not match.
@@ -609,20 +618,20 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 
 | kind | reported by |
 |---|---|
-| `unsupported-yet` | CHK-8, CHK-213 |
+| `unsupported-yet` | CHK-8, CHK-61, CHK-213, CHK-237 |
 | `duplicate-declaration` | CHK-12, CHK-28, CHK-241 |
 | `dependency-cycle` | CHK-18, CHK-136 |
 | `unknown-name` | CHK-24, CHK-62, CHK-245 |
-| `wrong-kind-of-name` | CHK-24, CHK-54, CHK-79, CHK-237, CHK-199, CHK-200, CHK-202, CHK-203, CHK-205 |
+| `wrong-kind-of-name` | CHK-24, CHK-54, CHK-79, CHK-237, CHK-247, CHK-199, CHK-200, CHK-202, CHK-203, CHK-205 |
 | `missing-type` | CHK-26 |
 | `unknown-builtin` | CHK-31 |
-| `expected-body` | CHK-32 |
+| `expected-body` | CHK-32, CHK-236 |
 | `opaque-struct-needs-builtin` | CHK-34 |
 | `invalid-attribute-arguments` | CHK-36, CHK-39, CHK-204, CHK-208, CHK-211, CHK-212, CHK-220, CHK-231 |
 | `binding-not-listed` | CHK-45, CHK-131, CHK-228 |
 | `type-mismatch` | CHK-52, CHK-56, CHK-77, CHK-112 to CHK-118, CHK-121, CHK-167, CHK-210, CHK-214, CHK-219, CHK-236, CHK-243 |
-| `not-assignable` | CHK-112 |
-| `missing-return` | CHK-125 |
+| `not-assignable` | CHK-112, CHK-236 |
+| `missing-return` | CHK-125, CHK-236 |
 | `unreachable-code` | CHK-126, CHK-162 |
 | `no-effect` | CHK-225 |
 | `recursive-call` | CHK-130 |
@@ -642,9 +651,10 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `test-must-end-in-check` | CHK-226 |
 | `unmet-expectation` | CHK-232 |
 | `member-name-clash` | CHK-238 |
-| `literal-not-representable` | CHK-253 |
+| `literal-not-representable` | CHK-60, CHK-61, CHK-253 |
 | `call-spelling` | CHK-256 |
 | `literal-conversion-result` | CHK-85 |
+| `literal-needs-type` | CHK-257 |
 
 ## Open
 

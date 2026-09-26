@@ -23,7 +23,9 @@ let d = (..lit, 1)     // does the 1 stay a literal inside the tuple?
 A tuple that holds a literal has a type that holds a literal type, and what that means when the tuple is stored, passed or compared is not worked out.
 
 **Where the call model already stands.**
-A number literal converts, at no cost, to any numeric type that holds it, and the candidate keeping it at its default type wins a tie ([CHK-253](../semantics/checking.md#calls-and-overloads)).
+A number literal converts to any numeric type that holds it ([CHK-253](../semantics/checking.md#calls-and-overloads)).
+Leaving its default type is one step of its chain, so the candidate keeping it there is shorter.
+An operator over integer literals alone that only a float operator takes is an error today ([CHK-257](../semantics/checking.md#calls-and-overloads)), which is the error half of the folding below.
 Literal types would refine that rather than replace it.
 
 **Folding what is literal alone.**
@@ -31,7 +33,7 @@ A subtree of number literals and operators, with no call of a function, is folde
 Anything touching a float literal becomes a float literal.
 `1 / 3` is then an error rather than a silent `0`: it is written `1.0 / 3`, `1 / 3.0` or `(1 as int) / 3`.
 Afterwards "what is the type of `1 + 2`" stops being a question, since no builtin operator ever sees a call of literals alone.
-The folding runs in 64-bit arithmetic today, and extended precision is the intended refinement.
+Nothing folds yet; the folding is meant to run in 64-bit arithmetic first, where a literal is already held, with extended precision as the refinement.
 
 ## What it touches
 

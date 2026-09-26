@@ -77,3 +77,33 @@ test handle(name = 1.0) == 7
 @expect(error = "unsupported-yet") test:
     let t = (1.0, 2.0)
     true
+
+// an operator over integer literals alone meets no operator of another type: there is no int `/` yet
+@expect(error = "literal-needs-type") test 7 / 2 == 3
+
+test 7.0 / 2 == 3.5
+test 7 / 2.0 == 3.5
+
+// a float literal rounds to nearest, so the shortest spelling of FLT_MAX is one `float` holds, in a call as in a let
+test half(3.4028235e38) > 0.0
+
+test:
+    let x = 3.4028235e38
+    x > 0.0
+
+@expect(error = "literal-not-representable") test:
+    let x = 1e39
+    x > 0.0
+
+// an integer literal is held in 64 bits, and refused only where it keeps a type that does not hold it
+test:
+    let u: uint = 3000000000
+    u == 3000000000
+
+@expect(error = "literal-not-representable") test:
+    let i = 3000000000
+    true
+
+@expect(error = "unsupported-yet") test:
+    let u: uint = 99999999999999999999
+    true

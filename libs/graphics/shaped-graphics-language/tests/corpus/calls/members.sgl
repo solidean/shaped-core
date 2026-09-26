@@ -7,11 +7,11 @@ struct span2:
     // a property: read as a field, computed on every read, `self` its one parameter
     width => self.hi - self.lo
 
-    // a bare name in a member body finds a field or a property of `self`
-    center => lo + width * 0.5
+    // a member body reads every member through `self`
+    center => self.lo + self.width * 0.5
 
     // a method names its receiver
-    fun contains(self, x: float) -> bool => lo <= x and x <= hi
+    fun contains(self, x: float) -> bool => self.lo <= x and x <= self.hi
 
     // a method may call another through `self`
     fun scaled(self, k: float) -> span2 => span2(self.lo * k, self.hi * k)
@@ -21,7 +21,7 @@ struct span2:
 
     // a property's block has its value through `yield`
     is_empty =>:
-        let w = width
+        let w = self.width
         yield w <= 0.0
 
 test span2(1.0, 3.0).width == 2.0
@@ -55,3 +55,22 @@ enum light_kind:
 test light_kind.point.is_local
 test not light_kind.sun.is_local
 test light_kind.spot.falloff(2.0) == 0.5
+
+// a property is read-only, so no assignment names it
+@expect(error = "not-assignable") test:
+    let mut s = span2(1.0, 3.0)
+    s.width = 5.0
+    true
+
+@expect(error = "not-assignable") test:
+    let mut s = span2(1.0, 3.0)
+    s.width += 5.0
+    true
+
+// a body reads its receiver's members through `self` alone (CHK-62),
+// so a field named like a binding or a type is still reached through `self`, and never mistaken for it
+struct clock:
+    span2: span2
+    fun w(self) -> float => self.span2.width
+
+test clock(span2(1.0, 3.0)).w() == 2.0

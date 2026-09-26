@@ -221,11 +221,20 @@ void checker::check_assign(function_scope& scope, ast::stmt_id id, ast::assign_s
                    "this buffer is read-only; `mut buffer[T]` declares one a shader writes");
     }
 
-    // The place is otherwise a mutable local, or a member of one at any depth.
+    // The place is otherwise a mutable local, or a field of one at any depth; a property is read-only (CHK-236).
     auto root = assign.target;
+    auto property = ast::expr_id::none;
     while (ast::is_valid(root) && ast.at(root).node.is<ast::member>())
+    {
+        if (out.files[file].target_at(root).kind == target_kind::overload && !ast::is_valid(property))
+            property = root;
         root = ast.at(root).node.as<ast::member>().object;
-    if (indexed == nullptr && place != error_type && ast::is_valid(root))
+    }
+    if (indexed == nullptr && place != error_type && ast::is_valid(property))
+        report(diagnostic_kind::not_assignable, file, span_of(file, assign.target),
+               cc::format("{} is a property, which is read-only",
+                          text_of(file, ast.at(property).node.as<ast::member>().name)));
+    else if (indexed == nullptr && place != error_type && ast::is_valid(root))
     {
         auto const* const n = ast.at(root).node.try_as<ast::name>();
         auto const& named = out.files[file].target_at(root);

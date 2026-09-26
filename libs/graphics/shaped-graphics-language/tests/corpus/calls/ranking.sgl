@@ -1,9 +1,9 @@
-// where several candidates match, the best is no worse at any argument, and ties go to the literal's own type
+// where several candidates match, the best is no worse at any argument, and a literal leaving its own type costs one step
 
 fun pick(x: int) -> int => 1
 fun pick(x: float) -> int => 2
 
-// a number literal converts to both at no cost, and the one that keeps its default type wins
+// a number literal converts to both, and the one that keeps its default type is shorter
 test pick(1) == 1
 test pick(1.0) == 2
 test pick(2.5) == 2
@@ -13,6 +13,14 @@ fun mix(a: int, b: float) -> int => 1
 fun mix(a: float, b: int) -> int => 2
 
 @expect(error = "ambiguous-overload") test mix(1, 1) == 1
+
+// the literals kept at their type are not counted across the call: each candidate is shorter somewhere, so neither wins
+fun trio(a: int, b: int, c: float) -> int => 1
+fun trio(a: float, b: float, c: int) -> int => 2
+
+@expect(error = "ambiguous-overload") test trio(1, 2, 3) == 1
+
+test trio(1, 2, 3.0) == 1
 
 test mix(1, 1.0) == 1
 test mix(1.0, 1) == 2
@@ -35,7 +43,7 @@ test saturate(4.0) == 0.25
 struct pair:
     a: float
     b: float
-    fun sum(self) -> float => a + b
+    fun sum(self) -> float => self.a + self.b
 
 fun sum(p: pair) -> float => 0.0
 

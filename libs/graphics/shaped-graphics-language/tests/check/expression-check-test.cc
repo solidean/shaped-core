@@ -197,8 +197,12 @@ TEST("sgl check - a number literal with a dot or an exponent is a float, and not
     CHECK(body_reports("let i: int = 1.0\nreturn k\n")
           == "literal-not-representable user:[1.0] int does not hold 1.0 exactly\n");
     CHECK(body_reports("let i = 1'000 + -3\nreturn k\n") == "");
+    // CHK-61: held in 64 bits, and refused where it keeps a type that does not hold it
     CHECK(body_reports("let i = 3'000'000'000\nreturn k\n")
-          == "unsupported-yet user:[3'000'000'000] an integer literal that does not fit an int\n");
+          == "literal-not-representable user:[3'000'000'000] int does not hold 3'000'000'000\n");
+    CHECK(body_reports("let u: uint = 3'000'000'000\nreturn k\n") == "");
+    CHECK(body_reports("let i = 99'999'999'999'999'999'999\nreturn k\n")
+          == "unsupported-yet user:[99'999'999'999'999'999'999] an integer literal beyond 64 bits\n");
     CHECK(body_reports("return 0.5f32\n")
           == "unsupported-yet user:[0.5f32] a number literal with a prefix, a suffix or a p exponent\n");
     CHECK(body_reports("return 0xff\n")
@@ -404,12 +408,12 @@ TEST("sgl check - name_mint never hands out a name twice")
     CHECK(names.is_taken("n_3"));
 }
 
-TEST("sgl check - a named argument keeps its name in what a failed call reports")
+TEST("sgl check - a named argument keeps its name, and a number literal its text, in what a failed call reports")
 {
     CHECK(reports_for("fun sub(a: int, b: int) -> int => a - b\nfun f() -> int => sub(b = 3, 5)\n")
-          == "no-matching-overload user:[sub(b = 3, 5)] sub(b = int, int)\n");
+          == "no-matching-overload user:[sub(b = 3, 5)] sub(b = 3, 5)\n");
     CHECK(reports_for("struct s:\n    a: float\nfun f() -> s => s(b = 1.0)\n")
-          == "no-matching-overload user:[s(b = 1.0)] s(b = float), and the constructor is s(float)\n");
+          == "no-matching-overload user:[s(b = 1.0)] s(b = 1.0), and the constructor is s(float)\n");
 }
 
 TEST("sgl check - a call that matches nothing keeps why each candidate did not, for a later did-you-mean")
@@ -426,13 +430,28 @@ TEST("sgl check - a call that matches nothing keeps why each candidate did not, 
     CHECK(misses[1].parameter == 1);
 }
 
+TEST("sgl check - a property's body is judged as a function's is: it exists, and it yields on every path")
+{
+    CHECK(reports_for("struct box:\n    w: float\nfun box.nobody -> float\n") == "expected-body user:[nobody] nobody\n");
+    CHECK(reports_for("struct box:\n    w: float\n    none =>:\n        let z = self.w\n")
+          == "missing-return user:[none] none is a property, and a path through its block ends without a yield\n");
+    CHECK(reports_for("struct box:\n    w: float\n    some =>:\n        if self.w > 1.0 => yield 1.0\n")
+          == "missing-return user:[some] some is a property, and a path through its block ends without a yield\n");
+}
+
+TEST("sgl check - an extension inside a type's block is unsupported-yet")
+{
+    CHECK(reports_for("struct box:\n    w: float\n    fun float.y => 2.0\n")
+          == "unsupported-yet user:[float] an extension inside a type's block\n");
+}
+
 TEST("sgl check - a literal argument of a call that matches nothing is reported as a literal")
 {
     CHECK(reports_for("fun f(a: int) -> int => a\nfun g() -> int => f((1, 2))\n")
           == "no-matching-overload user:[f((1, 2))] f(a literal)\n");
     CHECK(reports_for("struct s:\n    a: float\nfun f(x: s, k: bool) -> float => x.a\nfun g() -> float => f({a = 1.0}, "
                       "2)\n")
-          == "no-matching-overload user:[f({a = 1.0}, 2)] f(a literal, int)\n");
+          == "no-matching-overload user:[f({a = 1.0}, 2)] f(a literal, 2)\n");
 }
 
 TEST("sgl check - a constructor is an edge of the call graph, so a loop through a field's default is recursion")

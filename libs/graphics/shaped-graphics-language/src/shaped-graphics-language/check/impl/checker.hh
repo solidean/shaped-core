@@ -30,6 +30,10 @@ enum class number_class : u8
 /// `text` must be a `plain_integer`; nullopt when the value does not fit an i32.
 [[nodiscard]] cc::optional<i32> parse_plain_integer(cc::string_view text);
 
+/// `text` must be a `plain_integer`; nullopt when the value does not fit an i64, which is what a literal is held in
+/// until the type it meets is known (CHK-61).
+[[nodiscard]] cc::optional<i64> parse_literal_integer(cc::string_view text);
+
 /// A name of the function being checked: its parameters, then the locals in scope, in source order.
 struct local_name
 {
@@ -61,6 +65,8 @@ struct value_block_scope
     /// The type of the first `yield`; `none` before one was seen.
     type_id value = type_id::none;
     bool has_yield = false;
+    /// `value` was written, as a property's `-> T`, so a `yield` converts to it rather than setting it (CHK-82).
+    bool is_expected = false;
 };
 
 /// How a statement list ends.
@@ -92,7 +98,7 @@ struct function_scope
     cc::vector<local_name> captured;
     /// For a test in a function body: that function.
     symbol_id enclosing = symbol_id::none;
-    /// The type of `self` in a method or a property, whose fields and properties a bare name finds (CHK-62).
+    /// The type of `self` in a method or a property, where `self` is a name (CHK-245).
     type_id receiver = type_id::none;
 
     /// The newest visible local or parameter of that name, which hides every module-level symbol of it.
@@ -174,8 +180,6 @@ struct candidate_match
     cc::vector<i32> slots;
     /// Parallel to the call's written arguments: the length of the chain that converts each to its parameter (CHK-70).
     cc::vector<i32> chains;
-    /// How many number literals keep their default type, inside converted literals included (CHK-255).
-    i32 at_default = 0;
 };
 
 /// Which written argument fills each parameter of one candidate (CHK-250 to CHK-252).
@@ -187,6 +191,15 @@ struct bound_arguments
     /// The written argument, or the parameter, the failure is about; -1 where it is about neither.
     i32 argument = -1;
     i32 parameter = -1;
+};
+
+/// An integer literal beyond `int`, which is an error only where it keeps that default type.
+struct wide_literal
+{
+    i32 file = 0;
+    ast::expr_id expr = ast::expr_id::none;
+    /// The function whose body or defaults it stands in; `none` outside one.
+    symbol_id function = symbol_id::none;
 };
 
 /// `fun T.name`, whose type is known only once every file is declared.
@@ -239,6 +252,8 @@ struct checker
     /// Members are declared with their type, and extensions once every file is declared (CHK-233, CHK-237).
     cc::map<i32, cc::map<cc::string, cc::vector<symbol_id>>> type_scopes;
     cc::vector<pending_extension> pending_extensions;
+    /// Integer literals that do not fit an `int`, judged once every literal has met the type it converts to (CHK-61).
+    cc::vector<wide_literal> wide_literals;
     /// The elements of every tuple and object literal an argument or an expected type met, each as the arguments of the
     /// call it converts by (CHK-81); positions stay valid while it grows.
     cc::vector<call_arguments> literals;
@@ -314,6 +329,8 @@ struct checker
     [[nodiscard]] cc::string_view member_kind_of(symbol_id owner, cc::string_view name) const;
     /// Every `fun T.name`, into the type scope of `T`; run once every file is declared.
     void attach_extensions();
+    /// Reports each integer literal beyond `int` that no conversion took to a type holding it (CHK-61).
+    void judge_wide_literals();
     /// Two functions of one overload set whose parameters agree in type, name and named-only mark (CHK-241).
     void judge_redeclarations();
     /// The functions a call of `name` from `file` may choose from, where `first` is its first argument's type:
@@ -511,15 +528,10 @@ struct checker
     /// Nothing where the arguments do not bind or one does not convert.
     /// It reports nothing, so a literal can try every candidate.
     [[nodiscard]] cc::optional<candidate_match> match(i32 file, symbol_id candidate, call_arguments const& arguments);
-    /// The length of the chain that converts written argument `i` to `parameter`, counting a literal kept at its
-    /// default type into `at_default`; nothing where it does not convert.
-    [[nodiscard]] cc::optional<i32> chain_of(i32 file,
-                                             type_id parameter,
-                                             call_arguments const& arguments,
-                                             isize i,
-                                             i32& at_default);
+    /// The length of the chain that converts written argument `i` to `parameter`; nothing where it does not convert.
+    [[nodiscard]] cc::optional<i32> chain_of(i32 file, type_id parameter, call_arguments const& arguments, isize i);
     /// The chain of tuple or object literal `literal` to `to`: one more than its call's longest (CHK-84).
-    [[nodiscard]] cc::optional<i32> literal_chain(i32 file, type_id to, i32 literal, i32& at_default);
+    [[nodiscard]] cc::optional<i32> literal_chain(i32 file, type_id to, i32 literal);
     /// The functions of the name of the struct `to` visible from `file`, its synthesized constructor among them.
     [[nodiscard]] cc::vector<symbol_id> functions_named_after(i32 file, type_id to) const;
     /// The matches that remain after CHK-192, CHK-254 and CHK-255; one is the target, more are ambiguous.
@@ -563,8 +575,9 @@ struct checker
     /// `a.foo(…)` or `T.foo(…)`, whose callee is the member `callee`.
     [[nodiscard]] type_id check_dot_call(function_scope& scope, ast::expr_id id, ast::call const& call);
     [[nodiscard]] cc::string signature_text(cc::string_view spelling, cc::span<type_id const> types) const;
-    /// A call as it was written, each named argument with its name: `sub(int, b = int)`.
-    [[nodiscard]] cc::string call_text(cc::string_view spelling, call_arguments const& arguments) const;
+    /// A call as it was written, each named argument with its name and a number literal as its text:
+    /// `sub(int, b = 2.5)`; `file_of_call` is the file its arguments stand in.
+    [[nodiscard]] cc::string call_text(i32 file_of_call, cc::string_view spelling, call_arguments const& arguments) const;
     /// Records a call of `callee`, a function of the program, as an edge of the call graph, and reports each binding it
     /// reads that the caller does not list.
     void note_program_call(function_scope const& scope, symbol_id callee, source_span where);

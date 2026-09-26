@@ -161,6 +161,27 @@ The spelling says what the writer means: a property is read, a function is calle
 It takes no part in resolution, so the error always names the fix rather than reporting that nothing was found.
 A free call may reach a property so that generic code can write `length v` for anything that has a length, whether it is a property or a function.
 
+## CHK-62
+
+A bare name inside a method was first read through `self` too, and that put a field of the receiver between a local and every name of the module.
+Every lookup that starts from a name then had to know about the receiver, and two of them did not: `frame.x` in a method found a binding `frame` before a field of that name.
+Writing `self.frame.x` makes the receiver a name like any other, and a body reads the same wherever it is moved.
+A field's default is the exception that is none: it reads the constructor's parameters, and no receiver exists while they are bound.
+
+## CHK-253
+
+A literal leaving its default type is one step of its chain, so dominance alone ranks calls of literals.
+Free conversion with a count of the literals kept at their type broke ties by summing over the arguments, which CHK-254 rejects for chains.
+`f(1, 2, 3)` would then pick the candidate that keeps two literals over one that keeps the third.
+With the step, `f(1)` still picks `f(x: int)` over `f(x: float)`, and a call each candidate wins somewhere is ambiguous.
+
+## CHK-257
+
+An operator over literals alone meets whatever operators the prelude declares, and a prelude that adds one of the literals' own type would change the answer.
+`7 / 2` is `3.5` through the float `/`, and `3` through an int one.
+The call names no type, so no answer is the reader's, and the error asks for one.
+Folding literals in the front end would settle it for good, as the [literal-types](../../incubator/literal-types.md) incubator sketches, and nothing written under this rule changes meaning then.
+
 ## CHK-81
 
 A literal converting by a call of the type's name gets defaults, named arguments, named-only parameters and the evaluation order from the call rules.

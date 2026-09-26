@@ -36,7 +36,7 @@ binding sampled:
     if xy.x < sampled.dst.size().x and xy.y < sampled.dst.size().y:
         sampled.dst.store(xy, sampled.src.sample(uv, sampled.smp, level = 0.0))
 
-// A full-screen quad whose pixel stage samples a texture: `DEBUG_sample` picks its level from derivatives,
+// A full-screen quad whose pixel stage samples a texture: `sample` without a `level` picks its level from derivatives,
 // which only a pixel stage has, so it is @stages(.pixel) and a compute entry point may not reach it.
 @vertex struct screen_vertex:
     corner: float3

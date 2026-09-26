@@ -296,15 +296,19 @@ TEST("sgl check - a type scope holds one kind of thing per name, and an extensio
 {
     CHECK(reports_for("struct s:\n    x: float\n    fun x(self) -> float => 1.0\n")
           == "member-name-clash user:[x] x is a field of s already\n");
-    CHECK(reports_for("struct s:\n    x: float\n    y => x\n    fun y(self, k: float) -> float => k\n")
+    CHECK(reports_for("struct s:\n    x: float\n    y => self.x\n    fun y(self, k: float) -> float => k\n")
           == "member-name-clash user:[y] y is a property of s already\n");
     CHECK(reports_for("enum e:\n    a\n    a => 1\n") == "member-name-clash user:[a] a is a case of e already\n");
     // an extension is checked against the type's own members the same way
     CHECK(reports_for("struct s:\n    x: float\nfun s.x => 1.0\n")
           == "member-name-clash user:[x] x is a field of s already\n");
     // methods of one name are an overload set, in the type and through extensions alike
-    CHECK(reports_for("struct s:\n    x: float\n    fun f(self) -> float => x\nfun s.f(self, k: float) -> float => k\n")
+    CHECK(reports_for("struct s:\n    x: float\n    fun f(self) -> float => self.x\nfun s.f(self, k: float) -> float "
+                      "=> k\n")
           == "");
+    // CHK-62: a member body reads its receiver's members through `self` alone
+    CHECK(reports_for("struct s:\n    x: float\n    fun f(self) -> float => x\n") == "unknown-name user:[x] x\n");
+    CHECK(reports_for("struct s:\n    x: float\n    y => x\n") == "unknown-name user:[x] x\n");
 
     // CHK-237: the extended type is a struct or an enum
     CHECK(reports_for("fun nothing.f(self) -> float => 1.0\n") == "unknown-name user:[nothing] nothing\n");

@@ -438,10 +438,12 @@ sgl::print_source(file)      // == file.source for EVERY input: the lossless inv
 - **One call model** (CHK-69): a method, a static, a property, an extension and a struct's constructor are all functions.
   `a.foo(b)` and `foo(a, b)` collect the same candidates: the functions of that name, and those of `a`'s type scope (CHK-247).
   `a.foo` is a field where there is one; otherwise the target must be a property, and `a.foo()` must not reach one (CHK-256).
+  A member body reads its receiver through `self` ALONE: a bare `radius` is no field (CHK-62), while a field's default reads earlier fields bare.
 - **Arguments bind by position, then by name** (CHK-250); a positional one after a named one only in its own slot, and `.x: T` is named-only.
   A default is checked ONCE in its function's scope, and evaluated at each call that leaves it out, after every written argument (EVAL-80).
 - **A literal converts where a type is expected** (CHK-81, CHK-253): `(1, 2)` or `{a = 1}` is a call of the struct's name, `1` meets a float.
-  Candidates rank by dominance over per-argument chains; ties go to literals at their default type, then to a type-scope function (CHK-254).
+  Leaving its default type is one step of a literal's chain; candidates rank by dominance over those chains, then a type-scope function wins (CHK-254).
+  `7 / 2` is `literal-needs-type` while no `/` takes `int` (CHK-257); an integer literal is held in 64 bits and refused only in a type that cannot hold it.
 - **Still `unsupported-yet`:** generics, `mut self` and `mut` parameters, lambdas and function values, nested functions, `use`,
   a `const` whose value is no literal, enum case or const, a `for` over anything but `a ..< b`, a `let` without a value,
   an expression statement that is no call outside a `test`, an `assert` message, and an `assert` whose condition writes.

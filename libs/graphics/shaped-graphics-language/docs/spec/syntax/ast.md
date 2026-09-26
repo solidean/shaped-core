@@ -565,6 +565,7 @@ fun falloff(d: float) -> float:
 
 * **AST-66** A **signature** is what follows `fun`: a name, then type parameters `[…]`, parameters `(…)` and bindings `{…}`, each fused to what is before it, each at most once, and in this order.
 * **AST-142** The name of a signature may be a type's name, a DOT and a name, `fun ray.inverted`: that function is an **extension**, and the type it names is its **extended type**.
+  Inside a type's block the AST records one as well, and the check pass refuses it as `unsupported-yet` (CHK-237).
 * **AST-67** The parameters are mandatory, and they may be empty: `fun f()` ([why](why/ast.md#ast-67)).
 * **AST-143** An extension without parameters is a property of its extended type, as AST-81 reads one: `fun ray.inverted => …` ([why](why/ast.md#ast-143)).
   It may carry `-> type` before its body, and type parameters or bindings there are `missing-parameter-list`.

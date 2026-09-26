@@ -364,11 +364,6 @@ struct flattener
         {
             return where.kind == target_kind::enum_case ? enum_value(type, id, where.index) : fail();
         }
-        // a bare name read through `self`, which is a property's call or a field of the receiver (CHK-62)
-        if (e.node.is<ast::name>() && tables().call_at(id) >= 0)
-            return flatten_bound_call(id, type, c.out.call_records[tables().call_at(id)]);
-        if (e.node.is<ast::name>() && where.kind == target_kind::field)
-            return add_expr(type, id, flat_member{.object = receiver(id), .member = where.index});
         if (e.node.is<ast::name>() || e.node.is<ast::self_ref>())
         {
             for (auto const& b : current()->bound)
@@ -462,13 +457,17 @@ struct flattener
         auto const is_float = type == c.prelude_type(builtins::k_float);
         if (classify_number(text) == number_class::plain_integer)
         {
-            auto const value = parse_plain_integer(text);
+            auto const value = parse_literal_integer(text);
             if (!value.has_value())
                 return fail();
             if (is_float)
                 return add_expr(type, id, flat_literal{.value = f64(value.value())});
+            // an unsigned literal keeps its bits in `value`
             auto const is_unsigned = type == c.prelude_type(builtins::k_uint);
-            return add_expr(type, id, flat_int_literal{.value = value.value(), .is_unsigned = is_unsigned});
+            auto const v = value.value();
+            if (is_unsigned ? v < 0 || v > 4294967295ll : v < -2147483647 - 1 || v > 2147483647)
+                return fail();
+            return add_expr(type, id, flat_int_literal{.value = i32(u32(v)), .is_unsigned = is_unsigned});
         }
         auto const value = parse_plain_float(text);
         return value.has_value() ? add_expr(type, id, flat_literal{.value = value.value()}) : fail();
@@ -665,15 +664,6 @@ struct flattener
                                   .arguments = add_list(arguments)});
     }
 
-    /// The `self` of the frame being written, read where `from` stands.
-    flat_expr_id receiver(ast::expr_id from)
-    {
-        for (auto const& b : current()->bound)
-            if (b.where.kind == target_kind::receiver)
-                return is_valid(b.literal) ? again(b.literal, from) : local_ref(b.local, from);
-        return fail();
-    }
-
     /// The values of a call's written arguments, in the order written.
     /// A splat stands for one member access per field, and its value is evaluated once: where the first one stands.
     cc::vector<flat_expr_id> flatten_written(cc::span<written_argument const> written)
@@ -682,11 +672,6 @@ struct flattener
         auto splat = evaluated_once{};
         for (auto const& w : written)
         {
-            if (w.is_receiver)
-            {
-                result.push_back(receiver(w.expr));
-                continue;
-            }
             if (w.splat_member < 0)
             {
                 result.push_back(flatten_expr(w.expr));
