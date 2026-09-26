@@ -22,6 +22,30 @@ from ..entry.grammar import is_ack_name
 from ..entry.parse import Entry
 from ..render.markdown import strip_raw
 
+def replaced_asks(pairs: list[tuple[Entry, AnswerFile]]) -> dict[str, str]:
+    """Every ask that a later answered ask names in `follows:`, mapped to the follow-ups' names, joined in order.
+
+    A follow-up exists because the answer before it was refined or reversed.
+    A gather that prints both unmarked reads as two rules, the overridden one first.
+    Only an answered follow-up replaces: an open one has decided nothing.
+    """
+    out: dict[str, list[str]] = {}
+    for entry, answers in pairs:
+        if entry.state != "open":
+            continue
+        for block in entry.asks:
+            followed = block.attrs.get("follows", "").strip()
+            answer = answers.get(block.name)
+            if followed and answer is not None and not answer.is_empty:
+                out.setdefault(followed, []).append(block.name)
+    return {name: ", ".join(followers) for name, followers in out.items()}
+
+
+def _tag(name: str, replaced: dict[str, str]) -> str:
+    """How an ask is named in an artifact: its name, and the follow-up that replaced it where one did."""
+    return f"{name} (replaced by {replaced[name]})" if name in replaced else name
+
+
 def _decisions(entry: Entry, answers: AnswerFile) -> list[tuple[str, list[str], str]]:
     """(ask name, chosen options, free text) for every question this entry has a real answer to."""
     out = []
@@ -56,12 +80,15 @@ def pr_comment(cfg: ReviewConfig, pairs: list[tuple[Entry, AnswerFile]]) -> str:
     Which entries appear is not a goal question — every answered one does, tagged with its group so the synthesis step can weigh it.
     """
     lines = ["<!-- draft: read it before posting; the tool assembled it, it did not decide it -->", ""]
+    replaced = replaced_asks(pairs)
     number = 0
     for entry, _, decisions in _answered(pairs):
         number += 1
         severity = f" ({entry.severity})" if entry.severity else ""
         lines.append(f"**{number}. {entry.title}**  <sub>{entry.group}{severity}</sub>")
-        for _, chosen, text in decisions:
+        for name, chosen, text in decisions:
+            if name in replaced:
+                lines.append(f"- _replaced by `{replaced[name]}` below:_")
             for option in chosen:
                 lines.append(f"- {option}")
             if text:
@@ -80,6 +107,7 @@ def work_order(cfg: ReviewConfig, pairs: list[tuple[Entry, AnswerFile]]) -> str:
     which is what makes the list checkable rather than merely readable.
     """
     lines = [f"# Work order — {cfg.name}", ""]
+    replaced = replaced_asks(pairs)
     number = 0
     for entry, _, decisions in _answered(pairs):
         number += 1
@@ -88,6 +116,8 @@ def work_order(cfg: ReviewConfig, pairs: list[tuple[Entry, AnswerFile]]) -> str:
         for name, chosen, text in decisions:
             block = entry.ask(name)
             discharges = f"  [{' '.join(block.discharges)}]" if block and block.discharges else ""
+            if name in replaced:
+                lines.append(f"- replaced by `{replaced[name]}`, and done there:")
             for option in chosen:
                 lines.append(f"- [ ] {option}{discharges}")
             if text and chosen:
@@ -108,6 +138,7 @@ def design_summary(cfg: ReviewConfig, pairs: list[tuple[Entry, AnswerFile]]) -> 
     lines = [f"# {cfg.title or cfg.name} — decisions", ""]
     settled: list[str] = []
     open_points: list[str] = []
+    replaced = replaced_asks(pairs)
 
     for entry, answers in pairs:
         if entry.state != "open":
@@ -115,7 +146,7 @@ def design_summary(cfg: ReviewConfig, pairs: list[tuple[Entry, AnswerFile]]) -> 
         decisions = _decisions(entry, answers)
         answered_names = {name for name, _, _ in decisions}
         for name, chosen, text in decisions:
-            head = f"**{entry.title} / {name}**"
+            head = f"**{entry.title} / {_tag(name, replaced)}**"
             body = "; ".join([*chosen, *([text] if text else [])])
             settled.append(f"- {head}: {body}")
         for block in entry.asks:

@@ -1394,6 +1394,34 @@ def test_the_last_artifact_block_is_the_one_that_publishes(root: Path) -> None:
     assert "first draft" not in blocks[-1].prose
 
 
+def test_finalize_tags_an_answer_a_later_follow_up_replaced(root: Path) -> None:
+    """Every answer is gathered, and one an answered `follows:` ask refined or reversed says so.
+
+    Written after a design gather listed "statics are reached only as `T.foo`" beside its reversal, unmarked,
+    so the overridden answer read as a rule of its own.
+    """
+    from tools.review.lib.core.config import ReviewConfig
+    from tools.review.lib.goals.finalize import design_summary, replaced_asks
+
+    text = (
+        "---\nid: 140\ntitle: candidates\ngroup: topics\nstate: open\n---\n\n"
+        "## ask  statics\nround: 1\n\nAre statics candidates?\n\n- radio: no\n- radio: yes\n\n"
+        "## ask  statics-again\nround: 2\nfollows: statics\n\nAre they, after all?\n\n- radio: no\n- radio: yes\n\n"
+        "## ask  unanswered\nround: 2\nfollows: statics-again\n\nAnd a third time?\n\n- radio: no\n"
+    )
+    entry = parse_text(text, Path("140-candidates.md"))
+    answers = AnswerFile(root / "a.json")
+    answers.upsert(entry.ask("statics"), selected=["no"], text="", round_number=1)
+    answers.upsert(entry.ask("statics-again"), selected=["yes"], text="", round_number=2)
+    pairs = [(entry, answers)]
+
+    # an open follow-up has decided nothing, so it replaces nothing
+    assert replaced_asks(pairs) == {"statics": "statics-again"}
+    summary = design_summary(ReviewConfig(name="d", goals=["design"]), pairs)
+    assert "**candidates / statics (replaced by statics-again)**: no" in summary, summary
+    assert "**candidates / statics-again**: yes" in summary, summary
+
+
 def test_a_read_only_command_sees_past_an_entry_that_does_not_parse(root: Path) -> None:
     """One stale entry must not hide the rest of the review from `edit`, `show`, `status` or `validate`.
 
