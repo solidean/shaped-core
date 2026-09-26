@@ -196,10 +196,12 @@ enum light_kind:
 
 ```sgl sketch
 fun shade(k: float) -> float:
-    @expect(error = "test-captures-runtime-value") test k > 0.0
+    @expect(error = "test-captures-runtime-value")
+    test k > 0.0
     return k
 
-@expect(.fail) test 1 > 2
+@expect(.fail)
+test 1 > 2
 ```
 
 ```sgl

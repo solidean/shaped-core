@@ -18,9 +18,12 @@ test doubled(pair(1.0, 2.0)).b == 4.0
 // a free call may reach a property, so generic code can write it one way for both
 test total(pair(1.0, 2.0)) == 3.0
 
-@expect(error = "call-spelling") test pair(1.0, 2.0).total() == 3.0
-@expect(error = "call-spelling") test pair(1.0, 2.0).swapped.a == 2.0
-@expect(error = "call-spelling") test pair(1.0, 2.0).doubled.b == 4.0
+@expect(error = "call-spelling")
+test pair(1.0, 2.0).total() == 3.0
+@expect(error = "call-spelling")
+test pair(1.0, 2.0).swapped.a == 2.0
+@expect(error = "call-spelling")
+test pair(1.0, 2.0).doubled.b == 4.0
 
 // a field ends the search for `a.x`, and takes part in no call
 fun a(p: pair, k: float) -> float => p.a * k

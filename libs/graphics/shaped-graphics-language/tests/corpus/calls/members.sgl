@@ -57,12 +57,14 @@ test not light_kind.sun.is_local
 test light_kind.spot.falloff(2.0) == 0.5
 
 // a property is read-only, so no assignment names it
-@expect(error = "not-assignable") test:
+@expect(error = "not-assignable")
+test:
     let mut s = span2(1.0, 3.0)
     s.width = 5.0
     true
 
-@expect(error = "not-assignable") test:
+@expect(error = "not-assignable")
+test:
     let mut s = span2(1.0, 3.0)
     s.width += 5.0
     true

@@ -18,7 +18,8 @@ test falloff(2.0, 0.5).inner == 0.5
 test falloff(2.0).sharpness == 1.0
 test falloff(2.0, sharpness = 4.0).sharpness == 4.0
 
-@expect(error = "no-matching-overload") test falloff(2.0, 0.5, 4.0).sharpness == 4.0
+@expect(error = "no-matching-overload")
+test falloff(2.0, 0.5, 4.0).sharpness == 4.0
 
 // a default reads what its function's scope sees, and never what the call sees
 const factor = 2.0
@@ -33,7 +34,8 @@ test:
 fun pick(x: int) -> int => 1
 fun pick(x: int, y: int = 0) -> int => 2
 
-@expect(error = "ambiguous-overload") test pick(5) == 1
+@expect(error = "ambiguous-overload")
+test pick(5) == 1
 
 test pick(5, 0) == 2
 test pick(5, y = 0) == 2
