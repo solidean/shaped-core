@@ -704,7 +704,7 @@ struct particle:
     velocity: vec3
     age: float = 0.0
     lifetime: float = age + 10.0
-    speed => self.velocity.length
+    speed => self.velocity.length()
     energy =>:
         let v = self.speed
         yield 0.5 * v * v

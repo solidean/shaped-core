@@ -36,7 +36,7 @@ Each file has the same shape, so an idea can be picked up cold:
 | [inferred-comptime.md](inferred-comptime.md) | a function value is a compile-time entity, and a parameter that must be constant is inferred from the body, as Zig's `comptime` without the keyword |
 | [patterns.md](patterns.md) | a real pattern language for `case`, where an arm destructures its scrutinee and binds the pieces it names |
 | [enum-futures.md](enum-futures.md) | ordering, casts to and from `int`, `@bitflags` for a mask enum, and `@exhaustive(false)` for an open one |
-| [texture-methods.md](texture-methods.md) | textures sampled through methods over UFCS, with a default sampler declared on the binding |
+| [texture-methods.md](texture-methods.md) | a default sampler declared on the binding, and the texture methods past 2D |
 | [footprint.md](footprint.md) | what a pipeline's code actually does to each binding, per stage, so a `mut buffer` only loaded costs a read's hazards |
 | [uniformity.md](uniformity.md) | SGL's own uniformity analysis after inlining, refusing a derivative sample in divergent control flow with a fix to offer |
 | [beyond-shaders.md](beyond-shaders.md) | SGL as a test run for a general-purpose language, and what that asks of today's decisions |
