@@ -171,7 +171,8 @@ TEST("sgl check - what the tracer does not carry is unsupported-yet, and names t
     CHECK(reports_for("use brdf\n") == "unsupported-yet user:[use brdf] use\n");
     CHECK(reports_for("sampler s:\n    filter = .linear\n") == "unsupported-yet user:[sampler s:] sampler\n");
     CHECK(reports_for("fun id[T](x: T) -> T => x\n").starts_with("unsupported-yet user:[id] a generic function\n"));
-    CHECK(reports_for("struct a:\n    x: float\n    len => x\n") == "unsupported-yet user:[len => x] a property\n");
+    CHECK(reports_for("struct a:\n    x: float\n    fun reset(mut self):\n        self.x = 0.0\n")
+          == "unsupported-yet user:[reset] mut self\n");
     CHECK(reports_for("binding b = constants\n") == "unsupported-yet user:[constants] a binding composition\n");
     // CHK-25: a format is no type, so a texture takes what it samples to and an image takes a format as a case.
     CHECK(reports_for("binding b:\n    t: texture_2d[rgba8]\n") == "unknown-name user:[rgba8] rgba8\n");
@@ -289,4 +290,28 @@ TEST("sgl check - a default is checked once, where it is declared, and reads onl
     // a field's default is its constructor parameter's, and reads the fields before it
     CHECK(reports_for("struct s:\n    a: float = b\n    b: float = 1.0\n") == "unknown-name user:[b] b\n");
     CHECK(reports_for("struct s:\n    a: float\n    b: float = a * 2.0\n") == "");
+}
+
+TEST("sgl check - a type scope holds one kind of thing per name, and an extension names a type")
+{
+    CHECK(reports_for("struct s:\n    x: float\n    fun x(self) -> float => 1.0\n")
+          == "member-name-clash user:[x] x is a field of s already\n");
+    CHECK(reports_for("struct s:\n    x: float\n    y => x\n    fun y(self, k: float) -> float => k\n")
+          == "member-name-clash user:[y] y is a property of s already\n");
+    CHECK(reports_for("enum e:\n    a\n    a => 1\n") == "member-name-clash user:[a] a is a case of e already\n");
+    // an extension is checked against the type's own members the same way
+    CHECK(reports_for("struct s:\n    x: float\nfun s.x => 1.0\n")
+          == "member-name-clash user:[x] x is a field of s already\n");
+    // methods of one name are an overload set, in the type and through extensions alike
+    CHECK(reports_for("struct s:\n    x: float\n    fun f(self) -> float => x\nfun s.f(self, k: float) -> float => k\n")
+          == "");
+
+    // CHK-237: the extended type is a struct or an enum
+    CHECK(reports_for("fun nothing.f(self) -> float => 1.0\n") == "unknown-name user:[nothing] nothing\n");
+    CHECK(reports_for("fun dot.f(self) -> float => 1.0\n")
+          == "wrong-kind-of-name user:[dot] dot is no struct and no enum, and only a type has functions of its own\n");
+    // `self` belongs to a function of a type scope
+    CHECK(reports_for("fun f(self) -> float => 1.0\n")
+          == "wrong-kind-of-name user:[f] self is the receiver of a method, and this function belongs to no type\n");
+    CHECK(reports_for("fun f() -> float => self\n") == "unknown-name user:[self] self\n");
 }

@@ -351,7 +351,12 @@ struct flattener
         {
             return where.kind == target_kind::enum_case ? enum_value(type, id, where.index) : fail();
         }
-        if (e.node.is<ast::name>())
+        // a bare name read through `self`, which is a property's call or a field of the receiver (CHK-62)
+        if (e.node.is<ast::name>() && tables().call_at(id) >= 0)
+            return flatten_bound_call(id, type, c.out.call_records[tables().call_at(id)]);
+        if (e.node.is<ast::name>() && where.kind == target_kind::field)
+            return add_expr(type, id, flat_member{.object = receiver(id), .member = where.index});
+        if (e.node.is<ast::name>() || e.node.is<ast::self_ref>())
         {
             for (auto const& b : current()->bound)
                 if (b.where == where)
@@ -364,6 +369,9 @@ struct flattener
         }
         if (auto const* const m = e.node.try_as<ast::member>())
         {
+            // `a.foo` that is no field is a call of `foo` with `a` (CHK-249)
+            if (tables().call_at(id) >= 0)
+                return flatten_bound_call(id, type, c.out.call_records[tables().call_at(id)]);
             if (where.kind == target_kind::enum_case)
                 return enum_value(type, id, where.index);
             if (where.kind == target_kind::binding_member)
@@ -633,6 +641,15 @@ struct flattener
                                   .arguments = add_list(arguments)});
     }
 
+    /// The `self` of the frame being written, read where `from` stands.
+    flat_expr_id receiver(ast::expr_id from)
+    {
+        for (auto const& b : current()->bound)
+            if (b.where.kind == target_kind::receiver)
+                return is_valid(b.literal) ? again(b.literal, from) : local_ref(b.local, from);
+        return fail();
+    }
+
     /// The values of a call's written arguments, in the order written.
     /// A splat stands for one member access per field, and its value is evaluated once: where the first one stands.
     cc::vector<flat_expr_id> flatten_written(cc::span<written_argument const> written)
@@ -641,6 +658,11 @@ struct flattener
         auto splat = evaluated_once{};
         for (auto const& w : written)
         {
+            if (w.is_receiver)
+            {
+                result.push_back(receiver(w.expr));
+                continue;
+            }
             if (w.splat_member < 0)
             {
                 result.push_back(flatten_expr(w.expr));
@@ -1148,9 +1170,14 @@ struct flattener
         auto is_open = s.info < 0 || frames.size() > k_max_inline_depth;
         for (auto const& f : frames)
             is_open = is_open || f.function == callee;
-        auto const* const decl = is_open ? nullptr : c.ast_of(s.file).at(s.declaration).node.try_as<ast::fun_decl>();
+        auto const* const node = is_open ? nullptr : &c.ast_of(s.file).at(s.declaration).node;
+        auto const* const function = node != nullptr ? node->try_as<ast::fun_decl>() : nullptr;
+        auto const* const property = node != nullptr ? node->try_as<ast::property_decl>() : nullptr;
+        auto const* const source = function != nullptr ? &function->body
+                                 : property != nullptr ? &property->body
+                                                       : nullptr;
         // recursion was reported by the check pass, and an entry point that reaches it is never written
-        if (decl == nullptr)
+        if (source == nullptr)
         {
             is_failed = true;
             return {};
@@ -1213,9 +1240,26 @@ struct flattener
         // EVAL-80: the defaults of the parameters the call left out come after every written argument, in parameter
         // order, and each reads the parameters before it.
         bind_defaults(parameters, slots);
-        if (ast::is_valid(decl->body.value))
-            flatten_return({.file = s.file, .expr = decl->body.value}, decl->body.value);
-        for (auto const stmt : ast().at(decl->body.statements))
+        // `self` is the first parameter of a method and of a property, which its body reads as the receiver
+        auto const has_receiver = s.role == function_role::property
+                               || (s.role == function_role::method && function->receiver == ast::receiver_kind::self);
+        if (has_receiver)
+        {
+            auto const first = target{.kind = target_kind::parameter, .index = i32(parameters[0].field)};
+            for (isize i = 0, n = current()->bound.size(); i < n; ++i)
+                if (current()->bound[i].where == first)
+                {
+                    auto receiver = current()->bound[i];
+                    receiver.where = {.kind = target_kind::receiver};
+                    current()->bound.push_back(receiver);
+                }
+        }
+        // a property's `=>:` block has its value through `yield`, which leaves the property's block
+        if (property != nullptr && !ast::is_valid(source->value))
+            current()->value_blocks.push_back(label);
+        if (ast::is_valid(source->value))
+            flatten_return({.file = s.file, .expr = source->value}, source->value);
+        for (auto const stmt : ast().at(source->statements))
             flatten_stmt(stmt);
         frames.remove_back();
 

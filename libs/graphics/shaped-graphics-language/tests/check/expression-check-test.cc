@@ -49,10 +49,15 @@ TEST("sgl check - overloads resolve by exact argument types")
     CHECK(body_reports("return dot(v)\n") == "no-matching-overload user:[dot(v)] dot(vec3)\n");
     CHECK(body_reports("return saturate()\n") == "no-matching-overload user:[saturate()] saturate()\n");
 
-    // A second declaration with the same parameter types in one scope is no error by itself; the call cannot choose.
+    // CHK-241: a second declaration with the same parameters in one scope is an error where it stands, and no call
+    // meets it
     CHECK(reports_for("fun g(v: vec3) -> float => v.x\nfun g(v: vec3) -> float => v.y\nfun f(v: vec3) -> float:\n"
                       "    return g(v)\n")
-          == "ambiguous-overload user:[g(v)] g(vec3) has 2 candidates\n");
+          == "duplicate-declaration user:[g] g has these parameters already\n");
+    // the names are part of it: these two differ, and a call by name tells them apart
+    CHECK(reports_for("fun g(v: vec3) -> float => v.x\nfun g(w: vec3) -> float => w.y\nfun f(v: vec3) -> float:\n"
+                      "    return g(w = v)\n")
+          == "");
 
     // CHK-192: across the two scopes the user file's wins, so a prelude that gains its signature later breaks nothing
     auto const shadowed = check_sources(read_prelude(), "fun dot(x: vec3, y: vec3) -> float => 7.0\n"

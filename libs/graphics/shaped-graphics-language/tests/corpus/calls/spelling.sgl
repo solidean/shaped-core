@@ -1,0 +1,34 @@
+// `a.foo` reads a property and `a.foo()` calls a function; the spelling is checked on the target it chose
+
+struct pair:
+    a: float
+    b: float
+    total => a + b
+    fun swapped(self) -> pair => pair(b, a)
+
+fun doubled(p: pair) -> pair => pair(p.a * 2.0, p.b * 2.0)
+
+test pair(1.0, 2.0).total == 3.0
+test pair(1.0, 2.0).swapped().a == 2.0
+
+// a function found through the first argument's type, dot or free, is the same call
+test pair(1.0, 2.0).doubled().b == 4.0
+test doubled(pair(1.0, 2.0)).b == 4.0
+
+// a free call may reach a property, so generic code can write it one way for both
+test total(pair(1.0, 2.0)) == 3.0
+
+@expect(error = "call-spelling") test pair(1.0, 2.0).total() == 3.0
+@expect(error = "call-spelling") test pair(1.0, 2.0).swapped.a == 2.0
+@expect(error = "call-spelling") test pair(1.0, 2.0).doubled.b == 4.0
+
+// a field ends the search for `a.x`, and takes part in no call
+fun a(p: pair, k: float) -> float => p.a * k
+
+test pair(1.0, 2.0).a == 1.0
+test pair(3.0, 2.0).a(2.0) == 6.0
+
+// a function of the type scope is better than one found by name at the call
+fun total(p: pair) -> float => 0.0
+
+test pair(1.0, 2.0).total == 3.0

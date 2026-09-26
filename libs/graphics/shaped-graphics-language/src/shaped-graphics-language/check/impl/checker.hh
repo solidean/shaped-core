@@ -92,6 +92,8 @@ struct function_scope
     cc::vector<local_name> captured;
     /// For a test in a function body: that function.
     symbol_id enclosing = symbol_id::none;
+    /// The type of `self` in a method or a property, whose fields and properties a bare name finds (CHK-62).
+    type_id receiver = type_id::none;
 
     /// The newest visible local or parameter of that name, which hides every module-level symbol of it.
     /// In a test, a name of the function around it is found last, and is `is_captured`.
@@ -173,6 +175,24 @@ struct bound_arguments
     i32 parameter = -1;
 };
 
+/// `fun T.name`, whose type is known only once every file is declared.
+struct pending_extension
+{
+    i32 file = 0;
+    ast::decl_id declaration = ast::decl_id::none;
+};
+
+/// How a call was spelled, which its target is checked against once it is chosen (CHK-256).
+enum class call_spelling : u8
+{
+    /// `foo(a)`, `a + b`, `T.foo(a)`: any function may be its target.
+    free,
+    /// `a.foo(…)`: a property may not be its target.
+    dot_call,
+    /// `a.foo`, or a bare name read through `self`: only a property may be its target.
+    dot_read,
+};
+
 /// Which pipeline settings an attribute may be, by what it stands on.
 enum class setting_scope : u8
 {
@@ -201,6 +221,10 @@ struct checker
     cc::map<cc::string, cc::vector<symbol_id>> names;
     /// `@operator` functions by operator spelling.
     cc::map<cc::string, cc::vector<symbol_id>> operators;
+    /// The functions of each struct's and enum's type scope, keyed by the index of the type's symbol, then by name.
+    /// Members are declared with their type, and extensions once every file is declared (CHK-233, CHK-237).
+    cc::map<i32, cc::map<cc::string, cc::vector<symbol_id>>> type_scopes;
+    cc::vector<pending_extension> pending_extensions;
     /// The symbols in compilation, outermost first, which is the loop a dependency cycle names.
     cc::vector<symbol_id> compiling;
     cc::vector<function_notes> notes;
@@ -264,6 +288,25 @@ struct checker
     [[nodiscard]] bool is_all_functions(cc::span<symbol_id const> ids) const;
     /// True where `ids` are functions, or a struct in front of functions of its name (CHK-240).
     [[nodiscard]] bool is_overload_set(cc::span<symbol_id const> ids) const;
+    /// The properties and functions of a struct's or an enum's block, into the type scope of `owner`.
+    void declare_members(symbol_id owner, i32 file, ast::range_of<ast::decl_id> members);
+    /// One function of a type scope, a member or an extension; reports a name its type already holds as another kind.
+    void add_member(symbol s, source_span name_where);
+    /// The kind of thing `name` is in the type scope of `owner`, from its block and what was added so far; empty for
+    /// nothing, else "field", "case", "property" or "function".
+    [[nodiscard]] cc::string_view member_kind_of(symbol_id owner, cc::string_view name) const;
+    /// Every `fun T.name`, into the type scope of `T`; run once every file is declared.
+    void attach_extensions();
+    /// Two functions of one overload set whose parameters agree in type, name and named-only mark (CHK-241).
+    void judge_redeclarations();
+    /// The functions a call of `name` from `file` may choose from, where `first` is its first argument's type:
+    /// the functions of that name visible there, and those of the type scope of `first` (CHK-247).
+    [[nodiscard]] cc::vector<symbol_id> candidates_of(i32 file, cc::string_view name, type_id first) const;
+    /// True where a lookup from `file` sees a function of `from`: the prelude never sees the program's.
+    [[nodiscard]] bool is_visible_from(i32 file, symbol_id from) const
+    {
+        return !is_prelude_file(file) || is_prelude_file(out.at(from).file);
+    }
     /// Gives every struct with a block its synthesized constructor, a function of the struct's name (CHK-239).
     /// Run once every file is declared, so the symbols declared before keep their ids.
     void declare_constructors();
@@ -284,6 +327,10 @@ struct checker
     void compile_function(symbol_id id);
     /// The synthesized constructor `id`: one parameter per field of its struct, and the struct as its result.
     void compile_constructor(symbol_id id);
+    /// A property, `name => value`: one parameter, `self`, and the value's type or the written one as its result.
+    void compile_property(symbol_id id);
+    /// The type of `self` for a function of a type scope; `none` for a free function and a static.
+    [[nodiscard]] type_id receiver_of(symbol_id id);
     void judge_entry_point(symbol_id id);
 
     /// True for the prelude's `int3`, the type a dispatch reports a thread's id as.
@@ -459,7 +506,10 @@ struct checker
                                            ast::expr_id callee,
                                            cc::span<symbol_id const> candidates,
                                            call_arguments const& arguments,
-                                           cc::string_view spelling);
+                                           cc::string_view spelling,
+                                           call_spelling written_as = call_spelling::free);
+    /// `a.foo(…)` or `T.foo(…)`, whose callee is the member `callee`.
+    [[nodiscard]] type_id check_dot_call(function_scope& scope, ast::expr_id id, ast::call const& call);
     [[nodiscard]] cc::string signature_text(cc::string_view spelling, cc::span<type_id const> types) const;
     /// A call as it was written, each named argument with its name: `sub(int, b = int)`.
     [[nodiscard]] cc::string call_text(cc::string_view spelling, call_arguments const& arguments) const;

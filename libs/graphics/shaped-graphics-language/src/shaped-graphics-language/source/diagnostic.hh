@@ -172,6 +172,14 @@ enum class sgl::diagnostic_kind : sgl::u8
     test_failed,
     /// An `@expect` whose diagnostic did not occur in its test.
     unmet_expectation,
+    /// A type scope that holds two kinds of thing under one name: a field and a method, a property and a method.
+    member_name_clash,
+    /// `a.foo` whose target is no property, or `a.foo()` whose target is one.
+    call_spelling,
+    /// A number literal where one type is expected that cannot hold it exactly.
+    literal_not_representable,
+    /// A literal converted to `T` by a function of `T`'s name that returns another type.
+    literal_conversion_result,
 };
 
 namespace sgl

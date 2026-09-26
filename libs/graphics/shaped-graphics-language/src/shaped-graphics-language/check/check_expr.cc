@@ -21,16 +21,34 @@ void checker::check_body(symbol_id id)
     auto const index = out.at(id).info;
     if (notes[index].is_body_checked)
         return;
-    auto const& f = ast.at(out.at(id).declaration).node.as<ast::fun_decl>();
-    if (f.body.kind == ast::body_kind::none)
+    auto const& node = ast.at(out.at(id).declaration).node;
+    auto const* const f = node.try_as<ast::fun_decl>();
+    auto const* const property = node.try_as<ast::property_decl>();
+    if (f == nullptr && property == nullptr)
+        return;
+    auto const& body = f != nullptr ? f->body : property->body;
+    auto const name = f != nullptr ? f->name : property->name;
+    if (body.kind == ast::body_kind::none)
         return;
     notes[index].is_body_checked = true;
 
     // by value: checking the body may compile another function, and `functions` then moves
     auto const info = out.functions[index];
     auto scope = function_scope{.function = id, .file = file, .result = info.result};
-    for (auto const& p : out.at(info.parameters))
+    // CHK-245: `self` is the receiver of a method and of a property, whose members a bare name also finds (CHK-62)
+    auto const role = out.at(id).role;
+    auto const has_receiver
+        = role == function_role::property || (role == function_role::method && f->receiver == ast::receiver_kind::self);
+    auto const parameters = out.at(info.parameters);
+    for (auto i = isize(0); i < parameters.size(); ++i)
     {
+        auto const& p = parameters[i];
+        if (has_receiver && i == 0)
+        {
+            scope.receiver = p.type;
+            scope.locals.push_back({.name = "self", .where = {.kind = target_kind::receiver}, .type = p.type});
+            continue;
+        }
         // CHK-54: a parameter may have the name of a module-level symbol, which it hides in the body.
         judge_shadowing(file, text_of(file, ast.at(p.field).name), ast.at(p.field).name);
         scope.locals.push_back({
@@ -42,21 +60,39 @@ void checker::check_body(symbol_id id)
 
     auto const errors_before = error_count();
 
-    auto ending = check_statements(scope, f.body.statements);
-    if (ast::is_valid(f.body.value) && notes[index].infers_result)
+    // A property's `=>:` block is a value block: it has a value only through `yield` (AST-81).
+    if (property != nullptr && !ast::is_valid(body.value))
     {
-        out.functions[index].result = check_expr(scope, f.body.value);
+        scope.value_blocks.push_back({});
+        (void)check_statements(scope, body.statements);
+        auto const yielded = scope.value_blocks.back();
+        scope.value_blocks.remove_back();
+        auto const value = yielded.has_yield ? yielded.value : error_type;
+        if (notes[index].infers_result)
+            out.functions[index].result = value;
+        else if (value != error_type && info.result != error_type && value != info.result)
+            report(diagnostic_kind::type_mismatch, file, name,
+                   cc::format("{} is {}, and its block yields {}", out.at(id).name, out.name_of(info.result),
+                              out.name_of(value)));
+        notes[index].is_body_sound = error_count() == errors_before;
+        return;
+    }
+
+    auto ending = check_statements(scope, body.statements);
+    if (ast::is_valid(body.value) && notes[index].infers_result)
+    {
+        out.functions[index].result = check_expr(scope, body.value);
         ending = flow::exits;
     }
-    else if (ast::is_valid(f.body.value))
+    else if (ast::is_valid(body.value))
     {
-        check_return(scope, span_of(file, f.body.value), f.body.value);
+        check_return(scope, span_of(file, body.value), body.value);
         ending = flow::exits;
     }
     // a block without a statement was reported where it was parsed
-    auto const has_statements = !f.body.statements.empty() || ast::is_valid(f.body.value);
+    auto const has_statements = !body.statements.empty() || ast::is_valid(body.value);
     if (has_statements && ending == flow::falls_through && info.result != void_type && info.result != error_type)
-        report(diagnostic_kind::missing_return, file, f.name,
+        report(diagnostic_kind::missing_return, file, name,
                cc::format("{} returns {}, and a path through its body ends without a return", out.at(id).name,
                           out.name_of(info.result)));
 
@@ -243,7 +279,24 @@ type_id checker::check_expr(function_scope& scope, ast::expr_id expr)
         { return check_literal(scope, expr, l); }, [&](ast::name const& n) { return check_name(scope, expr, n); },
         [&](ast::member const& m) { return check_member(scope, expr, m); },
         [&](ast::call const& c) { return check_call(scope, expr, c); },
-        [&](ast::self_ref const&) { return not_yet("self"); }, [&](ast::void_ref const&) { return void_type; },
+        [&](ast::self_ref const&)
+        {
+            // CHK-245: `self` is the receiver of a method or a property, and names nothing anywhere else
+            auto const* const local = is_valid(scope.receiver) ? scope.find_local("self") : nullptr;
+            if (local == nullptr)
+            {
+                report(diagnostic_kind::unknown_name, file, where, "self");
+                return error_type;
+            }
+            set_target(file, expr, local->where);
+            if (local->is_captured)
+            {
+                report_capture(scope, where, *local);
+                return error_type;
+            }
+            return local->type;
+        },
+        [&](ast::void_ref const&) { return void_type; },
         [&](ast::wildcard const&) { return not_yet("a wildcard as a value"); },
         // CHK-152: a leading dot needs a type the context expects, which today only a `case` pattern gives it
         [&](ast::leading_dot const&) { return not_yet("a leading-dot name outside a case pattern"); },
@@ -327,6 +380,31 @@ type_id checker::check_name(function_scope& scope, ast::expr_id id, ast::name co
             return error_type;
         }
         return local->type;
+    }
+
+    // CHK-62: in a method or a property, a field or a property of `self` comes before the module
+    if (is_valid(scope.receiver) && scope.receiver != error_type)
+    {
+        auto const& receiver = out.at(scope.receiver);
+        auto const fields = out.at(receiver.members);
+        for (auto i = isize(0); i < fields.size(); ++i)
+            if (fields[i].name == text)
+            {
+                set_target(file, id, {.kind = target_kind::field, .symbol = receiver.symbol, .index = i32(i)});
+                return fields[i].type;
+            }
+        auto properties = cc::vector<symbol_id>();
+        for (auto const candidate : candidates_of(file, text, scope.receiver))
+            if (out.at(candidate).role == function_role::property)
+                properties.push_back(candidate);
+        if (!properties.empty())
+        {
+            auto arguments = call_arguments();
+            arguments.written.push_back({.is_receiver = true});
+            arguments.types.push_back(scope.receiver);
+            arguments.names.push_back({});
+            return resolve_overload(scope, id, ast::expr_id::none, properties, arguments, text, call_spelling::dot_read);
+        }
     }
 
     auto const* const found = names_seen_from(file).get_ptr(text);
@@ -480,16 +558,26 @@ type_id checker::check_member(function_scope& scope, ast::expr_id id, ast::membe
     if (object == error_type || member.name.empty())
         return error_type;
 
+    // CHK-249: `a.foo` is the field where there is one, and a call of `foo` with `a` otherwise
     auto const& type = out.at(object);
     auto const index = find_member(type.members);
-    if (index < 0)
+    if (index >= 0)
+    {
+        set_target(file, id, {.kind = target_kind::field, .symbol = type.symbol, .index = i32(index)});
+        return out.at(type.members)[index].type;
+    }
+    auto const candidates = candidates_of(file, name, object);
+    if (candidates.empty())
     {
         report(diagnostic_kind::unknown_member, file, member.name,
                cc::format("{} has no member {}", out.name_of(object), name));
         return error_type;
     }
-    set_target(file, id, {.kind = target_kind::field, .symbol = type.symbol, .index = i32(index)});
-    return out.at(type.members)[index].type;
+    auto arguments = call_arguments();
+    arguments.written.push_back({.expr = member.object});
+    arguments.types.push_back(object);
+    arguments.names.push_back({});
+    return resolve_overload(scope, id, ast::expr_id::none, candidates, arguments, name, call_spelling::dot_read);
 }
 
 // ---- calls ----------------------------------------------------------------------------------------------------------
@@ -617,12 +705,12 @@ type_id checker::check_call(function_scope& scope, ast::expr_id id, ast::call co
     auto const& callee = ast.at(call.callee);
     auto const callee_where = span_of(file, call.callee);
     auto const* const n = callee.node.try_as<ast::name>();
+    if (callee.node.is<ast::member>())
+        return check_dot_call(scope, id, call);
     if (n == nullptr)
     {
         (void)check_arguments(scope, call.arguments, false);
-        if (callee.node.is<ast::member>())
-            unsupported(file, callee_where, "a method call");
-        else if (callee.node.is<ast::index>())
+        if (callee.node.is<ast::index>())
             unsupported(file, callee_where, "type arguments");
         else if (!callee.node.is<ast::invalid_expr>())
             unsupported(file, callee_where, "a call of something that is no name");
@@ -642,11 +730,22 @@ type_id checker::check_call(function_scope& scope, ast::expr_id id, ast::call co
     }
 
     auto const* const found = names_seen_from(file).get_ptr(text);
-    if (found == nullptr || found->empty())
+    if (found == nullptr || found->empty() || out.at(found->front()).kind == symbol_kind::function)
     {
-        (void)check_arguments(scope, call.arguments, false);
-        report(diagnostic_kind::unknown_name, file, callee_where, text);
-        return error_type;
+        // CHK-247: the functions of its name, and those of its first argument's type scope
+        auto const arguments = check_arguments(scope, call.arguments, false);
+        auto const first
+            = arguments.written.empty() || arguments.written[0].splat_member > 0 ? type_id::none : arguments.types[0];
+        auto const candidates = candidates_of(file, text, first);
+        if (candidates.empty())
+        {
+            report(diagnostic_kind::unknown_name, file, callee_where, text);
+            return error_type;
+        }
+        auto const result = resolve_overload(scope, id, call.callee, candidates, arguments, text);
+        if (result != error_type)
+            judge_filtering(file, where, call.arguments);
+        return result;
     }
 
     auto const first = found->front();
@@ -675,13 +774,7 @@ type_id checker::check_call(function_scope& scope, ast::expr_id id, ast::call co
         return result == error_type ? type : result;
     }
     case symbol_kind::function:
-    {
-        auto const result
-            = resolve_overload(scope, id, call.callee, *found, check_arguments(scope, call.arguments, false), text);
-        if (result != error_type)
-            judge_filtering(file, where, call.arguments);
-        return result;
-    }
+        return error_type;
     case symbol_kind::binding:
         (void)check_arguments(scope, call.arguments, false);
         set_target(file, call.callee, {.kind = target_kind::symbol, .symbol = first});
@@ -706,12 +799,78 @@ type_id checker::check_call(function_scope& scope, ast::expr_id id, ast::call co
     return error_type;
 }
 
+type_id checker::check_dot_call(function_scope& scope, ast::expr_id id, ast::call const& call)
+{
+    auto const file = scope.file;
+    auto const& ast = ast_of(file);
+    auto const& member = ast.at(call.callee).node.as<ast::member>();
+    auto const name = text_of(file, member.name);
+
+    // `T.foo(…)`: the functions of the type scope of `T`, and `T` is no argument (CHK-248)
+    auto const* const object_name
+        = ast::is_valid(member.object) ? ast.at(member.object).node.try_as<ast::name>() : nullptr;
+    if (object_name != nullptr && scope.find_local(text_of(file, object_name->where)) == nullptr)
+    {
+        auto const* const found = names_seen_from(file).get_ptr(text_of(file, object_name->where));
+        auto const kind = found != nullptr && !found->empty() ? out.at(found->front()).kind : symbol_kind::unsupported;
+        if (kind == symbol_kind::structure || kind == symbol_kind::enumeration)
+        {
+            auto const owner = found->front();
+            set_target(file, member.object, {.kind = target_kind::symbol, .symbol = owner});
+            auto const arguments = check_arguments(scope, call.arguments, false);
+            if (demand(owner, file, span_of(file, member.object)) != symbol_state::checked || member.name.empty())
+                return error_type;
+            auto candidates = cc::vector<symbol_id>();
+            if (auto const* const scope_of = type_scopes.get_ptr(i32(index_of(owner))))
+                if (auto const* const functions = scope_of->get_ptr(name))
+                    for (auto const f : *functions)
+                        if (is_visible_from(file, f))
+                            candidates.push_back(f);
+            if (candidates.empty())
+            {
+                report(diagnostic_kind::unknown_member, file, member.name,
+                       cc::format("{} has no function {}", out.at(owner).name, name));
+                return error_type;
+            }
+            return resolve_overload(scope, id, call.callee, candidates, arguments,
+                                    cc::format("{}.{}", out.at(owner).name, name));
+        }
+        if (kind == symbol_kind::binding)
+        {
+            (void)check_arguments(scope, call.arguments, false);
+            unsupported(file, span_of(file, call.callee), "a call through a binding");
+            return error_type;
+        }
+    }
+
+    // `a.foo(…)` is `foo(a, …)`, and a field of `a` takes part in no call (CHK-249)
+    handed.push_back(member.object);
+    auto const receiver = check_expr(scope, member.object);
+    handed.pop_back();
+    auto arguments = check_arguments(scope, call.arguments, false);
+    if (receiver == error_type || member.name.empty())
+        return error_type;
+    arguments.written.insert_at(0, {.expr = member.object});
+    arguments.types.insert_at(0, receiver);
+    arguments.names.insert_at(0, {});
+
+    auto const candidates = candidates_of(file, name, receiver);
+    if (candidates.empty())
+    {
+        report(diagnostic_kind::unknown_member, file, member.name,
+               cc::format("{} has no member {}", out.name_of(receiver), name));
+        return error_type;
+    }
+    return resolve_overload(scope, id, call.callee, candidates, arguments, name, call_spelling::dot_call);
+}
+
 type_id checker::resolve_overload(function_scope& scope,
                                   ast::expr_id id,
                                   ast::expr_id callee,
                                   cc::span<symbol_id const> candidates,
                                   call_arguments const& arguments,
-                                  cc::string_view spelling)
+                                  cc::string_view spelling,
+                                  call_spelling written_as)
 {
     auto const file = scope.file;
     auto const where = span_of(file, id);
@@ -768,6 +927,19 @@ type_id checker::resolve_overload(function_scope& scope,
                 matches.remove_at(i);
                 match_slots.remove_at(i);
             }
+    // CHK-255: a function of a type scope is better than one found by name at the call
+    auto const is_of_type
+        = [&](symbol_id m) { return is_valid(out.at(m).owner) && out.at(m).role != function_role::constructor; };
+    auto type_scoped = 0;
+    for (auto const m : matches)
+        type_scoped += is_of_type(m) ? 1 : 0;
+    if (type_scoped > 0 && type_scoped < matches.size())
+        for (auto i = matches.size() - 1; i >= 0; --i)
+            if (!is_of_type(matches[i]))
+            {
+                matches.remove_at(i);
+                match_slots.remove_at(i);
+            }
     if (matches.size() > 1)
     {
         report(diagnostic_kind::ambiguous_overload, file, where,
@@ -777,6 +949,13 @@ type_id checker::resolve_overload(function_scope& scope,
 
     auto const chosen = matches.front();
     auto const& chosen_symbol = out.at(chosen);
+    // CHK-256: the spelling says what the writer means, and is checked on the target it chose
+    if (written_as == call_spelling::dot_read && chosen_symbol.role != function_role::property)
+        report(diagnostic_kind::call_spelling, file, where,
+               cc::format("{} is a function, so it is called: write .{}()", spelling, spelling));
+    else if (written_as == call_spelling::dot_call && chosen_symbol.role == function_role::property)
+        report(diagnostic_kind::call_spelling, file, where,
+               cc::format("{} is a property, so it is read: write .{}", spelling, spelling));
     // A synthesized constructor is its struct's, which is what an editor goes to.
     auto const self = chosen_symbol.role == function_role::constructor
                         ? target{.kind = target_kind::constructor, .symbol = chosen_symbol.owner}

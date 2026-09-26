@@ -398,6 +398,8 @@ enum class sgl::check::target_kind : sgl::u8
     binding_member,
     /// On a `member` or a `leading_dot`: case `index` of the enum `symbol`.
     enum_case,
+    /// `self` in a method or a property, and so the object of a member a bare name reads through it (CHK-245).
+    receiver,
 };
 
 /// What an expression refers to, for an editor: go to definition, hover, rename.
@@ -417,6 +419,8 @@ struct sgl::check::written_argument
     ast::expr_id expr = ast::expr_id::none;
     /// A splat is one written argument per field of its value; this is that field, and -1 for no splat.
     i32 splat_member = -1;
+    /// The `self` of the method or property the call stands in, which a bare name reads a property through (CHK-62).
+    bool is_receiver = false;
 
     constexpr bool operator==(written_argument const&) const = default;
 };

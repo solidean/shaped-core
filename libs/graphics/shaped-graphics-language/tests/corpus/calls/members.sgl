@@ -1,0 +1,57 @@
+// a struct's and an enum's own functions: methods, statics and properties, and what their bodies see
+
+struct span2:
+    lo: float
+    hi: float
+
+    // a property: read as a field, computed on every read, `self` its one parameter
+    width => self.hi - self.lo
+
+    // a bare name in a member body finds a field or a property of `self`
+    center => lo + width * 0.5
+
+    // a method names its receiver
+    fun contains(self, x: float) -> bool => lo <= x and x <= hi
+
+    // a method may call another through `self`
+    fun scaled(self, k: float) -> span2 => span2(self.lo * k, self.hi * k)
+
+    // a static takes no `self`, and is reached through its type
+    fun unit() -> span2 => span2(0.0, 1.0)
+
+    // a property's block has its value through `yield`
+    is_empty =>:
+        let w = width
+        yield w <= 0.0
+
+test span2(1.0, 3.0).width == 2.0
+test span2(1.0, 3.0).center == 2.0
+test span2(1.0, 3.0).contains(2.0)
+test not span2(1.0, 3.0).contains(4.0)
+test span2(1.0, 3.0).scaled(2.0).hi == 6.0
+test span2.unit().hi == 1.0
+test span2(1.0, 1.0).is_empty
+
+// a method is a function of the type scope, so a free call finds it as well
+test contains(span2(1.0, 3.0), 2.0)
+
+// and the type's name reaches every function of its scope, the receiver passed like any argument
+test span2.contains(span2(1.0, 3.0), 2.0)
+
+// an enum has them too
+enum light_kind:
+    point
+    spot
+    sun
+
+    is_local => self != light_kind.sun
+
+    fun falloff(self, d: float) -> float:
+        return case self:
+            .point => 1.0 / (d * d)
+            .spot => 1.0 / d
+            _ => 1.0
+
+test light_kind.point.is_local
+test not light_kind.sun.is_local
+test light_kind.spot.falloff(2.0) == 0.5

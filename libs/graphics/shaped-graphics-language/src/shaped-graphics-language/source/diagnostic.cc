@@ -200,6 +200,14 @@ cc::string_view sgl::to_string(diagnostic_kind kind)
         return "test-failed";
     case diagnostic_kind::unmet_expectation:
         return "unmet-expectation";
+    case diagnostic_kind::member_name_clash:
+        return "member-name-clash";
+    case diagnostic_kind::call_spelling:
+        return "call-spelling";
+    case diagnostic_kind::literal_not_representable:
+        return "literal-not-representable";
+    case diagnostic_kind::literal_conversion_result:
+        return "literal-conversion-result";
     }
     CC_UNREACHABLE("unknown diagnostic_kind");
 }
@@ -301,6 +309,10 @@ sgl::severity sgl::default_severity_of(diagnostic_kind kind)
     case diagnostic_kind::test_must_end_in_check:
     case diagnostic_kind::test_failed:
     case diagnostic_kind::unmet_expectation:
+    case diagnostic_kind::member_name_clash:
+    case diagnostic_kind::call_spelling:
+    case diagnostic_kind::literal_not_representable:
+    case diagnostic_kind::literal_conversion_result:
         return severity::normal_error;
     case diagnostic_kind::spaced_attribute_arguments:
     case diagnostic_kind::no_effect:

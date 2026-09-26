@@ -230,11 +230,14 @@ void checker::run()
         declare_file(file);
     declare_constructors();
     merge_scopes();
+    attach_extensions();
 
     // Source order is only the order of the first demand: whatever a symbol needs is compiled from inside it.
     for (auto i = isize(0); i < out.symbols.size(); ++i)
         if (out.symbols[i].state == symbol_state::untouched)
             compile(symbol_id(i));
+
+    judge_redeclarations();
 
     // A default is checked where it is declared, once, and a call binds against the signature alone (CHK-243).
     for (auto i = isize(0); i < out.symbols.size(); ++i)
@@ -306,6 +309,188 @@ void checker::add_symbol(symbol s, source_span name_where)
         return;
     }
     declared.push_back(id);
+}
+
+void checker::declare_members(symbol_id owner, i32 file, ast::range_of<ast::decl_id> members)
+{
+    for (auto const member : ast_of(file).at(members))
+    {
+        auto const& d = ast_of(file).at(member);
+        if (auto const* const f = d.node.try_as<ast::fun_decl>(); f != nullptr && !f->name.empty())
+            add_member({.file = file,
+                        .declaration = member,
+                        .kind = symbol_kind::function,
+                        .name = cc::string(text_of(file, f->name)),
+                        .role = f->receiver == ast::receiver_kind::none ? function_role::static_ : function_role::method,
+                        .owner = owner},
+                       f->name);
+        else if (auto const* const p = d.node.try_as<ast::property_decl>(); p != nullptr && !p->name.empty())
+            add_member({.file = file,
+                        .declaration = member,
+                        .kind = symbol_kind::function,
+                        .name = cc::string(text_of(file, p->name)),
+                        .role = function_role::property,
+                        .owner = owner},
+                       p->name);
+    }
+}
+
+cc::string_view checker::member_kind_of(symbol_id owner, cc::string_view name) const
+{
+    auto const& o = out.at(owner);
+    auto const& ast = ast_of(o.file);
+    auto const& node = ast.at(o.declaration).node;
+    auto const* const s = node.try_as<ast::struct_decl>();
+    auto const* const e = node.try_as<ast::enum_decl>();
+    auto const members = s != nullptr ? s->members : e != nullptr ? e->members : ast::range_of<ast::decl_id>();
+    for (auto const member : ast.at(members))
+    {
+        auto const& d = ast.at(member).node;
+        if (auto const* const f = d.try_as<ast::field_decl>();
+            f != nullptr && ast::is_valid(f->field) && text_of(o.file, ast.at(f->field).name) == name)
+            return "field";
+        if (auto const* const c = d.try_as<ast::enum_case_decl>(); c != nullptr && text_of(o.file, c->name) == name)
+            return "case";
+    }
+    auto const* const scope = type_scopes.get_ptr(i32(index_of(owner)));
+    auto const* const found = scope != nullptr ? scope->get_ptr(name) : nullptr;
+    if (found == nullptr || found->empty())
+        return {};
+    return out.at(found->front()).role == function_role::property ? "property" : "function";
+}
+
+void checker::add_member(symbol s, source_span name_where)
+{
+    auto const id = symbol_id(out.symbols.size());
+    auto const owner = s.owner;
+    auto const file = s.file;
+    auto const name = s.name;
+    auto const kind = s.role == function_role::property ? cc::string_view("property") : cc::string_view("function");
+    // CHK-238: a type scope holds one kind of thing per name, and functions of one name are an overload set
+    auto const existing = member_kind_of(owner, name);
+    out.symbols.push_back(cc::move(s));
+    if (!existing.empty() && (existing != "function" || kind != "function"))
+    {
+        if (existing == kind)
+            report(diagnostic_kind::duplicate_declaration, file, name_where, name);
+        else
+            report(diagnostic_kind::member_name_clash, file, name_where,
+                   cc::format("{} is a {} of {} already", name, existing, out.at(owner).name));
+        out.symbols[index_of(id)].state = symbol_state::failed;
+        return;
+    }
+    type_scopes[i32(index_of(owner))][name].push_back(id);
+}
+
+void checker::attach_extensions()
+{
+    for (auto const& pending : pending_extensions)
+    {
+        auto const file = pending.file;
+        auto const& d = ast_of(file).at(pending.declaration).node;
+        auto const* const f = d.try_as<ast::fun_decl>();
+        auto const* const p = d.try_as<ast::property_decl>();
+        auto const extended = f != nullptr ? f->extended_type : p->extended_type;
+        auto const name_where = f != nullptr ? f->name : p->name;
+        auto const type_name = text_of(file, extended);
+
+        // CHK-237: `T` names a struct or an enum
+        auto const* const found = names_seen_from(file).get_ptr(type_name);
+        if (found == nullptr || found->empty())
+        {
+            report(diagnostic_kind::unknown_name, file, extended, type_name);
+            continue;
+        }
+        auto const owner = found->front();
+        auto const owner_kind = out.at(owner).kind;
+        if (owner_kind != symbol_kind::structure && owner_kind != symbol_kind::enumeration)
+        {
+            report(diagnostic_kind::wrong_kind_of_name, file, extended,
+                   cc::format("{} is no struct and no enum, and only a type has functions of its own", type_name));
+            continue;
+        }
+        auto const role = p != nullptr                            ? function_role::property
+                        : f->receiver == ast::receiver_kind::none ? function_role::static_
+                                                                  : function_role::method;
+        add_member({.file = file,
+                    .declaration = pending.declaration,
+                    .kind = symbol_kind::function,
+                    .name = cc::string(text_of(file, name_where)),
+                    .role = role,
+                    .owner = owner},
+                   name_where);
+    }
+}
+
+cc::vector<symbol_id> checker::candidates_of(i32 file, cc::string_view name, type_id first) const
+{
+    auto result = cc::vector<symbol_id>();
+    if (auto const* const found = names_seen_from(file).get_ptr(name))
+        for (auto const id : *found)
+            if (out.at(id).kind == symbol_kind::function)
+                result.push_back(id);
+
+    // CHK-247: the type scope of the first argument's type, extensions visible from `file` among it.
+    // The scope that declares that type is always visible too, while the module is the prelude and one program file.
+    if (!is_valid(first) || index_of(first) >= out.types.size())
+        return result;
+    auto const& type = out.at(first);
+    if ((type.kind != type_kind::structure && type.kind != type_kind::enumeration) || !is_valid(type.symbol))
+        return result;
+    auto const* const scope = type_scopes.get_ptr(i32(index_of(type.symbol)));
+    auto const* const members = scope != nullptr ? scope->get_ptr(name) : nullptr;
+    if (members != nullptr)
+        for (auto const id : *members)
+        {
+            auto is_known = false;
+            for (auto const r : result)
+                is_known = is_known || r == id;
+            if (is_visible_from(file, id) && !is_known)
+                result.push_back(id);
+        }
+    return result;
+}
+
+void checker::judge_redeclarations()
+{
+    auto const judge = [&](cc::span<symbol_id const> set)
+    {
+        for (auto i = isize(0); i < set.size(); ++i)
+            for (auto j = isize(0); j < i; ++j)
+            {
+                auto const& a = out.at(set[j]);
+                auto const& b = out.at(set[i]);
+                if (a.kind != symbol_kind::function || b.kind != symbol_kind::function || a.info < 0 || b.info < 0
+                    || a.state != symbol_state::checked || b.state != symbol_state::checked)
+                    continue;
+                auto const pa = out.at(out.functions[a.info].parameters);
+                auto const pb = out.at(out.functions[b.info].parameters);
+                auto is_same = pa.size() == pb.size();
+                for (auto k = isize(0); is_same && k < pa.size(); ++k)
+                    is_same = pa[k].type == pb[k].type && pa[k].name == pb[k].name
+                           && pa[k].is_named_only == pb[k].is_named_only;
+                if (!is_same)
+                    continue;
+                // the later one: a synthesized constructor is the struct's, which stands before any function of it
+                auto const later = b.role == function_role::constructor ? set[j] : set[i];
+                auto const& l = out.at(later);
+                auto const& decl = ast_of(l.file).at(l.declaration).node;
+                auto where = span_of(l.file, l.declaration);
+                if (auto const* const f = decl.try_as<ast::fun_decl>())
+                    where = f->name;
+                report(diagnostic_kind::duplicate_declaration, l.file, where,
+                       cc::format("{} has these parameters already", l.name));
+                // No call could choose between the two, so the later one is out of every lookup.
+                out.symbols[index_of(later)].state = symbol_state::failed;
+            }
+    };
+    for (auto const& [name, ids] : prelude_names)
+        judge(ids);
+    for (auto const& [name, ids] : file_names)
+        judge(ids);
+    for (auto const& [owner, scope] : type_scopes)
+        for (auto const& [name, ids] : scope)
+            judge(ids);
 }
 
 bool checker::is_overload_set(cc::span<symbol_id const> ids) const
@@ -405,7 +590,7 @@ void checker::declare(i32 file, ast::decl_id decl)
                 return;
             if (!f.extended_type.empty())
             {
-                unsupported(file, span_of(file, decl), "an extension");
+                pending_extensions.push_back({.file = file, .declaration = decl});
                 return;
             }
             auto s = named(symbol_kind::function, f.name);
@@ -441,8 +626,12 @@ void checker::declare(i32 file, ast::decl_id decl)
         },
         [&](ast::struct_decl const& s)
         {
+            auto const owner = symbol_id(out.symbols.size());
             if (!s.name.empty())
+            {
                 add_symbol(named(symbol_kind::structure, s.name), s.name);
+                declare_members(owner, file, s.members);
+            }
             add_member_tests(file, s.members, cc::format("struct {}", text_of(file, s.name)));
         },
         [&](ast::binding_decl const& b)
@@ -455,8 +644,12 @@ void checker::declare(i32 file, ast::decl_id decl)
         [&](ast::use_decl const&) { unsupported(file, span_of(file, decl), "use"); },
         [&](ast::enum_decl const& e)
         {
+            auto const owner = symbol_id(out.symbols.size());
             if (!e.name.empty())
+            {
                 add_symbol(named(symbol_kind::enumeration, e.name), e.name);
+                declare_members(owner, file, e.members);
+            }
             add_member_tests(file, e.members, cc::format("enum {}", text_of(file, e.name)));
         },
         [&](ast::type_decl const& t) { unsupported_symbol(t.name, "type alias"); },
@@ -481,7 +674,7 @@ void checker::declare(i32 file, ast::decl_id decl)
         [&](ast::property_decl const& p)
         {
             if (!p.extended_type.empty())
-                unsupported(file, span_of(file, decl), "an extension");
+                pending_extensions.push_back({.file = file, .declaration = decl});
         },
         [&](ast::enum_case_decl const&) {}, [&](ast::invalid_decl const&) {});
 }
@@ -530,6 +723,8 @@ void checker::compile(symbol_id id)
     case symbol_kind::function:
         if (out.at(id).role == function_role::constructor)
             compile_constructor(id);
+        else if (out.at(id).role == function_role::property)
+            compile_property(id);
         else
             compile_function(id);
         break;
