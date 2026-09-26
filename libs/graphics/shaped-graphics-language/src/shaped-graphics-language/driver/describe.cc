@@ -44,13 +44,31 @@ cc::string_view sample_type_of(check::checked_module const& m, check::member_inf
     return member.is_unfilterable || t.shape == check::texture_shape::d2_ms ? "unfilterable_float" : "filterable_float";
 }
 
+// An `sg::access_mode` name; SGL's own enum orders its members differently, so it is never cast across.
+cc::string_view access_name(check::access_mode access)
+{
+    switch (access)
+    {
+    case check::access_mode::read:
+        return "read";
+    case check::access_mode::read_write:
+        return "read_write";
+    case check::access_mode::write:
+        return "write";
+    }
+    return "read";
+}
+
 described_binding_member describe_resource(check::checked_module const& m,
                                            check::member_info const& member,
                                            i32 slot,
                                            cc::string host_name)
 {
     auto const& t = m.at(member.type);
-    auto result = described_binding_member{.name = member.name, .slot = slot, .host_name = cc::move(host_name)};
+    auto result = described_binding_member{.name = member.name,
+                                           .slot = slot,
+                                           .host_name = cc::move(host_name),
+                                           .access = cc::string("read")};
     switch (t.kind)
     {
     case check::type_kind::texture:
@@ -60,16 +78,12 @@ described_binding_member describe_resource(check::checked_module const& m,
         result.sample_type = cc::string(sample_type_of(m, member));
         break;
     case check::type_kind::image:
-    {
-        cc::string_view const accesses[] = {"read", "read_write", "write"};
         result.kind = described_member_kind::image;
         result.type = cc::string(m.name_of(member.type));
-        result.is_mut = t.access != check::access_mode::read;
         result.texture_dimension = cc::string(check::info_of(t.shape).sg_name);
         result.image_format = cc::string(check::k_image_formats[t.format].name);
-        result.access = cc::string(accesses[isize(t.access)]);
+        result.access = cc::string(access_name(t.access));
         break;
-    }
     default:
         result.kind = described_member_kind::sampler;
         result.type = cc::string(m.name_of(member.type));
@@ -137,9 +151,9 @@ described_binding describe_binding(check::checked_module const& m, check::symbol
             result.members.push_back({.name = member.name,
                                       .kind = described_member_kind::buffer,
                                       .type = cc::string(m.name_of(t.element)),
-                                      .is_mut = t.is_mut,
                                       .slot = slot++,
-                                      .host_name = cc::format("{}.{}", s.name, member.name)});
+                                      .host_name = cc::format("{}.{}", s.name, member.name),
+                                      .access = cc::string(t.is_mut ? "read_write" : "read")});
             continue;
         }
         if (check::is_resource(t.kind))

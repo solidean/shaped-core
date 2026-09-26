@@ -134,8 +134,9 @@ def emit_group(package: str, namespace: str, file: SglFile, binding: dict) -> st
                 out.append(f"    sg::sampler {member['name']}; ///< `{member['type']}`, which the group binds\n")
             continue
         element = host_type(package, where, member["type"])
-        access = "readwrite" if member["mut"] else "readonly"
-        sgl_type = f"mut buffer[{member['type']}]" if member["mut"] else f"buffer[{member['type']}]"
+        is_written = member["access"] == "read_write"
+        access = "readwrite" if is_written else "readonly"
+        sgl_type = f"mut buffer[{member['type']}]" if is_written else f"buffer[{member['type']}]"
         out.append(f"    sg::{access}_buffer_view<{element}> {member['name']}; ///< `{sgl_type}`\n")
     out.append("\n")
     if has_block(binding):
@@ -209,7 +210,7 @@ def binding_entry(member: dict) -> str:
     head = f'{{.name = "{member["host_name"]}", .index = {member["slot"]}u, .count = 1u, '
     kind = member["kind"]
     if kind == "buffer":
-        access = ", .access = sg::access_mode::read_write" if member["mut"] else ""
+        access = "" if member["access"] == "read" else f", .access = sg::access_mode::{member['access']}"
         return head + f".type = sg::binding_type::buffer{access}}}"
     if kind == "texture":
         return head + (f".type = sg::binding_type::texture, "

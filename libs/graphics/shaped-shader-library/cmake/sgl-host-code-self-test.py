@@ -143,6 +143,16 @@ def an_image_entry_carries_its_format_and_access():
 
 
 @test
+def a_buffer_entry_states_access_only_when_written():
+    got = sgl_host_code.binding_entry(resource("buffer", access="read"))
+    expect_equal(got, '{.name = "g_r", .index = 3u, .count = 1u, .type = sg::binding_type::buffer}', "a read buffer")
+    got = sgl_host_code.binding_entry(resource("buffer", access="read_write"))
+    expect_equal(got, '{.name = "g_r", .index = 3u, .count = 1u, .type = sg::binding_type::buffer, '
+                      ".access = sg::access_mode::read_write}",
+                 "a mut buffer")
+
+
+@test
 def a_sampler_entry_carries_its_sampler_type():
     for sampler_type in ("filtering", "non_filtering", "comparison"):
         got = sgl_host_code.binding_entry(resource("sampler", sampler_type=sampler_type))
@@ -162,6 +172,8 @@ GROUP = {
          "slot": 0, "texture_dimension": "cube", "sample_type": "depth"},
         {"kind": "image", "name": "counts", "type": "image_3d[uint]", "host_name": "shadow_counts", "slot": 1,
          "texture_dimension": "tex_3d", "image_format": "r32_uint", "access": "read_write"},
+        {"kind": "buffer", "name": "weights", "type": "float", "host_name": "shadow_weights", "slot": 4,
+         "access": "read_write"},
         {"kind": "sampler", "name": "picked", "type": "sampler", "host_name": "shadow_picked", "slot": 2,
          "sampler_type": "non_filtering"},
         {"kind": "sampler", "name": "compare", "type": "sampler", "host_name": "shadow_compare", "slot": 3,
@@ -177,6 +189,7 @@ def a_group_has_a_field_per_view_and_per_dynamic_sampler():
     header = sgl_host_code.emit_group("pkg", "ns", FILE, GROUP)
     expect_in("sg::texture_view<sg::tv_cube> depth_map;", header, "a cube texture's field")
     expect_in("sg::image_view<sg::tv_3d, sg::pixel_format::r32_uint> counts;", header, "a 3d image's field, typed on its format")
+    expect_in("sg::readwrite_buffer_view<float> weights;", header, "a mut buffer's field, its view by access")
     expect_in("sg::sampler picked;", header, "a dynamic sampler's field")
     # A static sampler is the layout's, so the group the host fills has nothing to set for it.
     expect_not_in(" compare;", header, "a static sampler")
@@ -190,7 +203,7 @@ def a_groups_static_sampler_is_declared_and_its_dynamic_one_gathered():
     expect_in("return k_sgl_samplers_shadow;", source, "declared_samplers")
     expect_in('samplers.push_back({.name = "shadow_picked", .sampler = picked});', source, "the dynamic sampler")
     expect_not_in('.sampler = compare}', source, "a static sampler gathered as a dynamic one")
-    expect_in("views.reserve(2);", source, "only views are gathered as views")
+    expect_in("views.reserve(3);", source, "only views are gathered as views")
 
 
 # ---- the runner -----------------------------------------------------------------------------------------------------

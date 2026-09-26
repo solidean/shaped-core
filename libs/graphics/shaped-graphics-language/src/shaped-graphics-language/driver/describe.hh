@@ -51,8 +51,6 @@ struct sgl::described_binding_member
     described_member_kind kind = described_member_kind::constant;
     /// A constant's type, a buffer's element, and any other resource's whole spelling: `out image2d[.rgba8_unorm]`.
     cc::string type;
-    /// A resource the shader may write: `mut buffer[T]`, or an `out` or `mut` image.
-    bool is_mut = false;
     /// A constant's byte offset in its block; -1 for a resource.
     i32 offset = -1;
     /// A constant's size in bytes; 0 for a resource.
@@ -68,8 +66,9 @@ struct sgl::described_binding_member
     cc::string texture_dimension;
     /// A texture's `sg::texture_sample_type`: `filterable_float`, `depth`, ….
     cc::string sample_type;
-    /// An image's `sg::pixel_format` and `sg::access_mode`: `rgba8_unorm`, `write`.
+    /// An image's `sg::pixel_format`: `rgba8_unorm`.
     cc::string image_format;
+    /// Every resource's `sg::access_mode`: `read`, `write` or `read_write`.
     cc::string access;
     /// A sampler's `sg::sampler_binding_type`: `filtering`, `non_filtering` or `comparison`.
     cc::string sampler_type;

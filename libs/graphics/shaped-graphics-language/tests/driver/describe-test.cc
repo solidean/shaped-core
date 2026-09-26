@@ -78,10 +78,10 @@ TEST("sgl describe - a buffer group numbers its buffers and names each by its pa
     REQUIRE(work.members.size() == 2);
     CHECK(work.members[0].kind == sgl::described_member_kind::buffer);
     CHECK(work.members[0].type == "float");
-    CHECK(!work.members[0].is_mut);
+    CHECK(work.members[0].access == "read");
     CHECK(work.members[0].slot == 0);
     CHECK(work.members[0].host_name == "work.src");
-    CHECK(work.members[1].is_mut);
+    CHECK(work.members[1].access == "read_write");
     CHECK(work.members[1].slot == 1);
     CHECK(work.members[1].host_name == "work.dst");
 
