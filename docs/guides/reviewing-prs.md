@@ -98,6 +98,11 @@ Not preferences that decide a case — options the maintainer wants **beside the
   The counter-proposal was "the driver may hold tags, or the child may, never both": deadlock-free by the same argument top-level exclusion is, and relaxable later.
   **It loses on a high-level wrapper's public surface**, where the maintainer wants the complete shape on day one: "if we don't have api for this day 1 we might have friction adding it in the future".
   Inside that surface, where a relaxation reaches no caller, the strict rule was still the one chosen — ratios as named presets, a free ratio left to add later.
+  **It also loses where it breaks the one model a design is built on.**
+  A design for SGL's calls recommended that a free call `foo(a)` not search the type scope of `a`, on C++'s ADL record.
+  The answer was yes: free and dot calls are then stylistic choices, so a generic function never favours one spelling to stay general.
+  In the maintainer's words, "the language will be in beta for some time … we don't need to design as defensive as the C++ standard right now".
+  Price the strict option against the model's consistency, and not only against what it would cost to relax later.
 - **Deleting a legacy spelling, beside accommodating it.**
   When a new design has to grow a rule only to keep an old spelling working, ask whether the spelling is needed at all; removing it deletes the question along with the rule.
 

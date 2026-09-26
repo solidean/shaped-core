@@ -129,6 +129,43 @@ Without implicit conversions a match is exact, so two matching candidates have t
 That could be reported where the second one is declared.
 It is reported at the call because a declaration's parameter types are only known once it is compiled, which a call demands and a declaration does not.
 Once conversions exist, ambiguity at the call is the rule that is needed anyway.
+With conversions, a best candidate is needed as well: CHK-254 ranks by chain length, and two candidates that each win somewhere have no best.
+
+## CHK-243
+
+A default is a small prologue of its function: it runs where the call stands, once per call that leaves its parameter unfilled.
+But it is written in the function, and it reads what the function's scope reads.
+Resolving it where the call stands would make `shade(n)` mean something different in every file that calls it, and none of that would show in the signature.
+Checking it once at the declaration is what lets a call bind without checking an expression per candidate.
+
+## CHK-247
+
+Dot and free calls collect the same candidates so that the spelling is a choice of style and nothing else.
+A generic function then never has to prefer `a.foo()` to stay general, and no API is reachable only one way.
+Searching the first argument's type scope is argument-dependent lookup restricted to one argument, which is what keeps the set small enough to predict.
+
+## CHK-251
+
+Naming an argument for the reader's sake should cost nothing, so `make_light(color = c, 2.0)` binds.
+A positional argument whose parameter depends on the names written before it is what the rule excludes: `make_light(intensity = 2.0, c)` would bind `c` to whichever parameter was still empty.
+The strictest rule, positionals before any name, would reject the first call, and relaxing it to this one later would change nothing already written.
+
+## CHK-254
+
+A single number per candidate, the sum of its chains, would let a candidate win by being much better at one argument and worse at another, a trade the reader never asked for.
+Dominance resolves a call only where one candidate is at least as good everywhere, and every call it resolves a sum resolves the same way, so relaxing it later breaks nothing.
+
+## CHK-256
+
+The spelling says what the writer means: a property is read, a function is called.
+It takes no part in resolution, so the error always names the fix rather than reporting that nothing was found.
+A free call may reach a property so that generic code can write `length v` for anything that has a length, whether it is a property or a function.
+
+## CHK-81
+
+A literal converting by a call of the type's name gets defaults, named arguments, named-only parameters and the evaluation order from the call rules.
+There is no second set of rules for making a struct from values.
+Every function of the name takes part, so a program that adds `fun ray(.from: pos3, .to: pos3)` can write `{from = p, to = q}` where a `ray` is expected.
 
 ## CHK-106
 

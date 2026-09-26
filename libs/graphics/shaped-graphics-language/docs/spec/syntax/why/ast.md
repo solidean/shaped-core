@@ -106,6 +106,12 @@ Every signature scans the same way: a name, then `(`.
 A function without parameters that could drop the `()` would look like a property, and inside a struct the two must be told apart by shape alone.
 It also keeps `[…]`, `(…)` and `{…}` in one fixed order with the middle one always present, so the eye finds the bindings of a function without reading the brackets before them.
 
+## AST-143
+
+AST-67 reserves a signature without `()` for exactly one reading, a property, and an extension is where that reading is wanted outside a type.
+Inside a type a property needs no keyword, since its shape alone tells it from a method there.
+At file level `fun` is what makes a line a declaration, so an extension property keeps it, and the missing `()` is what says property.
+
 ## AST-74
 
 Bindings match structurally, so a binding group is, to a library, only a set of members.

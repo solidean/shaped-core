@@ -38,7 +38,7 @@ A listing here is the dump of a flat tree, shortened: a label is `$name`, and a 
 * **EVAL-16** Evaluation is as if every expression were sequenced into single steps: no two operands overlap, and nothing is evaluated twice or skipped, except by EVAL-18.
 * **EVAL-17** `not x` evaluates `x`, and a member access evaluates its object.
 * **EVAL-18** `a and b` evaluates `b` only when `a` is true, and `a or b` evaluates `b` only when `a` is false.
-* **EVAL-19** A construction evaluates one argument per field, in field order.
+* **EVAL-19** A construction evaluates one argument per field, in field order; a literal converted to a struct is a call by CHK-81, so its elements are evaluated as EVAL-80 says.
 * **EVAL-20** A read of a local gives the value it holds at that step, so a read to the left of a write sees the old value.
 
 ```raw
@@ -116,12 +116,17 @@ This prints 11: the left operand is read while `x` is 1, and the block to its ri
 * **EVAL-46** The arguments are evaluated left to right, each exactly once, before any statement of the body.
 * **EVAL-47** A parameter is a value: the callee cannot change it, and the caller's later writes do not reach it.
 * **EVAL-48** An argument that is a literal or an immutable local stands wherever its parameter is read.
-  Every other argument is bound by a `let` named after its parameter, at the top of the block, in the order of the arguments.
+  Every other argument is bound by a `let` named after its parameter, at the top of the block, in the order EVAL-80 evaluates them.
 * **EVAL-49** `return value` of the callee is `leave $callee value`, and its bare `return` is `leave $callee`.
 * **EVAL-50** The entry point's own `return value` is `leave $root value`, which a tree of the check pass spells `return`.
 * **EVAL-51** Inlining moves nothing: the block stands where the call stood, so EVAL-15 alone says when its statements run ([why](why/evaluation.md#eval-51)).
 * **EVAL-52** Every local of an inlined body is a local of its own by EVAL-8, so two calls of one function share none.
 * **EVAL-53** A callee that returns a value leaves its block with one on every path ([CHK-125](checking.md#returning)), so a call never meets EVAL-28.
+* **EVAL-80** A call evaluates its written arguments left to right, in the order they are written ([why](why/evaluation.md#eval-80)).
+  Then it evaluates the default of each parameter left unfilled, in parameter order.
+  Its parameters are bound from those values, so it is as if every argument were a `let` in that order and the call read locals alone.
+* **EVAL-81** A default is evaluated where its call stands, once per call that leaves its parameter unfilled, and it reads the values bound to the parameters before it.
+* **EVAL-82** A call of a builtin evaluates its arguments by EVAL-80 as a call of the program does, and nothing about a target's own order of arguments reaches the program.
 
 ```sgl
 fun grade(x: float, limit: float) -> float:

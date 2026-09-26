@@ -39,8 +39,7 @@ A resource is not a runtime value on any target, so a function taking one is ins
 
 ## What it touches
 
-* Methods and UFCS: a call `x.f(a)` resolving to a free `f(x, a)` ([members-and-properties.md](members-and-properties.md)).
-* Default and named arguments, and keyword-only parameters.
+* Nothing of the call model: methods through UFCS, defaults, named and named-only parameters are [CHK-247](../semantics/checking.md#calls-and-overloads) and its neighbours.
 * Generics over a texture's component type, `texture_2d[T] -> T`.
 * The builtin registry: records whose parameters are resources, and a default reading another parameter.
 * Bindings: `@sampler(name)` on a texture member, naming a static sampler at file scope or in the same binding ([bindings.md](../bindings.md#samplers)).

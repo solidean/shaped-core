@@ -272,7 +272,8 @@ An example of an AST kind is an `sgl sketch`, since examples are checked through
 | `misplaced-module` | a second `module`, or one that is not the first declaration of its file |
 | `member-not-allowed-here` | a member its owner does not allow: a method in a `binding`, a field in an `enum`, a case in a `struct` |
 | `default-not-allowed-here` | a default on a field whose owner allows none: a member of a `binding` |
-| `missing-parameter-list` | a signature without `()` |
+| `named-only-not-allowed-here` | a leading-dot name on a binding member, a member of a `struct_type` or `self` ([AST-144](ast.md#functions)) |
+| `missing-parameter-list` | a signature without `()`, other than an extension property |
 | `signature-out-of-order` | the lists of a signature in another order than `[…]`, `(…)`, `{…}` |
 | `duplicate-signature-list` | a list of a signature that stands twice |
 | `stray-else` | an `else` or an `else if` that pairs with no `if` |

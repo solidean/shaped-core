@@ -22,6 +22,17 @@ let d = (..lit, 1)     // does the 1 stay a literal inside the tuple?
 **This needs to propagate through structural types**, which is where the semantics become muddy.
 A tuple that holds a literal has a type that holds a literal type, and what that means when the tuple is stored, passed or compared is not worked out.
 
+**Where the call model already stands.**
+A number literal converts, at no cost, to any numeric type that holds it, and the candidate keeping it at its default type wins a tie ([CHK-253](../semantics/checking.md#calls-and-overloads)).
+Literal types would refine that rather than replace it.
+
+**Folding what is literal alone.**
+A subtree of number literals and operators, with no call of a function, is folded in the front end into a new literal, and the language guarantees it.
+Anything touching a float literal becomes a float literal.
+`1 / 3` is then an error rather than a silent `0`: it is written `1.0 / 3`, `1 / 3.0` or `(1 as int) / 3`.
+Afterwards "what is the type of `1 + 2`" stops being a question, since no builtin operator ever sees a call of literals alone.
+The folding runs in 64-bit arithmetic today, and extended precision is the intended refinement.
+
 ## What it touches
 
 * The type system: literal types for integers and floats, and the types built from them.
@@ -40,6 +51,5 @@ A tuple that holds a literal has a type that holds a literal type, and what that
 
 * Whether a literal type survives inside a tuple or an object that is bound to a name.
 * What a generic function sees when it is called with a literal.
-* Whether an integer literal coerces to a float type, or only to the integer types.
 * Whether a literal that does not fit the type asked of it is an error at the literal or at the use.
 * The tracer avoids all of it: its shaders write `1.0` where a float is meant.
