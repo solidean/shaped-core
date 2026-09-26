@@ -245,7 +245,7 @@ struct machine
         }
         if (auto const* const l = x.node.try_as<flat_int_literal>())
         {
-            result.leaves.push_back(scalar::of(l->value));
+            result.leaves.push_back(l->is_unsigned ? scalar::of_uint(u32(l->value)) : scalar::of(l->value));
             return {};
         }
         if (auto const* const l = x.node.try_as<flat_bool_literal>())

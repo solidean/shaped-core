@@ -129,6 +129,64 @@ Without implicit conversions a match is exact, so two matching candidates have t
 That could be reported where the second one is declared.
 It is reported at the call because a declaration's parameter types are only known once it is compiled, which a call demands and a declaration does not.
 Once conversions exist, ambiguity at the call is the rule that is needed anyway.
+With conversions, a best candidate is needed as well: CHK-254 ranks by chain length, and two candidates that each win somewhere have no best.
+
+## CHK-243
+
+A default is a small prologue of its function: it runs where the call stands, once per call that leaves its parameter unfilled.
+But it is written in the function, and it reads what the function's scope reads.
+Resolving it where the call stands would make `shade(n)` mean something different in every file that calls it, and none of that would show in the signature.
+Checking it once at the declaration is what lets a call bind without checking an expression per candidate.
+
+## CHK-247
+
+Dot and free calls collect the same candidates so that the spelling is a choice of style and nothing else.
+A generic function then never has to prefer `a.foo()` to stay general, and no API is reachable only one way.
+Searching the first argument's type scope is argument-dependent lookup restricted to one argument, which is what keeps the set small enough to predict.
+
+## CHK-251
+
+Naming an argument for the reader's sake should cost nothing, so `make_light(color = c, 2.0)` binds.
+A positional argument whose parameter depends on the names written before it is what the rule excludes: `make_light(intensity = 2.0, c)` would bind `c` to whichever parameter was still empty.
+The strictest rule, positionals before any name, would reject the first call, and relaxing it to this one later would change nothing already written.
+
+## CHK-254
+
+A single number per candidate, the sum of its chains, would let a candidate win by being much better at one argument and worse at another, a trade the reader never asked for.
+Dominance resolves a call only where one candidate is at least as good everywhere, and every call it resolves a sum resolves the same way, so relaxing it later breaks nothing.
+
+## CHK-256
+
+The spelling says what the writer means: a property is read, a function is called.
+It takes no part in resolution, so the error always names the fix rather than reporting that nothing was found.
+A free call may reach a property so that generic code can write `length v` for anything that has a length, whether it is a property or a function.
+
+## CHK-62
+
+A bare name inside a method was first read through `self` too, and that put a field of the receiver between a local and every name of the module.
+Every lookup that starts from a name then had to know about the receiver, and two of them did not: `frame.x` in a method found a binding `frame` before a field of that name.
+Writing `self.frame.x` makes the receiver a name like any other, and a body reads the same wherever it is moved.
+A field's default is the exception that is none: it reads the constructor's parameters, and no receiver exists while they are bound.
+
+## CHK-253
+
+A literal leaving its default type is one step of its chain, so dominance alone ranks calls of literals.
+Free conversion with a count of the literals kept at their type broke ties by summing over the arguments, which CHK-254 rejects for chains.
+`f(1, 2, 3)` would then pick the candidate that keeps two literals over one that keeps the third.
+With the step, `f(1)` still picks `f(x: int)` over `f(x: float)`, and a call each candidate wins somewhere is ambiguous.
+
+## CHK-257
+
+An operator over literals alone meets whatever operators the prelude declares, and a prelude that adds one of the literals' own type would change the answer.
+`7 / 2` is `3.5` through the float `/`, and `3` through an int one.
+The call names no type, so no answer is the reader's, and the error asks for one.
+Folding literals in the front end would settle it for good, as the [literal-types](../../incubator/literal-types.md) incubator sketches, and nothing written under this rule changes meaning then.
+
+## CHK-81
+
+A literal converting by a call of the type's name gets defaults, named arguments, named-only parameters and the evaluation order from the call rules.
+There is no second set of rules for making a struct from values.
+Every function of the name takes part, so a program that adds `fun ray(.from: pos3, .to: pos3)` can write `{from = p, to = q}` where a `ray` is expected.
 
 ## CHK-106
 

@@ -65,10 +65,17 @@ A diagnostic, an origin and a side table all name a file that way, and `compile_
 It carries what its samples need, and every other construct is the one diagnostic `unsupported-yet`, never a guess.
 [semantics/checking.md](spec/semantics/checking.md) says what is carried.
 
-**A call is defined by substitution, and every call is inlined.**
-A block named after the callee stands where the call stood, its arguments bound at the top, each `return` a `leave`.
-The inliner never hoists and never reorders, since evaluation order is the legalizer's job alone.
-Each body is checked once on its own.
+**Every call resolves through one routine, and records what it chose.**
+Free calls, dot calls, operators, constructors and literal conversions all go through `checker::resolve_overload`.
+It collects candidates by name and by the first argument's type scope, binds the arguments, measures a conversion chain per argument, and ranks.
+The winner is kept as a `call_record`: the arguments in the order written, and which one fills each parameter.
+The flattener reads that record and never the argument list, so named arguments, defaults and receivers need no second path.
+
+**A call is defined by substitution, and every call of the program is inlined.**
+A block named after the callee stands where the call stood, its arguments bound at the top in the order written, then its defaults, each `return` a `leave`.
+A builtin call whose parameters take the arguments in another order, or two of whose arguments have an effect, binds them to lets first.
+Beyond that the flattener never hoists and never reorders, since evaluation order is the legalizer's job.
+Each body is checked once on its own, and each default once where it is declared.
 
 **Compiling a function means its signature, with one exception.**
 A body is checked after every signature is known, which is what lets a function call one declared below it.
@@ -174,6 +181,6 @@ Every "why" is mirrored in a `why/` folder beside its rules, and ideas that are 
 
 ## What does not exist yet
 
-Generics, methods and lambdas.
+Generics, lambdas and `mut self`.
 GLSL, a Metal toolchain, and in MSL a compute entry point and a group.
 Modules, interfaces and the parallel driver of [the compilation model](spec/incubator/compilation-model.md).

@@ -1,0 +1,109 @@
+// a literal converts where a type is expected: a number to a numeric type that holds it, a tuple or an object by a call
+
+fun half(x: float) -> float => x * 0.5
+
+// an integer literal converts to a float that holds it exactly, at no cost
+test half(3) == 1.5
+test float3(0, 1, 0).y == 1.0
+
+test:
+    let x: float = 2
+    x == 2.0
+
+test:
+    let u: uint = 3
+    u == 3
+
+@expect(error = "literal-not-representable") test:
+    let x: float = 16777217
+    true
+
+// a float literal converts to no integer type, whole or not
+@expect(error = "literal-not-representable") test:
+    let i: int = 2.0
+    true
+
+// a tuple or an object literal is a call of the name of the struct expected where it stands
+struct span2:
+    lo: float
+    hi: float = lo + 1.0
+
+fun width(s: span2) -> float => s.hi - s.lo
+
+test width((0.0, 2.0)) == 2.0
+test width({lo = 1.0}) == 1.0
+test width((1.0, hi = 4.0)) == 3.0
+test width((0, 2)) == 2.0
+
+test:
+    let s: span2 = {hi = 3.0, lo = 1.0}
+    s.hi == 3.0
+
+test:
+    let mut s = span2(0.0)
+    s = (5.0, 6.0)
+    s.lo == 5.0
+
+// a literal inside a literal converts to the parameter it fills
+struct segment:
+    a: span2
+    b: span2
+
+test segment((0.0, 1.0), {lo = 2.0}).b.hi == 3.0
+
+test:
+    let s: segment = {a = (0.0, 1.0), b = (2.0, 4.0)}
+    width(s.b) == 2.0
+
+// every function of the struct's name takes part, the synthesized constructor among them
+fun span2(.center: float, .radius: float) -> span2 => span2(center - radius, center + radius)
+
+test width({center = 1.0, radius = 0.5}) == 1.0
+test span2(center = 1.0, radius = 0.25).hi == 1.25
+
+// a function of the struct's name that returns something else is called by name, and converts nothing
+struct handle:
+    id: int
+
+fun handle(.name: float) -> int => 7
+
+test handle(name = 1.0) == 7
+
+@expect(error = "literal-conversion-result") test:
+    let h: handle = {name = 1.0}
+    true
+
+// only a literal written where the type is expected converts
+@expect(error = "unsupported-yet") test:
+    let t = (1.0, 2.0)
+    true
+
+// an operator over integer literals alone meets no operator of another type: there is no int `/` yet
+@expect(error = "literal-needs-type") test 7 / 2 == 3
+
+test 7.0 / 2 == 3.5
+test 7 / 2.0 == 3.5
+
+// a float literal rounds to nearest, so the shortest spelling of FLT_MAX is one `float` holds, in a call as in a let
+test half(3.4028235e38) > 0.0
+
+test:
+    let x = 3.4028235e38
+    x > 0.0
+
+@expect(error = "literal-not-representable") test:
+    let x = 1e39
+    x > 0.0
+
+// an integer literal is held in 64 bits, and refused only where it keeps a type that does not hold it
+test:
+    let u: uint = 3000000000
+    u == 3000000000
+
+@expect(error = "literal-not-representable") test:
+    let i = 3000000000
+    true
+
+@expect(error = "unsupported-yet") test:
+    let u: uint = 99999999999999999999
+    true

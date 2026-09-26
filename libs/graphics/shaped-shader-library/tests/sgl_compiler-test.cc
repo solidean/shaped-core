@@ -343,9 +343,9 @@ constexpr auto k_two_groups_source
                       "@compute(8, 8) fun blur(@thread_id id: int3){frame, post}:\n"
                       "    let xy = int2(id.x, id.y)\n"
                       "    let uv = ((xy as float2) + float2(0.5, 0.5)) * post.texel_size * frame.values[0]\n"
-                      "    let c = DEBUG_sample_level(post.src, uv, 0.0, post.bilinear)\n"
-                      "    DEBUG_store(post.dst, xy, c)\n"
-                      "    DEBUG_store(post.acc, xy, DEBUG_load(post.acc, xy) + c.x)\n");
+                      "    let c = post.src.sample(uv, post.bilinear, level = 0.0)\n"
+                      "    post.dst.store(xy, c)\n"
+                      "    post.acc.store(xy, post.acc.load(xy) + c.x)\n");
 } // namespace
 
 ASYNC_TEST("slib sgl compiler - every compiler behind an edge reflects the group and slot SGL wrote",

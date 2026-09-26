@@ -1,0 +1,46 @@
+// how a call's arguments fill its parameters: by position, by name, and in its own slot after a name
+
+fun sub(a: int, b: int) -> int => a - b
+
+test sub(5, 3) == 2
+test sub(b = 3, a = 5) == 2
+test sub(5, b = 3) == 2
+
+// a positional argument after a named one binds where every argument before it is in its own slot
+test sub(a = 5, 3) == 2
+
+@expect(error = "no-matching-overload") test sub(b = 3, 5) == 2
+
+// a named argument may be spelled with a leading dot
+test sub(.b = 3, .a = 5) == 2
+
+// a parameter is filled once, by a name it has, and each one without a default is filled
+@expect(error = "no-matching-overload") test sub(5, a = 3) == 2
+@expect(error = "no-matching-overload") test sub(5, c = 3) == 2
+@expect(error = "no-matching-overload") test sub(5) == 5
+@expect(error = "no-matching-overload") test sub(1, 2, 3) == 0
+
+// a named-only parameter binds by name alone
+fun scaled(x: float, .by: float) -> float => x * by
+
+test scaled(2.0, by = 3.0) == 6.0
+test scaled(by = 3.0, x = 2.0) == 6.0
+
+@expect(error = "no-matching-overload") test scaled(2.0, 3.0) == 6.0
+
+// names tell overloads apart where the arity alone does not
+fun area(width: float, height: float) -> float => width * height
+fun area(side: float, .times: float) -> float => side * side * times
+
+test area(width = 2.0, height = 3.0) == 6.0
+test area(2.0, times = 3.0) == 12.0
+
+// a constructor binds like any other call
+struct span2:
+    lo: float
+    hi: float
+
+test span2(hi = 2.0, lo = 1.0).hi == 2.0
+test span2(1.0, hi = 2.0).lo == 1.0
+
+@expect(error = "no-matching-overload") test span2(1.0, lo = 2.0).lo == 1.0

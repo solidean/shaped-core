@@ -78,7 +78,7 @@ fun foo(v: vec3){frame}:
     return A.sample_sky v // ok! structurally matching binding with name "sky" is available
 ```
 
-The member of the local `binding sky` is a property ([members-and-properties.md](members-and-properties.md)) that forwards to a resource of `frame`.
+The member of the local `binding sky` is a property ([CHK-236](../semantics/checking.md#members-and-constructors)) that forwards to a resource of `frame`.
 `foo` itself declares only `frame`, so the library's `sky` never dictates a binding group of its own to the caller.
 A binding satisfies a requirement when it has the required name and matches structurally.
 

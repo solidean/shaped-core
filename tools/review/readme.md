@@ -170,6 +170,9 @@ The maintainer answers whenever, says so, and the agent runs `delta <name> --fin
   A collapsed block costs the page one line: its cards and their diffs are fetched when it is opened, so an lgtm entry discharging a hundred changes loads as fast as one discharging two.
 - **`finalize` drops nothing by group.** Every answered entry appears, tagged with its group, because the artifact is
   input to a synthesis step rather than something to paste unread.
+- **`finalize` tags an answer a later follow-up replaced.**
+  Every answer is still gathered, and one an answered `follows:` ask refined or reversed names that follow-up.
+  Printed unmarked, the overridden answer read as a second rule, and it came first.
 - **Only one server per review.** `serve` refuses a taken port rather than sharing it, and says so when another review
   in this repo is already up.
 - **`restart` returns, and `serve` does not.**

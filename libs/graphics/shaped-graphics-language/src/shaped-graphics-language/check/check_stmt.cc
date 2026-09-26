@@ -168,19 +168,17 @@ void checker::check_let(function_scope& scope, ast::stmt_id id, ast::let_stmt co
     auto const where = span_of(file, id);
 
     auto type = error_type;
-    if (ast::is_valid(let.value))
-        type = check_expr(scope, let.value);
-    else
+    if (!ast::is_valid(let.value))
         unsupported(file, where, "a let without a value");
-
+    // CHK-82: a written type is expected of the value, which a literal converts to
     if (ast::is_valid(let.type))
     {
-        auto const declared = resolve_value_type(file, let.type, &scope);
-        if (type != error_type && declared != error_type && type != declared)
-            report(diagnostic_kind::type_mismatch, file, span_of(file, let.value),
-                   cc::format("expected {}, got {}", out.name_of(declared), out.name_of(type)));
-        type = declared;
+        type = resolve_value_type(file, let.type, &scope);
+        if (ast::is_valid(let.value))
+            (void)check_expected(scope, let.value, type);
     }
+    else if (ast::is_valid(let.value))
+        type = check_expr(scope, let.value);
 
     if (!ast::is_valid(let.pattern))
         return;
@@ -207,7 +205,10 @@ void checker::check_assign(function_scope& scope, ast::stmt_id id, ast::assign_s
     auto const where = span_of(file, id);
 
     auto const place = check_expr(scope, assign.target);
-    auto const value = check_expr(scope, assign.value);
+    auto const is_plain = sgl::is_valid(assign.op) && text_of(file, file_of(file).at(assign.op).where) == "=";
+    // CHK-82: a plain assignment expects the place's type of its value, which a literal converts to
+    auto const value = is_plain && place != error_type ? check_expected(scope, assign.value, place)
+                                                       : check_expr(scope, assign.value);
 
     // A buffer element is a place of its own: `work.dst[i] = v`, and only where the buffer is `mut`.
     auto const* const indexed = ast::is_valid(assign.target) ? ast.at(assign.target).node.try_as<ast::index>() : nullptr;
@@ -220,11 +221,20 @@ void checker::check_assign(function_scope& scope, ast::stmt_id id, ast::assign_s
                    "this buffer is read-only; `mut buffer[T]` declares one a shader writes");
     }
 
-    // The place is otherwise a mutable local, or a member of one at any depth.
+    // The place is otherwise a mutable local, or a field of one at any depth; a property is read-only (CHK-236).
     auto root = assign.target;
+    auto property = ast::expr_id::none;
     while (ast::is_valid(root) && ast.at(root).node.is<ast::member>())
+    {
+        if (out.files[file].target_at(root).kind == target_kind::overload && !ast::is_valid(property))
+            property = root;
         root = ast.at(root).node.as<ast::member>().object;
-    if (indexed == nullptr && place != error_type && ast::is_valid(root))
+    }
+    if (indexed == nullptr && place != error_type && ast::is_valid(property))
+        report(diagnostic_kind::not_assignable, file, span_of(file, assign.target),
+               cc::format("{} is a property, which is read-only",
+                          text_of(file, ast.at(property).node.as<ast::member>().name)));
+    else if (indexed == nullptr && place != error_type && ast::is_valid(root))
     {
         auto const* const n = ast.at(root).node.try_as<ast::name>();
         auto const& named = out.files[file].target_at(root);
@@ -251,17 +261,13 @@ void checker::check_assign(function_scope& scope, ast::stmt_id id, ast::assign_s
 
     auto const op = text_of(file, file_of(file).at(assign.op).where);
     if (op == "=")
-    {
-        if (place != value)
-            report(diagnostic_kind::type_mismatch, file, span_of(file, assign.value),
-                   cc::format("expected {}, got {}", out.name_of(place), out.name_of(value)));
         return;
-    }
 
     // `x += v` is `x = x + v`: the operator resolves like any other, and its result has to fit the place again.
     auto const spelling = op.subview({.offset = 0, .size = op.size() - 1});
     type_id const types[] = {place, value};
-    auto const chosen = resolve_operator(file, where, spelling, types);
+    ast::expr_id const operands[] = {assign.target, assign.value};
+    auto const chosen = resolve_operator(file, where, spelling, types, operands);
     if (!is_valid(chosen))
         return;
     auto const result = out.functions[out.at(chosen).info].result;
@@ -433,16 +439,8 @@ void checker::check_return(function_scope& scope, source_span where, ast::expr_i
                    cc::format("{} returns void, got {}", name, out.name_of(type)));
         return;
     }
-    if (ast_of(file).at(value).node.is<ast::object>())
-    {
-        convert_object(scope, value, scope.result);
-        return;
-    }
-
-    auto const type = check_expr(scope, value);
-    if (type != error_type && scope.result != error_type && type != scope.result)
-        report(diagnostic_kind::type_mismatch, file, span_of(file, value),
-               cc::format("expected {}, got {}", out.name_of(scope.result), out.name_of(type)));
+    // CHK-82: the result type is expected of the value, which a literal converts to
+    (void)check_expected(scope, value, scope.result);
 }
 
 // ---- recursion ------------------------------------------------------------------------------------------------------
@@ -503,8 +501,8 @@ bool checker::inlines_whole(symbol_id function)
     if (notes[info].inlines_whole != 0)
         return notes[info].inlines_whole == 1;
 
-    auto result
-        = out.at(function).state == symbol_state::checked && notes[info].is_body_sound && !notes[info].is_recursive;
+    auto result = out.at(function).state == symbol_state::checked && notes[info].is_body_sound
+               && notes[info].are_defaults_sound && !notes[info].is_recursive;
     // Set before the callees are asked: a loop of calls is recursive, so nothing on it gets here twice.
     notes[info].inlines_whole = result ? 1 : 2;
     for (auto i = isize(0); result && i < calls.size(); ++i)

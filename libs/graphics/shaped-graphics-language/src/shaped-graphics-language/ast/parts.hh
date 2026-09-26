@@ -36,6 +36,8 @@ struct sgl::ast::argument
     bool is_splat = false;
     /// A bare name in an object, `{a}`, which means `a = a` and is not expanded.
     bool is_shorthand = false;
+    /// `.name = value`, the named argument spelled as a leading-dot form; `name` holds it without the dot.
+    bool is_dotted_name = false;
 
     constexpr bool operator==(argument const&) const = default;
 };
@@ -50,6 +52,8 @@ struct sgl::ast::field
     source_span name;
     /// `mut self`; nothing else may be `mut` today, and the builder records it wherever it was written.
     bool is_mut = false;
+    /// `.name: type`, which a call fills by name alone; `name` holds it without the dot (AST-144).
+    bool is_named_only = false;
     /// A type position; `none` when no type was written, as for `self` and most lambda parameters.
     expr_id type = expr_id::none;
     expr_id default_value = expr_id::none;

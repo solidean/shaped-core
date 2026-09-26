@@ -180,6 +180,9 @@ expr_id builder::curly_list_expression(form_id form)
     if (total > 0 && typed == total)
     {
         auto const fields = fields_of(form, diagnostic_kind::expected_member);
+        for (auto const& f : ast.at(fields))
+            if (f.is_named_only)
+                report(diagnostic_kind::named_only_not_allowed_here, f.form);
         return make_expr(form, struct_type{.fields = fields});
     }
     if (typed > 0)

@@ -353,6 +353,7 @@ INVOCABLE_TEST("sgl spec - an example that holds a test checks clean and passes 
     auto const tested = sgl::test_source(f.source, cc::format("{}:{}", f.file, f.line));
     CHECK(tested.errors == "");
     CHECK(tested.warnings == "");
+    CHECK(tested.tests_run + tested.tests_expecting_diagnostics == tested.test_count);
 }
 
 TEST("sgl spec - the tests of every example run")

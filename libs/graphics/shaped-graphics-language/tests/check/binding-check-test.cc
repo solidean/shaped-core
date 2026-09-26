@@ -158,7 +158,7 @@ TEST("sgl check - a repeated sampler setting overrides the one before it")
 
 TEST("sgl check - an @unfilterable texture is sampled only through a sampler that never filters")
 {
-    constexpr auto sample = "    let c = DEBUG_sample_level(work.t, float2(0.5, 0.5), 0.0, work.s)\n";
+    constexpr auto sample = "    let c = work.t.sample(float2(0.5, 0.5), work.s, level = 0.0)\n";
     auto const reports = [&](cc::string_view sampler)
     { return reports_for(listing(cc::format("    @unfilterable t: texture_2d[float4]\n{}", sampler), sample)); };
 
@@ -181,17 +181,17 @@ TEST("sgl check - a texture, an image or a sampler is handed to a builtin and is
                              "    ro: image_2d[.rgba8_unorm]\n"
                              "    dst: out image_2d[.rgba8_unorm]\n"
                              "    smp: sampler\n";
-    CHECK(reports_for(listing(members, "    let c = DEBUG_sample_level(work.src, float2(0.5, 0.5), 0.0, work.smp)\n"
-                                       "    DEBUG_store(work.dst, int2(0, 0), c + DEBUG_load(work.ro, int2(0, 0)))\n"))
+    CHECK(reports_for(listing(members, "    let c = work.src.sample(float2(0.5, 0.5), work.smp, level = 0.0)\n"
+                                       "    work.dst.store(int2(0, 0), c + work.ro.load(int2(0, 0)))\n"))
           == "");
 
     CHECK(reports_for(listing(members, "    let t = work.src\n")).contains("texture_2d[float4] as a value"));
     // CHK-207: a read-only image cannot be stored to, and a write-only one cannot be loaded.
-    CHECK(reports_for(listing(members, "    DEBUG_store(work.ro, int2(0, 0), float4(1.0, 1.0, 1.0, 1.0))\n"))
+    CHECK(reports_for(listing(members, "    work.ro.store(int2(0, 0), float4(1.0, 1.0, 1.0, 1.0))\n"))
               .contains("no-matching-overload"));
-    CHECK(reports_for(listing(members, "    let v = DEBUG_load(work.dst, int2(0, 0))\n")).contains("no-matching-overload"));
+    CHECK(reports_for(listing(members, "    let v = work.dst.load(int2(0, 0))\n")).contains("no-matching-overload"));
     // A texel of four floats is what an rgba8 image holds, and nothing narrower.
-    CHECK(reports_for(listing(members, "    DEBUG_store(work.dst, int2(0, 0), 1.0)\n")).contains("no-matching-overload"));
+    CHECK(reports_for(listing(members, "    work.dst.store(int2(0, 0), 1.0)\n")).contains("no-matching-overload"));
 }
 
 TEST("sgl check - a buffer element is read by subscript and written where the buffer is mut")

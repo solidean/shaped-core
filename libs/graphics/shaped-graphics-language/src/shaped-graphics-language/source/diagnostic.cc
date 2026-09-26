@@ -88,6 +88,8 @@ cc::string_view sgl::to_string(diagnostic_kind kind)
         return "member-not-allowed-here";
     case diagnostic_kind::default_not_allowed_here:
         return "default-not-allowed-here";
+    case diagnostic_kind::named_only_not_allowed_here:
+        return "named-only-not-allowed-here";
     case diagnostic_kind::missing_parameter_list:
         return "missing-parameter-list";
     case diagnostic_kind::signature_out_of_order:
@@ -198,6 +200,16 @@ cc::string_view sgl::to_string(diagnostic_kind kind)
         return "test-failed";
     case diagnostic_kind::unmet_expectation:
         return "unmet-expectation";
+    case diagnostic_kind::member_name_clash:
+        return "member-name-clash";
+    case diagnostic_kind::call_spelling:
+        return "call-spelling";
+    case diagnostic_kind::literal_not_representable:
+        return "literal-not-representable";
+    case diagnostic_kind::literal_conversion_result:
+        return "literal-conversion-result";
+    case diagnostic_kind::literal_needs_type:
+        return "literal-needs-type";
     }
     CC_UNREACHABLE("unknown diagnostic_kind");
 }
@@ -246,6 +258,7 @@ sgl::severity sgl::default_severity_of(diagnostic_kind kind)
     case diagnostic_kind::misplaced_module:
     case diagnostic_kind::member_not_allowed_here:
     case diagnostic_kind::default_not_allowed_here:
+    case diagnostic_kind::named_only_not_allowed_here:
     case diagnostic_kind::missing_parameter_list:
     case diagnostic_kind::signature_out_of_order:
     case diagnostic_kind::duplicate_signature_list:
@@ -298,6 +311,11 @@ sgl::severity sgl::default_severity_of(diagnostic_kind kind)
     case diagnostic_kind::test_must_end_in_check:
     case diagnostic_kind::test_failed:
     case diagnostic_kind::unmet_expectation:
+    case diagnostic_kind::member_name_clash:
+    case diagnostic_kind::call_spelling:
+    case diagnostic_kind::literal_not_representable:
+    case diagnostic_kind::literal_conversion_result:
+    case diagnostic_kind::literal_needs_type:
         return severity::normal_error;
     case diagnostic_kind::spaced_attribute_arguments:
     case diagnostic_kind::no_effect:

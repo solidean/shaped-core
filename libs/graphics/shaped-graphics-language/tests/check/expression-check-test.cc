@@ -49,10 +49,15 @@ TEST("sgl check - overloads resolve by exact argument types")
     CHECK(body_reports("return dot(v)\n") == "no-matching-overload user:[dot(v)] dot(vec3)\n");
     CHECK(body_reports("return saturate()\n") == "no-matching-overload user:[saturate()] saturate()\n");
 
-    // A second declaration with the same parameter types in one scope is no error by itself; the call cannot choose.
+    // CHK-241: a second declaration with the same parameters in one scope is an error where it stands, and no call
+    // meets it
     CHECK(reports_for("fun g(v: vec3) -> float => v.x\nfun g(v: vec3) -> float => v.y\nfun f(v: vec3) -> float:\n"
                       "    return g(v)\n")
-          == "ambiguous-overload user:[g(v)] g(vec3) has 2 candidates\n");
+          == "duplicate-declaration user:[g] g has these parameters already\n");
+    // the names are part of it: these two differ, and a call by name tells them apart
+    CHECK(reports_for("fun g(v: vec3) -> float => v.x\nfun g(w: vec3) -> float => w.y\nfun f(v: vec3) -> float:\n"
+                      "    return g(w = v)\n")
+          == "");
 
     // CHK-192: across the two scopes the user file's wins, so a prelude that gains its signature later breaks nothing
     auto const shadowed = check_sources(read_prelude(), "fun dot(x: vec3, y: vec3) -> float => 7.0\n"
@@ -185,10 +190,19 @@ TEST("sgl check - a binding member is reachable only through the function's bind
 TEST("sgl check - a number literal with a dot or an exponent is a float, and nothing else is carried")
 {
     CHECK(body_reports("return 0.5 + -0.4 + 1e3 + 2.5e-3 + 1. + 1'000.0\n") == "");
-    CHECK(body_reports("return 1\n") == "type-mismatch user:[1] expected float, got int\n");
+    // CHK-253: an integer literal a float holds exactly converts to it, and a float literal converts to no integer
+    CHECK(body_reports("return 1\n") == "");
+    CHECK(body_reports("return 16777217\n")
+          == "literal-not-representable user:[16777217] float does not hold 16777217 exactly\n");
+    CHECK(body_reports("let i: int = 1.0\nreturn k\n")
+          == "literal-not-representable user:[1.0] int does not hold 1.0 exactly\n");
     CHECK(body_reports("let i = 1'000 + -3\nreturn k\n") == "");
+    // CHK-61: held in 64 bits, and refused where it keeps a type that does not hold it
     CHECK(body_reports("let i = 3'000'000'000\nreturn k\n")
-          == "unsupported-yet user:[3'000'000'000] an integer literal that does not fit an int\n");
+          == "literal-not-representable user:[3'000'000'000] int does not hold 3'000'000'000\n");
+    CHECK(body_reports("let u: uint = 3'000'000'000\nreturn k\n") == "");
+    CHECK(body_reports("let i = 99'999'999'999'999'999'999\nreturn k\n")
+          == "unsupported-yet user:[99'999'999'999'999'999'999] an integer literal beyond 64 bits\n");
     CHECK(body_reports("return 0.5f32\n")
           == "unsupported-yet user:[0.5f32] a number literal with a prefix, a suffix or a p exponent\n");
     CHECK(body_reports("return 0xff\n")
@@ -201,15 +215,22 @@ TEST("sgl check - a number literal with a dot or an exponent is a float, and not
           == "unknown-name user:[1.0] float, which the prelude must declare @builtin\n");
 }
 
-TEST("sgl check - a returned object converts structurally: every field once, types equal")
+TEST("sgl check - a literal where a struct is expected converts by a call of the struct's name")
 {
     auto const head = cc::string("struct pair:\n    a: float\n    b: vec3\nfun f(k: float, v: vec3) -> pair:\n");
     CHECK(reports_for(head + "    return { a = k, b = v }\n") == "");
     CHECK(reports_for(head + "    return { b = v, a = k }\n") == "");
-    CHECK(reports_for(head + "    return { a = k }\n") == "missing-field user:[{ a = k }] b\n");
-    CHECK(reports_for(head + "    return { a = k, b = v, c = k }\n") == "unknown-field user:[c] pair has no field c\n");
-    CHECK(reports_for(head + "    return { a = k, a = k, b = v }\n") == "duplicate-field user:[a] a\n");
-    CHECK(reports_for(head + "    return { a = v, b = v }\n") == "type-mismatch user:[v] a is float, got vec3\n");
+    CHECK(reports_for(head + "    return (k, v)\n") == "");
+    CHECK(reports_for(head + "    return (k, b = v)\n") == "");
+    // CHK-84: what does not bind is the call's failure, and the constructor says what it takes
+    CHECK(reports_for(head + "    return { a = k }\n")
+          == "no-matching-overload user:[{ a = k }] pair(a = float), and the constructor is pair(float, vec3)\n");
+    CHECK(reports_for(head + "    return { a = k, b = v, c = k }\n")
+          == "no-matching-overload user:[{ a = k, b = v, c = k }] pair(a = float, b = vec3, c = float), and the "
+             "constructor is pair(float, vec3)\n");
+    CHECK(reports_for(head + "    return { a = v, b = v }\n")
+          == "no-matching-overload user:[{ a = v, b = v }] pair(a = vec3, b = vec3), and the constructor is "
+             "pair(float, vec3)\n");
     CHECK(reports_for(head + "    return k\n") == "type-mismatch user:[k] expected pair, got float\n");
     CHECK(reports_for(head + "    let p = { a = k, b = v }\n    return p\n")
           == "unsupported-yet user:[{ a = k, b = v }] an object with no struct to convert to\n");
@@ -385,4 +406,61 @@ TEST("sgl check - name_mint never hands out a name twice")
     CHECK(names.mint("main_ps") == "main_ps_1");
     CHECK(names.mint("") == "_");
     CHECK(names.is_taken("n_3"));
+}
+
+TEST("sgl check - a named argument keeps its name, and a number literal its text, in what a failed call reports")
+{
+    CHECK(reports_for("fun sub(a: int, b: int) -> int => a - b\nfun f() -> int => sub(b = 3, 5)\n")
+          == "no-matching-overload user:[sub(b = 3, 5)] sub(b = 3, 5)\n");
+    CHECK(reports_for("struct s:\n    a: float\nfun f() -> s => s(b = 1.0)\n")
+          == "no-matching-overload user:[s(b = 1.0)] s(b = 1.0), and the constructor is s(float)\n");
+}
+
+TEST("sgl check - a call that matches nothing keeps why each candidate did not, for a later did-you-mean")
+{
+    auto const checked = check_sources(read_prelude(), "fun sub(a: int, b: int) -> int => a - b\n"
+                                                       "fun f() -> int => sub(b = 3, 5)\n"
+                                                       "fun g() -> int => sub(1, true)\n");
+    auto const& misses = checked.module.near_misses;
+    REQUIRE(misses.size() == 2);
+    CHECK(misses[0].reason == sgl::check::miss_reason::positional_out_of_slot);
+    CHECK(misses[0].argument == 1);
+    CHECK(misses[1].reason == sgl::check::miss_reason::no_conversion);
+    CHECK(misses[1].argument == 1);
+    CHECK(misses[1].parameter == 1);
+}
+
+TEST("sgl check - a property's body is judged as a function's is: it exists, and it yields on every path")
+{
+    CHECK(reports_for("struct box:\n    w: float\nfun box.nobody -> float\n") == "expected-body user:[nobody] nobody\n");
+    CHECK(reports_for("struct box:\n    w: float\n    none =>:\n        let z = self.w\n")
+          == "missing-return user:[none] none is a property, and a path through its block ends without a yield\n");
+    CHECK(reports_for("struct box:\n    w: float\n    some =>:\n        if self.w > 1.0 => yield 1.0\n")
+          == "missing-return user:[some] some is a property, and a path through its block ends without a yield\n");
+}
+
+TEST("sgl check - an extension inside a type's block is unsupported-yet")
+{
+    CHECK(reports_for("struct box:\n    w: float\n    fun float.y => 2.0\n")
+          == "unsupported-yet user:[float] an extension inside a type's block\n");
+}
+
+TEST("sgl check - a literal argument of a call that matches nothing is reported as a literal")
+{
+    CHECK(reports_for("fun f(a: int) -> int => a\nfun g() -> int => f((1, 2))\n")
+          == "no-matching-overload user:[f((1, 2))] f(a literal)\n");
+    CHECK(reports_for("struct s:\n    a: float\nfun f(x: s, k: bool) -> float => x.a\nfun g() -> float => f({a = 1.0}, "
+                      "2)\n")
+          == "no-matching-overload user:[f({a = 1.0}, 2)] f(a literal, 2)\n");
+}
+
+TEST("sgl check - a constructor is an edge of the call graph, so a loop through a field's default is recursion")
+{
+    CHECK(reports_for("struct s:\n    a: int = f()\nfun f() -> int => s().a\n").contains("recursive-call"));
+}
+
+TEST("sgl check - a splat spreads a struct with fields, and a value with none is refused")
+{
+    CHECK(reports_for("struct e:\n    x: float\nfun f() -> float2 => float2(..void, 1.0, 2.0)\n")
+          == "type-mismatch user:[..void] void has no fields a splat could spread\n");
 }

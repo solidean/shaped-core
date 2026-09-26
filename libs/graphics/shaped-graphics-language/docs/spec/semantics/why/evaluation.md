@@ -21,6 +21,12 @@ Left to right is the order the text is read in, so it is the one a reader assume
 Once matters as much as the order: an inlined function names its parameter several times, and an argument with an effect must still run once.
 The price is a pin now and then ([LEGAL-16](../legalization.md#expressions)), and only where an effect makes the order observable.
 
+## EVAL-80
+
+A reader of a call sees its arguments in the order they are written, so their effects happen in that order.
+The defaults come after, as if they were added at the end of the call in their own order, which is the mental model the syntax suggests.
+A default reads only the parameters before it, and every written argument is evaluated before any default, so the defaults never see a parameter without its value.
+
 ## EVAL-24
 
 An effect analysis that changed meaning would make a program's behaviour depend on how clever the compiler is this month.

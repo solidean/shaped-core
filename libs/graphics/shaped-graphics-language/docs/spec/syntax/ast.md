@@ -564,8 +564,14 @@ fun falloff(d: float) -> float:
 ### Functions
 
 * **AST-66** A **signature** is what follows `fun`: a name, then type parameters `[…]`, parameters `(…)` and bindings `{…}`, each fused to what is before it, each at most once, and in this order.
+* **AST-142** The name of a signature may be a type's name, a DOT and a name, `fun ray.inverted`: that function is an **extension**, and the type it names is its **extended type**.
+  Inside a type's block the AST records one as well, and the check pass refuses it as `unsupported-yet` (CHK-237).
 * **AST-67** The parameters are mandatory, and they may be empty: `fun f()` ([why](why/ast.md#ast-67)).
+* **AST-143** An extension without parameters is a property of its extended type, as AST-81 reads one: `fun ray.inverted => …` ([why](why/ast.md#ast-143)).
+  It may carry `-> type` before its body, and type parameters or bindings there are `missing-parameter-list`.
 * **AST-68** A **parameter** is a [field](#members), and a type parameter is a parameter whose type may be left out.
+* **AST-144** A parameter or a field whose name is a leading-dot form, `.level: float`, is **named-only**: the AST records the mark, and the name without its dot.
+  A named-only mark on a binding member, on a member of a `struct_type` or on `self` is the normal error `named-only-not-allowed-here`, and the member is still read.
 * **AST-69** An element of the bindings is a **binding entry**, and the AST keeps it as an expression.
 * **AST-70** After the signature stands an optional `->` with the return type, which is a type position.
 * **AST-71** Then stands at most one body: `=>` and an expression, or a block.
@@ -665,7 +671,7 @@ pipeline shadow = (shadow_vs, shadow_ps)
 
 | source | reads as |
 |---|---|
-| `name: type`, with an optional `= default` | a **field** |
+| `name: type` or `.name: type`, with an optional `= default` | a **field** |
 | `name => expression` | a **property** |
 | `fun` and a signature | a **method** |
 | one bare name, or `name = value`, inside an `enum` | a **case** |
@@ -699,7 +705,7 @@ struct particle:
     velocity: vec3
     age: float = 0.0
     lifetime: float = age + 10.0
-    speed => self.velocity.length
+    speed => self.velocity.length()
     energy =>:
         let v = self.speed
         yield 0.5 * v * v

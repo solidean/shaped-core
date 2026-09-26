@@ -1,0 +1,29 @@
+// where a call finds its candidates: the name at the call, the first argument's type scope, and where that type is declared
+
+// a program const shadows the prelude's `length`, and a float3 still finds the prelude's function of that name
+const length = 1.0
+
+test float3(3.0, 4.0, 0.0).length() == 5.0
+test length == 1.0
+
+// a free call takes the first argument's type scope whatever else its name is: here a const, and there a struct
+const scale = 2.0
+
+struct box:
+    w: float
+    fun scale(self, k: float) -> float => self.w * k
+    fun span(self, k: float) -> float => self.w + k
+
+struct span:
+    lo: float
+    hi: float
+
+test scale(box(2.0), 3.0) == 6.0
+test span(box(2.0), 3.0) == 5.0
+test span(1.0, 2.0).hi == 2.0
+
+// the receiver is argument 0, so a number literal there converts as anywhere else
+fun half(x: float) -> float => x * 0.5
+
+test (2).half() == 1.0
+test half(2) == 1.0
