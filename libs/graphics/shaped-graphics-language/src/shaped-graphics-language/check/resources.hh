@@ -35,23 +35,21 @@ struct sgl::check::shape_info
     cc::string_view image;
     /// sg's `texture_view_dimension` member, which the host description names.
     cc::string_view sg_name;
-    /// Needs a feature some backend lacks, so it is refused until a function can opt into one (bindings, "Features").
-    cc::string_view feature;
 };
 
 namespace sgl::check
 {
 
 inline constexpr shape_info k_shapes[] = {
-    {texture_shape::d1, "texture_1d", "", "image_1d", "tex_1d", ""},
-    {texture_shape::d1_array, "texture_1d_array", "", "image_1d_array", "tex_1d_array", ""},
-    {texture_shape::d2, "texture_2d", "texture_2d_depth", "image_2d", "tex_2d", ""},
-    {texture_shape::d2_array, "texture_2d_array", "texture_2d_array_depth", "image_2d_array", "tex_2d_array", ""},
-    {texture_shape::d2_ms, "texture_2d_ms", "texture_2d_ms_depth", "", "tex_2d_ms", ""},
-    {texture_shape::d2_ms_array, "texture_2d_ms_array", "", "", "tex_2d_ms_array", "multisampled arrays"},
-    {texture_shape::d3, "texture_3d", "", "image_3d", "tex_3d", ""},
-    {texture_shape::cube, "texture_cube", "texture_cube_depth", "", "cube", ""},
-    {texture_shape::cube_array, "texture_cube_array", "texture_cube_array_depth", "", "cube_array", ""},
+    {texture_shape::d1, "texture_1d", "", "image_1d", "tex_1d"},
+    {texture_shape::d1_array, "texture_1d_array", "", "image_1d_array", "tex_1d_array"},
+    {texture_shape::d2, "texture_2d", "texture_2d_depth", "image_2d", "tex_2d"},
+    {texture_shape::d2_array, "texture_2d_array", "texture_2d_array_depth", "image_2d_array", "tex_2d_array"},
+    {texture_shape::d2_ms, "texture_2d_ms", "texture_2d_ms_depth", "", "tex_2d_ms"},
+    {texture_shape::d2_ms_array, "texture_2d_ms_array", "", "", "tex_2d_ms_array"},
+    {texture_shape::d3, "texture_3d", "", "image_3d", "tex_3d"},
+    {texture_shape::cube, "texture_cube", "texture_cube_depth", "", "cube"},
+    {texture_shape::cube_array, "texture_cube_array", "texture_cube_array_depth", "", "cube_array"},
 };
 
 [[nodiscard]] constexpr shape_info const& info_of(texture_shape s)

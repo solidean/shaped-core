@@ -3,6 +3,7 @@
 #include <clean-core/string/format.hh>
 #include <shaped-graphics/binding/binding.hh>
 #include <shaped-graphics/binding/binding_group.hh>
+#include <shaped-graphics/binding/compiled_shader.hh>
 #include <shaped-graphics/resource/raw_texture.hh>
 #include <shaped-graphics/resource/views.hh>
 
@@ -82,6 +83,20 @@ cc::optional<cc::string> impl::find_unsupported_view(bool float32_filtering,
             if (b.name == v.name)
                 if (auto message = find_unsupported_view(false, b, v.view.span()); message.has_value())
                     return message;
+    return {};
+}
+
+cc::optional<cc::string> impl::find_missing_feature(feature_set supported, cc::span<compiled_shader const* const> stages)
+{
+    for (auto const* const stage : stages)
+    {
+        if (stage == nullptr || !stage->required_features.has_value())
+            continue;
+        for (auto const f : k_all_features)
+            if (stage->required_features.value().has(f) && !supported.has(f))
+                return cc::format("the shader '{}' needs sg::feature::{}, and this device lacks it", stage->entry_point,
+                                  to_string(f));
+    }
     return {};
 }
 

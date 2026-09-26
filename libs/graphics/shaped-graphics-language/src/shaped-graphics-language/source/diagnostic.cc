@@ -186,6 +186,12 @@ cc::string_view sgl::to_string(diagnostic_kind kind)
         return "missing-value-in-arm";
     case diagnostic_kind::needs_feature:
         return "needs-feature";
+    case diagnostic_kind::unknown_feature:
+        return "unknown-feature";
+    case diagnostic_kind::feature_not_declared:
+        return "feature-not-declared";
+    case diagnostic_kind::unused_require:
+        return "unused-require";
     case diagnostic_kind::stage_not_allowed:
         return "stage-not-allowed";
     case diagnostic_kind::invalid_pipeline:
@@ -397,7 +403,7 @@ cc::string_view sgl::summary_of(diagnostic_kind kind)
     case diagnostic_kind::missing_value_in_arm:
         return "a `case` arm that neither produces a value nor exits";
     case diagnostic_kind::needs_feature:
-        return "a form some backend lacks, used by a function that does not opt into its feature";
+        return "a form some backend lacks, used where no `require` grants its feature";
     case diagnostic_kind::stage_not_allowed:
         return "a function reached from an entry point of a stage its `@stages` leaves out";
     case diagnostic_kind::invalid_pipeline:
@@ -422,6 +428,12 @@ cc::string_view sgl::summary_of(diagnostic_kind kind)
         return "a literal converted by a function that returns another type";
     case diagnostic_kind::literal_needs_type:
         return "an operator over literals alone that only another type provides";
+    case diagnostic_kind::unknown_feature:
+        return "a `require` of a name that is no feature a shader can use";
+    case diagnostic_kind::feature_not_declared:
+        return "an entry point that uses a feature its file, its bindings and its body never `require`";
+    case diagnostic_kind::unused_require:
+        return "a `require` in a body that nothing there needed";
     }
     CC_UNREACHABLE("unknown diagnostic_kind");
 }
@@ -516,6 +528,8 @@ sgl::severity sgl::default_severity_of(diagnostic_kind kind)
     case diagnostic_kind::duplicate_case_pattern:
     case diagnostic_kind::missing_value_in_arm:
     case diagnostic_kind::needs_feature:
+    case diagnostic_kind::unknown_feature:
+    case diagnostic_kind::feature_not_declared:
     case diagnostic_kind::stage_not_allowed:
     case diagnostic_kind::invalid_pipeline:
     case diagnostic_kind::shadows_unshadowable:
@@ -533,6 +547,7 @@ sgl::severity sgl::default_severity_of(diagnostic_kind kind)
     case diagnostic_kind::no_effect:
     case diagnostic_kind::redundant_yield:
     case diagnostic_kind::unreachable_code:
+    case diagnostic_kind::unused_require:
         return severity::warning;
     }
     CC_UNREACHABLE("unknown diagnostic_kind");

@@ -186,16 +186,31 @@ They apply in order, so a later setting overrides what an earlier one set, `filt
 ## Features
 
 **SGL refuses a non-portable form by feature, never by target.**
-A form that some backend lacks is a normal error on every target, unless the function opts into the feature that grants it.
+A form that some backend lacks is a normal error on every target, unless a `require` of its feature grants it.
 Opting in is what makes a shader non-portable on purpose, and the host then asks the device before it builds a pipeline.
-The opt-in itself is unbuilt ([feature-levels.md](incubator/feature-levels.md)), so today each of these is refused with a diagnostic naming its feature.
+
+```sgl
+require extended_image_formats
+
+binding post:
+    require readwrite_image_formats
+    acc: mut image_2d[.rgba16_float]
+```
+
+A `require` stands in the file, in a binding, or in a function body.
+It permits a feature and costs nothing where nothing uses it.
+What an entry point needs of a device is what the bindings it lists use, which `sgl describe` reports per entry point and per pipeline.
+An entry point must declare each of those itself: by its file, by a binding it lists, or in its body.
+[Features](semantics/checking.md#features) holds the rules.
 
 | form | the feature that grants it |
 |---|---|
-| `texture_2d_ms_array` | multisampled arrays, which WebGPU lacks |
+| `texture_2d_ms_array` | `sg::feature::multisampled_array_textures`, which WebGPU lacks |
 | `mut image*[.F]` with `F` not `r32_float`, `r32_uint` or `r32_sint` | `sg::feature::readwrite_image_formats`, WebGPU's `texture-formats-tier2` |
-| `image*[.F]` with `F` outside the portable image formats | the tier-1 image formats, WebGPU's `texture-formats-tier1` |
-| filtering a 32-bit float texture | float32 filtering, WebGPU's `float32-filterable`; refused by sg at bind time |
+| `image*[.F]` with `F` outside the portable image formats | `sg::feature::extended_image_formats`, WebGPU's `texture-formats-tier1` |
+| filtering a 32-bit float texture | `sg::feature::float32_filtering`, WebGPU's `float32-filterable`; refused by sg at bind time, never by SGL |
+
+`binding_arrays` and `raytracing` are names a `require` accepts, and nothing in SGL uses either yet.
 
 ## Which group a binding is
 
@@ -287,4 +302,4 @@ A shader using one then gets a diagnostic that names the feature, rather than a 
 * A buffer as a field of a struct, which is `unsupported-yet` like every buffer outside a binding member.
   It could be allowed where the buffer is hoisted and stays uniform across every use, a scalarization of the struct that inlining makes possible.
 * The functions over textures and images — sampling, loads, stores and sizes — and a default sampler on a texture member ([texture-methods.md](incubator/texture-methods.md)).
-* Arrays of textures and images, which need `sg::feature::binding_arrays` and so the feature opt-in.
+* Arrays of textures and images, which `require binding_arrays` grants once they exist.

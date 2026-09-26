@@ -529,6 +529,18 @@ struct dumper
                     out += file.text_of(n.alias);
                 }
             },
+            [&](require_decl const& n)
+            {
+                open("require");
+                auto is_first = true;
+                for (auto const feature : ast.at(n.features))
+                {
+                    if (!is_first)
+                        out += " ";
+                    is_first = false;
+                    dump_expr(feature, depth);
+                }
+            },
             [&](fun_decl const& n)
             {
                 open("fun");

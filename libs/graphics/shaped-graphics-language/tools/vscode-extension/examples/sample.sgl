@@ -4,6 +4,7 @@
 module highlighting_sample
 
 use brdf_library as brdf
+require extended_image_formats, binding_arrays
 notation \phi => φ
 
 /// A documentation comment owns its deeper lines too.

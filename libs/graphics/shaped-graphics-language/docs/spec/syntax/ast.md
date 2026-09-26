@@ -515,6 +515,7 @@ fun update(state: particle):
 |---|---|---|---|
 | module | `module name` | yes | no |
 | import | `use module`, `use module as name` | yes | yes |
+| feature requirement | `require feature`, `require a, b`, `require:` and one name per line | yes | yes |
 | function | `fun` and a [signature](#functions) | yes | yes |
 | struct | `struct name:` and a block of [members](#members) | yes | yes |
 | enum | `enum name:` and a block of members | yes | yes |
@@ -533,6 +534,9 @@ fun update(state: particle):
 * **AST-138** `test expression` reads as a `test` whose block holds the one expression statement `expression`; a `test` with both, or with neither, is a normal error.
 * **AST-139** A `test` stands in a struct and an enum as well, and inside another `test` is `declaration-not-allowed-here`.
   No jump crosses a `test`'s body, so a `return` in it is `jump-without-target`.
+* **AST-145** Each argument of a `require` is one name, and any other argument, or none at all, is `expected-name`.
+  `require:` with a block takes one name per line instead, and a `require` with both arguments and a block is `too-many-arguments`.
+  What the names mean is the check pass's ([Features](../semantics/checking.md#features)).
 
 ```sgl
 fun square(x: float) -> float => x * x
@@ -548,6 +552,7 @@ test:
 module example
 
 use brdf_library as brdf
+require extended_image_formats, raytracing
 notation \phi => φ
 
 type color = vec3
@@ -694,6 +699,7 @@ pipeline shadow = (shadow_vs, shadow_ps)
 
 * **AST-86** A member that its owner does not allow is a normal error, and it is still read.
 * **AST-136** A `sampler` declaration stands at file scope or in a `binding`, and anywhere else is `declaration-not-allowed-here`; in a binding it is a member, the group's static sampler.
+* **AST-146** A `require` stands in a `binding` as well, and in a `struct` or an `enum` is `member-not-allowed-here`.
 * **AST-125** A `struct` line without a block is an **opaque struct**: it has no member that can be named, which a block without members does not say ([why](why/ast.md#ast-125)).
 * **AST-126** The AST accepts an opaque struct wherever a `struct` stands, and a later phase allows it for a small set of `@builtin` types only.
 * **AST-115** A case may carry a value, which is an expression: `red = 1`.

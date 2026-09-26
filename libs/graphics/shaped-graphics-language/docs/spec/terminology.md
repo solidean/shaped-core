@@ -109,7 +109,7 @@ Each term links to the rule that defines it.
 | **composition short form** | `binding name = other` or `binding name = (a, b)` (AST-74) |
 | **setting** | one `name = value` line of a `sampler` block (AST-76), or one `path = value` line of a `pipeline` block (AST-131) |
 | **pipeline** | shader stages and the configuration compiled into them ([pipelines.md](pipelines.md)) |
-| **frozen part** | what a host's own code is built against: a pipeline's binding layout, vertex input, target set, formats and sample count; no hot reload changes it |
+| **frozen part** | what a host's own code is built against: a pipeline's binding layout, vertex input, target set, features, formats and sample count; no hot reload changes it |
 | **open part** | a format or a sample count a pipeline leaves to the host with `.host` (CHK-180) |
 | **member** | a statement of a `struct`, `enum` or `binding` block, or an element of a `struct_type` (AST-77) |
 | **field** | the member `name: type`, with an optional default; also what a parameter is (AST-79) |

@@ -274,7 +274,7 @@ fun shade(k: float) -> float:
   Another type as the argument is `wrong-kind-of-name` too, and a name that is no type is `unknown-name` by CHK-24, so `texture_2d[rgba8]` is the latter.
 * **CHK-200** An image's argument is exactly one enum case naming one of sg's image formats, `.rgba8_unorm`.
   It is the one value type argument SGL reads, until value type arguments exist in general.
-* **CHK-201** A form some backend lacks is the normal error `needs-feature`, naming the feature, on every target alike:
+* **CHK-201** A form some backend lacks is the normal error `needs-feature` on every target alike, unless a `require` grants its feature ([Features](#features)):
   `texture_2d_ms_array`, an image outside the portable image formats, and a `mut` image outside the three `r32` formats.
 * **CHK-202** `@unfilterable` stands on a texture member of floats, and on any other binding member is `wrong-kind-of-name`.
   Elsewhere it is an attribute the pass does not know, by CHK-39.
@@ -323,7 +323,7 @@ fun shade(k: float) -> float:
 * **CHK-220** A symbol that carries `@shadowable(false)` is hidden by nothing, and it stays what its name means.
   A declaration of the program, a local, a parameter or a `for` variable of its name is `shadows-unshadowable`.
   Its one argument is `false` or `true`, on any declaration it stands on, and anything else is `invalid-attribute-arguments`.
-* **CHK-258** Every type of `builtins.sgl` is `@shadowable(false)`, and the types of `core.sgl` are not.
+* **CHK-266** Every type of `builtins.sgl` is `@shadowable(false)`, and the types of `core.sgl` are not.
   A program's own `int` would be a second type that reads like the first, while a literal stays of the prelude's, so `level: int = 0` would read `expected int, got int`.
 * **CHK-55** A pattern in a `let` and a `let` without a value are `unsupported-yet`; `let mut` is CHK-111.
 * **CHK-56** `return value` needs `value` to be of the function's return type, or it is `type-mismatch`.
@@ -450,6 +450,44 @@ fun f() -> float:
   It is judged per entry point once everything is inlined, since a function in between says nothing about where it is reached from.
   `sample` without a `level` is `@stages(.pixel)`: its level comes from derivatives, which only a pixel stage has on every target.
 * **CHK-93** Breaking one of CHK-88 to CHK-92 is `invalid-entry-point`, and its detail names the rule.
+
+## Features
+
+A feature is what a device may lack, so using one makes a shader non-portable on purpose.
+[bindings.md](../bindings.md#features) lists the forms each one grants.
+
+* **CHK-258** A `require` names features as `sg::feature` names them, and only those a shader can use:
+  `binding_arrays`, `extended_image_formats`, `readwrite_image_formats`, `multisampled_array_textures` and `raytracing`.
+  Any other name is the normal error `unknown-feature`, and its detail lists the names.
+* **CHK-259** A `require` at file scope grants its features to everything in the file ([why](why/checking.md#chk-259)).
+* **CHK-260** A `require` in a binding grants its features to that binding's members.
+* **CHK-261** A binding requires what its own `require` lines name and what its members use, and an entry point that lists it needs all of that of a device ([why](why/checking.md#chk-261)).
+* **CHK-262** An entry point declares a feature by a `require` of its file, of a binding it lists, or among the lines of its own body ([why](why/checking.md#chk-262)).
+  A `require` inside a nested block is `unsupported-yet`.
+* **CHK-263** What an entry point needs of a device is what the bindings it lists require, never what it merely may use ([why](why/checking.md#chk-263)).
+  It is judged once every body is checked, and a use is counted wherever it stands, reached or not.
+* **CHK-264** A feature an entry point needs and does not declare is the normal error `feature-not-declared` at its name, with a note at each listed binding that needs it.
+* **CHK-265** A `require` in a body that is not the declaration an entry point needs is the warning `unused-require`, and so is a second `require` of a feature in one body.
+  A `require` of a file or of a binding is never unused: each declares an intent, whether anything uses the feature or not ([why](why/checking.md#chk-265)).
+
+```sgl
+require extended_image_formats
+
+binding post:
+    dst: out image_2d[.r8_unorm]
+```
+
+Nothing in a body uses a feature yet, so a `require` in a test's body is `unused-require`, and a name that is none is `unknown-feature`.
+
+```sgl
+@expect(warning = "unused-require") test:
+    require raytracing
+    1 == 1
+
+@expect(error = "unknown-feature") test:
+    require ray_query
+    1 == 1
+```
 
 ## Pipelines
 
@@ -617,7 +655,7 @@ fun make_mvp(model: mat4){frame} => frame.proj * frame.view * model
 
 ## Diagnostic kinds
 
-Every kind below is a normal error by [DIAG-4](../syntax/diagnostics.md#rules), except `unreachable-code` and `no-effect`, which are warnings.
+Every kind below is a normal error by [DIAG-4](../syntax/diagnostics.md#rules), except `unreachable-code`, `no-effect` and `unused-require`, which are warnings.
 A diagnostic of this pass has a kind, a file, a byte span in that file, and a detail.
 
 | kind | reported by |
@@ -645,12 +683,15 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `duplicate-case-pattern` | CHK-161 |
 | `missing-value-in-arm` | CHK-168 |
 | `needs-feature` | CHK-201 |
+| `unknown-feature` | CHK-258 |
+| `feature-not-declared` | CHK-264 |
+| `unused-require` | CHK-265 |
 | `stage-not-allowed` | CHK-193 |
 | `ambiguous-overload` | CHK-72 |
 | `missing-field`, `unknown-field`, `duplicate-field` | CHK-178 |
 | `invalid-entry-point` | CHK-87, CHK-93 |
 | `invalid-pipeline` | CHK-175 to CHK-185, CHK-187 |
-| `shadows-unshadowable` | CHK-220, CHK-258 |
+| `shadows-unshadowable` | CHK-220, CHK-266 |
 | `test-captures-runtime-value` | CHK-228 |
 | `test-must-end-in-check` | CHK-226 |
 | `unmet-expectation` | CHK-232 |

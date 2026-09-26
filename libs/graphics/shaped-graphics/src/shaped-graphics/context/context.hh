@@ -66,6 +66,13 @@ public:
         return false;
     }
 
+    /// Every feature `supports` answers yes for.
+    [[nodiscard]] feature_set supported_features() const;
+
+    /// What `shader` needs that this context lacks, which is what building a pipeline from it would be refused for.
+    /// Empty for a shader whose `required_features` is unknown: nothing about it can be named.
+    [[nodiscard]] feature_set missing_features(compiled_shader const& shader) const;
+
     /// The numeric bounds a portable caller stays inside.
     /// See sg::device_limits.
     [[nodiscard]] device_limits const& limits() const { return _limits; }

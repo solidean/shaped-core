@@ -28,8 +28,11 @@ Back to the [semantics](_index.md); the reasons are in [why/emitting.md](why/emi
 * **EMIT-10** A module that reported an error is the error `module-has-errors`, whichever entry point is asked for.
 * **EMIT-11** An entry point the module does not hold is `unknown-entry-point`.
 * **EMIT-12** A construct that no emitter carries yet is `unsupported`, and its detail names the construct; an emitter never guesses an address.
-* **EMIT-13** No error depends on the target but EMIT-89's: an entry point is written for every target or for none ([why](why/emitting.md#emit-13)).
+* **EMIT-13** No error depends on the target but EMIT-89's and EMIT-109's: an entry point is written for every target or for none ([why](why/emitting.md#emit-13)).
   The exception is `msl`, which refuses what a Metal entry point takes as an argument.
+* **EMIT-109** An entry point that needs a feature no device of the target has is `target-lacks-feature`, and its detail names the feature.
+  Today that is `wgsl` against `binding_arrays`, `multisampled_array_textures` and `raytracing`.
+  The shader chose it by `require`, so a portable shader still meets EMIT-13's promise.
 * **EMIT-66** A tree that is not core is the error `not-core`, and its detail names the first node that offends.
 * **EMIT-67** A `print` is `unsupported`: no target writes one yet.
 
@@ -287,6 +290,7 @@ So `{float3; float}` is `layout-mismatch`: the `float` is at byte 12 in HLSL and
 | `malformed-tree` | a flat tree the check pass does not produce |
 | `not-core` | EMIT-66 |
 | `too-many-groups` | EMIT-105 |
+| `target-lacks-feature` | EMIT-109 |
 
 ## Open
 

@@ -8,7 +8,7 @@ bool builder::is_declaration_keyword(cc::string_view keyword)
 {
     return keyword == "module" || keyword == "use" || keyword == "fun" || keyword == "struct" || keyword == "enum"
         || keyword == "type" || keyword == "const" || keyword == "binding" || keyword == "sampler"
-        || keyword == "pipeline" || keyword == "notation" || keyword == "test";
+        || keyword == "pipeline" || keyword == "notation" || keyword == "test" || keyword == "require";
 }
 
 range_of<decl_id> builder::declarations(form_id block, scope_kind scope)
@@ -58,6 +58,12 @@ decl_id builder::declaration(statement_head const& head, scope_kind scope, bool 
     }
     else if (keyword == "pipeline" && scope != scope_kind::file)
         report(diagnostic_kind::declaration_not_allowed_here, head.keyword_form);
+    // AST-146: a feature is granted to a file, a binding or a body, and a type's members are none of those.
+    else if (keyword == "require")
+    {
+        if (scope == scope_kind::struct_body || scope == scope_kind::enum_body)
+            report(diagnostic_kind::member_not_allowed_here, head.keyword_form);
+    }
     // AST-139: a test runs on its own, so one inside another would be a second test the first never runs.
     else if (keyword == "test" && is_in_test_body())
         report(diagnostic_kind::declaration_not_allowed_here, head.keyword_form);
@@ -68,6 +74,8 @@ decl_id builder::declaration(statement_head const& head, scope_kind scope, bool 
         return module_declaration(head, parts);
     if (keyword == "use")
         return use_declaration(head, parts);
+    if (keyword == "require")
+        return require_declaration(head, parts);
     if (keyword == "fun")
         return fun_declaration(head, parts);
     if (keyword == "struct")
@@ -242,6 +250,33 @@ decl_id builder::use_declaration(statement_head const& head, keyword_parts const
     else
         result.path = invalid_expression(is_valid(path) ? path : head.keyword_form, diagnostic_kind::expected_name);
     return make_decl(head.whole, attributes, result);
+}
+
+decl_id builder::require_declaration(statement_head const& head, keyword_parts const& parts)
+{
+    auto const attributes = attributes_of(head.whole);
+    reject_arrow(head);
+    reject_assignment(head);
+
+    // AST-145: each argument names one feature, and so does each line of the block form.
+    auto features = cc::vector<expr_id>();
+    auto const add = [&](form_id name)
+    {
+        features.push_back(is_kind(name, form_kind::identifier)
+                               ? expression(name)
+                               : invalid_expression(name, diagnostic_kind::expected_name));
+    };
+    for (auto const argument : parts.arguments)
+        add(argument);
+    if (is_valid(parts.block) && !parts.arguments.empty())
+        report(diagnostic_kind::too_many_arguments, parts.block);
+    else if (is_valid(parts.block))
+        for (auto const line : lines_of(parts.block))
+            add(line);
+    if (features.empty())
+        features.push_back(invalid_expression(head.keyword_form, diagnostic_kind::expected_name));
+    return make_decl(head.whole, attributes,
+                     require_decl{.features = append(ast.expr_lists, cc::span<expr_id const>(features))});
 }
 
 bool builder::is_anonymous_fun(keyword_parts const& parts) const

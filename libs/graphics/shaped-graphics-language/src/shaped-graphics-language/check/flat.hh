@@ -615,6 +615,8 @@ struct sgl::check::flat_entry_point
     i32 workgroup[3] = {1, 1, 1};
     /// The parameter carries `@thread_id` itself rather than being a struct that holds one.
     bool takes_thread_id = false;
+    /// What a device needs to run it, `function_info::features`.
+    feature_set features;
 
     cc::vector<flat_local> locals;
     cc::vector<flat_label> labels;

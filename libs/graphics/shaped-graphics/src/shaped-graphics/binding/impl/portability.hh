@@ -3,6 +3,7 @@
 #include <clean-core/container/span.hh>
 #include <clean-core/error/optional.hh>
 #include <clean-core/string/string.hh>
+#include <shaped-graphics/context/capabilities.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/resource/views.hh>
 
@@ -32,4 +33,9 @@ namespace sg::impl
 [[nodiscard]] cc::optional<cc::string> find_unsupported_view(bool float32_filtering,
                                                              cc::span<binding const> bindings,
                                                              cc::span<slotted_view const> views);
+
+/// The first stage whose `required_features` holds one outside `supported`, as a message naming the shader and the feature.
+/// A null stage and a stage whose features are unknown are not judged.
+[[nodiscard]] cc::optional<cc::string> find_missing_feature(feature_set supported,
+                                                            cc::span<compiled_shader const* const> stages);
 } // namespace sg::impl

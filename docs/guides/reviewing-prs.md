@@ -175,6 +175,12 @@ The **highest-value-per-effort** category, because it is what the GitHub diff vi
   The change that falsified them never touched the line.
   When a change adds the Nth member of a set, grep the old cardinality across the subsystem before reading anything else.
   Adding deflate beside zstd and lz4 left four such sentences wrong, three in files the branch itself edited.
+  **The fix is to drop the count, not to update it.** Say what kinds of member there are, name one as an example, and claim no exhaustiveness.
+  A review once recommended turning sg's "three such forms" into an exact list of what each backend judges, and got this back:
+
+  ```raw
+  do we really want to enumerate them explicitly here? we might get different backends in the future. [...] why commit to a number that becomes stale in the comment? why not just say some features are runtime grants by a backend, some are currently something a backend cannot grant at all and might even refuse to generate the shader for. name an example. but dont claim exhaustiveness
+  ```
 - **"The only X" is a count too.** *The only*, *the single exception*, *nothing else* read as emphasis and are arithmetic, and a reader uses them to stop looking.
   Enumerate on the way past — whether you are reading one in the branch or about to write one in the comment.
 

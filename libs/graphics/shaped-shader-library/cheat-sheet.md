@@ -321,7 +321,7 @@ auto const p = co_await ctx.cached.acquire_raster_pipeline(shaders::cube.pipelin
 //   .description_latest(ctx, parts)   the newest stages and settings even where the frozen part moved; acquire it yourself
 //   an open field left unset (a format still `undefined`, a sample count still 0) asserts: the declaration said the host would state it
 //   the build's settings are generated field writes (slib::impl::fields, from impl/pipeline_fields.hh, which `sgl pipeline-fields` writes)
-//   hot reload: cull, depth, blend… follow the source; a moved frozen part (layout, vertex input, targets, formats, samples,
+//   hot reload: cull, depth, blend… follow the source; a moved frozen part (layout, vertex input, targets, features, formats, samples,
 //   each struct by name AND shape) keeps the stages and settings this context last built with, and logs what moved
 // `@vertex struct v` -> shaders::v and v::layout(): attributes in the shader's order, no semantic or offset by hand.
 //   members marked `@per_instance` / `@stream(name)` split it over buffers: then v::<stream> per buffer, in slot order,

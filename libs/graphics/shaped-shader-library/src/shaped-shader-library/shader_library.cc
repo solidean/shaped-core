@@ -31,10 +31,11 @@ struct host_facts
     cc::vector<slib::binding_rename> renames;
     cc::optional<i32> color_output_count;
     cc::string target_set;
+    cc::optional<sg::feature_set> required_features;
 
     [[nodiscard]] bool is_empty() const
     {
-        return renames.empty() && !color_output_count.has_value() && target_set.empty();
+        return renames.empty() && !color_output_count.has_value() && target_set.empty() && !required_features.has_value();
     }
 };
 
@@ -51,6 +52,8 @@ void apply(sg::compiled_shader& shader, host_facts const& facts)
     if (facts.color_output_count.has_value())
         shader.color_output_count = facts.color_output_count;
     shader.target_set = facts.target_set;
+    if (facts.required_features.has_value())
+        shader.required_features = facts.required_features;
 }
 
 sg::async_compiled_shader applied_once_settled(sg::async_compiled_shader built, host_facts facts)
@@ -362,7 +365,8 @@ void slib::shader_library::_compile_text(compile_outcome& outcome,
     }
 
     desc.source = cc::move(preprocessed.value().source);
-    auto facts = host_facts{.renames = cc::move(preprocessed.value().renamed_bindings)};
+    auto facts = host_facts{.renames = cc::move(preprocessed.value().renamed_bindings),
+                            .required_features = preprocessed.value().required_features};
     if (preprocessed.value().color_targets >= 0)
         facts.color_output_count = preprocessed.value().color_targets;
     if (!preprocessed.value().target_struct.empty() && !host_namespace.empty())

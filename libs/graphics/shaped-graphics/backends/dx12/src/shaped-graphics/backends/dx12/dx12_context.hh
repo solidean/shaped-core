@@ -199,6 +199,7 @@ public:
         case sg::feature::tessellation_shader:
         case sg::feature::readwrite_image_formats:
         case sg::feature::float32_filtering:
+        case sg::feature::multisampled_array_textures:
             return true;
         case sg::feature::extended_image_formats:
             return _extended_image_formats;

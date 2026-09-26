@@ -1,5 +1,8 @@
 #pragma once
 
+#include <clean-core/common/flags.hh>
+#include <clean-core/error/optional.hh>
+#include <clean-core/string/string_view.hh>
 #include <shaped-graphics/fwd.hh>
 
 /// What a context can and cannot do, as one vocabulary rather than one spelling per question.
@@ -57,7 +60,76 @@ enum class sg::feature
     /// WebGPU core refuses one unless the device has `texture-compression-unaligned`, and D3D12 reports it as an option.
     /// Where this is false, creating one is a refusal naming the size, which a loader of user textures can pad against.
     unaligned_block_compression,
+
+    /// A texture binding may be a multisampled 2D array (`texture_view_dimension::tex_2d_ms_array`).
+    /// WebGPU has no such binding at all, and it is also how a multisampled cube is sampled.
+    multisampled_array_textures,
 };
+
+CC_FLAG_ENUM_INDEXED(sg, feature, cc::u16);
+
+namespace sg
+{
+/// A set of features: what a shader needs of a device, or what a device has.
+using feature_set = cc::flags<feature>;
+
+/// Every feature, in the enum's order.
+inline constexpr feature k_all_features[] = {
+    feature::raytracing,
+    feature::timestamp_query,
+    feature::headless_present,
+    feature::geometry_shader,
+    feature::tessellation_shader,
+    feature::binding_arrays,
+    feature::readwrite_image_formats,
+    feature::float32_filtering,
+    feature::extended_image_formats,
+    feature::unaligned_block_compression,
+    feature::multisampled_array_textures,
+};
+static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize(feature::multisampled_array_textures) + 1,
+              "k_all_features lists every feature");
+
+/// The enumerator's name, `raytracing`, which is also what SGL's `require` spells it as.
+[[nodiscard]] constexpr cc::string_view to_string(feature f)
+{
+    switch (f)
+    {
+    case feature::raytracing:
+        return "raytracing";
+    case feature::timestamp_query:
+        return "timestamp_query";
+    case feature::headless_present:
+        return "headless_present";
+    case feature::geometry_shader:
+        return "geometry_shader";
+    case feature::tessellation_shader:
+        return "tessellation_shader";
+    case feature::binding_arrays:
+        return "binding_arrays";
+    case feature::readwrite_image_formats:
+        return "readwrite_image_formats";
+    case feature::float32_filtering:
+        return "float32_filtering";
+    case feature::extended_image_formats:
+        return "extended_image_formats";
+    case feature::unaligned_block_compression:
+        return "unaligned_block_compression";
+    case feature::multisampled_array_textures:
+        return "multisampled_array_textures";
+    }
+    return "";
+}
+
+/// The feature named `name` as `to_string` spells it; nullopt for a name that is none.
+[[nodiscard]] constexpr cc::optional<feature> feature_from_string(cc::string_view name)
+{
+    for (auto const f : k_all_features)
+        if (to_string(f) == name)
+            return f;
+    return {};
+}
+} // namespace sg
 
 /// Whether the thread driving this context may block at all.
 ///

@@ -289,3 +289,34 @@ The rule exists so a test cannot pass vacuously by mistake: a last line that com
 EVAL-78's `no-check-ran` catches a run that checked nothing too, but only when the test runs; this rule says so when the test is checked, in the editor.
 A test whose asserts are what it checks pays one line for it, `true // why`, which also says why it checks nothing else.
 A test that expects `.fail` or `.assert` is exempt, since it cannot pass without its run failing: it is fail-closed already.
+
+## CHK-259
+
+A `require` is permission, and what an entry point needs is judged from its use (CHK-263).
+So a file-level `require` costs nothing: a vertex stage in a ray-tracing file still runs on a device that cannot trace.
+The alternative, where the file's `require` is every entry point's floor, would make the cheapest place to write it the most expensive one to have written.
+
+## CHK-261
+
+A binding is a layout the host binds whole, so what one of its members needs is needed wherever the binding is listed, read or not.
+Its own `require` is therefore a requirement of the binding and not only a grant to its members: a library that ships a binding says, in the binding, what a device must have to take it.
+
+## CHK-262
+
+A file's `require` grants everything in its file, and declares only for that file's entry points.
+A library whose file requires a feature says the file may use it, not that every shader listing one of its bindings must accept it.
+The binding's own `require` is how a library says that (CHK-261), so a user's entry point is never made non-portable by a line in a file it does not own.
+Letting a listed binding carry its needs to the entry point on its own would erase that difference, and a file-wide permission would silently become every user's requirement.
+
+## CHK-263
+
+The floor is defined by what the language counts, never by what an optimizer happens to remove.
+A floor that followed dead-code elimination would change with a compiler version or an unrelated refactor, and the host would find out on a device that lacks the feature.
+So every use the entry point reaches counts, including one behind a condition that is always false.
+A compile-time branch on a feature, `if feature raytracing:`, is the form that may leave a use out, and it is not built.
+
+## CHK-265
+
+A binding's `require` is how a library says what a device must have to take the binding, and a member need not be what uses it.
+A binding that carries an acceleration structure later, or that a caller's shader reads through a feature, states the need before anything in SGL can show it.
+So only a body's `require` can be unused: it says nothing about any binding, and it is the one place an unneeded line is certainly a mistake.

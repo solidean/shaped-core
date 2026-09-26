@@ -43,6 +43,8 @@ enum class sgl::emit::error_kind : sgl::u8
     not_core,
     /// An entry point listing more groups than sg binds, which is three besides the inline constants.
     too_many_groups,
+    /// An entry point that needs a feature no device of this target has, which the detail names.
+    target_lacks_feature,
 };
 
 struct sgl::emit::error
@@ -112,8 +114,9 @@ namespace sgl::emit
 /// An address is a position: member i of an edge struct is location i, counted over the members without `@position`.
 ///
 /// Total: a module with errors, a position out of range and a construct no target carries yet are errors in the result.
-/// No error depends on `t` but two, so an entry point written for one target is written for every other: `msl`
+/// No error depends on `t` but three, so an entry point written for one target is written for every other: `msl`
 /// refuses a compute entry point and a group, which are both arguments of a Metal entry point and wait for a Metal compiler.
+/// And `wgsl` refuses an entry point needing a feature WebGPU never has, which is portability the shader opted out of.
 /// Deterministic: equal arguments give equal text.
 [[nodiscard]] emitted_text emit(check::checked_module const& m, isize entry_point, target t);
 

@@ -122,6 +122,8 @@ struct sgl::described_entry_point
     i32 workgroup[3] = {1, 1, 1};
     /// The binding list in the order written, which is the order of the pipeline layout's groups with any `@inline` one last.
     cc::vector<cc::string> bindings;
+    /// The `sg::feature`s a device needs to run it, by name, in the enum's order.
+    cc::vector<cc::string> features;
 };
 
 /// One field of a pipeline's description, as the check pass resolved it.
@@ -153,13 +155,15 @@ struct sgl::described_pipeline
     cc::string target_set;
     /// The members of `target_set`, in location order.
     cc::vector<cc::string> targets;
+    /// What its stages need of a device together, as `described_entry_point::features`.
+    cc::vector<cc::string> features;
     /// In the order they apply, each over the ones before it.
     cc::vector<described_pipeline_setting> settings;
     /// The paths the host states at acquire, whose last setting is `.host`, in the order first set so.
     cc::vector<cc::string> open;
     /// What the host's generated code is built against, one `key = value` line each, in a fixed order:
-    /// the layout, the inline constants, the vertex input and the target set, each as `name@shape`, then the last
-    /// setting of every format and of the sample count.
+    /// the layout, the inline constants, the vertex input and the target set, each as `name@shape`, then `features`,
+    /// then the last setting of every format and of the sample count.
     /// A build bakes these, and a hot reload that finds any of them changed keeps what it had.
     cc::vector<cc::string> frozen;
 };

@@ -6,6 +6,7 @@
 #include <clean-core/string/string.hh>
 #include <shaped-graphics/binding/binding.hh>
 #include <shaped-graphics/binding/shader_stage.hh>
+#include <shaped-graphics/context/capabilities.hh>
 #include <shaped-graphics/fwd.hh>
 
 /// A compiled shader: a bytecode blob plus the metadata and reflection needed to build pipelines and bind resources.
@@ -72,6 +73,12 @@ struct sg::compiled_shader
     /// A pipeline description that names no target set takes this one.
     /// slib sets it once a compile settles, so a cached shader never carries it.
     cc::string target_set;
+
+    /// The features a device needs to run it, which pipeline creation refuses a device without.
+    /// Empty is the portable baseline, and nullopt is unknown: a compiler that cannot tell, such as one reading HLSL, says so.
+    /// An unknown shader is built as a portable one would be, and only the backend can still refuse it.
+    /// slib sets it for an SGL shader once a compile settles, so a cached shader never carries it.
+    cc::optional<feature_set> required_features;
 
     // Deferred: constant-buffer member layouts, root/push constants, content hash, I/O signatures.
 };
