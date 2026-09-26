@@ -515,7 +515,7 @@ fun update(state: particle):
 |---|---|---|---|
 | module | `module name` | yes | no |
 | import | `use module`, `use module as name` | yes | yes |
-| feature requirement | `require feature`, `require a, b` | yes | yes |
+| feature requirement | `require feature`, `require a, b`, `require:` and one name per line | yes | yes |
 | function | `fun` and a [signature](#functions) | yes | yes |
 | struct | `struct name:` and a block of [members](#members) | yes | yes |
 | enum | `enum name:` and a block of members | yes | yes |
@@ -535,6 +535,7 @@ fun update(state: particle):
 * **AST-139** A `test` stands in a struct and an enum as well, and inside another `test` is `declaration-not-allowed-here`.
   No jump crosses a `test`'s body, so a `return` in it is `jump-without-target`.
 * **AST-142** Each argument of a `require` is one name, and any other argument, or none at all, is `expected-name`.
+  `require:` with a block takes one name per line instead, and a `require` with both arguments and a block is `too-many-arguments`.
   What the names mean is the check pass's ([Features](../semantics/checking.md#features)).
 
 ```sgl

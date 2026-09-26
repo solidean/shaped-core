@@ -58,5 +58,6 @@ cc::result<sgl::emitted_source, cc::string> sgl::compile_to_text(text_request co
                                .entry_point = cc::move(emitted.entry_point),
                                .bound_names = cc::move(emitted.bound_names),
                                .color_targets = emitted.color_targets,
-                               .target_struct = cc::move(emitted.target_struct)};
+                               .target_struct = cc::move(emitted.target_struct),
+                               .features = e.features};
 }

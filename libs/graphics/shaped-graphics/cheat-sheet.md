@@ -98,6 +98,9 @@ ctx.supports(sg::feature::raytracing)              // bool — THE capability qu
                                                    //   binding_arrays false (webgpu) = no count > 1 bindings, no staging_binding_group, no bindless_array
                                                    //   the per-scope bools (cmd.raytracing.is_supported(), cmd.query.is_supported(),
                                                    //   ctx.supports_headless_present()) all forward here, so there is one answer per question
+ctx.supported_features()                           // sg::feature_set (cc::flags<feature>) — every feature supports() says yes to
+ctx.missing_features(shader)                       // feature_set — what shader.required_features holds that this device lacks; empty when unknown
+sg::to_string(f)  sg::feature_from_string(name)    // "raytracing" <-> feature::raytracing; sg::k_all_features lists them in enum order
 ctx.limits()                                       // -> sg::device_limits const& — { max_binding_groups, max_sample_count }
                                                    //   FLOORS a portable caller sizes against, not the most the hardware could do
 ctx.threading()                                    // sg::thread_model — which ops are concurrency-safe
@@ -623,7 +626,10 @@ sg::shader_format           // dxil | spirv | metal_lib | wgsl — which backend
 // sg only CONSUMES compiled shaders. Producing one — packages, compilation, hot reload — is
 // shaped-shader-library's job; docs/shaders.md is the front door for the whole shader system.
 sg::compiled_shader         // { stage; format; entry_point; cc::vector<byte> bytecode; cc::vector<binding> bindings;
-                            //   cc::optional<compute_dimensions> workgroup_size; compiler_info compiler }  — value type
+                            //   cc::optional<compute_dimensions> workgroup_size; compiler_info compiler; ...;
+                            //   cc::optional<feature_set> required_features }  — value type
+                            //   required_features: EMPTY = portable baseline, NULLOPT = unknown (HLSL / raw WGSL cannot say);
+                            //   slib fills it for an SGL shader from its `require`s; never cached, like target_set
 sg::compiled_shader_handle  // std::shared_ptr<compiled_shader const>
 // data model only: no compiler yet (construct by hand / future loader)
 ```
@@ -745,6 +751,7 @@ sg::raster_pipeline_description   // { pipeline_layout_handle layout; compiled_s
                                   //   depth/stencil state with no depth_stencil_format warns at creation: it would draw without either
                                   //   creation refuses a stage whose reflection does not fit `layout` (sg::describe_layout_misfit, binding/layout_fit.hh),
                                   //   and a fragment shader's color_output_count (at most color_targets; the rest need an empty write_mask) and target_set; an empty target_set takes the shader's
+                                  //   every pipeline kind refuses a stage whose required_features the device lacks, naming the feature (ctx.missing_features asks first)
 sg::color_target_state            // { pixel_format format; optional<blend_state> blend={}; color_write_mask write_mask=color_write_mask_all }  — one color target's PSO state
 sg::vertex_input_layout           // { small_vector<vertex_input_slot,8> slots; vector<vertex_attribute> attributes }; static create<Vs...>() derives one slot per type
                                   //   via a sg::vertex_layout_of<V> specialization (static vertex_type_layout get()). vertex_attribute { string semantic; u32 semantic_index; vertex_attribute_format format; isize offset; int slot }

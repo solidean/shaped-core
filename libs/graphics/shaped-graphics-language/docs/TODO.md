@@ -16,8 +16,8 @@ What the compiler carries today is the [spec](spec/_index.md); a construct it do
 - **Features used in a body.** Only a binding member uses a feature today, so a body's `require` can only declare one for its entry point (CHK-237).
   The first builtin or binding array that needs one in a body brings the use into the inlined entry point, and `feature-not-declared` then names the call chain down to it.
   A `require` inside a nested block, and `if feature f:` to branch on one, wait for that too.
-- **Features on the host.** `sgl describe` reports what an entry point needs, and sg's `compiled_shader` and pipeline descriptions do not carry it yet.
-  sg should refuse a pipeline whose shaders need what `ctx.supports` denies, by the feature's name.
+- **Features across a hot reload.** A reload whose shader needs a feature the device lacks compiles, and its pipeline is then refused by the feature's name.
+  It could keep the pipeline it had instead, as a moved `frozen` line does.
 - **Unsigned literals.** A `uint` is reached through `as` today, `1 as uint`, since a literal with a suffix is `unsupported-yet` (CHK-61).
   Whether `1u` exists or a literal takes the type it is asked for is the question [literal-types.md](spec/incubator/literal-types.md) holds.
 - **File-scope samplers.** A `sampler name:` at file scope is a pipeline layout's `sg::bound_sampler`, which vulkan and metal do not bind yet (sg's TODO.md).

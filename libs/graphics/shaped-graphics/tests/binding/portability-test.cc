@@ -1,5 +1,6 @@
 #include <nexus/test.hh>
 #include <shaped-graphics/binding/binding.hh>
+#include <shaped-graphics/binding/compiled_shader.hh>
 #include <shaped-graphics/binding/impl/portability.hh>
 #include <shaped-graphics/resource/pixel_format.hh>
 #include <shaped-graphics/resource/raw_texture.hh>
@@ -100,4 +101,36 @@ TEST("sg::portability - a view of undefined format is judged by its texture's ow
     auto const filterable = sampled_binding(sg::texture_sample_type::filterable_float);
     CHECK(refused(filterable, view_of(sg::pixel_format::r32_float, sg::pixel_format::undefined)));
     CHECK(!refused(filterable, view_of(sg::pixel_format::rgba8_unorm, sg::pixel_format::undefined)));
+}
+
+TEST("sg - a stage needing a feature the device lacks is refused by that feature's name")
+{
+    auto shader = sg::compiled_shader();
+    shader.entry_point = "main_ps";
+    sg::compiled_shader const* const stages[] = {nullptr, &shader};
+    auto const none = sg::feature_set();
+    auto const tracing = sg::feature_set(sg::feature::raytracing);
+
+    // Unknown is not judged: nothing about it can be named.
+    CHECK(!sg::impl::find_missing_feature(none, stages).has_value());
+
+    // Empty is the portable baseline, which every device has.
+    shader.required_features = sg::feature_set();
+    CHECK(!sg::impl::find_missing_feature(none, stages).has_value());
+
+    shader.required_features = tracing;
+    auto const missing = sg::impl::find_missing_feature(none, stages);
+    REQUIRE(missing.has_value());
+    CHECK(missing.value() == "the shader 'main_ps' needs sg::feature::raytracing, and this device lacks it");
+    CHECK(!sg::impl::find_missing_feature(tracing, stages).has_value());
+}
+
+TEST("sg - every feature has a name, and the name finds it")
+{
+    for (auto const f : sg::k_all_features)
+    {
+        CHECK(!sg::to_string(f).empty());
+        CHECK(sg::feature_from_string(sg::to_string(f)) == cc::optional<sg::feature>(f));
+    }
+    CHECK(!sg::feature_from_string("ray_query").has_value());
 }

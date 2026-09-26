@@ -255,16 +255,23 @@ decl_id builder::require_declaration(statement_head const& head, keyword_parts c
     auto const attributes = attributes_of(head.whole);
     reject_arrow(head);
     reject_assignment(head);
-    if (is_valid(parts.block))
-        report(diagnostic_kind::too_many_arguments, parts.block);
 
-    // AST-142: each argument names one feature.
+    // AST-142: each argument names one feature, and so does each line of the block form.
     auto features = cc::vector<expr_id>();
+    auto const add = [&](form_id name)
+    {
+        features.push_back(is_kind(name, form_kind::identifier)
+                               ? expression(name)
+                               : invalid_expression(name, diagnostic_kind::expected_name));
+    };
     for (auto const argument : parts.arguments)
-        features.push_back(is_kind(argument, form_kind::identifier)
-                               ? expression(argument)
-                               : invalid_expression(argument, diagnostic_kind::expected_name));
-    if (parts.arguments.empty())
+        add(argument);
+    if (is_valid(parts.block) && !parts.arguments.empty())
+        report(diagnostic_kind::too_many_arguments, parts.block);
+    else if (is_valid(parts.block))
+        for (auto const line : lines_of(parts.block))
+            add(line);
+    if (features.empty())
         features.push_back(invalid_expression(head.keyword_form, diagnostic_kind::expected_name));
     return make_decl(head.whole, attributes,
                      require_decl{.features = append(ast.expr_lists, cc::span<expr_id const>(features))});

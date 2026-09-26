@@ -4,6 +4,8 @@
 #include <shaped-graphics-language/driver/compile_to_text.hh>
 #include <shaped-shader-library/compiler/sgl_compiler.hh>
 
+using namespace cc::primitive_defines;
+
 namespace
 {
 [[nodiscard]] sgl::emit::target target_of(sg::shader_format format)
@@ -66,6 +68,16 @@ public:
             result.renamed_bindings.push_back({.reflected = cc::move(bound.emitted), .name = cc::move(bound.host)});
         result.color_targets = text.value().color_targets;
         result.target_struct = cc::move(text.value().target_struct);
+        // SGL names each feature as sg does, and links no sg to say so in types.
+        auto features = sg::feature_set();
+        for (auto i = isize(0); i < sgl::check::k_feature_count; ++i)
+            if (text.value().features.has(sgl::check::feature(i)))
+            {
+                auto const f = sg::feature_from_string(sgl::check::k_feature_names[i]);
+                CC_ASSERT(f.has_value(), "every feature SGL knows is an sg::feature of the same name");
+                features.set(f.value());
+            }
+        result.required_features = features;
         return result;
     }
 

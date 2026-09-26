@@ -45,6 +45,13 @@ TEST("sgl ast - require names features, at file level, in a binding and in a bod
     CHECK(ast_of("binding b:\n    require raytracing\n    x: float\n")
           == "(binding b\n  (require raytracing)\n  (field x : float))");
 
+    // The block form: one name per line, the same node as the argument form.
+    CHECK(ast_of("require:\n    extended_image_formats\n    binding_arrays\n")
+          == "(require extended_image_formats binding_arrays)");
+    CHECK(body_of("require:\n    raytracing\n") == "(require raytracing)");
+    CHECK(ast_of("require a:\n    b\n").contains("too-many-arguments"));
+    CHECK(ast_of("require:\n    5\n").contains("expected-name"));
+
     CHECK(ast_of("require\n") == "(require (invalid \"require\")) !! expected-name @0+7\n");
     CHECK(ast_of("require 5\n") == "(require (invalid \"5\")) !! expected-name @8+1\n");
     CHECK(ast_of("require a.b\n") == "(require (invalid \"a.b\")) !! expected-name @8+3\n");

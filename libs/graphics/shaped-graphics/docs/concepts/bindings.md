@@ -106,7 +106,11 @@ That equivalence is what lets a binding validate a bound view with no backend in
 ## Features
 
 **A form some device lacks is refused where it is lacking, and refused alike on every backend.**
-Two such forms are judged before any backend sees them, in [portability.cc](../../src/shaped-graphics/binding/impl/portability.cc):
+Three such forms are judged before any backend sees them, in [portability.cc](../../src/shaped-graphics/binding/impl/portability.cc):
+
+- A compiled shader whose `required_features` names a feature the device lacks, and the refusal comes at pipeline creation, for every pipeline kind.
+  Empty is the portable baseline and nullopt is unknown, which is not judged: a shader read from HLSL cannot say what it needs.
+  An SGL shader states it, from the `require`s its entry point needs, and `ctx.missing_features(shader)` asks before building.
 
 - A texture with `image` usage, or an `image` binding, in a format outside `is_portable_image_format` needs `feature::extended_image_formats`.
   The portable set is core WebGPU's image formats, and the refusal comes at texture creation and at layout creation.

@@ -33,8 +33,17 @@ cc::optional<cc::string> misfit_of(sg::compiled_shader const& shader, sg::pipeli
     return cc::format("the shader '{}' does not fit its pipeline layout:\n{}", shader.entry_point, misfit);
 }
 
+/// Why a compute pipeline of `desc` cannot be built on a device with `supported`, or nothing when it can.
+cc::optional<cc::string> refusal_of(sg::compute_pipeline_description const& desc, sg::feature_set supported)
+{
+    sg::compiled_shader const* const stages[] = {&desc.shader};
+    if (auto missing = sg::impl::find_missing_feature(supported, stages); missing.has_value())
+        return missing;
+    return misfit_of(desc.shader, desc.layout);
+}
+
 // What the frontend checks of a raster description before any backend sees it.
-cc::optional<cc::string> refusal_of(sg::raster_pipeline_description const& desc)
+cc::optional<cc::string> refusal_of(sg::raster_pipeline_description const& desc, sg::feature_set supported)
 {
     sg::compiled_shader const* const stages[] = {
         &desc.vertex_shader,
@@ -45,6 +54,8 @@ cc::optional<cc::string> refusal_of(sg::raster_pipeline_description const& desc)
     };
     if (auto conflict = sg::impl::find_binding_conflict(stages); conflict.has_value())
         return conflict;
+    if (auto missing = sg::impl::find_missing_feature(supported, stages); missing.has_value())
+        return missing;
     for (auto const* stage : stages)
         if (stage != nullptr)
             if (auto misfit = misfit_of(*stage, desc.layout); misfit.has_value())
@@ -170,8 +181,8 @@ compute_pipeline_handle context_uncached_scope::create_compute_pipeline(compute_
 cc::result<compute_pipeline_handle> context_uncached_scope::try_create_compute_pipeline(
     compute_pipeline_description const& desc)
 {
-    if (auto misfit = misfit_of(desc.shader, desc.layout); misfit.has_value())
-        return cc::error(cc::move(misfit.value()));
+    if (auto refusal = refusal_of(desc, _ctx.supported_features()); refusal.has_value())
+        return cc::error(cc::move(refusal.value()));
     return _ctx.try_create_compute_pipeline(desc, lifetime_scope::persistent);
 }
 
@@ -187,7 +198,7 @@ raster_pipeline_handle context_uncached_scope::create_raster_pipeline(raster_pip
 
 cc::result<raster_pipeline_handle> context_uncached_scope::try_create_raster_pipeline(raster_pipeline_description const& desc)
 {
-    if (auto refusal = refusal_of(desc); refusal.has_value())
+    if (auto refusal = refusal_of(desc, _ctx.supported_features()); refusal.has_value())
         return cc::error(cc::move(refusal.value()));
 
     auto r = _ctx.try_create_raster_pipeline(desc, lifetime_scope::persistent);
@@ -199,16 +210,16 @@ cc::result<raster_pipeline_handle> context_uncached_scope::try_create_raster_pip
 cc::shared_async<compute_pipeline_handle> context_uncached_scope::create_compute_pipeline_async(
     compute_pipeline_description const& desc)
 {
-    if (auto misfit = misfit_of(desc.shader, desc.layout); misfit.has_value())
+    if (auto refusal = refusal_of(desc, _ctx.supported_features()); refusal.has_value())
         return cc::make_async_from_error<compute_pipeline_handle>(
-            cc::async_error::make_error(cc::any_error(cc::move(misfit.value()))));
+            cc::async_error::make_error(cc::any_error(cc::move(refusal.value()))));
     return _ctx.create_compute_pipeline_async(desc, lifetime_scope::persistent);
 }
 
 cc::shared_async<raster_pipeline_handle> context_uncached_scope::create_raster_pipeline_async(
     raster_pipeline_description const& desc)
 {
-    if (auto refusal = refusal_of(desc); refusal.has_value())
+    if (auto refusal = refusal_of(desc, _ctx.supported_features()); refusal.has_value())
         return cc::make_async_from_error<raster_pipeline_handle>(
             cc::async_error::make_error(cc::any_error(cc::move(refusal.value()))));
 
@@ -251,6 +262,8 @@ cc::result<raytracing_pipeline_handle> context_uncached_scope::try_create_raytra
     }
     if (auto conflict = impl::find_binding_conflict(stages); conflict.has_value())
         return cc::error(cc::move(conflict.value()));
+    if (auto missing = impl::find_missing_feature(_ctx.supported_features(), stages); missing.has_value())
+        return cc::error(cc::move(missing.value()));
 
     return _ctx.try_create_raytracing_pipeline(desc, lifetime_scope::persistent);
 }
