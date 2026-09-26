@@ -70,6 +70,7 @@ enum class sgl::diagnostic_kind : sgl::u8
     /// The owner has no such member: a method in a `binding`, a field in an `enum`, a case in a `struct`.
     member_not_allowed_here,
     default_not_allowed_here,
+    named_only_not_allowed_here,
     missing_parameter_list,
     signature_out_of_order,
     duplicate_signature_list,

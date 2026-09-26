@@ -88,6 +88,8 @@ cc::string_view sgl::to_string(diagnostic_kind kind)
         return "member-not-allowed-here";
     case diagnostic_kind::default_not_allowed_here:
         return "default-not-allowed-here";
+    case diagnostic_kind::named_only_not_allowed_here:
+        return "named-only-not-allowed-here";
     case diagnostic_kind::missing_parameter_list:
         return "missing-parameter-list";
     case diagnostic_kind::signature_out_of_order:
@@ -246,6 +248,7 @@ sgl::severity sgl::default_severity_of(diagnostic_kind kind)
     case diagnostic_kind::misplaced_module:
     case diagnostic_kind::member_not_allowed_here:
     case diagnostic_kind::default_not_allowed_here:
+    case diagnostic_kind::named_only_not_allowed_here:
     case diagnostic_kind::missing_parameter_list:
     case diagnostic_kind::signature_out_of_order:
     case diagnostic_kind::duplicate_signature_list:

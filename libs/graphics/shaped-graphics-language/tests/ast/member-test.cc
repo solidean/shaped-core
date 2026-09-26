@@ -193,3 +193,37 @@ TEST("sgl ast - mut and out qualify a type only at the top of a type position")
     // AST-130: `out` outside a type position is no qualifier.
     CHECK(body_of("out = 1\n").contains("!!"));
 }
+
+TEST("sgl ast - a leading dot makes a parameter or a field named-only")
+{
+    CHECK(ast_of("fun f(x: float, .level: float = 0.0) => x\n")
+          == "(fun f (params (field x : float) (field .level : float = num:0.0)) => x)");
+    CHECK(ast_of("struct light:\n    color: vec3\n    .intensity: float = 1.0\n")
+          == "(struct light\n  (field color : vec3)\n  (field .intensity : float = num:1.0))");
+    // A call may name it with the dot too, as it may any named argument.
+    CHECK(ast_of("fun g() => f(x, .level = 2.0)\n") == "(fun g (params) => (call:paren f x .level=num:2.0))");
+}
+
+TEST("sgl ast - a named-only mark where nothing is filled by name")
+{
+    CHECK(ast_of("binding b:\n    .scale: float\n")
+          == "(binding b\n  (field .scale : float)) !! named-only-not-allowed-here @15+13\n");
+    CHECK(ast_of("struct s:\n    fun f(.self) => 1\n")
+          == "(struct s\n  (fun f (params (field .self)) => num:1)) !! named-only-not-allowed-here @20+5\n");
+}
+
+TEST("sgl ast - fun with a dotted name extends a type, and without parameters is a property of it")
+{
+    CHECK(ast_of("fun ray.from_points(a: pos3, b: pos3) -> ray => ray(a, b - a)\n")
+          == "(fun ray.from_points (params (field a : pos3) (field b : pos3)) -> ray => (call:paren ray a (call:infix "
+             "- b "
+             "a)))");
+    CHECK(ast_of("fun ray.distance_to(self, p: pos3) -> float => 0.0\n")
+          == "(fun ray.distance_to (params (field self) (field p : pos3)) -> float => num:0.0)");
+    CHECK(ast_of("fun ray.inverted => ray(self.origin, -self.dir)\n")
+          == "(property ray.inverted => (call:paren ray (member self origin) (call:prefix - (member self dir))))");
+    CHECK(ast_of("fun ray.inverted -> ray => self\n") == "(property ray.inverted -> ray => self)");
+    // Bindings or type parameters without the parameter list are no property.
+    CHECK(ast_of("fun ray.f{frame} => 1\n")
+          == "(fun ray.f (params) (uses frame) => num:1) !! missing-parameter-list @4+5\n");
+}

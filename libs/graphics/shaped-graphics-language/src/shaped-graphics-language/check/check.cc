@@ -348,6 +348,11 @@ void checker::declare(i32 file, ast::decl_id decl)
             // a function that lost its name was reported by the AST pass, and nothing can call it
             if (f.name.empty())
                 return;
+            if (!f.extended_type.empty())
+            {
+                unsupported(file, span_of(file, decl), "an extension");
+                return;
+            }
             auto s = named(symbol_kind::function, f.name);
             if (auto const* const a = find_attribute(file, d.attributes, "operator"))
             {
@@ -418,7 +423,12 @@ void checker::declare(i32 file, ast::decl_id decl)
         [&](ast::test_decl const&) { add_test(file, decl, ""); },
         // A member line at module level and an `invalid` declaration were reported by the AST pass.
         [&](ast::field_decl const&) {}, //
-        [&](ast::property_decl const&) {}, [&](ast::enum_case_decl const&) {}, [&](ast::invalid_decl const&) {});
+        [&](ast::property_decl const& p)
+        {
+            if (!p.extended_type.empty())
+                unsupported(file, span_of(file, decl), "an extension");
+        },
+        [&](ast::enum_case_decl const&) {}, [&](ast::invalid_decl const&) {});
 }
 
 symbol_state checker::demand(symbol_id id, i32 file, source_span where)

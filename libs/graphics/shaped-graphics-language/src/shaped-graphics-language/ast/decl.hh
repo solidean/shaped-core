@@ -39,6 +39,8 @@ enum class sgl::ast::receiver_kind : sgl::u8
 struct sgl::ast::fun_decl
 {
     source_span name;
+    /// `T` of `fun T.name(…)`, an extension; empty for every other function (AST-142).
+    source_span extended_type;
     range_of<field> type_parameters;
     /// `self`, when written, is the first entry here as well as in `receiver`.
     range_of<field> parameters;
@@ -154,9 +156,14 @@ struct sgl::ast::field_decl
 };
 
 /// `name => value`: a computed, read-only member without a parameter list.
+/// `fun T.name => value` is the same property declared from outside its type (AST-143).
 struct sgl::ast::property_decl
 {
     source_span name;
+    /// `T` of an extension property, empty for a member line.
+    source_span extended_type;
+    /// `none` unless an extension property writes `-> type`.
+    expr_id return_type = expr_id::none;
     sgl::ast::body body;
 
     constexpr bool operator==(property_decl const&) const = default;
