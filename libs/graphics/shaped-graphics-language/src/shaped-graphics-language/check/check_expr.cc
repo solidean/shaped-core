@@ -10,6 +10,21 @@ namespace
 {
 constexpr auto error_type = checked_module::error_type;
 constexpr auto void_type = checked_module::void_type;
+
+/// Appends one argument to every parallel list of `a`.
+void add_argument(call_arguments& a,
+                  written_argument w,
+                  type_id type,
+                  cc::string_view name = {},
+                  number_literal number = {},
+                  i32 literal = -1)
+{
+    a.written.push_back(w);
+    a.types.push_back(type);
+    a.names.push_back(name);
+    a.numbers.push_back(number);
+    a.literals.push_back(literal);
+}
 } // namespace
 
 // ---- bodies ---------------------------------------------------------------------------------------------------------
@@ -112,12 +127,7 @@ void checker::check_defaults(symbol_id id)
     {
         if (ast::is_valid(p.field) && p.has_default)
         {
-            auto const value = ast.at(p.field).default_value;
-            auto const type = check_expr(scope, value);
-            if (type != error_type && p.type != error_type && type != p.type)
-                report(diagnostic_kind::type_mismatch, file, span_of(file, value),
-                       cc::format("the default of {} is {}, and {} takes {}", p.name, out.name_of(type), p.name,
-                                  out.name_of(p.type)));
+            (void)check_expected(scope, ast.at(p.field).default_value, p.type, cc::format("the default of {}", p.name));
         }
         // a parameter is visible to the defaults after it
         if (ast::is_valid(p.field))
@@ -160,67 +170,6 @@ type_id checker::check_index(function_scope& scope, ast::expr_id id, ast::index 
         report(diagnostic_kind::type_mismatch, file, span_of(file, arguments[0].value),
                cc::format("a buffer is indexed by an int, and this is a {}", out.name_of(index)));
     return out.at(object).element;
-}
-
-void checker::convert_object(function_scope& scope, ast::expr_id object, type_id to)
-{
-    auto const file = scope.file;
-    auto const& ast = ast_of(file);
-    auto const where = span_of(file, object);
-    auto const elements = ast.at(ast.at(object).node.as<ast::object>().elements);
-    set_type(file, object, to);
-
-    auto const target_type = out.at(to);
-    auto const members = out.at(target_type.members);
-    if (to != error_type && target_type.is_opaque)
-        report(diagnostic_kind::type_mismatch, file, where,
-               cc::format("{} has no fields an object could name", out.name_of(to)));
-
-    auto seen = cc::vector<bool>::create_filled(members.size(), false);
-    for (auto const& e : elements)
-    {
-        auto const element_where = span_of(file, e.form);
-        judge_attributes(file, e.attributes, {}, "an object element");
-        if (e.is_splat)
-        {
-            unsupported(file, element_where, "a splat in an object");
-            continue;
-        }
-        if (e.is_shorthand)
-        {
-            unsupported(file, element_where, "a shorthand object element");
-            continue;
-        }
-
-        auto member = isize(-1);
-        auto const name = text_of(file, e.name);
-        for (auto i = isize(0); i < members.size(); ++i)
-            if (members[i].name == name)
-                member = i;
-
-        // a positional element was reported by the AST pass
-        if (member < 0 && !e.name.empty() && to != error_type && !target_type.is_opaque)
-            report(diagnostic_kind::unknown_field, file, e.name, cc::format("{} has no field {}", out.name_of(to), name));
-        if (member >= 0 && seen[member])
-            report(diagnostic_kind::duplicate_field, file, e.name, name);
-        if (member >= 0)
-            seen[member] = true;
-
-        auto const expected = member >= 0 ? members[member].type : error_type;
-        if (ast::is_valid(e.value) && ast.at(e.value).node.is<ast::object>())
-        {
-            convert_object(scope, e.value, expected);
-            continue;
-        }
-        auto const type = check_expr(scope, e.value);
-        if (type != error_type && expected != error_type && type != expected)
-            report(diagnostic_kind::type_mismatch, file, span_of(file, e.value),
-                   cc::format("{} is {}, got {}", name, out.name_of(expected), out.name_of(type)));
-    }
-
-    for (auto i = isize(0); i < members.size(); ++i)
-        if (!seen[i])
-            report(diagnostic_kind::missing_field, file, where, members[i].name);
 }
 
 // ---- expressions ----------------------------------------------------------------------------------------------------
@@ -400,9 +349,7 @@ type_id checker::check_name(function_scope& scope, ast::expr_id id, ast::name co
         if (!properties.empty())
         {
             auto arguments = call_arguments();
-            arguments.written.push_back({.is_receiver = true});
-            arguments.types.push_back(scope.receiver);
-            arguments.names.push_back({});
+            add_argument(arguments, {.is_receiver = true}, scope.receiver);
             return resolve_overload(scope, id, ast::expr_id::none, properties, arguments, text, call_spelling::dot_read);
         }
     }
@@ -574,9 +521,7 @@ type_id checker::check_member(function_scope& scope, ast::expr_id id, ast::membe
         return error_type;
     }
     auto arguments = call_arguments();
-    arguments.written.push_back({.expr = member.object});
-    arguments.types.push_back(object);
-    arguments.names.push_back({});
+    add_argument(arguments, {.expr = member.object}, object);
     return resolve_overload(scope, id, ast::expr_id::none, candidates, arguments, name, call_spelling::dot_read);
 }
 
@@ -594,6 +539,16 @@ call_arguments checker::check_arguments(function_scope& scope, ast::range_of<ast
         if (!a.attributes.empty())
             result.is_poisoned = true;
 
+        // CHK-81: a tuple or an object literal converts to the parameter it meets, so it has no type of its own yet
+        auto const* const value = ast::is_valid(a.value) ? &ast_of(file).at(a.value).node : nullptr;
+        if (!a.is_splat && value != nullptr && (value->is<ast::tuple>() || value->is<ast::object>()))
+        {
+            auto const literal = shape_literal(scope, a.value);
+            result.is_poisoned = result.is_poisoned || literals[literal].is_poisoned;
+            add_argument(result, {.expr = a.value}, type_id::none, text_of(file, a.name), {}, literal);
+            continue;
+        }
+
         handed.push_back(a.value);
         auto const type = check_expr(scope, a.value);
         handed.pop_back();
@@ -604,9 +559,7 @@ call_arguments checker::check_arguments(function_scope& scope, ast::range_of<ast
         }
         if (!a.is_splat)
         {
-            result.written.push_back({.expr = a.value});
-            result.types.push_back(type);
-            result.names.push_back(text_of(file, a.name));
+            add_argument(result, {.expr = a.value}, type, text_of(file, a.name), number_of(file, a.value));
             continue;
         }
 
@@ -626,14 +579,77 @@ call_arguments checker::check_arguments(function_scope& scope, ast::range_of<ast
             auto member = i32(0);
             for (auto const& m : out.at(out.at(type).members))
             {
-                result.written.push_back({.expr = a.value, .splat_member = member++});
-                result.types.push_back(m.type);
-                result.names.push_back({});
+                add_argument(result, {.expr = a.value, .splat_member = member++}, m.type);
                 result.is_poisoned = result.is_poisoned || m.type == error_type;
             }
         }
     }
     return result;
+}
+
+number_literal checker::number_of(i32 file, ast::expr_id expr) const
+{
+    if (!ast::is_valid(expr) || !ast_of(file).at(expr).node.is<ast::literal>())
+        return {};
+    auto const text = text_of(file, span_of(file, expr));
+    switch (classify_number(text))
+    {
+    case number_class::plain_integer:
+    {
+        auto const value = parse_plain_integer(text);
+        if (!value.has_value())
+            return {};
+        return {.is_number = true, .is_integer = true, .integer = value.value()};
+    }
+    case number_class::plain_float:
+    {
+        auto const value = parse_plain_float(text);
+        if (!value.has_value())
+            return {};
+        return {.is_number = true, .real = value.value()};
+    }
+    case number_class::other:
+        break;
+    }
+    return {};
+}
+
+i32 checker::shape_literal(function_scope& scope, ast::expr_id expr)
+{
+    auto const file = scope.file;
+    auto const& node = ast_of(file).at(expr).node;
+    auto const* const tuple = node.try_as<ast::tuple>();
+    auto const elements = ast_of(file).at(tuple != nullptr ? tuple->elements : node.as<ast::object>().elements);
+    auto shaped = call_arguments();
+    for (auto const& e : elements)
+    {
+        auto const where = span_of(file, e.form);
+        judge_attributes(file, e.attributes, {}, "an element");
+        // CHK-86
+        if (e.is_splat || e.is_shorthand)
+        {
+            unsupported(file, where, e.is_splat ? "a splat in a literal" : "a shorthand object element");
+            shaped.is_poisoned = true;
+            continue;
+        }
+        auto const* const inner = ast::is_valid(e.value) ? &ast_of(file).at(e.value).node : nullptr;
+        if (inner != nullptr && (inner->is<ast::tuple>() || inner->is<ast::object>()))
+        {
+            auto const literal = shape_literal(scope, e.value);
+            shaped.is_poisoned = shaped.is_poisoned || literals[literal].is_poisoned;
+            add_argument(shaped, {.expr = e.value}, type_id::none, text_of(file, e.name), {}, literal);
+            continue;
+        }
+        auto const type = check_expr(scope, e.value);
+        if (type == error_type)
+        {
+            shaped.is_poisoned = true;
+            continue;
+        }
+        add_argument(shaped, {.expr = e.value}, type, text_of(file, e.name), number_of(file, e.value));
+    }
+    literals.push_back(cc::move(shaped));
+    return i32(literals.size() - 1);
 }
 
 cc::string checker::signature_text(cc::string_view spelling, cc::span<type_id const> types) const
@@ -853,6 +869,8 @@ type_id checker::check_dot_call(function_scope& scope, ast::expr_id id, ast::cal
     arguments.written.insert_at(0, {.expr = member.object});
     arguments.types.insert_at(0, receiver);
     arguments.names.insert_at(0, {});
+    arguments.numbers.insert_at(0, {});
+    arguments.literals.insert_at(0, -1);
 
     auto const candidates = candidates_of(file, name, receiver);
     if (candidates.empty())
@@ -876,11 +894,10 @@ type_id checker::resolve_overload(function_scope& scope,
     auto const where = span_of(file, id);
 
     auto is_silent = arguments.is_poisoned;
-    auto matches = cc::vector<symbol_id>();
-    auto match_slots = cc::vector<cc::vector<i32>>();
+    auto matches = cc::vector<candidate_match>();
     for (auto const candidate : candidates)
     {
-        if (is_out_of_the_running(candidate, arguments))
+        if (is_out_of_the_running(file, candidate, arguments))
             continue;
         if (demand(candidate, file, where) != symbol_state::checked)
         {
@@ -889,12 +906,8 @@ type_id checker::resolve_overload(function_scope& scope,
         }
         if (arguments.is_poisoned)
             continue;
-        auto const parameters = out.at(out.functions[out.at(candidate).info].parameters);
-        auto bound = bind_arguments(parameters, arguments);
-        if (bound.failure != bind_failure::none || !converts(parameters, arguments, bound.slots))
-            continue;
-        matches.push_back(candidate);
-        match_slots.push_back(cc::move(bound.slots));
+        if (auto m = match(file, candidate, arguments); m.has_value())
+            matches.push_back(cc::move(m.value()));
     }
 
     if (matches.empty())
@@ -916,38 +929,16 @@ type_id checker::resolve_overload(function_scope& scope,
             report(diagnostic_kind::no_matching_overload, file, where, call_text(spelling, arguments));
         return error_type;
     }
-    // CHK-192: a match of the program's file hides every match of the prelude
-    auto is_program_match = false;
-    for (auto const m : matches)
-        is_program_match = is_program_match || !is_prelude_file(out.at(m).file);
-    if (is_program_match)
-        for (auto i = matches.size() - 1; i >= 0; --i)
-            if (is_prelude_file(out.at(matches[i]).file))
-            {
-                matches.remove_at(i);
-                match_slots.remove_at(i);
-            }
-    // CHK-255: a function of a type scope is better than one found by name at the call
-    auto const is_of_type
-        = [&](symbol_id m) { return is_valid(out.at(m).owner) && out.at(m).role != function_role::constructor; };
-    auto type_scoped = 0;
-    for (auto const m : matches)
-        type_scoped += is_of_type(m) ? 1 : 0;
-    if (type_scoped > 0 && type_scoped < matches.size())
-        for (auto i = matches.size() - 1; i >= 0; --i)
-            if (!is_of_type(matches[i]))
-            {
-                matches.remove_at(i);
-                match_slots.remove_at(i);
-            }
-    if (matches.size() > 1)
+    auto const best = best_of(cc::move(matches));
+    if (best.size() > 1)
     {
         report(diagnostic_kind::ambiguous_overload, file, where,
-               cc::format("{} has {} candidates", call_text(spelling, arguments), matches.size()));
+               cc::format("{} has {} candidates", call_text(spelling, arguments), best.size()));
         return error_type;
     }
 
-    auto const chosen = matches.front();
+    auto const& chosen_match = best.front();
+    auto const chosen = chosen_match.candidate;
     auto const& chosen_symbol = out.at(chosen);
     // CHK-256: the spelling says what the writer means, and is checked on the target it chose
     if (written_as == call_spelling::dot_read && chosen_symbol.role != function_role::property)
@@ -956,21 +947,258 @@ type_id checker::resolve_overload(function_scope& scope,
     else if (written_as == call_spelling::dot_call && chosen_symbol.role == function_role::property)
         report(diagnostic_kind::call_spelling, file, where,
                cc::format("{} is a property, so it is read: write .{}", spelling, spelling));
+
     // A synthesized constructor is its struct's, which is what an editor goes to.
     auto const self = chosen_symbol.role == function_role::constructor
                         ? target{.kind = target_kind::constructor, .symbol = chosen_symbol.owner}
                         : target{.kind = target_kind::overload, .symbol = chosen};
     set_target(file, id, self);
     set_target(file, callee, self);
-    record_call(file, id, chosen, arguments, match_slots.front());
-    auto const result = out.functions[chosen_symbol.info].result;
+    record_call(file, id, chosen, arguments, chosen_match.slots);
+    // by value: resolving a literal argument may compile another function, and `functions` then moves
+    auto const info = out.functions[chosen_symbol.info];
+    commit_literals(scope, arguments, out.at(info.parameters), chosen_match.slots);
     if (chosen_symbol.role == function_role::constructor)
-        set_type(file, callee, result);
-    if (is_valid(chosen_symbol.intrinsic) || chosen_symbol.role == function_role::constructor)
-        return result;
+        set_type(file, callee, info.result);
+    if (is_valid(out.at(chosen).intrinsic) || out.at(chosen).role == function_role::constructor)
+        return info.result;
 
     note_program_call(scope, chosen, where);
+    return info.result;
+}
+
+cc::optional<candidate_match> checker::match(i32 file, symbol_id candidate, call_arguments const& arguments)
+{
+    // by value: a literal argument may compile another function, and `parameters` then moves
+    auto const range = out.functions[out.at(candidate).info].parameters;
+    auto const parameters = cc::vector<parameter>::create_copy_of(out.at(range));
+    auto bound = bind_arguments(parameters, arguments);
+    if (bound.failure != bind_failure::none)
+        return cc::nullopt;
+    auto result = candidate_match{.candidate = candidate,
+                                  .slots = cc::move(bound.slots),
+                                  .chains = cc::vector<i32>::create_filled(arguments.written.size(), 0)};
+    for (auto p = isize(0); p < parameters.size(); ++p)
+    {
+        auto const i = result.slots[p];
+        if (i < 0)
+            continue;
+        auto const length = chain_of(file, parameters[p].type, arguments, i, result.at_default);
+        if (!length.has_value())
+            return cc::nullopt;
+        result.chains[i] = length.value();
+    }
     return result;
+}
+
+cc::optional<i32> checker::chain_of(i32 file, type_id parameter, call_arguments const& arguments, isize i, i32& at_default)
+{
+    if (arguments.literals[i] >= 0)
+        return literal_chain(file, parameter, arguments.literals[i], at_default);
+    if (arguments.numbers[i].is_number)
+    {
+        // CHK-253: a number literal converts to what holds it, at no cost; its default type is what it was checked as
+        if (!holds(arguments.numbers[i], parameter))
+            return cc::nullopt;
+        at_default += parameter == arguments.types[i] ? 1 : 0;
+        return 0;
+    }
+    return takes(parameter, arguments.types[i]) ? cc::optional<i32>(0) : cc::nullopt;
+}
+
+cc::vector<symbol_id> checker::functions_named_after(i32 file, type_id to) const
+{
+    auto result = cc::vector<symbol_id>();
+    if (!is_valid(to) || to == error_type || out.at(to).kind != type_kind::structure)
+        return result;
+    if (auto const* const found = names_seen_from(file).get_ptr(out.at(out.at(to).symbol).name))
+        for (auto const id : *found)
+            if (out.at(id).kind == symbol_kind::function)
+                result.push_back(id);
+    return result;
+}
+
+cc::optional<i32> checker::literal_chain(i32 file, type_id to, i32 literal, i32& at_default)
+{
+    auto matches = cc::vector<candidate_match>();
+    for (auto const candidate : functions_named_after(file, to))
+    {
+        if (out.at(candidate).state == symbol_state::in_compilation)
+            continue;
+        if (demand(candidate, file, {}) != symbol_state::checked)
+            continue;
+        if (auto m = match(file, candidate, literals[literal]); m.has_value())
+            matches.push_back(cc::move(m.value()));
+    }
+    auto const best = best_of(cc::move(matches));
+    if (best.size() != 1)
+        return cc::nullopt;
+    at_default += best.front().at_default;
+    auto longest = 0;
+    for (auto const c : best.front().chains)
+        longest = c > longest ? c : longest;
+    return longest + 1;
+}
+
+cc::vector<candidate_match> checker::best_of(cc::vector<candidate_match> matches) const
+{
+    // CHK-192: a match of the program's file hides every match of the prelude
+    auto is_program_match = false;
+    for (auto const& m : matches)
+        is_program_match = is_program_match || !is_prelude_file(out.at(m.candidate).file);
+    if (is_program_match)
+        matches.remove_all_where([&](candidate_match const& m) { return is_prelude_file(out.at(m.candidate).file); });
+
+    // CHK-254: a candidate no worse at any argument and better at one is better; the best is better than every other
+    auto const is_better = [](candidate_match const& a, candidate_match const& b)
+    {
+        auto is_shorter = false;
+        for (auto i = isize(0); i < a.chains.size(); ++i)
+        {
+            if (a.chains[i] > b.chains[i])
+                return false;
+            is_shorter = is_shorter || a.chains[i] < b.chains[i];
+        }
+        return is_shorter;
+    };
+    auto result = cc::vector<candidate_match>();
+    for (auto const& m : matches)
+    {
+        auto is_beaten = false;
+        for (auto const& other : matches)
+            is_beaten = is_beaten || is_better(other, m);
+        if (!is_beaten)
+            result.push_back(m);
+    }
+    if (result.size() < 2)
+        return result;
+
+    // CHK-255: only between candidates whose chains agree at every argument
+    for (auto const& m : result)
+        for (auto i = isize(0); i < m.chains.size(); ++i)
+            if (m.chains[i] != result.front().chains[i])
+                return result;
+    auto most = 0;
+    for (auto const& m : result)
+        most = m.at_default > most ? m.at_default : most;
+    result.remove_all_where([&](candidate_match const& m) { return m.at_default < most; });
+    auto const is_of_type = [&](candidate_match const& m)
+    { return is_valid(out.at(m.candidate).owner) && out.at(m.candidate).role != function_role::constructor; };
+    auto type_scoped = isize(0);
+    for (auto const& m : result)
+        type_scoped += is_of_type(m) ? 1 : 0;
+    if (type_scoped > 0 && type_scoped < result.size())
+        result.remove_all_where([&](candidate_match const& m) { return !is_of_type(m); });
+    return result;
+}
+
+type_id checker::prelude_type(cc::string_view name) const
+{
+    auto const* const found = prelude_names.get_ptr(name);
+    if (found == nullptr || found->empty() || out.at(found->front()).kind != symbol_kind::structure)
+        return type_id::none;
+    return out.at(found->front()).type;
+}
+
+bool checker::holds(number_literal const& n, type_id to) const
+{
+    if (!is_valid(to))
+        return false;
+    if (to == prelude_type(builtins::k_int))
+        return n.is_integer && n.integer >= -2147483648ll && n.integer <= 2147483647ll;
+    if (to == prelude_type(builtins::k_uint))
+        return n.is_integer && n.integer >= 0 && n.integer <= 4294967295ll;
+    if (to == prelude_type(builtins::k_float))
+    {
+        // an integer converts only where the float holds it exactly, and a float rounds to nearest within range
+        if (n.is_integer)
+            return f64(f32(n.integer)) == f64(n.integer);
+        auto const magnitude = n.real < 0 ? -n.real : n.real;
+        return magnitude <= 3.4028234663852886e38;
+    }
+    return false;
+}
+
+void checker::commit_literals(function_scope& scope,
+                              call_arguments const& arguments,
+                              cc::span<parameter const> parameters,
+                              cc::span<i32 const> slots)
+{
+    // by value: resolving a literal may compile another function, and `parameters` then moves
+    auto const copied = cc::vector<parameter>::create_copy_of(parameters);
+    for (auto p = isize(0); p < copied.size(); ++p)
+    {
+        auto const i = slots[p];
+        if (i < 0)
+            continue;
+        if (arguments.numbers[i].is_number)
+            set_type(scope.file, arguments.written[i].expr, copied[p].type);
+        else if (arguments.literals[i] >= 0)
+            (void)resolve_literal(scope, arguments.written[i].expr, copied[p].type, arguments.literals[i]);
+    }
+}
+
+type_id checker::resolve_literal(function_scope& scope, ast::expr_id expr, type_id to, i32 literal)
+{
+    auto const file = scope.file;
+    auto const where = span_of(file, expr);
+    if (to == error_type || literals[literal].is_poisoned)
+        return error_type;
+    auto const candidates = functions_named_after(file, to);
+    if (candidates.empty())
+    {
+        report(diagnostic_kind::type_mismatch, file, where,
+               out.at(to).kind == type_kind::structure
+                   ? cc::format("{} is opaque, so no literal converts to it", out.name_of(to))
+                   : cc::format("a literal converts to a struct, and {} is none", out.name_of(to)));
+        return error_type;
+    }
+    // by value: `literals` may grow while the call resolves
+    auto const arguments = literals[literal];
+    auto const result
+        = resolve_overload(scope, expr, ast::expr_id::none, candidates, arguments, out.at(out.at(to).symbol).name);
+    set_type(file, expr, to);
+    // CHK-85: a function of the type's name that gives another type is called by name, and converts nothing
+    if (result != error_type && result != to)
+        report(diagnostic_kind::literal_conversion_result, file, where,
+               cc::format("this literal converts by {}, which returns {} and not {}",
+                          out.at(out.files[file].target_at(expr).symbol).name, out.name_of(result), out.name_of(to)));
+    return result == error_type ? error_type : to;
+}
+
+type_id checker::check_expected(function_scope& scope, ast::expr_id expr, type_id to, cc::string_view what)
+{
+    auto const file = scope.file;
+    if (!ast::is_valid(expr))
+        return error_type;
+    auto const& node = ast_of(file).at(expr).node;
+    // CHK-82: a tuple or an object literal converts to the type expected where it stands
+    if (node.is<ast::tuple>() || node.is<ast::object>())
+    {
+        auto const literal = shape_literal(scope, expr);
+        return resolve_literal(scope, expr, to, literal);
+    }
+    auto const type = check_expr(scope, expr);
+    if (type == error_type || to == error_type)
+        return type;
+    // CHK-253: a number literal where one type is expected converts to it where it holds exactly
+    auto const number = number_of(file, expr);
+    if (number.is_number && type != to && prelude_type(out.name_of(to)) == to)
+    {
+        if (!holds(number, to))
+        {
+            report(diagnostic_kind::literal_not_representable, file, span_of(file, expr),
+                   cc::format("{} does not hold {} exactly", out.name_of(to), text_of(file, span_of(file, expr))));
+            return error_type;
+        }
+        set_type(file, expr, to);
+        return to;
+    }
+    if (type != to)
+        report(diagnostic_kind::type_mismatch, file, span_of(file, expr),
+               what.empty() ? cc::format("expected {}, got {}", out.name_of(to), out.name_of(type))
+                            : cc::format("{} is {}, got {}", what, out.name_of(to), out.name_of(type)));
+    return type;
 }
 
 bound_arguments checker::bind_arguments(cc::span<parameter const> parameters, call_arguments const& arguments) const
@@ -1020,14 +1248,6 @@ bound_arguments checker::bind_arguments(cc::span<parameter const> parameters, ca
         if (result.slots[p] < 0 && !parameters[p].has_default)
             return fail(bind_failure::missing_argument, -1, p);
     return result;
-}
-
-bool checker::converts(cc::span<parameter const> parameters, call_arguments const& arguments, cc::span<i32 const> slots) const
-{
-    for (auto p = isize(0); p < parameters.size(); ++p)
-        if (slots[p] >= 0 && !takes(parameters[p].type, arguments.types[slots[p]]))
-            return false;
-    return true;
 }
 
 void checker::record_call(i32 file,
@@ -1115,7 +1335,8 @@ type_id checker::check_chain(function_scope& scope, ast::expr_id id, ast::compar
             continue;
         type_id const pair[] = {types[i], types[i + 1]};
         auto const spelling = text_of(file, file_of(file).at(operators[i]).where);
-        auto const chosen = resolve_operator(file, where, spelling, pair);
+        ast::expr_id const both[] = {operands[i], operands[i + 1]};
+        auto const chosen = resolve_operator(file, where, spelling, pair, both);
         if (is_valid(chosen) && out.functions[out.at(chosen).info].result != bool_type && bool_type != error_type)
             report(diagnostic_kind::type_mismatch, file, where,
                    cc::format("a comparison in a chain is a bool, and operator {} gives {}", spelling,
@@ -1124,14 +1345,12 @@ type_id checker::check_chain(function_scope& scope, ast::expr_id id, ast::compar
     return bool_type;
 }
 
-bool checker::is_out_of_the_running(symbol_id candidate, call_arguments const& arguments) const
+bool checker::is_out_of_the_running(i32 file, symbol_id candidate, call_arguments const& arguments)
 {
     auto const& s = out.at(candidate);
     if (s.kind != symbol_kind::function || s.state != symbol_state::in_compilation || s.info < 0)
         return false;
-    auto const parameters = out.at(out.functions[s.info].parameters);
-    auto const bound = bind_arguments(parameters, arguments);
-    return bound.failure != bind_failure::none || !converts(parameters, arguments, bound.slots);
+    return !match(file, candidate, arguments).has_value();
 }
 
 symbol_id checker::find_operator(cc::string_view spelling, cc::span<type_id const> types) const
@@ -1156,54 +1375,58 @@ symbol_id checker::find_operator(cc::string_view spelling, cc::span<type_id cons
     return result;
 }
 
-symbol_id checker::resolve_operator(i32 file, source_span where, cc::string_view spelling, cc::span<type_id const> types)
+symbol_id checker::resolve_operator(i32 file,
+                                    source_span where,
+                                    cc::string_view spelling,
+                                    cc::span<type_id const> types,
+                                    cc::span<ast::expr_id const> operands)
 {
-    auto matches = 0;
-    auto is_silent = false;
-    auto chosen = symbol_id::none;
-    auto positional = call_arguments{.types = cc::vector<type_id>::create_copy_of(types)};
+    auto arguments = call_arguments();
     for (auto i = isize(0); i < types.size(); ++i)
     {
-        positional.written.push_back({});
-        positional.names.push_back({});
+        auto const expr = i < operands.size() ? operands[i] : ast::expr_id::none;
+        add_argument(arguments, {.expr = expr}, types[i], {}, number_of(file, expr));
     }
+
+    auto is_silent = false;
+    auto matches = cc::vector<candidate_match>();
     if (auto const* const found = operators.get_ptr(spelling))
         for (auto const candidate : *found)
         {
-            if (is_out_of_the_running(candidate, positional))
+            if (is_out_of_the_running(file, candidate, arguments))
                 continue;
             if (demand(candidate, file, where) != symbol_state::checked)
             {
                 is_silent = true;
                 continue;
             }
-            auto const parameters = out.at(out.functions[out.at(candidate).info].parameters);
-            auto is_match = parameters.size() == types.size();
-            for (auto i = isize(0); is_match && i < parameters.size(); ++i)
-                is_match = parameters[i].type == types[i];
-            if (is_match)
-            {
-                ++matches;
-                chosen = candidate;
-            }
+            if (auto m = match(file, candidate, arguments); m.has_value())
+                matches.push_back(cc::move(m.value()));
         }
 
     auto const text = signature_text(cc::format("operator {}", spelling), types);
-    if (matches == 0)
+    if (matches.empty())
     {
         if (!is_silent)
             report(diagnostic_kind::no_matching_overload, file, where, text);
         return symbol_id::none;
     }
-    if (matches > 1)
+    auto const best = best_of(cc::move(matches));
+    if (best.size() > 1)
     {
-        report(diagnostic_kind::ambiguous_overload, file, where, cc::format("{} has {} candidates", text, matches));
+        report(diagnostic_kind::ambiguous_overload, file, where, cc::format("{} has {} candidates", text, best.size()));
         return symbol_id::none;
     }
+    auto const chosen = best.front().candidate;
     if (!is_valid(out.at(chosen).intrinsic))
     {
         unsupported(file, where, "an operator of the program's own where no call is written");
         return symbol_id::none;
     }
+    // a number literal operand takes the type of the parameter it fills, which is what the flat tree writes
+    auto const parameters = out.at(out.functions[out.at(chosen).info].parameters);
+    for (auto i = isize(0); i < parameters.size() && i < operands.size(); ++i)
+        if (arguments.numbers[i].is_number)
+            set_type(file, operands[i], parameters[i].type);
     return chosen;
 }

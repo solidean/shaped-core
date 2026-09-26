@@ -224,8 +224,10 @@ struct writer
             [&](flat_int_literal const& l)
             {
                 auto const is_wrapped = l.value == -2147483647 - 1;
-                result = {.text = int_literal_text(l.value),
-                          .binds = l.value < 0 && !is_wrapped ? level::unary : level::primary};
+                auto text = int_literal_text(l.value);
+                if (l.is_unsigned)
+                    text += "u";
+                result = {.text = cc::move(text), .binds = l.value < 0 && !is_wrapped ? level::unary : level::primary};
             },
             [&](flat_bool_literal const& l) { result = {.text = l.value ? "true" : "false"}; },
             [&](flat_enum_value const& v)

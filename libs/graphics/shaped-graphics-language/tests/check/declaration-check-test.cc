@@ -285,7 +285,7 @@ TEST("sgl check - an entry point with an error has diagnostics and no flat tree"
 TEST("sgl check - a default is checked once, where it is declared, and reads only the parameters before it")
 {
     CHECK(reports_for("fun f(x: float, y: float = true) -> float => x + y\n")
-          == "type-mismatch user:[true] the default of y is bool, and y takes float\n");
+          == "type-mismatch user:[true] the default of y is float, got bool\n");
     CHECK(reports_for("fun f(x: float = y, y: float = 1.0) -> float => x + y\n") == "unknown-name user:[y] y\n");
     // a field's default is its constructor parameter's, and reads the fields before it
     CHECK(reports_for("struct s:\n    a: float = b\n    b: float = 1.0\n") == "unknown-name user:[b] b\n");

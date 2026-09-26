@@ -139,6 +139,16 @@ struct function_notes
     u8 inlines_whole = 0;
 };
 
+/// A number literal as an argument, which converts to any numeric type that holds it (CHK-253).
+struct number_literal
+{
+    bool is_number = false;
+    /// An integer literal, whose value is `integer`; a float literal's is `real`.
+    bool is_integer = false;
+    i64 integer = 0;
+    f64 real = 0;
+};
+
 /// The arguments of one call as it wrote them, a splat spread into one per field, before any candidate is looked at.
 struct call_arguments
 {
@@ -148,8 +158,24 @@ struct call_arguments
     cc::vector<type_id> types;
     /// Parallel to `written`: the name of a named argument, empty for a positional one.
     cc::vector<cc::string_view> names;
+    /// Parallel to `written`: what a number literal holds, for the conversions it may take.
+    cc::vector<number_literal> numbers;
+    /// Parallel to `written`: a tuple or object literal, as a position in `checker::literals`; -1 for anything else.
+    /// Such a literal has no type of its own, so its entry in `types` is `none` (CHK-81).
+    cc::vector<i32> literals;
     /// An argument had the error type or was reported, so the call reports nothing about its arguments.
     bool is_poisoned = false;
+};
+
+/// One candidate that takes a call's arguments: which argument fills which parameter, and at what cost.
+struct candidate_match
+{
+    symbol_id candidate = symbol_id::none;
+    cc::vector<i32> slots;
+    /// Parallel to the call's written arguments: the length of the chain that converts each to its parameter (CHK-70).
+    cc::vector<i32> chains;
+    /// How many number literals keep their default type, inside converted literals included (CHK-255).
+    i32 at_default = 0;
 };
 
 /// Why a candidate did not take a call's arguments (CHK-252), or `none` where it did.
@@ -225,6 +251,9 @@ struct checker
     /// Members are declared with their type, and extensions once every file is declared (CHK-233, CHK-237).
     cc::map<i32, cc::map<cc::string, cc::vector<symbol_id>>> type_scopes;
     cc::vector<pending_extension> pending_extensions;
+    /// The elements of every tuple and object literal an argument or an expected type met, each as the arguments of the
+    /// call it converts by (CHK-81); positions stay valid while it grows.
+    cc::vector<call_arguments> literals;
     /// The symbols in compilation, outermost first, which is the loop a dependency cycle names.
     cc::vector<symbol_id> compiling;
     cc::vector<function_notes> notes;
@@ -422,7 +451,6 @@ struct checker
     [[nodiscard]] cc::string comment_of(i32 file, source_span where) const;
     /// Reports a use of what a test cannot reach: a name `local` of the function around it.
     void report_capture(function_scope const& scope, source_span where, local_name const& local);
-    void convert_object(function_scope& scope, ast::expr_id object, type_id to);
     /// `values[i]`, which today is a buffer element and nothing else; the error type where it is not one.
     [[nodiscard]] type_id check_index(function_scope& scope, ast::expr_id id, ast::index const& node);
     /// `x as T`, which is the operator function of `as` that takes `x` and gives `T`; the error type where none does.
@@ -482,18 +510,49 @@ struct checker
     [[nodiscard]] symbol_id resolve_operator(i32 file,
                                              source_span where,
                                              cc::string_view spelling,
-                                             cc::span<type_id const> types);
+                                             cc::span<type_id const> types,
+                                             cc::span<ast::expr_id const> operands = {});
     /// True for a function whose inferred result is being compiled right now and whose parameters do not take `types`.
     /// Its parameters are known by then, so a call that could never choose it does not need its result.
     /// That keeps an overload set usable from inside one of its own inferred members, where demanding it would be a cycle.
-    [[nodiscard]] bool is_out_of_the_running(symbol_id candidate, call_arguments const& arguments) const;
+    [[nodiscard]] bool is_out_of_the_running(i32 file, symbol_id candidate, call_arguments const& arguments);
     /// Which argument fills which parameter, by position and by name; says why where the arguments do not bind.
     [[nodiscard]] bound_arguments bind_arguments(cc::span<parameter const> parameters,
                                                  call_arguments const& arguments) const;
-    /// True where every argument that fills a parameter converts to its type.
-    [[nodiscard]] bool converts(cc::span<parameter const> parameters,
-                                call_arguments const& arguments,
-                                cc::span<i32 const> slots) const;
+    /// How `candidate`, which is checked, takes the arguments: its slots and the chain of each argument.
+    /// Nothing where the arguments do not bind or one does not convert.
+    /// It reports nothing, so a literal can try every candidate.
+    [[nodiscard]] cc::optional<candidate_match> match(i32 file, symbol_id candidate, call_arguments const& arguments);
+    /// The length of the chain that converts written argument `i` to `parameter`, counting a literal kept at its
+    /// default type into `at_default`; nothing where it does not convert.
+    [[nodiscard]] cc::optional<i32> chain_of(i32 file,
+                                             type_id parameter,
+                                             call_arguments const& arguments,
+                                             isize i,
+                                             i32& at_default);
+    /// The chain of tuple or object literal `literal` to `to`: one more than its call's longest (CHK-84).
+    [[nodiscard]] cc::optional<i32> literal_chain(i32 file, type_id to, i32 literal, i32& at_default);
+    /// The functions of the name of the struct `to` visible from `file`, its synthesized constructor among them.
+    [[nodiscard]] cc::vector<symbol_id> functions_named_after(i32 file, type_id to) const;
+    /// The matches that remain after CHK-192, CHK-254 and CHK-255; one is the target, more are ambiguous.
+    [[nodiscard]] cc::vector<candidate_match> best_of(cc::vector<candidate_match> matches) const;
+    /// True where number literal `n` holds exactly in the prelude's numeric type `to` (CHK-253).
+    [[nodiscard]] bool holds(number_literal const& n, type_id to) const;
+    /// The prelude's `float`, `int` or `uint` by name, as a literal's conversion knows them; `none` for another name.
+    [[nodiscard]] type_id prelude_type(cc::string_view name) const;
+    /// What a number literal `expr` holds; `is_number` is false for any other expression.
+    [[nodiscard]] number_literal number_of(i32 file, ast::expr_id expr) const;
+    /// The elements of tuple or object literal `expr`, checked where they are no literal themselves, into `literals`.
+    [[nodiscard]] i32 shape_literal(function_scope& scope, ast::expr_id expr);
+    /// Converts literal `expr`, shaped as `literal`, to `to` by a call of `to`'s name (CHK-81, CHK-85).
+    type_id resolve_literal(function_scope& scope, ast::expr_id expr, type_id to, i32 literal);
+    /// `expr` where the type `to` is expected, which a literal converts to (CHK-82); reports a value of another type.
+    type_id check_expected(function_scope& scope, ast::expr_id expr, type_id to, cc::string_view what = {});
+    /// Gives each literal argument of a chosen call the type of the parameter it fills.
+    void commit_literals(function_scope& scope,
+                         call_arguments const& arguments,
+                         cc::span<parameter const> parameters,
+                         cc::span<i32 const> slots);
     /// Remembers how call `id` fills the parameters of `callee`, which is what the flat tree is written from.
     void record_call(i32 file, ast::expr_id id, symbol_id callee, call_arguments const& arguments, cc::span<i32 const> slots);
     /// The candidates of `spelling` that take exactly `types`, without a report; what the flat tree is written from.

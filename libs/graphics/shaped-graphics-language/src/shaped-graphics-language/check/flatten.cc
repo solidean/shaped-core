@@ -344,6 +344,9 @@ struct flattener
 
         if (e.node.is<ast::literal>())
             return flatten_number(id, type);
+        // a tuple or an object literal is the call it converts by (CHK-81)
+        if ((e.node.is<ast::tuple>() || e.node.is<ast::object>()) && tables().call_at(id) >= 0)
+            return flatten_bound_call(id, type, c.out.call_records[tables().call_at(id)]);
         // void's one value is the construction of no fields.
         if (e.node.is<ast::void_ref>())
             return add_expr(type, id, flat_construct{});
@@ -442,13 +445,20 @@ struct flattener
         return fail();
     }
 
+    /// A number literal as the type it was checked as, which a conversion may have made other than its default.
     flat_expr_id flatten_number(ast::expr_id id, type_id type)
     {
         auto const text = c.text_of(file(), c.span_of(file(), id));
+        auto const is_float = type == c.prelude_type(builtins::k_float);
         if (classify_number(text) == number_class::plain_integer)
         {
             auto const value = parse_plain_integer(text);
-            return value.has_value() ? add_expr(type, id, flat_int_literal{.value = value.value()}) : fail();
+            if (!value.has_value())
+                return fail();
+            if (is_float)
+                return add_expr(type, id, flat_literal{.value = f64(value.value())});
+            auto const is_unsigned = type == c.prelude_type(builtins::k_uint);
+            return add_expr(type, id, flat_int_literal{.value = value.value(), .is_unsigned = is_unsigned});
         }
         auto const value = parse_plain_float(text);
         return value.has_value() ? add_expr(type, id, flat_literal{.value = value.value()}) : fail();
@@ -1068,25 +1078,6 @@ struct flattener
         return add_expr(type, id, flat_block{.label = value_block, .body = add_list(statements)});
     }
 
-    /// An object that converts to `type`: one value per field, in FIELD order, whatever order the source names them in.
-    flat_expr_id flatten_object(ast::expr_id id, type_id type)
-    {
-        auto const elements = ast().at(ast().at(id).node.as<ast::object>().elements);
-        auto values = cc::vector<flat_expr_id>();
-        for (auto const& m : c.out.at(c.out.at(type).members))
-        {
-            ast::argument const* named = nullptr;
-            for (auto const& e : elements)
-                if (c.text_of(file(), e.name) == m.name)
-                    named = &e;
-            if (named == nullptr)
-                return fail();
-            auto const is_object = ast::is_valid(named->value) && ast().at(named->value).node.is<ast::object>();
-            values.push_back(is_object ? flatten_object(named->value, m.type) : flatten_expr(named->value));
-        }
-        return add_expr(type, id, flat_construct{.arguments = add_list(values)});
-    }
-
     // ---- calls ------------------------------------------------------------------------------------------------------
 
     struct inlined_body
@@ -1288,10 +1279,7 @@ struct flattener
         auto const result_type = current()->result;
         auto result = flat_expr_id::none;
         if (ast::is_valid(value))
-        {
-            auto const is_object = ast().at(value).node.is<ast::object>();
-            result = is_object ? flatten_object(value, result_type) : flatten_expr(value);
-        }
+            result = flatten_expr(value);
         if (is_valid(return_label))
             add_stmt(from, flat_leave{.target = return_label, .value = result});
         else

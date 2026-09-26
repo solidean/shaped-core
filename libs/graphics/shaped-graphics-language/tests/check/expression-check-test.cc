@@ -190,7 +190,12 @@ TEST("sgl check - a binding member is reachable only through the function's bind
 TEST("sgl check - a number literal with a dot or an exponent is a float, and nothing else is carried")
 {
     CHECK(body_reports("return 0.5 + -0.4 + 1e3 + 2.5e-3 + 1. + 1'000.0\n") == "");
-    CHECK(body_reports("return 1\n") == "type-mismatch user:[1] expected float, got int\n");
+    // CHK-253: an integer literal a float holds exactly converts to it, and a float literal converts to no integer
+    CHECK(body_reports("return 1\n") == "");
+    CHECK(body_reports("return 16777217\n")
+          == "literal-not-representable user:[16777217] float does not hold 16777217 exactly\n");
+    CHECK(body_reports("let i: int = 1.0\nreturn k\n")
+          == "literal-not-representable user:[1.0] int does not hold 1.0 exactly\n");
     CHECK(body_reports("let i = 1'000 + -3\nreturn k\n") == "");
     CHECK(body_reports("let i = 3'000'000'000\nreturn k\n")
           == "unsupported-yet user:[3'000'000'000] an integer literal that does not fit an int\n");
@@ -206,15 +211,22 @@ TEST("sgl check - a number literal with a dot or an exponent is a float, and not
           == "unknown-name user:[1.0] float, which the prelude must declare @builtin\n");
 }
 
-TEST("sgl check - a returned object converts structurally: every field once, types equal")
+TEST("sgl check - a literal where a struct is expected converts by a call of the struct's name")
 {
     auto const head = cc::string("struct pair:\n    a: float\n    b: vec3\nfun f(k: float, v: vec3) -> pair:\n");
     CHECK(reports_for(head + "    return { a = k, b = v }\n") == "");
     CHECK(reports_for(head + "    return { b = v, a = k }\n") == "");
-    CHECK(reports_for(head + "    return { a = k }\n") == "missing-field user:[{ a = k }] b\n");
-    CHECK(reports_for(head + "    return { a = k, b = v, c = k }\n") == "unknown-field user:[c] pair has no field c\n");
-    CHECK(reports_for(head + "    return { a = k, a = k, b = v }\n") == "duplicate-field user:[a] a\n");
-    CHECK(reports_for(head + "    return { a = v, b = v }\n") == "type-mismatch user:[v] a is float, got vec3\n");
+    CHECK(reports_for(head + "    return (k, v)\n") == "");
+    CHECK(reports_for(head + "    return (k, b = v)\n") == "");
+    // CHK-84: what does not bind is the call's failure, and the constructor says what it takes
+    CHECK(reports_for(head + "    return { a = k }\n")
+          == "no-matching-overload user:[{ a = k }] pair(a = float), and the constructor is pair(float, vec3)\n");
+    CHECK(reports_for(head + "    return { a = k, b = v, c = k }\n")
+          == "no-matching-overload user:[{ a = k, b = v, c = k }] pair(a = float, b = vec3, c = float), and the "
+             "constructor is pair(float, vec3)\n");
+    CHECK(reports_for(head + "    return { a = v, b = v }\n")
+          == "no-matching-overload user:[{ a = v, b = v }] pair(a = vec3, b = vec3), and the constructor is "
+             "pair(float, vec3)\n");
     CHECK(reports_for(head + "    return k\n") == "type-mismatch user:[k] expected pair, got float\n");
     CHECK(reports_for(head + "    let p = { a = k, b = v }\n    return p\n")
           == "unsupported-yet user:[{ a = k, b = v }] an object with no struct to convert to\n");

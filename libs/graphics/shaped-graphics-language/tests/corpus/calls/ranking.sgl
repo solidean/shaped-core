@@ -1,0 +1,43 @@
+// where several candidates match, the best is no worse at any argument, and ties go to the literal's own type
+
+fun pick(x: int) -> int => 1
+fun pick(x: float) -> int => 2
+
+// a number literal converts to both at no cost, and the one that keeps its default type wins
+test pick(1) == 1
+test pick(1.0) == 2
+test pick(2.5) == 2
+
+// each candidate keeps one literal at its default type, so neither is better
+fun mix(a: int, b: float) -> int => 1
+fun mix(a: float, b: int) -> int => 2
+
+@expect(error = "ambiguous-overload") test mix(1, 1) == 1
+
+test mix(1, 1.0) == 1
+test mix(1.0, 1) == 2
+
+// operators resolve the same way: `1 + 2` is the int one, and a float beside a literal makes it the float one
+test 1 + 2 == 3
+test 0.5 + 1 == 1.5
+
+test:
+    let mut x = 0.5
+    x += 1
+    x == 1.5
+
+// the program's function hides the prelude's where both match
+fun saturate(x: float) -> float => 0.25
+
+test saturate(4.0) == 0.25
+
+// a function of the type scope is better than one found by name at the call
+struct pair:
+    a: float
+    b: float
+    fun sum(self) -> float => a + b
+
+fun sum(p: pair) -> float => 0.0
+
+test pair(1.0, 2.0).sum() == 3.0
+test sum(pair(1.0, 2.0)) == 3.0
