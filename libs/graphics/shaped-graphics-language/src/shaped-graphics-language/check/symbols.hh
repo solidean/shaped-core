@@ -118,7 +118,7 @@ struct sgl::check::type_info
     access_mode access = access_mode::read;
     /// A `sampler` that compares.
     bool is_comparison = false;
-    /// How a resource type is written, `out image2d[.rgba8_unorm]`; empty for a declared type, which its symbol names.
+    /// How a resource type is written, `out image_2d[.rgba8_unorm]`; empty for a declared type, which its symbol names.
     cc::string spelled;
 
     bool operator==(type_info const&) const = default;

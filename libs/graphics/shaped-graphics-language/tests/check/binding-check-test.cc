@@ -56,14 +56,14 @@ TEST("sgl check - bytes and a separate constant buffer are not built yet")
 
 TEST("sgl check - every texture, image and sampler form sg binds is a binding member")
 {
-    constexpr auto members = "    src: texture2d[float4]\n"
-                             "    ids: texture2d_array[uint]\n"
+    constexpr auto members = "    src: texture_2d[float4]\n"
+                             "    ids: texture_2d_array[uint]\n"
                              "    sky: texture_cube[float3]\n"
-                             "    shadow: texture2d_depth\n"
-                             "    @unfilterable positions: texture2d[float4]\n"
-                             "    ro: image2d[.rgba16_float]\n"
-                             "    acc: mut image2d[.r32_float]\n"
-                             "    dst: out image3d[.rgba8_unorm]\n"
+                             "    shadow: texture_2d_depth\n"
+                             "    @unfilterable positions: texture_2d[float4]\n"
+                             "    ro: image_2d[.rgba16_float]\n"
+                             "    acc: mut image_2d[.r32_float]\n"
+                             "    dst: out image_3d[.rgba8_unorm]\n"
                              "    smp: sampler\n"
                              "    cmp: comparison_sampler\n"
                              "    @non_filtering near: sampler\n"
@@ -77,18 +77,18 @@ TEST("sgl check - every texture, image and sampler form sg binds is a binding me
 TEST("sgl check - a resource that some backend lacks needs a feature, and a misplaced word is an error")
 {
     // CHK-201: refused by the feature that would grant it, on every target alike.
-    CHECK(reports_for(listing("    a: mut image2d[.rgba8_unorm]\n")).contains("needs-feature"));
-    CHECK(reports_for(listing("    a: mut image2d[.rgba8_unorm]\n")).contains("readwrite_image_formats"));
-    CHECK(reports_for(listing("    a: out image2d[.r8_unorm]\n")).contains("extended_image_formats"));
-    CHECK(reports_for(listing("    a: texture2d_ms_array[float4]\n")).contains("multisampled arrays"));
+    CHECK(reports_for(listing("    a: mut image_2d[.rgba8_unorm]\n")).contains("needs-feature"));
+    CHECK(reports_for(listing("    a: mut image_2d[.rgba8_unorm]\n")).contains("readwrite_image_formats"));
+    CHECK(reports_for(listing("    a: out image_2d[.r8_unorm]\n")).contains("extended_image_formats"));
+    CHECK(reports_for(listing("    a: texture_2d_ms_array[float4]\n")).contains("multisampled arrays"));
 
-    CHECK(reports_for(listing("    a: out texture2d[float4]\n")).contains("a texture is only ever read"));
+    CHECK(reports_for(listing("    a: out texture_2d[float4]\n")).contains("a texture is only ever read"));
     CHECK(reports_for(listing("    a: out buffer[float]\n")).contains("a buffer is never `out`"));
-    CHECK(reports_for(listing("    a: image2d[float4]\n")).contains("one of sg's image formats"));
-    CHECK(reports_for(listing("    a: image2d[.rgba7_unorm]\n")).contains("one of sg's image formats"));
-    CHECK(reports_for(listing("    a: texture2d[vec3]\n")).contains("a float, an int or a uint"));
-    CHECK(reports_for(listing("    a: texture2d\n")).contains("`texture2d[float4]`"));
-    CHECK(reports_for(listing("    @unfilterable a: texture2d[uint]\n")).contains("only a texture of floats"));
+    CHECK(reports_for(listing("    a: image_2d[float4]\n")).contains("one of sg's image formats"));
+    CHECK(reports_for(listing("    a: image_2d[.rgba7_unorm]\n")).contains("one of sg's image formats"));
+    CHECK(reports_for(listing("    a: texture_2d[vec3]\n")).contains("a float, an int or a uint"));
+    CHECK(reports_for(listing("    a: texture_2d\n")).contains("`texture_2d[float4]`"));
+    CHECK(reports_for(listing("    @unfilterable a: texture_2d[uint]\n")).contains("only a texture of floats"));
     CHECK(reports_for(listing("    @non_filtering a: comparison_sampler\n")).contains("only a `sampler` member"));
     CHECK(reports_for(listing("    sampler s:\n        filter = .cubic\n"))
               .contains("filter takes one of .nearest, .linear"));
@@ -160,7 +160,7 @@ TEST("sgl check - an @unfilterable texture is sampled only through a sampler tha
 {
     constexpr auto sample = "    let c = DEBUG_sample_level(work.t, float2(0.5, 0.5), 0.0, work.s)\n";
     auto const reports = [&](cc::string_view sampler)
-    { return reports_for(listing(cc::format("    @unfilterable t: texture2d[float4]\n{}", sampler), sample)); };
+    { return reports_for(listing(cc::format("    @unfilterable t: texture_2d[float4]\n{}", sampler), sample)); };
 
     CHECK(reports("    @non_filtering s: sampler\n") == "");
     CHECK(reports("    sampler s:\n        filter = .nearest\n") == "");
@@ -172,20 +172,20 @@ TEST("sgl check - an @unfilterable texture is sampled only through a sampler tha
     CHECK(reports("    sampler s:\n        filter = .nearest\n        mag_filter = .linear\n").contains(refused));
 
     // A texture that may be filtered takes either kind.
-    CHECK(reports_for(listing("    t: texture2d[float4]\n    s: sampler\n", sample)) == "");
+    CHECK(reports_for(listing("    t: texture_2d[float4]\n    s: sampler\n", sample)) == "");
 }
 
 TEST("sgl check - a texture, an image or a sampler is handed to a builtin and is no value otherwise")
 {
-    constexpr auto members = "    src: texture2d[float4]\n"
-                             "    ro: image2d[.rgba8_unorm]\n"
-                             "    dst: out image2d[.rgba8_unorm]\n"
+    constexpr auto members = "    src: texture_2d[float4]\n"
+                             "    ro: image_2d[.rgba8_unorm]\n"
+                             "    dst: out image_2d[.rgba8_unorm]\n"
                              "    smp: sampler\n";
     CHECK(reports_for(listing(members, "    let c = DEBUG_sample_level(work.src, float2(0.5, 0.5), 0.0, work.smp)\n"
                                        "    DEBUG_store(work.dst, int2(0, 0), c + DEBUG_load(work.ro, int2(0, 0)))\n"))
           == "");
 
-    CHECK(reports_for(listing(members, "    let t = work.src\n")).contains("texture2d[float4] as a value"));
+    CHECK(reports_for(listing(members, "    let t = work.src\n")).contains("texture_2d[float4] as a value"));
     // CHK-207: a read-only image cannot be stored to, and a write-only one cannot be loaded.
     CHECK(reports_for(listing(members, "    DEBUG_store(work.ro, int2(0, 0), float4(1.0, 1.0, 1.0, 1.0))\n"))
               .contains("no-matching-overload"));

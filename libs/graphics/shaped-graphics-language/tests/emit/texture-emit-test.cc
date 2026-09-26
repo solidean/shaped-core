@@ -8,9 +8,9 @@ namespace
 /// One of each resource a post-processing pass has: sample a texture, write one image, accumulate into another.
 constexpr cc::string_view k_blur = "binding post:\n"
                                    "    texel_size: float2\n"
-                                   "    src: texture2d[float4]\n"
-                                   "    dst: out image2d[.rgba8_unorm]\n"
-                                   "    acc: mut image2d[.r32_float]\n"
+                                   "    src: texture_2d[float4]\n"
+                                   "    dst: out image_2d[.rgba8_unorm]\n"
+                                   "    acc: mut image_2d[.r32_float]\n"
                                    "    sampler bilinear:\n"
                                    "        filter = .linear\n"
                                    "        address = .clamp_edge\n"
@@ -90,11 +90,11 @@ TEST("sgl emit - textures, images and a static sampler are resources of the grou
 TEST("sgl emit - each texture shape and depth is its target's own type, and 1D is 2D on WebGPU")
 {
     constexpr auto shapes = "binding set:\n"
-                            "    a: texture1d[float]\n"
-                            "    b: texture2d_array[uint4]\n"
+                            "    a: texture_1d[float]\n"
+                            "    b: texture_2d_array[uint4]\n"
                             "    c: texture_cube[float3]\n"
-                            "    d: texture2d_depth\n"
-                            "    e: image3d[.rgba16_float]\n"
+                            "    d: texture_2d_depth\n"
+                            "    e: image_3d[.rgba16_float]\n"
                             "    f: comparison_sampler\n"
                             "\n"
                             "@compute(1) fun cs(@thread_id id: int3){set}:\n"
@@ -124,7 +124,7 @@ TEST("sgl emit - MSL declines a group of textures as it declines one of buffers"
 TEST("sgl emit - a pixel stage samples with the level its derivatives pick")
 {
     constexpr auto lit = "binding material:\n"
-                         "    albedo: texture2d[float3]\n"
+                         "    albedo: texture_2d[float3]\n"
                          "    smp: sampler\n"
                          "\n"
                          "struct pixel_input:\n"
@@ -147,9 +147,9 @@ TEST("sgl emit - a size is one HLSL helper per texture type, declared once howev
 {
     constexpr auto sized
         = "binding set:\n"
-          "    a: texture2d[float4]\n"
-          "    b: texture2d[uint]\n"
-          "    c: out image2d[.rgba8_unorm]\n"
+          "    a: texture_2d[float4]\n"
+          "    b: texture_2d[uint]\n"
+          "    c: out image_2d[.rgba8_unorm]\n"
           "\n"
           "@compute(8, 8) fun cs(@thread_id id: int3){set}:\n"
           "    let s = DEBUG_size(set.a, 0) + DEBUG_size(set.a, 1) + DEBUG_size(set.b, 0) + DEBUG_size(set.c)\n"
@@ -180,8 +180,8 @@ TEST("sgl emit - a size is one HLSL helper per texture type, declared once howev
 TEST("sgl emit - a helper is declared by the entry point that calls it, and by no other of the module")
 {
     constexpr auto two = "binding set:\n"
-                         "    a: texture2d[float4]\n"
-                         "    c: out image2d[.rgba8_unorm]\n"
+                         "    a: texture_2d[float4]\n"
+                         "    c: out image_2d[.rgba8_unorm]\n"
                          "\n"
                          "@compute(8, 8) fun sized(@thread_id id: int3){set}:\n"
                          "    DEBUG_store(set.c, DEBUG_size(set.a, 0), float4(1.0, 1.0, 1.0, 1.0))\n"
@@ -200,8 +200,8 @@ TEST("sgl emit - a local named as a builtin the text calls is renamed, and the c
 {
     // WGSL's texture functions are predeclared, so a local of the same name would shadow the call.
     constexpr auto shadowing = "binding set:\n"
-                               "    src: texture2d[float4]\n"
-                               "    dst: out image2d[.rgba8_unorm]\n"
+                               "    src: texture_2d[float4]\n"
+                               "    dst: out image_2d[.rgba8_unorm]\n"
                                "\n"
                                "@compute(8, 8) fun cs(@thread_id id: int3){set}:\n"
                                "    let xy = int2(id.x, id.y)\n"
@@ -216,8 +216,8 @@ TEST("sgl emit - a local named as a builtin the text calls is renamed, and the c
 
     // `sgl_size` is the helper's name, so HLSL reserves it even where no helper is declared.
     constexpr auto sized = "binding set:\n"
-                           "    a: texture2d[float4]\n"
-                           "    c: out image2d[.rgba8_unorm]\n"
+                           "    a: texture_2d[float4]\n"
+                           "    c: out image_2d[.rgba8_unorm]\n"
                            "\n"
                            "@compute(8, 8) fun cs(@thread_id id: int3){set}:\n"
                            "    let sgl_size = int2(id.x, id.y)\n"
@@ -230,8 +230,8 @@ TEST("sgl emit - a local named as a builtin the text calls is renamed, and the c
 TEST("sgl emit - an int or a uint image pads a narrow store with zeros of its own kind in WGSL")
 {
     constexpr auto integers = "binding set:\n"
-                              "    i: out image2d[.r32_sint]\n"
-                              "    u: out image2d[.r32_uint]\n"
+                              "    i: out image_2d[.r32_sint]\n"
+                              "    u: out image_2d[.r32_uint]\n"
                               "\n"
                               "@compute(8, 8) fun cs(@thread_id id: int3){set}:\n"
                               "    let xy = int2(id.x, id.y)\n"
@@ -269,7 +269,7 @@ TEST("sgl emit - WGSL lets an implicit-derivative sample stand in non-uniform co
 {
     // Tint refuses what HLSL accepts, so the directive keeps the program written for every target (EMIT-103).
     constexpr auto branched = "binding material:\n"
-                              "    albedo: texture2d[float4]\n"
+                              "    albedo: texture_2d[float4]\n"
                               "    smp: sampler\n"
                               "\n"
                               "struct pixel_input:\n"

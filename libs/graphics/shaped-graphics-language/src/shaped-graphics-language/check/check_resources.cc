@@ -69,7 +69,7 @@ cc::string spelling_of(check::type_info const& t, checked_module const& m)
 type_id checker::resource_type(check::type_info info)
 {
     info.spelled = spelling_of(info, out);
-    // Interned, as a buffer is: two mentions of `texture2d[float4]` are one type.
+    // Interned, as a buffer is: two mentions of `texture_2d[float4]` are one type.
     for (auto i = isize(0); i < out.types.size(); ++i)
         if (out.types[i] == info)
             return type_id(i);
@@ -200,7 +200,7 @@ type_id checker::qualify_resource(i32 file, ast::expr_id expr, type_id inner, as
     if (t.kind == type_kind::texture)
     {
         report(diagnostic_kind::wrong_kind_of_name, file, where,
-               "a texture is only ever read; a storage texture the shader writes is an image, such as `image2d`");
+               "a texture is only ever read; a storage texture the shader writes is an image, such as `image_2d`");
         return checked_module::error_type;
     }
     if (is_write_only)

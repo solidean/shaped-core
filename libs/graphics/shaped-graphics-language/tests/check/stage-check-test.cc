@@ -9,9 +9,9 @@ using namespace sgl_test;
 namespace
 {
 constexpr cc::string_view k_resources = "binding tex:\n"
-                                        "    src: texture2d[float4]\n"
+                                        "    src: texture_2d[float4]\n"
                                         "    smp: sampler\n"
-                                        "    dst: out image2d[.rgba8_unorm]\n"
+                                        "    dst: out image_2d[.rgba8_unorm]\n"
                                         "\n"
                                         "struct pixel_input:\n"
                                         "    @position position: hpos4\n"

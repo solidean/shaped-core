@@ -27,11 +27,11 @@ enum class sgl::check::texture_shape : sgl::u8
 struct sgl::check::shape_info
 {
     texture_shape shape;
-    /// The sampled texture's type name: `texture2d_array`.
+    /// The sampled texture's type name: `texture_2d_array`.
     cc::string_view texture;
-    /// The depth texture's type name, empty where no target has one: `texture2d_array_depth`.
+    /// The depth texture's type name, empty where no target has one: `texture_2d_array_depth`.
     cc::string_view depth;
-    /// The image's type name, empty where no target has one: `image2d_array`.
+    /// The image's type name, empty where no target has one: `image_2d_array`.
     cc::string_view image;
     /// sg's `texture_view_dimension` member, which the host description names.
     cc::string_view sg_name;
@@ -43,13 +43,13 @@ namespace sgl::check
 {
 
 inline constexpr shape_info k_shapes[] = {
-    {texture_shape::d1, "texture1d", "", "image1d", "tex_1d", ""},
-    {texture_shape::d1_array, "texture1d_array", "", "image1d_array", "tex_1d_array", ""},
-    {texture_shape::d2, "texture2d", "texture2d_depth", "image2d", "tex_2d", ""},
-    {texture_shape::d2_array, "texture2d_array", "texture2d_array_depth", "image2d_array", "tex_2d_array", ""},
-    {texture_shape::d2_ms, "texture2d_ms", "texture2d_ms_depth", "", "tex_2d_ms", ""},
-    {texture_shape::d2_ms_array, "texture2d_ms_array", "", "", "tex_2d_ms_array", "multisampled arrays"},
-    {texture_shape::d3, "texture3d", "", "image3d", "tex_3d", ""},
+    {texture_shape::d1, "texture_1d", "", "image_1d", "tex_1d", ""},
+    {texture_shape::d1_array, "texture_1d_array", "", "image_1d_array", "tex_1d_array", ""},
+    {texture_shape::d2, "texture_2d", "texture_2d_depth", "image_2d", "tex_2d", ""},
+    {texture_shape::d2_array, "texture_2d_array", "texture_2d_array_depth", "image_2d_array", "tex_2d_array", ""},
+    {texture_shape::d2_ms, "texture_2d_ms", "texture_2d_ms_depth", "", "tex_2d_ms", ""},
+    {texture_shape::d2_ms_array, "texture_2d_ms_array", "", "", "tex_2d_ms_array", "multisampled arrays"},
+    {texture_shape::d3, "texture_3d", "", "image_3d", "tex_3d", ""},
     {texture_shape::cube, "texture_cube", "texture_cube_depth", "", "cube", ""},
     {texture_shape::cube_array, "texture_cube_array", "texture_cube_array_depth", "", "cube_array", ""},
 };

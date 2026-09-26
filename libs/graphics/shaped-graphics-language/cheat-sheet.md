@@ -211,7 +211,7 @@ m.functions  m.parameters  m.binding_lists // signatures; symbol::info is the po
 m.bindings                                 // binding_info { symbol, is_inline, members }
 m.samplers                                 // sampler_state per `sampler name:` block of a binding; member_info::static_sampler indexes it
                                            // resource types (texture / image / sampler) are interned like buffers; name_of spells them
-                                           // `out image2d[.rgba8_unorm]`; check/resources.hh holds the shapes and the image formats
+                                           // `out image_2d[.rgba8_unorm]`; check/resources.hh holds the shapes and the image formats
 m.files[f].type_at(expr_id)                // side table: type_id, none for what nothing checked
 m.files[f].target_at(expr_id)              // side table: { kind, symbol, index } — local / parameter / symbol / overload /
                                            // constructor / field / binding_member
@@ -365,7 +365,7 @@ sgl::print_source(file)      // == file.source for EVERY input: the lossless inv
   application, prefix and postfix, fused lists and members.
 - **A form's attributes are not on its groups.** Read them through `first_attribute` / `attribute_count` into `file.form_attributes`.
 - **A range start is a position, not an id.** `line::first_token` and `form::first_attribute` are `u32`, since an empty range starts at nothing.
-- **The AST is name-free.** `build` never looks a name up, so `vec3` is a `name` and `texture2d[rgba8]` an `index` wherever they stand.
+- **The AST is name-free.** `build` never looks a name up, so `vec3` is a `name` and `texture_2d[rgba8]` an `index` wherever they stand.
 - **`build` is total.** What has no reading is an `invalid_*` node that keeps its form, and `ast.diagnostics` says what was expected.
   A `missing`, `error` or postfix form becomes `invalid` WITHOUT a second diagnostic.
 - **An AST name is a `source_span`.** Nothing is interned; read it with `file.text_of(span)`.

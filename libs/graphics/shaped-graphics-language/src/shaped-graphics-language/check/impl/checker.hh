@@ -255,7 +255,7 @@ struct checker
     [[nodiscard]] type_id resource_type(type_info info);
     /// The resource type a bare name in a type position names — a depth texture or a sampler — and `none` otherwise.
     [[nodiscard]] type_id resolve_resource_name(i32 file, ast::expr_id expr, cc::string_view text);
-    /// `texture2d[float4]` or `image2d[.rgba8_unorm]`; `none` where `node` heads with no texture or image name.
+    /// `texture_2d[float4]` or `image_2d[.rgba8_unorm]`; `none` where `node` heads with no texture or image name.
     [[nodiscard]] type_id resolve_resource_applied(i32 file, ast::expr_id expr, ast::index const& node);
     /// `mut` or `out` in front of `inner`, which only a buffer and an image take.
     [[nodiscard]] type_id qualify_resource(i32 file, ast::expr_id expr, type_id inner, ast::type_access access);
@@ -263,7 +263,7 @@ struct checker
     [[nodiscard]] sampler_state compile_sampler(i32 file, ast::sampler_decl const& s);
     /// Reports a call that hands over an `@unfilterable` texture member together with a sampler member that filters.
     void judge_filtering(i32 file, source_span call, ast::range_of<ast::argument> arguments);
-    /// A builtin's parameter type, where an image names the texel it reads or writes: `out image2d[float4]`.
+    /// A builtin's parameter type, where an image names the texel it reads or writes: `out image_2d[float4]`.
     [[nodiscard]] type_id resolve_pattern_type(i32 file, ast::expr_id expr);
     /// True where an argument of type `argument` may stand for a parameter of type `parameter` (CHK-70, CHK-207).
     [[nodiscard]] bool takes(type_id parameter, type_id argument) const;

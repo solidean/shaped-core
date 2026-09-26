@@ -35,7 +35,7 @@ So they are ordinary types that are also image formats, and one name serves in b
 
 ```sgl sketch
 binding instance:
-    tex_color: texture2d[rgba8]     // a texture argument
+    tex_color: texture_2d[rgba8]     // a texture argument
 
 @pixel struct pixel:
     color: rgba8                    // a framebuffer member
@@ -56,7 +56,7 @@ So a render target member has the type the shader computes, and the format is an
     @format(rgba16f) normal: float4   // this one is pinned
 ```
 
-An image format is an enum case with `sg`'s name, `image2d[.rgba8_unorm]` ([bindings.md](../bindings.md#image-formats)).
+An image format is an enum case with `sg`'s name, `image_2d[.rgba8_unorm]` ([bindings.md](../bindings.md#image-formats)).
 This is the spelling that is simplest to change later, and the sketches above predate it.
 
 The same holds further down.
@@ -77,7 +77,7 @@ The transformation hierarchy that `tg` has might be modelled later as well, inst
 
 * The splat is the prefix operator `..`, as a whole element of a paren group.
 * `as` is a word operator, and its right-hand side is a type position ([types-as-values.md](types-as-values.md)).
-* Type arguments are a fused square list, so `texture2d[rgba8]` needs nothing new.
+* Type arguments are a fused square list, so `texture_2d[rgba8]` needs nothing new.
 * A symbol may end in digits, so `float3`, `vec4f16` and `rgba8` are plain identifiers.
 * No type name is a keyword.
 

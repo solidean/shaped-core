@@ -20,9 +20,9 @@ enum class sgl::described_member_kind : sgl::u8
     constant,
     /// A `buffer[T]`, which the host binds as a resource of its own.
     buffer,
-    /// A sampled texture, `texture2d[float4]` or a depth texture.
+    /// A sampled texture, `texture_2d[float4]` or a depth texture.
     texture,
-    /// A storage texture, `out image2d[.rgba8_unorm]`.
+    /// A storage texture, `out image_2d[.rgba8_unorm]`.
     image,
     /// A sampler: one the host binds, or a static one of the group, which carries `sampler_state`.
     sampler,
@@ -49,7 +49,7 @@ struct sgl::described_binding_member
 {
     cc::string name;
     described_member_kind kind = described_member_kind::constant;
-    /// A constant's type, a buffer's element, and any other resource's whole spelling: `out image2d[.rgba8_unorm]`.
+    /// A constant's type, a buffer's element, and any other resource's whole spelling: `out image_2d[.rgba8_unorm]`.
     cc::string type;
     /// A constant's byte offset in its block; -1 for a resource.
     i32 offset = -1;

@@ -185,7 +185,7 @@ struct sg::binding
     /// vertex stage, so a storage binding wrongly marked vertex-visible fails validation on a conformant device.
     shader_stages visibility;
 
-    /// For `image` bindings: the texel format the shader declared (`image2d[.rgba8_unorm]`).
+    /// For `image` bindings: the texel format the shader declared (`image_2d[.rgba8_unorm]`).
     /// A WebGPU storage-texture layout entry requires it, and a layout is built before any view exists — so it
     /// cannot be taken from the bound view the way dx12 and vulkan take it.
     cc::optional<pixel_format> image_format;

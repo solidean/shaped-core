@@ -169,10 +169,10 @@ A binding that is not `@inline` is a group.
 
 | SGL | HLSL | WGSL |
 |---|---|---|
-| `texture2d[float4]` | `Texture2D<float4>` | `texture_2d<f32>` |
-| `texture2d_depth` | `Texture2D<float>` | `texture_depth_2d` |
-| `image2d[.rgba8_unorm]` | `RWTexture2D<float4>` | `texture_storage_2d<rgba8unorm, read>` |
-| `out image2d[.r32_float]` | `RWTexture2D<float>` | `texture_storage_2d<r32float, write>` |
+| `texture_2d[float4]` | `Texture2D<float4>` | `texture_2d<f32>` |
+| `texture_2d_depth` | `Texture2D<float>` | `texture_depth_2d` |
+| `image_2d[.rgba8_unorm]` | `RWTexture2D<float4>` | `texture_storage_2d<rgba8unorm, read>` |
+| `out image_2d[.r32_float]` | `RWTexture2D<float>` | `texture_storage_2d<r32float, write>` |
 | `sampler`, `comparison_sampler` | `SamplerState`, `SamplerComparisonState` | `sampler`, `sampler_comparison` |
 
 The other shapes follow the same pattern: HLSL's `Texture2DArray`, `TextureCube`, `Texture2DMS`, and WGSL's `texture_2d_array`, `texture_cube`, `texture_multisampled_2d`.

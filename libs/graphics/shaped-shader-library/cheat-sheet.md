@@ -298,8 +298,8 @@ auto const layout = ctx.cached.acquire_binding_group_layout<shaders::work>();
 auto const group = ctx.transient.create_binding_group(cmd, layout, shaders::work{.scale = 2.0f, .values = buf.as_readwrite_buffer()});
 cmd.compute.bind_group(0, *group);        // group 0 of `main`, group 1 of an entry point listing {factor, work}
 // a texture or image member is a typed view too, sg's typedef for its shape (`texture_view_2d`, `texture_view_cube`, `image_view_2d_array<F>`…):
-//   `albedo: texture2d[float4]`        -> sg::texture_view_2d albedo
-//   `dst: out image2d[.rgba8_unorm]`   -> sg::image_view_2d<sg::pixel_format::rgba8_unorm> dst   (any access: read, out, mut)
+//   `albedo: texture_2d[float4]`        -> sg::texture_view_2d albedo
+//   `dst: out image_2d[.rgba8_unorm]`   -> sg::image_view_2d<sg::pixel_format::rgba8_unorm> dst   (any access: read, out, mut)
 //   `user_smp: sampler`                -> sg::sampler user_smp, which gather() hands sg by its host name (`work.user_smp`)
 //   `sampler albedo_smp:` block        -> NO field: an sg::named_sampler in declared_samplers(), which the layout carries
 // `@inline binding constants` -> shaders::constants: plain fields in C++'s layout, and the block the shader reads:

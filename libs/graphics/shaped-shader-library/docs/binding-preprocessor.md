@@ -166,7 +166,7 @@ A storage texture's format, named as `sg::pixel_format` names it, and only one a
 The binding carries it as `image_format`, which a WebGPU layout needs before any view exists.
 On the SPIR-V arm the pass also writes `[[vk::image_format]]`, since reading an image of unknown format needs a Vulkan device feature and DXC otherwise declares none.
 DXIL takes the format from the view, so that arm writes nothing more; neither does a format SPIR-V lacks, `bgra8_unorm`.
-SGL's text never reaches this pass: for an `image2d[.F]` member it writes `[[vk::image_format]]` itself.
+SGL's text never reaches this pass: for an `image_2d[.F]` member it writes `[[vk::image_format]]` itself.
 [done]
 
 ### `push_constants`

@@ -9,7 +9,7 @@ What the compiler carries today is the [spec](spec/_index.md); a construct it do
   `classify_number` puts every prefixed literal in `number_class::other`, since those need literal types the checker does not have.
   A stencil mask in a `pipeline` is where it bites first.
 - **Binary literals.** `0b1010`, the same way and for the same reason: `unsupported-yet: a binary literal`.
-- **Values as type arguments.** `image2d[.rgba8_unorm]` takes an enum case, and the checker reads exactly that argument today, as a special case of image types.
+- **Values as type arguments.** `image_2d[.rgba8_unorm]` takes an enum case, and the checker reads exactly that argument today, as a special case of image types.
   The general feature is a type parameterized on an integer or an enum value, which math templated on a dimension wants as well, and it lets code branch on the value.
 - **Texture methods.** The `DEBUG_sample`, `DEBUG_sample_level`, `DEBUG_load`, `DEBUG_store` and `DEBUG_size` builtins stand in for them, for 2D shapes only.
   The intended shape is methods through UFCS, with default and named arguments ([texture-methods.md](spec/incubator/texture-methods.md)).

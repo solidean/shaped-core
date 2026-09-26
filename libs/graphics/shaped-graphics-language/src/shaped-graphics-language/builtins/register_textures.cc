@@ -205,7 +205,7 @@ void add_family(registry& r, cc::string_view stem, bool samples)
     // The level comes from screen-space derivatives, which only a pixel stage has on every target.
     if (samples)
         r.add(function_record{
-            .signature = cc::format("@pure @stages(.pixel) fun DEBUG_sample(t: texture2d[{}], coord: float2, "
+            .signature = cc::format("@pure @stages(.pixel) fun DEBUG_sample(t: texture_2d[{}], coord: float2, "
                                     "s: sampler) -> {}",
                                     texel, texel),
             .evaluate = zeros<Width, Kind>,
@@ -214,26 +214,26 @@ void add_family(registry& r, cc::string_view stem, bool samples)
         });
     if (samples)
         r.add(function_record{
-            .signature = cc::format("@pure fun DEBUG_sample_level(t: texture2d[{}], coord: float2, level: float, "
+            .signature = cc::format("@pure fun DEBUG_sample_level(t: texture_2d[{}], coord: float2, level: float, "
                                     "s: sampler) -> {}",
                                     texel, texel),
             .evaluate = zeros<Width, Kind>,
             .write = custom(write_sample_level<Width>),
         });
     r.add(function_record{
-        .signature = cc::format("@pure fun DEBUG_load(t: texture2d[{}], xy: int2, level: int) -> {}", texel, texel),
+        .signature = cc::format("@pure fun DEBUG_load(t: texture_2d[{}], xy: int2, level: int) -> {}", texel, texel),
         .evaluate = zeros<Width, Kind>,
         .write = custom(write_texture_load<Width>),
     });
     // An image is read where another invocation may have written it, so its load keeps its place: no @pure.
     r.add(function_record{
-        .signature = cc::format("fun DEBUG_load(i: image2d[{}], xy: int2) -> {}", texel, texel),
+        .signature = cc::format("fun DEBUG_load(i: image_2d[{}], xy: int2) -> {}", texel, texel),
         .evaluate = zeros<Width, Kind>,
         .write = custom(write_image_load<Width>),
     });
     // Core WebGPU has no writable storage in a vertex stage.
     r.add(function_record{
-        .signature = cc::format("@stages(.pixel, .compute) fun DEBUG_store(i: out image2d[{}], xy: int2, "
+        .signature = cc::format("@stages(.pixel, .compute) fun DEBUG_store(i: out image_2d[{}], xy: int2, "
                                 "value: {})",
                                 texel, texel),
         .evaluate = nothing,
@@ -262,12 +262,12 @@ void sgl::builtins::register_textures(registry& r)
 
     // A size is the same whatever a texture holds or however an image is read, so one record takes every one.
     r.add(function_record{
-        .signature = "@pure fun DEBUG_size(t: texture2d, level: int) -> int2",
+        .signature = "@pure fun DEBUG_size(t: texture_2d, level: int) -> int2",
         .evaluate = size_of,
         .write = {.kind = spelling_kind::custom, .custom = write_texture_size, .helper = texture_size_helper},
     });
     r.add(function_record{
-        .signature = "@pure fun DEBUG_size(i: image2d) -> int2",
+        .signature = "@pure fun DEBUG_size(i: image_2d) -> int2",
         .evaluate = size_of,
         .write = {.kind = spelling_kind::custom, .custom = write_image_size, .helper = image_size_helper},
     });

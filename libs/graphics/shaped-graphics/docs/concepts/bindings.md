@@ -38,7 +38,7 @@ Vulkan consumes the real mask today — an empty set still means `VK_SHADER_STAG
 **`image_format` has no source in DXC reflection.**
 `RWTexture2D<float4>` declares a component type and count, not a concrete texel format, and DXIL carries no format for a typed UAV.
 So an HLSL shader package states it beside the declaration, with slib's `#pragma sc format`, and the binding table generated for the package carries it as `.image_format`.
-WGSL declares one itself (`texture_storage_2d<rgba8unorm, write>`), and an SGL `image2d[.F]` member does too, so both of those paths fill it from the source.
+WGSL declares one itself (`texture_storage_2d<rgba8unorm, write>`), and an SGL `image_2d[.F]` member does too, so both of those paths fill it from the source.
 A binding reflected by DXC alone, outside a package's table, leaves it absent.
 The access mode is the same story without the pragma: WGSL and SGL state it, and HLSL's `RWTexture` is always read-write, so the HLSL path says `read_write`.
 

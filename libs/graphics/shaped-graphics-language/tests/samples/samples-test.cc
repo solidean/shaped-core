@@ -54,7 +54,7 @@ TEST("sgl samples - the raster shader builds an AST without a diagnostic and wit
     CHECK(!dump.contains("<missing>"));
 
     CHECK(dump.starts_with("(module example)\n(binding frame\n  (field view : mat4)\n"));
-    CHECK(dump.contains("(field tex_color : (index texture2d rgba8))"));
+    CHECK(dump.contains("(field tex_color : (index texture_2d rgba8))"));
     // The sample's sampler has only a comment under it.
     CHECK(dump.contains("(sampler bilinear)\n"));
     CHECK(dump.contains("(struct{@vertex} basic_vertex\n  (field pos : pos3)\n"));

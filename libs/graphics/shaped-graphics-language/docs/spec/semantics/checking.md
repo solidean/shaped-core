@@ -133,13 +133,13 @@ enum light_kind:
 * **CHK-46** A binding is no value: its bare name in an expression is `unsupported-yet`.
 * **CHK-171** A buffer member is known to the host by its path, `binding.member`, and a group's constant block by the binding's name ([why](why/checking.md#chk-171)).
 * **CHK-198** A texture, an image and a sampler are types of a binding member, as a buffer is, and none is a value: [bindings.md](../bindings.md) is the model.
-  Two mentions of one such type are one type, and a member names each of them as its spelling does: `texture2d[float4]`, `out image2d[.rgba8_unorm]`.
+  Two mentions of one such type are one type, and a member names each of them as its spelling does: `texture_2d[float4]`, `out image_2d[.rgba8_unorm]`.
 * **CHK-199** A texture's argument is `float`, `int` or `uint`, one to four wide, and a texture without its argument is `wrong-kind-of-name`.
-  Another type as the argument is `wrong-kind-of-name` too, and a name that is no type is `unknown-name` by CHK-24, so `texture2d[rgba8]` is the latter.
+  Another type as the argument is `wrong-kind-of-name` too, and a name that is no type is `unknown-name` by CHK-24, so `texture_2d[rgba8]` is the latter.
 * **CHK-200** An image's argument is exactly one enum case naming one of sg's image formats, `.rgba8_unorm`.
   It is the one value type argument SGL reads, until value type arguments exist in general.
 * **CHK-201** A form some backend lacks is the normal error `needs-feature`, naming the feature, on every target alike:
-  `texture2d_ms_array`, an image outside the portable image formats, and a `mut` image outside the three `r32` formats.
+  `texture_2d_ms_array`, an image outside the portable image formats, and a `mut` image outside the three `r32` formats.
 * **CHK-202** `@unfilterable` stands on a texture member of floats, and on any other binding member is `wrong-kind-of-name`.
   Elsewhere it is an attribute the pass does not know, by CHK-39.
 * **CHK-203** `@non_filtering` stands on a `sampler` member, and on any other binding member is `wrong-kind-of-name`.
@@ -150,9 +150,9 @@ enum light_kind:
   An attribute on the block is judged as on any other binding member.
 * **CHK-205** A static sampler in an `@inline` binding is `wrong-kind-of-name`, since such a binding holds constants only.
 * **CHK-206** A `@builtin` function alone may take a texture, an image or a sampler; for any other function each is `unsupported-yet`, as it is anywhere a value stands.
-* **CHK-207** A builtin's image parameter names the texel it loads or stores instead of a format, `out image2d[float4]`, and is a pattern:
+* **CHK-207** A builtin's image parameter names the texel it loads or stores instead of a format, `out image_2d[float4]`, and is a pattern:
   it takes every image of that shape whose format's texel is that type, and which the shader may read where the pattern reads, or write where it writes.
-* **CHK-194** A builtin's bare `texture2d` or `image2d` parameter is a pattern too, which takes every texture, or every image, of that shape, whatever it holds and however it is read.
+* **CHK-194** A builtin's bare `texture_2d` or `image_2d` parameter is a pattern too, which takes every texture, or every image, of that shape, whatever it holds and however it is read.
   It is for what depends on neither, such as a size.
 * **CHK-210** A call that hands a builtin an `@unfilterable` texture member and a sampler member that filters is `type-mismatch`, and its detail names both.
   A `sampler` member filters unless it is `@non_filtering`, and a static sampler filters unless every filter is `.nearest`.

@@ -164,7 +164,7 @@ you must fall back to a typed storage buffer (i.e. the stride-aligned structured
 
 Textures have views too, but instead of an element type `T` they are typed by `Traits`.
 A `texture_view_traits<Dim>` names the shader-facing dimension (`tv_2d` / `tv_cube` / `tv_2d_array` / …), and the subresource range stays runtime.
-So the leaves are `texture_view<Traits>`, a sampled texture (SRV), and `image_view<Traits, Format>`, a storage image (UAV) — SGL's `texture2d[T]` and `image2d[.F]`.
+So the leaves are `texture_view<Traits>`, a sampled texture (SRV), and `image_view<Traits, Format>`, a storage image (UAV) — SGL's `texture_2d[T]` and `image_2d[.F]`.
 Each shape has a typedef, `texture_view_2d` for `texture_view<tv_2d>` and `image_view_2d<Format>` for `image_view<tv_2d, Format>`, and generated code spells them that way.
 **An image view is typed on its texel format too**, because the format is the binding contract: WebGPU and vulkan require the view to be exactly the shader's declared format.
 A texture's format stays runtime, since a sampled texture reads any format of its sample type.
