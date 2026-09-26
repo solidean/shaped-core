@@ -62,6 +62,10 @@ Build `sgl` first, since the extension runs the binary your build made: `uv run 
 VS Code loads every folder in its user extensions directory, so installing is linking this folder into it.
 A link rather than a copy means a `git pull` updates the extension.
 
+`uv run dev.py install sgl-vscode` does both steps: it builds `sgl`, then links the folder into every VS Code-family editor whose extensions directory exists.
+`--editor code` picks one, `--uninstall` removes the links again, and `uv run dev.py install` shows where it is installed.
+By hand, the link is:
+
 Windows (PowerShell, from the repo root — a junction needs no admin rights):
 
 ```powershell

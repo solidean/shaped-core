@@ -443,6 +443,7 @@ A stale "no cc:: equivalent yet" reason sends the next author back to the old wa
 | Run pre-commit checks            | `uv run dev.py check --fix`                                       |
 | Re-check an already-made commit  | `uv run dev.py check --commit <rev>` (a range works too; a single commit means its first-parent diff, so a merge yields all it brought in) |
 | Sanity-check the toolchain       | `uv run dev.py doctor`                                            |
+| Install a repo tool into your editor | `uv run dev.py install` (lists them; `install sgl-vscode` links the SGL extension) |
 | List presets / targets           | `uv run dev.py list-presets` / `list-targets`                     |
 | Pin a compiler version           | `uv run dev.py build --toolset <ver>` (`list-toolsets` shows them) |
 | Review a PR, a branch or a design | `uv run review.py init <name> --range A..B --goal <goal>` ([readme](tools/review/readme.md); the `reviewing-a-pr` skill drives it) |

@@ -80,4 +80,3 @@ Recorded so they are not re-derived:
 * **Reusing a checked prelude**, which waits for modules, where an imported module is a checked thing reused the same way.
 * **Hover, go-to-definition, completion and formatting**: the checker's side tables already answer the first two per expression; the library needs a position-to-node lookup.
 * **A Test Explorer** view beside the gutter marks.
-* **`dev.py install <name>`**, to make the extension's install a command instead of a junction by hand.
