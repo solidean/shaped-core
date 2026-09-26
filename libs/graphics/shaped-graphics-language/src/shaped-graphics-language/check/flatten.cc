@@ -546,13 +546,40 @@ struct flattener
             add_stmt(where, flat_let{.local = local, .value = value});
             bound[i] = local_ref(local, id);
         }
+        // The defaults are written in the callee's frame, which reads its parameters as the call filled them.
+        auto has_default = false;
+        for (auto const slot : slots)
+            has_default = has_default || slot < 0;
+        auto filled = cc::vector<bound_name>();
+        if (has_default)
+        {
+            auto const chain = chain_through(id);
+            frames.push_back({.function = callee, .file = s.file, .chain = chain});
+            for (auto p = isize(0); p < slots.size(); ++p)
+                if (slots[p] >= 0)
+                    bind_parameter(parameters[p], again(bound[slots[p]], id));
+            bind_defaults(parameters, slots);
+            filled = cc::move(current()->bound);
+            frames.remove_back();
+        }
+
         auto arguments = cc::vector<flat_expr_id>();
         for (auto p = isize(0); p < slots.size(); ++p)
         {
-            if (slots[p] < 0)
+            if (slots[p] >= 0)
+            {
+                auto const value = bound[slots[p]];
+                arguments.push_back(entry.at(value).node.is<flat_local_ref>() || p == 0 ? value : again(value, id));
+                continue;
+            }
+            auto const where_p = target{.kind = target_kind::parameter, .index = i32(parameters[p].field)};
+            auto value = flat_expr_id::none;
+            for (auto const& b : filled)
+                if (b.where == where_p)
+                    value = is_valid(b.literal) ? again(b.literal, id) : local_ref(b.local, id);
+            if (!is_valid(value))
                 return fail();
-            auto const value = bound[slots[p]];
-            arguments.push_back(entry.at(value).node.is<flat_local_ref>() || p == 0 ? value : again(value, id));
+            arguments.push_back(value);
         }
         add_stmt(where, flat_leave{.target = label, .value = call_of(arguments)});
         auto const body = add_list(block);
@@ -1046,6 +1073,59 @@ struct flattener
         ast::range_of<flat_stmt_id> body;
     };
 
+    /// The call sites a node inlined through `call` stands under: the current frame's, then `call`.
+    ast::range_of<call_site> chain_through(ast::expr_id call)
+    {
+        // The chain is copied first, since `call_sites` grows under the span that names it.
+        auto chain = cc::vector<call_site>();
+        chain.push_back_range(entry.at(current()->chain));
+        chain.push_back({.file = file(), .call = call});
+        auto const range = ast::range_of<call_site>{.first = u32(entry.call_sites.size()), .count = u32(chain.size())};
+        entry.call_sites.push_back_range(chain);
+        return range;
+    }
+
+    /// Binds a value to parameter `p` in the current frame: a literal or an immutable local stands for it, and
+    /// anything else is bound once by a `let` of the block being written.
+    void bind_parameter(parameter const& p, flat_expr_id value)
+    {
+        if (!is_valid(value))
+        {
+            is_failed = true;
+            return;
+        }
+        auto const where = target{.kind = target_kind::parameter, .index = i32(p.field)};
+        auto const& x = entry.at(value);
+        auto const* const ref = x.node.try_as<flat_local_ref>();
+        if (ref != nullptr && is_substitutable(value))
+            current()->bound.push_back({.where = where, .local = ref->local});
+        else if (is_substitutable(value))
+            current()->bound.push_back({.where = where, .literal = value});
+        else
+        {
+            auto const local = add_local(local_kind::let, p.name, x.type);
+            add_stmt(x.from, flat_let{.local = local, .value = value});
+            current()->bound.push_back({.where = where, .local = local});
+        }
+    }
+
+    /// The default of every parameter `slots` leaves unfilled, flattened in the callee's frame, which is the current
+    /// one, and bound in parameter order (EVAL-80, EVAL-81).
+    void bind_defaults(cc::span<parameter const> parameters, cc::span<i32 const> slots)
+    {
+        for (auto p = isize(0); p < parameters.size(); ++p)
+        {
+            if (slots[p] >= 0)
+                continue;
+            if (!parameters[p].has_default || !ast::is_valid(parameters[p].field))
+            {
+                is_failed = true;
+                continue;
+            }
+            bind_parameter(parameters[p], flatten_expr(ast().at(parameters[p].field).default_value));
+        }
+    }
+
     /// `inline_bound` for arguments that fill the parameters in order, one each.
     inlined_body inline_call(ast::expr_id call, symbol_id callee, cc::span<flat_expr_id const> arguments)
     {
@@ -1083,7 +1163,7 @@ struct flattener
                 filled[slots[p]] = i32(p);
         auto is_complete = parameters.size() == slots.size();
         for (auto p = isize(0); is_complete && p < slots.size(); ++p)
-            is_complete = slots[p] >= 0;
+            is_complete = slots[p] >= 0 || (parameters[p].has_default && ast::is_valid(parameters[p].field));
         for (auto const p : filled)
             is_complete = is_complete && p >= 0;
         if (!is_complete)
@@ -1092,13 +1172,7 @@ struct flattener
             return {};
         }
 
-        // The chain is copied first, since `call_sites` grows under the span that names it.
-        auto chain = cc::vector<call_site>();
-        chain.push_back_range(entry.at(current()->chain));
-        chain.push_back({.file = file(), .call = call});
-        auto const chain_range
-            = ast::range_of<call_site>{.first = u32(entry.call_sites.size()), .count = u32(chain.size())};
-        entry.call_sites.push_back_range(chain);
+        auto const chain_range = chain_through(call);
 
         auto const label = add_label(s.name);
         auto const outer = cc::move(block);
@@ -1136,6 +1210,9 @@ struct flattener
                           .return_label = label,
                           .chain = chain_range,
                           .bound = cc::move(bound)});
+        // EVAL-80: the defaults of the parameters the call left out come after every written argument, in parameter
+        // order, and each reads the parameters before it.
+        bind_defaults(parameters, slots);
         if (ast::is_valid(decl->body.value))
             flatten_return({.file = s.file, .expr = decl->body.value}, decl->body.value);
         for (auto const stmt : ast().at(decl->body.statements))

@@ -248,6 +248,28 @@ TEST("sgl source - the prints of nested calls run left to right, inner before ou
           == "ok 3.5 3.5 3.5 1 | print 0.25 | print 0.75 | print 1.5 | print 0.5");
 }
 
+TEST("sgl source - a call evaluates its arguments in the order written, then its defaults in parameter order")
+{
+    auto const helpers = cc::format("{}fun sub(a: float, b: float = noisy(0.5)) -> float => a - b\n", noisy);
+    // a = 0.25 and b = 0.75: the named arguments run as written, then the default of the call that leaves b out
+    auto const program
+        = check_program(grey_source(helpers, "let x = sub(b = noisy(p.a), a = noisy(p.b)) + sub(noisy(p.a))\n"));
+    REQUIRE(program.module.entry_points.size() == 1);
+    auto const& m = program.module;
+    CHECK(dump(interpret(m, m.entry_points[0], test_inputs(m)))
+          == "ok 0.5 0.5 0.5 1 | print 0.25 | print 0.75 | print 0.25 | print 0.5");
+    CHECK(dump(interpret(m, legalize(m, m.entry_points[0]), test_inputs(m)))
+          == "ok 0.5 0.5 0.5 1 | print 0.25 | print 0.75 | print 0.25 | print 0.5");
+
+    // a builtin's parameters take them in their own order, and the arguments still run as written
+    auto const builtin = check_program(grey_source(noisy, "let x = max(b = noisy(p.a), a = noisy(p.b))\n"));
+    REQUIRE(builtin.module.entry_points.size() == 1);
+    auto const& b = builtin.module;
+    CHECK(dump(interpret(b, b.entry_points[0], test_inputs(b))) == "ok 1.5 1.5 1.5 1 | print 0.25 | print 0.75");
+    CHECK(dump(interpret(b, legalize(b, b.entry_points[0]), test_inputs(b)))
+          == "ok 1.5 1.5 1.5 1 | print 0.25 | print 0.75");
+}
+
 TEST("sgl source - the right side of and / or runs only when the left side has not decided")
 {
     auto const checked = check_program(grey_source(noisy, short_circuit_body));

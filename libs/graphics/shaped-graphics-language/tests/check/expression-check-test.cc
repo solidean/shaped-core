@@ -386,3 +386,11 @@ TEST("sgl check - name_mint never hands out a name twice")
     CHECK(names.mint("") == "_");
     CHECK(names.is_taken("n_3"));
 }
+
+TEST("sgl check - a named argument keeps its name in what a failed call reports")
+{
+    CHECK(reports_for("fun sub(a: int, b: int) -> int => a - b\nfun f() -> int => sub(b = 3, 5)\n")
+          == "no-matching-overload user:[sub(b = 3, 5)] sub(b = int, int)\n");
+    CHECK(reports_for("struct s:\n    a: float\nfun f() -> s => s(b = 1.0)\n")
+          == "no-matching-overload user:[s(b = 1.0)] s(b = float), and the constructor is s(float)\n");
+}

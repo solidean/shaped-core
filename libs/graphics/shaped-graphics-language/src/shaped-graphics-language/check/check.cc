@@ -236,6 +236,11 @@ void checker::run()
         if (out.symbols[i].state == symbol_state::untouched)
             compile(symbol_id(i));
 
+    // A default is checked where it is declared, once, and a call binds against the signature alone (CHK-243).
+    for (auto i = isize(0); i < out.symbols.size(); ++i)
+        if (out.symbols[i].kind == symbol_kind::function && out.symbols[i].state == symbol_state::checked)
+            check_defaults(symbol_id(i));
+
     // A call needs a signature only, so each body is checked once, after every signature is known.
     // That is what lets a function call one declared below it.
     // The exception checked its body already: an arrow body without `-> T`, whose signature is not known before.

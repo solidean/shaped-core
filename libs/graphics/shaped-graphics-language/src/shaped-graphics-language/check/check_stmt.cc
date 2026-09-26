@@ -503,8 +503,8 @@ bool checker::inlines_whole(symbol_id function)
     if (notes[info].inlines_whole != 0)
         return notes[info].inlines_whole == 1;
 
-    auto result
-        = out.at(function).state == symbol_state::checked && notes[info].is_body_sound && !notes[info].is_recursive;
+    auto result = out.at(function).state == symbol_state::checked && notes[info].is_body_sound
+               && notes[info].are_defaults_sound && !notes[info].is_recursive;
     // Set before the callees are asked: a loop of calls is recursive, so nothing on it gets here twice.
     notes[info].inlines_whole = result ? 1 : 2;
     for (auto i = isize(0); result && i < calls.size(); ++i)

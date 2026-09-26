@@ -172,7 +172,6 @@ TEST("sgl check - what the tracer does not carry is unsupported-yet, and names t
     CHECK(reports_for("sampler s:\n    filter = .linear\n") == "unsupported-yet user:[sampler s:] sampler\n");
     CHECK(reports_for("fun id[T](x: T) -> T => x\n").starts_with("unsupported-yet user:[id] a generic function\n"));
     CHECK(reports_for("struct a:\n    x: float\n    len => x\n") == "unsupported-yet user:[len => x] a property\n");
-    CHECK(reports_for("struct a:\n    x: float = 1.0\n") == "unsupported-yet user:[1.0] a default value\n");
     CHECK(reports_for("binding b = constants\n") == "unsupported-yet user:[constants] a binding composition\n");
     // CHK-25: a format is no type, so a texture takes what it samples to and an image takes a format as a case.
     CHECK(reports_for("binding b:\n    t: texture_2d[rgba8]\n") == "unknown-name user:[rgba8] rgba8\n");
@@ -280,4 +279,14 @@ TEST("sgl check - an entry point with an error has diagnostics and no flat tree"
     auto const invalid = check_sources(
         read_prelude(), cc::string(edges) + "@pixel fun ps(v: vout) -> plain:\n    return { p = pos3(1.0, 1.0, 1.0) }\n");
     CHECK(invalid.module.entry_points.empty());
+}
+
+TEST("sgl check - a default is checked once, where it is declared, and reads only the parameters before it")
+{
+    CHECK(reports_for("fun f(x: float, y: float = true) -> float => x + y\n")
+          == "type-mismatch user:[true] the default of y is bool, and y takes float\n");
+    CHECK(reports_for("fun f(x: float = y, y: float = 1.0) -> float => x + y\n") == "unknown-name user:[y] y\n");
+    // a field's default is its constructor parameter's, and reads the fields before it
+    CHECK(reports_for("struct s:\n    a: float = b\n    b: float = 1.0\n") == "unknown-name user:[b] b\n");
+    CHECK(reports_for("struct s:\n    a: float\n    b: float = a * 2.0\n") == "");
 }

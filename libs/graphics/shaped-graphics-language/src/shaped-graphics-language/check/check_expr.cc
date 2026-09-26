@@ -63,6 +63,37 @@ void checker::check_body(symbol_id id)
     notes[index].is_body_sound = error_count() == errors_before;
 }
 
+void checker::check_defaults(symbol_id id)
+{
+    auto const file = out.at(id).file;
+    auto const& ast = ast_of(file);
+    auto const index = out.at(id).info;
+    // by value: checking a default may compile another function, and `functions` then moves
+    auto const info = out.functions[index];
+    auto scope = function_scope{.function = id, .file = file, .result = info.result};
+    auto const errors_before = error_count();
+    for (auto const& p : out.at(info.parameters))
+    {
+        if (ast::is_valid(p.field) && p.has_default)
+        {
+            auto const value = ast.at(p.field).default_value;
+            auto const type = check_expr(scope, value);
+            if (type != error_type && p.type != error_type && type != p.type)
+                report(diagnostic_kind::type_mismatch, file, span_of(file, value),
+                       cc::format("the default of {} is {}, and {} takes {}", p.name, out.name_of(type), p.name,
+                                  out.name_of(p.type)));
+        }
+        // a parameter is visible to the defaults after it
+        if (ast::is_valid(p.field))
+            scope.locals.push_back({
+                .name = p.name,
+                .where = {.kind = target_kind::parameter, .index = i32(p.field)},
+                .type = p.type,
+            });
+    }
+    notes[index].are_defaults_sound = error_count() == errors_before;
+}
+
 type_id checker::check_index(function_scope& scope, ast::expr_id id, ast::index const& node)
 {
     auto const file = scope.file;
@@ -474,11 +505,6 @@ call_arguments checker::check_arguments(function_scope& scope, ast::range_of<ast
         judge_attributes(file, a.attributes, {}, "an argument");
         if (!a.attributes.empty())
             result.is_poisoned = true;
-        if (!a.name.empty())
-        {
-            unsupported(file, where, "a named argument");
-            result.is_poisoned = true;
-        }
 
         handed.push_back(a.value);
         auto const type = check_expr(scope, a.value);
@@ -531,6 +557,22 @@ cc::string checker::signature_text(cc::string_view spelling, cc::span<type_id co
         if (i > 0)
             text += ", ";
         text += out.name_of(types[i]);
+    }
+    text += ")";
+    return text;
+}
+
+cc::string checker::call_text(cc::string_view spelling, call_arguments const& arguments) const
+{
+    auto text = cc::string(spelling);
+    text += "(";
+    for (auto i = isize(0); i < arguments.types.size(); ++i)
+    {
+        if (i > 0)
+            text += ", ";
+        if (!arguments.names[i].empty())
+            text.appendf("{} = ", arguments.names[i]);
+        text += out.name_of(arguments.types[i]);
     }
     text += ")";
     return text;
@@ -708,11 +750,11 @@ type_id checker::resolve_overload(function_scope& scope,
             for (auto const& p : out.at(out.functions[out.at(candidates[0]).info].parameters))
                 expected.push_back(p.type);
             report(diagnostic_kind::no_matching_overload, file, where,
-                   cc::format("{}, and the constructor is {}", signature_text(spelling, arguments.types),
+                   cc::format("{}, and the constructor is {}", call_text(spelling, arguments),
                               signature_text(spelling, expected)));
         }
         else
-            report(diagnostic_kind::no_matching_overload, file, where, signature_text(spelling, arguments.types));
+            report(diagnostic_kind::no_matching_overload, file, where, call_text(spelling, arguments));
         return error_type;
     }
     // CHK-192: a match of the program's file hides every match of the prelude
@@ -729,7 +771,7 @@ type_id checker::resolve_overload(function_scope& scope,
     if (matches.size() > 1)
     {
         report(diagnostic_kind::ambiguous_overload, file, where,
-               cc::format("{} has {} candidates", signature_text(spelling, arguments.types), matches.size()));
+               cc::format("{} has {} candidates", call_text(spelling, arguments), matches.size()));
         return error_type;
     }
 

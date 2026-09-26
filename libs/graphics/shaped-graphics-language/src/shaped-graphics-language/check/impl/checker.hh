@@ -128,6 +128,8 @@ struct function_notes
     bool is_valid_entry = false;
     /// The body checked without a single error, so its side tables are complete.
     bool is_body_sound = false;
+    /// Every default of its parameters checked without an error; a call that leaves one out flattens it.
+    bool are_defaults_sound = true;
     /// Stands on a loop of calls, which was reported.
     bool is_recursive = false;
     /// 0 before anybody asked, 1 for a function that inlines whole, 2 for one that does not.
@@ -345,6 +347,10 @@ struct checker
     // ---- bodies and expressions (check_expr.cc) ---------------------------------------------------------------------
 
     void check_body(symbol_id id);
+    /// The defaults of function `id`'s parameters, each in the function's own scope with the parameters before it
+    /// visible, and of its parameter's type (CHK-243).
+    /// Checked once, after every signature is known, since a default may call what is declared below it.
+    void check_defaults(symbol_id id);
 
     // ---- tests (check_test.cc) --------------------------------------------------------------------------------------
 
@@ -455,6 +461,8 @@ struct checker
                                            call_arguments const& arguments,
                                            cc::string_view spelling);
     [[nodiscard]] cc::string signature_text(cc::string_view spelling, cc::span<type_id const> types) const;
+    /// A call as it was written, each named argument with its name: `sub(int, b = int)`.
+    [[nodiscard]] cc::string call_text(cc::string_view spelling, call_arguments const& arguments) const;
     /// Records a call of `callee`, a function of the program, as an edge of the call graph, and reports each binding it
     /// reads that the caller does not list.
     void note_program_call(function_scope const& scope, symbol_id callee, source_span where);

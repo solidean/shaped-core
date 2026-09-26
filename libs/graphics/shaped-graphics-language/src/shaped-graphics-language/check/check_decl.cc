@@ -329,10 +329,8 @@ ast::range_of<member_info> checker::compile_members(i32 file,
         judge_attributes(file, d.attributes, {}, owner);
         if (f.is_mut)
             unsupported(file, f.name, "a mut member");
-        if (ast::is_valid(f.default_value))
-            unsupported(file, span_of(file, f.default_value), "a default value");
-        if (f.is_named_only)
-            unsupported(file, f.name, "a named-only field");
+        if (!is_struct && f.is_named_only)
+            unsupported(file, f.name, "a named-only binding member");
 
         auto is_duplicate = false;
         for (auto const& other : collected)
@@ -727,16 +725,6 @@ void checker::compile_function(symbol_id id)
         judge_attributes(file, p.attributes, known_on_parameter, "a parameter");
         if (p.is_mut)
             unsupported(file, p.name, "a mut parameter");
-        if (ast::is_valid(p.default_value))
-        {
-            unsupported(file, span_of(file, p.default_value), "a default argument");
-            is_failed = true;
-        }
-        if (p.is_named_only)
-        {
-            unsupported(file, p.name, "a named-only parameter");
-            is_failed = true;
-        }
 
         for (auto const& other : parameters)
             if (other.name == name && name != "_")
@@ -757,6 +745,8 @@ void checker::compile_function(symbol_id id)
         parameters.push_back({.name = name,
                               .type = type,
                               .field = ast::field_id(index),
+                              .has_default = ast::is_valid(p.default_value),
+                              .is_named_only = p.is_named_only,
                               .is_thread_id = find_attribute(file, p.attributes, "thread_id") != nullptr});
     }
 
