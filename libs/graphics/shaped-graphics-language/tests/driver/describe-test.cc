@@ -92,6 +92,43 @@ TEST("sgl describe - a buffer group numbers its buffers and names each by its pa
     CHECK(d.entry_points[0].workgroup[2] == 1);
 }
 
+TEST("sgl describe - an entry point and a pipeline name the sg features a device needs for them")
+{
+    // Both stages may use the image format the file requires, and only the pixel stage lists what does.
+    auto const d = described(R"(require extended_image_formats, raytracing
+
+binding narrow:
+    r: out image_2d[.r8_unorm]
+
+@vertex struct vertex_input:
+    pos: pos3
+
+struct pixel_input:
+    @position position: hpos4
+
+@pixel struct target:
+    color: float4
+
+@vertex fun main_vs(v: vertex_input) -> pixel_input => {position = hpos4(v.pos.x, v.pos.y, v.pos.z, 1.0)}
+
+@pixel fun main_ps(p: pixel_input){narrow} -> target:
+    return {color = float4(1.0, 1.0, 1.0, 1.0)}
+
+pipeline:
+    vertex = main_vs
+    pixel = main_ps
+    color_targets.color.format = .rgba8_unorm
+)");
+
+    REQUIRE(d.entry_points.size() == 2);
+    CHECK(d.entry_points[0].features.empty());
+    REQUIRE(d.entry_points[1].features.size() == 1);
+    CHECK(d.entry_points[1].features[0] == "extended_image_formats");
+    REQUIRE(d.pipelines.size() == 1);
+    REQUIRE(d.pipelines[0].features.size() == 1);
+    CHECK(d.pipelines[0].features[0] == "extended_image_formats");
+}
+
 TEST("sgl describe - a group no entry point lists is still described, and still judged")
 {
     // A shader file is a library, so the host may bind a group this file's own entry points never name.

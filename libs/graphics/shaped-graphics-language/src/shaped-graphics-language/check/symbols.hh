@@ -4,6 +4,7 @@
 #include <clean-core/string/string.hh>
 #include <shaped-graphics-language/ast/file_ast.hh>
 #include <shaped-graphics-language/builtins/ids.hh>
+#include <shaped-graphics-language/check/features.hh>
 #include <shaped-graphics-language/check/ids.hh>
 
 /// What the check pass knows about the declarations of a module: its types, its symbols and the per-file side tables.
@@ -265,6 +266,9 @@ struct sgl::check::function_info
     bool is_pure = false;
     /// The stages an entry point may be of to reach it, one bit per `stage` (`stage_bit`); every stage without `@stages`.
     u8 stages = k_every_stage;
+    /// For an entry point, the features a device needs to run it: what it uses, never what it merely declares (CHK-238).
+    /// Empty for every other function.
+    feature_set features;
 
     constexpr bool operator==(function_info const&) const = default;
 };
@@ -275,6 +279,10 @@ struct sgl::check::binding_info
     /// `@inline`: the members ride as inline constants, which an emitter must know.
     bool is_inline = false;
     ast::range_of<member_info> members;
+    /// What its own `require` lines name, which declares them for every entry point listing it (CHK-237).
+    feature_set declared;
+    /// `declared` and whatever its members use: what every entry point listing it needs of a device (CHK-236).
+    feature_set required;
 
     constexpr bool operator==(binding_info const&) const = default;
 };

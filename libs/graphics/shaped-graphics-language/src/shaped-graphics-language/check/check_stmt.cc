@@ -155,6 +155,18 @@ flow checker::check_stmt(function_scope& scope, ast::stmt_id stmt)
                              add_test(file, d.declaration, cc::format("fun {}", out.at(scope.function).name), &scope);
                          return;
                      }
+                     // CHK-237: a body's `require` stands among its own lines; a block of its own is not carried yet
+                     if (auto const* const r = ast::is_valid(d.declaration)
+                                                 ? ast.at(d.declaration).node.try_as<ast::require_decl>()
+                                                 : nullptr)
+                     {
+                         judge_attributes(file, ast.at(d.declaration).attributes, {}, "a require");
+                         if (scope.depth > 0)
+                             unsupported(file, where, "a `require` inside a block");
+                         else
+                             read_require(file, *r, require_scope::body, scope.function);
+                         return;
+                     }
                      unsupported(file, where, "a declaration inside a function");
                  },
                  [&](ast::invalid_stmt const&) { result = flow::unknown; });

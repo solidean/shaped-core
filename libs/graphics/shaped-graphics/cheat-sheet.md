@@ -94,6 +94,7 @@ ctx.supports(sg::feature::raytracing)              // bool — THE capability qu
                                                    //   | float32_filtering (filter r32/rg32/rgba32_float) | extended_image_formats (storage beyond is_portable_image_format)
                                                    //   | unaligned_block_compression (false on webgpu and metal: a BC texture needs whole 4x4 blocks,
                                                    //     and create_texture THROWS on one that has not; desc.unaligned_block_error(supports) asks first)
+                                                   //   | multisampled_array_textures (false on webgpu: no tex_2d_ms_array binding)
                                                    //   binding_arrays false (webgpu) = no count > 1 bindings, no staging_binding_group, no bindless_array
                                                    //   the per-scope bools (cmd.raytracing.is_supported(), cmd.query.is_supported(),
                                                    //   ctx.supports_headless_present()) all forward here, so there is one answer per question

@@ -308,7 +308,9 @@ ast::range_of<member_info> checker::compile_members(i32 file,
             unsupported(file, where, "a property");
         else if (d.node.is<ast::fun_decl>())
             unsupported(file, where, "a method");
-        else if (!d.node.is<ast::field_decl>() && !d.node.is<ast::invalid_decl>() && !d.node.is<ast::test_decl>())
+        // a `require` of a binding is read by compile_binding, and one in a struct was reported by the AST pass
+        else if (!d.node.is<ast::field_decl>() && !d.node.is<ast::invalid_decl>() && !d.node.is<ast::test_decl>()
+                 && !d.node.is<ast::require_decl>())
             unsupported(file, where, "this member");
 
         auto const* const line = d.node.try_as<ast::field_decl>();
@@ -670,7 +672,33 @@ void checker::compile_binding(symbol_id id)
         return;
     }
 
+    // CHK-235: its own `require` lines grant its members what their file does not.
+    auto const first_line = require_lines.size();
+    auto declared = feature_set();
+    for (auto const member : ast_of(file).at(b.members))
+        if (auto const* const r = ast_of(file).at(member).node.try_as<ast::require_decl>())
+        {
+            judge_attributes(file, ast_of(file).at(member).attributes, {}, "a require");
+            declared |= read_require(file, *r, require_scope::binding, id);
+        }
+
+    // `compile` restores whatever grant was in effect around this binding.
+    auto used = feature_set();
+    granted = declared;
+    used_features = &used;
     auto const members = compile_members(file, b.members, false);
+    granted = {};
+    used_features = nullptr;
+
+    // CHK-240: the first `require` of a feature is used where a member uses it, and any later one never is.
+    auto seen = feature_set();
+    for (auto i = first_line; i < require_lines.size(); ++i)
+    {
+        auto& line = require_lines[i];
+        line.is_used = !seen.has(line.what) && used.has(line.what);
+        seen.set(line.what);
+    }
+
     auto const is_inline = find_attribute(file, d.attributes, "inline") != nullptr;
     // CHK-205: an `@inline` binding holds constants only, so a static sampler in one has nowhere to go.
     if (is_inline)
@@ -683,6 +711,8 @@ void checker::compile_binding(symbol_id id)
         .symbol = id,
         .is_inline = is_inline,
         .members = members,
+        .declared = declared,
+        .required = declared | used,
     });
 }
 

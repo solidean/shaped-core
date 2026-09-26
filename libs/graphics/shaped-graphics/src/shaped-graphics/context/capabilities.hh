@@ -57,6 +57,10 @@ enum class sg::feature
     /// WebGPU core refuses one unless the device has `texture-compression-unaligned`, and D3D12 reports it as an option.
     /// Where this is false, creating one is a refusal naming the size, which a loader of user textures can pad against.
     unaligned_block_compression,
+
+    /// A texture binding may be a multisampled 2D array (`texture_view_dimension::tex_2d_ms_array`).
+    /// WebGPU has no such binding at all, and it is also how a multisampled cube is sampled.
+    multisampled_array_textures,
 };
 
 /// Whether the thread driving this context may block at all.

@@ -223,6 +223,7 @@ void checker::run()
             .type_of = cc::vector<type_id>::create_filled(count, type_id::none),
             .target_of = cc::vector<target>::create_filled(count, target{}),
         });
+        file_features.push_back({});
     }
 
     for (auto file = i32(0); file < i32(files.size()); ++file)
@@ -250,6 +251,12 @@ void checker::run()
         check_test(i32(i));
 
     find_recursion();
+
+    // Every binding and body is checked by now, so what each entry point needs and declares is known.
+    for (auto i = isize(0); i < out.symbols.size(); ++i)
+        if (out.symbols[i].kind == symbol_kind::function && out.symbols[i].state == symbol_state::checked)
+            judge_entry_features(symbol_id(i));
+    report_unused_requires();
 
     for (auto i = isize(0); i < out.symbols.size(); ++i)
         if (out.symbols[i].kind == symbol_kind::function && out.symbols[i].state == symbol_state::checked)
@@ -393,6 +400,11 @@ void checker::declare(i32 file, ast::decl_id decl)
         // one unnamed module: the line is accepted and names nothing
         [&](ast::module_decl const&) {}, //
         [&](ast::use_decl const&) { unsupported(file, span_of(file, decl), "use"); },
+        [&](ast::require_decl const& r)
+        {
+            judge_attributes(file, d.attributes, {}, "a require");
+            file_features[file] |= read_require(file, r, require_scope::file, symbol_id::none);
+        },
         [&](ast::enum_decl const& e)
         {
             if (!e.name.empty())
@@ -451,6 +463,12 @@ void checker::compile(symbol_id id)
     out.symbols[index_of(id)].state = symbol_state::in_compilation;
     compiling.push_back(id);
 
+    // A symbol demanded from inside a binding's members is no member of it: it sees its own file's features alone.
+    auto const outer_granted = granted;
+    auto* const outer_used = used_features;
+    granted = {};
+    used_features = nullptr;
+
     switch (out.at(id).kind)
     {
     case symbol_kind::structure:
@@ -479,6 +497,8 @@ void checker::compile(symbol_id id)
         break;
     }
 
+    granted = outer_granted;
+    used_features = outer_used;
     compiling.remove_back();
     if (out.at(id).state == symbol_state::in_compilation)
         out.symbols[index_of(id)].state = symbol_state::checked;

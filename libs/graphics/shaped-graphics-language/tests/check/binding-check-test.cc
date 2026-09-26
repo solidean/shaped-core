@@ -76,11 +76,11 @@ TEST("sgl check - every texture, image and sampler form sg binds is a binding me
 
 TEST("sgl check - a resource that some backend lacks needs a feature, and a misplaced word is an error")
 {
-    // CHK-201: refused by the feature that would grant it, on every target alike.
+    // CHK-201: refused by the feature that would grant it, on every target alike; feature-check-test has the grants.
     CHECK(reports_for(listing("    a: mut image_2d[.rgba8_unorm]\n")).contains("needs-feature"));
     CHECK(reports_for(listing("    a: mut image_2d[.rgba8_unorm]\n")).contains("readwrite_image_formats"));
     CHECK(reports_for(listing("    a: out image_2d[.r8_unorm]\n")).contains("extended_image_formats"));
-    CHECK(reports_for(listing("    a: texture_2d_ms_array[float4]\n")).contains("multisampled arrays"));
+    CHECK(reports_for(listing("    a: texture_2d_ms_array[float4]\n")).contains("multisampled_array_textures"));
 
     CHECK(reports_for(listing("    a: out texture_2d[float4]\n")).contains("a texture is only ever read"));
     CHECK(reports_for(listing("    a: out buffer[float]\n")).contains("a buffer is never `out`"));

@@ -291,6 +291,7 @@ struct builder
 
     decl_id module_declaration(statement_head const& head, keyword_parts const& parts);
     decl_id use_declaration(statement_head const& head, keyword_parts const& parts);
+    decl_id require_declaration(statement_head const& head, keyword_parts const& parts);
     decl_id fun_declaration(statement_head const& head, keyword_parts const& parts);
     /// True when no identifier stands where the name of a `fun` belongs, which in expression position is a lambda.
     [[nodiscard]] bool is_anonymous_fun(keyword_parts const& parts) const;

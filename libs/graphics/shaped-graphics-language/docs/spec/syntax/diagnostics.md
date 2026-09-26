@@ -263,14 +263,14 @@ An example of an AST kind is an `sgl sketch`, since examples are checked through
 | `expected-declaration` | a form at file level or in a function body position that is no declaration and no statement |
 | `expected-member` | a line of a `struct`, `enum`, `binding` or `sampler` block, or an element of a `struct_type`, that is no member |
 | `expected-case-arm` | a statement of a `case` block that is no `pattern => result` |
-| `expected-name` | a declaration, an import or a named argument that has no identifier where its name stands |
+| `expected-name` | a declaration, an import, a feature of a `require` or a named argument that has no identifier where its name stands |
 | `reserved-name` | a declaration, a field, an enum case or a parameter named by a reserved name such as `void` ([AST-141](ast.md#atoms)) |
 | `expected-pattern` | a `let` whose target is no name, no `_` and no round list of patterns |
 | `expected-parameter` | an element of a parameter list, or the left side of an arrow lambda, that is no parameter |
 | `expected-body` | a construct that needs a body and has none, or has `=` where `=>` or a block stands |
 | `declaration-not-allowed-here` | a declaration in a place its row does not allow: a `let` at file level, a `sampler` in a function body |
 | `misplaced-module` | a second `module`, or one that is not the first declaration of its file |
-| `member-not-allowed-here` | a member its owner does not allow: a method in a `binding`, a field in an `enum`, a case in a `struct` |
+| `member-not-allowed-here` | a member its owner does not allow: a method in a `binding`, a field in an `enum`, a case or a `require` in a `struct` |
 | `default-not-allowed-here` | a default on a field whose owner allows none: a member of a `binding` |
 | `missing-parameter-list` | a signature without `()` |
 | `signature-out-of-order` | the lists of a signature in another order than `[…]`, `(…)`, `{…}` |

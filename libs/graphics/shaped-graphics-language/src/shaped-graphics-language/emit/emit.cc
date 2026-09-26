@@ -60,6 +60,8 @@ cc::string_view sgl::emit::to_string(error_kind kind)
         return "not-core";
     case error_kind::too_many_groups:
         return "too-many-groups";
+    case error_kind::target_lacks_feature:
+        return "target-lacks-feature";
     }
     return "";
 }
@@ -112,6 +114,21 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
     impl::validate(m, e, result.errors);
     if (!result.errors.empty())
         return result;
+
+    // EMIT-109: WebGPU has none of these on any device, and the text would spell a type WGSL does not have.
+    if (t == target::wgsl)
+    {
+        auto const never = check::feature_set(check::feature::binding_arrays)
+                         | check::feature::multisampled_array_textures | check::feature::raytracing;
+        for (auto i = isize(0); i < check::k_feature_count; ++i)
+            if (e.features.has(check::feature(i)) && never.has(check::feature(i)))
+                result.errors.push_back({.kind = error_kind::target_lacks_feature,
+                                         .symbol = e.function,
+                                         .detail = cc::format("{} needs {}, which WebGPU does not have", e.name,
+                                                              check::k_feature_names[i])});
+        if (!result.errors.empty())
+            return result;
+    }
 
     auto plan = impl::make_plan(m, e, t);
     // EMIT-13's two exceptions, which wait for a Metal compiler to be checked against.

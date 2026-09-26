@@ -231,3 +231,21 @@ The rule exists so a test cannot pass vacuously by mistake: a last line that com
 EVAL-78's `no-check-ran` catches a run that checked nothing too, but only when the test runs; this rule says so when the test is checked, in the editor.
 A test whose asserts are what it checks pays one line for it, `true // why`, which also says why it checks nothing else.
 A test that expects `.fail` or `.assert` is exempt, since it cannot pass without its run failing: it is fail-closed already.
+
+## CHK-234
+
+A `require` is permission, and what an entry point needs is judged from its use (CHK-238).
+So a file-level `require` costs nothing: a vertex stage in a ray-tracing file still runs on a device that cannot trace.
+The alternative, where the file's `require` is every entry point's floor, would make the cheapest place to write it the most expensive one to have written.
+
+## CHK-236
+
+A binding is a layout the host binds whole, so what one of its members needs is needed wherever the binding is listed, read or not.
+Its own `require` is therefore a requirement of the binding and not only a grant to its members: a library that ships a binding says, in the binding, what a device must have to take it.
+
+## CHK-238
+
+The floor is defined by what the language counts, never by what an optimizer happens to remove.
+A floor that followed dead-code elimination would change with a compiler version or an unrelated refactor, and the host would find out on a device that lacks the feature.
+So every use the entry point reaches counts, including one behind a condition that is always false.
+A compile-time branch on a feature, `if feature raytracing:`, is the form that may leave a use out, and it is not built.

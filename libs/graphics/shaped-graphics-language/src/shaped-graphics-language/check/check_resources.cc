@@ -78,10 +78,17 @@ type_id checker::resource_type(check::type_info info)
     return id;
 }
 
-void checker::judge_feature(i32 file, source_span where, cc::string_view form, cc::string_view feature)
+void checker::judge_feature(i32 file, source_span where, cc::string_view form, feature needed)
 {
+    // CHK-201: granted by a `require` of the file, or of the binding whose members are being compiled
+    if (file_features[file].has(needed) || granted.has(needed))
+    {
+        if (used_features != nullptr)
+            used_features->set(needed);
+        return;
+    }
     report(diagnostic_kind::needs_feature, file, where,
-           cc::format("{} needs {}, which a function cannot opt into yet", form, feature));
+           cc::format("{} needs {}, which `require {}` grants", form, name_of(needed), name_of(needed)));
 }
 
 type_id checker::resolve_resource_name(i32 file, ast::expr_id expr, cc::string_view text)
@@ -151,8 +158,8 @@ type_id checker::resolve_resource_applied(i32 file, ast::expr_id expr, ast::inde
                               out.name_of(element)));
             return checked_module::error_type;
         }
-        if (!texture->feature.empty())
-            judge_feature(file, where, text, texture->feature);
+        if (texture->shape == texture_shape::d2_ms_array)
+            judge_feature(file, where, text, feature::multisampled_array_textures);
         return resource_type({.kind = type_kind::texture, .element = element, .shape = texture->shape});
     }
 
@@ -168,7 +175,7 @@ type_id checker::resolve_resource_applied(i32 file, ast::expr_id expr, ast::inde
     }
     if (!k_image_formats[format].is_portable)
         judge_feature(file, where, cc::format("an image of .{}", k_image_formats[format].name),
-                      "sg::feature::extended_image_formats");
+                      feature::extended_image_formats);
     return resource_type({.kind = type_kind::image, .shape = image->shape, .format = format});
 }
 
@@ -194,7 +201,7 @@ type_id checker::qualify_resource(i32 file, ast::expr_id expr, type_id inner, as
         qualified.access = is_write_only ? access_mode::write : access_mode::read_write;
         if (!is_write_only && !k_image_formats[t.format].is_readwrite_portable)
             judge_feature(file, where, cc::format("a `mut` image of .{}", k_image_formats[t.format].name),
-                          "sg::feature::readwrite_image_formats");
+                          feature::readwrite_image_formats);
         return resource_type(cc::move(qualified));
     }
     if (t.kind == type_kind::texture)

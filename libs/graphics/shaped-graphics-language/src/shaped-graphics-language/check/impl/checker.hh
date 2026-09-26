@@ -8,6 +8,7 @@
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
 #include <shaped-graphics-language/check/check.hh>
+#include <shaped-graphics-language/check/features.hh>
 
 namespace sgl::check::impl
 {
@@ -135,6 +136,27 @@ struct function_notes
     u8 inlines_whole = 0;
 };
 
+/// Where a `require` stands, which decides what it grants and when it is unused (CHK-240).
+enum class require_scope : u8
+{
+    file,
+    binding,
+    body,
+};
+
+/// One feature one `require` names, kept until the pass knows whether anything needed it.
+struct require_line
+{
+    i32 file = 0;
+    /// The feature's name in the line.
+    source_span where;
+    feature what = {};
+    require_scope scope = require_scope::file;
+    /// The binding, or the function whose body it stands in; `none` at file scope.
+    symbol_id owner = symbol_id::none;
+    bool is_used = false;
+};
+
 /// The argument types of one call after its splats were spread.
 struct call_arguments
 {
@@ -183,6 +205,14 @@ struct checker
     /// Parallel to `out.tests`: what a test in a function body sees of that function, and the function.
     cc::vector<cc::vector<local_name>> test_captures;
     cc::vector<symbol_id> test_enclosing;
+    /// Parallel to `files`: what the `require` lines at file scope grant everything in that file (CHK-234).
+    cc::vector<feature_set> file_features;
+    /// What a type resolved right now may use beyond its file's features: a binding's own while its members compile.
+    feature_set granted;
+    /// Where a granted use is recorded; null where nobody collects one.
+    feature_set* used_features = nullptr;
+    /// Every `require` of a binding or a body, which is reported at the end where nothing needed it (CHK-240).
+    cc::vector<require_line> require_lines;
 
     // ---- shared helpers (check.cc) ----------------------------------------------------------------------------------
 
@@ -291,8 +321,17 @@ struct checker
     [[nodiscard]] type_id resolve_pattern_type(i32 file, ast::expr_id expr);
     /// True where an argument of type `argument` may stand for a parameter of type `parameter` (CHK-70, CHK-207).
     [[nodiscard]] bool takes(type_id parameter, type_id argument) const;
-    /// Reports `form` as `needs-feature`, naming the feature that would grant it.
-    void judge_feature(i32 file, source_span where, cc::string_view form, cc::string_view feature);
+    /// Reports `form` as `needs-feature` where neither its file nor `granted` grants `needed`, and records the use otherwise.
+    void judge_feature(i32 file, source_span where, cc::string_view form, feature needed);
+
+    // ---- features (check_features.cc) -------------------------------------------------------------------------------
+
+    /// The features one `require` names, each appended to `require_lines`; a name that is no feature is reported.
+    feature_set read_require(i32 file, ast::require_decl const& r, require_scope scope, symbol_id owner);
+    /// Records which features entry point `id` needs and reports every one it does not declare (CHK-238, CHK-239).
+    void judge_entry_features(symbol_id id);
+    /// `unused-require` for every `require` of a binding or a body that nothing needed (CHK-240).
+    void report_unused_requires();
     /// True where `expr` is the bare name `name`, which is how a resource type is recognized before lookup.
     [[nodiscard]] bool is_named(i32 file, ast::expr_id expr, cc::string_view name) const;
 

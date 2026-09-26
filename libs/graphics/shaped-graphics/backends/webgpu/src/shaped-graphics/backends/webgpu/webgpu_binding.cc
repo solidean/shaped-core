@@ -156,7 +156,7 @@ cc::result<webgpu_binding_group_layout_handle> webgpu_binding_group_layout::crea
         }
         if (b.type == sg::binding_type::texture && b.texture_dimension == sg::texture_view_dimension::tex_2d_ms_array)
             return cc::error(cc::format("binding_group_layout: '{}' is a multisampled array texture, which webgpu does "
-                                        "not have",
+                                        "not have (ctx.supports(sg::feature::multisampled_array_textures) is false)",
                                         b.name));
         for (isize j = i + 1; j < bindings.size(); ++j)
             if (bindings[j].index == b.index)

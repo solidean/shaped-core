@@ -247,6 +247,37 @@ TEST("sgl emit - an int or a uint image pads a narrow store with zeros of its ow
     CHECK(hlsl.contains("    set_u[xy] = uint(id.x);\n"));
 }
 
+TEST("sgl emit - a granted image format is written like any portable one")
+{
+    constexpr auto narrow = "require extended_image_formats\n"
+                            "\n"
+                            "binding set:\n"
+                            "    r: out image_2d[.r8_unorm]\n"
+                            "\n"
+                            "@compute(8, 8) fun cs(@thread_id id: int3){set}:\n"
+                            "    DEBUG_store(set.r, int2(id.x, id.y), 0.5)\n";
+    CHECK(text_of(narrow, target::wgsl).contains("var set_r: texture_storage_2d<r8unorm, write>;\n"));
+    CHECK(text_of(narrow, target::hlsl_vulkan)
+              .contains("[[vk::binding(0, 0)]] [[vk::image_format(\"r8\")]] RWTexture2D<float> set_r;\n"));
+    CHECK(text_of(narrow, target::hlsl_dx12).contains("RWTexture2D<float> set_r : register(u0, space0);\n"));
+}
+
+TEST("sgl emit - WGSL refuses an entry point needing a feature WebGPU never has, by its name")
+{
+    // EMIT-109: the one refusal by feature that depends on the target; a device of every other target may have it.
+    constexpr auto layered = "require multisampled_array_textures\n"
+                             "\n"
+                             "binding set:\n"
+                             "    layers: texture_2d_ms_array[float4]\n"
+                             "\n"
+                             "@compute(1) fun cs(@thread_id id: int3){set}:\n"
+                             "    let unused = id.x\n";
+    CHECK(sgl::emit::dump_errors(emit_source(layered, 0, target::wgsl))
+          == "target-lacks-feature cs needs multisampled_array_textures, which WebGPU does not have\n");
+    CHECK(text_of(layered, target::hlsl_dx12).contains("Texture2DMSArray<float4> set_layers : register(t0, space0);\n"));
+    CHECK(text_of(layered, target::hlsl_vulkan).contains("[[vk::binding(0, 0)]] Texture2DMSArray<float4> set_layers;\n"));
+}
+
 TEST("sgl emit - a static sampler that compares is a comparison sampler, and its settings stay out of the text")
 {
     constexpr auto shadowed = "binding set:\n"

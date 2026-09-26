@@ -244,6 +244,7 @@ public:
         case sg::feature::tessellation_shader:
         case sg::feature::readwrite_image_formats:
         case sg::feature::unaligned_block_compression:
+        case sg::feature::multisampled_array_textures:
             return true;
         case sg::feature::float32_filtering:
             return _float32_filtering;
