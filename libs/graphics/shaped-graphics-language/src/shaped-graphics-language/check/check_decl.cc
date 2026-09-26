@@ -560,16 +560,6 @@ void checker::compile_const(symbol_id id)
 
     cc::string_view const known[] = {"shadowable"};
     judge_attributes(file, d.attributes, known, "a const");
-    if (auto const* const a = find_attribute(file, d.attributes, "shadowable"))
-    {
-        auto const arguments = ast.at(a->arguments);
-        auto const text = arguments.size() == 1 && ast::is_valid(arguments[0].value)
-                            ? text_of(file, span_of(file, arguments[0].value))
-                            : cc::string_view();
-        if (text != "false" && text != "true")
-            report(diagnostic_kind::invalid_attribute_arguments, file, a->name,
-                   "@shadowable takes `false` or `true`, as in @shadowable(false)");
-    }
 
     auto const fail = [&] { out.symbols[index_of(id)].state = symbol_state::failed; };
     if (!ast::is_valid(c.value))

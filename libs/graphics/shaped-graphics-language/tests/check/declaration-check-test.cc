@@ -148,6 +148,17 @@ TEST("sgl check - a @shadowable(false) symbol is hidden by nothing")
     CHECK(reports_for("@shadowable(maybe) const limit = 4\n")
           == "invalid-attribute-arguments user:[shadowable] @shadowable takes `false` or `true`, as in "
              "@shadowable(false)\n");
+    // and on every declaration it stands on, where a typo would otherwise leave the symbol hidable
+    cc::string_view const declarations[] = {
+        "@shadowable(flase) struct light:\n    power: float\n",
+        "@shadowable(flase) enum mode:\n    on\n    off\n",
+        "@shadowable(flase) fun f() -> float => 1.0\n",
+        "@shadowable(flase) binding frame:\n    e: float\n",
+        "@shadowable struct light:\n    power: float\n",
+    };
+    for (auto const d : declarations)
+        CHECK(reports_for(d).starts_with("invalid-attribute-arguments user:[shadowable]")).dump("source", d);
+    CHECK(reports_for("@shadowable(true) struct light:\n    power: float\n") == "");
 }
 
 TEST("sgl check - what the tracer does not carry is unsupported-yet, and names the construct")

@@ -274,6 +274,7 @@ fun shade(k: float) -> float:
   A parameter's type is resolved before any parameter is in scope, so `light: light` is fine.
 * **CHK-220** A symbol that carries `@shadowable(false)` is hidden by nothing, and it stays what its name means.
   A declaration of the program, a local, a parameter or a `for` variable of its name is `shadows-unshadowable`.
+  Its one argument is `false` or `true`, on any declaration it stands on, and anything else is `invalid-attribute-arguments`.
 * **CHK-55** A pattern in a `let` and a `let` without a value are `unsupported-yet`; `let mut` is CHK-111.
 * **CHK-56** `return value` needs `value` to be of the function's return type, or it is `type-mismatch`.
 * **CHK-57** An arrow body `=> value` is `return value`.
@@ -531,7 +532,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `unknown-builtin` | CHK-31 |
 | `expected-body` | CHK-32 |
 | `opaque-struct-needs-builtin` | CHK-34 |
-| `invalid-attribute-arguments` | CHK-36, CHK-39, CHK-204, CHK-208, CHK-211, CHK-212, CHK-231 |
+| `invalid-attribute-arguments` | CHK-36, CHK-39, CHK-204, CHK-208, CHK-211, CHK-212, CHK-220, CHK-231 |
 | `binding-not-listed` | CHK-45, CHK-131, CHK-228 |
 | `type-mismatch` | CHK-52, CHK-56, CHK-77, CHK-84, CHK-112 to CHK-118, CHK-121, CHK-167, CHK-210, CHK-214, CHK-219 |
 | `not-assignable` | CHK-112 |

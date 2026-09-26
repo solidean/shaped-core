@@ -172,6 +172,17 @@ void checker::judge_attributes(i32 file,
         }
         if (!is_known)
             unsupported(file, a.name, cc::format("the attribute @{} on {}", name, owner));
+        // CHK-220: its one argument is `false` or `true`, whatever it stands on
+        else if (name == "shadowable")
+        {
+            auto const arguments = ast_of(file).at(a.arguments);
+            auto const text = arguments.size() == 1 && ast::is_valid(arguments[0].value) && arguments[0].name.empty()
+                                ? text_of(file, span_of(file, arguments[0].value))
+                                : cc::string_view();
+            if (text != "false" && text != "true")
+                report(diagnostic_kind::invalid_attribute_arguments, file, a.name,
+                       "@shadowable takes `false` or `true`, as in @shadowable(false)");
+        }
         else if (sgl::is_valid(a.list) && name != "operator" && name != "compute" && name != "stream"
                  && name != "stages" && name != "shadowable" && name != "expect")
             report(diagnostic_kind::invalid_attribute_arguments, file, span_of(file, a.list),
