@@ -1,6 +1,7 @@
 """The index a file reference resolves against.
 
 Three lookups, in order: the exact repo-relative path, a unique path suffix, and a unique basename.
+An entry may name a context folder, and a short path is then looked for under it first — see `resolve`.
 `lib/render/markdown.py` is how someone working inside `tools/review/` writes it, and `markdown.py` is how anyone
 refers to a file in a sentence — neither resolved before this existed, so most references simply missed.
 
@@ -117,8 +118,12 @@ class RepoIndex:
         _, dot, suffix = ref.rpartition(".")
         return bool(dot) and suffix.lower() in self.suffixes
 
-    def resolve(self, ref: str) -> Resolution:
-        """Resolve one reference, saying which of the three ways it went — or why it did not."""
+    def resolve(self, ref: str, context: str = "") -> Resolution:
+        """Resolve one reference, saying which of the three ways it went — or why it did not.
+
+        `context` is a resolved folder the entry lives in, and the candidates under it are asked first.
+        Only when none of them match does the lookup go repository-wide, so a context never makes a path unresolvable.
+        """
         # A literal `./` prefix, not a character class: `lstrip("./")` also eats the leading dot of
         # `.claude/skills/...`, and a dot-directory is a perfectly ordinary thing for an entry to name.
         # A leading `/` never reaches here — `looks_like_a_path` rejects it as a URL or a route.
@@ -127,16 +132,19 @@ class RepoIndex:
             ref = ref[2:]
         if not ref:
             return Resolution(MISSING)
+        candidates = self._by_suffix.get(ref, [])
+        scoped = _under(context, candidates)
+        if scoped is not None:
+            return scoped
         if ref in self._exact:
             return Resolution(RESOLVED, ref)
-        candidates = self._by_suffix.get(ref, [])
         if len(candidates) == 1:
             return Resolution(RESOLVED, candidates[0])
         if candidates:
             return Resolution(AMBIGUOUS, candidates=tuple(candidates))
         return Resolution(MISSING)
 
-    def resolve_dir(self, ref: str) -> Resolution:
+    def resolve_dir(self, ref: str, context: str = "") -> Resolution:
         """The same three lookups, against directories.
 
         A folder is held to the same strictness as a file on purpose.
@@ -149,9 +157,12 @@ class RepoIndex:
             ref = ref[2:]
         if not ref:
             return Resolution(MISSING)
+        candidates = self._dirs_by_suffix.get(ref, [])
+        scoped = _under(context, candidates)
+        if scoped is not None:
+            return scoped
         if ref in self.dirs:
             return Resolution(RESOLVED, ref)
-        candidates = self._dirs_by_suffix.get(ref, [])
         if len(candidates) == 1:
             return Resolution(RESOLVED, candidates[0])
         if candidates:
@@ -170,3 +181,16 @@ class RepoIndex:
 
     def __len__(self) -> int:
         return len(self.paths)
+
+
+def _under(context: str, candidates: list[str]) -> Resolution | None:
+    """The lookup restricted to one folder, or None when nothing under it matches and the caller should look wider."""
+    if not context:
+        return None
+    prefix = context.rstrip("/") + "/"
+    inside = [c for c in candidates if c.startswith(prefix)]
+    if len(inside) == 1:
+        return Resolution(RESOLVED, inside[0])
+    if inside:
+        return Resolution(AMBIGUOUS, candidates=tuple(inside))
+    return None

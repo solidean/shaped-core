@@ -66,7 +66,6 @@ from .lib.entry.grammar import (
     ACK_PROMPT,
     ack_name,
     is_ack_name,
-    ATTR_RE,
     BLOCK_TYPES,
     OPTION_KINDS,
     SEVERITIES,
@@ -79,6 +78,7 @@ from .lib.entry.parse import parse_file as parse_entry_file
 from .lib.entry.parse import parse_text as parse_entry_text
 from .lib.entry.write import (
     append_text,
+    attributes_read_as_prose,
     check_immutable,
     check_supersedes,
     compose,
@@ -116,7 +116,6 @@ __all__ = [
     "token_problems",
     "AnswerFile",
     "Comment",
-    "ATTR_RE",
     "BLOCK_TYPES",
     "Block",
     "ANYTHING_SLUG",
@@ -155,6 +154,7 @@ __all__ = [
     "allocate_many",
     "append_jsonl",
     "append_text",
+    "attributes_read_as_prose",
     "ack_name",
     "ask_canonical",
     "build_net_space",
