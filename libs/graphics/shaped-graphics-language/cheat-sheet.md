@@ -55,6 +55,8 @@ d.value().pipelines                        // name, stages, layout, vertex_input
 sgl::prelude_files()                       // -> cc::span<prelude_file const> { name, source }, in module order:
                                            // "builtins.sgl": GENERATED in memory from the builtin registry, never read from disk
                                            // "core.sgl": the hand-written prelude/core.sgl as it was when the library was built
+sgl::prelude_file_of(path)                 // -> i32: which prelude file a path ending in `prelude/core.sgl` is, else -1;
+                                           // a driver checks such a source IN that file's place, never behind a 2nd prelude
 
 #include <shaped-graphics-language/source/format_diagnostic.hh>
 sgl::line_column_of(source, offset)        // -> sgl::line_column { line, column }, both 1-based, columns in bytes

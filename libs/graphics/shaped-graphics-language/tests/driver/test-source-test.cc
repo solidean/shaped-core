@@ -1,7 +1,30 @@
 #include "../check/check-test-support.hh"
 
 #include <shaped-graphics-language/driver/compile_to_text.hh>
+#include <shaped-graphics-language/driver/prelude.hh>
 #include <shaped-graphics-language/driver/test_source.hh>
+
+TEST("sgl driver - a path ending in a file of the prelude names that file, and no other path does")
+{
+    CHECK(sgl::prelude_file_of("prelude/builtins.sgl") == 0);
+    CHECK(sgl::prelude_file_of("C:\\src\\sgl\\prelude\\core.sgl") == 1);
+    CHECK(sgl::prelude_file_of("file:///c%3A/src/sgl/prelude/core.sgl") == 1);
+    CHECK(sgl::prelude_file_of("core.sgl") == -1);
+    CHECK(sgl::prelude_file_of("src/core.sgl") == -1);
+    CHECK(sgl::prelude_file_of("my_prelude/core.sgl") == -1);
+    CHECK(sgl::prelude_file_of("prelude/my_core.sgl") == -1);
+}
+
+TEST("sgl driver - a file of the prelude is checked in its own place, where it declares each name once")
+{
+    auto const builtins = sgl::prelude_files()[0].source;
+    CHECK(sgl::test_source(builtins, "sgl/prelude/builtins.sgl").errors == "");
+    // behind the prelude, each builtin type is declared a second time
+    CHECK(sgl::test_source(builtins, "sgl/copy/builtins.sgl").errors != "");
+
+    auto const core = cc::string(sgl::prelude_files()[1].source) + "fun broken() => nope\n";
+    CHECK(sgl::test_source(core, "sgl/prelude/core.sgl").errors.contains("sgl/prelude/core.sgl:"));
+}
 
 TEST("sgl driver - test_source counts the tests, reports what failed, and names the entry points")
 {

@@ -23,6 +23,12 @@ namespace sgl
 ///
 /// The views live for the life of the process.
 [[nodiscard]] cc::span<prelude_file const> prelude_files();
+
+/// The position in `prelude_files()` of the file `path` is the source of, found by its place in the tree: a path that
+/// ends in `prelude/core.sgl`, with either separator and in a file uri alike; -1 for every other path.
+/// A driver checks such a source as that file of the prelude, in place of the library's copy.
+/// Behind the prelude it would declare everything a second time, and each name would then hide its own twin.
+[[nodiscard]] i32 prelude_file_of(cc::string_view path);
 } // namespace sgl
 
 namespace sgl::impl

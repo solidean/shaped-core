@@ -640,8 +640,9 @@ void checker::compile_const(symbol_id id)
         auto const declared = resolve_value_type(file, c.type);
         if (declared != error_type && declared != info.type)
         {
-            report(diagnostic_kind::type_mismatch, file, where,
-                   cc::format("expected {}, got {}", out.name_of(declared), out.name_of(info.type)));
+            tell_apart(report(diagnostic_kind::type_mismatch, file, where,
+                              cc::format("expected {}, got {}", out.name_of(declared), out.name_of(info.type))),
+                       declared, info.type);
             return fail();
         }
     }

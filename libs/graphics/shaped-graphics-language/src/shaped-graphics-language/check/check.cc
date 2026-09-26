@@ -125,6 +125,29 @@ located_diagnostic& checker::report(diagnostic_kind kind, i32 file, source_span 
     return out.diagnostics.back();
 }
 
+void checker::tell_apart(located_diagnostic& d, type_id expected, type_id got)
+{
+    if (expected == got || out.name_of(expected) != out.name_of(got))
+        return;
+    d.detail += ", two different types of that name";
+    auto const note_at = [&](type_id t, cc::string message)
+    {
+        auto const symbol = out.at(t).symbol;
+        if (!is_valid(symbol) || index_of(symbol) >= out.symbols.size())
+            return;
+        auto const& s = out.at(symbol);
+        auto const& node = ast_of(s.file).at(s.declaration).node;
+        auto const* const structure = node.try_as<ast::struct_decl>();
+        auto const* const enumeration = node.try_as<ast::enum_decl>();
+        if (structure == nullptr && enumeration == nullptr)
+            return;
+        auto const where = structure != nullptr ? structure->name : enumeration->name;
+        d.notes.push_back({.file = s.file, .where = where, .message = cc::move(message)});
+    };
+    note_at(expected, cc::format("the {} expected is declared here", out.name_of(expected)));
+    note_at(got, cc::format("the {} given is declared here", out.name_of(got)));
+}
+
 void checker::unsupported(i32 file, source_span where, cc::string_view construct)
 {
     report(diagnostic_kind::unsupported_yet, file, where, construct);
@@ -580,10 +603,19 @@ void checker::merge_scopes()
                 is_sealed = is_sealed || !out.at(s).is_shadowable;
             if (is_sealed)
             {
-                for (auto const s : ids)
+                for (auto i = isize(0); i < ids.size(); ++i)
+                {
+                    // a struct's constructor has the struct's declaration, which is reported once
+                    auto const s = ids[i];
+                    auto is_reported = false;
+                    for (auto j = isize(0); j < i; ++j)
+                        is_reported = is_reported || out.at(ids[j]).declaration == out.at(s).declaration;
+                    if (is_reported)
+                        continue;
                     report(diagnostic_kind::shadows_unshadowable, out.at(s).file,
                            span_of(out.at(s).file, out.at(s).declaration),
                            cc::format("{} is @shadowable(false) in the prelude", name));
+                }
                 continue;
             }
             seen.clear();

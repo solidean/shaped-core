@@ -7,8 +7,8 @@ using sgl::check::target_kind;
 
 namespace
 {
-/// The reports of `lines` as the body of `fun f(v: vec3, c: float3, k: float) -> float`; `lines` is indented here.
-cc::string body_reports(cc::string_view lines)
+/// `lines` as the body of `fun f(v: vec3, c: float3, k: float) -> float`; `lines` is indented here.
+cc::string body_source(cc::string_view lines)
 {
     auto source = cc::string("fun f(v: vec3, c: float3, k: float) -> float:\n");
     auto at_line_start = true;
@@ -19,7 +19,12 @@ cc::string body_reports(cc::string_view lines)
         source += ch;
         at_line_start = ch == '\n';
     }
-    return reports_for(source);
+    return source;
+}
+
+cc::string body_reports(cc::string_view lines)
+{
+    return reports_for(body_source(lines));
 }
 
 /// The first expression of the user file that is spelled exactly `text`.
@@ -261,10 +266,13 @@ TEST("sgl check - a local or a parameter shadows a module-level name, and hides 
     CHECK(body_reports("let length = length v\nreturn length\n") == "");
     // one namespace: behind the local, the name is no function and no type
     CHECK(body_reports("let dot = k\nreturn dot v v\n") == "unsupported-yet user:[dot] a call of a local value\n");
-    CHECK(body_reports("let float = k\nlet a : float = k\nreturn k\n")
+    // a builtin type is @shadowable(false), so these two need a prelude whose types may be hidden
+    auto const shadowable = shadowable_builtins_text();
+    CHECK(reports_of(check_sources(shadowable, body_source("let float = k\nlet a : float = k\nreturn k\n")))
           == "wrong-kind-of-name user:[float] float is a local, and a type stands here\n");
     // a literal is of the prelude's type whatever a local is named
-    CHECK(body_reports("let float = 1.0\nlet int = 2\nreturn float\n") == "");
+    CHECK(reports_of(check_sources(shadowable, body_source("let float = 1.0\nlet int = 2\nreturn float\n"))) == "");
+    CHECK(body_reports("let float = k\nreturn k\n") == "shadows-unshadowable user:[float] float is @shadowable(false)\n");
     // an inner block's local hides the name only up to its end
     CHECK(body_reports("if k > 0.0:\n    let dot = k\n    return dot\nreturn dot v v\n") == "");
 
@@ -463,4 +471,14 @@ TEST("sgl check - a splat spreads a struct with fields, and a value with none is
 {
     CHECK(reports_for("struct e:\n    x: float\nfun f() -> float2 => float2(..void, 1.0, 2.0)\n")
           == "type-mismatch user:[..void] void has no fields a splat could spread\n");
+}
+
+TEST("sgl check - a mismatch between two types of one name says so, and notes where each is declared")
+{
+    auto const prelude
+        = cc::string(sgl::prelude_files()[0].source) + "struct thing:\n    a: float\nfun make() => thing(1.0)\n";
+    CHECK(reports_of(check_sources(prelude, "struct thing:\n    b: float\nfun f():\n    let t : thing = make()\n"))
+          == "type-mismatch user:[make()] expected thing, got thing, two different types of that name\n"
+             "  note user:[thing] the thing expected is declared here\n"
+             "  note prelude:[thing] the thing given is declared here\n");
 }

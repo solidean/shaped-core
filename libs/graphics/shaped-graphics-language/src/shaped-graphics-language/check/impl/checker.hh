@@ -289,6 +289,9 @@ struct checker
 
     /// The diagnostic it appended, which a caller may give related notes.
     located_diagnostic& report(diagnostic_kind kind, i32 file, source_span where, cc::string detail);
+    /// Where `expected` and `got` are two types of one name, `d` says so and notes where each is declared.
+    /// Without it a mismatch would read `expected int, got int`.
+    void tell_apart(located_diagnostic& d, type_id expected, type_id got);
     void unsupported(i32 file, source_span where, cc::string_view construct);
     /// `report`, unless a diagnostic of that kind already stands there: for what every tree inlining one body finds.
     void report_once(diagnostic_kind kind, i32 file, source_span where, cc::string_view detail);

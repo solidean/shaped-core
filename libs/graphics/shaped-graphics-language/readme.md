@@ -96,6 +96,8 @@ What the server provides:
 * inlay hints showing inferred types;
 * test results: a failing `check` is a diagnostic, and every check site gets a gutter mark.
 
+An open `prelude/builtins.sgl` or `prelude/core.sgl` is checked as that file of the prelude, so editing `core.sgl` is checked live.
+
 The gutter marks are a green check when every run passed, a red cross when every run failed, and a half-and-half mark for both.
 A grey question mark is a site that never ran, and hovering any mark gives the counts.
 An edit dims the marks to a dashed circle until the server reports on the edited text.
@@ -125,13 +127,14 @@ Changing either restarts the server.
 * After changing it, run `npm install && npm run bundle` in `tools/vscode-extension/` and commit `dist/extension.js` with the change.
 * `uv run dev.py check` rebuilds the bundle whenever its sources changed and fails when the committed one differs; `--fix` replaces it.
 
-A manual test after a change, with `sgl` built and the extension linked:
+A manual test after a change, with the extension installed by `uv run dev.py install sgl-vscode` and the window reloaded:
 
 1. Open [tests/samples/control-flow.sgl](tests/samples/control-flow.sgl): names are coloured by the server, and inferred types appear as inlay hints.
 2. Type a deliberate error: a squiggle appears, and its hover names the problem.
 3. Open a file with tests, such as [tests/corpus/calls/defaults.sgl](tests/corpus/calls/defaults.sgl): every check has a green gutter mark.
    Break one so that it fails: its mark turns into a red cross, and the test is a diagnostic.
-4. Rebuild with `uv run dev.py build -t sgl`: the "A newer sgl was built." prompt appears, and **Restart** brings the new server up.
+4. Open [prelude/builtins.sgl](prelude/builtins.sgl): it checks without a diagnostic.
+5. Rebuild with `uv run dev.py build -t sgl`: the "A newer sgl was built." prompt appears, and **Restart** brings the new server up.
 
 ### Working on the grammar
 

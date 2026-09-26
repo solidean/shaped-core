@@ -28,6 +28,7 @@ namespace sgl_lsp
 } // namespace sgl_lsp
 
 /// What every feature reads: one document checked as one unnamed module behind the prelude.
+/// A document that is a file of the prelude is checked in that file's place instead.
 ///
 /// Today a unit is one file, since every file is its own unnamed module.
 /// Once modules exist, an analysis covers every file of one, and a feature finds its file with `file_of`.
@@ -36,14 +37,19 @@ struct sgl_lsp::analysis
     cc::shared_ptr<lsp::document> document;
     sgl::parsed_file file;
     sgl::ast::file_ast ast;
+    /// The file that stands behind the prelude when the document is one of the prelude's own, empty then.
+    sgl::parsed_file empty_file;
+    sgl::ast::file_ast empty_ast;
+    /// The document's position among the module's files: the last, or its place in the prelude (`sgl::prelude_file_of`).
+    i32 own_file = 0;
     sgl::check::checked_module module;
     /// Every phase's diagnostics, the ones a test's `@expect` declared taken out.
     cc::vector<sgl::check::located_diagnostic> diagnostics;
 
-    /// The position of the user file among the files the module was checked from.
-    [[nodiscard]] i32 user_file() const { return i32(the_prelude().files.size()); }
+    /// The position of the document among the files the module was checked from.
+    [[nodiscard]] i32 user_file() const { return own_file; }
 
-    /// The files the module was checked from, in order, prelude first.
+    /// The files the module was checked from, in order, prelude first, the document in its own place.
     [[nodiscard]] cc::vector<sgl::check::module_file> module_files() const;
 
     /// The text of file `i`, the prelude's or the document's.

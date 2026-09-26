@@ -9,6 +9,7 @@ This page is for whoever works on the server.
 * **Diagnostics**, pushed per document and version: every phase's, then again with each failing test once the document's tests ran.
   A diagnostic without a detail says `sgl::summary_of(kind)`, and `unreachable-code` is drawn faded.
   A note into the prelude points at a virtual `sgl-prelude:` document, which the client fetches with `sgl/preludeText`.
+  An open `prelude/builtins.sgl` or `prelude/core.sgl` is checked in that file's place (`sgl::prelude_file_of`), so an edit of `core.sgl` is checked as the prelude it is.
 * **Semantic tokens**, the whole document at once: what `sgl::classify` says every token is, mapped onto LSP's standard names.
 * **Inlay hints**: ` : type` after every `let` that writes no type, which inserts itself when accepted.
 * **Tests**: after every check the server runs the document's tests itself.

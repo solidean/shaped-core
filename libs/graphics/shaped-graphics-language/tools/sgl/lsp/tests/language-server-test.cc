@@ -1,30 +1,32 @@
 #include "../server.hh"
 #include "lsp-test-support.hh"
 
+#include <shaped-graphics-language/driver/prelude.hh>
+
 using namespace lsp_test;
 
 namespace
 {
-/// A language server with `source` open as `file:///t.sgl` at version 1, settled: checked, published, tests run.
+/// A language server with `source` open as `uri` at version 1, settled: checked, published, tests run.
 struct session
 {
     cc::unique_ptr<sgl_lsp::language_server> ls = sgl_lsp::language_server::create();
     cc::vector<babel::json::document> messages;
 
-    explicit session(cc::string_view source, bool offers_utf8 = false)
+    explicit session(cc::string_view source, bool offers_utf8 = false, cc::string_view uri = "file:///t.sgl")
     {
         initialize(ls->protocol(), offers_utf8);
         (void)outgoing(ls->protocol());
-        open(source);
+        open(source, uri);
     }
 
-    void open(cc::string_view source)
+    void open(cc::string_view source, cc::string_view uri)
     {
         auto w = babel::json::string_writer();
         {
             auto o = w.object();
             auto d = o.write_object("textDocument");
-            d.write("uri", "file:///t.sgl");
+            d.write("uri", uri);
             d.write("languageId", "sgl");
             d.write("version", 1);
             d.write("text", source);
@@ -82,6 +84,21 @@ TEST("sgl lsp - opening a document publishes its diagnostics, with a summary whe
 
     auto clean = session("fun f() -> float => 1.0\n");
     CHECK(diagnostics_text(clean.last("textDocument/publishDiagnostics")) == "");
+}
+
+TEST("sgl lsp - a file of the prelude is checked in its own place, not behind a second copy of itself", main_thread)
+{
+    auto const builtins = sgl::prelude_files()[0].source;
+    auto own = session(builtins, false, "file:///c%3A/sgl/prelude/builtins.sgl");
+    CHECK(diagnostics_text(own.last("textDocument/publishDiagnostics")) == "");
+    // the same text anywhere else declares every builtin type a second time
+    auto elsewhere = session(builtins, false, "file:///c%3A/sgl/copy/builtins.sgl");
+    CHECK(diagnostics_text(elsewhere.last("textDocument/publishDiagnostics")) != "");
+
+    // an edit of core.sgl is checked as the prelude, so its error is reported in it
+    auto core = session(cc::string(sgl::prelude_files()[1].source) + "fun broken() => nope\n", false,
+                        "file:///c%3A/sgl/prelude/core.sgl");
+    CHECK(diagnostics_text(core.last("textDocument/publishDiagnostics")).contains("unknown-name"));
 }
 
 TEST("sgl lsp - a failing test is a diagnostic, and every check is a mark with its counts", main_thread)

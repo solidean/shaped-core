@@ -28,27 +28,33 @@ cc::vector<sgl::check::module_file> sgl_lsp::analysis::module_files() const
     auto const& p = the_prelude();
     auto out = cc::vector<sgl::check::module_file>();
     for (auto i = isize(0); i < p.files.size(); ++i)
-        out.push_back({.file = p.files[i], .ast = p.asts[i]});
-    out.push_back({.file = file, .ast = ast});
+        out.push_back(i == own_file ? sgl::check::module_file{.file = file, .ast = ast}
+                                    : sgl::check::module_file{.file = p.files[i], .ast = p.asts[i]});
+    if (own_file < p.files.size())
+        out.push_back({.file = empty_file, .ast = empty_ast});
+    else
+        out.push_back({.file = file, .ast = ast});
     return out;
 }
 
 cc::string_view sgl_lsp::analysis::text_of(i32 f) const
 {
     auto const& p = the_prelude();
-    return f < p.files.size() ? cc::string_view(p.files[f].source) : cc::string_view(document->text);
+    if (f == own_file)
+        return document->text;
+    return f < p.files.size() ? cc::string_view(p.files[f].source) : cc::string_view();
 }
 
 lsp::text_index const& sgl_lsp::analysis::index_of(i32 f) const
 {
     auto const& p = the_prelude();
-    return f < p.files.size() ? p.indices[f] : document->index;
+    return f == own_file || f >= p.files.size() ? document->index : p.indices[f];
 }
 
 cc::string sgl_lsp::analysis::uri_of(i32 f) const
 {
     auto const& p = the_prelude();
-    return f < p.files.size() ? p.uri_of(f) : document->uri;
+    return f == own_file || f >= p.files.size() ? document->uri : p.uri_of(f);
 }
 
 cc::shared_ptr<sgl_lsp::analysis> sgl_lsp::analyze(cc::shared_ptr<lsp::document> document)
@@ -58,11 +64,15 @@ cc::shared_ptr<sgl_lsp::analysis> sgl_lsp::analyze(cc::shared_ptr<lsp::document>
     a->document = cc::move(document);
     a->file = sgl::parse(a->document->text);
     a->ast = sgl::ast::build(a->file);
+    a->empty_file = sgl::parse("");
+    a->empty_ast = sgl::ast::build(a->empty_file);
+    auto const own = sgl::prelude_file_of(a->document->uri);
+    a->own_file = own >= 0 ? own : i32(p.files.size());
 
-    auto prelude_files = cc::vector<sgl::check::module_file>();
-    for (auto i = isize(0); i < p.files.size(); ++i)
-        prelude_files.push_back({.file = p.files[i], .ast = p.asts[i]});
-    a->module = sgl::check::check(prelude_files, {.file = a->file, .ast = a->ast});
+    auto files = a->module_files();
+    auto const behind = files.back();
+    files.remove_back();
+    a->module = sgl::check::check(files, behind);
 
     auto const user = a->user_file();
     for (auto const& d : a->file.diagnostics)

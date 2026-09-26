@@ -28,11 +28,13 @@ cc::vector<sgl::check::module_file> sgl::driver::impl::module_files_of(front_end
 sgl::driver::impl::front_end sgl::driver::impl::run_front_end(cc::string_view source, cc::string_view source_name)
 {
     auto result = front_end{.prelude = prelude_files(), .source_name = source_name};
+    auto const own = prelude_file_of(source_name);
+    result.program = own >= 0 ? own : i32(result.prelude.size());
 
     // Both vectors are complete before a `module_file` refers into them.
-    for (auto const& p : result.prelude)
-        result.files.push_back(parse(p.source));
-    result.files.push_back(parse(source));
+    for (auto i = isize(0); i < result.prelude.size(); ++i)
+        result.files.push_back(parse(i == own ? source : result.prelude[i].source));
+    result.files.push_back(parse(own >= 0 ? cc::string_view() : source));
     for (auto const& f : result.files)
         result.asts.push_back(ast::build(f));
 
