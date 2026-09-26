@@ -55,6 +55,7 @@ struct sgl_lsp::check_mark
 };
 
 /// The params of `sgl/checkResults`: every site of the document, summed over the tests of `run`.
+/// A test judged by the diagnostics it expects is one more mark, on its `test` keyword: passed when they all occurred.
 struct sgl_lsp::check_results_params
 {
     cc::string uri;

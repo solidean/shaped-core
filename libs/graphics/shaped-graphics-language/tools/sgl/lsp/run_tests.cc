@@ -56,6 +56,21 @@ sgl_lsp::check_results_params sgl_lsp::check_results_of(test_run const& run, lsp
             out.marks[at - 1].passed += s.passed;
             out.marks[at - 1].failed += s.failed;
         }
+
+    // a test that expects diagnostics never runs; its verdict is whether they occurred, and one that did not is reported
+    // as `unmet-expectation` at the expectation's own argument
+    for (auto const& test : a.module.tests)
+    {
+        if (test.file != user || !test.expects_diagnostics())
+            continue;
+        auto is_met = true;
+        for (auto const& d : a.diagnostics)
+            if (d.what.kind == sgl::diagnostic_kind::unmet_expectation && d.file == user)
+                for (auto const& e : test.expectations)
+                    is_met = is_met && d.what.where != e.where;
+        out.marks.push_back(
+            {.range = range_of(a, user, test.where, e), .passed = is_met ? 1 : 0, .failed = is_met ? 0 : 1});
+    }
     return out;
 }
 

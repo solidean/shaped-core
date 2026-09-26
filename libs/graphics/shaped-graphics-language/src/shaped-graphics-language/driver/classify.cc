@@ -9,6 +9,13 @@ using namespace sgl;
 
 namespace
 {
+/// Words that steer control flow, whether the form tree reads them as keywords or as word operators.
+[[nodiscard]] bool is_control_word(cc::string_view w)
+{
+    return w == "if" || w == "else" || w == "for" || w == "in" || w == "while" || w == "loop" || w == "return"
+        || w == "break" || w == "continue" || w == "yield" || w == "case" || w == "and" || w == "or" || w == "not";
+}
+
 /// One class per token, filled pass by pass: the syntax first, then declarations, then what the check resolved.
 struct classifier
 {
@@ -94,13 +101,17 @@ struct classifier
             switch (f.kind)
             {
             case form_kind::keyword:
-                set(t, token_class::keyword);
-                break;
             case form_kind::op:
             case form_kind::prefix_operator:
             case form_kind::postfix_operator:
-                set(t, token_class::op);
+            {
+                auto const word = t >= 0 ? file.text_of(file.tokens[t].where) : cc::string_view();
+                if (is_control_word(word))
+                    set(t, token_class::control);
+                else
+                    set(t, f.kind == form_kind::keyword ? token_class::keyword : token_class::op);
                 break;
+            }
             case form_kind::number:
             case form_kind::hash_literal:
             {
@@ -170,6 +181,14 @@ struct classifier
                 continue;
             set_span(f.name, text == "self" ? token_class::self_ : token_class::parameter, true, is_prelude);
         }
+    }
+
+    /// Named arguments and object elements, attribute arguments included; a positional one has no name.
+    void classify_arguments()
+    {
+        auto const is_prelude = is_prelude_file(options.file);
+        for (auto const& arg : ast.arguments)
+            set_span(arg.name, token_class::argument, false, is_prelude);
     }
 
     void classify_members(ast::range_of<ast::decl_id> members, token_class cls, bool is_prelude)
@@ -341,6 +360,7 @@ struct classifier
         classify_tokens();
         classify_forms();
         classify_fields();
+        classify_arguments();
         classify_declarations();
         classify_locals();
         classify_uses();
@@ -366,6 +386,8 @@ cc::string_view sgl::to_string(token_class c)
     {
     case token_class::keyword:
         return "keyword";
+    case token_class::control:
+        return "control";
     case token_class::number:
         return "number";
     case token_class::string:
@@ -404,6 +426,8 @@ cc::string_view sgl::to_string(token_class c)
         return "pipeline";
     case token_class::parameter:
         return "parameter";
+    case token_class::argument:
+        return "argument";
     case token_class::local:
         return "local";
     case token_class::mutable_local:

@@ -9,7 +9,7 @@ using namespace sgl_test;
 namespace
 {
 /// Each classified span of `source` checked behind the library's prelude, as `text:class`, with `!` for a declaration
-/// and `^` for something the prelude declares; spans of class `op` and `keyword` are left out unless `all` is set.
+/// and `^` for something the prelude declares; spans of class `op`, `keyword` and `control` are left out unless `all` is set.
 cc::string classes_of(cc::string_view source, bool all = false)
 {
     auto const checked = check_sources(read_prelude(), source);
@@ -19,7 +19,8 @@ cc::string classes_of(cc::string_view source, bool all = false)
         {.module = &checked.module, .file = checked.user_file(), .prelude_file_count = checked.user_file()});
     for (auto const& s : spans)
     {
-        if (!all && (s.cls == sgl::token_class::op || s.cls == sgl::token_class::keyword))
+        if (!all
+            && (s.cls == sgl::token_class::op || s.cls == sgl::token_class::keyword || s.cls == sgl::token_class::control))
             continue;
         out.appendf("{}:{}{}{} ", checked.user.text_of(s.where), sgl::to_string(s.cls), s.is_declaration ? "!" : "",
                     s.is_from_prelude ? "^" : "");
@@ -68,6 +69,15 @@ TEST("sgl classify - methods, properties, self and attributes")
     CHECK(classes_of("@inline\nfun f() -> int => 1\n", true).starts_with("@inline:attribute fun:keyword f:function!"));
 }
 
+TEST("sgl classify - control flow words are their own class, and so is the name a named argument gives")
+{
+    CHECK(classes_of("fun f(a: bool, b: bool) -> int:\n    if a and not b:\n        return 1\n    return 0\n", true)
+              .contains("if:control a:parameter and:control not:control b:parameter"));
+    CHECK(classes_of("struct span:\n    lo: float\n    hi: float\nfun w(s: span) -> float => s.hi - s.lo\n"
+                     "test w({lo = 1.0, hi = 2.0}) == 1.0\n")
+              .contains("lo:argument 1.0:number hi:argument"));
+}
+
 TEST("sgl classify - spans are in source order and never overlap, on the extension's whole sample")
 {
     auto const source = read_text(cc::string(SGL_SAMPLES_DIR) + "/../../tools/vscode-extension/examples/sample.sgl");
@@ -101,4 +111,16 @@ TEST("sgl classify - an unannotated let has the type the check gave it, and an a
     for (auto const& b : sgl::unannotated_bindings(checked.user_ast, checked.module, checked.user_file()))
         out.appendf("{} : {}\n", checked.user.text_of(b.name), checked.module.name_of(b.type));
     CHECK(out == "a : float\nc : float\n");
+}
+
+TEST("sgl classify - a let whose value is a call of the type's own name says so, which an editor's hint leaves out")
+{
+    auto const checked = check_sources(read_prelude(), "fun f() -> float:\n"
+                                                       "    let v = vec3(1.0, 2.0, 3.0)\n"
+                                                       "    let x = v.x\n"
+                                                       "    return x\n");
+    auto out = cc::string();
+    for (auto const& b : sgl::unannotated_bindings(checked.user_ast, checked.module, checked.user_file()))
+        out.appendf("{}{} ", checked.user.text_of(b.name), b.is_type_named ? " named" : "");
+    CHECK(out == "v named x ");
 }

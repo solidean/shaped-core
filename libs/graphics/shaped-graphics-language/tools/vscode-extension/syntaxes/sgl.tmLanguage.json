@@ -315,7 +315,7 @@
                     "name": "meta.attribute.sgl",
                     "begin": "((?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])@[0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*)(\\()",
                     "beginCaptures": {
-                        "1": { "name": "entity.name.function.decorator.sgl" },
+                        "1": { "name": "storage.type.annotation.sgl" },
                         "2": { "name": "punctuation.section.parens.begin.sgl" }
                     },
                     "end": "(\\))|$",
@@ -332,7 +332,7 @@
             ]
         },
         "attribute-name": {
-            "name": "entity.name.function.decorator.sgl",
+            "name": "storage.type.annotation.sgl",
             "match": "(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])@[0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}']*"
         },
         "named-argument": {
@@ -524,8 +524,13 @@
                     "match": "(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])(?:assert|print)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])"
                 },
                 {
+                    "comment": "The word operators that steer control flow read as control keywords, as the language server colours them.",
+                    "name": "keyword.control.sgl",
+                    "match": "(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])(?:and|or|not|in)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])"
+                },
+                {
                     "name": "keyword.operator.wordlike.sgl",
-                    "match": "(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])(?:and|or|not|as|in)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])"
+                    "match": "(?<![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])(?:as)(?![0-9A-Za-z_@#\\\\\\x{80}-\\x{10FFFF}'])"
                 },
                 {
                     "comment": "Consts of the prelude that nothing may shadow, over the cases of the builtin enum bool.",

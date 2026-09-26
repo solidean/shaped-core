@@ -167,3 +167,15 @@ TEST("sgl lsp - closing a document clears its diagnostics", main_thread)
     s.settle();
     CHECK(s.last("textDocument/publishDiagnostics")["diagnostics"].size() == 0);
 }
+
+TEST("sgl lsp - a test judged by the diagnostics it expects is one mark on its keyword, green when they occurred",
+     main_thread)
+{
+    auto s = session("@expect(error = \"unknown-name\")\ntest nope\n@expect(error = \"type-mismatch\")\ntest 1 < 2\n");
+    auto const marks = s.last("sgl/checkResults")["marks"];
+    REQUIRE(marks.size() == 2);
+    CHECK(marks[0]["range"]["start"]["line"].as_double() == 1);
+    CHECK(marks[0]["passed"].as_double() == 1);
+    CHECK(marks[1]["range"]["start"]["line"].as_double() == 3);
+    CHECK(marks[1]["failed"].as_double() == 1);
+}

@@ -9,6 +9,8 @@
 enum class sgl::token_class : sgl::u8
 {
     keyword,
+    /// A keyword or word operator that steers control flow: `if`, `for`, `return`, `yield`, `case`, `and`, `or`, `not`.
+    control,
     number,
     string,
     comment,
@@ -33,6 +35,8 @@ enum class sgl::token_class : sgl::u8
     constant,
     pipeline,
     parameter,
+    /// The name a named argument or an object element gives: `center` in `f(center = 1.0)` and in `{center = 1.0}`.
+    argument,
     local,
     mutable_local,
     /// `self`, as a parameter and as a use.

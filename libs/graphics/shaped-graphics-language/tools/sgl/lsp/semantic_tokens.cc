@@ -6,8 +6,8 @@ using namespace cc::primitive_defines;
 
 namespace
 {
-// The legend: LSP's standard names, so every theme colours them.
-// A custom name would go uncoloured until a theme opted in.
+// The legend: LSP's standard types, so every theme colours them.
+// A custom type would go uncoloured until a theme opted in; the two custom modifiers are styled by the extension instead.
 enum token_type : u32
 {
     t_type,
@@ -40,10 +40,14 @@ enum token_modifier : u32
     m_static = 1u << 2,
     m_default_library = 1u << 3,
     m_documentation = 1u << 4,
+    /// Not LSP's: the extension maps `keyword.controlFlow` to the `keyword.control` scope themes colour apart.
+    m_control_flow = 1u << 5,
+    /// Not LSP's: the extension underlines it, as rust-analyzer does for what can change.
+    m_mutable = 1u << 6,
 };
 
 constexpr cc::string_view token_modifier_names[]
-    = {"declaration", "readonly", "static", "defaultLibrary", "documentation"};
+    = {"declaration", "readonly", "static", "defaultLibrary", "documentation", "controlFlow", "mutable"};
 
 struct mapped
 {
@@ -61,6 +65,8 @@ struct mapped
     {
     case token_class::keyword:
         return {true, t_keyword, 0};
+    case token_class::control:
+        return {true, t_keyword, m_control_flow};
     case token_class::number:
         return {true, t_number, 0};
     case token_class::string:
@@ -95,6 +101,9 @@ struct mapped
     case token_class::binding_member:
         return {true, t_property, 0};
     case token_class::enum_case:
+        // a case of a prelude enum is a constant of the language, `true` and `false` above all
+        if (s.is_from_prelude)
+            return {true, t_keyword, 0};
         return {true, t_enum_member, 0};
     case token_class::constant:
         return {true, t_variable, m_static | m_readonly};
@@ -102,10 +111,12 @@ struct mapped
         return {true, t_variable, m_static | m_readonly};
     case token_class::parameter:
         return {true, t_parameter, 0};
+    case token_class::argument:
+        return {true, t_parameter, 0};
     case token_class::local:
         return {true, t_variable, m_readonly};
     case token_class::mutable_local:
-        return {true, t_variable, 0};
+        return {true, t_variable, m_mutable};
     case token_class::self_:
         return {true, t_keyword, 0};
     case token_class::name:

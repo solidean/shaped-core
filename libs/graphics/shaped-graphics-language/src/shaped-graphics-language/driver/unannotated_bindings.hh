@@ -11,6 +11,9 @@ struct sgl::unannotated_binding
     /// The bound name; an annotation is written right after it.
     source_span name;
     check::type_id type = check::type_id::none;
+    /// The value already names the type: a call of a function of the type's name, `let s = span2(0.0)`.
+    /// A hint there repeats what the line says, so an editor leaves it out.
+    bool is_type_named = false;
 
     constexpr bool operator==(unannotated_binding const&) const = default;
 };
