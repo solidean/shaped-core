@@ -94,6 +94,16 @@ struct sgl::check::check_failure
     }
 };
 
+/// How often one check or `assert` held and how often it did not, over one run.
+/// Both zero is a site the run never reached.
+struct sgl::check::site_tally
+{
+    i32 passed = 0;
+    i32 failed = 0;
+
+    constexpr bool operator==(site_tally const&) const = default;
+};
+
 struct sgl::check::outcome
 {
     run_status status = run_status::ok;
@@ -113,6 +123,8 @@ struct sgl::check::outcome
     i32 asserts_run = 0;
     /// How many failures `max_failures` left out.
     i32 failures_dropped = 0;
+    /// Parallel to the tree's `check_sites`, and counted past `max_failures`, since it holds no values.
+    cc::vector<site_tally> sites;
 
     /// Same status, same result, same trace, same buffers.
     [[nodiscard]] bool operator==(outcome const& rhs) const

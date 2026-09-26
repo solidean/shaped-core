@@ -58,8 +58,27 @@ sgl::prelude_files()                       // -> cc::span<prelude_file const> { 
 
 #include <shaped-graphics-language/source/format_diagnostic.hh>
 sgl::line_column_of(source, offset)        // -> sgl::line_column { line, column }, both 1-based, columns in bytes
+                                           // lines end at `\n`, `\r\n` and a bare `\r`, as the line tree ends them
 sgl::format_diagnostic(name, source, d, detail = {})   // `a.sgl:2:2: error: unknown-name: foo`; warning / error from d.level
+                                                       // no detail: the kind's summary_of stands in its place
 sgl::format_note(name, source, where, message)         // `a.sgl:3:1: note: declared here`, the line after a diagnostic
+```
+
+What an editor asks — the library answers it, and a language server only translates:
+
+```cpp
+#include <shaped-graphics-language/driver/classify.hh>
+sgl::classify(file, ast, {.module = &m, .file = f, .prelude_file_count = p})
+                                           // -> vector<classified_span { where, cls, is_declaration, is_from_prelude }>
+                                           // every token that has a class, in order, never overlapping; a fused number is ONE span
+                                           // without .module: the syntax alone, so every name is token_class::name
+sgl::token_class                           // keyword number string comment doc_comment op attribute struct_ enum_ type function
+                                           // method property field binding binding_member enum_case constant pipeline parameter
+                                           // local mutable_local self_ name; to_string(c) -> "mutable-local"
+
+#include <shaped-graphics-language/driver/unannotated_bindings.hh>
+sgl::unannotated_bindings(ast, m, f)       // -> vector<unannotated_binding { name, type }>: each `let x = …` that writes no type
+                                           // left out: a pattern that is no name, a body the check never reached, the error type
 ```
 
 ## Parsing a file
@@ -305,6 +324,8 @@ o.status                                   // ok, out_of_fuel, fell_off_the_end,
 o.result  o.trace  o.detail                // value { type, leaves }; trace = every print, and every call with an effect
 o.failures  o.checks_run                   // check_failure { site, values, is_evaluated, loop_values } per false check;
                                            // {.run_checks = false} skips checks as the core form does, {.max_failures = 8}
+o.sites                                    // site_tally { passed, failed } parallel to e.check_sites, past max_failures too;
+                                           // both zero: the run never reached that check
 o == other                                 // status, result and trace; NOT the detail
 sgl::check::zero_value(m, type)  sgl::check::leaf_count_of(m, type)   // a value is its scalars in field order; mat4 is 16
 sgl::check::scalar::of(0.5f)  .as_float()  .as_int()  .as_bool()      // equality is on the BITS
@@ -314,6 +335,10 @@ sgl::check::dump(o)                        // `ok 1.5 | print 1 | print true`
 m.tests  m.test_units                      // test_info { symbol, file, where, scope_path, comment, unit } and its flat tree
 sgl::test::run_tests(m, files, {.file = f})  // -> vector<test_result { test, status, failures, checks_run }>; files are the
                                            // module_files m was checked from, since a report quotes the source
+sgl::test::run_test(m, files, t, limits)   // ONE test, m.tests[t]: what a caller that stops between tests runs;
+                                           // a test that expects diagnostics is judged by them, so its result is not_run
+r.sites                                    // site_mark { file, where, is_assert, passed, failed } per check and assert of its tree
+                                           // an assert inlined from a helper names the helper's file
 sgl::test::diagnostic_of(m, r)             // `test-failed` at the test, one related note per narrowed part:
                                            // "`s.z > 0.6` is 0.5 > 0.6, with i = 2"
 ```
@@ -357,6 +382,7 @@ sgl::emit::is_reserved(t, "target")        // true for wgsl only; msl also reser
 #include <shaped-graphics-language/source/diagnostic.hh>
 sgl::diagnostic            // { kind, level, where }
 sgl::to_string(kind)       // -> the stable kebab-case name: "undelimited-string"
+sgl::summary_of(kind)      // -> one sentence for a reader: "a bracket that is opened and never closed"
 sgl::default_severity_of(kind)   // normal_error / fatal_error / warning
 ```
 

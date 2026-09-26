@@ -56,6 +56,17 @@ struct sgl::test::check_report
     cc::vector<cc::string> loop_values;
 };
 
+/// One check or `assert` the test's tree holds, and how often it held and failed in the run.
+/// Both zero is a site the run never reached; an `assert` inlined from a helper names the helper's file.
+struct sgl::test::site_mark
+{
+    i32 file = 0;
+    source_span where;
+    bool is_assert = false;
+    i32 passed = 0;
+    i32 failed = 0;
+};
+
 struct sgl::test::test_result
 {
     /// A position in `checked_module::tests`.
@@ -69,6 +80,8 @@ struct sgl::test::test_result
     i32 asserts_run = 0;
     /// What the interpreter said about a run that stopped for another reason than a check.
     cc::string detail;
+    /// Every check and `assert` of the run's tree, in tree order; empty for a test that did not run.
+    cc::vector<site_mark> sites;
 
     [[nodiscard]] bool is_passed() const { return status == test_status::passed; }
 };
@@ -91,6 +104,13 @@ namespace sgl::test
 [[nodiscard]] cc::vector<test_result> run_tests(check::checked_module const& m,
                                                 cc::span<check::module_file const> files,
                                                 test_options const& options = {});
+
+/// The test at position `test` of `m.tests` alone, which is what a caller that stops between tests runs.
+/// A test that expects diagnostics is judged by them and not run, so its result is `not_run`.
+[[nodiscard]] test_result run_test(check::checked_module const& m,
+                                   cc::span<check::module_file const> files,
+                                   i32 test,
+                                   check::run_limits const& limits = {});
 
 /// Removes from `diagnostics` every one inside a test that has an `@expect(error = …)` or `@expect(warning = …)`, and
 /// reports each such expectation that none of them met as `unmet-expectation` (CHK-232).

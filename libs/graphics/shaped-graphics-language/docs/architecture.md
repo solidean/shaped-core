@@ -28,6 +28,11 @@ bytes → line tree → tokens → group tokens → form tree      sgl::parse   
 `sgl::describe` stops short of text: it runs the same front end and the emitter's own checks, and hands back what a host is generated from.
 It is what slib's package generator reads, through `sgl describe`, and it describes exactly what the emitter would build.
 
+**The library answers every question, and a tool translates.**
+What a compiler, an editor or any other tool asks about a source — what a token is, what type a binding got, which tests passed where — is a function of this library.
+`sgl lsp` and the other commands of the `sgl` tool are shallow shims over it, so a second front end never grows in a tool.
+Everything here is UTF-8 and byte offsets; an encoding a protocol wants, such as LSP's UTF-16 columns, is that protocol layer's.
+
 **Total and local by construction.**
 Any bytes parse to a tree plus diagnostics, and no syntax error escapes its indentation.
 Every later phase is total as well: a malformed input is a diagnostic or an error result, never an assert.

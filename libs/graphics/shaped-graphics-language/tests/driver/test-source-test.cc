@@ -22,7 +22,8 @@ TEST("sgl driver - test_source counts the tests, reports what failed, and names 
 
     auto const clean = sgl::test_source("test 1 < 2\n", "c.sgl");
     CHECK(clean.is_clean());
-    CHECK(sgl::test_source("test:\n    1 + 2\n    true\n", "w.sgl").warnings == "w.sgl:2:5: warning: no-effect\n");
+    CHECK(sgl::test_source("test:\n    1 + 2\n    true\n", "w.sgl").warnings
+          == "w.sgl:2:5: warning: no-effect: a statement that computes a value and drops it\n");
 }
 
 TEST("sgl driver - a const that did not check fails what reads it silently, and never crashes")
@@ -61,7 +62,7 @@ TEST("sgl driver - a test an earlier phase found an error in is never run")
 {
     // CHK-230: it would otherwise pass, beside the error that says its text is not what it seems
     auto const tested = sgl::test_source("test 1 == 1:\n    true\n", "g.sgl");
-    CHECK(tested.errors == "g.sgl:1:12: error: too-many-arguments\n");
+    CHECK(tested.errors == "g.sgl:1:12: error: too-many-arguments: a keyword that holds more expressions than it takes\n");
     CHECK(tested.test_count == 1);
     CHECK(tested.tests_run == 0);
 }

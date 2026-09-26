@@ -79,6 +79,8 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/driver/pipeline_fields.cc
     src/shaped-graphics-language/driver/impl/front_end.cc
     src/shaped-graphics-language/driver/prelude.cc
+    src/shaped-graphics-language/driver/classify.cc
+    src/shaped-graphics-language/driver/unannotated_bindings.cc
 )
 
 # The prelude is two files, and only one of them is embedded.
@@ -219,6 +221,8 @@ target_sources(shaped-graphics-language
     src/shaped-graphics-language/driver/pipeline_fields.hh
     src/shaped-graphics-language/driver/impl/front_end.hh
     src/shaped-graphics-language/driver/prelude.hh
+    src/shaped-graphics-language/driver/classify.hh
+    src/shaped-graphics-language/driver/unannotated_bindings.hh
 )
 
 # Require at least C++23 for this target; the final -std is chosen by the top-level project.
@@ -306,6 +310,7 @@ if(SC_BUILD_TESTS)
         tests/emit/case-emit-test.cc
         tests/emit/enum-emit-test.cc
 
+        tests/driver/classify-test.cc
         tests/driver/compile-to-text-test.cc
         tests/driver/describe-test.cc
         tests/driver/source-differential-test.cc

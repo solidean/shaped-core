@@ -92,5 +92,7 @@ That needs no multi-file compilation.
 * Whether on-demand compilation is recursive or asynchronous.
 * How a dependency cycle is reported when its loop passes through a type expression.
 * Whether a file without a `module` line is a module of its own.
+* How the files of a module are found.
+  What is settled: the compiler takes a project as in-memory sources and never reads a file; finding the files of each module, and their text, happens outside its core.
 * How an inlined early `return` is written in targets that have no `goto`.
 * How much of an inlined program's source structure the readable text can keep.

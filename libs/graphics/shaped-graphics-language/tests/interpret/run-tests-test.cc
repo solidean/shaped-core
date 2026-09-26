@@ -82,3 +82,46 @@ TEST("sgl tests - a report spells a whole float as one, narrows through not, and
           == "test-failed user:[test] 1 of 2 checks failed, 2 asserts held\n"
              "  note user:[half(i as float) > 0.25] `half(i as float) > 0.25` is 0.0 > 0.25, with i = 0\n");
 }
+
+namespace
+{
+/// Every site of every test of `source`, one per line: `<text> <passed>/<failed>`, and `assert` before an assert's.
+cc::string marks_of(cc::string_view source)
+{
+    auto const checked = check_sources(read_prelude(), source);
+    REQUIRE(reports_of(checked) == "");
+    auto files = cc::vector<sgl::check::module_file>();
+    for (auto i = isize(0); i < checked.files.size(); ++i)
+        files.push_back({.file = checked.files[i], .ast = checked.asts[i]});
+
+    auto out = cc::string();
+    for (auto t = isize(0); t < checked.module.tests.size(); ++t)
+        for (auto const& s : sgl::test::run_test(checked.module, files, i32(t)).sites)
+            out.appendf("{}{} {}/{}\n", s.is_assert ? "assert " : "", checked.files[s.file].text_of(s.where), s.passed,
+                        s.failed);
+    return out;
+}
+} // namespace
+
+TEST("sgl tests - every site of a run counts how often it held and failed, and one never reached counts neither")
+{
+    CHECK(marks_of("test:\n    1 < 2\n    2 < 1\n") == "1 < 2 1/0\n2 < 1 0/1\n");
+    // a check in a loop can do both
+    CHECK(marks_of("test:\n    for i in 0 ..< 3:\n        i < 2\n") == "i < 2 2/1\n");
+    // a check the run never reaches is a site all the same
+    CHECK(marks_of("test:\n    let b = 1 > 2\n    if b:\n        false\n    true\n") == "false 0/0\ntrue 1/0\n");
+    // an assert in a helper is a site of the test that reaches it, in the helper's own place
+    CHECK(marks_of("fun half(x: float) -> float:\n    assert x >= 0.0\n    return x * 0.5\ntest half(2.0) == 1.0\n")
+          == "half(2.0) == 1.0 1/0\nassert assert x >= 0.0 1/0\n");
+}
+
+TEST("sgl tests - one test runs alone, and a test that expects diagnostics is judged by them rather than run")
+{
+    auto const checked = check_sources(read_prelude(), "test 1 < 2\n@expect(error = unknown-name)\ntest nope\n");
+    auto files = cc::vector<sgl::check::module_file>();
+    for (auto i = isize(0); i < checked.files.size(); ++i)
+        files.push_back({.file = checked.files[i], .ast = checked.asts[i]});
+    REQUIRE(checked.module.tests.size() == 2);
+    CHECK(sgl::test::run_test(checked.module, files, 0).is_passed());
+    CHECK(sgl::test::run_test(checked.module, files, 1).status == sgl::test::test_status::not_run);
+}

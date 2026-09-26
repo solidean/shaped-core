@@ -546,8 +546,13 @@ struct machine
         ++out.checks_run;
         if (site.stops)
             ++out.asserts_run;
+        auto& tally = out.sites[k.site];
         if (condition.leaves[0].as_bool())
+        {
+            ++tally.passed;
             return {};
+        }
+        ++tally.failed;
 
         if (out.failures.size() < limits.max_failures)
         {
@@ -804,6 +809,7 @@ outcome sgl::check::interpret(checked_module const& m,
     auto run = machine{.m = m, .e = e, .inputs = inputs, .limits = limits, .fuel = limits.fuel};
     run.out.buffers = inputs.buffers;
     run.is_stored.resize_to_filled(inputs.buffers.size(), false);
+    run.out.sites.resize_to_defaulted(e.check_sites.size());
     run.locals.resize_to_defaulted(e.locals.size());
     run.is_set.resize_to_filled(e.locals.size(), false);
     // A test has no parameter, and its first local is one of its own.

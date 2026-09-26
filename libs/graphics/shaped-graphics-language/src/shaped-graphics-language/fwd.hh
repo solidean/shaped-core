@@ -30,6 +30,11 @@ struct tested_source;
 struct emitted_source;
 struct prelude_file;
 
+enum class token_class : u8;
+struct classified_span;
+struct classify_options;
+struct unannotated_binding;
+
 enum class described_member_kind : u8;
 struct described_sampler;
 struct described_binding_member;
@@ -265,6 +270,7 @@ enum class run_status : u8;
 struct run_inputs;
 struct run_limits;
 struct check_failure;
+struct site_tally;
 struct outcome;
 
 struct legalize_options;
@@ -283,6 +289,7 @@ namespace sgl::test
 enum class test_status : u8;
 struct narrowed_part;
 struct check_report;
+struct site_mark;
 struct test_result;
 struct test_options;
 } // namespace sgl::test
