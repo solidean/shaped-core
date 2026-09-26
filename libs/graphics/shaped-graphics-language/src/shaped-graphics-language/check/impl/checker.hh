@@ -178,24 +178,12 @@ struct candidate_match
     i32 at_default = 0;
 };
 
-/// Why a candidate did not take a call's arguments (CHK-252), or `none` where it did.
-enum class bind_failure : u8
-{
-    none,
-    no_such_parameter,
-    filled_twice,
-    positional_out_of_slot,
-    positional_to_named_only,
-    too_many,
-    missing_argument,
-};
-
 /// Which written argument fills each parameter of one candidate (CHK-250 to CHK-252).
 struct bound_arguments
 {
     /// One per parameter: a position in `call_arguments::written`, or -1 where the parameter takes its default.
     cc::vector<i32> slots;
-    bind_failure failure = bind_failure::none;
+    miss_reason failure = miss_reason::none;
     /// The written argument, or the parameter, the failure is about; -1 where it is about neither.
     i32 argument = -1;
     i32 parameter = -1;
@@ -553,6 +541,11 @@ struct checker
                          call_arguments const& arguments,
                          cc::span<parameter const> parameters,
                          cc::span<i32 const> slots);
+    /// Why each of `candidates` did not match call `call`, kept for a later "did you mean".
+    void note_near_misses(i32 file,
+                          ast::expr_id call,
+                          cc::span<symbol_id const> candidates,
+                          call_arguments const& arguments);
     /// Remembers how call `id` fills the parameters of `callee`, which is what the flat tree is written from.
     void record_call(i32 file, ast::expr_id id, symbol_id callee, call_arguments const& arguments, cc::span<i32 const> slots);
     /// The candidates of `spelling` that take exactly `types`, without a report; what the flat tree is written from.

@@ -411,3 +411,17 @@ TEST("sgl check - a named argument keeps its name in what a failed call reports"
     CHECK(reports_for("struct s:\n    a: float\nfun f() -> s => s(b = 1.0)\n")
           == "no-matching-overload user:[s(b = 1.0)] s(b = float), and the constructor is s(float)\n");
 }
+
+TEST("sgl check - a call that matches nothing keeps why each candidate did not, for a later did-you-mean")
+{
+    auto const checked = check_sources(read_prelude(), "fun sub(a: int, b: int) -> int => a - b\n"
+                                                       "fun f() -> int => sub(b = 3, 5)\n"
+                                                       "fun g() -> int => sub(1, true)\n");
+    auto const& misses = checked.module.near_misses;
+    REQUIRE(misses.size() == 2);
+    CHECK(misses[0].reason == sgl::check::miss_reason::positional_out_of_slot);
+    CHECK(misses[0].argument == 1);
+    CHECK(misses[1].reason == sgl::check::miss_reason::no_conversion);
+    CHECK(misses[1].argument == 1);
+    CHECK(misses[1].parameter == 1);
+}

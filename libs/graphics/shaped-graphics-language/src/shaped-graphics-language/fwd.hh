@@ -204,6 +204,8 @@ enum class target_kind : u8;
 struct target;
 struct written_argument;
 struct call_record;
+enum class miss_reason : u8;
+struct near_miss;
 struct file_tables;
 
 struct origin;

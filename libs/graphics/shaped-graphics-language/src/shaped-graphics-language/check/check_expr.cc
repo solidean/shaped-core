@@ -914,6 +914,7 @@ type_id checker::resolve_overload(function_scope& scope,
     {
         if (is_silent)
             return error_type;
+        note_near_misses(file, id, candidates, arguments);
         // A struct's one constructor says what it takes, which is what a reader needs to fix the call.
         auto const is_constructor = candidates.size() == 1 && out.at(candidates[0]).role == function_role::constructor;
         if (is_constructor)
@@ -967,13 +968,47 @@ type_id checker::resolve_overload(function_scope& scope,
     return info.result;
 }
 
+void checker::note_near_misses(i32 file,
+                               ast::expr_id call,
+                               cc::span<symbol_id const> candidates,
+                               call_arguments const& arguments)
+{
+    for (auto const candidate : candidates)
+    {
+        if (out.at(candidate).state != symbol_state::checked)
+            continue;
+        auto const parameters
+            = cc::vector<parameter>::create_copy_of(out.at(out.functions[out.at(candidate).info].parameters));
+        auto const bound = bind_arguments(parameters, arguments);
+        auto miss = near_miss{.file = file,
+                              .call = call,
+                              .candidate = candidate,
+                              .reason = bound.failure,
+                              .argument = bound.argument,
+                              .parameter = bound.parameter};
+        for (auto p = isize(0); miss.reason == miss_reason::none && p < parameters.size(); ++p)
+        {
+            auto at_default = 0;
+            auto const i = bound.slots[p];
+            if (i >= 0 && !chain_of(file, parameters[p].type, arguments, i, at_default).has_value())
+                miss = {.file = file,
+                        .call = call,
+                        .candidate = candidate,
+                        .reason = miss_reason::no_conversion,
+                        .argument = i,
+                        .parameter = i32(p)};
+        }
+        out.near_misses.push_back(miss);
+    }
+}
+
 cc::optional<candidate_match> checker::match(i32 file, symbol_id candidate, call_arguments const& arguments)
 {
     // by value: a literal argument may compile another function, and `parameters` then moves
     auto const range = out.functions[out.at(candidate).info].parameters;
     auto const parameters = cc::vector<parameter>::create_copy_of(out.at(range));
     auto bound = bind_arguments(parameters, arguments);
-    if (bound.failure != bind_failure::none)
+    if (bound.failure != miss_reason::none)
         return cc::nullopt;
     auto result = candidate_match{.candidate = candidate,
                                   .slots = cc::move(bound.slots),
@@ -1204,7 +1239,7 @@ type_id checker::check_expected(function_scope& scope, ast::expr_id expr, type_i
 bound_arguments checker::bind_arguments(cc::span<parameter const> parameters, call_arguments const& arguments) const
 {
     auto result = bound_arguments{.slots = cc::vector<i32>::create_filled(parameters.size(), -1)};
-    auto const fail = [&](bind_failure why, i32 argument, i32 parameter)
+    auto const fail = [&](miss_reason why, i32 argument, i32 parameter)
     {
         result.failure = why;
         result.argument = argument;
@@ -1222,11 +1257,11 @@ bound_arguments checker::bind_arguments(cc::span<parameter const> parameters, ca
         if (name.empty())
         {
             if (seen_named && !is_in_own_slot)
-                return fail(bind_failure::positional_out_of_slot, i, -1);
+                return fail(miss_reason::positional_out_of_slot, i, -1);
             if (i >= i32(parameters.size()))
-                return fail(bind_failure::too_many, i, -1);
+                return fail(miss_reason::too_many, i, -1);
             if (parameters[i].is_named_only)
-                return fail(bind_failure::positional_to_named_only, i, i);
+                return fail(miss_reason::positional_to_named_only, i, i);
             p = i;
         }
         else
@@ -1237,16 +1272,16 @@ bound_arguments checker::bind_arguments(cc::span<parameter const> parameters, ca
                 if (parameters[k].name == name && name != "self")
                     p = k;
             if (p < 0)
-                return fail(bind_failure::no_such_parameter, i, -1);
+                return fail(miss_reason::no_such_parameter, i, -1);
         }
         is_in_own_slot = is_in_own_slot && p == i;
         if (result.slots[p] >= 0)
-            return fail(bind_failure::filled_twice, i, p);
+            return fail(miss_reason::filled_twice, i, p);
         result.slots[p] = i;
     }
     for (auto p = i32(0); p < i32(parameters.size()); ++p)
         if (result.slots[p] < 0 && !parameters[p].has_default)
-            return fail(bind_failure::missing_argument, -1, p);
+            return fail(miss_reason::missing_argument, -1, p);
     return result;
 }
 

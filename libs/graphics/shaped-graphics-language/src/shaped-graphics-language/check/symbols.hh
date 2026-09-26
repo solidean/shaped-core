@@ -436,6 +436,34 @@ struct sgl::check::call_record
     constexpr bool operator==(call_record const&) const = default;
 };
 
+/// Why a candidate did not take a call's arguments (CHK-252, CHK-70), or `none` where it did.
+enum class sgl::check::miss_reason : sgl::u8
+{
+    none,
+    no_such_parameter,
+    filled_twice,
+    positional_out_of_slot,
+    positional_to_named_only,
+    too_many,
+    missing_argument,
+    /// Every argument bound, and `argument` does not convert to `parameter`.
+    no_conversion,
+};
+
+/// One candidate of a call that matched nothing, and why: what a "did you mean" is written from.
+struct sgl::check::near_miss
+{
+    i32 file = 0;
+    ast::expr_id call = ast::expr_id::none;
+    symbol_id candidate = symbol_id::none;
+    miss_reason reason = miss_reason::none;
+    /// A position in the call's written arguments, and one in the candidate's parameters; -1 where it is about neither.
+    i32 argument = -1;
+    i32 parameter = -1;
+
+    constexpr bool operator==(near_miss const&) const = default;
+};
+
 /// The side tables over one file's untouched AST, each parallel to `file_ast::exprs`.
 struct sgl::check::file_tables
 {
