@@ -317,7 +317,7 @@ TEST("sgl ast - a reserved name names nothing a program declares")
 {
     // AST-141: the meaning of `self` and `void` is fixed, so no declaration may take either
     cc::string_view const refused[] = {
-        "enum void:\n    a\n",      "struct self:\n    x: float\n", "fun void() -> int => 1\n",
+        "enum void:\n    a\n",        "struct self:\n    x: float\n",   "fun void() -> int => 1\n",
         "struct s:\n    void: int\n", "fun f(void: int) -> int => 1\n", "enum e:\n    self\n",
         "const void = 1\n",
     };

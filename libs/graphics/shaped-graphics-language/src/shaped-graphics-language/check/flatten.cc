@@ -44,7 +44,8 @@ bool writes_outside(flat_entry_point const& e, ast::range_of<flat_stmt_id> body,
             return true;
         auto result = false;
         for_each_expr_of(s, [&](flat_expr_id x) { result = result || writes_outside(e, x, depth + 1); });
-        for_each_body_of(e, s, [&](ast::range_of<flat_stmt_id> inner) { result = result || writes_outside(e, inner, depth + 1); });
+        for_each_body_of(
+            e, s, [&](ast::range_of<flat_stmt_id> inner) { result = result || writes_outside(e, inner, depth + 1); });
         if (result)
             return true;
     }

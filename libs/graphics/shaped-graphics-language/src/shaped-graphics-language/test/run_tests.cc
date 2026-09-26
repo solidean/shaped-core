@@ -310,8 +310,9 @@ cc::vector<test_result> sgl::test::run_tests(checked_module const& m,
         else if (unmet != nullptr && ran == test_status::passed)
         {
             result.status = test_status::failed;
-            result.detail = unmet->kind == expectation_kind::fail ? "it was to fail, and it passed"
-                                                                  : "it was to stop at an assert, and it ran to its end";
+            result.detail = unmet->kind == expectation_kind::fail
+                              ? "it was to fail, and it passed"
+                              : "it was to stop at an assert, and it ran to its end";
         }
         results.push_back(cc::move(result));
     }

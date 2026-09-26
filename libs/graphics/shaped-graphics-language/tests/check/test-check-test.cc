@@ -61,7 +61,8 @@ TEST("sgl check - a test ends in a check")
               .starts_with("test-must-end-in-check user:[let y = 2]"));
     CHECK(reports_for("test:\n    let b = 1 < 2\n    if b:\n        let y = 2\n    else:\n        not b\n") == "");
     // a test that is to fail or to stop at an assert cannot pass vacuously, and an empty one was reported already
-    CHECK(reports_for("fun f(x: float) -> float:\n    assert x > 0.0\n    return x\n@expect(.assert) test:\n    f -1.0\n")
+    CHECK(reports_for("fun f(x: float) -> float:\n    assert x > 0.0\n    return x\n@expect(.assert) test:\n    f "
+                      "-1.0\n")
           == "");
     CHECK(reports_for("test\n") == ""); // `expected-body` is the AST pass's, and the check pass adds nothing
     // a line that does not check is reported once, as what it is
@@ -127,12 +128,14 @@ TEST("sgl check - an assert whose condition writes is refused, and one that only
                                    "fun bumped(i: int){work} -> bool:\n    work.values[i] = 7.0\n    return true\n"
                                    "fun half(x: float) -> float => x * 0.5\n");
     // one assert inlined into two entry points is reported once
-    CHECK(reports_for(shared + "fun guard(){work}:\n    assert bumped(1)\n"
-                               "@compute(64) fun main(@thread_id id: int3){work}:\n    guard()\n"
-                               "@compute(64) fun other(@thread_id id: int3){work}:\n    guard()\n")
+    CHECK(reports_for(shared
+                      + "fun guard(){work}:\n    assert bumped(1)\n"
+                        "@compute(64) fun main(@thread_id id: int3){work}:\n    guard()\n"
+                        "@compute(64) fun other(@thread_id id: int3){work}:\n    guard()\n")
           == "unsupported-yet user:[bumped(1)] an assert whose condition writes a buffer, prints, or calls a builtin "
              "with an effect\n");
-    CHECK(reports_for(shared + "@compute(64) fun main(@thread_id id: int3){work}:\n    assert half(1.0) > 0.0\n"
-                               "    work.values[id.x] = 1.0\n")
+    CHECK(reports_for(shared
+                      + "@compute(64) fun main(@thread_id id: int3){work}:\n    assert half(1.0) > 0.0\n"
+                        "    work.values[id.x] = 1.0\n")
           == "");
 }

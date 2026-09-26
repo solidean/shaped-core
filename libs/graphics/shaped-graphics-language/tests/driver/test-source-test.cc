@@ -29,11 +29,8 @@ TEST("sgl driver - a const that did not check fails what reads it silently, and 
 {
     // CHK-19: a failed symbol is the error type where it is named, and the one diagnostic is its own
     cc::string_view const broken[] = {
-        "const a = nope\n",
-        "const a: float = 3\n",
-        "const a = 1 + 2\n",
-        "const a = 2147483648\n",
-        "const a = b\nconst b = a\n",
+        "const a = nope\n",       "const a: float = 3\n",       "const a = 1 + 2\n",
+        "const a = 2147483648\n", "const a = b\nconst b = a\n",
     };
     for (auto const b : broken)
     {
@@ -50,11 +47,12 @@ TEST("sgl driver - a const that did not check fails what reads it silently, and 
                            "        bad => 1\n        _ => 0\ntest f(m.a) == 0\n",
                            "p.sgl")
               .errors.contains("unsupported-yet"));
-    auto const entry = sgl::compile_to_text(
-        {.source = "const a = nope\nstruct frag:\n    x: float\n@pixel struct target:\n    color: float4\n"
-                   "@pixel fun main_ps(p: frag) -> target:\n    let w = a\n    return target(float4(p.x, p.x, p.x, 1.0))\n",
-         .source_name = "e.sgl",
-         .entry_point = "main_ps"});
+    auto const entry = sgl::compile_to_text({.source = "const a = nope\nstruct frag:\n    x: float\n@pixel struct "
+                                                       "target:\n    color: float4\n"
+                                                       "@pixel fun main_ps(p: frag) -> target:\n    let w = a\n    "
+                                                       "return target(float4(p.x, p.x, p.x, 1.0))\n",
+                                             .source_name = "e.sgl",
+                                             .entry_point = "main_ps"});
     REQUIRE(entry.has_error());
     CHECK(entry.error() == "e.sgl:1:11: error: unknown-name: nope\n");
 }

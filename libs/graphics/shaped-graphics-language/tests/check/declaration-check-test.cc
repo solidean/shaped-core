@@ -150,10 +150,8 @@ TEST("sgl check - a @shadowable(false) symbol is hidden by nothing")
              "@shadowable(false)\n");
     // and on every declaration it stands on, where a typo would otherwise leave the symbol hidable
     cc::string_view const declarations[] = {
-        "@shadowable(flase) struct light:\n    power: float\n",
-        "@shadowable(flase) enum mode:\n    on\n    off\n",
-        "@shadowable(flase) fun f() -> float => 1.0\n",
-        "@shadowable(flase) binding frame:\n    e: float\n",
+        "@shadowable(flase) struct light:\n    power: float\n", "@shadowable(flase) enum mode:\n    on\n    off\n",
+        "@shadowable(flase) fun f() -> float => 1.0\n",         "@shadowable(flase) binding frame:\n    e: float\n",
         "@shadowable struct light:\n    power: float\n",
     };
     for (auto const d : declarations)

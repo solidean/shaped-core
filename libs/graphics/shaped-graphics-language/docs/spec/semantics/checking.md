@@ -140,10 +140,12 @@ enum light_kind:
   A node is an `and`, an `or`, a `not`, a comparison, a comparison chain, or a leaf any other expression is; it runs in the order and under the conditions the condition itself would run it.
 * **CHK-230** A test whose body checked clean, and whose every callee inlines whole, has a flat tree of its own, of no stage and without a parameter.
   A test that expects a diagnostic has none, and neither has one in whose text the parser or the AST pass found an error.
-* **CHK-231** `@expect` on a test names what it does, one argument each: `.fail`, `.assert`, `error = "kind"` or `warning = "kind"`, where `*` in a kind stands for any run of characters and `?` for one.
+* **CHK-231** `@expect` on a test names what it does, one argument each: `.fail`, `.assert`, `error = "kind"` or `warning = "kind"`.
+  In a kind, `*` stands for any run of characters and `?` for one.
   An empty kind is `invalid-attribute-arguments`.
   Any other argument is `invalid-attribute-arguments`.
-* **CHK-232** In a test with an `error` or a `warning` expectation, every diagnostic of any phase that stands inside it, from its keyword to the end of its body, is the test's, and is reported nowhere.
+* **CHK-232** In a test with an `error` or a `warning` expectation, every diagnostic of any phase inside it is the test's, and is reported nowhere.
+  Inside is from its keyword to the end of its body.
   One expected diagnostic usually brings others with it, and the test exists to show that the one it names is reported.
   An expectation none of them meets is `unmet-expectation`, and a test that expects a diagnostic is judged by that alone and never run.
   A test that expects `.fail` passes where a check or an `assert` of its run is false, and one that expects `.assert` where its run stops at a false `assert`.
