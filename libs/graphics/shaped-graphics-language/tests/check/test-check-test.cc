@@ -119,3 +119,20 @@ TEST("sgl check - a test is named at its keyword, whatever its attributes spell"
     CHECK(t.extent.offset == t.where.offset);
     CHECK(checked.user.text_of(t.extent) == "test missing < 1");
 }
+
+TEST("sgl check - an assert whose condition writes is refused, and one that only computes is not")
+{
+    // CHK-227: no target writes an assert, so its effect would happen on the interpreter alone
+    auto const shared = cc::string("binding work:\n    values: mut buffer[float]\n"
+                                   "fun bumped(i: int){work} -> bool:\n    work.values[i] = 7.0\n    return true\n"
+                                   "fun half(x: float) -> float => x * 0.5\n");
+    // one assert inlined into two entry points is reported once
+    CHECK(reports_for(shared + "fun guard(){work}:\n    assert bumped(1)\n"
+                               "@compute(64) fun main(@thread_id id: int3){work}:\n    guard()\n"
+                               "@compute(64) fun other(@thread_id id: int3){work}:\n    guard()\n")
+          == "unsupported-yet user:[bumped(1)] an assert whose condition writes a buffer, prints, or calls a builtin "
+             "with an effect\n");
+    CHECK(reports_for(shared + "@compute(64) fun main(@thread_id id: int3){work}:\n    assert half(1.0) > 0.0\n"
+                               "    work.values[id.x] = 1.0\n")
+          == "");
+}

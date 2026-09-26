@@ -1,6 +1,7 @@
 #include <clean-core/common/utility.hh>
 #include <clean-core/string/format.hh>
 #include <shaped-graphics-language/check/impl/checker.hh>
+#include <shaped-graphics-language/legalize/impl/walk.hh>
 
 using namespace sgl;
 using namespace sgl::check;
@@ -8,6 +9,48 @@ using namespace sgl::check::impl;
 
 namespace
 {
+bool writes_outside(flat_entry_point const& e, ast::range_of<flat_stmt_id> body, int depth);
+
+/// True where evaluating `id` writes what outlives it: a builtin call that is not pure.
+bool writes_outside(flat_entry_point const& e, flat_expr_id id, int depth)
+{
+    if (!is_known(e, id) || depth > k_max_depth)
+        return false;
+    auto const& x = e.at(id);
+    if (auto const* const call = x.node.try_as<flat_call>(); call != nullptr && !call->is_pure)
+        return true;
+    if (auto const* const block = x.node.try_as<flat_block>())
+        return writes_outside(e, block->body, depth + 1);
+    auto result = false;
+    for_each_operand(e, x, [&](flat_expr_id operand) { result = result || writes_outside(e, operand, depth + 1); });
+    return result;
+}
+
+/// True where running `body` writes what outlives it: a print, a store to a buffer element, or an impure builtin.
+/// A local is no such thing, so an inlined function that only computes a value writes nothing.
+bool writes_outside(flat_entry_point const& e, ast::range_of<flat_stmt_id> body, int depth)
+{
+    if (!is_known(e, body) || depth > k_max_depth)
+        return false;
+    for (auto const id : e.at(body))
+    {
+        if (!is_known(e, id))
+            continue;
+        auto const& s = e.at(id);
+        if (s.node.is<flat_print>())
+            return true;
+        if (auto const* const assign = s.node.try_as<flat_assign>();
+            assign != nullptr && is_known(e, assign->place) && e.at(assign->place).node.is<flat_buffer_element>())
+            return true;
+        auto result = false;
+        for_each_expr_of(s, [&](flat_expr_id x) { result = result || writes_outside(e, x, depth + 1); });
+        for_each_body_of(e, s, [&](ast::range_of<flat_stmt_id> inner) { result = result || writes_outside(e, inner, depth + 1); });
+        if (result)
+            return true;
+    }
+    return false;
+}
+
 /// A call reached from an entry point of a stage its callee's `@stages` leaves out (CHK-193).
 struct stage_violation
 {
@@ -29,6 +72,8 @@ struct flattener
 {
     checker const& c;
     cc::vector<stage_violation> stage_violations;
+    /// The condition of every `assert` whose run would write what outlives it, which its caller reports (CHK-227).
+    cc::vector<origin> effectful_asserts;
 
     /// Notes a call of `callee` whose `@stages` leaves out the stage of the entry point being flattened.
     /// A test has no stage, so it may reach what any stage may.
@@ -619,6 +664,14 @@ struct flattener
         (void)materialize(condition, -1, nodes);
         auto const body = add_list(block);
         block = cc::move(outer);
+
+        // CHK-227: a target writes no assert, so what its condition would write happens on the interpreter alone
+        if (stops && writes_outside(entry, body, 0))
+        {
+            effectful_asserts.push_back({.file = file(), .expr = condition});
+            meets_error = true;
+            is_failed = true;
+        }
 
         auto loop_variables = cc::vector<flat_expr_id>();
         for (auto const index : test_loops)
@@ -1268,6 +1321,10 @@ void checker::flatten_test(i32 index)
     for (auto const stmt : ast_of(test.file).at(body.statements))
         f.flatten_stmt(stmt);
 
+    // CHK-227: once, however many trees inline the function the assert stands in
+    for (auto const& a : f.effectful_asserts)
+        report_once(diagnostic_kind::unsupported_yet, a.file, span_of(a.file, a.expr),
+                    "an assert whose condition writes a buffer, prints, or calls a builtin with an effect");
     if (f.is_failed && !f.meets_error)
         unsupported(test.file, test.where, "a test whose body reaches a construct the flat tree cannot hold yet");
     if (f.is_failed)
@@ -1336,6 +1393,10 @@ void checker::flatten_entry_point(symbol_id id)
     {
         return st == stage::vertex ? "vertex" : st == stage::pixel ? "pixel" : "compute";
     };
+    // CHK-227: once, however many trees inline the function the assert stands in
+    for (auto const& a : f.effectful_asserts)
+        report_once(diagnostic_kind::unsupported_yet, a.file, span_of(a.file, a.expr),
+                    "an assert whose condition writes a buffer, prints, or calls a builtin with an effect");
     for (auto const& v : f.stage_violations)
         report(diagnostic_kind::stage_not_allowed, v.file, span_of(v.file, v.call),
                cc::format("{} is a {} entry point, and {} is @stages without it", s.name, stage_name(info.entry_stage),

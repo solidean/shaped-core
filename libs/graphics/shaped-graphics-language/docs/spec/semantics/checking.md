@@ -132,6 +132,7 @@ enum light_kind:
   A test whose asserts are what it checks ends in `true // why`.
   A test that expects `.fail` or `.assert` is exempt, since it cannot pass without its run failing, and so is a test with no statement, which the AST pass reported.
 * **CHK-227** `assert condition` takes a `bool`, in a test or anywhere else; a message is `unsupported-yet`.
+  A condition that writes a buffer, prints, or calls a builtin with an effect is `unsupported-yet`, since no target writes an `assert` (LEGAL-53) and its effect would happen on the interpreter alone.
 * **CHK-228** A test reads nothing of the function it stands in: a parameter, a local or a binding member of it is `test-captures-runtime-value`, since the test runs on its own.
   Those names are still visible, so they hide what the module has of the name; a `const` is no value of a run and may be read.
   A test lists no binding, so a callee that needs one is `binding-not-listed` by CHK-131, with a note that a local binding in the test will give it.

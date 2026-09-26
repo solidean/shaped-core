@@ -204,6 +204,8 @@ struct checker
     /// The diagnostic it appended, which a caller may give related notes.
     located_diagnostic& report(diagnostic_kind kind, i32 file, source_span where, cc::string detail);
     void unsupported(i32 file, source_span where, cc::string_view construct);
+    /// `report`, unless a diagnostic of that kind already stands there: for what every tree inlining one body finds.
+    void report_once(diagnostic_kind kind, i32 file, source_span where, cc::string_view detail);
     [[nodiscard]] isize error_count() const;
 
     [[nodiscard]] ast::attribute const* find_attribute(i32 file,

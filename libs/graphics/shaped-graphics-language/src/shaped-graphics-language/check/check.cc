@@ -125,6 +125,14 @@ void checker::unsupported(i32 file, source_span where, cc::string_view construct
     report(diagnostic_kind::unsupported_yet, file, where, construct);
 }
 
+void checker::report_once(diagnostic_kind kind, i32 file, source_span where, cc::string_view detail)
+{
+    for (auto const& d : out.diagnostics)
+        if (d.what.kind == kind && d.file == file && d.what.where == where)
+            return;
+    report(kind, file, where, cc::string(detail));
+}
+
 isize checker::error_count() const
 {
     auto count = isize(0);
