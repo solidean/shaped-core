@@ -222,11 +222,13 @@ void checker::run()
         out.files.push_back({
             .type_of = cc::vector<type_id>::create_filled(count, type_id::none),
             .target_of = cc::vector<target>::create_filled(count, target{}),
+            .call_of = cc::vector<i32>::create_filled(count, -1),
         });
     }
 
     for (auto file = i32(0); file < i32(files.size()); ++file)
         declare_file(file);
+    declare_constructors();
     merge_scopes();
 
     // Source order is only the order of the first demand: whatever a symbol needs is compiled from inside it.
@@ -282,14 +284,61 @@ void checker::add_symbol(symbol s, source_span name_where)
     }
 
     // CHK-12 holds within one scope; the user file's may shadow the prelude's.
+    // A struct shares its name with functions, its constructors among them, and stands in front of them (CHK-240).
     auto& declared = is_prelude_file(file) ? prelude_names[name] : file_names[name];
-    if (!declared.empty() && !(is_function && is_all_functions(declared)))
+    auto const is_struct = out.at(id).kind == symbol_kind::structure;
+    auto const is_allowed
+        = declared.empty() || (is_function && is_overload_set(declared)) || (is_struct && is_all_functions(declared));
+    if (!is_allowed)
     {
         // The later declaration is compiled like any other and no lookup finds it.
         report(diagnostic_kind::duplicate_declaration, file, name_where, name);
         return;
     }
+    if (is_struct)
+    {
+        declared.insert_at(0, id);
+        return;
+    }
     declared.push_back(id);
+}
+
+bool checker::is_overload_set(cc::span<symbol_id const> ids) const
+{
+    for (auto i = isize(0); i < ids.size(); ++i)
+    {
+        auto const kind = out.at(ids[i]).kind;
+        if (kind != symbol_kind::function && !(i == 0 && kind == symbol_kind::structure))
+            return false;
+    }
+    return true;
+}
+
+void checker::declare_constructors()
+{
+    auto const count = out.symbols.size();
+    for (auto i = isize(0); i < count; ++i)
+    {
+        auto const s = out.symbols[i];
+        if (s.kind != symbol_kind::structure)
+            continue;
+        auto const& decl = ast_of(s.file).at(s.declaration).node.as<ast::struct_decl>();
+        // A struct nobody can name has no constructor anybody could call, and an opaque one has none (CHK-33).
+        if (decl.is_opaque || decl.name.empty())
+            continue;
+        // Only a struct a lookup finds has a constructor there: a duplicate is found by nothing.
+        auto const& scope = is_prelude_file(s.file) ? prelude_names : file_names;
+        auto const* const found = scope.get_ptr(s.name);
+        if (found == nullptr || found->empty() || found->front() != symbol_id(i))
+            continue;
+        add_symbol({.file = s.file,
+                    .declaration = s.declaration,
+                    .kind = symbol_kind::function,
+                    .name = s.name,
+                    .role = function_role::constructor,
+                    .owner = symbol_id(i)},
+                   decl.name);
+    }
 }
 
 bool checker::is_all_functions(cc::span<symbol_id const> ids) const
@@ -306,8 +355,9 @@ void checker::merge_scopes()
     for (auto const& [name, ids] : file_names)
     {
         auto& seen = names[name];
-        // Two overload sets are one; anything else of the user file hides what the prelude has of that name.
-        if (!is_all_functions(seen) || !is_all_functions(ids))
+        // Two overload sets are one, a struct's constructors among them (CHK-189).
+        // Anything else of the user file hides what the prelude has of that name.
+        if (!is_overload_set(seen) || !is_all_functions(ids))
         {
             // CHK-220: unless the prelude's may not be hidden, which keeps the prelude's and reports the user's.
             auto is_sealed = false;
@@ -473,7 +523,10 @@ void checker::compile(symbol_id id)
         compile_binding(id);
         break;
     case symbol_kind::function:
-        compile_function(id);
+        if (out.at(id).role == function_role::constructor)
+            compile_constructor(id);
+        else
+            compile_function(id);
         break;
     case symbol_kind::pipeline:
         compile_pipeline(id);

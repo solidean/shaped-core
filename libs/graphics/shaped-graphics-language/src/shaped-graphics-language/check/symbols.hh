@@ -191,6 +191,21 @@ enum class sgl::check::symbol_state : sgl::u8
     failed,
 };
 
+/// What a function is to the call model, which calls every one of them the same way (CHK-69).
+enum class sgl::check::function_role : sgl::u8
+{
+    /// Declared at file scope, found by its name where it is visible.
+    free,
+    /// A `fun` of a type scope whose first parameter is `self` (CHK-234).
+    method,
+    /// A `fun` of a type scope without `self` (CHK-235).
+    static_,
+    /// `name => value`, a function of a type scope whose one parameter is `self` (CHK-236).
+    property,
+    /// The function of a struct's name that takes its fields (CHK-239); its declaration is the struct's.
+    constructor,
+};
+
 /// One module-level declaration, named by the file it stands in and its declaration there.
 struct sgl::check::symbol
 {
@@ -211,6 +226,11 @@ struct sgl::check::symbol
     i32 info = -1;
     /// False under `@shadowable(false)`: a declaration or a local of its name is then an error rather than hiding it.
     bool is_shadowable = true;
+    /// For a function: which kind of function it is.
+    function_role role = function_role::free;
+    /// The struct or enum whose type scope holds this function; `none` for a free function.
+    /// A constructor's owner is its struct, although the constructor stands in the struct's scope and not in its own.
+    symbol_id owner = symbol_id::none;
 
     bool operator==(symbol const&) const = default;
 };
@@ -241,7 +261,13 @@ struct sgl::check::parameter
 {
     cc::string name;
     type_id type = type_id::none;
+    /// In the file of the function; for a constructor, the struct field the parameter stands for.
+    /// `none` for the `self` a property takes without writing it.
     ast::field_id field = ast::field_id::none;
+    /// A call may leave the parameter out, and its default is then evaluated where the call stands (EVAL-81).
+    bool has_default = false;
+    /// Filled by name alone (CHK-244).
+    bool is_named_only = false;
     /// Carries `@thread_id`, which a compute entry point may write instead of a struct.
     bool is_thread_id = false;
 
@@ -384,18 +410,44 @@ struct sgl::check::target
     constexpr bool operator==(target const&) const = default;
 };
 
-/// The side tables over one file's untouched AST, both parallel to `file_ast::exprs`.
+/// One argument a call wrote, in the order it wrote them, which is the order they are evaluated in (EVAL-80).
+struct sgl::check::written_argument
+{
+    /// In the file of the call.
+    ast::expr_id expr = ast::expr_id::none;
+    /// A splat is one written argument per field of its value; this is that field, and -1 for no splat.
+    i32 splat_member = -1;
+
+    constexpr bool operator==(written_argument const&) const = default;
+};
+
+/// How one call's written arguments fill the parameters of the function resolution chose.
+struct sgl::check::call_record
+{
+    symbol_id callee = symbol_id::none;
+    ast::range_of<written_argument> written;
+    /// One per parameter of `callee`: a position in `written`, or -1 where the parameter takes its default.
+    ast::range_of<i32> slots;
+
+    constexpr bool operator==(call_record const&) const = default;
+};
+
+/// The side tables over one file's untouched AST, each parallel to `file_ast::exprs`.
 struct sgl::check::file_tables
 {
     /// `none` for an expression nothing checked; an expression in a type position has the type it names.
     cc::vector<type_id> type_of;
     cc::vector<target> target_of;
+    /// A position in `checked_module::call_records` for a call that resolved, -1 for every other expression.
+    cc::vector<i32> call_of;
 
     [[nodiscard]] type_id type_at(ast::expr_id id) const { return type_of[ast::index_of(id)]; }
     [[nodiscard]] target const& target_at(ast::expr_id id) const { return target_of[ast::index_of(id)]; }
+    [[nodiscard]] i32 call_at(ast::expr_id id) const { return call_of[ast::index_of(id)]; }
 
     [[nodiscard]] bool operator==(file_tables const& rhs) const
     {
-        return ast::impl::is_equal(type_of, rhs.type_of) && ast::impl::is_equal(target_of, rhs.target_of);
+        return ast::impl::is_equal(type_of, rhs.type_of) && ast::impl::is_equal(target_of, rhs.target_of)
+            && ast::impl::is_equal(call_of, rhs.call_of);
     }
 };

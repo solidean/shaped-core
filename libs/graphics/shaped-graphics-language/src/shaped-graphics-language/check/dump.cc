@@ -50,6 +50,9 @@ struct dumper
 
     void dump_symbol(symbol const& s)
     {
+        // A synthesized constructor is its struct's, which the struct's own line already says.
+        if (s.kind == symbol_kind::function && s.role == function_role::constructor)
+            return;
         switch (s.kind)
         {
         case symbol_kind::structure:

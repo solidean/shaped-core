@@ -125,6 +125,10 @@ struct sgl::check::checked_module
     cc::vector<pipeline_setting> pipeline_settings;
     /// The value of every `const` that checked.
     cc::vector<constant_info> constants;
+    /// How each resolved call fills its callee's parameters; `file_tables::call_of` points in here.
+    cc::vector<call_record> call_records;
+    cc::vector<written_argument> written_arguments;
+    cc::vector<i32> call_slots;
 
     /// One entry per file `check` was given, in that order.
     cc::vector<file_tables> files;
@@ -170,6 +174,11 @@ struct sgl::check::checked_module
     {
         return ast::impl::slice(pipeline_settings, r);
     }
+    [[nodiscard]] cc::span<written_argument const> at(ast::range_of<written_argument> r) const
+    {
+        return ast::impl::slice(written_arguments, r);
+    }
+    [[nodiscard]] cc::span<i32 const> at(ast::range_of<i32> r) const { return ast::impl::slice(call_slots, r); }
 
     /// The registry record behind a type the prelude declares `@builtin`; null for every other type and for an id that names none.
     [[nodiscard]] builtins::type_record const* builtin_type_of(type_id id) const
@@ -219,8 +228,9 @@ struct sgl::check::checked_module
             && is_equal(parameters, rhs.parameters) && is_equal(bindings, rhs.bindings)
             && is_equal(binding_lists, rhs.binding_lists) && is_equal(samplers, rhs.samplers)
             && is_equal(pipelines, rhs.pipelines) && is_equal(pipeline_settings, rhs.pipeline_settings)
-            && is_equal(constants, rhs.constants) && is_equal(files, rhs.files)
-            && is_equal(entry_points, rhs.entry_points) && is_equal(tests, rhs.tests)
+            && is_equal(constants, rhs.constants) && is_equal(call_records, rhs.call_records)
+            && is_equal(written_arguments, rhs.written_arguments) && is_equal(call_slots, rhs.call_slots)
+            && is_equal(files, rhs.files) && is_equal(entry_points, rhs.entry_points) && is_equal(tests, rhs.tests)
             && is_equal(test_units, rhs.test_units) && is_equal(diagnostics, rhs.diagnostics)
             && builtins == rhs.builtins;
     }

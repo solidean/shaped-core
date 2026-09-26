@@ -135,12 +135,40 @@ struct function_notes
     u8 inlines_whole = 0;
 };
 
-/// The argument types of one call after its splats were spread.
+/// The arguments of one call as it wrote them, a splat spread into one per field, before any candidate is looked at.
 struct call_arguments
 {
+    /// In the order written, which is the order they are evaluated in (EVAL-80).
+    cc::vector<written_argument> written;
+    /// Parallel to `written`.
     cc::vector<type_id> types;
+    /// Parallel to `written`: the name of a named argument, empty for a positional one.
+    cc::vector<cc::string_view> names;
     /// An argument had the error type or was reported, so the call reports nothing about its arguments.
     bool is_poisoned = false;
+};
+
+/// Why a candidate did not take a call's arguments (CHK-252), or `none` where it did.
+enum class bind_failure : u8
+{
+    none,
+    no_such_parameter,
+    filled_twice,
+    positional_out_of_slot,
+    positional_to_named_only,
+    too_many,
+    missing_argument,
+};
+
+/// Which written argument fills each parameter of one candidate (CHK-250 to CHK-252).
+struct bound_arguments
+{
+    /// One per parameter: a position in `call_arguments::written`, or -1 where the parameter takes its default.
+    cc::vector<i32> slots;
+    bind_failure failure = bind_failure::none;
+    /// The written argument, or the parameter, the failure is about; -1 where it is about neither.
+    i32 argument = -1;
+    i32 parameter = -1;
 };
 
 /// Which pipeline settings an attribute may be, by what it stands on.
@@ -232,6 +260,11 @@ struct checker
     void merge_scopes();
     /// True where every symbol of `ids` is a function, so the name is an overload set (CHK-12, CHK-189).
     [[nodiscard]] bool is_all_functions(cc::span<symbol_id const> ids) const;
+    /// True where `ids` are functions, or a struct in front of functions of its name (CHK-240).
+    [[nodiscard]] bool is_overload_set(cc::span<symbol_id const> ids) const;
+    /// Gives every struct with a block its synthesized constructor, a function of the struct's name (CHK-239).
+    /// Run once every file is declared, so the symbols declared before keep their ids.
+    void declare_constructors();
 
     /// Compiles the symbol when nobody has, and reports a cycle when somebody is.
     /// The state it returns is `checked` or `failed`, or `in_compilation` for a cycle, which was reported at `where`.
@@ -247,6 +280,8 @@ struct checker
     void judge_shadowing(i32 file, cc::string_view name, source_span where);
     void compile_binding(symbol_id id);
     void compile_function(symbol_id id);
+    /// The synthesized constructor `id`: one parameter per field of its struct, and the struct as its result.
+    void compile_constructor(symbol_id id);
     void judge_entry_point(symbol_id id);
 
     /// True for the prelude's `int3`, the type a dispatch reports a thread's id as.
@@ -398,17 +433,21 @@ struct checker
     /// True for a function whose inferred result is being compiled right now and whose parameters do not take `types`.
     /// Its parameters are known by then, so a call that could never choose it does not need its result.
     /// That keeps an overload set usable from inside one of its own inferred members, where demanding it would be a cycle.
-    [[nodiscard]] bool is_out_of_the_running(symbol_id candidate, cc::span<type_id const> types) const;
+    [[nodiscard]] bool is_out_of_the_running(symbol_id candidate, call_arguments const& arguments) const;
+    /// Which argument fills which parameter, by position and by name; says why where the arguments do not bind.
+    [[nodiscard]] bound_arguments bind_arguments(cc::span<parameter const> parameters,
+                                                 call_arguments const& arguments) const;
+    /// True where every argument that fills a parameter converts to its type.
+    [[nodiscard]] bool converts(cc::span<parameter const> parameters,
+                                call_arguments const& arguments,
+                                cc::span<i32 const> slots) const;
+    /// Remembers how call `id` fills the parameters of `callee`, which is what the flat tree is written from.
+    void record_call(i32 file, ast::expr_id id, symbol_id callee, call_arguments const& arguments, cc::span<i32 const> slots);
     /// The candidates of `spelling` that take exactly `types`, without a report; what the flat tree is written from.
     [[nodiscard]] symbol_id find_operator(cc::string_view spelling, cc::span<type_id const> types) const;
     [[nodiscard]] call_arguments check_arguments(function_scope& scope,
                                                  ast::range_of<ast::argument> range,
                                                  bool is_constructor);
-    [[nodiscard]] type_id construct(function_scope& scope,
-                                    ast::expr_id id,
-                                    ast::expr_id callee,
-                                    symbol_id structure,
-                                    call_arguments const& arguments);
     [[nodiscard]] type_id resolve_overload(function_scope& scope,
                                            ast::expr_id id,
                                            ast::expr_id callee,

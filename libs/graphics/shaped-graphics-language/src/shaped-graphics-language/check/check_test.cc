@@ -89,7 +89,8 @@ void checker::add_unregistered_tests()
             auto innermost = u32(-1);
             for (auto const& s : out.symbols)
             {
-                if (s.file != file || s.kind != symbol_kind::function || !ast::is_valid(s.declaration))
+                if (s.file != file || s.kind != symbol_kind::function || s.role == function_role::constructor
+                    || !ast::is_valid(s.declaration))
                     continue;
                 auto const around = span_of(file, s.declaration);
                 if (around.offset <= where.offset && where.offset + where.length <= around.offset + around.length

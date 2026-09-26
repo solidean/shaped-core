@@ -469,17 +469,111 @@ struct flattener
                 return flatten_void_equality(id, type, spelling == "==", arguments[0].value, arguments[1].value);
         }
 
-        auto const arguments = flatten_arguments(call.arguments);
-        if (where.kind == target_kind::constructor)
-            return add_expr(type, id, flat_construct{.arguments = add_list(arguments)});
-        if (where.kind != target_kind::overload)
+        auto const record = tables().call_at(id);
+        if (record < 0 || (where.kind != target_kind::overload && where.kind != target_kind::constructor))
             return fail();
-        if (!is_valid(c.out.at(where.symbol).intrinsic))
+        return flatten_bound_call(id, type, c.out.call_records[record]);
+    }
+
+    /// True where a call of a program function is inlined rather than written as a call of the target.
+    [[nodiscard]] bool is_inlined(symbol_id callee) const
+    {
+        auto const& s = c.out.at(callee);
+        return s.role != function_role::constructor && !is_valid(s.intrinsic);
+    }
+
+    /// A call as its record says: the written arguments evaluated in the order written, each filling its parameter.
+    flat_expr_id flatten_bound_call(ast::expr_id id, type_id type, call_record const& record)
+    {
+        auto const values = flatten_written(c.out.at(record.written));
+        auto const slots = c.out.at(record.slots);
+        if (is_inlined(record.callee))
         {
-            auto const inlined = inline_call(id, where.symbol, arguments);
+            auto const inlined = inline_bound(id, record.callee, values, slots);
             return add_expr(type, id, flat_block{.label = inlined.label, .body = inlined.body});
         }
-        return builtin_call(id, where.symbol, arguments);
+        return target_call(id, type, record.callee, values, slots);
+    }
+
+    /// A builtin or a construction over `values`, written in the order the call wrote them.
+    /// Where the parameters take them in that order and no two have an effect, they stand in the call itself.
+    /// Otherwise each is bound by a `let` in the order written, since a target may evaluate a call's arguments in any
+    /// order (EVAL-82), and the call reads the locals.
+    flat_expr_id target_call(ast::expr_id id,
+                             type_id type,
+                             symbol_id callee,
+                             cc::span<flat_expr_id const> values,
+                             cc::span<i32 const> slots)
+    {
+        auto const& s = c.out.at(callee);
+        auto in_order = slots.size() == values.size();
+        for (auto p = isize(0); in_order && p < slots.size(); ++p)
+            in_order = slots[p] == p;
+        auto with_effect = 0;
+        for (auto const v : values)
+            with_effect += calls_impure(v, 0) ? 1 : 0;
+
+        auto const call_of = [&](cc::span<flat_expr_id const> arguments)
+        {
+            if (s.role == function_role::constructor)
+                return add_expr(type, id, flat_construct{.arguments = add_list(arguments)});
+            return builtin_call(id, callee, arguments);
+        };
+        if (in_order && with_effect < 2)
+            return call_of(values);
+
+        auto const parameters = c.out.at(c.out.functions[s.info].parameters);
+        auto const where = origin{.file = file(), .expr = id};
+        auto const label = add_label(s.name);
+        auto const outer = cc::move(block);
+        block = {};
+        auto bound = cc::vector<flat_expr_id>::create_filled(values.size(), flat_expr_id::none);
+        for (auto i = isize(0); i < values.size(); ++i)
+        {
+            auto const value = values[i];
+            if (!is_valid(value))
+                return fail();
+            if (is_substitutable(value))
+            {
+                bound[i] = value;
+                continue;
+            }
+            auto name = cc::string_view("argument");
+            for (auto p = isize(0); p < slots.size(); ++p)
+                if (slots[p] == i)
+                    name = parameters[p].name;
+            auto const local = add_local(local_kind::let, name, entry.at(value).type);
+            add_stmt(where, flat_let{.local = local, .value = value});
+            bound[i] = local_ref(local, id);
+        }
+        auto arguments = cc::vector<flat_expr_id>();
+        for (auto p = isize(0); p < slots.size(); ++p)
+        {
+            if (slots[p] < 0)
+                return fail();
+            auto const value = bound[slots[p]];
+            arguments.push_back(entry.at(value).node.is<flat_local_ref>() || p == 0 ? value : again(value, id));
+        }
+        add_stmt(where, flat_leave{.target = label, .value = call_of(arguments)});
+        auto const body = add_list(block);
+        block = cc::move(outer);
+        return add_expr(type, id, flat_block{.label = label, .body = body});
+    }
+
+    /// True where evaluating `id` calls a builtin with an effect outside any block.
+    /// A block is the legalizer's to order: it moves in front of its statement and pins what stands left of it (LEGAL-16).
+    [[nodiscard]] bool calls_impure(flat_expr_id id, int depth) const
+    {
+        if (!is_valid(id) || depth > k_max_inline_depth)
+            return false;
+        auto const& x = entry.at(id);
+        if (auto const* const call = x.node.try_as<flat_call>(); call != nullptr && !call->is_pure)
+            return true;
+        if (x.node.is<flat_block>())
+            return false;
+        auto result = false;
+        for_each_operand(entry, x, [&](flat_expr_id operand) { result = result || calls_impure(operand, depth + 1); });
+        return result;
     }
 
     /// `a == b` over void: both sides run for their effects, in order, and the answer is known before either does.
@@ -512,30 +606,35 @@ struct flattener
                                   .arguments = add_list(arguments)});
     }
 
-    cc::vector<flat_expr_id> flatten_arguments(ast::range_of<ast::argument> range)
+    /// The values of a call's written arguments, in the order written.
+    /// A splat stands for one member access per field, and its value is evaluated once: where the first one stands.
+    cc::vector<flat_expr_id> flatten_written(cc::span<written_argument const> written)
     {
         auto result = cc::vector<flat_expr_id>();
-        for (auto const& a : ast().at(range))
+        auto splat = evaluated_once{};
+        for (auto const& w : written)
         {
-            if (!a.is_splat)
+            if (w.splat_member < 0)
             {
-                result.push_back(flatten_expr(a.value));
+                result.push_back(flatten_expr(w.expr));
                 continue;
             }
-
-            // A splat stands for one member access per field, and its value is evaluated once: where the first one stands.
-            auto const value = flatten_expr(a.value);
-            if (!is_valid(value))
-                continue;
-            auto const is_local = entry.at(value).node.is<flat_local_ref>();
-            auto const once
-                = is_local ? evaluated_once{.first = value, .later = value} : evaluate_once(value, "splat", a.value);
-            auto const members = c.out.at(c.out.at(entry.at(value).type).members);
-            for (auto i = isize(0); i < members.size(); ++i)
+            if (w.splat_member == 0)
             {
-                auto const object = i == 0 ? once.first : again(once.later, a.value);
-                result.push_back(add_expr(members[i].type, a.value, flat_member{.object = object, .member = i32(i)}));
+                auto const value = flatten_expr(w.expr);
+                auto const is_local = is_valid(value) && entry.at(value).node.is<flat_local_ref>();
+                splat = !is_valid(value) || is_local ? evaluated_once{.first = value, .later = value}
+                                                     : evaluate_once(value, "splat", w.expr);
             }
+            if (!is_valid(splat.first))
+            {
+                result.push_back(fail());
+                continue;
+            }
+            auto const object = w.splat_member == 0 ? splat.first : again(splat.later, w.expr);
+            auto const members = c.out.at(c.out.at(entry.at(object).type).members);
+            result.push_back(add_expr(members[w.splat_member].type, w.expr,
+                                      flat_member{.object = object, .member = w.splat_member}));
         }
         return result;
     }
@@ -947,9 +1046,22 @@ struct flattener
         ast::range_of<flat_stmt_id> body;
     };
 
-    /// The body of `callee` as the statements of a block named after it.
-    /// `arguments` were written in the caller's frame, left to right, and are bound at the top of the block in that order.
+    /// `inline_bound` for arguments that fill the parameters in order, one each.
     inlined_body inline_call(ast::expr_id call, symbol_id callee, cc::span<flat_expr_id const> arguments)
+    {
+        auto slots = cc::vector<i32>();
+        for (auto i = isize(0); i < arguments.size(); ++i)
+            slots.push_back(i32(i));
+        return inline_bound(call, callee, arguments, slots);
+    }
+
+    /// The body of `callee` as the statements of a block named after it.
+    /// `values` were written in the caller's frame, in the order the call wrote them, and are bound at the top of the
+    /// block in that order; `slots` says which parameter each one fills.
+    inlined_body inline_bound(ast::expr_id call,
+                              symbol_id callee,
+                              cc::span<flat_expr_id const> values,
+                              cc::span<i32 const> slots)
     {
         judge_stage(call, callee);
         auto const& s = c.out.at(callee);
@@ -965,7 +1077,16 @@ struct flattener
         }
         auto const& info = c.out.functions[s.info];
         auto const parameters = c.out.at(info.parameters);
-        if (parameters.size() != arguments.size())
+        auto filled = cc::vector<i32>::create_filled(values.size(), -1);
+        for (auto p = isize(0); p < slots.size(); ++p)
+            if (slots[p] >= 0 && slots[p] < values.size())
+                filled[slots[p]] = i32(p);
+        auto is_complete = parameters.size() == slots.size();
+        for (auto p = isize(0); is_complete && p < slots.size(); ++p)
+            is_complete = slots[p] >= 0;
+        for (auto const p : filled)
+            is_complete = is_complete && p >= 0;
+        if (!is_complete)
         {
             is_failed = true;
             return {};
@@ -985,10 +1106,11 @@ struct flattener
 
         // A parameter is a value: a literal or an immutable local stands for it, and anything else is bound once.
         auto bound = cc::vector<bound_name>();
-        for (auto i = isize(0); i < parameters.size(); ++i)
+        for (auto k = isize(0); k < values.size(); ++k)
         {
+            auto const i = filled[k];
             auto const where = target{.kind = target_kind::parameter, .index = i32(parameters[i].field)};
-            auto const argument = arguments[i];
+            auto const argument = values[k];
             if (!is_valid(argument))
             {
                 is_failed = true;
@@ -1281,11 +1403,13 @@ struct flattener
         if (call == nullptr)
             return add_stmt(from, flat_eval{.value = flatten_expr(value)});
         auto const& where = tables().target_at(value);
-        if (where.kind == target_kind::overload && !is_valid(c.out.at(where.symbol).intrinsic)
+        auto const record = tables().call_at(value);
+        if (where.kind == target_kind::overload && record >= 0 && is_inlined(where.symbol)
             && tables().type_at(value) == checked_module::void_type)
         {
-            auto const arguments = flatten_arguments(call->arguments);
-            auto const inlined = inline_call(value, where.symbol, arguments);
+            auto const& r = c.out.call_records[record];
+            auto const values = flatten_written(c.out.at(r.written));
+            auto const inlined = inline_bound(value, where.symbol, values, c.out.at(r.slots));
             return add_stmt(from, flat_block{.label = inlined.label, .body = inlined.body});
         }
         // Any other call has a value, which is evaluated where it stands and dropped.

@@ -30,10 +30,15 @@ TEST("sgl check - an opaque struct needs @builtin")
           == "opaque-struct-needs-builtin @0:7+6 handle\n");
 }
 
-TEST("sgl check - a name is declared once, unless every declaration of it is a function")
+TEST("sgl check - a name is declared once, unless it is functions and at most one struct in front of them")
 {
     CHECK(reports_for("struct a:\n    x: float\nstruct a:\n    y: float\n") == "duplicate-declaration user:[a] a\n");
-    CHECK(reports_for("struct a:\n    x: float\nfun a(k: float) -> float => k\n") == "duplicate-declaration user:[a] a\n");
+    CHECK(reports_for("struct a:\n    x: float\nenum a:\n    y\n") == "duplicate-declaration user:[a] a\n");
+    CHECK(reports_for("fun a(k: float) -> float => k\nbinding a:\n    y: float\n")
+          == "duplicate-declaration user:[a] a\n");
+    // CHK-240: functions of a struct's name overload its constructor, whichever of them stands first
+    CHECK(reports_for("struct a:\n    x: float\nfun a(k: float, l: float) -> a => a(k + l)\n") == "");
+    CHECK(reports_for("fun a(k: float, l: float) -> a => a(k + l)\nstruct a:\n    x: float\n") == "");
     CHECK(reports_for("struct a:\n    x: float\n    x: float\n") == "duplicate-declaration user:[x] x\n");
     CHECK(reports_for("@builtin fun dot(a: float3, a: float3) -> float\n") == "duplicate-declaration user:[a] a\n");
 
@@ -91,9 +96,8 @@ TEST("sgl check - compilation is on demand, so a declaration may stand below its
     CHECK(reports_of(checked) == "");
     // `inner` was compiled from inside `outer`, so its type exists first
     auto const& m = checked.module;
-    auto const outer = m.symbols[m.symbols.size() - 2];
-    auto const inner = m.symbols[m.symbols.size() - 1];
-    CHECK(outer.name == "outer");
+    auto const outer = symbol_named(m, "outer");
+    auto const inner = symbol_named(m, "inner");
     CHECK(sgl::check::index_of(inner.type) < sgl::check::index_of(outer.type));
 }
 
@@ -110,7 +114,7 @@ TEST("sgl check - a type is canonical: one id per struct, and the error type is 
     auto const checked = check_sources(read_prelude(), "struct a:\n    x: float\n    y: float\n");
     auto const& m = checked.module;
     CHECK(m.types[0].kind == sgl::check::type_kind::error);
-    auto const& a = m.at(m.symbols.back().type);
+    auto const& a = m.at(symbol_named(m, "a").type);
     auto const fields = m.at(a.members);
     REQUIRE(fields.size() == 2);
     CHECK(fields[0].type == fields[1].type);
@@ -187,7 +191,7 @@ TEST("sgl check - a function needs a body unless it is @builtin, and a generic o
     CHECK(reports_for("fun f(x: float) -> float\n") == "expected-body user:[f] f\n");
 
     auto const checked = check_sources(read_prelude(), "fun id[T](x: float) -> float => x\n");
-    CHECK(checked.module.symbols.back().state == symbol_state::failed);
+    CHECK(symbol_named(checked.module, "id").state == symbol_state::failed);
     CHECK(sgl::check::dump(checked.module).ends_with("(fun id failed)\n"));
 }
 

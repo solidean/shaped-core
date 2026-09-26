@@ -885,6 +885,43 @@ void checker::compile_function(symbol_id id)
         out.symbols[index_of(id)].state = symbol_state::failed;
 }
 
+void checker::compile_constructor(symbol_id id)
+{
+    auto const structure = out.at(id).owner;
+    auto const file = out.at(id).file;
+    auto const where = ast_of(file).at(out.at(structure).declaration).node.as<ast::struct_decl>().name;
+    auto const is_checked = demand(structure, file, where) == symbol_state::checked;
+
+    auto parameters = cc::vector<parameter>();
+    auto result = checked_module::error_type;
+    if (is_checked)
+    {
+        result = out.at(structure).type;
+        for (auto const& m : out.at(out.at(result).members))
+        {
+            auto const& f = ast_of(file).at(m.field);
+            parameters.push_back({.name = m.name,
+                                  .type = m.type,
+                                  .field = m.field,
+                                  .has_default = ast::is_valid(f.default_value),
+                                  .is_named_only = f.is_named_only});
+        }
+    }
+
+    out.symbols[index_of(id)].info = i32(out.functions.size());
+    out.functions.push_back({
+        .symbol = id,
+        .parameters = {.first = u32(out.parameters.size()), .count = u32(parameters.size())},
+        .result = result,
+        .is_pure = true,
+    });
+    out.parameters.push_back_range(parameters);
+    // A construction has no body of its own, so there is nothing to check and nothing to inline.
+    notes.push_back({.is_body_checked = true, .is_body_sound = true});
+    if (!is_checked)
+        out.symbols[index_of(id)].state = symbol_state::failed;
+}
+
 void checker::judge_entry_point(symbol_id id)
 {
     auto const& s = out.at(id);

@@ -18,9 +18,11 @@ void checker::check_body(symbol_id id)
 {
     auto const file = out.at(id).file;
     auto const& ast = ast_of(file);
-    auto const& f = ast.at(out.at(id).declaration).node.as<ast::fun_decl>();
     auto const index = out.at(id).info;
-    if (f.body.kind == ast::body_kind::none || notes[index].is_body_checked)
+    if (notes[index].is_body_checked)
+        return;
+    auto const& f = ast.at(out.at(id).declaration).node.as<ast::fun_decl>();
+    if (f.body.kind == ast::body_kind::none)
         return;
     notes[index].is_body_checked = true;
 
@@ -488,7 +490,9 @@ call_arguments checker::check_arguments(function_scope& scope, ast::range_of<ast
         }
         if (!a.is_splat)
         {
+            result.written.push_back({.expr = a.value});
             result.types.push_back(type);
+            result.names.push_back(text_of(file, a.name));
             continue;
         }
 
@@ -504,11 +508,16 @@ call_arguments checker::check_arguments(function_scope& scope, ast::range_of<ast
             result.is_poisoned = true;
         }
         else
+        {
+            auto member = i32(0);
             for (auto const& m : out.at(out.at(type).members))
             {
+                result.written.push_back({.expr = a.value, .splat_member = member++});
                 result.types.push_back(m.type);
+                result.names.push_back({});
                 result.is_poisoned = result.is_poisoned || m.type == error_type;
             }
+        }
     }
     return result;
 }
@@ -602,7 +611,27 @@ type_id checker::check_call(function_scope& scope, ast::expr_id id, ast::call co
     switch (out.at(first).kind)
     {
     case symbol_kind::structure:
-        return construct(scope, id, call.callee, first, check_arguments(scope, call.arguments, true));
+    {
+        // CHK-75: a call of a struct's name is a call of its overload set, its synthesized constructor among it.
+        auto const arguments = check_arguments(scope, call.arguments, true);
+        if (demand(first, file, callee_where) != symbol_state::checked)
+            return error_type;
+        auto const type = out.at(first).type;
+        auto functions = cc::vector<symbol_id>();
+        for (auto const candidate : *found)
+            if (out.at(candidate).kind == symbol_kind::function)
+                functions.push_back(candidate);
+        if (functions.empty())
+        {
+            set_target(file, call.callee, {.kind = target_kind::symbol, .symbol = first});
+            report(diagnostic_kind::no_matching_overload, file, where,
+                   cc::format("{} is opaque and has no constructor", out.name_of(type)));
+            return type;
+        }
+        auto const result = resolve_overload(scope, id, call.callee, functions, arguments, text);
+        // A call that names a struct is of that struct, so one bad argument does not take the whole value with it.
+        return result == error_type ? type : result;
+    }
     case symbol_kind::function:
     {
         auto const result
@@ -635,49 +664,6 @@ type_id checker::check_call(function_scope& scope, ast::expr_id id, ast::call co
     return error_type;
 }
 
-type_id checker::construct(function_scope& scope,
-                           ast::expr_id id,
-                           ast::expr_id callee,
-                           symbol_id structure,
-                           call_arguments const& arguments)
-{
-    auto const file = scope.file;
-    auto const where = span_of(file, id);
-    if (demand(structure, file, where) != symbol_state::checked)
-        return error_type;
-
-    auto const type = out.at(structure).type;
-    auto const self = target{.kind = target_kind::constructor, .symbol = structure};
-    set_target(file, id, self);
-    set_target(file, callee, self);
-    set_type(file, callee, type);
-
-    // The result is known whatever the arguments are, so one bad argument does not take the whole value with it.
-    if (arguments.is_poisoned)
-        return type;
-
-    auto const members = out.at(out.at(type).members);
-    auto is_match = !out.at(type).is_opaque && members.size() == arguments.types.size();
-    auto is_silent = false;
-    for (auto i = isize(0); is_match && i < members.size(); ++i)
-    {
-        is_silent = is_silent || members[i].type == error_type;
-        is_match = members[i].type == error_type || members[i].type == arguments.types[i];
-    }
-    if (!is_match && !is_silent)
-    {
-        auto expected = cc::vector<type_id>();
-        for (auto const& m : members)
-            expected.push_back(m.type);
-        auto const name = out.name_of(type);
-        report(diagnostic_kind::no_matching_overload, file, where,
-               out.at(type).is_opaque ? cc::format("{} is opaque and has no constructor", name)
-                                      : cc::format("{}, and the constructor is {}", signature_text(name, arguments.types),
-                                                   signature_text(name, expected)));
-    }
-    return type;
-}
-
 type_id checker::resolve_overload(function_scope& scope,
                                   ast::expr_id id,
                                   ast::expr_id callee,
@@ -690,26 +676,42 @@ type_id checker::resolve_overload(function_scope& scope,
 
     auto is_silent = arguments.is_poisoned;
     auto matches = cc::vector<symbol_id>();
+    auto match_slots = cc::vector<cc::vector<i32>>();
     for (auto const candidate : candidates)
     {
-        if (is_out_of_the_running(candidate, arguments.types))
+        if (is_out_of_the_running(candidate, arguments))
             continue;
         if (demand(candidate, file, where) != symbol_state::checked)
         {
             is_silent = true;
             continue;
         }
+        if (arguments.is_poisoned)
+            continue;
         auto const parameters = out.at(out.functions[out.at(candidate).info].parameters);
-        auto is_match = !arguments.is_poisoned && parameters.size() == arguments.types.size();
-        for (auto i = isize(0); is_match && i < parameters.size(); ++i)
-            is_match = takes(parameters[i].type, arguments.types[i]);
-        if (is_match)
-            matches.push_back(candidate);
+        auto bound = bind_arguments(parameters, arguments);
+        if (bound.failure != bind_failure::none || !converts(parameters, arguments, bound.slots))
+            continue;
+        matches.push_back(candidate);
+        match_slots.push_back(cc::move(bound.slots));
     }
 
     if (matches.empty())
     {
-        if (!is_silent)
+        if (is_silent)
+            return error_type;
+        // A struct's one constructor says what it takes, which is what a reader needs to fix the call.
+        auto const is_constructor = candidates.size() == 1 && out.at(candidates[0]).role == function_role::constructor;
+        if (is_constructor)
+        {
+            auto expected = cc::vector<type_id>();
+            for (auto const& p : out.at(out.functions[out.at(candidates[0]).info].parameters))
+                expected.push_back(p.type);
+            report(diagnostic_kind::no_matching_overload, file, where,
+                   cc::format("{}, and the constructor is {}", signature_text(spelling, arguments.types),
+                              signature_text(spelling, expected)));
+        }
+        else
             report(diagnostic_kind::no_matching_overload, file, where, signature_text(spelling, arguments.types));
         return error_type;
     }
@@ -718,7 +720,12 @@ type_id checker::resolve_overload(function_scope& scope,
     for (auto const m : matches)
         is_program_match = is_program_match || !is_prelude_file(out.at(m).file);
     if (is_program_match)
-        matches.remove_all_where([&](symbol_id m) { return is_prelude_file(out.at(m).file); });
+        for (auto i = matches.size() - 1; i >= 0; --i)
+            if (is_prelude_file(out.at(matches[i]).file))
+            {
+                matches.remove_at(i);
+                match_slots.remove_at(i);
+            }
     if (matches.size() > 1)
     {
         report(diagnostic_kind::ambiguous_overload, file, where,
@@ -727,14 +734,94 @@ type_id checker::resolve_overload(function_scope& scope,
     }
 
     auto const chosen = matches.front();
-    auto const self = target{.kind = target_kind::overload, .symbol = chosen};
+    auto const& chosen_symbol = out.at(chosen);
+    // A synthesized constructor is its struct's, which is what an editor goes to.
+    auto const self = chosen_symbol.role == function_role::constructor
+                        ? target{.kind = target_kind::constructor, .symbol = chosen_symbol.owner}
+                        : target{.kind = target_kind::overload, .symbol = chosen};
     set_target(file, id, self);
     set_target(file, callee, self);
-    if (is_valid(out.at(chosen).intrinsic))
-        return out.functions[out.at(chosen).info].result;
+    record_call(file, id, chosen, arguments, match_slots.front());
+    auto const result = out.functions[chosen_symbol.info].result;
+    if (chosen_symbol.role == function_role::constructor)
+        set_type(file, callee, result);
+    if (is_valid(chosen_symbol.intrinsic) || chosen_symbol.role == function_role::constructor)
+        return result;
 
     note_program_call(scope, chosen, where);
-    return out.functions[out.at(chosen).info].result;
+    return result;
+}
+
+bound_arguments checker::bind_arguments(cc::span<parameter const> parameters, call_arguments const& arguments) const
+{
+    auto result = bound_arguments{.slots = cc::vector<i32>::create_filled(parameters.size(), -1)};
+    auto const fail = [&](bind_failure why, i32 argument, i32 parameter)
+    {
+        result.failure = why;
+        result.argument = argument;
+        result.parameter = parameter;
+        return result;
+    };
+
+    // CHK-251: a positional argument after a named one binds only where every argument before it is in its own slot.
+    auto is_in_own_slot = true;
+    auto seen_named = false;
+    for (auto i = i32(0); i < i32(arguments.written.size()); ++i)
+    {
+        auto const name = arguments.names[i];
+        auto p = i32(-1);
+        if (name.empty())
+        {
+            if (seen_named && !is_in_own_slot)
+                return fail(bind_failure::positional_out_of_slot, i, -1);
+            if (i >= i32(parameters.size()))
+                return fail(bind_failure::too_many, i, -1);
+            if (parameters[i].is_named_only)
+                return fail(bind_failure::positional_to_named_only, i, i);
+            p = i;
+        }
+        else
+        {
+            seen_named = true;
+            // the receiver is filled by its position, never by the name `self`
+            for (auto k = i32(0); k < i32(parameters.size()); ++k)
+                if (parameters[k].name == name && name != "self")
+                    p = k;
+            if (p < 0)
+                return fail(bind_failure::no_such_parameter, i, -1);
+        }
+        is_in_own_slot = is_in_own_slot && p == i;
+        if (result.slots[p] >= 0)
+            return fail(bind_failure::filled_twice, i, p);
+        result.slots[p] = i;
+    }
+    for (auto p = i32(0); p < i32(parameters.size()); ++p)
+        if (result.slots[p] < 0 && !parameters[p].has_default)
+            return fail(bind_failure::missing_argument, -1, p);
+    return result;
+}
+
+bool checker::converts(cc::span<parameter const> parameters, call_arguments const& arguments, cc::span<i32 const> slots) const
+{
+    for (auto p = isize(0); p < parameters.size(); ++p)
+        if (slots[p] >= 0 && !takes(parameters[p].type, arguments.types[slots[p]]))
+            return false;
+    return true;
+}
+
+void checker::record_call(i32 file,
+                          ast::expr_id id,
+                          symbol_id callee,
+                          call_arguments const& arguments,
+                          cc::span<i32 const> slots)
+{
+    auto const written = ast::range_of<written_argument>{.first = u32(out.written_arguments.size()),
+                                                         .count = u32(arguments.written.size())};
+    out.written_arguments.push_back_range(arguments.written);
+    auto const slot_range = ast::range_of<i32>{.first = u32(out.call_slots.size()), .count = u32(slots.size())};
+    out.call_slots.push_back_range(slots);
+    out.files[file].call_of[ast::index_of(id)] = i32(out.call_records.size());
+    out.call_records.push_back({.callee = callee, .written = written, .slots = slot_range});
 }
 
 void checker::note_program_call(function_scope const& scope, symbol_id callee, source_span where)
@@ -816,16 +903,14 @@ type_id checker::check_chain(function_scope& scope, ast::expr_id id, ast::compar
     return bool_type;
 }
 
-bool checker::is_out_of_the_running(symbol_id candidate, cc::span<type_id const> types) const
+bool checker::is_out_of_the_running(symbol_id candidate, call_arguments const& arguments) const
 {
     auto const& s = out.at(candidate);
     if (s.kind != symbol_kind::function || s.state != symbol_state::in_compilation || s.info < 0)
         return false;
     auto const parameters = out.at(out.functions[s.info].parameters);
-    auto is_match = parameters.size() == types.size();
-    for (auto i = isize(0); is_match && i < parameters.size(); ++i)
-        is_match = takes(parameters[i].type, types[i]);
-    return !is_match;
+    auto const bound = bind_arguments(parameters, arguments);
+    return bound.failure != bind_failure::none || !converts(parameters, arguments, bound.slots);
 }
 
 symbol_id checker::find_operator(cc::string_view spelling, cc::span<type_id const> types) const
@@ -855,10 +940,16 @@ symbol_id checker::resolve_operator(i32 file, source_span where, cc::string_view
     auto matches = 0;
     auto is_silent = false;
     auto chosen = symbol_id::none;
+    auto positional = call_arguments{.types = cc::vector<type_id>::create_copy_of(types)};
+    for (auto i = isize(0); i < types.size(); ++i)
+    {
+        positional.written.push_back({});
+        positional.names.push_back({});
+    }
     if (auto const* const found = operators.get_ptr(spelling))
         for (auto const candidate : *found)
         {
-            if (is_out_of_the_running(candidate, types))
+            if (is_out_of_the_running(candidate, positional))
                 continue;
             if (demand(candidate, file, where) != symbol_state::checked)
             {

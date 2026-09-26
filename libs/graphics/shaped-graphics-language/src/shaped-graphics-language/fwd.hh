@@ -188,6 +188,7 @@ struct enum_case_info;
 enum class stage : u8;
 enum class symbol_kind : u8;
 enum class symbol_state : u8;
+enum class function_role : u8;
 struct symbol;
 enum class constant_kind : u8;
 struct constant_info;
@@ -201,6 +202,8 @@ enum class pipeline_kind : u8;
 struct pipeline_info;
 enum class target_kind : u8;
 struct target;
+struct written_argument;
+struct call_record;
 struct file_tables;
 
 struct origin;
