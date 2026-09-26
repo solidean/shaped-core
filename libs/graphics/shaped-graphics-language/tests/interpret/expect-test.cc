@@ -68,6 +68,6 @@ TEST("sgl expect - a test that is to fail passes by failing")
     CHECK(outcome_of(cc::string(half) + "@expect(.assert) test:\n    half(-1.0) < 0.0\n    true\n") == "");
     // a false check is no assert, and the assert that held counts among the checks that ran
     CHECK(outcome_of(cc::string(half) + "@expect(.assert) test:\n    half(1.0) > 1.0\n    true\n")
-          == "test-failed user:[test] 1 of 3 checks failed\n"
-             "  note user:[half(1.0) > 1.0] `half(1.0) > 1.0` is 0.5 > 1\n");
+          == "test-failed user:[test] 1 of 2 checks failed, 1 asserts held\n"
+             "  note user:[half(1.0) > 1.0] `half(1.0) > 1.0` is 0.5 > 1.0\n");
 }

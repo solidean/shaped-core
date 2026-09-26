@@ -12,6 +12,11 @@ test half_of_positive(4.0) == 2.0
 
 @expect(.fail) test 2 < 1
 
+// several expectations each hold of the one run
+@expect(.fail, .assert) test:
+    half_of_positive(-1.0) < 0.0
+    true // the assert inside is what this test is about
+
 // an entry point may assert too, and no target writes it
 struct frag:
     a: float

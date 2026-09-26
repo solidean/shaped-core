@@ -172,8 +172,10 @@ fun graded(a: float) -> float:
 * **EVAL-76** An `assert` is a `check` that stops the run where it is false.
 * **EVAL-77** A run that reaches the end of a function returning `void` ends with `void`'s value, which is how a test and a compute entry point end.
 * **EVAL-78** A test passes when its run ends normally, having run at least one check and found none false.
-  A false check or `assert`, a run out of fuel and a run that ran no check each fail it, and a failure is reported as `test-failed`.
+  A false check or `assert`, a run out of fuel, a read of a `var` nothing assigned, and a run that ran no check each fail it.
+  A failure is reported as `test-failed`.
 * **EVAL-79** A false check is reported narrowed: through `and`, `or`, `not` and a chain to the parts that were false, a comparison with the values of its operands.
+  A `not` of a comparison that held reports that comparison's values.
 
 ## Errors of the program
 

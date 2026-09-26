@@ -107,8 +107,10 @@ struct sgl::check::outcome
     cc::string detail;
     /// Every check and `assert` that was false, up to `run_limits::max_failures`, in the order they ran.
     cc::vector<check_failure> failures;
-    /// How many checks ran, whatever they found; a test whose run ran none has checked nothing.
+    /// How many checks ran, whatever they found, `assert`s included (EVAL-76); a test whose run ran none has checked nothing.
     i32 checks_run = 0;
+    /// How many of `checks_run` were `assert`s.
+    i32 asserts_run = 0;
     /// How many failures `max_failures` left out.
     i32 failures_dropped = 0;
 

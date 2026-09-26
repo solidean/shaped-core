@@ -56,6 +56,17 @@ struct narrower
         parts.push_back({.file = nodes[i].from.file, .where = at.where, .text = at.text, .values = cc::move(values)});
     }
 
+    /// A comparison node as its operand values: `0.5 > 0.6`.
+    [[nodiscard]] cc::string compared(flat_check_node const& node) const
+    {
+        auto const operand = [&](i32 k)
+        {
+            return k >= 0 && k < nodes.size() && failure.is_evaluated[k] ? text_of_value(m, failure.values[k])
+                                                                         : cc::string("?");
+        };
+        return cc::format("{} {} {}", operand(node.lhs), node.op, operand(node.rhs));
+    }
+
     void narrow(isize i, int depth = 0)
     {
         if (depth > 64)
@@ -104,15 +115,26 @@ struct narrower
         }
         case check_node_kind::compare:
         {
-            auto const operand = [&](i32 k)
-            {
-                return k >= 0 && k < nodes.size() && failure.is_evaluated[k] ? text_of_value(m, failure.values[k])
-                                                                             : cc::string("?");
-            };
-            add(i, cc::format("{} {} {}", operand(node.lhs), node.op, operand(node.rhs)));
+            add(i, compared(node));
             return;
         }
         case check_node_kind::not_:
+        {
+            // `not (4 == 4)`: a comparison under the `not` held, and its values are why the `not` is false
+            auto is_done = false;
+            children(
+                [&](isize k)
+                {
+                    if (!is_done && nodes[k].kind == check_node_kind::compare && failure.is_evaluated[k])
+                    {
+                        add(i, cc::format("not ({})", compared(nodes[k])));
+                        is_done = true;
+                    }
+                });
+            if (!is_done)
+                add(i, "false");
+            return;
+        }
         case check_node_kind::leaf:
             add(i, "false");
             return;
@@ -137,6 +159,8 @@ cc::string_view sgl::test::to_string(test_status s)
         return "no-check-ran";
     case test_status::not_run:
         return "not-run";
+    case test_status::uninitialized_read:
+        return "uninitialized-read";
     case test_status::internal_error:
         return "internal-error";
     }
@@ -150,7 +174,18 @@ cc::string sgl::test::text_of_value(checked_module const& m, value const& v)
         switch (leaf.kind)
         {
         case value_kind::scalar_float:
-            return cc::format("{}", leaf.as_float());
+        {
+            // `1.0` and not `1`, so a value reads as the type it is; and never the C library's `-nan`
+            auto const f = leaf.as_float();
+            if (f != f)
+                return cc::string("nan");
+            if (f - f != 0.0f)
+                return cc::string(f < 0.0f ? "-inf" : "inf");
+            auto text = cc::format("{}", f);
+            if (!text.contains('.') && !text.contains('e'))
+                text += ".0";
+            return text;
+        }
         case value_kind::scalar_int:
             return cc::format("{}", leaf.as_int());
         case value_kind::scalar_uint:
@@ -199,7 +234,8 @@ cc::vector<test_result> sgl::test::run_tests(checked_module const& m,
 
         auto const& unit = m.test_units[test.unit];
         auto const o = interpret(m, unit, {}, options.limits);
-        result.checks_run = o.checks_run;
+        result.checks_run = o.checks_run - o.asserts_run;
+        result.asserts_run = o.asserts_run;
         result.failures_dropped = o.failures_dropped;
         result.detail = o.detail;
         for (auto const& f : o.failures)
@@ -239,9 +275,8 @@ cc::vector<test_result> sgl::test::run_tests(checked_module const& m,
         case run_status::out_of_fuel:
             result.status = test_status::out_of_fuel;
             break;
-        // reading a `var` nothing assigned is a mistake of the program, which the check pass cannot see yet
         case run_status::uninitialized_read:
-            result.status = test_status::failed;
+            result.status = test_status::uninitialized_read;
             break;
         case run_status::fell_off_the_end:
         case run_status::type_error:
@@ -249,26 +284,33 @@ cc::vector<test_result> sgl::test::run_tests(checked_module const& m,
             break;
         }
 
-        // CHK-232: a test that is to fail passes by failing, and one that is to stop at an assert by stopping there
+        // CHK-232: a test that is to fail passes by failing, and one that is to stop at an assert by stopping there.
+        // Every expectation is judged against the one run, so two of them never judge each other's verdict.
+        auto const ran = result.status;
+        auto has_run_expectation = false;
+        auto const* unmet = static_cast<test_expectation const*>(nullptr);
         for (auto const& e : test.expectations)
         {
             if (e.kind != expectation_kind::fail && e.kind != expectation_kind::assert_)
                 continue;
-            auto const is_met = e.kind == expectation_kind::fail ? result.status == test_status::failed
-                                                                       || result.status == test_status::assertion_failed
-                                                                 : result.status == test_status::assertion_failed;
-            if (is_met)
-            {
-                result.status = test_status::passed;
-                result.failures.clear();
-                result.failures_dropped = 0;
-            }
-            else if (result.status == test_status::passed)
-            {
-                result.status = test_status::failed;
-                result.detail = e.kind == expectation_kind::fail ? "it was to fail, and it passed"
-                                                                 : "it was to stop at an assert, and it ran to its end";
-            }
+            has_run_expectation = true;
+            auto const is_met = e.kind == expectation_kind::fail
+                                  ? ran == test_status::failed || ran == test_status::assertion_failed
+                                  : ran == test_status::assertion_failed;
+            if (!is_met && unmet == nullptr)
+                unmet = &e;
+        }
+        if (has_run_expectation && unmet == nullptr)
+        {
+            result.status = test_status::passed;
+            result.failures.clear();
+            result.failures_dropped = 0;
+        }
+        else if (unmet != nullptr && ran == test_status::passed)
+        {
+            result.status = test_status::failed;
+            result.detail = unmet->kind == expectation_kind::fail ? "it was to fail, and it passed"
+                                                                  : "it was to stop at an assert, and it ran to its end";
         }
         results.push_back(cc::move(result));
     }
@@ -341,6 +383,8 @@ located_diagnostic sgl::test::diagnostic_of(checked_module const& m, test_result
         detail = r.failures.empty() && !r.detail.empty()
                    ? r.detail
                    : cc::format("{} of {} checks failed", r.failures.size() + r.failures_dropped, r.checks_run);
+        if (r.asserts_run > 0 && !r.failures.empty())
+            detail.appendf(", {} asserts held", r.asserts_run);
         break;
     case test_status::assertion_failed:
         detail = "an assert failed, and the run stopped there";
@@ -350,6 +394,9 @@ located_diagnostic sgl::test::diagnostic_of(checked_module const& m, test_result
         break;
     case test_status::no_check_ran:
         detail = "the run ran no check";
+        break;
+    case test_status::uninitialized_read:
+        detail = cc::format("the run read a variable nothing assigned: {}", r.detail);
         break;
     case test_status::internal_error:
         detail = cc::format("the compiler wrote a tree it cannot run: {}", r.detail);

@@ -22,6 +22,9 @@ enum class sgl::test::test_status : sgl::u8
     out_of_fuel,
     /// The run ended without running a single check, which a test that checks by its asserts ends in `true` to avoid.
     no_check_ran,
+    /// The run read a `var` nothing assigned, a mistake of the program the check pass cannot see yet.
+    /// A status of its own, so `@expect(.fail)` never passes on it.
+    uninitialized_read,
     /// The test has no flat tree: its body did not check, which a diagnostic already says.
     not_run,
     /// The interpreter met a tree the check pass should not have written; a bug of the compiler, and not of the test.
@@ -61,7 +64,9 @@ struct sgl::test::test_result
     cc::vector<check_report> failures;
     /// The failures `run_limits::max_failures` left out.
     i32 failures_dropped = 0;
+    /// The test's own checks that ran, and the `assert`s that ran beside them, which a report counts apart.
     i32 checks_run = 0;
+    i32 asserts_run = 0;
     /// What the interpreter said about a run that stopped for another reason than a check.
     cc::string detail;
 
@@ -78,7 +83,7 @@ struct sgl::test::test_options
 namespace sgl::test
 {
 
-/// `passed`, `failed`, `assertion-failed`, `out-of-fuel`, `no-check-ran`, `not-run`, `internal-error`.
+/// `passed`, `failed`, `assertion-failed`, `out-of-fuel`, `no-check-ran`, `uninitialized-read`, `not-run`, `internal-error`.
 [[nodiscard]] cc::string_view to_string(test_status s);
 
 /// Every test of `m` the options select, in the order `m.tests` holds them.

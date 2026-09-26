@@ -61,7 +61,24 @@ TEST("sgl tests - an assert stops the test, and a run that checked nothing fails
                       "    half(-1.0) < 0.0\n"
                       "    true\n")
           == "test-failed user:[test] an assert failed, and the run stopped there\n"
-             "  note user:[x >= 0.0] `x >= 0.0` is -1 >= 0\n");
+             "  note user:[x >= 0.0] `x >= 0.0` is -1.0 >= 0.0\n");
     CHECK(failures_of("test:\n    let b = 1 > 2\n    if b:\n        true\n")
           == "test-failed user:[test] the run ran no check\n");
+}
+
+TEST("sgl tests - a report spells a whole float as one, narrows through not, and counts asserts apart")
+{
+    // `2.0`, never `2`: a value reads as the type it is
+    CHECK(failures_of("test 1.5 + 0.25 > 2.0\n")
+          == "test-failed user:[test] 1 of 1 checks failed\n"
+             "  note user:[1.5 + 0.25 > 2.0] `1.5 + 0.25 > 2.0` is 1.75 > 2.0\n");
+    // EVAL-79: a `not` of a comparison that held shows that comparison's values
+    CHECK(failures_of("fun sq(x: int) -> int => x * x\ntest not (sq(2) == 4)\n")
+          == "test-failed user:[test] 1 of 1 checks failed\n"
+             "  note user:[not (sq(2) == 4)] `not (sq(2) == 4)` is not (4 == 4)\n");
+    // the asserts of a callee are no checks of the test, and the report says so beside them
+    CHECK(failures_of("fun half(x: float) -> float:\n    assert x >= 0.0\n    return x * 0.5\n"
+                      "test:\n    for i in 0 ..< 2:\n        half(i as float) > 0.25\n")
+          == "test-failed user:[test] 1 of 2 checks failed, 2 asserts held\n"
+             "  note user:[half(i as float) > 0.25] `half(i as float) > 0.25` is 0.0 > 0.25, with i = 0\n");
 }

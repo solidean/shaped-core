@@ -139,7 +139,8 @@ enum light_kind:
   Any other argument is `invalid-attribute-arguments`.
 * **CHK-232** A diagnostic of any phase that stands inside a test, from its keyword to the end of its body, and that an `error` or a `warning` expectation names is the test's, and is reported nowhere.
   An expectation nothing met is `unmet-expectation`, and a test that expects a diagnostic is judged by that alone and never run.
-  A test that expects `.fail` passes where its run fails, and one that expects `.assert` where its run stops at a false `assert`.
+  A test that expects `.fail` passes where a check or an `assert` of its run is false, and one that expects `.assert` where its run stops at a false `assert`.
+  Several of them on one test must all hold of its one run.
 
 ```sgl sketch
 fun shade(k: float) -> float:

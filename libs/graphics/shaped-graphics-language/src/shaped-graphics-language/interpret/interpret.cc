@@ -544,6 +544,8 @@ struct machine
         if (condition.leaves.size() != 1 || condition.leaves[0].kind != value_kind::boolean)
             return type_error("a check whose condition is no bool");
         ++out.checks_run;
+        if (site.stops)
+            ++out.asserts_run;
         if (condition.leaves[0].as_bool())
             return {};
 
