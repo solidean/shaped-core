@@ -16,6 +16,7 @@ tools/review/readme.md is the tool, and tools/review/docs/_index.md the design b
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -119,7 +120,13 @@ def main() -> None:
     review.console.configure("colored" if args.colored else "plain" if args.plain else "auto")
 
     ctx = cmd.Context.at(_home(), dir_override=Path(args.dir).resolve() if args.dir else None)
-    commands[args.command].run(args, ctx)
+    try:
+        commands[args.command].run(args, ctx)
+    except BrokenPipeError:
+        # The reader went away — `review.py changes … | head` — which is the reader's choice, not a crash.
+        # Point stdout at devnull so the interpreter's own flush at exit cannot raise the same error again.
+        os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+        sys.exit(0)
 
 
 if __name__ == "__main__":

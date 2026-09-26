@@ -2092,6 +2092,25 @@ def test_mojibake_is_reported(root: Path) -> None:
     assert "cp1252" in warnings[0], warnings[0]
 
 
+def test_a_blank_line_before_an_asks_attribute_is_reported(root: Path) -> None:
+    """A blank line ends the prelude, so `discharges:` under it is question text and discharges nothing.
+
+    Written after three asks in one review silently left 62 changes undischarged, with `validate` saying nothing.
+    """
+    from tools.review.cmd.validate import stranded_attribute_warnings
+
+    front = "---\nid: 1\ntitle: t\n---\n\n"
+    attached = parse_text(front + "## ask  a\ndischarges: CHANGE-X\n\nWhich?\n\n- radio: yes\n", Path("e.md"), slug="010-a")
+    assert stranded_attribute_warnings(attached) == [], "a prelude attribute is not stranded"
+
+    stranded = parse_text(front + "## ask  a\n\ndischarges: CHANGE-X\n\n- radio: yes\n", Path("e.md"), slug="010-a")
+    warnings = stranded_attribute_warnings(stranded)
+    assert len(warnings) == 1 and "discharges:" in warnings[0], warnings
+
+    prose = parse_text(front + "## ask  a\n\nnote: this is a question.\n\n- radio: yes\n", Path("e.md"), slug="010-a")
+    assert stranded_attribute_warnings(prose) == [], "a key no ask accepts is ordinary prose"
+
+
 def test_an_acknowledgement_a_later_ask_replaced_is_no_orphan(root: Path) -> None:
     """`validate` agrees with `reconcile`: an answered acknowledgement outlives the round that offered it.
 

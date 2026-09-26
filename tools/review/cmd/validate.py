@@ -51,6 +51,24 @@ def orphan_answer_warnings(entry, answers) -> list[str]:
     ]
 
 
+def stranded_attribute_warnings(entry) -> list[str]:
+    """One warning per ask whose body opens, after the blank line that ends a prelude, with one of its own attributes.
+
+    The blank line is the grammar's escape for prose that must start with `something:`, so the parser is right to
+    read it as question text — but for an ask it is nearly always a `discharges:` that silently discharges nothing.
+    """
+    out: list[str] = []
+    for block in entry.asks:
+        first = next((line for line in block.prose.splitlines() if line.strip()), "")
+        m = review.ATTR_RE.match(first)
+        if m and m.group(1) in review.BLOCK_TYPES["ask"]:
+            out.append(
+                f"{entry.slug}: ask {block.name!r} opens its text with `{m.group(1)}:`, which a blank line above it "
+                f"made prose — delete the blank line to make it an attribute"
+            )
+    return out
+
+
 def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     p = sub.add_parser(NAME, help="Check every entry parses and every reference resolves")
     a.review_name(p)
@@ -78,6 +96,7 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
 
     for entry in entries:
         warnings.extend(mojibake_warnings(entry))
+        warnings.extend(stranded_attribute_warnings(entry))
         answers = ctx.answers(paths, entry)
         open_asks = {b.name for b in entry.asks if (answers.get(b.name) is None or answers.get(b.name).tentative)}
         if not review.is_orientation(entry.group):

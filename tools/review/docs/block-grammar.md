@@ -283,6 +283,7 @@ A typo'd `discharge:` degrading into a sentence — dropping the discharge witho
 
 A body whose first line is blank has no prelude at all.
 That is the escape hatch for prose that genuinely must start with `something:`.
+On an ask it is almost never meant, so `validate` warns when an ask's text opens with one of an ask's own attributes, such as a `discharges:` that the blank line made prose.
 
 ## Asks
 
