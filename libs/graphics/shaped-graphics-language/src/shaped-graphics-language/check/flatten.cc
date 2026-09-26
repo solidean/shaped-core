@@ -1242,10 +1242,7 @@ struct flattener
                           .return_label = label,
                           .chain = chain_range,
                           .bound = cc::move(bound)});
-        // EVAL-80: the defaults of the parameters the call left out come after every written argument, in parameter
-        // order, and each reads the parameters before it.
-        bind_defaults(parameters, slots);
-        // `self` is the first parameter of a method and of a property, which its body reads as the receiver
+        // `self`, the first parameter of a method or a property, is the receiver its body and its defaults read
         auto const has_receiver = s.role == function_role::property
                                || (s.role == function_role::method && function->receiver == ast::receiver_kind::self);
         if (has_receiver)
@@ -1259,6 +1256,9 @@ struct flattener
                     current()->bound.push_back(receiver);
                 }
         }
+        // EVAL-80: the defaults of the parameters the call left out come after every written argument, in parameter
+        // order, and each reads the parameters before it.
+        bind_defaults(parameters, slots);
         // a property's `=>:` block has its value through `yield`, which leaves the property's block
         if (property != nullptr && !ast::is_valid(source->value))
             current()->value_blocks.push_back(label);

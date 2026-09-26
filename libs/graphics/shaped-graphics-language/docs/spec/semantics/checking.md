@@ -84,6 +84,7 @@ struct b:
   The synthesized constructor is one of them.
 * **CHK-242** A parameter may carry a default, `= value`, which makes it optional; a field's default is the default of its constructor parameter.
 * **CHK-243** A default may read the parameters before it and what its function's scope sees, and never what the call sees ([why](why/checking.md#chk-243)).
+  A method's `self` is one of them, so a default reads `self.scale`, or `scale` bare by CHK-62.
   It is checked once, where it is declared, and it is of its parameter's type or `type-mismatch`.
 * **CHK-244** A named-only parameter (AST-144) binds by name alone, and a named-only field makes its constructor's parameter named-only.
 * **CHK-245** `self` in the body of a method or a property is its receiver, and anywhere else it is `unknown-name`.

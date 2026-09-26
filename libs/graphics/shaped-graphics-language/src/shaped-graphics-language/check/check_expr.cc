@@ -122,15 +122,24 @@ void checker::check_defaults(symbol_id id)
     // by value: checking a default may compile another function, and `functions` then moves
     auto const info = out.functions[index];
     auto scope = function_scope{.function = id, .file = file, .result = info.result};
+    // CHK-243: a method's `self` is a parameter before every default, and a bare member name reads through it (CHK-62)
+    auto const* const f = ast.at(out.at(id).declaration).node.try_as<ast::fun_decl>();
+    auto const has_receiver
+        = out.at(id).role == function_role::method && f != nullptr && f->receiver == ast::receiver_kind::self;
     auto const errors_before = error_count();
-    for (auto const& p : out.at(info.parameters))
+    auto const parameters = out.at(info.parameters);
+    for (auto i = isize(0); i < parameters.size(); ++i)
     {
+        auto const& p = parameters[i];
         if (ast::is_valid(p.field) && p.has_default)
-        {
             (void)check_expected(scope, ast.at(p.field).default_value, p.type, cc::format("the default of {}", p.name));
-        }
         // a parameter is visible to the defaults after it
-        if (ast::is_valid(p.field))
+        if (has_receiver && i == 0)
+        {
+            scope.receiver = p.type;
+            scope.locals.push_back({.name = "self", .where = {.kind = target_kind::receiver}, .type = p.type});
+        }
+        else if (ast::is_valid(p.field))
             scope.locals.push_back({
                 .name = p.name,
                 .where = {.kind = target_kind::parameter, .index = i32(p.field)},
