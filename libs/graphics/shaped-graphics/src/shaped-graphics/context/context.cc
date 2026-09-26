@@ -5,6 +5,7 @@
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <clean-core/thread/atomic.hh>
+#include <clean-core/thread/mutex.hh>
 #include <clean-core/thread/thread_bound_scheduler.hh>
 #include <shaped-graphics/command_list/command_list.hh>
 #include <shaped-graphics/compute/compute_pipeline.hh>
@@ -28,6 +29,11 @@ struct context::completion_signals
 
     // Read without the lock by a drain reaching zero, which must stay cheap with nothing outstanding.
     cc::atomic<bool> has_pending = false;
+
+    // Held from taking the due nodes out to pushing them, so a settle that returns has pushed everything that was due,
+    // what another thread took a moment earlier included; `settlers` is how the cheap check sees one under way.
+    cc::mutex<cc::unit> settling;
+    cc::atomic<int> settlers = 0;
 };
 
 std::unique_ptr<command_list> context::create_command_list()
@@ -275,11 +281,39 @@ void context::rearm_completion_signal(cc::vector<pending_completion> const& pend
     arm_completion_signal(t.submission, t.epoch);
 }
 
+namespace
+{
+/// How deep this thread is in settles: a push resumes a dependent inline, and one that settles again must not wait on
+/// the settle it runs inside.
+thread_local int t_settle_depth = 0;
+} // namespace
+
 void context::settle_due_completions()
 {
     auto* const signals = _completion_signals.get();
-    if (signals == nullptr || !signals->has_pending.load(cc::memory_order_acquire))
+    if (signals == nullptr
+        || (!signals->has_pending.load(cc::memory_order_acquire) && signals->settlers.load(cc::memory_order_acquire) == 0))
         return;
+
+    if (t_settle_depth > 0)
+    {
+        impl_settle_due_completions();
+        return;
+    }
+    signals->settlers.fetch_add(1, cc::memory_order_acq_rel);
+    signals->settling.lock(
+        [&](cc::unit&)
+        {
+            ++t_settle_depth;
+            impl_settle_due_completions();
+            --t_settle_depth;
+        });
+    signals->settlers.fetch_sub(1, cc::memory_order_acq_rel);
+}
+
+void context::impl_settle_due_completions()
+{
+    auto* const signals = _completion_signals.get();
 
     // Taken out under the lock and pushed outside it: pushing resumes whoever depended on the node, and a dependent
     // that reaches back in here would deadlock on a mutex this thread still holds.
