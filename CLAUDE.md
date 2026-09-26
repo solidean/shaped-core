@@ -120,6 +120,8 @@ One-liner per library:
   The compiler carries a deliberately thin slice of the language so far, and everything else is the one diagnostic `unsupported-yet`, never a guess.
   **To work on the compiler**: [docs/architecture.md](libs/graphics/shaped-graphics-language/docs/architecture.md) is the map.
   `prelude/builtins.sgl` is generated from the C++ builtin registry and checked by `dev.py check`, so never edit it by hand.
+  **`sgl lsp` is the language server**, a shallow shim that translates what the library answers into LSP; the VS Code extension in `tools/vscode-extension/` is its client.
+  [docs/lsp.md](libs/graphics/shaped-graphics-language/docs/lsp.md) is its design.
   Namespace `sgl`. Depends on clean-core alone, which must stay so: an editor links it to parse.
   Early stage.
 * **`libs/graphics/shaped-viewer`** — professional, RTX-enabled visualization renderer with a dev-friendly API.

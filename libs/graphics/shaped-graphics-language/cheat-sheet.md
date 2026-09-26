@@ -326,6 +326,8 @@ o.failures  o.checks_run                   // check_failure { site, values, is_e
                                            // {.run_checks = false} skips checks as the core form does, {.max_failures = 8}
 o.sites                                    // site_tally { passed, failed } parallel to e.check_sites, past max_failures too;
                                            // both zero: the run never reached that check
+{.stop = &flag}                            // run_limits: a raised cc::atomic<bool> ends the run as `stopped`, read every
+                                           // 4096 steps; how an editor abandons a test whose document changed
 o == other                                 // status, result and trace; NOT the detail
 sgl::check::zero_value(m, type)  sgl::check::leaf_count_of(m, type)   // a value is its scalars in field order; mat4 is 16
 sgl::check::scalar::of(0.5f)  .as_float()  .as_int()  .as_bool()      // equality is on the BITS
@@ -350,6 +352,8 @@ uv run dev.py run sgl -- emit shader.sgl --entry main_ps --target wgsl   # the t
 uv run dev.py run sgl -- test a.sgl b.sgl                                # the tests of each file; exit 2 when one fails
 uv run dev.py run sgl -- prelude [--check <path> | --write <path>]       # the generated builtins.sgl; --check exits 2 on a difference
 uv run dev.py run sgl -- describe shader.sgl                             # sgl::describe as JSON: what slib's generator reads
+sgl lsp                                                                  # the language server over stdio; the VS Code extension starts it
+uv run dev.py test sgl                                                   # the language server's tests, carried by the binary (docs/lsp.md)
 uv run dev.py check sgl-prelude [--fix]                                  # the gate over prelude/builtins.sgl
 ```
 

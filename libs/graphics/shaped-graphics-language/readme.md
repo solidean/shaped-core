@@ -24,6 +24,7 @@ This will also later form the basis of our shader node editing
 * **To write SGL**: [docs/spec/](docs/spec/_index.md) is the language, and [sgl-cube](../../../examples/graphics/sgl-cube/shaders/cube.sgl) is a shader that draws.
 * **To work on the compiler**: [docs/architecture.md](docs/architecture.md) is the map of the pipeline, and [cheat-sheet.md](cheat-sheet.md) the API.
   [docs/TODO.md](docs/TODO.md) lists the short-term follow-ups, and the [spec incubator](docs/spec/incubator/_index.md) the far-off ideas.
+* **To work on the language server**: [docs/lsp.md](docs/lsp.md) is its design, what it measures and where it grows.
 
 ## The `sgl` command line
 
@@ -40,7 +41,10 @@ uv run dev.py run sgl -- prelude                        # prelude/builtins.sgl a
 uv run dev.py run sgl -- prelude --check <path>         # exit 2, and where the texts part, when the file differs
 uv run dev.py run sgl -- prelude --write <path>         # what `uv run dev.py check sgl-prelude --fix` runs
 uv run dev.py run sgl -- describe shader.sgl            # what slib's package generator reads, as JSON
+uv run dev.py test sgl                                  # the language server's tests, which the binary carries
 ```
+
+`sgl lsp` is the language server, which an editor starts and talks to over stdin and stdout; the extension below does.
 
 SGL's builtins live in a C++ registry, and `prelude/builtins.sgl` is generated from it and committed.
 [docs/adding-a-builtin.md](docs/adding-a-builtin.md) is how one is added.
@@ -121,7 +125,8 @@ A manual test after a change, with `sgl` built and the extension linked:
 
 1. Open [tests/samples/control-flow.sgl](tests/samples/control-flow.sgl): names are coloured by the server, and inferred types appear as inlay hints.
 2. Type a deliberate error: a squiggle appears, and its hover names the problem.
-3. Break a `check` in a test so that it fails: its gutter mark turns into a red cross.
+3. Open a file with tests, such as [tests/corpus/calls/defaults.sgl](tests/corpus/calls/defaults.sgl): every check has a green gutter mark.
+   Break one so that it fails: its mark turns into a red cross, and the test is a diagnostic.
 4. Rebuild with `uv run dev.py build -t sgl`: the "A newer sgl was built." prompt appears, and **Restart** brings the new server up.
 
 ### Working on the grammar

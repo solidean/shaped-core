@@ -241,6 +241,29 @@ target_compile_options(shaped-graphics-language PUBLIC $<$<CXX_COMPILER_ID:MSVC>
 # Run it through `uv run dev.py run sgl -- <command> …`; `dev.py check`'s `sgl-prelude` step does.
 # Gated like tools/: a dependent that adds shaped-core as a subdirectory wants the library and not our binaries.
 if(SC_BUILD_TOOLS)
+    # The Language Server Protocol, knowing no SGL: it links clean-core and babel-data alone, so an SGL include in it
+    # fails to compile. It is what a shared LSP library would be extracted from.
+    add_library(sgl-lsp-protocol STATIC
+        tools/sgl/lsp/protocol/fwd.hh
+        tools/sgl/lsp/protocol/fwd.cc
+        tools/sgl/lsp/protocol/json.hh
+        tools/sgl/lsp/protocol/types.hh
+        tools/sgl/lsp/protocol/types.cc
+        tools/sgl/lsp/protocol/framing.hh
+        tools/sgl/lsp/protocol/framing.cc
+        tools/sgl/lsp/protocol/text_index.hh
+        tools/sgl/lsp/protocol/text_index.cc
+        tools/sgl/lsp/protocol/documents.hh
+        tools/sgl/lsp/protocol/documents.cc
+        tools/sgl/lsp/protocol/server.hh
+        tools/sgl/lsp/protocol/server.cc
+        tools/sgl/lsp/protocol/log_listener.hh
+        tools/sgl/lsp/protocol/log_listener.cc
+        tools/sgl/lsp/protocol/stdio_host.hh
+        tools/sgl/lsp/protocol/stdio_host.cc
+    )
+    target_link_libraries(sgl-lsp-protocol PUBLIC clean-core babel-data)
+
     add_executable(sgl
         tools/sgl/main.cc
         tools/sgl/files.hh
@@ -248,10 +271,28 @@ if(SC_BUILD_TOOLS)
         tools/sgl/emit_command.cc
         tools/sgl/prelude_command.cc
         tools/sgl/test_command.cc
+        tools/sgl/lsp_command.cc
+        # the SGL half of the language server, which translates what the library answers into LSP
+        tools/sgl/lsp/analysis.hh
+        tools/sgl/lsp/analysis.cc
+        tools/sgl/lsp/features.hh
+        tools/sgl/lsp/diagnostics.cc
+        tools/sgl/lsp/semantic_tokens.cc
+        tools/sgl/lsp/inlay_hints.cc
+        tools/sgl/lsp/run_tests.cc
+        tools/sgl/lsp/server.hh
+        tools/sgl/lsp/server.cc
+        # the tests of the language server, both halves; `sgl` carries them as a nexus binary of kind `tests`
+        tools/sgl/lsp/tests/lsp-test-support.hh
+        tools/sgl/lsp/tests/protocol-test.cc
+        tools/sgl/lsp/tests/server-test.cc
+        tools/sgl/lsp/tests/language-server-test.cc
+        tools/sgl/lsp/tests/language-server-benchmark.cc
     )
-    sc_nexus_binary(sgl KINDS tool)
+    sc_nexus_binary(sgl KINDS tool tests)
     # babel-data writes `describe`'s JSON; the tool may take it, and the library must not.
-    target_link_libraries(sgl PRIVATE shaped-graphics-language babel-data nexus)
+    target_link_libraries(sgl PRIVATE shaped-graphics-language sgl-lsp-protocol babel-data nexus)
+    target_compile_definitions(sgl PRIVATE SGL_SAMPLES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/samples")
 endif()
 
 # Test executable
