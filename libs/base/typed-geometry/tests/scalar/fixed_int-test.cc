@@ -71,7 +71,8 @@ static_assert(fi32::limb_count == 1 && fi192::limb_count == 3);
 
 // every operation is usable in a constant expression
 static_assert(fi128(3) * fi128(-4) == fi128(-12));
-static_assert(fi256(-7) / fi256(2) == fi256(-3) && fi256(-7) % fi256(2) == fi256(-1));
+static_assert(fi256(-7) / fi256(2) == fi256(-3));
+static_assert(fi256(-7) % fi256(2) == fi256(-1));
 static_assert(((fi192(1) << 130) >> 129) == fi192(2));
 static_assert(fi128::min() < fi128::max() && fu128::max() > fu128(0));
 static_assert(tg::mul<fi192>(fi128(1) << 80, fi128(1) << 90) == fi192(1) << 170);
@@ -555,9 +556,10 @@ TEST("tg fixed_int - scalar traits")
 
 // =========================================================================================================
 // clang's _BitInt is an independent implementation of every width, so it is the oracle wherever it exists.
+// Targets whose ABI caps _BitInt at 128 bits (ARM, wasm) have no 512-bit one to hold every result.
 // =========================================================================================================
 
-#if defined(CC_COMPILER_CLANG)
+#if defined(CC_COMPILER_CLANG) && defined(__BITINT_MAXWIDTH__) && __BITINT_MAXWIDTH__ >= 512
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wbit-int-extension"
 

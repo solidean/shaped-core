@@ -138,7 +138,7 @@ void bench_signed_mul(int bits_a, int bits_b, Row row, Column column)
            [](auto const& a, auto const& b) { return tg::impl::mul_generic<R, true>(a, b); });
     in.run("C magnitudes, product, masked negate",
            [](auto const& a, auto const& b) { return mul_by_magnitudes<R>(a, b); });
-#if defined(CC_COMPILER_CLANG)
+#if defined(CC_COMPILER_CLANG) && defined(__BITINT_MAXWIDTH__) && __BITINT_MAXWIDTH__ >= 320 // 128 on ARM and wasm
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wbit-int-extension"
     // _BitInt holds its own copy of the inputs, so the conversion is outside the loop

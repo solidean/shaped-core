@@ -141,7 +141,7 @@ TEST("wide_arith - udiv128")
         u64 const ds[] = {1, 2, 3, 0xFFFFFFFFull, 0x100000000ull, 0x8000000000000000ull, U64_MAX - 1, U64_MAX};
         for (u64 const d : ds)
             for (u64 const hi : {u64(0), u64(1), d - 1, d / 2})
-                for (u64 const lo : {u64(0), u64(1), U64_MAX, 0x8000000000000000ull})
+                for (u64 const lo : {u64(0), u64(1), U64_MAX, u64(0x8000000000000000ull)})
                 {
                     if (hi >= d)
                         continue;
