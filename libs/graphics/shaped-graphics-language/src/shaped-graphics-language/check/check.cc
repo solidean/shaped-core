@@ -302,6 +302,7 @@ void checker::run()
             flatten_entry_point(symbol_id(i));
     for (auto i = isize(0); i < out.tests.size(); ++i)
         flatten_test(i32(i));
+    judge_footprint_pins();
 }
 
 void checker::declare_file(i32 file)

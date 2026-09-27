@@ -195,7 +195,10 @@ cc::vector<cc::string> feature_names(check::feature_set features)
     return result;
 }
 
-described_entry_point describe_entry_point(check::checked_module const& m, check::flat_entry_point const& e)
+/// `legal` is `e` legalized, which is the tree the footprint is read from.
+described_entry_point describe_entry_point(check::checked_module const& m,
+                                           check::flat_entry_point const& e,
+                                           check::flat_entry_point const& legal)
 {
     auto result = described_entry_point{.name = e.name, .stage = e.entry_stage};
     for (auto axis = 0; axis < 3; ++axis)
@@ -203,6 +206,7 @@ described_entry_point describe_entry_point(check::checked_module const& m, check
     for (auto const id : e.bindings)
         result.bindings.push_back(m.at(id).name);
     result.features = feature_names(e.features);
+    result.footprint = check::footprint_of(m, legal);
     return result;
 }
 
@@ -330,9 +334,10 @@ cc::result<sgl::module_description, cc::string> sgl::describe(describe_request c
     for (auto const& e : m.entry_points)
     {
         auto const before = errors.size();
-        emit_impl::validate(m, check::legalize(m, e), errors);
+        auto const legal = check::legalize(m, e);
+        emit_impl::validate(m, legal, errors);
         if (errors.size() == before)
-            result.entry_points.push_back(describe_entry_point(m, e));
+            result.entry_points.push_back(describe_entry_point(m, e, legal));
     }
 
     for (auto const& p : m.pipelines)

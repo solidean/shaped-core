@@ -268,6 +268,39 @@ Every call is inlined, so resources are parameters of the entry point alone.
 An image's access maps one-to-one onto `access::read`, `access::write` and `access::read_write`, and a depth texture is `depth2d<float>`.
 A file-scope static sampler can be a `constexpr sampler` in the text.
 
+## Footprint
+
+**An entry point carries its footprint: what its code does to each slot of the bindings it lists.**
+A binding's access is what its layout permits, and a group is declared once and bound to many pipelines, so that is the union of what they all do.
+One entry point usually does less: a `mut buffer` it only loads from is a read to it, and a member it never names is untouched.
+sg places barriers by the footprint, so that difference is a barrier a pipeline does not pay.
+
+**A slot is one resource member, or a binding's constant block as a whole.**
+The plain members of a group share one constant buffer, so reading any of them reads the block, spelled by the binding's name alone.
+A sampler is no slot: nothing orders against one.
+An `@inline` binding is none either, since sg sets it as constants rather than binding it.
+
+**How a slot is touched: read, write, or both.**
+
+* A buffer element read as a value is a read, and one assigned to is a write; `values[i] += x` is both.
+* A resource handed to a builtin is used as the builtin's parameter declares it: an `out` parameter writes, a `mut` one reads and writes, and an unmarked one reads.
+  `size` reads, since the text it becomes uses the resource.
+* A constant member read anywhere reads the block.
+
+**It is computed over the code the entry point runs, after inlining, in the form an emitter prints.**
+So a use in a called function counts, a use in a branch that may not run counts, and a use only a check or an `assert` makes does not, since the text holds neither.
+A use behind a constant that is always false still counts while the emitted text still holds it; removing it from both is dead-code elimination's job, never the footprint's alone.
+That is the invariant sg relies on: **the footprint covers everything the emitted text uses**, because a slot it calls untouched gets no layout transition at all.
+
+**`sgl describe` reports it**, one `slot: access` per touched slot, and slib hands it to sg with the compiled shader.
+A pin in a source states it, which [CHK-267](semantics/checking.md#entry-points) judges:
+
+```sgl
+@expect(footprint = "work: read, work.values: read write")
+@compute(64) fun scale(@thread_id id: int3){work}:
+    work.values[id.x] += work.factor
+```
+
 ## What the compiler carries today
 
 The syntax above is what the AST builds; the check pass is what limits it.
@@ -303,3 +336,4 @@ A shader using one then gets a diagnostic that names the feature, rather than a 
   It could be allowed where the buffer is hoisted and stays uniform across every use, a scalarization of the struct that inlining makes possible.
 * The functions over textures and images — sampling, loads, stores and sizes — and a default sampler on a texture member ([texture-methods.md](incubator/texture-methods.md)).
 * Arrays of textures and images, which `require binding_arrays` grants once they exist.
+  Their footprint says whether and how the code indexes them and whether an index is dynamic; which elements it reaches stays the host's to declare per dispatch.
