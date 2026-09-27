@@ -85,6 +85,12 @@ struct assigned_locals
                 buffers.push_back(buffer_of(e, *element));
                 return;
             }
+            // workgroup memory is written where it stands, as a buffer is
+            if (auto const* const b = x.node.try_as<flat_binding_member>(); b != nullptr && b->is_workgroup)
+            {
+                buffers.push_back({.binding = b->binding, .member = b->member});
+                return;
+            }
             // an array's element is part of the local that holds the array
             if (auto const* const element = x.node.try_as<flat_element>())
             {
@@ -132,6 +138,10 @@ bool reads_any(flat_entry_point const& e, flat_expr_id id, assigned_locals const
         for (auto const b : assigned.buffers)
             if (b == buffer_of(e, *element))
                 return true;
+    if (auto const* const member = x.node.try_as<flat_binding_member>(); member != nullptr && member->is_workgroup)
+        for (auto const b : assigned.buffers)
+            if (b == buffer_ref{.binding = member->binding, .member = member->member})
+                return true;
     auto result = false;
     for_each_operand(e, x, [&](flat_expr_id operand) { result = result || reads_any(e, operand, assigned, depth + 1); });
     return result;
@@ -144,8 +154,10 @@ bool reads_mutable(flat_entry_point const& e, flat_expr_id id, int depth = 0)
     auto const& x = e.at(id);
     if (auto const* const ref = x.node.try_as<flat_local_ref>())
         return !is_known(e, ref->local) || e.at(ref->local).is_mut;
-    // an element may be stored to between two reads of it
+    // an element may be stored to between two reads of it, and so may workgroup memory
     if (x.node.is<flat_buffer_element>())
+        return true;
+    if (auto const* const b = x.node.try_as<flat_binding_member>(); b != nullptr && b->is_workgroup)
         return true;
     auto result = false;
     for_each_operand(e, x, [&](flat_expr_id operand) { result = result || reads_mutable(e, operand, depth + 1); });

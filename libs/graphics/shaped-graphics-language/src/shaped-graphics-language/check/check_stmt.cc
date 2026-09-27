@@ -280,8 +280,12 @@ void checker::check_assign(function_scope& scope, ast::stmt_id id, ast::assign_s
         if (n == nullptr || (local == nullptr && named.kind != target_kind::symbol))
             report(diagnostic_kind::not_assignable, file, target_where, "only a local, or a member of one, is assigned");
         else if (local == nullptr)
-            report(diagnostic_kind::not_assignable, file, target_where,
-                   cc::format("{} is a binding, which no shader writes", text_of(file, n->where)));
+        {
+            // CHK-292: workgroup memory is the one binding a shader writes
+            if (!is_workgroup_binding(named.symbol))
+                report(diagnostic_kind::not_assignable, file, target_where,
+                       cc::format("{} is a binding the host fills, which no shader writes", text_of(file, n->where)));
+        }
         else if (local->where.kind == target_kind::parameter)
             report(diagnostic_kind::not_assignable, file, target_where,
                    cc::format("{} is a parameter, which is a value", local->name));

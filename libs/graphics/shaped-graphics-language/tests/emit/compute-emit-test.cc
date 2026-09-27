@@ -195,3 +195,28 @@ TEST("sgl emit - each barrier is its target's own, an execution barrier over one
                         "    DeviceMemoryBarrierWithGroupSync();\n"
                         "    DeviceMemoryBarrierWithGroupSync();\n"));
 }
+
+TEST("sgl emit - workgroup memory is a variable per member, and takes no group however it is listed")
+{
+    constexpr auto shared = "@workgroup binding tile:\n"
+                            "    values: float[64]\n"
+                            "    total: float\n"
+                            "\n"
+                            "binding work:\n"
+                            "    sums: mut buffer[float]\n"
+                            "\n"
+                            "@compute(64) fun cs(@local_thread_index li: int){tile, work}:\n"
+                            "    tile.values[li] = 1.0\n"
+                            "    workgroup_barrier()\n"
+                            "    if li == 0 => work.sums[0] = tile.values[63]\n";
+    auto const wgsl = text_of(shared, target::wgsl);
+    CHECK(wgsl.contains("@group(0) @binding(0) var<storage, read_write> work_sums: array<f32>;\n"));
+    CHECK(wgsl.contains("var<workgroup> tile_values: array<f32, 64>;\n"
+                        "var<workgroup> tile_total: f32;\n"));
+    CHECK(wgsl.contains("    tile_values[li] = 1.0;\n"));
+
+    auto const hlsl = text_of(shared, target::hlsl_dx12);
+    CHECK(hlsl.contains("RWStructuredBuffer<float> work_sums : register(u0, space0);\n"));
+    CHECK(hlsl.contains("groupshared float tile_values[64];\n"
+                        "groupshared float tile_total;\n"));
+}

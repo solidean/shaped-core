@@ -105,6 +105,17 @@ struct planned_resource
     i32 slot = 0;
 };
 
+/// One member of a `@workgroup` binding: memory the workgroup shares, which no host binds.
+struct planned_workgroup
+{
+    check::symbol_id binding = check::symbol_id::none;
+    /// A position in the binding's `members`.
+    i32 member = -1;
+    /// The variable the shader reads and writes through, minted like any other name.
+    cc::string name;
+    check::type_id type = check::type_id::none;
+};
+
 struct plan
 {
     check::checked_module const& m;
@@ -131,6 +142,8 @@ struct plan
     cc::vector<planned_constants> group_blocks;
     /// The resources the entry point's bindings declare, in group then slot order.
     cc::vector<planned_resource> resources;
+    /// The members of its `@workgroup` bindings, in the order listed and then declared.
+    cc::vector<planned_workgroup> workgroup;
     /// Parallel to `e.locals`.
     cc::vector<cc::string> locals;
     /// Parallel to `e.stage_inputs`: each as the target hands it over, unsigned, ahead of the local the body reads;
@@ -142,6 +155,8 @@ struct plan
     check::name_mint names;
 };
 
+/// The position in `workgroup` of `binding.member`, or -1 where that member is no workgroup memory.
+[[nodiscard]] i32 workgroup_of(plan const& p, check::symbol_id binding, i32 member);
 /// The position in `resources` of the resource `binding.member` names, or -1 where that member is no resource.
 [[nodiscard]] i32 resource_of(plan const& p, check::symbol_id binding, i32 member);
 

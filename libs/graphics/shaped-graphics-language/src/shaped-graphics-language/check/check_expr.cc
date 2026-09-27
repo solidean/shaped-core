@@ -447,9 +447,11 @@ type_id checker::check_member(function_scope& scope, ast::expr_id id, ast::membe
             auto is_listed = false;
             for (auto const listed : out.at(out.functions[out.at(scope.function).info].bindings))
                 is_listed = is_listed || listed == binding;
+            // CHK-295: a test's run holds its own workgroup memory, which no host fills
+            is_listed = is_listed || (scope.is_test && is_workgroup_binding(binding));
             // CHK-228: a test lists no binding, and one its function lists is a value of the function's run
             auto is_captured = false;
-            if (scope.is_test && is_valid(scope.enclosing))
+            if (scope.is_test && is_valid(scope.enclosing) && !is_workgroup_binding(binding))
                 for (auto const listed : out.at(out.functions[out.at(scope.enclosing).info].bindings))
                     is_captured = is_captured || listed == binding;
             if (is_captured)
@@ -1410,6 +1412,7 @@ void checker::note_program_call(function_scope const& scope, symbol_id callee, s
         auto is_listed = false;
         for (auto const l : listed)
             is_listed = is_listed || l == needed;
+        is_listed = is_listed || (scope.is_test && is_workgroup_binding(needed));
         if (!is_listed && scope.is_test)
         {
             // CHK-228: a test gives a callee its bindings through a local binding, which delegation will carry

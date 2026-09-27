@@ -425,11 +425,25 @@ struct checker
     [[nodiscard]] cc::string name_argument_of(i32 file, ast::attribute const* a);
     /// The members of a struct or a binding, collected locally and appended whole so the range stays contiguous.
     /// A `@pixel struct`'s members are targets, so their attributes may be a target's settings.
+    /// A `@workgroup` binding's members are memory of the workgroup: values, arrays among them, and never a resource.
     [[nodiscard]] ast::range_of<member_info> compile_members(i32 file,
                                                              ast::range_of<ast::decl_id> members,
                                                              bool is_struct,
                                                              bool is_target_struct = false,
-                                                             bool is_vertex_struct = false);
+                                                             bool is_vertex_struct = false,
+                                                             bool is_workgroup = false);
+    /// The bytes a value of `type` takes in workgroup memory, laid out as WGSL lays out its workgroup variables.
+    [[nodiscard]] i32 workgroup_size_of(type_id type) const;
+    /// A `@workgroup` binding, whose members a shader writes and a test holds without listing it (CHK-292).
+    [[nodiscard]] bool is_workgroup_binding(symbol_id id) const
+    {
+        return is_valid(id) && out.at(id).kind == symbol_kind::binding && out.at(id).info >= 0
+            && out.bindings[out.at(id).info].is_workgroup;
+    }
+    /// A resource, or an array or a struct holding one at any depth.
+    [[nodiscard]] bool holds_resource(type_id type) const;
+    /// What every target gives a workgroup of memory: WebGPU's default limit, and vulkan's required minimum.
+    static constexpr i32 k_portable_workgroup_bytes = 16384;
     /// A `@vertex struct` member's `@format(.case)`: the case's name, checked against the member's type (CHK-275).
     [[nodiscard]] cc::string vertex_format_of(i32 file, ast::attribute const* a, type_id member_type);
     /// A `@pixel struct` member's `@depth` or `@sample_mask`, checked against its type (CHK-276).

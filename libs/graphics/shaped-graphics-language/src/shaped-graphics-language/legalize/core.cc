@@ -32,8 +32,10 @@ bool reads_mutable_local(flat_entry_point const& e, flat_expr_id id, int depth)
     auto const& x = e.at(id);
     if (auto const* const ref = x.node.try_as<flat_local_ref>())
         return !is_known(e, ref->local) || e.at(ref->local).is_mut;
-    // an element may be stored to between two reads of it
+    // an element may be stored to between two reads of it, and so may workgroup memory
     if (x.node.is<flat_buffer_element>())
+        return true;
+    if (auto const* const b = x.node.try_as<flat_binding_member>(); b != nullptr && b->is_workgroup)
         return true;
     auto result = false;
     for_each_operand(e, x, [&](flat_expr_id operand) { result = result || reads_mutable_local(e, operand, depth + 1); });

@@ -254,6 +254,11 @@ struct writer
                     result = {.text = p.resources[found].name};
                     return;
                 }
+                if (auto const found = workgroup_of(p, b.binding, b.member); found >= 0)
+                {
+                    result = {.text = p.workgroup[found].name};
+                    return;
+                }
                 auto const& block = *block_of(p, b.binding);
                 result = {.text = cc::format("{}.{}", block.name, block.members[block.block_member_of[b.member]].name)};
             },
@@ -594,6 +599,13 @@ cc::string sgl::emit::impl::write_text(plan& p, dialect const& d)
     d.write_declarations(w.out, p);
     write_helpers(w.out, p, d);
     d.write_function_head(w.out, p);
+    if (d.declares_workgroup_in_function())
+        for (auto const& memory : p.workgroup)
+        {
+            auto declaration = cc::string();
+            d.write_workgroup(declaration, memory, p);
+            w.line(declaration);
+        }
     for (auto const id : p.e.at(p.e.body))
         w.statement(p.e.at(id));
     w.out += "}\n";

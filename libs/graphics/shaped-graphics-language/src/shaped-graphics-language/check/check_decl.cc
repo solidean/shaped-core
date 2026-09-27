@@ -413,7 +413,8 @@ ast::range_of<member_info> checker::compile_members(i32 file,
                                                     ast::range_of<ast::decl_id> members,
                                                     bool is_struct,
                                                     bool is_target_struct,
-                                                    bool is_vertex_struct)
+                                                    bool is_vertex_struct,
+                                                    bool is_workgroup)
 {
     auto const& ast = ast_of(file);
     auto const owner = is_struct ? cc::string_view("a struct field") : cc::string_view("a binding member");
@@ -432,6 +433,13 @@ ast::range_of<member_info> checker::compile_members(i32 file,
         auto const& d = ast.at(member);
         auto const where = span_of(file, member);
 
+        // CHK-292: workgroup memory holds values, which a sampler is none of
+        if (auto const* const smp = d.node.try_as<ast::sampler_decl>(); smp != nullptr && is_workgroup)
+        {
+            report(diagnostic_kind::wrong_kind_of_name, file, smp->name,
+                   "a @workgroup binding holds values the workgroup shares, and a sampler is none");
+            continue;
+        }
         if (auto const* const smp = d.node.try_as<ast::sampler_decl>(); smp != nullptr && !is_struct)
         {
             // CHK-204: a static sampler of the group, a member whose type is the sampler its settings make.
@@ -506,8 +514,15 @@ ast::range_of<member_info> checker::compile_members(i32 file,
         else
             report(diagnostic_kind::missing_type, file, f.name, name);
 
+        if (is_workgroup && type != checked_module::error_type && holds_resource(type))
+        {
+            report(diagnostic_kind::wrong_kind_of_name, file, span_of(file, f.type),
+                   cc::format("a @workgroup binding holds values the workgroup shares, and {} is a resource",
+                              out.name_of(type)));
+            type = checked_module::error_type;
+        }
         // CHK-291: an array's layout in a block is the struct-buffer work's to settle
-        if (!is_struct && type != checked_module::error_type && out.at(type).kind == type_kind::array)
+        if (!is_struct && !is_workgroup && type != checked_module::error_type && out.at(type).kind == type_kind::array)
         {
             auto innermost = type;
             while (out.at(innermost).kind == type_kind::array)
@@ -870,8 +885,9 @@ void checker::compile_binding(symbol_id id)
     auto const& d = ast_of(file).at(decl);
     auto const& b = d.node.as<ast::binding_decl>();
 
-    cc::string_view const known[] = {"inline", "shadowable"};
+    cc::string_view const known[] = {"inline", "workgroup", "shadowable"};
     judge_attributes(file, d.attributes, known, "a binding");
+    auto const is_workgroup = find_attribute(file, d.attributes, "workgroup") != nullptr;
 
     if (ast::is_valid(b.composition))
     {
@@ -893,11 +909,27 @@ void checker::compile_binding(symbol_id id)
     auto used = feature_set();
     granted = declared;
     used_features = &used;
-    auto const members = compile_members(file, b.members, false);
+    auto const members = compile_members(file, b.members, false, false, false, is_workgroup);
     granted = {};
     used_features = nullptr;
 
     auto const is_inline = find_attribute(file, d.attributes, "inline") != nullptr;
+    if (is_inline && is_workgroup)
+        report(diagnostic_kind::invalid_attribute_arguments, file, find_attribute(file, d.attributes, "workgroup")->name,
+               "a binding is @inline constants or @workgroup memory, never both");
+    // CHK-293: WebGPU's default limit, and vulkan's required minimum, is what every target has
+    if (is_workgroup)
+    {
+        auto total = 0;
+        for (auto const& m : out.at(members))
+            if (m.type != checked_module::error_type)
+                total += workgroup_size_of(m.type);
+        if (total > k_portable_workgroup_bytes)
+            report(diagnostic_kind::invalid_attribute_arguments, file,
+                   find_attribute(file, d.attributes, "workgroup")->name,
+                   cc::format("{} holds {} bytes, and a workgroup has {} on every target", out.at(id).name, total,
+                              k_portable_workgroup_bytes));
+    }
     // CHK-205: an `@inline` binding holds constants only, so a static sampler in one has nowhere to go.
     if (is_inline)
         for (auto const member : ast_of(file).at(b.members))
@@ -908,6 +940,7 @@ void checker::compile_binding(symbol_id id)
     out.bindings.push_back({
         .symbol = id,
         .is_inline = is_inline,
+        .is_workgroup = is_workgroup,
         .members = members,
         .declared = declared,
         .required = declared | used,
@@ -1250,6 +1283,23 @@ void checker::judge_entry_point(symbol_id id)
         invalid("an entry point is no @builtin");
     if (!s.operator_spelling.empty())
         invalid("an entry point is no @operator");
+
+    // CHK-294: a workgroup is a compute stage's, and all its memory together fits the portable budget
+    auto workgroup_bytes = 0;
+    for (auto const binding : out.at(info.bindings))
+    {
+        auto const& b = out.bindings[out.at(binding).info];
+        if (!b.is_workgroup)
+            continue;
+        if (info.entry_stage != stage::compute)
+            invalid(cc::format("{} is @workgroup memory, which only a compute stage has", out.at(binding).name));
+        for (auto const& m : out.at(b.members))
+            if (m.type != checked_module::error_type)
+                workgroup_bytes += workgroup_size_of(m.type);
+    }
+    if (workgroup_bytes > k_portable_workgroup_bytes)
+        invalid(cc::format("its @workgroup bindings hold {} bytes, and a workgroup has {} on every target",
+                           workgroup_bytes, k_portable_workgroup_bytes));
 
     // CHK-271: at most one stage struct, first, and then the stage inputs, each of this stage, each once, of its type
     auto structs = 0;

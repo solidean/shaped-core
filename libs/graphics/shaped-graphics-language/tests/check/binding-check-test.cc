@@ -282,3 +282,31 @@ TEST("sgl check - a buffer's host name is its path, so no two buffers of a modul
     // Nor does a module-level declaration's name matter to a buffer.
     CHECK(reports_for(cc::string("fun work_src() -> float => 1.0\n\n") + listing("    src: buffer[float]\n")) == "");
 }
+
+TEST("sgl check - a @workgroup binding holds values a compute stage shares, within the portable budget")
+{
+    constexpr auto compute = "@compute(64) fun cs(@local_thread_index li: int){tile}:\n"
+                             "    tile.values[li] = 1.0\n";
+    CHECK(reports_for(cc::format("@workgroup binding tile:\n    values: float[64]\n    count: int\n\n{}", compute)) == "");
+
+    CHECK(reports_for("@workgroup binding tile:\n    t: texture_2d[float4]\n")
+              .contains("a @workgroup binding holds values the workgroup shares, and texture_2d[float4] is a "
+                        "resource"));
+    CHECK(reports_for("@workgroup binding tile:\n    sampler s:\n        filter = .linear\n")
+              .contains("a @workgroup binding holds values the workgroup shares, and a sampler is none"));
+    CHECK(reports_for("@inline @workgroup binding tile:\n    x: float\n")
+              .contains("a binding is @inline constants or @workgroup memory, never both"));
+
+    // CHK-293: 16 KiB is what WebGPU gives by default and vulkan at least
+    CHECK(reports_for("@workgroup binding tile:\n    values: float[4096]\n") == "");
+    CHECK(reports_for("@workgroup binding tile:\n    values: float[4097]\n")
+              .contains("tile holds 16388 bytes, and a workgroup has 16384 on every target"));
+
+    // CHK-294: only a compute stage has a workgroup
+    auto const raster = reports_for("@workgroup binding tile:\n    values: float[4]\n\n"
+                                    "struct pixel_input:\n    @position position: hpos4\n\n"
+                                    "@pixel struct target:\n    color: float4\n\n"
+                                    "@pixel fun ps(p: pixel_input){tile} -> target:\n"
+                                    "    return {color = float4(1.0, 1.0, 1.0, 1.0)}\n");
+    CHECK(raster.contains("tile is @workgroup memory, which only a compute stage has"));
+}

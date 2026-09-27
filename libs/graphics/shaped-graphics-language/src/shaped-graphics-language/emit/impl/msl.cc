@@ -35,6 +35,13 @@ public:
 
     void write_eval(cc::string& out, cc::string_view value) const override { out.appendf("(void)({});", value); }
 
+    /// MSL has threadgroup memory only in a kernel's own scope, and every function is inlined into the kernel.
+    void write_workgroup(cc::string& out, planned_workgroup const& w, plan const& p) const override
+    {
+        out.appendf("threadgroup {} {};", type_text(p, *this, w.type), w.name);
+    }
+    bool declares_workgroup_in_function() const override { return true; }
+
     void write_local(cc::string& out, local_declaration const& local) const override
     {
         if (local.value.empty())

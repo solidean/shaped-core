@@ -227,3 +227,24 @@ TEST("sgl tests - an array index outside the array is a program error, read or w
     }
     CHECK(sgl::test::run_test(checked.module, files, 3).status == sgl::test::test_status::passed);
 }
+
+TEST("sgl tests - workgroup memory holds nothing before a store, element by element")
+{
+    // EVAL-92: no target defines what it holds first, so a read of what was never stored is a program error
+    auto const checked
+        = check_sources(read_prelude(), "@workgroup binding tile:\n    values: int[4]\n    total: int\n\n"
+                                        "test:\n    tile.values[0] = 1\n    tile.values[1] == 0\n"
+                                        "test:\n    tile.total == 0\n"
+                                        "test:\n    tile.values[2] = 5\n    tile.values[2] == 5\n");
+    auto files = cc::vector<sgl::check::module_file>();
+    for (auto i = isize(0); i < checked.files.size(); ++i)
+        files.push_back({.file = checked.files[i], .ast = checked.asts[i]});
+    REQUIRE(checked.module.tests.size() == 3);
+    for (auto i = isize(0); i < 2; ++i)
+    {
+        auto const r = sgl::test::run_test(checked.module, files, i);
+        CHECK(r.status == sgl::test::test_status::program_error).dump("test", i);
+        CHECK(r.detail.contains("where nothing was stored")).dump(r.detail);
+    }
+    CHECK(sgl::test::run_test(checked.module, files, 2).status == sgl::test::test_status::passed);
+}

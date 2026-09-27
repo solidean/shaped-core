@@ -30,7 +30,8 @@ struct footprint_builder
     void touch_member(flat_binding_member const& b, bool reads, bool writes)
     {
         auto const& info = m.bindings[m.at(b.binding).info];
-        if (info.is_inline)
+        // an `@inline` block is set rather than bound, and workgroup memory has no host side at all
+        if (info.is_inline || info.is_workgroup)
             return;
         auto const& member = m.at(info.members)[b.member];
         auto const kind = m.at(member.type).kind;
@@ -100,6 +101,9 @@ cc::vector<slot_footprint> footprint_of(checked_module const& m, flat_entry_poin
                 place = element->object;
                 continue;
             }
+            // workgroup memory is no slot of the host's
+            if (auto const* const b = x.node.try_as<flat_binding_member>(); b != nullptr && b->is_workgroup)
+                break;
             if (auto const* const element = x.node.try_as<flat_buffer_element>())
             {
                 auto const* const buffer = impl::is_known(e, element->buffer)

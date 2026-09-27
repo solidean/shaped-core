@@ -52,6 +52,11 @@ public:
 
     void write_eval(cc::string& out, cc::string_view value) const override { out.appendf("_ = {};", value); }
 
+    void write_workgroup(cc::string& out, planned_workgroup const& w, plan const& p) const override
+    {
+        out.appendf("var<workgroup> {}: {};\n", w.name, type_text(p, *this, w.type));
+    }
+
     void write_local(cc::string& out, local_declaration const& local) const override
     {
         auto const keyword = local.is_mut ? "var" : "let";
@@ -168,6 +173,10 @@ public:
             write_members(out, s.members, p);
             out += "}\n\n";
         }
+        for (auto const& w : p.workgroup)
+            write_workgroup(out, w, p);
+        if (!p.workgroup.empty())
+            out += "\n";
 
         if (!p.constants.has_value())
             return;

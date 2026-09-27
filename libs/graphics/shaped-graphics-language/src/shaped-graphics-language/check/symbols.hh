@@ -389,6 +389,8 @@ struct sgl::check::binding_info
     symbol_id symbol = symbol_id::none;
     /// `@inline`: the members ride as inline constants, which an emitter must know.
     bool is_inline = false;
+    /// `@workgroup`: the members are memory each workgroup of a dispatch shares, which no host binds (CHK-292).
+    bool is_workgroup = false;
     ast::range_of<member_info> members;
     /// What its own `require` lines name, which declares them for every entry point listing it (CHK-262).
     feature_set declared;

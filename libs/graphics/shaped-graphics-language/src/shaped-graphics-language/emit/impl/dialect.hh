@@ -60,6 +60,10 @@ public:
 
     /// One constant of an enum, without indentation and with its line break: `static const int light_kind_point = 0;`.
     virtual void write_enum_constant(cc::string& out, cc::string_view name, i32 value) const = 0;
+    /// One variable of workgroup memory, a line of its own: at file scope, or at the top of the function where
+    /// `declares_workgroup_in_function` says so.
+    virtual void write_workgroup(cc::string& out, planned_workgroup const& w, plan const& p) const = 0;
+    [[nodiscard]] virtual bool declares_workgroup_in_function() const { return false; }
 
     /// The structs of `p.structs` and the constant block, each followed by an empty line.
     virtual void write_declarations(cc::string& out, plan const& p) const = 0;

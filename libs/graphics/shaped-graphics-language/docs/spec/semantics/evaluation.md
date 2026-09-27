@@ -38,7 +38,7 @@ A listing here is the dump of a flat tree, shortened: a label is `$name`, and a 
 * **EVAL-9** `let` declares an immutable local and gives it its value; nothing assigns it afterwards.
 * **EVAL-10** `var` declares a mutable local; without a value it holds nothing, and reading it before an assignment is an error of the program.
 * **EVAL-11** A declaration that runs again, in a later iteration of a loop, starts the local afresh.
-* **EVAL-12** A **place** is a mutable local, a member or an array element of a place, or an element of a `mut` buffer.
+* **EVAL-12** A **place** is a mutable local, a member of a `@workgroup` binding, a member or an array element of a place, or an element of a `mut` buffer.
 * **EVAL-13** `place = value` evaluates `value` and then stores it; the members of the place it does not name keep their values.
 * **EVAL-14** The expressions a place holds are its indices: each is evaluated once, before the value, the one nearest the local first, and the store goes to the element they named.
 
@@ -202,6 +202,8 @@ fun graded(a: float) -> float:
 * **EVAL-90** An index outside `0 ..< length` of an array, or past the end of a buffer, is the status `program-error` as well.
   No target agrees on what one does, and a correct program has none, so no target pays to define it ([why](why/evaluation.md#eval-84)).
 * **EVAL-91** A square literal evaluates its elements in the order written, and so does a construction.
+* **EVAL-92** A run holds the memory of each `@workgroup` binding it reaches, from its start, and a read of any part of it nothing was stored to is a `program-error`.
+  A run is one invocation, so a barrier waits for nobody and what it stored is all the memory holds.
 * **EVAL-44** A run is bounded by a fuel count, one unit per statement, per expression node and per iteration, and running out is a status as well.
 
 ## Open

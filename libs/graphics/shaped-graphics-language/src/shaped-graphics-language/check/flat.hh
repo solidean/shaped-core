@@ -236,6 +236,8 @@ struct sgl::check::flat_binding_member
     symbol_id binding = symbol_id::none;
     /// A position in the binding's `members`.
     i32 member = -1;
+    /// Of a `@workgroup` binding: memory the workgroup shares, which a store changes between two reads of it.
+    bool is_workgroup = false;
 
     constexpr bool operator==(flat_binding_member const&) const = default;
 };

@@ -98,44 +98,54 @@ struct uniformity_pass
             return {};
         auto const& x = e.at(id);
         auto result = divergence::none();
-        x.node.visit(
-            [&](flat_local_ref const& l) { result = locals[index_of(l.local)]; }, [&](flat_binding_member const&) {},
-            [&](flat_buffer_element const& b)
-            {
-                auto const index = value(b.index, flow);
-                auto const* const member = e.at(b.buffer).node.try_as<flat_binding_member>();
-                auto const& info = m.bindings[m.at(member->binding).info];
-                auto const& buffer = m.at(info.members)[member->member];
-                // a buffer the shader also writes may hold what another invocation just stored
-                if (m.at(buffer.type).is_mut)
-                    result = {.is = true,
-                              .where = x.from,
-                              .why = cc::format("is read from {}.{}, which the shader also writes",
-                                                m.at(member->binding).name, buffer.name)};
-                else
-                    result = index;
-            },
-            [&](flat_member const& member) { result = value(member.object, flow); }, [&](flat_element const& element)
-            { result = first_of(value(element.object, flow), value(element.index, flow)); },
-            [&](flat_construct const& c)
-            {
-                for (auto const a : e.at(c.arguments))
-                    result = first_of(result, value(a, flow));
-            },
-            [&](flat_call const& c) { result = call(id, c, flow); },
-            [&](flat_not const& n) { result = value(n.operand, flow); },
-            [&](flat_and const& a)
-            {
-                auto const lhs = value(a.lhs, flow);
-                // `rhs` runs only where `lhs` is true, which is flow of its own
-                result = first_of(lhs, value(a.rhs, first_of(flow, as_branch(lhs, x.from))));
-            },
-            [&](flat_or const& o)
-            {
-                auto const lhs = value(o.lhs, flow);
-                result = first_of(lhs, value(o.rhs, first_of(flow, as_branch(lhs, x.from))));
-            },
-            [&](auto const&) {});
+        x.node.visit([&](flat_local_ref const& l) { result = locals[index_of(l.local)]; },
+                     [&](flat_binding_member const& b)
+                     {
+                         // WGSL takes workgroup memory as different in every thread, whatever was stored to it
+                         if (b.is_workgroup)
+                             result = {.is = true,
+                                       .where = x.from,
+                                       .why = cc::format("is read from {}.{}, workgroup memory the threads write",
+                                                         m.at(b.binding).name,
+                                                         m.at(m.bindings[m.at(b.binding).info].members)[b.member].name)};
+                     },
+                     [&](flat_buffer_element const& b)
+                     {
+                         auto const index = value(b.index, flow);
+                         auto const* const member = e.at(b.buffer).node.try_as<flat_binding_member>();
+                         auto const& info = m.bindings[m.at(member->binding).info];
+                         auto const& buffer = m.at(info.members)[member->member];
+                         // a buffer the shader also writes may hold what another invocation just stored
+                         if (m.at(buffer.type).is_mut)
+                             result = {.is = true,
+                                       .where = x.from,
+                                       .why = cc::format("is read from {}.{}, which the shader also writes",
+                                                         m.at(member->binding).name, buffer.name)};
+                         else
+                             result = index;
+                     },
+                     [&](flat_member const& member) { result = value(member.object, flow); },
+                     [&](flat_element const& element)
+                     { result = first_of(value(element.object, flow), value(element.index, flow)); },
+                     [&](flat_construct const& c)
+                     {
+                         for (auto const a : e.at(c.arguments))
+                             result = first_of(result, value(a, flow));
+                     },
+                     [&](flat_call const& c) { result = call(id, c, flow); },
+                     [&](flat_not const& n) { result = value(n.operand, flow); },
+                     [&](flat_and const& a)
+                     {
+                         auto const lhs = value(a.lhs, flow);
+                         // `rhs` runs only where `lhs` is true, which is flow of its own
+                         result = first_of(lhs, value(a.rhs, first_of(flow, as_branch(lhs, x.from))));
+                     },
+                     [&](flat_or const& o)
+                     {
+                         auto const lhs = value(o.lhs, flow);
+                         result = first_of(lhs, value(o.rhs, first_of(flow, as_branch(lhs, x.from))));
+                     },
+                     [&](auto const&) {});
         return result;
     }
 

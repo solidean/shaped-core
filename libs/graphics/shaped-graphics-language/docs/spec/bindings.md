@@ -279,6 +279,29 @@ A binding an entry point lists but never reads still takes its position, because
 They are listed like any other binding and skipped when numbering, since sg addresses them itself.
 An `@inline` binding anywhere but the last position of a list is a normal error, so that reading order matches binding order.
 
+## Workgroup memory
+
+**A `@workgroup` binding is memory every thread of one workgroup shares**, alive for that workgroup's run: HLSL's `groupshared`, WGSL's `var<workgroup>`, MSL's `threadgroup`.
+
+```sgl
+@workgroup binding tile:
+    values: float[256]
+    total: float
+
+@compute(256) fun reduce(@local_thread_index li: int, @workgroup_id g: int3){work, tile}:
+    tile.values[li] = work.input[g.x * 256 + li]
+    workgroup_barrier()
+    …
+```
+
+* It is listed like any binding and takes no group, as `@inline` constants take none, since no host binds it; describe tells the host nothing of it.
+* Its members are values — scalars, vectors, structs and arrays of them — and never a resource (CHK-292).
+* A shader writes it, and only a compute entry point may list it (CHK-294).
+* Everything it holds together fits 16 KiB, WebGPU's default limit and vulkan's required minimum (CHK-293).
+* Nothing is defined before it is stored: no target but WGSL zeroes it, and a shader that relies on either pays for it on every target.
+  The interpreter reports a read of what was never stored as a program error (EVAL-92).
+* A test holds workgroup memory of its own run, so it uses a `@workgroup` binding without listing it (CHK-295).
+
 ## How a group reaches sg
 
 **The slots of a group are its members in declaration order**, after the constant block at slot 0 when the group has plain members.
@@ -360,6 +383,7 @@ Everything not named here is the diagnostic `unsupported-yet`, never a guess.
   The builtins that take one are `sample`, `load`, `store` and `size` in `prelude/builtins.sgl`, called as methods of it: `tex.sample(uv, smp)`.
 * A plain member of a group, as a field of the constant buffer the group owns, for a type whose place in a block every target agrees on.
 * The positional group numbering, and `@inline` last.
+* `@workgroup` bindings, which take no group.
 * A resource's host name, its path `binding.member` ([CHK-171](semantics/checking.md#bindings)), which the text reports beside the identifier it minted.
 
 Three targets write a group, and the fourth declines rather than guessing.

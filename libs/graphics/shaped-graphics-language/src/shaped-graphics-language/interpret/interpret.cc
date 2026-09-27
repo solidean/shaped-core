@@ -77,6 +77,17 @@ struct machine
 
     cc::vector<value> locals;
     cc::vector<bool> is_set;
+
+    /// One member of a `@workgroup` binding, which the run holds from its start: memory of one invocation's workgroup.
+    struct workgroup_cell
+    {
+        symbol_id binding = symbol_id::none;
+        i32 member = -1;
+        value memory;
+        /// Parallel to `memory.leaves`: nothing is defined before it is stored (CHK-292).
+        cc::vector<bool> is_written;
+    };
+    cc::vector<workgroup_cell> workgroup;
     /// Parallel to `out.buffers`: whether the run stored to that buffer, which is what the outcome keeps.
     cc::vector<bool> is_stored;
     /// The value a `leave` or a `return` under way carries.
@@ -265,7 +276,7 @@ struct machine
         if (!burn())
             return {.kind = flow_kind::failed};
         ++depth;
-        auto const f = eval_node(e.at(id), result);
+        auto const f = is_in_workgroup(id) ? read_workgroup(id, result) : eval_node(e.at(id), result);
         --depth;
         return f;
     }
@@ -444,7 +455,67 @@ struct machine
     }
 
     /// Where a place lies in its local: evaluates its array indices, the one nearest the local first (EVAL-14).
-    flow locate_place(flat_expr_id place, local_id& local, isize& offset, type_id& type)
+    /// The cell of workgroup memory `b` names, which starts as the run's first touch of it.
+    isize cell_of(flat_binding_member const& b)
+    {
+        for (auto i = isize(0); i < workgroup.size(); ++i)
+            if (workgroup[i].binding == b.binding && workgroup[i].member == b.member)
+                return i;
+        auto const type = m.at(m.bindings[m.at(b.binding).info].members)[b.member].type;
+        auto cell = workgroup_cell{.binding = b.binding, .member = b.member, .memory = zero_value(m, type)};
+        cell.is_written.resize_to_filled(cell.memory.leaves.size(), false);
+        workgroup.push_back(cc::move(cell));
+        return workgroup.size() - 1;
+    }
+
+    /// True for a member or an element of workgroup memory, at any depth.
+    [[nodiscard]] bool is_in_workgroup(flat_expr_id id) const
+    {
+        for (auto i = 0; i < k_max_depth && is_known(e, id); ++i)
+        {
+            auto const& node = e.at(id).node;
+            if (auto const* const b = node.try_as<flat_binding_member>())
+                return b->is_workgroup;
+            if (auto const* const element = node.try_as<flat_element>())
+                id = element->object;
+            else if (auto const* const member = node.try_as<flat_member>())
+                id = member->object;
+            else
+                return false;
+        }
+        return false;
+    }
+
+    /// A read of workgroup memory, of what the run stored there and nothing else (EVAL-92).
+    flow read_workgroup(flat_expr_id id, value& result)
+    {
+        auto where = place_ref();
+        auto offset = isize(0);
+        auto type = type_id::none;
+        if (auto const f = locate_place(id, where, offset, type); !f.is_normal())
+            return f;
+        auto const& cell = workgroup[where.cell];
+        auto const count = leaf_count_of(m, type);
+        for (auto i = isize(0); i < count; ++i)
+            if (!cell.is_written[offset + i])
+                return fail(run_status::program_error,
+                            cc::format("a read of {}.{} where nothing was stored", m.at(cell.binding).name,
+                                       m.at(m.bindings[m.at(cell.binding).info].members)[cell.member].name));
+        result.type = type;
+        result.leaves.clear();
+        result.leaves.push_back_range(
+            cc::span<scalar const>(cell.memory.leaves).subspan({.offset = offset, .size = count}));
+        return {};
+    }
+
+    /// What a place is part of: a mutable local, or a cell of workgroup memory.
+    struct place_ref
+    {
+        local_id local = local_id::none;
+        isize cell = -1;
+    };
+
+    flow locate_place(flat_expr_id place, place_ref& where, isize& offset, type_id& type)
     {
         // the steps from the place down to its local, innermost first: a member, or an element's index expression
         struct step
@@ -454,13 +525,18 @@ struct machine
         };
         auto path = cc::vector<step>();
         auto id = place;
-        local = local_id::none;
+        where = {};
         for (auto i = 0; i < k_max_depth && is_known(e, id); ++i)
         {
             auto const& x = e.at(id);
             if (auto const* const ref = x.node.try_as<flat_local_ref>())
             {
-                local = ref->local;
+                where.local = ref->local;
+                break;
+            }
+            if (auto const* const b = x.node.try_as<flat_binding_member>(); b != nullptr && b->is_workgroup)
+            {
+                where.cell = cell_of(*b);
                 break;
             }
             if (auto const* const element = x.node.try_as<flat_element>())
@@ -475,10 +551,10 @@ struct machine
             path.push_back({.member = member->member});
             id = member->object;
         }
-        if (!is_known(e, local) || !e.at(local).is_mut)
+        if (where.cell < 0 && (!is_known(e, where.local) || !e.at(where.local).is_mut))
             return type_error("an assignment to what is no mutable local");
 
-        type = e.at(local).type;
+        type = where.cell >= 0 ? workgroup[where.cell].memory.type : e.at(where.local).type;
         offset = 0;
         for (auto k = path.size() - 1; k >= 0; --k)
         {
@@ -507,23 +583,27 @@ struct machine
 
     flow assign(flat_expr_id place, value const& v)
     {
-        auto local = local_id::none;
+        auto where = place_ref();
         auto offset = isize(0);
         auto type = type_id::none;
-        if (auto const f = locate_place(place, local, offset, type); !f.is_normal())
+        if (auto const f = locate_place(place, where, offset, type); !f.is_normal())
             return f;
-        return write(local, offset, type, v);
+        return write(where, offset, type, v);
     }
 
-    flow write(local_id local, isize offset, type_id type, value const& v)
+    flow write(place_ref const& where, isize offset, type_id type, value const& v)
     {
-        auto& target = locals[index_of(local)];
+        auto& target = where.cell >= 0 ? workgroup[where.cell].memory : locals[index_of(where.local)];
         auto const count = leaf_count_of(m, type);
         if (v.leaves.size() != count || offset + count > target.leaves.size())
             return type_error("an assignment of a value of the wrong size");
         for (auto i = isize(0); i < count; ++i)
             target.leaves[offset + i] = v.leaves[i];
-        is_set[index_of(local)] = true;
+        if (where.cell >= 0)
+            for (auto i = isize(0); i < count; ++i)
+                workgroup[where.cell].is_written[offset + i] = true;
+        else
+            is_set[index_of(where.local)] = true;
         return {};
     }
 
@@ -714,15 +794,15 @@ struct machine
             if (element != nullptr)
                 return store_element(*element, e.at(a->place).type, a->value);
             // EVAL-14: the place's indices, then the value
-            auto local = local_id::none;
+            auto where = place_ref();
             auto offset = isize(0);
             auto type = type_id::none;
-            if (auto const f = locate_place(a->place, local, offset, type); !f.is_normal())
+            if (auto const f = locate_place(a->place, where, offset, type); !f.is_normal())
                 return f;
             auto v = value();
             if (auto const f = eval(a->value, v); !f.is_normal())
                 return f;
-            return write(local, offset, type, v);
+            return write(where, offset, type, v);
         }
         if (auto const* const p = s.node.try_as<flat_print>())
         {

@@ -214,3 +214,55 @@ type_id checker::check_filled(function_scope& scope, ast::expr_id id, ast::call 
     set_target(file, id, {.kind = target_kind::array_filled});
     return type;
 }
+
+bool checker::holds_resource(type_id type) const
+{
+    auto const& t = out.at(type);
+    if (is_resource(t.kind))
+        return true;
+    if (t.kind == type_kind::array)
+        return holds_resource(t.element);
+    for (auto const& m : out.at(t.members))
+        if (m.type != type && holds_resource(m.type))
+            return true;
+    return false;
+}
+
+i32 checker::workgroup_size_of(type_id type) const
+{
+    // a type's size, rounded up to its alignment, as WGSL strides an array of it
+    struct measured
+    {
+        i32 size = 0;
+        i32 alignment = 1;
+    };
+    auto const round_up = [](i32 n, i32 to) { return (n + to - 1) / to * to; };
+    auto const measure = [&](auto const& self, type_id t) -> measured
+    {
+        if (auto const* const record = out.builtin_type_of(t))
+        {
+            // a bool has no place in a host's block, and takes four bytes where the shader alone holds it
+            if (record->wgsl_layout.size == 0)
+                return {.size = 4 * record->leaf_count, .alignment = 4};
+            return {.size = record->wgsl_layout.size, .alignment = record->wgsl_layout.alignment};
+        }
+        auto const& info = out.at(t);
+        if (info.kind == type_kind::enumeration)
+            return {.size = 4, .alignment = 4};
+        if (info.kind == type_kind::array)
+        {
+            auto const element = self(self, info.element);
+            return {.size = round_up(element.size, element.alignment) * info.count, .alignment = element.alignment};
+        }
+        auto result = measured();
+        for (auto const& m : out.at(info.members))
+        {
+            auto const member = self(self, m.type);
+            result.size = round_up(result.size, member.alignment) + member.size;
+            result.alignment = member.alignment > result.alignment ? member.alignment : result.alignment;
+        }
+        result.size = round_up(result.size, result.alignment);
+        return result;
+    };
+    return measure(measure, type).size;
+}

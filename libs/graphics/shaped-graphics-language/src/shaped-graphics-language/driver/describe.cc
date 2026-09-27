@@ -210,7 +210,8 @@ described_entry_point describe_entry_point(check::checked_module const& m,
     for (auto axis = 0; axis < 3; ++axis)
         result.workgroup[axis] = e.workgroup[axis];
     for (auto const id : e.bindings)
-        result.bindings.push_back(m.at(id).name);
+        if (!m.bindings[m.at(id).info].is_workgroup)
+            result.bindings.push_back(m.at(id).name);
     result.features = feature_names(e.features);
     result.footprint = check::footprint_of(m, legal);
     return result;
@@ -319,6 +320,9 @@ cc::result<sgl::module_description, cc::string> sgl::describe(describe_request c
         if (s.file != front.program_file() || s.state != check::symbol_state::checked)
             continue;
 
+        // workgroup memory has no host side, so the host is told nothing of it
+        if (s.kind == check::symbol_kind::binding && m.bindings[s.info].is_workgroup)
+            continue;
         if (s.kind == check::symbol_kind::binding)
         {
             auto const before = errors.size();

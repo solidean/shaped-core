@@ -412,7 +412,10 @@ struct flattener
             if (where.kind == target_kind::enum_case)
                 return enum_value(type, id, where.index);
             if (where.kind == target_kind::binding_member)
-                return add_expr(type, id, flat_binding_member{.binding = where.symbol, .member = where.index});
+                return add_expr(type, id,
+                                flat_binding_member{.binding = where.symbol,
+                                                    .member = where.index,
+                                                    .is_workgroup = c.is_workgroup_binding(where.symbol)});
             // CHK-288: a constant, and an object with an effect still runs for it
             if (where.kind == target_kind::array_length)
             {

@@ -61,6 +61,11 @@ public:
 
     void write_eval(cc::string& out, cc::string_view value) const override { out.appendf("{};", value); }
 
+    void write_workgroup(cc::string& out, planned_workgroup const& w, plan const& p) const override
+    {
+        out.appendf("groupshared {} {}{};\n", type_text(p, *this, w.type), w.name, array_dimensions(p, w.type));
+    }
+
     /// SPIR-V has no semantics, so vulkan takes the location as an attribute and keeps the semantic HLSL's grammar asks for.
     cc::string semantic_of(planned_struct const& s, planned_member const& member) const
     {
@@ -226,6 +231,10 @@ public:
                 write_member(out, &s, member, p);
             out += "};\n\n";
         }
+        for (auto const& w : p.workgroup)
+            write_workgroup(out, w, p);
+        if (!p.workgroup.empty())
+            out += "\n";
 
         if (!p.constants.has_value())
             return;

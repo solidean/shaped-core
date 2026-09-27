@@ -65,6 +65,9 @@ struct target_ {
 * **EMIT-107** A struct whose every field is `void` is `unsupported`, since it would be a struct of no member, which WGSL has no spelling for.
 * **EMIT-118** An array is `array<T, N>` in WGSL and MSL, and in HLSL its element type with the lengths after the declared name, `float weights[3]`.
   A square literal is WGSL's constructor, and in HLSL and MSL a local assigned element by element, as a struct is (EMIT-55).
+* **EMIT-119** Each member of a `@workgroup` binding is a variable of its own, minted `<binding>_<member>`: `groupshared` in HLSL and `var<workgroup>` in WGSL at file scope,
+  and `threadgroup` at the top of the kernel in MSL, which has it nowhere else.
+  It takes no group, so the groups after it in a list keep their numbers.
 
 | SGL | HLSL | WGSL | MSL |
 |---|---|---|---|

@@ -5,7 +5,7 @@
 ## The idea
 
 `test` declarations exist ([CHK-224](../semantics/checking.md#tests)), and they run on the interpreter.
-Five directions were agreed when they were designed and left for later, and each builds on what is there without changing it.
+Six directions were agreed and left for later, and each builds on what is there without changing it.
 
 **Running tests on the GPU.**
 A test has no stage, no parameter and no binding, so it can be written as a compute shader of one thread.
@@ -28,6 +28,11 @@ A test inside a generic reads its generic arguments, so it runs once per instant
 The keyword is seen before any instantiation, so the test is registered at once, and a module whose generic is never instantiated fails its tests with "this test was not run".
 That keeps a test fail-closed where it cannot run yet.
 The way out is a module-level test that instantiates the generic and ends in `true // run the generic tests`.
+
+**A simulated workgroup.**
+A run is one invocation today, so a barrier waits for nobody, an atomic is its plain read-modify-write, and workgroup memory holds what that one invocation stored (EVAL-92).
+A test could name a workgroup size instead, and the interpreter run that many invocations, switching between them at each barrier and interleaving atomics in a fixed order.
+Races and barrier placement would then be testable off the GPU, deterministically; it needs a scheduler in the interpreter and a spelling for "run this test as a workgroup of 64".
 
 **Matching an expected diagnostic by its message.**
 `@expect(error = "kind")` matches the kind's name only, which is stable where a message is not.

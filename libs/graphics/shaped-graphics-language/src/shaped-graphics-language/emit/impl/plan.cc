@@ -103,6 +103,12 @@ struct validator
         {
             ++listed;
             auto const& s = m.at(id);
+            // workgroup memory is listed like a group and takes none: no host binds it
+            if (m.bindings[s.info].is_workgroup)
+            {
+                --listed;
+                continue;
+            }
             if (!m.bindings[s.info].is_inline)
             {
                 // Refused on every target, so an entry point written for one is written for all of them.
@@ -336,7 +342,7 @@ struct planner
         {
             auto const& s = p.m.at(id);
             auto const& b = p.m.bindings[s.info];
-            if (b.is_inline)
+            if (b.is_inline || b.is_workgroup)
                 continue; // sg addresses the inline constants itself, so they take no group of their own
             auto slot = first_resource_slot(p.m, b);
             auto const members = p.m.at(b.members);
@@ -367,7 +373,7 @@ struct planner
         {
             auto const& s = p.m.at(id);
             auto const& b = p.m.bindings[s.info];
-            if (b.is_inline)
+            if (b.is_inline || b.is_workgroup)
                 continue;
             auto const plain = plain_members_of(p.m, b);
             if (!plain.empty())
@@ -391,6 +397,28 @@ struct planner
                 p.group_blocks.push_back(cc::move(planned));
             }
             ++group;
+        }
+    }
+
+    /// Every member of a `@workgroup` binding is a variable of its own, minted `<binding>_<member>`.
+    void workgroup_memory()
+    {
+        for (auto const id : p.e.bindings)
+        {
+            auto const& s = p.m.at(id);
+            auto const& b = p.m.bindings[s.info];
+            if (!b.is_workgroup)
+                continue;
+            auto const members = p.m.at(b.members);
+            for (auto i = isize(0); i < members.size(); ++i)
+            {
+                need(members[i].type, struct_role::plain);
+                need_enum(members[i].type);
+                p.workgroup.push_back({.binding = id,
+                                       .member = i32(i),
+                                       .name = p.names.mint(cc::format("{}_{}", s.name, members[i].name)),
+                                       .type = members[i].type});
+            }
         }
     }
 
@@ -434,6 +462,14 @@ sgl::builtins::language sgl::emit::impl::language_of(target t)
         return builtins::language::msl;
     }
     return builtins::language::hlsl;
+}
+
+sgl::i32 sgl::emit::impl::workgroup_of(plan const& p, check::symbol_id binding, i32 member)
+{
+    for (auto i = isize(0); i < p.workgroup.size(); ++i)
+        if (p.workgroup[i].binding == binding && p.workgroup[i].member == member)
+            return i32(i);
+    return -1;
 }
 
 sgl::i32 sgl::emit::impl::resource_of(plan const& p, check::symbol_id binding, i32 member)
@@ -533,6 +569,9 @@ void sgl::emit::impl::validate_binding(check::checked_module const& m, check::sy
 
     auto const& s = m.at(id);
     auto const& b = m.bindings[s.info];
+    // workgroup memory is laid out by each target alone, since no host writes it
+    if (b.is_workgroup)
+        return;
 
     // A plain member is a constant of a block: the `@inline` one, or the constant buffer its group owns.
     // A resource is a slot of its own in a group, and has no place in an `@inline` block.
@@ -666,6 +705,7 @@ sgl::emit::impl::plan sgl::emit::impl::make_plan(check::checked_module const& m,
     p.constants();
     p.group_blocks();
     p.resources();
+    p.workgroup_memory();
     // The check pass minted the locals, so a buffer or a block minted above never took one's name.
     for (auto const& local : e.locals)
         result.locals.push_back(p.spell(local.name));

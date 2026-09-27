@@ -587,6 +587,15 @@ Nothing in a body uses a feature yet, so a `require` in a test's body is `unused
 * **CHK-291** An array in a constant block, in a buffer's element or in a struct that crosses a stage edge is `unsupported-yet`, until a layout rule settles it.
   A binding array, an array of resources as a binding member, is `unsupported-yet` too.
 
+## Workgroup memory
+
+* **CHK-292** A `@workgroup` binding's members are values its workgroup shares; a resource or a sampler block in one is `wrong-kind-of-name`.
+  An array stands in one, since workgroup memory has no host layout, and a member of one is a place a shader assigns.
+  `@inline` and `@workgroup` together are `invalid-attribute-arguments`.
+* **CHK-293** A `@workgroup` binding whose members take more than 16384 bytes, laid out as WGSL lays out workgroup variables, is `invalid-attribute-arguments`.
+* **CHK-294** An entry point listing a `@workgroup` binding is a compute stage, and all it lists fits the same 16384 bytes, or it is `invalid-entry-point`.
+* **CHK-295** A test uses a `@workgroup` binding, and calls a function listing one, without listing it: the run holds its own.
+
 ## Uniformity
 
 A barrier waits for every thread of its workgroup, and a derivative compares a pixel with the other three of its quad.
@@ -755,7 +764,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `unknown-builtin` | CHK-31 |
 | `expected-body` | CHK-32, CHK-236 |
 | `opaque-struct-needs-builtin` | CHK-34 |
-| `invalid-attribute-arguments` | CHK-36, CHK-39, CHK-204, CHK-208, CHK-211, CHK-212, CHK-220, CHK-231, CHK-267 |
+| `invalid-attribute-arguments` | CHK-36, CHK-39, CHK-204, CHK-208, CHK-211, CHK-212, CHK-220, CHK-231, CHK-267, CHK-292, CHK-293 |
 | `binding-not-listed` | CHK-45, CHK-131, CHK-228 |
 | `type-mismatch` | CHK-52, CHK-56, CHK-77, CHK-112 to CHK-118, CHK-121, CHK-167, CHK-210, CHK-214, CHK-219, CHK-236, CHK-243, CHK-279, CHK-281 |
 | `not-assignable` | CHK-112, CHK-236 |
@@ -775,7 +784,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `stage-not-allowed` | CHK-193 |
 | `ambiguous-overload` | CHK-72 |
 | `missing-field`, `unknown-field`, `duplicate-field` | CHK-178 |
-| `invalid-entry-point` | CHK-87, CHK-93 |
+| `invalid-entry-point` | CHK-87, CHK-93, CHK-294 |
 | `invalid-pipeline` | CHK-175 to CHK-185, CHK-187 |
 | `shadows-unshadowable` | CHK-220, CHK-266 |
 | `test-captures-runtime-value` | CHK-228 |
