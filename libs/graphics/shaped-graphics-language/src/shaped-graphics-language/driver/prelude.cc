@@ -1,6 +1,9 @@
 #include "prelude.hh"
 
+#include <clean-core/common/macros.hh>
+#include <clean-core/string/char_predicates.hh>
 #include <clean-core/string/string.hh>
+#include <clean-core/string/uri.hh>
 #include <shaped-graphics-language/builtins/registry.hh>
 
 cc::span<sgl::prelude_file const> sgl::prelude_files()
@@ -14,24 +17,41 @@ cc::span<sgl::prelude_file const> sgl::prelude_files()
     return files;
 }
 
+namespace
+{
+/// `path` spelled one way: a `file://` uri decoded to its path, `/` as the separator, and lower case on Windows.
+[[nodiscard]] cc::string normalized(cc::string_view path)
+{
+    auto out = cc::string(path);
+    if (constexpr auto scheme = cc::string_view("file://"); path.starts_with(scheme))
+    {
+        auto decoded = cc::percent_decode(path.subview(scheme.size()));
+        if (!decoded.has_value())
+            return {};
+        out = cc::move(decoded.value());
+        // `/c:/x` is the Windows path `c:/x`
+        if (out.size() >= 3 && out[0] == '/' && out[2] == ':')
+            out = out.substring(1);
+    }
+    for (auto i = sgl::isize(0); i < out.size(); ++i)
+    {
+        if (out[i] == '\\')
+            out[i] = '/';
+#ifdef CC_OS_WINDOWS
+        out[i] = cc::to_lower(out[i]);
+#endif
+    }
+    return out;
+}
+} // namespace
+
 sgl::i32 sgl::prelude_file_of(cc::string_view path)
 {
-    auto const is_separator = [](char c) { return c == '/' || c == '\\'; };
-    auto const folder = cc::string_view("prelude");
+    auto const given = normalized(path);
+    auto const directory = normalized(impl::prelude_directory());
     auto const files = prelude_files();
     for (auto i = isize(0); i < files.size(); ++i)
-    {
-        auto const name = files[i].name;
-        if (!path.ends_with(name) || path.size() < name.size() + folder.size() + 1)
-            continue;
-        auto const before_name = path.subview({.offset = 0, .size = path.size() - name.size()});
-        auto const in_folder = before_name.subview({.offset = 0, .size = before_name.size() - 1});
-        if (!is_separator(before_name.back()) || !in_folder.ends_with(folder))
-            continue;
-        // `prelude` is a whole folder name, not the tail of `my_prelude`
-        auto const outer = in_folder.size() - folder.size();
-        if (outer == 0 || is_separator(in_folder[outer - 1]))
+        if (given == directory + "/" + normalized(files[i].name))
             return i32(i);
-    }
     return -1;
 }

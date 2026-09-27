@@ -1,29 +1,44 @@
 #include "../check/check-test-support.hh"
 
+#include <clean-core/string/uri.hh>
 #include <shaped-graphics-language/driver/compile_to_text.hh>
 #include <shaped-graphics-language/driver/prelude.hh>
 #include <shaped-graphics-language/driver/test_source.hh>
 
-TEST("sgl driver - a path ending in a file of the prelude names that file, and no other path does")
+TEST("sgl driver - the library's own prelude files are recognized by their path, and a user's of the same name is not")
 {
-    CHECK(sgl::prelude_file_of("prelude/builtins.sgl") == 0);
-    CHECK(sgl::prelude_file_of("C:\\src\\sgl\\prelude\\core.sgl") == 1);
-    CHECK(sgl::prelude_file_of("file:///c%3A/src/sgl/prelude/core.sgl") == 1);
-    CHECK(sgl::prelude_file_of("core.sgl") == -1);
-    CHECK(sgl::prelude_file_of("src/core.sgl") == -1);
+    auto const dir = cc::string(sgl::impl::prelude_directory());
+    CHECK(sgl::prelude_file_of(dir + "/builtins.sgl") == 0);
+    CHECK(sgl::prelude_file_of(dir + "/core.sgl") == 1);
+    auto const uri = cc::string(dir.starts_with("/") ? "file://" : "file:///")
+                   + cc::percent_encode(dir + "/core.sgl", cc::uri_component::path);
+    CHECK(sgl::prelude_file_of(uri) == 1);
+    auto backslashed = dir + "/core.sgl";
+    for (auto i = sgl::isize(0); i < backslashed.size(); ++i)
+        backslashed[i] = backslashed[i] == '/' ? '\\' : backslashed[i];
+    CHECK(sgl::prelude_file_of(backslashed) == 1);
+
+    CHECK(sgl::prelude_file_of("prelude/core.sgl") == -1);
+    CHECK(sgl::prelude_file_of("shaders/prelude/core.sgl") == -1);
+    CHECK(sgl::prelude_file_of("/home/me/shaders/prelude/core.sgl") == -1);
+    CHECK(sgl::prelude_file_of("file:///c%3A/src/shaders/prelude/core.sgl") == -1);
     CHECK(sgl::prelude_file_of("my_prelude/core.sgl") == -1);
-    CHECK(sgl::prelude_file_of("prelude/my_core.sgl") == -1);
+    CHECK(sgl::prelude_file_of(dir + "/my_core.sgl") == -1);
+    CHECK(sgl::prelude_file_of(dir + "/../core.sgl") == -1);
 }
 
 TEST("sgl driver - a file of the prelude is checked in its own place, where it declares each name once")
 {
+    auto const dir = cc::string(sgl::impl::prelude_directory());
     auto const builtins = sgl::prelude_files()[0].source;
-    CHECK(sgl::test_source(builtins, "sgl/prelude/builtins.sgl").errors == "");
-    // behind the prelude, each builtin type is declared a second time
+    CHECK(sgl::test_source(builtins, dir + "/builtins.sgl").errors == "");
+    // behind the prelude, each builtin type is declared a second time, and so it is in a user's prelude folder
     CHECK(sgl::test_source(builtins, "sgl/copy/builtins.sgl").errors != "");
+    CHECK(sgl::test_source(builtins, "shaders/prelude/builtins.sgl").errors != "");
 
     auto const core = cc::string(sgl::prelude_files()[1].source) + "fun broken() => nope\n";
-    CHECK(sgl::test_source(core, "sgl/prelude/core.sgl").errors.contains("sgl/prelude/core.sgl:"));
+    auto const core_path = dir + "/core.sgl";
+    CHECK(sgl::test_source(core, core_path).errors.contains(core_path + ":"));
 }
 
 TEST("sgl driver - test_source counts the tests, reports what failed, and names the entry points")

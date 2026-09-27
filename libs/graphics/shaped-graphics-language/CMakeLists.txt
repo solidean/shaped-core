@@ -123,6 +123,7 @@ if(_sgl_prelude_literals STREQUAL "")
     set(_sgl_prelude_literals " \"\"")
 endif()
 
+# The same file names the prelude's directory, which tells the library's own prelude files from a user's files of the same names.
 # Written only when it differs, so a configure that changes nothing recompiles nothing.
 # Not file(CONFIGURE): SGL spells an attribute `@name`, and two of them on one line would read as a CMake variable.
 set(_sgl_prelude_generated "${CMAKE_CURRENT_BINARY_DIR}/generated/prelude.generated.cc")
@@ -136,6 +137,8 @@ constexpr char const* k_prelude =${_sgl_prelude_literals};
 } // namespace
 
 cc::string_view sgl::impl::embedded_core_prelude() { return k_prelude; }
+
+cc::string_view sgl::impl::prelude_directory() { return R\"sglprelude(${CMAKE_CURRENT_SOURCE_DIR}/prelude)sglprelude\"; }
 ")
 set(_sgl_prelude_existing "")
 if(EXISTS "${_sgl_prelude_generated}")
