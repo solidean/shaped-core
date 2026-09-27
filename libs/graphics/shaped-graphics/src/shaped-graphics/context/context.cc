@@ -297,13 +297,6 @@ void context::rearm_completion_signal(cc::vector<pending_completion> const& pend
     arm_completion_signal(t.submission, t.epoch);
 }
 
-namespace
-{
-/// How deep this thread is in settles: a push resumes a dependent inline, and one that settles again must not wait on
-/// the settle it runs inside.
-thread_local int t_settle_depth = 0;
-} // namespace
-
 void context::settle_due_completions()
 {
     auto* const signals = _completion_signals.get();
@@ -311,28 +304,20 @@ void context::settle_due_completions()
         || (!signals->has_pending.load(cc::memory_order_acquire) && signals->settlers.load(cc::memory_order_acquire) == 0))
         return;
 
-    if (t_settle_depth > 0)
-    {
-        impl_settle_due_completions();
-        return;
-    }
     signals->settlers.fetch_add(1, cc::memory_order_acq_rel);
-    signals->settling.lock(
-        [&](cc::unit&)
-        {
-            ++t_settle_depth;
-            impl_settle_due_completions();
-            --t_settle_depth;
-        });
-    signals->settlers.fetch_sub(1, cc::memory_order_acq_rel);
+    CC_DEFER
+    {
+        signals->settlers.fetch_sub(1, cc::memory_order_acq_rel);
+    };
+    signals->settling.lock([&](cc::unit&) { impl_settle_due_completions(); });
 }
 
 void context::impl_settle_due_completions()
 {
     auto* const signals = _completion_signals.get();
 
-    // Taken out under the lock and pushed outside it: pushing resumes whoever depended on the node, and a dependent
-    // that reaches back in here would deadlock on a mutex this thread still holds.
+    // Taken out under the pending lock and pushed outside it, so a push never holds the lock arming takes.
+    // A push only enqueues the node's dependents on a scheduler; none of them runs on this stack.
     auto const lost = is_device_lost();
     auto due = _pending_completions.lock(
         [&](cc::vector<pending_completion>& pending)
