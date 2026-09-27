@@ -169,7 +169,7 @@ ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - array bindings: partial fill, declared a
     CHECK(data[1] == u32(texel_value));
 }
 
-ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - array bindings: an undeclared array logs once and is covered by a global barrier",
+ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - array bindings: an undeclared array logs once, and the dispatch runs",
                      (sg::context_handle const& handle))
 {
     auto comp = ssc::dxc::compiler::create();
