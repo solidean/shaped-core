@@ -163,6 +163,22 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
             f"append a block with `addresses: {comment.id}`, which a block that declines to act also satisfies"
         )
 
+    # An `addresses:` naming a comment its entry does not have satisfies nothing and misleads whoever reads the thread,
+    # and nothing else would catch it: the obligation above only asks whether every comment is claimed.
+    # A finalized round cannot be edited, so only the round still being written is held to it.
+    for entry in entries:
+        known = set(ctx.answers(paths, entry).comments)
+        for block in entry.blocks:
+            if block.round and block.round <= cfg.watermark:
+                continue
+            for comment_id in block.addresses:
+                if comment_id not in known:
+                    listed = ", ".join(sorted(known)) if known else "none"
+                    problems.append(
+                        f"{entry.slug}: block {block.name!r} addresses {comment_id!r}, which is no comment of this entry "
+                        f"— its comments are: {listed}"
+                    )
+
     total = len(paths.entry_files())
     # A broken entry was still checked, so it counts toward what the problems were found across.
     checked = len(entries) + len(broken)

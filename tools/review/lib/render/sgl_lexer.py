@@ -214,7 +214,9 @@ def _code_tokens(line: str, closes: str):
 
 def _classify(word: str, previous_symbol: str, expects_type: bool, fused_call: bool):
     if word.startswith("@"):
-        return Name.Decorator
+        # The VS Code grammar scopes an attribute as an escape for its colour, since a theme paints a decorator like a
+        # function; the page follows the editor rather than Pygments' default.
+        return String.Escape
     if word.startswith("#"):
         return Number.Hex
     if word == "_":
