@@ -64,7 +64,7 @@
                 "sgl.server.path": {
                     "type": "string",
                     "default": "",
-                    "markdownDescription": "The `sgl` binary to run as the language server. Empty finds the newest one a workspace build's `nexus-binaries.json` names."
+                    "markdownDescription": "The `sgl` binary to run as the language server. Empty takes the default preset's build, else the newest native one a workspace build's `nexus-binaries.json` names."
                 },
                 "sgl.server.logLevel": {
                     "type": "string",

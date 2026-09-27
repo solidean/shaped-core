@@ -108,12 +108,15 @@ A diagnostic can point into the prelude, and such a link opens a read-only `sgl-
 
 **Which binary runs.**
 The setting `sgl.server.path` wins when it is set.
-Otherwise the extension reads `build/*/nexus-binaries.json` in every workspace folder, whose `paths` object configure writes, and takes the newest `sgl` that exists.
-So with several presets built, the most recently built one runs.
+Otherwise the extension reads `build/*/nexus-binaries.json` in every workspace folder, whose `paths` object configure writes.
+It takes the `sgl` of the platform's default preset, the one `uv run dev.py build` builds without `--preset`.
+Without one it takes the newest `sgl` of any other build that runs on this machine, skipping wasm and other platforms' builds.
+The output channel names the binary it chose, and why.
 
 **The server runs from a copy.**
 The binary (with its `.pdb` on Windows) is copied into the extension's global storage first, so a rebuild can replace the original while the server runs.
 When the original changes, the extension offers to restart with "A newer sgl was built."
+A rebuild of the default preset's `sgl` offers it too, even while a fallback runs.
 **SGL: Restart Language Server** does the same on demand: it stops the server, copies the binary again, and starts it.
 
 **Settings.**
@@ -138,6 +141,8 @@ A manual test after a change, with the extension installed by `uv run dev.py ins
    Break one so that it fails: its mark turns into a red cross, and the test is a diagnostic.
 4. Open [prelude/builtins.sgl](prelude/builtins.sgl): it checks without a diagnostic.
 5. Rebuild with `uv run dev.py build -t sgl`: the "A newer sgl was built." prompt appears, and **Restart** brings the new server up.
+   The output channel's `using …` line names the default preset's build directory.
+6. With the marks of step 3 showing, add a line above a check: its mark moves down with it, and stays on that line once it dims.
 
 ### Working on the grammar
 
