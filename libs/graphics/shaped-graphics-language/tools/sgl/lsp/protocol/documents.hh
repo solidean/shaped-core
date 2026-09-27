@@ -66,8 +66,9 @@ private:
 
 namespace lsp
 {
-/// The file path a `file:` URI names, with `%XX` decoded and a Windows drive's leading slash dropped; nothing for any
-/// other scheme.
+/// The file path a `file:` URI names, `%XX` decoded, its query and fragment ignored; nothing for any other scheme.
+/// An authority makes it a UNC path: `file://server/share/x` is `\\server\share\x` on Windows and `//server/share/x` elsewhere.
+/// On Windows `/c:/x` is the drive path `c:/x`, when the first segment is exactly a letter and a colon; elsewhere it stays.
 [[nodiscard]] cc::optional<cc::string> path_of_uri(cc::string_view uri);
 
 /// The `file:` URI of an absolute path, as VS Code writes it: `C:\a b` is `file:///c%3A/a%20b`.

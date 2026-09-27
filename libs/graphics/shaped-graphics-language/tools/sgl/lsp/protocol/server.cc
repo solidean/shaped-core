@@ -8,14 +8,32 @@ lsp::server::server(options opts) : _options(cc::move(opts))
 
 namespace
 {
-/// A request id as JSON text, so it is echoed exactly: `7`, or `"abc"` with its escapes.
-[[nodiscard]] cc::string id_text_of(lsp::json::ref id)
+/// A request id as JSON text, so it is echoed exactly: `7`, `"abc"` with its escapes, or `null`.
+/// Nothing for an id that cannot be echoed exactly, such as `1.5`, `1e300` or an object.
+[[nodiscard]] cc::optional<cc::string> id_text_of(lsp::json::ref id)
 {
     if (id.is_string())
         return lsp::json::to_text(cc::string(id.as_string()));
-    if (id.is_number())
-        return cc::format("{}", i64(id.as_double()));
-    return "null";
+    if (auto n = i64(0); lsp::json::read(id, n))
+        return cc::format("{}", n);
+    if (id.is_null())
+        return cc::string("null");
+    return cc::nullopt;
+}
+
+[[nodiscard]] lsp::impl::reply invalid_request(cc::string text)
+{
+    return {.is_error = true, .error_code = lsp::error_code::invalid_request, .text = cc::move(text)};
+}
+
+/// Warns that a document notification was dropped, naming its document when that much reads.
+void warn_unread(cc::string_view method, lsp::json::ref params)
+{
+    auto const uri = params["textDocument"]["uri"].as_string();
+    if (uri.empty())
+        CC_LOG_WARNING("{}: params that do not read, dropped", method);
+    else
+        CC_LOG_WARNING("{} for {}: params that do not read, dropped", method, uri);
 }
 } // namespace
 
@@ -30,24 +48,48 @@ void lsp::server::receive(cc::string_view message)
     }
     auto doc = cc::move(parsed.value());
     auto const root = doc.root();
-    auto const method = cc::string(root["method"].as_string());
-    if (method.empty())
+    if (!root.is_object())
+    {
+        // a batch array among them, which LSP does not use
+        impl_respond("null", invalid_request("a message must be one object"));
+        return;
+    }
+    auto const has_method = root["method"].is_string();
+    if (!has_method && (root.has("result") || root.has("error")))
         return; // a response to a request of ours, none of which waits for its answer
-    if (!root.has("id"))
+
+    auto const id = root.has("id") ? id_text_of(root["id"]) : cc::optional<cc::string>();
+    if (root.has("id") && !id.has_value())
+    {
+        impl_respond("null", invalid_request("an id must be a string or an integer"));
+        return;
+    }
+    if (!has_method)
+    {
+        auto const echoed = id.has_value() ? cc::string_view(id.value()) : cc::string_view("null");
+        impl_respond(echoed, invalid_request("a message names no method"));
+        return;
+    }
+    auto const method = cc::string(root["method"].as_string());
+    if (!id.has_value())
     {
         impl_handle_notification(method, root["params"]);
         return;
     }
 
-    auto id = id_text_of(root["id"]);
     if (method == "initialize")
     {
+        if (_initialize_document.has_value())
+        {
+            impl_respond(id.value(), invalid_request("initialize was sent before"));
+            return;
+        }
         // kept whole, since what the client said about itself is read later
         _initialize_document = cc::move(doc);
-        impl_initialize(id, _initialize_document.value().root()["params"]);
+        impl_initialize(id.value(), _initialize_document.value().root()["params"]);
         return;
     }
-    impl_handle_request(cc::move(id), method, root["params"]);
+    impl_handle_request(id.value(), method, root["params"]);
 }
 
 void lsp::server::impl_initialize(cc::string const& id, json::ref params)
@@ -84,6 +126,11 @@ void lsp::server::impl_handle_request(cc::string id, cc::string_view method, jso
     if (!is_initialized())
     {
         impl_respond(id, {.is_error = true, .error_code = error_code::server_not_initialized, .text = "not initialized"});
+        return;
+    }
+    if (_has_shut_down)
+    {
+        impl_respond(id, invalid_request("the server was shut down"));
         return;
     }
     if (method == "shutdown")
@@ -132,37 +179,46 @@ void lsp::server::impl_handle_notification(cc::string_view method, json::ref par
     {
         auto const id = id_text_of(params["id"]);
         for (auto& p : _pending)
-            if (p.id == id)
+            if (id.has_value() && p.id == id.value())
                 p.flag->is_raised.store(true);
         return;
     }
     if (method == "textDocument/didOpen")
     {
         auto p = did_open_params();
-        if (read(params, p))
+        if (!read(params, p))
         {
-            _workspace.open(p.text_document);
-            if (_on_document)
-                _on_document(p.text_document.uri);
+            warn_unread(method, params);
+            return;
         }
+        _workspace.open(p.text_document);
+        if (_on_document)
+            _on_document(p.text_document.uri);
         return;
     }
     if (method == "textDocument/didChange")
     {
         auto p = did_change_params();
-        if (read(params, p) && _workspace.change(p, _encoding) && _on_document)
+        if (!read(params, p))
+        {
+            warn_unread(method, params);
+            return;
+        }
+        if (_workspace.change(p, _encoding) && _on_document)
             _on_document(p.uri);
         return;
     }
     if (method == "textDocument/didClose")
     {
         auto p = did_close_params();
-        if (read(params, p))
+        if (!read(params, p))
         {
-            _workspace.close(p.uri);
-            if (_on_document)
-                _on_document(p.uri);
+            warn_unread(method, params);
+            return;
         }
+        _workspace.close(p.uri);
+        if (_on_document)
+            _on_document(p.uri);
         return;
     }
 
@@ -248,6 +304,7 @@ cc::vector<cc::string> lsp::server::take_outgoing()
 void lsp::server::post_log(message_type type, cc::string message)
 {
     _logs.lock([&](cc::vector<log_message_params>& l) { l.push_back({.type = type, .message = cc::move(message)}); });
+    cc::thread_pump_notify();
 }
 
 lsp::json::ref lsp::server::initialize_params() const

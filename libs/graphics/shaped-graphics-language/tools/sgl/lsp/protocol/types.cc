@@ -30,18 +30,8 @@ bool lsp::read(json::ref in, text_document_item& out)
 
 bool lsp::read(json::ref in, text_document_content_change& out)
 {
-    if (!json::read(in["text"], out.text))
-        return false;
-    if (!in.has("range"))
-    {
-        out.range = cc::nullopt;
-        return true;
-    }
-    auto r = range();
-    if (!read(in["range"], r))
-        return false;
-    out.range = r;
-    return true;
+    // an absent or null range is a change of the whole text
+    return json::read(in["text"], out.text) && json::read_optional(in["range"], out.range);
 }
 
 bool lsp::read(json::ref in, did_open_params& out)

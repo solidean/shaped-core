@@ -21,9 +21,18 @@
 /// blocking and waits a millisecond when there is nothing, so an idle unthreaded server does not spin.
 class lsp::stdio_host
 {
+    /// Only `open` can name it, so only `open` constructs a host.
+    struct passkey
+    {
+        explicit passkey() = default;
+    };
+
 public:
+    /// On POSIX this also ignores SIGPIPE for the whole process, so a client gone mid-write fails the write instead of
+    /// killing the server.
     [[nodiscard]] static cc::unique_ptr<stdio_host> open();
 
+    explicit stdio_host(passkey);
     ~stdio_host();
     stdio_host(stdio_host&&) = delete;
     stdio_host& operator=(stdio_host&&) = delete;
@@ -40,8 +49,6 @@ public:
         bool is_closed = false;
     };
 
-    stdio_host();
-
 private:
     bool impl_pump();
     void impl_write(cc::string_view bytes);
@@ -50,6 +57,8 @@ private:
     cc::unique_ptr<reader> _reader;
     cc::mutex<input> _input;
     int _output_fd = -1;
+    /// Set by the first failed write, after which nothing more is written: the client is gone.
+    bool _is_output_dead = false;
     server* _server = nullptr;
     cc::shared_async<int> _done;
     cc::thread_pump_registration _pump;

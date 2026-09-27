@@ -172,7 +172,7 @@ public:
     template <class Params>
     void request(cc::string_view method, Params const& params);
 
-    /// `window/logMessage`, safe to call from any thread; queued until the next `poll`.
+    /// `window/logMessage`, safe to call from any thread; queued until the next `poll`, which it wakes the loop for.
     void post_log(message_type type, cc::string message);
 
     // state
@@ -287,7 +287,7 @@ void lsp::server::request(cc::string_view method, Params const& params)
     auto& j = w.underlying();
     j.begin_object();
     j.write("jsonrpc", "2.0");
-    j.write("id", cc::format("sgl-{}", _next_request_id++));
+    j.write("id", _next_request_id++);
     j.write("method", method);
     json::put(j, "params", params);
     j.end_object();

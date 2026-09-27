@@ -5,6 +5,7 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/log.hh>
 #include <clean-core/common/macros.hh>
+#include <clean-core/common/time.hh>
 #include <clean-core/string/print.hh>
 #include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/threaded_actor.hh>
@@ -14,7 +15,9 @@
 #include <fcntl.h>
 #include <io.h>
 #else
+#include <errno.h>
 #include <poll.h>
+#include <signal.h>
 #include <time.h>
 #include <unistd.h>
 #endif
@@ -36,7 +39,8 @@ struct reader_state
     cc::atomic<bool> is_stopping = false;
     cc::atomic<bool> has_exited = false;
 #ifdef CC_OS_WINDOWS
-    HANDLE thread = nullptr;
+    /// The reader thread's own handle, null until the thread has made it.
+    cc::atomic<HANDLE> thread = nullptr;
 #endif
 };
 
@@ -58,8 +62,12 @@ struct reader_impl final : cc::threaded_actor_impl<wake>
 #ifdef CC_OS_WINDOWS
         // a blocking ReadFile is only ever interrupted by CancelSynchronousIo, which needs this thread's handle
         if (state->is_threaded)
-            DuplicateHandle(GetCurrentProcess(), GetCurrentThread(), GetCurrentProcess(), &state->thread, 0, FALSE,
-                            DUPLICATE_SAME_ACCESS);
+        {
+            auto h = HANDLE(nullptr);
+            if (DuplicateHandle(GetCurrentProcess(), GetCurrentThread(), GetCurrentProcess(), &h, 0, FALSE,
+                                DUPLICATE_SAME_ACCESS))
+                state->thread.store(h);
+        }
 #endif
     }
 
@@ -79,12 +87,8 @@ struct reader_impl final : cc::threaded_actor_impl<wake>
         }
         if (n == 0)
             return state->is_threaded;
+        // the messages framed before a broken header still reach the server
         auto messages = frames.feed(cc::span<byte const>(buffer, n));
-        if (frames.is_broken())
-        {
-            close();
-            return false;
-        }
         if (!messages.empty())
         {
             state->input->lock(
@@ -94,6 +98,11 @@ struct reader_impl final : cc::threaded_actor_impl<wake>
                         in.messages.push_back(cc::move(m));
                 });
             cc::thread_pump_notify();
+        }
+        if (frames.is_broken())
+        {
+            close();
+            return false;
         }
         return true;
     }
@@ -117,8 +126,7 @@ struct reader_impl final : cc::threaded_actor_impl<wake>
         auto p = pollfd{.fd = 0, .events = POLLIN, .revents = 0};
         if (::poll(&p, 1, 50) <= 0)
             return 0;
-        auto const n = ::read(0, buffer, read_size);
-        return n <= 0 ? -1 : isize(n);
+        return read_posix();
 #endif
     }
 
@@ -127,7 +135,8 @@ struct reader_impl final : cc::threaded_actor_impl<wake>
     {
 #ifdef CC_OS_WINDOWS
         auto const h = GetStdHandle(STD_INPUT_HANDLE);
-        if (GetFileType(h) == FILE_TYPE_PIPE)
+        auto const type = GetFileType(h);
+        if (type == FILE_TYPE_PIPE)
         {
             auto available = DWORD(0);
             if (!PeekNamedPipe(h, nullptr, 0, nullptr, &available, nullptr))
@@ -140,6 +149,9 @@ struct reader_impl final : cc::threaded_actor_impl<wake>
                 return -1;
             return isize(read);
         }
+        // a console is signalled once it holds input, and a ReadFile before that would block
+        if (type == FILE_TYPE_CHAR && WaitForSingleObject(h, 0) != WAIT_OBJECT_0)
+            return 0;
         // a file never blocks for long, so it is read as it is
         auto read = DWORD(0);
         if (!ReadFile(h, buffer, DWORD(read_size), &read, nullptr) || read == 0)
@@ -149,10 +161,22 @@ struct reader_impl final : cc::threaded_actor_impl<wake>
         auto p = pollfd{.fd = 0, .events = POLLIN, .revents = 0};
         if (::poll(&p, 1, 0) <= 0)
             return 0;
-        auto const n = ::read(0, buffer, read_size);
-        return n <= 0 ? -1 : isize(n);
+        return read_posix();
 #endif
     }
+
+#ifndef CC_OS_WINDOWS
+    /// One read of stdin once poll said it is ready: bytes read, 0 when there were none after all, -1 at end of input.
+    [[nodiscard]] isize read_posix()
+    {
+        auto n = ::read(0, buffer, read_size);
+        while (n < 0 && errno == EINTR)
+            n = ::read(0, buffer, read_size);
+        if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
+            return 0;
+        return n <= 0 ? -1 : isize(n);
+    }
+#endif
 };
 } // namespace
 
@@ -162,11 +186,13 @@ struct lsp::stdio_host::reader
     cc::unique_ptr<cc::threaded_actor<wake>> actor;
 };
 
-lsp::stdio_host::stdio_host() = default;
+lsp::stdio_host::stdio_host(passkey)
+{
+}
 
 cc::unique_ptr<lsp::stdio_host> lsp::stdio_host::open()
 {
-    auto host = cc::make_unique<stdio_host>();
+    auto host = cc::make_unique<stdio_host>(passkey());
     cc::flush();
 #ifdef CC_OS_WINDOWS
     // 0, 1 and 2 are stdin, stdout and stderr on every platform
@@ -176,6 +202,8 @@ cc::unique_ptr<lsp::stdio_host> lsp::stdio_host::open()
     _dup2(2, 1);
     SetStdHandle(STD_OUTPUT_HANDLE, GetStdHandle(STD_ERROR_HANDLE));
 #else
+    // the process is the server's, and a client that closed its end must fail a write, not end the process
+    ::signal(SIGPIPE, SIG_IGN);
     host->_output_fd = ::dup(1);
     ::dup2(2, 1);
 #endif
@@ -190,20 +218,24 @@ lsp::stdio_host::~stdio_host()
     _reader->state.is_stopping.store(true);
     _reader->actor->begin_shutdown();
 #ifdef CC_OS_WINDOWS
-    // the thread may be inside ReadFile, which only CancelSynchronousIo interrupts; it may also be just about to enter
-    // it, so the cancel repeats until the thread is seen gone
-    if (_reader->state.is_threaded && _reader->state.thread != nullptr)
+    // The thread may be inside ReadFile, which only CancelSynchronousIo interrupts.
+    // It may also be just about to enter it, or not yet have made its handle, so the cancel repeats until the thread is
+    // seen gone, for a bounded time.
+    if (_reader->state.is_threaded)
     {
-        for (auto i = 0; i < 2000 && !_reader->state.has_exited.load(); ++i)
+        auto const deadline = cc::current_time_steady_secs() + 2.0;
+        while (!_reader->state.has_exited.load() && cc::current_time_steady_secs() < deadline)
         {
-            CancelSynchronousIo(_reader->state.thread);
+            if (auto const h = _reader->state.thread.load(); h != nullptr)
+                CancelSynchronousIo(h);
             Sleep(1);
         }
-        CloseHandle(_reader->state.thread);
     }
 #endif
     _reader->actor->shutdown();
 #ifdef CC_OS_WINDOWS
+    if (auto const h = _reader->state.thread.exchange(nullptr); h != nullptr)
+        CloseHandle(h);
     if (_output_fd >= 0)
         _close(_output_fd);
 #else
@@ -285,16 +317,19 @@ bool lsp::stdio_host::impl_pump()
 
 void lsp::stdio_host::impl_write(cc::string_view bytes)
 {
-    while (!bytes.empty())
+    while (!bytes.empty() && !_is_output_dead)
     {
 #ifdef CC_OS_WINDOWS
         auto const n = _write(_output_fd, bytes.data(), unsigned(bytes.size()));
 #else
         auto const n = ::write(_output_fd, bytes.data(), bytes.size());
+        if (n < 0 && errno == EINTR)
+            continue;
 #endif
         if (n <= 0)
         {
-            CC_LOG_ERROR("writing to stdout failed; the client is gone");
+            CC_LOG_ERROR("writing to stdout failed; the client is gone, and nothing more is written");
+            _is_output_dead = true;
             return;
         }
         bytes.remove_prefix(isize(n));

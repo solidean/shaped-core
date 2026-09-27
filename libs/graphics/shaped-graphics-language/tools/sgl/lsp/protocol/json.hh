@@ -136,7 +136,31 @@ template <class T>
     return text.has_value() ? cc::move(text.value()) : cc::string("null");
 }
 
-// reading scalars; each is false on a missing member or a wrong kind, and leaves `out` alone then
+// reading scalars; each is false on a missing member, a wrong kind or a number that is no integer of the target type,
+// and leaves `out` alone then
+
+namespace impl
+{
+/// A number that is an exact integer within `I`'s range.
+/// A fraction, NaN, an infinity or a value outside the range is false, since converting any of them is undefined.
+template <class I>
+[[nodiscard]] bool read_integral(ref in, I& out)
+{
+    static_assert(std::is_signed_v<I>, "the bounds assume a two's-complement signed type");
+    if (!in.is_number())
+        return false;
+    auto const v = in.as_double();
+    // the range is [-2^(n-1), 2^(n-1)), both exact as doubles; NaN fails the comparison
+    auto const bound = double(u64(1) << (sizeof(I) * 8 - 1));
+    if (!(v >= -bound && v < bound))
+        return false;
+    auto const i = I(v);
+    if (double(i) != v)
+        return false;
+    out = i;
+    return true;
+}
+} // namespace impl
 
 [[nodiscard]] inline bool read(ref in, cc::string& out)
 {
@@ -148,10 +172,12 @@ template <class T>
 
 [[nodiscard]] inline bool read(ref in, i32& out)
 {
-    if (!in.is_number())
-        return false;
-    out = i32(in.as_double());
-    return true;
+    return impl::read_integral(in, out);
+}
+
+[[nodiscard]] inline bool read(ref in, i64& out)
+{
+    return impl::read_integral(in, out);
 }
 
 [[nodiscard]] inline bool read(ref in, bool& out)

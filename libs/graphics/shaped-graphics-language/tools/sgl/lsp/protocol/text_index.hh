@@ -15,7 +15,8 @@
 class lsp::text_index
 {
 public:
-    text_index() = default;
+    /// The index of the empty text.
+    text_index() : text_index(cc::string_view()) {}
     explicit text_index(cc::string_view text);
 
     [[nodiscard]] isize line_count() const { return _line_starts.size(); }

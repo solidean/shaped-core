@@ -15,6 +15,6 @@ rules:
     files: tools/sgl/lsp/protocol/stdio_host.cc
 
   - kind: allow-include
-    value: [<poll.h>, <time.h>, <unistd.h>]
-    reason: the POSIX half of the stdio host, which polls stdin, dups stdout and sleeps a millisecond without threads
+    value: [<errno.h>, <poll.h>, <signal.h>, <time.h>, <unistd.h>]
+    reason: the POSIX half of the stdio host, which polls stdin, dups stdout, retries on EINTR, ignores SIGPIPE and sleeps a millisecond without threads
     files: tools/sgl/lsp/protocol/stdio_host.cc

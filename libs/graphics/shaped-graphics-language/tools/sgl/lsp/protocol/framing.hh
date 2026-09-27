@@ -17,7 +17,8 @@ public:
     /// Appends `bytes`, and returns every body now complete, in order.
     [[nodiscard]] cc::vector<cc::string> feed(cc::span<cc::byte const> bytes);
 
-    /// True once a header could not be read; everything after it is dropped, since the stream has lost its framing.
+    /// True once a header could not be read, or named a header block over 8 KiB or a body over 64 MiB.
+    /// Everything after it is dropped, since the stream has lost its framing; bodies complete before it are returned.
     [[nodiscard]] bool is_broken() const { return _is_broken; }
 
     /// Bytes held that do not yet make a message.

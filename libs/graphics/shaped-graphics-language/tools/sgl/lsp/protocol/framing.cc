@@ -1,6 +1,7 @@
 #include "framing.hh"
 
 #include <clean-core/common/log.hh>
+#include <clean-core/string/char_predicates.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/from_string.hh>
 
@@ -8,21 +9,16 @@ using namespace cc::primitive_defines;
 
 namespace
 {
+/// Beyond either, the peer is not speaking LSP, and holding its bytes would only grow without end.
+constexpr isize max_header_size = 8 * 1024;
+constexpr i64 max_content_length = 64 * 1024 * 1024;
+
 /// `Content-Length` in any case, as HTTP header names are.
 [[nodiscard]] bool is_content_length(cc::string_view name)
 {
-    constexpr auto expected = cc::string_view("content-length");
-    if (name.size() != expected.size())
-        return false;
-    for (auto i = isize(0); i < name.size(); ++i)
-    {
-        auto c = name[i];
-        if (c >= 'A' && c <= 'Z')
-            c = char(c - 'A' + 'a');
-        if (c != expected[i])
-            return false;
-    }
-    return true;
+    constexpr auto expected = cc::string_view("Content-Length");
+    return name.size() == expected.size()
+        && cc::string_view::matching_prefix_of(name, expected, cc::equal_case_insensitive{}).size() == name.size();
 }
 
 /// The body length a header block names, or -1 when it names none or names it badly.
@@ -59,19 +55,36 @@ cc::vector<cc::string> lsp::frame_reader::feed(cc::span<byte const> bytes)
         return out;
     _buffer.append(cc::string_view(reinterpret_cast<char const*>(bytes.data()), bytes.size()));
 
+    auto const lose_framing = [this]
+    {
+        _is_broken = true;
+        _buffer.clear();
+    };
     auto consumed = isize(0);
     while (true)
     {
         auto const rest = cc::string_view(_buffer).subview(consumed);
         auto const header_end = rest.find("\r\n\r\n");
+        if (header_end > max_header_size || (header_end < 0 && rest.size() > max_header_size + 3))
+        {
+            CC_LOG_ERROR("a message header is longer than {} bytes; the stream has lost its framing", max_header_size);
+            lose_framing();
+            return out;
+        }
         if (header_end < 0)
             break;
         auto const length = content_length_of(rest.subview({.offset = 0, .size = header_end}));
         if (length < 0)
         {
             CC_LOG_ERROR("a message header names no valid Content-Length; the stream has lost its framing");
-            _is_broken = true;
-            _buffer.clear();
+            lose_framing();
+            return out;
+        }
+        if (length > max_content_length)
+        {
+            CC_LOG_ERROR("a message's Content-Length {} is over the limit of {}; the stream is dropped", length,
+                         max_content_length);
+            lose_framing();
             return out;
         }
         auto const body_start = header_end + 4;

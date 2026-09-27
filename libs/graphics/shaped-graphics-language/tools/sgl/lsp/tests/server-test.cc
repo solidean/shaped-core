@@ -154,3 +154,128 @@ TEST("lsp server - shutdown then exit is a clean exit, exit alone is not, and lo
     rude.receive(notification("exit"));
     CHECK(rude.exit_code() == 1);
 }
+
+namespace
+{
+/// The one response among `messages` whose id is null; an invalid ref when there is none or several.
+babel::json::ref response_to_null(cc::vector<babel::json::document> const& messages)
+{
+    auto found = babel::json::ref();
+    auto count = 0;
+    for (auto const& m : messages)
+        if (m.root()["id"].is_null() && !m.root().has("method"))
+        {
+            found = m.root();
+            ++count;
+        }
+    return count == 1 ? found : babel::json::ref();
+}
+} // namespace
+
+TEST("lsp server - an id that is no exact integer is refused with a null id, never converted", main_thread)
+{
+    auto s = lsp::server({.name = "test", .version = "1"});
+    initialize(s);
+    (void)outgoing(s);
+
+    for (auto const id : {"1.5", "1e300", "-1e19", "{}", "true"})
+    {
+        s.receive(cc::format(R"({{"jsonrpc":"2.0","id":{},"method":"shutdown"}})", id));
+        auto const out = outgoing(s);
+        REQUIRE(out.size() == 1);
+        CHECK(response_to_null(out)["error"]["code"].as_double() == lsp::error_code::invalid_request);
+    }
+    CHECK(s.exit_code() == 1); // none of them shut the server down
+
+    // a string id and a large exact integer are echoed as they came
+    s.receive(R"({"jsonrpc":"2.0","id":"a\"b","method":"test/nope"})");
+    s.receive(R"({"jsonrpc":"2.0","id":4294967296,"method":"test/nope"})");
+    auto const out = outgoing(s);
+    REQUIRE(out.size() == 2);
+    CHECK(out[0].root()["id"].as_string() == "a\"b");
+    CHECK(out[1].root()["id"].as_double() == 4294967296.0);
+}
+
+TEST("lsp server - a document notification that does not read is dropped with a warning naming it", main_thread)
+{
+    auto s = lsp::server({.name = "test", .version = "1"});
+    initialize(s);
+
+    nx::expect_warning("textDocument/didOpen for file:///a.sgl", nx::exactly(1));
+    s.receive(notification("textDocument/didOpen",
+                           R"({"textDocument":{"uri":"file:///a.sgl","languageId":"sgl","version":1.5,"text":""}})"));
+    CHECK(s.workspace().find("file:///a.sgl") == nullptr);
+
+    nx::expect_warning("textDocument/didClose: params that do not read", nx::exactly(1));
+    s.receive(notification("textDocument/didClose", R"({"textDocument":{}})"));
+
+    // a null range is the whole text, not a change that fails to read
+    s.receive(notification("textDocument/didOpen",
+                           R"({"textDocument":{"uri":"file:///b.sgl","languageId":"sgl","version":1,"text":"old"}})"));
+    s.receive(notification(
+        "textDocument/didChange",
+        R"({"textDocument":{"uri":"file:///b.sgl","version":2},"contentChanges":[{"range":null,"text":"new"}]})"));
+    CHECK(s.workspace().find("file:///b.sgl")->text == "new");
+    CHECK(s.workspace().find("file:///b.sgl")->version == 2);
+}
+
+TEST("lsp server - after shutdown every request is invalid, and a second initialize changes nothing", main_thread)
+{
+    auto s = lsp::server({.name = "test", .version = "1"});
+    s.receive(request(1, "initialize", R"({"capabilities":{},"clientInfo":{"name":"first"}})"));
+    s.receive(request(2, "initialize",
+                      R"({"capabilities":{"general":{"positionEncodings":["utf-8"]}},"clientInfo":{"name":"second"}})"));
+    auto const init = outgoing(s);
+    CHECK(response_to(init, 1)["result"]["capabilities"]["positionEncoding"].as_string() == "utf-16");
+    CHECK(response_to(init, 2)["error"]["code"].as_double() == lsp::error_code::invalid_request);
+    CHECK(s.initialize_params()["clientInfo"]["name"].as_string() == "first");
+    CHECK(s.encoding() == lsp::position_encoding::utf16);
+
+    s.receive(request(3, "shutdown"));
+    s.receive(request(4, "shutdown"));
+    s.receive(request(5, "test/nope"));
+    auto const out = outgoing(s);
+    CHECK(response_to(out, 3)["result"].is_null());
+    CHECK(response_to(out, 4)["error"]["code"].as_double() == lsp::error_code::invalid_request);
+    CHECK(response_to(out, 5)["error"]["code"].as_double() == lsp::error_code::invalid_request);
+
+    s.receive(notification("exit"));
+    CHECK(s.exit_code() == 0);
+}
+
+TEST("lsp server - a message with an id but no method, and a batch, are invalid requests; a response is not", main_thread)
+{
+    auto s = lsp::server({.name = "test", .version = "1"});
+    initialize(s);
+    (void)outgoing(s);
+
+    s.receive(R"({"jsonrpc":"2.0","id":11})");
+    s.receive(R"({"jsonrpc":"2.0","id":12,"method":7})");
+    // responses to requests of ours, which are dropped
+    s.receive(R"({"jsonrpc":"2.0","id":13,"result":null})");
+    s.receive(R"({"jsonrpc":"2.0","id":14,"error":{"code":1,"message":"x"}})");
+    auto const out = outgoing(s);
+    REQUIRE(out.size() == 2);
+    CHECK(response_to(out, 11)["error"]["code"].as_double() == lsp::error_code::invalid_request);
+    CHECK(response_to(out, 12)["error"]["code"].as_double() == lsp::error_code::invalid_request);
+
+    s.receive(R"([{"jsonrpc":"2.0","id":15,"method":"shutdown"}])");
+    auto const batch = outgoing(s);
+    REQUIRE(batch.size() == 1);
+    CHECK(response_to_null(batch)["error"]["code"].as_double() == lsp::error_code::invalid_request);
+    CHECK(s.exit_code() == 1);
+}
+
+TEST("lsp server - a request of the server's own carries a plain integer id", main_thread)
+{
+    auto s = lsp::server({.name = "test", .version = "1"});
+    initialize(s);
+    (void)outgoing(s);
+
+    s.request("workspace/inlayHint/refresh", lsp::json::null_t());
+    s.request("workspace/inlayHint/refresh", lsp::json::null_t());
+    auto const out = outgoing(s);
+    REQUIRE(out.size() == 2);
+    CHECK(out[0].root()["id"].is_number());
+    CHECK(out[1].root()["id"].as_double() == out[0].root()["id"].as_double() + 1);
+}

@@ -1,7 +1,10 @@
 #include "documents.hh"
 
 #include <clean-core/common/log.hh>
+#include <clean-core/common/macros.hh>
+#include <clean-core/string/char_predicates.hh>
 #include <clean-core/string/format.hh>
+#include <clean-core/string/uri.hh>
 
 using namespace cc::primitive_defines;
 
@@ -81,41 +84,43 @@ void lsp::workspace::close(cc::string_view uri)
     _current._documents.erase(uri);
 }
 
-namespace
-{
-[[nodiscard]] int hex_value(char c)
-{
-    if (c >= '0' && c <= '9')
-        return c - '0';
-    if (c >= 'a' && c <= 'f')
-        return c - 'a' + 10;
-    if (c >= 'A' && c <= 'F')
-        return c - 'A' + 10;
-    return -1;
-}
-} // namespace
-
 cc::optional<cc::string> lsp::path_of_uri(cc::string_view uri)
 {
-    constexpr auto scheme = cc::string_view("file://");
-    if (!uri.starts_with(scheme))
+    auto const parsed = cc::uri_view::parse(uri);
+    if (!parsed.has_value())
         return cc::nullopt;
-    uri.remove_prefix(scheme.size());
+    constexpr auto file = cc::string_view("file");
+    auto const scheme = parsed.value().scheme();
+    if (scheme.size() != file.size()
+        || cc::string_view::matching_prefix_of(scheme, file, cc::equal_case_insensitive{}).size() != file.size())
+        return cc::nullopt;
 
-    auto path = cc::string();
-    for (auto i = isize(0); i < uri.size(); ++i)
+    auto path = cc::percent_decode(parsed.value().path());
+    auto host = cc::percent_decode(parsed.value().host());
+    if (!path.has_value() || !host.has_value())
+        return cc::nullopt;
+
+    if (!host.value().empty())
     {
-        if (uri[i] == '%' && i + 2 < uri.size() && hex_value(uri[i + 1]) >= 0 && hex_value(uri[i + 2]) >= 0)
-        {
-            path.push_back(char(hex_value(uri[i + 1]) * 16 + hex_value(uri[i + 2])));
-            i += 2;
-        }
-        else
-            path.push_back(uri[i]);
+        // `file://server/share/x` is a UNC path, as VS Code reads it
+#ifdef CC_OS_WINDOWS
+        auto unc = cc::string("\\\\") + host.value() + path.value();
+        for (auto& c : unc)
+            if (c == '/')
+                c = '\\';
+        return unc;
+#else
+        return cc::string("//") + host.value() + path.value();
+#endif
     }
-    // `/c:/x` is the Windows path `c:/x`
-    if (path.size() >= 3 && path[0] == '/' && path[2] == ':')
-        path = path.substring(1);
+
+#ifdef CC_OS_WINDOWS
+    // `/c:/x` is the drive path `c:/x`, when the first segment is exactly a letter and a colon
+    auto const& p = path.value();
+    if (p.size() >= 3 && p[0] == '/' && (cc::is_lower(p[1]) || cc::is_upper(p[1])) && p[2] == ':'
+        && (p.size() == 3 || p[3] == '/'))
+        return p.substring(1);
+#endif
     return path;
 }
 
