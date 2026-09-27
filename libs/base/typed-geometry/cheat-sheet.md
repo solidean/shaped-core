@@ -341,6 +341,35 @@ tg::pi<T>;                                // inline constexpr T  (scalar/constan
 // exponent is floor(log2(|x|)). Porting frexp-shaped code means adjusting the exponent by one.
 ```
 
+## fixed_int (wide two's-complement integers)
+
+```cpp
+#include <typed-geometry/scalar/fixed_int/fixed_int.hh>    // the types and their operators
+#include <typed-geometry/scalar/fixed_int/fixed_arith.hh>  // + tg::add/sub/mul<R>, checked_*, the division family
+tg::fi32; tg::fi64; tg::fi128; tg::fi192; tg::fi256;       // tg::fixed_int<Bits>: Bits is 32 or a multiple of 64
+tg::fu32 … tg::fu256;                                      // tg::fixed_uint<Bits>
+x.limbs[i];                                                // u64, least significant first (fi32/fu32: one u32)
+a + b; a * b; a << n; a >> n; a / b; a <=> b;              // same type both sides; wrap modulo 2^Bits
+fi128 x = 5; x + 1;                                        // a builtin converts implicitly when every value fits
+fi192(x); x.widened<fi192>();                              // widen: explicit, lossless
+x.truncated_to<fi64>();                                    // narrow: the low bits
+x.shifted_left<fi192>(n);                                  // widen, then shift
+fu128(x);                                                  // same width, other signedness: reinterpret
+tg::mul<fi192>(a, b);                                      // fi128 x fi128 -> fi192: the exact result into R
+tg::add<fi192>(a, b); tg::sub<R>(a, b);                    //   R is a claim: SC_CHECK_WIDE_ARITH checks it
+tg::checked_mul<R>(a, b);                                  // -> cc::optional<R>; none when it does not fit
+tg::div_trunc / mod_trunc / div_floor / mod_floor / div_ceil(a, b);  // same width; operators are trunc
+tg::div_mod_trunc(a, b); tg::div_mod_floor(a, b);          // -> {quotient, remainder} from one division
+tg::div_floor<fi32>(x, w); tg::div_ceil<fi32>(x, w);       // quotient known to fit fi32: f64 estimate + exact fix
+tg::div_floor_ceil<fi32>(x, w);                            // -> {floor, ceil}
+x.to_f64(); x.to_f32(); fi128(2.5);                        // correctly rounded out; truncating in
+u.count_leading_zeroes(); u.popcount(); u.bit_width();     // fixed_uint only; s.magnitude_bit_width() for signed
+x.to_string(); cc::format("{:'x}", x);                     // decimal; the full integer format spec
+// fi192 r = a * b over fi128 does not compile: the product would wrap at 128 bits. Write tg::mul<fi192>(a, b).
+// A shift amount must be in [0, Bits); min() / -1 wraps to min(); division by zero asserts.
+// vec<3, fi64> exists, and its dot product is computed (and wraps) in fi64.
+```
+
 ## Umbrellas
 
 ```cpp

@@ -41,6 +41,8 @@ One-liner per library:
   It takes `babel-data` rather than all of babel for a reason of its own: every `*-test` binary links nexus, so a nexus dependency is a repo-wide tax and only externals-free libraries belong there.
 * **`libs/base/typed-geometry`** — strongly-typed C++23 math & geometry.
   The `scalar_traits` seam, `vec`/`pos`/`comp`/`bivec`/`mat`/`quat` and the first `geometry/` primitives exist.
+  So does `tg::fixed_int<Bits>` (`fi128`, `fi192`, …): wrapping two's-complement integers for exact predicates, with `tg::mul<fi192>(a, b)`-style arithmetic across widths.
+  Up to 256 bits that arithmetic is loop-free, from a committed generator.
   Everything above them — transforms, queries, curves, symbolic, mesh — is planned.
   Namespace `tg`. Depends on clean-core.
   Early stage — see its [docs/structure.md](libs/base/typed-geometry/docs/structure.md) roadmap.

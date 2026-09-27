@@ -586,16 +586,19 @@ def main() -> int:
     files = generate(args.max_bits, find_clang_format(args.clang_format))
     stale = sorted(p for p in GENERATED.glob("w*.hh") if p not in files)
 
+    # Line endings are the checkout's business, so a file differs only in its content.
+    differs = [p for p, text in files.items() if not p.exists() or p.read_bytes().decode("utf-8").replace("\r\n", "\n") != text]
+
     if args.write:
+        # Only what changed is written, so a no-op --fix touches no file and triggers no rebuild.
         GENERATED.mkdir(parents=True, exist_ok=True)
-        for path, text in files.items():
-            path.write_bytes(text.encode("utf-8"))
+        for path in differs:
+            path.write_bytes(files[path].encode("utf-8"))
         for path in stale:
             path.unlink()
-        print(f"gen-fixed-int: wrote {len(files)} files")
+        print(f"gen-fixed-int: wrote {len(differs)} of {len(files)} files, removed {len(stale)}")
         return 0
 
-    differs = [p for p, text in files.items() if not p.exists() or p.read_bytes().decode("utf-8").replace("\r\n", "\n") != text]
     differs += stale
     for p in differs:
         print(f"gen-fixed-int: {p.relative_to(REPO).as_posix()} differs from the generator's output")
