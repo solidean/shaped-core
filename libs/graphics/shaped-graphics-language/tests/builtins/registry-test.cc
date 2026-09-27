@@ -10,8 +10,8 @@ namespace builtins = sgl::builtins;
 
 namespace
 {
-/// The fractional part, which the library does not have: what this file adds to a registry of its own.
-void fract(cc::span<scalar const> in, cc::vector<scalar>& out)
+/// A sawtooth of period 1, which the library does not have: what this file adds to a registry of its own.
+void sawtooth(cc::span<scalar const> in, cc::vector<scalar>& out)
 {
     auto const x = in[0].as_float();
     out.push_back(scalar::of(x - f32(i32(x))));
@@ -76,7 +76,8 @@ TEST("sgl builtins - what means nothing is not there: a position plus a position
     {
         auto const is_pair = [&](cc::string_view a, cc::string_view b)
         { return f.parameters.size() == 2 && f.parameters[0] == a && f.parameters[1] == b; };
-        if (is_pair("pos3", "pos3"))
+        // an operator, that is: `distance(a, b)` of two positions is a length, and means something
+        if (is_pair("pos3", "pos3") && f.signature.contains("@operator"))
             CHECK(f.result == vec3);
         CHECK(!(is_pair("vec3", "vec3") && f.name.starts_with("multiply")));
     }
@@ -84,24 +85,25 @@ TEST("sgl builtins - what means nothing is not there: a position plus a position
 
 TEST("sgl builtins - one record is all a new builtin takes: checked, run and written for every target")
 {
-    // A registry of the test's own: everything the library has, and `fract`.
+    // A registry of the test's own: everything the library has, and `sawtooth`.
     auto r = builtins::registry();
     builtins::register_builtins(r);
     r.add(builtins::function_record{
-        .signature = "@pure fun fract(x: float) -> float",
+        .signature = "@pure fun sawtooth(x: float) -> float",
         .doc = "/// What is left of `x` behind the point.",
-        .evaluate = fract,
-        .write = {.hlsl = "frac"},
+        .evaluate = sawtooth,
+        .write = {.hlsl = "frac", .wgsl = "fract", .msl = "fract"},
     });
     r.finalize();
-    CHECK(r.prelude_text().ends_with("/// What is left of `x` behind the point.\n@builtin @pure fun fract(x: float) -> "
+    CHECK(r.prelude_text().ends_with("/// What is left of `x` behind the point.\n@builtin @pure fun sawtooth(x: float) "
+                                     "-> "
                                      "float\n"));
 
     auto const prelude = sgl::parse(r.prelude_text());
     auto const prelude_ast = sgl::ast::build(prelude);
     auto const user = sgl::parse(cc::string(frag_edges)
                                  + "@pixel fun main_ps(p: frag) -> target:\n"
-                                   "    let x = fract(p.a * 10.0)\n"
+                                   "    let x = sawtooth(p.a * 10.0)\n"
                                    "    return {\n"
                                    "        color = float4(x, x, x, 1.0)\n"
                                    "    }\n");

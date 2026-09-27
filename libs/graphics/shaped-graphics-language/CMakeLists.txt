@@ -33,7 +33,9 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/ast/dump.cc
 
     src/shaped-graphics-language/builtins/register.cc
+    src/shaped-graphics-language/builtins/impl/soft_math.cc
     src/shaped-graphics-language/builtins/register_bit_math.cc
+    src/shaped-graphics-language/builtins/register_math.cc
     src/shaped-graphics-language/builtins/register_conversions.cc
     src/shaped-graphics-language/builtins/register_scalar_math.cc
     src/shaped-graphics-language/builtins/register_textures.cc
@@ -194,6 +196,7 @@ target_sources(shaped-graphics-language
     src/shaped-graphics-language/ast/impl/builder.hh
 
     src/shaped-graphics-language/builtins/ids.hh
+    src/shaped-graphics-language/builtins/impl/soft_math.hh
     src/shaped-graphics-language/builtins/register.hh
     src/shaped-graphics-language/builtins/registry.hh
 

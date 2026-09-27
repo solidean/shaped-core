@@ -1,0 +1,77 @@
+// the maths builtins; a transcendental is compared within a tolerance, since no two libraries agree on its last bit
+
+fun close(a: float, b: float) => nearly_equal(a, b, within = 0.000001)
+
+test sin(0.0) == 0.0 and cos(0.0) == 1.0
+test close(sin(1.5707963), 1.0) and close(cos(3.1415927), -1.0)
+test close(tan(0.7853982), 1.0)
+test close(atan2(1.0, 1.0), 0.7853982) and close(atan2(-1.0, -1.0), -2.3561945)
+test close(asin(1.0), 1.5707963) and close(acos(1.0), 0.0)
+test close(exp(1.0), 2.7182817) and close(log(2.7182817), 1.0)
+test exp2(10.0) == 1024.0 and log2(8.0) == 3.0
+test sqrt(9.0) == 3.0 and inverse_sqrt(4.0) == 0.5
+test close(pow(2.0, 0.5), 1.4142135)
+test close(tanh(0.5), 0.46211716)
+
+// rounding: `round` is ties to even, `fract` is what `floor` leaves, and both keep the sign rules of every target
+test floor(-1.5) == -2.0 and ceil(-1.5) == -1.0 and trunc(-1.5) == -1.0
+test round(0.5) == 0.0 and round(1.5) == 2.0 and round(-2.5) == -2.0
+test fract(-0.25) == 0.75
+test sign(-3.0) == -1.0 and sign(0.0) == 0.0
+
+test:
+    let v = floor(float3(1.5, -1.5, 2.0))
+    v.x == 1.0 and v.y == -2.0 and v.z == 2.0
+
+test step(0.5, 0.25) == 0.0 and step(0.5, 0.5) == 1.0
+test smoothstep(0.0, 1.0, 0.5) == 0.5
+
+// geometry
+test:
+    let a = cross(vec3(1.0, 0.0, 0.0), vec3(0.0, 1.0, 0.0))
+    a.z == 1.0
+
+test distance(pos3(0.0, 0.0, 0.0), pos3(3.0, 4.0, 0.0)) == 5.0
+
+test:
+    let r = reflect(vec3(1.0, -1.0, 0.0), vec3(0.0, 1.0, 0.0))
+    r.x == 1.0 and r.y == 1.0
+
+// integer bits: a count, the first set bit from either end, and all ones where there is none
+test count_bits(0xff) == 8
+test first_bit_high(0x10) == 4 and first_bit_low(0x10) == 4
+test first_bit_high(0) == -1 and first_bit_high(-1) == -1
+test:
+    let u: uint = 0
+    first_bit_low(u) == 0xffff'ffff
+test reverse_bits(1) == -0x8000'0000
+
+// a float's bits, read and written back
+test 1.0.bits == 0x3f80'0000
+test float.from_bits(0x3f80'0000) == 1.0
+test int.from_bits(0xffff'ffff) == -1
+
+// packing
+test pack_unorm4x8(float4(1.0, 0.0, 0.5, 1.0)) == 0xff80'00ff
+test:
+    let c = unpack_unorm4x8(0xff80'00ff)
+    c.x == 1.0 and c.y == 0.0 and c.w == 1.0
+test pack_half2x16(float2(1.0, -2.0)) == 0xc000'3c00
+test:
+    let h = unpack_half2x16(0xc000'3c00)
+    h.x == 1.0 and h.y == -2.0
+
+struct pixel_input:
+    @position position: hpos4
+
+@pixel struct target:
+    color: float4
+
+@pixel fun maths_ps(p: pixel_input) -> target:
+    let x = p.position.x
+    let wave = sin(x * 0.1) * cos(x * 0.05) + atan2(p.position.y, x)
+    let edge = abs(ddx(x)) + abs(ddy(x))
+    let bits = count_bits(x as int) + (first_bit_high(x as uint) as int) + reverse_bits(x as int)
+    let packed = pack_unorm4x8(float4(fract(wave), round(x), sign(wave), step(0.5, edge)))
+    let mixed = float.from_bits(x.bits) + pow(2.0, 0.5) + smoothstep(0.0, 1.0, x)
+    return { color = float4(wave, edge, (bits + int.from_bits(packed)) as float, mixed) }

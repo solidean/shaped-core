@@ -20,7 +20,7 @@ A record is for what SGL cannot say: an opaque type, or a function some target s
 
 ## A function
 
-Say `fract`, the fractional part of a float, which HLSL calls `frac`.
+Say `fract`, the fractional part of a float, which HLSL calls `frac`; this is how the prelude's own `fract` was added.
 It goes into the topic it belongs to, here `register_scalar_math` or the componentwise family of `register_vector_math`.
 
 ```cpp
@@ -83,5 +83,5 @@ Two things keep the two from drifting apart:
 * the `sgl-prelude` step of `uv run dev.py check`, which builds the `sgl` tool and runs `sgl prelude --check` on the file, and `--write` under `--fix`;
 * the test `sgl driver - the prelude is the generated builtins and the hand-written core`, which compares the same two texts without the tool.
 
-The test `sgl builtins - one record is all a new builtin takes` adds `fract` to a registry of its own.
+The test `sgl builtins - one record is all a new builtin takes` adds `sawtooth`, a `fract` under another name, to a registry of its own.
 It checks that the record alone gets it checked, run and written for every target, so this page stays true.

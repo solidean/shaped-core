@@ -393,6 +393,213 @@
 @builtin @pure @operator(">>") fun shift_right_uint4(a: uint4, b: uint4) -> uint4
 @builtin @pure @operator("~") fun bit_not_uint4(x: uint4) -> uint4
 
+// the maths of float and its plain vectors, componentwise; `round` is ties to even everywhere,
+// and a value WGSL leaves indeterminate - pow of a negative base, asin of 2 - has no behaviour
+@builtin @pure fun sin(x: float) -> float
+@builtin @pure fun cos(x: float) -> float
+@builtin @pure fun tan(x: float) -> float
+@builtin @pure fun asin(x: float) -> float
+@builtin @pure fun acos(x: float) -> float
+@builtin @pure fun atan(x: float) -> float
+@builtin @pure fun sinh(x: float) -> float
+@builtin @pure fun cosh(x: float) -> float
+@builtin @pure fun tanh(x: float) -> float
+@builtin @pure fun exp(x: float) -> float
+@builtin @pure fun exp2(x: float) -> float
+@builtin @pure fun log(x: float) -> float
+@builtin @pure fun log2(x: float) -> float
+@builtin @pure fun sqrt(x: float) -> float
+@builtin @pure fun inverse_sqrt(x: float) -> float
+@builtin @pure fun floor(x: float) -> float
+@builtin @pure fun ceil(x: float) -> float
+@builtin @pure fun trunc(x: float) -> float
+@builtin @pure fun round(x: float) -> float
+@builtin @pure fun fract(x: float) -> float
+/// -1, 0 or 1, by the sign of each component.
+@builtin @pure fun sign(x: float) -> float
+/// The angle of (x, y), in -pi to pi; `y` comes first, as in every target.
+@builtin @pure fun atan2(y: float, x: float) -> float
+@builtin @pure fun pow(x: float, y: float) -> float
+/// 0 where `x` is below `edge`, and 1 from it on.
+@builtin @pure fun step(edge: float, x: float) -> float
+/// 0 up to `low`, 1 from `high` on, and a smooth Hermite curve between.
+@builtin @pure fun smoothstep(low: float, high: float, x: float) -> float
+@builtin @pure fun sin(x: float2) -> float2
+@builtin @pure fun cos(x: float2) -> float2
+@builtin @pure fun tan(x: float2) -> float2
+@builtin @pure fun asin(x: float2) -> float2
+@builtin @pure fun acos(x: float2) -> float2
+@builtin @pure fun atan(x: float2) -> float2
+@builtin @pure fun sinh(x: float2) -> float2
+@builtin @pure fun cosh(x: float2) -> float2
+@builtin @pure fun tanh(x: float2) -> float2
+@builtin @pure fun exp(x: float2) -> float2
+@builtin @pure fun exp2(x: float2) -> float2
+@builtin @pure fun log(x: float2) -> float2
+@builtin @pure fun log2(x: float2) -> float2
+@builtin @pure fun sqrt(x: float2) -> float2
+@builtin @pure fun inverse_sqrt(x: float2) -> float2
+@builtin @pure fun floor(x: float2) -> float2
+@builtin @pure fun ceil(x: float2) -> float2
+@builtin @pure fun trunc(x: float2) -> float2
+@builtin @pure fun round(x: float2) -> float2
+@builtin @pure fun fract(x: float2) -> float2
+/// -1, 0 or 1, by the sign of each component.
+@builtin @pure fun sign(x: float2) -> float2
+/// The angle of (x, y), in -pi to pi; `y` comes first, as in every target.
+@builtin @pure fun atan2(y: float2, x: float2) -> float2
+@builtin @pure fun pow(x: float2, y: float2) -> float2
+/// 0 where `x` is below `edge`, and 1 from it on.
+@builtin @pure fun step(edge: float2, x: float2) -> float2
+/// 0 up to `low`, 1 from `high` on, and a smooth Hermite curve between.
+@builtin @pure fun smoothstep(low: float2, high: float2, x: float2) -> float2
+@builtin @pure fun sin(x: float3) -> float3
+@builtin @pure fun cos(x: float3) -> float3
+@builtin @pure fun tan(x: float3) -> float3
+@builtin @pure fun asin(x: float3) -> float3
+@builtin @pure fun acos(x: float3) -> float3
+@builtin @pure fun atan(x: float3) -> float3
+@builtin @pure fun sinh(x: float3) -> float3
+@builtin @pure fun cosh(x: float3) -> float3
+@builtin @pure fun tanh(x: float3) -> float3
+@builtin @pure fun exp(x: float3) -> float3
+@builtin @pure fun exp2(x: float3) -> float3
+@builtin @pure fun log(x: float3) -> float3
+@builtin @pure fun log2(x: float3) -> float3
+@builtin @pure fun sqrt(x: float3) -> float3
+@builtin @pure fun inverse_sqrt(x: float3) -> float3
+@builtin @pure fun floor(x: float3) -> float3
+@builtin @pure fun ceil(x: float3) -> float3
+@builtin @pure fun trunc(x: float3) -> float3
+@builtin @pure fun round(x: float3) -> float3
+@builtin @pure fun fract(x: float3) -> float3
+/// -1, 0 or 1, by the sign of each component.
+@builtin @pure fun sign(x: float3) -> float3
+/// The angle of (x, y), in -pi to pi; `y` comes first, as in every target.
+@builtin @pure fun atan2(y: float3, x: float3) -> float3
+@builtin @pure fun pow(x: float3, y: float3) -> float3
+/// 0 where `x` is below `edge`, and 1 from it on.
+@builtin @pure fun step(edge: float3, x: float3) -> float3
+/// 0 up to `low`, 1 from `high` on, and a smooth Hermite curve between.
+@builtin @pure fun smoothstep(low: float3, high: float3, x: float3) -> float3
+@builtin @pure fun sin(x: float4) -> float4
+@builtin @pure fun cos(x: float4) -> float4
+@builtin @pure fun tan(x: float4) -> float4
+@builtin @pure fun asin(x: float4) -> float4
+@builtin @pure fun acos(x: float4) -> float4
+@builtin @pure fun atan(x: float4) -> float4
+@builtin @pure fun sinh(x: float4) -> float4
+@builtin @pure fun cosh(x: float4) -> float4
+@builtin @pure fun tanh(x: float4) -> float4
+@builtin @pure fun exp(x: float4) -> float4
+@builtin @pure fun exp2(x: float4) -> float4
+@builtin @pure fun log(x: float4) -> float4
+@builtin @pure fun log2(x: float4) -> float4
+@builtin @pure fun sqrt(x: float4) -> float4
+@builtin @pure fun inverse_sqrt(x: float4) -> float4
+@builtin @pure fun floor(x: float4) -> float4
+@builtin @pure fun ceil(x: float4) -> float4
+@builtin @pure fun trunc(x: float4) -> float4
+@builtin @pure fun round(x: float4) -> float4
+@builtin @pure fun fract(x: float4) -> float4
+/// -1, 0 or 1, by the sign of each component.
+@builtin @pure fun sign(x: float4) -> float4
+/// The angle of (x, y), in -pi to pi; `y` comes first, as in every target.
+@builtin @pure fun atan2(y: float4, x: float4) -> float4
+@builtin @pure fun pow(x: float4, y: float4) -> float4
+/// 0 where `x` is below `edge`, and 1 from it on.
+@builtin @pure fun step(edge: float4, x: float4) -> float4
+/// 0 up to `low`, 1 from `high` on, and a smooth Hermite curve between.
+@builtin @pure fun smoothstep(low: float4, high: float4, x: float4) -> float4
+
+// derivatives across the 2x2 quad of pixels, which only a pixel stage has;
+// a run of one invocation has no neighbours, and reads 0
+@builtin @pure @stages(.pixel) fun ddx(x: float) -> float
+@builtin @pure @stages(.pixel) fun ddy(x: float) -> float
+@builtin @pure @stages(.pixel) fun ddx(x: float2) -> float2
+@builtin @pure @stages(.pixel) fun ddy(x: float2) -> float2
+@builtin @pure @stages(.pixel) fun ddx(x: float3) -> float3
+@builtin @pure @stages(.pixel) fun ddy(x: float3) -> float3
+@builtin @pure @stages(.pixel) fun ddx(x: float4) -> float4
+@builtin @pure @stages(.pixel) fun ddy(x: float4) -> float4
+
+// geometry
+@builtin @pure fun cross(a: vec3, b: vec3) -> vec3
+@builtin @pure fun cross(a: float3, b: float3) -> float3
+@builtin @pure fun distance(a: pos3, b: pos3) -> float
+@builtin @pure fun distance(a: float2, b: float2) -> float
+@builtin @pure fun distance(a: float3, b: float3) -> float
+@builtin @pure fun distance(a: float4, b: float4) -> float
+/// `v` mirrored at the plane whose unit normal is `n`.
+@builtin @pure fun reflect(v: vec3, n: vec3) -> vec3
+/// `v` bent through a surface of unit normal `n` by the ratio of indices `eta`; zero where it reflects entirely.
+@builtin @pure fun refract(v: vec3, n: vec3, eta: float) -> vec3
+
+// integer bits, componentwise; `first_bit_*` gives all ones - -1 for an int - where there is no bit
+@builtin @pure fun count_bits(x: int) -> int
+/// The highest set bit of a uint; of an int, the highest bit that differs from its sign.
+@builtin @pure fun first_bit_high(x: int) -> int
+@builtin @pure fun first_bit_low(x: int) -> int
+@builtin @pure fun reverse_bits(x: int) -> int
+@builtin @pure fun count_bits(x: int2) -> int2
+/// The highest set bit of a uint; of an int, the highest bit that differs from its sign.
+@builtin @pure fun first_bit_high(x: int2) -> int2
+@builtin @pure fun first_bit_low(x: int2) -> int2
+@builtin @pure fun reverse_bits(x: int2) -> int2
+@builtin @pure fun count_bits(x: int3) -> int3
+/// The highest set bit of a uint; of an int, the highest bit that differs from its sign.
+@builtin @pure fun first_bit_high(x: int3) -> int3
+@builtin @pure fun first_bit_low(x: int3) -> int3
+@builtin @pure fun reverse_bits(x: int3) -> int3
+@builtin @pure fun count_bits(x: int4) -> int4
+/// The highest set bit of a uint; of an int, the highest bit that differs from its sign.
+@builtin @pure fun first_bit_high(x: int4) -> int4
+@builtin @pure fun first_bit_low(x: int4) -> int4
+@builtin @pure fun reverse_bits(x: int4) -> int4
+@builtin @pure fun count_bits(x: uint) -> uint
+/// The highest set bit of a uint; of an int, the highest bit that differs from its sign.
+@builtin @pure fun first_bit_high(x: uint) -> uint
+@builtin @pure fun first_bit_low(x: uint) -> uint
+@builtin @pure fun reverse_bits(x: uint) -> uint
+@builtin @pure fun count_bits(x: uint2) -> uint2
+/// The highest set bit of a uint; of an int, the highest bit that differs from its sign.
+@builtin @pure fun first_bit_high(x: uint2) -> uint2
+@builtin @pure fun first_bit_low(x: uint2) -> uint2
+@builtin @pure fun reverse_bits(x: uint2) -> uint2
+@builtin @pure fun count_bits(x: uint3) -> uint3
+/// The highest set bit of a uint; of an int, the highest bit that differs from its sign.
+@builtin @pure fun first_bit_high(x: uint3) -> uint3
+@builtin @pure fun first_bit_low(x: uint3) -> uint3
+@builtin @pure fun reverse_bits(x: uint3) -> uint3
+@builtin @pure fun count_bits(x: uint4) -> uint4
+/// The highest set bit of a uint; of an int, the highest bit that differs from its sign.
+@builtin @pure fun first_bit_high(x: uint4) -> uint4
+@builtin @pure fun first_bit_low(x: uint4) -> uint4
+@builtin @pure fun reverse_bits(x: uint4) -> uint4
+
+// the bits of a float, read and written; `x.bits` and `float.from_bits(u)` in core.sgl are how a
+// program spells them, and `as` stays a numeric conversion
+@builtin @pure fun reinterpret_as_uint(x: float) -> uint
+@builtin @pure fun reinterpret_as_uint(x: float2) -> uint2
+@builtin @pure fun reinterpret_as_uint(x: float3) -> uint3
+@builtin @pure fun reinterpret_as_uint(x: float4) -> uint4
+@builtin @pure fun reinterpret_as_float(x: uint) -> float
+@builtin @pure fun reinterpret_as_float(x: uint2) -> float2
+@builtin @pure fun reinterpret_as_float(x: uint3) -> float3
+@builtin @pure fun reinterpret_as_float(x: uint4) -> float4
+@builtin @pure fun reinterpret_as_int(x: uint) -> int
+@builtin @pure fun reinterpret_as_int(x: uint2) -> int2
+@builtin @pure fun reinterpret_as_int(x: uint3) -> int3
+@builtin @pure fun reinterpret_as_int(x: uint4) -> int4
+
+// packing into a uint and back: bytes rounded to nearest, and halves rounded to even
+@builtin @pure fun pack_unorm4x8(v: float4) -> uint
+@builtin @pure fun unpack_unorm4x8(u: uint) -> float4
+@builtin @pure fun pack_snorm4x8(v: float4) -> uint
+@builtin @pure fun unpack_snorm4x8(u: uint) -> float4
+@builtin @pure fun pack_half2x16(v: float2) -> uint
+@builtin @pure fun unpack_half2x16(u: uint) -> float2
+
 // Textures and images, called as methods: `tex.sample(uv, smp)` is `sample(tex, uv, smp)`.
 // A texture samples and loads, an image loads where the shader may read it and stores where it may write it.
 // A sample takes its level from derivatives, or from a `level` named at the call.

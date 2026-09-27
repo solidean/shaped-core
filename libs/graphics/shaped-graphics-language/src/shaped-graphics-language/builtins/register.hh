@@ -25,6 +25,8 @@ void register_conversions(registry& r);
 void register_textures(registry& r);
 /// `&`, `|`, `^`, `~`, `<<` and `>>` of `int`, `uint` and their vectors.
 void register_bit_math(registry& r);
+/// Transcendentals, rounding, derivatives, geometry, integer bit functions, packing and reinterpreting bits.
+void register_math(registry& r);
 } // namespace sgl::builtins
 
 /// What the topic files share.

@@ -21,6 +21,10 @@ A listing here is the dump of a flat tree, shortened: a label is `$name`, and a 
   A float `%` is `a - b * trunc(a / b)`, with the sign of `a` the same way.
 * **EVAL-86** `&`, `|`, `^` and `~` work on the 32 bits of an `int` or a `uint`, componentwise over their vectors.
   A shift uses the low five bits of its count, `x << 33` of a count computed as 33 is `x << 1`, and `>>` is arithmetic for an `int` and logical for a `uint`.
+* **EVAL-87** A maths builtin has no value where WGSL leaves its result indeterminate, and a run that reaches one is EVAL-85's `program-error`.
+  That is `pow` of a negative base or of zero to a power that is not positive, `asin` and `acos` outside -1 to 1, and `smoothstep` whose low edge is not below its high one.
+* **EVAL-88** A transcendental builtin is computed to within a few units in the last place of a `float`, and no closer ([why](why/evaluation.md#eval-88)).
+  `round` is ties to even, `floor`, `ceil`, `trunc` and `fract` are exact, and a derivative in a run of one invocation is 0.
 * **EVAL-84** An integer `/` or `%` by zero, and the most negative `int` divided by `-1`, have no value: a run that reaches one has no behaviour past it ([why](why/evaluation.md#eval-84)).
 * **EVAL-7** A struct value is one value per field, in field order.
 * **EVAL-64** An enum value is the `int` value of one of its type's cases, and `==` and `!=` over two of them compare those `int`s.

@@ -82,3 +82,10 @@ WGSL defines an integer division by zero, and HLSL, SPIR-V and MSL leave it to t
 Defining it everywhere would cost a compare and a select on every division those three write, for a value no correct shader produces.
 A shader is not where performance is given up for nothing, so the value is left undefined, and the machine reports the run instead of inventing one.
 A test that reaches it fails loudly, which is the check a correct program needs; a debug build checking live shaders is the [shader-logging](../../incubator/shader-logging.md) incubator's to add.
+
+## EVAL-88
+
+No two libraries agree on the last bit of `sin`, and no GPU promises to match any of them, so exactness here would be a promise nothing keeps.
+The machine computes each in plain f64 arithmetic of its own rather than with the host's library, so that every host meets the same bits.
+A test's verdict and an editor's marks are compared across machines.
+A test compares a transcendental within a tolerance, which `nearly_equal` in the prelude spells.

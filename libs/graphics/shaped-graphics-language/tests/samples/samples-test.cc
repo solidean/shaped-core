@@ -164,7 +164,9 @@ TEST("sgl samples - the AST pass is total: every truncation of a sample builds, 
     {
         auto const source = read_sample(name);
         // A prime stride cuts through every kind of token over the length of a file.
-        for (auto length = isize(0); length < source.size(); length += 13)
+        // Each length parses the whole prefix, so a file as long as the generated prelude takes a coarser one by default.
+        auto const stride = nx::is_thorough() || source.size() < 8'000 ? 13 : 47;
+        for (auto length = isize(0); length < source.size(); length += stride)
         {
             auto const file = sgl::parse(cc::string(cc::string_view(source).subview({.offset = 0, .size = length})));
             auto const ast = sgl::ast::build(file);

@@ -422,8 +422,14 @@ struct dumper
 cc::string sgl::check::dump(checked_module const& m)
 {
     auto d = dumper{.m = m};
+    // File by file, since an extension is declared after every file and would otherwise stand among a later file's
+    auto last_file = i32(0);
     for (auto const& s : m.symbols)
-        d.dump_symbol(s);
+        last_file = s.file > last_file ? s.file : last_file;
+    for (auto file = i32(0); file <= last_file; ++file)
+        for (auto const& s : m.symbols)
+            if (s.file == file)
+                d.dump_symbol(s);
     for (auto const& e : m.entry_points)
         d.dump_entry_point(e);
     return d.out;
