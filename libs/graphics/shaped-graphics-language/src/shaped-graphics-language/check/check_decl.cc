@@ -720,9 +720,11 @@ void checker::compile_function(symbol_id id)
     auto const is_raster_entry = find_attribute(file, d.attributes, "vertex") != nullptr
                               || find_attribute(file, d.attributes, "pixel") != nullptr;
     cc::string_view const known[]
-        = {"builtin", "pure", "operator", "vertex", "pixel", "compute", "stages", "shadowable"};
+        = {"builtin", "pure", "operator", "vertex", "pixel", "compute", "stages", "shadowable", "expect"};
     judge_attributes(file, d.attributes, known, "a function",
                      is_raster_entry ? setting_scope::description : setting_scope::none);
+    read_footprint_pin(id, file, d.attributes,
+                       is_raster_entry || find_attribute(file, d.attributes, "compute") != nullptr);
 
     if (!f.type_parameters.empty())
     {

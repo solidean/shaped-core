@@ -27,12 +27,12 @@ f32 engine_busy(f64 before, f64 after, f64 interval)
 
 bool sg::gpu_load_sampler::is_supported(sg::context const& ctx)
 {
-    return ctx.read_gpu_counters().has_value();
+    return ctx.metrics.read_gpu_counters().has_value();
 }
 
 sg::gpu_load_sampler::gpu_load_sampler(sg::context const& ctx) : _ctx(&ctx)
 {
-    if (auto baseline = ctx.read_gpu_counters(); baseline.has_value())
+    if (auto baseline = ctx.metrics.read_gpu_counters(); baseline.has_value())
     {
         _previous = cc::move(baseline.value());
         _previous_time_secs = cc::current_time_steady_secs();
@@ -42,7 +42,7 @@ sg::gpu_load_sampler::gpu_load_sampler(sg::context const& ctx) : _ctx(&ctx)
 
 cc::result<sg::gpu_load> sg::gpu_load_sampler::sample()
 {
-    auto current = _ctx->read_gpu_counters();
+    auto current = _ctx->metrics.read_gpu_counters();
     if (current.has_error())
         return cc::error(cc::move(current.error()));
 

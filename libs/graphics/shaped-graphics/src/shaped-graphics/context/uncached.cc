@@ -108,12 +108,51 @@ sg::raster_target_formats target_formats_of(sg::raster_pipeline_description cons
     return formats;
 }
 
+/// What a pipeline's code does to each binding: every stage's footprint, resolved against `layout`.
+sg::impl::pipeline_footprint footprint_of(sg::pipeline_layout const& layout,
+                                          cc::span<sg::compiled_shader const* const> shaders)
+{
+    cc::vector<sg::impl::pipeline_footprint::stage_input> stages;
+    for (auto const* shader : shaders)
+        if (shader != nullptr)
+            stages.push_back({.footprint = &shader->footprint, .stages = sg::impl::stages_of(shader->stage)});
+    return sg::impl::pipeline_footprint::resolve(layout, stages);
+}
+
+sg::impl::pipeline_footprint footprint_of(sg::compute_pipeline_description const& desc)
+{
+    sg::compiled_shader const* const stages[] = {&desc.shader};
+    return footprint_of(*desc.layout, stages);
+}
+
+sg::impl::pipeline_footprint footprint_of(sg::raster_pipeline_description const& desc)
+{
+    sg::compiled_shader const* const stages[] = {
+        &desc.vertex_shader,
+        desc.fragment_shader.has_value() ? &desc.fragment_shader.value() : nullptr,
+        desc.tessellation_control_shader.has_value() ? &desc.tessellation_control_shader.value() : nullptr,
+        desc.tessellation_evaluation_shader.has_value() ? &desc.tessellation_evaluation_shader.value() : nullptr,
+        desc.geometry_shader.has_value() ? &desc.geometry_shader.value() : nullptr,
+    };
+    return footprint_of(*desc.layout, stages);
+}
+
 cc::shared_async<sg::raster_pipeline_handle> named(cc::shared_async<sg::raster_pipeline_handle> built,
                                                    cc::string target_set,
-                                                   sg::raster_target_formats formats)
+                                                   sg::raster_target_formats formats,
+                                                   sg::impl::pipeline_footprint footprint)
 {
     auto pipeline = co_await built;
     sg::impl::set_targets(*pipeline, target_set, formats);
+    sg::impl::set_footprint(*pipeline, cc::move(footprint));
+    co_return pipeline;
+}
+
+cc::shared_async<sg::compute_pipeline_handle> with_footprint(cc::shared_async<sg::compute_pipeline_handle> built,
+                                                             sg::impl::pipeline_footprint footprint)
+{
+    auto pipeline = co_await built;
+    sg::impl::set_footprint(*pipeline, cc::move(footprint));
     co_return pipeline;
 }
 } // namespace
@@ -183,7 +222,11 @@ cc::result<compute_pipeline_handle> context_uncached_scope::try_create_compute_p
 {
     if (auto refusal = refusal_of(desc, _ctx.supported_features()); refusal.has_value())
         return cc::error(cc::move(refusal.value()));
-    return _ctx.try_create_compute_pipeline(desc, lifetime_scope::persistent);
+    _ctx._stats.add(stat::pipelines_created);
+    auto r = _ctx.try_create_compute_pipeline(desc, lifetime_scope::persistent);
+    if (r.has_value())
+        impl::set_footprint(*r.value(), footprint_of(desc));
+    return r;
 }
 
 raster_pipeline_handle context_uncached_scope::create_raster_pipeline(raster_pipeline_description const& desc)
@@ -201,9 +244,13 @@ cc::result<raster_pipeline_handle> context_uncached_scope::try_create_raster_pip
     if (auto refusal = refusal_of(desc, _ctx.supported_features()); refusal.has_value())
         return cc::error(cc::move(refusal.value()));
 
+    _ctx._stats.add(stat::pipelines_created);
     auto r = _ctx.try_create_raster_pipeline(desc, lifetime_scope::persistent);
     if (r.has_value())
+    {
         impl::set_targets(*r.value(), target_set_of(desc), target_formats_of(desc));
+        impl::set_footprint(*r.value(), footprint_of(desc));
+    }
     return r;
 }
 
@@ -213,7 +260,8 @@ cc::shared_async<compute_pipeline_handle> context_uncached_scope::create_compute
     if (auto refusal = refusal_of(desc, _ctx.supported_features()); refusal.has_value())
         return cc::make_async_from_error<compute_pipeline_handle>(
             cc::async_error::make_error(cc::any_error(cc::move(refusal.value()))));
-    return _ctx.create_compute_pipeline_async(desc, lifetime_scope::persistent);
+    _ctx._stats.add(stat::pipelines_created);
+    return with_footprint(_ctx.create_compute_pipeline_async(desc, lifetime_scope::persistent), footprint_of(desc));
 }
 
 cc::shared_async<raster_pipeline_handle> context_uncached_scope::create_raster_pipeline_async(
@@ -224,8 +272,9 @@ cc::shared_async<raster_pipeline_handle> context_uncached_scope::create_raster_p
             cc::async_error::make_error(cc::any_error(cc::move(refusal.value()))));
 
     // A backend may settle the build from a callback of its own, so the name is set once it has.
+    _ctx._stats.add(stat::pipelines_created);
     auto built = _ctx.create_raster_pipeline_async(desc, lifetime_scope::persistent);
-    return named(cc::move(built), cc::string(target_set_of(desc)), target_formats_of(desc));
+    return named(cc::move(built), cc::string(target_set_of(desc)), target_formats_of(desc), footprint_of(desc));
 }
 
 raytracing_pipeline_handle context_uncached_scope::create_raytracing_pipeline(raytracing_pipeline_description const& desc)
@@ -265,7 +314,11 @@ cc::result<raytracing_pipeline_handle> context_uncached_scope::try_create_raytra
     if (auto missing = impl::find_missing_feature(_ctx.supported_features(), stages); missing.has_value())
         return cc::error(cc::move(missing.value()));
 
-    return _ctx.try_create_raytracing_pipeline(desc, lifetime_scope::persistent);
+    _ctx._stats.add(stat::pipelines_created);
+    auto r = _ctx.try_create_raytracing_pipeline(desc, lifetime_scope::persistent);
+    if (r.has_value())
+        impl::set_footprint(*r.value(), footprint_of(*desc.layout, stages));
+    return r;
 }
 
 raytracing_shader_table_handle context_uncached_scope::create_raytracing_shader_table(

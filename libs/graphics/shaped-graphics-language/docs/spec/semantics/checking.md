@@ -450,6 +450,9 @@ fun f() -> float:
   It is judged per entry point once everything is inlined, since a function in between says nothing about where it is reached from.
   `sample` without a `level` is `@stages(.pixel)`: its level comes from derivatives, which only a pixel stage has on every target.
 * **CHK-93** Breaking one of CHK-88 to CHK-92 is `invalid-entry-point`, and its detail names the rule.
+* **CHK-267** `@expect(footprint = "slot: access, ...")` on an entry point pins its [footprint](../bindings.md#footprint): each touched slot once, as `read`, `write` or `read write`, in any order.
+  A footprint that differs is `unmet-expectation`, whose detail spells the one the code has.
+  On a function that is no entry point, or with any other argument, it is `invalid-attribute-arguments`.
 
 ## Features
 
@@ -669,7 +672,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `unknown-builtin` | CHK-31 |
 | `expected-body` | CHK-32, CHK-236 |
 | `opaque-struct-needs-builtin` | CHK-34 |
-| `invalid-attribute-arguments` | CHK-36, CHK-39, CHK-204, CHK-208, CHK-211, CHK-212, CHK-220, CHK-231 |
+| `invalid-attribute-arguments` | CHK-36, CHK-39, CHK-204, CHK-208, CHK-211, CHK-212, CHK-220, CHK-231, CHK-267 |
 | `binding-not-listed` | CHK-45, CHK-131, CHK-228 |
 | `type-mismatch` | CHK-52, CHK-56, CHK-77, CHK-112 to CHK-118, CHK-121, CHK-167, CHK-210, CHK-214, CHK-219, CHK-236, CHK-243 |
 | `not-assignable` | CHK-112, CHK-236 |
@@ -694,7 +697,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `shadows-unshadowable` | CHK-220, CHK-266 |
 | `test-captures-runtime-value` | CHK-228 |
 | `test-must-end-in-check` | CHK-226 |
-| `unmet-expectation` | CHK-232 |
+| `unmet-expectation` | CHK-232, CHK-267 |
 | `member-name-clash` | CHK-238 |
 | `literal-not-representable` | CHK-60, CHK-61, CHK-253 |
 | `call-spelling` | CHK-256 |

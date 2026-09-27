@@ -12,16 +12,19 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   It is a second member of "access is inferred, never declared (with one exception)", for the same reason the bindless declaration is the first.
   dx12 first, vulkan when a member needs it; sr's [denoising.md](../../shaped-rendering/docs/denoising.md) is the consumer.
   Pin it with a test that clears through the scope and checks sg's next inferred barrier.
-- **A dispatch's hazards follow each view's `bound_as`, not what the shader does with it.**
-  `shader_access_of` counts every image and every `readwrite` buffer as written, so one a pipeline only loads still orders against every other access of it.
-  The binding's `access` says more, but it is the group's declared access, the union over every pipeline the group is bound to.
-  The fix is a pipeline **footprint**: per binding and per stage, the `access_flags` the code really performs, which SGL can compute exactly.
-  Barrier inference then joins the group's bound resources with the footprint at dispatch.
-  The groups' `hazard_views` become plain `bound_buffers` / `bound_textures` carrying no access, as metal already names them.
-  HLSL and WGSL get a conservative footprint from `binding::access` and the stage visibility.
-  An array binding's footprint says only whether and how it is indexed; which elements stays the caller's to declare per dispatch, bounded by it.
-  The layout keeps the declared access regardless, since WebGPU validates a bind group against it.
-  The design is [footprint.md](../../shaped-graphics-language/docs/spec/incubator/footprint.md).
+- **A barrier-only dx12 submit once landed outside any test.**
+  One full `dev.py check` failed `shaped-graphics-test` on debug-nopch with the debug layer's "recorded only Barrier commands" warning, logged under no test owner.
+  The message is allowlisted, but only inside a test, so an unowned one fails the run.
+  It did not reproduce in 105 further runs of the suite on that preset, 60 of them under concurrent load.
+  Ruled out by reading: the copy-queue windows record only copies, `prepare_texture_for_async` and routine ticks run on the test's thread, and shutdown submits nothing.
+  A barrier-only list is almost always an entry pre-list, whose need depends on submit order, which fits a rare failure; which thread submitted without an owner is unknown.
+  Next step when it recurs: have the dx12 relay name the raising thread, and attach a stack to this one message.
+- **A footprint is only as exact as the code the emitter prints.**
+  SGL removes no dead code yet, so a use behind a constant-false branch still counts, and costs the barrier it implies.
+  Dead-code removal belongs on the tree both the emitter and the footprint read, never in the footprint alone, since an untouched slot records no layout transition.
+- **An atomic has its own access flag and nothing reads it differently yet.**
+  `shader_atomic` orders as a read and a write, which is what both D3D12 and Vulkan formally want between two atomic dispatches.
+  Letting atomic-after-atomic run free is a tracker change once SGL has atomics to set the flag.
 - **Exportable memory and shared fences.**
   OIDN's GPU devices run on their own API (CUDA, HIP, SYCL, Metal) and share memory with ours through an OS handle.
   That wants an "exportable" usage on buffer and texture creation, a way to read the handle, and a fence shared both ways.

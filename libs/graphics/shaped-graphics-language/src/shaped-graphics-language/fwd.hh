@@ -261,6 +261,8 @@ struct flat_check_site;
 struct flat_check;
 struct flat_stmt;
 struct flat_entry_point;
+enum class slot_view : u8; // which kind of view a footprint slot is bound through (check/footprint.hh)
+struct slot_footprint;     // how an entry point's code touches one slot of a binding
 struct flat_builder;
 
 struct core_violation;

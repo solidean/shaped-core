@@ -192,10 +192,12 @@ void rendering_scope::set_inline_constants(cc::span<byte const> data, cc::option
 }
 void rendering_scope::draw(draw_config const& config)
 {
+    _cmd._stats.add(stat::draws);
     _cmd.raster_draw(config);
 }
 void rendering_scope::draw_indexed(draw_indexed_config const& config)
 {
+    _cmd._stats.add(stat::draws);
     _cmd.raster_draw_indexed(config);
 }
 
@@ -263,10 +265,12 @@ void command_list_raster_scope::set_inline_constants(cc::span<byte const> data, 
 }
 void command_list_raster_scope::draw(draw_config const& config)
 {
+    _cmd._stats.add(stat::draws);
     _cmd.raster_draw(config);
 }
 void command_list_raster_scope::draw_indexed(draw_indexed_config const& config)
 {
+    _cmd._stats.add(stat::draws);
     _cmd.raster_draw_indexed(config);
 }
 
@@ -316,10 +320,12 @@ void command_list_raster_manual_scope::set_inline_constants(cc::span<byte const>
 }
 void command_list_raster_manual_scope::draw(draw_config const& config)
 {
+    _cmd._stats.add(stat::draws);
     _cmd.raster_draw(config);
 }
 void command_list_raster_manual_scope::draw_indexed(draw_indexed_config const& config)
 {
+    _cmd._stats.add(stat::draws);
     _cmd.raster_draw_indexed(config);
 }
 } // namespace sg

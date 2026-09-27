@@ -47,6 +47,7 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/check/check_pipeline.cc
     src/shaped-graphics-language/check/check_expr.cc
     src/shaped-graphics-language/check/check_features.cc
+    src/shaped-graphics-language/check/check_footprint.cc
     src/shaped-graphics-language/check/check_resources.cc
     src/shaped-graphics-language/check/check_stmt.cc
     src/shaped-graphics-language/check/check_test.cc
@@ -55,6 +56,7 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/check/flat_builder.cc
     src/shaped-graphics-language/check/structural_hash.cc
     src/shaped-graphics-language/check/flatten.cc
+    src/shaped-graphics-language/check/footprint.cc
 
     src/shaped-graphics-language/legalize/core.cc
     src/shaped-graphics-language/legalize/legalize_cases.cc
@@ -198,6 +200,7 @@ target_sources(shaped-graphics-language
     src/shaped-graphics-language/check/checked_module.hh
     src/shaped-graphics-language/check/dump.hh
     src/shaped-graphics-language/check/flat.hh
+    src/shaped-graphics-language/check/footprint.hh
     src/shaped-graphics-language/check/flat_builder.hh
     src/shaped-graphics-language/check/structural_hash.hh
     src/shaped-graphics-language/check/ids.hh
@@ -326,6 +329,7 @@ if(SC_BUILD_TESTS)
         tests/corpus/corpus-test.cc
         tests/check/binding-check-test.cc
         tests/check/case-check-test.cc
+        tests/check/footprint-check-test.cc
         tests/check/control-flow-check-test.cc
         tests/check/cube-test.cc
         tests/check/stage-check-test.cc

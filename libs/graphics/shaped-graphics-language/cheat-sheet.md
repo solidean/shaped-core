@@ -25,6 +25,8 @@ r.value().text                             // the emitter's text, unchanged
 r.value().entry_point                      // the name the text declares, which is the one to compile: `main` is `main_` in MSL
 r.value().bound_names                      // { emitted, host } per resource: `work_values` is what the host binds as `work.values`
 r.value().color_targets  .target_struct    // a pixel entry point's target count and `@pixel struct`; -1 and empty otherwise
+r.value().footprint                        // check::slot_footprint per TOUCHED slot: host_name, view (constants/read_only/storage), reads, writes
+                                           // a member never named is absent — sg skips its barrier; see spec/bindings.md "Footprint"
 r.error()                                  // one line per diagnostic: `cube.sgl:12:5: error: unknown-name: foo`
                                            // one inside the prelude names `builtins.sgl` or `core.sgl`
                                            // a missing entry point names the ones the source holds; a wrong stage says both
@@ -44,7 +46,8 @@ d.value().bindings                         // name, is_inline, members (constant
                                            // texture / image / sampler members also carry the sg enum values of their binding:
                                            // texture_dimension, sample_type, image_format + access, sampler_type, static_sampler
 d.value().structs                          // the @vertex / @pixel structs: name, edge, members with their location
-d.value().entry_points                     // name, stage, workgroup, bindings (the list as written)
+d.value().entry_points                     // name, stage, workgroup, bindings (the list as written), footprint
+@expect(footprint = "work: read, work.values: read write")   // on an entry point: pins its footprint (CHK-267), any order
 d.value().pipelines                        // name, stages, layout, vertex_input, target_set, targets, settings, open (the `.host` paths)
                                            // bindings and structs carry `shape`: check::structural_hash of their members,
                                            // 32 hex digits; the type's own name is not in it. What a hot reload compares.

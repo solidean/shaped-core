@@ -3,6 +3,7 @@
 #include <clean-core/error/result.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
+#include <shaped-graphics-language/check/footprint.hh>
 #include <shaped-graphics-language/check/symbols.hh>
 #include <shaped-graphics-language/emit/emit.hh>
 
@@ -36,6 +37,8 @@ struct sgl::emitted_source
     cc::string target_struct;
     /// What a device needs to run the entry point, each named as `sg::feature` names it; empty is portable.
     check::feature_set features;
+    /// What the entry point's code does to each binding it lists, keyed by host name; a slot it never touches is absent.
+    cc::vector<check::slot_footprint> footprint;
 };
 
 namespace sgl

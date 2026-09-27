@@ -227,7 +227,7 @@ INVOCABLE_TEST("sg reports which adapter it is running on", (dx12::dx12_context_
     REQUIRE(handle != nullptr);
     sg::context& ctx = *handle;
 
-    auto const& adapter = ctx.adapter();
+    auto const& adapter = ctx.metrics.adapter();
     CHECK(!adapter.name.empty());
     CHECK(adapter.vendor_id != 0);
 }

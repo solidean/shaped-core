@@ -38,7 +38,8 @@ D3D12_BARRIER_ACCESS d3d12_access_from(sg::access_flags access)
         out |= D3D12_BARRIER_ACCESS_VERTEX_BUFFER;
     if (access.has(sg::access_flag::shader_read))
         out |= D3D12_BARRIER_ACCESS_SHADER_RESOURCE;
-    if (access.has(sg::access_flag::shader_write))
+    // A read through a UAV is still a UAV access to D3D12, whatever the shader does with it.
+    if (access.has_any(sg::access_flag::shader_write | sg::access_flag::storage_read | sg::access_flag::shader_atomic))
         out |= D3D12_BARRIER_ACCESS_UNORDERED_ACCESS;
     if (access.has(sg::access_flag::copy_read))
         out |= D3D12_BARRIER_ACCESS_COPY_SOURCE;
@@ -80,8 +81,9 @@ namespace
     if ((sync & D3D12_BARRIER_SYNC_VERTEX_SHADING) == 0)
         return sync | D3D12_BARRIER_SYNC_INDEX_INPUT;
 
-    auto const vertex_stage_access
-        = sg::access_flag::vertex_read | sg::access_flag::constants_read | sg::access_flag::shader_read;
+    auto const vertex_stage_access = sg::access_flag::vertex_read | sg::access_flag::constants_read
+                                   | sg::access_flag::shader_read | sg::access_flag::storage_read
+                                   | sg::access_flag::shader_write | sg::access_flag::shader_atomic;
     auto const also_shades = access.has_any(vertex_stage_access);
 
     sync &= ~D3D12_BARRIER_SYNC_VERTEX_SHADING;
@@ -167,21 +169,56 @@ D3D12_TEXTURE_BARRIER make_texture_barrier(ID3D12Resource* resource,
     return tb;
 }
 
+D3D12_GLOBAL_BARRIER make_empty_global_barrier()
+{
+    auto g = D3D12_GLOBAL_BARRIER{};
+    g.SyncBefore = D3D12_BARRIER_SYNC_NONE;
+    g.SyncAfter = D3D12_BARRIER_SYNC_NONE;
+    g.AccessBefore = D3D12_BARRIER_ACCESS_NO_ACCESS;
+    g.AccessAfter = D3D12_BARRIER_ACCESS_NO_ACCESS;
+    return g;
+}
+
+void merge_into_global_barrier(D3D12_GLOBAL_BARRIER& global, D3D12_BUFFER_BARRIER const& b)
+{
+    // NO_ACCESS is a bit of its own and must stand alone, so it is dropped the moment a real access joins.
+    auto const merge_access = [](D3D12_BARRIER_ACCESS into, D3D12_BARRIER_ACCESS add)
+    {
+        if (add == D3D12_BARRIER_ACCESS_NO_ACCESS)
+            return into;
+        if (into == D3D12_BARRIER_ACCESS_NO_ACCESS)
+            return add;
+        return D3D12_BARRIER_ACCESS(into | add);
+    };
+    global.SyncBefore = D3D12_BARRIER_SYNC(global.SyncBefore | b.SyncBefore);
+    global.SyncAfter = D3D12_BARRIER_SYNC(global.SyncAfter | b.SyncAfter);
+    global.AccessBefore = merge_access(global.AccessBefore, b.AccessBefore);
+    global.AccessAfter = merge_access(global.AccessAfter, b.AccessAfter);
+}
+
 void submit_barriers(ID3D12GraphicsCommandList* list,
                      cc::span<D3D12_BUFFER_BARRIER const> buffer_barriers,
-                     cc::span<D3D12_TEXTURE_BARRIER const> texture_barriers)
+                     cc::span<D3D12_TEXTURE_BARRIER const> texture_barriers,
+                     cc::span<D3D12_GLOBAL_BARRIER const> global_barriers)
 {
-    if (buffer_barriers.empty() && texture_barriers.empty())
+    if (buffer_barriers.empty() && texture_barriers.empty() && global_barriers.empty())
         return;
 
     ComPtr<ID3D12GraphicsCommandList7> list7;
     HRESULT const hr = list->QueryInterface(IID_PPV_ARGS(&list7));
     CC_ASSERT(SUCCEEDED(hr) && list7, "enhanced barriers require ID3D12GraphicsCommandList7 (SDK/driver too old)");
 
-    // One barrier group per type;
-    // both go into a single Barrier call so the whole operation's hazards are resolved at once.
-    D3D12_BARRIER_GROUP groups[2] = {};
+    // One barrier group per type, and every group goes into a single Barrier call so the whole operation's hazards
+    // are resolved at once.
+    D3D12_BARRIER_GROUP groups[3] = {};
     UINT num_groups = 0;
+    if (!global_barriers.empty())
+    {
+        auto& g = groups[num_groups++];
+        g.Type = D3D12_BARRIER_TYPE_GLOBAL;
+        g.NumBarriers = UINT(global_barriers.size());
+        g.pGlobalBarriers = global_barriers.data();
+    }
     if (!buffer_barriers.empty())
     {
         auto& g = groups[num_groups++];

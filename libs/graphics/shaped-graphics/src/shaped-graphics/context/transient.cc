@@ -99,6 +99,7 @@ cc::result<raw_buffer_handle> context_transient_scope::try_create_raw_buffer(isi
         alloc = reserved.value();
     }
 
+    _ctx._stats.add(stat::buffers_created);
     auto created = _ctx.try_create_raw_buffer(size_in_bytes, usage, alloc);
     if (created.has_value())
         created.value()->_scope = lifetime_scope::transient;
@@ -126,6 +127,7 @@ cc::result<raw_texture_handle> context_transient_scope::try_create_raw_texture(t
         return cc::error(cc::move(error));
     allocation_info alloc;
     alloc.scope = lifetime_scope::transient;
+    _ctx._stats.add(stat::textures_created);
     auto created = _ctx.try_create_raw_texture(desc, alloc);
     if (created.has_value())
         created.value()->_scope = lifetime_scope::transient;
@@ -153,6 +155,7 @@ cc::result<binding_group_handle> context_transient_scope::try_create_binding_gro
         = impl::find_unsupported_view(_ctx.supports(feature::float32_filtering), layout->bindings(), views);
         unsupported.has_value())
         return cc::error(cc::move(unsupported.value()));
+    _ctx._stats.add(stat::binding_groups_created);
     return _ctx.try_create_binding_group(cc::move(layout), views, samplers, lifetime_scope::transient);
 }
 
@@ -177,6 +180,7 @@ cc::result<binding_group_handle> context_transient_scope::try_create_binding_gro
         = impl::find_unsupported_view(_ctx.supports(feature::float32_filtering), layout->bindings(), views);
         unsupported.has_value())
         return cc::error(cc::move(unsupported.value()));
+    _ctx._stats.add(stat::binding_groups_created);
     return _ctx.try_create_binding_group(cc::move(layout), views, samplers, lifetime_scope::transient);
 }
 } // namespace sg

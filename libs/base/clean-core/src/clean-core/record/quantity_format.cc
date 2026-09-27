@@ -1,5 +1,6 @@
 #include <clean-core/record/desc.hh>
 #include <clean-core/record/quantity_format.hh>
+#include <clean-core/record/stat.hh>
 #include <clean-core/string/format.hh>
 
 using namespace cc::primitive_defines;
@@ -118,6 +119,11 @@ void cc::rec::format_quantity_to(cc::string& out, f64 value, cc::rec::unit const
         out += ' ';
         out += name;
     }
+}
+
+void cc::rec::impl::format_nanoseconds(cc::string& out, f64 value, cc::rec::unit const&)
+{
+    cc::rec::format_quantity_to(out, value * 1e-9, cc::rec::unit_seconds);
 }
 
 cc::string cc::rec::format_quantity(f64 value, cc::rec::unit const& u)

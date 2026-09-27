@@ -106,16 +106,19 @@ ctx.limits()                                       // -> sg::device_limits const
 ctx.threading()                                    // sg::thread_model — which ops are concurrency-safe
 ctx.is_on_device_thread()                          // -> bool; may this thread make a bound call (always true under multi_threaded)
 ctx.device_home()                                  // cc::async_scheduler* — where sg's asyncs move before touching the device; main under main_thread
-ctx.adapter()                                      // sg::adapter_info const& — { name, vendor_id, device_id, driver_version, is_software }, fixed at creation
+ctx.metrics.adapter()                              // sg::adapter_info const& — { name, vendor_id, device_id, driver_version, is_software }, fixed at creation
                                                    // driver_version is OPAQUE: compare for equality, never parse. Empty = unknown. Key any driver-produced blob on this
-ctx.adapter().dedicated_video_memory_bytes         // optional<i64> — what the BOARD has; 0 is real on an integrated GPU
-ctx.query_gpu_memory()                             // result<gpu_memory_usage> — { budget_bytes, current_usage_bytes }
+ctx.metrics.adapter().dedicated_video_memory_bytes // optional<i64> — what the BOARD has; 0 is real on an integrated GPU
+ctx.metrics.query_gpu_memory()                     // result<gpu_memory_usage> — { budget_bytes, current_usage_bytes }
                                                    //   the budget is what THIS PROCESS may use now and shrinks as others take memory
                                                    //   NOT the same scale as the board size — dividing one by the other is the classic wrong dashboard
-ctx.read_gpu_counters()                            // result<gpu_counters> — monotone busy_secs per engine class
+ctx.metrics.read_gpu_counters()                    // result<gpu_counters> — monotone busy_secs per engine class
 sg::gpu_load_sampler s(ctx); s.sample();           // result<gpu_load> — total is the BUSIEST engine, not the sum
                                                    //   Windows reads the GPU Engine perf counters; elsewhere it refuses
                                                    //   see docs/concepts/gpu-metrics.md
+auto const d = ctx.metrics.stats() - before;       // sg::stats — monotone i64 totals per sg::stat; subtract two readings for "per frame"
+d[sg::stat::buffer_barriers]; d.is_counted(s)      //   an uncounted stat reads 0 — webgpu sees no barriers, metal no per-resource ones
+                                                   //   a list counts at its SUBMIT, a transfer at its ENQUEUE; see docs/concepts/metrics.md
 ctx.is_device_lost() / ctx.device_loss_reason()    // bool / string_view — sticky device-lost status (see Error handling above)
                                                    //   the reason carries DRED's breadcrumbs + page fault when dx12_config::enable_dred was set BEFORE device creation
 ctx.create_command_list()                          // -> std::unique_ptr<command_list> (already recording); infallible (throws only on device loss)
@@ -740,7 +743,7 @@ cmd.compute.dispatch_threads(x, y, z)    // void — dispatch ceil(threads / wor
 cmd.compute.declare_array_buffer_access(name, elements)  // void — per-element access for a buffer array/bindless binding, next dispatch only
 cmd.compute.declare_array_texture_access(name, elements) // void — same for a texture array (elements also carry a layout)
                                                          // (scalar bindings are inferred; arrays can't be — declare them; cmd.raytracing has the same pair)
-                                                         // ACCOUNTED FOR: dispatch asserts every bound array binding was declared; empty span = "unused"
+                                                         // an array the code indexes and nobody declared LOGS and gets a global barrier; one it never indexes needs none
 
 // raster_pipeline — a graphics PSO. Owns its shaders; formats/state baked in. Draws via cmd.raster (above).
 //   bind_pipeline ASSERTS the rendering's color count/formats, depth format and sample count equal pipeline.target_formats()
@@ -762,8 +765,10 @@ sg::vertex_input_layout           // { small_vector<vertex_input_slot,8> slots; 
 //   blend presets: sg::blend_alpha, sg::blend_premultiplied_alpha, sg::blend_additive — opaque is an unset `blend`
 //   vertex_attribute_format {f32,vec2f,vec3f,vec4f, i32.., u32.., rgba8_unorm, rgba8_uint}   index_format {uint16, uint32}
 raster_pipeline.cached_pipeline_data()  // -> pinned_data<byte const> — serialized PSO blob; persist + feed back via desc.cached_pipeline (empty if unsupported)
-// Access is inferred from each op (upload⇒copy_write, dispatch⇒bound views' access); no public
-// declare_access. Concurrent command lists are fine — each takes a tracking slot. See docs/concepts/barriers.md.
+// Access is inferred from each op (upload⇒copy_write, dispatch⇒what the pipeline's FOOTPRINT says its code does to each view);
+// an untouched binding costs no barrier, a mut buffer only loaded is storage_read. No public declare_access.
+// pipeline.footprint() / compiled_shader.footprint (exact from SGL, reflected from DXC, none = every writable view written).
+// Concurrent command lists are fine — each takes a tracking slot. See docs/concepts/barriers.md.
 ```
 
 ## acceleration structures — ray-tracing blas / tlas  (see docs/concepts/acceleration-structures.md)

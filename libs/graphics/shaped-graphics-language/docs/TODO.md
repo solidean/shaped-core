@@ -5,6 +5,10 @@ An idea that may be far off, or that we may never want, belongs in the [spec inc
 What the compiler carries today is the [spec](spec/_index.md); a construct it does not carry yet is `unsupported-yet` there.
 `DEBUG_` in a name marks a stand-in for something listed here.
 
+- **A debug build overflows its stack well inside `k_max_depth`.** A compute entry point whose store sums a 150-term chain (`x + 1.0 + … + 1.0`) crashes `sgl describe` on `debug-nopch-clang`.
+  It did so before the footprint became a linear pass too.
+  The recursive passes each guard their own depth at 200, which a release frame fits and a debug frame does not.
+  Either the limit shrinks to what the smallest stack carries, or the deepest walks stop recursing on an operand chain.
 - **Hex literals.** `0xFF` is a number, and the checker refuses it as `unsupported-yet: a hex literal`.
   `classify_number` puts every prefixed literal in `number_class::other`, since those need literal types the checker does not have.
   A stencil mask in a `pipeline` is where it bites first.

@@ -66,6 +66,9 @@ void finish_creation(webgpu_context& ctx)
         wgpuAdapterInfoFreeMembers(info);
     }
 
+    // WebGPU tracks usage itself and emits barriers nothing here can see.
+    ctx.set_counted_stats(sg::all_stats.without(sg::barrier_stats));
+
     auto limits = WGPULimits{};
     auto alignment = isize(256);
     if (wgpuDeviceGetLimits(ctx.device(), &limits) == WGPUStatus_Success && limits.minUniformBufferOffsetAlignment > 0)

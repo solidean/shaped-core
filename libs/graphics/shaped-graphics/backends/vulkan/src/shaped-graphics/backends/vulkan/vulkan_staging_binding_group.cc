@@ -148,6 +148,7 @@ void vulkan_staging_binding_group::write_sampler_descriptor(int descriptor_index
 
 cc::result<sg::binding_group_handle> vulkan_staging_binding_group::mint()
 {
+    _ctx.stat_totals().add(sg::stat::binding_groups_created);
     // The resource references the staged descriptors point at, in the two shapes a group needs: a scalar binding is
     // auto-tracked through the hazard vectors, an array binding is declared per dispatch.
     cc::vector<vulkan_buffer_handle> referenced;
@@ -171,6 +172,8 @@ cc::result<sg::binding_group_handle> vulkan_staging_binding_group::mint()
         {
             auto ab = vulkan_array_binding{.name = b.name,
                                            .is_texture = sg::shape_of(b.type) == sg::view_shape::texture,
+                                           .binding = i,
+                                           .bound_as = sg::view_class_of(b),
                                            .elements = {}};
             for (int e = 0; e < int(b.count); ++e)
             {
@@ -185,12 +188,12 @@ cc::result<sg::binding_group_handle> vulkan_staging_binding_group::mint()
             if (res.texture != nullptr)
             {
                 referenced_textures.push_back(res.texture);
-                texture_hazard_views.push_back({res.texture, res.range, res.bound_as});
+                texture_hazard_views.push_back({res.texture, res.range, res.bound_as, i});
             }
             else if (res.buffer != nullptr)
             {
                 referenced.push_back(res.buffer);
-                hazard_views.push_back({res.buffer, res.bound_as});
+                hazard_views.push_back({res.buffer, res.bound_as, i});
             }
             // else: a scalar slot with no resource — the null acceleration structure, which tracks nothing.
         }

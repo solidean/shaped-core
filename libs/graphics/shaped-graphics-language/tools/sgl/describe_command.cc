@@ -141,9 +141,15 @@ void write_entry_point(babel::json::object_writer& o, sgl::described_entry_point
         for (auto const& name : e.bindings)
             list.write(cc::string_view(name));
     }
-    auto list = o.write_array("features", babel::json::layout::compact);
-    for (auto const& name : e.features)
-        list.write(cc::string_view(name));
+    {
+        auto list = o.write_array("features", babel::json::layout::compact);
+        for (auto const& name : e.features)
+            list.write(cc::string_view(name));
+    }
+    // One `slot: access` per touched slot, the way a corpus pin spells it.
+    auto list = o.write_array("footprint", babel::json::layout::compact);
+    for (auto const& slot : e.footprint)
+        list.write(cc::string_view(sgl::check::footprint_text(cc::span<sgl::check::slot_footprint const>(&slot, 1))));
 }
 
 void write_pipeline(babel::json::object_writer& o, sgl::described_pipeline const& p)

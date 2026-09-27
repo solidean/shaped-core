@@ -77,6 +77,10 @@ public:
 
     // create_metal_context fills this in once it has picked a device.
     using sg::context::set_adapter_info;
+    using sg::context::set_counted_stats;
+
+    /// The context's stat totals, for the systems that count into them.
+    [[nodiscard]] sg::impl::stat_totals& stat_totals() { return _stats; }
 
     [[nodiscard]] MTL::Device* device() const { return _device; }
     [[nodiscard]] MTL4::CommandQueue* queue() const { return _queue; }
@@ -206,7 +210,7 @@ public:
     // The sg::context surface.
     [[nodiscard]] sg::epoch current_epoch() const override { return _epochs.current(); }
     [[nodiscard]] sg::epoch completed_epoch() const override { return _epochs.completed(); }
-    void advance_epoch() override;
+    void do_advance_epoch() override;
     [[nodiscard]] int in_flight_epoch_count() override { return _epochs.in_flight_count(); }
     [[nodiscard]] bool is_submission_complete(sg::submission_token token) const override
     {

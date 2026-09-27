@@ -61,6 +61,10 @@ sg::compiled_shader make_shader()
                                .sampler_type = sg::sampler_binding_type::comparison});
 
     shader.compiler = {.name = "dxc", .version = "1.8", .signature = "-T cs_6_8 -E main"};
+
+    // A reflected footprint is what a compiler hands back, so a cached shader carries it.
+    shader.footprint = sg::reflected_footprint(shader.bindings);
+    shader.footprint.slots[0].dynamic_index = true;
     return shader;
 }
 
@@ -94,6 +98,8 @@ bool same(sg::compiled_shader const& a, sg::compiled_shader const& b)
             return false;
     }
     if (a.color_output_count != b.color_output_count)
+        return false;
+    if (a.footprint != b.footprint)
         return false;
     if (a.workgroup_size.has_value() != b.workgroup_size.has_value())
         return false;
@@ -188,4 +194,22 @@ TEST("sg shader codec refuses a length larger than the blob holding it")
     // Both must come back as nothing rather than as a reservation the input chose.
     CHECK(!sg::impl::decode_compiled_shader(with_huge_length_at(entry_point_length_offset)).has_value());
     CHECK(!sg::impl::decode_compiled_shader(with_huge_length_at(bytecode_length_offset)).has_value());
+}
+
+TEST("sg reflected footprint - a binding touched as its declaration allows, and a sampler not at all")
+{
+    auto const shader = make_shader();
+    auto const& fp = shader.footprint;
+    CHECK(fp.source == sg::footprint_source::reflected);
+
+    // A writable buffer is read and written through its view, which is one storage access.
+    REQUIRE(fp.find("Output") != nullptr);
+    CHECK(fp.find("Output")->access == (sg::access_flag::storage_read | sg::access_flag::shader_write));
+    CHECK(fp.find("Params")->access == sg::access_flags(sg::access_flag::constants_read));
+    CHECK(fp.find("Albedo")->access == sg::access_flags(sg::access_flag::shader_read));
+
+    // A write-only image is written and never read, so nothing orders a read after it.
+    CHECK(fp.find("Target")->access == sg::access_flags(sg::access_flag::shader_write));
+    CHECK(fp.find("Shadow") == nullptr);
+    CHECK(fp.find("Unbound") == nullptr);
 }

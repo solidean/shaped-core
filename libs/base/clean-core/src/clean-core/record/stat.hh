@@ -47,6 +47,24 @@ inline constexpr rec::unit unit_seconds = {
     .aggregate = rec::aggregation::sum,
 };
 
+namespace impl
+{
+void format_nanoseconds(cc::string& out, f64 value, rec::unit const& u);
+}
+
+/// A duration counted in whole nanoseconds, for a counter that has to stay an integer.
+///
+/// Live, it reads as seconds do — "5.00 ms".
+/// A loaded recording has lost the formatter and prints the plain count, since the symbol takes no prefix.
+inline constexpr rec::unit unit_nanoseconds = {
+    .singular = "nanosecond",
+    .plural = "nanoseconds",
+    .symbol = "ns",
+    .prefix_base = 0,
+    .aggregate = rec::aggregation::sum,
+    .format = &impl::format_nanoseconds,
+};
+
 inline constexpr rec::unit unit_ratio = {
     .singular = "ratio",
     .plural = "ratios",

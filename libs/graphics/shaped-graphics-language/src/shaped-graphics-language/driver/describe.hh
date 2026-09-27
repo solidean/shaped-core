@@ -5,6 +5,7 @@
 #include <clean-core/error/result.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
+#include <shaped-graphics-language/check/footprint.hh>
 #include <shaped-graphics-language/check/symbols.hh>
 
 /// What the host side of one SGL source is generated from: its binding groups, its pipeline-edge structs and its entry points.
@@ -124,6 +125,8 @@ struct sgl::described_entry_point
     cc::vector<cc::string> bindings;
     /// The `sg::feature`s a device needs to run it, by name, in the enum's order.
     cc::vector<cc::string> features;
+    /// What its code does to each binding it lists, a slot it never touches left out (the spec's bindings file, "Footprint").
+    cc::vector<check::slot_footprint> footprint;
 };
 
 /// One field of a pipeline's description, as the check pass resolved it.

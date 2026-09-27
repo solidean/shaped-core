@@ -200,6 +200,7 @@ void dx12_command_list::raster_end_rendering()
     // The graphics bind + IA state is scoped to the pass it was set up in.
     _bound_raster_layout = nullptr;
     _bound_raster_groups.clear();
+    _bound_raster_footprint = nullptr;
     _bound_vertex_buffers.clear();
     _bound_index_buffer = nullptr;
 }
@@ -222,6 +223,7 @@ void dx12_command_list::raster_bind_pipeline(sg::raster_pipeline const& pipeline
 
     _bound_raster_layout = rp->layout.get();
     _bound_raster_groups.clear_resize_to_filled(_bound_raster_layout->groups.size(), nullptr);
+    _bound_raster_footprint = &pipeline.footprint();
 }
 
 void dx12_command_list::raster_bind_group(int group_index, sg::binding_group const& group)
@@ -347,21 +349,12 @@ void dx12_command_list::raster_set_inline_constants(cc::span<byte const> data, c
 void dx12_command_list::declare_raster_draw_barriers(bool indexed)
 {
     // Bound groups' shader reads/writes (same policy as compute_dispatch), keyed to the graphics stages.
+    // The raster scope has no declare_array_*_access yet, so an array binding here would go untracked.
     for (auto const* bound_group : _bound_raster_groups)
-    {
-        if (bound_group == nullptr)
-            continue;
-        // The raster scope has no declare_array_*_access yet, so an array binding here would go untracked.
-        CC_ASSERT(bound_group->array_bindings.empty(), "array bindings are not supported in raster draws yet");
-        for (auto const& view : bound_group->hazard_views)
-            if (view.buffer)
-                track_buffer_access(view.buffer, sg::pipeline_stage_flag::vertex | sg::pipeline_stage_flag::fragment,
-                                    sg::shader_access_of(view.bound_as));
-        for (auto const& tv : bound_group->texture_hazard_views)
-            track_texture_access(tv.texture, tv.range,
-                                 sg::pipeline_stage_flag::vertex | sg::pipeline_stage_flag::fragment,
-                                 sg::shader_access_of(tv.bound_as), sg::shader_layout_of(tv.bound_as));
-    }
+        CC_ASSERT(bound_group == nullptr || bound_group->array_bindings.empty(), "array bindings are not supported in "
+                                                                                 "raster draws yet");
+    declare_group_accesses(_bound_raster_groups, _bound_raster_footprint,
+                           sg::pipeline_stage_flag::vertex | sg::pipeline_stage_flag::fragment);
 
     // The IA vertex fetch reads the bound vertex buffers; an indexed draw also fetches the index buffer.
     for (auto const& vb : _bound_vertex_buffers)

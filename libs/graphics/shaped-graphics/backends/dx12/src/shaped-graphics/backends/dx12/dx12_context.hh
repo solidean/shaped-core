@@ -569,7 +569,7 @@ public:
 
     [[nodiscard]] sg::epoch current_epoch() const override { return _current_epoch; }
     [[nodiscard]] sg::epoch completed_epoch() const override;
-    void advance_epoch() override;
+    void do_advance_epoch() override;
     [[nodiscard]] int in_flight_epoch_count() override;
     void retire_completed_epochs() override;
     void block_until_submissions_complete() override;
@@ -592,6 +592,9 @@ public:
 
     // create_dx12_context fills this in once it has picked an adapter, like every other member here.
     using sg::context::set_adapter_info;
+
+    /// The context's stat totals, for the transfer systems that count into them.
+    [[nodiscard]] sg::impl::stat_totals& stat_totals() { return _stats; }
 
     ComPtr<IDXGIFactory4> _factory;
     ComPtr<ID3D12Device> _device;

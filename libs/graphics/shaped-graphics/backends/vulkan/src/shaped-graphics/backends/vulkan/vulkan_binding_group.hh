@@ -17,6 +17,8 @@ struct sg::backend::vulkan::vulkan_hazard_view
 {
     vulkan_buffer_handle buffer;
     sg::view_class bound_as;
+    /// Its position in the group layout's `bindings()`, which the pipeline's footprint is keyed by.
+    isize binding = -1;
 };
 
 /// A bound texture paired with the subresource range + view class it is used as.
@@ -26,6 +28,8 @@ struct sg::backend::vulkan::vulkan_texture_hazard_view
     vulkan_texture_handle texture;
     sg::subresource_range range;
     sg::view_class bound_as;
+    /// Its position in the group layout's `bindings()`, which the pipeline's footprint is keyed by.
+    isize binding = -1;
 };
 
 /// One element of an array binding: the bound resource (exactly one of buffer / texture set, both null when vacant)
@@ -48,6 +52,10 @@ struct sg::backend::vulkan::vulkan_array_binding
 {
     cc::string name;
     bool is_texture = false;
+    /// Its position in the group layout's `bindings()`.
+    isize binding = -1;
+    /// What its elements are bound as, which an undeclared array falls back to.
+    sg::view_class bound_as = sg::view_class::readonly;
     cc::vector<vulkan_array_element> elements;
 };
 

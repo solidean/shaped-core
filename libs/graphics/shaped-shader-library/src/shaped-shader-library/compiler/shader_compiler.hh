@@ -52,6 +52,9 @@ struct slib::preprocessed_source
     /// What a device needs to run the shader, which the library sets on the compiled shader.
     /// nullopt is unknown, which every compiler but SGL's is: nothing in HLSL or WGSL declares it.
     cc::optional<sg::feature_set> required_features;
+    /// What the shader's code does to each binding, keyed by host name, which the library sets on the compiled shader.
+    /// Unknown (`none`) for every compiler but SGL's, whose shaders keep what their compiler reflected.
+    sg::shader_footprint footprint;
 };
 
 /// One shader to compile.

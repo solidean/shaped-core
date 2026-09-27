@@ -253,6 +253,16 @@ enum class setting_scope : u8
     target,
 };
 
+/// An entry point's `@expect(footprint = "...")`, judged once its flat tree exists (CHK-267).
+struct footprint_pin
+{
+    symbol_id function = symbol_id::none;
+    i32 file = 0;
+    cc::string expected;
+    /// The argument, which an unmet pin is reported at.
+    source_span where;
+};
+
 /// The one demand-driven pass; every member function only appends to `out` and flips symbol states.
 struct checker
 {
@@ -299,6 +309,8 @@ struct checker
     feature_set* used_features = nullptr;
     /// Every `require` of a body, which is reported at the end where nothing needed it (CHK-265).
     cc::vector<require_line> require_lines;
+    /// Every entry point's footprint pin, judged once the entry points are flattened (CHK-267).
+    cc::vector<footprint_pin> footprint_pins;
 
     // ---- shared helpers (check.cc) ----------------------------------------------------------------------------------
 
@@ -453,6 +465,14 @@ struct checker
     void judge_entry_features(symbol_id id);
     /// `unused-require` for every `require` of a body that nothing needed (CHK-265).
     void report_unused_requires();
+
+    // ---- footprint pins (check_footprint.cc) ------------------------------------------------------------------------
+
+    /// Records the `@expect(footprint = "...")` among the attributes of function `id`; any other `@expect` there is
+    /// reported, since a function's only expectation is its footprint.
+    void read_footprint_pin(symbol_id id, i32 file, ast::range_of<ast::attribute> attributes, bool is_entry_point);
+    /// `unmet-expectation` for every pin whose entry point's footprint says otherwise (CHK-267).
+    void judge_footprint_pins();
     /// True where `expr` is the bare name `name`, which is how a resource type is recognized before lookup.
     [[nodiscard]] bool is_named(i32 file, ast::expr_id expr, cc::string_view name) const;
 

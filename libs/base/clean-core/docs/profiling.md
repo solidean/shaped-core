@@ -86,7 +86,7 @@ Two kinds, and picking the wrong one produces a plausible graph of the wrong thi
 
 ```cpp
 CC_RECORD_STAT("sg.command_lists.live", cc::rec::unit_count, n);      // a SNAPSHOT
-CC_RECORD_ACCUM("sg.upload.bytes", cc::rec::unit_bytes, size);        // a DELTA to add up
+CC_RECORD_ACCUM("ssc.cache.misses", cc::rec::unit_count, 1);         // a DELTA to add up
 ```
 
 A **snapshot** is the current reading of something that exists whether or not you look: queue depth, resident bytes, frame time.
@@ -98,7 +98,8 @@ Summing them is the whole point.
 Values are `f64` only, which also covers every integer up to 2^53 — one numeric type means a listener can graph anything without a type switch.
 
 The unit is a `cc::rec::unit`, a plain struct rather than an enum, so adding one breaks nobody.
-`unit_count`, `unit_bytes`, `unit_seconds`, `unit_ratio` and `unit_hertz` come with `cc::rec`; define your own next to the code that records it.
+`unit_count`, `unit_bytes`, `unit_seconds`, `unit_nanoseconds`, `unit_ratio` and `unit_hertz` come with `cc::rec`; define your own next to the code that records it.
+`unit_nanoseconds` is for a duration that has to stay an integer; it reads as seconds live, and as a plain count in a loaded recording, which has lost its formatter.
 
 ### Mirror a counter, do not duplicate it
 

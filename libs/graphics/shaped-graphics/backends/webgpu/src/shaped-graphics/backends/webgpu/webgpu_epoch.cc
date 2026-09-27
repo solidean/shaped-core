@@ -59,7 +59,7 @@ void webgpu_context::on_queue_done(u64 submission, u64 epoch)
     settle_due_completions();
 }
 
-void webgpu_context::advance_epoch()
+void webgpu_context::do_advance_epoch()
 {
     CC_ASSERT(!_is_shut_down, "cannot advance a shut-down context");
     CC_ASSERT(_open_command_lists == 0, "all command lists opened this epoch must be submitted or dropped before "

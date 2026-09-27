@@ -106,6 +106,13 @@ They are the variant in `check/flat.hh` with its forward declaration, `flat_buil
 Then come `find_core_violation`, both legalizer passes, the interpreter and the shared text writer, plus one `dialect` method where the targets differ.
 The random generator of `tests/legalize/random-program.cc` has to produce it too, or the differential test never meets it.
 The legalizer drops an `eval` whose value was a block once the block has moved in front, since what is left is a read of a local; a call stays, pure or not.
+A new expression kind that names a binding also teaches `check/footprint.cc` whether it reads or writes it.
+
+**The footprint is read from the core form**, in `check/footprint.cc`: what an entry point does to each slot of its bindings.
+It is one pass over the entry point's node arrays, not a walk: `legalize` returns them compacted, every node reachable from `body` and every expression with one parent, and the pass asserts that.
+A binding member counts as a read unless its parent says otherwise — the place of a store, or a builtin's parameter.
+That is what makes it cover exactly what the emitted text uses, with no nesting limit of its own, which sg relies on to skip an untouched slot's layout transition.
+`compile_to_text` and `sgl describe` both report it, and an entry point's `@expect(footprint = "...")` pins it (`check/check_footprint.cc`).
 
 ## Tests
 

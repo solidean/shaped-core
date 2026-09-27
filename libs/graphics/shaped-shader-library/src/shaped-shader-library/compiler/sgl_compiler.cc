@@ -89,6 +89,21 @@ public:
             if (text.value().features.has(sgl::check::feature(i)))
                 features.set(sg::feature_from_string(sgl::check::k_feature_names[i]).value());
         result.required_features = features;
+
+        // The words SGL's slots are spelled in, turned into the access sg's barrier tracker declares.
+        result.footprint.source = sg::footprint_source::exact;
+        for (auto const& slot : text.value().footprint)
+        {
+            auto access = sg::access_flags();
+            if (slot.view == sgl::check::slot_view::constants)
+                access |= sg::access_flag::constants_read;
+            else if (slot.reads)
+                access |= slot.view == sgl::check::slot_view::storage ? sg::access_flag::storage_read
+                                                                      : sg::access_flag::shader_read;
+            if (slot.writes)
+                access |= sg::access_flag::shader_write;
+            result.footprint.slots.push_back({.name = slot.host_name, .access = access, .dynamic_index = false});
+        }
         return result;
     }
 

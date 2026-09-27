@@ -46,7 +46,8 @@ cc::result<sgl::emitted_source, cc::string> sgl::compile_to_text(text_request co
                                     emit::impl::stage_name(request.stage)));
 
     // The check pass writes the structured form, and a target prints the core form.
-    auto emitted = emit::emit_entry_point(m, check::legalize(m, e), request.target);
+    auto const legal = check::legalize(m, e);
+    auto emitted = emit::emit_entry_point(m, legal, request.target);
     if (!emitted.has_text())
     {
         auto text = cc::string();
@@ -59,5 +60,6 @@ cc::result<sgl::emitted_source, cc::string> sgl::compile_to_text(text_request co
                                .bound_names = cc::move(emitted.bound_names),
                                .color_targets = emitted.color_targets,
                                .target_struct = cc::move(emitted.target_struct),
-                               .features = e.features};
+                               .features = e.features,
+                               .footprint = check::footprint_of(m, legal)};
 }

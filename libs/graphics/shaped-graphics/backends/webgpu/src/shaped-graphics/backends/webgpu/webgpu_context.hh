@@ -106,6 +106,10 @@ public:
     using sg::context::mark_device_lost;
     using sg::context::report_device_error;
     using sg::context::set_adapter_info;
+    using sg::context::set_counted_stats;
+
+    /// The context's stat totals, for the transfer systems that count into them.
+    [[nodiscard]] sg::impl::stat_totals& stat_totals() { return _stats; }
     using sg::context::settle_due_completions;
 
     [[nodiscard]] sg::execution_model execution() const override { return sg::execution_model::never_block; }
@@ -386,7 +390,7 @@ public:
 
     [[nodiscard]] sg::epoch current_epoch() const override { return _current_epoch; }
     [[nodiscard]] sg::epoch completed_epoch() const override { return sg::epoch(_epochs.completed_epoch); }
-    void advance_epoch() override;
+    void do_advance_epoch() override;
     [[nodiscard]] int in_flight_epoch_count() override { return int(_epochs.in_flight.size()); }
     void retire_completed_epochs() override;
     [[nodiscard]] bool is_submission_complete(sg::submission_token token) const override;
