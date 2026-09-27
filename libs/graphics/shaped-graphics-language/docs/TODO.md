@@ -9,10 +9,6 @@ What the compiler carries today is the [spec](spec/_index.md); a construct it do
   It did so before the footprint became a linear pass too.
   The recursive passes each guard their own depth at 200, which a release frame fits and a debug frame does not.
   Either the limit shrinks to what the smallest stack carries, or the deepest walks stop recursing on an operand chain.
-- **Hex literals.** `0xFF` is a number, and the checker refuses it as `unsupported-yet: a hex literal`.
-  `classify_number` puts every prefixed literal in `number_class::other`, since those need literal types the checker does not have.
-  A stencil mask in a `pipeline` is where it bites first.
-- **Binary literals.** `0b1010`, the same way and for the same reason: `unsupported-yet: a binary literal`.
 - **Values as type arguments.** `image_2d[.rgba8_unorm]` takes an enum case, and the checker reads exactly that argument today, as a special case of image types.
   The general feature is a type parameterized on an integer or an enum value, which math templated on a dimension wants as well, and it lets code branch on the value.
 - **Scoped extensions.** An extension inside a type's block is `unsupported-yet` (CHK-237).

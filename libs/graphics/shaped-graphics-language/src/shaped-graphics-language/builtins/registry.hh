@@ -25,6 +25,8 @@ enum class sgl::builtins::language : sgl::u8
 /// How tightly a written expression holds together, loosest first; the same ladder in every target so far.
 enum class sgl::builtins::precedence : sgl::u8
 {
+    /// `&`, `|`, `^` and the shifts, which bind differently in every target: parenthesized wherever they are embedded.
+    bitwise,
     logical_or,
     logical_and,
     /// `<` and `==`, which no target chains.

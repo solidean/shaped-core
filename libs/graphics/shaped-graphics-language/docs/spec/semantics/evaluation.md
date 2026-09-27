@@ -19,6 +19,8 @@ A listing here is the dump of a flat tree, shortened: a label is `$name`, and a 
 * **EVAL-6** A `float` is a 32-bit IEEE number, an `int` is 32 bits, signed, and its arithmetic wraps, and a `bool` is true or false.
 * **EVAL-83** An integer `/` truncates toward zero, and `%` is what it leaves, with the sign of its left operand: `-7 / 2` is `-3` and `-7 % 3` is `-1`.
   A float `%` is `a - b * trunc(a / b)`, with the sign of `a` the same way.
+* **EVAL-86** `&`, `|`, `^` and `~` work on the 32 bits of an `int` or a `uint`, componentwise over their vectors.
+  A shift uses the low five bits of its count, `x << 33` of a count computed as 33 is `x << 1`, and `>>` is arithmetic for an `int` and logical for a `uint`.
 * **EVAL-84** An integer `/` or `%` by zero, and the most negative `int` divided by `-1`, have no value: a run that reaches one has no behaviour past it ([why](why/evaluation.md#eval-84)).
 * **EVAL-7** A struct value is one value per field, in field order.
 * **EVAL-64** An enum value is the `int` value of one of its type's cases, and `==` and `!=` over two of them compare those `int`s.

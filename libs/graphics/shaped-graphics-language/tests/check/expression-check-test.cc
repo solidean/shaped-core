@@ -209,9 +209,13 @@ TEST("sgl check - a number literal with a dot or an exponent is a float, and not
     CHECK(body_reports("let i = 99'999'999'999'999'999'999\nreturn k\n")
           == "unsupported-yet user:[99'999'999'999'999'999'999] an integer literal beyond 64 bits\n");
     CHECK(body_reports("return 0.5f32\n")
-          == "unsupported-yet user:[0.5f32] a number literal with a prefix, a suffix or a p exponent\n");
-    CHECK(body_reports("return 0xff\n")
-          == "unsupported-yet user:[0xff] a number literal with a prefix, a suffix or a p exponent\n");
+          == "unsupported-yet user:[0.5f32] a number literal with a suffix or a p exponent\n");
+    // CHK-269: a hex or binary literal is a number like any other, held to the type asked of it
+    CHECK(body_reports("return 0xff\n") == "");
+    CHECK(body_reports("let u: uint = 0xffff'ffff\nreturn k\n") == "");
+    CHECK(body_reports("let i = 0xffff'ffff\nreturn k\n")
+          == "literal-not-representable user:[0xffff'ffff] int does not hold 0xffff'ffff\n");
+    CHECK(body_reports("let i: int = -0x8000'0000\nlet b: int = 0b1010\nreturn k\n") == "");
     CHECK(body_reports("let s = \"text\"\nreturn k\n") == "unsupported-yet user:[\"text\"] a string literal\n");
 
     // The literal's type is the prelude's `float`, so a module without one says so.

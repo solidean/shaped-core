@@ -316,7 +316,7 @@ type_id checker::check_literal(function_scope& scope, ast::expr_id id, ast::lite
         return type_of_builtin(builtins::k_int, file, where);
     }
     case number_class::other:
-        unsupported(file, where, "a number literal with a prefix, a suffix or a p exponent");
+        unsupported(file, where, "a number literal with a suffix or a p exponent");
         return error_type;
     case number_class::plain_float:
         break;
@@ -954,6 +954,15 @@ type_id checker::resolve_overload(function_scope& scope,
                cc::format("{} takes no int, and a literal alone says nothing of which type is meant; write a float "
                           "literal such as 1.0, or `as` a type",
                           spelling));
+        return error_type;
+    }
+    // CHK-270: a shift by a literal count outside the bits of an int can only be a mistake, as WGSL has it
+    if ((spelling == "operator <<" || spelling == "operator >>") && arguments.numbers.size() == 2
+        && arguments.numbers[1].is_number && arguments.numbers[1].is_integer
+        && (arguments.numbers[1].integer < 0 || arguments.numbers[1].integer > 31))
+    {
+        report(diagnostic_kind::shift_out_of_range, file, where,
+               cc::format("a shift by {} moves every bit out of 32; a count is 0 to 31", arguments.numbers[1].integer));
         return error_type;
     }
     // CHK-268: `/` and `%` are the operators whose integer and float answers differ, so over integer literals alone

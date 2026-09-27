@@ -23,6 +23,8 @@ void register_transforms(registry& r);
 void register_conversions(registry& r);
 /// DEBUG: the stand-ins for sampling, loading and storing texels, until textures have methods.
 void register_textures(registry& r);
+/// `&`, `|`, `^`, `~`, `<<` and `>>` of `int`, `uint` and their vectors.
+void register_bit_math(registry& r);
 } // namespace sgl::builtins
 
 /// What the topic files share.

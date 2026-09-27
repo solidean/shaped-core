@@ -338,8 +338,10 @@ fun shade(k: float) -> float:
   At its default type as anywhere else, it is one `float` holds by CHK-253, or `literal-not-representable`.
 * **CHK-61** A decimal literal of digits alone is an **integer literal**, whose default type is the prelude's `int`, and a sign directly on it is part of it.
   A number literal is of its default type wherever no other type is asked of it by CHK-253.
-  An integer literal is held in 64 bits, and one beyond them is `unsupported-yet`, as is a literal with a prefix, a suffix or a `p` exponent.
+  An integer literal is held in 64 bits, and one beyond them is `unsupported-yet`, as is a literal with a suffix or a `p` exponent.
   One the type it ends up with does not hold, its default type included, is `literal-not-representable`: `let u: uint = 3000000000` is legal and `let i = 3000000000` is not.
+* **CHK-269** A literal of hexadecimal digits behind `0x`, or of binary ones behind `0b`, is an integer literal like a decimal one ([why](why/checking.md#chk-269)).
+  Its value is the number it spells: `0xffff'ffff` is 4294967295, which a `uint` holds and an `int` does not, and `-0x8000'0000` is the most negative `int`.
 * **CHK-62** A name resolves to a local or a parameter first, and to a symbol of the module after that; one that resolves to nothing is `unknown-name`.
   A body reads the members of its receiver through `self` alone: a bare `radius` in a method is no field of `self` ([why](why/checking.md#chk-62)).
 * **CHK-63** A name that stands for a struct, a function or a binding is no value by itself: it is `unsupported-yet`.
@@ -381,6 +383,7 @@ fun shade(k: float) -> float:
 * **CHK-255** Among matching candidates whose chains are of equal length at every argument, a function of a type scope is better than one found by name at the call.
 * **CHK-257** An operator whose operands are all integer literals, and whose best candidate converts one of them, is the normal error `literal-needs-type` ([why](why/checking.md#chk-257)).
   `7.0 / 2` is the float `/`, since one operand is no integer literal.
+* **CHK-270** A `<<` or a `>>` whose count is an integer literal outside 0 to 31 is the normal error `shift-out-of-range`; a count computed at run time keeps its low five bits (EVAL-86).
 * **CHK-268** A `/` or a `%` whose operands are all integer literals is the normal error `literal-needs-type`, although `int` has both ([why](why/checking.md#chk-268)).
   So `1 / 3` is an error, and `1.0 / 3`, `(1 as int) / 3` and a division of two `int` locals are not.
 * **CHK-71** No matching candidate is the normal error `no-matching-overload`, and its detail spells the call with its argument types and says why each candidate did not match.
@@ -705,6 +708,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `call-spelling` | CHK-256 |
 | `literal-conversion-result` | CHK-85 |
 | `literal-needs-type` | CHK-257, CHK-268 |
+| `shift-out-of-range` | CHK-270 |
 
 ## Open
 

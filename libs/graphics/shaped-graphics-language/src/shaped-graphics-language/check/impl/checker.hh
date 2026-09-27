@@ -17,9 +17,9 @@ enum class number_class : u8
 {
     /// A decimal literal with a DOT or an exponent and no suffix.
     plain_float,
-    /// Decimal digits and nothing else.
+    /// Decimal digits, or hexadecimal or binary ones behind `0x` or `0b`, and nothing else.
     plain_integer,
-    /// A prefix, a suffix or a `p` exponent: spellings whose meaning needs literal types.
+    /// A suffix or a `p` exponent: spellings whose meaning needs literal types.
     other,
 };
 

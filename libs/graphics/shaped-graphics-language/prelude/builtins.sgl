@@ -342,6 +342,57 @@
 @builtin @pure @operator("as") fun convert_uint4_to_float4(x: uint4) -> float4
 @builtin @pure @operator("as") fun convert_uint4_to_int4(x: uint4) -> int4
 
+// bits of int, uint and their vectors, componentwise; a shift counts in the left side's own type,
+// and only its low five bits count, so `x << 33` of a runtime 33 is `x << 1`
+@builtin @pure @operator("&") fun bit_and_int(a: int, b: int) -> int
+@builtin @pure @operator("|") fun bit_or_int(a: int, b: int) -> int
+@builtin @pure @operator("^") fun bit_xor_int(a: int, b: int) -> int
+@builtin @pure @operator("<<") fun shift_left_int(a: int, b: int) -> int
+@builtin @pure @operator(">>") fun shift_right_int(a: int, b: int) -> int
+@builtin @pure @operator("~") fun bit_not_int(x: int) -> int
+@builtin @pure @operator("&") fun bit_and_int2(a: int2, b: int2) -> int2
+@builtin @pure @operator("|") fun bit_or_int2(a: int2, b: int2) -> int2
+@builtin @pure @operator("^") fun bit_xor_int2(a: int2, b: int2) -> int2
+@builtin @pure @operator("<<") fun shift_left_int2(a: int2, b: int2) -> int2
+@builtin @pure @operator(">>") fun shift_right_int2(a: int2, b: int2) -> int2
+@builtin @pure @operator("~") fun bit_not_int2(x: int2) -> int2
+@builtin @pure @operator("&") fun bit_and_int3(a: int3, b: int3) -> int3
+@builtin @pure @operator("|") fun bit_or_int3(a: int3, b: int3) -> int3
+@builtin @pure @operator("^") fun bit_xor_int3(a: int3, b: int3) -> int3
+@builtin @pure @operator("<<") fun shift_left_int3(a: int3, b: int3) -> int3
+@builtin @pure @operator(">>") fun shift_right_int3(a: int3, b: int3) -> int3
+@builtin @pure @operator("~") fun bit_not_int3(x: int3) -> int3
+@builtin @pure @operator("&") fun bit_and_int4(a: int4, b: int4) -> int4
+@builtin @pure @operator("|") fun bit_or_int4(a: int4, b: int4) -> int4
+@builtin @pure @operator("^") fun bit_xor_int4(a: int4, b: int4) -> int4
+@builtin @pure @operator("<<") fun shift_left_int4(a: int4, b: int4) -> int4
+@builtin @pure @operator(">>") fun shift_right_int4(a: int4, b: int4) -> int4
+@builtin @pure @operator("~") fun bit_not_int4(x: int4) -> int4
+@builtin @pure @operator("&") fun bit_and_uint(a: uint, b: uint) -> uint
+@builtin @pure @operator("|") fun bit_or_uint(a: uint, b: uint) -> uint
+@builtin @pure @operator("^") fun bit_xor_uint(a: uint, b: uint) -> uint
+@builtin @pure @operator("<<") fun shift_left_uint(a: uint, b: uint) -> uint
+@builtin @pure @operator(">>") fun shift_right_uint(a: uint, b: uint) -> uint
+@builtin @pure @operator("~") fun bit_not_uint(x: uint) -> uint
+@builtin @pure @operator("&") fun bit_and_uint2(a: uint2, b: uint2) -> uint2
+@builtin @pure @operator("|") fun bit_or_uint2(a: uint2, b: uint2) -> uint2
+@builtin @pure @operator("^") fun bit_xor_uint2(a: uint2, b: uint2) -> uint2
+@builtin @pure @operator("<<") fun shift_left_uint2(a: uint2, b: uint2) -> uint2
+@builtin @pure @operator(">>") fun shift_right_uint2(a: uint2, b: uint2) -> uint2
+@builtin @pure @operator("~") fun bit_not_uint2(x: uint2) -> uint2
+@builtin @pure @operator("&") fun bit_and_uint3(a: uint3, b: uint3) -> uint3
+@builtin @pure @operator("|") fun bit_or_uint3(a: uint3, b: uint3) -> uint3
+@builtin @pure @operator("^") fun bit_xor_uint3(a: uint3, b: uint3) -> uint3
+@builtin @pure @operator("<<") fun shift_left_uint3(a: uint3, b: uint3) -> uint3
+@builtin @pure @operator(">>") fun shift_right_uint3(a: uint3, b: uint3) -> uint3
+@builtin @pure @operator("~") fun bit_not_uint3(x: uint3) -> uint3
+@builtin @pure @operator("&") fun bit_and_uint4(a: uint4, b: uint4) -> uint4
+@builtin @pure @operator("|") fun bit_or_uint4(a: uint4, b: uint4) -> uint4
+@builtin @pure @operator("^") fun bit_xor_uint4(a: uint4, b: uint4) -> uint4
+@builtin @pure @operator("<<") fun shift_left_uint4(a: uint4, b: uint4) -> uint4
+@builtin @pure @operator(">>") fun shift_right_uint4(a: uint4, b: uint4) -> uint4
+@builtin @pure @operator("~") fun bit_not_uint4(x: uint4) -> uint4
+
 // Textures and images, called as methods: `tex.sample(uv, smp)` is `sample(tex, uv, smp)`.
 // A texture samples and loads, an image loads where the shader may read it and stores where it may write it.
 // A sample takes its level from derivatives, or from a `level` named at the call.

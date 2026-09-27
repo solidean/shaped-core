@@ -12,6 +12,7 @@ void sgl::builtins::register_builtins(registry& r)
     register_vector_math(r);
     register_transforms(r);
     register_conversions(r);
+    register_bit_math(r);
     register_textures(r);
 }
 

@@ -407,13 +407,10 @@ struct pipeline_compiler
                     return true;
                 }
             }
-            // A prefixed or suffixed literal is a number whose meaning needs literal types, which the checker has not.
+            // A suffixed literal is a number whose meaning needs literal types, which the checker has not.
             if (is_literal && kind == number_class::other)
             {
-                c.unsupported(in_file, at,
-                              text.starts_with("0x") || text.starts_with("0X")   ? "a hex literal"
-                              : text.starts_with("0b") || text.starts_with("0B") ? "a binary literal"
-                                                                                 : "a number literal of this spelling");
+                c.unsupported(in_file, at, "a number literal of this spelling");
                 is_failed = true;
                 return false;
             }

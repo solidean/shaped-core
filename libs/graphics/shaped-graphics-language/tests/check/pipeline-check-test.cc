@@ -166,8 +166,11 @@ TEST("sgl check - a setting's value has the type of its field")
     CHECK(bad("    depth_test = 1\n")
           == "invalid-pipeline user:[1] depth_stencil.depth_test is a bool: `true` or `false`\n");
     CHECK(bad("    sample_count = 1.5\n") == "invalid-pipeline user:[1.5] sample_count is an int: write a number\n");
-    // A hex literal is a number, which the checker cannot read yet: unsupported, not "write a number".
-    CHECK(bad("    stencil_read_mask = 0xFF\n") == "unsupported-yet user:[0xFF] a hex literal\n");
+    // A hex literal is a number like any other (CHK-269), which is how a stencil mask is written.
+    CHECK(bad("    stencil_read_mask = 0xff\n") == "");
+    CHECK(bad("    stencil_write_mask = 0x1ff\n") != "");
+    // A suffixed literal is a number whose meaning needs literal types: unsupported, not "write a number".
+    CHECK(bad("    stencil_read_mask = 255u32\n") == "unsupported-yet user:[255u32] a number literal of this spelling\n");
     // `.host` is only for what the host knows better: a format, and the sample count.
     CHECK(bad("    cull = .host\n")
           == "invalid-pipeline user:[.host] rasterization.cull is no format and no sample count, so the host cannot "

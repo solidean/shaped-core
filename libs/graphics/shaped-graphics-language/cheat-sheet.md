@@ -489,6 +489,7 @@ sgl::print_source(file)      // == file.source for EVERY input: the lossless inv
   A default is checked ONCE in its function's scope, and evaluated at each call that leaves it out, after every written argument (EVAL-80).
 - **A literal converts where a type is expected** (CHK-81, CHK-253): `(1, 2)` or `{a = 1}` is a call of the struct's name, `1` meets a float.
   Leaving its default type is one step of a literal's chain; candidates rank by dominance over those chains, then a type-scope function wins (CHK-254).
+  `0xff`, `0b1010` are integer literals like decimal ones (CHK-269); `&`, `|`, `^`, `~`, `<<`, `>>` take int, uint and their vectors, a shift's count keeps its low five bits.
   `1 / 3` is `literal-needs-type` (CHK-268): `/` and `%` over integer literals alone say nothing of int or float; an integer literal is held in 64 bits and refused only in a type that cannot hold it.
 - **Still `unsupported-yet`:** generics, `mut self` and `mut` parameters, lambdas and function values, nested functions, `use`,
   a `const` whose value is no literal, enum case or const, a `for` over anything but `a ..< b`, a `let` without a value,

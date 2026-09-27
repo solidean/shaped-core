@@ -216,6 +216,8 @@ cc::string_view sgl::to_string(diagnostic_kind kind)
         return "literal-conversion-result";
     case diagnostic_kind::literal_needs_type:
         return "literal-needs-type";
+    case diagnostic_kind::shift_out_of_range:
+        return "shift-out-of-range";
     }
     CC_UNREACHABLE("unknown diagnostic_kind");
 }
@@ -428,6 +430,8 @@ cc::string_view sgl::summary_of(diagnostic_kind kind)
         return "a literal converted by a function that returns another type";
     case diagnostic_kind::literal_needs_type:
         return "an operator over literals alone that only another type provides";
+    case diagnostic_kind::shift_out_of_range:
+        return "a shift by a literal count outside 0 to 31";
     case diagnostic_kind::unknown_feature:
         return "a `require` of a name that is no feature a shader can use";
     case diagnostic_kind::feature_not_declared:
@@ -542,6 +546,7 @@ sgl::severity sgl::default_severity_of(diagnostic_kind kind)
     case diagnostic_kind::literal_not_representable:
     case diagnostic_kind::literal_conversion_result:
     case diagnostic_kind::literal_needs_type:
+    case diagnostic_kind::shift_out_of_range:
         return severity::normal_error;
     case diagnostic_kind::spaced_attribute_arguments:
     case diagnostic_kind::no_effect:

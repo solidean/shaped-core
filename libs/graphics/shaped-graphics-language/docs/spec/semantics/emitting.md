@@ -210,6 +210,9 @@ binding affine:
 * **EMIT-49** A float literal is the shortest decimal text that reads back as its value, always with a decimal point, and without a suffix.
 * **EMIT-50** A literal that is infinite or not a number is `non-finite-literal`.
 * **EMIT-51** An `@operator` builtin is its operator: `+`, `-`, `*`, `/`, `%`, the six comparisons, and the prefix `-`; the products of a matrix are EMIT-43.
+* **EMIT-111** An operand of `&`, `|`, `^`, `<<` or `>>` is parenthesized unless it is a name, a call, a literal or a prefix expression, since WGSL takes nothing else there.
+  The operation itself is parenthesized wherever it is embedded.
+  WGSL writes an `int` count as `u32(count)`, and MSL masks the count, `x << (count & 31)`, since a count past 31 is undefined there.
 * **EMIT-110** A float `%` is `fmod(a, b)` in MSL, which has no `%` of floats; HLSL's and WGSL's `%` of floats already mean EVAL-83's remainder.
   Parentheses follow the tree, and an operand of equal precedence on the right keeps them.
 * **EMIT-52** Every other builtin function is a call of the target's function of that name, and `mix` is `lerp` in HLSL.

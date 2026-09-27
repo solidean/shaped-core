@@ -182,6 +182,12 @@ An operator over literals alone meets whatever operators the prelude declares, a
 The call names no type, so no answer is the reader's, and the error asks for one.
 Folding literals in the front end would settle it for good, as the [literal-types](../../incubator/literal-types.md) incubator sketches, and nothing written under this rule changes meaning then.
 
+## CHK-269
+
+A hex literal is how a mask or a bit pattern is written, and a mask that means one number as a `uint` and another as an `int` is the surprise to avoid.
+Reading it as the number it spells is CHK-253 as it stands, so no rule of its own decides what it converts to.
+A pattern with the top bit set belongs in a `uint`, or is built with `int.from_bits`.
+
 ## CHK-268
 
 `/` and `%` are where an integer answer and a float answer differ, and a reader of `1 / 3` cannot tell which the writer meant.
