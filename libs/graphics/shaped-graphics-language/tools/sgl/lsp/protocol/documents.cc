@@ -100,7 +100,13 @@ cc::optional<cc::string> lsp::path_of_uri(cc::string_view uri)
     if (!path.has_value() || !host.has_value())
         return cc::nullopt;
 
-    if (!host.value().empty())
+    // `localhost` names this machine (RFC 8089), so `file://localhost/x` is the local `/x`
+    constexpr auto localhost = cc::string_view("localhost");
+    auto const is_local
+        = host.value().size() == localhost.size()
+       && cc::string_view::matching_prefix_of(host.value(), localhost, cc::equal_case_insensitive{}).size()
+              == localhost.size();
+    if (!host.value().empty() && !is_local)
     {
         // `file://server/share/x` is a UNC path, as VS Code reads it
 #ifdef CC_OS_WINDOWS

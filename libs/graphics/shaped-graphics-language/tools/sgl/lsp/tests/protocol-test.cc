@@ -231,6 +231,10 @@ TEST("lsp documents - a file uri's authority, query, fragment and escapes, and w
     CHECK(lsp::path_of_uri("FILE:///home/a.sgl").value() == "/home/a.sgl");
     CHECK(!lsp::path_of_uri("file:///home/bad%zz.sgl").has_value());
 
+    // `localhost` is this machine, in any case
+    CHECK(lsp::path_of_uri("file://localhost/home/a.sgl").value() == "/home/a.sgl");
+    CHECK(lsp::path_of_uri("file://LocalHost/home/a.sgl").value() == "/home/a.sgl");
+
     // a first segment that is more than a letter and a colon is never a drive
     CHECK(lsp::path_of_uri("file:///ab:/c").value() == "/ab:/c");
     CHECK(lsp::path_of_uri("file:///a:b/c").value() == "/a:b/c");
