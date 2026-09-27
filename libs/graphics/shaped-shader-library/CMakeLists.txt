@@ -38,6 +38,8 @@ target_sources(shaped-shader-library
     BASE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/src"
     FILES
     src/shaped-shader-library/fwd.hh
+    src/shaped-shader-library/gpu_bool.hh
+    src/shaped-shader-library/compiler/block_layout.hh
     src/shaped-shader-library/all.hh
     src/shaped-shader-library/filesystem/filesystem.hh
     src/shaped-shader-library/filesystem/watch.hh
@@ -114,6 +116,7 @@ endif()
 if(SC_BUILD_TESTS)
     add_executable(shaped-shader-library-test
         tests/main.cc
+        tests/gpu_bool-test.cc
         tests/filesystem/path-test.cc
         tests/filesystem/filesystem-test.cc
         tests/filesystem/real_filesystem-test.cc
@@ -123,7 +126,6 @@ if(SC_BUILD_TESTS)
         tests/compile_source-test.cc
         tests/hot_reload-test.cc
         tests/shader_package-test.cc
-        tests/reflection_mismatch-test.cc
         tests/dxc_compiler-test.cc
         tests/wgsl_compiler-test.cc
         tests/sgl_compiler-test.cc

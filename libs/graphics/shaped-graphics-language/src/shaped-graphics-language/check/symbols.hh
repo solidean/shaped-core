@@ -106,6 +106,8 @@ struct sgl::check::type_info
     bool is_opaque = false;
     /// `@vertex struct` is a vertex input and `@pixel struct` a set of render targets.
     stage edge = stage::none;
+    /// `@no_padding`: a layout that leaves a gap before any of its members is an error wherever it is placed.
+    bool is_no_padding = false;
     /// The element of a `buffer`; `none` for every other kind.
     type_id element = type_id::none;
     /// Whether a `buffer` may be written: `mut buffer[T]` against `buffer[T]`.
@@ -304,6 +306,8 @@ struct sgl::check::binding_info
     symbol_id symbol = symbol_id::none;
     /// `@inline`: the members ride as inline constants, which an emitter must know.
     bool is_inline = false;
+    /// `@no_padding`: a gap before any member of its constant block is an error.
+    bool is_no_padding = false;
     ast::range_of<member_info> members;
     /// What its own `require` lines name, which declares them for every entry point listing it (CHK-262).
     feature_set declared;

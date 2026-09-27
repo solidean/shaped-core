@@ -1,39 +1,39 @@
 #include <clean-core/fwd.hh>
 #include <nexus/test.hh>
-#include <shaped-rendering/gpu_types.hh>
+#include <shaped-shader-library/gpu_bool.hh>
 
 #include <type_traits>
 
 using namespace cc::primitive_defines;
 
-TEST("sr - gpu_boolean packs a bool into one 32-bit lane")
+TEST("slib - gpu_bool packs a bool into one 32-bit lane")
 {
-    static_assert(sizeof(sr::gpu_boolean) == 4);
-    static_assert(std::is_trivially_copyable_v<sr::gpu_boolean>); // it rides into a cbuffer by memcpy
+    static_assert(sizeof(slib::gpu_bool) == 4);
+    static_assert(std::is_trivially_copyable_v<slib::gpu_bool>); // it rides into GPU memory by memcpy
 
-    auto const t = sr::gpu_boolean(true);
-    auto const f = sr::gpu_boolean();
+    auto const t = slib::gpu_bool(true);
+    auto const f = slib::gpu_bool();
 
     CHECK(t.value == 1u);
     CHECK(f.value == 0u);
     CHECK(bool(t));
     CHECK(!bool(f));
-    CHECK(t == sr::gpu_boolean(true));
+    CHECK(t == slib::gpu_bool(true));
     CHECK(t != f);
 
     // A shader reads any non-zero lane as `true`, so an off-by-one bit pattern is still equal to `true` here.
-    auto raw = sr::gpu_boolean();
+    auto raw = slib::gpu_bool();
     raw.value = 0xFFFFFFFFu;
     CHECK(bool(raw));
     CHECK(raw == t);
 }
 
-TEST("sr - gpu_boolean is a drop-in cbuffer field")
+TEST("slib - gpu_bool is a drop-in field of a GPU struct")
 {
-    // What a `*_gpu` struct looks like where it carries a flag: the lane is declared gpu_boolean and a plain bool assigns into it.
+    // What a GPU struct looks like where it carries a flag: the lane is declared gpu_bool and a plain bool assigns into it.
     struct constants
     {
-        sr::gpu_boolean is_indexed = false;
+        slib::gpu_bool is_indexed = false;
         u32 _padding[3] = {};
     };
 

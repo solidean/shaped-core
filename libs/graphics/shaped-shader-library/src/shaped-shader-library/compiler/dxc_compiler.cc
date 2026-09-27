@@ -4,6 +4,7 @@
 
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/async.hh> // sg::async_compiled_shader is a cc::shared_async
+#include <shaped-shader-compiler-dxc/block_reflection.hh>
 #include <shaped-shader-compiler-dxc/compile_options.hh>
 #include <shaped-shader-compiler-dxc/compiler.hh>
 #include <shaped-shader-compiler-dxc/shader_cache.hh>
@@ -52,6 +53,26 @@ public:
     {
         // The cache keys on the flattened source and options: a reload that touched a file without changing what it expands to returns the node that already exists.
         return _cache.compile(to_dxc(desc), {.target = _target});
+    }
+
+    /// SPIR-V states its layout in decorations; DXIL's would need the reflection container, which the bytecode does
+    /// not carry, so a dxil shader's layout is not read.
+    [[nodiscard]] cc::optional<cc::vector<slib::block_layout>> reflect_layouts(sg::compiled_shader const& shader) const override
+    {
+        if (_target != ssc::dxc::compile_target::spirv)
+            return {};
+        auto blocks = ssc::dxc::reflect_spirv_blocks(shader.bytecode);
+        if (blocks.has_error())
+            return {};
+        auto result = cc::vector<slib::block_layout>();
+        for (auto& b : blocks.value())
+        {
+            auto layout = slib::block_layout{.global = cc::move(b.name), .stride = b.stride};
+            for (auto& f : b.fields)
+                layout.fields.push_back({.name = cc::move(f.name), .offset = f.offset});
+            result.push_back(cc::move(layout));
+        }
+        return result;
     }
 
 private:

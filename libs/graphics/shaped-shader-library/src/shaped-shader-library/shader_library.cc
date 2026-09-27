@@ -1,6 +1,8 @@
 #include <clean-core/common/assert.hh>
+#include <clean-core/common/log.hh>
 #include <clean-core/container/set.hh>
 #include <clean-core/record/domain.hh>
+#include <clean-core/record/scope.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_coroutine.hh>
@@ -25,67 +27,172 @@ namespace
 // The generated package symbols are process-wide globals, so two libraries would fight over who owns the assets they point at.
 bool g_library_alive = false;
 
-/// What a preprocessor knew that the compiler behind it does not reflect.
-struct host_facts
+/// The name a compiler reflects `b` under: the identifier the text spells it with.
+cc::string_view emitted_name_of(sg::binding const& b)
 {
-    cc::vector<slib::binding_rename> renames;
-    cc::optional<i32> color_output_count;
-    cc::string target_set;
-    cc::optional<sg::feature_set> required_features;
-    /// SGL's own footprint, which replaces whatever the compiler reflected.
-    sg::shader_footprint footprint;
+    return b.reflected_name.empty() ? cc::string_view(b.name) : cc::string_view(b.reflected_name);
+}
 
-    [[nodiscard]] bool is_empty() const
+/// Where `reflected`, a compiler's reading of a binding, disagrees with the `declared` one the text was written from.
+/// Only what every compiler reads off the text is compared: DXC declares every image read-write, so an image's access
+/// is compared as whether it writes, and slib's WGSL reader assumes a sampler's and a texture's filtering.
+void compare_binding(sg::binding const& reflected, sg::binding const& declared, sg::shader_format format, cc::string& out)
+{
+    auto const name = cc::string_view(declared.name);
+    auto const differs = [&](cc::string_view what, auto const& a, auto const& b)
+    { out += cc::format("'{}' reflects {} {}, and SGL states {}\n", name, what, a, b); };
+
+    if (reflected.type != declared.type)
+        differs("kind", int(reflected.type), int(declared.type));
+    if (reflected.index != declared.index)
+        differs("index", reflected.index, declared.index);
+    if (reflected.count != declared.count)
+        differs("count", reflected.count, declared.count);
+    if (reflected.group_index.has_value() && reflected.group_index != declared.group_index)
+        differs("set", reflected.group_index.value(), declared.group_index.value_or(u32(-1)));
+    if (reflected.space.has_value() && reflected.space != declared.space)
+        differs("space", reflected.space.value(), declared.space.value_or(u32(-1)));
+    if (reflected.is_writable() != declared.is_writable())
+        differs("writable", reflected.is_writable(), declared.is_writable());
+    auto const rows = [](isize size) { return (size + 15) / 16 * 16; };
+    if (reflected.block_size.has_value() && declared.block_size.has_value()
+        && rows(reflected.block_size.value()) != rows(declared.block_size.value()))
+        differs("block size", reflected.block_size.value(), declared.block_size.value());
+    if (reflected.texture_dimension.has_value() && reflected.texture_dimension != declared.texture_dimension)
+        differs("dimension", int(reflected.texture_dimension.value()), int(declared.texture_dimension.value_or({})));
+    if (reflected.image_format.has_value() && reflected.image_format != declared.image_format)
+        differs("image format", int(reflected.image_format.value()), int(declared.image_format.value_or({})));
+    if (format != sg::shader_format::wgsl)
     {
-        return renames.empty() && !color_output_count.has_value() && target_set.empty()
-            && !required_features.has_value() && !footprint.is_known();
+        if (reflected.sample_type.has_value() && reflected.sample_type != declared.sample_type)
+            differs("sample type", int(reflected.sample_type.value()), int(declared.sample_type.value_or({})));
+        if (reflected.sampler_type.has_value() && reflected.sampler_type != declared.sampler_type)
+            differs("sampler type", int(reflected.sampler_type.value()), int(declared.sampler_type.value_or({})));
     }
+}
+
+/// What keeps `reflected`, the compiler's own reading of the text, from confirming what SGL `stated` of it; empty where it does.
+/// A compiler reports every binding the text declares (WGSL) or only those the code keeps (DXC), so each reflected
+/// binding is looked up among `declared`, and SGL's used ones are a subset of those by construction.
+cc::string reflection_mismatch(sg::compiled_shader const& reflected,
+                               sg::compiled_shader const& stated,
+                               cc::span<sg::binding const> declared)
+{
+    auto out = cc::string();
+    for (auto const& r : reflected.bindings)
+    {
+        sg::binding const* match = nullptr;
+        for (auto const& d : declared)
+            if (emitted_name_of(d) == r.name)
+                match = &d;
+        if (match == nullptr)
+            out += cc::format("'{}' is reflected, and SGL declares no binding the text spells so\n", r.name);
+        else
+            compare_binding(r, *match, stated.format, out);
+    }
+
+    if (reflected.workgroup_size.has_value() && stated.workgroup_size.has_value())
+    {
+        auto const& a = reflected.workgroup_size.value();
+        auto const& b = stated.workgroup_size.value();
+        if (a.x != b.x || a.y != b.y || a.z != b.z)
+            out += cc::format("the workgroup reflects as {}x{}x{}, and SGL states {}x{}x{}\n", a.x, a.y, a.z, b.x, b.y,
+                              b.z);
+    }
+    if (reflected.color_output_count.has_value() && stated.color_output_count.has_value()
+        && reflected.color_output_count != stated.color_output_count)
+        out += cc::format("{} render targets reflect, and SGL states {}\n", reflected.color_output_count.value(),
+                          stated.color_output_count.value());
+
+    // A written slot cannot be dropped by a compiler, so it has to reflect as writable wherever it reflects at all.
+    for (auto const& slot : stated.footprint.slots)
+    {
+        if (!slot.access.has(sg::access_flag::shader_write))
+            continue;
+        for (auto const& d : declared)
+            if (d.name == slot.name)
+                for (auto const& r : reflected.bindings)
+                    if (r.name == emitted_name_of(d) && !r.is_writable())
+                        out += cc::format("'{}' is written, and reflects as read-only\n", slot.name);
+    }
+    return out;
+}
+
+/// What keeps the compiler's layout of each block and buffer element from being the one SGL `stated`; empty where it is.
+/// A block the compiler dropped is not compared, and neither is one whose fields it names in another way than SGL.
+cc::string layout_mismatch(cc::span<slib::block_layout const> reflected, cc::span<slib::block_layout const> stated)
+{
+    auto out = cc::string();
+    for (auto const& s : stated)
+    {
+        slib::block_layout const* r = nullptr;
+        for (auto const& candidate : reflected)
+            if (candidate.global == s.global)
+                r = &candidate;
+        if (r == nullptr)
+            continue;
+        if (s.stride > 0 && r->stride > 0 && s.stride != r->stride)
+            out += cc::format("'{}' strides by {} bytes, and SGL states {}\n", s.global, r->stride, s.stride);
+        for (auto const& f : s.fields)
+            for (auto const& g : r->fields)
+                if (g.name == f.name && g.offset != f.offset)
+                    out += cc::format("'{}.{}' sits at byte {}, and SGL states {}\n", s.global, f.name, g.offset,
+                                      f.offset);
+    }
+    return out;
+}
+
+/// SGL's `interface`, with the bytecode and the compiler of `compiled`, which is all a compile contributes to it.
+/// `compiled`'s own reflection is compared against the interface on the way, and a difference is an SGL bug that is
+/// logged, never used: SGL wrote the text, so it is what the text means.
+sg::compiled_shader assembled(sg::compiled_shader compiled,
+                              sg::compiled_shader interface,
+                              cc::span<sg::binding const> declared,
+                              cc::span<slib::block_layout const> layouts,
+                              slib::shader_compiler const* compiler,
+                              cc::string_view label)
+{
+    {
+        CC_RECORD_SCOPE("slib.reflection_check");
+        auto mismatch = reflection_mismatch(compiled, interface, declared);
+        if (auto const reflected = compiler->reflect_layouts(compiled); reflected.has_value())
+            mismatch += layout_mismatch(reflected.value(), layouts);
+        if (!mismatch.empty())
+            CC_LOG_ERROR("the compiler's reflection of '{}' ({}) disagrees with SGL, whose interface is used:\n{}",
+                         label, interface.entry_point, mismatch);
+    }
+    interface.bytecode = cc::move(compiled.bytecode);
+    interface.compiler = cc::move(compiled.compiler);
+    interface.compiler.signature = cc::format("{} sgl", interface.compiler.signature);
+    return interface;
+}
+
+struct sgl_interface
+{
+    sg::compiled_shader shader;
+    cc::vector<sg::binding> declared;
+    cc::vector<slib::block_layout> layouts;
+    /// The edge that compiled it, whose reflection is compared; the library owns it for as long as it compiles.
+    slib::shader_compiler const* compiler = nullptr;
+    cc::string label;
 };
 
-void apply(sg::compiled_shader& shader, host_facts const& facts)
-{
-    for (auto& b : shader.bindings)
-        for (auto const& r : facts.renames)
-            if (b.name == r.reflected)
-            {
-                b.reflected_name = cc::move(b.name);
-                b.name = r.name;
-                break;
-            }
-    // A reflected footprint names bindings as the compiler saw them, so it takes the same renames.
-    for (auto& slot : shader.footprint.slots)
-        for (auto const& r : facts.renames)
-            if (slot.name == r.reflected)
-            {
-                slot.name = r.name;
-                break;
-            }
-    if (facts.color_output_count.has_value())
-        shader.color_output_count = facts.color_output_count;
-    shader.target_set = facts.target_set;
-    if (facts.required_features.has_value())
-        shader.required_features = facts.required_features;
-    if (facts.footprint.is_known())
-        shader.footprint = facts.footprint;
-}
-
-sg::async_compiled_shader applied_once_settled(sg::async_compiled_shader built, host_facts facts)
+sg::async_compiled_shader assembled_once_settled(sg::async_compiled_shader built, sgl_interface interface)
 {
     auto shader = co_await built;
-    apply(shader, facts);
-    co_return shader;
+    co_return assembled(cc::move(shader), cc::move(interface.shader), interface.declared, interface.layouts,
+                        interface.compiler, interface.label);
 }
 
-/// `built`, with every reflected binding renamed to the name the host knows it by, and its targets stated.
-/// Applied after the compile rather than inside it, so a compiler's cache holds only what the compiler reflected.
+/// `built` as the shader SGL's interface describes, once it settles.
+/// Assembled after the compile rather than inside it, so a compiler's cache holds only what the compiler reflected.
 /// A compile that settled already stays settled, as a WGSL one does.
-sg::async_compiled_shader with_host_facts(sg::async_compiled_shader built, host_facts facts)
+sg::async_compiled_shader with_interface(sg::async_compiled_shader built, sgl_interface interface)
 {
     if (!built->has_value())
-        return applied_once_settled(cc::move(built), cc::move(facts));
-    auto shader = *built->try_value();
-    apply(shader, facts);
-    return cc::make_async_from_value(cc::move(shader));
+        return assembled_once_settled(cc::move(built), cc::move(interface));
+    return cc::make_async_from_value(assembled(*built->try_value(), cc::move(interface.shader), interface.declared,
+                                               interface.layouts, interface.compiler, interface.label));
 }
 
 sg::async_compiled_shader make_failed_shader(cc::string message)
@@ -378,13 +485,18 @@ void slib::shader_library::_compile_text(compile_outcome& outcome,
     }
 
     desc.source = cc::move(preprocessed.value().source);
-    auto facts = host_facts{.renames = cc::move(preprocessed.value().renamed_bindings),
-                            .required_features = preprocessed.value().required_features,
-                            .footprint = cc::move(preprocessed.value().footprint)};
-    if (preprocessed.value().color_targets >= 0)
-        facts.color_output_count = preprocessed.value().color_targets;
-    if (!preprocessed.value().target_struct.empty() && !host_namespace.empty())
-        facts.target_set = cc::format("{}::{}", host_namespace, preprocessed.value().target_struct);
+    auto interface = cc::optional<sgl_interface>();
+    if (preprocessed.value().interface.has_value())
+    {
+        interface = sgl_interface{.shader = cc::move(preprocessed.value().interface.value()),
+                                  .declared = cc::move(preprocessed.value().declared_bindings),
+                                  .layouts = cc::move(preprocessed.value().layouts),
+                                  .compiler = compiler,
+                                  .label = cc::string::create_copy_of(label)};
+        auto& target_set = interface.value().shader.target_set;
+        if (!target_set.empty())
+            target_set = host_namespace.empty() ? cc::string() : cc::format("{}::{}", host_namespace, target_set);
+    }
     // A preprocessor that renamed the entry point says so, and the compile has to ask for the name the text declares.
     if (!preprocessed.value().entry_point.empty())
         desc.entry_point = cc::move(preprocessed.value().entry_point);
@@ -410,7 +522,7 @@ void slib::shader_library::_compile_text(compile_outcome& outcome,
         desc.source = cc::move(rewritten.value());
     }
     outcome.shader = compiler->compile(desc);
-    if (!facts.is_empty())
-        outcome.shader = with_host_facts(cc::move(outcome.shader), cc::move(facts));
+    if (interface.has_value())
+        outcome.shader = with_interface(cc::move(outcome.shader), cc::move(interface.value()));
     _backlog.track(outcome.shader);
 }

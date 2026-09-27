@@ -8,6 +8,7 @@
 #include <clean-core/string/string_view.hh>
 #include <shaped-graphics/binding/compiled_shader.hh>
 #include <shaped-graphics/fwd.hh>
+#include <shaped-shader-library/compiler/block_layout.hh>
 #include <shaped-shader-library/fwd.hh>
 
 /// The language a shader is authored in.
@@ -28,33 +29,23 @@ using include_resolver = cc::function_ref<cc::optional<cc::string>(cc::string_vi
 
 } // namespace slib
 
-/// A binding the compiler will reflect under one name, and the name the host knows it by.
-struct slib::binding_rename
-{
-    cc::string reflected;
-    cc::string name;
-};
-
 /// What `preprocess` hands back.
 /// `entry_point` is empty where preprocessing kept the name it was given, which is every compiler but SGL's:
 /// SGL renames an entry point the target reserves, and the compile has to ask for the name the text declares.
-/// `renamed_bindings` is empty likewise: SGL's text declares `work_values` for what the host binds as `work.values`,
-/// and the library renames the compiled shader's reflected bindings with it once the compile settles.
 struct slib::preprocessed_source
 {
     cc::string source;
     cc::string entry_point;
-    cc::vector<binding_rename> renamed_bindings;
-    /// A pixel entry point's render targets: how many, and the name of the struct that declares them; -1 and empty
-    /// otherwise, and for every compiler but SGL's.
-    i32 color_targets = -1;
-    cc::string target_struct;
-    /// What a device needs to run the shader, which the library sets on the compiled shader.
-    /// nullopt is unknown, which every compiler but SGL's is: nothing in HLSL or WGSL declares it.
-    cc::optional<sg::feature_set> required_features;
-    /// What the shader's code does to each binding, keyed by host name, which the library sets on the compiled shader.
-    /// Unknown (`none`) for every compiler but SGL's, whose shaders keep what their compiler reflected.
-    sg::shader_footprint footprint;
+    /// The whole shader but its bytecode and compiler, where the source language states it, which only SGL does.
+    /// The library then takes nothing from the compile but those two, and the compiler's reflection only confirms the rest.
+    /// `target_set` is the bare name of the target struct, which the library qualifies with the package's namespace.
+    /// nullopt for every other compiler, whose shader is what the compile reflects.
+    cc::optional<sg::compiled_shader> interface;
+    /// Every binding the text declares, used or not, which is what a compiler reflecting the text may report.
+    /// Empty without an `interface`.
+    cc::vector<sg::binding> declared_bindings;
+    /// Every constant block and buffer element the text declares, laid out as the text states; empty without an `interface`.
+    cc::vector<block_layout> layouts;
 };
 
 /// One shader to compile.
@@ -92,4 +83,12 @@ public:
     /// Already-flattened source -> bytecode.
     /// A compile failure arrives as an error on the returned node rather than a throw: a broken shader edit must not take down a running app.
     [[nodiscard]] virtual sg::async_compiled_shader compile(shader_source_description const& desc) const = 0;
+
+    /// Where `shader`'s own bytecode puts the values of each constant block and buffer element, which slib compares
+    /// against what SGL stated of the text; nullopt where this compiler cannot read it.
+    [[nodiscard]] virtual cc::optional<cc::vector<block_layout>> reflect_layouts(sg::compiled_shader const& shader) const
+    {
+        (void)shader;
+        return {};
+    }
 };

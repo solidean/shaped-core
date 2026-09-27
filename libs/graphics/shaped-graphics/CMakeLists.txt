@@ -397,6 +397,7 @@ if(SC_BUILD_TESTS)
                 quads.sgl:*
                 textures.sgl:*
                 footprint.sgl:*
+                layout.sgl:*
         )
     endif()
 

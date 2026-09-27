@@ -39,7 +39,7 @@ constexpr table_entry k_table[] = {
     {"uint3", "unsigned[3]", 12, 4, 4, true, vertex_attribute_format::vec3u},
     {"uint4", "unsigned[4]", 16, 4, 4, true, vertex_attribute_format::vec4u},
 
-    // Four bytes in a constant block, and no vertex attribute format at all -- the reason sr::gpu_boolean exists.
+    // Four bytes in a constant block, and no vertex attribute format at all -- the reason slib::gpu_bool exists.
     {"bool", "unsigned", 4, 4, 4},
 
     // Every matrix is column-major and the PASS writes that, exactly as it writes an address -- see

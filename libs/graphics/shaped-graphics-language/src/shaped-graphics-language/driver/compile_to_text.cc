@@ -1,12 +1,88 @@
 #include "compile_to_text.hh"
 
 #include <clean-core/string/format.hh>
+#include <shaped-graphics-language/check/resources.hh>
+#include <shaped-graphics-language/driver/impl/describe_binding.hh>
 #include <shaped-graphics-language/driver/impl/front_end.hh>
 #include <shaped-graphics-language/emit/impl/dialect.hh>
 #include <shaped-graphics-language/legalize/legalize.hh>
 #include <shaped-graphics-language/test/run_tests.hh>
 
 using namespace sgl;
+
+namespace
+{
+/// Whether the code of `legal` reaches slot `member` of `binding`: a resource by its position, a block by -1.
+/// Every plain member reaches its binding's block, and every member of an `@inline` binding reaches that one block.
+bool is_reached(check::checked_module const& m, check::flat_entry_point const& legal, check::symbol_id binding, i32 member)
+{
+    auto const& info = m.bindings[m.at(binding).info];
+    auto const members = m.at(info.members);
+    for (auto const& x : legal.exprs)
+    {
+        auto const* const b = x.node.try_as<check::flat_binding_member>();
+        if (b == nullptr || b->binding != binding)
+            continue;
+        auto const is_resource = !info.is_inline && check::is_resource(m.at(members[b->member].type).kind);
+        if ((is_resource ? b->member : -1) == member)
+            return true;
+    }
+    return false;
+}
+
+/// Every slot the entry point's text declares, as `sgl describe` numbers and names them.
+cc::vector<interface_binding> interface_of(check::checked_module const& m,
+                                           check::flat_entry_point const& legal,
+                                           cc::span<emit::bound_name const> bound_names)
+{
+    auto const emitted_of = [&](cc::string_view host) -> cc::string
+    {
+        for (auto const& b : bound_names)
+            if (b.host == host)
+                return b.emitted;
+        return cc::string(host);
+    };
+
+    auto result = cc::vector<interface_binding>();
+    auto group = 0;
+    for (auto const id : legal.bindings)
+    {
+        auto const& s = m.at(id);
+        auto const is_inline = m.bindings[s.info].is_inline;
+        auto const described = driver::impl::describe_binding(m, s);
+        if (is_inline || described.block_slot == 0)
+            result.push_back({.name = s.name,
+                              .emitted = emitted_of(s.name),
+                              .kind = described_member_kind::constant,
+                              .is_inline = is_inline,
+                              .group = is_inline ? -1 : group,
+                              .slot = 0,
+                              .is_used = is_reached(m, legal, id, -1),
+                              .block_size = described.block_size});
+        if (is_inline)
+            continue;
+        for (auto i = isize(0); i < described.members.size(); ++i)
+        {
+            auto const& member = described.members[i];
+            if (member.kind == described_member_kind::constant)
+                continue;
+            result.push_back({.name = member.host_name,
+                              .emitted = emitted_of(member.host_name),
+                              .kind = member.kind,
+                              .group = group,
+                              .slot = member.slot,
+                              .is_used = is_reached(m, legal, id, i32(i)),
+                              .access = member.access,
+                              .texture_dimension = member.texture_dimension,
+                              .sample_type = member.sample_type,
+                              .image_format = member.image_format,
+                              .sampler_type = member.sampler_type});
+        }
+        ++group;
+    }
+    return result;
+}
+} // namespace
 
 cc::result<sgl::emitted_source, cc::string> sgl::compile_to_text(text_request const& request)
 {
@@ -55,11 +131,15 @@ cc::result<sgl::emitted_source, cc::string> sgl::compile_to_text(text_request co
             text.appendf("{}: error: {}: {}\n", request.source_name, emit::to_string(error.kind), error.detail);
         return cc::error(cc::move(text));
     }
-    return sgl::emitted_source{.text = cc::move(emitted.text),
-                               .entry_point = cc::move(emitted.entry_point),
-                               .bound_names = cc::move(emitted.bound_names),
-                               .color_targets = emitted.color_targets,
-                               .target_struct = cc::move(emitted.target_struct),
-                               .features = e.features,
-                               .footprint = check::footprint_of(m, legal)};
+    auto result = sgl::emitted_source{.text = cc::move(emitted.text),
+                                      .entry_point = cc::move(emitted.entry_point),
+                                      .bindings = interface_of(m, legal, emitted.bound_names),
+                                      .color_targets = emitted.color_targets,
+                                      .target_struct = cc::move(emitted.target_struct),
+                                      .features = e.features,
+                                      .footprint = check::footprint_of(m, legal),
+                                      .layouts = cc::move(emitted.layouts)};
+    for (auto axis = 0; axis < 3; ++axis)
+        result.workgroup[axis] = e.workgroup[axis];
+    return result;
 }

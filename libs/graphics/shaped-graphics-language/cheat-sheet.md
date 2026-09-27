@@ -529,8 +529,10 @@ sgl::print_source(file)      // == file.source for EVERY input: the lossless inv
   Its resource at `slot` is `register(<class>slot, spaceN)` in dx12, `[[vk::binding(slot, N)]]` in vulkan, `@group(N) @binding(slot)` in WGSL.
   An entry point lists at most three groups besides its `@inline` binding, as sg binds; a fourth is `too-many-groups` on every target.
   MSL has no globals, so there it is the entry point's parameter `constant T& name [[buffer(4)]]`.
-  Its members must land on the same offsets in HLSL, WGSL and MSL, so `{float; float3}` is `layout-mismatch`.
-  **So is `{float3; float}`**: MSL's `float3` is 16 bytes, so nothing fits into its tail, and `{float3; mat4; float}` is fine.
+- **GPU memory has one layout per address space, the same on every target** (the spec's emitting file, "Layout").
+  A constant block packs as an HLSL constant buffer does, and a buffer's element as a dx12 structured buffer: tight, like a `tg` struct.
+  WGSL and MSL are made to follow by a memory form, where a vector their own rule would place elsewhere is split or packed.
+  A struct in both a block and a buffer is `layout-conflict`; `@no_padding` turns a gap into `padding-forbidden`; `bool` has no layout, `bool32` does.
 - **`compile_to_text` drops warnings.** It gives the text or the errors; a caller that wants warnings runs the phases itself.
 - **`prelude/builtins.sgl` is GENERATED and committed; never edit it.** A hand edit fails `dev.py check` (`sgl-prelude`) and a library test.
   `prelude/core.sgl` is the hand-written half, embedded at CONFIGURE time: editing it re-runs CMake, and a test pins the embedded text to the file.

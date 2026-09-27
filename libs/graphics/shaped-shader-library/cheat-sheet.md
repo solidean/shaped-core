@@ -302,11 +302,16 @@ cmd.compute.bind_group(0, *group);        // group 0 of `main`, group 1 of an en
 //   `dst: out image_2d[.rgba8_unorm]`   -> sg::image_view_2d<sg::pixel_format::rgba8_unorm> dst   (any access: read, out, mut)
 //   `user_smp: sampler`                -> sg::sampler user_smp, which gather() hands sg by its host name (`work.user_smp`)
 //   `sampler albedo_smp:` block        -> NO field: an sg::named_sampler in declared_samplers(), which the layout carries
-// `@inline binding constants` -> shaders::constants: plain fields in C++'s layout, and the block the shader reads:
+// `@inline binding constants` -> shaders::constants: the block byte for byte, and to_block() its own bytes:
 pass.set_inline_constants(shaders::constants{.view_projection = vp}.to_block());
+// a struct a binding places in GPU memory -> shaders::particle: tg members at SGL's offsets, padding as `cc::u32 _padN = {}`,
+//   and static_asserts on sizeof and every offsetof. A buffer of it is sg::readwrite_buffer_view<shaders::particle>:
+auto const items = ctx.persistent.create_buffer_from_data(cc::vector<shaders::particle>{...}, sg::buffer_usage::readwrite_buffer);
+//   a constant block packs as an HLSL cbuffer, a buffer element tight like a tg struct (the SGL spec's layout rules).
+// SGL `bool32` -> slib::gpu_bool (gpu_bool.hh): a bool as one 32-bit lane; a plain bool assigns into it.
 // every name lives in the package namespace, so two files declaring one name is a generator error.
 // sg sees an SGL binding by its path, `work.values`, and a group's constant block by the binding's name:
-//   slib renames what the target's compiler reflected, which stays on each binding as `reflected_name`.
+//   the identifier the target text spells it with stays on each binding as `reflected_name`, for diagnostics.
 // `@inline binding constants` also gives constants::inline_binding(): the pipeline layout's inline block, no reflection.
 // an entry point of a `*`-declared file is a small wrapper: `->acquire(ctx)` as before, plus the layout its list states:
 auto const layout = shaders::cube.main_vs.acquire_layout(ctx);                  // {constants}, nothing reflected
@@ -332,9 +337,8 @@ cmd.raster.render_to(shaders::target{.color = rt.cleared(c), .depth_stencil = de
 //   the pipeline side, for one built by hand: .color_targets = shaders::target::states{.color = {.format = f}}, .target_set = shaders::target::name
 //   sg then refuses to bind that pipeline in a rendering of another target set, even one of the same shape.
 //   .target_set may be left out: a compiled SGL pixel shader states its own (and its target count), which sg takes.
-// a package with wrapped entry points also gets check_reflection(ctx) -> shared_async<string>: empty while every
-//   entry point's compiled reflection fits the groups it lists. Compiles them all, so it belongs in a test.
-CHECK(co_await shaders::check_reflection(*ctx) == "");
+// an SGL shader's compiled_shader is SGL's own statement of it: bindings, workgroup, targets, features, footprint.
+//   The inner compiler adds only bytecode; its reflection is compared on every compile, and a mismatch logs an error.
 ```
 
 ## include resolution
