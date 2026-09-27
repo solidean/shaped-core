@@ -1,26 +1,36 @@
 #include "../server.hh"
 #include "lsp-test-support.hh"
 
+#include <clean-core/string/uri.hh>
 #include <shaped-graphics-language/driver/prelude.hh>
 
 using namespace lsp_test;
 
 namespace
 {
-/// A language server with `source` open as `uri` at version 1, settled: checked, published, tests run.
+/// A language server, initialized; with `source`, open as `uri` at version 1 and settled: checked, published, tests run.
 struct session
 {
     cc::unique_ptr<sgl_lsp::language_server> ls = sgl_lsp::language_server::create();
     cc::vector<babel::json::document> messages;
 
+    session() { start(false); }
+
     explicit session(cc::string_view source, bool offers_utf8 = false, cc::string_view uri = "file:///t.sgl")
+    {
+        start(offers_utf8);
+        send_open(source, uri);
+        settle();
+    }
+
+    void start(bool offers_utf8)
     {
         initialize(ls->protocol(), offers_utf8);
         (void)outgoing(ls->protocol());
-        open(source, uri);
     }
 
-    void open(cc::string_view source, cc::string_view uri)
+    /// `didOpen`, not yet settled.
+    void send_open(cc::string_view source, cc::string_view uri = "file:///t.sgl")
     {
         auto w = babel::json::string_writer();
         {
@@ -32,12 +42,53 @@ struct session
             d.write("text", source);
         }
         ls->protocol().receive(notification("textDocument/didOpen", w.finish().value()));
-        settle();
+    }
+
+    /// `didChange` replacing the whole text, not yet settled.
+    void send_change(cc::string_view source, i32 version)
+    {
+        auto w = babel::json::string_writer();
+        {
+            auto o = w.object();
+            {
+                auto d = o.write_object("textDocument");
+                d.write("uri", "file:///t.sgl");
+                d.write("version", version);
+            }
+            auto changes = o.write_array("contentChanges");
+            auto c = changes.write_object();
+            c.write("text", source);
+        }
+        ls->protocol().receive(notification("textDocument/didChange", w.finish().value()));
+    }
+
+    void send_close()
+    {
+        ls->protocol().receive(notification("textDocument/didClose", R"({"textDocument":{"uri":"file:///t.sgl"}})"));
     }
 
     void settle()
     {
         lsp_test::settle(ls->protocol());
+        collect();
+    }
+
+    /// Drives the server until it sent `method` at least once.
+    void settle_until_sent(cc::string_view method)
+    {
+        collect();
+        while (notifications_of(messages, method).empty())
+        {
+            if (ls->protocol().is_idle())
+                FAIL("the server settled without sending it");
+            ls->protocol().poll();
+            cc::pump_main_thread(1.0);
+            collect();
+        }
+    }
+
+    void collect()
+    {
         for (auto& m : outgoing(ls->protocol()))
             messages.push_back(cc::move(m));
     }
@@ -88,16 +139,23 @@ TEST("sgl lsp - opening a document publishes its diagnostics, with a summary whe
 
 TEST("sgl lsp - a file of the prelude is checked in its own place, not behind a second copy of itself", main_thread)
 {
+    auto const dir = cc::string(sgl::impl::prelude_directory());
+    auto const uri_of = [&](cc::string_view name)
+    {
+        return cc::string(dir.starts_with("/") ? "file://" : "file:///")
+             + cc::percent_encode(dir + "/" + name, cc::uri_component::path);
+    };
     auto const builtins = sgl::prelude_files()[0].source;
-    auto own = session(builtins, false, "file:///c%3A/sgl/prelude/builtins.sgl");
+    auto own = session(builtins, false, uri_of("builtins.sgl"));
     CHECK(diagnostics_text(own.last("textDocument/publishDiagnostics")) == "");
-    // the same text anywhere else declares every builtin type a second time
+    // the same text anywhere else declares every builtin type a second time, a user's `prelude/` folder included
     auto elsewhere = session(builtins, false, "file:///c%3A/sgl/copy/builtins.sgl");
     CHECK(diagnostics_text(elsewhere.last("textDocument/publishDiagnostics")) != "");
+    auto users = session(builtins, false, "file:///c%3A/shaders/prelude/builtins.sgl");
+    CHECK(diagnostics_text(users.last("textDocument/publishDiagnostics")) != "");
 
     // an edit of core.sgl is checked as the prelude, so its error is reported in it
-    auto core = session(cc::string(sgl::prelude_files()[1].source) + "fun broken() => nope\n", false,
-                        "file:///c%3A/sgl/prelude/core.sgl");
+    auto core = session(cc::string(sgl::prelude_files()[1].source) + "fun broken() => nope\n", false, uri_of("core.sgl"));
     CHECK(diagnostics_text(core.last("textDocument/publishDiagnostics")).contains("unknown-name"));
 }
 
@@ -175,15 +233,40 @@ TEST("sgl lsp - an inferred return type is a hint before the arrow, which insert
 
 TEST("sgl lsp - positions count UTF-16 units unless the client offers UTF-8", main_thread)
 {
-    // `é` is two bytes and one UTF-16 unit, so the unknown name sits one character further left in UTF-16
-    auto const source = cc::string_view("fun f() -> float:\n    // \xc3\xa9\n    return nope\n");
+    // `é` is two bytes and one UTF-16 unit, so the unknown name after it on its line sits one character further left
+    auto const source = cc::string_view("fun f() -> float:\n    let \xc3\xa9x = nope\n    return 1.0\n");
     auto utf16 = session(source);
-    CHECK(diagnostics_text(utf16.last("textDocument/publishDiagnostics")).starts_with("2:11 unknown-name"));
-    auto const tail = cc::string_view("fun f() -> float:\n    let \xc3\xa9x = nope\n    return 1.0\n");
-    auto a = session(tail);
-    auto b = session(tail, true);
-    CHECK(diagnostics_text(a.last("textDocument/publishDiagnostics")).starts_with("1:13 unknown-name"));
-    CHECK(diagnostics_text(b.last("textDocument/publishDiagnostics")).starts_with("1:14 unknown-name"));
+    auto utf8 = session(source, true);
+    CHECK(diagnostics_text(utf16.last("textDocument/publishDiagnostics")).starts_with("1:13 unknown-name"));
+    CHECK(diagnostics_text(utf8.last("textDocument/publishDiagnostics")).starts_with("1:14 unknown-name"));
+}
+
+TEST("sgl lsp - a character beyond the BMP is two UTF-16 units and four bytes before the token after it", main_thread)
+{
+    // U+1F600 in a string, so the closing quote after it is a token of the same line
+    auto const source = cc::string_view("fun f():\n    print \"\xf0\x9f\x98\x80\"\n");
+    auto const line_1_tokens = [&](bool offers_utf8)
+    {
+        auto s = session(source, offers_utf8);
+        auto const r = s.ask(4, "textDocument/semanticTokens/full", R"({"textDocument":{"uri":"file:///t.sgl"}})");
+        auto const data = r["result"]["data"];
+        // every token of line 1 as `start+length`, undoing the encoding relative to the token before
+        auto out = cc::string();
+        auto line = i32(0);
+        auto start = i32(0);
+        for (auto i = isize(0); i + 5 <= data.size(); i += 5)
+        {
+            auto const delta_line = i32(data[i].as_double());
+            line += delta_line;
+            start = (delta_line == 0 ? start : 0) + i32(data[i + 1].as_double());
+            if (line == 1)
+                out.appendf("{}+{} ", start, i32(data[i + 2].as_double()));
+        }
+        return out;
+    };
+    // `print`, the opening quote, the string's body, the closing quote
+    CHECK(line_1_tokens(false) == "4+5 10+1 11+2 13+1 ");
+    CHECK(line_1_tokens(true) == "4+5 10+1 11+4 15+1 ");
 }
 
 TEST("sgl lsp - a note into the prelude names a virtual document the client can open", main_thread)
@@ -198,9 +281,54 @@ TEST("sgl lsp - a note into the prelude names a virtual document the client can 
 TEST("sgl lsp - closing a document clears its diagnostics", main_thread)
 {
     auto s = session("fun f() -> float => nope\n");
-    s.ls->protocol().receive(notification("textDocument/didClose", R"({"textDocument":{"uri":"file:///t.sgl"}})"));
+    s.send_close();
     s.settle();
     CHECK(s.last("textDocument/publishDiagnostics")["diagnostics"].size() == 0);
+}
+
+TEST("sgl lsp - a version changed before its check settled publishes nothing, and the next one publishes all", main_thread)
+{
+    auto s = session();
+    s.send_open("fun f() -> float => nope\ntest 2 < 1\n");
+    s.send_change("fun f() -> float => 1.0\ntest f() == 1.0\n", 2);
+    s.settle();
+
+    auto const published = notifications_of(s.messages, "textDocument/publishDiagnostics");
+    CHECK(published.size() == 2); // the check's, then again once the tests ran
+    for (auto const& p : published)
+    {
+        CHECK(p["version"].as_double() == 2);
+        CHECK(p["diagnostics"].size() == 0);
+    }
+    auto const results = notifications_of(s.messages, "sgl/checkResults");
+    REQUIRE(results.size() == 1);
+    CHECK(results[0]["version"].as_double() == 2);
+    CHECK(results[0]["marks"][0]["passed"].as_double() == 1);
+}
+
+TEST("sgl lsp - a document closed while its check or tests are in flight is cleared once, and nothing follows",
+     main_thread)
+{
+    // a test that runs to its fuel limit, so the run is what is in flight
+    auto const source = cc::string_view("test:\n    let mut i = 0\n    while i >= 0:\n        i = i + 1\n    i < 0\n");
+    auto s = session();
+    s.send_open(source);
+
+    SECTION("before the check settled")
+    {
+    }
+    SECTION("while the tests run")
+    {
+        s.settle_until_sent("textDocument/publishDiagnostics");
+        s.messages.clear();
+    }
+
+    s.send_close();
+    s.settle();
+    auto const published = notifications_of(s.messages, "textDocument/publishDiagnostics");
+    REQUIRE(published.size() == 1);
+    CHECK(published[0]["diagnostics"].size() == 0);
+    CHECK(notifications_of(s.messages, "sgl/checkResults").empty());
 }
 
 TEST("sgl lsp - a test judged by the diagnostics it expects is one mark on its keyword, green when they occurred",
