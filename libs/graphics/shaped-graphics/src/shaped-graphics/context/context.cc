@@ -64,6 +64,7 @@ cc::optional<submission_token> context::prepare_texture_for_async(raw_texture_ha
                        "list holding one transition was submitted for it. Record cmd.prepare_for_async on a list you "
                        "already submit to avoid the submit");
 
+    _stats.add(stat::async_layout_fixups);
     auto cmd = create_command_list();
     cmd->ensure_layout(texture, required, range);
     return submit_command_list(cc::move(cmd));
@@ -111,6 +112,7 @@ context::context(backend_kind backend, thread_model threading, cc::span<shader_f
     uncached(*this),
     cached(*this),
     routines(*this),
+    metrics(*this),
     _backend(backend),
     _thread_model(threading),
     _pipeline_cache(std::make_unique<pipeline_cache>())
@@ -210,6 +212,17 @@ void context::process_completed_epochs()
 {
     retire_completed_epochs();
     settle_due_completions();
+}
+
+void context::advance_epoch()
+{
+    do_advance_epoch();
+    _stats.add(stat::epochs_advanced);
+
+    // Each stat's change over the epoch just closed, as one accumulate per stat.
+    auto const now = _stats.snapshot();
+    impl::record_stats(now - _recorded_stats);
+    _recorded_stats = now;
 }
 
 bool context::try_advance_epoch(int allowed_in_flight)

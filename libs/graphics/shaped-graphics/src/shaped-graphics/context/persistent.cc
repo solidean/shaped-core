@@ -28,6 +28,7 @@ cc::result<raw_buffer_handle> context_persistent_scope::try_create_raw_buffer(is
                                                                               allocation_info const& alloc)
 {
     CC_ASSERT(alloc.scope == lifetime_scope::persistent, "persistent scope requires a persistent allocation");
+    _ctx._stats.add(stat::buffers_created);
     return _ctx.try_create_raw_buffer(size_in_bytes, usage, alloc);
 }
 
@@ -62,6 +63,7 @@ cc::result<raw_texture_handle> context_persistent_scope::try_create_raw_texture(
         return cc::error(cc::move(unsupported.value()));
     if (auto error = desc.unaligned_block_error(_ctx.supports(feature::unaligned_block_compression)); !error.empty())
         return cc::error(cc::move(error));
+    _ctx._stats.add(stat::textures_created);
     return _ctx.try_create_raw_texture(desc, alloc);
 }
 
@@ -107,6 +109,7 @@ cc::result<binding_group_handle> context_persistent_scope::try_create_binding_gr
         = impl::find_unsupported_view(_ctx.supports(feature::float32_filtering), layout->bindings(), views);
         unsupported.has_value())
         return cc::error(cc::move(unsupported.value()));
+    _ctx._stats.add(stat::binding_groups_created);
     return _ctx.try_create_binding_group(cc::move(layout), views, samplers, lifetime_scope::persistent);
 }
 
@@ -131,6 +134,7 @@ cc::result<binding_group_handle> context_persistent_scope::try_create_binding_gr
         = impl::find_unsupported_view(_ctx.supports(feature::float32_filtering), layout->bindings(), views);
         unsupported.has_value())
         return cc::error(cc::move(unsupported.value()));
+    _ctx._stats.add(stat::binding_groups_created);
     return _ctx.try_create_binding_group(cc::move(layout), views, samplers, lifetime_scope::persistent);
 }
 

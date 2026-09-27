@@ -187,7 +187,7 @@ bcache::blob_cache* pipeline_cache::resolve_blob_cache()
 
 bcache::cache_key pipeline_cache::persistent_key(context& ctx, cc::hash128 pipeline_key, cc::string_view kind) const
 {
-    auto const& adapter = ctx.adapter();
+    auto const& adapter = ctx.metrics.adapter();
 
     auto& b = cc::byte_stream_builder::thread_local_scratch();
     b.add_pod(pipeline_key);

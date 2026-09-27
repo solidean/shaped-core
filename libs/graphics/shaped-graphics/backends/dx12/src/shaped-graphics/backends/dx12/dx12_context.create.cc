@@ -452,6 +452,7 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
 
     auto ctx = std::make_shared<dx12_context>();
     ctx->set_adapter_info(describe_adapter(adapter.Get()));
+    ctx->set_counted_stats(sg::all_stats);
     // IDXGIAdapter3 is where QueryVideoMemoryInfo lives; an older runtime leaves this null and the query then refuses.
     adapter.As(&ctx->_adapter);
 

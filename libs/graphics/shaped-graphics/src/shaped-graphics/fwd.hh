@@ -52,6 +52,10 @@ struct gpu_engine_counter;    // monotone busy time on one engine class
 struct gpu_counters;          // those counters, per engine class
 struct gpu_engine_load;       // one engine's share of a sampled load
 class gpu_load_sampler;       // GPU load, differenced against its own previous reading
+enum class stat : u8;         // one monotone total a context counts (see context/metrics.hh)
+class stats;                  // a reading of every stat, or the difference of two
+struct stat_info;             // a stat's recorded name and unit
+class context_metrics_scope;  // ctx.metrics
 class context_persistent_scope;
 class context_transient_scope;
 class context_upload_scope;
@@ -270,6 +274,12 @@ class slot_table;           // a bindless_array's key -> element-index map (bind
 class bindless_array_state; // what a bindless_array owns, shared so an element may outlive it
 class transfer_drain; // outstanding-job count a transfer system is drained against (transfer/impl/transfer_drain.hh)
 void notify_transfer_drained(sg::context& ctx); // a drain reached zero; defined in context/context.cc
+struct stat_counts;                             // what one command list counted while recording (context/metrics.hh)
+class stat_totals;                              // a context's running stat totals
+class gpu_wait_scope;                           // times a CPU wait on the GPU into gpu_wait_nanoseconds
+// the counts `cmd` recorded, for its backend to fold in at submit; defined in command_list/command_list.cc
+stat_counts const& recorded_stats(command_list const& cmd);
+void record_stats(sg::stats const& delta); // each non-zero counted stat as one CC_RECORD_ACCUM; context/metrics.cc
 } // namespace impl
 
 // Raster (graphics) pipeline + its fixed-function state vocabulary (see pipeline/raster_pipeline.hh and the

@@ -63,6 +63,8 @@ void finish_creation(webgpu_context& ctx)
         adapter.device_id = info.deviceID;
         adapter.is_software = info.adapterType == WGPUAdapterType_CPU;
         ctx.set_adapter_info(cc::move(adapter));
+        // WebGPU tracks usage itself and emits barriers nothing here can see.
+        ctx.set_counted_stats(sg::all_stats.without(sg::barrier_stats));
         wgpuAdapterInfoFreeMembers(info);
     }
 

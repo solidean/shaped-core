@@ -10,6 +10,7 @@ bytes_future command_list_download_scope::bytes_from_buffer(raw_buffer_handle bu
                                                             isize offset_in_bytes,
                                                             isize size_in_bytes)
 {
+    _cmd._stats.add(stat::bytes_downloaded_inline, size_in_bytes);
     return _cmd.download_bytes_from_buffer(cc::move(buffer), offset_in_bytes, size_in_bytes);
 }
 
@@ -24,6 +25,7 @@ bytes_future command_list_download_scope::bytes_from_texture(raw_texture_handle 
     impl::assert_texture_region_in_bounds(texture, subresource, box);
     if (box.is_empty()) // no copy — a ready, empty future
         return bytes_future(cc::pinned_data<byte const>(), make_ready_completion());
+    _cmd._stats.add(stat::bytes_downloaded_inline, impl::packed_region_bytes(texture, box));
     return _cmd.download_bytes_from_texture(cc::move(texture), subresource, box);
 }
 } // namespace sg

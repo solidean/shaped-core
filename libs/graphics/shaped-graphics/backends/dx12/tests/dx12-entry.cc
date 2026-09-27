@@ -40,7 +40,7 @@ ASYNC_TEST("sg dx12 backend - warp")
     else
     {
         // The driver is the one place that knows which adapter it asked for, so the flag is checked here rather than in a test.
-        CHECK(ctx.value()->adapter().is_software);
+        CHECK(ctx.value()->metrics.adapter().is_software);
         co_await nx::async_invoke_tests_in_sequence("warp", ctx.value());
 
         // A device reset during our own tests is a defect, not an environment quirk to tolerate.
@@ -65,7 +65,7 @@ ASYNC_TEST("sg dx12 backend - hardware")
         SKIP("no dx12 hardware device");
     else
     {
-        CHECK(!ctx.value()->adapter().is_software);
+        CHECK(!ctx.value()->metrics.adapter().is_software);
         co_await nx::async_invoke_tests_in_sequence("hardware", ctx.value());
 
         // A device reset during our own tests is a defect, not an environment quirk to tolerate.

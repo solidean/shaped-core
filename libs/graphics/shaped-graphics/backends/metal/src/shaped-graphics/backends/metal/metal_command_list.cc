@@ -360,6 +360,8 @@ void metal_command_list::flush_barriers()
     // publishes rather than leaving it to the end of the list.
     // So a mask clamping to nothing here is not a lost dependency: it is one the boundary pair already covers.
     ++_barriers_emitted;
+    _stats.add(sg::stat::global_barriers);
+    _stats.add(sg::stat::barrier_calls);
 
     if (_render_encoder == nullptr)
     {
@@ -1211,6 +1213,7 @@ void metal_command_list::reopen_render_encoder()
     _render_encoder = nullptr;
 
     ++_pass_reopens;
+    _stats.add(sg::stat::render_pass_splits);
     open_render_encoder(true);
 
     // Encoder state does not survive the boundary, so everything the scope set is replayed onto the new encoder.

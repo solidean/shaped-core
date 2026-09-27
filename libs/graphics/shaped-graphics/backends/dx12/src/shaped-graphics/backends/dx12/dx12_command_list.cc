@@ -183,6 +183,7 @@ void dx12_command_list::flush_barriers()
     _pending_barrier_buffers.clear();
     _pending_barrier_textures.clear();
 
+    count_barriers(_stats, _pending_buffer_barriers, _pending_texture_barriers);
     submit_barriers(_list.Get(), _pending_buffer_barriers, _pending_texture_barriers);
     _pending_buffer_barriers.clear();
     _pending_texture_barriers.clear();
@@ -684,7 +685,6 @@ sg::submission_token dx12_context::submit_dx12_command_list(std::unique_ptr<dx12
 {
     // Barrier resolution plus ExecuteCommandLists — the per-submit CPU cost a frame pays whatever the GPU does.
     CC_RECORD_SCOPE("sg.command_list.submit");
-    CC_RECORD_ACCUM("sg.submits", cc::rec::unit_count, 1);
 
     CC_ASSERT(cmd != nullptr, "cannot submit a null command list");
     CC_ASSERT(cmd->created_in_epoch() == current_epoch(), "a command list must be submitted in the epoch it was opened "
@@ -720,7 +720,10 @@ sg::submission_token dx12_context::submit_dx12_command_list(std::unique_ptr<dx12
                       "a declared access was never flushed by a GPU op");
 
             if (!entry_barriers.empty())
+            {
+                count_barriers(_stats, {}, entry_barriers);
                 submit_barriers(acquire_pre_list(*cmd), {}, entry_barriers);
+            }
             if (cmd->_pre_list)
             {
                 HRESULT const pre_closed = cmd->_pre_list->Close();
@@ -772,6 +775,9 @@ sg::submission_token dx12_context::submit_dx12_command_list(std::unique_ptr<dx12
 
             // Stamp this list's deferred downloads with the token and hand them to the actor under the same lock, so the actor's copy order matches submission — and thus ring-allocation — order.
             _download_inline.enqueue_submitted(t, cmd->_pending_downloads);
+
+            _stats.fold(sg::impl::recorded_stats(*cmd));
+            _stats.add(sg::stat::command_lists_submitted);
             return t;
         });
 

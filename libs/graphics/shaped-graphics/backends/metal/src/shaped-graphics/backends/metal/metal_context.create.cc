@@ -121,12 +121,15 @@ cc::result<sg::context_handle> sg::create_metal_context(backend::metal::metal_co
     // That is why the guard-style unwinds stop here rather than continuing past construction.
     auto ctx = std::make_shared<metal_context>(device, queue, compiler, epoch_event, submission_event);
     ctx->set_adapter_info(describe(device));
+    // An MTL4 barrier names stages, never a resource, so there is no per-resource barrier to count.
+    ctx->set_counted_stats(
+        sg::all_stats.without(sg::stat::buffer_barriers | sg::stat::texture_barriers | sg::stat::texture_transitions));
 
     // A refusal here is the device declining an allocation, not a broken contract — so it reaches the caller as an
     // error, and the half-built context unwinds through its own shutdown as this handle drops.
     CC_RETURN_IF_ERROR(ctx->create_systems(config.upload_ring_bytes, config.download_ring_bytes));
 
-    CC_LOG_INFO("metal context on '{}'", ctx->adapter().name);
+    CC_LOG_INFO("metal context on '{}'", ctx->metrics.adapter().name);
 
     return sg::context_handle(cc::move(ctx));
 }

@@ -4,6 +4,7 @@
 #include <shaped-graphics/backends/vulkan/vulkan_common.hh>
 #include <shaped-graphics/barrier/resource_access.hh>
 #include <shaped-graphics/barrier/resource_access_state.hh>
+#include <shaped-graphics/context/metrics.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/resource/subresource.hh>
 
@@ -47,4 +48,23 @@ namespace sg::backend::vulkan
 void submit_barriers(VkCommandBuffer cmd,
                      cc::span<VkBufferMemoryBarrier2 const> buffer_barriers,
                      cc::span<VkImageMemoryBarrier2 const> image_barriers);
+
+/// Adds the batch `submit_barriers` would record to `sink`'s stats: its records by kind, and one call if it is not empty.
+/// `sink` is a list's sg::impl::stat_counts or the context's sg::impl::stat_totals.
+template <class Sink>
+void count_barriers(Sink& sink,
+                    cc::span<VkBufferMemoryBarrier2 const> buffer_barriers,
+                    cc::span<VkImageMemoryBarrier2 const> image_barriers)
+{
+    if (buffer_barriers.empty() && image_barriers.empty())
+        return;
+    sink.add(sg::stat::barrier_calls);
+    sink.add(sg::stat::buffer_barriers, buffer_barriers.size());
+    sink.add(sg::stat::texture_barriers, image_barriers.size());
+    auto transitions = isize(0);
+    for (auto const& b : image_barriers)
+        if (b.oldLayout != b.newLayout)
+            ++transitions;
+    sink.add(sg::stat::texture_transitions, transitions);
+}
 } // namespace sg::backend::vulkan

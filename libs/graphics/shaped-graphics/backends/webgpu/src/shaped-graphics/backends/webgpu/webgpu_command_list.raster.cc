@@ -102,6 +102,7 @@ void webgpu_command_list::open_render_pass(bool reopen)
 
     if (reopen)
     {
+        _stats.add(sg::stat::render_pass_splits);
         for (auto& a : _color_attachments)
             a.attachment.loadOp = WGPULoadOp_Load;
         if (_has_depth)

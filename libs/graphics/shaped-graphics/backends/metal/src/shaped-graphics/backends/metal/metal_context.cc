@@ -45,6 +45,9 @@ cc::result<cc::unit> metal_context::create_systems(isize upload_bytes, isize dow
 
     CC_RETURN_IF_ERROR(_upload_ring.create(_device, upload_bytes, "sg inline upload ring", "upload"));
     CC_RETURN_IF_ERROR(_download_ring.create(_device, download_bytes, "sg inline download ring", "download"));
+    _upload_ring.count_overflow_into(&_stats);
+    _download_ring.count_overflow_into(&_stats);
+    _epochs.count_waits_into(&_stats);
 
     _residency.add(_upload_ring.buffer());
     _residency.add(_download_ring.buffer());
@@ -141,7 +144,7 @@ bool metal_context::supports(sg::feature f) const
     return false;
 }
 
-void metal_context::advance_epoch()
+void metal_context::do_advance_epoch()
 {
     // Before any state change, so a caller catching this still has a usable context.
     CC_ASSERT(_slots.live_count() == 0, "all command lists opened this epoch must be submitted or dropped before "
@@ -296,6 +299,9 @@ sg::submission_token metal_context::submit_command_list(std::unique_ptr<sg::comm
             options->release();
 
             _epochs.signal_submission(claimed);
+
+            _stats.fold(sg::impl::recorded_stats(list));
+            _stats.add(sg::stat::command_lists_submitted);
             return claimed;
         });
 

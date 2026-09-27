@@ -252,9 +252,15 @@ sg::submission_token vulkan_context::submit_vulkan_command_list(std::unique_ptr<
                 // Two dependencies rather than one: an initial transition and an entry barrier can name the same
                 // subresource, and two barriers on one subresource in a single dependency have no order between them.
                 if (!initial_barriers.empty())
+                {
+                    count_barriers(_stats, {}, initial_barriers);
                     submit_barriers(cmd->_pre_buffer, {}, initial_barriers);
+                }
                 if (has_entry_barriers)
+                {
+                    count_barriers(_stats, entry_buffer_barriers, entry_image_barriers);
                     submit_barriers(cmd->_pre_buffer, entry_buffer_barriers, entry_image_barriers);
+                }
                 VkResult const pre_end = vkEndCommandBuffer(cmd->_pre_buffer);
                 CC_ASSERT(pre_end == VK_SUCCESS, "vkEndCommandBuffer (entry transitions) failed");
                 submitted_buffers[submitted_count++] = cmd->_pre_buffer;
@@ -343,6 +349,9 @@ sg::submission_token vulkan_context::submit_vulkan_command_list(std::unique_ptr<
             // Inside the lock, so the actor's queue order matches submission order — which is also the order the
             // readback ring handed out its space.
             _download_inline.enqueue_submitted(t, cmd->_pending_downloads);
+
+            _stats.fold(sg::impl::recorded_stats(*cmd));
+            _stats.add(sg::stat::command_lists_submitted);
             return t;
         });
 
@@ -499,8 +508,12 @@ void vulkan_command_list::flush_barriers()
     // never reaches this, and one that does not pays a tile flush on a tiler.
     bool const suspend = _in_render_pass && !(_pending_buffer_barriers.empty() && _pending_image_barriers.empty());
     if (suspend)
+    {
         vkCmdEndRendering(_buffer);
+        _stats.add(sg::stat::render_pass_splits);
+    }
 
+    count_barriers(_stats, _pending_buffer_barriers, _pending_image_barriers);
     submit_barriers(_buffer, _pending_buffer_barriers, _pending_image_barriers);
     _pending_buffer_barriers.clear();
     _pending_image_barriers.clear();

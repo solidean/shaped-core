@@ -21,6 +21,7 @@
 #include <shaped-graphics/context/download.hh>
 #include <shaped-graphics/context/gpu_metrics.hh>
 #include <shaped-graphics/context/impl/device_lifecycle.hh>
+#include <shaped-graphics/context/metrics.hh>
 #include <shaped-graphics/context/persistent.hh>
 #include <shaped-graphics/context/transient.hh>
 #include <shaped-graphics/context/uncached.hh>
@@ -106,33 +107,6 @@ public:
     /// sg's own asyncs move there before touching the device, which is what keeps the free-threaded surface free.
     [[nodiscard]] cc::async_scheduler* device_home() const { return _device_home; }
 
-    /// Which GPU this context is running on, fixed at creation.
-    /// Fields a backend cannot report are left at their defaults, so a caller reads "unknown" and never a wrong answer.
-    [[nodiscard]] adapter_info const& adapter() const { return _adapter; }
-
-    // GPU metrics.
-    //
-    // Non-pure with a refusing default, so a backend that cannot answer needs no code at all and a caller gets a clean
-    // error rather than a fabricated zero.
-
-    /// What this process may use of the GPU's memory right now, and what it is using.
-    ///
-    /// Portable in principle and available on both shipping backends: DXGI reports it directly, and Vulkan does where
-    /// VK_EXT_memory_budget is present.
-    /// The card's own size is `adapter().dedicated_video_memory_bytes`, and the two are different scales — see there.
-    [[nodiscard]] virtual cc::result<gpu_memory_usage> query_gpu_memory() const;
-
-    /// Monotone busy time per GPU engine class, for sg::gpu_load_sampler to difference.
-    ///
-    /// **Neither D3D12 nor Vulkan exposes utilization**, so this comes from the OS instead: the GPU Engine performance
-    /// counters on Windows, `raw:/sys/class/drm/*/device/gpu_busy_percent` on Linux where the driver provides one,
-    /// IOKit on macOS.
-    /// Only the Windows path exists today; everywhere else this refuses rather than guessing.
-    ///
-    /// A caller almost always wants sg::gpu_load_sampler rather than this — the counters are published because a rate
-    /// has thrown the seconds away and somebody always wants them back.
-    [[nodiscard]] virtual cc::result<gpu_counters> read_gpu_counters() const;
-
     /// Whether the GPU device has been lost — driver reset, TDR, removed adapter.
     /// Sticky once set: the context is unusable and must be torn down and recreated.
     /// Submit / advance / fence waits and the throwing create façades raise sg::device_lost_exception once this is true.
@@ -189,6 +163,10 @@ public:
     /// Touch this to `prewarm<...>()` before opening a list, or to `evict<R>()` / `clear()` cached routine GPU state early.
     /// Cleared on shutdown.
     routine_registry routines;
+
+    /// What the context reports about its device and its own activity: `ctx.metrics.adapter()`, `ctx.metrics.stats()`.
+    /// Free-threaded.
+    context_metrics_scope metrics;
 
     /// Opens a new command list, already recording.
     /// Bound by the thread model.
@@ -267,7 +245,7 @@ public:
     ///
     /// **It never waits.** Bounding pipelining depth is a separate decision, and it is spelled either way:
     /// `try_advance_epoch(N)` declines instead of advancing, and `epochs_in_flight_completion(N)` settles once the depth is back inside the bound.
-    virtual void advance_epoch() = 0;
+    void advance_epoch();
 
     /// How many epochs have been advanced past but not yet retired.
     /// The pipelining depth a caller throttles against: 0 means the GPU has caught up with everything closed so far.
@@ -346,6 +324,10 @@ protected:
     /// already goes through, and the first adapter to arrive is the one a recording describes.
     void set_adapter_info(adapter_info info);
 
+    /// Which stats this backend counts; the rest read zero and say so through `stats::is_counted`.
+    /// Called once during creation, before the context is handed out.
+    void set_counted_stats(stat_set counted) { _stats.set_counted(counted); }
+
 private:
     /// `settle_due_completions` under its `settling` lock, which is what makes a returning call complete.
     void impl_settle_due_completions();
@@ -404,6 +386,16 @@ protected:
     friend class context_stream_scope;
     friend class context_uncached_scope;
     friend class context_cached_scope;
+    friend class context_metrics_scope;
+
+    /// The backend's half of advance_epoch; the public one then counts the epoch and records the stats it closed.
+    virtual void do_advance_epoch() = 0;
+
+    // GPU metrics, reached through ctx.metrics.
+    // Non-pure with a refusing default, so a backend that cannot answer needs no code at all and a caller gets a clean
+    // error rather than a fabricated zero.
+    [[nodiscard]] virtual cc::result<gpu_memory_usage> query_gpu_memory() const;
+    [[nodiscard]] virtual cc::result<gpu_counters> read_gpu_counters() const;
 
     /// Blocks until `e`'s GPU work has finished, then retires.
     ///
@@ -713,6 +705,12 @@ protected:
 
     // Filled by the backend during creation, from whatever the API tells it about the adapter it picked.
     adapter_info _adapter;
+
+    // What ctx.metrics.stats() reads; a backend adds to it directly, and folds each list's counts in at submit.
+    impl::stat_totals _stats;
+
+    // The reading the last advance_epoch recorded into cc::rec, which the next one differences against.
+    sg::stats _recorded_stats;
 
     // See device_home; set from the thread model at construction, never changed afterwards.
     cc::async_scheduler* _device_home = nullptr;

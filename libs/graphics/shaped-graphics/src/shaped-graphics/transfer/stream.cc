@@ -1,11 +1,11 @@
 #include <clean-core/common/assert.hh>
-#include <clean-core/common/profiling.hh>
 #include <shaped-graphics/context/context.hh>
 #include <shaped-graphics/resource/impl/texture_copy_region.hh>
 #include <shaped-graphics/resource/raw_buffer.hh>
 #include <shaped-graphics/resource/raw_texture.hh>
 #include <shaped-graphics/transfer/impl/async_target.hh>
 #include <shaped-graphics/transfer/stream.hh>
+#include <shaped-graphics/transfer/stream_source.hh>
 
 namespace sg
 {
@@ -45,6 +45,32 @@ void assert_texture_scope(raw_texture_handle const& texture, stream_scope scope)
                   "streaming into a region INSIDE a subresource other work may use concurrently needs "
                   "texture_usage::allow_region_stream");
 }
+/// A buffer source's size is unknown until its chunks exist, so its bytes count as each chunk is handed over.
+/// Polled on the copy actor thread, which the relaxed add is safe from; the context outlives every transfer.
+class counting_source final : public stream_source
+{
+public:
+    counting_source(std::unique_ptr<stream_source> inner, impl::stat_totals& totals)
+      : _inner(cc::move(inner)), _totals(totals)
+    {
+    }
+
+    [[nodiscard]] stream_poll try_next_chunk() override
+    {
+        auto poll = _inner->try_next_chunk();
+        if (poll.status == stream_source_status::ready)
+            _totals.add(stat::bytes_uploaded_stream, poll.chunk.data.size());
+        return poll;
+    }
+
+    [[nodiscard]] i64 total_size_hint() const override { return _inner->total_size_hint(); }
+
+    void set_waker(cc::unique_function<void()> waker) override { _inner->set_waker(cc::move(waker)); }
+
+private:
+    std::unique_ptr<stream_source> _inner;
+    impl::stat_totals& _totals;
+};
 } // namespace
 
 stream_upload_handle context_stream_scope::bytes_to_buffer(raw_buffer_handle buffer,
@@ -61,10 +87,7 @@ stream_upload_handle context_stream_scope::bytes_to_buffer(raw_buffer_handle buf
     if (data.empty())
         return stream_upload_handle(make_settled_control());
 
-    // Counted where the SIZE is known and the request is made, rather than in a backend: how much a frame asked to
-    // move is the question, and the two backends would have to agree on the answer to be worth anything.
-    CC_RECORD_ACCUM("sg.upload.bytes", cc::rec::unit_bytes, data.size());
-
+    _ctx._stats.add(stat::bytes_uploaded_stream, data.size());
     return _ctx.stream_bytes_to_buffer(cc::move(buffer), cc::move(data), offset_in_bytes, scope);
 }
 
@@ -83,6 +106,7 @@ stream_upload_handle context_stream_scope::bytes_to_texture(raw_texture_handle t
 
     if (box.is_empty() || data.empty())
         return stream_upload_handle(make_settled_control());
+    _ctx._stats.add(stat::bytes_uploaded_stream, data.size());
     return _ctx.stream_bytes_to_texture(cc::move(texture), cc::move(data), subresource, box, scope);
 }
 
@@ -97,7 +121,8 @@ stream_upload_handle context_stream_scope::from_source_to_buffer(raw_buffer_hand
     CC_ASSERT(offset_in_bytes >= 0 && offset_in_bytes <= buffer->size_in_bytes(), "stream upload offset is out of the "
                                                                                   "buffer's bounds");
     assert_buffer_scope(buffer, scope);
-    return _ctx.stream_source_to_buffer(cc::move(buffer), cc::move(source), offset_in_bytes, scope);
+    auto counted = std::make_unique<counting_source>(cc::move(source), _ctx._stats);
+    return _ctx.stream_source_to_buffer(cc::move(buffer), cc::move(counted), offset_in_bytes, scope);
 }
 
 stream_upload_handle context_stream_scope::from_source_to_texture(raw_texture_handle texture,
@@ -116,6 +141,8 @@ stream_upload_handle context_stream_scope::from_source_to_texture(raw_texture_ha
 
     if (box.is_empty())
         return stream_upload_handle(make_settled_control());
+    // A texture source fills exactly its region, so its size is known before any chunk exists.
+    _ctx._stats.add(stat::bytes_uploaded_stream, impl::packed_region_bytes(texture, box));
     return _ctx.stream_source_to_texture(cc::move(texture), cc::move(source), subresource, box, scope);
 }
 
@@ -135,8 +162,7 @@ stream_download_handle context_stream_scope::bytes_from_buffer(raw_buffer_handle
         return stream_download_handle(make_settled_control(),
                                       bytes_future(cc::pinned_data<byte const>(), make_ready_completion()));
 
-    CC_RECORD_ACCUM("sg.download.bytes", cc::rec::unit_bytes, size_in_bytes);
-
+    _ctx._stats.add(stat::bytes_downloaded_stream, size_in_bytes);
     return _ctx.stream_bytes_from_buffer(cc::move(buffer), offset_in_bytes, size_in_bytes, scope);
 }
 
@@ -155,6 +181,7 @@ stream_download_handle context_stream_scope::bytes_from_texture(raw_texture_hand
     if (box.is_empty())
         return stream_download_handle(make_settled_control(),
                                       bytes_future(cc::pinned_data<byte const>(), make_ready_completion()));
+    _ctx._stats.add(stat::bytes_downloaded_stream, impl::packed_region_bytes(texture, box));
     return _ctx.stream_bytes_from_texture(cc::move(texture), subresource, box, scope);
 }
 
@@ -174,6 +201,7 @@ stream_download_handle context_stream_scope::to_sink_from_buffer(raw_buffer_hand
 
     if (size_in_bytes == 0)
         return stream_download_handle(make_settled_control(), bytes_future());
+    _ctx._stats.add(stat::bytes_downloaded_stream, size_in_bytes);
     return _ctx.stream_to_sink_from_buffer(cc::move(buffer), cc::move(sink), offset_in_bytes, size_in_bytes, scope);
 }
 
@@ -193,6 +221,7 @@ stream_download_handle context_stream_scope::to_sink_from_texture(raw_texture_ha
 
     if (box.is_empty())
         return stream_download_handle(make_settled_control(), bytes_future());
+    _ctx._stats.add(stat::bytes_downloaded_stream, impl::packed_region_bytes(texture, box));
     return _ctx.stream_to_sink_from_texture(cc::move(texture), cc::move(sink), subresource, box, scope);
 }
 

@@ -75,6 +75,7 @@ void webgpu_upload_ring::write(WGPUBuffer buffer, isize offset, cc::span<byte co
 
 webgpu_upload_span webgpu_upload_ring::stage_outside_ring(cc::span<byte const> padded)
 {
+    _ctx->stat_totals().add(sg::stat::bytes_inline_overflow, padded.size());
     auto const epoch = u64(_ctx->current_epoch());
     if (_last_warned_epoch != epoch)
     {

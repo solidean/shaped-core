@@ -183,6 +183,7 @@ cc::result<compute_pipeline_handle> context_uncached_scope::try_create_compute_p
 {
     if (auto refusal = refusal_of(desc, _ctx.supported_features()); refusal.has_value())
         return cc::error(cc::move(refusal.value()));
+    _ctx._stats.add(stat::pipelines_created);
     return _ctx.try_create_compute_pipeline(desc, lifetime_scope::persistent);
 }
 
@@ -201,6 +202,7 @@ cc::result<raster_pipeline_handle> context_uncached_scope::try_create_raster_pip
     if (auto refusal = refusal_of(desc, _ctx.supported_features()); refusal.has_value())
         return cc::error(cc::move(refusal.value()));
 
+    _ctx._stats.add(stat::pipelines_created);
     auto r = _ctx.try_create_raster_pipeline(desc, lifetime_scope::persistent);
     if (r.has_value())
         impl::set_targets(*r.value(), target_set_of(desc), target_formats_of(desc));
@@ -213,6 +215,7 @@ cc::shared_async<compute_pipeline_handle> context_uncached_scope::create_compute
     if (auto refusal = refusal_of(desc, _ctx.supported_features()); refusal.has_value())
         return cc::make_async_from_error<compute_pipeline_handle>(
             cc::async_error::make_error(cc::any_error(cc::move(refusal.value()))));
+    _ctx._stats.add(stat::pipelines_created);
     return _ctx.create_compute_pipeline_async(desc, lifetime_scope::persistent);
 }
 
@@ -224,6 +227,7 @@ cc::shared_async<raster_pipeline_handle> context_uncached_scope::create_raster_p
             cc::async_error::make_error(cc::any_error(cc::move(refusal.value()))));
 
     // A backend may settle the build from a callback of its own, so the name is set once it has.
+    _ctx._stats.add(stat::pipelines_created);
     auto built = _ctx.create_raster_pipeline_async(desc, lifetime_scope::persistent);
     return named(cc::move(built), cc::string(target_set_of(desc)), target_formats_of(desc));
 }
@@ -265,6 +269,7 @@ cc::result<raytracing_pipeline_handle> context_uncached_scope::try_create_raytra
     if (auto missing = impl::find_missing_feature(_ctx.supported_features(), stages); missing.has_value())
         return cc::error(cc::move(missing.value()));
 
+    _ctx._stats.add(stat::pipelines_created);
     return _ctx.try_create_raytracing_pipeline(desc, lifetime_scope::persistent);
 }
 

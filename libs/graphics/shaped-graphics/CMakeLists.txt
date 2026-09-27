@@ -45,6 +45,7 @@ add_library(shaped-graphics
     src/shaped-graphics/context/impl/completion_waiter.cc
     src/shaped-graphics/context/impl/device_lifecycle.cc
     src/shaped-graphics/context/gpu_load_sampler.cc
+    src/shaped-graphics/context/metrics.cc
     src/shaped-graphics/context/persistent.cc
     src/shaped-graphics/context/transient.cc
     src/shaped-graphics/context/upload.cc
@@ -129,6 +130,7 @@ target_sources(shaped-graphics
     src/shaped-graphics/binding/pipeline_layout.hh
     src/shaped-graphics/context/adapter_info.hh
     src/shaped-graphics/context/gpu_metrics.hh
+    src/shaped-graphics/context/metrics.hh
     src/shaped-graphics/binding/compiled_shader.hh
     src/shaped-graphics/binding/shader_stage.hh
     src/shaped-graphics/compute/compute_pipeline.hh
@@ -253,6 +255,7 @@ if(SC_BUILD_TESTS)
         tests/barrier/subresource-test.cc
         tests/barrier/slot-test.cc
         tests/barrier/slot-recording-test.cc
+        tests/context/stats-recording-test.cc
     )
     sc_nexus_binary(shaped-graphics-test KINDS tests ${SG_WARP_TEST_BINARY_ARGS})
 
@@ -270,6 +273,7 @@ if(SC_BUILD_TESTS)
         target_sources(shaped-graphics-test PRIVATE
             tests/backends/backends.cc
             tests/context/context-test.cc
+            tests/context/metrics-test.cc
             tests/context/cold-caches-test.cc
             tests/buffer/buffer-test.cc
             tests/texture/texture-create-test.cc
