@@ -86,6 +86,8 @@ ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - inline constants drive Out[i] = i*scale 
     REQUIRE(pipeline_layout != nullptr);
     auto pipeline = co_await ctx.cached.acquire_compute_pipeline({.shader = shader, .layout = pipeline_layout});
     REQUIRE(pipeline != nullptr);
+    // Reflection reports the inline block as a slot of its own, which no group holds; it must not unkey the footprint.
+    CHECK(pipeline->footprint().is_known());
 
     // Two independent outputs so the two dispatches don't alias: out1 for the full set, out2 for the partial.
     auto const byte_size = isize(count) * isize(sizeof(u32));

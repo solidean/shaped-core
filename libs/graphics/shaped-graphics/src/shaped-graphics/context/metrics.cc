@@ -2,13 +2,13 @@
 #include <shaped-graphics/context/context.hh>
 #include <shaped-graphics/context/metrics.hh>
 
-sg::stat_info sg::info(stat s)
+sg::stat_info sg::info_of(stat s)
 {
     switch (s)
     {
-#define SG_IMPL_STAT_INFO(id_, name_, unit_) \
-    case stat::id_:                          \
-        return {.name = name_, .unit = &unit_};
+#define SG_IMPL_STAT_INFO(id_, u_, what_) \
+    case stat::id_:                       \
+        return {.name = "sg." #id_, .unit = &::cc::rec::unit_##u_, .description = what_};
         SG_IMPL_STATS(SG_IMPL_STAT_INFO)
 #undef SG_IMPL_STAT_INFO
     }
@@ -34,9 +34,9 @@ sg::stats sg::impl::stat_totals::snapshot() const
 void sg::impl::record_stats(sg::stats const& delta)
 {
     // CC_RECORD_ACCUM needs its name as a literal at the site, so every stat gets a site of its own.
-#define SG_IMPL_STAT_RECORD(id_, name_, unit_)                \
+#define SG_IMPL_STAT_RECORD(id_, u_, what_)                   \
     if (delta.is_counted(stat::id_) && delta[stat::id_] != 0) \
-        CC_RECORD_ACCUM(name_, unit_, delta[stat::id_]);
+        CC_RECORD_ACCUM("sg." #id_, ::cc::rec::unit_##u_, delta[stat::id_]);
     SG_IMPL_STATS(SG_IMPL_STAT_RECORD)
 #undef SG_IMPL_STAT_RECORD
 }

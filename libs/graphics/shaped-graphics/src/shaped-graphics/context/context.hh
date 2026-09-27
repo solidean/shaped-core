@@ -242,6 +242,7 @@ public:
     /// Closes the current epoch and opens the next, gating all its GPU work behind one fence value.
     /// Every command list opened this epoch must already be submitted or dropped.
     /// This epoch's garbage becomes reclaimable once that fence signals.
+    /// It also records each counted stat's change over the closing epoch into `cc::rec`, under its `sg.` name.
     ///
     /// **It never waits.** Bounding pipelining depth is a separate decision, and it is spelled either way:
     /// `try_advance_epoch(N)` declines instead of advancing, and `epochs_in_flight_completion(N)` settles once the depth is back inside the bound.
@@ -325,7 +326,7 @@ protected:
     void set_adapter_info(adapter_info info);
 
     /// Which stats this backend counts; the rest read zero and say so through `stats::is_counted`.
-    /// Called once during creation, before the context is handed out.
+    /// Every stat unless a backend names fewer, once during creation, before the context is handed out.
     void set_counted_stats(stat_set counted) { _stats.set_counted(counted); }
 
 private:

@@ -38,6 +38,8 @@ enum class sg::access_flag : sg::u32
     accel_write, // AS build:               DX12 / Vk ACCELERATION_STRUCTURE_WRITE
 
     // Through a writable (UAV / storage) view, as a pipeline's footprint names them.
+    // Append only: a footprint's flags are stored raw in the shader cache, so reordering these means bumping
+    // k_shader_codec_version.
     storage_read,  // read, not written:      DX12 UNORDERED_ACCESS / Vk SHADER_STORAGE_READ
     shader_atomic, // an atomic, ordered as a read and a write: DX12 UNORDERED_ACCESS / Vk SHADER_STORAGE_READ|WRITE
 };

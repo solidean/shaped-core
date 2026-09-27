@@ -148,6 +148,7 @@ void vulkan_staging_binding_group::write_sampler_descriptor(int descriptor_index
 
 cc::result<sg::binding_group_handle> vulkan_staging_binding_group::mint()
 {
+    _ctx.stat_totals().add(sg::stat::binding_groups_created);
     // The resource references the staged descriptors point at, in the two shapes a group needs: a scalar binding is
     // auto-tracked through the hazard vectors, an array binding is declared per dispatch.
     cc::vector<vulkan_buffer_handle> referenced;

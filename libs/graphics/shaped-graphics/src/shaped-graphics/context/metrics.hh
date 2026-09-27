@@ -13,34 +13,35 @@
 /// What a context reports about the device it runs on and about its own activity.
 /// See libs/graphics/shaped-graphics/docs/concepts/metrics.md.
 
-// Every stat, once: its enumerator, the name it records under, and its unit.
+// Every stat, once: its enumerator, its unit, and what it counts; it records as `sg.` and its enumerator.
 // The enum, the name table and the cc::rec bridge are all generated from this list, so they cannot drift apart.
 // The bridge needs the name as a literal at each site, which is why this is a macro rather than a table.
-#define SG_IMPL_STATS(X)                                                            \
-    X(draws, "sg.draws", ::cc::rec::unit_count)                                     \
-    X(dispatches, "sg.dispatches", ::cc::rec::unit_count)                           \
-    X(ray_dispatches, "sg.ray_dispatches", ::cc::rec::unit_count)                   \
-    X(command_lists_submitted, "sg.command_lists_submitted", ::cc::rec::unit_count) \
-    X(epochs_advanced, "sg.epochs_advanced", ::cc::rec::unit_count)                 \
-    X(buffer_barriers, "sg.buffer_barriers", ::cc::rec::unit_count)                 \
-    X(texture_barriers, "sg.texture_barriers", ::cc::rec::unit_count)               \
-    X(texture_transitions, "sg.texture_transitions", ::cc::rec::unit_count)         \
-    X(global_barriers, "sg.global_barriers", ::cc::rec::unit_count)                 \
-    X(barrier_calls, "sg.barrier_calls", ::cc::rec::unit_count)                     \
-    X(render_pass_splits, "sg.render_pass_splits", ::cc::rec::unit_count)           \
-    X(bytes_uploaded_inline, "sg.bytes_uploaded_inline", ::cc::rec::unit_bytes)     \
-    X(bytes_uploaded_async, "sg.bytes_uploaded_async", ::cc::rec::unit_bytes)       \
-    X(bytes_uploaded_stream, "sg.bytes_uploaded_stream", ::cc::rec::unit_bytes)     \
-    X(bytes_downloaded_inline, "sg.bytes_downloaded_inline", ::cc::rec::unit_bytes) \
-    X(bytes_downloaded_async, "sg.bytes_downloaded_async", ::cc::rec::unit_bytes)   \
-    X(bytes_downloaded_stream, "sg.bytes_downloaded_stream", ::cc::rec::unit_bytes) \
-    X(bytes_inline_overflow, "sg.bytes_inline_overflow", ::cc::rec::unit_bytes)     \
-    X(async_layout_fixups, "sg.async_layout_fixups", ::cc::rec::unit_count)         \
-    X(pipelines_created, "sg.pipelines_created", ::cc::rec::unit_count)             \
-    X(binding_groups_created, "sg.binding_groups_created", ::cc::rec::unit_count)   \
-    X(buffers_created, "sg.buffers_created", ::cc::rec::unit_count)                 \
-    X(textures_created, "sg.textures_created", ::cc::rec::unit_count)               \
-    X(gpu_wait_nanoseconds, "sg.gpu_wait_nanoseconds", ::cc::rec::unit_nanoseconds)
+// A comment cannot sit on one of its lines, since line splicing runs first, so what a stat counts is its last argument.
+#define SG_IMPL_STATS(X)                                                                                    \
+    X(draws, count, "every draw a submitted list recorded, indexed or not")                                 \
+    X(dispatches, count, "every compute dispatch a submitted list recorded")                                \
+    X(ray_dispatches, count, "every ray dispatch a submitted list recorded")                                \
+    X(command_lists_submitted, count, "every list submitted, the ones sg submits on its own included")      \
+    X(epochs_advanced, count, "every advance_epoch")                                                        \
+    X(buffer_barriers, count, "one per buffer barrier record the backend emitted")                          \
+    X(texture_barriers, count, "one per texture barrier record the backend emitted, per subresource range") \
+    X(texture_transitions, count, "the texture barriers that also changed the layout")                      \
+    X(global_barriers, count, "barriers naming stages and no resource")                                     \
+    X(barrier_calls, count, "one per API call that submitted a batch of barriers")                          \
+    X(render_pass_splits, count, "a rendering scope ended and reopened mid-scope, whatever forced it")      \
+    X(bytes_uploaded_inline, bytes, "cmd.upload bytes, counted on the list")                                \
+    X(bytes_uploaded_async, bytes, "async upload bytes, at enqueue")                                        \
+    X(bytes_uploaded_stream, bytes, "stream upload bytes, at enqueue, or per chunk for a buffer source")    \
+    X(bytes_downloaded_inline, bytes, "cmd.download bytes, counted on the list")                            \
+    X(bytes_downloaded_async, bytes, "async download bytes, at enqueue")                                    \
+    X(bytes_downloaded_stream, bytes, "stream download bytes, at enqueue")                                  \
+    X(bytes_inline_overflow, bytes, "inline bytes that missed their ring and got a one-off allocation")     \
+    X(async_layout_fixups, count, "async transfers that had to submit a texture transition of their own")   \
+    X(pipelines_created, count, "pipelines built by ctx.uncached, which a cache hit never reaches")         \
+    X(binding_groups_created, count, "binding groups created, and every staging-group snapshot minted")     \
+    X(buffers_created, count, "buffers created, persistent or transient")                                   \
+    X(textures_created, count, "textures created, persistent or transient")                                 \
+    X(gpu_wait_nanoseconds, nanoseconds, "time blocked on the GPU in the context's waits, which vary per backend")
 
 /// One monotone total a context counts: it only ever grows, so two readings subtract into "what happened between".
 ///
@@ -49,9 +50,11 @@
 /// A barrier naming stages and no resource — metal's, or one a missing array declaration falls back to — is a `global_barriers`.
 ///
 /// **Transfer bytes count when the transfer is enqueued**, not when it lands, so a reading is deterministic.
+/// A stream from a buffer source is the exception: its size is unknown up front, so it counts each chunk as the copy
+/// thread takes it.
 enum class sg::stat : sg::u8
 {
-#define SG_IMPL_STAT_ENUMERATOR(id_, name_, unit_) id_,
+#define SG_IMPL_STAT_ENUMERATOR(id_, u_, what_) id_,
     SG_IMPL_STATS(SG_IMPL_STAT_ENUMERATOR)
 #undef SG_IMPL_STAT_ENUMERATOR
 };
@@ -65,7 +68,7 @@ using stat_set = cc::flags<stat>;
 
 /// How many stats there are.
 inline constexpr int stat_count = 0
-#define SG_IMPL_STAT_COUNT(id_, name_, unit_) +1
+#define SG_IMPL_STAT_COUNT(id_, u_, what_) +1
     SG_IMPL_STATS(SG_IMPL_STAT_COUNT)
 #undef SG_IMPL_STAT_COUNT
     ;
@@ -78,17 +81,18 @@ inline constexpr stat_set barrier_stats = stat::buffer_barriers | stat::texture_
                                         | stat::global_barriers | stat::barrier_calls;
 } // namespace sg
 
-/// What a stat is called when it is recorded, and what it counts in.
+/// What a stat is called when it is recorded, what it counts in, and what it counts.
 struct sg::stat_info
 {
     cc::string_view name;
     cc::rec::unit const* unit = nullptr;
+    cc::string_view description;
 };
 
 namespace sg
 {
-/// `s`'s recorded name and unit.
-[[nodiscard]] stat_info info(stat s);
+/// `s`'s recorded name, unit and description.
+[[nodiscard]] stat_info info_of(stat s);
 } // namespace sg
 
 /// A reading of every stat at one moment, or the difference between two.
@@ -144,14 +148,14 @@ public:
 
     void fold(stat_counts const& counts);
 
-    /// Set once by the backend, before the context is handed out.
+    /// Set once by a backend that cannot see every stat, before the context is handed out.
     void set_counted(stat_set counted) { _counted = counted; }
 
     [[nodiscard]] sg::stats snapshot() const;
 
 private:
     cc::atomic<i64> _values[stat_count] = {};
-    stat_set _counted;
+    stat_set _counted = all_stats;
 };
 
 /// Adds the time from construction to destruction to `gpu_wait_nanoseconds`.
@@ -182,7 +186,7 @@ public:
 
     /// What this process may use of the GPU's memory right now, and what it is using.
     ///
-    /// Available on both shipping backends: DXGI reports it directly, and Vulkan does where VK_EXT_memory_budget is present.
+    /// dx12 answers through DXGI, and vulkan where VK_EXT_memory_budget is present; webgpu and metal refuse.
     /// The card's own size is `adapter().dedicated_video_memory_bytes`, and the two are different scales — see there.
     /// Refuses rather than fabricating a zero where the backend cannot answer.
     [[nodiscard]] cc::result<gpu_memory_usage> query_gpu_memory() const;

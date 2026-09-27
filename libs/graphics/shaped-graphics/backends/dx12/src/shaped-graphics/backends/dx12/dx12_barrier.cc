@@ -208,8 +208,8 @@ void submit_barriers(ID3D12GraphicsCommandList* list,
     HRESULT const hr = list->QueryInterface(IID_PPV_ARGS(&list7));
     CC_ASSERT(SUCCEEDED(hr) && list7, "enhanced barriers require ID3D12GraphicsCommandList7 (SDK/driver too old)");
 
-    // One barrier group per type;
-    // both go into a single Barrier call so the whole operation's hazards are resolved at once.
+    // One barrier group per type, and every group goes into a single Barrier call so the whole operation's hazards
+    // are resolved at once.
     D3D12_BARRIER_GROUP groups[3] = {};
     UINT num_groups = 0;
     if (!global_barriers.empty())

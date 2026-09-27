@@ -592,7 +592,6 @@ public:
 
     // create_dx12_context fills this in once it has picked an adapter, like every other member here.
     using sg::context::set_adapter_info;
-    using sg::context::set_counted_stats;
 
     /// The context's stat totals, for the transfer systems that count into them.
     [[nodiscard]] sg::impl::stat_totals& stat_totals() { return _stats; }

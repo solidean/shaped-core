@@ -54,7 +54,7 @@ struct gpu_engine_load;       // one engine's share of a sampled load
 class gpu_load_sampler;       // GPU load, differenced against its own previous reading
 enum class stat : u8;         // one monotone total a context counts (see context/metrics.hh)
 class stats;                  // a reading of every stat, or the difference of two
-struct stat_info;             // a stat's recorded name and unit
+struct stat_info;             // a stat's recorded name, unit and description
 class context_metrics_scope;  // ctx.metrics
 class context_persistent_scope;
 class context_transient_scope;
@@ -283,6 +283,8 @@ class gpu_wait_scope;                           // times a CPU wait on the GPU i
 struct slot_use;                                // how a pipeline's code touches one binding slot (barrier/footprint.hh)
 class pipeline_footprint;                       // a pipeline's footprint, resolved against its layout
 struct view_access;                             // the access and stages a bound view is declared with at an op
+struct array_declarations;                      // what a dispatch's declarations say about one bound array
+struct array_plan;                              // how a dispatch tracks one bound array, given its declarations
 // the counts `cmd` recorded, for its backend to fold in at submit; defined in command_list/command_list.cc
 stat_counts const& recorded_stats(command_list const& cmd);
 void record_stats(sg::stats const& delta); // each non-zero counted stat as one CC_RECORD_ACCUM; context/metrics.cc

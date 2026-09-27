@@ -496,10 +496,7 @@ void vulkan_command_list::flush_barriers()
         if (auto const barrier = buffer->flush_access(_slot); barrier.needed)
         {
             auto const vk_barrier = make_buffer_barrier(buffer->_buffer, barrier);
-            auto folded = false;
-            for (auto const* g : _global_barrier_buffers)
-                folded |= g == buffer;
-            if (folded)
+            if (_global_barrier_buffers.contains(buffer))
             {
                 merge_into_memory_barrier(global, vk_barrier);
                 has_global = true;

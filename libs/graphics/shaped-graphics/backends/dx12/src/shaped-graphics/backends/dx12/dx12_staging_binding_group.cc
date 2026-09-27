@@ -199,6 +199,7 @@ void dx12_staging_binding_group::write_sampler_descriptor(int descriptor_index, 
 
 cc::result<sg::binding_group_handle> dx12_staging_binding_group::mint()
 {
+    _ctx.stat_totals().add(sg::stat::binding_groups_created);
     auto group = std::make_shared<dx12_binding_group>();
     // Set before any allocation: a partial mint is then freed by the group's own destructor.
     group->_ctx = &_ctx;

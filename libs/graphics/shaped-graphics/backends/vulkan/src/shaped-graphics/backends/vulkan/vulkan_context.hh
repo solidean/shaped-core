@@ -165,7 +165,6 @@ public:
 
     // create_vulkan_context fills this in once it has picked a physical device.
     using sg::context::set_adapter_info;
-    using sg::context::set_counted_stats;
 
     /// The context's stat totals, for the transfer systems that count into them.
     [[nodiscard]] sg::impl::stat_totals& stat_totals() { return _stats; }

@@ -3,12 +3,17 @@
 #include <clean-core/record/recording.hh>
 #include <clean-core/record/system.hh>
 #include <clean-core/string/string_view.hh>
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
+#include <nexus/rec.hh>
 #include <nexus/test.hh>
+#include <shaped-graphics/context/context.hh>
 #include <shaped-graphics/context/metrics.hh>
+#include <shaped-graphics/resource/raw_buffer.hh>
 
 using namespace cc::primitive_defines;
 
-// advance_epoch records each stat's change over the epoch into cc::rec; this pins what that recording says.
+// advance_epoch records each stat's change over the epoch into cc::rec, through record_stats; this pins what that recording says.
 
 namespace
 {
@@ -67,11 +72,11 @@ TEST("sg/stats - every stat has a recorded name and a unit")
 {
     for (auto i = 0; i < sg::stat_count; ++i)
     {
-        auto const info = sg::info(sg::stat(i));
+        auto const info = sg::info_of(sg::stat(i));
         CHECK(info.name.starts_with("sg."));
         CHECK(info.unit != nullptr);
     }
-    CHECK(sg::info(sg::stat::gpu_wait_nanoseconds).unit == &cc::rec::unit_nanoseconds);
+    CHECK(sg::info_of(sg::stat::gpu_wait_nanoseconds).unit == &cc::rec::unit_nanoseconds);
 }
 
 TEST("sg/stats - a recorded epoch is one accumulate per stat that moved, and none for an uncounted one",
@@ -96,4 +101,22 @@ TEST("sg/stats - a recorded epoch is one accumulate per stat that moved, and non
     CHECK(accumulated(r, "sg.draws") == 7.0);
     CHECK(accumulated(r, "sg.dispatches") == -1.0);
     CHECK(accumulated(r, "sg.buffer_barriers") == -1.0);
+}
+
+ASYNC_INVOCABLE_TEST("sg - advance_epoch records what changed over the epoch it closes",
+                     (sg::context_handle const& ctx),
+                     nx::config::recorded)
+{
+    REQUIRE(ctx != nullptr);
+    auto rec = nx::test_recording();
+    REQUIRE(rec.is_attached());
+
+    // Other tests may advance the same context meanwhile, so an epoch this one closes can hold their work too.
+    auto const buf = ctx->persistent.create_raw_buffer(64, sg::buffer_usage::copy_dst);
+    ctx->advance_epoch();
+    auto const r = rec.sync();
+
+    CHECK(accumulated(r, "sg.epochs_advanced") >= 1.0);
+    CHECK(accumulated(r, "sg.buffers_created") >= 1.0);
+    co_return;
 }

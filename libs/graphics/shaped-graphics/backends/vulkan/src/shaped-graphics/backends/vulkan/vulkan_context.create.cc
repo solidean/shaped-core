@@ -769,7 +769,6 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     ctx->set_device_properties(device_props.properties);
 
     ctx->set_adapter_info(describe_adapter(best_device));
-    ctx->set_counted_stats(sg::all_stats);
 
     // Ray tracing is supported only if its entry points are actually there too, which is the same all-or-nothing rule
     // the descriptor-buffer loader applies — except that here a false answer is a legitimate device rather than a

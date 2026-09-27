@@ -60,6 +60,59 @@ namespace sg
     auto const stages = use.stages & op_stages;
     return impl::view_access{.access = use.access, .stages = stages.is_empty() ? op_stages : stages};
 }
+} // namespace sg
+
+/// What an op's declarations say about one bound array binding, gathered over every declaration naming it.
+struct sg::impl::array_declarations
+{
+    /// Some declaration named the array, even with no element — an empty span declares it unused.
+    bool named = false;
+    bool any_element = false;
+
+    /// The union of every declared element's access.
+    access_flags access;
+};
+
+/// How an op tracks one bound array: its elements as declared, every element, or none.
+struct sg::impl::array_plan
+{
+    enum class mode : u8
+    {
+        /// Nothing: the code never indexes it, or the caller declared it unused and the code does not write it.
+        skip,
+
+        /// Each declared element, at its declared access joined with `widen_by`.
+        as_declared,
+
+        /// Every element, at `cover_access` and `cover_stages`, as for an array nobody declared.
+        cover_all,
+    };
+
+    mode how = mode::skip;
+    access_flags widen_by;
+    access_flags cover_access;
+    pipeline_stage_flags cover_stages;
+};
+
+namespace sg::impl
+{
+/// How an op whose pipeline touches the array `name` as `use` meets the caller's declarations for it.
+///
+/// `use` is empty where the pipeline's footprint is unknown, and the array is then taken as `bound_as` allows.
+/// Where the declarations and the code disagree it logs once per pipeline, array and kind of mismatch, and covers both, never asserts:
+/// a hot-reloaded shader can make them disagree at any frame.
+/// The one disagreement it cannot see is per element — a declaration narrower than the code, element by element, is
+/// the caller's to make.
+[[nodiscard]] array_plan plan_array_declarations(void const* pipeline,
+                                                 cc::string_view name,
+                                                 cc::optional<slot_use> const& use,
+                                                 view_class bound_as,
+                                                 pipeline_stage_flags op_stages,
+                                                 array_declarations const& declared);
+} // namespace sg::impl
+
+namespace sg
+{
 
 /// The layout a bound texture view of this class needs (the single inference point for the texture bind
 /// path): a texture view wants `shader_texture`, an image view wants `shader_image`.

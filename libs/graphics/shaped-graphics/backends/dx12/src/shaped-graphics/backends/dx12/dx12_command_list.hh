@@ -1,6 +1,7 @@
 #pragma once
 
 #include <clean-core/container/fixed_vector.hh>
+#include <clean-core/container/set.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <shaped-graphics/backends/dx12/dx12_common.hh>
@@ -109,7 +110,7 @@ public:
 
     // Buffers of an array a dispatch declared nothing for, whose barriers this op folds into one global barrier.
     // Their tracked state still moves per buffer; only the emission is shared.
-    cc::vector<dx12_buffer const*> _global_barrier_buffers;
+    cc::set<dx12_buffer const*> _global_barrier_buffers;
     cc::vector<D3D12_TEXTURE_BARRIER> _pending_texture_barriers;
 
     // Buffers this list has touched: their slots are finalized at submit/drop, and each gets the reverse async-upload stamp at submit.
@@ -291,12 +292,11 @@ private:
     // Called by raster_draw / raster_draw_indexed just before flush_barriers and the draw.
     void declare_raster_draw_barriers(bool indexed);
 
-    // Resolve the pending array-access declarations against the bound groups' array bindings and track each
-    // declared element's access, then clear the pending set.
-    // Asserts every bound array binding is covered by a declaration, and every declaration names a bound one.
-    // Called by compute_dispatch / raytracing_dispatch_rays alongside the scalar hazard declares.
-    /// `pipeline` is the bound pipeline, which names what a mismatch is logged against.
-    void declare_array_accesses(void const* pipeline);
+    // Resolve the pending array-access declarations against the bound groups' array bindings and the footprint,
+    // track what sg::impl::plan_array_declarations decides, then clear the pending set.
+    // A declaration naming no bound array, or an element out of range or vacant, asserts.
+    // `pipeline` is the bound pipeline, which names what a mismatch is logged against, and `op_stages` the op's stages.
+    void declare_array_accesses(void const* pipeline, sg::pipeline_stage_flags op_stages);
 
     /// Declares every bound group's views at an op of `op_stages`, as `footprint` says the code touches them.
     void declare_group_accesses(cc::span<dx12_binding_group const* const> groups,

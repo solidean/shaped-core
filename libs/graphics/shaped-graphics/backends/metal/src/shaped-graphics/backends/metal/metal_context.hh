@@ -79,6 +79,9 @@ public:
     using sg::context::set_adapter_info;
     using sg::context::set_counted_stats;
 
+    /// The context's stat totals, for the systems that count into them.
+    [[nodiscard]] sg::impl::stat_totals& stat_totals() { return _stats; }
+
     [[nodiscard]] MTL::Device* device() const { return _device; }
     [[nodiscard]] MTL4::CommandQueue* queue() const { return _queue; }
     [[nodiscard]] metal_epoch_system& epochs() { return _epochs; }

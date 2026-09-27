@@ -140,113 +140,113 @@ void vulkan_command_list::declare_group_accesses(cc::span<vulkan_binding_group c
     }
 }
 
-void vulkan_command_list::declare_array_accesses(void const* pipeline)
+void vulkan_command_list::declare_array_accesses(void const* pipeline, sg::pipeline_stage_flags op_stages)
 {
     // Which elements of an array a shader indexes cannot be inferred, so the caller declares them per dispatch.
-    // What the code does to the array at all is the footprint's to say, and where the two disagree the dispatch
-    // stays correct and slower rather than asserting: a hot-reloaded shader can make them disagree at any frame.
-    struct bound_array
+    // How those declarations meet what the code does to the array is sg::impl::plan_array_declarations' to decide.
+    auto const find_array_binding = [&](cc::string_view name, bool want_texture) -> vulkan_array_binding const*
     {
-        int group = 0;
-        vulkan_array_binding const* binding = nullptr;
-    };
-    auto const find_array_binding = [&](cc::string_view name, bool want_texture) -> cc::optional<bound_array>
-    {
-        for (auto group = 0; group < int(_bound_groups.size()); ++group)
-        {
-            if (_bound_groups[group] == nullptr)
-                continue;
-            for (auto const& ab : _bound_groups[group]->array_bindings)
-                if (ab.name == name && ab.is_texture == want_texture)
-                    return bound_array{.group = group, .binding = &ab};
-        }
-        return {};
-    };
-    auto const footprint_of = [&](bound_array const& a) -> cc::optional<sg::impl::slot_use>
-    {
-        if (_bound_footprint == nullptr || !_bound_footprint->is_known())
-            return {};
-        return _bound_footprint->use_of(a.group, a.binding->binding);
-    };
-    // A declared access the code cannot perform is honoured anyway, joined with what the code does.
-    auto const joined = [&](bound_array const& a, sg::access_flags declared)
-    {
-        auto const use = footprint_of(a);
-        if (!use.has_value() || use.value().access.has_all(declared))
-            return declared;
-        sg::impl::log_footprint_mismatch_once(pipeline, a.binding->name,
-                                              "a dispatch declared an array access its pipeline's code does not "
-                                              "perform, so the barrier covers both");
-        return declared | use.value().access;
+        for (auto const* group : _bound_groups)
+            if (group != nullptr)
+                for (auto const& ab : group->array_bindings)
+                    if (ab.name == name && ab.is_texture == want_texture)
+                        return &ab;
+        return nullptr;
     };
 
+    // A mistake in the host's own declarations asserts, whatever the code does with the array.
     for (auto const& declare : _pending_array_buffer_declares)
     {
-        auto const a = find_array_binding(declare.name, false);
-        CC_ASSERT(a.has_value(), "declare_array_buffer_access names no buffer array binding of a bound group");
+        auto const* const ab = find_array_binding(declare.name, false);
+        CC_ASSERT(ab != nullptr, "declare_array_buffer_access names no buffer array binding of a bound group");
         for (auto const& e : declare.elements)
         {
-            CC_ASSERT(e.index >= 0 && e.index < int(a.value().binding->elements.size()), "declared array element index "
-                                                                                         "out of range");
-            auto const& element = a.value().binding->elements[e.index];
-            CC_ASSERT(!element.is_vacant(), "declared array element is vacant (nothing is bound there)");
-            track_buffer_access(*element.buffer, e.stages, joined(a.value(), e.access));
+            CC_ASSERT(e.index >= 0 && e.index < int(ab->elements.size()), "declared array element index out of range");
+            CC_ASSERT(!ab->elements[e.index].is_vacant(), "declared array element is vacant (nothing is bound there)");
         }
     }
-
     for (auto const& declare : _pending_array_texture_declares)
     {
-        auto const a = find_array_binding(declare.name, true);
-        CC_ASSERT(a.has_value(), "declare_array_texture_access names no texture array binding of a bound group");
+        auto const* const ab = find_array_binding(declare.name, true);
+        CC_ASSERT(ab != nullptr, "declare_array_texture_access names no texture array binding of a bound group");
         for (auto const& e : declare.elements)
         {
-            CC_ASSERT(e.index >= 0 && e.index < int(a.value().binding->elements.size()), "declared array element index "
-                                                                                         "out of range");
-            auto const& element = a.value().binding->elements[e.index];
-            CC_ASSERT(!element.is_vacant(), "declared array element is vacant (nothing is bound there)");
-            (void)track_texture_access(*element.texture, element.range, e.stages, joined(a.value(), e.access), e.layout);
+            CC_ASSERT(e.index >= 0 && e.index < int(ab->elements.size()), "declared array element index out of range");
+            CC_ASSERT(!ab->elements[e.index].is_vacant(), "declared array element is vacant (nothing is bound there)");
         }
     }
 
-    // An array the code touches and nobody declared: every element, at what the code does to the array, with one
-    // memory barrier for the buffers rather than one per element.
     for (auto group = 0; group < int(_bound_groups.size()); ++group)
     {
         if (_bound_groups[group] == nullptr)
             continue;
         for (auto const& ab : _bound_groups[group]->array_bindings)
         {
-            auto declared = false;
-            for (auto const& declare : _pending_array_buffer_declares)
-                declared |= !ab.is_texture && declare.name == ab.name;
-            for (auto const& declare : _pending_array_texture_declares)
-                declared |= ab.is_texture && declare.name == ab.name;
-            if (declared)
-                continue;
-
-            auto const a = bound_array{.group = group, .binding = &ab};
-            auto const use = footprint_of(a);
-            if (use.has_value() && !use.value().is_touched())
-                continue; // the code never indexes it, so there is nothing to declare
-
-            sg::impl::log_footprint_mismatch_once(pipeline, ab.name,
-                                                  "a dispatch declared no access for an array its pipeline's code "
-                                                  "indexes, so every element is covered by a global barrier");
-            auto const access = use.has_value() ? use.value().access : sg::shader_access_of(ab.bound_as);
-            auto const stages = use.has_value() && !use.value().stages.is_empty()
-                                  ? use.value().stages
-                                  : sg::pipeline_stage_flag::compute | sg::pipeline_stage_flag::raytracing;
-            for (auto const& element : ab.elements)
+            auto declared = sg::impl::array_declarations();
+            auto const gather = [&](auto const& declares)
             {
-                if (element.buffer != nullptr)
+                for (auto const& declare : declares)
+                    if (declare.name == ab.name)
+                    {
+                        declared.named = true;
+                        for (auto const& e : declare.elements)
+                        {
+                            declared.any_element = true;
+                            declared.access |= e.access;
+                        }
+                    }
+            };
+            if (ab.is_texture)
+                gather(_pending_array_texture_declares);
+            else
+                gather(_pending_array_buffer_declares);
+
+            auto use = cc::optional<sg::impl::slot_use>();
+            if (_bound_footprint != nullptr && _bound_footprint->is_known())
+                use = _bound_footprint->use_of(group, ab.binding);
+            auto const plan = sg::impl::plan_array_declarations(pipeline, ab.name, use, ab.bound_as, op_stages, declared);
+
+            switch (plan.how)
+            {
+            case sg::impl::array_plan::mode::skip:
+                break;
+            case sg::impl::array_plan::mode::as_declared:
+                if (ab.is_texture)
                 {
-                    track_buffer_access(*element.buffer, stages, access);
-                    _global_barrier_buffers.push_back(element.buffer.get());
+                    for (auto const& declare : _pending_array_texture_declares)
+                        if (declare.name == ab.name)
+                            for (auto const& e : declare.elements)
+                            {
+                                auto const& element = ab.elements[e.index];
+                                (void)track_texture_access(*element.texture, element.range, e.stages,
+                                                           e.access | plan.widen_by, e.layout);
+                            }
                 }
-                else if (element.texture != nullptr)
-                    // A memory barrier moves no layout, so a texture still gets its own transition where it needs one.
-                    (void)track_texture_access(*element.texture, element.range, stages, access,
-                                               sg::shader_layout_of(ab.bound_as));
+                else
+                {
+                    for (auto const& declare : _pending_array_buffer_declares)
+                        if (declare.name == ab.name)
+                            for (auto const& e : declare.elements)
+                                track_buffer_access(*ab.elements[e.index].buffer, e.stages, e.access | plan.widen_by);
+                }
+                break;
+            case sg::impl::array_plan::mode::cover_all:
+                // One memory barrier for the buffers rather than one per element.
+                for (auto const& element : ab.elements)
+                {
+                    if (element.buffer != nullptr)
+                    {
+                        track_buffer_access(*element.buffer, plan.cover_stages, plan.cover_access);
+                        _global_barrier_buffers.insert(element.buffer.get());
+                    }
+                    else if (element.texture != nullptr)
+                    {
+                        // A memory barrier moves no layout, so a texture still gets its own transition where it needs one.
+                        (void)track_texture_access(*element.texture, element.range, plan.cover_stages,
+                                                   plan.cover_access, sg::shader_layout_of(ab.bound_as));
+                    }
+                }
+                break;
             }
         }
     }
@@ -266,7 +266,7 @@ void vulkan_command_list::compute_dispatch(int x, int y, int z)
     declare_group_accesses(_bound_groups, _bound_footprint, sg::pipeline_stage_flag::compute);
 
     // Array bindings are not auto-tracked — apply (and account for) the caller's explicit declarations.
-    declare_array_accesses(_bound_footprint_owner);
+    declare_array_accesses(_bound_footprint_owner, sg::pipeline_stage_flag::compute);
 
     // Emit every hazard the bound resources declared, batched, right before the dispatch consumes them.
     flush_barriers();

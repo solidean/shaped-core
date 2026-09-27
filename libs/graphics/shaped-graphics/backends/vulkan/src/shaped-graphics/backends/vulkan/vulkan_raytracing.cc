@@ -458,7 +458,7 @@ void vulkan_command_list::raytracing_dispatch_rays(sg::raytracing_shader_table c
     // Declare each bound group's accesses at the raytracing stage — a bound TLAS surfaces as accel_read — the same
     // rhythm as compute_dispatch.
     declare_group_accesses(_bound_groups, _bound_footprint, sg::pipeline_stage_flag::raytracing);
-    declare_array_accesses(_bound_footprint_owner);
+    declare_array_accesses(_bound_footprint_owner, sg::pipeline_stage_flag::raytracing);
 
     // The shader table buffer is read by the fixed-function ray dispatch.
     track_buffer_access(*vt->buffer, sg::pipeline_stage_flag::raytracing, sg::access_flag::shader_read);

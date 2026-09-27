@@ -3,6 +3,7 @@
 #include <clean-core/container/set.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/mutex.hh>
+#include <shaped-graphics/barrier/access_inference.hh>
 #include <shaped-graphics/barrier/footprint.hh>
 #include <shaped-graphics/binding/binding.hh>
 #include <shaped-graphics/binding/binding_group_layout.hh>
@@ -97,10 +98,12 @@ sg::impl::pipeline_footprint sg::impl::pipeline_footprint::resolve(pipeline_layo
 
     // A footprint naming a binding the layout does not hold is keyed differently from it, not narrower than it.
     // Reading its absences as "untouched" would then drop real barriers, so it is not used at all.
+    // The inline-constants block is the exception: it is set on the list rather than bound, so nothing orders on it.
+    auto const& inline_block = layout.inline_constants();
     for (auto const& s : stages)
         for (auto const& slot : s.footprint->slots)
         {
-            auto found = false;
+            auto found = inline_block.has_value() && inline_block.value().name == slot.name;
             for (auto const& group : layout.groups())
                 if (group != nullptr)
                     for (auto const& b : group->bindings())
@@ -152,11 +155,68 @@ sg::impl::slot_use sg::impl::pipeline_footprint::use_of(int group, cc::string_vi
     return {};
 }
 
+sg::impl::array_plan sg::impl::plan_array_declarations(void const* pipeline,
+                                                       cc::string_view name,
+                                                       cc::optional<slot_use> const& use,
+                                                       view_class bound_as,
+                                                       pipeline_stage_flags op_stages,
+                                                       array_declarations const& declared)
+{
+    if (use.has_value() && !use.value().is_touched())
+        return {.how = array_plan::mode::skip};
+
+    auto const code_writes = use.has_value() && is_unordered_write(use.value().access);
+    auto const cover_all = [&]
+    {
+        auto const stages = use.has_value() ? use.value().stages & op_stages : pipeline_stage_flags();
+        return array_plan{
+            .how = array_plan::mode::cover_all,
+            .cover_access = use.has_value() ? use.value().access : shader_access_of(bound_as),
+            .cover_stages = stages.is_empty() ? op_stages : stages,
+        };
+    };
+
+    if (!declared.named)
+    {
+        log_footprint_mismatch_once(pipeline, name,
+                                    "a dispatch declared no access for a bound array, so every element is covered");
+        return cover_all();
+    }
+    if (!declared.any_element)
+    {
+        if (!code_writes)
+            return {.how = array_plan::mode::skip};
+        log_footprint_mismatch_once(pipeline, name,
+                                    "a dispatch declared an array unused that its pipeline's code writes, so every "
+                                    "element is covered");
+        return cover_all();
+    }
+    if (!use.has_value())
+        return {.how = array_plan::mode::as_declared};
+
+    if (code_writes && !is_unordered_write(declared.access))
+    {
+        log_footprint_mismatch_once(pipeline, name,
+                                    "a dispatch declared no write to an array its pipeline's code writes, so every "
+                                    "declared element is covered for the write too");
+        return {.how = array_plan::mode::as_declared, .widen_by = use.value().access};
+    }
+    if (!use.value().access.has_all(declared.access))
+    {
+        log_footprint_mismatch_once(pipeline, name,
+                                    "a dispatch declared an array access its pipeline's code does not perform, so the "
+                                    "barrier covers both");
+        return {.how = array_plan::mode::as_declared, .widen_by = use.value().access};
+    }
+    return {.how = array_plan::mode::as_declared};
+}
+
 void sg::impl::log_footprint_mismatch_once(void const* pipeline, cc::string_view binding, cc::string_view message)
 {
     // Keyed by address: a pipeline freed and another built at its address inherits its silence, which costs one log line.
+    // The message is part of the key, so one kind of mismatch never silences another on the same binding.
     static auto logged = cc::mutex<cc::set<cc::string>>();
-    auto const key = cc::format("{}:{}", reinterpret_cast<u64>(pipeline), binding);
+    auto const key = cc::format("{}:{}:{}", reinterpret_cast<u64>(pipeline), binding, message);
     if (logged.lock([&](cc::set<cc::string>& s) { return s.insert(key); }))
         CC_LOG_ERROR("'{}': {}", binding, message);
 }

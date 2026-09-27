@@ -44,7 +44,7 @@ namespace sg::backend::vulkan
                                                        sg::pixel_format format,
                                                        sg::access_barrier const& barrier);
 
-/// Records one `vkCmdPipelineBarrier2` for everything staged, or nothing at all when both spans are empty.
+/// Records one `vkCmdPipelineBarrier2` for everything staged, or nothing at all when every span is empty.
 void submit_barriers(VkCommandBuffer cmd,
                      cc::span<VkBufferMemoryBarrier2 const> buffer_barriers,
                      cc::span<VkImageMemoryBarrier2 const> image_barriers,

@@ -2,6 +2,7 @@
 
 #include <clean-core/common/assert.hh>
 #include <clean-core/container/fixed_vector.hh>
+#include <clean-core/container/set.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/memory/unique_ptr.hh>
@@ -98,7 +99,7 @@ public:
 
     // Buffers of an array a dispatch declared nothing for, whose barriers this op folds into one memory barrier.
     // Their tracked state still moves per buffer; only the emission is shared.
-    cc::vector<vulkan_buffer const*> _global_barrier_buffers;
+    cc::set<vulkan_buffer const*> _global_barrier_buffers;
     cc::vector<vulkan_texture const*> _pending_barrier_textures;
     cc::vector<VkImageMemoryBarrier2> _pending_image_barriers;
 
@@ -196,9 +197,9 @@ public:
     // Flushes what the build declared, then records it.
     void record_acceleration_structure_build(built_acceleration_structure const& built);
 
-    /// Resolves the pending array declares against the bound groups and tracks each named element.
-    // An array the code indexes and nobody declared is covered by a global barrier, and logged against `pipeline`.
-    void declare_array_accesses(void const* pipeline);
+    /// Resolves the pending array declares against the bound groups and the footprint, and tracks what
+    /// sg::impl::plan_array_declarations decides at `op_stages`; a mismatch is logged against `pipeline`.
+    void declare_array_accesses(void const* pipeline, sg::pipeline_stage_flags op_stages);
 
     /// Declares every bound group's views at an op of `op_stages`, as `footprint` says the code touches them.
     void declare_group_accesses(cc::span<vulkan_binding_group const* const> groups,

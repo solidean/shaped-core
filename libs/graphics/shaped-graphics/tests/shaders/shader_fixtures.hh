@@ -40,6 +40,6 @@ slib::shader_library& shader_fixtures();
 inline void require_counted(sg::stats const& stats, sg::stat stat)
 {
     if (!stats.is_counted(stat))
-        SKIP(cc::format("this backend does not count {}", sg::info(stat).name));
+        SKIP(cc::format("this backend does not count {}", sg::info_of(stat).name));
 }
 } // namespace sg_test

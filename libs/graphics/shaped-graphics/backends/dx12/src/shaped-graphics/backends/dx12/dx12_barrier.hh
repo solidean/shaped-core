@@ -35,7 +35,7 @@ namespace sg::backend::dx12
                                                          sg::access_barrier const& b);
 
 /// Submits a collected batch of buffer + texture barriers in a single `Barrier` call, at most one group of each type.
-/// A no-op when both spans are empty.
+/// A no-op when every span is empty.
 /// Requires enhanced-barrier support (ID3D12GraphicsCommandList7).
 void submit_barriers(ID3D12GraphicsCommandList* list,
                      cc::span<D3D12_BUFFER_BARRIER const> buffer_barriers,

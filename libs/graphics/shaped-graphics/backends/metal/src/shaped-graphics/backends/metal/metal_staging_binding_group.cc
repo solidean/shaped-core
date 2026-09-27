@@ -104,6 +104,7 @@ cc::result<sg::binding_group_handle> metal_staging_binding_group::mint()
 {
     if (_sampler_refused)
         return cc::error("staging_binding_group: the metal device refused a sampler state for this group");
+    _ctx.stat_totals().add(sg::stat::binding_groups_created);
 
     auto const scope = autorelease_scope();
 

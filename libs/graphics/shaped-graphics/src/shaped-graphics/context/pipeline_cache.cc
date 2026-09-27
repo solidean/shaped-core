@@ -135,6 +135,7 @@ void add_shader(cc::byte_stream_builder& b, compiled_shader const& s)
     // Identical bytecode almost always means an identical footprint, but an SGL and an HLSL compile can share bytecode
     // and differ in how exact theirs is.
     b.add_pod(u32(s.footprint.source));
+    b.add_pod(u64(s.footprint.slots.size()));
     for (auto const& slot : s.footprint.slots)
     {
         b.add_string(slot.name);

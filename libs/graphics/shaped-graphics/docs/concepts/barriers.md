@@ -36,10 +36,11 @@ Where a footprint comes from decides how far it narrows:
 - `none` — nothing is known, and every view counts as its class says: a writable view is written.
 
 A footprint naming a binding the layout does not hold is keyed differently from it, and is not used at all rather than read as "untouched".
+The inline-constants block is the exception: it is set on the list rather than bound, so a slot naming it is simply skipped.
 
 **A check a shader edit can flip logs and degrades; it never asserts.**
 Hot reload replaces a shader under a running program, so a declaration that disagreed with the old code may disagree with the new one at any frame.
-Such a mismatch logs an error once per pipeline and binding and falls back to a barrier that covers both sides.
+Such a mismatch logs an error once per pipeline, binding and kind of mismatch, and falls back to a barrier that covers both sides.
 Only a mistake in the host's own code — a declaration naming no bound array, an element out of range — asserts.
 
 **The one exception — arrays / bindless.**
@@ -49,9 +50,13 @@ So the caller declares it explicitly, split by resource family since buffers car
 A declaration applies to the next dispatch only, resolved by binding name against the bound groups' array elements and tracked exactly like an inferred scalar access.
 The footprint still says whether the code touches the array at all:
 
-- an array the code never indexes needs no declaration;
-- one it indexes and nobody declared logs an error, and every element is covered — one global barrier for the buffers, and a transition for each texture whose layout is wrong;
+- an array the code never indexes needs no declaration, and one declared anyway is dropped;
+- one it indexes and nobody declared logs an error, and every element is covered at the op's stages — one global barrier for the buffers, and a transition for each texture whose layout is wrong;
+- one declared unused (an empty span) that the code writes is covered the same way;
+- declarations that write nothing, for an array the code writes, log an error, and every declared element is covered for the code's write too;
 - a declared access the code cannot perform logs an error, and the barrier covers the declaration and the code together.
+
+A declaration narrower than the code element by element is the caller's to make: the footprint knows only what the code does to the array as a whole.
 
 Declaring a vacant (null-handle) or out-of-range element, or an array no bound group holds, asserts.
 See [bindings — array bindings](bindings.md#array-bindings).
@@ -71,9 +76,11 @@ Color and depth *targets* are ROP-ordered freebies.
 
 WebGPU emits no barriers sg can see, and it orders every pass after the one before it.
 What it does not order is two draws of one render pass: a pixel shader writing a buffer, and the next draw reading it, may race.
-So the webgpu backend ends the pass before a draw that touches what an earlier draw of the open pass wrote, and reopens it with its targets loaded.
-Which draws write is the bound pipeline's footprint; a draw that only reads splits nothing.
-That split is counted as `render_pass_splits`, which is where vulkan and metal count theirs too.
+So the webgpu backend ends the pass before a draw that touches what an earlier draw of the open pass wrote, or writes what one read, and reopens it with its targets loaded.
+A vertex or index fetch is a read like any other, so a draw fetching a buffer an earlier draw of the pass wrote splits too.
+Which draws write is the bound pipeline's footprint; draws that only read split nothing.
+`render_pass_splits` counts every end and reopen in the middle of a rendering scope, whatever forced it — on webgpu a copy recorded inside the scope counts as much as this hazard.
+Vulkan and metal count theirs in the same stat.
 
 ## Minimal barriers: the three-timeline state
 
