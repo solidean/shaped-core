@@ -253,6 +253,15 @@ A pointer says the same as a block quote, and the block quote is what turns "you
 - **Exceptions are for infrequent failures that must bubble past frames that cannot help** — a device reset, an allocation the subsystem above can recover from.
 
 Look for **an assert on anything from outside the program** — a file, a shader, a device — and for **a fallible operation offering only one surface**.
+**A shader is outside the program because hot reload changes it under a running one.**
+A design review recommended asserting when a dispatch declared an array write that the shader's reflected footprint rules out, and the answer was:
+
+```raw
+careful about the last one: it must only log, not assert. imagine you comment out the write during hot reload - you do NOT want that to tear down the program due to that.
+```
+
+The same answer turned an existing assert into a log: a missing declaration logs an error and falls back to a conservative barrier.
+So a check whose outcome a shader edit can flip logs and degrades safely, and only a check on the host's own code may assert.
 The house pattern is a `try_*` fallible core plus a thin throwing façade.
 
 ### A 64-bit hash is not an identity
