@@ -289,8 +289,9 @@ struct planner
     /// Post-order, so a struct stands after every struct it holds, which HLSL needs and WGSL does not mind.
     void need(type_id type, struct_role role)
     {
+        // a binding array is declared with its resource, and has no type of its own to spell
         if (is_valid(type) && !is_builtin_type(p.m, type) && p.m.at(type).kind == type_kind::array)
-            return need_array(type);
+            return p.m.takes_slots(type) ? void() : need_array(type);
         if (!is_valid(type) || is_builtin_type(p.m, type) || p.m.at(type).kind != type_kind::structure)
             return;
         if (p.struct_of_type[index_of(type)] != -1)
@@ -350,18 +351,24 @@ struct planner
             auto const members = p.m.at(b.members);
             for (auto i = isize(0); i < members.size(); ++i)
             {
-                auto const& t = p.m.at(members[i].type);
+                // a binding array is its element's resource, at as many consecutive slots as it has elements
+                auto const& whole = p.m.at(members[i].type);
+                auto const is_array = whole.kind == type_kind::array;
+                auto const& t = is_array ? p.m.at(whole.element) : whole;
                 if (!check::is_resource(t.kind))
                     continue;
+                auto const count = is_array ? whole.count : 1;
                 p.resources.push_back({.binding = id,
                                        .member = i32(i),
                                        .name = p.names.mint(cc::format("{}_{}", s.name, members[i].name)),
                                        .host_name = cc::format("{}.{}", s.name, members[i].name),
-                                       .type = members[i].type,
+                                       .type = is_array ? whole.element : members[i].type,
                                        .element = t.element,
                                        .is_mut = t.is_mut,
                                        .group = group,
-                                       .slot = slot++});
+                                       .slot = slot,
+                                       .count = count});
+                slot += count;
             }
             ++group;
         }
@@ -395,7 +402,7 @@ struct planner
                     planned.members[i].offset = placed.offsets[i];
                 auto next = 0;
                 for (auto const& member : p.m.at(b.members))
-                    planned.block_member_of.push_back(check::is_resource(p.m.at(member.type).kind) ? -1 : next++);
+                    planned.block_member_of.push_back(p.m.takes_slots(member.type) ? -1 : next++);
                 p.group_blocks.push_back(cc::move(planned));
             }
             ++group;
@@ -596,7 +603,7 @@ void sgl::emit::impl::validate_binding(check::checked_module const& m, check::sy
     auto is_placed = true;
     for (auto const& member : m.at(b.members))
     {
-        if (!b.is_inline && check::is_resource(m.at(member.type).kind))
+        if (!b.is_inline && m.takes_slots(member.type))
             continue;
         if (layout_of(m, member.type).hlsl.size != 0)
             continue;
@@ -635,7 +642,7 @@ cc::vector<sgl::check::member_info> sgl::emit::impl::plain_members_of(check::che
 {
     auto result = cc::vector<check::member_info>();
     for (auto const& member : m.at(b.members))
-        if (!check::is_resource(m.at(member.type).kind))
+        if (!m.takes_slots(member.type))
             result.push_back(member);
     return result;
 }

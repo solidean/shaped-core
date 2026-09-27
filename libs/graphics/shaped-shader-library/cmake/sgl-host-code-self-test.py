@@ -211,6 +211,32 @@ def a_groups_static_sampler_is_declared_and_its_dynamic_one_gathered():
     expect_in("views.reserve(3);", source, "only views are gathered as views")
 
 
+ARRAYS = {
+    "name": "materials",
+    "inline": False,
+    "members": [
+        {"kind": "texture", "name": "albedo", "type": "texture_2d[float4]", "host_name": "materials_albedo",
+         "slot": 0, "count": 8, "texture_dimension": "tex_2d", "sample_type": "filterable_float"},
+        {"kind": "buffer", "name": "params", "type": "float4", "host_name": "materials_params", "slot": 8,
+         "count": 2, "access": "read"},
+    ],
+}
+
+
+@test
+def a_binding_array_is_a_fixed_array_of_views_gathered_as_one_binding():
+    header = sgl_host_code.emit_group("pkg", "ns", FILE, ARRAYS)
+    expect_in("cc::fixed_array<sg::texture_view_2d, 8> albedo;", header, "a texture array's field")
+    expect_in("cc::fixed_array<sg::readonly_buffer_view<tg::vec4f>, 2> params;", header, "a buffer array's field")
+    source = sgl_host_code.emit_group_impl("pkg", "ns", FILE, ARRAYS)
+    expect_in('{.name = "materials_albedo", .index = 0u, .count = 8u, .type = sg::binding_type::texture', source,
+              "a binding array's count")
+    expect_in("        for (auto const& element : albedo)\n"
+              "            elements.push_back(element);\n"
+              "        views.push_back({.slot = sg::binding_slot(0), .view = cc::move(elements)});\n", source,
+              "every element gathered, in order")
+
+
 # ---- a vertex input ---------------------------------------------------------------------------------------------------
 
 MESH = {

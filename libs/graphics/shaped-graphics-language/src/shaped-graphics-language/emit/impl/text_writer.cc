@@ -129,6 +129,14 @@ struct writer
         return x.node.is<flat_construct>() && !is_builtin_type(p.m, x.type) && !d.has_struct_constructor();
     }
 
+    /// `nonuniform i`, whose own text is `i`.
+    [[nodiscard]] bool is_nonuniform_mark(flat_expr_id id) const
+    {
+        auto const* const c = p.e.at(id).node.try_as<flat_call>();
+        auto const* const record = c != nullptr ? p.m.builtin_function(c->intrinsic) : nullptr;
+        return record != nullptr && record->is_nonuniform_mark;
+    }
+
     [[nodiscard]] bool is_array(check::type_id type) const
     {
         return is_valid(type) && p.m.at(type).kind == check::type_kind::array;
@@ -282,7 +290,11 @@ struct writer
             [&](flat_element const& a)
             {
                 auto const object = wrapped(expr(a.object), level::primary);
-                result = {.text = cc::format("{}[{}]", object, expr(a.index).text), .binds = level::primary};
+                auto index = expr(a.index).text;
+                // EMIT-121: a marked index into a binding array tells HLSL, and SPIR-V through it, that it may differ
+                if (d.language() == builtins::language::hlsl && is_nonuniform_mark(a.index))
+                    index = cc::format("NonUniformResourceIndex({})", index);
+                result = {.text = cc::format("{}[{}]", object, index), .binds = level::primary};
             },
             [&](flat_member const& member)
             {

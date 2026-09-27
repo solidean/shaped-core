@@ -404,3 +404,36 @@ TEST("sgl emit - every texture method is its target's own call, with a layer and
                         "    return int(samples);\n"
                         "}\n"));
 }
+
+TEST("sgl emit - a binding array takes consecutive registers, and a marked index is NonUniformResourceIndex")
+{
+    constexpr auto arrays
+        = "require binding_arrays\n"
+          "\n"
+          "binding materials:\n"
+          "    @sampler(smp) albedo: texture_2d[float4][8]\n"
+          "    params: buffer[float4][2]\n"
+          "    smp: sampler\n"
+          "\n"
+          "struct pixel_input:\n"
+          "    @position position: hpos4\n"
+          "    uv: float2\n"
+          "    @interpolate(.flat) material: int\n"
+          "\n"
+          "@pixel struct target:\n"
+          "    color: float4\n"
+          "\n"
+          "@pixel fun ps(p: pixel_input){materials} -> target:\n"
+          "    return {color = materials.albedo[nonuniform p.material].sample(p.uv) * materials.params[1][0]}\n";
+    auto const dx12 = text_of(arrays, target::hlsl_dx12);
+    CHECK(dx12.contains("Texture2D<float4> materials_albedo[8] : register(t0, space0);\n"
+                        "StructuredBuffer<float4> materials_params[2] : register(t8, space0);\n"
+                        "SamplerState materials_smp : register(s10, space0);\n"));
+    CHECK(dx12.contains("materials_albedo[NonUniformResourceIndex(p.material)].Sample(materials_smp, p.uv) * "
+                        "materials_params[1][0]"));
+    CHECK(text_of(arrays, target::hlsl_vulkan)
+              .contains("[[vk::binding(8, 0)]] StructuredBuffer<float4> materials_params[2];\n"));
+
+    // WebGPU has no binding arrays, so WGSL refuses by the feature rather than guessing
+    CHECK(sgl::emit::dump_errors(emit_source(arrays, 0, target::wgsl)).contains("binding_arrays"));
+}

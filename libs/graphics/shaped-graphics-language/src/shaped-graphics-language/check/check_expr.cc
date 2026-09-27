@@ -198,6 +198,22 @@ type_id checker::check_index(function_scope& scope, ast::expr_id id, ast::index 
     }
     if (!judge_atomic_use(file, id, result))
         return error_type;
+    // an element of a binding array is the resource itself, which a builtin is handed, or a buffer that is subscripted
+    if (kind == type_kind::array && is_resource(out.at(result).kind))
+    {
+        auto is_handed = false;
+        for (auto const h : handed)
+            is_handed = is_handed || h == id;
+        auto const is_buffer = out.at(result).kind == type_kind::buffer;
+        if (is_buffer ? id != subscripted : !is_handed)
+        {
+            unsupported(
+                file, where,
+                is_buffer ? cc::string("a buffer as a value; read an element of it, as in `values[i]`")
+                          : cc::format("{} as a value; call a builtin on it, as in `t.load(xy)`", out.name_of(result)));
+            return error_type;
+        }
+    }
     return result;
 }
 
@@ -485,6 +501,15 @@ type_id checker::check_member(function_scope& scope, ast::expr_id id, ast::membe
             }
             if (!judge_atomic_use(file, id, type))
                 return error_type;
+            // CHK-299: a binding array is read by element, which a builtin is handed
+            if (type != error_type && out.at(type).kind == type_kind::array && holds_resource(type) && id != subscripted)
+            {
+                report(diagnostic_kind::wrong_kind_of_name, file, span_of(file, id),
+                       cc::format("{}.{} is a binding array, read by element: `{}[i]`", out.at(binding).name,
+                                  out.at(out.bindings[out.at(binding).info].members)[index].name,
+                                  text_of(file, span_of(file, id))));
+                return error_type;
+            }
             auto is_handed = false;
             for (auto const h : handed)
                 is_handed = is_handed || h == id;

@@ -165,7 +165,9 @@ public:
     {
         auto const& t = p.m.at(b.type);
         auto const format = t.kind == type_kind::image ? k_image_formats[t.format].spirv : cc::string_view();
-        write_addressed(out, resource_text(p, b.type), b.name, register_class_of(t), b.group, b.slot, format);
+        // a binding array takes `count` consecutive registers from its first
+        auto const name = b.count > 1 ? cc::format("{}[{}]", b.name, b.count) : cc::string(b.name);
+        write_addressed(out, resource_text(p, b.type), name, register_class_of(t), b.group, b.slot, format);
     }
 
     /// One declaration of a group with its address; `format` is an image's `[[vk::image_format]]`, which vulkan's

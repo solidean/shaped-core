@@ -339,3 +339,24 @@ TEST("sgl check - an atomic is memory a builtin updates, in a mut buffer or in w
     CHECK(reports_for("fun f() -> int:\n    let a: atomic[int] = 0\n    return 0\n")
               .contains("an atomic is memory in a `mut buffer` or a @workgroup binding, and never a value"));
 }
+
+TEST("sgl check - a binding array is one dimension of resources, bounded, granted, and read by element")
+{
+    constexpr auto granted = "require binding_arrays\n\n";
+    CHECK(reports_for(cc::format("{}binding b:\n    t: texture_2d[float4][8]\n    i: out image_2d[.rgba8_unorm][2]\n"
+                                 "    s: buffer[float][4]\n",
+                                 granted))
+          == "");
+    CHECK(reports_for("binding b:\n    t: texture_2d[float4][8]\n").contains("needs binding_arrays"));
+    CHECK(reports_for(cc::format("{}binding b:\n    t: texture_2d[float4][]\n", granted))
+              .contains("an unbounded binding array, which sg binds none of yet"));
+    CHECK(
+        reports_for(cc::format("{}binding b:\n    s: comparison_sampler[4]\n", granted)).contains("an array of samplers"));
+    CHECK(reports_for(cc::format("{}binding b:\n    t: texture_2d[float4][2, 2]\n", granted))
+              .contains("a binding array of more than one dimension"));
+
+    auto const whole = reports_for(cc::format("{}binding b:\n    t: texture_2d[float4][8]\n\n"
+                                              "@compute(1) fun cs(){{b}}:\n    let n = b.t\n",
+                                              granted));
+    CHECK(whole.contains("b.t is a binding array, read by element: `b.t[i]`"));
+}

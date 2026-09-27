@@ -37,7 +37,7 @@ struct footprint_builder
         auto const kind = m.at(member.type).kind;
         if (kind == type_kind::sampler)
             return;
-        touch(b.binding, is_resource(kind) ? b.member : -1, reads, writes);
+        touch(b.binding, m.takes_slots(member.type) ? b.member : -1, reads, writes);
     }
 };
 
@@ -106,14 +106,17 @@ cc::vector<slot_footprint> footprint_of(checked_module const& m, flat_entry_poin
                 break;
             if (auto const* const element = x.node.try_as<flat_buffer_element>())
             {
-                auto const* const buffer = impl::is_known(e, element->buffer)
-                                             ? e.at(element->buffer).node.try_as<flat_binding_member>()
-                                             : nullptr;
+                // the buffer, or the binding array it is an element of
+                auto named = element->buffer;
+                if (auto const* const array = impl::is_known(e, named) ? e.at(named).node.try_as<flat_element>() : nullptr)
+                    named = array->object;
+                auto const* const buffer
+                    = impl::is_known(e, named) ? e.at(named).node.try_as<flat_binding_member>() : nullptr;
                 CC_ASSERT(buffer != nullptr,
                           "a stored buffer element names its buffer as a binding member; a footprint "
                           "that met anything else would miss the write");
                 b.touch_member(*buffer, false, true);
-                claimed[index_of(element->buffer)] = true;
+                claimed[index_of(named)] = true;
                 break;
             }
             CC_ASSERT(x.node.is<flat_local_ref>(), "an assignment's place is a local, a member of one, or a buffer "
@@ -140,19 +143,27 @@ cc::vector<slot_footprint> footprint_of(checked_module const& m, flat_entry_poin
                 element != nullptr && m.at(parameters[i].type).kind == type_kind::atomic
                 && impl::is_known(e, element->buffer))
             {
-                if (auto const* const buffer = e.at(element->buffer).node.try_as<flat_binding_member>())
+                auto named = element->buffer;
+                if (auto const* const array = e.at(named).node.try_as<flat_element>())
+                    named = array->object;
+                if (auto const* const buffer = e.at(named).node.try_as<flat_binding_member>())
                 {
                     b.touch_member(*buffer, true, true);
-                    claimed[index_of(element->buffer)] = true;
+                    claimed[index_of(named)] = true;
                 }
                 continue;
             }
-            auto const* const member = e.at(arguments[i]).node.try_as<flat_binding_member>();
+            // an element of a binding array is used as its member is, whichever element it is
+            auto named = arguments[i];
+            if (auto const* const element = e.at(named).node.try_as<flat_element>();
+                element != nullptr && impl::is_known(e, element->object))
+                named = element->object;
+            auto const* const member = e.at(named).node.try_as<flat_binding_member>();
             if (member == nullptr)
                 continue;
             auto const& type = m.at(parameters[i].type);
             b.touch_member(*member, type.access != access_mode::write, type.access != access_mode::read || type.is_mut);
-            claimed[index_of(arguments[i])] = true;
+            claimed[index_of(named)] = true;
         }
     }
 

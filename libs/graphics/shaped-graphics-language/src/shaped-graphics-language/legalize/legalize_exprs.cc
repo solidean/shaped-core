@@ -266,8 +266,10 @@ struct expr_lowering
                 if (!has_effect(out.e, operand) && !reads_any(out.e, operand, moved))
                     continue;
                 out.from = out.e.at(operand).from;
-                // an atomic names the memory a call updates, so its index is pinned, and never its value
-                if (out.m.at(out.e.at(operand).type).kind == type_kind::atomic)
+                // an atomic names the memory a call updates, and a binding array's element a resource, so either's
+                // index is pinned, and never its value
+                if (auto const kind = out.m.at(out.e.at(operand).type).kind;
+                    kind == type_kind::atomic || is_resource(kind))
                 {
                     result[j] = pin_atomic_index(operand, pre, at);
                     continue;

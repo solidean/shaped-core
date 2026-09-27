@@ -102,7 +102,10 @@ struct planned_resource
     check::type_id element = check::type_id::none;
     bool is_mut = false;
     i32 group = 0;
+    /// The first of the `count` consecutive slots it takes: a binding array takes one per element (CHK-299).
     i32 slot = 0;
+    /// A binding array's length; 1 for any other resource.
+    i32 count = 1;
 };
 
 /// One member of a `@workgroup` binding: memory the workgroup shares, which no host binds.

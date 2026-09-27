@@ -327,6 +327,12 @@ struct flattener
             return add_expr(x.type, from, *v);
         if (auto const* const m = x.node.try_as<flat_binding_member>())
             return add_expr(x.type, from, *m);
+        if (auto const* const element = x.node.try_as<flat_element>())
+        {
+            auto const object = again(element->object, from);
+            auto const index = again(element->index, from);
+            return add_expr(x.type, from, flat_element{.object = object, .index = index});
+        }
         if (auto const* const made = x.node.try_as<flat_construct>())
         {
             // copied first: `again` appends to the lists the view reads
@@ -344,8 +350,12 @@ struct flattener
     /// and it stands wherever it is named, since naming one has no effect.
     [[nodiscard]] bool is_resource_member(flat_expr_id id) const
     {
-        return is_valid(id) && entry.at(id).node.is<flat_binding_member>()
-            && is_resource(c.out.at(entry.at(id).type).kind);
+        if (!is_valid(id) || !is_resource(c.out.at(entry.at(id).type).kind))
+            return false;
+        // an element of a binding array, at an index that reads the same wherever it stands
+        if (auto const* const element = entry.at(id).node.try_as<flat_element>())
+            return entry.at(element->object).node.is<flat_binding_member>() && is_substitutable(element->index);
+        return entry.at(id).node.is<flat_binding_member>();
     }
 
     /// A value that is read more than once and evaluated once, where it stands.
@@ -720,8 +730,9 @@ struct flattener
                 bound[i] = value;
                 continue;
             }
-            // an atomic names the memory the call updates, so its index is bound in its stead, and never its value
-            if (c.out.at(entry.at(value).type).kind == type_kind::atomic)
+            // an atomic names the memory the call updates, and a binding array's element the resource it hands over,
+            // so either's index is bound in its stead, and never its value
+            if (auto const kind = c.out.at(entry.at(value).type).kind; kind == type_kind::atomic || is_resource(kind))
             {
                 bound[i] = with_bound_index(value, id);
                 continue;
@@ -832,9 +843,11 @@ struct flattener
     /// coordinate (CHK-279); the check pass has made sure the texture names one.
     flat_expr_id default_sampled_call(ast::expr_id id, builtin_id with_sampler, cc::span<flat_expr_id const> arguments)
     {
-        auto const* const texture = arguments.size() >= 2 && is_valid(arguments[0])
-                                      ? entry.at(arguments[0]).node.try_as<flat_binding_member>()
-                                      : nullptr;
+        // the texture, or the binding array it is an element of
+        auto named = arguments.size() >= 2 ? arguments[0] : flat_expr_id::none;
+        if (auto const* const element = is_valid(named) ? entry.at(named).node.try_as<flat_element>() : nullptr)
+            named = element->object;
+        auto const* const texture = is_valid(named) ? entry.at(named).node.try_as<flat_binding_member>() : nullptr;
         if (texture == nullptr)
             return fail();
         auto const members = c.out.at(c.out.bindings[c.out.at(texture->binding).info].members);

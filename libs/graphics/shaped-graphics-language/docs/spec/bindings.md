@@ -279,6 +279,31 @@ A binding an entry point lists but never reads still takes its position, because
 They are listed like any other binding and skipped when numbering, since sg addresses them itself.
 An `@inline` binding anywhere but the last position of a list is a normal error, so that reading order matches binding order.
 
+## Binding arrays
+
+**`T[N]` of a resource is a binding array**: `N` consecutive slots of one resource type under one name, which a device grants through `require binding_arrays`.
+
+```sgl
+require binding_arrays
+
+binding materials:
+    @sampler(bilinear) albedo: texture_2d[float4][64]
+    params: buffer[float4][8]
+    bilinear: sampler
+
+let base = materials.albedo[nonuniform p.material].sample(p.uv)
+let fixed = materials.albedo[materials.slot].sample(p.uv)
+```
+
+* It is read by element, and an element is the resource itself, handed to a builtin as the member would be.
+* It takes `N` slots from its first, so the resources after it start `N` later, as sg's bindings concept requires of every array.
+* An index the uniformity pass cannot prove the same in every invocation is marked `nonuniform i`, or refused (CHK-300).
+  Forgetting the mark is silent on the GPU: some hardware reads one invocation's descriptor for its whole wave.
+  A mark on an index the pass proves uniform is a warning, since it pays for nothing.
+* `T[]`, whose length the host binds, is the spelling an unbounded array has, and `unsupported-yet` until sg binds one.
+  An array of samplers, and one of more than one dimension, are `unsupported-yet` too.
+* HLSL writes `Texture2D<float4> albedo[64]` and `NonUniformResourceIndex` around a marked index; WebGPU has no binding arrays, so WGSL refuses by the feature.
+
 ## Workgroup memory
 
 **A `@workgroup` binding is memory every thread of one workgroup shares**, alive for that workgroup's run: HLSL's `groupshared`, WGSL's `var<workgroup>`, MSL's `threadgroup`.
@@ -406,6 +431,7 @@ Everything not named here is the diagnostic `unsupported-yet`, never a guess.
   The builtins that take one are `sample`, `load`, `store` and `size` in `prelude/builtins.sgl`, called as methods of it: `tex.sample(uv, smp)`.
 * A plain member of a group, as a field of the constant buffer the group owns, for a type whose place in a block every target agrees on.
 * The positional group numbering, and `@inline` last.
+* Binding arrays of textures, images and buffers, under `require binding_arrays`, with `nonuniform`.
 * `@workgroup` bindings, which take no group.
 * `atomic[uint]` and `atomic[int]`, in a `mut buffer` and in workgroup memory, with every update but a compare-exchange.
 * A resource's host name, its path `binding.member` ([CHK-171](semantics/checking.md#bindings)), which the text reports beside the identifier it minted.

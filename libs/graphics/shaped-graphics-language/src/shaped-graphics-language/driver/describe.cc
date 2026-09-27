@@ -143,22 +143,36 @@ described_binding describe_binding(check::checked_module const& m, check::symbol
     }
     auto slot = emit_impl::first_resource_slot(m, b);
     auto next_constant = isize(0);
-    for (auto const& member : members)
+    for (auto const& whole : members)
     {
+        // a binding array is described as its element, taking one slot per element
+        auto member = whole;
+        auto count = 1;
+        if (auto const& t = m.at(whole.type);
+            t.kind == check::type_kind::array && check::is_resource(m.at(t.element).kind))
+        {
+            member.type = t.element;
+            count = t.count;
+        }
         auto const& t = m.at(member.type);
         if (t.kind == check::type_kind::buffer)
         {
             result.members.push_back({.name = member.name,
                                       .kind = described_member_kind::buffer,
                                       .type = cc::string(m.name_of(t.element)),
-                                      .slot = slot++,
+                                      .slot = slot,
+                                      .count = count,
                                       .host_name = cc::format("{}.{}", s.name, member.name),
                                       .access = cc::string(t.is_mut ? "read_write" : "read")});
+            slot += count;
             continue;
         }
         if (check::is_resource(t.kind))
         {
-            result.members.push_back(describe_resource(m, member, slot++, cc::format("{}.{}", s.name, member.name)));
+            auto described = describe_resource(m, member, slot, cc::format("{}.{}", s.name, member.name));
+            described.count = count;
+            result.members.push_back(cc::move(described));
+            slot += count;
             continue;
         }
         result.members.push_back({.name = member.name,

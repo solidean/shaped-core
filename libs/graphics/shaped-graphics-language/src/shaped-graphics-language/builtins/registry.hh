@@ -178,6 +178,8 @@ struct sgl::builtins::function_record
     /// Updates its first argument, an atomic, in one step (EVAL-93): the evaluator is given the atomic's value and then
     /// the other arguments, and gives what the atomic holds after; the call gives what it held before, or nothing.
     bool is_atomic = false;
+    /// `nonuniform i`: its argument, marked as an index into a binding array that differs between invocations (CHK-300).
+    bool is_nonuniform_mark = false;
 
     /// Read back from the signature by `finalize`.
     cc::string name;

@@ -613,6 +613,11 @@
     z
     w
 
+// `nonuniform i` marks an index into a binding array that differs between invocations (CHK-300).
+/// `i`, which the hardware is told may differ between the invocations that index with it.
+@builtin @pure fun nonuniform(i: int) -> int
+/// `i`, which the hardware is told may differ between the invocations that index with it.
+@builtin @pure fun nonuniform(i: uint) -> uint
 @builtin @pure fun load(t: texture_1d[float], xy: int, level: int = 0) -> float
 @builtin @pure @stages(.pixel) fun sample(t: texture_1d[float], coord: float, smp: sampler) -> float
 @builtin @pure @stages(.pixel) fun sample(t: texture_1d[float], coord: float) -> float

@@ -215,6 +215,13 @@ struct sgl::check::checked_module
     }
 
     /// The name a type is written with; `<error>` for the error type.
+    /// A resource, or a binding array of one: what takes slots of its group rather than a place in its constant block.
+    [[nodiscard]] bool takes_slots(type_id id) const
+    {
+        auto const& t = at(id);
+        return is_resource(t.kind) || (t.kind == type_kind::array && is_resource(at(t.element).kind));
+    }
+
     [[nodiscard]] cc::string_view name_of(type_id id) const
     {
         auto const& t = at(id);

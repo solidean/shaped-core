@@ -190,6 +190,14 @@ type_id checker::qualify_resource(i32 file, ast::expr_id expr, type_id inner, as
     auto const& t = out.at(inner);
     auto const is_write_only = access == ast::type_access::write_only;
 
+    // `mut image_2d[.r32_float][4]` is an array of what the access word says, whichever the word stood before
+    if (t.kind == type_kind::array)
+    {
+        auto const count = t.count;
+        auto const element = qualify_resource(file, expr, t.element, access);
+        return element == checked_module::error_type ? element : array_type(element, count);
+    }
+
     if (t.kind == type_kind::buffer)
     {
         if (is_write_only)
@@ -361,7 +369,11 @@ void checker::judge_filtering(i32 file, ast::expr_id id, source_span call, cc::s
     {
         if (!ast::is_valid(a.expr) || a.splat_member >= 0)
             continue;
-        auto const& where = out.files[file].target_at(a.expr);
+        // an element of a binding array is sampled as its member is
+        auto named = a.expr;
+        if (auto const* const element = ast_of(file).at(named).node.try_as<ast::index>())
+            named = element->object;
+        auto const& where = out.files[file].target_at(named);
         if (where.kind != target_kind::binding_member)
             continue;
         auto const& binding = out.bindings[out.at(where.symbol).info];

@@ -122,3 +122,40 @@ TEST("sgl check - a sample that picks its own level stands where every pixel of 
     CHECK(reports_for(pixel("    c.y = ddx(p.uv.x)\n")) == "");
     CHECK(reports_for(pixel("    if p.uv.y > 0.5 => c.y = ddy(p.uv.x)\n")).contains("ddy takes derivatives"));
 }
+
+TEST("sgl check - a dynamic index into a binding array is proven uniform, or marked nonuniform")
+{
+    auto const indexed = [](cc::string_view line)
+    {
+        return reports_for(cc::format("require binding_arrays\n\n"
+                                      "binding materials:\n"
+                                      "    @sampler(smp) albedo: texture_2d[float4][8]\n"
+                                      "    smp: sampler\n"
+                                      "    slot: int\n"
+                                      "\n"
+                                      "struct pixel_input:\n"
+                                      "    @position position: hpos4\n"
+                                      "    uv: float2\n"
+                                      "    @interpolate(.flat) material: int\n"
+                                      "\n"
+                                      "@pixel struct target:\n"
+                                      "    color: float4\n"
+                                      "\n"
+                                      "@pixel fun ps(p: pixel_input){{materials}} -> target:\n"
+                                      "    return {{color = {}}}\n",
+                                      line));
+    };
+    CHECK(indexed("materials.albedo[materials.slot].sample(p.uv)") == "");
+    CHECK(indexed("materials.albedo[3].sample(p.uv)") == "");
+    CHECK(indexed("materials.albedo[nonuniform p.material].sample(p.uv)") == "");
+
+    // CHK-300: forgetting the mark reads another invocation's texture on some hardware, silently
+    auto const unmarked = indexed("materials.albedo[p.material].sample(p.uv)");
+    CHECK(unmarked.contains("non-uniform-index"));
+    CHECK(unmarked.contains("mark it `nonuniform p.material`, or make it the same in all of them"));
+    CHECK(unmarked.contains("this value comes from the stage's input struct"));
+
+    // and a mark where none is needed pays for nothing
+    auto const needless = indexed("materials.albedo[nonuniform materials.slot].sample(p.uv)");
+    CHECK(needless.contains("needless-nonuniform"));
+}

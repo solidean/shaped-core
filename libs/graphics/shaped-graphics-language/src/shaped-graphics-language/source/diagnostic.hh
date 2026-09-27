@@ -197,6 +197,10 @@ enum class sgl::diagnostic_kind : sgl::u8
     invalid_constant_argument,
     /// A barrier, or a call that takes derivatives, where some invocations of its group may not arrive.
     non_uniform_control_flow,
+    /// An index into a binding array that may differ between invocations, and is not marked `nonuniform`.
+    non_uniform_index,
+    /// A `nonuniform` mark on an index the check pass proves uniform, which pays for nothing; a warning.
+    needless_nonuniform,
 };
 
 namespace sgl

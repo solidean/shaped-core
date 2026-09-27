@@ -76,6 +76,9 @@ void write_binding(babel::json::object_writer& o, sgl::described_binding const& 
         }
         mo.write("access", cc::string_view(m.access));
         mo.write("slot", m.slot);
+        // a binding array's length, which is 1 for any other resource
+        if (m.count > 1)
+            mo.write("count", m.count);
         mo.write("host_name", cc::string_view(m.host_name));
         // The sg enum values a binding of this kind states, each written only where it applies.
         auto const optional = [&](cc::string_view key, cc::string const& value)

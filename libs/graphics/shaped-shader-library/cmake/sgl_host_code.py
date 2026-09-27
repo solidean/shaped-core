@@ -83,6 +83,8 @@ def includes(entries: SglEntries) -> list[str]:
                 "<shaped-graphics/raster/raster_pipeline.hh>"]
     if any(b["inline"] for _, b in entries.bindings):
         out += ["<clean-core/container/fixed_array.hh>", "<clean-core/fwd.hh>"]
+    if any(m.get("count", 1) > 1 for _, b in entries.bindings for m in b["members"]):
+        out += ["<clean-core/container/fixed_array.hh>"]
 
     # Every type a field names: a constant's own, a buffer's element, and a vertex attribute's.
     types = {m["type"] for _, b in entries.bindings for m in b["members"]}
@@ -120,16 +122,19 @@ def emit_group(package: str, namespace: str, file: SglFile, binding: dict) -> st
     # A plain member is a plain field: the group owns the constant buffer it lands in, and sg fills it at creation.
     for member in binding["members"]:
         where = f"'{file.path}' `binding {name}` member '{member['name']}'"
+        # a binding array is one field holding a view per element
+        count = member.get("count", 1)
+        array = (lambda view: f"cc::fixed_array<{view}, {count}>") if count > 1 else (lambda view: view)
         if member["kind"] == "constant":
             out.append(f"    {host_type(package, where, member['type'])} {member['name']}; ///< `{member['type']}`, "
                        f"at byte {member['offset']} of the group's constant buffer\n")
             continue
         if member["kind"] == "texture":
-            out.append(f"    sg::texture_view_{view_shape(member)} {member['name']}; ///< `{member['type']}`\n")
+            out.append(f"    {array(f'sg::texture_view_{view_shape(member)}')} {member['name']}; ///< `{member['type']}`\n")
             continue
         if member["kind"] == "image":
             view = f"sg::image_view_{view_shape(member)}<sg::pixel_format::{member['image_format']}>"
-            out.append(f"    {view} {member['name']}; ///< `{member['type']}`\n")
+            out.append(f"    {array(view)} {member['name']}; ///< `{member['type']}`\n")
             continue
         if member["kind"] == "sampler":
             # A static sampler is the layout's, so the group has no field for it.
@@ -140,7 +145,7 @@ def emit_group(package: str, namespace: str, file: SglFile, binding: dict) -> st
         is_written = member["access"] == "read_write"
         access = "readwrite" if is_written else "readonly"
         sgl_type = f"mut buffer[{member['type']}]" if is_written else f"buffer[{member['type']}]"
-        out.append(f"    sg::{access}_buffer_view<{element}> {member['name']}; ///< `{sgl_type}`\n")
+        out.append(f"    {array(f'sg::{access}_buffer_view<{element}>')} {member['name']}; ///< `{sgl_type}`\n")
     out.append("\n")
     if has_block(binding):
         out.append("    /// The group's constant buffer: its plain members, laid out as the shader reads them, at this slot.\n")
@@ -210,7 +215,8 @@ def sampler_initializer(state: dict) -> str:
 
 def binding_entry(member: dict) -> str:
     """The sg::binding a resource member is, its fields in sg::binding's declaration order."""
-    head = f'{{.name = "{member["host_name"]}", .index = {member["slot"]}u, .count = 1u, '
+    # a binding array takes `count` consecutive slots from its own
+    head = f'{{.name = "{member["host_name"]}", .index = {member["slot"]}u, .count = {member.get("count", 1)}u, '
     kind = member["kind"]
     if kind == "buffer":
         access = "" if member["access"] == "read" else f", .access = sg::access_mode::{member['access']}"
@@ -263,6 +269,15 @@ def emit_group_impl(package: str, namespace: str, file: SglFile, binding: dict) 
         out.append("    (void)samplers;\n")
     out.append(f"    views.reserve({len(views)});\n")
     for member in views:
+        if member.get("count", 1) > 1:
+            # one view per element, in element order
+            out.append("    {\n")
+            out.append("        auto elements = cc::vector<sg::raw_view>();\n")
+            out.append(f"        for (auto const& element : {member['name']})\n")
+            out.append("            elements.push_back(element);\n")
+            out.append(f"        views.push_back({{.slot = sg::binding_slot({member['slot']}), .view = cc::move(elements)}});\n")
+            out.append("    }\n")
+            continue
         out.append(f"    views.push_back({{.slot = sg::binding_slot({member['slot']}), .view = {member['name']}}});\n")
     for member in dynamic:
         out.append(f'    samplers.push_back({{.name = "{member["host_name"]}", .sampler = {member["name"]}}});\n')

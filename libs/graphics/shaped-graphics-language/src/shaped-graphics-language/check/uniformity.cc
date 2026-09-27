@@ -64,6 +64,23 @@ struct uniformity_pass
     };
     cc::vector<violation> violations;
 
+    /// CHK-300: an index into a binding array, divergent and unmarked, or marked and uniform.
+    struct index_finding
+    {
+        flat_expr_id index;
+        bool is_marked = false;
+        divergence value;
+    };
+    cc::vector<index_finding> index_findings;
+
+    /// True for `nonuniform i`, the one call that marks an index.
+    [[nodiscard]] bool is_marked(flat_expr_id index) const
+    {
+        auto const* const c = e.at(index).node.try_as<flat_call>();
+        auto const* const record = c != nullptr ? m.builtin_function(c->intrinsic) : nullptr;
+        return record != nullptr && record->is_nonuniform_mark;
+    }
+
     /// What a walk of statements hands on: how the flow leaves them, and whether any of them jumps out.
     struct flow_out
     {
@@ -98,54 +115,71 @@ struct uniformity_pass
             return {};
         auto const& x = e.at(id);
         auto result = divergence::none();
-        x.node.visit([&](flat_local_ref const& l) { result = locals[index_of(l.local)]; },
-                     [&](flat_binding_member const& b)
-                     {
-                         // WGSL takes workgroup memory as different in every thread, whatever was stored to it
-                         if (b.is_workgroup)
-                             result = {.is = true,
-                                       .where = x.from,
-                                       .why = cc::format("is read from {}.{}, workgroup memory the threads write",
-                                                         m.at(b.binding).name,
-                                                         m.at(m.bindings[m.at(b.binding).info].members)[b.member].name)};
-                     },
-                     [&](flat_buffer_element const& b)
-                     {
-                         auto const index = value(b.index, flow);
-                         auto const* const member = e.at(b.buffer).node.try_as<flat_binding_member>();
-                         auto const& info = m.bindings[m.at(member->binding).info];
-                         auto const& buffer = m.at(info.members)[member->member];
-                         // a buffer the shader also writes may hold what another invocation just stored
-                         if (m.at(buffer.type).is_mut)
-                             result = {.is = true,
-                                       .where = x.from,
-                                       .why = cc::format("is read from {}.{}, which the shader also writes",
-                                                         m.at(member->binding).name, buffer.name)};
-                         else
-                             result = index;
-                     },
-                     [&](flat_member const& member) { result = value(member.object, flow); },
-                     [&](flat_element const& element)
-                     { result = first_of(value(element.object, flow), value(element.index, flow)); },
-                     [&](flat_construct const& c)
-                     {
-                         for (auto const a : e.at(c.arguments))
-                             result = first_of(result, value(a, flow));
-                     },
-                     [&](flat_call const& c) { result = call(id, c, flow); },
-                     [&](flat_not const& n) { result = value(n.operand, flow); },
-                     [&](flat_and const& a)
-                     {
-                         auto const lhs = value(a.lhs, flow);
-                         // `rhs` runs only where `lhs` is true, which is flow of its own
-                         result = first_of(lhs, value(a.rhs, first_of(flow, as_branch(lhs, x.from))));
-                     },
-                     [&](flat_or const& o)
-                     {
-                         auto const lhs = value(o.lhs, flow);
-                         result = first_of(lhs, value(o.rhs, first_of(flow, as_branch(lhs, x.from))));
-                     },
-                     [&](auto const&) {});
+        x.node.visit(
+            [&](flat_local_ref const& l) { result = locals[index_of(l.local)]; },
+            [&](flat_binding_member const& b)
+            {
+                // WGSL takes workgroup memory as different in every thread, whatever was stored to it
+                if (b.is_workgroup)
+                    result = {.is = true,
+                              .where = x.from,
+                              .why = cc::format("is read from {}.{}, workgroup memory the threads write",
+                                                m.at(b.binding).name,
+                                                m.at(m.bindings[m.at(b.binding).info].members)[b.member].name)};
+            },
+            [&](flat_buffer_element const& b)
+            {
+                // the buffer, or the binding array it is an element of, whose index picks a buffer
+                auto const index = first_of(value(b.index, flow), value(b.buffer, flow));
+                auto named = b.buffer;
+                if (auto const* const element = e.at(named).node.try_as<flat_element>())
+                    named = element->object;
+                auto const* const member = e.at(named).node.try_as<flat_binding_member>();
+                // a buffer the shader also writes may hold what another invocation just stored
+                if (m.at(e.at(b.buffer).type).is_mut && member != nullptr)
+                    result = {
+                        .is = true,
+                        .where = x.from,
+                        .why = cc::format("is read from {}.{}, which the shader also writes", m.at(member->binding).name,
+                                          m.at(m.bindings[m.at(member->binding).info].members)[member->member].name)};
+                else
+                    result = index;
+            },
+            [&](flat_member const& member) { result = value(member.object, flow); },
+            [&](flat_element const& element)
+            {
+                auto const index = value(element.index, flow);
+                result = first_of(value(element.object, flow), index);
+                // an element of a binding array is the resource the index picks, read once per wave
+                if (is_reporting && e.at(element.object).node.is<flat_binding_member>() && is_resource(m.at(x.type).kind))
+                {
+                    auto const marked = is_marked(element.index);
+                    if (index.is != marked)
+                        index_findings.push_back({.index = element.index, .is_marked = marked, .value = index});
+                }
+                // a resource is the same in every invocation that names it, whatever index named it
+                if (is_resource(m.at(x.type).kind))
+                    result = {};
+            },
+            [&](flat_construct const& c)
+            {
+                for (auto const a : e.at(c.arguments))
+                    result = first_of(result, value(a, flow));
+            },
+            [&](flat_call const& c) { result = call(id, c, flow); },
+            [&](flat_not const& n) { result = value(n.operand, flow); },
+            [&](flat_and const& a)
+            {
+                auto const lhs = value(a.lhs, flow);
+                // `rhs` runs only where `lhs` is true, which is flow of its own
+                result = first_of(lhs, value(a.rhs, first_of(flow, as_branch(lhs, x.from))));
+            },
+            [&](flat_or const& o)
+            {
+                auto const lhs = value(o.lhs, flow);
+                result = first_of(lhs, value(o.rhs, first_of(flow, as_branch(lhs, x.from))));
+            },
+            [&](auto const&) {});
         return result;
     }
 
@@ -348,12 +382,16 @@ struct uniformity_pass
 
 void checker::judge_uniformity(flat_entry_point const& structured)
 {
-    // most entry points call nothing that asks, and legalizing is not free
+    // most entry points call nothing that asks, and index no binding array, and legalizing is not free
     auto asks = false;
     for (auto const& x : structured.exprs)
+    {
         if (auto const* const c = x.node.try_as<flat_call>())
             if (auto const* const record = out.builtin_function(c->intrinsic))
                 asks = asks || record->is_barrier || record->uses_derivatives;
+        if (x.node.is<flat_element>())
+            asks = asks || is_resource(out.at(x.type).kind);
+    }
     if (!asks)
         return;
 
@@ -380,6 +418,30 @@ void checker::judge_uniformity(flat_entry_point const& structured)
     pass.walk();
 
     auto reported = cc::vector<flat_expr_id>();
+    for (auto const& f : pass.index_findings)
+    {
+        auto is_seen = false;
+        for (auto const r : reported)
+            is_seen = is_seen || r == f.index;
+        if (is_seen)
+            continue;
+        reported.push_back(f.index);
+        auto const& index = e.at(f.index);
+        auto const where = span_of(index.from.file, index.from.expr);
+        if (f.is_marked)
+        {
+            report(diagnostic_kind::needless_nonuniform, index.from.file, where,
+                   "this index is the same in every invocation, so marking it `nonuniform` pays for nothing");
+            continue;
+        }
+        auto& d = report(diagnostic_kind::non_uniform_index, index.from.file, where,
+                         cc::format("an index into a binding array that may differ between invocations: mark it "
+                                    "`nonuniform {}`, or make it the same in all of them",
+                                    text_of(index.from.file, where)));
+        auto const& from = f.value.where;
+        auto const span = ast::is_valid(from.expr) ? span_of(from.file, from.expr) : span_of(from.file, from.stmt);
+        d.notes.push_back({.file = from.file, .where = span, .message = cc::format("this value {}", f.value.why)});
+    }
     for (auto const& v : pass.violations)
     {
         auto is_seen = false;

@@ -36,6 +36,7 @@ The WGSL text of an entry point that sampled used to open with `diagnostic(off, 
 ## What exists
 
 The pass is CHK-282 to CHK-284, over the core tree of each entry point, for barriers and for every builtin that takes derivatives.
+It judges an index into a binding array too, which is marked `nonuniform` or proven uniform (CHK-300).
 Its rules are WGSL's, so Tint accepts what it accepts, and it is coarser than WGSL's in one place:
 a local set anywhere in non-uniform control flow is non-uniform everywhere, where WGSL follows each assignment.
 

@@ -57,7 +57,10 @@ struct sgl::described_binding_member
     /// A constant's size in bytes; 0 for a resource.
     i32 size = 0;
     /// A resource's position among its binding's resources; -1 for a constant.
+    /// A binding array takes `count` consecutive slots from this one.
     i32 slot = -1;
+    /// A binding array's length; 1 for any other resource and for a constant.
+    i32 count = 1;
     /// What the host binds a resource by, `binding.member`; empty for a constant.
     /// slib renames the compiled shader's reflected binding to it, so it is the name sg sees.
     cc::string host_name;

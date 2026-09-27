@@ -224,6 +224,10 @@ cc::string_view sgl::to_string(diagnostic_kind kind)
         return "invalid-constant-argument";
     case diagnostic_kind::non_uniform_control_flow:
         return "non-uniform-control-flow";
+    case diagnostic_kind::non_uniform_index:
+        return "non-uniform-index";
+    case diagnostic_kind::needless_nonuniform:
+        return "needless-nonuniform";
     }
     CC_UNREACHABLE("unknown diagnostic_kind");
 }
@@ -444,6 +448,10 @@ cc::string_view sgl::summary_of(diagnostic_kind kind)
         return "an argument taken only as a constant in a range, given something else";
     case diagnostic_kind::non_uniform_control_flow:
         return "a barrier or a derivative where not every invocation of its group arrives";
+    case diagnostic_kind::non_uniform_index:
+        return "an index into a binding array that may differ between invocations, without `nonuniform`";
+    case diagnostic_kind::needless_nonuniform:
+        return "a `nonuniform` mark on an index that is the same in every invocation";
     case diagnostic_kind::unknown_feature:
         return "a `require` of a name that is no feature a shader can use";
     case diagnostic_kind::feature_not_declared:
@@ -562,8 +570,10 @@ sgl::severity sgl::default_severity_of(diagnostic_kind kind)
     case diagnostic_kind::missing_sampler:
     case diagnostic_kind::invalid_constant_argument:
     case diagnostic_kind::non_uniform_control_flow:
+    case diagnostic_kind::non_uniform_index:
         return severity::normal_error;
     case diagnostic_kind::spaced_attribute_arguments:
+    case diagnostic_kind::needless_nonuniform:
     case diagnostic_kind::no_effect:
     case diagnostic_kind::redundant_yield:
     case diagnostic_kind::unreachable_code:

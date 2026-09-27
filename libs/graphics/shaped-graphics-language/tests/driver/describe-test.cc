@@ -443,3 +443,21 @@ TEST("sgl describe - workgroup memory has no host side, so the host is told noth
     REQUIRE(d.entry_points[0].bindings.size() == 1);
     CHECK(d.entry_points[0].bindings[0] == "work");
 }
+
+TEST("sgl describe - a binding array is its element's binding, with a count and as many slots")
+{
+    auto const d = described("require binding_arrays\n"
+                             "\n"
+                             "binding materials:\n"
+                             "    albedo: texture_2d[float4][8]\n"
+                             "    params: buffer[float4][2]\n");
+    REQUIRE(d.bindings.size() == 1);
+    auto const& members = d.bindings[0].members;
+    REQUIRE(members.size() == 2);
+    CHECK(members[0].type == "texture_2d[float4]");
+    CHECK(members[0].slot == 0);
+    CHECK(members[0].count == 8);
+    CHECK(members[1].type == "float4");
+    CHECK(members[1].slot == 8);
+    CHECK(members[1].count == 2);
+}

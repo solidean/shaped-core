@@ -252,7 +252,10 @@ type_id checker::buffer_type(type_id element, bool is_mut)
             return type_id(i);
     }
     auto const id = type_id(out.types.size());
-    out.types.push_back({.kind = type_kind::buffer, .element = element, .is_mut = is_mut});
+    out.types.push_back({.kind = type_kind::buffer,
+                         .element = element,
+                         .is_mut = is_mut,
+                         .spelled = cc::format("{}buffer[{}]", is_mut ? "mut " : "", out.name_of(element))});
     return id;
 }
 
@@ -547,14 +550,32 @@ ast::range_of<member_info> checker::compile_members(i32 file,
         // CHK-291: an array's layout in a block is the struct-buffer work's to settle
         if (!is_struct && !is_workgroup && type != checked_module::error_type && out.at(type).kind == type_kind::array)
         {
-            auto innermost = type;
-            while (out.at(innermost).kind == type_kind::array)
-                innermost = out.at(innermost).element;
-            unsupported(file, span_of(file, f.type),
-                        is_resource(out.at(innermost).kind)
-                            ? "a binding array"
-                            : "an array in a constant block, whose layout no rule settles yet");
-            type = checked_module::error_type;
+            auto const& t = out.at(type);
+            auto const& element = out.at(t.element);
+            if (!is_resource(element.kind) && element.kind != type_kind::array)
+            {
+                unsupported(file, span_of(file, f.type),
+                            "an array in a constant block, whose layout no rule settles yet");
+                type = checked_module::error_type;
+            }
+            // CHK-299: a binding array is `count` consecutive slots of one resource, which a device grants
+            else if (element.kind == type_kind::array)
+            {
+                unsupported(file, span_of(file, f.type), "a binding array of more than one dimension");
+                type = checked_module::error_type;
+            }
+            else if (t.count == 0)
+            {
+                unsupported(file, span_of(file, f.type), "an unbounded binding array, which sg binds none of yet");
+                type = checked_module::error_type;
+            }
+            else if (element.kind == type_kind::sampler)
+            {
+                unsupported(file, span_of(file, f.type), "an array of samplers");
+                type = checked_module::error_type;
+            }
+            else
+                judge_feature(file, span_of(file, f.type), "a binding array", feature::binding_arrays);
         }
 
         // CHK-214: a binding member is a slot of the group's layout, and a void one fills none.
@@ -604,7 +625,11 @@ ast::range_of<member_info> checker::compile_members(i32 file,
         auto& m = collected[n.member];
         if (n.name.empty() || m.type == checked_module::error_type)
             continue;
-        if (auto const& t = out.at(m.type); t.kind != type_kind::texture)
+        // a binding array's elements are what it samples
+        auto sampled = m.type;
+        if (out.at(sampled).kind == type_kind::array)
+            sampled = out.at(sampled).element;
+        if (auto const& t = out.at(sampled); t.kind != type_kind::texture)
         {
             report(diagnostic_kind::wrong_kind_of_name, file, n.attribute->name,
                    "only a texture is sampled, so only one takes a @sampler");
