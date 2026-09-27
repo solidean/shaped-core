@@ -442,6 +442,12 @@ struct checker
     }
     /// A resource, or an array or a struct holding one at any depth.
     [[nodiscard]] bool holds_resource(type_id type) const;
+    /// An atomic, or an array of them.
+    [[nodiscard]] bool holds_atomic(type_id type) const;
+    /// `atomic[uint]` and `atomic[int]` in a type position.
+    [[nodiscard]] type_id resolve_atomic(i32 file, ast::expr_id expr, ast::index const& node, function_scope const* scope);
+    /// CHK-297: an expression of an atomic's type, which only a builtin's argument may be.
+    [[nodiscard]] bool judge_atomic_use(i32 file, ast::expr_id id, type_id type);
     /// What every target gives a workgroup of memory: WebGPU's default limit, and vulkan's required minimum.
     static constexpr i32 k_portable_workgroup_bytes = 16384;
     /// A `@vertex struct` member's `@format(.case)`: the case's name, checked against the member's type (CHK-275).

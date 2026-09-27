@@ -1269,3 +1269,46 @@
 @builtin @stages(.compute) fun storage_barrier()
 /// Waits for every thread of the workgroup, after which each sees what the others stored to images.
 @builtin @stages(.compute) fun texture_barrier()
+
+// Atomics, called as methods of the atomic they update: `stats.hits[0].add(1)`.
+// Each is relaxed, and each but a store gives the value before; a vertex stage has none (CHK-296).
+/// Adds `v`, wrapping, and gives the value before.
+@builtin @stages(.pixel, .compute) fun add(a: mut atomic[uint], v: uint) -> uint
+/// Subtracts `v`, wrapping, and gives the value before.
+@builtin @stages(.pixel, .compute) fun subtract(a: mut atomic[uint], v: uint) -> uint
+/// Keeps the smaller of the value and `v`, and gives the value before.
+@builtin @stages(.pixel, .compute) fun min(a: mut atomic[uint], v: uint) -> uint
+/// Keeps the larger of the value and `v`, and gives the value before.
+@builtin @stages(.pixel, .compute) fun max(a: mut atomic[uint], v: uint) -> uint
+/// Keeps the bits `v` shares, and gives the value before.
+@builtin @stages(.pixel, .compute) fun bit_and(a: mut atomic[uint], v: uint) -> uint
+/// Sets the bits of `v`, and gives the value before.
+@builtin @stages(.pixel, .compute) fun bit_or(a: mut atomic[uint], v: uint) -> uint
+/// Flips the bits of `v`, and gives the value before.
+@builtin @stages(.pixel, .compute) fun bit_xor(a: mut atomic[uint], v: uint) -> uint
+/// Stores `v`, and gives the value before.
+@builtin @stages(.pixel, .compute) fun exchange(a: mut atomic[uint], v: uint) -> uint
+/// The value, read in one step.
+@builtin @stages(.pixel, .compute) fun load(a: atomic[uint]) -> uint
+/// Stores `v` in one step.
+@builtin @stages(.pixel, .compute) fun store(a: out atomic[uint], v: uint)
+/// Adds `v`, wrapping, and gives the value before.
+@builtin @stages(.pixel, .compute) fun add(a: mut atomic[int], v: int) -> int
+/// Subtracts `v`, wrapping, and gives the value before.
+@builtin @stages(.pixel, .compute) fun subtract(a: mut atomic[int], v: int) -> int
+/// Keeps the smaller of the value and `v`, and gives the value before.
+@builtin @stages(.pixel, .compute) fun min(a: mut atomic[int], v: int) -> int
+/// Keeps the larger of the value and `v`, and gives the value before.
+@builtin @stages(.pixel, .compute) fun max(a: mut atomic[int], v: int) -> int
+/// Keeps the bits `v` shares, and gives the value before.
+@builtin @stages(.pixel, .compute) fun bit_and(a: mut atomic[int], v: int) -> int
+/// Sets the bits of `v`, and gives the value before.
+@builtin @stages(.pixel, .compute) fun bit_or(a: mut atomic[int], v: int) -> int
+/// Flips the bits of `v`, and gives the value before.
+@builtin @stages(.pixel, .compute) fun bit_xor(a: mut atomic[int], v: int) -> int
+/// Stores `v`, and gives the value before.
+@builtin @stages(.pixel, .compute) fun exchange(a: mut atomic[int], v: int) -> int
+/// The value, read in one step.
+@builtin @stages(.pixel, .compute) fun load(a: atomic[int]) -> int
+/// Stores `v` in one step.
+@builtin @stages(.pixel, .compute) fun store(a: out atomic[int], v: int)

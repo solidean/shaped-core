@@ -271,7 +271,7 @@ type_id checker::resolve_buffer(i32 file, ast::expr_id expr, ast::index const& n
         return checked_module::error_type;
 
     // A struct element needs a layout rule the four targets agree on, which the spec's bindings file leaves open.
-    if (out.builtin_type_of(element) == nullptr)
+    if (out.builtin_type_of(element) == nullptr && out.at(element).kind != type_kind::atomic)
     {
         unsupported(file, span_of(file, arguments[0].value), "a buffer of anything but a scalar or a vector");
         return checked_module::error_type;
@@ -332,6 +332,8 @@ type_id checker::resolve_type(i32 file, ast::expr_id expr, function_scope const*
     {
         if (is_named(file, applied->object, "buffer"))
             result = resolve_buffer(file, expr, *applied, scope);
+        else if (is_named(file, applied->object, "atomic"))
+            result = resolve_atomic(file, expr, *applied, scope);
         else if (auto const applied_resource = resolve_resource_applied(file, expr, *applied);
                  applied_resource != type_id::none)
             result = applied_resource;
@@ -366,6 +368,13 @@ type_id checker::resolve_value_type(i32 file, ast::expr_id expr, function_scope 
     auto const type = resolve_type(file, expr, scope);
     if (type == checked_module::error_type)
         return type;
+    // CHK-297: an atomic stands in a `mut buffer` or in workgroup memory, and no value holds one
+    if (holds_atomic(type))
+    {
+        report(diagnostic_kind::wrong_kind_of_name, file, span_of(file, expr),
+               "an atomic is memory in a `mut buffer` or a @workgroup binding, and never a value");
+        return checked_module::error_type;
+    }
     // CHK-286: a binding array is a binding member, whose length only the host knows
     auto innermost = type;
     while (out.at(innermost).kind == type_kind::array)
@@ -514,6 +523,20 @@ ast::range_of<member_info> checker::compile_members(i32 file,
         else
             report(diagnostic_kind::missing_type, file, f.name, name);
 
+        // CHK-296: an atomic is memory the shader updates, which a constant block is not, and a read-only buffer is not
+        if (!is_struct && !is_workgroup && type != checked_module::error_type && holds_atomic(type))
+        {
+            report(diagnostic_kind::wrong_kind_of_name, file, span_of(file, f.type),
+                   "an atomic stands in a `mut buffer` or a @workgroup binding, and a constant block holds none");
+            type = checked_module::error_type;
+        }
+        if (!is_struct && type != checked_module::error_type && out.at(type).kind == type_kind::buffer
+            && out.at(out.at(type).element).kind == type_kind::atomic && !out.at(type).is_mut)
+        {
+            report(diagnostic_kind::wrong_kind_of_name, file, span_of(file, f.type),
+                   "a buffer of atomics is written by every update, so it is a `mut buffer`");
+            type = checked_module::error_type;
+        }
         if (is_workgroup && type != checked_module::error_type && holds_resource(type))
         {
             report(diagnostic_kind::wrong_kind_of_name, file, span_of(file, f.type),

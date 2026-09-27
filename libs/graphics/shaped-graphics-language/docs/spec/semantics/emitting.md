@@ -68,6 +68,9 @@ struct target_ {
 * **EMIT-119** Each member of a `@workgroup` binding is a variable of its own, minted `<binding>_<member>`: `groupshared` in HLSL and `var<workgroup>` in WGSL at file scope,
   and `threadgroup` at the top of the kernel in MSL, which has it nowhere else.
   It takes no group, so the groups after it in a list keep their numbers.
+* **EMIT-120** An atomic is `atomic<u32>` in WGSL and `atomic_uint` in MSL, updated by `atomicAdd(&a, v)` and `atomic_fetch_add_explicit(&a, v, memory_order_relaxed)`.
+  HLSL declares the plain integer, and its `Interlocked*` gives the value before through an out parameter, so a local declared ahead of the statement holds it.
+  A load is `InterlockedOr` with 0, and a store `InterlockedExchange`, so that no plain access races an update.
 
 | SGL | HLSL | WGSL | MSL |
 |---|---|---|---|

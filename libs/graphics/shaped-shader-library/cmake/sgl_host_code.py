@@ -31,6 +31,9 @@ HOST_TYPES: dict[str, tuple[str, int, str | None]] = {
     "float4": ("tg::vec4f", 16, "vec4f"),
     "int3": ("tg::vec3i", 12, "vec3i"),
     "mat4": ("tg::mat4f", 64, None),
+    # an atomic is a plain integer to the host, which never updates it while the shader does
+    "atomic[uint]": ("cc::u32", 4, None),
+    "atomic[int]": ("cc::i32", 4, None),
 }
 
 
@@ -84,7 +87,7 @@ def includes(entries: SglEntries) -> list[str]:
     # Every type a field names: a constant's own, a buffer's element, and a vertex attribute's.
     types = {m["type"] for _, b in entries.bindings for m in b["members"]}
     types |= {m["type"] for _, v in entries.vertex_inputs for m in v["members"]}
-    if types & {"int", "uint"}:
+    if types & {"int", "uint", "atomic[int]", "atomic[uint]"}:
         out.append("<clean-core/fwd.hh>")
     if types & {"float2", "float3", "vec3", "float4", "int2", "int3", "int4", "uint2", "uint3", "uint4"}:
         out.append("<typed-geometry/linalg/vec.hh>")

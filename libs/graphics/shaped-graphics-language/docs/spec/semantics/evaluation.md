@@ -204,6 +204,8 @@ fun graded(a: float) -> float:
 * **EVAL-91** A square literal evaluates its elements in the order written, and so does a construction.
 * **EVAL-92** A run holds the memory of each `@workgroup` binding it reaches, from its start, and a read of any part of it nothing was stored to is a `program-error`.
   A run is one invocation, so a barrier waits for nobody and what it stored is all the memory holds.
+* **EVAL-93** An atomic's update names its place first, then evaluates its other arguments, then reads, updates and writes the atomic in one step, giving the value it read.
+  A run is one invocation, so no other update ever falls between.
 * **EVAL-44** A run is bounded by a fuel count, one unit per statement, per expression node and per iteration, and running out is a status as well.
 
 ## Open

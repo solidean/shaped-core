@@ -160,6 +160,9 @@ struct uniformity_pass
             return result;
         if ((record->is_barrier || record->uses_derivatives) && flow.is && is_reporting)
             violations.push_back({.call = id, .flow = flow});
+        // what another thread did to it first is what an atomic gives
+        if (record->is_atomic && !result.is)
+            result = {.is = true, .where = e.at(id).from, .why = cc::format("is what {} gave", record->name)};
         // an image the shader also stores to may hold what another invocation just stored
         if (!arguments.empty())
             if (auto const* const member = e.at(arguments[0]).node.try_as<flat_binding_member>())

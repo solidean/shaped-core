@@ -37,6 +37,11 @@ void append_zero(checked_module const& m, type_id type, cc::vector<scalar>& leav
         leaves.push_back({.kind = value_kind::scalar_int, .bits = 0});
         return;
     }
+    if (is_valid(type) && m.at(type).kind == type_kind::atomic)
+    {
+        append_zero(m, m.at(type).element, leaves, depth + 1);
+        return;
+    }
     if (is_valid(type) && m.at(type).kind == type_kind::array)
     {
         for (auto i = 0; i < m.at(type).count; ++i)
@@ -173,8 +178,83 @@ struct machine
         return {};
     }
 
+    /// EVAL-93: the atomic's place, then the other arguments, then the update, in one step.
+    flow atomic_call(flat_expr const& x, flat_call const& c, builtins::function_record const& record, value& result)
+    {
+        auto const arguments = e.at(c.arguments);
+        if (arguments.empty() || !is_known(e, arguments[0]))
+            return type_error("an atomic call without its atomic");
+
+        // where the atomic is: an element of a buffer's scalars, or of a cell of workgroup memory
+        auto buffer = isize(-1);
+        auto where = place_ref();
+        auto offset = isize(0);
+        auto const atomic = arguments[0];
+        if (auto const* const element = e.at(atomic).node.try_as<flat_buffer_element>())
+        {
+            if (auto const f = locate(*element, e.at(atomic).type, buffer, offset); !f.is_normal())
+                return f;
+        }
+        else if (is_in_workgroup(atomic))
+        {
+            auto type = type_id::none;
+            if (auto const f = locate_place(atomic, where, offset, type); !f.is_normal())
+                return f;
+        }
+        else
+            return type_error("an atomic that is no buffer element and no workgroup memory");
+
+        auto in = cc::vector<scalar>();
+        in.push_back({});
+        for (auto k = isize(1); k < arguments.size(); ++k)
+        {
+            auto v = value();
+            if (auto const f = eval(arguments[k], v); !f.is_normal())
+                return f;
+            in.push_back_range(v.leaves);
+        }
+
+        auto const is_store = !is_valid(record.result);
+        if (where.cell >= 0)
+        {
+            auto const& cell = workgroup[where.cell];
+            if (!is_store && !cell.is_written[offset])
+                return fail(
+                    run_status::program_error,
+                    cc::format("an atomic {} of {}.{} where nothing was stored", record.name, m.at(cell.binding).name,
+                               m.at(m.bindings[m.at(cell.binding).info].members)[cell.member].name));
+            in[0] = cell.memory.leaves[offset];
+        }
+        else
+            in[0] = out.buffers[buffer].leaves[offset];
+
+        auto after = cc::vector<scalar>();
+        record.evaluate(in, after);
+        if (after.size() != 1)
+            return type_error(cc::format("an atomic '{}' whose evaluator gave no one value", record.name));
+        if (where.cell >= 0)
+        {
+            workgroup[where.cell].memory.leaves[offset] = after[0];
+            workgroup[where.cell].is_written[offset] = true;
+        }
+        else
+        {
+            out.buffers[buffer].leaves[offset] = after[0];
+            is_stored[buffer] = true;
+        }
+
+        result.type = x.type;
+        result.leaves.clear();
+        if (!is_store)
+            result.leaves.push_back(in[0]);
+        out.trace.push_back(result);
+        return {};
+    }
+
     flow call(flat_expr const& x, flat_call const& c, value& result)
     {
+        if (auto const* const record = m.builtin_function(c.intrinsic); record != nullptr && record->is_atomic)
+            return atomic_call(x, c, *record, result);
         auto args = cc::vector<value>();
         if (auto const f = eval_all(c.arguments, args); !f.is_normal())
             return f;

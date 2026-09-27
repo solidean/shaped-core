@@ -172,6 +172,8 @@ struct plan
 
 /// How the target of `p` spells the builtin type named `name`, such as the texel of an image format.
 [[nodiscard]] cc::string_view builtin_spelling(plan const& p, cc::string_view name);
+/// An atomic as the target spells it: HLSL's plain integer, which `Interlocked*` updates, and WGSL's and MSL's atomic types.
+[[nodiscard]] cc::string_view atomic_text(plan const& p, check::type_id type);
 /// What HLSL writes after a declared name of `type`, `[3][5]`; empty for any other type and any other target.
 [[nodiscard]] cc::string array_dimensions(plan const& p, check::type_id type);
 /// The column of a builtin's record `t` reads; the two HLSL targets share one.

@@ -135,6 +135,18 @@ cc::vector<slot_footprint> footprint_of(checked_module const& m, flat_entry_poin
         {
             if (!impl::is_known(e, arguments[i]))
                 continue;
+            // an atomic update writes the buffer whose element it names
+            if (auto const* const element = e.at(arguments[i]).node.try_as<flat_buffer_element>();
+                element != nullptr && m.at(parameters[i].type).kind == type_kind::atomic
+                && impl::is_known(e, element->buffer))
+            {
+                if (auto const* const buffer = e.at(element->buffer).node.try_as<flat_binding_member>())
+                {
+                    b.touch_member(*buffer, true, true);
+                    claimed[index_of(element->buffer)] = true;
+                }
+                continue;
+            }
             auto const* const member = e.at(arguments[i]).node.try_as<flat_binding_member>();
             if (member == nullptr)
                 continue;

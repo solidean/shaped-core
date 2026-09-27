@@ -2,6 +2,7 @@
 
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/function/function_ref.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
 #include <shaped-graphics-language/builtins/ids.hh>
@@ -44,6 +45,9 @@ struct sgl::builtins::written
 {
     cc::string text;
     precedence binds = precedence::primary;
+    /// Statements the target needs ahead of the one that holds the call, such as HLSL's `InterlockedAdd`, which gives
+    /// the value before through an out parameter; `text` then reads what they left.
+    cc::vector<cc::string> lines;
 };
 
 /// What a custom writer is given: the arguments already written, in order, and the registry for a type's spelling.
@@ -54,6 +58,8 @@ struct sgl::builtins::call_context
     registry const& builtins;
     /// The record's `spelling::data`, which lets one writer serve a family of records.
     u32 data = 0;
+    /// A fresh name of the text, for a local that `written::lines` declares; none where no text is being written.
+    cc::function_ref<cc::string(cc::string_view)> mint = {};
 };
 
 /// What a helper writer is given: the target, and each argument's type as the target spells it.
@@ -169,6 +175,9 @@ struct sgl::builtins::function_record
     bool uses_derivatives = false;
     /// Waits for every thread of the workgroup, so every one of them reaches the call or none does (CHK-282).
     bool is_barrier = false;
+    /// Updates its first argument, an atomic, in one step (EVAL-93): the evaluator is given the atomic's value and then
+    /// the other arguments, and gives what the atomic holds after; the call gives what it held before, or nothing.
+    bool is_atomic = false;
 
     /// Read back from the signature by `finalize`.
     cc::string name;

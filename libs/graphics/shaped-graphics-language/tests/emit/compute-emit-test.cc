@@ -220,3 +220,32 @@ TEST("sgl emit - workgroup memory is a variable per member, and takes no group h
     CHECK(hlsl.contains("groupshared float tile_values[64];\n"
                         "groupshared float tile_total;\n"));
 }
+
+TEST("sgl emit - an atomic is WGSL's atomic type, and HLSL's integer that Interlocked updates through an out value")
+{
+    constexpr auto counted = "@workgroup binding local:\n"
+                             "    count: atomic[uint]\n"
+                             "\n"
+                             "binding stats:\n"
+                             "    hits: mut buffer[atomic[uint]]\n"
+                             "\n"
+                             "@compute(64) fun cs(@local_thread_index li: int){stats, local}:\n"
+                             "    let slot = local.count.add(1)\n"
+                             "    stats.hits[0].max(slot)\n";
+    auto const wgsl = text_of(counted, target::wgsl);
+    CHECK(wgsl.contains("var<storage, read_write> stats_hits: array<atomic<u32>>;\n"));
+    CHECK(wgsl.contains("var<workgroup> local_count: atomic<u32>;\n"));
+    CHECK(wgsl.contains("    let slot: u32 = atomicAdd(&local_count, 1u);\n"
+                        "    _ = atomicMax(&stats_hits[0], slot);\n"));
+
+    // the value before is a local that InterlockedAdd writes, and a dropped one is written all the same
+    auto const hlsl = text_of(counted, target::hlsl_dx12);
+    CHECK(hlsl.contains("RWStructuredBuffer<uint> stats_hits : register(u0, space0);\n"));
+    CHECK(hlsl.contains("groupshared uint local_count;\n"));
+    CHECK(hlsl.contains("    uint atomic_before;\n"
+                        "    InterlockedAdd(local_count, 1u, atomic_before);\n"
+                        "    const uint slot = atomic_before;\n"
+                        "    uint atomic_before_1;\n"
+                        "    InterlockedMax(stats_hits[0], slot, atomic_before_1);\n"
+                        "}\n"));
+}

@@ -596,6 +596,14 @@ Nothing in a body uses a feature yet, so a `require` in a test's body is `unused
 * **CHK-294** An entry point listing a `@workgroup` binding is a compute stage, and all it lists fits the same 16384 bytes, or it is `invalid-entry-point`.
 * **CHK-295** A test uses a `@workgroup` binding, and calls a function listing one, without listing it: the run holds its own.
 
+## Atomics
+
+* **CHK-296** `atomic[T]` is an atomic of `uint` or `int`, and of any other `T` `wrong-kind-of-name`.
+  It is the element of a `mut buffer` or a member of a `@workgroup` binding, arrays of them included; in a read-only buffer or a constant block it is `wrong-kind-of-name`.
+  Its builtins are `@stages(.pixel, .compute)`.
+* **CHK-297** An expression of an atomic's type stands only as a builtin's argument; anywhere else, and as the place of an assignment, it is `wrong-kind-of-name`.
+  A local, a parameter or a field of an atomic's type is `wrong-kind-of-name` as well.
+
 ## Uniformity
 
 A barrier waits for every thread of its workgroup, and a derivative compares a pixel with the other three of its quad.
@@ -759,7 +767,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `duplicate-declaration` | CHK-12, CHK-28, CHK-241 |
 | `dependency-cycle` | CHK-18, CHK-136 |
 | `unknown-name` | CHK-24, CHK-62, CHK-245 |
-| `wrong-kind-of-name` | CHK-24, CHK-54, CHK-79, CHK-237, CHK-247, CHK-199, CHK-200, CHK-202, CHK-203, CHK-205, CHK-279, CHK-285, CHK-286 |
+| `wrong-kind-of-name` | CHK-24, CHK-54, CHK-79, CHK-237, CHK-247, CHK-199, CHK-200, CHK-202, CHK-203, CHK-205, CHK-279, CHK-285, CHK-286, CHK-292, CHK-296, CHK-297 |
 | `missing-type` | CHK-26 |
 | `unknown-builtin` | CHK-31 |
 | `expected-body` | CHK-32, CHK-236 |

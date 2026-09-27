@@ -81,7 +81,7 @@ type_id checker::resolve_array(i32 file, ast::expr_id expr, ast::index const& no
 
     // CHK-285: `float[3][5]` would read as five arrays of three to a C reader, so one group holds every dimension
     if (auto const* const inner = ast::is_valid(node.object) ? ast.at(node.object).node.try_as<ast::index>() : nullptr)
-        if (!is_named(file, inner->object, "buffer")
+        if (!is_named(file, inner->object, "buffer") && !is_named(file, inner->object, "atomic")
             && resolve_resource_applied(file, node.object, *inner) == type_id::none)
         {
             report(diagnostic_kind::wrong_kind_of_name, file, where,
@@ -265,4 +265,39 @@ i32 checker::workgroup_size_of(type_id type) const
         return result;
     };
     return measure(measure, type).size;
+}
+
+bool checker::holds_atomic(type_id type) const
+{
+    auto const& t = out.at(type);
+    return t.kind == type_kind::atomic || (t.kind == type_kind::array && holds_atomic(t.element));
+}
+
+type_id checker::resolve_atomic(i32 file, ast::expr_id expr, ast::index const& node, function_scope const* scope)
+{
+    auto const arguments = ast_of(file).at(node.arguments);
+    auto const element = arguments.size() == 1 && arguments[0].name.empty() && !arguments[0].is_splat
+                           ? resolve_type(file, arguments[0].value, scope)
+                           : checked_module::error_type;
+    auto const name = element == checked_module::error_type ? cc::string_view() : out.name_of(element);
+    // CHK-296: the widths and kinds every target has atomics of
+    if (name != builtins::k_uint && name != builtins::k_int)
+    {
+        report(diagnostic_kind::wrong_kind_of_name, file, span_of(file, expr),
+               "an atomic holds a `uint` or an `int`: `atomic[uint]`");
+        return checked_module::error_type;
+    }
+    return resource_type({.kind = type_kind::atomic, .element = element});
+}
+
+bool checker::judge_atomic_use(i32 file, ast::expr_id id, type_id type)
+{
+    if (type == checked_module::error_type || !holds_atomic(type) || id == subscripted)
+        return true;
+    for (auto const h : handed)
+        if (h == id && out.at(type).kind == type_kind::atomic)
+            return true;
+    report(diagnostic_kind::wrong_kind_of_name, file, span_of(file, id),
+           "an atomic is read by `.load()` and written by `.store(v)` or one of its updates, and is never a value");
+    return false;
 }

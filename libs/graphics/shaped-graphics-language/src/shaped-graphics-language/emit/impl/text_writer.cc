@@ -115,6 +115,10 @@ struct writer
         auto const& x = p.e.at(id);
         if (needs_member_assignment(x))
             return true;
+        // HLSL hands an atomic's value before through an out parameter, which a statement of its own declares
+        if (auto const* const c = x.node.try_as<flat_call>(); c != nullptr && d.language() == builtins::language::hlsl)
+            if (auto const* const record = p.m.builtin_function(c->intrinsic); record != nullptr && record->is_atomic)
+                return true;
         auto result = false;
         check::impl::for_each_operand(p.e, x, [&](flat_expr_id operand) { result = result || writes_lines(operand); });
         return result;
@@ -211,8 +215,16 @@ struct writer
             return {.text = cc::format("{}{}", how.text, wrapped(cc::move(arguments[0]), level::primary)),
                     .binds = level::unary};
         case builtins::spelling_kind::custom:
-            return how.custom(
-                {.target = d.language(), .arguments = arguments, .builtins = *p.m.builtins, .data = how.data});
+        {
+            auto mint = [&](cc::string_view desired) { return p.names.mint(desired); };
+            auto result = how.custom(
+                {.target = d.language(), .arguments = arguments, .builtins = *p.m.builtins, .data = how.data, .mint = mint});
+            // the statements its value needs, ahead of the one that holds it
+            for (auto const& l : result.lines)
+                line(l);
+            result.lines.clear();
+            return result;
+        }
         case builtins::spelling_kind::call:
             break;
         }
@@ -442,6 +454,14 @@ struct writer
                      [&](flat_print const&) {}, //
                      [&](flat_eval const& v)
                      {
+                         // an atomic HLSL writes as statements alone has nothing left to evaluate
+                         if (writes_lines(v.value) && p.e.at(v.value).node.is<flat_call>())
+                         {
+                             if (auto const rendered = expr(v.value);
+                                 !rendered.text.empty() && d.language() != builtins::language::hlsl)
+                                 line(cc::format("{};", rendered.text));
+                             return;
+                         }
                          // A call that gives nothing is a statement as it stands, in every target.
                          auto text = cc::string();
                          if (p.e.at(v.value).type == checked_module::void_type)
@@ -543,6 +563,8 @@ cc::string_view sgl::emit::impl::type_text(plan const& p, dialect const& d, chec
     }
     if (is_valid(type) && p.m.at(type).kind == check::type_kind::array)
         return p.array_texts[p.array_of_type[index_of(type)]];
+    if (is_valid(type) && p.m.at(type).kind == check::type_kind::atomic)
+        return atomic_text(p, type);
     return p.structs[p.struct_of_type[index_of(type)]].name;
 }
 

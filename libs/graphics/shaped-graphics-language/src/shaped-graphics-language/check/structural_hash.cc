@@ -59,6 +59,10 @@ void fold_type(cc::byte_stream_builder& b, checked_module const& m, type_id type
         b.add_pod(t.count);
         fold_type(b, m, t.element);
         break;
+    case type_kind::atomic:
+        b.add_pod(u8(t.access));
+        fold_type(b, m, t.element);
+        break;
     case type_kind::buffer:
         b.add_bool(t.is_mut);
         fold_type(b, m, t.element);

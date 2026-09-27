@@ -221,6 +221,28 @@ struct expr_lowering
 
     /// Rule E2 over the operands of one node.
     /// `pre` is the list the statement that holds them will join, so whatever lands there runs before it.
+    /// The atomic element `place` names, over a local that holds its index from here on.
+    flat_expr_id pin_atomic_index(flat_expr_id place, stmt_list& pre, isize& at)
+    {
+        // by value: pinning appends to the tree
+        auto copy = out.e.at(place);
+        auto pin_index = [&](flat_expr_id index)
+        {
+            auto const pin = out.let("index", index);
+            out.e.locals[index_of(pin.local)].kind = local_kind::temporary;
+            pre.insert_at(at++, pin.stmt);
+            return out.local(pin.local);
+        };
+        if (auto* const element = copy.node.try_as<flat_buffer_element>())
+            element->index = pin_index(element->index);
+        else if (auto* const element = copy.node.try_as<flat_element>())
+            element->index = pin_index(element->index);
+        else
+            return place;
+        out.e.exprs.push_back(cc::move(copy));
+        return flat_expr_id(out.e.exprs.size() - 1);
+    }
+
     cc::vector<flat_expr_id> lower_operands(cc::span<flat_expr_id const> operands, stmt_list& pre)
     {
         auto result = cc::vector<flat_expr_id>();
@@ -244,6 +266,12 @@ struct expr_lowering
                 if (!has_effect(out.e, operand) && !reads_any(out.e, operand, moved))
                     continue;
                 out.from = out.e.at(operand).from;
+                // an atomic names the memory a call updates, so its index is pinned, and never its value
+                if (out.m.at(out.e.at(operand).type).kind == type_kind::atomic)
+                {
+                    result[j] = pin_atomic_index(operand, pre, at);
+                    continue;
+                }
                 auto const pin = out.let(pin_name(operand), operand);
                 out.e.locals[index_of(pin.local)].kind = local_kind::temporary;
                 pre.insert_at(at++, pin.stmt);

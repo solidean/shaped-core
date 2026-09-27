@@ -281,6 +281,8 @@ struct planner
             return cc::string(builtin_spelling(p, builtins::k_int));
         if (info.kind == type_kind::array)
             return p.array_texts[p.array_of_type[index_of(type)]];
+        if (info.kind == type_kind::atomic)
+            return cc::string(atomic_text(p, type));
         return p.structs[p.struct_of_type[index_of(type)]].name;
     }
 
@@ -478,6 +480,22 @@ sgl::i32 sgl::emit::impl::resource_of(plan const& p, check::symbol_id binding, i
         if (p.resources[i].binding == binding && p.resources[i].member == member)
             return i32(i);
     return -1;
+}
+
+cc::string_view sgl::emit::impl::atomic_text(plan const& p, check::type_id type)
+{
+    auto const is_signed = p.m.name_of(p.m.at(type).element) == builtins::k_int;
+    switch (p.which)
+    {
+    case target::hlsl_dx12:
+    case target::hlsl_vulkan:
+        return is_signed ? "int" : "uint";
+    case target::wgsl:
+        return is_signed ? "atomic<i32>" : "atomic<u32>";
+    case target::msl:
+        return is_signed ? "atomic_int" : "atomic_uint";
+    }
+    return {};
 }
 
 cc::string sgl::emit::impl::array_dimensions(plan const& p, check::type_id type)

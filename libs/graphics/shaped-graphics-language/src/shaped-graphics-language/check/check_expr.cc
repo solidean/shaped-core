@@ -196,6 +196,8 @@ type_id checker::check_index(function_scope& scope, ast::expr_id id, ast::index 
                               kind == type_kind::buffer ? "a buffer" : "an array", out.name_of(index)));
         result = out.at(result).element;
     }
+    if (!judge_atomic_use(file, id, result))
+        return error_type;
     return result;
 }
 
@@ -481,6 +483,8 @@ type_id checker::check_member(function_scope& scope, ast::expr_id id, ast::membe
                 unsupported(file, span_of(file, id), "a buffer as a value; read an element of it, as in `values[i]`");
                 return error_type;
             }
+            if (!judge_atomic_use(file, id, type))
+                return error_type;
             auto is_handed = false;
             for (auto const h : handed)
                 is_handed = is_handed || h == id;

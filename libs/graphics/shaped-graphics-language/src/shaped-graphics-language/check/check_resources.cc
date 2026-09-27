@@ -60,6 +60,8 @@ cc::string spelling_of(check::type_info const& t, checked_module const& m)
                  : cc::format("{}{}[.{}]", access_prefix(t.access), shape.image, k_image_formats[t.format].name);
     case type_kind::sampler:
         return t.is_comparison ? cc::string("comparison_sampler") : cc::string("sampler");
+    case type_kind::atomic:
+        return cc::format("{}atomic[{}]", access_prefix(t.access), m.name_of(t.element));
     default:
         return {};
     }
@@ -212,6 +214,13 @@ type_id checker::qualify_resource(i32 file, ast::expr_id expr, type_id inner, as
         report(diagnostic_kind::wrong_kind_of_name, file, where,
                "a texture is only ever read; a storage texture the shader writes is an image, such as `image_2d`");
         return checked_module::error_type;
+    }
+    // a builtin's pattern: `mut atomic[uint]` updates it, `out atomic[uint]` stores to it
+    if (t.kind == type_kind::atomic)
+    {
+        auto qualified = t;
+        qualified.access = is_write_only ? access_mode::write : access_mode::read_write;
+        return resource_type(cc::move(qualified));
     }
     if (is_write_only)
         report(diagnostic_kind::wrong_kind_of_name, file, where, "only an image may be `out`, and this is no image");
@@ -584,6 +593,9 @@ bool checker::takes(type_id parameter, type_id argument) const
         return true;
     auto const& p = out.at(parameter);
     auto const& a = out.at(argument);
+    // an atomic is always memory the shader may update, whatever the pattern says it does with it
+    if (p.kind == type_kind::atomic && a.kind == type_kind::atomic)
+        return p.element == a.element;
     auto const is_bare = p.element == type_id::none && p.format < 0 && !p.is_depth;
     if (is_bare && p.kind == type_kind::texture)
         return a.kind == type_kind::texture && !a.is_depth && a.shape == p.shape;

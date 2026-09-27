@@ -621,6 +621,34 @@ struct flattener
         return flatten_bound_call(id, type, c.out.call_records[record]);
     }
 
+    /// The element `place` names, over a local holding its index where evaluating the index twice could differ.
+    flat_expr_id with_bound_index(flat_expr_id place, ast::expr_id id)
+    {
+        // by value: binding adds nodes, and the arrays move
+        auto const x = entry.at(place);
+        auto bind = [&](flat_expr_id index)
+        {
+            if (is_substitutable(index))
+                return index;
+            auto const local = add_local(local_kind::temporary, "index", entry.at(index).type);
+            add_stmt({.file = file(), .expr = id}, flat_let{.local = local, .value = index});
+            return local_ref(local, id);
+        };
+        if (auto const* const element = x.node.try_as<flat_buffer_element>())
+        {
+            auto const buffer = element->buffer;
+            auto const index = bind(element->index);
+            return add_expr(x.type, id, flat_buffer_element{.buffer = buffer, .index = index});
+        }
+        if (auto const* const element = x.node.try_as<flat_element>())
+        {
+            auto const object = element->object;
+            auto const index = bind(element->index);
+            return add_expr(x.type, id, flat_element{.object = object, .index = index});
+        }
+        return place;
+    }
+
     /// True where a call of a program function is inlined rather than written as a call of the target.
     [[nodiscard]] bool is_inlined(symbol_id callee) const
     {
@@ -682,6 +710,12 @@ struct flattener
             if (is_substitutable(value) || is_resource_member(value) || is_literal_construction(value))
             {
                 bound[i] = value;
+                continue;
+            }
+            // an atomic names the memory the call updates, so its index is bound in its stead, and never its value
+            if (c.out.at(entry.at(value).type).kind == type_kind::atomic)
+            {
+                bound[i] = with_bound_index(value, id);
                 continue;
             }
             auto name = cc::string_view("argument");

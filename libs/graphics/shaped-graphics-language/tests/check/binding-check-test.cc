@@ -310,3 +310,32 @@ TEST("sgl check - a @workgroup binding holds values a compute stage shares, with
                                     "    return {color = float4(1.0, 1.0, 1.0, 1.0)}\n");
     CHECK(raster.contains("tile is @workgroup memory, which only a compute stage has"));
 }
+
+TEST("sgl check - an atomic is memory a builtin updates, in a mut buffer or in workgroup memory, and never a value")
+{
+    CHECK(reports_for("binding stats:\n    hits: mut buffer[atomic[uint]]\n\n"
+                      "@compute(64) fun cs(@local_thread_index li: int){stats}:\n"
+                      "    stats.hits[0].add(1)\n")
+          == "");
+
+    constexpr auto value
+        = "an atomic is read by `.load()` and written by `.store(v)` or one of its updates, and is never a value";
+    auto const use = [](cc::string_view body)
+    {
+        return reports_for(cc::format("binding stats:\n    hits: mut buffer[atomic[uint]]\n\n"
+                                      "@compute(64) fun cs(@local_thread_index li: int){{stats}}:\n{}",
+                                      body));
+    };
+    CHECK(use("    let n = stats.hits[0]\n").contains(value));
+    // an argument of an operator is handed to it, so what refuses it is the operator
+    CHECK(use("    let n = stats.hits[0] + 1\n").contains("operator +(atomic[uint], 1)"));
+    CHECK(use("    stats.hits[0] = 1\n").contains(value));
+
+    CHECK(reports_for("binding stats:\n    hits: buffer[atomic[uint]]\n")
+              .contains("a buffer of atomics is written by every update, so it is a `mut buffer`"));
+    CHECK(reports_for("binding stats:\n    hits: atomic[uint]\n").contains("a constant block holds none"));
+    CHECK(reports_for("binding stats:\n    hits: mut buffer[atomic[float]]\n")
+              .contains("an atomic holds a `uint` or an `int`: `atomic[uint]`"));
+    CHECK(reports_for("fun f() -> int:\n    let a: atomic[int] = 0\n    return 0\n")
+              .contains("an atomic is memory in a `mut buffer` or a @workgroup binding, and never a value"));
+}

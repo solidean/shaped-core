@@ -23,6 +23,9 @@ enum class sgl::check::type_kind : sgl::u8
     enumeration,
     /// `T[N]`: `count` values of `element`, a value like a struct (CHK-285); `T[a, b]` is an array of arrays.
     array,
+    /// `atomic[uint]` or `atomic[int]`: memory every invocation updates in one indivisible step (CHK-296).
+    /// It stands in a `mut buffer` or in workgroup memory, and like a resource it is never a value: builtins take it.
+    atomic,
     /// A `buffer[T]`: an array of `element` a shader indexes, and `mut` where it may be written (the spec's bindings file).
     /// It is a resource rather than a value: it stands in a binding, and nothing loads or copies one.
     buffer,

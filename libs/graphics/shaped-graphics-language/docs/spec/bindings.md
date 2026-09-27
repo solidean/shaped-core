@@ -302,6 +302,29 @@ An `@inline` binding anywhere but the last position of a list is a normal error,
   The interpreter reports a read of what was never stored as a program error (EVAL-92).
 * A test holds workgroup memory of its own run, so it uses a `@workgroup` binding without listing it (CHK-295).
 
+## Atomics
+
+**`atomic[uint]` and `atomic[int]` are memory every invocation updates in one indivisible step**, and like a resource they are never a value.
+One stands as the element of a `mut buffer`, or as a member of a `@workgroup` binding, arrays of them included:
+
+```sgl
+binding stats:
+    hits: mut buffer[atomic[uint]]
+
+@workgroup binding local:
+    count: atomic[uint]
+
+let slot = local.count.add(1)        // the value before the add
+stats.hits[slot].max(7)
+```
+
+Its operations are builtins that take it first, called as methods: `add`, `subtract`, `min`, `max`, `bit_and`, `bit_or`, `bit_xor` and `exchange` each give the value before,
+`load()` reads it, and `store(v)` writes it.
+`and` and `or` are keywords, so the bitwise updates carry the `bit_` their operators lack.
+Every one is relaxed, the one ordering WGSL has, and a vertex stage has none, since WebGPU has no writable storage there (CHK-296).
+The host holds a buffer of atomics as the plain integers it is.
+Floats, 64 bits, images, a compare-exchange and a vertex stage are [the incubator's](incubator/atomics.md).
+
 ## How a group reaches sg
 
 **The slots of a group are its members in declaration order**, after the constant block at slot 0 when the group has plain members.
@@ -384,6 +407,7 @@ Everything not named here is the diagnostic `unsupported-yet`, never a guess.
 * A plain member of a group, as a field of the constant buffer the group owns, for a type whose place in a block every target agrees on.
 * The positional group numbering, and `@inline` last.
 * `@workgroup` bindings, which take no group.
+* `atomic[uint]` and `atomic[int]`, in a `mut buffer` and in workgroup memory, with every update but a compare-exchange.
 * A resource's host name, its path `binding.member` ([CHK-171](semantics/checking.md#bindings)), which the text reports beside the identifier it minted.
 
 Three targets write a group, and the fourth declines rather than guessing.
