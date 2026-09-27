@@ -384,6 +384,7 @@ if(SC_BUILD_TESTS)
             tests/compute/compute-test.cc
             tests/compute/compute-texture-test.cc
             tests/raster/raster-test.cc
+            tests/barrier/footprint-barrier-test.cc
         )
         sc_add_shader_package(
             TARGET     shaped-graphics-test
@@ -395,6 +396,7 @@ if(SC_BUILD_TESTS)
                 double_values.sgl:*
                 quads.sgl:*
                 textures.sgl:*
+                footprint.sgl:*
         )
     endif()
 

@@ -1,0 +1,40 @@
+// Pipelines whose code does less than their bindings allow, which is what the barrier tests count against.
+// Every binding here is writable, so without a footprint each dispatch would order against every other one.
+
+binding traffic:
+    values: mut buffer[float]
+    result: mut buffer[float]
+
+// Loads `values` and stores `result`: a read and a write, though the binding lets it write both.
+@compute(64) fun scale(@thread_id id: int3){traffic}:
+    traffic.result[id.x] = traffic.values[id.x] * 2.0
+
+// Writes `values`, which `scale` then reads.
+@compute(64) fun fill(@thread_id id: int3){traffic}:
+    traffic.values[id.x] = id.x as float
+
+// A draw whose vertex stage reads a buffer, and whose group also holds a texture neither stage samples.
+binding shift:
+    offsets: buffer[float]
+    unsampled: texture_2d[float4]
+
+@vertex struct shift_corner:
+    position: float3
+
+struct shift_varyings:
+    @position position: hpos4
+
+@pixel struct shift_target:
+    color: float4
+
+@vertex fun shifted_vs(v: shift_corner){shift} -> shift_varyings:
+    return { position = hpos4(v.position.x + shift.offsets[0], v.position.y, 0.0, 1.0) }
+
+@pixel fun flat_ps(p: shift_varyings){shift} -> shift_target:
+    return { color = float4(1.0, 0.0, 0.0, 1.0) }
+
+pipeline shifted:
+    vertex = shifted_vs
+    pixel = flat_ps
+    cull = .none
+    format = .rgba8_unorm

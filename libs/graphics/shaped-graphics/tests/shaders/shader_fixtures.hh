@@ -1,5 +1,8 @@
 #pragma once
 
+#include <clean-core/string/format.hh>
+#include <nexus/test.hh>
+#include <shaped-graphics/context/metrics.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-shader-library/fwd.hh>
 
@@ -31,4 +34,12 @@ slib::shader_library& shader_fixtures();
 /// tests start running with nothing here to update.
 /// libs/graphics/shaped-graphics/docs/TODO.md carries the missing edge.
 [[nodiscard]] bool shaders_reach(sg::context const& ctx);
+
+/// SKIPs the test where the backend does not count `stat`, so a zero nobody measured never passes as a zero.
+/// WebGPU sees no barriers at all, and metal none per resource.
+inline void require_counted(sg::stats const& stats, sg::stat stat)
+{
+    if (!stats.is_counted(stat))
+        SKIP(cc::format("this backend does not count {}", sg::info(stat).name));
+}
 } // namespace sg_test
