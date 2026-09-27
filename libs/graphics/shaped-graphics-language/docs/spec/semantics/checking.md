@@ -184,10 +184,12 @@ enum light_kind:
 * **CHK-230** A test whose body checked clean, and whose every callee inlines whole, has a flat tree of its own, of no stage and without a parameter.
   A test that expects a diagnostic has none, and neither has one in whose text the parser or the AST pass found an error.
 * **CHK-231** `@expect` on a test names what it does, one argument each: `.fail`, `.assert`, `.discard`, `error = "kind"` or `warning = "kind"`.
-* **CHK-278** A test that expects `.discard` passes where its run ends at a `discard`, and like one that expects `.fail` or `.assert` it need not end in a check.
   In a kind, `*` stands for any run of characters and `?` for one.
   An empty kind is `invalid-attribute-arguments`.
   Any other argument is `invalid-attribute-arguments`.
+* **CHK-278** A test that expects `.discard` passes where its run ends at a `discard`, and like one that expects `.fail` or `.assert` it need not end in a check.
+* **CHK-298** A test whose run reaches a builtin that takes derivatives is `stage-not-allowed` at that call: a run is one invocation, and has no quad to take one across.
+  A barrier waits for nobody in it, and an atomic updates the memory of its own run (EVAL-92, EVAL-93).
 * **CHK-232** In a test with an `error` or a `warning` expectation, every diagnostic of any phase inside it is the test's, and is reported nowhere.
   Inside is from its keyword to the end of its body.
   One expected diagnostic usually brings others with it, and the test exists to show that the one it names is reported.
@@ -789,7 +791,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `unknown-feature` | CHK-258 |
 | `feature-not-declared` | CHK-264 |
 | `unused-require` | CHK-265 |
-| `stage-not-allowed` | CHK-193 |
+| `stage-not-allowed` | CHK-193, CHK-298 |
 | `ambiguous-overload` | CHK-72 |
 | `missing-field`, `unknown-field`, `duplicate-field` | CHK-178 |
 | `invalid-entry-point` | CHK-87, CHK-93, CHK-294 |

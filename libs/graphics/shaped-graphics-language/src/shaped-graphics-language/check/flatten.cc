@@ -82,6 +82,14 @@ struct flattener
     /// A test has no stage, so it may reach what any stage may.
     void judge_stage(ast::expr_id call, symbol_id callee)
     {
+        // CHK-298: a test's run is one invocation, which has no quad to take a derivative across
+        if (is_test)
+        {
+            auto const* const record = c.out.builtin_function(c.out.at(callee).intrinsic);
+            if (record != nullptr && record->uses_derivatives)
+                stage_violations.push_back({.file = file(), .call = call, .callee = callee});
+            return;
+        }
         if (entry.entry_stage == stage::none)
             return;
         auto const& s = c.out.at(callee);
@@ -1793,9 +1801,13 @@ void checker::flatten_test(i32 index)
     for (auto const& a : f.effectful_asserts)
         report_once(diagnostic_kind::unsupported_yet, a.file, span_of(a.file, a.expr),
                     "an assert whose condition writes a buffer, prints, or calls a builtin with an effect");
+    for (auto const& v : f.stage_violations)
+        report(diagnostic_kind::stage_not_allowed, v.file, span_of(v.file, v.call),
+               cc::format("{} takes derivatives across a quad of pixels, and a test runs one invocation",
+                          out.at(v.callee).name));
     if (f.is_failed && !f.meets_error)
         unsupported(test.file, test.where, "a test whose body reaches a construct the flat tree cannot hold yet");
-    if (f.is_failed)
+    if (f.is_failed || !f.stage_violations.empty())
         return;
     f.entry.body = f.add_list(f.block);
     out.tests[index].unit = i32(out.test_units.size());
