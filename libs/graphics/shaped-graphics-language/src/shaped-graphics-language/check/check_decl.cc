@@ -60,6 +60,48 @@ sgl::u8 checker::stages_of(i32 file, ast::attribute const* a)
     return result;
 }
 
+pixel_output checker::pixel_output_of(i32 file,
+                                      ast::range_of<ast::attribute> attributes,
+                                      type_id member_type,
+                                      cc::string_view name)
+{
+    auto const* const depth = find_attribute(file, attributes, "depth");
+    auto const* const mask = find_attribute(file, attributes, "sample_mask");
+    if (depth == nullptr && mask == nullptr)
+        return pixel_output::color;
+    // CHK-276: the pixel's depth is a float and its sample mask a uint, and a member is one of them at most
+    if (depth != nullptr && mask != nullptr)
+    {
+        report(diagnostic_kind::invalid_attribute_arguments, file, depth->name,
+               cc::format("{} is the depth or the sample mask, not both", name));
+        return pixel_output::depth;
+    }
+    if (mask != nullptr)
+    {
+        if (out.name_of(member_type) != "uint")
+            report(diagnostic_kind::type_mismatch, file, mask->name,
+                   cc::format("a @sample_mask member is a uint, and {} is a {}", name, out.name_of(member_type)));
+        return pixel_output::sample_mask;
+    }
+    if (out.name_of(member_type) != "float")
+        report(diagnostic_kind::type_mismatch, file, depth->name,
+               cc::format("a @depth member is a float, and {} is a {}", name, out.name_of(member_type)));
+    auto const arguments = ast_of(file).at(depth->arguments);
+    if (arguments.empty())
+        return pixel_output::depth;
+    auto const* const dot = arguments.size() == 1 && ast::is_valid(arguments[0].value) && arguments[0].name.empty()
+                              ? ast_of(file).at(arguments[0].value).node.try_as<ast::leading_dot>()
+                              : nullptr;
+    auto const promise = dot != nullptr ? text_of(file, dot->name) : cc::string_view();
+    if (promise == "greater_equal")
+        return pixel_output::depth_greater_equal;
+    if (promise == "less_equal")
+        return pixel_output::depth_less_equal;
+    report(diagnostic_kind::invalid_attribute_arguments, file, depth->name,
+           "@depth takes nothing, or the direction it only moves in: `@depth(.greater_equal)`, `@depth(.less_equal)`");
+    return pixel_output::depth;
+}
+
 cc::string checker::vertex_format_of(i32 file, ast::attribute const* a, type_id member_type)
 {
     if (a == nullptr)
@@ -399,12 +441,16 @@ ast::range_of<member_info> checker::compile_members(i32 file,
         auto const name = text_of(file, f.name);
 
         cc::string_view const known_on_field[] = {"position", "per_instance", "stream", "interpolate"};
+        // CHK-276: a `@pixel struct` member may be the depth or the sample mask rather than a color target
+        cc::string_view const known_on_pixel_field[]
+            = {"position", "per_instance", "stream", "interpolate", "depth", "sample_mask"};
         // CHK-275: on a `@vertex struct` member `@format` is the member's own bytes, never a pipeline setting
         cc::string_view const known_on_vertex_field[] = {"position", "per_instance", "stream", "interpolate", "format"};
         cc::string_view const known_on_member[] = {"unfilterable", "non_filtering"};
         judge_attributes(file, f.attributes,
                          !is_struct         ? cc::span<cc::string_view const>(known_on_member)
                          : is_vertex_struct ? cc::span<cc::string_view const>(known_on_vertex_field)
+                         : is_target_struct ? cc::span<cc::string_view const>(known_on_pixel_field)
                                             : cc::span<cc::string_view const>(known_on_field),
                          owner, is_target_struct ? setting_scope::target : setting_scope::none);
         judge_attributes(file, d.attributes, {}, owner);
@@ -456,6 +502,7 @@ ast::range_of<member_info> checker::compile_members(i32 file,
             .is_position = find_attribute(file, f.attributes, "position") != nullptr,
             .interpolate = interpolation_of(file, find_attribute(file, f.attributes, "interpolate")),
             .has_interpolate = find_attribute(file, f.attributes, "interpolate") != nullptr,
+            .output = is_target_struct ? pixel_output_of(file, f.attributes, type, name) : pixel_output::color,
             .vertex_format = is_vertex_struct ? vertex_format_of(file, find_attribute(file, f.attributes, "format"), type)
                                               : cc::string(),
             .is_per_instance = find_attribute(file, f.attributes, "per_instance") != nullptr,
@@ -1199,7 +1246,19 @@ void checker::judge_entry_point(symbol_id id)
         if (result.edge != stage::pixel)
             invalid("a @pixel fun returns a @pixel struct");
         else
+        {
             judge_uninterpolated(info.result);
+            // CHK-276: one depth and one sample mask at most, since each is the pixel's one value
+            auto depths = 0;
+            auto masks = 0;
+            for (auto const& m : out.at(result.members))
+            {
+                depths += m.output != pixel_output::color && m.output != pixel_output::sample_mask ? 1 : 0;
+                masks += m.output == pixel_output::sample_mask ? 1 : 0;
+            }
+            if (depths > 1 || masks > 1)
+                invalid("a @pixel struct has at most one @depth member and one @sample_mask member");
+        }
         if (stage_struct != nullptr)
             judge_link(stage_struct->type);
     }

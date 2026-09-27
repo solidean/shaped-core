@@ -552,7 +552,8 @@ def emit_render_target(package: str, namespace: str, file: SglFile, struct: dict
     mixes two target sets even where their formats agree.
     """
     name = struct["name"]
-    members = struct["members"]
+    # the depth and the sample mask a pixel stage writes are outputs, and no color target a rendering binds
+    members = [m for m in struct["members"] if not m.get("output")]
     for m in members:
         if m["name"] in RENDER_TARGET_RESERVED:
             raise HostCodeError(
@@ -586,7 +587,7 @@ def emit_render_target(package: str, namespace: str, file: SglFile, struct: dict
 
 def emit_render_target_impl(namespace: str, struct: dict) -> str:
     qualified = f"{namespace}::{struct['name']}"
-    names = [m["name"] for m in struct["members"]]
+    names = [m["name"] for m in struct["members"] if not m.get("output")]
     out = [f"\n{qualified}::operator sg::rendering_info() const\n{{\n"]
     out.append("    return {.color_targets = {" + ", ".join(names) + "}, .depth_stencil_target = depth_stencil, "
                ".target_set = name};\n}\n")

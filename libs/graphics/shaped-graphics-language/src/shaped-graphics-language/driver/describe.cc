@@ -178,12 +178,17 @@ described_struct describe_struct(check::checked_module const& m, check::type_inf
                                    .shape = check::hex_of(check::structural_hash(m, m.at(t.members)))};
     auto location = 0;
     for (auto const& member : m.at(t.members))
-        result.members.push_back({.name = member.name,
-                                  .type = cc::string(m.name_of(member.type)),
-                                  .location = member.is_position ? -1 : location++,
-                                  .stream = t.edge == check::stage::vertex ? emit_impl::stream_of(member) : cc::string(),
-                                  .format = member.vertex_format,
-                                  .is_per_instance = member.is_per_instance});
+        result.members.push_back(
+            {.name = member.name,
+             .type = cc::string(m.name_of(member.type)),
+             // the position, the depth and the sample mask take no location
+             .location = member.is_position || member.output != check::pixel_output::color ? -1 : location++,
+             .stream = t.edge == check::stage::vertex ? emit_impl::stream_of(member) : cc::string(),
+             .format = member.vertex_format,
+             .output = member.output == check::pixel_output::sample_mask ? cc::string("sample_mask")
+                     : member.output != check::pixel_output::color       ? cc::string("depth")
+                                                                         : cc::string(),
+             .is_per_instance = member.is_per_instance});
     return result;
 }
 
@@ -227,7 +232,8 @@ described_pipeline describe_pipeline(check::checked_module const& m, check::pipe
     {
         result.target_set = m.name_of(p.target_set);
         for (auto const& member : m.at(m.at(p.target_set).members))
-            result.targets.push_back(member.name);
+            if (member.output == check::pixel_output::color)
+                result.targets.push_back(member.name);
     }
     auto features = m.functions[m.at(p.vertex).info].features;
     if (check::is_valid(p.pixel))

@@ -67,6 +67,19 @@ public:
                               i.kind == kind::linear ? "no_perspective" : "perspective");
         }
         case struct_role::render_targets:
+            switch (member.output)
+            {
+            case check::pixel_output::depth:
+                return "depth(any)";
+            case check::pixel_output::depth_greater_equal:
+                return "depth(greater)";
+            case check::pixel_output::depth_less_equal:
+                return "depth(less)";
+            case check::pixel_output::sample_mask:
+                return "sample_mask";
+            case check::pixel_output::color:
+                break;
+            }
             return cc::format("color({})", member.location);
         case struct_role::plain:
             break;

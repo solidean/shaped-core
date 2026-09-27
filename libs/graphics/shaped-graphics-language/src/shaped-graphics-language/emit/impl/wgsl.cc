@@ -68,6 +68,11 @@ public:
             out += k_indent;
             if (member.is_position)
                 out += "@builtin(position) ";
+            // EMIT-116: WGSL has no conservative depth, and the promise changes no result, so it is dropped
+            else if (member.output == check::pixel_output::sample_mask)
+                out += "@builtin(sample_mask) ";
+            else if (member.output != check::pixel_output::color)
+                out += "@builtin(frag_depth) ";
             else if (member.location >= 0)
                 out.appendf("@location({}) ", member.location);
             // EMIT-115: only what differs from perspective at the centre is written

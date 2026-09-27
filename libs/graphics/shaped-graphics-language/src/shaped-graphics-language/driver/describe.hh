@@ -103,6 +103,8 @@ struct sgl::described_struct_member
     cc::string stream;
     /// A vertex input member's `sg::vertex_attribute_format` where `@format` states one; empty for its type's own.
     cc::string format;
+    /// A `@pixel struct` member that is no color target: "depth" or "sample_mask"; empty for a color target.
+    cc::string output;
     bool is_per_instance = false;
 };
 

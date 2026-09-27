@@ -86,6 +86,7 @@ Decided:
 
 * The values the GPU hands an invocation are parameters marked with their input, after the one stage struct ([CHK-271](../semantics/checking.md#entry-points)).
 * Interpolation is `@interpolate(kind, sampling)` on the member, WGSL's two axes as enum cases (CHK-273).
+* Depth output is a `@depth` member of the `@pixel struct`, and a struct of it alone is a pixel stage without color targets (CHK-276).
 
 * Two entry points are paired by a `pipeline` declaration ([pipelines](../pipelines.md)).
   Pairing by matching types alone was rejected: one vertex stage feeding two pixel stages would make pipelines nobody asked for, and it leaves the configuration nowhere to go.
@@ -94,6 +95,5 @@ Decided:
 * Whether the pixel stage may take one struct parameter instead of one parameter per member.
 * **Stage inputs as builtin functions**, as sugar over their parameters: `vertex_index()` with `@stages(.vertex)`, which any inlined helper could call without being handed the id.
   The emitter would add exactly the inputs the inlined body reaches to the target's signature, and CHK-193 already refuses one reached from the wrong stage.
-* Depth output, and a pixel stage without color targets.
 * The stages beyond vertex and pixel, several of which the terminology still marks as undecided.
 * What a known attribute on a node kind that does not accept it is: the unknown one is a warning, and this one is not decided.

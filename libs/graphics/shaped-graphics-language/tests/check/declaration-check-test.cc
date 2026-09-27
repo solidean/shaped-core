@@ -392,3 +392,25 @@ TEST("sgl check - a vertex member's @format names the bytes it reads, and they d
     // on a struct that is no vertex input, @format is no member's own
     CHECK(reports_for("struct plain:\n    @format(.rgba8_unorm) c: float4\n").contains("unsupported-yet"));
 }
+
+TEST("sgl check - a @pixel struct's depth and sample mask are outputs of their types, one each")
+{
+    // CHK-276
+    auto const pixel = [](cc::string_view members)
+    {
+        return reports_for(cc::string("struct vout:\n    @position p: hpos4\n@pixel struct target:\n") + members
+                           + "@pixel fun ps(v: vout) -> target:\n    return target()\n");
+    };
+    CHECK(reports_for("struct vout:\n    @position p: hpos4\n@pixel struct target:\n    c: float4\n    @depth d: "
+                      "float\n"
+                      "    @sample_mask m: uint\n@pixel fun ps(v: vout) -> target:\n"
+                      "    return { c = float4(1.0, 1.0, 1.0, 1.0), d = 0.5, m = 0xff }\n")
+          == "");
+    CHECK(pixel("    @depth d: float4\n").contains("a @depth member is a float, and d is a float4"));
+    CHECK(pixel("    @sample_mask m: int\n").contains("a @sample_mask member is a uint"));
+    CHECK(pixel("    @depth(.sideways) d: float\n").contains("invalid-attribute-arguments"));
+    CHECK(pixel("    @depth a: float\n    @depth b: float\n")
+              .contains("a @pixel struct has at most one @depth member and one @sample_mask member"));
+    // only a @pixel struct writes a pixel's outputs
+    CHECK(reports_for("struct plain:\n    @depth d: float\n").contains("unsupported-yet"));
+}

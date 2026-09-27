@@ -351,3 +351,9 @@ An integer member must say `.flat` rather than being flat by default, because wh
 A format is not a type, which the vector-and-format incubator settled for render targets: a member has the type the shader computes with, and the format is an attribute.
 A vertex member follows the same rule, so one word, `@format`, says "these bytes, read as this type" on either edge of a pipeline.
 On a `@pixel struct` member it is that target's setting, and on a `@vertex struct` member it is the member's own, which is why it is never read as a setting there.
+
+## CHK-276
+
+A pixel stage's output is its return value, all of it, which is SGL's model for every stage; a depth written through a builtin call would be an output the signature hides.
+`@position` is the precedent: a marked member of a stage's struct that the stage link treats specially.
+A struct holding only `@depth` is how a depth-only pixel stage is written, which is what a shadow pass with a cut-out needs.

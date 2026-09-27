@@ -430,6 +430,11 @@ struct checker
                                                              bool is_vertex_struct = false);
     /// A `@vertex struct` member's `@format(.case)`: the case's name, checked against the member's type (CHK-275).
     [[nodiscard]] cc::string vertex_format_of(i32 file, ast::attribute const* a, type_id member_type);
+    /// A `@pixel struct` member's `@depth` or `@sample_mask`, checked against its type (CHK-276).
+    [[nodiscard]] pixel_output pixel_output_of(i32 file,
+                                               ast::range_of<ast::attribute> attributes,
+                                               type_id member_type,
+                                               cc::string_view name);
     /// The type an expression in a type position names; the error type when it names none.
     /// Inside a body, `scope` holds the locals, which hide a module-level type of their name.
     [[nodiscard]] type_id resolve_type(i32 file, ast::expr_id expr, function_scope const* scope = nullptr);

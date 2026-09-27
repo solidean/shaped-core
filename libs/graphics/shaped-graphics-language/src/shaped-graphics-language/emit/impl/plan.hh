@@ -39,6 +39,8 @@ struct planned_member
     bool is_position = false;
     /// How a stage link's member is interpolated; the default everywhere else.
     check::interpolation interpolate;
+    /// A render target struct's depth or sample mask, which takes no location; `color` everywhere else.
+    check::pixel_output output = {};
     /// The position among the members without `@position`; -1 on a `plain` struct and on the position itself.
     i32 location = -1;
     /// The byte offset in an inline binding's block; -1 everywhere else.

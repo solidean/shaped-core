@@ -243,7 +243,7 @@ fun shade(k: float) -> float:
 | a test | `@expect` |
 | a binding | `@inline`, `@shadowable` |
 | a binding member | `@unfilterable`, `@non_filtering` |
-| a struct field | `@position`, `@per_instance`, `@stream`, `@interpolate`, and `@format` on a `@vertex struct` |
+| a struct field | `@position`, `@per_instance`, `@stream`, `@interpolate`, `@format` on a `@vertex struct`, `@depth` and `@sample_mask` on a `@pixel struct` |
 | a parameter | the stage inputs of CHK-271 |
 | a pipeline | `@raster`, `@compute`, `@raytracing` |
 
@@ -469,6 +469,10 @@ fun f() -> float:
 * **CHK-275** `@format(.case)` on a member of a `@vertex struct` names the `sg::vertex_attribute_format` its bytes are, and never a pipeline setting ([why](why/checking.md#chk-275)).
   The format decodes into the member's type, or it is `type-mismatch`: `.rgba8_unorm` into a `float4`, `.rgba8_uint` into a `uint4`.
   A member without one reads the format its type has at full width: `float3` is `vec3f`, `uint` is `u32`.
+* **CHK-276** A member of a `@pixel struct` marked `@depth` is the pixel's depth, a `float`, and one marked `@sample_mask` the samples it writes, a `uint` ([why](why/checking.md#chk-276)).
+  Neither is a color target, so neither takes a location or a `color_targets` entry, and a struct holds one of each at most.
+  `@depth(.greater_equal)` and `@depth(.less_equal)` promise that the written depth only moves that way from the rasterized one.
+  A pipeline whose pixel stage writes depth has a `depth_stencil_format` other than `.undefined`, or `invalid-pipeline`.
 * **CHK-274** A pixel stage that takes a member interpolated `.sample` runs once per sample, and needs `sample_rate_shading` of a device.
 * **CHK-272** `@primitive_id` needs `primitive_index` of a device and `@sample_index` needs `sample_rate_shading`, as a binding member needs its feature (CHK-261).
 * **CHK-90** A `@vertex fun` returns a struct with exactly one field that carries `@position`, and that field is of the type `hpos4`.

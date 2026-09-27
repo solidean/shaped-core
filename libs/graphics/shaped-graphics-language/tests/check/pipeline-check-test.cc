@@ -328,3 +328,24 @@ TEST("sgl check - a pipeline shares its file's names, and only a raster pipeline
     CHECK(reports("@compute pipeline p = (vs, ps)\n")
           == "unsupported-yet user:[compute] a @compute pipeline; every compute entry point is its own\n");
 }
+
+TEST("sgl check - a pipeline whose pixel stage writes depth has a depth target")
+{
+    // CHK-276
+    constexpr auto stages
+        = "struct vout:\n    @position p: hpos4\n"
+          "@vertex fun depth_vs(@vertex_index i: int) -> vout:\n    return { p = hpos4(0.0, 0.0, 0.0, 1.0) }\n"
+          "@pixel struct shaded:\n    c: float4\n    @depth d: float\n"
+          "@pixel fun depth_ps(v: vout) -> shaded:\n    return { c = float4(1.0, 1.0, 1.0, 1.0), d = 0.5 }\n";
+    CHECK(reports(cc::string(stages)
+                  + "pipeline:\n    vertex = depth_vs\n    pixel = depth_ps\n    format = .rgba8_unorm\n")
+              .contains("the pixel stage writes its depth, and the pipeline has no depth target"));
+    CHECK(reports(cc::string(stages)
+                  + "pipeline:\n    vertex = depth_vs\n    pixel = depth_ps\n    format = .rgba8_unorm\n"
+                    "    depth_stencil_format = .depth32_float\n")
+          == "");
+    CHECK(reports(cc::string(stages)
+                  + "pipeline:\n    vertex = depth_vs\n    pixel = depth_ps\n    format = .rgba8_unorm\n    "
+                    "depth_stencil_format = .host\n")
+          == "");
+}

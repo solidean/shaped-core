@@ -98,6 +98,7 @@ A pipeline is the first place two stages meet, so it is where they are checked a
 * **The binding lists agree by position**: with `@inline` left out, each stage's list names the same binding as the longest one at every position it has.
   The pipeline's binding layout is that longest list, and all its stages list one `@inline` binding at most.
 * **Every target has a format**: stated by a setting, by `@format`, or left to the host with `.host`.
+* **A pixel stage that writes its depth has a depth target**: a `@depth` member of the `@pixel struct` needs a `depth_stencil_format` (CHK-276).
 
 ## Formats the host states
 

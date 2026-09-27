@@ -183,6 +183,19 @@ struct sgl::check::interpolation
     constexpr bool operator==(interpolation const&) const = default;
 };
 
+/// What a member of a `@pixel struct` is: a color target, or an output that is none (CHK-276).
+enum class sgl::check::pixel_output : sgl::u8
+{
+    color,
+    /// `@depth`: the pixel's own depth, which it promises nothing about.
+    depth,
+    /// `@depth(.greater_equal)` and `@depth(.less_equal)`: a depth that only moves one way, which keeps early testing.
+    depth_greater_equal,
+    depth_less_equal,
+    /// `@sample_mask`: which samples the pixel writes.
+    sample_mask,
+};
+
 /// A field of a struct or a member of a binding.
 struct sgl::check::member_info
 {
@@ -197,6 +210,8 @@ struct sgl::check::member_info
     interpolation interpolate;
     /// Carries `@interpolate` at all, which a member that is no stage link must not.
     bool has_interpolate = false;
+    /// On a `@pixel struct`, whether the member is a color target or another output; `color` everywhere else.
+    pixel_output output = pixel_output::color;
     /// A `@vertex struct` member's `@format(.case)`: the `sg::vertex_attribute_format` its bytes are; empty for the one
     /// its type implies (CHK-275).
     cc::string vertex_format;

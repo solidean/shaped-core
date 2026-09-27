@@ -72,6 +72,20 @@ public:
         case struct_role::stage_link:
             return cc::format("SGL{}", member.location);
         case struct_role::render_targets:
+            // EMIT-116: the depth and the sample mask are outputs of their own
+            switch (member.output)
+            {
+            case check::pixel_output::depth:
+                return "SV_Depth";
+            case check::pixel_output::depth_greater_equal:
+                return "SV_DepthGreaterEqual";
+            case check::pixel_output::depth_less_equal:
+                return "SV_DepthLessEqual";
+            case check::pixel_output::sample_mask:
+                return "SV_Coverage";
+            case check::pixel_output::color:
+                break;
+            }
             return cc::format("SV_Target{}", member.location);
         case struct_role::plain:
             break;

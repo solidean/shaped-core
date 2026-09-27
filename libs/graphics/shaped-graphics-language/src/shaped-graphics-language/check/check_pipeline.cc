@@ -184,6 +184,8 @@ struct pipeline_compiler
     type_id description = type_id::none;
     /// The `@pixel struct` members, in location order.
     cc::vector<cc::string> targets;
+    /// The pixel stage's `@pixel struct` has a `@depth` member (CHK-276).
+    bool writes_depth = false;
     bool is_failed = false;
 
     void fail(i32 in_file, source_span where, cc::string detail)
@@ -743,6 +745,12 @@ void checker::compile_pipeline(symbol_id id)
         target_set = pixel_info.result;
         for (auto const& m : out.at(out.at(target_set).members))
         {
+            // CHK-276: the depth and the sample mask are outputs, and no color target
+            if (m.output != pixel_output::color)
+            {
+                pc.writes_depth = pc.writes_depth || m.output != pixel_output::sample_mask;
+                continue;
+            }
             // The host states an open target's format by the target's name, beside these two.
             if (m.name == "sample_count" || m.name == "depth_stencil_format")
                 pc.fail(
@@ -807,6 +815,8 @@ void checker::compile_pipeline(symbol_id id)
         if (has_targets)
             for (auto const& m : out.at(info.members))
             {
+                if (m.output != pixel_output::color)
+                    continue;
                 auto const prefix = cc::vector<cc::string>{cc::string(k_color_targets), m.name};
                 pc.attribute_settings(edge_file, ast_of(edge_file).at(m.field).attributes, target_state, prefix, true,
                                       s.kind, s.settings);
@@ -893,6 +903,19 @@ void checker::compile_pipeline(symbol_id id)
                                "with "
                                "`.host`",
                                t, t));
+    }
+
+    // CHK-276: a pixel stage that writes its depth writes it into a depth target, or nowhere
+    if (pc.writes_depth && !pc.is_failed)
+    {
+        auto const* last = static_cast<pipeline_setting const*>(nullptr);
+        for (auto const& s : settings)
+            if (s.path == "depth_stencil_format")
+                last = &s;
+        if (last == nullptr || (last->kind == setting_kind::enum_case && last->enum_case == "undefined"))
+            pc.fail(file, where,
+                    "the pixel stage writes its depth, and the pipeline has no depth target: set "
+                    "`depth_stencil_format`, or leave it to the host with `.host`");
     }
 
     if (pc.is_failed)

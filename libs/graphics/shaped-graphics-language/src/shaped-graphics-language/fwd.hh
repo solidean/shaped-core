@@ -196,6 +196,7 @@ struct enum_case_info;
 enum class stage : u8;
 enum class stage_input : u8;
 struct interpolation;
+enum class pixel_output : u8;
 struct flat_stage_input;
 struct stage_input_info;
 enum class symbol_kind : u8;
