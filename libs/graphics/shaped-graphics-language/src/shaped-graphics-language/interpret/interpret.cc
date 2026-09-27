@@ -94,7 +94,7 @@ struct machine
     {
         if (--fuel >= 0)
         {
-            // a relaxed load every 4096 steps: a stop is seen within microseconds, and costs the run nothing measurable
+            // a relaxed load every 4096 steps: a stop is seen within a fraction of a millisecond, and costs the run nothing measurable
             if (limits.stop != nullptr && (fuel & 4095) == 0 && limits.stop->load(cc::memory_order_relaxed))
             {
                 fail(run_status::stopped, "");

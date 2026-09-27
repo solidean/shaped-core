@@ -55,7 +55,8 @@ d.value().pipelines                        // name, stages, layout, vertex_input
 sgl::prelude_files()                       // -> cc::span<prelude_file const> { name, source }, in module order:
                                            // "builtins.sgl": GENERATED in memory from the builtin registry, never read from disk
                                            // "core.sgl": the hand-written prelude/core.sgl as it was when the library was built
-sgl::prelude_file_of(path)                 // -> i32: which prelude file a path ending in `prelude/core.sgl` is, else -1;
+sgl::prelude_file_of(path)                 // -> i32: which prelude file an ABSOLUTE path or file:// uri is, else -1;
+                                           // only the library's own prelude/ dir counts: shaders/prelude/core.sgl is -1
                                            // a driver checks such a source IN that file's place, never behind a 2nd prelude
 
 #include <shaped-graphics-language/source/format_diagnostic.hh>
@@ -70,16 +71,17 @@ What an editor asks — the library answers it, and a language server only trans
 
 ```cpp
 #include <shaped-graphics-language/driver/classify.hh>
-sgl::classify(file, ast, {.module = &m, .file = f, .prelude_file_count = p})
+sgl::classify(file, ast, {.module = &m, .file_index = f})
                                            // -> vector<classified_span { where, cls, is_declaration, is_from_prelude }>
                                            // every token that has a class, in order, never overlapping; a fused number is ONE span
-                                           // without .module: the syntax alone, so every name is token_class::name
-sgl::token_class                           // keyword number string comment doc_comment op attribute struct_ enum_ type function
-                                           // method property field binding binding_member enum_case constant pipeline parameter
-                                           // local mutable_local self_ name; to_string(c) -> "mutable-local"
+                                           // without .module: the syntax and the file's declarations; every USE is `name`
+sgl::token_class                           // keyword control number string comment doc_comment op attribute struct_ enum_ type
+                                           // function method property field binding binding_member enum_case constant pipeline
+                                           // parameter argument local mutable_local self_ name; to_string(c) -> "mutable-local"
 
 #include <shaped-graphics-language/driver/unannotated_bindings.hh>
-sgl::unannotated_bindings(ast, m, f)       // -> vector<unannotated_binding { name, type }>: each `let x = …` that writes no type
+sgl::unannotated_bindings(pf, ast, m, f)   // -> vector<unannotated_binding { name, type, is_type_named }>: each `let x = …`
+                                           // that writes no type; is_type_named: `let v = vec3(…)`, where a hint repeats the line
                                            // left out: a pattern that is no name, a body the check never reached, the error type
 #include <shaped-graphics-language/driver/inferred_results.hh>
 sgl::inferred_results(pf, ast, m, f)       // -> vector<inferred_result { arrow, type, is_writable }>: each `=> value` without `->`
@@ -231,6 +233,7 @@ auto const m = sgl::check::check(prelude_files, {.file = user, .ast = user_ast})
                                            // carried: let / let mut, assignment and `op=`, if chains, while, for over `a ..< b`, loop with
                                            // break / break value / continue, and / or / not, comparison chains, int literals, print,
                                            // and calls of the program's own functions, overloads included, which are INLINED
+m.prelude_file_count()                     // -> i32: every file but the last; a symbol of a file below it is the prelude's
 m.symbols                                  // every top-level fun / struct / binding: file, declaration, kind, state, name,
                                            // intrinsic (builtin_id) / intrinsic_type (builtin_type_id), operator_spelling, type, info
 m.builtins                                 // the registry those ids are positions in; m.builtin_type_of(type_id) / m.builtin_function(id)
@@ -343,7 +346,7 @@ m.tests  m.test_units                      // test_info { symbol, file, where, s
 sgl::test::run_tests(m, files, {.file = f})  // -> vector<test_result { test, status, failures, checks_run }>; files are the
                                            // module_files m was checked from, since a report quotes the source
 sgl::test::run_test(m, files, t, limits)   // ONE test, m.tests[t]: what a caller that stops between tests runs;
-                                           // a test that expects diagnostics is judged by them, so its result is not_run
+                                           // a test that expects diagnostics: judged_by_diagnostics; one that did not check: not_run
 r.sites                                    // site_mark { file, where, is_assert, passed, failed } per check and assert of its tree
                                            // an assert inlined from a helper names the helper's file
 sgl::test::diagnostic_of(m, r)             // `test-failed` at the test, one related note per narrowed part:

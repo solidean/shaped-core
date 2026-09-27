@@ -142,7 +142,7 @@ struct sgl::check::outcome
 
 namespace sgl::check
 {
-/// `ok`, `out-of-fuel`, `fell-off-the-end`, `type-error`, `uninitialized-read`, `assertion-failed`.
+/// The status in kebab case, as `dump` writes it: `out-of-fuel`, `assertion-failed`.
 [[nodiscard]] cc::string_view to_string(run_status s);
 
 /// How many scalars a value of `type` has; 0 for a type that has no value here.
@@ -153,7 +153,7 @@ namespace sgl::check
 
 /// Runs `e`, structured or core, on the abstract machine.
 /// Total: a malformed tree is a `type_error`, a run without end is `out_of_fuel`, and nothing asserts.
-/// Deterministic: equal arguments give equal outcomes.
+/// Deterministic: equal arguments give equal outcomes, unless `stop` is raised.
 [[nodiscard]] outcome interpret(checked_module const& m,
                                 flat_entry_point const& e,
                                 run_inputs const& inputs,

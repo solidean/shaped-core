@@ -9,7 +9,9 @@ This page is for whoever works on the server.
 * **Diagnostics**, pushed per document and version: every phase's, then again with each failing test once the document's tests ran.
   A diagnostic without a detail says `sgl::summary_of(kind)`, and `unreachable-code` is drawn faded.
   A note into the prelude points at a virtual `sgl-prelude:` document, which the client fetches with `sgl/preludeText`.
-  An open `prelude/builtins.sgl` or `prelude/core.sgl` is checked in that file's place (`sgl::prelude_file_of`), so an edit of `core.sgl` is checked as the prelude it is.
+  The library's own `prelude/builtins.sgl` or `prelude/core.sgl`, when open, is checked in that file's place (`sgl::prelude_file_of`).
+  So an edit of `core.sgl` is checked as the prelude it is.
+  A user's file of the same name elsewhere is an ordinary document.
 * **Semantic tokens**, the whole document at once: what `sgl::classify` says every token is, mapped onto LSP's standard names.
 * **Inlay hints**: ` : type` after every `let` that writes no type, and `-> type` before the `=>` of every function or property whose return type is inferred.
   Each inserts itself when accepted, except on a property of a type body, which takes no `-> type`.
@@ -49,7 +51,7 @@ The stdio host frames them with `Content-Length`; a browser host would hand `pos
 
 **Stale work is stopped, not just discarded.**
 A new version raises the flag of the previous one's test run, which checks it between tests.
-The interpreter reads it too, through `run_limits::stop`, so a test that runs long stops within microseconds.
+The interpreter reads it too, through `run_limits::stop`, so a test that runs long stops within a fraction of a millisecond.
 A request answers `RequestCancelled` on `$/cancelRequest`.
 
 **stdout carries the protocol and nothing else.**
@@ -72,6 +74,17 @@ On a Ryzen 9 7950X3D, release build:
 * It runs the language server's too, which open a document and read what the server sent.
 * They drive the server by hand on the main thread, so they run the same with `SC_THREADS=OFF`.
 * The extension is tested by hand, with the checklist in the [readme](../readme.md#working-on-the-client).
+
+## Alternatives
+
+Two designs were weighed and rejected:
+
+* **A TypeScript server inside the extension, running `sgl` per edit.**
+  Every edit would pay a process start and a prelude parse that the in-process server caches.
+  A running test could only be stopped by killing the process, and every other editor would need its own port.
+* **A third-party C++ LSP library.**
+  It is an external dependency built on the standard library, with its own JSON and threading, which this repo avoids.
+  None is sans-IO, which a browser host needs.
 
 ## Growth paths
 

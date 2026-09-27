@@ -34,7 +34,7 @@ What the compiler carries today is the [spec](spec/_index.md); a construct it do
 - **One test that the highlighters agree with the compiler.** The VS Code grammar and the review tool's lexer each copy the syntax, and only the lexer's keyword set is checked today.
   The test tokenizes a corpus, `tools/vscode-extension/examples/sample.sgl` at least, with the compiler, the grammar and the lexer.
   It compares the class each assigns to every token: keyword, name, number, string, comment, operator.
-  The compiler's side is `sgl::classify` without a checked module, which is exactly the syntactic classes.
+  The compiler's side is `sgl::classify` without a checked module: the syntactic classes, plus a class for each name the file declares.
   It runs the TextMate grammar through `vscode-textmate`, or through a Python TextMate engine if one is good enough to spare the Node dependency.
 - **`no-effect` in a test, by what can reach an assert.** A line of a test without an effect is still code under test when it can reach an `assert`, since it may trigger one.
   So CHK-225's warning is too coarse there, and a `void` line is exempt from it today.
