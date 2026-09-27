@@ -60,7 +60,7 @@ Goals combine: `--goal pr-comment --goal land-changes` is a review of someone el
 | `ingest --rest` | ids for whatever nothing claims yet |
 | `ingest --dry-run` / `--stats` | what a sweep would create, and the shape of the change set, before committing to it |
 | `coverage <name>` | gate 1 and the discharge progress, with the uncovered runs listed; also names changes only a meta or orientation entry claims |
-| `changes <name>` | the ledger: every change, and which ask accounts for it. `--undischarged`, `--path` (comma-OR'd prefixes or globs, `!` subtracts), `--ids` |
+| `changes <name>` | the ledger: every change, and which ask accounts for it. `--undischarged`, `--path` (comma-OR'd prefixes or gitignore-style globs, where `*` stays in one folder and `**` crosses them; `!` subtracts), `--ids` |
 | `list` | the reviews in this repository, and where each one stands |
 | `validate <name> [ENTRY...]` | every entry parses, every change id resolves; run it before serving a round. Entries narrow it to a slug, a number or a range like `200..299`, and only those are parsed, so parallel writers each check their own block |
 | `generate <name>` | write or refresh the overview and coverage entries |

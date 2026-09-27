@@ -17,7 +17,6 @@ the repository under review — which is why a path carries the root it was foun
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -30,9 +29,6 @@ MISSING = "missing"
 
 # What a review folder contributes, relative to its own root.
 _REVIEW_GLOBS = ("review.toml", "entries/*.md", "answers/*.json", "rounds/*.md", "attachments/*")
-
-# A suffix a planned file may carry although no tracked file does — see `looks_like_a_path`.
-_PLANNED_SUFFIX_RE = re.compile(r"[a-z][a-z0-9]{0,4}")
 
 
 @dataclass(frozen=True)
@@ -106,16 +102,14 @@ class RepoIndex:
         except Exception:  # noqa: BLE001 — as in build: an unreadable commit is an empty index, never a failed render.
             return RepoIndex({})
 
-    def looks_like_a_path(self, ref: str, planned: bool = False) -> bool:
+    def looks_like_a_path(self, ref: str) -> bool:
         """Whether this is a reference at all, rather than prose that happens to hold a dot.
 
         A slash settles it.
         Otherwise the suffix has to be one some tracked file really uses, which keeps `sr::window.headless`
         and `git.has_merges` out without a hand-maintained list of extensions.
-        `planned` widens that, for text whose entry names a folder a design will create:
-        a file there may use a suffix nothing in the tree has yet, so a short lowercase suffix counts too.
-        It stays that narrow because whatever it admits and resolves nowhere is drawn as a planned file,
-        so a looser rule would underline `obj.method` in every fence of a design review.
+        A planned folder does not widen it: whatever it admits and resolves nowhere is drawn as a planned file,
+        so any wider rule underlines every `p.node` field access in a design review's fences.
         """
         # A leading slash or a scheme means a URL or a route — `/favicon.ico`, `vscode://file/x` — never a path
         # relative to a repository root.
@@ -124,9 +118,7 @@ class RepoIndex:
         if "/" in ref:
             return True
         _, dot, suffix = ref.rpartition(".")
-        if not dot:
-            return False
-        return suffix.lower() in self.suffixes or (planned and _PLANNED_SUFFIX_RE.fullmatch(suffix) is not None)
+        return bool(dot) and suffix.lower() in self.suffixes
 
     def resolve(self, ref: str, context: str = "") -> Resolution:
         """Resolve one reference, saying which of the three ways it went — or why it did not.
@@ -194,11 +186,18 @@ class RepoIndex:
 
 
 def _under(context: str, candidates: list[str]) -> Resolution | None:
-    """The lookup restricted to one folder, or None when nothing under it matches and the caller should look wider."""
+    """The lookup restricted to one folder, or None when nothing under it matches and the caller should look wider.
+
+    The shallowest match wins, so a context naming a folder settles its own files against a namesake in a subfolder;
+    only matches at the same depth are ambiguous.
+    """
     if not context:
         return None
     prefix = context.rstrip("/") + "/"
     inside = [c for c in candidates if c.startswith(prefix)]
+    if inside:
+        depth = min(c.count("/") for c in inside)
+        inside = [c for c in inside if c.count("/") == depth]
     if len(inside) == 1:
         return Resolution(RESOLVED, inside[0])
     if inside:

@@ -213,7 +213,8 @@ context: src/stages/08_ring_ir/
 ```
 
 - **Under the folder first, then everywhere.**
-  A path with exactly one match under the context resolves to it; one with several there is ambiguous among those.
+  A path with one match under the context resolves to it, and with several the shallowest wins, so `server.hh` names the context's own file over a namesake in a subfolder.
+  Only matches at the same depth are ambiguous among themselves.
   One with none there resolves repository-wide exactly as without a context, so `src/lib.rs` still works from an entry about stage 8.
 - **A block can narrow it again** with its own `context:`, which replaces the entry's for that block — the one block about the tests, say.
 - **The folder is itself a reference**, resolved the same three ways, so `08_ring_ir/` is enough where it is unique.
@@ -245,8 +246,9 @@ planned: src/lsp/
 - **A path outside the folder keeps every error**, which is what keeps a typo elsewhere loud.
 - **The folder is never resolved**, since it does not exist yet; a leading `./` and a trailing `/` are ignored.
 - **A block can name its own** with `planned:`, which replaces the entry's for that block, the way `context:` does.
-- **A bare name may carry a suffix no tracked file uses yet**, as long as it is short and lowercase.
-  A call or a longer word right after it keeps `obj.size()` a member access rather than a planned file.
+- **A bare name counts only with a suffix some tracked file uses**, the rule every reference follows.
+  A file of a kind the tree has not seen yet is named with a `/`, under the folder.
+  Anything wider turns every `p.node` field access in a fence into a planned file.
 
 ## `raw:` — a span that is not a reference
 

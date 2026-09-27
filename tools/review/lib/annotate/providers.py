@@ -111,9 +111,7 @@ class FileProvider:
             # Prose that happens to hold a dot is not a reference, and treating one as a broken reference would
             # make the strictness unusable.
             # The repository decides, by what its own files are actually called.
-            # The planned widening is refused mid-word and before a call, so `obj.size()` stays a member access.
-            widen = bool(self.planned) and not re.match(r"[\w(]", text[match.end():match.end() + 1])
-            if not self.index.looks_like_a_path(ref, planned=widen):
+            if not self.index.looks_like_a_path(ref):
                 continue
             self.seen.add(literal)
             out.append(self._token(literal, match.group(1), match.group(2), match.group(3)))
