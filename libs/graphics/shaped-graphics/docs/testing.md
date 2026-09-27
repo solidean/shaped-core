@@ -213,6 +213,7 @@ The transient lifetime scope shows the split cleanly:
 
 ## See also
 
+- [tier1-pipeline-tests.md](tier1-pipeline-tests.md) — the plan for executing sg's pipeline semantics in tier 1, trimmed as it lands.
 - [nexus/docs/invocable-tests.md](../../../base/nexus/docs/invocable-tests.md) — the invocable/alias machinery.
 - [concepts/backends.md](concepts/backends.md) — what a backend is and how it carries its own tests.
 - [building-and-testing guide](../../../../docs/guides/building-and-testing.md) — driving `dev.py` + diagnostics.
