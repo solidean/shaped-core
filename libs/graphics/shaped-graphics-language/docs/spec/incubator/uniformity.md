@@ -17,10 +17,8 @@ It follows where a value may differ between invocations — a stage input, a sto
 Either the control flow is annotated as uniform, with `@uniform` or something like it, where the author knows more than the analysis can prove.
 Or the gradient is computed before the branch, where every pixel of the quad still runs, and the sample inside takes it explicitly through the `grad` form of `sample`.
 
-**It replaces a stopgap.**
-Today the WGSL text of an entry point that samples opens with `diagnostic(off, derivative_uniformity);` ([EMIT-103](../semantics/emitting.md#bindings)).
-That keeps Tint quiet and leaves the undefined result in place.
-Once SGL judges uniformity, that directive goes, and WGSL's own analysis agrees with SGL's or finds nothing SGL has not already refused.
+**It replaced a stopgap.**
+The WGSL text of an entry point that sampled used to open with `diagnostic(off, derivative_uniformity);`, which kept Tint quiet and left the undefined result in place.
 
 ## What it touches
 
@@ -35,9 +33,15 @@ Once SGL judges uniformity, that directive goes, and WGSL's own analysis agrees 
 * Attributes attach to declarations and take parsed arguments, so a statement attribute would be a new place for one rather than a new form.
 * `@stages` already keeps an implicit-derivative sample out of every stage but the pixel stage.
 
+## What exists
+
+The pass is CHK-282 to CHK-284, over the core tree of each entry point, for barriers and for every builtin that takes derivatives.
+Its rules are WGSL's, so Tint accepts what it accepts, and it is coarser than WGSL's in one place:
+a local set anywhere in non-uniform control flow is non-uniform everywhere, where WGSL follows each assignment.
+
 ## Open
 
-* Whether the analysis is WGSL's rules, which are conservative and specified, or a finer one that proves more programs uniform.
+* Whether a finer analysis proves more programs uniform than WGSL's rules, and whether every target then still accepts them.
 * Where `@uniform` stands: on the branch, on the value it tests, or on a function's parameter.
 * Whether an annotated branch is trusted, or checked at run time in a debug build.
-* Whether other derivative consumers — `ddx`, `ddy`, `fwidth` — follow the same rule once they exist, and barriers in compute.
+* Subgroup operations, which need the same judgement once they exist.

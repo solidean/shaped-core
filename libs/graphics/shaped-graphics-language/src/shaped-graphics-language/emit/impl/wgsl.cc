@@ -159,9 +159,6 @@ public:
         for (auto const& input : p.e.stage_inputs)
             if (input.input == check::stage_input::primitive_id)
                 out += "enable primitive_index;\n\n";
-        // EMIT-103: a directive, so it stands ahead of every declaration.
-        if (uses_derivatives(p))
-            out += "diagnostic(off, derivative_uniformity);\n\n";
         write_enum_constants(out, p, *this);
         write_buffers(out, p, *this);
 

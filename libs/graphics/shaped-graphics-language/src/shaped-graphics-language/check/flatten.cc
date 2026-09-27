@@ -1735,5 +1735,6 @@ void checker::flatten_entry_point(symbol_id id)
     if (f.is_failed || !f.stage_violations.empty() || reaches_discard || (info.stages & stage_bit(info.entry_stage)) == 0)
         return;
     f.entry.body = f.add_list(f.block);
+    judge_uniformity(f.entry);
     out.entry_points.push_back(cc::move(f.entry));
 }

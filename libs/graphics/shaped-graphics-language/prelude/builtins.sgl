@@ -1261,3 +1261,11 @@
 @builtin @pure fun size(t: texture_cube_array_depth, level: int = 0) -> int2
 @builtin @pure fun layer_count(t: texture_cube_array_depth) -> int
 @builtin @pure fun level_count(t: texture_cube_array_depth) -> int
+
+// Barriers, which a compute shader reaches in control flow every thread of its workgroup takes (CHK-282).
+/// Waits for every thread of the workgroup, after which each sees what the others wrote to workgroup memory.
+@builtin @stages(.compute) fun workgroup_barrier()
+/// Waits for every thread of the workgroup, after which each sees what the others wrote to buffers.
+@builtin @stages(.compute) fun storage_barrier()
+/// Waits for every thread of the workgroup, after which each sees what the others stored to images.
+@builtin @stages(.compute) fun texture_barrier()

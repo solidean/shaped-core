@@ -93,8 +93,6 @@ void write_enum_constants(cc::string& out, plan const& p, dialect const& d);
 void write_helpers(cc::string& out, plan const& p, dialect const& d);
 /// Every resource of the entry point, handed to the dialect one binding at a time.
 void write_buffers(cc::string& out, plan const& p, dialect const& d);
-/// True when the entry point calls a builtin that takes derivatives implicitly: a sample that picks its own level.
-[[nodiscard]] bool uses_derivatives(plan const& p);
 
 /// The whole text of the planned entry point: a header comment, the declarations, and the function.
 /// Mints what the body still needs from `p.names`.

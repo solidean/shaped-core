@@ -165,10 +165,7 @@ A binding that is not `@inline` is a group.
 * **EMIT-101** A call of a builtin that gives nothing is a statement as it stands, with no `_ =` in WGSL.
 * **EMIT-102** A builtin a target cannot write as one expression declares a helper function ahead of the entry point, once per text, and the call names it.
   HLSL's `GetDimensions` writes through out parameters, so `size` is an overload of `sgl_size` per texture type the entry point passes.
-* **EMIT-103** WGSL text whose entry point calls a builtin that takes derivatives implicitly opens with `diagnostic(off, derivative_uniformity);`, and other WGSL text does not.
-  `sample` without a `level` is such a builtin.
-  HLSL samples under an `if` that differs between pixels, and Tint refuses it, so without the directive a program would be written for some targets only, against EMIT-13.
-  It is a stopgap: SGL is to judge uniformity itself, as the [incubator](../incubator/uniformity.md) sketches.
+* **EMIT-103** *Retired:* WGSL text no longer switches Tint's derivative uniformity analysis off, since the check pass refuses what it would refuse (CHK-282).
 * **EMIT-104** A resource at slot i of group N is `register(<class>i, spaceN)` in `hlsl-dx12` and `[[vk::binding(i, N)]]` in `hlsl-vulkan`, which is the address sg's backends give that slot.
   The class is `b` for the constant buffer, `u` for an image and a `mut` buffer, `s` for a sampler, and `t` for every other resource.
 * **EMIT-105** An entry point that lists more than three groups is `too-many-groups` on every target, since sg binds three besides the inline constants.

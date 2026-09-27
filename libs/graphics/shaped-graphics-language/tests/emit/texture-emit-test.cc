@@ -295,35 +295,25 @@ TEST("sgl emit - a static sampler that compares is a comparison sampler, and its
     CHECK(text_of(shadowed, target::wgsl).contains("var set_shadow: sampler_comparison;\n"));
 }
 
-TEST("sgl emit - WGSL lets an implicit-derivative sample stand in non-uniform control flow, only where one is called")
+TEST("sgl emit - WGSL takes an implicit-derivative sample as it stands, since the check pass judged its uniformity")
 {
-    // Tint refuses what HLSL accepts, so the directive keeps the program written for every target (EMIT-103).
-    constexpr auto branched = "binding material:\n"
-                              "    albedo: texture_2d[float4]\n"
-                              "    smp: sampler\n"
-                              "\n"
-                              "struct pixel_input:\n"
-                              "    @position position: hpos4\n"
-                              "    uv: float2\n"
-                              "\n"
-                              "@pixel struct target:\n"
-                              "    color: float4\n"
-                              "\n"
-                              "@pixel fun ps(p: pixel_input){material} -> target:\n"
-                              "    let mut c = float4(0.0, 0.0, 0.0, 1.0)\n"
-                              "    if p.uv.x < 0.5:\n"
-                              "        c = material.albedo.sample(p.uv, material.smp)\n"
-                              "    return {color = c}\n";
-    CHECK(text_of(branched, target::wgsl)
-              .contains("// Generated: the SGL source is what to edit.\n"
-                        "\n"
-                        "diagnostic(off, derivative_uniformity);\n"
-                        "\n"
-                        "@group(0) @binding(0) var material_albedo: texture_2d<f32>;\n"));
-    CHECK(!text_of(branched, target::hlsl_dx12).contains("diagnostic"));
-
-    // A sample at an explicit level takes no derivative, so it leaves Tint's analysis on.
-    CHECK(!text_of(k_blur, target::wgsl).contains("diagnostic"));
+    // CHK-282 refuses what Tint's analysis would, so no directive switches that analysis off
+    constexpr auto sampled = "binding material:\n"
+                             "    albedo: texture_2d[float4]\n"
+                             "    smp: sampler\n"
+                             "\n"
+                             "struct pixel_input:\n"
+                             "    @position position: hpos4\n"
+                             "    uv: float2\n"
+                             "\n"
+                             "@pixel struct target:\n"
+                             "    color: float4\n"
+                             "\n"
+                             "@pixel fun ps(p: pixel_input){material} -> target:\n"
+                             "    let c = material.albedo.sample(p.uv, material.smp)\n"
+                             "    if p.uv.x < 0.5 => return {color = c}\n"
+                             "    return {color = float4(0.0, 0.0, 0.0, 1.0)}\n";
+    CHECK(!text_of(sampled, target::wgsl).contains("diagnostic"));
 }
 
 TEST("sgl emit - a builtin's default fills the level a call leaves out, and a texture stays where it is named")

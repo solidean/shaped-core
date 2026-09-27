@@ -561,18 +561,6 @@ void sgl::emit::impl::write_helpers(cc::string& out, plan const& p, dialect cons
         out.appendf("{}\n", w);
 }
 
-bool sgl::emit::impl::uses_derivatives(plan const& p)
-{
-    for (auto const& x : p.e.exprs)
-    {
-        auto const* const call = x.node.try_as<check::flat_call>();
-        auto const* const record = call != nullptr ? p.m.builtin_function(call->intrinsic) : nullptr;
-        if (record != nullptr && record->uses_derivatives)
-            return true;
-    }
-    return false;
-}
-
 cc::string sgl::emit::impl::write_text(plan& p, dialect const& d)
 {
     auto w = writer{.p = p, .d = d};

@@ -165,8 +165,10 @@ struct sgl::builtins::function_record
     /// The flattener calls this record instead, with the sampler inserted after the coordinate; `none` for every other.
     builtin_id with_default_sampler = builtin_id::none;
     /// Takes screen-space derivatives implicitly, as a sample that picks its own level does.
-    /// WGSL then judges the control flow around every call by its uniformity rules, which HLSL and MSL do not have.
+    /// So every pixel of the quad reaches the call together (CHK-282).
     bool uses_derivatives = false;
+    /// Waits for every thread of the workgroup, so every one of them reaches the call or none does (CHK-282).
+    bool is_barrier = false;
 
     /// Read back from the signature by `finalize`.
     cc::string name;

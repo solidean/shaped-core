@@ -195,6 +195,8 @@ enum class sgl::diagnostic_kind : sgl::u8
     /// An argument a target takes only as a constant, such as a texel offset, given a value computed at run time or a
     /// constant outside the range the targets take.
     invalid_constant_argument,
+    /// A barrier, or a call that takes derivatives, where some invocations of its group may not arrive.
+    non_uniform_control_flow,
 };
 
 namespace sgl

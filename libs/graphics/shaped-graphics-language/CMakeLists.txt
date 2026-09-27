@@ -36,6 +36,7 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/builtins/impl/soft_math.cc
     src/shaped-graphics-language/builtins/register_bit_math.cc
     src/shaped-graphics-language/builtins/register_math.cc
+    src/shaped-graphics-language/builtins/register_sync.cc
     src/shaped-graphics-language/builtins/register_conversions.cc
     src/shaped-graphics-language/builtins/register_scalar_math.cc
     src/shaped-graphics-language/builtins/register_textures.cc
@@ -54,6 +55,7 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/check/check_resources.cc
     src/shaped-graphics-language/check/check_stmt.cc
     src/shaped-graphics-language/check/check_test.cc
+    src/shaped-graphics-language/check/uniformity.cc
     src/shaped-graphics-language/check/dump.cc
     src/shaped-graphics-language/check/flat.cc
     src/shaped-graphics-language/check/flat_builder.cc
@@ -333,6 +335,7 @@ if(SC_BUILD_TESTS)
         tests/corpus/corpus-test.cc
         tests/check/binding-check-test.cc
         tests/check/texture-check-test.cc
+        tests/check/uniformity-check-test.cc
         tests/check/case-check-test.cc
         tests/check/footprint-check-test.cc
         tests/check/control-flow-check-test.cc

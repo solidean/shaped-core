@@ -175,3 +175,23 @@ TEST("sgl emit - WGSL enables primitive_index before it reads one")
     CHECK(text_of(source, target::hlsl_dx12).contains("uint id_in : SV_PrimitiveID"));
     CHECK(text_of(source, target::msl).contains("uint id_in [[primitive_id]]"));
 }
+
+TEST("sgl emit - each barrier is its target's own, an execution barrier over one kind of memory")
+{
+    constexpr auto synced = "binding work:\n"
+                            "    values: mut buffer[float]\n"
+                            "\n"
+                            "@compute(64) fun cs(@thread_id id: int3){work}:\n"
+                            "    work.values[id.x] = 1.0\n"
+                            "    workgroup_barrier()\n"
+                            "    storage_barrier()\n"
+                            "    texture_barrier()\n";
+    CHECK(text_of(synced, target::wgsl)
+              .contains("    workgroupBarrier();\n"
+                        "    storageBarrier();\n"
+                        "    textureBarrier();\n"));
+    CHECK(text_of(synced, target::hlsl_dx12)
+              .contains("    GroupMemoryBarrierWithGroupSync();\n"
+                        "    DeviceMemoryBarrierWithGroupSync();\n"
+                        "    DeviceMemoryBarrierWithGroupSync();\n"));
+}

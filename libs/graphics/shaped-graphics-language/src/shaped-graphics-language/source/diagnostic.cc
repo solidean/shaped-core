@@ -222,6 +222,8 @@ cc::string_view sgl::to_string(diagnostic_kind kind)
         return "missing-sampler";
     case diagnostic_kind::invalid_constant_argument:
         return "invalid-constant-argument";
+    case diagnostic_kind::non_uniform_control_flow:
+        return "non-uniform-control-flow";
     }
     CC_UNREACHABLE("unknown diagnostic_kind");
 }
@@ -440,6 +442,8 @@ cc::string_view sgl::summary_of(diagnostic_kind kind)
         return "a texture sampled without a sampler, and without a `@sampler` to supply one";
     case diagnostic_kind::invalid_constant_argument:
         return "an argument taken only as a constant in a range, given something else";
+    case diagnostic_kind::non_uniform_control_flow:
+        return "a barrier or a derivative where not every invocation of its group arrives";
     case diagnostic_kind::unknown_feature:
         return "a `require` of a name that is no feature a shader can use";
     case diagnostic_kind::feature_not_declared:
@@ -557,6 +561,7 @@ sgl::severity sgl::default_severity_of(diagnostic_kind kind)
     case diagnostic_kind::shift_out_of_range:
     case diagnostic_kind::missing_sampler:
     case diagnostic_kind::invalid_constant_argument:
+    case diagnostic_kind::non_uniform_control_flow:
         return severity::normal_error;
     case diagnostic_kind::spaced_attribute_arguments:
     case diagnostic_kind::no_effect:

@@ -467,6 +467,8 @@ struct checker
     void judge_constant_arguments(i32 file, ast::expr_id id);
     void judge_offset_range(i32 file, ast::expr_id expr);
     void index_builtin_symbols();
+    /// CHK-282: every barrier and every call that takes derivatives stands where all invocations of its group arrive.
+    void judge_uniformity(flat_entry_point const& structured);
     /// The prelude symbol that declares `id`; `none` for a record no declaration names.
     [[nodiscard]] symbol_id symbol_declaring(builtin_id id) const;
     /// A literal, an enum case, a `const`, or a construction of those: what a target takes where it takes no value.

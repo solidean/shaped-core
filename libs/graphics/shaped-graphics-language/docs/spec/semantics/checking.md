@@ -570,6 +570,24 @@ Nothing in a body uses a feature yet, so a `require` in a test's body is `unused
 * **CHK-186** `@compute` and `@raytracing` on a pipeline are `unsupported-yet`.
 * **CHK-187** Breaking one of CHK-175 to CHK-185 is `invalid-pipeline`, unless a rule names another kind, and its detail says what broke.
 
+## Uniformity
+
+A barrier waits for every thread of its workgroup, and a derivative compares a pixel with the other three of its quad.
+So each stands where every invocation of its group arrives together, which the check pass judges once every call is inlined.
+Its rules are WGSL's, applied to the tree an emitter prints, so that no target refuses what SGL accepts.
+
+* **CHK-282** A barrier, and a builtin that takes derivatives implicitly, in **non-uniform control flow** is `non-uniform-control-flow`, at the call.
+  A note names the branch or the exit that made the flow so, and what the branch tested.
+  `sample` without a `level` or gradients, `sample_compare` without a `level`, `ddx` and `ddy` take derivatives.
+* **CHK-283** A value is **non-uniform** where it comes from a stage input other than `@workgroup_id`, from the stage struct, from a `mut` buffer or a `mut` image,
+  from a non-uniform value, or from a local set anywhere in non-uniform control flow.
+  Every other value is uniform: a literal, a `const`, a member of a constant block, and an element of a read-only buffer at a uniform index.
+* **CHK-284** Control flow is non-uniform inside an `if`, a `case` or a loop whose condition is non-uniform, and the right side of an `and` or an `or` whose left side is.
+  It stays so after an `if` or a `case` one of whose sides leaves in non-uniform control flow, and for the rest of the entry point after such a `return`.
+  A loop some invocations leave early, by a `break`, a `continue` or a `return` in non-uniform control flow, is non-uniform throughout and after it.
+  An inlined function's early `return` is such an exit of the block it became.
+  A `discard` changes nothing, as in WGSL, where the pixel goes on as a helper of its quad.
+
 ## The flat tree
 
 * **CHK-94** The pass has two results: side tables over the untouched ASTs, and one **flat tree** per entry point.
@@ -754,6 +772,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `shift-out-of-range` | CHK-270 |
 | `missing-sampler` | CHK-279 |
 | `invalid-constant-argument` | CHK-280 |
+| `non-uniform-control-flow` | CHK-282 |
 
 ## Open
 

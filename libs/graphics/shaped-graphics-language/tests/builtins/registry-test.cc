@@ -163,7 +163,7 @@ TEST("sgl builtins - a local may not hide the function a builtin is written as, 
     CHECK(wgsl.text.contains("let lerp: f32 = mix(p.a, p.b, 0.5);"));
 }
 
-TEST("sgl builtins - a texture method's MSL, which no group reaches until MSL takes one")
+TEST("sgl builtins - a texture method's MSL and a barrier's, which no entry point reaches until MSL takes a group")
 {
     auto const& r = builtins::default_registry();
     // the call a record writes, with its arguments already written as the names of their parameters
@@ -217,4 +217,9 @@ TEST("sgl builtins - a texture method's MSL, which no group reaches until MSL ta
     cc::string_view const size_names[] = {"", ""};
     cc::string_view const size_args[] = {"t", "2"};
     CHECK(msl("size", size_types, size_names, size_args) == "int3(t.get_width(2), t.get_height(2), t.get_depth(2))");
+
+    // Metal has one barrier, and the memory it orders is its argument
+    CHECK(msl("workgroup_barrier", {}, {}, {}) == "threadgroup_barrier(mem_flags::mem_threadgroup)");
+    CHECK(msl("storage_barrier", {}, {}, {}) == "threadgroup_barrier(mem_flags::mem_device)");
+    CHECK(msl("texture_barrier", {}, {}, {}) == "threadgroup_barrier(mem_flags::mem_texture)");
 }

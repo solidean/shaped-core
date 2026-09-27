@@ -21,12 +21,14 @@ void register_vector_math(registry& r);
 void register_transforms(registry& r);
 /// `x as T` between `float`, `int` and `uint` of one width, as operator functions of `as`.
 void register_conversions(registry& r);
-/// DEBUG: the stand-ins for sampling, loading and storing texels, until textures have methods.
+/// The texture and image methods, for every shape.
 void register_textures(registry& r);
 /// `&`, `|`, `^`, `~`, `<<` and `>>` of `int`, `uint` and their vectors.
 void register_bit_math(registry& r);
 /// Transcendentals, rounding, derivatives, geometry, integer bit functions, packing and reinterpreting bits.
 void register_math(registry& r);
+/// The barriers of a compute workgroup.
+void register_sync(registry& r);
 } // namespace sgl::builtins
 
 /// What the topic files share.
