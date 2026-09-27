@@ -111,9 +111,7 @@ cc::optional<cc::string> lsp::path_of_uri(cc::string_view uri)
         // `file://server/share/x` is a UNC path, as VS Code reads it
 #ifdef CC_OS_WINDOWS
         auto unc = cc::string("\\\\") + host.value() + path.value();
-        for (auto& c : unc)
-            if (c == '/')
-                c = '\\';
+        unc.replace_all('/', '\\');
         return unc;
 #else
         return cc::string("//") + host.value() + path.value();
