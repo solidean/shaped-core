@@ -12,6 +12,13 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   It is a second member of "access is inferred, never declared (with one exception)", for the same reason the bindless declaration is the first.
   dx12 first, vulkan when a member needs it; sr's [denoising.md](../../shaped-rendering/docs/denoising.md) is the consumer.
   Pin it with a test that clears through the scope and checks sg's next inferred barrier.
+- **A barrier-only dx12 submit once landed outside any test.**
+  One full `dev.py check` failed `shaped-graphics-test` on debug-nopch with the debug layer's "recorded only Barrier commands" warning, logged under no test owner.
+  The message is allowlisted, but only inside a test, so an unowned one fails the run.
+  It did not reproduce in 105 further runs of the suite on that preset, 60 of them under concurrent load.
+  Ruled out by reading: the copy-queue windows record only copies, `prepare_texture_for_async` and routine ticks run on the test's thread, and shutdown submits nothing.
+  A barrier-only list is almost always an entry pre-list, whose need depends on submit order, which fits a rare failure; which thread submitted without an owner is unknown.
+  Next step when it recurs: have the dx12 relay name the raising thread, and attach a stack to this one message.
 - **A footprint is only as exact as the code the emitter prints.**
   SGL removes no dead code yet, so a use behind a constant-false branch still counts, and costs the barrier it implies.
   Dead-code removal belongs on the tree both the emitter and the footprint read, never in the footprint alone, since an untouched slot records no layout transition.
