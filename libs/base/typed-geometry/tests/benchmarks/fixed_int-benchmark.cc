@@ -10,6 +10,8 @@
 //   exact remainder (C).
 //   Measured against an f64 estimate with the same correction (B), an f64 division trusted outside an epsilon band
 //   around the integers (A), and a full long division.
+//   On a Zen 4, C is ~30% faster than B and ~2.2x faster than the long division.
+//   A is no faster than B, so skipping the exact correction does not pay for the error analysis it rests on.
 // - to_f64 correctly rounded against the variant without the sticky bit; the sticky bit costs ~20%, and stays.
 //
 // Run with

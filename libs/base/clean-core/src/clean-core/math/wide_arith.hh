@@ -3,7 +3,7 @@
 #include <clean-core/common/macros.hh>
 #include <clean-core/fwd.hh>
 
-// Portable extended-precision integer primitives: the 64x64 -> 128 multiplies, and the carry/borrow-propagating add/sub that wider arithmetic is built from.
+// Portable extended-precision integer primitives that wider arithmetic is built from: the 64x64 -> 128 multiplies, the carry/borrow-propagating add/sub, and the 128 ÷ 64 division step.
 // Hash mixers, bignum and fixed-point are the callers.
 // All are constexpr.
 //
@@ -11,12 +11,12 @@
 //   * clang/gcc, every arch incl. ARM/WASM: __int128, so the whole job is a builtin 128-bit op.
 //     Best codegen, constexpr, and the compiler emits the native MUL/UMULH and ADC/SBB itself.
 //   * MSVC cl.exe has no __int128, so it uses intrinsics.
-//     x64 has _umul128 / _mul128 / _addcarry_u64 / _subborrow_u64.
+//     x64 has _umul128 / _mul128 / _addcarry_u64 / _subborrow_u64 / _udiv128.
 //     ARM64 has __umulh / __mulh for the multiplies but no carry intrinsic, so add/sub take the plain-u64 fallback.
 //     None of the intrinsics are usable in a constant expression, so `if !consteval` routes constant evaluation to the plain-u64 fallback below.
 
 // The MSVC intrinsics below are declared by intrinsics.hh rather than pulled in with <intrin.h>, which costs
-// tens of thousands of lines for the six we use.
+// tens of thousands of lines for the handful we use.
 // It expands to nothing on clang and gcc, which have __int128.
 #include <clean-core/platform/intrinsics.hh>
 

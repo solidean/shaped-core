@@ -206,9 +206,10 @@ def body_mul(r: int, a: int, b: int, signed: bool, form: str | None = None) -> l
     db, nb, _ = operand_words("b", b, signed)
     lines = [d for d in da + db if "_fill" not in d]
 
-    # Measured on Zen 4 (tests/benchmarks/fixed_int-benchmark.cc times both): a truncated product, whose top column
-    # is only low halves, is ~20% faster summed column by column, since its multiplies are independent.
-    # A full product is 5-10% faster row by row, where the accumulation folds into the multiply chain.
+    # A tie-break rather than a measured win (tests/benchmarks/fixed_int-benchmark.cc times both forms).
+    # A truncated product, whose top column is only low halves, is summed column by column, since its multiplies are independent.
+    # A full product is summed row by row, where the accumulation folds into the multiply chain.
+    # One Zen 4 measured each choice 5-20% ahead; a second could not separate the forms from its run-to-run noise.
     if form is None:
         form = "row" if aw + bw <= rw else "column"
 

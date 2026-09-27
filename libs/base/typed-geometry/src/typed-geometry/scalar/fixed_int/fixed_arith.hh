@@ -222,6 +222,11 @@ template <int A, int B, bool S>
         ++t;
         r -= wv;
     }
+#if TG_CHECK_WIDE_ARITH
+    // One step lands the remainder on the divisor's side of zero and below it only for an estimate within one.
+    auto const landed = w_negative ? wv < r && !(wide() < r) : !(r < wide()) && r < wv;
+    CC_ASSERT_ALWAYS(landed, "tg::div_floor / div_ceil: the quotient does not fit the result type");
+#endif
     return {t, t + i64(r != wide())};
 }
 
@@ -241,6 +246,13 @@ template <int A, int B, bool S>
     auto const s = width > 64 ? width - 64 : 0;
     auto const wt = limb(mw >> s, 0);
     auto const xs = s < A ? mx >> s : fixed_integer<A, false>(); // an x narrower than the shift divides to 0
+#if TG_CHECK_WIDE_ARITH
+    // A quotient that fits 32 bits leaves xs below 2^64 * wt; past that the division traps, or drops xs's top words.
+    auto estimable = limb(xs, 1) < wt;
+    for (auto i = 2; i < word_count<A>; ++i)
+        estimable = estimable && limb(xs, i) == 0;
+    CC_ASSERT_ALWAYS(estimable, "tg::div_floor / div_ceil: the quotient does not fit the result type");
+#endif
     auto const q = i64(cc::udiv128({limb(xs, 0), limb(xs, 1)}, wt).quotient);
     auto const t = is_negative(x) != is_negative(w) ? -q - 1 : q;
     return correct_quotient(x, w, t);
@@ -280,6 +292,7 @@ template <class Q, int A, int B, bool S>
 
 /// floor(x / w) for a quotient known to fit Q, which is the claim TG_CHECK_WIDE_ARITH checks; w must be non-zero.
 /// With Q 32 bits wide this is one 128 ÷ 64 estimate plus one exact correction rather than a long division.
+/// Unchecked, a false claim is undefined rather than wrapping: the estimate's division can trap on x64.
 template <class Q, int A, int B, bool S>
     requires impl::result_of<Q, S>
 [[nodiscard]] constexpr Q div_floor(impl::fixed_integer<A, S> const& x, impl::fixed_integer<B, S> const& w)

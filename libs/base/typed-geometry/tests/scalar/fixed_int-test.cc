@@ -434,6 +434,46 @@ TEST("tg fixed_int - bounded quotient")
     CHECK(tg::div_ceil<fi128>(fi256(-7), fi192(2)) == fi128(-3));
 }
 
+#if TG_CHECK_WIDE_ARITH
+TEST("tg fixed_int - a false claim fails where it is made")
+{
+    auto const p80 = fi128(1) << 80;
+    auto const p90 = fi128(1) << 90;
+
+    SECTION("result widths")
+    {
+        CHECK_ASSERTS(tg::mul<fi128>(p80, p90));
+        CHECK_ASSERTS(tg::add<fi128>(fi128::max(), fi128(1)));
+        CHECK_ASSERTS(tg::sub<fu64>(fu64(1), fu64(2)));
+        CHECK(tg::mul<fi192>(p80, p90) == fi192(1) << 170);
+    }
+    SECTION("shift amounts")
+    {
+        CHECK_ASSERTS(fi128(1) << 128);
+        CHECK_ASSERTS(fi128(1) >> -1);
+        CHECK_ASSERTS(fi64(1).shifted_left<fi128>(128));
+        CHECK((fi128(1) << 127) == fi128::min());
+    }
+    SECTION("floats in")
+    {
+        CHECK_ASSERTS(fi64(0x1p63));
+        CHECK_ASSERTS(fi64(cc::bit_cast<f64>(u64(0x7ff) << 52)));
+        CHECK(fi64(-0x1p63) == fi64::min());
+    }
+    SECTION("quotients")
+    {
+        // past 64 bits, the estimate's 128 ÷ 64 division would trap before any width check
+        CHECK_ASSERTS(tg::div_floor<fi32>(fi128(1) << 100, fi64(1)));
+        // past xs's two low words, the estimate drops the rest and one correction cannot recover it
+        CHECK_ASSERTS(tg::div_floor<fi32>((fi256(1) << 200) + fi256(5), fi64(1)));
+        // estimable, but wider than the claim
+        CHECK_ASSERTS(tg::div_floor<fi32>(fi128(1) << 40, fi64(1)));
+        CHECK_ASSERTS(tg::div_ceil<fi64>(fi256(1) << 100, fi192(1)));
+        CHECK(tg::div_floor<fi32>(fi128(-7), fi64(2)) == fi32(-4));
+    }
+}
+#endif
+
 // =========================================================================================================
 // Conversions, bits, printing
 // =========================================================================================================
@@ -635,6 +675,7 @@ TEST("tg fixed_int - every triple against _BitInt")
         check_triples_a<128, true>(checks);
         check_triples_a<192, true>(checks);
         check_triples_a<256, true>(checks);
+        CHECK(checks > 0);
     }
     SECTION("unsigned")
     {
@@ -643,6 +684,7 @@ TEST("tg fixed_int - every triple against _BitInt")
         check_triples_a<128, false>(checks);
         check_triples_a<192, false>(checks);
         check_triples_a<256, false>(checks);
+        CHECK(checks > 0);
     }
 }
 

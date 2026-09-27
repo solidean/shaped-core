@@ -174,9 +174,11 @@ So `try_resize_bytes_in_place` returning -1 is a normal outcome rather than a pl
 `SC_CHECK_WIDE_ARITH` (default `OFF`) checks typed-geometry's `fixed_int` claims at runtime; it reaches C++ as `TG_CHECK_WIDE_ARITH`, 0 or 1.
 A claim is something the caller knows and the code trusts: the result width `tg::mul<fi192>(a, b)` names, a shift amount below the width, a float that fits the integer it is converted to.
 Checked, a false claim fails `CC_ASSERT_ALWAYS` at the line that made it; unchecked, the result wraps and nothing is paid for.
+The exception is a quotient claim, `tg::div_floor<fi32>(x, w)`: unchecked, a false one is undefined, and its estimate's 128 ÷ 64 division can trap on x64.
 
 These sit in the hottest loops of exact geometry predicates, which is why they are a switch of their own rather than `CC_ASSERT`s riding on the default preset.
-`tg::checked_add` / `checked_sub` / `checked_mul` always check whatever the switch says, so the checking code is tested in every build.
+`tg::checked_add` / `checked_sub` / `checked_mul` always check whatever the switch says, so the fit computation behind the `add` / `sub` / `mul` asserts is tested in every build.
+The asserts themselves are tested where the switch is on.
 
 Like `SC_THREADS` it is whole-build, never per-target: an inline function compiled with and without the check in one program is an ODR violation.
 The `debug-nopch` presets turn it on, so `dev.py check`'s debug leg exercises it on every platform.

@@ -53,11 +53,12 @@ inline constexpr int word_count = Bits == 32 ? 1 : Bits / 64;
     // One 128-bit expression lets the compiler schedule the whole carry chain, rather than three calls' worth.
     auto const s = static_cast<__uint128_t>(a) * b + acc + carry;
     return {u64(s), u64(s >> 64)};
-#endif
+#else
     auto const p = cc::umul128(a, b);
     auto const s1 = cc::add_with_carry(p.lo, acc);
     auto const s2 = cc::add_with_carry(s1.value, carry);
     return {s2.value, p.hi + s1.carry + s2.carry};
+#endif
 }
 
 /// x's i-th 64-bit word, sign- or zero-extended past its top; for 32 bits that is the value widened to 64.
