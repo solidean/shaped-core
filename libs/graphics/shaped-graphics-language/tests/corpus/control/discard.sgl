@@ -1,0 +1,33 @@
+// `discard` ends the pixel with no effect; it is a jump, so a path that ends in it needs no value
+
+fun alpha_tested(c: float4) -> float4:
+    if c.w < 0.5 => discard
+    return c
+
+test alpha_tested(float4(1.0, 0.0, 0.0, 1.0)).x == 1.0
+
+// a test that is to discard ends there, and needs no last check
+@expect(.discard)
+test:
+    alpha_tested(float4(1.0, 0.0, 0.0, 0.25))
+
+struct varyings:
+    @position position: hpos4
+    uv: float2
+
+@pixel struct target:
+    color: float4
+
+// a circle cut from a quad
+@pixel fun circle_ps(p: varyings) -> target:
+    let d = p.uv - float2(0.5, 0.5)
+    if dot(d, d) > 0.25 => discard
+    return { color = alpha_tested(float4(p.uv.x, p.uv.y, 0.0, 1.0)) }
+
+// a function whose every path discards or returns needs no value past the discard
+@pixel fun every_other_ps(p: varyings) -> target:
+    let column = p.position.x as int
+    if column % 2 == 1:
+        discard
+    else:
+        return { color = float4(1.0, 1.0, 1.0, 1.0) }

@@ -181,3 +181,26 @@ TEST("sgl tests - a maths builtin outside the domain WGSL defines it on is a pro
     // inside the domain it is an ordinary value
     CHECK(sgl::test::run_test(checked.module, files, 4).is_passed());
 }
+
+TEST("sgl tests - a run that reaches discard ends as discarded, which only @expect(.discard) accepts")
+{
+    // CHK-278
+    auto const checked
+        = check_sources(read_prelude(), "fun cut(a: float) -> float:\n    if a < 0.5 => discard\n    return a\n"
+                                        "test cut(0.25) == 0.25\n"
+                                        "@expect(.fail)\ntest cut(0.25) == 0.25\n"
+                                        "@expect(.discard)\ntest:\n    cut(0.25)\n"
+                                        "@expect(.discard)\ntest cut(0.75) == 0.75\n");
+    auto files = cc::vector<sgl::check::module_file>();
+    for (auto i = isize(0); i < checked.files.size(); ++i)
+        files.push_back({.file = checked.files[i], .ast = checked.asts[i]});
+    REQUIRE(checked.module.tests.size() == 4);
+    CHECK(sgl::test::run_test(checked.module, files, 0).status == sgl::test::test_status::discarded);
+    // a discard is no failed check
+    CHECK(sgl::test::run_test(checked.module, files, 1).status == sgl::test::test_status::discarded);
+    CHECK(sgl::test::run_test(checked.module, files, 2).is_passed());
+    // one that was to discard and ran to its end fails
+    auto const ran_through = sgl::test::run_test(checked.module, files, 3);
+    CHECK(ran_through.status == sgl::test::test_status::failed);
+    CHECK(ran_through.detail == "it was to discard, and it ran to its end");
+}

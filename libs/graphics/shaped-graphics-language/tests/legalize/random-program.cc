@@ -286,7 +286,10 @@ struct generator
                 loops.push_back(t.label);
 
         auto stmt = flat_stmt_id::none;
-        if (!loops.empty() && chance(35))
+        // a discard ends the whole run, which both forms must do at the same step; rarely, or little else runs
+        if (chance(4))
+            stmt = b.discard();
+        else if (!loops.empty() && chance(35))
             stmt = b.continue_(loops[pick(int(loops.size()))]);
         else
         {
@@ -644,8 +647,8 @@ cc::string sgl_test::differential_failure(checked_module const& m,
         return text;
     };
 
-    // a program the generator got wrong proves nothing about the legalizer
-    if (expected.status != run_status::ok)
+    // a program the generator got wrong proves nothing about the legalizer; a discard is a program ending as it may
+    if (expected.status != run_status::ok && expected.status != run_status::discarded)
         return report("the generated program does not run to a result", nullptr, nullptr);
     if (auto const violation = scope_violation(structured); !violation.empty())
         return report(cc::format("the generated program is not scoped: {}", violation), nullptr, nullptr);

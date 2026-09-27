@@ -173,7 +173,7 @@ enum light_kind:
 * **CHK-226** The last code line of a test is a check, or it is `test-must-end-in-check` ([why](why/checking.md#chk-226)).
   The last code line is the last statement of its body, through the last branch of an `if`, the body of a loop and the last arm of a `case`.
   A test whose asserts are what it checks ends in `true // why`.
-  A test that expects `.fail` or `.assert` is exempt, since it cannot pass without its run failing, and so is a test with no statement, which the AST pass reported.
+  A test that expects `.fail`, `.assert` or `.discard` is exempt, since it cannot pass without its run ending so, and so is a test with no statement, which the AST pass reported.
 * **CHK-227** `assert condition` takes a `bool`, in a test or anywhere else; a message is `unsupported-yet`.
   A condition that writes a buffer, prints, or calls a builtin with an effect is `unsupported-yet`, since no target writes an `assert` (LEGAL-53) and its effect would happen on the interpreter alone.
 * **CHK-228** A test reads nothing of the function it stands in: a parameter, a local or a binding member of it is `test-captures-runtime-value`, since the test runs on its own.
@@ -183,7 +183,8 @@ enum light_kind:
   A node is an `and`, an `or`, a `not`, a comparison, a comparison chain, or a leaf any other expression is; it runs in the order and under the conditions the condition itself would run it.
 * **CHK-230** A test whose body checked clean, and whose every callee inlines whole, has a flat tree of its own, of no stage and without a parameter.
   A test that expects a diagnostic has none, and neither has one in whose text the parser or the AST pass found an error.
-* **CHK-231** `@expect` on a test names what it does, one argument each: `.fail`, `.assert`, `error = "kind"` or `warning = "kind"`.
+* **CHK-231** `@expect` on a test names what it does, one argument each: `.fail`, `.assert`, `.discard`, `error = "kind"` or `warning = "kind"`.
+* **CHK-278** A test that expects `.discard` passes where its run ends at a `discard`, and like one that expects `.fail` or `.assert` it need not end in a check.
   In a kind, `*` stands for any run of characters and `?` for one.
   An empty kind is `invalid-attribute-arguments`.
   Any other argument is `invalid-attribute-arguments`.
@@ -469,6 +470,8 @@ fun f() -> float:
 * **CHK-275** `@format(.case)` on a member of a `@vertex struct` names the `sg::vertex_attribute_format` its bytes are, and never a pipeline setting ([why](why/checking.md#chk-275)).
   The format decodes into the member's type, or it is `type-mismatch`: `.rgba8_unorm` into a `float4`, `.rgba8_uint` into a `uint4`.
   A member without one reads the format its type has at full width: `float3` is `vec3f`, `uint` is `u32`.
+* **CHK-277** An entry point whose inlined body reaches a `discard` is a `@pixel fun`, or it is `stage-not-allowed` at the `discard` ([why](why/checking.md#chk-277)).
+  A path that ends in a `discard` needs no value, as one that ends in `return` does.
 * **CHK-276** A member of a `@pixel struct` marked `@depth` is the pixel's depth, a `float`, and one marked `@sample_mask` the samples it writes, a `uint` ([why](why/checking.md#chk-276)).
   Neither is a color target, so neither takes a location or a `color_targets` entry, and a struct holds one of each at most.
   `@depth(.greater_equal)` and `@depth(.less_equal)` promise that the written depth only moves that way from the rasterized one.

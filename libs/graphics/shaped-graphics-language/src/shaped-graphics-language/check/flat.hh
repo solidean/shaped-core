@@ -442,6 +442,13 @@ struct sgl::check::flat_for
     constexpr bool operator==(flat_for const&) const = default;
 };
 
+/// Ends the invocation with no effect: nothing after it runs, and what it would have written is never written.
+/// A pixel entry point's alone (CHK-277); a test's run ends as `discarded`.
+struct sgl::check::flat_discard
+{
+    constexpr bool operator==(flat_discard const&) const = default;
+};
+
 /// Starts the next iteration of the loop `target`, from any depth inside it in the structured form.
 /// In the core form `target` is the innermost loop, and no `once` stands in between.
 struct sgl::check::flat_continue
@@ -587,6 +594,7 @@ struct sgl::check::flat_stmt
                 flat_while,
                 flat_for,
                 flat_continue,
+                flat_discard,
                 flat_once,
                 flat_break,
                 flat_case,

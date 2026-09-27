@@ -171,6 +171,8 @@ cc::string_view sgl::test::to_string(test_status s)
         return "uninitialized-read";
     case test_status::program_error:
         return "program-error";
+    case test_status::discarded:
+        return "discarded";
     case test_status::internal_error:
         return "internal-error";
     case test_status::stopped:
@@ -292,6 +294,9 @@ test_result sgl::test::run_test(checked_module const& m, cc::span<module_file co
     case run_status::program_error:
         result.status = test_status::program_error;
         break;
+    case run_status::discarded:
+        result.status = test_status::discarded;
+        break;
     case run_status::fell_off_the_end:
     case run_status::type_error:
         result.status = test_status::internal_error;
@@ -308,12 +313,13 @@ test_result sgl::test::run_test(checked_module const& m, cc::span<module_file co
     auto const* unmet = static_cast<test_expectation const*>(nullptr);
     for (auto const& e : test.expectations)
     {
-        if (e.kind != expectation_kind::fail && e.kind != expectation_kind::assert_)
+        if (e.kind != expectation_kind::fail && e.kind != expectation_kind::assert_ && e.kind != expectation_kind::discard)
             continue;
         has_run_expectation = true;
         auto const is_met = e.kind == expectation_kind::fail
                               ? ran == test_status::failed || ran == test_status::assertion_failed
-                              : ran == test_status::assertion_failed;
+                          : e.kind == expectation_kind::assert_ ? ran == test_status::assertion_failed
+                                                                : ran == test_status::discarded;
         if (!is_met && unmet == nullptr)
             unmet = &e;
     }
@@ -326,8 +332,9 @@ test_result sgl::test::run_test(checked_module const& m, cc::span<module_file co
     else if (unmet != nullptr && ran == test_status::passed)
     {
         result.status = test_status::failed;
-        result.detail = unmet->kind == expectation_kind::fail ? "it was to fail, and it passed"
-                                                              : "it was to stop at an assert, and it ran to its end";
+        result.detail = unmet->kind == expectation_kind::fail    ? "it was to fail, and it passed"
+                      : unmet->kind == expectation_kind::assert_ ? "it was to stop at an assert, and it ran to its end"
+                                                                 : "it was to discard, and it ran to its end";
     }
     return result;
 }
@@ -418,6 +425,9 @@ located_diagnostic sgl::test::diagnostic_of(checked_module const& m, test_result
         break;
     case test_status::program_error:
         detail = cc::format("the run has no behaviour past this: {}", r.detail);
+        break;
+    case test_status::discarded:
+        detail = "the run reached a discard, which ends it; `@expect(.discard)` says that is what it is to do";
         break;
     case test_status::internal_error:
         detail = cc::format("the compiler wrote a tree it cannot run: {}", r.detail);

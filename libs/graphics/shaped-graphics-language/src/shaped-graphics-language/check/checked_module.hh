@@ -45,6 +45,8 @@ enum class sgl::check::expectation_kind : sgl::u8
     fail,
     /// `.assert`: the run stops at a false `assert`.
     assert_,
+    /// `.discard`: the run ends at a `discard` (CHK-278).
+    discard,
     /// `error = "kind"`: a diagnostic of that kind, a normal or a fatal error, stands in the test.
     error,
     /// `warning = "kind"`: the same, of a warning.

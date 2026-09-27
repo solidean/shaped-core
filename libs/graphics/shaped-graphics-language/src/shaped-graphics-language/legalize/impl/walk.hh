@@ -103,6 +103,7 @@ void for_each_expr_of(flat_stmt const& s, Fn&& fn)
                      visit(n.end);
                  },
                  [&](flat_continue const&) {}, //
+                 [&](flat_discard const&) {},  //
                  [&](flat_once const&) {},     //
                  [&](flat_break const&) {},    //
                  [&](flat_case const& n) { visit(n.scrutinee); }, [&](flat_switch const& n) { visit(n.scrutinee); },

@@ -25,6 +25,8 @@ enum class sgl::test::test_status : sgl::u8
     /// The run read a `var` nothing assigned, a mistake of the program the check pass cannot see yet.
     /// A status of its own, so `@expect(.fail)` never passes on it.
     uninitialized_read,
+    /// The run reached a `discard`, which ends it with no result and no effect; `@expect(.discard)` expects it.
+    discarded,
     /// The run met a value no target defines an operation for, such as an integer divisor of zero.
     /// A status of its own for the same reason: it is a mistake of the program, never a check that failed.
     program_error,

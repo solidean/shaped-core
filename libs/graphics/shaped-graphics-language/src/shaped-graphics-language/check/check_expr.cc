@@ -275,8 +275,9 @@ type_id checker::check_expr(function_scope& scope, ast::expr_id expr)
         },
         [&](ast::return_expr const&) { return not_yet("return as a value"); }, [&](ast::yield_expr const&)
         { return not_yet("yield as a value"); }, [&](ast::break_expr const&) { return not_yet("break as a value"); },
-        [&](ast::continue_expr const&) { return not_yet("continue as a value"); }, [&](ast::struct_type const&)
-        { return not_yet("a type as a value"); }, [&](ast::function_type const&) { return not_yet("a type as a value"); },
+        [&](ast::continue_expr const&) { return not_yet("continue as a value"); }, [&](ast::discard_expr const&)
+        { return not_yet("discard as a value"); }, [&](ast::struct_type const&) { return not_yet("a type as a value"); },
+        [&](ast::function_type const&) { return not_yet("a type as a value"); },
         // reserved, and reported by the AST pass
         [&](ast::with_bindings const&) { return error_type; });
 

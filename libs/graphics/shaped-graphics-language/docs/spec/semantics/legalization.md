@@ -17,6 +17,7 @@ The worked examples are WGSL, since it is the strictest target: no `do … while
 * **LEGAL-4** `continue` names the innermost enclosing loop, and no `once` stands between the two ([why](why/legalization.md#legal-4)).
 * **LEGAL-50** A `switch` may stand between them: every target takes a `continue` inside one as the enclosing loop's, WGSL included ([why](why/legalization.md#legal-50)).
 * **LEGAL-5** `return` is legal at any depth: it is the exit of the root block.
+* **LEGAL-54** `discard` is legal at any depth, and no pass moves anything across it: it ends the invocation, not a construct around it.
 * **LEGAL-6** The right operand of `and` / `or` has no effect ([why](why/legalization.md#legal-6)).
 * **LEGAL-7** The `end` of a `for` has no effect and reads no mutable local and no buffer element, since a target evaluates it before every iteration.
 * **LEGAL-8** A tree that is core already is left as it is.

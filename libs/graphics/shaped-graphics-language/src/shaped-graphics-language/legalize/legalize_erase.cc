@@ -191,6 +191,7 @@ struct void_eraser
                                 n.body = body(n.body, depth);
                             },
                             [&](flat_continue&) {}, //
+                            [&](flat_discard&) {},  //
                             [&](flat_once& n) { n.body = body(n.body, depth); }, [&](flat_break&) {},
                             [&](flat_case& n)
                             {

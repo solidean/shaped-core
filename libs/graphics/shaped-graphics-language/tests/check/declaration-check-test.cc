@@ -414,3 +414,18 @@ TEST("sgl check - a @pixel struct's depth and sample mask are outputs of their t
     // only a @pixel struct writes a pixel's outputs
     CHECK(reports_for("struct plain:\n    @depth d: float\n").contains("unsupported-yet"));
 }
+
+TEST("sgl check - only a pixel entry point may reach discard")
+{
+    // CHK-277: judged once the body is inlined, so a helper may hold one
+    constexpr auto helper = "fun cut(a: float) -> float:\n    if a < 0.5 => discard\n    return a\n";
+    CHECK(reports_for(cc::string(helper)
+                      + "struct vout:\n    @position p: hpos4\n"
+                        "@vertex fun vs(@vertex_index i: int) -> vout:\n"
+                        "    return { p = hpos4(cut(0.25), 0.0, 0.0, 1.0) }\n")
+          == "stage-not-allowed user:[discard] vs is a vertex entry point, and only a pixel stage discards\n");
+    CHECK(reports_for(cc::string(helper)
+                      + "struct vout:\n    @position p: hpos4\n@pixel struct target:\n    c: float4\n"
+                        "@pixel fun ps(v: vout) -> target:\n    return { c = float4(cut(v.p.x), 0.0, 0.0, 1.0) }\n")
+          == "");
+}

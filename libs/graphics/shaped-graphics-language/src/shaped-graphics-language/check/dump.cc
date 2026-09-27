@@ -371,6 +371,7 @@ struct dumper
                          out += ")";
                      },
                      [&](flat_continue const& c) { out.appendf("(continue ${})", label_name(e, c.target)); },
+                     [&](flat_discard const&) { out += "(discard)"; },
                      [&](flat_once const& o)
                      {
                          out += "(once";

@@ -465,6 +465,8 @@ struct expr_lowering
             auto const target = is_known(out.e, c->target) || loops.empty() ? c->target : loops.back();
             into.push_back(attributed().continue_(target));
         }
+        else if (s.node.is<flat_discard>())
+            into.push_back(attributed().discard());
         else if (auto const* const once = s.node.try_as<flat_once>())
         {
             auto const label = label_or_new(label_id::none, "once");

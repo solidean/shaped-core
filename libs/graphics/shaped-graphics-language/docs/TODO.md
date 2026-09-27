@@ -15,6 +15,9 @@ What the compiler carries today is the [spec](spec/_index.md); a construct it do
   It is meant to extend the type it names where that block alone sees it, as when implementing a method.
 - **Literal folding.** `1 / 3` over integer literals alone is refused (CHK-268), and so is an operator over them that only a float takes (CHK-257).
   Folding literal subtrees is what [literal-types.md](spec/incubator/literal-types.md) sketches in their place.
+- **What `discard` does to a quad's derivatives, per target.** SGL writes `discard;` and MSL `discard_fragment();`, which every target reads as "no effect after this".
+  Whether the pixel keeps running as a helper is where they differ, and a sample after a discard in a neighbouring pixel depends on it.
+  The tier-1 foliage test pins it per backend; a target that terminates gets the emulation the design settled: a flag, guarded stores, and the real discard at the end.
 - **Texture methods past 2D.** `sample`, `load`, `store` and `size` cover 2D shapes, with the sampler always passed.
   A default sampler per texture, the other shapes and subscripts are [texture-methods.md](spec/incubator/texture-methods.md).
 - **Features used in a body.** Only a binding member uses a feature today, so a body's `require` can only declare one for its entry point (CHK-262).

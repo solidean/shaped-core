@@ -188,6 +188,8 @@ struct core_checker
                               s.end);
                 breakable_body({.is_loop = true, .label = s.label}, s.body, depth + 1);
             },
+            // like `return`, legal at any depth: it ends the invocation, not a construct around it
+            [&](flat_discard const&) {},
             [&](flat_continue const& s)
             {
                 auto at = enclosing.size() - 1;

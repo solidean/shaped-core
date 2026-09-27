@@ -310,6 +310,7 @@ struct rect:
 ### Jumps
 
 * **AST-40** `return`, `break`, `continue` and `yield` are expressions, the **jumps** ([why](why/ast.md#ast-40)).
+* **AST-148** `discard` is a jump too, which takes no value and always has a target: the invocation it ends.
 * **AST-41** `return` and `break` take at most one value, `yield` takes exactly one, and `continue` takes none; a `yield` without a value is the normal error `expected-expression`.
 * **AST-112** `return` leaves the nearest enclosing `fun`, named or anonymous, through every value block and every loop between ([why](why/ast.md#ast-112)).
 * **AST-113** A `return` in the block of an arrow lambda, or in a `case` arm inside one, is the normal error `return-in-lambda`; it is written `yield`.

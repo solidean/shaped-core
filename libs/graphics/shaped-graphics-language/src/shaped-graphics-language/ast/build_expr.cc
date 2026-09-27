@@ -479,7 +479,7 @@ expr_id builder::keyword_expression_from(form_id form, keyword_parts const& part
 
     if (keyword == "case")
         return case_expression(form, parts);
-    if (is_value_jump(keyword) || keyword == "continue")
+    if (is_value_jump(keyword) || keyword == "continue" || keyword == "discard")
         return jump_expression(form, parts, keyword);
     if (keyword == "fun" && is_anonymous_fun(parts))
         return fun_lambda_expression(form, form, parts, form_id::none);
@@ -550,7 +550,7 @@ expr_id builder::case_expression(form_id form, keyword_parts const& parts)
 
 expr_id builder::jump_expression(form_id form, keyword_parts const& parts, cc::string_view keyword)
 {
-    auto const takes_value = keyword != "continue";
+    auto const takes_value = keyword != "continue" && keyword != "discard";
     auto const allowed = takes_value ? isize(1) : isize(0);
     if (parts.arguments.size() > allowed)
         report(diagnostic_kind::too_many_arguments, parts.arguments[allowed]);
@@ -568,6 +568,9 @@ expr_id builder::jump_expression(form_id form, keyword_parts const& parts, cc::s
 
 expr_id builder::make_jump(form_id form, cc::string_view keyword, expr_id value)
 {
+    // AST-148: a discard always has a target, the invocation, so nothing it stands in is looked for
+    if (keyword == "discard")
+        return make_expr(form, discard_expr{});
     report_jump_target(form, keyword);
     if (keyword == "continue")
         return make_expr(form, continue_expr{});

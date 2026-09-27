@@ -331,7 +331,8 @@ struct writer
         auto const statements = p.e.at(s.body);
         auto const ends_in_exit
             = !statements.empty()
-           && (p.e.at(statements.back()).node.is<flat_break>() || p.e.at(statements.back()).node.is<flat_return>());
+           && (p.e.at(statements.back()).node.is<flat_break>() || p.e.at(statements.back()).node.is<flat_return>()
+               || p.e.at(statements.back()).node.is<flat_discard>());
         if (!ends_in_exit)
             line("break;");
         close();
@@ -359,7 +360,8 @@ struct writer
         if (statements.empty())
             return false;
         auto const& last = p.e.at(statements.back());
-        return last.node.is<flat_break>() || last.node.is<flat_return>() || last.node.is<flat_continue>();
+        return last.node.is<flat_break>() || last.node.is<flat_return>() || last.node.is<flat_continue>()
+            || last.node.is<flat_discard>();
     }
 
     /// One arm: its labels, its body, and the `break` that stops the C-like targets falling into the next one.
@@ -442,9 +444,9 @@ struct writer
                          body(f.body);
                          close();
                      },
-                     [&](flat_continue const&) { line("continue;"); }, //
-                     [&](flat_once const& o) { once(o); },             //
-                     [&](flat_break const&) { line("break;"); },       //
+                     [&](flat_continue const&) { line("continue;"); },                                                //
+                     [&](flat_discard const&) { line(d.discard_statement()); }, [&](flat_once const& o) { once(o); }, //
+                     [&](flat_break const&) { line("break;"); },                                                      //
                      [&](flat_switch const& sw) { switch_(sw); },
                      // a core tree holds none, and the plan refuses one that is not core (EMIT-66)
                      [&](flat_check const&) {},

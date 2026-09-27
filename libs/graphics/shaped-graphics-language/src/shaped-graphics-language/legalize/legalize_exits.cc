@@ -21,7 +21,8 @@ stmt_list ids_of(flat_entry_point const& e, ast::range_of<flat_stmt_id> range)
 /// True for a statement after which the rest of its list never runs.
 bool is_exit(flat_stmt const& s)
 {
-    return s.node.is<flat_leave>() || s.node.is<flat_continue>() || s.node.is<flat_break>() || s.node.is<flat_return>();
+    return s.node.is<flat_leave>() || s.node.is<flat_continue>() || s.node.is<flat_break>() || s.node.is<flat_return>()
+        || s.node.is<flat_discard>();
 }
 
 bool holds_leave(flat_entry_point const& e, flat_stmt_id id, label_id label, int depth = 0)
@@ -593,6 +594,7 @@ struct compactor
                                 n.body = body(ids_of(in, n.body), depth + 1);
                             },
                             [&](flat_continue&) {},                                                                   //
+                            [&](flat_discard&) {},                                                                    //
                             [&](flat_once& n) { n.body = body(ids_of(in, n.body), depth + 1); }, [&](flat_break&) {}, //
                             [&](flat_case& n)
                             {

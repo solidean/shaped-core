@@ -731,6 +731,8 @@ struct machine
         }
         if (auto const* const c = s.node.try_as<flat_continue>())
             return {.kind = flow_kind::continue_, .label = c->target};
+        if (s.node.is<flat_discard>())
+            return fail(run_status::discarded, "");
         if (auto const* const once = s.node.try_as<flat_once>())
         {
             auto const f = run_body(once->body);
@@ -794,6 +796,8 @@ cc::string_view sgl::check::to_string(run_status s)
         return "uninitialized-read";
     case run_status::program_error:
         return "program-error";
+    case run_status::discarded:
+        return "discarded";
     case run_status::assertion_failed:
         return "assertion-failed";
     case run_status::stopped:

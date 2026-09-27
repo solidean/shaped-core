@@ -13,7 +13,8 @@ namespace
 [[nodiscard]] bool is_control_word(cc::string_view w)
 {
     return w == "if" || w == "else" || w == "for" || w == "in" || w == "while" || w == "loop" || w == "return"
-        || w == "break" || w == "continue" || w == "yield" || w == "case" || w == "and" || w == "or" || w == "not";
+        || w == "break" || w == "continue" || w == "yield" || w == "case" || w == "and" || w == "or" || w == "not"
+        || w == "discard";
 }
 
 /// One class per token, filled pass by pass: the syntax first, then declarations, then what the check resolved.

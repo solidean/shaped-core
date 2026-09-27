@@ -21,7 +21,8 @@ _DECLARATION_KEYWORDS = frozenset({
 })
 # `mut buffer[float]`, `out image_2d[.rgba8_unorm]`: an access word at the top of a type position leaves the position a type.
 _TYPE_QUALIFIERS = frozenset({"mut", "out"})
-_CONTROL_KEYWORDS = frozenset({"if", "else", "for", "while", "loop", "return", "yield", "continue", "break", "case"})
+_CONTROL_KEYWORDS = frozenset({"if", "else", "for", "while", "loop", "return", "yield", "continue", "discard", "break",
+                               "case"})
 _WORD_OPERATORS = frozenset({"and", "or", "not", "in", "as"})
 _CONSTANTS = frozenset({"true", "false"})
 # A symbol directly after one of these names a function or a type.

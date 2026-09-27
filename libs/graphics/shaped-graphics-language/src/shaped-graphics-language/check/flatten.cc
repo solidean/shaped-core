@@ -75,6 +75,8 @@ struct flattener
     cc::vector<stage_violation> stage_violations;
     /// The condition of every `assert` whose run would write what outlives it, which its caller reports (CHK-227).
     cc::vector<origin> effectful_asserts;
+    /// Every `discard` the tree reaches, which only a pixel entry point may (CHK-277).
+    cc::vector<origin> discards;
 
     /// Notes a call of `callee` whose `@stages` leaves out the stage of the entry point being flattened.
     /// A test has no stage, so it may reach what any stage may.
@@ -1045,7 +1047,8 @@ struct flattener
             auto const where = origin{.file = file(), .expr = arm.result.value};
             auto const& e = ast().at(arm.result.value);
             auto const is_jump = e.node.is<ast::return_expr>() || e.node.is<ast::break_expr>()
-                              || e.node.is<ast::continue_expr>() || e.node.is<ast::yield_expr>();
+                              || e.node.is<ast::continue_expr>() || e.node.is<ast::yield_expr>()
+                              || e.node.is<ast::discard_expr>();
             if (is_jump)
                 flatten_expr_stmt(where, arm.result.value);
             else if (is_valid(value_block))
@@ -1470,6 +1473,12 @@ struct flattener
             is_failed = is_failed || !is_valid(target);
             return add_stmt(from, flat_leave{.target = target, .value = flatten_expr(b->value)});
         }
+        if (x.node.is<ast::discard_expr>())
+        {
+            // CHK-277: only a pixel entry point may reach it, which is known once the whole body is inlined
+            discards.push_back({.file = file(), .expr = value});
+            return add_stmt(from, flat_discard{});
+        }
         if (x.node.is<ast::continue_expr>())
         {
             if (loops.empty())
@@ -1647,6 +1656,11 @@ void checker::flatten_entry_point(symbol_id id)
         report(diagnostic_kind::stage_not_allowed, v.file, span_of(v.file, v.call),
                cc::format("{} is a {} entry point, and {} is @stages without it", s.name, stage_name(info.entry_stage),
                           out.at(v.callee).name));
+    auto const reaches_discard = info.entry_stage != stage::pixel && !f.discards.empty();
+    for (auto const& d : info.entry_stage != stage::pixel ? cc::span<origin const>(f.discards) : cc::span<origin const>())
+        report(
+            diagnostic_kind::stage_not_allowed, d.file, span_of(d.file, d.expr),
+            cc::format("{} is a {} entry point, and only a pixel stage discards", s.name, stage_name(info.entry_stage)));
     if ((info.stages & stage_bit(info.entry_stage)) == 0)
         report(diagnostic_kind::stage_not_allowed, s.file, ast_of(s.file).at(s.declaration).node.as<ast::fun_decl>().name,
                cc::format("{} is a {} entry point, and its own @stages leaves that out", s.name,
@@ -1655,7 +1669,7 @@ void checker::flatten_entry_point(symbol_id id)
     if (f.is_failed && !f.meets_error)
         unsupported(s.file, ast_of(s.file).at(s.declaration).node.as<ast::fun_decl>().name,
                     cc::format("{}: its body reaches a construct the flat tree cannot hold yet", s.name));
-    if (f.is_failed || !f.stage_violations.empty() || (info.stages & stage_bit(info.entry_stage)) == 0)
+    if (f.is_failed || !f.stage_violations.empty() || reaches_discard || (info.stages & stage_bit(info.entry_stage)) == 0)
         return;
     f.entry.body = f.add_list(f.block);
     out.entry_points.push_back(cc::move(f.entry));

@@ -105,7 +105,7 @@ flow checker::check_stmt(function_scope& scope, ast::stmt_id stmt)
                          check_break(scope, where, b->value);
                          result = flow::exits;
                      }
-                     else if (value.node.is<ast::continue_expr>())
+                     else if (value.node.is<ast::continue_expr>() || value.node.is<ast::discard_expr>())
                          result = flow::exits;
                      else if (auto const* const y = value.node.try_as<ast::yield_expr>())
                      {

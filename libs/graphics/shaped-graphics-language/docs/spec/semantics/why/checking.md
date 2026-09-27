@@ -357,3 +357,10 @@ On a `@pixel struct` member it is that target's setting, and on a `@vertex struc
 A pixel stage's output is its return value, all of it, which is SGL's model for every stage; a depth written through a builtin call would be an output the signature hides.
 `@position` is the precedent: a marked member of a stage's struct that the stage link treats specially.
 A struct holding only `@depth` is how a depth-only pixel stage is written, which is what a shadow pass with a cut-out needs.
+
+## CHK-277
+
+A `discard` is a jump rather than a builtin call, since control flow reads as control flow: `if … => discard` ends that path the way `if … => return x` does.
+A call is no jump, so a path that discarded would still have had to produce a value.
+The portable meaning is that the pixel has no effect after it — no target, no depth, no stencil, no store — which every target keeps.
+Whether the pixel keeps running as a helper for its quad's derivatives is where the targets differ, and the writers demote wherever a target offers the choice.
