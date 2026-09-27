@@ -183,6 +183,7 @@ void webgpu_command_list::raster_bind_group(int group_index, sg::binding_group c
     CC_ASSERT(_in_rendering_scope, "raster bind_group is only valid inside a rendering scope");
     bind_group_into(_raster, _ctx, group_index, group);
     touch_group(group);
+    _keep_alive.push_back(group.weak_from_this().lock());
     while (int(_raster_group_objects.size()) <= group_index)
         _raster_group_objects.push_back(nullptr);
     _raster_group_objects[group_index] = static_cast<webgpu_binding_group const*>(&group);
@@ -205,6 +206,7 @@ void webgpu_command_list::raster_bind_pipeline(sg::raster_pipeline const& pipeli
     rebind_layout(_raster, wp->layout.get());
     _raster.render_pipeline = wp->pipeline;
     _keep_alive.push_back(wp->layout);
+    _keep_alive.push_back(pipeline.weak_from_this().lock());
     _raster_footprint = &pipeline.footprint();
 }
 } // namespace sg::backend::webgpu

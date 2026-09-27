@@ -1,5 +1,5 @@
 // Pipelines whose code does less than their bindings allow, which is what the barrier tests count against.
-// Every binding here is writable, so without a footprint each dispatch would order against every other one.
+// Most bindings here are writable, so without a footprint each op would order against every other one that binds them.
 
 binding traffic:
     values: mut buffer[float]
@@ -68,5 +68,37 @@ pipeline marking:
 pipeline reading:
     vertex = marks_vs
     pixel = read_ps
+    cull = .none
+    format = .rgba8_unorm
+
+// Loads its element of `hits` and stores it back one higher: a draw that reads and writes what the one before it wrote.
+@pixel fun accumulate_ps(p: shift_varyings){marks} -> shift_target:
+    let i = pixel_index(p)
+    marks.hits[i] = marks.hits[i] + 1.0
+    return { color = float4(0.0, 1.0, 0.0, 1.0) }
+
+pipeline accumulating:
+    vertex = marks_vs
+    pixel = accumulate_ps
+    cull = .none
+    format = .rgba8_unorm
+
+// `hits` through a read-only binding, copied into `seen`: a draw that reads what the next one overwrites.
+// A write that raced ahead of the read shows up in `seen`.
+binding peek:
+    hits: buffer[float]
+    seen: mut buffer[float]
+
+@vertex fun peek_vs(v: shift_corner){peek} -> shift_varyings:
+    return { position = hpos4(v.position.x, v.position.y, 0.0, 1.0) }
+
+@pixel fun peek_ps(p: shift_varyings){peek} -> shift_target:
+    let i = pixel_index(p)
+    peek.seen[i] = peek.hits[i]
+    return { color = float4(0.0, 1.0, 0.0, 1.0) }
+
+pipeline peeking:
+    vertex = peek_vs
+    pixel = peek_ps
     cull = .none
     format = .rgba8_unorm

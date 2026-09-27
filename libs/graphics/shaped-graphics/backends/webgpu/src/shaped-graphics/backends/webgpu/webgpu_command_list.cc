@@ -69,6 +69,10 @@ void webgpu_command_list::end_open_pass()
         wgpuRenderPassEncoderEnd(render_pass());
         _render_pass = {};
         _raster.needs_full_apply = true;
+
+        // The next pass orders after everything this one did, so nothing it read or wrote is a hazard any more.
+        _pass_reads.clear();
+        _pass_writes.clear();
     }
 }
 

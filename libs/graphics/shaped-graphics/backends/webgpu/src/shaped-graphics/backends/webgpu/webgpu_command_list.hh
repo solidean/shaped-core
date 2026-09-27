@@ -16,8 +16,9 @@
 /// A copy recorded inside a rendering scope closes the render pass and reopens it with every load op set to load, since the contents are now real.
 ///
 /// There are no barriers: WebGPU tracks usage itself and transitions nothing sg can see.
-/// **Except between two draws of one render pass**, which WebGPU does not order: a draw touching what an earlier draw of
-/// the open pass wrote ends the pass, and the reopened one sees the write — the pipeline's footprint says which draws write.
+/// **Except between two draws of one render pass**, which WebGPU does not order.
+/// A draw touching what an earlier draw of the open pass wrote, or writing what one read, ends the pass, and the reopened one orders after it.
+/// The pipeline's footprint says which draws write; vertex and index fetches count as reads.
 class sg::backend::webgpu::webgpu_command_list final : public sg::command_list
 {
 public:
@@ -100,14 +101,19 @@ public:
     bound_state _raster;
 
     // What a draw orders against inside one pass, which WebGPU does not order for sg.
-    // The bound raster groups and the pipeline's footprint say what each draw touches; a draw touching a resource an
-    // earlier draw of the open pass wrote ends the pass, and the reopened one sees the write.
+    // The bound raster groups and the pipeline's footprint say what each draw touches, the bound vertex and index buffers
+    // what it fetches.
+    // The group and the pipeline behind these pointers are held in `_keep_alive` from their bind.
     cc::fixed_vector<webgpu_binding_group const*, sg::max_binding_groups> _raster_group_objects;
     sg::impl::pipeline_footprint const* _raster_footprint = nullptr;
+
+    // What draws of the open render pass read and wrote, by sg resource identity; ending the pass clears both.
+    cc::vector<void const*> _pass_reads;
     cc::vector<void const*> _pass_writes;
 
-    /// Ends the open pass where the next draw touches what an earlier draw of it wrote, and records what this one writes.
-    void order_draw_after_pass_writes();
+    /// Ends the open pass where this draw touches what an earlier draw of it wrote, or writes what one read, then
+    /// records what this draw reads and writes; `indexed` counts the index buffer as a read.
+    void order_draw_within_pass(bool indexed);
 
     // The open rendering scope, kept so a copy in its middle can close and reopen it.
     bool _in_rendering_scope = false;
@@ -136,9 +142,11 @@ public:
         WGPUBuffer buffer = nullptr;
         u64 offset = 0;
         u64 size = 0;
+        void const* resource = nullptr; // the sg buffer, the identity a draw orders against
     };
     cc::fixed_vector<vertex_binding, sg::max_vertex_buffers> _vertex_buffers;
     WGPUBuffer _index_buffer = nullptr;
+    void const* _index_resource = nullptr;
     WGPUIndexFormat _index_format = WGPUIndexFormat_Undefined;
     u64 _index_offset = 0;
 
