@@ -77,7 +77,7 @@ On a Ryzen 9 7950X3D, release build:
 
 ## Alternatives
 
-Two designs were weighed and rejected:
+Designs weighed and rejected, recorded so they are not proposed again:
 
 * **A TypeScript server inside the extension, running `sgl` per edit.**
   Every edit would pay a process start and a prelude parse that the in-process server caches.
