@@ -136,6 +136,8 @@ void lsp::server::impl_handle_request(cc::string id, cc::string_view method, jso
     if (method == "shutdown")
     {
         _has_shut_down = true;
+        if (_on_shutdown)
+            _on_shutdown();
         impl_respond(id, {.text = "null"});
         return;
     }

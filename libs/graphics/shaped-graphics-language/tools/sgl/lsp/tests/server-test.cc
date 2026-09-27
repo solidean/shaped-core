@@ -231,9 +231,13 @@ TEST("lsp server - after shutdown every request is invalid, and a second initial
     CHECK(s.initialize_params()["clientInfo"]["name"].as_string() == "first");
     CHECK(s.encoding() == lsp::position_encoding::utf16);
 
+    // the hook runs once, for the shutdown that is answered
+    auto shutdowns = 0;
+    s.on_shutdown([&] { ++shutdowns; });
     s.receive(request(3, "shutdown"));
     s.receive(request(4, "shutdown"));
     s.receive(request(5, "test/nope"));
+    CHECK(shutdowns == 1);
     auto const out = outgoing(s);
     CHECK(response_to(out, 3)["result"].is_null());
     CHECK(response_to(out, 4)["error"]["code"].as_double() == lsp::error_code::invalid_request);

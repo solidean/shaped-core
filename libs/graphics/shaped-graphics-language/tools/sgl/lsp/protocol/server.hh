@@ -159,6 +159,9 @@ public:
     /// Called once the client sent `initialized`.
     void on_initialized(cc::unique_function<void()> handler) { _on_initialized = cc::move(handler); }
 
+    /// Called when `shutdown` arrives, before it is answered, on the driving thread.
+    void on_shutdown(cc::unique_function<void()> handler) { _on_shutdown = cc::move(handler); }
+
     /// Runs `then(a)` on the driving thread once `a` is ready, value or error; starts `a` if it is cold.
     template <class T, class F>
     void when_ready(cc::shared_async<T> a, F then);
@@ -210,6 +213,7 @@ private:
     cc::map<cc::string, notification_handler> _notifications;
     cc::unique_function<void(cc::string_view)> _on_document;
     cc::unique_function<void()> _on_initialized;
+    cc::unique_function<void()> _on_shutdown;
 
     cc::vector<impl::pending_request> _pending;
     cc::vector<impl::watch> _watches;

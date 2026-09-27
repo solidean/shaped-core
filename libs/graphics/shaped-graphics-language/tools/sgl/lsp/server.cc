@@ -93,6 +93,7 @@ sgl_lsp::language_server::language_server()
     })
 {
     _server.on_document([this](cc::string_view uri) { impl_on_document(uri); });
+    _server.on_shutdown([this] { impl_stop_test_runs(); });
 
     _server.on_request<lsp::text_document_params>("textDocument/semanticTokens/full",
                                                   [this](lsp::request_context const& ctx, lsp::text_document_params p)
