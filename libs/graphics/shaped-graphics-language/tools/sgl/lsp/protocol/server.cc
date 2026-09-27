@@ -156,7 +156,7 @@ void lsp::server::impl_handle_request(cc::string id, cc::string_view method, jso
     }
     cc::async_start(r.value());
     _wakers.push_back(cc::async_start(impl::notify_when_settled(r.value())));
-    _pending.push_back({.id = cc::move(id), .method = cc::string(method), .reply = r.value(), .flag = ctx.flag});
+    _pending.push_back({.id = cc::move(id), .method = cc::string(method), .outcome = r.value(), .flag = ctx.flag});
 }
 
 void lsp::server::impl_handle_notification(cc::string_view method, json::ref params)
@@ -256,12 +256,12 @@ bool lsp::server::poll()
     for (auto i = isize(0); i < _pending.size();)
     {
         auto const& p = _pending[i];
-        if (!p.reply->is_ready())
+        if (!p.outcome->is_ready())
         {
             ++i;
             continue;
         }
-        if (auto const* r = p.reply->try_value())
+        if (auto const* r = p.outcome->try_value())
             impl_respond(p.id, *r);
         else
             impl_respond(p.id, {.is_error = true, .error_code = error_code::internal_error, .text = "no answer"});

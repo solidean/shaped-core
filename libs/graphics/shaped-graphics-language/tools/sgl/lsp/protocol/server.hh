@@ -89,7 +89,7 @@ struct pending_request
     /// The request's id as JSON text, echoed exactly: `7` or `"abc"`.
     cc::string id;
     cc::string method;
-    cc::shared_async<reply> reply;
+    cc::shared_async<reply> outcome;
     cc::shared_ptr<cancel_flag> flag;
 };
 
