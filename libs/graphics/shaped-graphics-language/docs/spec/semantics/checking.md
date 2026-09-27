@@ -455,7 +455,8 @@ fun f() -> float:
 
 ## Entry points
 
-* **CHK-87** A function that carries `@vertex` or `@pixel` is an **entry point** of that stage; one that carries both is the normal error `invalid-entry-point`.
+* **CHK-87** A function that carries `@vertex` or `@pixel` is an **entry point** of that stage; one that carries two stages is the normal error `invalid-entry-point`.
+  `@compute`, `@geometry`, `@tessellation_control` and `@tessellation_evaluation` make an entry point too, each of its own stage.
 * **CHK-88** A raster entry point takes at most one parameter without a stage input's attribute, its **stage struct**, which is of a struct type with fields and comes first.
   A `@pixel fun` takes one; a `@vertex fun` may take none, and then draws from no vertex buffer.
 * **CHK-89** The stage struct of a `@vertex fun` is of a `@vertex struct`.
@@ -468,7 +469,8 @@ fun f() -> float:
 | `@is_front_facing` | pixel | `bool` |
 | `@sample_index` | pixel | `int` |
 | `@sample_mask` | pixel | `uint` |
-| `@primitive_id` | pixel | `int` |
+| `@primitive_id` | pixel, geometry, tessellation control and evaluation | `int` |
+| `@domain_location` | tessellation evaluation | `float3` or `float2` (CHK-306) |
 | `@thread_id`, `@local_thread_id`, `@workgroup_id` | compute | `int3` |
 | `@local_thread_index` | compute | `int` |
 
@@ -489,11 +491,14 @@ fun f() -> float:
   A pipeline whose pixel stage writes depth has a `depth_stencil_format` other than `.undefined`, or `invalid-pipeline`.
 * **CHK-274** A pixel stage that takes a member interpolated `.sample` runs once per sample, and needs `sample_rate_shading` of a device.
 * **CHK-272** `@primitive_id` needs `primitive_index` of a device and `@sample_index` needs `sample_rate_shading`, as a binding member needs its feature (CHK-261).
-* **CHK-90** A `@vertex fun` returns a struct with exactly one field that carries `@position`, and that field is of the type `hpos4`.
+  The feature is the pixel stage's alone: the geometry and tessellation stages have the primitive's index wherever they have the stage.
+* **CHK-90** A `@vertex fun` returns a struct with at most one field that carries `@position`, and that field is of the type `hpos4`.
+  The struct that reaches the rasterizer carries exactly one, which CHK-307 asks of the pipeline.
 * **CHK-91** A `@pixel fun` returns a `@pixel struct`.
 * **CHK-92** An entry point is neither `@builtin` nor `@operator`.
 * **CHK-173** `@per_instance` and `@stream(name)` are attributes of a struct field, recorded on the member; `@stream` takes one bare name.
-* **CHK-208** `@stages(.pixel)` on a function, builtin or not, names the stages it may be reached from, each an enum case of `.vertex`, `.pixel` and `.compute`.
+* **CHK-208** `@stages(.pixel)` on a function, builtin or not, names the stages it may be reached from, each an enum case of a stage.
+  The cases are `.vertex`, `.tessellation_control`, `.tessellation_evaluation`, `.geometry`, `.pixel` and `.compute`.
   A function without it may be reached from every stage, and any other argument is `invalid-attribute-arguments`.
 * **CHK-193** An entry point whose inlined body reaches a function whose `@stages` leaves out the entry point's stage is `stage-not-allowed`, at that call.
   It is judged per entry point once everything is inlined, since a function in between says nothing about where it is reached from.
@@ -562,10 +567,12 @@ Nothing in a body uses a feature yet, so a `require` in a test's body is `unused
   On a member of a `@pixel struct` it is one of that target's fields.
   Such an attribute takes one value.
   One whose name is two fields is `invalid-pipeline`, and the detail names both and says to set it in the pipeline, since an attribute has no path.
-* **CHK-182** A pipeline's settings apply in this order: the attributes of its vertex input, then of its `@pixel struct` and its members, then of its vertex and its pixel stage, then its own.
+* **CHK-182** A pipeline's settings apply in this order: the attributes of its vertex input, then of its `@pixel struct` and its members.
+  Then the attributes of its stages, in the order a vertex passes them, then its own.
   Two sources of one step that set one field differently are `invalid-pipeline`, unless the pipeline sets that field itself.
   A part and a field inside it count as one field here, so `blend = .none` meets every field of another source's blend, and the pipeline's own `blend = .none` settles them.
-* **CHK-183** What the vertex stage returns has the members the pixel stage takes: as many, with the same names and types, in the same order, and `@position` on the same one.
+* **CHK-183** What a stage returns has the members the next stage takes: as many, with the same names and types, in the same order, and `@position` on the same one.
+  CHK-307 says what each stage between the vertex and the pixel stage takes and returns.
 * **CHK-184** Its stages' binding lists, `@inline` bindings left out, name the same binding at every position they share.
   The longest is the pipeline's layout, and the stages list one `@inline` binding at most.
 * **CHK-185** Every target has a format at the end: a case other than `.undefined`, or `.host`.
@@ -628,6 +635,34 @@ Its rules are WGSL's, applied to the tree an emitter prints, so that no target r
   A loop some invocations leave early, by a `break`, a `continue` or a `return` in non-uniform control flow, is non-uniform throughout and after it.
   An inlined function's early `return` is such an exit of the block it became.
   A `discard` changes nothing, as in WGSL, where the pixel goes on as a helper of its quad.
+
+## Geometry and tessellation stages
+
+Two optional stages stand between the vertex and the pixel stage, each an entry point of its own and each a feature a device grants.
+HLSL writes them on dx12 and vulkan; WebGPU and Metal have neither, so WGSL and MSL refuse by the feature.
+
+* **CHK-301** `@geometry(max_vertices = N)` makes an entry point of the geometry stage, which needs `geometry_shader`.
+  `N` is an `int` literal from 1 to 1024, and the entry point returns nothing.
+* **CHK-302** Its first parameter is an array of the struct the stage before it returns, one primitive long.
+  A primitive is 1 vertex for a point, 2 for a line, 3 for a triangle, 4 for a line with adjacency and 6 for a triangle with adjacency.
+  Stage inputs follow it, `@primitive_id` among them, and its last parameter is `mut point_stream[T]`, `mut line_stream[T]` or `mut triangle_stream[T]`.
+  `T` is the struct it hands the pixel stage, and a stream is no value: only the entry point's parameter is one.
+* **CHK-303** `s.emit(v)` appends the vertex `v`, which converts to `T`, and `s.end_strip()` ends the strip being appended; each is a geometry stage's alone.
+* **CHK-304** `@tessellation_control(partitioning = p, winding = w)` makes an entry point of the tessellation control stage, which needs `tessellation_shader`.
+  `p` is `.integer`, `.fractional_even` or `.fractional_odd`, and `w` is `.clockwise` or `.counter_clockwise`.
+  Power-of-two partitioning is none of them, since vulkan lacks it.
+  It takes one parameter, the patch: an array of from 1 to 32 of the struct the vertex stage returns, and it returns a **factors struct**.
+* **CHK-305** A factors struct has exactly one `@edge_factors` member, `float[2]`, `float[3]` or `float[4]`, which makes its domain isolines, triangles or quads.
+  It has one `@inside_factors` member, `float` for triangles and `float[2]` for quads, and none for isolines; any other member reaches the evaluation stage as it is.
+* **CHK-306** `@tessellation_evaluation` makes an entry point of the tessellation evaluation stage, which needs `tessellation_shader`.
+  It takes the patch as the control stage takes it, the control stage's factors struct, and `@domain_location`: a `float3` for triangles and a `float2` otherwise.
+  It returns the struct the stage after it takes.
+* **CHK-307** A pipeline names the stages as `geometry = f`, `tessellation_control = f` and `tessellation_evaluation = f`; the two tessellation stages come together.
+  Each stage takes what the one before it returns, by CHK-183's rule, and the struct that reaches the rasterizer carries exactly one `@position`.
+  The patch's length is `patch_control_points` and makes the topology `.patch_list`, so naming either as a setting is `invalid-pipeline`.
+  A pipeline without the tessellation stages draws no patches, and sets neither but `patch_control_points = 0`.
+  A geometry stage's primitive is the one the pipeline assembles: the topology's family, or the tessellator's lines for isolines and triangles otherwise.
+  A primitive with adjacency is `unsupported-yet` in a pipeline, since sg has no topology that assembles one.
 
 ## The flat tree
 
@@ -770,7 +805,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 
 | kind | reported by |
 |---|---|
-| `unsupported-yet` | CHK-8, CHK-61, CHK-213, CHK-237 |
+| `unsupported-yet` | CHK-8, CHK-61, CHK-213, CHK-237, CHK-307 |
 | `duplicate-declaration` | CHK-12, CHK-28, CHK-241 |
 | `dependency-cycle` | CHK-18, CHK-136 |
 | `unknown-name` | CHK-24, CHK-62, CHK-245 |
@@ -779,7 +814,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `unknown-builtin` | CHK-31 |
 | `expected-body` | CHK-32, CHK-236 |
 | `opaque-struct-needs-builtin` | CHK-34 |
-| `invalid-attribute-arguments` | CHK-36, CHK-39, CHK-204, CHK-208, CHK-211, CHK-212, CHK-220, CHK-231, CHK-267, CHK-292, CHK-293 |
+| `invalid-attribute-arguments` | CHK-36, CHK-39, CHK-204, CHK-208, CHK-211, CHK-212, CHK-220, CHK-231, CHK-267, CHK-292, CHK-293, CHK-301, CHK-304 |
 | `binding-not-listed` | CHK-45, CHK-131, CHK-228 |
 | `type-mismatch` | CHK-52, CHK-56, CHK-77, CHK-112 to CHK-118, CHK-121, CHK-167, CHK-210, CHK-214, CHK-219, CHK-236, CHK-243, CHK-279, CHK-281 |
 | `not-assignable` | CHK-112, CHK-236 |
@@ -799,8 +834,8 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `stage-not-allowed` | CHK-193, CHK-298 |
 | `ambiguous-overload` | CHK-72 |
 | `missing-field`, `unknown-field`, `duplicate-field` | CHK-178 |
-| `invalid-entry-point` | CHK-87, CHK-93, CHK-294 |
-| `invalid-pipeline` | CHK-175 to CHK-185, CHK-187 |
+| `invalid-entry-point` | CHK-87, CHK-93, CHK-294, CHK-301 to CHK-306 |
+| `invalid-pipeline` | CHK-175 to CHK-185, CHK-187, CHK-307 |
 | `shadows-unshadowable` | CHK-220, CHK-266 |
 | `test-captures-runtime-value` | CHK-228 |
 | `test-must-end-in-check` | CHK-226 |

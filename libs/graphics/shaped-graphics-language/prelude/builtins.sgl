@@ -1267,6 +1267,21 @@
 @builtin @pure fun layer_count(t: texture_cube_array_depth) -> int
 @builtin @pure fun level_count(t: texture_cube_array_depth) -> int
 
+// A geometry stage's stream, called as its methods: `stream.emit(v)` appends the vertex `v`, which the
+// check pass takes as the stream's own type, and `stream.end_strip()` ends the strip (CHK-303).
+/// Appends a vertex, handed as a second argument of the stream's own type.
+@builtin @stages(.geometry) fun emit(s: mut point_stream)
+/// Ends the strip being appended, so the next vertex starts a new one.
+@builtin @stages(.geometry) fun end_strip(s: mut point_stream)
+/// Appends a vertex, handed as a second argument of the stream's own type.
+@builtin @stages(.geometry) fun emit(s: mut line_stream)
+/// Ends the strip being appended, so the next vertex starts a new one.
+@builtin @stages(.geometry) fun end_strip(s: mut line_stream)
+/// Appends a vertex, handed as a second argument of the stream's own type.
+@builtin @stages(.geometry) fun emit(s: mut triangle_stream)
+/// Ends the strip being appended, so the next vertex starts a new one.
+@builtin @stages(.geometry) fun end_strip(s: mut triangle_stream)
+
 // Barriers, which a compute shader reaches in control flow every thread of its workgroup takes (CHK-282).
 /// Waits for every thread of the workgroup, after which each sees what the others wrote to workgroup memory.
 @builtin @stages(.compute) fun workgroup_barrier()

@@ -784,6 +784,10 @@ struct flattener
                 return fail();
             arguments.push_back(value);
         }
+        // CHK-303: a stream's `emit` takes the vertex past its signature, which no slot names
+        if (auto const* const record = c.out.builtin_function(s.intrinsic); record != nullptr && record->takes_element)
+            for (auto i = slots.size(); i < bound.size(); ++i)
+                arguments.push_back(entry.at(bound[i]).node.is<flat_local_ref>() ? bound[i] : again(bound[i], id));
         add_stmt(where, flat_leave{.target = label, .value = call_of(arguments)});
         auto const body = add_list(block);
         block = cc::move(outer);

@@ -19,7 +19,7 @@ namespace slib
 ///
 /// An SGL error is a `preprocess` error, so it rides the failure channel a DXC error does, one line per diagnostic:
 /// `cube_shaders/cube.sgl:12:5: error: unknown-name: foo`.
-/// The stages SGL has are vertex, fragment, which it calls pixel, and compute; any other stage is that kind of error as well.
+/// SGL has every raster stage, calling fragment pixel, and compute; a ray tracing stage is that kind of error as well.
 ///
 /// Every target's text carries its final addresses, HLSL's registers included, so slib's binding pass never runs behind this edge.
 /// It needs no toolchain of its own, so it exists wherever `inner` does.

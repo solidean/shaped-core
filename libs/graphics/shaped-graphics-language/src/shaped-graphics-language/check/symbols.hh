@@ -26,6 +26,9 @@ enum class sgl::check::type_kind : sgl::u8
     /// `atomic[uint]` or `atomic[int]`: memory every invocation updates in one indivisible step (CHK-296).
     /// It stands in a `mut buffer` or in workgroup memory, and like a resource it is never a value: builtins take it.
     atomic,
+    /// `point_stream[T]`, `line_stream[T]` or `triangle_stream[T]`: what a geometry stage appends vertices `T` to,
+    /// `count` of them a primitive; only a geometry entry point's parameter is one (CHK-302).
+    stream,
     /// A `buffer[T]`: an array of `element` a shader indexes, and `mut` where it may be written (the spec's bindings file).
     /// It is a resource rather than a value: it stands in a binding, and nothing loads or copies one.
     buffer,
@@ -95,6 +98,54 @@ enum class sgl::check::stage : sgl::u8
     pixel,
     /// A `@compute(x, y, z)` fun: it is dispatched over a grid, returns nothing, and reads which thread it is.
     compute,
+    /// A `@geometry(max_vertices = N)` fun: it takes one primitive's vertices and appends vertices to a stream (CHK-301).
+    geometry,
+    /// A `@tessellation_control` fun: it takes a patch and returns its tessellation factors (CHK-304).
+    tessellation_control,
+    /// A `@tessellation_evaluation` fun: it takes a patch, its factors and a point of the domain, and returns a vertex (CHK-306).
+    tessellation_evaluation,
+};
+
+namespace sgl::check
+{
+/// A stage as its attribute spells it: `vertex`, `tessellation_control`.
+[[nodiscard]] constexpr cc::string_view stage_name(stage s)
+{
+    switch (s)
+    {
+    case stage::vertex:
+        return "vertex";
+    case stage::pixel:
+        return "pixel";
+    case stage::compute:
+        return "compute";
+    case stage::geometry:
+        return "geometry";
+    case stage::tessellation_control:
+        return "tessellation_control";
+    case stage::tessellation_evaluation:
+        return "tessellation_evaluation";
+    case stage::none:
+        break;
+    }
+    return "no";
+}
+} // namespace sgl::check
+
+/// Which tessellation factors a member of a factors struct holds (CHK-305).
+enum class sgl::check::tessellation_factor : sgl::u8
+{
+    none,
+    edge,
+    inside,
+};
+
+/// How the tessellator spaces what a factor asks for (CHK-304); vulkan has no power-of-two spacing.
+enum class sgl::check::tessellation_partitioning : sgl::u8
+{
+    integer,
+    fractional_even,
+    fractional_odd,
 };
 
 /// A value the GPU hands an invocation, which an entry point takes as a parameter marked with its attribute (CHK-271).
@@ -111,6 +162,8 @@ enum class sgl::check::stage_input : sgl::u8
     local_thread_id,
     local_thread_index,
     workgroup_id,
+    /// Where in the tessellated domain the evaluation stage runs: barycentric for triangles, `(u, v)` otherwise.
+    domain_location,
 };
 
 /// What the checker knows of one stage input: the attribute, the stage that has it, its type and the feature it needs.
@@ -120,6 +173,8 @@ struct sgl::check::stage_input_info
     /// The attribute without its `@`, which is also the input's name in a diagnostic.
     cc::string_view name;
     stage in_stage = stage::none;
+    /// The other stages that have it, each without a feature: a `stage_bit` mask.
+    u8 also_in = 0;
     /// The name of its builtin type.
     cc::string_view type;
     /// -1 for an input every device has; otherwise a `feature` (check/features.hh).
@@ -219,6 +274,8 @@ struct sgl::check::member_info
     bool has_interpolate = false;
     /// On a `@pixel struct`, whether the member is a color target or another output; `color` everywhere else.
     pixel_output output = pixel_output::color;
+    /// `@edge_factors` or `@inside_factors`: a tessellation factor of a factors struct (CHK-305); `none` everywhere else.
+    tessellation_factor factor = tessellation_factor::none;
     /// A `@vertex struct` member's `@format(.case)`: the `sg::vertex_attribute_format` its bytes are; empty for the one
     /// its type implies (CHK-275).
     cc::string vertex_format;
@@ -378,6 +435,11 @@ struct sgl::check::function_info
     /// Carries `@pure`: a call of it has no effect, so nobody can tell whether or when it ran.
     /// A `@builtin` without it is assumed to have one.
     bool is_pure = false;
+    /// `@geometry(max_vertices = N)`'s `N`; 0 for every other stage.
+    i32 max_vertices = 0;
+    /// `@tessellation_control(partitioning = …, winding = …)`; the first of each for every other stage.
+    tessellation_partitioning partitioning = tessellation_partitioning::integer;
+    bool is_clockwise = true;
     /// The stages an entry point may be of to reach it, one bit per `stage` (`stage_bit`); every stage without `@stages`.
     u8 stages = k_every_stage;
     /// For an entry point, the features a device needs to run it: what it uses, never what it merely declares (CHK-263).
@@ -464,6 +526,10 @@ struct sgl::check::pipeline_info
     symbol_id vertex = symbol_id::none;
     /// `none` for a pipeline without a pixel stage, which writes depth alone.
     symbol_id pixel = symbol_id::none;
+    /// Each `none` for a pipeline without it; the two tessellation stages are both `none` or neither (CHK-307).
+    symbol_id geometry = symbol_id::none;
+    symbol_id tessellation_control = symbol_id::none;
+    symbol_id tessellation_evaluation = symbol_id::none;
     /// The binding layout: the longest binding list of its stages with `@inline` left out; a range of `binding_lists`.
     ast::range_of<symbol_id> layout;
     /// The one `@inline` binding its stages list, or `none`.

@@ -196,6 +196,8 @@ struct enum_case_info;
 
 enum class stage : u8;
 enum class stage_input : u8;
+enum class tessellation_partitioning : u8;
+enum class tessellation_factor : u8;
 struct interpolation;
 enum class pixel_output : u8;
 struct flat_stage_input;

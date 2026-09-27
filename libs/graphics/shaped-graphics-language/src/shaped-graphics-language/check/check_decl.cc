@@ -8,12 +8,19 @@ using namespace sgl::check::impl;
 
 namespace
 {
-stage stage_of(bool is_vertex, bool is_pixel, bool is_compute)
+/// The stage the one entry attribute a function carries makes it, or `none`.
+stage stage_of(bool is_vertex, bool is_pixel, bool is_compute, bool is_geometry, bool is_control, bool is_evaluation)
 {
     if (is_vertex)
         return stage::vertex;
     if (is_pixel)
         return stage::pixel;
+    if (is_geometry)
+        return stage::geometry;
+    if (is_control)
+        return stage::tessellation_control;
+    if (is_evaluation)
+        return stage::tessellation_evaluation;
     return is_compute ? stage::compute : stage::none;
 }
 } // namespace
@@ -39,10 +46,13 @@ sgl::u8 checker::stages_of(i32 file, ast::attribute const* a)
         auto const* const dot
             = ast::is_valid(argument.value) ? ast_of(file).at(argument.value).node.try_as<ast::leading_dot>() : nullptr;
         auto const name = dot != nullptr ? text_of(file, dot->name) : cc::string_view();
-        auto const s = name == "vertex"  ? stage::vertex
-                     : name == "pixel"   ? stage::pixel
-                     : name == "compute" ? stage::compute
-                                         : stage::none;
+        auto const s = name == "vertex"                  ? stage::vertex
+                     : name == "pixel"                   ? stage::pixel
+                     : name == "compute"                 ? stage::compute
+                     : name == "geometry"                ? stage::geometry
+                     : name == "tessellation_control"    ? stage::tessellation_control
+                     : name == "tessellation_evaluation" ? stage::tessellation_evaluation
+                                                         : stage::none;
         if (!argument.name.empty() || argument.is_splat || s == stage::none)
         {
             report(diagnostic_kind::invalid_attribute_arguments, file, a->name,
@@ -337,6 +347,9 @@ type_id checker::resolve_type(i32 file, ast::expr_id expr, function_scope const*
             result = resolve_buffer(file, expr, *applied, scope);
         else if (is_named(file, applied->object, "atomic"))
             result = resolve_atomic(file, expr, *applied, scope);
+        else if (is_named(file, applied->object, "point_stream") || is_named(file, applied->object, "line_stream")
+                 || is_named(file, applied->object, "triangle_stream"))
+            result = resolve_stream(file, expr, *applied, scope);
         else if (auto const applied_resource = resolve_resource_applied(file, expr, *applied);
                  applied_resource != type_id::none)
             result = applied_resource;
@@ -371,6 +384,13 @@ type_id checker::resolve_value_type(i32 file, ast::expr_id expr, function_scope 
     auto const type = resolve_type(file, expr, scope);
     if (type == checked_module::error_type)
         return type;
+    // CHK-302: a stream is a geometry stage's parameter, and no value
+    if (out.at(type).kind == type_kind::stream)
+    {
+        report(diagnostic_kind::wrong_kind_of_name, file, span_of(file, expr),
+               "a stream is what a geometry stage appends to, a parameter of its entry point and no value");
+        return checked_module::error_type;
+    }
     // CHK-297: an atomic stands in a `mut buffer` or in workgroup memory, and no value holds one
     if (holds_atomic(type))
     {
@@ -492,7 +512,8 @@ ast::range_of<member_info> checker::compile_members(i32 file,
             continue;
         auto const name = text_of(file, f.name);
 
-        cc::string_view const known_on_field[] = {"position", "per_instance", "stream", "interpolate"};
+        cc::string_view const known_on_field[]
+            = {"position", "per_instance", "stream", "interpolate", "edge_factors", "inside_factors"};
         // CHK-276: a `@pixel struct` member may be the depth or the sample mask rather than a color target
         cc::string_view const known_on_pixel_field[]
             = {"position", "per_instance", "stream", "interpolate", "depth", "sample_mask"};
@@ -607,6 +628,9 @@ ast::range_of<member_info> checker::compile_members(i32 file,
             .interpolate = interpolation_of(file, find_attribute(file, f.attributes, "interpolate")),
             .has_interpolate = find_attribute(file, f.attributes, "interpolate") != nullptr,
             .output = is_target_struct ? pixel_output_of(file, f.attributes, type, name) : pixel_output::color,
+            .factor = find_attribute(file, f.attributes, "edge_factors") != nullptr   ? tessellation_factor::edge
+                    : find_attribute(file, f.attributes, "inside_factors") != nullptr ? tessellation_factor::inside
+                                                                                      : tessellation_factor::none,
             .vertex_format = is_vertex_struct ? vertex_format_of(file, find_attribute(file, f.attributes, "format"), type)
                                               : cc::string(),
             .is_per_instance = find_attribute(file, f.attributes, "per_instance") != nullptr,
@@ -700,7 +724,7 @@ void checker::compile_struct(symbol_id id)
         .members = members,
         .is_opaque = s.is_opaque,
         // A struct has no compute edge: a compute entry point has no stage struct at all.
-        .edge = stage_of(is_vertex, is_pixel, false),
+        .edge = stage_of(is_vertex, is_pixel, false, false, false, false),
     });
     out.symbols[index_of(id)].type = type;
 }
@@ -1009,12 +1033,26 @@ void checker::compile_function(symbol_id id)
     // An entry point's attributes may be pipeline settings, which every pipeline it is a stage of starts from.
     auto const is_raster_entry = find_attribute(file, d.attributes, "vertex") != nullptr
                               || find_attribute(file, d.attributes, "pixel") != nullptr;
-    cc::string_view const known[]
-        = {"builtin", "pure", "operator", "vertex", "pixel", "compute", "stages", "shadowable", "expect"};
+    cc::string_view const known[] = {"builtin",
+                                     "pure",
+                                     "operator",
+                                     "vertex",
+                                     "pixel",
+                                     "compute",
+                                     "geometry",
+                                     "tessellation_control",
+                                     "tessellation_evaluation",
+                                     "stages",
+                                     "shadowable",
+                                     "expect"};
     judge_attributes(file, d.attributes, known, "a function",
                      is_raster_entry ? setting_scope::description : setting_scope::none);
+    auto const* const geometry = find_attribute(file, d.attributes, "geometry");
+    auto const* const control = find_attribute(file, d.attributes, "tessellation_control");
+    auto const is_evaluation = find_attribute(file, d.attributes, "tessellation_evaluation") != nullptr;
     read_footprint_pin(id, file, d.attributes,
-                       is_raster_entry || find_attribute(file, d.attributes, "compute") != nullptr);
+                       is_raster_entry || find_attribute(file, d.attributes, "compute") != nullptr
+                           || geometry != nullptr || control != nullptr || is_evaluation);
 
     if (!f.type_parameters.empty())
     {
@@ -1075,8 +1113,11 @@ void checker::compile_function(symbol_id id)
         // CHK-206: a builtin alone may take a resource, and its parameter is then a pattern of one (CHK-207).
         auto type = checked_module::error_type;
         auto const is_receiver = f.receiver != ast::receiver_kind::none && &p == &ast.at(f.parameters).front();
+        // CHK-302: a geometry stage's stream is a parameter of its entry point, and of no other function
         if (ast::is_valid(p.type))
-            type = is_builtin ? resolve_pattern_type(file, p.type) : resolve_value_type(file, p.type);
+            type = is_builtin          ? resolve_pattern_type(file, p.type)
+                 : geometry != nullptr ? resolve_type(file, p.type)
+                                       : resolve_value_type(file, p.type);
         else if (is_receiver)
             type = receiver;
         else
@@ -1184,6 +1225,8 @@ void checker::compile_function(symbol_id id)
     auto const is_pixel = find_attribute(file, d.attributes, "pixel") != nullptr;
     auto const* const compute = find_attribute(file, d.attributes, "compute");
     auto const workgroup = workgroup_of(file, compute);
+    auto const max_vertices = geometry != nullptr ? max_vertices_of(file, *geometry) : 0;
+    auto const tessellation = control != nullptr ? tessellation_of(file, *control) : tessellation_mode();
 
     out.symbols[index_of(id)].info = i32(out.functions.size());
     out.functions.push_back({
@@ -1191,9 +1234,13 @@ void checker::compile_function(symbol_id id)
         .parameters = {.first = u32(out.parameters.size()), .count = u32(parameters.size())},
         .result = result,
         .bindings = {.first = u32(out.binding_lists.size()), .count = u32(bindings.size())},
-        .entry_stage = stage_of(is_vertex, is_pixel, compute != nullptr),
+        .entry_stage
+        = stage_of(is_vertex, is_pixel, compute != nullptr, geometry != nullptr, control != nullptr, is_evaluation),
         .workgroup = {workgroup[0], workgroup[1], workgroup[2]},
         .is_pure = find_attribute(file, d.attributes, "pure") != nullptr,
+        .max_vertices = max_vertices,
+        .partitioning = tessellation.partitioning,
+        .is_clockwise = tessellation.is_clockwise,
         .stages = stages_of(file, find_attribute(file, d.attributes, "stages")),
     });
     out.parameters.push_back_range(parameters);
@@ -1210,7 +1257,8 @@ void checker::compile_function(symbol_id id)
         is_failed = is_failed || out.functions[out.at(id).info].result == checked_module::error_type;
     }
 
-    auto const stages = i32(is_vertex) + i32(is_pixel) + i32(compute != nullptr);
+    auto const stages = i32(is_vertex) + i32(is_pixel) + i32(compute != nullptr) + i32(geometry != nullptr)
+                      + i32(control != nullptr) + i32(is_evaluation);
     if (stages > 1)
         report(diagnostic_kind::invalid_entry_point, file, f.name, "an entry point has one stage");
     else if (!is_failed && stages == 1)
@@ -1349,6 +1397,16 @@ void checker::judge_entry_point(symbol_id id)
         invalid(cc::format("its @workgroup bindings hold {} bytes, and a workgroup has {} on every target",
                            workgroup_bytes, k_portable_workgroup_bytes));
 
+    // CHK-301 to CHK-306: the geometry and the tessellation stages take arrays of vertices, and are judged apart
+    if (info.entry_stage == stage::geometry || info.entry_stage == stage::tessellation_control
+        || info.entry_stage == stage::tessellation_evaluation)
+    {
+        auto forward = invalid;
+        judge_primitive_stage(id, forward);
+        notes[s.info].is_valid_entry = is_valid;
+        return;
+    }
+
     // CHK-271: at most one stage struct, first, and then the stage inputs, each of this stage, each once, of its type
     auto structs = 0;
     auto seen = cc::vector<stage_input>();
@@ -1362,11 +1420,8 @@ void checker::judge_entry_point(symbol_id id)
             continue;
         }
         auto const& input = info_of(parameter.input);
-        if (input.in_stage != info.entry_stage)
-            invalid(cc::format("@{} is an input of the {} stage", input.name,
-                               input.in_stage == stage::vertex  ? "vertex"
-                               : input.in_stage == stage::pixel ? "pixel"
-                                                                : "compute"));
+        if (input.in_stage != info.entry_stage && (input.also_in & stage_bit(info.entry_stage)) == 0)
+            invalid(cc::format("@{} is an input of the {} stage", input.name, stage_name(input.in_stage)));
         else if (out.name_of(parameter.type) != input.type)
             invalid(cc::format("a @{} parameter is an {}", input.name, input.type));
         for (auto const other : seen)
@@ -1456,8 +1511,9 @@ void checker::judge_entry_point(symbol_id id)
                 is_hpos4 = is_hpos4 && type.kind == type_kind::structure && record != nullptr
                         && record->name == builtins::k_hpos4;
             }
-        if (positions != 1)
-            invalid("a @vertex fun returns a struct with exactly one @position field");
+        // CHK-90: a vertex stage before a tessellation stage hands on control points, which have none
+        if (positions > 1)
+            invalid("a @vertex fun returns a struct with at most one @position field");
         else if (!is_hpos4)
             invalid("the @position field of a @vertex fun is an hpos4");
         judge_link(info.result);
@@ -1481,12 +1537,19 @@ cc::span<stage_input_info const> sgl::check::stage_inputs()
         {.input = stage_input::primitive_id,
          .name = "primitive_id",
          .in_stage = stage::pixel,
+         .also_in = u8(stage_bit(stage::geometry) | stage_bit(stage::tessellation_control)
+                       | stage_bit(stage::tessellation_evaluation)),
          .type = "int",
          .feature = i32(feature::primitive_index)},
         {.input = stage_input::thread_id, .name = "thread_id", .in_stage = stage::compute, .type = "int3"},
         {.input = stage_input::local_thread_id, .name = "local_thread_id", .in_stage = stage::compute, .type = "int3"},
         {.input = stage_input::local_thread_index, .name = "local_thread_index", .in_stage = stage::compute, .type = "int"},
         {.input = stage_input::workgroup_id, .name = "workgroup_id", .in_stage = stage::compute, .type = "int3"},
+        // its type is the domain's, which the factors struct says: CHK-306 judges it
+        {.input = stage_input::domain_location,
+         .name = "domain_location",
+         .in_stage = stage::tessellation_evaluation,
+         .type = "float3"},
     };
     return k_inputs;
 }

@@ -16,7 +16,14 @@ from pathlib import Path
 
 # An SGL package spells its stages as SGL does, and `pixel` is sg's fragment stage.
 # The word is the package's and the generated symbol's; sg has one stage, so the enumerator stays `fragment`.
-SGL_STAGES = {"vertex": "vertex", "pixel": "fragment", "compute": "compute"}
+SGL_STAGES = {
+    "vertex": "vertex",
+    "tessellation_control": "tessellation_control",
+    "tessellation_evaluation": "tessellation_evaluation",
+    "geometry": "geometry",
+    "pixel": "fragment",
+    "compute": "compute",
+}
 
 # The kinds that generate C++ from a declaration rather than naming an entry point, and what `describe` lists each under.
 BINDING_KIND = "binding"

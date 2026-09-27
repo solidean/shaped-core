@@ -18,7 +18,7 @@ Back to the [specification](_index.md).
         * "vertex"
         * "pixel" - not fragment
         * "geometry"
-        * "tessellation eval/control" - TODO i feel like we want "tessellation" in the name but not sure about the other
+        * "tessellation_control", "tessellation_evaluation" - sg's names, spelled out; the control stage returns a patch's factors, and the evaluation stage runs once per domain location
     * mesh shading??
         * "mesh" - is this right? what about amplification? this is basically TODO
     * compute

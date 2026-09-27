@@ -635,6 +635,10 @@ def open_fields(pipeline: dict) -> list[tuple[str, str, str]]:
     return out
 
 
+# A pipeline's stages in the order a vertex passes through them, each a field of `describe`'s pipeline.
+PIPELINE_STAGES = ("vertex", "tessellation_control", "tessellation_evaluation", "geometry", "pixel")
+
+
 def pipeline_includes(entries: SglEntries) -> list[str]:
     if not entries.pipelines:
         return []
@@ -648,7 +652,8 @@ def emit_pipelines(entries: SglEntries, stems: dict[str, str]) -> str:
         stem = stems[file.path]
         type_name = pipeline_type(stem, p["name"])
         fields = open_fields(p)
-        stages = p["vertex"] + (f" and {p['pixel']}" if p["pixel"] else "")
+        named = [p[s] for s in PIPELINE_STAGES if p[s]]
+        stages = ", ".join(named[:-1]) + " and " + named[-1] if len(named) > 1 else named[0]
         writes = f", writing `{p['target_set']}`" if p["target_set"] else ", writing depth alone"
         out.append(f"/// `pipeline {p['name']}` of {file.path}: {stages}{writes}. Generated; do not edit.\n")
         out.append(f"/// Acquired as `ctx.cached.acquire_raster_pipeline({stem}.{p['name']}, …)`.\n")
@@ -755,9 +760,10 @@ def emit_pipelines_impl(package: str, namespace: str, entries: SglEntries, stems
         out.append("    static slib::pipeline_definition const d = {\n")
         out.append(f'        .file = "{file.path}",\n')
         out.append(f'        .name = "{p["name"]}",\n')
-        out.append(f"        .vertex = {handle(p['vertex'])},\n")
-        if p["pixel"]:
-            out.append(f"        .pixel = {handle(p['pixel'])},\n")
+        # in pipeline_definition's field order, which a designated initializer has to follow
+        for s in ("vertex", "pixel", "geometry", "tessellation_control", "tessellation_evaluation"):
+            if p[s]:
+                out.append(f"        .{s} = {handle(p[s])},\n")
         out.append(f"        .acquire_layout = &{key}_layout,\n")
         if p["vertex_input"]:
             out.append(f"        .vertex_input = &{namespace}::{p['vertex_input']}::layout,\n")

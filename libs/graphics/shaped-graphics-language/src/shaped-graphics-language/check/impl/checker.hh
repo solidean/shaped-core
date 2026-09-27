@@ -421,6 +421,21 @@ struct checker
     [[nodiscard]] interpolation interpolation_of(i32 file, ast::attribute const* a);
     /// The grid of a `@compute` attribute; `{1, 1, 1}` without one, and after a bad argument it reports.
     [[nodiscard]] cc::fixed_array<i32, 3> workgroup_of(i32 file, ast::attribute const* a);
+    /// `@geometry(max_vertices = N)`'s `N`, from 1 to 1024; 1 after a bad argument, which it reports (CHK-301).
+    [[nodiscard]] i32 max_vertices_of(i32 file, ast::attribute const& a);
+    struct tessellation_mode
+    {
+        tessellation_partitioning partitioning = tessellation_partitioning::integer;
+        bool is_clockwise = true;
+    };
+    /// `@tessellation_control(partitioning = …, winding = …)`, both named (CHK-304).
+    [[nodiscard]] tessellation_mode tessellation_of(i32 file, ast::attribute const& a);
+    /// `point_stream[T]`, `line_stream[T]` and `triangle_stream[T]` in a type position (CHK-302).
+    [[nodiscard]] type_id resolve_stream(i32 file, ast::expr_id expr, ast::index const& node, function_scope const* scope);
+    /// CHK-303: `s.emit(v)` or `s.end_strip()` on a geometry stage's stream, which `check_dot_call` hands on.
+    type_id check_stream_call(function_scope& scope, ast::expr_id id, ast::call const& call, type_id stream);
+    /// CHK-301 to CHK-306: an entry point of the geometry or a tessellation stage, which `judge_entry_point` hands on.
+    void judge_primitive_stage(symbol_id id, cc::function_ref<void(cc::string_view)> invalid);
     /// The one name of a `@stream(name)` or a `@sampler(name)`; empty without one, and after a bad argument it reports.
     [[nodiscard]] cc::string name_argument_of(i32 file, ast::attribute const* a);
     /// The members of a struct or a binding, collected locally and appended whole so the range stays contiguous.

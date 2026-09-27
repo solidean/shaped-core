@@ -77,6 +77,13 @@ public:
             return upper_cased(member.source_name);
         case struct_role::stage_link:
             return cc::format("SGL{}", member.location);
+        case struct_role::patch_constants:
+            // EMIT-123: the factors are the tessellator's, and any other member reaches the evaluation stage as a link
+            if (member.factor == check::tessellation_factor::edge)
+                return "SV_TessFactor";
+            if (member.factor == check::tessellation_factor::inside)
+                return "SV_InsideTessFactor";
+            return cc::format("SGL{}", member.location);
         case struct_role::render_targets:
             // EMIT-116: the depth and the sample mask are outputs of their own
             switch (member.output)
@@ -252,8 +259,118 @@ public:
                         k_inline_constants_space);
     }
 
+    /// The domain a tessellation stage's factors struct says, as HLSL names it (CHK-305).
+    [[nodiscard]] static cc::string_view domain_of(plan const& p, type_id factors)
+    {
+        for (auto const& m : p.m.at(p.m.at(factors).members))
+            if (m.factor == check::tessellation_factor::edge)
+                return p.m.at(m.type).count == 2 ? "isoline" : p.m.at(m.type).count == 3 ? "tri" : "quad";
+        return "tri";
+    }
+
+    /// EMIT-123: a geometry or a tessellation entry point, its parameters as HLSL takes each, in the order written.
+    void write_primitive_head(cc::string& out, plan const& p) const
+    {
+        auto parameters = cc::vector<cc::string>();
+        auto factors = type_id::none;
+        for (auto i = isize(0); i < p.e.locals.size(); ++i)
+        {
+            auto const& local = p.e.locals[i];
+            if (local.kind != check::local_kind::parameter)
+                continue;
+            auto const& name = p.locals[i];
+            auto const& t = p.m.at(local.type);
+            auto input = isize(-1);
+            for (auto k = isize(0); k < p.e.stage_inputs.size(); ++k)
+                if (index_of(p.e.stage_inputs[k].local) == i)
+                    input = k;
+            if (input >= 0)
+            {
+                auto const& spelled = spelling_of(p.e.stage_inputs[input].input);
+                // a domain location is the float3 or the float2 its parameter is
+                auto const type = p.e.stage_inputs[input].input == check::stage_input::domain_location
+                                    ? type_text(p, *this, local.type)
+                                    : spelled.hlsl_type;
+                parameters.push_back(cc::format("{} {} : {}", type, p.stage_input_names[input], spelled.hlsl_semantic));
+                continue;
+            }
+            if (t.kind == type_kind::array)
+            {
+                auto const element = type_text(p, *this, t.element);
+                if (p.e.entry_stage == stage::geometry)
+                {
+                    constexpr cc::string_view primitives[]
+                        = {"", "point", "line", "triangle", "lineadj", "", "triangleadj"};
+                    parameters.push_back(cc::format("{} {} {}[{}]", primitives[t.count], element, name, t.count));
+                }
+                else if (p.e.entry_stage == stage::tessellation_control)
+                    parameters.push_back(cc::format("InputPatch<{}, {}> {}", element, t.count, name));
+                else
+                    parameters.push_back(cc::format("const OutputPatch<{}, {}> {}", element, t.count, name));
+                continue;
+            }
+            if (t.kind == type_kind::stream)
+            {
+                auto const stream = t.count == 1 ? "PointStream" : t.count == 2 ? "LineStream" : "TriangleStream";
+                parameters.push_back(cc::format("inout {}<{}> {}", stream, type_text(p, *this, t.element), name));
+                continue;
+            }
+            factors = local.type;
+            parameters.push_back(cc::format("{} {}", type_text(p, *this, local.type), name));
+        }
+        auto list = cc::string();
+        for (auto const& parameter : parameters)
+            list += cc::format("{}{}", list.empty() ? "" : ", ", parameter);
+
+        auto const& info = p.m.functions[p.m.at(p.e.function).info];
+        if (p.e.entry_stage == stage::geometry)
+        {
+            out.appendf("[maxvertexcount({})]\n", info.max_vertices);
+            out.appendf("void {}({})\n{{\n", p.entry_name, list);
+        }
+        else if (p.e.entry_stage == stage::tessellation_control)
+            out.appendf("{} {}({})\n{{\n", type_text(p, *this, p.e.result), p.patch_function, list);
+        else
+        {
+            out.appendf("[domain(\"{}\")]\n", domain_of(p, factors));
+            out.appendf("{} {}({})\n{{\n", type_text(p, *this, p.e.result), p.entry_name, list);
+        }
+        for (auto i = isize(0); i < p.e.stage_inputs.size(); ++i)
+        {
+            auto const local = p.e.stage_inputs[i].local;
+            out.appendf("    const {} {} = {};\n", type_text(p, *this, p.e.at(local).type), p.locals[index_of(local)],
+                        stage_input_value(p, i));
+        }
+    }
+
+    /// A control stage's control points pass through unchanged, which is a hull function that hands each on.
+    void write_function_tail(cc::string& out, plan const& p) const override
+    {
+        if (p.e.entry_stage != stage::tessellation_control)
+            return;
+        auto const& info = p.m.functions[p.m.at(p.e.function).info];
+        auto const& patch = p.m.at(p.e.input);
+        auto const point = type_text(p, *this, patch.element);
+        auto const domain = domain_of(p, p.e.result);
+        constexpr cc::string_view partitionings[] = {"integer", "fractional_even", "fractional_odd"};
+        auto const topology = domain == "isoline" ? cc::string_view("line")
+                            : info.is_clockwise   ? cc::string_view("triangle_cw")
+                                                  : cc::string_view("triangle_ccw");
+        out.appendf("\n[domain(\"{}\")]\n", domain);
+        out.appendf("[partitioning(\"{}\")]\n", partitionings[isize(info.partitioning)]);
+        out.appendf("[outputtopology(\"{}\")]\n", topology);
+        out.appendf("[outputcontrolpoints({})]\n", patch.count);
+        out.appendf("[patchconstantfunc(\"{}\")]\n", p.patch_function);
+        out.appendf("{} {}(InputPatch<{}, {}> {}, uint {} : SV_OutputControlPointID)\n{{\n", point, p.entry_name, point,
+                    patch.count, p.locals[0], p.point_index);
+        out.appendf("    return {}[{}];\n}}\n", p.locals[0], p.point_index);
+    }
+
     void write_function_head(cc::string& out, plan const& p) const override
     {
+        if (p.e.entry_stage == stage::geometry || p.e.entry_stage == stage::tessellation_control
+            || p.e.entry_stage == stage::tessellation_evaluation)
+            return write_primitive_head(out, p);
         auto parameters = cc::vector<cc::string>();
         if (check::is_valid(p.e.input))
             parameters.push_back(cc::format("{} {}", type_text(p, *this, p.e.input), p.locals[0]));

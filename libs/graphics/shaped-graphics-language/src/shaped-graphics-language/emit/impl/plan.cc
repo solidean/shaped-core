@@ -52,6 +52,8 @@ cc::string_view role_name(struct_role role)
         return "stage-to-stage struct";
     case struct_role::render_targets:
         return "render target struct";
+    case struct_role::patch_constants:
+        return "factors struct";
     }
     return "";
 }
@@ -73,12 +75,17 @@ struct_role input_role(flat_entry_point const& e)
     // A compute parameter crosses no edge: it is a system value, or a struct of them.
     if (e.entry_stage == stage::compute)
         return struct_role::plain;
+    // the geometry and the tessellation stages take an array of what the stage before hands on
     return e.entry_stage == stage::vertex ? struct_role::vertex_input : struct_role::stage_link;
 }
 
 struct_role result_role(flat_entry_point const& e)
 {
-    return e.entry_stage == stage::vertex ? struct_role::stage_link : struct_role::render_targets;
+    if (e.entry_stage == stage::tessellation_control)
+        return struct_role::patch_constants;
+    return e.entry_stage == stage::vertex || e.entry_stage == stage::tessellation_evaluation
+             ? struct_role::stage_link
+             : struct_role::render_targets;
 }
 
 struct validator
@@ -163,7 +170,9 @@ struct validator
             else if (auto const* c = x.node.try_as<flat_call>())
             {
                 auto const* const record = m.builtin_function(c->intrinsic);
-                if (record == nullptr || record->parameters.size() != e.at(c->arguments).size())
+                auto const expected
+                    = record == nullptr ? -1 : record->parameters.size() + (record->takes_element ? 1 : 0);
+                if (record == nullptr || expected != e.at(c->arguments).size())
                     report(
                         error_kind::malformed_tree, e.function,
                         cc::format("a call of '{}' with {} arguments", m.at(c->callee).name, e.at(c->arguments).size()));
@@ -193,6 +202,8 @@ struct planner
     plan& p;
     /// Every spelling a struct or an enum case was given.
     cc::set<cc::string> type_spellings;
+    /// Where a factors struct's locations start: after the control point's, which SPIR-V counts in the same space.
+    i32 patch_location_base = 0;
 
     /// A name of the program as this target may spell it: itself, or with a trailing underscore where it is reserved.
     cc::string spell(cc::string_view name)
@@ -238,10 +249,10 @@ struct planner
         return members_of(p.m.at(range), has_locations);
     }
 
-    cc::vector<planned_member> members_of(cc::span<member_info const> members, bool has_locations)
+    cc::vector<planned_member> members_of(cc::span<member_info const> members, bool has_locations, i32 first_location = 0)
     {
         auto result = cc::vector<planned_member>();
-        auto next_location = 0;
+        auto next_location = first_location;
         for (auto const& member : members)
             result.push_back({
                 .name = spell_member(member.name, members),
@@ -250,20 +261,22 @@ struct planner
                 .is_position = has_locations && member.is_position,
                 .interpolate = member.interpolate,
                 .output = member.output,
+                .factor = member.factor,
                 .location = has_locations && !member.is_position && member.output == check::pixel_output::color
+                                 && member.factor == check::tessellation_factor::none
                               ? next_location++
                               : -1,
             });
         return result;
     }
 
-    /// An array type's spelling, after its element's.
-    void need_array(type_id type)
+    /// An array type's spelling, after its element's, whose role is the array's: a patch's control points link stages.
+    void need_array(type_id type, struct_role role)
     {
         if (p.array_of_type[index_of(type)] != -1)
             return;
         auto const& info = p.m.at(type);
-        need(info.element, struct_role::plain);
+        need(info.element, role);
         need_enum(info.element);
         auto const element = element_text(info.element);
         auto const is_hlsl = p.which == emit::target::hlsl_dx12 || p.which == emit::target::hlsl_vulkan;
@@ -291,7 +304,7 @@ struct planner
     {
         // a binding array is declared with its resource, and has no type of its own to spell
         if (is_valid(type) && !is_builtin_type(p.m, type) && p.m.at(type).kind == type_kind::array)
-            return p.m.takes_slots(type) ? void() : need_array(type);
+            return p.m.takes_slots(type) ? void() : need_array(type, role);
         if (!is_valid(type) || is_builtin_type(p.m, type) || p.m.at(type).kind != type_kind::structure)
             return;
         if (p.struct_of_type[index_of(type)] != -1)
@@ -315,7 +328,8 @@ struct planner
             .type = type,
             .name = spell_type(p.m.at(info.symbol).name),
             .role = role,
-            .members = members_of(written, role != struct_role::plain),
+            .members = members_of(written, role != struct_role::plain,
+                                  role == struct_role::patch_constants ? patch_location_base : 0),
             .member_of = cc::move(member_of),
         });
     }
@@ -560,8 +574,10 @@ void sgl::emit::impl::validate_edge_struct(check::checked_module const& m,
                     break;
                 }
 
+        // a tessellation factor is an array HLSL passes as a system value, which crosses as no member does
         auto const* const record = m.builtin_type_of(member.type);
-        if (record == nullptr || !record->crosses_edges)
+        auto const is_factor = role == struct_role::patch_constants && member.factor != check::tessellation_factor::none;
+        if ((record == nullptr || !record->crosses_edges) && !is_factor)
             report(error_kind::unsupported, info.symbol,
                    cc::format("a member of type '{}' in a {}: '{}.{}'", m.name_of(member.type), role_name(role), name,
                               member.name));
@@ -689,9 +705,20 @@ void sgl::emit::impl::validate(check::checked_module const& m, check::flat_entry
     // A compute entry point has no pipeline edge at either end, so neither struct is judged as one.
     if (e.entry_stage != stage::compute)
     {
-        if (check::is_valid(e.input))
-            v.edge_struct(e.input, input_role(e));
-        if (e.input != e.result)
+        // the geometry and the tessellation stages take an array of what crosses, and a geometry stage hands its
+        // vertices on through its stream rather than its result
+        auto input = e.input;
+        if (check::is_valid(input) && m.at(input).kind == type_kind::array)
+            input = m.at(input).element;
+        if (check::is_valid(input))
+            v.edge_struct(input, input_role(e));
+        if (e.entry_stage == stage::geometry)
+        {
+            for (auto const& local : e.locals)
+                if (local.kind == check::local_kind::parameter && m.at(local.type).kind == type_kind::stream)
+                    v.edge_struct(m.at(local.type).element, struct_role::stage_link);
+        }
+        else if (input != e.result)
             v.edge_struct(e.result, result_role(e));
     }
     v.bindings();
@@ -713,8 +740,24 @@ sgl::emit::impl::plan sgl::emit::impl::make_plan(check::checked_module const& m,
     result.array_of_type.resize_to_filled(m.types.size(), -1);
 
     auto p = planner{.p = result};
+    // a tessellation stage's control points take the first locations, and its factors struct's members the next
+    if (check::is_valid(e.input) && m.at(e.input).kind == type_kind::array
+        && (e.entry_stage == stage::tessellation_control || e.entry_stage == stage::tessellation_evaluation))
+        for (auto const& member : m.at(m.at(m.at(e.input).element).members))
+            p.patch_location_base += member.is_position ? 0 : 1;
     p.need(e.input, input_role(e));
     p.need(e.result, result_role(e));
+    // the geometry stage's stream, and the evaluation stage's factors, are parameters after the first
+    for (auto const& local : e.locals)
+    {
+        if (local.kind != check::local_kind::parameter)
+            continue;
+        auto const& t = m.at(local.type);
+        if (t.kind == type_kind::stream)
+            p.need(t.element, struct_role::stage_link);
+        if (e.entry_stage == stage::tessellation_evaluation && t.kind == type_kind::structure && local.type != e.input)
+            p.need(local.type, struct_role::patch_constants);
+    }
     for (auto const& local : e.locals)
     {
         p.need(local.type, struct_role::plain);
@@ -727,6 +770,11 @@ sgl::emit::impl::plan sgl::emit::impl::make_plan(check::checked_module const& m,
     }
     // `spell` is what mints `<name>_` where the target reserves the name or a builtin is called by it.
     result.entry_name = p.spell(e.name);
+    if (e.entry_stage == stage::tessellation_control)
+    {
+        result.patch_function = result.names.mint(cc::format("{}_patch", e.name));
+        result.point_index = result.names.mint("point_index");
+    }
     p.constants();
     p.group_blocks();
     p.resources();
@@ -772,6 +820,9 @@ sgl::emit::impl::stage_input_spelling const& sgl::emit::impl::spelling_of(check:
         = {"uint", "SV_GroupIndex", "u32", "local_invocation_index", "uint", "thread_index_in_threadgroup"};
     static constexpr stage_input_spelling k_workgroup_id
         = {"uint3", "SV_GroupID", "vec3u", "workgroup_id", "uint3", "threadgroup_position_in_grid"};
+    // its HLSL type is the domain's, which the parameter states: `float3` for triangles, `float2` otherwise
+    static constexpr stage_input_spelling k_domain_location
+        = {"float3", "SV_DomainLocation", "vec3f", "", "float3", ""};
     switch (input)
     {
     case stage_input::vertex_index:
@@ -794,6 +845,8 @@ sgl::emit::impl::stage_input_spelling const& sgl::emit::impl::spelling_of(check:
         return k_local_thread_index;
     case stage_input::workgroup_id:
         return k_workgroup_id;
+    case stage_input::domain_location:
+        return k_domain_location;
     case stage_input::none:
         break;
     }

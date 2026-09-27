@@ -580,21 +580,6 @@ cc::string_view sgl::emit::impl::type_text(plan const& p, dialect const& d, chec
     return p.structs[p.struct_of_type[index_of(type)]].name;
 }
 
-cc::string_view sgl::emit::impl::stage_name(check::stage s)
-{
-    switch (s)
-    {
-    case check::stage::none:
-        return "";
-    case check::stage::vertex:
-        return "vertex";
-    case check::stage::pixel:
-        return "pixel";
-    case check::stage::compute:
-        return "compute";
-    }
-    return "";
-}
 
 void sgl::emit::impl::write_helpers(cc::string& out, plan const& p, dialect const& d)
 {
@@ -627,7 +612,7 @@ void sgl::emit::impl::write_helpers(cc::string& out, plan const& p, dialect cons
 cc::string sgl::emit::impl::write_text(plan& p, dialect const& d)
 {
     auto w = writer{.p = p, .d = d};
-    w.out.appendf("// SGL {} entry point '{}', written as {}.\n", stage_name(p.e.entry_stage), p.entry_name,
+    w.out.appendf("// SGL {} entry point '{}', written as {}.\n", check::stage_name(p.e.entry_stage), p.entry_name,
                   d.description());
     w.out += "// Generated: the SGL source is what to edit.\n\n";
     d.write_declarations(w.out, p);
@@ -643,5 +628,6 @@ cc::string sgl::emit::impl::write_text(plan& p, dialect const& d)
     for (auto const id : p.e.at(p.e.body))
         w.statement(p.e.at(id));
     w.out += "}\n";
+    d.write_function_tail(w.out, p);
     return cc::move(w.out);
 }

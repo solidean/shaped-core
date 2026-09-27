@@ -80,6 +80,9 @@ public:
 
     /// Everything of the function up to and including the line that opens its body.
     virtual void write_function_head(cc::string& out, plan const& p) const = 0;
+    /// What follows the entry point's function, such as the hull function a tessellation control stage hands its
+    /// control points on through; nothing for most stages.
+    virtual void write_function_tail(cc::string&, plan const&) const {}
 
 protected:
     ~dialect() = default;
@@ -90,8 +93,6 @@ protected:
 /// The name of a type as `d` writes it: a builtin's spelling, or the planned name of a struct of the program.
 [[nodiscard]] cc::string_view type_text(plan const& p, dialect const& d, check::type_id type);
 
-/// "vertex" or "pixel", as SGL names the stage.
-[[nodiscard]] cc::string_view stage_name(check::stage s);
 
 /// The constants of every enum of `p`, each set followed by an empty line; a dialect calls it from its declarations.
 void write_enum_constants(cc::string& out, plan const& p, dialect const& d);

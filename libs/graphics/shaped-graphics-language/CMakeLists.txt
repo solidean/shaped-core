@@ -54,6 +54,7 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/check/check_features.cc
     src/shaped-graphics-language/check/check_footprint.cc
     src/shaped-graphics-language/check/check_resources.cc
+    src/shaped-graphics-language/check/check_stages.cc
     src/shaped-graphics-language/check/check_stmt.cc
     src/shaped-graphics-language/check/check_test.cc
     src/shaped-graphics-language/check/uniformity.cc
@@ -335,6 +336,7 @@ if(SC_BUILD_TESTS)
         tests/check/check-test-support.hh
         tests/corpus/corpus-test.cc
         tests/check/array-check-test.cc
+        tests/check/primitive-stage-check-test.cc
         tests/check/binding-check-test.cc
         tests/check/texture-check-test.cc
         tests/check/uniformity-check-test.cc
@@ -367,6 +369,7 @@ if(SC_BUILD_TESTS)
         tests/emit/cube-emit-test.cc
         tests/emit/emit-test.cc
         tests/emit/array-emit-test.cc
+        tests/emit/primitive-stage-emit-test.cc
         tests/emit/buffer-emit-test.cc
         tests/emit/texture-emit-test.cc
         tests/emit/compute-emit-test.cc

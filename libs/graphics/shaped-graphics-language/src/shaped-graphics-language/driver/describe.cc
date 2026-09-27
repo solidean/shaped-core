@@ -233,9 +233,22 @@ described_entry_point describe_entry_point(check::checked_module const& m,
 
 described_pipeline describe_pipeline(check::checked_module const& m, check::pipeline_info const& p)
 {
-    auto result = described_pipeline{.name = m.at(p.symbol).name, .vertex = m.at(p.vertex).name};
-    if (check::is_valid(p.pixel))
-        result.pixel = m.at(p.pixel).name;
+    auto result = described_pipeline{.name = m.at(p.symbol).name};
+    auto features = check::feature_set();
+    struct named_stage
+    {
+        check::symbol_id entry;
+        cc::string* name;
+    };
+    for (auto const s :
+         {named_stage{p.vertex, &result.vertex}, named_stage{p.pixel, &result.pixel},
+          named_stage{p.geometry, &result.geometry}, named_stage{p.tessellation_control, &result.tessellation_control},
+          named_stage{p.tessellation_evaluation, &result.tessellation_evaluation}})
+        if (check::is_valid(s.entry))
+        {
+            *s.name = m.at(s.entry).name;
+            features |= m.functions[m.at(s.entry).info].features;
+        }
     for (auto const b : m.at(p.layout))
         result.layout.push_back(m.at(b).name);
     if (check::is_valid(p.inline_constants))
@@ -250,9 +263,6 @@ described_pipeline describe_pipeline(check::checked_module const& m, check::pipe
             if (member.output == check::pixel_output::color)
                 result.targets.push_back(member.name);
     }
-    auto features = m.functions[m.at(p.vertex).info].features;
-    if (check::is_valid(p.pixel))
-        features |= m.functions[m.at(p.pixel).info].features;
     result.features = feature_names(features);
 
     auto const settings = m.at(p.settings);
@@ -282,6 +292,13 @@ described_pipeline describe_pipeline(check::checked_module const& m, check::pipe
         cc::format("vertex input = {}", check::is_valid(p.vertex_input) ? shaped(p.vertex_input) : cc::string()));
     result.frozen.push_back(
         cc::format("target set = {}", check::is_valid(p.target_set) ? shaped(p.target_set) : cc::string()));
+    // The host's code holds a shader per stage, so a reload that adds or drops one has nothing to build it with.
+    auto stages = cc::string();
+    for (auto const* name : {&result.vertex, &result.tessellation_control, &result.tessellation_evaluation,
+                             &result.geometry, &result.pixel})
+        if (!name->empty())
+            stages += cc::format("{}{}", stages.empty() ? "" : ", ", *name);
+    result.frozen.push_back(cc::format("stages = {}", stages));
     // A device lacking a feature a reload now needs would refuse the pipeline, so the build's needs are frozen too.
     auto needs = cc::string();
     for (auto const& name : result.features)

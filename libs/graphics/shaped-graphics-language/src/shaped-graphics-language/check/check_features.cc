@@ -61,10 +61,17 @@ void checker::judge_entry_features(symbol_id id)
         needed |= out.bindings[out.at(b).info].required;
         declared |= out.bindings[out.at(b).info].declared;
     }
-    // CHK-272: a stage input some device lacks needs its feature, as a binding member does
+    // CHK-272: a stage input some device lacks needs its feature, as a binding member does; a stage that has it
+    // natively needs none
     for (auto const& parameter : out.at(info.parameters))
-        if (parameter.input != stage_input::none && info_of(parameter.input).feature >= 0)
+        if (parameter.input != stage_input::none && info_of(parameter.input).feature >= 0
+            && info_of(parameter.input).in_stage == info.entry_stage)
             needed.set(feature(info_of(parameter.input).feature));
+    // CHK-301, CHK-304, CHK-306: the geometry and the tessellation stages are features a device grants
+    if (info.entry_stage == stage::geometry)
+        needed.set(feature::geometry_shader);
+    if (info.entry_stage == stage::tessellation_control || info.entry_stage == stage::tessellation_evaluation)
+        needed.set(feature::tessellation_shader);
     // CHK-274: a pixel stage that takes a member per sample runs per sample, which vulkan gives only with a feature
     if (info.entry_stage == stage::pixel)
         for (auto const& parameter : out.at(info.parameters))

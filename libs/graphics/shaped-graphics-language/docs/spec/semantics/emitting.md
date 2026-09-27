@@ -28,10 +28,10 @@ Back to the [semantics](_index.md); the reasons are in [why/emitting.md](why/emi
 * **EMIT-10** A module that reported an error is the error `module-has-errors`, whichever entry point is asked for.
 * **EMIT-11** An entry point the module does not hold is `unknown-entry-point`.
 * **EMIT-12** A construct that no emitter carries yet is `unsupported`, and its detail names the construct; an emitter never guesses an address.
-* **EMIT-13** No error depends on the target but EMIT-89's and EMIT-109's: an entry point is written for every target or for none ([why](why/emitting.md#emit-13)).
+* **EMIT-13** No error depends on the target but EMIT-89's, EMIT-109's and EMIT-122's: an entry point is written for every target or for none ([why](why/emitting.md#emit-13)).
   The exception is `msl`, which refuses what a Metal entry point takes as an argument.
 * **EMIT-109** An entry point that needs a feature no device of the target has is `target-lacks-feature`, and its detail names the feature.
-  Today that is `wgsl` against `binding_arrays`, `multisampled_array_textures` and `raytracing`.
+  Today that is `wgsl` against `binding_arrays`, `multisampled_array_textures`, `raytracing`, `geometry_shader` and `tessellation_shader`.
   The shader chose it by `require`, so a portable shader still meets EMIT-13's promise.
 * **EMIT-66** A tree that is not core is the error `not-core`, and its detail names the first node that offends.
 * **EMIT-67** A `print` is `unsupported`: no target writes one yet.
@@ -125,7 +125,19 @@ const light_kind_sun: i32 = 2;
 | stage | parameter | result |
 |---|---|---|
 | `@vertex` | vertex input | stage link |
+| `@tessellation_control` | an array of stage links, the patch | patch constants |
+| `@tessellation_evaluation` | the patch, and the patch constants | stage link |
+| `@geometry` | an array of stage links, and the stream's element as a stage link | none |
 | `@pixel` | stage link | render targets |
+
+* **EMIT-122** `msl` refuses a geometry and a tessellation entry point as `target-lacks-feature`: Metal has neither stage, and tessellates by a compute kernel instead.
+* **EMIT-123** HLSL writes the stages as dx12 and vulkan both take them:
+  * a geometry stage is `[maxvertexcount(N)]` over `void`, taking `triangle T tri[3]` and last `inout TriangleStream<T>`, and `emit` and `end_strip` are `Append` and `RestartStrip`;
+  * a control stage is a passthrough hull function that returns `patch[point_index]`, named by its `domain`, `partitioning`, `outputtopology`, `outputcontrolpoints` and `patchconstantfunc`;
+  * the SGL body is that patch-constant function, `<name>_patch`, taking the `InputPatch`;
+  * an evaluation stage is `[domain(…)]` over the function, taking the `const OutputPatch`, the patch constants, and `SV_DomainLocation`;
+  * in patch constants, `@edge_factors` is `SV_TessFactor` and `@inside_factors` `SV_InsideTessFactor`;
+  * the other members of patch constants take the locations after the control point's, so vulkan's two never collide.
 
 ```hlsl
 struct pixel_input

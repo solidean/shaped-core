@@ -203,10 +203,40 @@ evaluator evaluator_of(atomic_op op)
     }
     return nullptr;
 }
+// ---- a geometry stage's streams ---------------------------------------------------------------------------------
+
+/// The data word: 0 for `emit`, 1 for `end_strip`.
+written write_stream(call_context const& ctx)
+{
+    auto const& s = ctx.arguments[0].text;
+    if (ctx.data == 1)
+        return {.text = cc::format("{}.RestartStrip()", s)};
+    return {.text = cc::format("{}.Append({})", s, ctx.arguments[1].text)};
+}
 } // namespace
 
 void sgl::builtins::register_sync(registry& r)
 {
+    r.add_comment("// A geometry stage's stream, called as its methods: `stream.emit(v)` appends the vertex `v`, which "
+                  "the\n"
+                  "// check pass takes as the stream's own type, and `stream.end_strip()` ends the strip (CHK-303).");
+    for (auto const shape : {"point_stream", "line_stream", "triangle_stream"})
+    {
+        r.add(function_record{
+            .signature = cc::format("@stages(.geometry) fun emit(s: mut {})", shape),
+            .doc = "/// Appends a vertex, handed as a second argument of the stream's own type.",
+            .evaluate = nothing,
+            .write = {.kind = spelling_kind::custom, .custom = write_stream, .data = 0},
+            .takes_element = true,
+        });
+        r.add(function_record{
+            .signature = cc::format("@stages(.geometry) fun end_strip(s: mut {})", shape),
+            .doc = "/// Ends the strip being appended, so the next vertex starts a new one.",
+            .evaluate = nothing,
+            .write = {.kind = spelling_kind::custom, .custom = write_stream, .data = 1},
+        });
+    }
+
     r.add_comment("// Barriers, which a compute shader reaches in control flow every thread of its workgroup takes "
                   "(CHK-282).");
     for (auto i = u32(0); i < u32(sizeof(k_barriers) / sizeof(k_barriers[0])); ++i)

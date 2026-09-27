@@ -28,6 +28,8 @@ The host then acquires it by name, and states nothing the shader already said: n
 
 * **A declaration names its entry points by stage**: `vertex = main_vs`, `pixel = main_ps`.
   The stage slots are named after SGL's stages ([terminology](terminology.md)), since what fills one is an SGL entry point.
+* **`geometry`, `tessellation_control` and `tessellation_evaluation` are optional slots**, the last two filled together (CHK-307).
+  Each needs a feature a device grants, and a tessellated pipeline draws the patch its stages take, so its topology is never a setting.
 * **The short form lists them instead**: `pipeline shadow = (shadow_vs, shadow_ps)`.
   Each entry point goes to the slot its stage attribute names, so their order is free, and two of one stage are an error.
   Settings go in a block under the list, `pipeline shadow = (shadow_vs, shadow_ps):`, the same ones a declaration takes.
@@ -92,7 +94,8 @@ Two sources of one step that set one field differently are an error, unless the 
 
 A pipeline is the first place two stages meet, so it is where they are checked against each other.
 
-* **Adjacent stages pass one interface**: what the vertex stage returns has the members the pixel stage takes, with the same names and types, in the same order.
+* **Adjacent stages pass one interface**: what one stage returns has the members the next one takes, with the same names and types, in the same order.
+  The struct that reaches the rasterizer has one `@position`, whichever stage returns it.
   A location is a member's position ([EMIT-26](semantics/emitting.md#addresses)), and each stage is compiled apart ([EMIT-6](semantics/emitting.md#targets)).
   So agreeing member for member is what makes the slots agree.
 * **The binding lists agree by position**: with `@inline` left out, each stage's list names the same binding as the longest one at every position it has.
@@ -111,7 +114,8 @@ A few parts of a pipeline are only known when the program runs, such as the form
 
 Everything a pipeline states reaches the host as one generated symbol per pipeline, which `ctx.cached` acquires; slib's [cheat sheet](../../../shaped-shader-library/cheat-sheet.md) has its spelling.
 
-* **The frozen part is what the host's own code was built against**: the binding layout, the vertex input, the target set, the features its stages need of a device, every format, and the sample count.
+* **The frozen part is what the host's own code was built against**: the binding layout, the vertex input, the target set and the stages.
+  So are the features the stages need of a device, every format, and the sample count.
   The features are frozen because the host chose its device by them: a reload that needs one more could be refused by a device the build ran on.
   A struct or binding in it is compared by its name and its shape, the structural hash of its members, so a member added under the same name is a change.
   It never changes under a hot reload.

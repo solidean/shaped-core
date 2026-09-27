@@ -27,6 +27,8 @@ enum class struct_role : u8
     stage_link,
     /// The result of a pixel entry point: member i is render target i.
     render_targets,
+    /// What a tessellation control stage returns and the evaluation stage takes: its factors, and data per patch.
+    patch_constants,
 };
 
 struct planned_member
@@ -41,6 +43,8 @@ struct planned_member
     check::interpolation interpolate;
     /// A render target struct's depth or sample mask, which takes no location; `color` everywhere else.
     check::pixel_output output = {};
+    /// A factors struct's tessellation factors, which take no location; `none` everywhere else.
+    check::tessellation_factor factor = {};
     /// The position among the members without `@position`; -1 on a `plain` struct and on the position itself.
     i32 location = -1;
     /// The byte offset in an inline binding's block; -1 everywhere else.
@@ -140,6 +144,10 @@ struct plan
     cc::vector<i32> enum_of_type;
     /// What this target declares the entry point as: the source's name, or a minted one where the target reserves it.
     cc::string entry_name;
+    /// A tessellation control stage's patch-constant function, which HLSL writes its body as, and the index of the
+    /// control point its pass-through hull function hands on; empty for every other stage.
+    cc::string patch_function;
+    cc::string point_index;
     cc::optional<planned_constants> constants;
     /// The constant blocks of the entry point's groups, one per group with a plain member, in group order.
     cc::vector<planned_constants> group_blocks;

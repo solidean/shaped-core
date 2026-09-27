@@ -62,6 +62,13 @@ cc::string spelling_of(check::type_info const& t, checked_module const& m)
         return t.is_comparison ? cc::string("comparison_sampler") : cc::string("sampler");
     case type_kind::atomic:
         return cc::format("{}atomic[{}]", access_prefix(t.access), m.name_of(t.element));
+    case type_kind::stream:
+    {
+        auto const shape = t.count == 1 ? "point_stream" : t.count == 2 ? "line_stream" : "triangle_stream";
+        // a builtin's bare pattern takes every stream of its shape
+        return t.element == type_id::none ? cc::format("{}{}", access_prefix(t.access), shape)
+                                          : cc::format("{}{}[{}]", access_prefix(t.access), shape, m.name_of(t.element));
+    }
     default:
         return {};
     }
@@ -223,8 +230,8 @@ type_id checker::qualify_resource(i32 file, ast::expr_id expr, type_id inner, as
                "a texture is only ever read; a storage texture the shader writes is an image, such as `image_2d`");
         return checked_module::error_type;
     }
-    // a builtin's pattern: `mut atomic[uint]` updates it, `out atomic[uint]` stores to it
-    if (t.kind == type_kind::atomic)
+    // a builtin's pattern: `mut atomic[uint]` updates it, `out atomic[uint]` stores to it; a stream is appended to
+    if (t.kind == type_kind::atomic || t.kind == type_kind::stream)
     {
         auto qualified = t;
         qualified.access = is_write_only ? access_mode::write : access_mode::read_write;
@@ -566,6 +573,22 @@ type_id checker::resolve_pattern_type(i32 file, ast::expr_id expr)
         return result;
     }
 
+    // CHK-303: a bare stream takes every stream of its shape, whatever vertex it holds
+    if (auto const* const bare = e.node.try_as<ast::name>())
+    {
+        auto const text = text_of(file, bare->where);
+        auto const vertices = text == "point_stream"    ? 1
+                            : text == "line_stream"     ? 2
+                            : text == "triangle_stream" ? 3
+                                                        : 0;
+        if (vertices > 0)
+        {
+            auto const result = resource_type({.kind = type_kind::stream, .count = vertices});
+            set_type(file, expr, result);
+            return result;
+        }
+    }
+
     // CHK-194: a bare shape name takes every texture or image of that shape, whatever it holds and however it is read.
     if (auto const* const bare = e.node.try_as<ast::name>())
         for (auto const& shape : k_shapes)
@@ -608,6 +631,9 @@ bool checker::takes(type_id parameter, type_id argument) const
     // an atomic is always memory the shader may update, whatever the pattern says it does with it
     if (p.kind == type_kind::atomic && a.kind == type_kind::atomic)
         return p.element == a.element;
+    // a bare stream pattern takes every stream of its shape
+    if (p.kind == type_kind::stream && a.kind == type_kind::stream)
+        return p.count == a.count && (p.element == type_id::none || p.element == a.element);
     auto const is_bare = p.element == type_id::none && p.format < 0 && !p.is_depth;
     if (is_bare && p.kind == type_kind::texture)
         return a.kind == type_kind::texture && !a.is_depth && a.shape == p.shape;

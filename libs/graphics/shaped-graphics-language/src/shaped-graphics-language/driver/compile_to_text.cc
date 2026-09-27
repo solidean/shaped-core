@@ -34,7 +34,7 @@ cc::result<sgl::emitted_source, cc::string> sgl::compile_to_text(text_request co
     {
         auto held = cc::string();
         for (auto const& e : m.entry_points)
-            held.appendf("{}{} '{}'", held.empty() ? "" : ", ", emit::impl::stage_name(e.entry_stage), e.name);
+            held.appendf("{}{} '{}'", held.empty() ? "" : ", ", check::stage_name(e.entry_stage), e.name);
         return cc::error(cc::format("{}: error: no entry point named '{}' (the source holds: {})\n", request.source_name,
                                     request.entry_point, held.empty() ? cc::string_view("none") : cc::string_view(held)));
     }
@@ -42,8 +42,8 @@ cc::result<sgl::emitted_source, cc::string> sgl::compile_to_text(text_request co
     auto const& e = m.entry_points[index];
     if (request.stage != check::stage::none && e.entry_stage != request.stage)
         return cc::error(cc::format("{}: error: entry point '{}' is a {} entry point, and a {} one was asked for\n",
-                                    request.source_name, e.name, emit::impl::stage_name(e.entry_stage),
-                                    emit::impl::stage_name(request.stage)));
+                                    request.source_name, e.name, check::stage_name(e.entry_stage),
+                                    check::stage_name(request.stage)));
 
     // The check pass writes the structured form, and a target prints the core form.
     auto const legal = check::legalize(m, e);

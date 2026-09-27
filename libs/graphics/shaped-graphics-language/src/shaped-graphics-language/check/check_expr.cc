@@ -932,6 +932,8 @@ type_id checker::check_dot_call(function_scope& scope, ast::expr_id id, ast::cal
     handed.push_back(member.object);
     auto const receiver = check_expr(scope, member.object);
     handed.pop_back();
+    if (receiver != error_type && out.at(receiver).kind == type_kind::stream)
+        return check_stream_call(scope, id, call, receiver);
     auto arguments = check_arguments(scope, call.arguments, false);
     if (receiver == error_type || member.name.empty())
         return error_type;

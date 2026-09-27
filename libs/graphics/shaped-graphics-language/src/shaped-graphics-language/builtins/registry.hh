@@ -180,6 +180,9 @@ struct sgl::builtins::function_record
     bool is_atomic = false;
     /// `nonuniform i`: its argument, marked as an index into a binding array that differs between invocations (CHK-300).
     bool is_nonuniform_mark = false;
+    /// Takes one argument more than its signature names, of the type its first argument holds: a stream's `emit`,
+    /// whose vertex is a struct of the program (CHK-303).
+    bool takes_element = false;
 
     /// Read back from the signature by `finalize`.
     cc::string name;

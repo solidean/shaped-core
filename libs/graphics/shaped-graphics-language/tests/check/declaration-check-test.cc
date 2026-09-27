@@ -269,10 +269,10 @@ TEST("sgl check - an entry point's signature follows the rules of its stage")
     CHECK(entry_reports("@vertex fun vs(v: vin, @vertex_index i: uint) -> vout:\n    return { p = hpos4(..v.p, 1.0) "
                         "}\n")
           == "invalid-entry-point user:[vs] a @vertex_index parameter is an int\n");
-    CHECK(entry_reports("@vertex fun vs(v: vin) -> plain:\n    return { p = v.p }\n")
-          == "invalid-entry-point user:[vs] a @vertex fun returns a struct with exactly one @position field\n");
+    // a vertex that a tessellation stage reads first has no @position; the pipeline asks for it where the rasterizer reads it
+    CHECK(entry_reports("@vertex fun vs(v: vin) -> plain:\n    return { p = v.p }\n") == "");
     CHECK(entry_reports("@vertex fun vs(v: vin) -> two:\n    return { a = hpos4(..v.p, 1.0), b = hpos4(..v.p, 1.0) }\n")
-          == "invalid-entry-point user:[vs] a @vertex fun returns a struct with exactly one @position field\n");
+          == "invalid-entry-point user:[vs] a @vertex fun returns a struct with at most one @position field\n");
     CHECK(entry_reports("@vertex fun vs(v: vin) -> wrong:\n    return { a = float4(..v.p, 1.0) }\n")
           == "invalid-entry-point user:[vs] the @position field of a @vertex fun is an hpos4\n");
 

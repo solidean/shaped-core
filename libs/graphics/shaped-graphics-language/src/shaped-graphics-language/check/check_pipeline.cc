@@ -36,6 +36,19 @@ struct settings_source
     cc::vector<pipeline_setting> settings;
 };
 
+/// The raster stages, in the order a vertex passes through them.
+constexpr stage k_raster_stages[]
+    = {stage::vertex, stage::tessellation_control, stage::tessellation_evaluation, stage::geometry, stage::pixel};
+
+/// The stage a pipeline's line `name = f` fills, or `none` for a line that fills no stage.
+[[nodiscard]] stage slot_named(cc::string_view name)
+{
+    for (auto const s : k_raster_stages)
+        if (stage_name(s) == name)
+            return s;
+    return stage::none;
+}
+
 [[nodiscard]] cc::string joined(cc::span<cc::string const> names)
 {
     auto result = cc::string();
@@ -150,7 +163,7 @@ void find_fields(checked_module const& out,
 cc::vector<cc::string> checker::setting_attribute_paths(cc::string_view name, bool is_on_target)
 {
     // A stage marks an entry point or an edge struct, and fills a stage slot; it is never a field.
-    if (name == "vertex" || name == "pixel" || name == "compute")
+    if (name == "compute" || slot_named(name) != stage::none)
         return {};
     auto const description = pipeline_description_type();
     if (description == checked_module::error_type)
@@ -592,6 +605,25 @@ void checker::compile_pipeline(symbol_id id)
     // ---- the stages
     auto vertex = symbol_id::none;
     auto pixel = symbol_id::none;
+    auto geometry = symbol_id::none;
+    auto control = symbol_id::none;
+    auto evaluation = symbol_id::none;
+    auto const slot_of = [&](stage s) -> symbol_id&
+    {
+        switch (s)
+        {
+        case stage::vertex:
+            return vertex;
+        case stage::geometry:
+            return geometry;
+        case stage::tessellation_control:
+            return control;
+        case stage::tessellation_evaluation:
+            return evaluation;
+        default:
+            return pixel;
+        }
+    };
     auto const place_stage = [&](ast::expr_id value, stage slot, source_span at) -> bool
     {
         auto const* const n = ast::is_valid(value) ? ast.at(value).node.try_as<ast::name>() : nullptr;
@@ -646,8 +678,7 @@ void checker::compile_pipeline(symbol_id id)
         auto const actual = slot == stage::none ? info.entry_stage : slot;
         if (info.entry_stage != actual)
         {
-            pc.fail(file, n->where,
-                    cc::format("{} is no {} entry point", text, actual == stage::vertex ? "@vertex" : "@pixel"));
+            pc.fail(file, n->where, cc::format("{} is no @{} entry point", text, stage_name(actual)));
             return false;
         }
         if (actual == stage::compute)
@@ -655,11 +686,10 @@ void checker::compile_pipeline(symbol_id id)
             pc.fail(file, n->where, cc::format("{} is a compute entry point, which is a pipeline of its own", text));
             return false;
         }
-        auto& into = actual == stage::vertex ? vertex : pixel;
+        auto& into = slot_of(actual);
         if (is_valid(into))
         {
-            pc.fail(file, n->where,
-                    cc::format("a pipeline has one {} stage", actual == stage::vertex ? "vertex" : "pixel"));
+            pc.fail(file, n->where, cc::format("a pipeline has one {} stage", stage_name(actual)));
             return false;
         }
         into = entry;
@@ -681,8 +711,7 @@ void checker::compile_pipeline(symbol_id id)
         for (auto const& s : ast.at(p.settings))
         {
             auto path = cc::vector<path_name>();
-            if (pc.names_of(file, s.path, path) && path.size() == 1
-                && (path[0].name == "vertex" || path[0].name == "pixel"))
+            if (pc.names_of(file, s.path, path) && path.size() == 1 && slot_named(path[0].name) != stage::none)
                 pc.fail(file, span_of(file, s.form), "the short form names its stages in its list");
         }
     }
@@ -693,10 +722,8 @@ void checker::compile_pipeline(symbol_id id)
             auto path = cc::vector<path_name>();
             if (!pc.names_of(file, s.path, path) || path.size() != 1)
                 continue;
-            if (path[0].name == "vertex")
-                (void)place_stage(s.value, stage::vertex, span_of(file, s.form));
-            else if (path[0].name == "pixel")
-                (void)place_stage(s.value, stage::pixel, span_of(file, s.form));
+            if (auto const slot = slot_named(path[0].name); slot != stage::none)
+                (void)place_stage(s.value, slot, span_of(file, s.form));
         }
     }
     if (!is_valid(vertex))
@@ -705,6 +732,12 @@ void checker::compile_pipeline(symbol_id id)
             pc.fail(file, where, "a pipeline has a vertex stage: `vertex = <entry point>`");
         return fail_symbol();
     }
+    // CHK-307: a tessellator runs between a control and an evaluation stage
+    if (is_valid(control) != is_valid(evaluation) && !pc.is_failed)
+        pc.fail(file, where,
+                cc::format("a pipeline with a {} stage has a {} stage too: the two tessellation stages come together",
+                           stage_name(is_valid(control) ? stage::tessellation_control : stage::tessellation_evaluation),
+                           stage_name(is_valid(control) ? stage::tessellation_evaluation : stage::tessellation_control)));
     if (pc.is_failed)
         return fail_symbol();
 
@@ -717,30 +750,90 @@ void checker::compile_pipeline(symbol_id id)
     auto target_set = type_id::none;
 
     // ---- the interface between the stages, and the targets
-    if (is_valid(pixel))
+    auto const info_of_entry = [&](symbol_id entry) -> function_info const& { return out.functions[out.at(entry).info]; };
+    // the first parameter that is no stage input; a valid entry point of a stage after the vertex stage has one
+    auto const taken_by = [&](symbol_id entry) -> type_id
     {
-        auto const& pixel_info = out.functions[out.at(pixel).info];
-        auto const passed = vertex_info.result;
-        // a valid pixel entry point takes its struct first (CHK-271)
-        auto const taken = out.at(pixel_info.parameters)[0].type;
+        for (auto const& parameter : out.at(info_of_entry(entry).parameters))
+            if (parameter.input == stage_input::none)
+                return parameter.type;
+        return checked_module::error_type;
+    };
+    // CHK-183: what one stage passes, the next takes, member for member
+    auto const match = [&](type_id passed, symbol_id from, type_id taken, symbol_id to)
+    {
         auto const returned = out.at(out.at(passed).members);
         auto const expected = out.at(out.at(taken).members);
         auto mismatch = cc::string();
         if (returned.size() != expected.size())
-            mismatch = cc::format("{} passes {} members and {} takes {}", out.at(vertex).name, returned.size(),
-                                  out.at(pixel).name, expected.size());
+            mismatch = cc::format("{} passes {} members and {} takes {}", out.at(from).name, returned.size(),
+                                  out.at(to).name, expected.size());
         else
             for (auto i = isize(0); i < returned.size() && mismatch.empty(); ++i)
             {
                 auto const& a = returned[i];
                 auto const& b = expected[i];
-                if (a.name != b.name || a.type != b.type || a.is_position != b.is_position)
+                if (a.name != b.name || a.type != b.type || a.is_position != b.is_position || a.factor != b.factor)
                     mismatch = cc::format("member {} is `{}: {}` where {} returns it and `{}: {}` where {} takes it", i,
-                                          a.name, out.name_of(a.type), out.at(vertex).name, b.name, out.name_of(b.type),
-                                          out.at(pixel).name);
+                                          a.name, out.name_of(a.type), out.at(from).name, b.name, out.name_of(b.type),
+                                          out.at(to).name);
             }
         if (!mismatch.empty())
             pc.fail(file, where, cc::format("the stages pass one interface, member for member: {}", mismatch));
+    };
+
+    auto passed = vertex_info.result;
+    auto from = vertex;
+    // the control points of a patch, and the edges of its domain: 2 for isolines, 3 for triangles, 4 for quads
+    auto patch_size = 0;
+    auto domain = 0;
+    if (is_valid(control))
+    {
+        // the control stage passes the patch on as it took it, and hands its factors to the evaluation stage
+        auto const patch = taken_by(control);
+        auto const evaluated = taken_by(evaluation);
+        match(passed, from, out.at(patch).element, control);
+        match(passed, from, out.at(evaluated).element, evaluation);
+        patch_size = out.at(patch).count;
+        if (out.at(evaluated).count != patch_size)
+            pc.fail(file, where,
+                    cc::format("{} takes a patch of {} and {} one of {}: the two tessellation stages take one patch",
+                               out.at(control).name, patch_size, out.at(evaluation).name, out.at(evaluated).count));
+        auto const factors = info_of_entry(control).result;
+        for (auto const& parameter : out.at(info_of_entry(evaluation).parameters))
+            if (parameter.input == stage_input::none && parameter.type != evaluated)
+                match(factors, control, parameter.type, evaluation);
+        for (auto const& m : out.at(out.at(factors).members))
+            if (m.factor == tessellation_factor::edge)
+                domain = out.at(m.type).count;
+        passed = info_of_entry(evaluation).result;
+        from = evaluation;
+    }
+    auto primitive = 0;
+    if (is_valid(geometry))
+    {
+        auto const vertices = taken_by(geometry);
+        match(passed, from, out.at(vertices).element, geometry);
+        primitive = out.at(vertices).count;
+        for (auto const& parameter : out.at(info_of_entry(geometry).parameters))
+            if (out.at(parameter.type).kind == type_kind::stream)
+                passed = out.at(parameter.type).element;
+        from = geometry;
+    }
+    // what reaches the rasterizer says where each vertex lands
+    auto positions = 0;
+    for (auto const& m : out.at(out.at(passed).members))
+        positions += m.is_position ? 1 : 0;
+    if (positions != 1 && !pc.is_failed)
+        pc.fail(file, where,
+                cc::format("{} hands the rasterizer {}, which has no @position field", out.at(from).name,
+                           out.name_of(passed)));
+
+    if (is_valid(pixel))
+    {
+        auto const& pixel_info = out.functions[out.at(pixel).info];
+        // a valid pixel entry point takes its struct first (CHK-271)
+        match(passed, from, out.at(pixel_info.parameters)[0].type, pixel);
 
         target_set = pixel_info.result;
         for (auto const& m : out.at(out.at(target_set).members))
@@ -765,7 +858,7 @@ void checker::compile_pipeline(symbol_id id)
     auto inline_constants = symbol_id::none;
     {
         auto lists = cc::vector<cc::vector<symbol_id>>();
-        for (auto const entry : {vertex, pixel})
+        for (auto const entry : {vertex, control, evaluation, geometry, pixel})
         {
             if (!is_valid(entry))
                 continue;
@@ -828,7 +921,7 @@ void checker::compile_pipeline(symbol_id id)
     if (is_valid(target_set))
         edge_source(target_set, true);
 
-    for (auto const entry : {vertex, pixel})
+    for (auto const entry : {vertex, control, evaluation, geometry, pixel})
     {
         if (!is_valid(entry))
             continue;
@@ -849,7 +942,7 @@ void checker::compile_pipeline(symbol_id id)
             pc.is_failed = true;
             continue;
         }
-        if (path.size() == 1 && (path[0].name == "vertex" || path[0].name == "pixel"))
+        if (path.size() == 1 && slot_named(path[0].name) != stage::none)
             continue;
         pc.assign(file, path, pc.description, {}, s.value, declared.kind, span_of(file, s.form), declared.settings);
     }
@@ -889,6 +982,60 @@ void checker::compile_pipeline(symbol_id id)
         settings.push_back_range(s.settings);
     settings.push_back_range(declared.settings);
 
+    // ---- CHK-307: the tessellation stages draw patches, as long as the patch they take
+    for (auto const& s : settings)
+    {
+        // 0 is sg's own `no patches`
+        auto const is_patch = (s.path == "patch_control_points" && s.integer != 0)
+                           || (s.path == "topology" && s.kind == setting_kind::enum_case && s.enum_case == "patch_list");
+        if (is_valid(control) && (s.path == "topology" || s.path == "patch_control_points"))
+            pc.fail(s.file, s.where,
+                    cc::format("the tessellation stages draw patches of {}, so a pipeline with them sets no {}",
+                               patch_size, s.path));
+        else if (!is_valid(control) && is_patch)
+            pc.fail(s.file, s.where, "a pipeline draws patches through its tessellation stages, and this one has none");
+    }
+    if (is_valid(control))
+    {
+        settings.push_back({.path = "topology",
+                            .kind = setting_kind::enum_case,
+                            .enum_case = "patch_list",
+                            .enum_name = "primitive_topology",
+                            .source = setting_source::stage,
+                            .file = file,
+                            .where = where});
+        settings.push_back({.path = "patch_control_points",
+                            .kind = setting_kind::integer,
+                            .integer = patch_size,
+                            .source = setting_source::stage,
+                            .file = file,
+                            .where = where});
+    }
+
+    // ---- CHK-307: a geometry stage takes the primitive the topology assembles
+    if (is_valid(geometry) && !pc.is_failed)
+    {
+        auto topology = cc::string_view("triangle_list");
+        for (auto const& s : settings)
+            if (s.path == "topology" && s.kind == setting_kind::enum_case)
+                topology = s.enum_case;
+        auto const assembled = topology == "point_list"                            ? 1
+                             : topology == "line_list" || topology == "line_strip" ? 2
+                             : topology == "patch_list"                            ? (domain == 2 ? 2 : 3)
+                                                                                   : 3;
+        if (primitive == 4 || primitive == 6)
+        {
+            unsupported(file, where, "a primitive with adjacency, which no topology of sg assembles yet");
+            pc.is_failed = true;
+        }
+        else if (primitive != assembled)
+            pc.fail(file, where,
+                    cc::format("{} takes a primitive of {} vertices, and {} assembles primitives of {}",
+                               out.at(geometry).name, primitive,
+                               is_valid(control) ? cc::string("the tessellator") : cc::format("topology .{}", topology),
+                               assembled));
+    }
+
     // ---- every target has a format; after another error, a missing one is likely what that line meant to set
     for (auto const& t : pc.is_failed ? cc::span<cc::string const>() : cc::span<cc::string const>(pc.targets))
     {
@@ -926,6 +1073,9 @@ void checker::compile_pipeline(symbol_id id)
         .symbol = id,
         .vertex = vertex,
         .pixel = pixel,
+        .geometry = geometry,
+        .tessellation_control = control,
+        .tessellation_evaluation = evaluation,
         .layout = {.first = u32(out.binding_lists.size()), .count = u32(layout.size())},
         .inline_constants = inline_constants,
         .vertex_input = vertex_input,
