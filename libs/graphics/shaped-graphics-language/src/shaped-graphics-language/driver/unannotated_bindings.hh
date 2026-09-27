@@ -22,7 +22,8 @@ namespace sgl
 {
 /// Every `let` of `file` that binds one name and writes no type, in source order.
 /// A binding the check did not reach, or gave the error type, is left out, since there is no type worth showing.
-[[nodiscard]] cc::vector<unannotated_binding> unannotated_bindings(ast::file_ast const& ast,
+[[nodiscard]] cc::vector<unannotated_binding> unannotated_bindings(parsed_file const& file,
+                                                                   ast::file_ast const& ast,
                                                                    check::checked_module const& m,
-                                                                   i32 file);
+                                                                   i32 file_index);
 } // namespace sgl

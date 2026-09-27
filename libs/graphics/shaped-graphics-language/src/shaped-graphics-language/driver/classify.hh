@@ -5,11 +5,12 @@
 #include <shaped-graphics-language/source/source_span.hh>
 
 /// What a token of the source is, in SGL's own words: what an editor colours, and what a highlighter is checked against.
-/// Without a checked module only the syntax decides, so every name is `name`.
+/// Without a checked module the syntax and the file's own declarations decide: a declared name has its class, and every use
+/// of a name is `name`.
 enum class sgl::token_class : sgl::u8
 {
     keyword,
-    /// A keyword or word operator that steers control flow: `if`, `for`, `return`, `yield`, `case`, `and`, `or`, `not`.
+    /// A keyword or word operator that steers control flow, such as `if`, `return` and `and`.
     control,
     number,
     string,
@@ -41,7 +42,7 @@ enum class sgl::token_class : sgl::u8
     mutable_local,
     /// `self`, as a parameter and as a use.
     self_,
-    /// A name the check did not resolve, or any name when there was no check.
+    /// A name the check did not resolve; without a check, every use of a name.
     name,
 };
 
@@ -60,18 +61,16 @@ struct sgl::classified_span
 
 struct sgl::classify_options
 {
-    /// The module `file` was checked in; null classifies by the syntax alone.
+    /// The module `file` was checked in; null classifies by the syntax and the file's declarations alone.
     check::checked_module const* module = nullptr;
     /// `file`'s position among the files the module was checked from; required with `module`.
-    i32 file = -1;
-    /// The prelude files come first in a check, so a symbol of a file below this count is the prelude's.
-    i32 prelude_file_count = 0;
+    i32 file_index = -1;
 };
 
 namespace sgl
 {
 /// Every token of `file` that has a class, in source order.
-/// Punctuation, brackets and error tokens have none and are left out.
+/// A token without one, such as a bracket or the wildcard `_`, is left out.
 [[nodiscard]] cc::vector<classified_span> classify(parsed_file const& file,
                                                    ast::file_ast const& ast,
                                                    classify_options const& options = {});

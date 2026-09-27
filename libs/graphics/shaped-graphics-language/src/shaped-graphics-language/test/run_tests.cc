@@ -165,6 +165,8 @@ cc::string_view sgl::test::to_string(test_status s)
         return "no-check-ran";
     case test_status::not_run:
         return "not-run";
+    case test_status::judged_by_diagnostics:
+        return "judged-by-diagnostics";
     case test_status::uninitialized_read:
         return "uninitialized-read";
     case test_status::internal_error:
@@ -226,7 +228,9 @@ test_result sgl::test::run_test(checked_module const& m, cc::span<module_file co
     CC_ASSERT(t >= 0 && t < m.tests.size(), "a test index names a test of the module");
     auto const& test = m.tests[t];
     auto result = test_result{.test = t};
-    if (test.expects_diagnostics() || test.unit < 0)
+    if (test.expects_diagnostics())
+        return {.test = t, .status = test_status::judged_by_diagnostics};
+    if (test.unit < 0)
         return result;
 
     auto const& unit = m.test_units[test.unit];
@@ -412,6 +416,7 @@ located_diagnostic sgl::test::diagnostic_of(checked_module const& m, test_result
         break;
     case test_status::passed:
     case test_status::not_run:
+    case test_status::judged_by_diagnostics:
     case test_status::stopped:
         detail = cc::string(to_string(r.status));
         break;

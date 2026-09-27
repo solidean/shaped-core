@@ -31,8 +31,8 @@ cc::vector<sgl::inferred_result> sgl::inferred_results(parsed_file const& file,
 
     for (auto const& s : m.symbols)
     {
-        if (s.file != file_index || s.kind != check::symbol_kind::function || s.info < 0
-            || !ast::is_valid(s.declaration) || s.state != check::symbol_state::checked)
+        if (s.file != file_index || s.kind != check::symbol_kind::function || s.info < 0 || !ast::is_valid(s.declaration)
+            || ast::index_of(s.declaration) >= ast.decls.size() || s.state != check::symbol_state::checked)
             continue;
         auto const type = m.functions[s.info].result;
         if (!check::is_valid(type) || m.at(type).kind == check::type_kind::error)

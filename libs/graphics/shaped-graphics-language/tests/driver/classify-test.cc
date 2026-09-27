@@ -15,9 +15,8 @@ cc::string classes_of(cc::string_view source, bool all = false)
 {
     auto const checked = check_sources(read_prelude(), source);
     auto out = cc::string();
-    auto const spans = sgl::classify(
-        checked.user, checked.user_ast,
-        {.module = &checked.module, .file = checked.user_file(), .prelude_file_count = checked.user_file()});
+    auto const spans
+        = sgl::classify(checked.user, checked.user_ast, {.module = &checked.module, .file_index = checked.user_file()});
     for (auto const& s : spans)
     {
         if (!all
@@ -70,6 +69,17 @@ TEST("sgl classify - methods, properties, self and attributes")
     CHECK(classes_of("@inline\nfun f() -> int => 1\n", true).starts_with("@inline:attribute fun:keyword f:function!"));
 }
 
+TEST("sgl classify - the type an extension extends is classed as every other use of it")
+{
+    CHECK(classes_of("struct box:\n    w: float\nfun box.wide => self.w > 1.0\n")
+              .contains("box:struct wide:property! self:self w:field"));
+    CHECK(classes_of("fun float3.sum => self.x + self.y + self.z\n").starts_with("float3:struct^ sum:property!"));
+    // without a check it is only known to be some type
+    auto const file = sgl::parse("fun box.wide => self.w > 1.0\n");
+    auto const ast = sgl::ast::build(file);
+    CHECK(sgl::classify(file, ast)[1].cls == sgl::token_class::type);
+}
+
 TEST("sgl classify - control flow words are their own class, and so is the name a named argument gives")
 {
     CHECK(classes_of("fun f(a: bool, b: bool) -> int:\n    if a and not b:\n        return 1\n    return 0\n", true)
@@ -83,9 +93,8 @@ TEST("sgl classify - spans are in source order and never overlap, on the extensi
 {
     auto const source = read_text(cc::string(SGL_SAMPLES_DIR) + "/../../tools/vscode-extension/examples/sample.sgl");
     auto const checked = check_sources(read_prelude(), source);
-    auto const spans = sgl::classify(
-        checked.user, checked.user_ast,
-        {.module = &checked.module, .file = checked.user_file(), .prelude_file_count = checked.user_file()});
+    auto const spans
+        = sgl::classify(checked.user, checked.user_ast, {.module = &checked.module, .file_index = checked.user_file()});
     REQUIRE(!spans.empty());
     for (auto i = isize(1); i < spans.size(); ++i)
         CHECK(spans[i - 1].where.end() <= spans[i].where.offset);
@@ -109,7 +118,7 @@ TEST("sgl classify - an unannotated let has the type the check gave it, and an a
                                                        "    let d = nope\n"
                                                        "    return a + b + c\n");
     auto out = cc::string();
-    for (auto const& b : sgl::unannotated_bindings(checked.user_ast, checked.module, checked.user_file()))
+    for (auto const& b : sgl::unannotated_bindings(checked.user, checked.user_ast, checked.module, checked.user_file()))
         out.appendf("{} : {}\n", checked.user.text_of(b.name), checked.module.name_of(b.type));
     CHECK(out == "a : float\nc : float\n");
 }
@@ -121,7 +130,7 @@ TEST("sgl classify - a let whose value is a call of the type's own name says so,
                                                        "    let x = v.x\n"
                                                        "    return x\n");
     auto out = cc::string();
-    for (auto const& b : sgl::unannotated_bindings(checked.user_ast, checked.module, checked.user_file()))
+    for (auto const& b : sgl::unannotated_bindings(checked.user, checked.user_ast, checked.module, checked.user_file()))
         out.appendf("{}{} ", checked.user.text_of(b.name), b.is_type_named ? " named" : "");
     CHECK(out == "v named x ");
 }

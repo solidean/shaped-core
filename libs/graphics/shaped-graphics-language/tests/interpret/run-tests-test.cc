@@ -117,13 +117,16 @@ TEST("sgl tests - every site of a run counts how often it held and failed, and o
 
 TEST("sgl tests - one test runs alone, and a test that expects diagnostics is judged by them rather than run")
 {
-    auto const checked = check_sources(read_prelude(), "test 1 < 2\n@expect(error = unknown-name)\ntest nope\n");
+    auto const checked
+        = check_sources(read_prelude(), "test 1 < 2\n@expect(error = \"unknown-name\")\ntest nope\ntest nope\n");
     auto files = cc::vector<sgl::check::module_file>();
     for (auto i = isize(0); i < checked.files.size(); ++i)
         files.push_back({.file = checked.files[i], .ast = checked.asts[i]});
-    REQUIRE(checked.module.tests.size() == 2);
+    REQUIRE(checked.module.tests.size() == 3);
     CHECK(sgl::test::run_test(checked.module, files, 0).is_passed());
-    CHECK(sgl::test::run_test(checked.module, files, 1).status == sgl::test::test_status::not_run);
+    CHECK(sgl::test::run_test(checked.module, files, 1).status == sgl::test::test_status::judged_by_diagnostics);
+    // the same body without the expectation did not check, so there is nothing to run
+    CHECK(sgl::test::run_test(checked.module, files, 2).status == sgl::test::test_status::not_run);
 }
 
 TEST("sgl tests - a raised stop flag ends a run as stopped, and nothing is judged against it")
@@ -135,6 +138,7 @@ TEST("sgl tests - a raised stop flag ends a run as stopped, and nothing is judge
         files.push_back({.file = checked.files[i], .ast = checked.asts[i]});
     auto stop = cc::atomic<bool>(true);
     auto const r = sgl::test::run_test(checked.module, files, 0, {.stop = &stop});
+    // `stopped` rather than `passed`: the `@expect(.fail)` was not judged against the unfinished run
     CHECK(r.status == sgl::test::test_status::stopped);
-    CHECK(!r.is_passed()); // `@expect(.fail)` would otherwise turn a run that did not pass into a pass
+    CHECK(!r.is_passed()); // a stopped run is no pass
 }

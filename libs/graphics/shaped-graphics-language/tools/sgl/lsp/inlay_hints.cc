@@ -14,7 +14,7 @@ cc::vector<lsp::inlay_hint> sgl_lsp::inlay_hints_of(analysis const& a, lsp::rang
     auto const last = index.offset_of(text, visible.end, e);
 
     auto out = cc::vector<lsp::inlay_hint>();
-    for (auto const& b : sgl::unannotated_bindings(a.ast, a.module, user))
+    for (auto const& b : sgl::unannotated_bindings(a.file, a.ast, a.module, user))
     {
         if (b.is_type_named || isize(b.name.end()) < first || isize(b.name.offset) > last)
             continue;

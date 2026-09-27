@@ -46,8 +46,10 @@ cc::vector<lsp::diagnostic> sgl_lsp::diagnostics_of(analysis const& a,
     for (auto const& d : a.diagnostics)
         if (d.file == user)
             out.push_back(lsp_diagnostic_of(a, d, e));
+    // a test that did not check has its diagnostics already, and one that expects diagnostics is a mark instead
     for (auto const& r : tests)
-        if (!r.is_passed() && r.status != sgl::test::test_status::not_run)
+        if (!r.is_passed() && r.status != sgl::test::test_status::not_run
+            && r.status != sgl::test::test_status::judged_by_diagnostics)
             out.push_back(lsp_diagnostic_of(a, sgl::test::diagnostic_of(a.module, r), e));
     return out;
 }

@@ -27,6 +27,8 @@ enum class sgl::test::test_status : sgl::u8
     uninitialized_read,
     /// The test has no flat tree: its body did not check, which a diagnostic already says.
     not_run,
+    /// The test expects diagnostics, so whether they occurred is its verdict, and `contain_expected` gives it.
+    judged_by_diagnostics,
     /// The interpreter met a tree the check pass should not have written; a bug of the compiler, and not of the test.
     internal_error,
     /// The caller raised `run_limits::stop` while it ran; the result says nothing about the test.
@@ -98,8 +100,7 @@ struct sgl::test::test_options
 namespace sgl::test
 {
 
-/// `passed`, `failed`, `assertion-failed`, `out-of-fuel`, `no-check-ran`, `uninitialized-read`, `not-run`, `internal-error`,
-/// `stopped`.
+/// The status in kebab case: `assertion-failed`, `judged-by-diagnostics`.
 [[nodiscard]] cc::string_view to_string(test_status s);
 
 /// Every test of `m` the options select, in the order `m.tests` holds them.
@@ -109,7 +110,7 @@ namespace sgl::test
                                                 test_options const& options = {});
 
 /// The test at position `test` of `m.tests` alone, which is what a caller that stops between tests runs.
-/// A test that expects diagnostics is judged by them and not run, so its result is `not_run`.
+/// A test that expects diagnostics is judged by them and not run, so its result is `judged_by_diagnostics`.
 [[nodiscard]] test_result run_test(check::checked_module const& m,
                                    cc::span<check::module_file const> files,
                                    i32 test,

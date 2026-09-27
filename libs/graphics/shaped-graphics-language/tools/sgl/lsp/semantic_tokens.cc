@@ -139,8 +139,7 @@ lsp::semantic_tokens_legend sgl_lsp::semantic_tokens_legend()
 lsp::semantic_tokens sgl_lsp::semantic_tokens_of(analysis const& a, lsp::position_encoding e)
 {
     auto const user = a.user_file();
-    auto const spans = sgl::classify(
-        a.file, a.ast, {.module = &a.module, .file = user, .prelude_file_count = i32(the_prelude().files.size())});
+    auto const spans = sgl::classify(a.file, a.ast, {.module = &a.module, .file_index = user});
     auto const text = a.text_of(user);
     auto const& index = a.index_of(user);
 

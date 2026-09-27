@@ -61,7 +61,10 @@ struct classifier
             set(token_at(where.offset), cls, is_declaration, is_from_prelude);
     }
 
-    [[nodiscard]] bool is_prelude_file(i32 f) const { return f >= 0 && f < options.prelude_file_count; }
+    [[nodiscard]] bool is_prelude_file(i32 f) const
+    {
+        return options.module != nullptr && f >= 0 && f < options.module->prelude_file_count();
+    }
 
     void classify_tokens()
     {
@@ -173,7 +176,7 @@ struct classifier
     /// Every field is a parameter until a declaration says it is a member; lambdas and type parameters included.
     void classify_fields()
     {
-        auto const is_prelude = is_prelude_file(options.file);
+        auto const is_prelude = is_prelude_file(options.file_index);
         for (auto const& f : ast.fields)
         {
             auto const text = file.text_of(f.name);
@@ -186,7 +189,7 @@ struct classifier
     /// Named arguments and object elements, attribute arguments included; a positional one has no name.
     void classify_arguments()
     {
-        auto const is_prelude = is_prelude_file(options.file);
+        auto const is_prelude = is_prelude_file(options.file_index);
         for (auto const& arg : ast.arguments)
             set_span(arg.name, token_class::argument, false, is_prelude);
     }
@@ -198,6 +201,18 @@ struct classifier
                 set_span(ast.at(fd->field).name, cls, true, is_prelude);
     }
 
+    /// The `box` of `fun box.wide`, classed as a use of `box` is: by what its symbol's owner is, `type` without a check.
+    void set_extended_type(source_span where, check::symbol const* s, bool is_prelude)
+    {
+        if (s == nullptr || !check::is_valid(s->owner))
+        {
+            set_span(where, token_class::type, false, is_prelude);
+            return;
+        }
+        auto const& owner = options.module->at(s->owner);
+        set_span(where, class_of_symbol(owner), false, is_prelude_file(owner.file));
+    }
+
     void classify_declarations()
     {
         // the checker's symbol for a declaration of this file, which knows a function's role
@@ -205,11 +220,11 @@ struct classifier
         symbol_of_decl.resize_to_filled(ast.decls.size(), nullptr);
         if (options.module != nullptr)
             for (auto const& s : options.module->symbols)
-                if (s.file == options.file && ast::is_valid(s.declaration)
+                if (s.file == options.file_index && ast::is_valid(s.declaration)
                     && ast::index_of(s.declaration) < ast.decls.size() && s.role != check::function_role::constructor)
                     symbol_of_decl[ast::index_of(s.declaration)] = &s;
 
-        auto const is_prelude = is_prelude_file(options.file);
+        auto const is_prelude = is_prelude_file(options.file_index);
         for (auto i = isize(0); i < ast.decls.size(); ++i)
         {
             auto const& node = ast.decls[i].node;
@@ -220,7 +235,7 @@ struct classifier
                 if (auto const* s = symbol_of_decl[i])
                     cls = class_of_symbol(*s);
                 set_span(d->name, cls, true, is_prelude);
-                set_span(d->extended_type, token_class::type, false, is_prelude);
+                set_extended_type(d->extended_type, symbol_of_decl[i], is_prelude);
                 for (auto const& p : ast.at(d->type_parameters))
                     set_span(p.name, token_class::type, true, is_prelude);
             }
@@ -249,7 +264,7 @@ struct classifier
             else if (auto const* d = node.try_as<ast::property_decl>())
             {
                 set_span(d->name, token_class::property, true, is_prelude);
-                set_span(d->extended_type, token_class::type, false, is_prelude);
+                set_extended_type(d->extended_type, symbol_of_decl[i], is_prelude);
             }
         }
     }
@@ -278,10 +293,10 @@ struct classifier
     /// What each name, member and `self` resolved to, which only the check knows.
     void classify_uses()
     {
-        if (options.module == nullptr || options.file < 0 || options.file >= options.module->files.size())
+        if (options.module == nullptr || options.file_index < 0 || options.file_index >= options.module->files.size())
             return;
         auto const& m = *options.module;
-        auto const& tables = m.files[options.file];
+        auto const& tables = m.files[options.file_index];
         auto const count = cc::min(ast.exprs.size(), tables.target_of.size());
         for (auto i = isize(0); i < count; ++i)
         {
@@ -376,7 +391,7 @@ struct classifier
 
 cc::vector<classified_span> sgl::classify(parsed_file const& file, ast::file_ast const& ast, classify_options const& options)
 {
-    CC_ASSERT(options.module == nullptr || options.file >= 0, "a checked module needs the file's position in it");
+    CC_ASSERT(options.module == nullptr || options.file_index >= 0, "a checked module needs the file's position in it");
     return classifier{.file = file, .ast = ast, .options = options}.run();
 }
 

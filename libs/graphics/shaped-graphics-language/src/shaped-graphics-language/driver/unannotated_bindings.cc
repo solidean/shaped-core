@@ -28,14 +28,15 @@ namespace
 }
 } // namespace
 
-cc::vector<sgl::unannotated_binding> sgl::unannotated_bindings(ast::file_ast const& ast,
+cc::vector<sgl::unannotated_binding> sgl::unannotated_bindings(parsed_file const&,
+                                                               ast::file_ast const& ast,
                                                                check::checked_module const& m,
-                                                               i32 file)
+                                                               i32 file_index)
 {
     auto out = cc::vector<unannotated_binding>();
-    if (file < 0 || file >= m.files.size())
+    if (file_index < 0 || file_index >= m.files.size())
         return out;
-    auto const& tables = m.files[file];
+    auto const& tables = m.files[file_index];
     for (auto const& s : ast.stmts)
     {
         auto const* l = s.node.try_as<ast::let_stmt>();
@@ -49,7 +50,7 @@ cc::vector<sgl::unannotated_binding> sgl::unannotated_bindings(ast::file_ast con
         if (!check::is_valid(type) || m.at(type).kind == check::type_kind::error)
             continue;
         out.push_back(
-            {.name = n->where, .type = type, .is_type_named = is_call_named_after(ast, m, file, l->value, type)});
+            {.name = n->where, .type = type, .is_type_named = is_call_named_after(ast, m, file_index, l->value, type)});
     }
     // statements are stored in the order the builder finished them, which is not always source order
     cc::sort_by(out, [](unannotated_binding const& b) { return b.name.offset; });
