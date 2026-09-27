@@ -197,6 +197,9 @@ struct sgl::check::member_info
     interpolation interpolate;
     /// Carries `@interpolate` at all, which a member that is no stage link must not.
     bool has_interpolate = false;
+    /// A `@vertex struct` member's `@format(.case)`: the `sg::vertex_attribute_format` its bytes are; empty for the one
+    /// its type implies (CHK-275).
+    cc::string vertex_format;
     /// Carries `@per_instance`: in a vertex input, the member steps once per instance.
     bool is_per_instance = false;
     /// The name `@stream(name)` gives; empty without one.

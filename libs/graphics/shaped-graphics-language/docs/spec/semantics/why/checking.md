@@ -345,3 +345,9 @@ It may come later as sugar over these parameters, and the [stage-interfaces](../
 
 The two axes and their names are WGSL's, which are exactly what every target has: HLSL's qualifiers and MSL's attributes spell the same combinations.
 An integer member must say `.flat` rather than being flat by default, because which vertex's value wins is part of what it means: a primitive id is right only because the first vertex's is taken.
+
+## CHK-275
+
+A format is not a type, which the vector-and-format incubator settled for render targets: a member has the type the shader computes with, and the format is an attribute.
+A vertex member follows the same rule, so one word, `@format`, says "these bytes, read as this type" on either edge of a pipeline.
+On a `@pixel struct` member it is that target's setting, and on a `@vertex struct` member it is the member's own, which is why it is never read as a setting there.

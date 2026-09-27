@@ -426,7 +426,10 @@ struct checker
     [[nodiscard]] ast::range_of<member_info> compile_members(i32 file,
                                                              ast::range_of<ast::decl_id> members,
                                                              bool is_struct,
-                                                             bool is_target_struct = false);
+                                                             bool is_target_struct = false,
+                                                             bool is_vertex_struct = false);
+    /// A `@vertex struct` member's `@format(.case)`: the case's name, checked against the member's type (CHK-275).
+    [[nodiscard]] cc::string vertex_format_of(i32 file, ast::attribute const* a, type_id member_type);
     /// The type an expression in a type position names; the error type when it names none.
     /// Inside a body, `scope` holds the locals, which hide a module-level type of their name.
     [[nodiscard]] type_id resolve_type(i32 file, ast::expr_id expr, function_scope const* scope = nullptr);

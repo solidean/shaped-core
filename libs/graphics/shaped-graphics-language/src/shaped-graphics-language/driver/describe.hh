@@ -101,6 +101,8 @@ struct sgl::described_struct_member
     i32 location = -1;
     /// The buffer a vertex input member is read from, and whether it steps per instance; empty on a `@pixel struct`.
     cc::string stream;
+    /// A vertex input member's `sg::vertex_attribute_format` where `@format` states one; empty for its type's own.
+    cc::string format;
     bool is_per_instance = false;
 };
 

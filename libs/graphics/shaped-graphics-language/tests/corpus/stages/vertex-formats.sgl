@@ -1,0 +1,36 @@
+// a vertex member reads its buffer at the width its type has, or as the packed format `@format` names
+
+@vertex struct mesh_vertex:
+    position: float3
+    @format(.rgba8_unorm) color: float4
+    @format(.rgba8_uint) joints: uint4
+    material: uint
+    offset: int2
+
+struct varyings:
+    @position position: hpos4
+    color: float4
+    @interpolate(.flat) material: uint
+
+@pixel struct target:
+    color: float4
+
+fun weighted(c: float4, joints: uint4) -> float4 => c * ((joints.x + joints.y) as float)
+
+test weighted(float4(1.0, 1.0, 1.0, 1.0), uint4(1, 2, 3, 4)).x == 3.0
+
+@vertex fun mesh_vs(v: mesh_vertex) -> varyings:
+    let shifted = v.position.x + (v.offset.x as float)
+    return {
+        position = hpos4(shifted, v.position.y, v.position.z, 1.0)
+        color = weighted(v.color, v.joints)
+        material = v.material
+    }
+
+@pixel fun mesh_ps(p: varyings) -> target:
+    return { color = p.color * (p.material as float) }
+
+pipeline mesh:
+    vertex = mesh_vs
+    pixel = mesh_ps
+    format = .rgba8_unorm

@@ -124,6 +124,8 @@ void write_struct(babel::json::object_writer& o, sgl::described_struct const& s)
             mo.write("stream", cc::string_view(m.stream));
             mo.write("per_instance", m.is_per_instance);
         }
+        if (!m.format.empty())
+            mo.write("format", cc::string_view(m.format));
     }
 }
 

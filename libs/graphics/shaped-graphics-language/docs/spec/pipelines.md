@@ -75,6 +75,7 @@ A shader that is only correct under one configuration says so where it is writte
 
 * **`@name(value)` on an entry point or an edge struct is the setting `name = value`**, found the same way a setting's name is.
 * **On a member of a `@pixel struct` it is that target's**: `@format(.rgba16_float) normal: float4`.
+  On a member of a `@vertex struct` it is no setting at all but the member's vertex format (CHK-275).
   `@format` is one of these, which is how a shader pins a target's format.
 * **Stage names are not settings**, since `@vertex` and `@pixel` already mark a stage.
 

@@ -60,6 +60,43 @@ sgl::u8 checker::stages_of(i32 file, ast::attribute const* a)
     return result;
 }
 
+cc::string checker::vertex_format_of(i32 file, ast::attribute const* a, type_id member_type)
+{
+    if (a == nullptr)
+        return {};
+
+    // What each `sg::vertex_attribute_format` decodes into, so a format and the member reading it agree.
+    struct decoded
+    {
+        cc::string_view format;
+        cc::string_view type;
+    };
+    static constexpr decoded k_formats[] = {
+        {"f32", "float"},   {"vec2f", "float2"}, {"vec3f", "float3"},       {"vec4f", "float4"},     {"i32", "int"},
+        {"vec2i", "int2"},  {"vec3i", "int3"},   {"vec4i", "int4"},         {"u32", "uint"},         {"vec2u", "uint2"},
+        {"vec3u", "uint3"}, {"vec4u", "uint4"},  {"rgba8_unorm", "float4"}, {"rgba8_uint", "uint4"},
+    };
+
+    auto const arguments = ast_of(file).at(a->arguments);
+    auto const* const dot = arguments.size() == 1 && ast::is_valid(arguments[0].value) && arguments[0].name.empty()
+                              ? ast_of(file).at(arguments[0].value).node.try_as<ast::leading_dot>()
+                              : nullptr;
+    auto const name = dot != nullptr ? text_of(file, dot->name) : cc::string_view();
+    for (auto const& f : k_formats)
+    {
+        if (f.format != name)
+            continue;
+        if (out.name_of(member_type) != f.type)
+            report(diagnostic_kind::type_mismatch, file, a->name,
+                   cc::format("@format(.{}) decodes into a {}, and the member is a {}", name, f.type,
+                              out.name_of(member_type)));
+        return cc::string(name);
+    }
+    report(diagnostic_kind::invalid_attribute_arguments, file, a->name,
+           "@format on a vertex member takes one case of sg::vertex_attribute_format: `@format(.rgba8_unorm)`");
+    return {};
+}
+
 /// `@interpolate(.flat)` or `@interpolate(.linear, .centroid)`; a bad argument reports and leaves the default.
 interpolation checker::interpolation_of(i32 file, ast::attribute const* a)
 {
@@ -309,7 +346,8 @@ type_id checker::type_of_builtin(cc::string_view name, i32 file, source_span whe
 ast::range_of<member_info> checker::compile_members(i32 file,
                                                     ast::range_of<ast::decl_id> members,
                                                     bool is_struct,
-                                                    bool is_target_struct)
+                                                    bool is_target_struct,
+                                                    bool is_vertex_struct)
 {
     auto const& ast = ast_of(file);
     auto const owner = is_struct ? cc::string_view("a struct field") : cc::string_view("a binding member");
@@ -361,10 +399,13 @@ ast::range_of<member_info> checker::compile_members(i32 file,
         auto const name = text_of(file, f.name);
 
         cc::string_view const known_on_field[] = {"position", "per_instance", "stream", "interpolate"};
+        // CHK-275: on a `@vertex struct` member `@format` is the member's own bytes, never a pipeline setting
+        cc::string_view const known_on_vertex_field[] = {"position", "per_instance", "stream", "interpolate", "format"};
         cc::string_view const known_on_member[] = {"unfilterable", "non_filtering"};
         judge_attributes(file, f.attributes,
-                         is_struct ? cc::span<cc::string_view const>(known_on_field)
-                                   : cc::span<cc::string_view const>(known_on_member),
+                         !is_struct         ? cc::span<cc::string_view const>(known_on_member)
+                         : is_vertex_struct ? cc::span<cc::string_view const>(known_on_vertex_field)
+                                            : cc::span<cc::string_view const>(known_on_field),
                          owner, is_target_struct ? setting_scope::target : setting_scope::none);
         judge_attributes(file, d.attributes, {}, owner);
         if (f.is_mut)
@@ -415,6 +456,8 @@ ast::range_of<member_info> checker::compile_members(i32 file,
             .is_position = find_attribute(file, f.attributes, "position") != nullptr,
             .interpolate = interpolation_of(file, find_attribute(file, f.attributes, "interpolate")),
             .has_interpolate = find_attribute(file, f.attributes, "interpolate") != nullptr,
+            .vertex_format = is_vertex_struct ? vertex_format_of(file, find_attribute(file, f.attributes, "format"), type)
+                                              : cc::string(),
             .is_per_instance = find_attribute(file, f.attributes, "per_instance") != nullptr,
             .stream = stream_of(file, find_attribute(file, f.attributes, "stream")),
             .is_unfilterable = unfilterable != nullptr,
@@ -457,7 +500,7 @@ void checker::compile_struct(symbol_id id)
     if (is_vertex && is_pixel)
         unsupported(file, s.name, "a struct of two stages");
 
-    auto const members = compile_members(file, s.members, true, is_pixel);
+    auto const members = compile_members(file, s.members, true, is_pixel, is_vertex);
 
     // The type exists only now, so a field that needs its own struct found a cycle and not a type.
     auto const type = type_id(out.types.size());

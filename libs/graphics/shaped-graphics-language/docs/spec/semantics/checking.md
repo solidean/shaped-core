@@ -243,7 +243,7 @@ fun shade(k: float) -> float:
 | a test | `@expect` |
 | a binding | `@inline`, `@shadowable` |
 | a binding member | `@unfilterable`, `@non_filtering` |
-| a struct field | `@position`, `@per_instance`, `@stream`, `@interpolate` |
+| a struct field | `@position`, `@per_instance`, `@stream`, `@interpolate`, and `@format` on a `@vertex struct` |
 | a parameter | the stage inputs of CHK-271 |
 | a pipeline | `@raster`, `@compute`, `@raytracing` |
 
@@ -466,6 +466,9 @@ fun f() -> float:
   The kind is `.perspective`, the default, `.linear` or `.flat`; the sampling is `.center`, the default, `.centroid` or `.sample`, and `.flat` takes none.
   An `int` or `uint` member, and a vector of them, crosses only `.flat`, or the entry point is `invalid-entry-point`, and no member that crosses no stage edge carries `@interpolate`.
   A flat member takes the value of the primitive's first vertex.
+* **CHK-275** `@format(.case)` on a member of a `@vertex struct` names the `sg::vertex_attribute_format` its bytes are, and never a pipeline setting ([why](why/checking.md#chk-275)).
+  The format decodes into the member's type, or it is `type-mismatch`: `.rgba8_unorm` into a `float4`, `.rgba8_uint` into a `uint4`.
+  A member without one reads the format its type has at full width: `float3` is `vec3f`, `uint` is `u32`.
 * **CHK-274** A pixel stage that takes a member interpolated `.sample` runs once per sample, and needs `sample_rate_shading` of a device.
 * **CHK-272** `@primitive_id` needs `primitive_index` of a device and `@sample_index` needs `sample_rate_shading`, as a binding member needs its feature (CHK-261).
 * **CHK-90** A `@vertex fun` returns a struct with exactly one field that carries `@position`, and that field is of the type `hpos4`.

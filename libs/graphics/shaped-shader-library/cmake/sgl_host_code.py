@@ -436,7 +436,20 @@ def streams_of(struct: dict) -> list[tuple[str, bool, list[dict]]]:
     return [(name, per_instance, members) for name, (per_instance, members) in out.items()]
 
 
+# A member whose `@format` packs it: the bytes the host writes, whatever type the shader reads them as.
+PACKED_HOST_TYPES = {"rgba8_unorm": "cc::u32", "rgba8_uint": "cc::u32"}
+
+
+def vertex_member_host_type(package: str, where: str, member: dict) -> str:
+    fmt = member.get("format", "")
+    if fmt in PACKED_HOST_TYPES:
+        return PACKED_HOST_TYPES[fmt]
+    return host_type(package, where, member["type"])
+
+
 def vertex_format(package: str, file: SglFile, struct: str, member: dict) -> str:
+    if member.get("format"):
+        return member["format"]
     host_type(package, f"'{file.path}' `@vertex struct {struct}` member '{member['name']}'", member["type"])
     fmt = HOST_TYPES[member["type"]][2]
     if fmt is None:
@@ -458,7 +471,7 @@ def emit_vertex_input(package: str, namespace: str, file: SglFile, struct: dict)
     def fields(members: list[dict], indent: str) -> str:
         out = []
         for m in members:
-            cpp = host_type(package, f"'{file.path}' `@vertex struct {name}` member '{m['name']}'", m["type"])
+            cpp = vertex_member_host_type(package, f"'{file.path}' `@vertex struct {name}` member '{m['name']}'", m)
             out.append(f"{indent}{cpp} {m['name']}; ///< location {m['location']}, `{m['name'].upper()}` on dx12\n")
         return "".join(out)
 

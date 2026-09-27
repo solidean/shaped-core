@@ -35,6 +35,7 @@ void fold_members(cc::byte_stream_builder& b, checked_module const& m, cc::span<
         b.add_bool(member.is_position);
         b.add_pod(u8(member.interpolate.kind));
         b.add_pod(u8(member.interpolate.sampling));
+        b.add_string(member.vertex_format);
         b.add_bool(member.is_per_instance);
         b.add_string(member.stream);
         b.add_bool(member.is_unfilterable);

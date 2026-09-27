@@ -211,6 +211,32 @@ def a_groups_static_sampler_is_declared_and_its_dynamic_one_gathered():
     expect_in("views.reserve(3);", source, "only views are gathered as views")
 
 
+# ---- a vertex input ---------------------------------------------------------------------------------------------------
+
+MESH = {
+    "name": "mesh_vertex",
+    "edge": "vertex",
+    "members": [
+        {"name": "position", "type": "float3", "location": 0, "stream": "per_vertex", "per_instance": False},
+        {"name": "color", "type": "float4", "location": 1, "stream": "per_vertex", "per_instance": False,
+         "format": "rgba8_unorm"},
+        {"name": "material", "type": "uint", "location": 2, "stream": "per_vertex", "per_instance": False},
+    ],
+}
+
+
+@test
+def a_packed_vertex_member_is_its_bytes_on_the_host_and_its_format_in_the_layout():
+    header = sgl_host_code.emit_vertex_input("pkg", "ns", FILE, MESH)
+    # four bytes the host writes, whatever the shader reads them as
+    expect_in("cc::u32 color;", header, "a packed member's host field")
+    expect_in("cc::u32 material;", header, "a uint member's host field")
+    source = sgl_host_code.emit_vertex_input_impl("pkg", "ns", FILE, MESH)
+    expect_in(".format = sg::vertex_attribute_format::rgba8_unorm", source, "a packed member's format")
+    expect_in(".format = sg::vertex_attribute_format::u32", source, "an integer member's format, from its type")
+    expect_in(".format = sg::vertex_attribute_format::vec3f", source, "a float member's format, from its type")
+
+
 # ---- the runner -----------------------------------------------------------------------------------------------------
 
 

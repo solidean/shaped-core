@@ -378,3 +378,17 @@ TEST("sgl check - a pixel stage interpolating per sample needs sample_rate_shadi
     CHECK(reports_for(source).contains("feature-not-declared user:[ps] ps needs sample_rate_shading"));
     CHECK(reports_for(cc::string("require sample_rate_shading\n") + source) == "");
 }
+
+TEST("sgl check - a vertex member's @format names the bytes it reads, and they decode into its type")
+{
+    // CHK-275
+    auto const with = [](cc::string_view member)
+    { return reports_for(cc::string("@vertex struct vin:\n    p: float3\n    ") + member + "\n"); };
+    CHECK(with("@format(.rgba8_unorm) c: float4") == "");
+    CHECK(with("@format(.rgba8_uint) j: uint4") == "");
+    CHECK(with("@format(.rgba8_unorm) c: float3")
+          == "type-mismatch user:[format] @format(.rgba8_unorm) decodes into a float4, and the member is a float3\n");
+    CHECK(with("@format(.bgra8) c: float4").contains("invalid-attribute-arguments"));
+    // on a struct that is no vertex input, @format is no member's own
+    CHECK(reports_for("struct plain:\n    @format(.rgba8_unorm) c: float4\n").contains("unsupported-yet"));
+}

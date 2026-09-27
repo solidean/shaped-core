@@ -182,6 +182,7 @@ described_struct describe_struct(check::checked_module const& m, check::type_inf
                                   .type = cc::string(m.name_of(member.type)),
                                   .location = member.is_position ? -1 : location++,
                                   .stream = t.edge == check::stage::vertex ? emit_impl::stream_of(member) : cc::string(),
+                                  .format = member.vertex_format,
                                   .is_per_instance = member.is_per_instance});
     return result;
 }
