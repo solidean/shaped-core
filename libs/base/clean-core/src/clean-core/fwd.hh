@@ -429,6 +429,7 @@ struct u128;
 struct i128;
 struct carrying_add_result;
 struct borrowing_sub_result;
+struct udiv128_result;
 
 
 //

@@ -1,4 +1,6 @@
 #include <clean-core/container/span.hh>
+#include <clean-core/function/function_ref.hh>
+#include <clean-core/math/wide_arith.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
@@ -112,9 +114,64 @@ struct cc::custom::formatter<celsius>
     }
 };
 
+// a signed 128-bit value as sign and magnitude, standing in for a wide integer type
+namespace
+{
+struct wide_int
+{
+    bool negative = false;
+    cc::u128 magnitude;
+};
+} // namespace
+
+template <>
+struct cc::custom::formatter<wide_int>
+{
+    static consteval void validate(cc::string_view spec) { cc::validate_integer_format_spec(spec); }
+    static void format(cc::format_sink out, cc::string_view spec, wide_int const& v)
+    {
+        char buf[128];
+        cc::format_wide_integer(out, spec, v.negative,
+                                [&](int base, bool upper)
+                                {
+                                    // least significant digit first into the buffer's tail, via 128 ÷ 64 steps
+                                    auto n = v.magnitude;
+                                    auto i = isize(sizeof buf);
+                                    do
+                                    {
+                                        auto const hi = cc::udiv128({n.hi, 0}, u64(base));
+                                        auto const lo = cc::udiv128({n.lo, hi.remainder}, u64(base));
+                                        n = {lo.quotient, hi.quotient};
+                                        auto const d = int(lo.remainder);
+                                        buf[--i] = char(d < 10 ? '0' + d : (upper ? 'A' : 'a') + d - 10);
+                                    } while (n.lo != 0 || n.hi != 0);
+                                    return cc::string_view(buf + i, isize(sizeof buf) - i);
+                                });
+    }
+};
+
 // =========================================================================================================
 // Runtime behavior
 // =========================================================================================================
+
+TEST("format - wide integers")
+{
+    auto const two_64 = wide_int{.negative = false, .magnitude = {0, 1}};
+    CHECK(cc::format("{}", two_64) == "18446744073709551616");
+    CHECK(cc::format("{:'}", two_64) == "18'446'744'073'709'551'616");
+    CHECK(cc::format("{:#x}", two_64) == "0x10000000000000000");
+    CHECK(cc::format("{:X}", wide_int{.negative = true, .magnitude = {0xABull, 0xFFull}}) == "-FF00000000000000AB");
+    CHECK(cc::format("{:+}", wide_int{.negative = false, .magnitude = {7, 0}}) == "+7");
+    CHECK(cc::format("{:>6}", wide_int{.negative = true, .magnitude = {7, 0}}) == "    -7");
+    CHECK(cc::format("{:06}", wide_int{.negative = true, .magnitude = {7, 0}}) == "-00007");
+    CHECK(cc::format("{}", wide_int{}) == "0");
+
+    // 128 binary digits grouped by four outgrow the stack buffer the builtin integers use
+    auto const all_ones = wide_int{.negative = false, .magnitude = {~u64(0), ~u64(0)}};
+    auto const grouped = cc::format("{:_b}", all_ones);
+    CHECK(grouped.size() == 128 + 31);
+    CHECK(grouped.starts_with("1111_1111"));
+}
 
 TEST("format - literals and escapes")
 {

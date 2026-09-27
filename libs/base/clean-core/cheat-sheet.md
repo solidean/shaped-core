@@ -377,6 +377,8 @@ cc::format_to(cc::span<char>(buf, n), "{}", v);  // -> isize, non-allocating; re
 //   static void format(cc::format_sink, cc::string_view spec, T const&) + static consteval void validate(spec).
 //   Delegate to the standard grammar via cc::format_value(sink, spec, v) / cc::validate_format_spec(spec).
 //   (Or just give T a member to_string() for the plain "{}" case.)
+//   An integer wider than u64: cc::format_wide_integer(sink, spec, negative, digits(base, upper) -> string_view)
+//   plus cc::validate_integer_format_spec(spec) — cc does the grammar, the type supplies raw digits.
 
 #include <clean-core/string/print.hh>            // print/println -> stdout, eprint/eprintln -> stderr (via fwrite)
 cc::print(sv);  cc::println("done");             // raw string_view (braces NOT interpreted); println() = just '\n'
@@ -499,6 +501,7 @@ cc::store_bytes_le<u64>(bytes, offset, v);  cc::store_bytes_be<i16>(bytes, offse
 #include <clean-core/math/wide_arith.hh>          // portable extended-precision int primitives (constexpr)
 cc::umul128(a, b);  cc::imul128(a, b);            // 64x64 -> {lo, hi} (u128 / i128); never overflows
 cc::add_with_carry(a, b, carry_in=0);            // -> {value, carry}; sub_with_borrow -> {value, borrow}
+cc::udiv128(n, d);                               // u128 / u64 -> {quotient, remainder}; n.hi < d is the precondition
 
 #include <clean-core/math/random.hh>
 cc::random rng(seed);                     // deterministic PCG32; MOVE-ONLY (use .clone() to duplicate a stream)

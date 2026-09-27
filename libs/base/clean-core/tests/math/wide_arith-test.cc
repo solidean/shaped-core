@@ -16,6 +16,10 @@ static_assert(cc::imul128(-1, -1) == cc::i128{1, 0});
 static_assert(cc::imul128(-1, 1) == cc::i128{U64_MAX, -1});
 static_assert(cc::add_with_carry(U64_MAX, 1) == cc::carrying_add_result{0, 1});
 static_assert(cc::sub_with_borrow(0, 1) == cc::borrowing_sub_result{U64_MAX, 1});
+static_assert(cc::udiv128({7, 0}, 2) == cc::udiv128_result{3, 1});
+static_assert(cc::udiv128({0, 1}, 2) == cc::udiv128_result{1ull << 63, 0}); // 2^64 / 2
+static_assert(cc::udiv128({U64_MAX, U64_MAX - 1}, U64_MAX) == cc::udiv128_result{U64_MAX, U64_MAX - 1});
+static_assert(cc::impl::wide_udiv128({U64_MAX, U64_MAX - 1}, U64_MAX) == cc::udiv128_result{U64_MAX, U64_MAX - 1});
 
 TEST("wide_arith - umul128")
 {
@@ -118,4 +122,48 @@ TEST("wide_arith - sub_with_borrow")
     auto const r = cc::sub_with_borrow(0, 1, 1); // -2
     CHECK(r.value == U64_MAX - 1);
     CHECK(r.borrow == 1ull);
+}
+
+TEST("wide_arith - udiv128")
+{
+    // q * d + r == n and r < d, checked through umul128 and add_with_carry rather than against a second division.
+    auto const check_division = [](cc::u128 n, u64 d, cc::udiv128_result const& got)
+    {
+        CHECK(got.remainder < d);
+        auto const p = cc::umul128(got.quotient, d);
+        auto const lo = cc::add_with_carry(p.lo, got.remainder);
+        CHECK(lo.value == n.lo);
+        CHECK(p.hi + lo.carry == n.hi);
+    };
+
+    SECTION("edge values")
+    {
+        u64 const ds[] = {1, 2, 3, 0xFFFFFFFFull, 0x100000000ull, 0x8000000000000000ull, U64_MAX - 1, U64_MAX};
+        for (u64 const d : ds)
+            for (u64 const hi : {u64(0), u64(1), d - 1, d / 2})
+                for (u64 const lo : {u64(0), u64(1), U64_MAX, u64(0x8000000000000000ull)})
+                {
+                    if (hi >= d)
+                        continue;
+                    auto const n = cc::u128{lo, hi};
+                    check_division(n, d, cc::udiv128(n, d));
+                    CHECK(cc::impl::wide_udiv128(n, d) == cc::udiv128(n, d));
+                }
+    }
+
+    SECTION("random, the portable fallback against the native path")
+    {
+        auto rng = nx::test_random();
+        for (auto i = 0; i < 10000; ++i)
+        {
+            // Draw the divisor's width too, so small divisors and every normalization shift are hit.
+            u64 d = rng.next_u64() >> (rng.next_u64() % 64);
+            if (d == 0)
+                d = 1;
+            auto const n = cc::u128{rng.next_u64(), rng.next_u64() % d};
+            auto const got = cc::udiv128(n, d);
+            check_division(n, d, got);
+            CHECK(cc::impl::wide_udiv128(n, d) == got);
+        }
+    }
 }

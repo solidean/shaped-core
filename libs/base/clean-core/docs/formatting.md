@@ -118,6 +118,11 @@ Two helpers exist so a custom formatter can reuse the standard grammar rather th
 `cc::format_value(out, spec, v)` renders a built-in value at runtime, and `cc::validate_format_spec(spec)` checks the spec's syntax at compile time.
 Both come with `<clean-core/string/format.hh>`.
 
+**An integer wider than `u64` has a pair of its own**, since `cc::format_value` only takes a built-in.
+`cc::format_wide_integer(out, spec, negative, digits)` does everything the integer grammar does — base, `#` prefix, sign, grouping, fill and width — and asks the type for one thing only.
+That is `digits(base, upper)`: the magnitude's raw digits in that base, most significant first, as a view that outlives the call.
+`cc::validate_integer_format_spec(spec)` is its compile-time half, accepting `d`/`x`/`X`/`o`/`b`/`B` and refusing `c` and a precision.
+
 `cc::format_sink` is a context pointer plus a write function, so it implies no allocation of its own.
 The same sink type backs both `cc::format` and `cc::format_to`; only the string-backed one grows a `cc::string` behind it.
 
