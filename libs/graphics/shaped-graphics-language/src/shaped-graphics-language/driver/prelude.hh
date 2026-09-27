@@ -23,10 +23,19 @@ namespace sgl
 ///
 /// The views live for the life of the process.
 [[nodiscard]] cc::span<prelude_file const> prelude_files();
+
+/// The position in `prelude_files()` of the file `path` is, -1 when it is none of them.
+/// Only the library's own prelude directory counts, as the build saw it: a user's `shaders/prelude/core.sgl` is -1.
+/// So `path` must be absolute, a path or a `file://` uri; either separator matches, and on Windows any case.
+/// A driver checks such a source as that file of the prelude, in place of the library's copy.
+/// Behind the prelude it would declare everything a second time, and each name would then hide its own twin.
+[[nodiscard]] i32 prelude_file_of(cc::string_view path);
 } // namespace sgl
 
 namespace sgl::impl
 {
-/// Defined by the file CMake generates from `prelude/core.sgl`.
+/// Both defined by the file CMake generates from `prelude/core.sgl`.
 [[nodiscard]] cc::string_view embedded_core_prelude();
+/// The absolute path of the source tree's `prelude/` directory, with `/` separators.
+[[nodiscard]] cc::string_view prelude_directory();
 } // namespace sgl::impl

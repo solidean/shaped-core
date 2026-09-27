@@ -108,6 +108,8 @@ class RepoIndex:
         A slash settles it.
         Otherwise the suffix has to be one some tracked file really uses, which keeps `sr::window.headless`
         and `git.has_merges` out without a hand-maintained list of extensions.
+        A planned folder does not widen it: whatever it admits and resolves nowhere is drawn as a planned file,
+        so any wider rule underlines every `p.node` field access in a design review's fences.
         """
         # A leading slash or a scheme means a URL or a route — `/favicon.ico`, `vscode://file/x` — never a path
         # relative to a repository root.
@@ -184,11 +186,18 @@ class RepoIndex:
 
 
 def _under(context: str, candidates: list[str]) -> Resolution | None:
-    """The lookup restricted to one folder, or None when nothing under it matches and the caller should look wider."""
+    """The lookup restricted to one folder, or None when nothing under it matches and the caller should look wider.
+
+    The shallowest match wins, so a context naming a folder settles its own files against a namesake in a subfolder;
+    only matches at the same depth are ambiguous.
+    """
     if not context:
         return None
     prefix = context.rstrip("/") + "/"
     inside = [c for c in candidates if c.startswith(prefix)]
+    if inside:
+        depth = min(c.count("/") for c in inside)
+        inside = [c for c in inside if c.count("/") == depth]
     if len(inside) == 1:
         return Resolution(RESOLVED, inside[0])
     if inside:

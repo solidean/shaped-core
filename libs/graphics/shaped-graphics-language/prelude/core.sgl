@@ -15,8 +15,10 @@
 // `bool` is a builtin enum of builtins.sgl, and its two cases are its two values, under the names every program writes.
 // Neither may be hidden: a local named `true` would change what every `x == true` below it means.
 
-@shadowable(false) const false = bool.false
-@shadowable(false) const true = bool.true
+@shadowable(false)
+const false = bool.false
+@shadowable(false)
+const true = bool.true
 
 // ---- the raster pipeline description --------------------------------------------------------------------------------
 //

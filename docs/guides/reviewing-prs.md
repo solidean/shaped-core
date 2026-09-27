@@ -539,6 +539,11 @@ The shapes this takes, each seen at least once:
 - **Beware two mechanisms with similar names.** A cache-key claim was true of the DXC compile key and false of the slib asset key, and named neither.
 - **A prescribed drain, wait or guard is a claim about what is outstanding.** "2 async items leaked, settle `background_work`" — the items were stream uploads `background_work` does not cover.
   Name what leaked before naming the remedy.
+- **A comment stating the mechanism is not the line that proves it.** A settle fix was found to hold a lock across continuations.
+  The evidence was the comment above the push loop: "pushing resumes whoever depended on the node".
+  The push only enqueued each dependent on a scheduler.
+  So the deadlock hazard, the "continuations must not block" rule and a per-context guard were all recommended against code that could not reach them.
+  The maintainer's question — "is this something user code commonly needs to abide to" — is what sent the review to `route_after_schedule`, one grep the draft had skipped.
 - **Look for the configuration that makes the race deterministic before writing the item.** A `singlethreaded-*` preset removes exactly the concurrency a one-run finding depends on.
   Two minutes there convert "I saw it once" into a named mechanism.
 

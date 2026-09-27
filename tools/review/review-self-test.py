@@ -789,6 +789,16 @@ def test_changes_path_takes_several_prefixes_globs_and_excludes(root: Path) -> N
     assert path_filter("!docs/")("lib/a.cc") and not path_filter("!docs/")("docs/a.md")
 
 
+def test_changes_path_globs_do_not_cross_folders(root: Path) -> None:
+    """`dir/*.cc` means that folder's files, as in gitignore; `**` is how a glob reaches into subfolders."""
+    from tools.review.cmd.changes import path_filter
+
+    assert path_filter("lib/lsp/*.cc")("lib/lsp/server.cc")
+    assert not path_filter("lib/lsp/*.cc")("lib/lsp/protocol/server.cc"), "`*` stays within one folder"
+    assert path_filter("lib/**/*.cc")("lib/lsp/protocol/server.cc") and path_filter("lib/**/*.cc")("lib/a.cc")
+    assert path_filter("*.cc")("lib/lsp/protocol/server.cc"), "a glob without a `/` matches a file name anywhere"
+
+
 def test_a_round_that_asks_is_owed_an_intro(root: Path) -> None:
     """A round opening on facts makes its reader reconstruct the question before weighing anything.
 
@@ -1681,11 +1691,85 @@ def test_an_entry_s_context_folder_is_where_a_short_path_looks_first(root: Path)
     assert token.path == "tests/stages/08_ring_ir/compile.rs" and not token.problem, token
 
 
+def test_a_context_folder_prefers_its_own_file_over_a_namesake_below_it(root: Path) -> None:
+    """A server beside its protocol subfolder has two `server.hh`, and the context names the shallower one.
+
+    Only matches at the same depth under the context stay ambiguous.
+    """
+    paths = ["lsp/server.hh", "lsp/protocol/server.hh", "lsp/a/x.hh", "lsp/b/x.hh"]
+    tokens = _context_tokens(root, "context: lsp/\n", "## prose\n\nSee `server.hh` and `x.hh`.\n", paths)
+    by_text = {t.text: t for t in tokens}
+    assert by_text["server.hh"].path == "lsp/server.hh", by_text["server.hh"]
+    assert by_text["x.hh"].problem, "two matches at one depth are still ambiguous"
+
+
 def test_a_context_folder_that_resolves_nowhere_is_a_problem(root: Path) -> None:
     """A typo'd context would otherwise quietly leave every short path to the repository-wide lookup."""
     tokens = _context_tokens(root, "context: src/stages/99_nope/\n", "## prose\n\nSee `lib.rs`.\n")
     problems = [t.problem for t in tokens if t.problem]
     assert any("99_nope" in p and "context" in p for p in problems), problems
+
+
+def test_a_planned_folder_holds_the_files_a_design_will_create(root: Path) -> None:
+    """A design review names files that do not exist yet, and marking each one `new:` would drown the entry.
+
+    `planned:` names the folder once, and a path under it, or a bare name, that resolves nowhere is drawn as new.
+    The folder itself does not exist either, so it is never resolved and never a context problem.
+    """
+    blocks = ("## prose\n\nSee `src/stages/10_lsp/framing.rs`, `server.rs`, `src/stages/10_lsp/session.wgsl`"
+              " and `src/stages/10_lsp/wire/`.\n")
+    tokens = _context_tokens(root, "planned: ./src/stages/10_lsp/\n", blocks)
+    by_text = {t.text: t for t in tokens}
+    assert not any(t.problem for t in tokens), [(t.text, t.problem) for t in tokens]
+    for text in ("src/stages/10_lsp/framing.rs", "server.rs", "src/stages/10_lsp/session.wgsl", "src/stages/10_lsp/wire/"):
+        assert by_text[text].css == "ref-new", by_text.get(text)
+        assert "planned under src/stages/10_lsp/" in by_text[text].note, by_text[text]
+    assert not by_text["server.rs"].path, "a planned file links nowhere, since there is nothing to open"
+
+
+def test_a_planned_folder_never_shadows_a_real_file(root: Path) -> None:
+    """A real file resolves as it always does, and only what resolves nowhere is judged against the plan."""
+    blocks = "## prose\n\nSee `lib.rs` and `src/stages/08_ring_ir/compile.rs`.\n"
+    by_text = {t.text: t for t in _context_tokens(root, "planned: src/stages/10_lsp/\n", blocks)}
+    assert by_text["lib.rs"].path == "src/lib.rs" and by_text["lib.rs"].css == "ref", by_text["lib.rs"]
+    assert by_text["src/stages/08_ring_ir/compile.rs"].css == "ref", by_text
+
+
+def test_a_path_outside_the_planned_folder_is_still_a_problem(root: Path) -> None:
+    """The plan excuses one folder, so a typo'd path elsewhere keeps failing, and so does a bare folder name."""
+    blocks = "## prose\n\nSee `src/stages/11_nope/framing.rs` and `wire/`.\n"
+    by_text = {t.text: t for t in _context_tokens(root, "planned: src/stages/10_lsp/\n", blocks)}
+    assert "not a file in this repository" in by_text["src/stages/11_nope/framing.rs"].problem, by_text
+    assert "not a folder in this repository" in by_text["wire/"].problem, by_text
+
+    # Without a plan a bare missing name is the same error it always was.
+    token = _context_tokens(root, "", "## prose\n\nSee `server.rs`.\n")[0]
+    assert "not a file in this repository" in token.problem, token
+
+
+def test_a_block_s_planned_folder_overrides_the_entry_s(root: Path) -> None:
+    blocks = ("## prose\nplanned: src/stages/12_dap/\n\n"
+              "See `src/stages/12_dap/adapter.rs` and `src/stages/10_lsp/framing.rs`.\n")
+    by_text = {t.text: t for t in _context_tokens(root, "planned: src/stages/10_lsp/\n", blocks)}
+    assert by_text["src/stages/12_dap/adapter.rs"].css == "ref-new", by_text
+    assert "not a file in this repository" in by_text["src/stages/10_lsp/framing.rs"].problem, by_text
+
+
+def test_a_planned_folder_does_not_turn_a_member_access_into_a_file(root: Path) -> None:
+    """A planned folder admits unfamiliar suffixes, and a call or a longer word is where that would misfire."""
+    blocks = "## prose\n\nCall `obj.size()` on `sr::window.headless`.\n"
+    tokens = _context_tokens(root, "planned: src/stages/10_lsp/\n", blocks)
+    assert not tokens, tokens
+
+
+def test_a_planned_folder_does_not_make_member_accesses_files(root: Path) -> None:
+    """A planned folder draws what resolves nowhere as new, so it must not widen what counts as a reference.
+
+    A design review's fences are full of field accesses, and each would otherwise become a planned file.
+    """
+    blocks = "## prose\n\n```cpp\nauto n = p.node; v.x = 1; cfg.value; it.first; e.g.\n```\n"
+    tokens = _context_tokens(root, "planned: src/stages/10_lsp/\n", blocks)
+    assert not tokens, [(t.text, t.css) for t in tokens]
 
 
 def test_an_ambiguous_reference_names_its_candidates_ready_to_paste(root: Path) -> None:

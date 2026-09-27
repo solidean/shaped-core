@@ -154,6 +154,9 @@ struct sgl::check::checked_module
     /// `types[1]`: what a function without a return type returns.
     static constexpr type_id void_type = type_id(1);
 
+    /// The files before the user file, which is always the last.
+    [[nodiscard]] i32 prelude_file_count() const { return files.empty() ? 0 : i32(files.size()) - 1; }
+
     [[nodiscard]] symbol const& at(symbol_id id) const { return symbols[index_of(id)]; }
     [[nodiscard]] type_info const& at(type_id id) const { return types[index_of(id)]; }
     [[nodiscard]] cc::span<member_info const> at(ast::range_of<member_info> r) const

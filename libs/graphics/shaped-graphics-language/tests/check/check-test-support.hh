@@ -33,6 +33,14 @@ inline cc::string builtins_text()
     return cc::string(sgl::prelude_files()[0].source);
 }
 
+/// `builtins_text()` with every `@shadowable(false)` taken out, for a test of what a shadowed builtin type still means.
+inline cc::string shadowable_builtins_text()
+{
+    auto text = builtins_text();
+    text.replace_all("@shadowable(false)\n", "");
+    return text;
+}
+
 } // namespace sgl_test
 
 /// Stands for the library's own prelude, both files of it, which every test here checks against unless it brings one.

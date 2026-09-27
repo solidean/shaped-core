@@ -88,7 +88,9 @@ void add_vectors(registry& r, scalar_family const& family)
 
 void sgl::builtins::register_types(registry& r)
 {
-    r.add_comment("// A struct line without a block is opaque: there is no member to name.");
+    r.add_comment("// A struct line without a block is opaque: there is no member to name.\n"
+                  "// A builtin type is @shadowable(false): a program's own `int` would be a second type that reads "
+                  "the same.");
     r.add(scalar_of(k_float_family, ""));
     add_vectors(r, k_float_family);
     r.add(vector_of(k_float_family, "vec3", 3, "/// A direction: it has a length, and a translation leaves it alone."));

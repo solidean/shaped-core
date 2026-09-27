@@ -4,10 +4,12 @@
 
 test answer == 42
 
-@expect(error = "shadows-unshadowable") test:
+@expect(error = "shadows-unshadowable")
+test:
     let answer = 1
     answer == 1
 
-@expect(error = "shadows-unshadowable") test:
+@expect(error = "shadows-unshadowable")
+test:
     for true in 0 ..< 2:
         true < 2

@@ -41,7 +41,7 @@ So an agent writing one cannot leave the file unbalanced; the worst it can do is
 ## Front matter
 
 `id` and `title` are required.
-`group`, `state`, `severity`, `resolved-by` and `context` are known; anything else is preserved verbatim, so a review can carry fields the tool has no opinion on.
+`group`, `state`, `severity`, `resolved-by`, `context` and `planned` are known; anything else is preserved verbatim, so a review can carry fields the tool has no opinion on.
 
 `state` is `open`, `obsolete` or `superseded`.
 `severity` is `bug`, `design`, `api`, `docs`, `nit`, `question` or `lgtm`.
@@ -213,7 +213,8 @@ context: src/stages/08_ring_ir/
 ```
 
 - **Under the folder first, then everywhere.**
-  A path with exactly one match under the context resolves to it; one with several there is ambiguous among those.
+  A path with one match under the context resolves to it, and with several the shallowest wins, so `server.hh` names the context's own file over a namesake in a subfolder.
+  Only matches at the same depth are ambiguous among themselves.
   One with none there resolves repository-wide exactly as without a context, so `src/lib.rs` still works from an entry about stage 8.
 - **A block can narrow it again** with its own `context:`, which replaces the entry's for that block — the one block about the tests, say.
 - **The folder is itself a reference**, resolved the same three ways, so `08_ring_ir/` is enough where it is unique.
@@ -222,6 +223,32 @@ context: src/stages/08_ring_ir/
 - A literal is resolved once per entry, by the first block that names it, because the page matches literals entry-wide.
 
 An ambiguous reference lists every candidate as a full path in backticks, ready to paste, and names `context:` as the other remedy.
+
+## `planned:` — files a design will create
+
+A design review names files that do not exist yet, and marking every one `new:` drowns the entry in prefixes.
+`planned:` names the folder the design will create, once, and what the entry names under it is drawn as new.
+
+```markdown
+---
+id: 310
+title: the language server's wire layer
+planned: src/lsp/
+---
+```
+
+- **A path that resolves nowhere is planned when it lies under the folder**, and so is a bare file name such as `framing.hh`.
+  It renders as a `new:` path does, with a hover note naming the folder, and is never a validation error.
+- **A real file always wins.**
+  The plan is consulted only for what resolves nowhere, so it never shadows a file that exists, and an ambiguous name stays ambiguous.
+- **Folders under it are planned too**, `src/lsp/wire/` included.
+  A bare folder name is not: a fence is full of `word/` spans, and each would silently become a planned folder.
+- **A path outside the folder keeps every error**, which is what keeps a typo elsewhere loud.
+- **The folder is never resolved**, since it does not exist yet; a leading `./` and a trailing `/` are ignored.
+- **A block can name its own** with `planned:`, which replaces the entry's for that block, the way `context:` does.
+- **A bare name counts only with a suffix some tracked file uses**, the rule every reference follows.
+  A file of a kind the tree has not seen yet is named with a `/`, under the folder.
+  Anything wider turns every `p.node` field access in a fence into a planned file.
 
 ## `raw:` — a span that is not a reference
 

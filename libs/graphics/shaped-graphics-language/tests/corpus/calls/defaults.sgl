@@ -1,6 +1,6 @@
 // a default fills a parameter the call leaves out, and reads the parameters before it
 
-fun ramp(x: float, low: float = 0.0, high: float = low + 1.0) -> float => (x - low) / (high - low)
+fun ramp(x: float, low: float = 0.0, high: float = low + 1.0) => (x - low) / (high - low)
 
 test ramp(0.5) == 0.5
 test ramp(2.5, 2.0) == 0.5
@@ -18,22 +18,24 @@ test falloff(2.0, 0.5).inner == 0.5
 test falloff(2.0).sharpness == 1.0
 test falloff(2.0, sharpness = 4.0).sharpness == 4.0
 
-@expect(error = "no-matching-overload") test falloff(2.0, 0.5, 4.0).sharpness == 4.0
+@expect(error = "no-matching-overload")
+test falloff(2.0, 0.5, 4.0).sharpness == 4.0
 
 // a default reads what its function's scope sees, and never what the call sees
 const factor = 2.0
 
-fun times(x: float, by: float = factor) -> float => x * by
+fun times(x: float, by: float = factor) => x * by
 
 test:
     let factor = 10.0
     times(1.0) == 2.0
 
 // a default costs nothing, so a call both overloads take has no best
-fun pick(x: int) -> int => 1
-fun pick(x: int, y: int = 0) -> int => 2
+fun pick(x: int) => 1
+fun pick(x: int, y: int = 0) => 2
 
-@expect(error = "ambiguous-overload") test pick(5) == 1
+@expect(error = "ambiguous-overload")
+test pick(5) == 1
 
 test pick(5, 0) == 2
 test pick(5, y = 0) == 2
@@ -41,7 +43,7 @@ test pick(5, y = 0) == 2
 // a method's `self` stands before every default, which reads it as the method's body does
 struct brush:
     size: float
-    fun stroke(self, width: float = self.size * 2.0, height: float = self.size) -> float => width * height
+    fun stroke(self, width: float = self.size * 2.0, height: float = self.size) => width * height
 
 test brush(3.0).stroke() == 18.0
 test brush(3.0).stroke(1.0) == 3.0

@@ -32,7 +32,8 @@ from dataclasses import dataclass
 # itself at the bottom, or editing a block the maintainer has already read.
 #
 # `context` narrows where a short path in this block is looked for first, overriding the entry's front-matter `context:`.
-_ANY = frozenset({"round", "name", "addresses", "supersedes", "context"})
+# `planned` names a folder a design will create, and overrides the entry's front-matter `planned:` the same way.
+_ANY = frozenset({"round", "name", "addresses", "supersedes", "context", "planned"})
 
 BLOCK_TYPES: dict[str, set[str]] = {
     # What the entry is about and which options are on the table, before any fact or trade-off.
@@ -45,7 +46,7 @@ BLOCK_TYPES: dict[str, set[str]] = {
     "code": _ANY | {"lang", "file"},
     "changes": _ANY | {"generated", "show"},
     "recommendation": set(_ANY),
-    "ask": {"round", "discharges", "follows", "addresses", "supersedes", "context"},
+    "ask": {"round", "discharges", "follows", "addresses", "supersedes", "context", "planned"},
     "auto-acknowledge": set(_ANY),
     "artifact": set(_ANY),
     # An example, and what running it produced.
@@ -124,7 +125,7 @@ SEVERITIES = ("bug", "design", "api", "docs", "nit", "question", "lgtm")
 OPTION_KINDS = ("radio", "check", "rank")
 
 FRONT_REQUIRED = ("id", "title")
-FRONT_KNOWN = {"id", "title", "group", "state", "severity", "round", "resolved-by", "context"}
+FRONT_KNOWN = {"id", "title", "group", "state", "severity", "round", "resolved-by", "context", "planned"}
 
 HEADING_RE = re.compile(r"^##[ \t]+(\S+)(?:[ \t]+(.*?))?[ \t]*$")
 # A fenced code block, opened by three or more backticks or tildes and closed by at least as many of the same character.

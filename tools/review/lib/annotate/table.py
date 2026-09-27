@@ -25,7 +25,7 @@ from ..entry.answers import AnswerFile
 from ..entry.parse import Entry
 from .glossary import GlossaryProvider, malformed_in, terms_in
 from .index import RepoIndex
-from .providers import CommitProvider, DirProvider, FileProvider, Token
+from .providers import CommitProvider, DirProvider, FileProvider, Token, planned_folder
 
 # The kind a bad `context:` is reported under; it has no regions, so the page never draws one.
 CONTEXT = "context"
@@ -87,6 +87,8 @@ def build(entry: Entry, index: RepoIndex, *, answers: AnswerFile | None = None, 
     A block's `context:`, or else the entry's, is the folder its short paths are looked for under first.
     It is itself a folder reference, and one that resolves to no single folder is a problem, since every path it
     was meant to settle would otherwise fall back to the repository-wide lookup without a word.
+    A block's `planned:`, or else the entry's, is a folder the design will create, and is never resolved.
+    A reference that resolves nowhere and lies under it is drawn as planned rather than failing — see FileProvider.
     A literal is resolved once per entry, in the first text naming it, because the page matches literals entry-wide.
     """
     seen_files: set[str] = set()
@@ -110,14 +112,14 @@ def build(entry: Entry, index: RepoIndex, *, answers: AnswerFile | None = None, 
                 tokens.append(Token(text=raw, kind=CONTEXT, regions=(), problem=f"context folder {raw} {what}"))
         return contexts[raw]
 
-    def scan(text: str, then: tuple[RepoIndex | None, str] | None, context: str = "") -> None:
+    def scan(text: str, then: tuple[RepoIndex | None, str] | None, context: str = "", planned: str = "") -> None:
         past, rev = then if then is not None else (None, "")
         answered = then is not None
         folder = context_of(context, answered)
         files = FileProvider(index=index, seen=seen_files, answered=answered, history=past, history_rev=rev,
-                             context=folder)
+                             context=folder, planned=planned)
         dirs = DirProvider(index=index, seen=seen_dirs, answered=answered, history=past, history_rev=rev,
-                           context=folder)
+                           context=folder, planned=planned)
         for fragment in _referencing_text(text):
             # Files first: a folder token is only ever the trailing-slash form, so the two cannot claim the
             # same span, and ordering them keeps the page's longest-first sort from having to break a tie.
@@ -131,31 +133,33 @@ def build(entry: Entry, index: RepoIndex, *, answers: AnswerFile | None = None, 
 
     entry_context = entry.front.get("context", "").strip()
     context_of(entry_context, False)
-    texts: list[tuple[str, int, str]] = []
-    retired: list[tuple[str, int, str]] = []
+    entry_planned = planned_folder(entry.front.get("planned", ""))
+    texts: list[tuple[str, int, str, str]] = []
+    retired: list[tuple[str, int, str, str]] = []
     for block in entry.blocks:
         into = retired if block.is_superseded else texts
         context = block.attrs.get("context", "").strip() or entry_context
-        into.append((block.prose, block.round, context))
-        into.append((block.head, block.round, context))
-        into.extend((option.label, block.round, context) for option in block.options)
+        planned = planned_folder(block.attrs.get("planned", "")) or entry_planned
+        into.append((block.prose, block.round, context, planned))
+        into.append((block.head, block.round, context, planned))
+        into.extend((option.label, block.round, context, planned) for option in block.options)
     if answers is not None:
-        texts.extend((answer.text, 0 if answer.tentative else answer.round, entry_context)
+        texts.extend((answer.text, 0 if answer.tentative else answer.round, entry_context, entry_planned)
                      for answer in answers.answers.values())
-        texts.extend((comment.text, 0 if comment.tentative else comment.round, entry_context)
+        texts.extend((comment.text, 0 if comment.tentative else comment.round, entry_context, entry_planned)
                      for comment in answers.comments.values())
 
-    then_of = {r: (history(r) if history is not None and r else None) for _, r, _ in [*texts, *retired]}
-    for text, r, context in texts:
+    then_of = {r: (history(r) if history is not None and r else None) for _, r, _, _ in [*texts, *retired]}
+    for text, r, context, planned in texts:
         if then_of[r] is None:
-            scan(text, None, context)
-    for text, r, context in texts:
+            scan(text, None, context, planned)
+    for text, r, context, planned in texts:
         if then_of[r] is not None:
-            scan(text, then_of[r], context)
+            scan(text, then_of[r], context, planned)
 
     live = len(tokens)
-    for text, r, context in retired:
-        scan(text, then_of[r], context)
+    for text, r, context, planned in retired:
+        scan(text, then_of[r], context, planned)
     tokens[live:] = [replace(token, problem="") if token.problem else token for token in tokens[live:]]
     return tokens
 

@@ -1243,9 +1243,10 @@ type_id checker::check_expected(function_scope& scope, ast::expr_id expr, type_i
         return to;
     }
     if (type != to)
-        report(diagnostic_kind::type_mismatch, file, span_of(file, expr),
-               what.empty() ? cc::format("expected {}, got {}", out.name_of(to), out.name_of(type))
-                            : cc::format("{} is {}, got {}", what, out.name_of(to), out.name_of(type)));
+        tell_apart(report(diagnostic_kind::type_mismatch, file, span_of(file, expr),
+                          what.empty() ? cc::format("expected {}, got {}", out.name_of(to), out.name_of(type))
+                                       : cc::format("{} is {}, got {}", what, out.name_of(to), out.name_of(type))),
+                   to, type);
     return type;
 }
 

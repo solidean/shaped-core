@@ -196,10 +196,12 @@ enum light_kind:
 
 ```sgl sketch
 fun shade(k: float) -> float:
-    @expect(error = "test-captures-runtime-value") test k > 0.0
+    @expect(error = "test-captures-runtime-value")
+    test k > 0.0
     return k
 
-@expect(.fail) test 1 > 2
+@expect(.fail)
+test 1 > 2
 ```
 
 ```sgl
@@ -321,6 +323,8 @@ fun shade(k: float) -> float:
 * **CHK-220** A symbol that carries `@shadowable(false)` is hidden by nothing, and it stays what its name means.
   A declaration of the program, a local, a parameter or a `for` variable of its name is `shadows-unshadowable`.
   Its one argument is `false` or `true`, on any declaration it stands on, and anything else is `invalid-attribute-arguments`.
+* **CHK-266** Every type of `builtins.sgl` is `@shadowable(false)`, and the types of `core.sgl` are not.
+  A program's own `int` would be a second type that reads like the first, while a literal stays of the prelude's, so `level: int = 0` would read `expected int, got int`.
 * **CHK-55** A pattern in a `let` and a `let` without a value are `unsupported-yet`; `let mut` is CHK-111.
 * **CHK-56** `return value` needs `value` to be of the function's return type, or it is `type-mismatch`.
 * **CHK-57** An arrow body `=> value` is `return value`.
@@ -687,7 +691,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `missing-field`, `unknown-field`, `duplicate-field` | CHK-178 |
 | `invalid-entry-point` | CHK-87, CHK-93 |
 | `invalid-pipeline` | CHK-175 to CHK-185, CHK-187 |
-| `shadows-unshadowable` | CHK-220 |
+| `shadows-unshadowable` | CHK-220, CHK-266 |
 | `test-captures-runtime-value` | CHK-228 |
 | `test-must-end-in-check` | CHK-226 |
 | `unmet-expectation` | CHK-232 |

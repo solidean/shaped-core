@@ -60,7 +60,7 @@ Goals combine: `--goal pr-comment --goal land-changes` is a review of someone el
 | `ingest --rest` | ids for whatever nothing claims yet |
 | `ingest --dry-run` / `--stats` | what a sweep would create, and the shape of the change set, before committing to it |
 | `coverage <name>` | gate 1 and the discharge progress, with the uncovered runs listed; also names changes only a meta or orientation entry claims |
-| `changes <name>` | the ledger: every change, and which ask accounts for it. `--undischarged`, `--path` (comma-OR'd prefixes or globs, `!` subtracts), `--ids` |
+| `changes <name>` | the ledger: every change, and which ask accounts for it. `--undischarged`, `--path` (comma-OR'd prefixes or gitignore-style globs, where `*` stays in one folder and `**` crosses them; `!` subtracts), `--ids` |
 | `list` | the reviews in this repository, and where each one stands |
 | `validate <name> [ENTRY...]` | every entry parses, every change id resolves; run it before serving a round. Entries narrow it to a slug, a number or a range like `200..299`, and only those are parsed, so parallel writers each check their own block |
 | `generate <name>` | write or refresh the overview and coverage entries |
@@ -135,6 +135,7 @@ The maintainer answers whenever, says so, and the agent runs `delta <name> --fin
   Ambiguous is a validation error, and so is unresolved — mark the exceptions `new:` (a file this change will create) or `old:` (one it removes).
   An ambiguous one lists every candidate as a path to paste.
   `context: <folder>` in an entry's front matter, or on one block, is where a short path is looked for first, which is the fix for a tree whose tests mirror its sources.
+  `planned: <folder>` is the design review's counterpart: a path under that folder, or a bare name, that resolves nowhere is drawn as a file the design will create rather than failing.
   **A reference in a finalized round never fails `validate`**, ambiguity included: a finalized ask is immutable, so nothing could fix it there.
   Carrying out what the round decided is what breaks it — a `new:` path now exists and links like any other, and a path that is gone is drawn as removed.
   Where the round's head is on record the text is read against that tree, which follows a file that moved and names the commit on hover.

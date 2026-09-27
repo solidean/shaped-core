@@ -196,6 +196,10 @@ namespace sgl
 /// The stable kebab-case name of a kind, e.g. "undelimited-string".
 [[nodiscard]] cc::string_view to_string(diagnostic_kind kind);
 
+/// One sentence a reader understands without knowing the kind's name, e.g. "a bracket that is opened and never closed".
+/// It is what a diagnostic says when the pass that reported it has no detail of its own.
+[[nodiscard]] cc::string_view summary_of(diagnostic_kind kind);
+
 [[nodiscard]] severity default_severity_of(diagnostic_kind kind);
 
 } // namespace sgl

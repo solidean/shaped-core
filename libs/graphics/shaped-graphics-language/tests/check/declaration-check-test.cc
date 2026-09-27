@@ -49,14 +49,22 @@ TEST("sgl check - a name is declared once, unless it is functions and at most on
 TEST("sgl check - the prelude is a scope around the user file's, which may shadow its names")
 {
     // the user file's struct is the one its lookups find: the prelude's vec3 has no member `weight`
-    CHECK(reports_for("struct vec3:\n    weight: float\nfun g(v: vec3) -> float:\n    return v.weight\n") == "");
+    // A builtin type is @shadowable(false), so this and the int below need a prelude whose types may be hidden.
+    auto const shadowable = shadowable_builtins_text();
+    CHECK(reports_of(check_sources(shadowable, "struct vec3:\n    weight: float\nfun g(v: vec3) -> float:\n    return "
+                                               "v.weight\n"))
+          == "");
+    // with the library's prelude it is reported once, although the struct and its constructor are two symbols
+    CHECK(reports_for("struct vec3:\n    weight: float\n")
+          == "shadows-unshadowable user:[struct vec3:] vec3 is @shadowable(false) in the prelude\n");
     CHECK(reports_for("binding dot:\n    x: float\n") == "");
     // a function hides a struct of the prelude, and a struct the prelude's functions, unless both are functions
     CHECK(reports_for("fun vec3(k: float) -> float => k\nfun g(k: float) -> float:\n    return vec3(k)\n") == "");
     CHECK(reports_for("struct dot:\n    a: float\nfun g(d: dot) -> float:\n    return d.a\n") == "");
     // what the checker needs of the prelude by name stays the prelude's: a for runs over its int
-    CHECK(reports_for("struct int:\n    a: float\nfun g(k: float) -> float:\n    for i in 0 ..< 3:\n        return k\n"
-                      "    return k\n")
+    CHECK(reports_of(check_sources(shadowable, "struct int:\n    a: float\nfun g(k: float) -> float:\n    for i in 0 "
+                                               "..< 3:\n"
+                                               "        return k\n    return k\n"))
           == "");
 
     // a prelude file never sees the user file's names

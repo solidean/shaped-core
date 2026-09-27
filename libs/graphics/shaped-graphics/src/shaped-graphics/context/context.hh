@@ -347,6 +347,9 @@ protected:
     void set_adapter_info(adapter_info info);
 
 private:
+    /// `settle_due_completions` under its `settling` lock, which is what makes a returning call complete.
+    void impl_settle_due_completions();
+
     /// What an outstanding completion async waits for.
     enum class completion_kind : u8
     {
@@ -448,7 +451,8 @@ protected:
 
     /// Push every node whose condition now holds, or fail every node once the device is lost.
     /// Safe from any thread, a transfer actor's and a GPU callback's included.
-    /// Settled OUTSIDE the lock: a dependent resuming here would otherwise re-enter a mutex this thread still holds.
+    /// A call that returns has pushed everything due, what another thread was settling at the same moment included.
+    /// A push only enqueues the node's dependents, so no dependent runs inside this call.
     void settle_due_completions();
 
     /// `idle_completion`'s three steps as a blocking drain, for a backend's own shutdown.

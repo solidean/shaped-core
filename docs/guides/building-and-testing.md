@@ -29,6 +29,7 @@ uv run dev.py <command> [options]
 | `assembly`     | Disassemble a symbol, or trace what one invocation actually ran ([disassembly.md](disassembly.md)). |
 | `profiling`    | Report the machine's hardware performance counters ([profiling.md](profiling.md)). |
 | `clean`        | Remove a preset's build directory (`--all` for every preset, `--dry-run`).    |
+| `install`      | Install a developer tool of this repo as a link into the checkout: `install sgl-vscode` builds `sgl` and links the SGL extension into every VS Code-family editor. No argument lists them, `--uninstall` removes only its own links. |
 | `diagnose clangd FILE` | Show clangd's diagnostics for a source file (see below).              |
 | `info`         | Inspect resolved compile/link flags and per-file compile commands (see below). |
 | `doctor`       | Read-only toolchain sanity check: cmake, ninja, compiler, presets, clangd, the LLVM tools coverage and PGO need, the networking environment, the graphics environment (Vulkan, windowing, DXC), and any [known external issue](../bugs-external/_index.md) this machine carries, as a `WARN`. |

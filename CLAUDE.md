@@ -120,6 +120,8 @@ One-liner per library:
   The compiler carries a deliberately thin slice of the language so far, and everything else is the one diagnostic `unsupported-yet`, never a guess.
   **To work on the compiler**: [docs/architecture.md](libs/graphics/shaped-graphics-language/docs/architecture.md) is the map.
   `prelude/builtins.sgl` is generated from the C++ builtin registry and checked by `dev.py check`, so never edit it by hand.
+  **`sgl lsp` is the language server**, a shallow shim that translates what the library answers into LSP; the VS Code extension in `tools/vscode-extension/` is its client.
+  [docs/lsp.md](libs/graphics/shaped-graphics-language/docs/lsp.md) is its design.
   Namespace `sgl`. Depends on clean-core alone, which must stay so: an editor links it to parse.
   Early stage.
 * **`libs/graphics/shaped-viewer`** — professional, RTX-enabled visualization renderer with a dev-friendly API.
@@ -441,6 +443,7 @@ A stale "no cc:: equivalent yet" reason sends the next author back to the old wa
 | Run pre-commit checks            | `uv run dev.py check --fix`                                       |
 | Re-check an already-made commit  | `uv run dev.py check --commit <rev>` (a range works too; a single commit means its first-parent diff, so a merge yields all it brought in) |
 | Sanity-check the toolchain       | `uv run dev.py doctor`                                            |
+| Install a repo tool into your editor | `uv run dev.py install` (lists them; `install sgl-vscode` links the SGL extension) |
 | List presets / targets           | `uv run dev.py list-presets` / `list-targets`                     |
 | Pin a compiler version           | `uv run dev.py build --toolset <ver>` (`list-toolsets` shows them) |
 | Review a PR, a branch or a design | `uv run review.py init <name> --range A..B --goal <goal>` ([readme](tools/review/readme.md); the `reviewing-a-pr` skill drives it) |

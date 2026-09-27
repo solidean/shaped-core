@@ -93,7 +93,15 @@ struct machine
     bool burn()
     {
         if (--fuel >= 0)
+        {
+            // a relaxed load every 4096 steps: a stop is seen within a fraction of a millisecond, and costs the run nothing measurable
+            if (limits.stop != nullptr && (fuel & 4095) == 0 && limits.stop->load(cc::memory_order_relaxed))
+            {
+                fail(run_status::stopped, "");
+                return false;
+            }
             return true;
+        }
         fail(run_status::out_of_fuel, "");
         return false;
     }
@@ -546,8 +554,13 @@ struct machine
         ++out.checks_run;
         if (site.stops)
             ++out.asserts_run;
+        auto& tally = out.sites[k.site];
         if (condition.leaves[0].as_bool())
+        {
+            ++tally.passed;
             return {};
+        }
+        ++tally.failed;
 
         if (out.failures.size() < limits.max_failures)
         {
@@ -778,6 +791,8 @@ cc::string_view sgl::check::to_string(run_status s)
         return "uninitialized-read";
     case run_status::assertion_failed:
         return "assertion-failed";
+    case run_status::stopped:
+        return "stopped";
     }
     return "";
 }
@@ -804,6 +819,7 @@ outcome sgl::check::interpret(checked_module const& m,
     auto run = machine{.m = m, .e = e, .inputs = inputs, .limits = limits, .fuel = limits.fuel};
     run.out.buffers = inputs.buffers;
     run.is_stored.resize_to_filled(inputs.buffers.size(), false);
+    run.out.sites.resize_to_defaulted(e.check_sites.size());
     run.locals.resize_to_defaulted(e.locals.size());
     run.is_set.resize_to_filled(e.locals.size(), false);
     // A test has no parameter, and its first local is one of its own.

@@ -95,7 +95,7 @@ TEST("sgl samples - members and bindings parse and build without a diagnostic")
     // A local binding with a property that reaches a local, then a nested function and a lambda.
     CHECK(dump.contains("  (binding timing\n    (field time : float)\n    (property phase => (call:infix * t "
                         "num:0.5)))\n"));
-    CHECK(dump.contains("  (fun weight (params (field l : light)) -> float => "));
+    CHECK(dump.contains("  (fun weight (params (field l : light)) => "));
     CHECK(dump.contains("  (let contribution = (lambda (params (field l)) => "));
     CHECK(dump.contains("      (branch (call:infix >= bounce max_bounces) => (break total))"));
     CHECK(dump.contains("(chain num:0.0 <= (call:paren (member brdf luminance) total) < num:1.0)"));

@@ -1,5 +1,6 @@
 #include "run_tests.hh"
 
+#include <clean-core/common/assert.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/glob.hh>
 #include <shaped-graphics-language/legalize/impl/walk.hh>
@@ -29,9 +30,13 @@ located locate(cc::span<module_file const> files, origin const& from)
         return {};
     auto const where = file.file.at(form).where;
     auto text = file.file.text_of(where);
-    // a report quotes one line
-    if (auto const end = text.find('\n'); end >= 0)
-        text = text.subview({.offset = 0, .size = end});
+    // a report quotes one line, and a line ends at `\n`, `\r\n` or a bare `\r`
+    for (auto i = isize(0); i < text.size(); ++i)
+        if (text[i] == '\n' || text[i] == '\r')
+        {
+            text = text.subview({.offset = 0, .size = i});
+            break;
+        }
     return {.where = where, .text = cc::string(text)};
 }
 
@@ -160,10 +165,14 @@ cc::string_view sgl::test::to_string(test_status s)
         return "no-check-ran";
     case test_status::not_run:
         return "not-run";
+    case test_status::judged_by_diagnostics:
+        return "judged-by-diagnostics";
     case test_status::uninitialized_read:
         return "uninitialized-read";
     case test_status::internal_error:
         return "internal-error";
+    case test_status::stopped:
+        return "stopped";
     }
     return "";
 }
@@ -214,6 +223,110 @@ cc::string sgl::test::text_of_value(checked_module const& m, value const& v)
     return text;
 }
 
+test_result sgl::test::run_test(checked_module const& m, cc::span<module_file const> files, i32 t, run_limits const& limits)
+{
+    CC_ASSERT(t >= 0 && t < m.tests.size(), "a test index names a test of the module");
+    auto const& test = m.tests[t];
+    auto result = test_result{.test = t};
+    if (test.expects_diagnostics())
+        return {.test = t, .status = test_status::judged_by_diagnostics};
+    if (test.unit < 0)
+        return result;
+
+    auto const& unit = m.test_units[test.unit];
+    auto const o = interpret(m, unit, {}, limits);
+    for (auto s = isize(0); s < unit.check_sites.size() && s < o.sites.size(); ++s)
+    {
+        auto const& site = unit.check_sites[s];
+        result.sites.push_back({.file = site.from.file,
+                                .where = locate(files, site.from).where,
+                                .is_assert = site.stops,
+                                .passed = o.sites[s].passed,
+                                .failed = o.sites[s].failed});
+    }
+    result.checks_run = o.checks_run - o.asserts_run;
+    result.asserts_run = o.asserts_run;
+    result.failures_dropped = o.failures_dropped;
+    result.detail = o.detail;
+    for (auto const& f : o.failures)
+    {
+        if (f.site < 0 || f.site >= unit.check_sites.size())
+            continue;
+        auto const& site = unit.check_sites[f.site];
+        auto const nodes = unit.at(site.nodes);
+        if (nodes.size() != f.values.size())
+            continue;
+        auto const at = locate(files, site.from);
+        auto report = check_report{.file = site.from.file, .where = at.where, .text = at.text, .is_assert = site.stops};
+        auto n = narrower{.m = m, .files = files, .nodes = nodes, .failure = f};
+        n.narrow(0);
+        report.parts = cc::move(n.parts);
+        if (check::impl::is_known(unit, site.loop_variables))
+            for (auto i = isize(0); i < f.loop_values.size() && i < unit.at(site.loop_variables).size(); ++i)
+            {
+                auto const* const ref = unit.at(unit.at(site.loop_variables)[i]).node.try_as<flat_local_ref>();
+                auto const name = ref != nullptr ? cc::string_view(unit.at(ref->local).name) : cc::string_view("?");
+                report.loop_values.push_back(cc::format("{} = {}", name, text_of_value(m, f.loop_values[i])));
+            }
+        result.failures.push_back(cc::move(report));
+    }
+
+    switch (o.status)
+    {
+    case run_status::ok:
+        result.status = !o.failures.empty() || o.failures_dropped > 0 ? test_status::failed
+                      : o.checks_run == 0                             ? test_status::no_check_ran
+                                                                      : test_status::passed;
+        break;
+    case run_status::assertion_failed:
+        result.status = test_status::assertion_failed;
+        break;
+    case run_status::out_of_fuel:
+        result.status = test_status::out_of_fuel;
+        break;
+    case run_status::uninitialized_read:
+        result.status = test_status::uninitialized_read;
+        break;
+    case run_status::fell_off_the_end:
+    case run_status::type_error:
+        result.status = test_status::internal_error;
+        break;
+    case run_status::stopped:
+        result.status = test_status::stopped;
+        return result; // no expectation is judged against a run that did not finish
+    }
+
+    // CHK-232: a test that is to fail passes by failing, and one that is to stop at an assert by stopping there.
+    // Every expectation is judged against the one run, so two of them never judge each other's verdict.
+    auto const ran = result.status;
+    auto has_run_expectation = false;
+    auto const* unmet = static_cast<test_expectation const*>(nullptr);
+    for (auto const& e : test.expectations)
+    {
+        if (e.kind != expectation_kind::fail && e.kind != expectation_kind::assert_)
+            continue;
+        has_run_expectation = true;
+        auto const is_met = e.kind == expectation_kind::fail
+                              ? ran == test_status::failed || ran == test_status::assertion_failed
+                              : ran == test_status::assertion_failed;
+        if (!is_met && unmet == nullptr)
+            unmet = &e;
+    }
+    if (has_run_expectation && unmet == nullptr)
+    {
+        result.status = test_status::passed;
+        result.failures.clear();
+        result.failures_dropped = 0;
+    }
+    else if (unmet != nullptr && ran == test_status::passed)
+    {
+        result.status = test_status::failed;
+        result.detail = unmet->kind == expectation_kind::fail ? "it was to fail, and it passed"
+                                                              : "it was to stop at an assert, and it ran to its end";
+    }
+    return result;
+}
+
 cc::vector<test_result> sgl::test::run_tests(checked_module const& m,
                                              cc::span<module_file const> files,
                                              test_options const& options)
@@ -226,95 +339,7 @@ cc::vector<test_result> sgl::test::run_tests(checked_module const& m,
             continue;
         if (test.expects_diagnostics())
             continue;
-        auto result = test_result{.test = i32(t)};
-        if (test.unit < 0)
-        {
-            results.push_back(cc::move(result));
-            continue;
-        }
-
-        auto const& unit = m.test_units[test.unit];
-        auto const o = interpret(m, unit, {}, options.limits);
-        result.checks_run = o.checks_run - o.asserts_run;
-        result.asserts_run = o.asserts_run;
-        result.failures_dropped = o.failures_dropped;
-        result.detail = o.detail;
-        for (auto const& f : o.failures)
-        {
-            if (f.site < 0 || f.site >= unit.check_sites.size())
-                continue;
-            auto const& site = unit.check_sites[f.site];
-            auto const nodes = unit.at(site.nodes);
-            if (nodes.size() != f.values.size())
-                continue;
-            auto const at = locate(files, site.from);
-            auto report
-                = check_report{.file = site.from.file, .where = at.where, .text = at.text, .is_assert = site.stops};
-            auto n = narrower{.m = m, .files = files, .nodes = nodes, .failure = f};
-            n.narrow(0);
-            report.parts = cc::move(n.parts);
-            if (check::impl::is_known(unit, site.loop_variables))
-                for (auto i = isize(0); i < f.loop_values.size() && i < unit.at(site.loop_variables).size(); ++i)
-                {
-                    auto const* const ref = unit.at(unit.at(site.loop_variables)[i]).node.try_as<flat_local_ref>();
-                    auto const name = ref != nullptr ? cc::string_view(unit.at(ref->local).name) : cc::string_view("?");
-                    report.loop_values.push_back(cc::format("{} = {}", name, text_of_value(m, f.loop_values[i])));
-                }
-            result.failures.push_back(cc::move(report));
-        }
-
-        switch (o.status)
-        {
-        case run_status::ok:
-            result.status = !o.failures.empty() || o.failures_dropped > 0 ? test_status::failed
-                          : o.checks_run == 0                             ? test_status::no_check_ran
-                                                                          : test_status::passed;
-            break;
-        case run_status::assertion_failed:
-            result.status = test_status::assertion_failed;
-            break;
-        case run_status::out_of_fuel:
-            result.status = test_status::out_of_fuel;
-            break;
-        case run_status::uninitialized_read:
-            result.status = test_status::uninitialized_read;
-            break;
-        case run_status::fell_off_the_end:
-        case run_status::type_error:
-            result.status = test_status::internal_error;
-            break;
-        }
-
-        // CHK-232: a test that is to fail passes by failing, and one that is to stop at an assert by stopping there.
-        // Every expectation is judged against the one run, so two of them never judge each other's verdict.
-        auto const ran = result.status;
-        auto has_run_expectation = false;
-        auto const* unmet = static_cast<test_expectation const*>(nullptr);
-        for (auto const& e : test.expectations)
-        {
-            if (e.kind != expectation_kind::fail && e.kind != expectation_kind::assert_)
-                continue;
-            has_run_expectation = true;
-            auto const is_met = e.kind == expectation_kind::fail
-                                  ? ran == test_status::failed || ran == test_status::assertion_failed
-                                  : ran == test_status::assertion_failed;
-            if (!is_met && unmet == nullptr)
-                unmet = &e;
-        }
-        if (has_run_expectation && unmet == nullptr)
-        {
-            result.status = test_status::passed;
-            result.failures.clear();
-            result.failures_dropped = 0;
-        }
-        else if (unmet != nullptr && ran == test_status::passed)
-        {
-            result.status = test_status::failed;
-            result.detail = unmet->kind == expectation_kind::fail
-                              ? "it was to fail, and it passed"
-                              : "it was to stop at an assert, and it ran to its end";
-        }
-        results.push_back(cc::move(result));
+        results.push_back(run_test(m, files, i32(t), options.limits));
     }
     return results;
 }
@@ -391,6 +416,8 @@ located_diagnostic sgl::test::diagnostic_of(checked_module const& m, test_result
         break;
     case test_status::passed:
     case test_status::not_run:
+    case test_status::judged_by_diagnostics:
+    case test_status::stopped:
         detail = cc::string(to_string(r.status));
         break;
     }

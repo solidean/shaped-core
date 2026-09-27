@@ -1,7 +1,7 @@
 // `and`, `or` and `not` are the language's own, on every pair of bools
 
-fun both(a: bool, b: bool) -> bool => a and b
-fun either(a: bool, b: bool) -> bool => a or b
+fun both(a: bool, b: bool) => a and b
+fun either(a: bool, b: bool) => a or b
 
 test:
     for i in 0 ..< 4:

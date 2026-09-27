@@ -428,8 +428,10 @@ void checker::check_break(function_scope& scope, source_span where, ast::expr_id
     if (!is_valid(expected) || expected == error_type)
         scope.loops[innermost].value = type;
     else if (type != expected)
-        report(diagnostic_kind::type_mismatch, file, span_of(file, value),
-               cc::format("an earlier break of this loop carries {}, got {}", out.name_of(expected), out.name_of(type)));
+        tell_apart(report(diagnostic_kind::type_mismatch, file, span_of(file, value),
+                          cc::format("an earlier break of this loop carries {}, got {}", out.name_of(expected),
+                                     out.name_of(type))),
+                   expected, type);
 }
 
 void checker::check_return(function_scope& scope, source_span where, ast::expr_id value)

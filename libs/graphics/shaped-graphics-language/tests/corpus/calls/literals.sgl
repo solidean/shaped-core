@@ -1,6 +1,6 @@
 // a literal converts where a type is expected: a number to a numeric type that holds it, a tuple or an object by a call
 
-fun half(x: float) -> float => x * 0.5
+fun half(x: float) => x * 0.5
 
 // an integer literal converts to a float that holds it exactly, at no cost
 test half(3) == 1.5
@@ -14,12 +14,14 @@ test:
     let u: uint = 3
     u == 3
 
-@expect(error = "literal-not-representable") test:
+@expect(error = "literal-not-representable")
+test:
     let x: float = 16777217
     true
 
 // a float literal converts to no integer type, whole or not
-@expect(error = "literal-not-representable") test:
+@expect(error = "literal-not-representable")
+test:
     let i: int = 2.0
     true
 
@@ -28,7 +30,7 @@ struct span2:
     lo: float
     hi: float = lo + 1.0
 
-fun width(s: span2) -> float => s.hi - s.lo
+fun width(s: span2) => s.hi - s.lo
 
 test width((0.0, 2.0)) == 2.0
 test width({lo = 1.0}) == 1.0
@@ -56,7 +58,7 @@ test:
     width(s.b) == 2.0
 
 // every function of the struct's name takes part, the synthesized constructor among them
-fun span2(.center: float, .radius: float) -> span2 => span2(center - radius, center + radius)
+fun span2(.center: float, .radius: float) => span2(center - radius, center + radius)
 
 test width({center = 1.0, radius = 0.5}) == 1.0
 test span2(center = 1.0, radius = 0.25).hi == 1.25
@@ -65,21 +67,24 @@ test span2(center = 1.0, radius = 0.25).hi == 1.25
 struct handle:
     id: int
 
-fun handle(.name: float) -> int => 7
+fun handle(.name: float) => 7
 
 test handle(name = 1.0) == 7
 
-@expect(error = "literal-conversion-result") test:
+@expect(error = "literal-conversion-result")
+test:
     let h: handle = {name = 1.0}
     true
 
 // only a literal written where the type is expected converts
-@expect(error = "unsupported-yet") test:
+@expect(error = "unsupported-yet")
+test:
     let t = (1.0, 2.0)
     true
 
 // an operator over integer literals alone meets no operator of another type: there is no int `/` yet
-@expect(error = "literal-needs-type") test 7 / 2 == 3
+@expect(error = "literal-needs-type")
+test 7 / 2 == 3
 
 test 7.0 / 2 == 3.5
 test 7 / 2.0 == 3.5
@@ -91,7 +96,8 @@ test:
     let x = 3.4028235e38
     x > 0.0
 
-@expect(error = "literal-not-representable") test:
+@expect(error = "literal-not-representable")
+test:
     let x = 1e39
     x > 0.0
 
@@ -100,10 +106,12 @@ test:
     let u: uint = 3000000000
     u == 3000000000
 
-@expect(error = "literal-not-representable") test:
+@expect(error = "literal-not-representable")
+test:
     let i = 3000000000
     true
 
-@expect(error = "unsupported-yet") test:
+@expect(error = "unsupported-yet")
+test:
     let u: uint = 99999999999999999999
     true

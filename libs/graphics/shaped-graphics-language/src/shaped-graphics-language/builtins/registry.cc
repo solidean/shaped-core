@@ -108,7 +108,7 @@ cc::string registry::prelude_text() const
             if (previous != registry_item::kind_t::comment)
                 out += "\n";
             doc(types[item.index].doc);
-            out.appendf("@builtin {}\n", types[item.index].declaration);
+            out.appendf("@shadowable(false)\n@builtin {}\n", types[item.index].declaration);
             break;
         case registry_item::kind_t::function:
             if (previous == registry_item::kind_t::type)
