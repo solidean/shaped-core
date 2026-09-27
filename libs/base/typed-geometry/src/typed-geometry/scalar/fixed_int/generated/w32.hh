@@ -82,7 +82,7 @@ struct tg::impl::mul_op<32, 32, 32, true>
     {
         u64 const a0 = u64(i64(i32(a.limbs[0])));
         u64 const b0 = u64(i64(i32(b.limbs[0])));
-        u64 const t1 = u64(0) + a0 * b0;
+        u64 const t1 = a0 * b0;
         fixed_integer<32, true> r;
         r.limbs[0] = u32(t1);
         return r;
@@ -132,7 +132,7 @@ struct tg::impl::mul_op<32, 32, 32, false>
     {
         u64 const a0 = u64(a.limbs[0]);
         u64 const b0 = u64(b.limbs[0]);
-        u64 const t1 = u64(0) + a0 * b0;
+        u64 const t1 = a0 * b0;
         fixed_integer<32, false> r;
         r.limbs[0] = u32(t1);
         return r;

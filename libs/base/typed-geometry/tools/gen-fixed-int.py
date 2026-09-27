@@ -43,6 +43,10 @@ LIB = HERE.parent
 REPO = LIB.parents[2]
 GENERATED = LIB / "src" / "typed-geometry" / "scalar" / "fixed_int" / "generated"
 GOLDEN = LIB / "tests" / "scalar" / "fixed_int-golden.gen.cc"
+MUL_VARIANTS = LIB / "tests" / "benchmarks" / "fixed_int-mul-variants.gen.hh"
+
+# The signed triples the benchmark times both product forms on.
+BENCHMARKED_MULS = [(192, 128, 128), (256, 128, 128), (256, 64, 192)]
 COMMAND = "uv run libs/base/typed-geometry/tools/gen-fixed-int.py --write"
 
 # --- the triple table ------------------------------------------------------------------------------------------
@@ -181,7 +185,7 @@ def body_add_sub(op: str, r: int, a: int, b: int, signed: bool) -> list[str]:
     return lines + result_store(r, signed, out)
 
 
-def body_mul(r: int, a: int, b: int, signed: bool) -> list[str]:
+def body_mul(r: int, a: int, b: int, signed: bool, form: str | None = None) -> list[str]:
     rw = word_count(r)
     # A 32-bit operand takes part as its sign-extended 64-bit word.
     ae = max(a, 64)
@@ -202,8 +206,12 @@ def body_mul(r: int, a: int, b: int, signed: bool) -> list[str]:
     db, nb, _ = operand_words("b", b, signed)
     lines = [d for d in da + db if "_fill" not in d]
 
-    # The unsigned product of the raw words, truncated to rw words: one row per word of a, in SSA form.
-    acc: list[str | None] = [None] * rw
+    # Measured on Zen 4 (tests/benchmarks/fixed_int-benchmark.cc times both): a truncated product, whose top column
+    # is only low halves, is ~20% faster summed column by column, since its multiplies are independent.
+    # A full product is 5-10% faster row by row, where the accumulation folds into the multiply chain.
+    if form is None:
+        form = "row" if aw + bw <= rw else "column"
+
     counter = 0
 
     def fresh(prefix: str) -> str:
@@ -211,27 +219,69 @@ def body_mul(r: int, a: int, b: int, signed: bool) -> list[str]:
         counter += 1
         return f"{prefix}{counter}"
 
-    for i in range(min(aw, rw)):
-        carry = None
-        for j in range(min(bw, rw - i)):
-            k = i + j
-            cur = acc[k] if acc[k] is not None else "u64(0)"
-            if k == rw - 1:
-                # only the low half of the top product lands below 2^R
-                v = fresh("t")
-                extra = f" + {carry}" if carry is not None else ""
-                lines.append(f"u64 const {v} = {cur} + {na[i]} * {nb[j]}{extra};")
-                acc[k] = v
-                carry = None
-                break
-            p = fresh("p")
-            lines.append(f"auto const {p} = mul_add({cur}, {na[i]}, {nb[j]}, {carry if carry else 'u64(0)'});")
-            acc[k] = f"{p}.lo"
-            carry = f"{p}.hi"
-        if carry is not None and i + bw < rw:
-            acc[i + bw] = carry
+    if form == "row":
+        # The same product row by row: each partial product accumulates into the running words with its carry.
+        acc: list[str | None] = [None] * rw
+        for i in range(min(aw, rw)):
+            carry = None
+            for j in range(min(bw, rw - i)):
+                k = i + j
+                cur = acc[k] if acc[k] is not None else "u64(0)"
+                if k == rw - 1:
+                    v = fresh("t")
+                    extra = f" + {carry}" if carry is not None else ""
+                    lines.append(f"u64 const {v} = {cur} + {na[i]} * {nb[j]}{extra};")
+                    acc[k] = v
+                    carry = None
+                    break
+                p = fresh("p")
+                lines.append(f"auto const {p} = mul_add({cur}, {na[i]}, {nb[j]}, {carry if carry else 'u64(0)'});")
+                acc[k] = f"{p}.lo"
+                carry = f"{p}.hi"
+            if carry is not None and i + bw < rw:
+                acc[i + bw] = carry
+        words = [w if w is not None else "u64(0)" for w in acc]
+    else:
+        # The same product column by column: every partial product is independent of the others, so the multiplies
+        # issue in parallel and only each column's additions chain.
+        pairs = [(i, j) for i in range(aw) for j in range(bw) if i + j < rw]
+        for i, j in pairs:
+            if i + j < rw - 1:
+                lines.append(f"auto const p{i}_{j} = cc::umul128({na[i]}, {nb[j]});")
 
-    words = [w if w is not None else "u64(0)" for w in acc]
+        words: list[str] = []
+        carry_in = None
+        for k in range(rw):
+            terms = []
+            for i, j in pairs:
+                if i + j == k:
+                    # only the low half of a top-column product lands below 2^R
+                    terms.append(f"{na[i]} * {nb[j]}" if k == rw - 1 else f"p{i}_{j}.lo")
+            terms += [f"p{i}_{j}.hi" for i, j in pairs if i + j == k - 1]
+            if carry_in is not None:
+                terms.append(carry_in)
+            if not terms:
+                words.append("u64(0)")
+                carry_in = None
+            elif k == rw - 1:
+                v = fresh("t")
+                lines.append(f"u64 const {v} = {' + '.join(terms)};")
+                words.append(v)
+            else:
+                sum_ = terms[0]
+                carries = []
+                for term in terms[1:]:
+                    s = fresh("s")
+                    lines.append(f"auto const {s} = cc::add_with_carry({sum_}, {term});")
+                    sum_ = f"{s}.value"
+                    carries.append(f"{s}.carry")
+                words.append(sum_)
+                if carries:
+                    c = fresh("c")
+                    lines.append(f"u64 const {c} = {' + '.join(carries)};")
+                    carry_in = c
+                else:
+                    carry_in = None
 
     # A negative a read as unsigned is a + 2^Ae, so the product is too large by b_raw * 2^Ae; likewise for b.
     # Subtracting both corrections leaves 2^(Ae + Be) * [a < 0][b < 0], which vanishes modulo 2^R.
@@ -342,6 +392,31 @@ def emit_width(r: int, table: list[tuple[str, int, int, int, bool]]) -> str:
             body = body_add_sub(op, r, a, b, signed)
         lines += specialization(f"{op}_op", f"{r}, {a}, {b}, {s}", ty(r, signed), args, body)
     lines += ["// NOLINTEND", ""]
+    return "\n".join(lines)
+
+
+def emit_mul_variants() -> str:
+    """The row and the column form of each benchmarked product, so one run can time both."""
+    lines = [
+        f"// GENERATED by {COMMAND} — do not edit.",
+        "// Both forms of the generated signed product, for fixed_int-benchmark.cc to time side by side.",
+        "#pragma once",
+        "",
+        "#include <typed-geometry/scalar/fixed_int/impl/core.hh>",
+        "",
+        "// NOLINTBEGIN",
+        "",
+        "namespace tg::impl::mul_variants",
+        "{",
+    ]
+    for form in ("row", "column"):
+        for r, a, b in BENCHMARKED_MULS:
+            lines.append(f"[[nodiscard]] constexpr {ty(r, True)} {form}_{r}_{a}_{b}({ty(a, True)} const& a, {ty(b, True)} const& b)")
+            lines.append("{")
+            lines += [f"    {line}" for line in body_mul(r, a, b, True, form)]
+            lines.append("}")
+            lines.append("")
+    lines += ["} // namespace tg::impl::mul_variants", "", "// NOLINTEND", ""]
     return "\n".join(lines)
 
 
@@ -566,6 +641,7 @@ def generate(max_bits: int, exe: str) -> dict[Path, str]:
         out[path] = clang_format(emit_width(r, table), path, exe)
     out[GENERATED / "all.hh"] = clang_format(emit_all(max_bits), GENERATED / "all.hh", exe)
     out[GOLDEN] = clang_format(emit_golden(table, max_bits), GOLDEN, exe)
+    out[MUL_VARIANTS] = clang_format(emit_mul_variants(), MUL_VARIANTS, exe)
     return out
 
 

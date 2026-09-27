@@ -116,7 +116,13 @@ It needs integers of a chosen width, and arithmetic whose result width the calle
   Everything else runs the generic bodies in `fixed_int/impl/core.hh`, which are a second, independent formulation the tests hold the generated ones against.
   Regenerate with `uv run libs/base/typed-geometry/tools/gen-fixed-int.py --write`; `dev.py check` fails when the committed output drifts.
 - **Division truncates, like the builtins, and floor and ceiling are named.**
-  `tg::div_floor<Q>(x, w)` is the case predicates need: a quotient known to fit `Q` (32 bits) comes from an f64 estimate plus one exact remainder rather than a long division.
+  `tg::div_floor<Q>(x, w)` is the case predicates need: a quotient known to fit `Q` (32 bits) comes from one estimate plus one exact remainder rather than a long division.
+  The estimate is a `cc::udiv128` of the top words, measured ~20% faster than an f64 estimate and ~2.7× faster than Knuth D on x64.
+  MSVC ARM64 has no 128 ÷ 64 instruction, so there it is a software division, and still correct.
+- **Float conversions are correctly rounded, with no fast variant.**
+  `to_f64` / `to_f32` round to nearest with ties to even, via a sticky bit over everything below the top 64 bits.
+  That costs ~20% against dropping the sticky bit, measured on fi256, which is too little to be worth a second, subtly different function.
+- **`x.sign()` is the predicate's answer**: -1, 0 or +1 from the OR of the limbs and the sign bit, without a branch or a comparison.
 - **A `fixed_int` is a scalar**, so `vec<3, fi64>` exists — and its operations wrap at the element width, so a dot product over `fi64` is computed in `fi64`.
   Width-aware `dot` and `cross` belong to a predicate layer on top of this one.
 

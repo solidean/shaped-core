@@ -49,6 +49,11 @@ inline constexpr int word_count = Bits == 32 ? 1 : Bits / 64;
 /// acc + a * b + carry as a 128-bit value; it cannot overflow, since (2^64 - 1)^2 + 2 * (2^64 - 1) = 2^128 - 1.
 [[nodiscard]] constexpr cc::u128 mul_add(u64 acc, u64 a, u64 b, u64 carry)
 {
+#if defined(CC_COMPILER_CLANG) || defined(CC_COMPILER_GCC)
+    // One 128-bit expression lets the compiler schedule the whole carry chain, rather than three calls' worth.
+    auto const s = static_cast<__uint128_t>(a) * b + acc + carry;
+    return {u64(s), u64(s >> 64)};
+#endif
     auto const p = cc::umul128(a, b);
     auto const s1 = cc::add_with_carry(p.lo, acc);
     auto const s2 = cc::add_with_carry(s1.value, carry);
@@ -666,6 +671,15 @@ struct tg::impl::fixed_integer
     // --- queries ---
 
     [[nodiscard]] constexpr bool is_negative() const { return impl::is_negative(*this); }
+
+    /// -1, 0 or +1, without a branch: the sign of a determinant is what an exact predicate returns.
+    [[nodiscard]] constexpr int sign() const
+    {
+        limb_type any = 0;
+        for (auto i = 0; i < limb_count; ++i)
+            any |= limbs[i];
+        return int(any != 0) - 2 * int(is_negative());
+    }
 
     /// Correctly rounded, to nearest with ties to even.
     [[nodiscard]] constexpr f64 to_f64() const { return to_f64_generic<true>(*this); }

@@ -251,13 +251,13 @@ struct tg::impl::mul_op<128, 32, 128, true>
         u64 const a0 = u64(i64(i32(a.limbs[0])));
         u64 const b0 = b.limbs[0];
         u64 const b1 = b.limbs[1];
-        auto const p1 = mul_add(u64(0), a0, b0, u64(0));
-        u64 const t2 = u64(0) + a0 * b1 + p1.hi;
-        u64 const m3 = mask_if(i64(a0) < 0);
-        u64 const t4 = t2 - (b0 & m3);
+        auto const p0_0 = cc::umul128(a0, b0);
+        u64 const t1 = a0 * b1 + p0_0.hi;
+        u64 const m2 = mask_if(i64(a0) < 0);
+        u64 const t3 = t1 - (b0 & m2);
         fixed_integer<128, true> r;
-        r.limbs[0] = p1.lo;
-        r.limbs[1] = t4;
+        r.limbs[0] = p0_0.lo;
+        r.limbs[1] = t3;
         return r;
     }
 };
@@ -302,13 +302,13 @@ struct tg::impl::mul_op<128, 64, 128, true>
         u64 const a0 = a.limbs[0];
         u64 const b0 = b.limbs[0];
         u64 const b1 = b.limbs[1];
-        auto const p1 = mul_add(u64(0), a0, b0, u64(0));
-        u64 const t2 = u64(0) + a0 * b1 + p1.hi;
-        u64 const m3 = mask_if(i64(a0) < 0);
-        u64 const t4 = t2 - (b0 & m3);
+        auto const p0_0 = cc::umul128(a0, b0);
+        u64 const t1 = a0 * b1 + p0_0.hi;
+        u64 const m2 = mask_if(i64(a0) < 0);
+        u64 const t3 = t1 - (b0 & m2);
         fixed_integer<128, true> r;
-        r.limbs[0] = p1.lo;
-        r.limbs[1] = t4;
+        r.limbs[0] = p0_0.lo;
+        r.limbs[1] = t3;
         return r;
     }
 };
@@ -346,12 +346,11 @@ struct tg::impl::mul_op<128, 128, 128, true>
         u64 const a1 = a.limbs[1];
         u64 const b0 = b.limbs[0];
         u64 const b1 = b.limbs[1];
-        auto const p1 = mul_add(u64(0), a0, b0, u64(0));
-        u64 const t2 = u64(0) + a0 * b1 + p1.hi;
-        u64 const t3 = t2 + a1 * b0;
+        auto const p0_0 = cc::umul128(a0, b0);
+        u64 const t1 = a0 * b1 + a1 * b0 + p0_0.hi;
         fixed_integer<128, true> r;
-        r.limbs[0] = p1.lo;
-        r.limbs[1] = t3;
+        r.limbs[0] = p0_0.lo;
+        r.limbs[1] = t1;
         return r;
     }
 };
@@ -676,11 +675,11 @@ struct tg::impl::mul_op<128, 32, 128, false>
         u64 const a0 = u64(a.limbs[0]);
         u64 const b0 = b.limbs[0];
         u64 const b1 = b.limbs[1];
-        auto const p1 = mul_add(u64(0), a0, b0, u64(0));
-        u64 const t2 = u64(0) + a0 * b1 + p1.hi;
+        auto const p0_0 = cc::umul128(a0, b0);
+        u64 const t1 = a0 * b1 + p0_0.hi;
         fixed_integer<128, false> r;
-        r.limbs[0] = p1.lo;
-        r.limbs[1] = t2;
+        r.limbs[0] = p0_0.lo;
+        r.limbs[1] = t1;
         return r;
     }
 };
@@ -723,11 +722,11 @@ struct tg::impl::mul_op<128, 64, 128, false>
         u64 const a0 = a.limbs[0];
         u64 const b0 = b.limbs[0];
         u64 const b1 = b.limbs[1];
-        auto const p1 = mul_add(u64(0), a0, b0, u64(0));
-        u64 const t2 = u64(0) + a0 * b1 + p1.hi;
+        auto const p0_0 = cc::umul128(a0, b0);
+        u64 const t1 = a0 * b1 + p0_0.hi;
         fixed_integer<128, false> r;
-        r.limbs[0] = p1.lo;
-        r.limbs[1] = t2;
+        r.limbs[0] = p0_0.lo;
+        r.limbs[1] = t1;
         return r;
     }
 };
@@ -765,12 +764,11 @@ struct tg::impl::mul_op<128, 128, 128, false>
         u64 const a1 = a.limbs[1];
         u64 const b0 = b.limbs[0];
         u64 const b1 = b.limbs[1];
-        auto const p1 = mul_add(u64(0), a0, b0, u64(0));
-        u64 const t2 = u64(0) + a0 * b1 + p1.hi;
-        u64 const t3 = t2 + a1 * b0;
+        auto const p0_0 = cc::umul128(a0, b0);
+        u64 const t1 = a0 * b1 + a1 * b0 + p0_0.hi;
         fixed_integer<128, false> r;
-        r.limbs[0] = p1.lo;
-        r.limbs[1] = t3;
+        r.limbs[0] = p0_0.lo;
+        r.limbs[1] = t1;
         return r;
     }
 };

@@ -323,6 +323,21 @@ TEST("tg fixed_int - shift identities")
     }
 }
 
+TEST("tg fixed_int - sign")
+{
+    static_assert(fi256(-3).sign() == -1 && fi256(0).sign() == 0 && fi256(3).sign() == 1);
+    CHECK(fi32::min().sign() == -1);
+    CHECK(fi32(7).sign() == 1);
+    CHECK((fi192(1) << 150).sign() == 1);
+    CHECK((fi192(-1) << 150).sign() == -1);
+    CHECK(fi192::min().sign() == -1);
+    CHECK(fu256::max().sign() == 1);
+    CHECK(fu128(0).sign() == 0);
+    // a determinant's sign, through the width it was computed in
+    auto const det = tg::mul<fi192>(fi128(3) << 80, fi128(-5) << 90) - tg::mul<fi192>(fi128(-1), fi128(1));
+    CHECK(det.sign() == -1);
+}
+
 TEST("tg fixed_int - wraparound")
 {
     CHECK(-fi128::min() == fi128::min());
@@ -403,6 +418,16 @@ TEST("tg fixed_int - bounded quotient")
         CHECK(fi256(got.floor) == expected_floor);
         CHECK(fi256(got.ceil) == expected_ceil);
     }
+
+    // an x narrower than the estimate's shift: the shifted value is 0, and the correction still lands on the floor
+    auto const big = fi192(1) << 150;
+    CHECK(tg::div_floor_ceil<fi32>(fi64(5), big).floor == fi32(0));
+    CHECK(tg::div_floor_ceil<fi32>(fi64(5), big).ceil == fi32(1));
+    CHECK(tg::div_floor_ceil<fi32>(fi64(-5), big).floor == fi32(-1));
+    CHECK(tg::div_floor_ceil<fi32>(fi64(-5), big).ceil == fi32(0));
+    CHECK(tg::div_floor_ceil<fi32>(fi64(0), -big).floor == fi32(0));
+    CHECK(tg::div_floor_ceil<fu32>(fu256(7) << 150, fu192(1) << 149).floor == fu32(14));
+    CHECK(tg::div_floor_ceil<fu32>((fu256(7) << 150) + fu256(1), fu192(1) << 149).ceil == fu32(15));
 
     // the wide path, for a quotient type no estimate resolves
     CHECK(tg::div_floor<fi128>(fi256(-7) << 100, fi192(2)) == fi128(-7) << 99);

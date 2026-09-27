@@ -360,9 +360,10 @@ tg::add<fi192>(a, b); tg::sub<R>(a, b);                    //   R is a claim: SC
 tg::checked_mul<R>(a, b);                                  // -> cc::optional<R>; none when it does not fit
 tg::div_trunc / mod_trunc / div_floor / mod_floor / div_ceil(a, b);  // same width; operators are trunc
 tg::div_mod_trunc(a, b); tg::div_mod_floor(a, b);          // -> {quotient, remainder} from one division
-tg::div_floor<fi32>(x, w); tg::div_ceil<fi32>(x, w);       // quotient known to fit fi32: f64 estimate + exact fix
+tg::div_floor<fi32>(x, w); tg::div_ceil<fi32>(x, w);       // quotient known to fit fi32: udiv128 estimate + exact fix
 tg::div_floor_ceil<fi32>(x, w);                            // -> {floor, ceil}
 x.to_f64(); x.to_f32(); fi128(2.5);                        // correctly rounded out; truncating in
+x.sign(); x.is_negative();                                 // int -1/0/+1 without a branch; bool
 u.count_leading_zeroes(); u.popcount(); u.bit_width();     // fixed_uint only; s.magnitude_bit_width() for signed
 x.to_string(); cc::format("{:'x}", x);                     // decimal; the full integer format spec
 // fi192 r = a * b over fi128 does not compile: the product would wrap at 128 bits. Write tg::mul<fi192>(a, b).

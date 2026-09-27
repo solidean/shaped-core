@@ -4,16 +4,20 @@
 //   operand (A).
 //   Measured against sign-extending both operands first (B, which is what the generic body does), taking magnitudes and
 //   negating the product (C), and clang's own _BitInt lowering.
-// - A quotient known to fit 32 bits: tg::div_floor_ceil<fi32> estimates with f64 and corrects from one exact remainder
-//   (B).
-//   Measured against an integer estimate from cc::udiv128 with the same correction (C), an f64 division trusted outside
-//   an epsilon band around the integers (A, the approach this replaced), and a full long division.
-// - to_f64 correctly rounded against the variant without the sticky bit.
+//   A itself is timed in both of the generator's forms, row by row and column by column, which is how the generator
+//   picks one per triple.
+// - A quotient known to fit 32 bits: tg::div_floor_ceil<fi32> estimates with one cc::udiv128 step and corrects from one
+//   exact remainder (C).
+//   Measured against an f64 estimate with the same correction (B), an f64 division trusted outside an epsilon band
+//   around the integers (A), and a full long division.
+// - to_f64 correctly rounded against the variant without the sticky bit; the sticky bit costs ~20%, and stays.
 //
 // Run with
 //   uv run dev.py benchmark "tg fixed_int"
 // and read one body with
 //   uv run dev.py assembly search "probe_" --target typed-geometry-test --preset release-clang
+
+#include "fixed_int-mul-variants.gen.hh"
 
 #include <clean-core/common/macros.hh>
 #include <clean-core/container/vector.hh>
@@ -54,19 +58,15 @@ tg::fixed_int<R> mul_by_magnitudes(tg::fixed_int<A> const& a, tg::fixed_int<B> c
     return tg::fixed_int<R>((m ^ mask) - mask);
 }
 
-/// C for the quotient: the top 64 bits of |w| divide |x| shifted by the same amount, via one 128 ÷ 64 step.
-/// That estimate is floor(|x / w|) or one off it either way; for a negative quotient one less keeps it within one of
-/// the floor.
+/// B for the quotient: an f64 estimate, within 2^-20 of the quotient (each conversion is within ~2^-52 and the
+/// division adds 2^-53), so its floor is floor(x / w) or one off it.
 template <int A, int B>
-tg::floor_ceil_result<i64> quotient_by_udiv128(tg::fixed_int<A> const& x, tg::fixed_int<B> const& w)
+tg::floor_ceil_result<i64> quotient_by_f64(tg::fixed_int<A> const& x, tg::fixed_int<B> const& w)
 {
-    auto const mx = tg::impl::magnitude(x);
-    auto const mw = tg::impl::magnitude(w);
-    auto const s = mw.bit_width() > 64 ? mw.bit_width() - 64 : 0;
-    auto const wt = (mw >> s).limbs[0];
-    auto const xs = mx >> s;
-    auto const q = i64(cc::udiv128({xs.limbs[0], xs.limbs[1]}, wt).quotient);
-    auto const t = x.is_negative() != w.is_negative() ? -q - 1 : q;
+    auto const qd = tg::impl::to_f64_generic<false>(x) / tg::impl::to_f64_generic<false>(w);
+    auto t = i64(qd);
+    if (f64(t) > qd)
+        --t;
     return tg::impl::correct_quotient(x, w, t);
 }
 
@@ -112,7 +112,8 @@ struct mul_inputs
                            u64 acc = 0;
                            for (isize i = 0; i < input_count; ++i)
                            {
-                               auto const r = f(nx::bench::keep(a[i]), b[i]);
+                               // the input is kept through its address, exactly as the _BitInt loop does
+                               auto const r = f(*nx::bench::keep(&a[i]), b[i]);
                                for (auto k = 0; k < r.limb_count; ++k)
                                    acc ^= r.limbs[k];
                            }
@@ -122,12 +123,15 @@ struct mul_inputs
     }
 };
 
-template <int R, int A, int B>
-void bench_signed_mul(int bits_a, int bits_b)
+template <int R, int A, int B, class Row, class Column>
+void bench_signed_mul(int bits_a, int bits_b, Row row, Column column)
 {
     auto const in = mul_inputs<R, A, B>(bits_a, bits_b);
     in.run("A generated: unsigned product - masked corrections",
            [](auto const& a, auto const& b) { return tg::impl::mul_op<R, A, B, true>::apply(a, b); });
+    // the same A, with its partial products summed row by row and column by column, timed in one run
+    in.run("A, row by row", row);
+    in.run("A, column by column", column);
     in.run("B generic: sign-extend, then unsigned",
            [](auto const& a, auto const& b) { return tg::impl::mul_generic<R, true>(a, b); });
     in.run("C magnitudes, product, masked negate",
@@ -158,7 +162,9 @@ void bench_signed_mul(int bits_a, int bits_b)
                        {
                            // keep() takes the address: its asm constraint has no register class for a _BitInt
                            auto const r = _BitInt(R)(*nx::bench::keep(&xs[i])) * _BitInt(R)(ys[i]);
-                           acc ^= u64(r) ^ u64(r >> 64) ^ u64(r >> 128);
+                           // every word is folded: a word nothing reads is a word the compiler never computes
+                           for (auto k = 0; k < R / 64; ++k)
+                               acc ^= u64(r >> (64 * k));
                        }
                        nx::bench::sink(acc);
                        it.items(input_count);
@@ -170,17 +176,23 @@ void bench_signed_mul(int bits_a, int bits_b)
 
 BENCHMARK("tg fixed_int - signed multiply, fi128 x fi128 -> fi192")
 {
-    bench_signed_mul<192, 128, 128>(80, 90);
+    bench_signed_mul<192, 128, 128>(
+        80, 90, [](auto const& a, auto const& b) { return tg::impl::mul_variants::row_192_128_128(a, b); },
+        [](auto const& a, auto const& b) { return tg::impl::mul_variants::column_192_128_128(a, b); });
 }
 
 BENCHMARK("tg fixed_int - signed multiply, fi128 x fi128 -> fi256")
 {
-    bench_signed_mul<256, 128, 128>(127, 127);
+    bench_signed_mul<256, 128, 128>(
+        127, 127, [](auto const& a, auto const& b) { return tg::impl::mul_variants::row_256_128_128(a, b); },
+        [](auto const& a, auto const& b) { return tg::impl::mul_variants::column_256_128_128(a, b); });
 }
 
 BENCHMARK("tg fixed_int - signed multiply, fi64 x fi192 -> fi256")
 {
-    bench_signed_mul<256, 64, 192>(63, 180);
+    bench_signed_mul<256, 64, 192>(
+        63, 180, [](auto const& a, auto const& b) { return tg::impl::mul_variants::row_256_64_192(a, b); },
+        [](auto const& a, auto const& b) { return tg::impl::mul_variants::column_256_64_192(a, b); });
 }
 
 BENCHMARK("tg fixed_int - quotient known to fit fi32, fi256 / fi192")
@@ -201,8 +213,8 @@ BENCHMARK("tg fixed_int - quotient known to fit fi32, fi256 / fi192")
     {
         auto const floor = i64(tg::div_floor(xs[i], fi256(ws[i])).limbs[0]);
         auto const ceil = i64(tg::div_ceil(xs[i], fi256(ws[i])).limbs[0]);
-        for (auto const r : {tg::impl::small_quotient(xs[i], ws[i]), quotient_by_udiv128(xs[i], ws[i]),
-                             quotient_by_epsilon(xs[i], ws[i])})
+        for (auto const r :
+             {tg::impl::small_quotient(xs[i], ws[i]), quotient_by_f64(xs[i], ws[i]), quotient_by_epsilon(xs[i], ws[i])})
         {
             CHECK(r.floor == floor);
             CHECK(r.ceil == ceil);
@@ -224,9 +236,9 @@ BENCHMARK("tg fixed_int - quotient known to fit fi32, fi256 / fi192")
                            it.items(input_count);
                        });
     };
-    run("B f64 estimate, exact correction",
+    run("C udiv128 estimate, exact correction (shipped)",
         [](fi256 const& x, fi192 const& w) { return tg::impl::small_quotient(x, w); });
-    run("C udiv128 estimate, exact correction", [](fi256 const& x, fi192 const& w) { return quotient_by_udiv128(x, w); });
+    run("B f64 estimate, exact correction", [](fi256 const& x, fi192 const& w) { return quotient_by_f64(x, w); });
     run("A f64, exact only near an integer", [](fi256 const& x, fi192 const& w) { return quotient_by_epsilon(x, w); });
     run("Knuth D long division",
         [](fi256 const& x, fi192 const& w)

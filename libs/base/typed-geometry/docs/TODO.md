@@ -12,12 +12,6 @@ Add entries as we discover them, and remove them as they land.
 - **Combined `sincos`.**
   `tg::sin_cos` calls `sin` and `cos` separately, where libm's combined `sincos` entry point is cheaper.
   Add it as a `scalar_traits` operation and have `sin_cos` prefer it.
-- **`fixed_int`: measured, not yet acted on.**
-  The benchmarks in `tests/benchmarks/fixed_int-benchmark.cc` leave three calls open.
-  - clang's `_BitInt` multiplies `fi128 × fi128 → fi256` and `fi64 × fi192 → fi256` about 20% faster than the generated bodies.
-    Both use four multiplies, so the difference is scheduling, and its assembly is worth reading.
-  - A `cc::udiv128` estimate resolves `tg::div_floor_ceil<fi32>` about 14% faster than the f64 estimate it uses now, at the price of a slow software path on MSVC ARM64.
-  - `to_f64` without the sticky bit is about 20% cheaper; a `to_f64_fast` is only worth adding once a caller shows the gap matters.
 - **`fixed_int`: what the first cut leaves out.**
   Mixed signed / unsigned heterogeneous operands, and generated loop-free widening shifts.
   Generated bit counts and float conversions, both short loops today.
