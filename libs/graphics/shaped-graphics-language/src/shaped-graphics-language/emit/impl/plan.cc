@@ -242,6 +242,7 @@ struct planner
                 .source_name = member.name,
                 .type = member.type,
                 .is_position = has_locations && member.is_position,
+                .interpolate = member.interpolate,
                 .location = has_locations && !member.is_position ? next_location++ : -1,
             });
         return result;

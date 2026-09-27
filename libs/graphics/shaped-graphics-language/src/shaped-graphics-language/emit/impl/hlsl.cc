@@ -90,6 +90,20 @@ public:
         // Stated on every matrix, so no `-Zpr` and no `#pragma pack_matrix` can turn one around.
         if (type_text(p, *this, member.type) == "float4x4")
             out += "column_major ";
+        // EMIT-115: a stage link's interpolation, as HLSL's qualifiers spell it
+        if (owner != nullptr && owner->role == struct_role::stage_link)
+        {
+            using kind = check::interpolation::kind_t;
+            using sampling = check::interpolation::sampling_t;
+            if (member.interpolate.kind == kind::flat)
+                out += "nointerpolation ";
+            else if (member.interpolate.kind == kind::linear)
+                out += "noperspective ";
+            if (member.interpolate.sampling == sampling::centroid)
+                out += "centroid ";
+            else if (member.interpolate.sampling == sampling::sample)
+                out += "sample ";
+        }
         out.appendf("{} {}", type_text(p, *this, member.type), member.name);
         if (owner != nullptr)
             if (auto const semantic = semantic_of(*owner, member); !semantic.empty())

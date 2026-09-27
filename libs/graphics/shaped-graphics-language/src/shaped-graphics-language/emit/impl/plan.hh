@@ -37,6 +37,8 @@ struct planned_member
     cc::string source_name;
     check::type_id type = check::type_id::none;
     bool is_position = false;
+    /// How a stage link's member is interpolated; the default everywhere else.
+    check::interpolation interpolate;
     /// The position among the members without `@position`; -1 on a `plain` struct and on the position itself.
     i32 location = -1;
     /// The byte offset in an inline binding's block; -1 everywhere else.

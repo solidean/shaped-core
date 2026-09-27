@@ -70,6 +70,17 @@ public:
                 out += "@builtin(position) ";
             else if (member.location >= 0)
                 out.appendf("@location({}) ", member.location);
+            // EMIT-115: only what differs from perspective at the centre is written
+            using kind = check::interpolation::kind_t;
+            using sampling = check::interpolation::sampling_t;
+            auto const& i = member.interpolate;
+            if (i.kind == kind::flat)
+                out += "@interpolate(flat) ";
+            else if (i.kind == kind::linear || i.sampling != sampling::center)
+                out.appendf("@interpolate({}{}) ", i.kind == kind::linear ? "linear" : "perspective",
+                            i.sampling == sampling::centroid ? ", centroid"
+                            : i.sampling == sampling::sample ? ", sample"
+                                                             : "");
             out.appendf("{}: {},\n", member.name, type_text(p, *this, member.type));
         }
     }

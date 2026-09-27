@@ -243,7 +243,7 @@ fun shade(k: float) -> float:
 | a test | `@expect` |
 | a binding | `@inline`, `@shadowable` |
 | a binding member | `@unfilterable`, `@non_filtering` |
-| a struct field | `@position`, `@per_instance`, `@stream` |
+| a struct field | `@position`, `@per_instance`, `@stream`, `@interpolate` |
 | a parameter | the stage inputs of CHK-271 |
 | a pipeline | `@raster`, `@compute`, `@raytracing` |
 
@@ -462,6 +462,11 @@ fun f() -> float:
 
   A `@compute fun` takes stage inputs alone.
   `vertex_index` and `instance_index` count from the draw's first vertex and first instance on every target.
+* **CHK-273** `@interpolate(kind, sampling)` on a member of the struct the vertex stage returns says how the member crosses to the pixel stage ([why](why/checking.md#chk-273)).
+  The kind is `.perspective`, the default, `.linear` or `.flat`; the sampling is `.center`, the default, `.centroid` or `.sample`, and `.flat` takes none.
+  An `int` or `uint` member, and a vector of them, crosses only `.flat`, or the entry point is `invalid-entry-point`, and no member that crosses no stage edge carries `@interpolate`.
+  A flat member takes the value of the primitive's first vertex.
+* **CHK-274** A pixel stage that takes a member interpolated `.sample` runs once per sample, and needs `sample_rate_shading` of a device.
 * **CHK-272** `@primitive_id` needs `primitive_index` of a device and `@sample_index` needs `sample_rate_shading`, as a binding member needs its feature (CHK-261).
 * **CHK-90** A `@vertex fun` returns a struct with exactly one field that carries `@position`, and that field is of the type `hpos4`.
 * **CHK-91** A `@pixel fun` returns a `@pixel struct`.

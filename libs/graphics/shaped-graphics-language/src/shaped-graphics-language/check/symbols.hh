@@ -162,6 +162,27 @@ struct sgl::check::type_info
     bool operator==(type_info const&) const = default;
 };
 
+/// How a member that crosses from the vertex to the pixel stage is interpolated: `@interpolate(kind, sampling)` (CHK-273).
+struct sgl::check::interpolation
+{
+    enum class kind_t : u8
+    {
+        perspective,
+        linear,
+        flat,
+    };
+    enum class sampling_t : u8
+    {
+        center,
+        centroid,
+        sample,
+    };
+    kind_t kind = kind_t::perspective;
+    sampling_t sampling = sampling_t::center;
+
+    constexpr bool operator==(interpolation const&) const = default;
+};
+
 /// A field of a struct or a member of a binding.
 struct sgl::check::member_info
 {
@@ -172,6 +193,10 @@ struct sgl::check::member_info
     ast::field_id field = ast::field_id::none;
     /// Carries `@position`.
     bool is_position = false;
+    /// `@interpolate(…)`, or the default: perspective at the pixel centre.
+    interpolation interpolate;
+    /// Carries `@interpolate` at all, which a member that is no stage link must not.
+    bool has_interpolate = false;
     /// Carries `@per_instance`: in a vertex input, the member steps once per instance.
     bool is_per_instance = false;
     /// The name `@stream(name)` gives; empty without one.

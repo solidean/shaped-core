@@ -340,3 +340,8 @@ That is what `sgl describe` and the pipeline check read, and what a reader looks
 A stage input as a field of the stage struct was the alternative, and it would have put a member no vertex buffer feeds into the struct the host mirrors as its vertex layout.
 A builtin function such as `vertex_index()` is the other alternative, which a helper could call without being handed the id.
 It may come later as sugar over these parameters, and the [stage-interfaces](../../incubator/stage-interfaces.md) incubator holds it.
+
+## CHK-273
+
+The two axes and their names are WGSL's, which are exactly what every target has: HLSL's qualifiers and MSL's attributes spell the same combinations.
+An integer member must say `.flat` rather than being flat by default, because which vertex's value wins is part of what it means: a primitive id is right only because the first vertex's is taken.

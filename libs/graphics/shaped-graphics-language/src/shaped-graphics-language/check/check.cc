@@ -268,7 +268,7 @@ void checker::judge_attributes(i32 file,
                        "@shadowable takes `false` or `true`, as in @shadowable(false)");
         }
         else if (sgl::is_valid(a.list) && name != "operator" && name != "compute" && name != "stream"
-                 && name != "stages" && name != "shadowable" && name != "expect")
+                 && name != "stages" && name != "shadowable" && name != "expect" && name != "interpolate")
             report(diagnostic_kind::invalid_attribute_arguments, file, span_of(file, a.list),
                    cc::format("@{} takes no arguments", name));
     }

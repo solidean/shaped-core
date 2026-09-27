@@ -51,7 +51,21 @@ public:
         case struct_role::vertex_input:
             return cc::format("attribute({})", member.location);
         case struct_role::stage_link:
-            return cc::format("user(sgl{})", member.location);
+        {
+            // EMIT-115: MSL names each combination as one attribute
+            using kind = check::interpolation::kind_t;
+            using sampling = check::interpolation::sampling_t;
+            auto const& i = member.interpolate;
+            if (i.kind == kind::flat)
+                return cc::format("user(sgl{}), flat", member.location);
+            if (i.kind == kind::perspective && i.sampling == sampling::center)
+                return cc::format("user(sgl{})", member.location);
+            return cc::format("user(sgl{}), {}_{}", member.location,
+                              i.sampling == sampling::centroid ? "centroid"
+                              : i.sampling == sampling::sample ? "sample"
+                                                               : "center",
+                              i.kind == kind::linear ? "no_perspective" : "perspective");
+        }
         case struct_role::render_targets:
             return cc::format("color({})", member.location);
         case struct_role::plain:

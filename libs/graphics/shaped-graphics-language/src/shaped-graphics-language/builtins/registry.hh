@@ -135,7 +135,7 @@ struct sgl::builtins::type_record
     i32 leaf_count = 0;
 
     /// May be a member of a struct that crosses a stage edge.
-    /// A bool crosses none in WGSL, and an int would need a flat interpolation nothing states yet.
+    /// A bool crosses none in WGSL; an int crosses only flat, which the check pass holds it to (CHK-273).
     bool crosses_edges = false;
 
     /// Read back from the declaration by `finalize`.

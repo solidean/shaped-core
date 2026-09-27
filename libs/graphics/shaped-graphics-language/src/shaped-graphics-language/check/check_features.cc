@@ -65,6 +65,13 @@ void checker::judge_entry_features(symbol_id id)
     for (auto const& parameter : out.at(info.parameters))
         if (parameter.input != stage_input::none && info_of(parameter.input).feature >= 0)
             needed.set(feature(info_of(parameter.input).feature));
+    // CHK-274: a pixel stage that takes a member per sample runs per sample, which vulkan gives only with a feature
+    if (info.entry_stage == stage::pixel)
+        for (auto const& parameter : out.at(info.parameters))
+            if (parameter.input == stage_input::none && out.at(parameter.type).kind == type_kind::structure)
+                for (auto const& m : out.at(out.at(parameter.type).members))
+                    if (m.interpolate.sampling == interpolation::sampling_t::sample)
+                        needed.set(feature::sample_rate_shading);
 
     // CHK-265: a body's `require` is used where it declares what nothing else declares; the first of a feature counts.
     auto in_body = feature_set();

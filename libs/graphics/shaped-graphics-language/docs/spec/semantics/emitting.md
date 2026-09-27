@@ -223,6 +223,9 @@ binding affine:
   HLSL marks it with a semantic (`SV_VertexID`, `SV_DispatchThreadID`, …), WGSL with `@builtin(…)` and MSL with an attribute (`[[vertex_id]]`, …).
   WGSL's `primitive_index` is an extension, which the text enables ahead of every declaration.
 * **EMIT-114** HLSL counts a vertex and an instance from the draw's base, on dx12 and on vulkan through DXC alike, so the text adds `SV_StartVertexLocation` and `SV_StartInstanceLocation` back.
+* **EMIT-115** A stage link's member carries its interpolation: HLSL's `nointerpolation`, `noperspective`, `centroid` and `sample`, and WGSL's `@interpolate(…)`.
+  MSL names each combination as one attribute: `flat`, `centroid_perspective`, `center_no_perspective` and their like.
+  The default, perspective at the centre, is written by none of them.
 * **EMIT-110** A float `%` is `fmod(a, b)` in MSL, which has no `%` of floats; HLSL's and WGSL's `%` of floats already mean EVAL-83's remainder.
   Parentheses follow the tree, and an operand of equal precedence on the right keeps them.
 * **EMIT-52** Every other builtin function is a call of the target's function of that name, and `mix` is `lerp` in HLSL.

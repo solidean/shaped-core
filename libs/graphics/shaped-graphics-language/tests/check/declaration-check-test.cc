@@ -344,3 +344,37 @@ TEST("sgl check - a type scope holds one kind of thing per name, and an extensio
           == "wrong-kind-of-name user:[f] self is the receiver of a method, and this function belongs to no type\n");
     CHECK(reports_for("fun f() -> float => self\n") == "unknown-name user:[self] self\n");
 }
+
+TEST("sgl check - a member crossing stages says how it is interpolated, and an integer crosses only flat")
+{
+    // CHK-273
+    constexpr auto vs = "@vertex fun vs(v: vin) -> link:\n    return { p = hpos4(..v.p, 1.0), id = 1 }\n";
+    auto const with = [](cc::string_view link_member)
+    {
+        return reports_for(cc::string("@vertex struct vin:\n    p: pos3\nstruct link:\n    @position p: hpos4\n    ")
+                           + link_member + "\n" + vs);
+    };
+    CHECK(with("@interpolate(.flat) id: int") == "");
+    CHECK(with("id: int")
+          == "invalid-entry-point user:[vs] the int member 'id' crosses stages only flat: write "
+             "`@interpolate(.flat)`\n");
+    CHECK(with("@interpolate(.linear) id: int").contains("crosses stages only flat"));
+    // flat takes one vertex's value, so it has no sampling point
+    CHECK(with("@interpolate(.flat, .centroid) id: int").contains("invalid-attribute-arguments"));
+    CHECK(with("@interpolate(.sideways) id: int").contains("invalid-attribute-arguments"));
+
+    // nothing that crosses no stage edge is interpolated
+    CHECK(reports_for("@vertex struct vin:\n    @interpolate(.flat) p: pos3\nstruct vout:\n    @position p: hpos4\n"
+                      "@vertex fun vs(v: vin) -> vout:\n    return { p = hpos4(..v.p, 1.0) }\n")
+              .contains("crosses no stage edge"));
+}
+
+TEST("sgl check - a pixel stage interpolating per sample needs sample_rate_shading")
+{
+    // CHK-274
+    constexpr auto source = "struct link:\n    @position p: hpos4\n    @interpolate(.perspective, .sample) c: float4\n"
+                            "@pixel struct target:\n    c: float4\n"
+                            "@pixel fun ps(l: link) -> target:\n    return { c = l.c }\n";
+    CHECK(reports_for(source).contains("feature-not-declared user:[ps] ps needs sample_rate_shading"));
+    CHECK(reports_for(cc::string("require sample_rate_shading\n") + source) == "");
+}

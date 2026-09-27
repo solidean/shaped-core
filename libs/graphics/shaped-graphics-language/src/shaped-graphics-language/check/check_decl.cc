@@ -60,6 +60,44 @@ sgl::u8 checker::stages_of(i32 file, ast::attribute const* a)
     return result;
 }
 
+/// `@interpolate(.flat)` or `@interpolate(.linear, .centroid)`; a bad argument reports and leaves the default.
+interpolation checker::interpolation_of(i32 file, ast::attribute const* a)
+{
+    auto result = interpolation();
+    if (a == nullptr)
+        return result;
+
+    // CHK-273: a kind, then a sampling that only a kind other than flat takes
+    auto const arguments = ast_of(file).at(a->arguments);
+    auto const case_at = [&](isize i)
+    {
+        auto const& argument = arguments[i];
+        auto const* const dot
+            = ast::is_valid(argument.value) ? ast_of(file).at(argument.value).node.try_as<ast::leading_dot>() : nullptr;
+        return dot != nullptr && argument.name.empty() && !argument.is_splat ? text_of(file, dot->name)
+                                                                             : cc::string_view();
+    };
+    auto const kind = arguments.size() >= 1 ? case_at(0) : cc::string_view();
+    auto const sampling = arguments.size() >= 2 ? case_at(1) : cc::string_view("center");
+    auto const is_kind = kind == "perspective" || kind == "linear" || kind == "flat";
+    auto const is_sampling = sampling == "center" || sampling == "centroid" || sampling == "sample";
+    if (arguments.empty() || arguments.size() > 2 || !is_kind || !is_sampling
+        || (kind == "flat" && arguments.size() == 2))
+    {
+        report(diagnostic_kind::invalid_attribute_arguments, file, a->name,
+               "@interpolate takes a kind - `.perspective`, `.linear` or `.flat` - and, for the first two, a sampling: "
+               "`.center`, `.centroid` or `.sample`");
+        return result;
+    }
+    result.kind = kind == "linear" ? interpolation::kind_t::linear
+                : kind == "flat"   ? interpolation::kind_t::flat
+                                   : interpolation::kind_t::perspective;
+    result.sampling = sampling == "centroid" ? interpolation::sampling_t::centroid
+                    : sampling == "sample"   ? interpolation::sampling_t::sample
+                                             : interpolation::sampling_t::center;
+    return result;
+}
+
 /// `@compute(64)` or `@compute(8, 8, 1)`: the axes nobody wrote are 1, and a bad argument reports and stays 1.
 cc::fixed_array<sgl::i32, 3> checker::workgroup_of(i32 file, ast::attribute const* a)
 {
@@ -322,7 +360,7 @@ ast::range_of<member_info> checker::compile_members(i32 file,
             continue;
         auto const name = text_of(file, f.name);
 
-        cc::string_view const known_on_field[] = {"position", "per_instance", "stream"};
+        cc::string_view const known_on_field[] = {"position", "per_instance", "stream", "interpolate"};
         cc::string_view const known_on_member[] = {"unfilterable", "non_filtering"};
         judge_attributes(file, f.attributes,
                          is_struct ? cc::span<cc::string_view const>(known_on_field)
@@ -375,6 +413,8 @@ ast::range_of<member_info> checker::compile_members(i32 file,
             .type = type,
             .field = line->field,
             .is_position = find_attribute(file, f.attributes, "position") != nullptr,
+            .interpolate = interpolation_of(file, find_attribute(file, f.attributes, "interpolate")),
+            .has_interpolate = find_attribute(file, f.attributes, "interpolate") != nullptr,
             .is_per_instance = find_attribute(file, f.attributes, "per_instance") != nullptr,
             .stream = stream_of(file, find_attribute(file, f.attributes, "stream")),
             .is_unfilterable = unfilterable != nullptr,
@@ -1085,10 +1125,40 @@ void checker::judge_entry_point(symbol_id id)
     else if (stage_struct != nullptr && out.at(stage_struct->type).is_opaque)
         invalid("the struct parameter of an entry point is a struct with fields");
 
+    // CHK-273: what crosses from the vertex to the pixel stage says how; an integer can only cross flat, and nothing
+    // that does not cross is interpolated at all
+    auto const judge_link = [&](type_id link)
+    {
+        for (auto const& m : out.at(out.at(link).members))
+        {
+            auto const* const record = out.builtin_type_of(m.type);
+            auto const is_integer
+                = record != nullptr
+               && (record->leaf_kind == value_kind::scalar_int || record->leaf_kind == value_kind::scalar_uint);
+            if (is_integer && m.interpolate.kind != interpolation::kind_t::flat)
+                invalid(cc::format("the {} member '{}' crosses stages only flat: write `@interpolate(.flat)`",
+                                   out.name_of(m.type), m.name));
+            if (m.has_interpolate && m.is_position)
+                invalid(cc::format("the @position member '{}' is the rasterizer's, and is no interpolated value", m.name));
+        }
+    };
+    auto const judge_uninterpolated = [&](type_id edge)
+    {
+        for (auto const& m : out.at(out.at(edge).members))
+            if (m.has_interpolate)
+                invalid(cc::format("'{}' crosses no stage edge, so @interpolate means nothing on it", m.name));
+    };
+    if (info.entry_stage == stage::vertex && stage_struct != nullptr)
+        judge_uninterpolated(stage_struct->type);
+
     if (info.entry_stage == stage::pixel)
     {
         if (result.edge != stage::pixel)
             invalid("a @pixel fun returns a @pixel struct");
+        else
+            judge_uninterpolated(info.result);
+        if (stage_struct != nullptr)
+            judge_link(stage_struct->type);
     }
     else
     {
@@ -1107,6 +1177,7 @@ void checker::judge_entry_point(symbol_id id)
             invalid("a @vertex fun returns a struct with exactly one @position field");
         else if (!is_hpos4)
             invalid("the @position field of a @vertex fun is an hpos4");
+        judge_link(info.result);
     }
 
     notes[s.info].is_valid_entry = is_valid;
