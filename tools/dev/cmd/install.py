@@ -1,7 +1,7 @@
 """`install` — install a developer tool of this repo into the machine's own tools, as a link into the checkout.
 
 A link rather than a copy, so a `git pull` or a rebuild updates what is installed.
-Every install is undone by `--uninstall`, which removes only links it made and never a folder of the user's.
+Every install is undone by `--uninstall`, which removes only links into this checkout: never a folder of the user's, and never another checkout's link.
 """
 
 from __future__ import annotations
@@ -161,6 +161,9 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
             if target is None:
                 print(f"  {editor.name:<9} {console.dim('not installed' if not link.exists() else 'not a link, left alone')}")
                 continue
+            if target != source:
+                print(f"  {editor.name:<9} {console.dim(f'links to {target}, not this checkout; left alone')}")
+                continue
             _remove_link(link)
             print(f"  {editor.name:<9} removed the link to {target}")
         print(console.dim("  reload the editor's window for it to let go of the extension"))
@@ -191,6 +194,11 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
             continue
         _make_link(link, source)
         print(f"  {editor.name:<9} linked {link} -> {source}")
+    for editor in editors:
+        # a VSIX install is a folder named with its version beside the link, and the editor would load both
+        for packaged in sorted(editor.extensions_dir.glob(f"{item.link_name}-*")):
+            print(f"  {editor.name:<9} {console.yellow('warning')}: {packaged} is a packaged install of the same extension; "
+                  "uninstall it in the editor, or it runs twice", file=sys.stderr)
     print(console.dim(f"  {item.hint}"))
     if failed:
         sys.exit(1)
