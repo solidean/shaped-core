@@ -1164,7 +1164,7 @@ e.field_as_bytes("value");                   // -> span<byte const>; the origina
 // Prefer CC_RECORD: a static name costs the stream nothing, a runtime one is copied into every event.
 CC_RECORD_STAT("queue_depth", cc::rec::unit_count, n);     // the CURRENT reading; summing snapshots is meaningless
 CC_RECORD_ACCUM("bytes_uploaded", cc::rec::unit_bytes, n); // a DELTA to add up
-// units: unit_count, unit_bytes, unit_seconds, unit_ratio, unit_hertz — or define your own cc::rec::unit
+// units: unit_count, unit_bytes, unit_seconds, unit_nanoseconds (integer durations), unit_ratio, unit_hertz — or define your own cc::rec::unit
 ```
 
 The low-level seam the above expand into:
