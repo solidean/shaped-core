@@ -332,3 +332,11 @@ A compile-time branch on a feature, `if feature raytracing:`, is the form that m
 A binding's `require` is how a library says what a device must have to take the binding, and a member need not be what uses it.
 A binding that carries an acceleration structure later, or that a caller's shader reads through a feature, states the need before anything in SGL can show it.
 So only a body's `require` can be unused: it says nothing about any binding, and it is the one place an unneeded line is certainly a mistake.
+
+## CHK-271
+
+An entry point's signature is its whole interface: what the GPU hands it in `()`, what it binds in `{}`.
+That is what `sgl describe` and the pipeline check read, and what a reader looks at first.
+A stage input as a field of the stage struct was the alternative, and it would have put a member no vertex buffer feeds into the struct the host mirrors as its vertex layout.
+A builtin function such as `vertex_index()` is the other alternative, which a helper could call without being handed the id.
+It may come later as sugar over these parameters, and the [stage-interfaces](../../incubator/stage-interfaces.md) incubator holds it.

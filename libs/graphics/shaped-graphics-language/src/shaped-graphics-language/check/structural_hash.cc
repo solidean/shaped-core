@@ -33,7 +33,6 @@ void fold_members(cc::byte_stream_builder& b, checked_module const& m, cc::span<
     {
         b.add_string(member.name);
         b.add_bool(member.is_position);
-        b.add_bool(member.is_thread_id);
         b.add_bool(member.is_per_instance);
         b.add_string(member.stream);
         b.add_bool(member.is_unfilterable);

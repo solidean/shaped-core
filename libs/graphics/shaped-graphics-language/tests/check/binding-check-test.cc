@@ -232,12 +232,26 @@ TEST("sgl check - a compute entry point takes the thread id and returns nothing"
                         "    work.values[id.x] = 1.0\n")
           == "");
 
-    // The struct spelling checks too; only the emitter has not caught up.
+    // CHK-271: a stage input is a parameter, never a struct field; the struct spelling was removed
     CHECK(reports_for(cc::string(work)
                       + "struct dispatch:\n    @thread_id id: int3\n\n"
                         "@compute(64) fun go(d: dispatch){work}:\n"
                         "    work.values[d.id.x] = 1.0\n")
+              .contains("a @compute fun takes stage inputs alone"));
+    // every id a dispatch hands over, in any order after one another
+    CHECK(reports_for(cc::string(work)
+                      + "@compute(64) fun go(@workgroup_id g: int3, @local_thread_index li: int, @thread_id id: int3, "
+                        "@local_thread_id l: int3){work}:\n"
+                        "    work.values[id.x] = (li + g.x + l.y) as float\n")
           == "");
+    CHECK(reports_for(cc::string(work)
+                      + "@compute(64) fun go(@thread_id a: int3, @thread_id b: int3){work}:\n"
+                        "    work.values[a.x] = 1.0\n")
+              .contains("@thread_id is taken twice"));
+    CHECK(reports_for(cc::string(work)
+                      + "@compute(64) fun go(@vertex_index v: int){work}:\n"
+                        "    work.values[v] = 1.0\n")
+              .contains("@vertex_index is an input of the vertex stage"));
 
     CHECK(reports_for(cc::string(work)
                       + "@compute(64) fun go(@thread_id id: float3){work}:\n"

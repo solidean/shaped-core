@@ -255,9 +255,20 @@ TEST("sgl check - an entry point's signature follows the rules of its stage")
     CHECK(entry_reports("@vertex fun vs(v: vin) -> vout:\n    return { p = hpos4(..v.p, 1.0) }\n") == "");
 
     CHECK(entry_reports("@vertex fun vs(v: plain) -> vout:\n    return { p = hpos4(..v.p, 1.0) }\n")
-          == "invalid-entry-point user:[vs] the parameter of a @vertex fun is a @vertex struct\n");
+          == "invalid-entry-point user:[vs] the struct parameter of a @vertex fun is a @vertex struct\n");
     CHECK(entry_reports("@vertex fun vs(v: vin, w: vin) -> vout:\n    return { p = hpos4(..v.p, 1.0) }\n")
-          == "invalid-entry-point user:[vs] an entry point takes one struct parameter\n");
+          == "invalid-entry-point user:[vs] an entry point takes its stage struct first, and stage inputs after it\n");
+    // CHK-271: a vertex stage may draw from no vertex buffer, and takes its stage inputs after its struct
+    CHECK(entry_reports("@vertex fun vs(@vertex_index i: int) -> vout:\n    return { p = hpos4(0.0, 0.0, 0.0, 1.0) }\n")
+          == "");
+    CHECK(entry_reports("@vertex fun vs(v: vin, @instance_index i: int, @vertex_index k: int) -> vout:\n"
+                        "    return { p = hpos4(..v.p, 1.0) }\n")
+          == "");
+    CHECK(entry_reports("@vertex fun vs(@vertex_index i: int, v: vin) -> vout:\n    return { p = hpos4(..v.p, 1.0) }\n")
+          == "invalid-entry-point user:[vs] an entry point takes its stage struct first, and stage inputs after it\n");
+    CHECK(entry_reports("@vertex fun vs(v: vin, @vertex_index i: uint) -> vout:\n    return { p = hpos4(..v.p, 1.0) "
+                        "}\n")
+          == "invalid-entry-point user:[vs] a @vertex_index parameter is an int\n");
     CHECK(entry_reports("@vertex fun vs(v: vin) -> plain:\n    return { p = v.p }\n")
           == "invalid-entry-point user:[vs] a @vertex fun returns a struct with exactly one @position field\n");
     CHECK(entry_reports("@vertex fun vs(v: vin) -> two:\n    return { a = hpos4(..v.p, 1.0), b = hpos4(..v.p, 1.0) }\n")
@@ -269,7 +280,13 @@ TEST("sgl check - an entry point's signature follows the rules of its stage")
     CHECK(entry_reports("@pixel fun ps(v: vout) -> plain:\n    return { p = pos3(1.0, 1.0, 1.0) }\n")
           == "invalid-entry-point user:[ps] a @pixel fun returns a @pixel struct\n");
     CHECK(entry_reports("@pixel fun ps(v: float) -> target:\n    return { c = float4(v, v, v, v) }\n")
-          == "invalid-entry-point user:[ps] the parameter of an entry point is a struct with fields\n");
+          == "invalid-entry-point user:[ps] the struct parameter of an entry point is a struct with fields\n");
+    CHECK(entry_reports("@pixel fun ps(v: vout, @is_front_facing f: bool, @sample_mask m: uint) -> target:\n"
+                        "    return { c = float4(..v.p) }\n")
+          == "");
+    CHECK(entry_reports("@pixel fun ps(@is_front_facing f: bool) -> target:\n    return { c = float4(1.0, 1.0, 1.0, "
+                        "1.0) }\n")
+          == "invalid-entry-point user:[ps] a @pixel fun takes the struct its vertex stage returns\n");
     CHECK(entry_reports("@vertex @pixel fun ps(v: vout) -> target:\n    return { c = float4(..v.p) }\n")
           == "invalid-entry-point user:[ps] an entry point has one stage\n");
 }

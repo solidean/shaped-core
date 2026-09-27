@@ -8,6 +8,7 @@ Back to the [specification](_index.md).
 ## Graphics terms
 
 * "inline constants". called push constants or root constants or SetBytes* in other apis
+* "stage input" - a value the GPU hands an invocation, such as its vertex index or its thread id; an entry point takes it as a parameter marked `@vertex_index`, `@thread_id`, …
 * "buffer"
 * "texture" - a sampled texture, read through the texture unit; also sg's word for the resource itself
 * "image" - a storage texture, addressed per texel in a named format, read, written or both

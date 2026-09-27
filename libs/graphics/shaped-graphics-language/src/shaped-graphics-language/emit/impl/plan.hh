@@ -124,9 +124,11 @@ struct plan
     cc::vector<planned_resource> resources;
     /// Parallel to `e.locals`.
     cc::vector<cc::string> locals;
-    /// A compute entry point's parameter as the dispatch hands it over, unsigned, ahead of the `int3` the body reads;
+    /// Parallel to `e.stage_inputs`: each as the target hands it over, unsigned, ahead of the local the body reads;
     /// minted, so no local of the program can take it.
-    cc::string dispatch_name;
+    cc::vector<cc::string> stage_input_names;
+    /// Parallel to `e.stage_inputs`: a second parameter where a target needs one, dx12's `SV_StartInstanceLocation`.
+    cc::vector<cc::string> stage_input_bases;
     /// Holds every name above and every reserved word of the target; a writer mints what it still needs from here.
     check::name_mint names;
 };
@@ -154,6 +156,25 @@ struct plan
 
 /// Appends what keeps `e` from being written, which is the same for every target.
 void validate(check::checked_module const& m, check::flat_entry_point const& e, cc::vector<error>& errors);
+
+/// How each target hands a stage input to an entry point (EMIT-113): its type there, and what marks it.
+struct stage_input_spelling
+{
+    cc::string_view hlsl_type;
+    cc::string_view hlsl_semantic;
+    cc::string_view wgsl_type;
+    cc::string_view wgsl_builtin;
+    cc::string_view msl_type;
+    cc::string_view msl_attribute;
+};
+[[nodiscard]] stage_input_spelling const& spelling_of(check::stage_input input);
+
+/// True where the target counts `input` from the draw's base and the text adds the base back: HLSL's vertex and instance.
+[[nodiscard]] bool has_base(plan const& p, check::stage_input input);
+
+/// The line that turns a stage input as the target handed it over into the value the body reads: `int3(id_in)`.
+/// `base` is the second parameter a target needs, or empty.
+[[nodiscard]] cc::string stage_input_value(plan const& p, isize index);
 
 /// The buffer a vertex input member is read from (EMIT-92): its `@stream`, else `per_instance` or `per_vertex`.
 [[nodiscard]] cc::string stream_of(check::member_info const& member);

@@ -139,6 +139,10 @@ public:
 
     void write_declarations(cc::string& out, plan const& p) const override
     {
+        // EMIT-113: `@builtin(primitive_index)` is an extension of WGSL, which the text enables first.
+        for (auto const& input : p.e.stage_inputs)
+            if (input.input == check::stage_input::primitive_id)
+                out += "enable primitive_index;\n\n";
         // EMIT-103: a directive, so it stands ahead of every declaration.
         if (uses_derivatives(p))
             out += "diagnostic(off, derivative_uniformity);\n\n";
@@ -164,16 +168,31 @@ public:
 
     void write_function_head(cc::string& out, plan const& p) const override
     {
+        auto list = cc::string();
+        if (check::is_valid(p.e.input))
+            list = cc::format("{}: {}", p.locals[0], type_text(p, *this, p.e.input));
+        for (auto i = isize(0); i < p.e.stage_inputs.size(); ++i)
+        {
+            auto const& spelled = spelling_of(p.e.stage_inputs[i].input);
+            list += cc::format("{}@builtin({}) {}: {}", list.empty() ? "" : ", ", spelled.wgsl_builtin,
+                               p.stage_input_names[i], spelled.wgsl_type);
+        }
+
         if (p.e.entry_stage == stage::compute)
         {
             out.appendf("@compute @workgroup_size({}, {}, {})\n", p.e.workgroup[0], p.e.workgroup[1], p.e.workgroup[2]);
-            out.appendf("fn {}(@builtin(global_invocation_id) {}: vec3u) {{\n", p.entry_name, p.dispatch_name);
-            // WebGPU reports the id unsigned and SGL has one integer type, so the conversion stands at the top.
-            out.appendf("    let {}: vec3i = vec3i({});\n", p.locals[0], p.dispatch_name);
-            return;
+            out.appendf("fn {}({}) {{\n", p.entry_name, list);
         }
-        out.appendf("@{}\nfn {}({}: {}) -> {} {{\n", p.e.entry_stage == stage::vertex ? "vertex" : "fragment",
-                    p.entry_name, p.locals[0], type_text(p, *this, p.e.input), type_text(p, *this, p.e.result));
+        else
+            out.appendf("@{}\nfn {}({}) -> {} {{\n", p.e.entry_stage == stage::vertex ? "vertex" : "fragment",
+                        p.entry_name, list, type_text(p, *this, p.e.result));
+        // WebGPU hands an index over unsigned and SGL counts in int, so each conversion stands at the top.
+        for (auto i = isize(0); i < p.e.stage_inputs.size(); ++i)
+        {
+            auto const local = p.e.stage_inputs[i].local;
+            out.appendf("    let {}: {} = {};\n", p.locals[index_of(local)], type_text(p, *this, p.e.at(local).type),
+                        stage_input_value(p, i));
+        }
     }
 };
 

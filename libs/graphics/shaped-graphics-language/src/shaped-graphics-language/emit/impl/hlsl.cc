@@ -214,16 +214,39 @@ public:
 
     void write_function_head(cc::string& out, plan const& p) const override
     {
+        auto parameters = cc::vector<cc::string>();
+        if (check::is_valid(p.e.input))
+            parameters.push_back(cc::format("{} {}", type_text(p, *this, p.e.input), p.locals[0]));
+        for (auto i = isize(0); i < p.e.stage_inputs.size(); ++i)
+        {
+            auto const& spelled = spelling_of(p.e.stage_inputs[i].input);
+            parameters.push_back(
+                cc::format("{} {} : {}", spelled.hlsl_type, p.stage_input_names[i], spelled.hlsl_semantic));
+            // EMIT-114: HLSL counts from the draw's base, and shader model 6.8 says where the draw started
+            if (has_base(p, p.e.stage_inputs[i].input))
+                parameters.push_back(cc::format("uint {} : {}", p.stage_input_bases[i],
+                                                p.e.stage_inputs[i].input == check::stage_input::vertex_index
+                                                    ? "SV_StartVertexLocation"
+                                                    : "SV_StartInstanceLocation"));
+        }
+        auto list = cc::string();
+        for (auto const& parameter : parameters)
+            list += cc::format("{}{}", list.empty() ? "" : ", ", parameter);
+
         if (p.e.entry_stage == stage::compute)
         {
             out.appendf("[numthreads({}, {}, {})]\n", p.e.workgroup[0], p.e.workgroup[1], p.e.workgroup[2]);
-            out.appendf("void {}(uint3 {} : SV_DispatchThreadID)\n{{\n", p.entry_name, p.dispatch_name);
-            // The dispatch reports the id unsigned and SGL has one integer type, so the conversion stands at the top.
-            out.appendf("    const int3 {} = int3({});\n", p.locals[0], p.dispatch_name);
-            return;
+            out.appendf("void {}({})\n{{\n", p.entry_name, list);
         }
-        out.appendf("{} {}({} {})\n{{\n", type_text(p, *this, p.e.result), p.entry_name, type_text(p, *this, p.e.input),
-                    p.locals[0]);
+        else
+            out.appendf("{} {}({})\n{{\n", type_text(p, *this, p.e.result), p.entry_name, list);
+        // A target hands an index over unsigned and SGL counts in int, so each conversion stands at the top.
+        for (auto i = isize(0); i < p.e.stage_inputs.size(); ++i)
+        {
+            auto const local = p.e.stage_inputs[i].local;
+            out.appendf("    const {} {} = {};\n", type_text(p, *this, p.e.at(local).type), p.locals[index_of(local)],
+                        stage_input_value(p, i));
+        }
     }
 
 private:

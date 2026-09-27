@@ -61,6 +61,10 @@ void checker::judge_entry_features(symbol_id id)
         needed |= out.bindings[out.at(b).info].required;
         declared |= out.bindings[out.at(b).info].declared;
     }
+    // CHK-272: a stage input some device lacks needs its feature, as a binding member does
+    for (auto const& parameter : out.at(info.parameters))
+        if (parameter.input != stage_input::none && info_of(parameter.input).feature >= 0)
+            needed.set(feature(info_of(parameter.input).feature));
 
     // CHK-265: a body's `require` is used where it declares what nothing else declares; the first of a feature counts.
     auto in_body = feature_set();

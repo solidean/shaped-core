@@ -109,14 +109,29 @@ public:
     /// MSL has no global resources, so the inline constants are a parameter, and the body reads them as it reads a global.
     void write_function_head(cc::string& out, plan const& p) const override
     {
-        out.appendf("{} {} {}({} {} [[stage_in]]", p.e.entry_stage == stage::vertex ? "vertex" : "fragment",
-                    type_text(p, *this, p.e.result), p.entry_name, type_text(p, *this, p.e.input), p.locals[0]);
+        auto list = cc::string();
+        if (check::is_valid(p.e.input))
+            list = cc::format("{} {} [[stage_in]]", type_text(p, *this, p.e.input), p.locals[0]);
+        for (auto i = isize(0); i < p.e.stage_inputs.size(); ++i)
+        {
+            auto const& spelled = spelling_of(p.e.stage_inputs[i].input);
+            list += cc::format("{}{} {} [[{}]]", list.empty() ? "" : ", ", spelled.msl_type, p.stage_input_names[i],
+                               spelled.msl_attribute);
+        }
         if (p.constants.has_value())
         {
             auto const& c = p.constants.value();
-            out.appendf(", constant {}& {} [[buffer({})]]", c.block_name, c.name, k_inline_constants_buffer);
+            list += cc::format("{}constant {}& {} [[buffer({})]]", list.empty() ? "" : ", ", c.block_name, c.name,
+                               k_inline_constants_buffer);
         }
-        out += ")\n{\n";
+        out.appendf("{} {} {}({})\n{{\n", p.e.entry_stage == stage::vertex ? "vertex" : "fragment",
+                    type_text(p, *this, p.e.result), p.entry_name, list);
+        for (auto i = isize(0); i < p.e.stage_inputs.size(); ++i)
+        {
+            auto const local = p.e.stage_inputs[i].local;
+            out.appendf("    const {} {} = {};\n", type_text(p, *this, p.e.at(local).type), p.locals[index_of(local)],
+                        stage_input_value(p, i));
+        }
     }
 };
 

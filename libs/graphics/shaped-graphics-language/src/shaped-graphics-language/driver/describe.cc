@@ -219,7 +219,9 @@ described_pipeline describe_pipeline(check::checked_module const& m, check::pipe
         result.layout.push_back(m.at(b).name);
     if (check::is_valid(p.inline_constants))
         result.inline_constants = m.at(p.inline_constants).name;
-    result.vertex_input = m.name_of(p.vertex_input);
+    // empty for a vertex stage that draws from no vertex buffer
+    if (check::is_valid(p.vertex_input))
+        result.vertex_input = m.name_of(p.vertex_input);
     if (check::is_valid(p.target_set))
     {
         result.target_set = m.name_of(p.target_set);
@@ -254,7 +256,8 @@ described_pipeline describe_pipeline(check::checked_module const& m, check::pipe
     result.frozen.push_back(cc::format("layout = {}", layout));
     result.frozen.push_back(
         cc::format("inline constants = {}", check::is_valid(p.inline_constants) ? bound(p.inline_constants) : ""));
-    result.frozen.push_back(cc::format("vertex input = {}", shaped(p.vertex_input)));
+    result.frozen.push_back(
+        cc::format("vertex input = {}", check::is_valid(p.vertex_input) ? shaped(p.vertex_input) : cc::string()));
     result.frozen.push_back(
         cc::format("target set = {}", check::is_valid(p.target_set) ? shaped(p.target_set) : cc::string()));
     // A device lacking a feature a reload now needs would refuse the pipeline, so the build's needs are frozen too.

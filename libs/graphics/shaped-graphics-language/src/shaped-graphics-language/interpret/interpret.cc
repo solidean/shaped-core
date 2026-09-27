@@ -827,11 +827,18 @@ outcome sgl::check::interpret(checked_module const& m,
     run.out.sites.resize_to_defaulted(e.check_sites.size());
     run.locals.resize_to_defaulted(e.locals.size());
     run.is_set.resize_to_filled(e.locals.size(), false);
-    // A test has no parameter, and its first local is one of its own.
-    if (!e.locals.empty() && e.locals[0].kind == local_kind::parameter)
+    // A test has no parameter, and its first local is one of its own; an entry point may have stage inputs alone.
+    if (is_valid(e.input) && !e.locals.empty() && e.locals[0].kind == local_kind::parameter)
     {
         run.locals[0] = inputs.parameter;
         run.is_set[0] = true;
+    }
+    // A stage input the caller did not state is zero, which is what one invocation of a draw or a dispatch would read.
+    for (auto i = isize(0); i < e.stage_inputs.size(); ++i)
+    {
+        auto const local = index_of(e.stage_inputs[i].local);
+        run.locals[local] = i < inputs.stage_inputs.size() ? inputs.stage_inputs[i] : zero_value(m, e.locals[local].type);
+        run.is_set[local] = true;
     }
 
     auto const f = run.run_body(e.body);

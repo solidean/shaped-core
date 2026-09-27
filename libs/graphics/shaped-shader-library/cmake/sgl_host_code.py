@@ -685,7 +685,8 @@ def emit_pipelines_impl(package: str, namespace: str, entries: SglEntries, stems
         key = f"{stem}_{p['name']}"
         groups = p["layout"] + ([p["inline"]] if p["inline"] else [])
         missing = [g for g in groups if g not in generated]
-        if p["vertex_input"] not in vertex_inputs:
+        # empty for a vertex stage that draws from no vertex buffer
+        if p["vertex_input"] and p["vertex_input"] not in vertex_inputs:
             missing.append(p["vertex_input"])
         if missing:
             raise HostCodeError(
@@ -726,7 +727,8 @@ def emit_pipelines_impl(package: str, namespace: str, entries: SglEntries, stems
         if p["pixel"]:
             out.append(f"        .pixel = {handle(p['pixel'])},\n")
         out.append(f"        .acquire_layout = &{key}_layout,\n")
-        out.append(f"        .vertex_input = &{namespace}::{p['vertex_input']}::layout,\n")
+        if p["vertex_input"]:
+            out.append(f"        .vertex_input = &{namespace}::{p['vertex_input']}::layout,\n")
         if p["target_set"]:
             out.append(f"        .target_set = {namespace}::{p['target_set']}::name,\n")
         if p["targets"]:

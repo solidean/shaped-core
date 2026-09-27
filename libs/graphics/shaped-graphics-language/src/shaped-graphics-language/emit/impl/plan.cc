@@ -578,15 +578,12 @@ void sgl::emit::impl::validate(check::checked_module const& m, check::flat_entry
     if (e.input == e.result && e.entry_stage != stage::compute)
         v.report(error_kind::unsupported, e.function,
                  cc::format("one struct as both the parameter and the result: '{}'", m.name_of(e.input)));
-    // The struct spelling of the thread id needs the signedness question settled first (the spec's bindings file).
-    if (e.entry_stage == stage::compute && !e.takes_thread_id)
-        v.report(error_kind::unsupported, e.function,
-                 "a @compute fun whose parameter is a struct; write `@thread_id id: int3` for now");
 
     // A compute entry point has no pipeline edge at either end, so neither struct is judged as one.
     if (e.entry_stage != stage::compute)
     {
-        v.edge_struct(e.input, input_role(e));
+        if (check::is_valid(e.input))
+            v.edge_struct(e.input, input_role(e));
         if (e.input != e.result)
             v.edge_struct(e.result, result_role(e));
     }
@@ -628,7 +625,84 @@ sgl::emit::impl::plan sgl::emit::impl::make_plan(check::checked_module const& m,
     // The check pass minted the locals, so a buffer or a block minted above never took one's name.
     for (auto const& local : e.locals)
         result.locals.push_back(p.spell(local.name));
-    if (e.entry_stage == stage::compute && !result.locals.empty())
-        result.dispatch_name = result.names.mint(cc::format("{}_in", result.locals[0]));
+    for (auto const& input : e.stage_inputs)
+    {
+        auto const& local = result.locals[index_of(input.local)];
+        result.stage_input_names.push_back(result.names.mint(cc::format("{}_in", local)));
+        result.stage_input_bases.push_back(result.names.mint(cc::format("{}_base", local)));
+    }
     return result;
+}
+
+bool sgl::emit::impl::has_base(plan const& p, check::stage_input input)
+{
+    auto const is_hlsl = p.which == target::hlsl_dx12 || p.which == target::hlsl_vulkan;
+    return is_hlsl && (input == check::stage_input::vertex_index || input == check::stage_input::instance_index);
+}
+
+sgl::emit::impl::stage_input_spelling const& sgl::emit::impl::spelling_of(check::stage_input input)
+{
+    using check::stage_input;
+    static constexpr stage_input_spelling k_vertex_index
+        = {"uint", "SV_VertexID", "u32", "vertex_index", "uint", "vertex_id"};
+    static constexpr stage_input_spelling k_instance_index
+        = {"uint", "SV_InstanceID", "u32", "instance_index", "uint", "instance_id"};
+    static constexpr stage_input_spelling k_front_facing
+        = {"bool", "SV_IsFrontFace", "bool", "front_facing", "bool", "front_facing"};
+    static constexpr stage_input_spelling k_sample_index
+        = {"uint", "SV_SampleIndex", "u32", "sample_index", "uint", "sample_id"};
+    static constexpr stage_input_spelling k_sample_mask
+        = {"uint", "SV_Coverage", "u32", "sample_mask", "uint", "sample_mask"};
+    static constexpr stage_input_spelling k_primitive_id
+        = {"uint", "SV_PrimitiveID", "u32", "primitive_index", "uint", "primitive_id"};
+    static constexpr stage_input_spelling k_thread_id
+        = {"uint3", "SV_DispatchThreadID", "vec3u", "global_invocation_id", "uint3", "thread_position_in_grid"};
+    static constexpr stage_input_spelling k_local_thread_id
+        = {"uint3", "SV_GroupThreadID", "vec3u", "local_invocation_id", "uint3", "thread_position_in_threadgroup"};
+    static constexpr stage_input_spelling k_local_thread_index
+        = {"uint", "SV_GroupIndex", "u32", "local_invocation_index", "uint", "thread_index_in_threadgroup"};
+    static constexpr stage_input_spelling k_workgroup_id
+        = {"uint3", "SV_GroupID", "vec3u", "workgroup_id", "uint3", "threadgroup_position_in_grid"};
+    switch (input)
+    {
+    case stage_input::vertex_index:
+        return k_vertex_index;
+    case stage_input::instance_index:
+        return k_instance_index;
+    case stage_input::is_front_facing:
+        return k_front_facing;
+    case stage_input::sample_index:
+        return k_sample_index;
+    case stage_input::sample_mask:
+        return k_sample_mask;
+    case stage_input::primitive_id:
+        return k_primitive_id;
+    case stage_input::thread_id:
+        return k_thread_id;
+    case stage_input::local_thread_id:
+        return k_local_thread_id;
+    case stage_input::local_thread_index:
+        return k_local_thread_index;
+    case stage_input::workgroup_id:
+        return k_workgroup_id;
+    case stage_input::none:
+        break;
+    }
+    CC_UNREACHABLE("a stage input without a spelling");
+}
+
+cc::string sgl::emit::impl::stage_input_value(plan const& p, isize index)
+{
+    auto const& input = p.e.stage_inputs[index];
+    auto const& raw = p.stage_input_names[index];
+    auto const type = check::info_of(input.input).type;
+    auto const is_wgsl = p.which == target::wgsl;
+    // HLSL counts a vertex and an instance from the draw's base, and DXC keeps that meaning on vulkan (EMIT-114).
+    auto const value
+        = has_base(p, input.input) ? cc::format("{} + {}", raw, p.stage_input_bases[index]) : cc::string(raw);
+    if (type == "int")
+        return cc::format("{}({})", is_wgsl ? "i32" : "int", value);
+    if (type == "int3")
+        return cc::format("{}({})", is_wgsl ? "vec3i" : "int3", value);
+    return value;
 }

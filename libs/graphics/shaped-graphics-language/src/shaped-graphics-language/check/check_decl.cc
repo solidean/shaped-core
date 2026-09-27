@@ -322,7 +322,7 @@ ast::range_of<member_info> checker::compile_members(i32 file,
             continue;
         auto const name = text_of(file, f.name);
 
-        cc::string_view const known_on_field[] = {"position", "thread_id", "per_instance", "stream"};
+        cc::string_view const known_on_field[] = {"position", "per_instance", "stream"};
         cc::string_view const known_on_member[] = {"unfilterable", "non_filtering"};
         judge_attributes(file, f.attributes,
                          is_struct ? cc::span<cc::string_view const>(known_on_field)
@@ -375,7 +375,6 @@ ast::range_of<member_info> checker::compile_members(i32 file,
             .type = type,
             .field = line->field,
             .is_position = find_attribute(file, f.attributes, "position") != nullptr,
-            .is_thread_id = find_attribute(file, f.attributes, "thread_id") != nullptr,
             .is_per_instance = find_attribute(file, f.attributes, "per_instance") != nullptr,
             .stream = stream_of(file, find_attribute(file, f.attributes, "stream")),
             .is_unfilterable = unfilterable != nullptr,
@@ -752,8 +751,25 @@ void checker::compile_function(symbol_id id)
     for (auto const& p : ast.at(f.parameters))
     {
         auto const name = text_of(file, p.name);
-        cc::string_view const known_on_parameter[] = {"thread_id"};
-        judge_attributes(file, p.attributes, known_on_parameter, "a parameter");
+        // CHK-271: a stage input is a parameter its attribute marks, one attribute per input
+        cc::string_view known_on_parameter[16] = {};
+        auto known_count = isize(0);
+        for (auto const& input : stage_inputs())
+            known_on_parameter[known_count++] = input.name;
+        judge_attributes(file, p.attributes, cc::span<cc::string_view const>(known_on_parameter, known_count),
+                         "a parameter");
+        auto input = stage_input::none;
+        for (auto const& candidate : stage_inputs())
+            if (find_attribute(file, p.attributes, candidate.name) != nullptr)
+            {
+                if (input != stage_input::none)
+                {
+                    report(diagnostic_kind::invalid_attribute_arguments, file, p.name,
+                           cc::format("{} is marked as two stage inputs; a parameter is one", name));
+                    is_failed = true;
+                }
+                input = candidate.input;
+            }
         // `mut self` was reported as itself
         if (p.is_mut && f.receiver != ast::receiver_kind::mut_self)
             unsupported(file, p.name, "a mut parameter");
@@ -782,7 +798,7 @@ void checker::compile_function(symbol_id id)
                               .field = ast::field_id(index),
                               .has_default = ast::is_valid(p.default_value),
                               .is_named_only = p.is_named_only,
-                              .is_thread_id = find_attribute(file, p.attributes, "thread_id") != nullptr});
+                              .input = input});
     }
 
     auto bindings = cc::vector<symbol_id>();
@@ -1022,46 +1038,52 @@ void checker::judge_entry_point(symbol_id id)
     if (!s.operator_spelling.empty())
         invalid("an entry point is no @operator");
 
+    // CHK-271: at most one stage struct, first, and then the stage inputs, each of this stage, each once, of its type
+    auto structs = 0;
+    auto seen = cc::vector<stage_input>();
+    for (auto const& parameter : parameters)
+    {
+        if (parameter.input == stage_input::none)
+        {
+            if (!seen.empty() || structs > 0)
+                invalid("an entry point takes its stage struct first, and stage inputs after it");
+            ++structs;
+            continue;
+        }
+        auto const& input = info_of(parameter.input);
+        if (input.in_stage != info.entry_stage)
+            invalid(cc::format("@{} is an input of the {} stage", input.name,
+                               input.in_stage == stage::vertex  ? "vertex"
+                               : input.in_stage == stage::pixel ? "pixel"
+                                                                : "compute"));
+        else if (out.name_of(parameter.type) != input.type)
+            invalid(cc::format("a @{} parameter is an {}", input.name, input.type));
+        for (auto const other : seen)
+            if (other == parameter.input)
+                invalid(cc::format("@{} is taken twice", input.name));
+        seen.push_back(parameter.input);
+    }
+    auto const* const stage_struct = structs == 1 && parameters[0].input == stage_input::none ? &parameters[0] : nullptr;
+
     if (info.entry_stage == stage::compute)
     {
-        // A compute entry point is dispatched over a grid and hands nothing back.
+        // A compute entry point is dispatched over a grid and hands nothing back, and is given nothing but its inputs.
         if (info.result != checked_module::void_type)
             invalid("a @compute fun returns nothing");
-
-        // Its one parameter is the thread id itself, or a struct whose fields are system values.
-        if (parameters.size() != 1)
-            invalid("a @compute fun takes one parameter: the thread id, or a struct of system values");
-        else if (parameters[0].is_thread_id)
-        {
-            if (!is_int3(parameters[0].type))
-                invalid("a @thread_id parameter is an int3");
-        }
-        else
-        {
-            auto ids = 0;
-            for (auto const& m : out.at(out.at(parameters[0].type).members))
-                if (m.is_thread_id)
-                {
-                    ++ids;
-                    if (!is_int3(m.type))
-                        invalid("a @thread_id field is an int3");
-                }
-            if (out.at(parameters[0].type).kind != type_kind::structure || out.at(parameters[0].type).is_opaque)
-                invalid("the parameter of a @compute fun is a struct with fields, or carries @thread_id itself");
-            else if (ids != 1)
-                invalid("the struct of a @compute fun has exactly one @thread_id field");
-        }
-
+        if (stage_struct != nullptr)
+            invalid("a @compute fun takes stage inputs alone, such as `@thread_id id: int3`");
         notes[s.info].is_valid_entry = is_valid;
         return;
     }
 
-    if (parameters.size() != 1)
-        invalid("an entry point takes one struct parameter");
-    else if (info.entry_stage == stage::vertex && out.at(parameters[0].type).edge != stage::vertex)
-        invalid("the parameter of a @vertex fun is a @vertex struct");
-    else if (out.at(parameters[0].type).is_opaque)
-        invalid("the parameter of an entry point is a struct with fields");
+    // A vertex stage may draw from no vertex buffer at all; a pixel stage always takes what the vertex stage hands on.
+    if (info.entry_stage == stage::pixel && stage_struct == nullptr)
+        invalid("a @pixel fun takes the struct its vertex stage returns");
+    else if (stage_struct != nullptr && info.entry_stage == stage::vertex
+             && out.at(stage_struct->type).edge != stage::vertex)
+        invalid("the struct parameter of a @vertex fun is a @vertex struct");
+    else if (stage_struct != nullptr && out.at(stage_struct->type).is_opaque)
+        invalid("the struct parameter of an entry point is a struct with fields");
 
     if (info.entry_stage == stage::pixel)
     {
@@ -1088,4 +1110,37 @@ void checker::judge_entry_point(symbol_id id)
     }
 
     notes[s.info].is_valid_entry = is_valid;
+}
+
+cc::span<stage_input_info const> sgl::check::stage_inputs()
+{
+    static constexpr stage_input_info k_inputs[] = {
+        {.input = stage_input::vertex_index, .name = "vertex_index", .in_stage = stage::vertex, .type = "int"},
+        {.input = stage_input::instance_index, .name = "instance_index", .in_stage = stage::vertex, .type = "int"},
+        {.input = stage_input::is_front_facing, .name = "is_front_facing", .in_stage = stage::pixel, .type = "bool"},
+        {.input = stage_input::sample_index,
+         .name = "sample_index",
+         .in_stage = stage::pixel,
+         .type = "int",
+         .feature = i32(feature::sample_rate_shading)},
+        {.input = stage_input::sample_mask, .name = "sample_mask", .in_stage = stage::pixel, .type = "uint"},
+        {.input = stage_input::primitive_id,
+         .name = "primitive_id",
+         .in_stage = stage::pixel,
+         .type = "int",
+         .feature = i32(feature::primitive_index)},
+        {.input = stage_input::thread_id, .name = "thread_id", .in_stage = stage::compute, .type = "int3"},
+        {.input = stage_input::local_thread_id, .name = "local_thread_id", .in_stage = stage::compute, .type = "int3"},
+        {.input = stage_input::local_thread_index, .name = "local_thread_index", .in_stage = stage::compute, .type = "int"},
+        {.input = stage_input::workgroup_id, .name = "workgroup_id", .in_stage = stage::compute, .type = "int3"},
+    };
+    return k_inputs;
+}
+
+stage_input_info const& sgl::check::info_of(stage_input input)
+{
+    for (auto const& i : stage_inputs())
+        if (i.input == input)
+            return i;
+    CC_UNREACHABLE("a stage input without an entry in stage_inputs()");
 }

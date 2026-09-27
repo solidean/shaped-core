@@ -194,6 +194,9 @@ struct member_info;
 struct enum_case_info;
 
 enum class stage : u8;
+enum class stage_input : u8;
+struct flat_stage_input;
+struct stage_input_info;
 enum class symbol_kind : u8;
 enum class symbol_state : u8;
 enum class function_role : u8;

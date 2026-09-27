@@ -707,7 +707,11 @@ void checker::compile_pipeline(symbol_id id)
         return fail_symbol();
 
     auto const& vertex_info = out.functions[out.at(vertex).info];
-    auto const vertex_input = out.at(vertex_info.parameters)[0].type;
+    // A vertex stage that draws from no vertex buffer has no vertex input (CHK-271).
+    auto const vertex_parameters = out.at(vertex_info.parameters);
+    auto const vertex_input = !vertex_parameters.empty() && vertex_parameters[0].input == stage_input::none
+                                ? vertex_parameters[0].type
+                                : type_id::none;
     auto target_set = type_id::none;
 
     // ---- the interface between the stages, and the targets
@@ -715,6 +719,7 @@ void checker::compile_pipeline(symbol_id id)
     {
         auto const& pixel_info = out.functions[out.at(pixel).info];
         auto const passed = vertex_info.result;
+        // a valid pixel entry point takes its struct first (CHK-271)
         auto const taken = out.at(pixel_info.parameters)[0].type;
         auto const returned = out.at(out.at(passed).members);
         auto const expected = out.at(out.at(taken).members);
@@ -808,7 +813,8 @@ void checker::compile_pipeline(symbol_id id)
             }
         sources.push_back(cc::move(s));
     };
-    edge_source(vertex_input, false);
+    if (is_valid(vertex_input))
+        edge_source(vertex_input, false);
     if (is_valid(target_set))
         edge_source(target_set, true);
 

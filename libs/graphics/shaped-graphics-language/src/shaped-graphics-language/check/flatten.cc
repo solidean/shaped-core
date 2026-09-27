@@ -1587,22 +1587,26 @@ void checker::flatten_entry_point(symbol_id id)
     if (info.entry_stage == stage::none || !note.is_valid_entry || !inlines_whole(id))
         return;
 
-    auto const parameter = out.at(info.parameters)[0];
+    auto const parameters = out.at(info.parameters);
     // A compute entry point hands nothing back, so `nothing` is its result and not a hole.
     auto const wants_result = info.entry_stage != stage::compute;
-    if (!is_sound(parameter.type) || (wants_result && !is_sound(info.result)))
+    auto is_parameter_sound = true;
+    for (auto const& parameter : parameters)
+        is_parameter_sound = is_parameter_sound && is_sound(parameter.type);
+    if (!is_parameter_sound || (wants_result && !is_sound(info.result)))
         return;
 
     auto f = flattener{.c = *this};
     f.entry.entry_stage = info.entry_stage;
     f.entry.name = s.name;
     f.entry.function = id;
-    f.entry.input = parameter.type;
+    // CHK-271: the stage struct, when there is one, is the first parameter; every other is a stage input
+    if (!parameters.empty() && parameters[0].input == stage_input::none)
+        f.entry.input = parameters[0].type;
     f.entry.result = info.result;
     f.entry.workgroup[0] = info.workgroup[0];
     f.entry.workgroup[1] = info.workgroup[1];
     f.entry.workgroup[2] = info.workgroup[2];
-    f.entry.takes_thread_id = parameter.is_thread_id;
     f.entry.features = info.features;
     for (auto const binding : out.at(info.bindings))
         f.entry.bindings.push_back(binding);
@@ -1614,9 +1618,15 @@ void checker::flatten_entry_point(symbol_id id)
             f.entry.names.reserve(other.name);
 
     f.frames.push_back({.function = id, .file = s.file, .result = info.result});
-    auto const local = f.add_local(local_kind::parameter, parameter.name, parameter.type);
-    f.current()->bound.push_back(
-        {.where = {.kind = target_kind::parameter, .index = i32(parameter.field)}, .local = local});
+    // Every parameter is a local, in the order written: the stage struct at `locals[0]` when there is one.
+    for (auto const& parameter : parameters)
+    {
+        auto const local = f.add_local(local_kind::parameter, parameter.name, parameter.type);
+        f.current()->bound.push_back(
+            {.where = {.kind = target_kind::parameter, .index = i32(parameter.field)}, .local = local});
+        if (parameter.input != stage_input::none)
+            f.entry.stage_inputs.push_back({.input = parameter.input, .local = local});
+    }
 
     auto const& body = ast_of(s.file).at(s.declaration).node.as<ast::fun_decl>().body;
     if (ast::is_valid(body.value))

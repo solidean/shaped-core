@@ -65,6 +65,7 @@ struct slib::pipeline_definition
     shader_asset_handle const* pixel = nullptr;
     /// The layout its stages' binding lists state, from their generated group types.
     sg::pipeline_layout_handle (*acquire_layout)(sg::context& ctx) = nullptr;
+    /// Null for a vertex stage that draws from no vertex buffer.
     sg::vertex_input_layout (*vertex_input)() = nullptr;
     /// The `@pixel struct`'s qualified name and its members, in location order; both empty without a pixel stage.
     cc::string_view target_set;

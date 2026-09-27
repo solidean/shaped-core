@@ -314,7 +314,9 @@ cc::shared_async<sg::raster_pipeline_description> slib::describe_raster_pipeline
     desc.vertex_shader = co_await (*d.vertex)->acquire(*ctx);
     if (d.pixel != nullptr)
         desc.fragment_shader = co_await (*d.pixel)->acquire(*ctx);
-    desc.vertex_input = d.vertex_input();
+    // a vertex stage that draws from no vertex buffer, reading `@vertex_index` alone, has no layout
+    if (d.vertex_input != nullptr)
+        desc.vertex_input = d.vertex_input();
     desc.target_set = cc::string(d.target_set);
     for (auto i = isize(0); i < d.targets.size(); ++i)
         desc.color_targets.push_back({});

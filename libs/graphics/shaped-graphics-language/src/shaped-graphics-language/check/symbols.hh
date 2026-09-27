@@ -92,6 +92,43 @@ enum class sgl::check::stage : sgl::u8
     compute,
 };
 
+/// A value the GPU hands an invocation, which an entry point takes as a parameter marked with its attribute (CHK-271).
+enum class sgl::check::stage_input : sgl::u8
+{
+    none,
+    vertex_index,
+    instance_index,
+    is_front_facing,
+    sample_index,
+    sample_mask,
+    primitive_id,
+    thread_id,
+    local_thread_id,
+    local_thread_index,
+    workgroup_id,
+};
+
+/// What the checker knows of one stage input: the attribute, the stage that has it, its type and the feature it needs.
+struct sgl::check::stage_input_info
+{
+    stage_input input = stage_input::none;
+    /// The attribute without its `@`, which is also the input's name in a diagnostic.
+    cc::string_view name;
+    stage in_stage = stage::none;
+    /// The name of its builtin type.
+    cc::string_view type;
+    /// -1 for an input every device has; otherwise a `feature` (check/features.hh).
+    i32 feature = -1;
+};
+
+namespace sgl::check
+{
+/// Every stage input, `none` excepted, in the order of the enum.
+[[nodiscard]] cc::span<stage_input_info const> stage_inputs();
+/// The one of `input`; `input` must not be `none`.
+[[nodiscard]] stage_input_info const& info_of(stage_input input);
+} // namespace sgl::check
+
 /// One canonical type: equal types have equal ids, so type equality is id equality.
 struct sgl::check::type_info
 {
@@ -135,8 +172,6 @@ struct sgl::check::member_info
     ast::field_id field = ast::field_id::none;
     /// Carries `@position`.
     bool is_position = false;
-    /// Carries `@thread_id`: which thread of the dispatch is running, as an `int3`.
-    bool is_thread_id = false;
     /// Carries `@per_instance`: in a vertex input, the member steps once per instance.
     bool is_per_instance = false;
     /// The name `@stream(name)` gives; empty without one.
@@ -269,8 +304,8 @@ struct sgl::check::parameter
     bool has_default = false;
     /// Filled by name alone (CHK-244).
     bool is_named_only = false;
-    /// Carries `@thread_id`, which a compute entry point may write instead of a struct.
-    bool is_thread_id = false;
+    /// The stage input its attribute marks it as, `none` for an ordinary parameter (CHK-271).
+    stage_input input = stage_input::none;
 
     bool operator==(parameter const&) const = default;
 };

@@ -61,8 +61,10 @@ enum class sgl::check::run_status : sgl::u8
 
 struct sgl::check::run_inputs
 {
-    /// The value of `locals[0]`.
+    /// The value of the stage struct, `locals[0]`; unread for an entry point without one.
     value parameter;
+    /// Parallel to `flat_entry_point::stage_inputs`; a missing one is zero.
+    cc::vector<value> stage_inputs;
     /// Parallel to `flat_entry_point::bindings`: the members of each binding as one value, in member order.
     /// A buffer member has no scalars there; its contents are `buffers`.
     cc::vector<value> bindings;

@@ -243,7 +243,8 @@ fun shade(k: float) -> float:
 | a test | `@expect` |
 | a binding | `@inline`, `@shadowable` |
 | a binding member | `@unfilterable`, `@non_filtering` |
-| a struct field | `@position`, `@thread_id`, `@per_instance`, `@stream` |
+| a struct field | `@position`, `@per_instance`, `@stream` |
+| a parameter | the stage inputs of CHK-271 |
 | a pipeline | `@raster`, `@compute`, `@raytracing` |
 
 ```sgl
@@ -443,8 +444,25 @@ fun f() -> float:
 ## Entry points
 
 * **CHK-87** A function that carries `@vertex` or `@pixel` is an **entry point** of that stage; one that carries both is the normal error `invalid-entry-point`.
-* **CHK-88** An entry point takes exactly one parameter, of a struct type with fields.
-* **CHK-89** The parameter of a `@vertex fun` is of a `@vertex struct`.
+* **CHK-88** A raster entry point takes at most one parameter without a stage input's attribute, its **stage struct**, which is of a struct type with fields and comes first.
+  A `@pixel fun` takes one; a `@vertex fun` may take none, and then draws from no vertex buffer.
+* **CHK-89** The stage struct of a `@vertex fun` is of a `@vertex struct`.
+* **CHK-271** A parameter marked with a stage input's attribute is a **stage input**: a value the GPU hands the invocation ([why](why/checking.md#chk-271)).
+  Each is of one stage and one type, and an entry point takes each at most once, after its stage struct:
+
+| attribute | stage | type |
+|---|---|---|
+| `@vertex_index`, `@instance_index` | vertex | `int` |
+| `@is_front_facing` | pixel | `bool` |
+| `@sample_index` | pixel | `int` |
+| `@sample_mask` | pixel | `uint` |
+| `@primitive_id` | pixel | `int` |
+| `@thread_id`, `@local_thread_id`, `@workgroup_id` | compute | `int3` |
+| `@local_thread_index` | compute | `int` |
+
+  A `@compute fun` takes stage inputs alone.
+  `vertex_index` and `instance_index` count from the draw's first vertex and first instance on every target.
+* **CHK-272** `@primitive_id` needs `primitive_index` of a device and `@sample_index` needs `sample_rate_shading`, as a binding member needs its feature (CHK-261).
 * **CHK-90** A `@vertex fun` returns a struct with exactly one field that carries `@position`, and that field is of the type `hpos4`.
 * **CHK-91** A `@pixel fun` returns a `@pixel struct`.
 * **CHK-92** An entry point is neither `@builtin` nor `@operator`.
@@ -466,6 +484,7 @@ A feature is what a device may lack, so using one makes a shader non-portable on
 
 * **CHK-258** A `require` names features as `sg::feature` names them, and only those a shader can use:
   `binding_arrays`, `extended_image_formats`, `readwrite_image_formats`, `multisampled_array_textures` and `raytracing`.
+  The stages and stage inputs a device may lack add `primitive_index`, `sample_rate_shading`, `geometry_shader` and `tessellation_shader`.
   Any other name is the normal error `unknown-feature`, and its detail lists the names.
 * **CHK-259** A `require` at file scope grants its features to everything in the file ([why](why/checking.md#chk-259)).
 * **CHK-260** A `require` in a binding grants its features to that binding's members.
