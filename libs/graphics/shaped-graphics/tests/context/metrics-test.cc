@@ -1,7 +1,11 @@
 #include <clean-core/container/pinned_data.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/record/event_view.hh>
+#include <clean-core/record/recording.hh>
+#include <clean-core/string/string_view.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <nexus/async-test.hh>
+#include <nexus/rec.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/command_list/command_list.hh>
 #include <shaped-graphics/context/context.hh>
@@ -18,6 +22,20 @@ namespace
 cc::pinned_data<byte const> zeros(isize n)
 {
     return cc::make_pinned_data(cc::vector<byte>::create_defaulted(n));
+}
+
+/// The sum of every accumulate named `name`, or -1 when there is none.
+f64 accumulated(cc::rec::recording const& r, cc::string_view name)
+{
+    auto total = -1.0;
+    for (auto const& b : r.blocks())
+    {
+        auto const v = b.view();
+        for (auto it = v.begin(); it != v.end(); ++it)
+            if (auto const e = *it; e.kind() == cc::rec::event_kind::stat_accumulate && cc::string_view(e.name()) == name)
+                total = (total < 0 ? 0 : total) + e.field_as_double("value").value_or(0);
+    }
+    return total;
 }
 } // namespace
 
@@ -107,5 +125,23 @@ ASYNC_INVOCABLE_TEST("sg - a backend says which stats it cannot count", (sg::con
     }
     if (ctx->backend() == sg::backend_kind::dx12 || ctx->backend() == sg::backend_kind::vulkan)
         CHECK(s.counted() == sg::all_stats);
+    co_return;
+}
+
+ASYNC_INVOCABLE_TEST("sg - advance_epoch records what changed over the epoch it closes",
+                     (sg::context_handle const& ctx),
+                     nx::config::recorded)
+{
+    REQUIRE(ctx != nullptr);
+    auto rec = nx::test_recording();
+    REQUIRE(rec.is_attached());
+
+    // Other tests may advance the same context meanwhile, so an epoch this one closes can hold their work too.
+    auto const buf = ctx->persistent.create_raw_buffer(64, sg::buffer_usage::copy_dst);
+    ctx->advance_epoch();
+    auto const r = rec.sync();
+
+    CHECK(accumulated(r, "sg.epochs_advanced") >= 1.0);
+    CHECK(accumulated(r, "sg.buffers_created") >= 1.0);
     co_return;
 }
