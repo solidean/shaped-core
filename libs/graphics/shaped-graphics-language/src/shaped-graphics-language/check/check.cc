@@ -269,7 +269,7 @@ void checker::judge_attributes(i32 file,
         }
         else if (sgl::is_valid(a.list) && name != "operator" && name != "compute" && name != "stream"
                  && name != "stages" && name != "shadowable" && name != "expect" && name != "interpolate"
-                 && name != "format" && name != "depth")
+                 && name != "format" && name != "depth" && name != "sampler")
             report(diagnostic_kind::invalid_attribute_arguments, file, span_of(file, a.list),
                    cc::format("@{} takes no arguments", name));
     }
@@ -346,6 +346,7 @@ void checker::run()
             judge_entry_features(symbol_id(i));
     report_unused_requires();
 
+    index_builtin_symbols();
     for (auto i = isize(0); i < out.symbols.size(); ++i)
         if (out.symbols[i].kind == symbol_kind::function && out.symbols[i].state == symbol_state::checked)
             flatten_entry_point(symbol_id(i));

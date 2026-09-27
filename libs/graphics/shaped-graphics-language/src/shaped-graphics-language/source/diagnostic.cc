@@ -218,6 +218,10 @@ cc::string_view sgl::to_string(diagnostic_kind kind)
         return "literal-needs-type";
     case diagnostic_kind::shift_out_of_range:
         return "shift-out-of-range";
+    case diagnostic_kind::missing_sampler:
+        return "missing-sampler";
+    case diagnostic_kind::invalid_constant_argument:
+        return "invalid-constant-argument";
     }
     CC_UNREACHABLE("unknown diagnostic_kind");
 }
@@ -432,6 +436,10 @@ cc::string_view sgl::summary_of(diagnostic_kind kind)
         return "an operator over literals alone that only another type provides";
     case diagnostic_kind::shift_out_of_range:
         return "a shift by a literal count outside 0 to 31";
+    case diagnostic_kind::missing_sampler:
+        return "a texture sampled without a sampler, and without a `@sampler` to supply one";
+    case diagnostic_kind::invalid_constant_argument:
+        return "an argument taken only as a constant in a range, given something else";
     case diagnostic_kind::unknown_feature:
         return "a `require` of a name that is no feature a shader can use";
     case diagnostic_kind::feature_not_declared:
@@ -547,6 +555,8 @@ sgl::severity sgl::default_severity_of(diagnostic_kind kind)
     case diagnostic_kind::literal_conversion_result:
     case diagnostic_kind::literal_needs_type:
     case diagnostic_kind::shift_out_of_range:
+    case diagnostic_kind::missing_sampler:
+    case diagnostic_kind::invalid_constant_argument:
         return severity::normal_error;
     case diagnostic_kind::spaced_attribute_arguments:
     case diagnostic_kind::no_effect:

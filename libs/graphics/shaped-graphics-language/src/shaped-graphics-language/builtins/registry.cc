@@ -159,11 +159,13 @@ void registry::finalize()
         auto& record = functions[item.index];
         record.name = file.text_of(f->name);
         record.parameters.clear();
+        record.named_only.clear();
         for (auto const& p : ast.at(f->parameters))
         {
             auto const text = type_text_at(file, ast, p.type);
             CC_ASSERT(!text.empty(), "a builtin signature with a parameter that has no type");
             record.parameters.push_back(cc::string(text));
+            record.named_only.push_back(p.is_named_only ? cc::string(file.text_of(p.name)) : cc::string());
         }
         record.result = find_type(type_name_at(file, ast, f->return_type));
         CC_ASSERT(is_valid(record.result) || !ast::is_valid(f->return_type), "a builtin signature whose result is no "
@@ -182,8 +184,11 @@ builtin_type_id registry::find_type(cc::string_view name) const
     return builtin_type_id::none;
 }
 
-builtin_id registry::find_function(cc::string_view name, cc::span<cc::string_view const> parameters) const
+builtin_id registry::find_function(cc::string_view name,
+                                   cc::span<cc::string_view const> parameters,
+                                   cc::span<cc::string_view const> named_only) const
 {
+    CC_ASSERT(named_only.size() == parameters.size(), "one named-only name, or an empty one, per parameter");
     for (auto i = isize(0); i < functions.size(); ++i)
     {
         auto const& f = functions[i];
@@ -191,7 +196,7 @@ builtin_id registry::find_function(cc::string_view name, cc::span<cc::string_vie
             continue;
         auto is_match = true;
         for (auto k = isize(0); k < parameters.size(); ++k)
-            is_match = is_match && f.parameters[k] == parameters[k];
+            is_match = is_match && f.parameters[k] == parameters[k] && f.named_only[k] == named_only[k];
         if (is_match)
             return builtin_id(i);
     }

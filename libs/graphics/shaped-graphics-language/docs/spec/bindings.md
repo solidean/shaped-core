@@ -183,6 +183,50 @@ They apply in order, so a later setting overrides what an earlier one set, `filt
 | `max_anisotropy` | an int from 1 to 16, where 1 is off; above 1 every filter is `.linear`, since WebGPU refuses anything else |
 | `min_lod`, `max_lod`, `mip_lod_bias` | the mip clamp and bias |
 
+## Sampling
+
+**A texture is read through its methods, which are builtins of the prelude called with the texture first.**
+`frame.sky.sample(dir, smp)` is `sample(frame.sky, dir, smp)`, and every argument after the coordinate that is not the sampler is named.
+
+| method | of | takes |
+|---|---|---|
+| `sample` | a texture of floats, and a depth texture | the level from derivatives, and only in a pixel stage |
+| `sample(…, level = l)` | the same, and every stage | an explicit level |
+| `sample(…, bias = b)` | a texture of floats | a bias on the level derivatives pick, in a pixel stage |
+| `sample(…, grad_x = …, grad_y = …)` | a texture of floats | the derivatives themselves |
+| `gather(…, component = texel_component.y)` | a 2D or cube texture of floats | one channel of the four texels a bilinear sample reads; `.x` by default |
+| `sample_compare(…, reference = r)` | a depth texture | a comparison, through a `comparison_sampler`, in a pixel stage |
+| `sample_compare(…, reference = r, level = 0.0)` | the same, and every stage | a comparison at level 0, the one level every target compares at |
+| `gather_compare(…, reference = r)` | a 2D or cube depth texture | the comparisons of four texels |
+| `load(xy, level)` | every texture but a cube | one texel, with no sampler; a multisampled one takes `sample = s` instead |
+| `load(xy)`, `store(xy, value)` | an image | one texel of an image the shader may read, or write |
+| `size(level)`, `layer_count()`, `level_count()`, `sample_count()` | textures and images | what the shape has |
+
+An array's layer is always named, `layer = 2`, since it is no coordinate on every target.
+An offset, `offset = int2(1, -1)`, is a constant from -8 to 7 on a shape that is no cube and no multisampled texture.
+A gather's component, an offset and a comparison's level are constants, because some target takes each only as written (CHK-280).
+
+**A texture may name the sampler it is sampled with, and a call then leaves it out.**
+`@sampler(name)` on a texture member names a sampler of the same binding, static or dynamic:
+
+```sgl
+binding material:
+    @sampler(albedo_smp)
+    albedo: texture_2d[float4]
+    sampler albedo_smp:
+        filter = .linear
+
+// in a pixel stage
+let a = material.albedo.sample(uv)
+let b = material.albedo.sample(uv, other_smp)
+```
+
+A call that names a sampler takes that one, and a call without one on a texture without `@sampler` is `missing-sampler` (CHK-279).
+A file-scope sampler is not yet one `@sampler` may name.
+
+**A depth texture filters only in a comparison**, because WebGPU refuses a filtering sampler on one otherwise.
+So a plain `sample` of a depth texture goes through a `@non_filtering` sampler, as an `@unfilterable` texture does (CHK-281).
+
 ## Features
 
 **SGL refuses a non-portable form by feature, never by target.**

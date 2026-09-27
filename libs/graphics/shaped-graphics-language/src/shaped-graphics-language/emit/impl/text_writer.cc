@@ -197,7 +197,8 @@ struct writer
             return {.text = cc::format("{}{}", how.text, wrapped(cc::move(arguments[0]), level::primary)),
                     .binds = level::unary};
         case builtins::spelling_kind::custom:
-            return how.custom({.target = d.language(), .arguments = arguments, .builtins = *p.m.builtins});
+            return how.custom(
+                {.target = d.language(), .arguments = arguments, .builtins = *p.m.builtins, .data = how.data});
         case builtins::spelling_kind::call:
             break;
         }
@@ -549,7 +550,7 @@ void sgl::emit::impl::write_helpers(cc::string& out, plan const& p, dialect cons
             types.push_back(check::is_resource(p.m.at(type).kind) ? d.resource_text(p, type)
                                                                   : cc::string(type_text(p, d, type)));
         }
-        auto text = record->write.helper({.target = d.language(), .argument_types = types});
+        auto text = record->write.helper({.target = d.language(), .argument_types = types, .data = record->write.data});
         auto is_known = text.empty();
         for (auto const& w : written)
             is_known = is_known || w == text;

@@ -286,7 +286,24 @@ struct flattener
         return ref != nullptr && !entry.at(ref->local).is_mut;
     }
 
-    /// One more node that means what the substitutable `id` means, attributed to `from`.
+    /// A construction of literals alone, such as a texel offset, which a target may take only as it is written.
+    [[nodiscard]] bool is_literal_construction(flat_expr_id id) const
+    {
+        auto const* const made = is_valid(id) ? entry.at(id).node.try_as<flat_construct>() : nullptr;
+        if (made == nullptr)
+            return false;
+        for (auto const a : entry.at(made->arguments))
+        {
+            auto const& x = entry.at(a).node;
+            auto const is_literal = x.is<flat_literal>() || x.is<flat_int_literal>() || x.is<flat_bool_literal>()
+                                 || x.is<flat_enum_value>();
+            if (!is_literal && !is_literal_construction(a))
+                return false;
+        }
+        return true;
+    }
+
+    /// One more node that means what the substitutable `id`, or a construction of literals, means, attributed to `from`.
     flat_expr_id again(flat_expr_id id, ast::expr_id from)
     {
         auto const x = entry.at(id);
@@ -302,6 +319,16 @@ struct flattener
             return add_expr(x.type, from, *v);
         if (auto const* const m = x.node.try_as<flat_binding_member>())
             return add_expr(x.type, from, *m);
+        if (auto const* const made = x.node.try_as<flat_construct>())
+        {
+            // copied first: `again` appends to the lists the view reads
+            auto arguments = cc::vector<flat_expr_id>();
+            for (auto const a : entry.at(made->arguments))
+                arguments.push_back(a);
+            for (auto& a : arguments)
+                a = again(a, from);
+            return add_expr(x.type, from, flat_construct{.arguments = add_list(arguments)});
+        }
         return fail();
     }
 
@@ -427,14 +454,18 @@ struct flattener
         return fail();
     }
 
-    /// A case of `type`; a case of `bool` is a bool literal, since a target writes a bool and not the `int` of a case.
+    /// A case of `type`; a case of a builtin enum is a literal of what the targets write it as: a bool, or an int.
     flat_expr_id enum_value(type_id type, ast::expr_id from, i32 case_index)
     {
         if (c.out.is_plain_enum(type))
             return add_expr(type, from, flat_enum_value{.case_index = case_index});
         auto const cases = c.out.at(c.out.at(type).cases);
-        auto const is_known_case = case_index >= 0 && case_index < cases.size();
-        return is_known_case ? add_expr(type, from, flat_bool_literal{.value = cases[case_index].value != 0}) : fail();
+        if (case_index < 0 || case_index >= cases.size())
+            return fail();
+        auto const value = cases[case_index].value;
+        if (c.out.builtin_type_of(type)->leaf_kind == value_kind::boolean)
+            return add_expr(type, from, flat_bool_literal{.value = value != 0});
+        return add_expr(type, from, flat_int_literal{.value = i32(value)});
     }
 
     /// A const stands for its value, written where the name stood.
@@ -562,7 +593,7 @@ struct flattener
             auto const value = values[i];
             if (!is_valid(value))
                 return fail();
-            if (is_substitutable(value) || is_resource_member(value))
+            if (is_substitutable(value) || is_resource_member(value) || is_literal_construction(value))
             {
                 bound[i] = value;
                 continue;
@@ -590,7 +621,7 @@ struct flattener
             frames.push_back({.function = callee, .file = s.file, .chain = chain});
             for (auto p = isize(0); p < slots.size(); ++p)
                 if (slots[p] >= 0)
-                    bind_parameter(parameters[p], copies[p]);
+                    bind_parameter(parameters[p], copies[p], true);
             bind_defaults(parameters, slots);
             filled = cc::move(current()->bound);
             frames.remove_back();
@@ -659,11 +690,41 @@ struct flattener
         if (!is_valid(s.intrinsic) || s.info < 0)
             return fail();
         auto const& info = c.out.functions[s.info];
+        auto const* const record = c.out.builtin_function(s.intrinsic);
+        if (record != nullptr && record->with_default_sampler != builtin_id::none)
+            return default_sampled_call(id, record->with_default_sampler, arguments);
         return add_expr(info.result, id,
                         flat_call{.callee = callee,
                                   .intrinsic = s.intrinsic,
                                   .is_pure = info.is_pure,
                                   .arguments = add_list(arguments)});
+    }
+
+    /// A sampling call without its sampler calls the record that takes one, with the texture's `@sampler` after the
+    /// coordinate (CHK-279); the check pass has made sure the texture names one.
+    flat_expr_id default_sampled_call(ast::expr_id id, builtin_id with_sampler, cc::span<flat_expr_id const> arguments)
+    {
+        auto const* const texture = arguments.size() >= 2 && is_valid(arguments[0])
+                                      ? entry.at(arguments[0]).node.try_as<flat_binding_member>()
+                                      : nullptr;
+        if (texture == nullptr)
+            return fail();
+        auto const members = c.out.at(c.out.bindings[c.out.at(texture->binding).info].members);
+        auto const sampler = members[texture->member].default_sampler;
+        if (sampler < 0)
+            return fail();
+        // the call becomes one of the record that takes the sampler, so its arguments match its callee's parameters
+        auto const declared = c.symbol_declaring(with_sampler);
+        if (!is_valid(declared))
+            return fail();
+        auto with = cc::vector<flat_expr_id>();
+        with.push_back_range(arguments);
+        with.insert_at(
+            2, add_expr(members[sampler].type, id, flat_binding_member{.binding = texture->binding, .member = sampler}));
+        auto const& info = c.out.functions[c.out.at(declared).info];
+        return add_expr(
+            info.result, id,
+            flat_call{.callee = declared, .intrinsic = with_sampler, .is_pure = info.is_pure, .arguments = add_list(with)});
     }
 
     /// The values of a call's written arguments, in the order written.
@@ -1102,7 +1163,8 @@ struct flattener
 
     /// Binds a value to parameter `p` in the current frame: a literal or an immutable local stands for it, and
     /// anything else is bound once by a `let` of the block being written.
-    void bind_parameter(parameter const& p, flat_expr_id value)
+    /// `keeps_constructions` binds a construction of literals as it stands, for a builtin that takes one only so.
+    void bind_parameter(parameter const& p, flat_expr_id value, bool keeps_constructions = false)
     {
         if (!is_valid(value))
         {
@@ -1114,7 +1176,8 @@ struct flattener
         auto const* const ref = x.node.try_as<flat_local_ref>();
         if (ref != nullptr && is_substitutable(value))
             current()->bound.push_back({.where = where, .local = ref->local});
-        else if (is_substitutable(value) || is_resource_member(value))
+        else if (is_substitutable(value) || is_resource_member(value)
+                 || (keeps_constructions && is_literal_construction(value)))
             current()->bound.push_back({.where = where, .literal = value});
         else
         {

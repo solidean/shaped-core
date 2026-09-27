@@ -44,6 +44,7 @@ void fold_members(cc::byte_stream_builder& b, checked_module const& m, cc::span<
         b.add_bool(member.static_sampler >= 0);
         if (member.static_sampler >= 0)
             fold_sampler(b, m.samplers[member.static_sampler]);
+        b.add_pod(member.default_sampler);
         fold_type(b, m, member.type);
     }
 }

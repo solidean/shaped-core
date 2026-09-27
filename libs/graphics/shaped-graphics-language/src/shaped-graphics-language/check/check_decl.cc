@@ -212,7 +212,7 @@ cc::fixed_array<sgl::i32, 3> checker::workgroup_of(i32 file, ast::attribute cons
 }
 
 /// `@stream(normals)`: one bare name, which is the buffer a vertex input member is read from.
-cc::string checker::stream_of(i32 file, ast::attribute const* a)
+cc::string checker::name_argument_of(i32 file, ast::attribute const* a)
 {
     if (a == nullptr)
         return {};
@@ -223,7 +223,10 @@ cc::string checker::stream_of(i32 file, ast::attribute const* a)
                                : nullptr;
     if (name == nullptr)
     {
-        report(diagnostic_kind::invalid_attribute_arguments, file, a->name, "@stream takes one name: `@stream(normals)`");
+        auto const attribute = text_of(file, a->name);
+        report(diagnostic_kind::invalid_attribute_arguments, file, a->name,
+               cc::format("@{} takes one name: `@{}({})`", attribute, attribute,
+                          attribute == "sampler" ? "linear" : "normals"));
         return {};
     }
     return cc::string(text_of(file, name->where));
@@ -394,6 +397,14 @@ ast::range_of<member_info> checker::compile_members(i32 file,
     auto const& ast = ast_of(file);
     auto const owner = is_struct ? cc::string_view("a struct field") : cc::string_view("a binding member");
     auto collected = cc::vector<member_info>();
+    // `@sampler(name)` of a member, resolved once every member is known, since the sampler may stand below it
+    struct named_sampler
+    {
+        isize member;
+        ast::attribute const* attribute;
+        cc::string name;
+    };
+    auto named_samplers = cc::vector<named_sampler>();
 
     for (auto const member : ast.at(members))
     {
@@ -446,7 +457,7 @@ ast::range_of<member_info> checker::compile_members(i32 file,
             = {"position", "per_instance", "stream", "interpolate", "depth", "sample_mask"};
         // CHK-275: on a `@vertex struct` member `@format` is the member's own bytes, never a pipeline setting
         cc::string_view const known_on_vertex_field[] = {"position", "per_instance", "stream", "interpolate", "format"};
-        cc::string_view const known_on_member[] = {"unfilterable", "non_filtering"};
+        cc::string_view const known_on_member[] = {"unfilterable", "non_filtering", "sampler"};
         judge_attributes(file, f.attributes,
                          !is_struct         ? cc::span<cc::string_view const>(known_on_member)
                          : is_vertex_struct ? cc::span<cc::string_view const>(known_on_vertex_field)
@@ -506,10 +517,45 @@ ast::range_of<member_info> checker::compile_members(i32 file,
             .vertex_format = is_vertex_struct ? vertex_format_of(file, find_attribute(file, f.attributes, "format"), type)
                                               : cc::string(),
             .is_per_instance = find_attribute(file, f.attributes, "per_instance") != nullptr,
-            .stream = stream_of(file, find_attribute(file, f.attributes, "stream")),
+            .stream = name_argument_of(file, find_attribute(file, f.attributes, "stream")),
             .is_unfilterable = unfilterable != nullptr,
             .is_non_filtering = non_filtering != nullptr,
         });
+        if (auto const* const named = is_struct ? nullptr : find_attribute(file, f.attributes, "sampler"))
+            named_samplers.push_back(
+                {.member = collected.size() - 1, .attribute = named, .name = name_argument_of(file, named)});
+    }
+
+    // CHK-279: a texture names a sampler of its own binding, which its sampling calls take when they name none
+    for (auto const& n : named_samplers)
+    {
+        auto& m = collected[n.member];
+        if (n.name.empty() || m.type == checked_module::error_type)
+            continue;
+        if (auto const& t = out.at(m.type); t.kind != type_kind::texture)
+        {
+            report(diagnostic_kind::wrong_kind_of_name, file, n.attribute->name,
+                   "only a texture is sampled, so only one takes a @sampler");
+            continue;
+        }
+        auto found = isize(-1);
+        for (auto i = isize(0); i < collected.size(); ++i)
+            if (collected[i].name == n.name)
+                found = i;
+        auto const where = span_of(file, ast_of(file).at(n.attribute->arguments)[0].value);
+        if (found < 0)
+        {
+            report(diagnostic_kind::unknown_member, file, where,
+                   cc::format("the binding has no member {}, and @sampler names one of its own", n.name));
+            continue;
+        }
+        if (collected[found].type != checked_module::error_type
+            && out.at(collected[found].type).kind != type_kind::sampler)
+        {
+            report(diagnostic_kind::wrong_kind_of_name, file, where, cc::format("{} is no sampler", n.name));
+            continue;
+        }
+        m.default_sampler = i32(found);
     }
 
     auto const range = ast::range_of<member_info>{.first = u32(out.members.size()), .count = u32(collected.size())};
@@ -982,15 +1028,18 @@ void checker::compile_function(symbol_id id)
     auto const has_body = f.body.kind != ast::body_kind::none;
     if (find_attribute(file, d.attributes, "builtin") != nullptr)
     {
-        // The record is the overload: the name and the parameter types together, as the registry read them from its own text.
+        // The record is the overload: the name, the parameter types and the named-only names together, as the registry read
+        // them from its own text.
         auto types = cc::vector<cc::string_view>();
+        auto named_only = cc::vector<cc::string_view>();
         auto is_silent = false;
         for (auto const& p : parameters)
         {
             is_silent = is_silent || p.type == checked_module::error_type;
             types.push_back(out.name_of(p.type));
+            named_only.push_back(p.is_named_only ? cc::string_view(p.name) : cc::string_view());
         }
-        auto const intrinsic = builtins.find_function(out.at(id).name, types);
+        auto const intrinsic = builtins.find_function(out.at(id).name, types, named_only);
         if (is_valid(intrinsic))
             out.symbols[index_of(id)].intrinsic = intrinsic;
         else

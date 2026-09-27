@@ -194,7 +194,10 @@ constexpr cc::string_view k_hlsl[] = {
     "mul",
     "normalize",
     "saturate",
-    // a helper the text declares for a builtin HLSL cannot write as one expression
+    // the helpers the text declares for builtins HLSL cannot write as one expression
+    "sgl_layers",
+    "sgl_levels",
+    "sgl_samples",
     "sgl_size",
 };
 

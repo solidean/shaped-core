@@ -50,12 +50,19 @@ A resource is not a runtime value on any target, so a function taking one is ins
 
 ## What exists
 
-`sample`, `load`, `store` and `size` are builtins of the prelude, for 2D shapes, called as methods through UFCS.
-A sample takes its sampler as an argument, since no texture has a default one yet, and a named-only `level` picks the overload that samples at a level.
-`load` and `size` default their level to 0.
+The whole method set is the spec's now, for every shape: [bindings.md](../bindings.md#sampling) and CHK-279 to CHK-281.
+`@sampler(name)` names a sampler of the texture's own binding, static or dynamic, and a call without a sampler on a texture without one is `missing-sampler`.
+
+What stands in for the design above:
+
+* **Each sampling record has a twin without its sampler**, rather than a default reading `tex.default_sampler`.
+  The flattener hands the twin's call the texture's `@sampler`, so the targets see one call either way.
+  A default that reads another parameter's binding retires the twins, and nothing a program writes changes.
+* **Every component type has records of its own**, rather than one generic over `texture_2d[T] -> T`.
 
 ## Open
 
-* Whether `@sampler` may name a dynamic sampler member, and what the host then binds.
-* What a texture without `@sampler` does when sampled without one: an error at the call, or at the declaration.
-* The full set: gradients, bias, gathers, comparison, sizes, and what each is called.
+* A file-scope sampler as a `@sampler`, once file-scope samplers bind on vulkan and metal (TODO.md).
+* Subscripts, `t[xy]` and `img[xy] = v`, as sugar over `load` and `store`.
+* A gather of an int or a uint texture, which every target has and the prelude does not yet.
+* `level` of a comparison anywhere but 0.0, which some target would need a feature for.

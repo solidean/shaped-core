@@ -806,7 +806,10 @@ type_id checker::check_call(function_scope& scope, ast::expr_id id, ast::call co
     }
     auto const result = resolve_overload(scope, id, call.callee, candidates, arguments, text);
     if (result != error_type)
-        judge_filtering(file, where, arguments.written);
+    {
+        judge_filtering(file, id, where, arguments.written);
+        judge_constant_arguments(file, id);
+    }
     return result;
 }
 
@@ -877,7 +880,10 @@ type_id checker::check_dot_call(function_scope& scope, ast::expr_id id, ast::cal
     }
     auto const result = resolve_overload(scope, id, call.callee, candidates, arguments, name, call_spelling::dot_call);
     if (result != error_type)
-        judge_filtering(file, span_of(file, id), arguments.written);
+    {
+        judge_filtering(file, id, span_of(file, id), arguments.written);
+        judge_constant_arguments(file, id);
+    }
     return result;
 }
 

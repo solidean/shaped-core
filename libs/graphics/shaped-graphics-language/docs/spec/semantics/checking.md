@@ -293,9 +293,18 @@ fun shade(k: float) -> float:
 * **CHK-194** A builtin's bare `texture_2d` or `image_2d` parameter is a pattern too, which takes every texture, or every image, of that shape, whatever it holds and however it is read.
   It is for what depends on neither, such as a size.
 * **CHK-210** A call that hands a builtin an `@unfilterable` texture member and a sampler member that filters is `type-mismatch`, and its detail names both.
+  A sampler a texture's `@sampler` supplies counts as handed (CHK-279).
   A `sampler` member filters unless it is `@non_filtering`, and a static sampler filters unless every filter is `.nearest`.
 * **CHK-211** `max_anisotropy` is an `int` literal from 1 to 16, and anything else is `invalid-attribute-arguments`.
 * **CHK-212** A static sampler whose `max_anisotropy` is above 1 has every filter `.linear` once its settings are applied, or it is `invalid-attribute-arguments`.
+* **CHK-279** `@sampler(name)` stands on a texture member and names a sampler member of the same binding, static or dynamic.
+  On any other member it is `wrong-kind-of-name`; a name the binding has no member of is `unknown-member`, and one that is no sampler `wrong-kind-of-name`.
+  A texture method called without its sampler takes the texture's `@sampler`, which is `missing-sampler` where the texture has none,
+  and `type-mismatch` where it is not the kind the call takes: a `comparison_sampler` for a comparison, and a `sampler` otherwise.
+* **CHK-280** A texture method's `offset` and `component` are constants: a literal, an enum case, a `const`, or a construction of those.
+  An offset's literals are from -8 to 7, and a comparison's `level` is the literal `0.0`; anything else is `invalid-constant-argument`.
+* **CHK-281** A call that samples a depth texture through a sampler that filters is `type-mismatch`, as CHK-210 is for an `@unfilterable` texture.
+  A comparison takes a `comparison_sampler`, which is none of the samplers this counts.
 
 ```sgl
 @inline binding constants:
@@ -706,20 +715,20 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `duplicate-declaration` | CHK-12, CHK-28, CHK-241 |
 | `dependency-cycle` | CHK-18, CHK-136 |
 | `unknown-name` | CHK-24, CHK-62, CHK-245 |
-| `wrong-kind-of-name` | CHK-24, CHK-54, CHK-79, CHK-237, CHK-247, CHK-199, CHK-200, CHK-202, CHK-203, CHK-205 |
+| `wrong-kind-of-name` | CHK-24, CHK-54, CHK-79, CHK-237, CHK-247, CHK-199, CHK-200, CHK-202, CHK-203, CHK-205, CHK-279 |
 | `missing-type` | CHK-26 |
 | `unknown-builtin` | CHK-31 |
 | `expected-body` | CHK-32, CHK-236 |
 | `opaque-struct-needs-builtin` | CHK-34 |
 | `invalid-attribute-arguments` | CHK-36, CHK-39, CHK-204, CHK-208, CHK-211, CHK-212, CHK-220, CHK-231, CHK-267 |
 | `binding-not-listed` | CHK-45, CHK-131, CHK-228 |
-| `type-mismatch` | CHK-52, CHK-56, CHK-77, CHK-112 to CHK-118, CHK-121, CHK-167, CHK-210, CHK-214, CHK-219, CHK-236, CHK-243 |
+| `type-mismatch` | CHK-52, CHK-56, CHK-77, CHK-112 to CHK-118, CHK-121, CHK-167, CHK-210, CHK-214, CHK-219, CHK-236, CHK-243, CHK-279, CHK-281 |
 | `not-assignable` | CHK-112, CHK-236 |
 | `missing-return` | CHK-125, CHK-236 |
 | `unreachable-code` | CHK-126, CHK-162 |
 | `no-effect` | CHK-225 |
 | `recursive-call` | CHK-130 |
-| `unknown-member` | CHK-64, CHK-147, CHK-152 |
+| `unknown-member` | CHK-64, CHK-147, CHK-152, CHK-279 |
 | `no-matching-overload` | CHK-71, CHK-155 |
 | `non-exhaustive-case` | CHK-160 |
 | `duplicate-case-pattern` | CHK-161 |
@@ -743,6 +752,8 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `literal-conversion-result` | CHK-85 |
 | `literal-needs-type` | CHK-257, CHK-268 |
 | `shift-out-of-range` | CHK-270 |
+| `missing-sampler` | CHK-279 |
+| `invalid-constant-argument` | CHK-280 |
 
 ## Open
 

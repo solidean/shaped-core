@@ -190,6 +190,11 @@ enum class sgl::diagnostic_kind : sgl::u8
     literal_needs_type,
     /// A shift whose count is a literal outside 0 to 31, which can only be a mistake.
     shift_out_of_range,
+    /// A texture method called without its sampler, on a texture whose binding member names none by `@sampler`.
+    missing_sampler,
+    /// An argument a target takes only as a constant, such as a texel offset, given a value computed at run time or a
+    /// constant outside the range the targets take.
+    invalid_constant_argument,
 };
 
 namespace sgl

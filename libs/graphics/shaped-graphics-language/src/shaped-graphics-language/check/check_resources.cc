@@ -158,7 +158,8 @@ type_id checker::resolve_resource_applied(i32 file, ast::expr_id expr, ast::inde
                               out.name_of(element)));
             return checked_module::error_type;
         }
-        if (texture->shape == texture_shape::d2_ms_array)
+        // a builtin's signature names the type the user's binding already had to be granted
+        if (texture->shape == texture_shape::d2_ms_array && !is_prelude_file(file))
             judge_feature(file, where, text, feature::multisampled_array_textures);
         return resource_type({.kind = type_kind::texture, .element = element, .shape = texture->shape});
     }
@@ -332,11 +333,19 @@ sampler_state checker::compile_sampler(i32 file, ast::sampler_decl const& s)
     return state;
 }
 
-void checker::judge_filtering(i32 file, source_span call, cc::span<written_argument const> arguments)
+void checker::judge_filtering(i32 file, ast::expr_id id, source_span call, cc::span<written_argument const> arguments)
 {
-    // CHK-210: an @unfilterable texture is sampled through a sampler that never filters.
-    auto texture = cc::string();
-    auto sampler = cc::string();
+    auto const record = out.files[file].call_at(id);
+    auto const* const callee
+        = record >= 0 ? out.builtin_function(out.at(out.call_records[record].callee).intrinsic) : nullptr;
+
+    // The members the call samples through: each binding member among its arguments, and a `@sampler` it leaves out.
+    struct sampled
+    {
+        member_info const* member;
+        cc::string path;
+    };
+    auto members = cc::vector<sampled>();
     for (auto const& a : arguments)
     {
         if (!ast::is_valid(a.expr) || a.splat_member >= 0)
@@ -344,24 +353,167 @@ void checker::judge_filtering(i32 file, source_span call, cc::span<written_argum
         auto const& where = out.files[file].target_at(a.expr);
         if (where.kind != target_kind::binding_member)
             continue;
-        auto const& m = out.at(out.bindings[out.at(where.symbol).info].members)[where.index];
-        auto const& t = out.at(m.type);
-        auto const path = cc::format("{}.{}", out.at(where.symbol).name, m.name);
-        if (t.kind == type_kind::texture && m.is_unfilterable)
+        auto const& binding = out.bindings[out.at(where.symbol).info];
+        auto const all = out.at(binding.members);
+        auto const& m = all[where.index];
+        members.push_back({.member = &m, .path = cc::format("{}.{}", out.at(where.symbol).name, m.name)});
+        if (callee == nullptr || callee->with_default_sampler == builtin_id::none || &a != &arguments[0])
+            continue;
+        // CHK-279: the texture's @sampler stands in for the sampler the call leaves out
+        if (m.default_sampler < 0)
+        {
+            report(diagnostic_kind::missing_sampler, file, call,
+                   cc::format("{} names no @sampler, so a call that samples it names a sampler: `{}.{}(…, smp)`",
+                              members.back().path, m.name, callee->name));
+            return;
+        }
+        auto const& smp = all[m.default_sampler];
+        auto const wants_comparison
+            = out.builtin_function(callee->with_default_sampler)->parameters[2] == "comparison_sampler";
+        if (smp.type != checked_module::error_type && out.at(smp.type).is_comparison != wants_comparison)
+        {
+            report(diagnostic_kind::type_mismatch, file, call,
+                   cc::format("{} takes a {}, and the @sampler of {} is {}", callee->name,
+                              wants_comparison ? "comparison_sampler" : "sampler", members.back().path, smp.name));
+            return;
+        }
+        members.push_back({.member = &smp, .path = cc::format("{}.{}", out.at(where.symbol).name, smp.name)});
+    }
+
+    // CHK-210: an @unfilterable texture is sampled through a sampler that never filters.
+    // CHK-281: so is a depth texture, which WebGPU has no filtering of outside a comparison.
+    auto texture = cc::string();
+    auto is_depth = false;
+    auto sampler = cc::string();
+    for (auto const& [m, path] : members)
+    {
+        auto const& t = out.at(m->type);
+        if (t.kind == type_kind::texture && (m->is_unfilterable || t.is_depth))
+        {
             texture = path;
+            is_depth = t.is_depth;
+        }
         if (t.kind != type_kind::sampler || t.is_comparison)
             continue;
-        auto const* const fixed = m.static_sampler >= 0 ? &out.samplers[m.static_sampler] : nullptr;
+        auto const* const fixed = m->static_sampler >= 0 ? &out.samplers[m->static_sampler] : nullptr;
         auto const is_linear_anywhere
             = fixed != nullptr && (fixed->min_filter == 1 || fixed->mag_filter == 1 || fixed->mip_filter == 1);
-        if (fixed != nullptr ? is_linear_anywhere : !m.is_non_filtering)
+        if (fixed != nullptr ? is_linear_anywhere : !m->is_non_filtering)
             sampler = path;
     }
     if (!texture.empty() && !sampler.empty())
         report(diagnostic_kind::type_mismatch, file, call,
-               cc::format("{} is @unfilterable, and {} filters: sample it through a @non_filtering sampler, or a "
+               cc::format("{} is {}, and {} filters: sample it through a @non_filtering sampler, or a "
                           "static one whose filters are all .nearest",
-                          texture, sampler));
+                          texture, is_depth ? "a depth texture" : "@unfilterable", sampler));
+}
+
+bool checker::is_constant_argument(i32 file, ast::expr_id expr) const
+{
+    if (!ast::is_valid(expr))
+        return false;
+    auto const& node = ast_of(file).at(expr).node;
+    if (node.is<ast::literal>() || node.is<ast::leading_dot>())
+        return true;
+    auto const& tables = out.files[file];
+    auto const& where = tables.target_at(expr);
+    if (where.kind == target_kind::enum_case)
+        return true;
+    if (where.kind == target_kind::symbol && out.at(where.symbol).kind == symbol_kind::constant)
+        return true;
+    // a construction, `int2(1, -1)`: a struct's own, or a builtin named for the type it gives
+    auto const record = tables.call_at(expr);
+    if (record < 0)
+        return false;
+    auto const& r = out.call_records[record];
+    auto const is_construction
+        = where.kind == target_kind::constructor || out.at(r.callee).name == out.name_of(tables.type_at(expr));
+    if (!is_construction)
+        return false;
+    for (auto const& w : out.at(r.written))
+        if (w.splat_member >= 0 || !is_constant_argument(file, w.expr))
+            return false;
+    return true;
+}
+
+void checker::judge_constant_arguments(i32 file, ast::expr_id id)
+{
+    auto const record = out.files[file].call_at(id);
+    if (record < 0)
+        return;
+    auto const& r = out.call_records[record];
+    auto const* const callee = out.builtin_function(out.at(r.callee).intrinsic);
+    if (callee == nullptr)
+        return;
+    auto const written = out.at(r.written);
+    auto const slots = out.at(r.slots);
+    auto is_compare = false;
+    for (auto const& n : callee->named_only)
+        is_compare = is_compare || n == "reference";
+    for (auto p = isize(0); p < slots.size() && p < callee->named_only.size(); ++p)
+    {
+        auto const& name = callee->named_only[p];
+        auto const is_level = is_compare && name == "level";
+        if (slots[p] < 0 || (name != "offset" && name != "component" && !is_level))
+            continue;
+        auto const expr = written[slots[p]].expr;
+        auto const where = span_of(file, expr);
+        if (is_level)
+        {
+            // every target compares at level 0 alone, and only WebGPU names it
+            auto const text = text_of(file, where);
+            if (!ast_of(file).at(expr).node.is<ast::literal>() || (text != "0.0" && text != "0.00"))
+                report(diagnostic_kind::invalid_constant_argument, file, where,
+                       "a comparison samples level 0.0 alone, which the call says as `level = 0.0`");
+            continue;
+        }
+        if (!is_constant_argument(file, expr))
+        {
+            report(diagnostic_kind::invalid_constant_argument, file, where,
+                   name == "offset"
+                       ? cc::string("an offset is a constant from -8 to 7, such as `offset = int2(1, -1)`")
+                       : cc::string("a gather's component is a constant, such as `component = texel_component.y`"));
+            continue;
+        }
+        if (name == "offset")
+            judge_offset_range(file, expr);
+    }
+}
+
+void checker::index_builtin_symbols()
+{
+    if (out.builtins == nullptr)
+        return;
+    symbol_of_builtin.resize_to_filled(out.builtins->functions.size(), symbol_id::none);
+    for (auto i = isize(0); i < out.symbols.size(); ++i)
+        if (auto const intrinsic = out.symbols[i].intrinsic; out.builtins->is_known(intrinsic))
+            symbol_of_builtin[index_of(intrinsic)] = symbol_id(i);
+}
+
+symbol_id checker::symbol_declaring(builtin_id id) const
+{
+    return is_valid(id) && index_of(id) < symbol_of_builtin.size() ? symbol_of_builtin[index_of(id)] : symbol_id::none;
+}
+
+void checker::judge_offset_range(i32 file, ast::expr_id expr)
+{
+    // the literals of the construction; a `const` it names was judged where it was declared, if at all
+    auto const& node = ast_of(file).at(expr).node;
+    if (node.is<ast::literal>())
+    {
+        auto const text = text_of(file, span_of(file, expr));
+        auto const value
+            = classify_number(text) == number_class::plain_integer ? parse_literal_integer(text) : cc::optional<i64>();
+        if (value.has_value() && (value.value() < -8 || value.value() > 7))
+            report(diagnostic_kind::invalid_constant_argument, file, span_of(file, expr),
+                   "an offset reaches from -8 to 7 texels on every target");
+        return;
+    }
+    auto const record = out.files[file].call_at(expr);
+    if (record < 0)
+        return;
+    for (auto const& w : out.at(out.call_records[record].written))
+        judge_offset_range(file, w.expr);
 }
 
 cc::string sgl::check::texel_name_of(i32 format)

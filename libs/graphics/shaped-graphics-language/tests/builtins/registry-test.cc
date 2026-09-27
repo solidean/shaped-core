@@ -39,30 +39,47 @@ TEST("sgl builtins - the registry generates a prelude that parses, and reads eve
     CHECK(r.at(float3).spelled_in(builtins::language::wgsl) == "vec3f");
     CHECK(r.at(float3).leaf_count == 3);
 
-    // a record is one overload: the name and the parameter types, read from the signature's own text
+    // a record is one overload: the name, the parameter types and the named-only names, read from the signature's own text
+    cc::string_view const positional[] = {"", "", ""};
+    cc::string_view const two_positional[] = {"", ""};
     cc::string_view const on_vec3[] = {"vec3", "vec3"};
     cc::string_view const on_float3[] = {"float3", "float3"};
-    auto const dot_vec3 = r.find_function("dot", on_vec3);
-    auto const dot_float3 = r.find_function("dot", on_float3);
+    auto const dot_vec3 = r.find_function("dot", on_vec3, two_positional);
+    auto const dot_float3 = r.find_function("dot", on_float3, two_positional);
     REQUIRE(sgl::is_valid(dot_vec3));
     REQUIRE(sgl::is_valid(dot_float3));
     CHECK(dot_vec3 != dot_float3);
     CHECK(r.at(dot_vec3).result == r.find_type("float"));
     cc::string_view const mixed[] = {"vec3", "float3"};
-    CHECK(!sgl::is_valid(r.find_function("dot", mixed)));
+    CHECK(!sgl::is_valid(r.find_function("dot", mixed, two_positional)));
+
+    // `.level` and `.bias` are one type, and two overloads
+    cc::string_view const on_sample[] = {"texture_2d[float4]", "float2", "sampler", "float"};
+    cc::string_view const at_level[] = {"", "", "", "level"};
+    cc::string_view const with_bias[] = {"", "", "", "bias"};
+    auto const level = r.find_function("sample", on_sample, at_level);
+    auto const bias = r.find_function("sample", on_sample, with_bias);
+    REQUIRE(sgl::is_valid(level));
+    REQUIRE(sgl::is_valid(bias));
+    CHECK(level != bias);
+    cc::string_view const all_positional[] = {"", "", "", ""};
+    CHECK(!sgl::is_valid(r.find_function("sample", on_sample, all_positional)));
 
     // no two records are the same overload, or a declaration could not say which one it stands for
     for (auto i = isize(0); i < r.functions.size(); ++i)
     {
         auto parameters = cc::vector<cc::string_view>();
+        auto named_only = cc::vector<cc::string_view>();
         for (auto const& p : r.functions[i].parameters)
             parameters.push_back(p);
-        CHECK(r.find_function(r.functions[i].name, parameters) == sgl::builtin_id(i));
+        for (auto const& n : r.functions[i].named_only)
+            named_only.push_back(n);
+        CHECK(r.find_function(r.functions[i].name, parameters, named_only) == sgl::builtin_id(i));
     }
 
     // the one name a target spells differently so far
     cc::string_view const on_mix[] = {"float3", "float3", "float"};
-    auto const mix = r.find_function("mix", on_mix);
+    auto const mix = r.find_function("mix", on_mix, positional);
     REQUIRE(sgl::is_valid(mix));
     CHECK(r.at(mix).called_in(builtins::language::hlsl) == "lerp");
     CHECK(r.at(mix).called_in(builtins::language::msl) == "mix");
@@ -144,4 +161,60 @@ TEST("sgl builtins - a local may not hide the function a builtin is written as, 
     REQUIRE(wgsl.has_text());
     CHECK(hlsl.text.contains("const float lerp_ = lerp(p.a, p.b, 0.5);"));
     CHECK(wgsl.text.contains("let lerp: f32 = mix(p.a, p.b, 0.5);"));
+}
+
+TEST("sgl builtins - a texture method's MSL, which no group reaches until MSL takes one")
+{
+    auto const& r = builtins::default_registry();
+    // the call a record writes, with its arguments already written as the names of their parameters
+    auto const msl = [&](cc::string_view name, cc::span<cc::string_view const> types,
+                         cc::span<cc::string_view const> named_only, cc::span<cc::string_view const> arguments)
+    {
+        auto const id = r.find_function(name, types, named_only);
+        REQUIRE(sgl::is_valid(id));
+        auto written = cc::vector<builtins::written>();
+        for (auto const a : arguments)
+            written.push_back({.text = cc::string(a)});
+        auto const& record = r.at(id);
+        return record.write
+            .custom({.target = builtins::language::msl, .arguments = written, .builtins = r, .data = record.write.data})
+            .text;
+    };
+
+    cc::string_view const bias_types[] = {"texture_2d_array[float4]", "float2", "sampler", "int", "float"};
+    cc::string_view const bias_names[] = {"", "", "", "layer", "bias"};
+    cc::string_view const bias_args[] = {"t", "uv", "s", "2", "0.5"};
+    CHECK(msl("sample", bias_types, bias_names, bias_args) == "t.sample(s, uv, uint(2), bias(0.5))");
+
+    // a gather names its component, and takes an offset before it on every shape but a cube
+    cc::string_view const gather_types[] = {"texture_2d[float4]", "float2", "sampler", "texel_component", "int2"};
+    cc::string_view const gather_names[] = {"", "", "", "component", "offset"};
+    cc::string_view const gather_args[] = {"t", "uv", "s", "3", "int2(1, 0)"};
+    CHECK(msl("gather", gather_types, gather_names, gather_args) == "t.gather(s, uv, int2(1, 0), component::w)");
+    cc::string_view const cube_types[] = {"texture_cube[float4]", "float3", "sampler", "texel_component"};
+    cc::string_view const cube_names[] = {"", "", "", "component"};
+    cc::string_view const cube_args[] = {"t", "d", "s", "1"};
+    CHECK(msl("gather", cube_types, cube_names, cube_args) == "t.gather(s, d, component::y)");
+
+    cc::string_view const compare_types[] = {"texture_2d_depth", "float2", "comparison_sampler", "float", "float"};
+    cc::string_view const compare_names[] = {"", "", "", "reference", "level"};
+    cc::string_view const compare_args[] = {"t", "uv", "c", "0.5", "0.0"};
+    CHECK(msl("sample_compare", compare_types, compare_names, compare_args) == "t.sample_compare(c, uv, 0.5, level(0))");
+
+    // a load of three channels reads four, and keeps its own
+    cc::string_view const load_types[] = {"texture_2d[float3]", "int2", "int"};
+    cc::string_view const load_names[] = {"", "", ""};
+    cc::string_view const load_args[] = {"t", "xy", "1"};
+    CHECK(msl("load", load_types, load_names, load_args) == "t.read(uint2(xy), uint(1)).xyz");
+
+    // a store pads its value to four channels of its own kind
+    cc::string_view const store_types[] = {"out image_2d_array[uint]", "int2", "uint", "int"};
+    cc::string_view const store_names[] = {"", "", "", "layer"};
+    cc::string_view const store_args[] = {"i", "xy", "v", "3"};
+    CHECK(msl("store", store_types, store_names, store_args) == "i.write(uint4(v, 0u, 0u, 0u), uint2(xy), uint(3))");
+
+    cc::string_view const size_types[] = {"texture_3d", "int"};
+    cc::string_view const size_names[] = {"", ""};
+    cc::string_view const size_args[] = {"t", "2"};
+    CHECK(msl("size", size_types, size_names, size_args) == "int3(t.get_width(2), t.get_height(2), t.get_depth(2))");
 }

@@ -292,6 +292,8 @@ struct checker
     /// The symbols in compilation, outermost first, which is the loop a dependency cycle names.
     cc::vector<symbol_id> compiling;
     cc::vector<function_notes> notes;
+    /// Parallel to the registry's functions: the prelude symbol declaring each, filled before any tree is flattened.
+    cc::vector<symbol_id> symbol_of_builtin;
     /// Every call of a function that is no `@builtin`, in the order the bodies were checked.
     cc::vector<call_edge> calls;
     /// The object `check_index` is checking right now: the one place a buffer may stand as an expression.
@@ -419,8 +421,8 @@ struct checker
     [[nodiscard]] interpolation interpolation_of(i32 file, ast::attribute const* a);
     /// The grid of a `@compute` attribute; `{1, 1, 1}` without one, and after a bad argument it reports.
     [[nodiscard]] cc::fixed_array<i32, 3> workgroup_of(i32 file, ast::attribute const* a);
-    /// The name of a `@stream(name)`; empty without one, and after a bad argument it reports.
-    [[nodiscard]] cc::string stream_of(i32 file, ast::attribute const* a);
+    /// The one name of a `@stream(name)` or a `@sampler(name)`; empty without one, and after a bad argument it reports.
+    [[nodiscard]] cc::string name_argument_of(i32 file, ast::attribute const* a);
     /// The members of a struct or a binding, collected locally and appended whole so the range stays contiguous.
     /// A `@pixel struct`'s members are targets, so their attributes may be a target's settings.
     [[nodiscard]] ast::range_of<member_info> compile_members(i32 file,
@@ -458,7 +460,17 @@ struct checker
     /// The settings of a `sampler name:` block; a setting that is wrong is reported and left at its default.
     [[nodiscard]] sampler_state compile_sampler(i32 file, ast::sampler_decl const& s);
     /// Reports a call that hands over an `@unfilterable` texture member together with a sampler member that filters.
-    void judge_filtering(i32 file, source_span call, cc::span<written_argument const> arguments);
+    /// The sampler a sampling call reads against its texture: filtering (CHK-210, CHK-281), and a `@sampler` supplied
+    /// where the call names none (CHK-279).
+    void judge_filtering(i32 file, ast::expr_id id, source_span call, cc::span<written_argument const> arguments);
+    /// CHK-280: a texel offset and a gather's component are constants, and a compare's level is the literal 0.0.
+    void judge_constant_arguments(i32 file, ast::expr_id id);
+    void judge_offset_range(i32 file, ast::expr_id expr);
+    void index_builtin_symbols();
+    /// The prelude symbol that declares `id`; `none` for a record no declaration names.
+    [[nodiscard]] symbol_id symbol_declaring(builtin_id id) const;
+    /// A literal, an enum case, a `const`, or a construction of those: what a target takes where it takes no value.
+    [[nodiscard]] bool is_constant_argument(i32 file, ast::expr_id expr) const;
     /// A builtin's parameter type, where an image names the texel it reads or writes: `out image_2d[float4]`.
     [[nodiscard]] type_id resolve_pattern_type(i32 file, ast::expr_id expr);
     /// True where an argument of type `argument` may stand for a parameter of type `parameter` (CHK-70, CHK-207).

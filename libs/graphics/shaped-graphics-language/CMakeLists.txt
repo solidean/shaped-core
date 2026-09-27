@@ -332,6 +332,7 @@ if(SC_BUILD_TESTS)
         tests/check/check-test-support.hh
         tests/corpus/corpus-test.cc
         tests/check/binding-check-test.cc
+        tests/check/texture-check-test.cc
         tests/check/case-check-test.cc
         tests/check/footprint-check-test.cc
         tests/check/control-flow-check-test.cc

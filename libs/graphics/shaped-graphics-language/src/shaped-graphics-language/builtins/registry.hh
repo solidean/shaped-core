@@ -52,6 +52,8 @@ struct sgl::builtins::call_context
     language target = language::hlsl;
     cc::span<written const> arguments;
     registry const& builtins;
+    /// The record's `spelling::data`, which lets one writer serve a family of records.
+    u32 data = 0;
 };
 
 /// What a helper writer is given: the target, and each argument's type as the target spells it.
@@ -59,6 +61,8 @@ struct sgl::builtins::helper_context
 {
     language target = language::hlsl;
     cc::span<cc::string const> argument_types;
+    /// The record's `spelling::data`.
+    u32 data = 0;
 };
 
 namespace sgl::builtins
@@ -105,6 +109,8 @@ struct sgl::builtins::spelling
     precedence binds = precedence::primary;
     custom_writer custom = nullptr;
     helper_writer helper = nullptr;
+    /// Whatever `custom` and `helper` read to tell the records they serve apart, such as which texture call it is.
+    u32 data = 0;
 };
 
 /// Where a value of a builtin type lands in a constant block; a size of 0 means it has no place in one.
@@ -155,6 +161,9 @@ struct sgl::builtins::function_record
     /// Empty for a builtin defined for every argument; otherwise the interpreter asks it before evaluating.
     undefined_check undefined_when = nullptr;
     spelling write;
+    /// A texture method called without its sampler, which the texture's `@sampler` supplies at the call (CHK-279).
+    /// The flattener calls this record instead, with the sampler inserted after the coordinate; `none` for every other.
+    builtin_id with_default_sampler = builtin_id::none;
     /// Takes screen-space derivatives implicitly, as a sample that picks its own level does.
     /// WGSL then judges the control flow around every call by its uniformity rules, which HLSL and MSL do not have.
     bool uses_derivatives = false;
@@ -164,6 +173,9 @@ struct sgl::builtins::function_record
     /// Each parameter's type as the signature spells it: a builtin type's name, or a resource pattern such as
     /// `out image_2d[float4]`, which the check pass matches by the same spelling.
     cc::vector<cc::string> parameters;
+    /// Parallel to `parameters`: a named-only parameter's name, empty for a positional one.
+    /// Two records whose types agree are still two overloads when these differ: `.level: float` and `.bias: float`.
+    cc::vector<cc::string> named_only;
     /// `none` for a function that gives nothing, which only one with an effect can be.
     builtin_type_id result = builtin_type_id::none;
 
@@ -209,8 +221,10 @@ struct sgl::builtins::registry
 
     /// `none` for a name no type was registered under.
     [[nodiscard]] builtin_type_id find_type(cc::string_view name) const;
-    /// The overload of `name` that takes exactly `parameters`; `none` when there is none.
-    [[nodiscard]] builtin_id find_function(cc::string_view name, cc::span<cc::string_view const> parameters) const;
+    /// The overload of `name` that takes exactly `parameters`, named-only as `named_only` says; `none` when there is none.
+    [[nodiscard]] builtin_id find_function(cc::string_view name,
+                                           cc::span<cc::string_view const> parameters,
+                                           cc::span<cc::string_view const> named_only) const;
     [[nodiscard]] bool has_function_named(cc::string_view name) const;
 
     /// The whole of `prelude/builtins.sgl`, byte for byte, in registration order.
