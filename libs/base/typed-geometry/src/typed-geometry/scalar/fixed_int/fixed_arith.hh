@@ -194,21 +194,16 @@ template <int Bits, bool S>
 
 namespace impl
 {
-/// floor(x / w) and ceil(x / w) as i64, for a quotient that fits 32 bits.
-///
-/// An f64 estimate of the quotient is within 2^-20 of it (each conversion is within ~2^-52, the division adds
-/// 2^-53, and |q| < 2^32), so its floor is floor(x / w) or one off it.
-/// The exact remainder says which: it is computed at a width where x - f * w cannot overflow, since |r| < 2|w|.
+/// floor(x / w) and ceil(x / w) from an estimate t that is floor(x / w) or one off it.
+/// The exact remainder says which: it is computed at a width where x - t * w cannot overflow, since |r| < 2|w|.
 template <int A, int B, bool S>
-[[nodiscard]] constexpr floor_ceil_result<i64> small_quotient(fixed_integer<A, S> const& x, fixed_integer<B, S> const& w)
+[[nodiscard]] constexpr floor_ceil_result<i64> correct_quotient(fixed_integer<A, S> const& x,
+                                                                fixed_integer<B, S> const& w,
+                                                                i64 t)
 {
     constexpr int W = A > B + 64 ? A : B + 64;
     using wide = fixed_integer<W, S>;
 
-    auto const qd = to_f64_generic<false>(x) / to_f64_generic<false>(w);
-    auto t = i64(qd);
-    if (f64(t) > qd)
-        --t;
     if constexpr (!S)
         t = t < 0 ? 0 : t; // the true quotient is not negative, and a wrapped estimate would break the remainder
 
@@ -228,6 +223,20 @@ template <int A, int B, bool S>
         r -= wv;
     }
     return {t, t + i64(r != wide())};
+}
+
+/// floor(x / w) and ceil(x / w) as i64, for a quotient that fits 32 bits.
+///
+/// An f64 estimate of the quotient is within 2^-20 of it (each conversion is within ~2^-52, the division adds
+/// 2^-53, and |q| < 2^32), so its floor is floor(x / w) or one off it, which correct_quotient settles.
+template <int A, int B, bool S>
+[[nodiscard]] constexpr floor_ceil_result<i64> small_quotient(fixed_integer<A, S> const& x, fixed_integer<B, S> const& w)
+{
+    auto const qd = to_f64_generic<false>(x) / to_f64_generic<false>(w);
+    auto t = i64(qd);
+    if (f64(t) > qd)
+        --t;
+    return correct_quotient(x, w, t);
 }
 
 template <class Q, int A, int B, bool S>

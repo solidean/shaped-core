@@ -121,6 +121,8 @@ if(SC_BUILD_TESTS)
         tests/scalar/fixed_int-test.cc
         tests/scalar/fixed_int-golden.gen.cc
 
+        tests/benchmarks/fixed_int-benchmark.cc
+
         tests/linalg/comp-test.cc
         tests/linalg/vec-test.cc
         tests/linalg/pos-test.cc
