@@ -3,6 +3,7 @@
 #include <clean-core/function/function_ref.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/string.hh>
+#include <typed-geometry/scalar/fixed_int/generated/all.hh>
 #include <typed-geometry/scalar/fixed_int/impl/core.hh>
 #include <typed-geometry/scalar/traits.hh>
 

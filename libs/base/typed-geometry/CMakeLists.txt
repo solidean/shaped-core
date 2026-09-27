@@ -26,6 +26,12 @@ target_sources(typed-geometry
     src/typed-geometry/scalar/angle.hh
     src/typed-geometry/scalar/all.hh
     src/typed-geometry/scalar/fixed_int/impl/core.hh
+    src/typed-geometry/scalar/fixed_int/generated/all.hh
+    src/typed-geometry/scalar/fixed_int/generated/w32.hh
+    src/typed-geometry/scalar/fixed_int/generated/w64.hh
+    src/typed-geometry/scalar/fixed_int/generated/w128.hh
+    src/typed-geometry/scalar/fixed_int/generated/w192.hh
+    src/typed-geometry/scalar/fixed_int/generated/w256.hh
     src/typed-geometry/scalar/fixed_int/fixed_int.hh
     src/typed-geometry/scalar/fixed_int/fixed_arith.hh
 
@@ -113,6 +119,7 @@ if(SC_BUILD_TESTS)
         tests/scalar/scalar-test.cc
         tests/scalar/angle-test.cc
         tests/scalar/fixed_int-test.cc
+        tests/scalar/fixed_int-golden.gen.cc
 
         tests/linalg/comp-test.cc
         tests/linalg/vec-test.cc
