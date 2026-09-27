@@ -464,6 +464,7 @@ struct resolved_view
             entry.offset = u64(bv->offset_in_bytes);
             entry.size = u64(size);
             group->referenced_buffers.push_back(bv->buffer);
+            group->bound.push_back({.resource = bv->buffer.get(), .binding = isize(rv.slot), .bound_as = bv->bound_as});
         }
         else if (auto const* tv = sg::try_as_texture_view(view))
         {
@@ -475,6 +476,7 @@ struct resolved_view
             texture_views.push_back(texture->create_view(tv->view_dimension, tv->format, tv->range));
             entry.textureView = texture_views.back().get();
             group->referenced_textures.push_back(tv->texture);
+            group->bound.push_back({.resource = tv->texture.get(), .binding = isize(rv.slot), .bound_as = tv->bound_as});
         }
         else
             return cc::error(cc::format("binding_group: '{}' binds an acceleration structure, and webgpu has no ray "

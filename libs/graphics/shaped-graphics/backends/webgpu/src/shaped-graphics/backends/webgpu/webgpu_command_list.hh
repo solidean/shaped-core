@@ -16,6 +16,8 @@
 /// A copy recorded inside a rendering scope closes the render pass and reopens it with every load op set to load, since the contents are now real.
 ///
 /// There are no barriers: WebGPU tracks usage itself and transitions nothing sg can see.
+/// **Except between two draws of one render pass**, which WebGPU does not order: a draw touching what an earlier draw of
+/// the open pass wrote ends the pass, and the reopened one sees the write — the pipeline's footprint says which draws write.
 class sg::backend::webgpu::webgpu_command_list final : public sg::command_list
 {
 public:
@@ -96,6 +98,16 @@ public:
     };
     bound_state _compute;
     bound_state _raster;
+
+    // What a draw orders against inside one pass, which WebGPU does not order for sg.
+    // The bound raster groups and the pipeline's footprint say what each draw touches; a draw touching a resource an
+    // earlier draw of the open pass wrote ends the pass, and the reopened one sees the write.
+    cc::fixed_vector<webgpu_binding_group const*, sg::max_binding_groups> _raster_group_objects;
+    sg::impl::pipeline_footprint const* _raster_footprint = nullptr;
+    cc::vector<void const*> _pass_writes;
+
+    /// Ends the open pass where the next draw touches what an earlier draw of it wrote, and records what this one writes.
+    void order_draw_after_pass_writes();
 
     // The open rendering scope, kept so a copy in its middle can close and reopen it.
     bool _in_rendering_scope = false;

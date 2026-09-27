@@ -67,6 +67,14 @@ None of it is any one backend's spelling, and each value documents its D3D12 and
 `is_unordered_write` marks the writes that need a hazard barrier — shader, copy and accel writes.
 Color and depth *targets* are ROP-ordered freebies.
 
+## Draws inside one render pass on webgpu
+
+WebGPU emits no barriers sg can see, and it orders every pass after the one before it.
+What it does not order is two draws of one render pass: a pixel shader writing a buffer, and the next draw reading it, may race.
+So the webgpu backend ends the pass before a draw that touches what an earlier draw of the open pass wrote, and reopens it with its targets loaded.
+Which draws write is the bound pipeline's footprint; a draw that only reads splits nothing.
+That split is counted as `render_pass_splits`, which is where vulkan and metal count theirs too.
+
 ## Minimal barriers: the three-timeline state
 
 [resource_access_state.hh](../../src/shaped-graphics/barrier/resource_access_state.hh) is the reusable state machine a backend feeds declared accesses into.

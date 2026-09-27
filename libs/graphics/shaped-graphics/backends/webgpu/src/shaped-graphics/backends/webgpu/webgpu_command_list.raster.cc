@@ -1,8 +1,10 @@
 // Raster recording for the webgpu backend: the rendering scope, its reopen around copies, and draws.
 
 #include <clean-core/common/assert.hh>
+#include <shaped-graphics/backends/webgpu/webgpu_binding_group.hh>
 #include <shaped-graphics/backends/webgpu/webgpu_context.hh>
 #include <shaped-graphics/backends/webgpu/webgpu_format.hh>
+#include <shaped-graphics/barrier/access_inference.hh>
 
 namespace sg::backend::webgpu
 {
@@ -87,6 +89,9 @@ void webgpu_command_list::raster_begin_rendering(sg::rendering_info const& info)
     _vertex_buffers.clear();
     _index_buffer = nullptr;
     _raster = bound_state();
+    _raster_group_objects.clear();
+    _raster_footprint = nullptr;
+    _pass_writes.clear();
 
     _in_rendering_scope = true;
 
@@ -99,6 +104,9 @@ void webgpu_command_list::open_render_pass(bool reopen)
     CC_ASSERT(_in_rendering_scope, "no rendering scope to open a pass for");
     if (_compute_pass)
         end_open_pass();
+
+    // A new pass orders after everything the one before it did, so nothing it wrote is a hazard any more.
+    _pass_writes.clear();
 
     if (reopen)
     {
@@ -158,6 +166,9 @@ void webgpu_command_list::raster_end_rendering()
     _vertex_buffers.clear();
     _index_buffer = nullptr;
     _raster = bound_state();
+    _raster_group_objects.clear();
+    _raster_footprint = nullptr;
+    _pass_writes.clear();
 }
 
 void webgpu_command_list::apply_raster_state()
@@ -279,9 +290,37 @@ void webgpu_command_list::raster_set_blend_constants(tg::vec4f constants)
         wgpuRenderPassEncoderSetBlendConstant(render_pass(), &_blend_constants);
 }
 
+void webgpu_command_list::order_draw_after_pass_writes()
+{
+    auto const stages = sg::pipeline_stage_flag::vertex | sg::pipeline_stage_flag::fragment;
+    auto must_split = false;
+    auto writes = cc::vector<void const*>();
+    for (auto group = 0; group < int(_raster_group_objects.size()); ++group)
+    {
+        auto const* const bound_group = _raster_group_objects[group];
+        if (bound_group == nullptr)
+            continue;
+        for (auto const& r : bound_group->bound)
+        {
+            auto const a = sg::access_at(_raster_footprint, group, r.binding, r.bound_as, stages);
+            if (!a.has_value())
+                continue;
+            for (auto const* written : _pass_writes)
+                must_split |= written == r.resource;
+            if (sg::is_unordered_write(a.value().access))
+                writes.push_back(r.resource);
+        }
+    }
+    if (must_split && _render_pass)
+        end_open_pass(); // apply_raster_state reopens it, which is what orders this draw after the write
+    for (auto const* w : writes)
+        _pass_writes.push_back(w);
+}
+
 void webgpu_command_list::raster_draw(sg::draw_config const& config)
 {
     CC_ASSERT(_in_rendering_scope, "draw is only valid inside a rendering scope");
+    order_draw_after_pass_writes();
     apply_raster_state();
     wgpuRenderPassEncoderDraw(render_pass(), u32(config.vertex_range.size), u32(config.instance_range.size),
                               u32(config.vertex_range.offset), u32(config.instance_range.offset));
@@ -300,6 +339,7 @@ void webgpu_command_list::raster_draw_indexed(sg::draw_indexed_config const& con
               "an odd first index into a 16-bit index buffer starts the fetch off a 4-byte boundary. Use an even "
               "first index, or 32-bit indices — sg::is_aligned_index_fetch answers it without asserting");
 
+    order_draw_after_pass_writes();
     apply_raster_state();
     wgpuRenderPassEncoderDrawIndexed(render_pass(), u32(config.index_range.size), u32(config.instance_range.size),
                                      u32(config.index_range.offset), config.vertex_offset,

@@ -3,6 +3,7 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/assertf.hh>
 #include <clean-core/common/utility.hh>
+#include <shaped-graphics/backends/webgpu/webgpu_binding_group.hh>
 #include <shaped-graphics/backends/webgpu/webgpu_context.hh>
 
 namespace sg::backend::webgpu
@@ -182,6 +183,9 @@ void webgpu_command_list::raster_bind_group(int group_index, sg::binding_group c
     CC_ASSERT(_in_rendering_scope, "raster bind_group is only valid inside a rendering scope");
     bind_group_into(_raster, _ctx, group_index, group);
     touch_group(group);
+    while (int(_raster_group_objects.size()) <= group_index)
+        _raster_group_objects.push_back(nullptr);
+    _raster_group_objects[group_index] = static_cast<webgpu_binding_group const*>(&group);
 }
 
 void webgpu_command_list::raster_set_inline_constants(cc::span<byte const> data, cc::optional<isize> offset)
@@ -195,8 +199,12 @@ void webgpu_command_list::raster_bind_pipeline(sg::raster_pipeline const& pipeli
     CC_ASSERT(_in_rendering_scope, "raster bind_pipeline is only valid inside a rendering scope");
     auto const* wp = dynamic_cast<webgpu_raster_pipeline const*>(&pipeline);
     CC_ASSERT(wp != nullptr, "raster_pipeline is not a webgpu raster_pipeline");
+    // A new layout unbinds every group, and what a draw orders against goes with them.
+    if (_raster.layout != wp->layout.get())
+        _raster_group_objects.clear();
     rebind_layout(_raster, wp->layout.get());
     _raster.render_pipeline = wp->pipeline;
     _keep_alive.push_back(wp->layout);
+    _raster_footprint = &pipeline.footprint();
 }
 } // namespace sg::backend::webgpu
