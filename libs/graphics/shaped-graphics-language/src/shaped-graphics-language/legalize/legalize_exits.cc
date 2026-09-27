@@ -642,8 +642,10 @@ flat_entry_point sgl::check::impl::compacted(checked_module const& m, flat_entry
 
 flat_entry_point sgl::check::legalize(checked_module const& m, flat_entry_point const& e, legalize_options const& options)
 {
+    // Compacted even when it is core already: what legalize returns has nothing unreachable in it and nothing shared,
+    // which is what lets a pass over its arrays stand for the tree.
     if (is_core(e))
-        return e;
+        return compacted(m, e, ids_of(e, e.body));
     auto out = flat_builder::extend(m, e);
     out.set_body(erase_checks(out, ids_of(out.e, out.e.body)));
     out.set_body(lower_expressions(out, options));

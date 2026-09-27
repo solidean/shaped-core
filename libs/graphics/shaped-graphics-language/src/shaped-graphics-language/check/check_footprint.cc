@@ -63,6 +63,8 @@ void checker::read_footprint_pin(symbol_id id, i32 file, ast::range_of<ast::attr
     {
         if (text_of(file, a.name) != "expect")
             continue;
+        if (ast.at(a.arguments).empty())
+            report(diagnostic_kind::invalid_attribute_arguments, file, a.name, cc::string(k_pin_usage));
         for (auto const& argument : ast.at(a.arguments))
         {
             auto const where = ast::is_valid(argument.value) ? span_of(file, argument.value) : a.name;

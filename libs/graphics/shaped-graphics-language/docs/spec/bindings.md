@@ -291,6 +291,8 @@ An `@inline` binding is none either, since sg sets it as constants rather than b
 So a use in a called function counts, a use in a branch that may not run counts, and a use only a check or an `assert` makes does not, since the text holds neither.
 A use behind a constant that is always false still counts while the emitted text still holds it; removing it from both is dead-code elimination's job, never the footprint's alone.
 That is the invariant sg relies on: **the footprint covers everything the emitted text uses**, because a slot it calls untouched gets no layout transition at all.
+It is its own pass over that tree rather than something each emitter records as it prints.
+One pass serves every target and a pin judges it once, where four emitters would each have to tell a load from a store at every print site.
 
 **`sgl describe` reports it**, one `slot: access` per touched slot, and slib hands it to sg with the compiled shader.
 A pin in a source states it, which [CHK-267](semantics/checking.md#entry-points) judges:
@@ -337,3 +339,5 @@ A shader using one then gets a diagnostic that names the feature, rather than a 
 * The functions over textures and images — sampling, loads, stores and sizes — and a default sampler on a texture member ([texture-methods.md](incubator/texture-methods.md)).
 * Arrays of textures and images, which `require binding_arrays` grants once they exist.
   Their footprint says whether and how the code indexes them and whether an index is dynamic; which elements it reaches stays the host's to declare per dispatch.
+* SGL may come to name that per-dispatch array declaration itself — tentatively `access` — rather than leaving it to the host alone.
+* Whether a footprint entry distinguishes a uniform dynamic index from a non-uniform one, which some backends pay for differently.

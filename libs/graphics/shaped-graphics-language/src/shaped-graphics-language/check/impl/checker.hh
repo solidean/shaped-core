@@ -253,7 +253,6 @@ enum class setting_scope : u8
     target,
 };
 
-/// The one demand-driven pass; every member function only appends to `out` and flips symbol states.
 /// An entry point's `@expect(footprint = "...")`, judged once its flat tree exists (CHK-267).
 struct footprint_pin
 {
@@ -264,6 +263,7 @@ struct footprint_pin
     source_span where;
 };
 
+/// The one demand-driven pass; every member function only appends to `out` and flips symbol states.
 struct checker
 {
     cc::span<module_file const> files;

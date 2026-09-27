@@ -75,6 +75,26 @@ TEST("sgl footprint - a builtin's parameter says how an image is used, and a sam
 )") == "");
 }
 
+TEST("sgl footprint - a use under deep nesting still counts")
+{
+    // The footprint has no nesting limit of its own, so statements nested inside statements add nothing to what an
+    // expression under them may hold: 100 of each is well inside what the emitter prints.
+    auto source = cc::string(R"(@expect(footprint = "work.source: read, work.values: write")
+@compute(64) fun main(@thread_id id: int3){work}:
+)");
+    auto indent = cc::string("    ");
+    for (auto i = 0; i < 100; ++i)
+    {
+        source += indent + "if id.x >= 0:\n";
+        indent += "    ";
+    }
+    source += indent + "work.values[id.x] = work.source[id.x]";
+    for (auto i = 0; i < 100; ++i)
+        source += " + 1.0";
+    source += "\n";
+    CHECK(reports_for_entry(source) == "");
+}
+
 TEST("sgl footprint - the order a pin names its slots in does not matter")
 {
     CHECK(reports_for_entry(R"(@expect(footprint = "work.values: write,work.source:read,  work:read")
@@ -100,6 +120,11 @@ fun helper(){work} -> float => work.scale
 )")
               .contains("only an entry point has a footprint to pin"));
     CHECK(reports_for_entry(R"(@expect(error = "x")
+@compute(64) fun main(@thread_id id: int3){work}:
+    work.values[id.x] = 1.0
+)")
+              .contains("invalid-attribute-arguments"));
+    CHECK(reports_for_entry(R"(@expect()
 @compute(64) fun main(@thread_id id: int3){work}:
     work.values[id.x] = 1.0
 )")
