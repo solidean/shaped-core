@@ -85,6 +85,12 @@ struct assigned_locals
                 buffers.push_back(buffer_of(e, *element));
                 return;
             }
+            // an array's element is part of the local that holds the array
+            if (auto const* const element = x.node.try_as<flat_element>())
+            {
+                id = element->object;
+                continue;
+            }
             auto const* const member = x.node.try_as<flat_member>();
             if (member == nullptr)
                 return;
@@ -333,6 +339,11 @@ struct expr_lowering
             element->buffer = lowered[0];
             element->index = lowered[1];
         }
+        else if (auto* const element = copy.node.try_as<flat_element>())
+        {
+            element->object = lowered[0];
+            element->index = lowered[1];
+        }
         else if (auto* const construct = copy.node.try_as<flat_construct>())
             construct->arguments = out.expr_list(lowered);
         else if (auto* const call = copy.node.try_as<flat_call>())
@@ -530,11 +541,7 @@ struct expr_lowering
         auto place = assign.place;
         auto const* const element = is_known(out.e, place) ? out.e.at(place).node.try_as<flat_buffer_element>() : nullptr;
         if (element == nullptr)
-        {
-            auto const value = lower_expr(assign.value, into);
-            into.push_back(attributed().assign(place, value));
-            return;
-        }
+            return lower_local_assign(assign, attributed, into);
 
         // by value: lowering appends to the tree
         auto const x = out.e.at(place);
@@ -560,6 +567,78 @@ struct expr_lowering
         {
             out.from = x.from;
             place = out.add_expr(x.type, flat_buffer_element{.buffer = written.buffer, .index = index});
+        }
+        into.push_back_range(value_pre);
+        into.push_back(attributed().assign(place, value));
+    }
+
+    /// A place in a local: its array indices, at any depth, are evaluated before the value, as a buffer's index is.
+    template <class Attributed>
+    void lower_local_assign(flat_assign const& assign, Attributed&& attributed, stmt_list& into)
+    {
+        // the place's steps, from the place down to the local it is part of
+        auto steps = cc::vector<flat_expr_id>();
+        auto root = assign.place;
+        for (auto depth = 0; is_known(out.e, root) && depth < k_max_depth; ++depth)
+        {
+            auto const& node = out.e.at(root).node;
+            auto next = flat_expr_id::none;
+            if (auto const* const member = node.try_as<flat_member>())
+                next = member->object;
+            else if (auto const* const element = node.try_as<flat_element>())
+                next = element->object;
+            else
+                break;
+            steps.push_back(root);
+            root = next;
+        }
+        auto has_index = false;
+        for (auto const step : steps)
+            has_index = has_index || out.e.at(step).node.is<flat_element>();
+        if (!has_index)
+        {
+            auto const value = lower_expr(assign.value, into);
+            into.push_back(attributed().assign(assign.place, value));
+            return;
+        }
+
+        // the indices in evaluation order, the one nearest the local first
+        auto indices = cc::vector<flat_expr_id>::create_filled(steps.size(), flat_expr_id::none);
+        for (auto k = steps.size(); k-- > 0;)
+            if (auto const* const element = out.e.at(steps[k]).node.try_as<flat_element>())
+                indices[k] = lower_expr(element->index, into);
+        auto value_pre = stmt_list();
+        auto const value = lower_expr(assign.value, value_pre);
+        if (!value_pre.empty() && !options.skip_pinning)
+        {
+            auto moved = assigned_locals{.e = out.e};
+            for (auto const id : value_pre)
+                moved.stmt(id, 0);
+            for (auto& index : indices)
+                if (is_known(out.e, index) && (has_effect(out.e, index) || reads_any(out.e, index, moved)))
+                {
+                    out.from = out.e.at(index).from;
+                    auto const pin = out.let("index", index);
+                    out.e.locals[index_of(pin.local)].kind = local_kind::temporary;
+                    into.push_back(pin.stmt);
+                    index = out.local(pin.local);
+                }
+        }
+
+        // the place again, over the lowered indices
+        auto place = root;
+        for (auto k = steps.size(); k-- > 0;)
+        {
+            auto copy = out.e.at(steps[k]);
+            if (auto* const member = copy.node.try_as<flat_member>())
+                member->object = place;
+            else if (auto* const element = copy.node.try_as<flat_element>())
+            {
+                element->object = place;
+                element->index = indices[k];
+            }
+            out.e.exprs.push_back(cc::move(copy));
+            place = flat_expr_id(out.e.exprs.size() - 1);
         }
         into.push_back_range(value_pre);
         into.push_back(attributed().assign(place, value));

@@ -63,6 +63,8 @@ struct target_ {
 * **EMIT-23** A struct is declared after every struct it holds.
 * **EMIT-106** A field of type `void` holds nothing, so no target declares it, and a construction writes no argument for it.
 * **EMIT-107** A struct whose every field is `void` is `unsupported`, since it would be a struct of no member, which WGSL has no spelling for.
+* **EMIT-118** An array is `array<T, N>` in WGSL and MSL, and in HLSL its element type with the lengths after the declared name, `float weights[3]`.
+  A square literal is WGSL's constructor, and in HLSL and MSL a local assigned element by element, as a struct is (EMIT-55).
 
 | SGL | HLSL | WGSL | MSL |
 |---|---|---|---|

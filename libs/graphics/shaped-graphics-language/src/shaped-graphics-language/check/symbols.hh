@@ -21,6 +21,8 @@ enum class sgl::check::type_kind : sgl::u8
     structure,
     /// A declared `enum`: a closed set of named `int` values that converts to nothing (CHK-142, CHK-150).
     enumeration,
+    /// `T[N]`: `count` values of `element`, a value like a struct (CHK-285); `T[a, b]` is an array of arrays.
+    array,
     /// A `buffer[T]`: an array of `element` a shader indexes, and `mut` where it may be written (the spec's bindings file).
     /// It is a resource rather than a value: it stands in a binding, and nothing loads or copies one.
     buffer,
@@ -143,8 +145,10 @@ struct sgl::check::type_info
     bool is_opaque = false;
     /// `@vertex struct` is a vertex input and `@pixel struct` a set of render targets.
     stage edge = stage::none;
-    /// The element of a `buffer`; `none` for every other kind.
+    /// The element of a `buffer` or an `array`; `none` for every other kind.
     type_id element = type_id::none;
+    /// An `array`'s length; 0 for `T[]`, whose length the host binds (CHK-286).
+    i32 count = 0;
     /// Whether a `buffer` may be written: `mut buffer[T]` against `buffer[T]`.
     bool is_mut = false;
     /// The shape of a `texture` or an `image`.
@@ -489,6 +493,10 @@ enum class sgl::check::target_kind : sgl::u8
     enum_case,
     /// `self` in a method or a property, and so the object of a member a bare name reads through it (CHK-245).
     receiver,
+    /// On a `member`: an array's `length`, a constant (CHK-288).
+    array_length,
+    /// On a call: `T[N].filled(v)`, an array holding `v` in every element (CHK-289).
+    array_filled,
 };
 
 /// What an expression refers to, for an editor: go to definition, hover, rename.

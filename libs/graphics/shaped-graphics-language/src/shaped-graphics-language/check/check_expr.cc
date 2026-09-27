@@ -160,25 +160,43 @@ type_id checker::check_index(function_scope& scope, ast::expr_id id, ast::index 
     subscripted = outer;
     if (object == error_type)
         return error_type;
-    if (out.at(object).kind != type_kind::buffer)
+    auto const kind = out.at(object).kind;
+    if (kind != type_kind::buffer && kind != type_kind::array)
     {
-        unsupported(file, where, "a subscript on anything but a buffer");
+        unsupported(file, where, "a subscript on anything but a buffer or an array");
         return error_type;
     }
 
+    // CHK-287: an array takes one index per dimension it has, `grid[i, j]` for `grid[i][j]`, and a buffer takes one
     auto const arguments = ast_of(file).at(node.arguments);
-    if (arguments.size() != 1 || !arguments[0].name.empty() || arguments[0].is_splat)
+    auto rank = isize(1);
+    if (kind == type_kind::array)
+        for (auto t = out.at(object).element; out.at(t).kind == type_kind::array; t = out.at(t).element)
+            ++rank;
+    auto is_plain = !arguments.empty() && arguments.size() <= rank;
+    for (auto const& a : arguments)
+        is_plain = is_plain && a.name.empty() && !a.is_splat;
+    if (!is_plain)
     {
-        report(diagnostic_kind::wrong_kind_of_name, file, where, "a buffer takes one index: `values[i]`");
+        report(diagnostic_kind::wrong_kind_of_name, file, where,
+               kind == type_kind::buffer
+                   ? cc::string("a buffer takes one index: `values[i]`")
+                   : cc::format("{} takes one to {} indices, one per dimension", out.name_of(object), rank));
         return error_type;
     }
 
-    auto const index = check_expr(scope, arguments[0].value);
     auto const int_type = type_of_builtin(builtins::k_int, file, where);
-    if (index != error_type && index != int_type)
-        report(diagnostic_kind::type_mismatch, file, span_of(file, arguments[0].value),
-               cc::format("a buffer is indexed by an int, and this is a {}", out.name_of(index)));
-    return out.at(object).element;
+    auto result = object;
+    for (auto const& a : arguments)
+    {
+        auto const index = check_expr(scope, a.value);
+        if (index != error_type && index != int_type)
+            report(diagnostic_kind::type_mismatch, file, span_of(file, a.value),
+                   cc::format("{} is indexed by an int, and this is a {}",
+                              kind == type_kind::buffer ? "a buffer" : "an array", out.name_of(index)));
+        result = out.at(result).element;
+    }
+    return result;
 }
 
 // ---- expressions ----------------------------------------------------------------------------------------------------
@@ -261,7 +279,8 @@ type_id checker::check_expr(function_scope& scope, ast::expr_id expr)
         [&](ast::index const& node) { return check_index(scope, expr, node); },
         // AST-128: `mut buffer[float]` and its neighbours parse, and the binding model they belong to is unbuilt.
         [&](ast::qualified_type const&) { return not_yet("a resource type"); },
-        [&](ast::tuple const&) { return not_yet("a tuple"); }, [&](ast::array const&) { return not_yet("an array"); },
+        [&](ast::tuple const&) { return not_yet("a tuple"); },
+        [&](ast::array const&) { return check_array_literal(scope, expr, type_id::none); },
         [&](ast::object const&) { return not_yet("an object with no struct to convert to"); },
         [&](ast::comparison_chain const& chain) { return check_chain(scope, expr, chain); }, [&](ast::cast const& node)
         { return check_cast(scope, expr, node); }, [&](ast::membership const&) { return not_yet("in"); },
@@ -503,6 +522,19 @@ type_id checker::check_member(function_scope& scope, ast::expr_id id, ast::membe
     auto const object = check_expr(scope, member.object);
     if (object == error_type || member.name.empty())
         return error_type;
+
+    // CHK-288: an array's length is a constant of its type, and it has no other member
+    if (out.at(object).kind == type_kind::array)
+    {
+        if (name != "length")
+        {
+            report(diagnostic_kind::unknown_member, file, member.name,
+                   cc::format("{} has no member {}; an array's one member is its length", out.name_of(object), name));
+            return error_type;
+        }
+        set_target(file, id, {.kind = target_kind::array_length, .index = out.at(object).count});
+        return type_of_builtin(builtins::k_int, file, span_of(file, id));
+    }
 
     // CHK-249: `a.foo` is the field where there is one, and a call of `foo` with `a` otherwise
     auto const& type = out.at(object);
@@ -819,6 +851,14 @@ type_id checker::check_dot_call(function_scope& scope, ast::expr_id id, ast::cal
     auto const& ast = ast_of(file);
     auto const& member = ast.at(call.callee).node.as<ast::member>();
     auto const name = text_of(file, member.name);
+
+    // CHK-289: `T[N].filled(v)`, where `T[N]` is a type in the position of a value
+    if (auto const* const applied
+        = ast::is_valid(member.object) ? ast.at(member.object).node.try_as<ast::index>() : nullptr;
+        applied != nullptr && ast::is_valid(applied->object) && is_type_name(file, applied->object)
+        && (!ast.at(applied->object).node.is<ast::name>()
+            || scope.find_local(text_of(file, span_of(file, applied->object))) == nullptr))
+        return check_filled(scope, id, call);
 
     // `T.foo(…)`: the functions of the type scope of `T`, and `T` is no argument (CHK-248)
     auto const* const object_name
@@ -1252,6 +1292,8 @@ type_id checker::check_expected(function_scope& scope, ast::expr_id expr, type_i
         auto const literal = shape_literal(scope, expr);
         return resolve_literal(scope, expr, to, literal);
     }
+    if (node.is<ast::array>() && to != error_type && out.at(to).kind == type_kind::array)
+        return check_array_literal(scope, expr, to);
     auto const type = check_expr(scope, expr);
     if (type == error_type || to == error_type)
         return type;

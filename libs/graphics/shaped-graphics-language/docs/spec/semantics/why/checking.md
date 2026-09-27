@@ -364,3 +364,11 @@ A `discard` is a jump rather than a builtin call, since control flow reads as co
 A call is no jump, so a path that discarded would still have had to produce a value.
 The portable meaning is that the pixel has no effect after it — no target, no depth, no stencil, no store — which every target keeps.
 Whether the pixel keeps running as a helper for its quad's derivatives is where the targets differ, and the writers demote wherever a target offers the choice.
+
+## CHK-285
+
+`T[N]` reads the way a C, HLSL or GLSL reader writes an array, and `texture_2d[float4][64]` is a binding array by the same rule, with no second spelling.
+Composed literally, `float[3][5]` would be five arrays of three, the reverse of what the same text means to those readers.
+Making it mean the C order instead would break aliasing: with `type row = float[5]`, `row[3]` has to be three rows.
+So several dimensions are one group, outermost first, and two groups in a row are refused rather than read one way or the other.
+`length` names the count, since the texture methods already use `size` for texels and `count` would read as a binding's descriptor count.

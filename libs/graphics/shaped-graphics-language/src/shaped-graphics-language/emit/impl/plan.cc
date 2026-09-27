@@ -251,9 +251,38 @@ struct planner
         return result;
     }
 
+    /// An array type's spelling, after its element's.
+    void need_array(type_id type)
+    {
+        if (p.array_of_type[index_of(type)] != -1)
+            return;
+        auto const& info = p.m.at(type);
+        need(info.element, struct_role::plain);
+        need_enum(info.element);
+        auto const element = element_text(info.element);
+        auto const is_hlsl = p.which == emit::target::hlsl_dx12 || p.which == emit::target::hlsl_vulkan;
+        p.array_of_type[index_of(type)] = i32(p.array_texts.size());
+        p.array_texts.push_back(is_hlsl ? element : cc::format("array<{}, {}>", element, info.count));
+    }
+
+    /// What an array's element is spelled as, which `type_text` answers once the plan is done.
+    cc::string element_text(type_id type) const
+    {
+        if (auto const* const record = p.m.builtin_type_of(type))
+            return cc::string(record->spelled_in(language_of(p.which)));
+        auto const& info = p.m.at(type);
+        if (info.kind == type_kind::enumeration)
+            return cc::string(builtin_spelling(p, builtins::k_int));
+        if (info.kind == type_kind::array)
+            return p.array_texts[p.array_of_type[index_of(type)]];
+        return p.structs[p.struct_of_type[index_of(type)]].name;
+    }
+
     /// Post-order, so a struct stands after every struct it holds, which HLSL needs and WGSL does not mind.
     void need(type_id type, struct_role role)
     {
+        if (is_valid(type) && !is_builtin_type(p.m, type) && p.m.at(type).kind == type_kind::array)
+            return need_array(type);
         if (!is_valid(type) || is_builtin_type(p.m, type) || p.m.at(type).kind != type_kind::structure)
             return;
         if (p.struct_of_type[index_of(type)] != -1)
@@ -413,6 +442,16 @@ sgl::i32 sgl::emit::impl::resource_of(plan const& p, check::symbol_id binding, i
         if (p.resources[i].binding == binding && p.resources[i].member == member)
             return i32(i);
     return -1;
+}
+
+cc::string sgl::emit::impl::array_dimensions(plan const& p, check::type_id type)
+{
+    if (p.which != target::hlsl_dx12 && p.which != target::hlsl_vulkan)
+        return {};
+    auto result = cc::string();
+    for (; is_valid(type) && p.m.at(type).kind == type_kind::array; type = p.m.at(type).element)
+        result.appendf("[{}]", p.m.at(type).count);
+    return result;
 }
 
 cc::string_view sgl::emit::impl::builtin_spelling(plan const& p, cc::string_view name)
@@ -607,6 +646,7 @@ sgl::emit::impl::plan sgl::emit::impl::make_plan(check::checked_module const& m,
                 result.names.taken.push_back(f.called_in(language_of(t)));
     result.struct_of_type.resize_to_filled(m.types.size(), -1);
     result.enum_of_type.resize_to_filled(m.types.size(), -1);
+    result.array_of_type.resize_to_filled(m.types.size(), -1);
 
     auto p = planner{.p = result};
     p.need(e.input, input_role(e));

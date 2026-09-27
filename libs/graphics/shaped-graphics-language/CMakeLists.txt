@@ -46,6 +46,7 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/builtins/registry.cc
 
     src/shaped-graphics-language/check/check.cc
+    src/shaped-graphics-language/check/check_arrays.cc
     src/shaped-graphics-language/check/check_case.cc
     src/shaped-graphics-language/check/check_decl.cc
     src/shaped-graphics-language/check/check_pipeline.cc
@@ -333,6 +334,7 @@ if(SC_BUILD_TESTS)
 
         tests/check/check-test-support.hh
         tests/corpus/corpus-test.cc
+        tests/check/array-check-test.cc
         tests/check/binding-check-test.cc
         tests/check/texture-check-test.cc
         tests/check/uniformity-check-test.cc
@@ -364,6 +366,7 @@ if(SC_BUILD_TESTS)
         tests/emit/core-emit-test.cc
         tests/emit/cube-emit-test.cc
         tests/emit/emit-test.cc
+        tests/emit/array-emit-test.cc
         tests/emit/buffer-emit-test.cc
         tests/emit/texture-emit-test.cc
         tests/emit/compute-emit-test.cc

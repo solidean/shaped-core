@@ -514,6 +514,11 @@ struct compactor
             element->buffer = expr(element->buffer, depth + 1);
             element->index = expr(element->index, depth + 1);
         }
+        else if (auto* const array_element = copy.node.try_as<flat_element>())
+        {
+            array_element->object = expr(array_element->object, depth + 1);
+            array_element->index = expr(array_element->index, depth + 1);
+        }
         else if (auto* const construct = copy.node.try_as<flat_construct>())
             construct->arguments = exprs(construct->arguments, depth);
         else if (auto* const call = copy.node.try_as<flat_call>())

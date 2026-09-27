@@ -115,6 +115,11 @@ struct plan
     cc::vector<planned_struct> structs;
     /// Parallel to `m.types`: a position in `structs`, or -1 for a builtin type and for a type nothing here needs.
     cc::vector<i32> struct_of_type;
+    /// How the target spells each array type the entry point needs: `array<f32, 5>`.
+    /// HLSL's is its innermost element's, since HLSL writes the lengths after the name (`array_dimensions`).
+    cc::vector<cc::string> array_texts;
+    /// Parallel to `m.types`: a position in `array_texts`, or -1 for a type that is no array this entry point needs.
+    cc::vector<i32> array_of_type;
     /// The enums the entry point mentions, in the order they were first needed.
     cc::vector<planned_enum> enums;
     /// Parallel to `m.types`: a position in `enums`, or -1 for a type that is no enum this entry point needs.
@@ -152,6 +157,8 @@ struct plan
 
 /// How the target of `p` spells the builtin type named `name`, such as the texel of an image format.
 [[nodiscard]] cc::string_view builtin_spelling(plan const& p, cc::string_view name);
+/// What HLSL writes after a declared name of `type`, `[3][5]`; empty for any other type and any other target.
+[[nodiscard]] cc::string array_dimensions(plan const& p, check::type_id type);
 /// The column of a builtin's record `t` reads; the two HLSL targets share one.
 [[nodiscard]] builtins::language language_of(target t);
 

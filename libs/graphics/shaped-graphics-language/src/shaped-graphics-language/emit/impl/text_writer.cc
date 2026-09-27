@@ -125,15 +125,28 @@ struct writer
         return x.node.is<flat_construct>() && !is_builtin_type(p.m, x.type) && !d.has_struct_constructor();
     }
 
-    /// Declares `name` and assigns its members one by one, for a target without a struct constructor.
+    [[nodiscard]] bool is_array(check::type_id type) const
+    {
+        return is_valid(type) && p.m.at(type).kind == check::type_kind::array;
+    }
+
+    /// Declares `name` and assigns its members, or its elements, one by one, for a target without a struct constructor.
     void build_struct(flat_expr const& x, cc::string_view name)
     {
         auto declaration = cc::string();
-        d.write_local(declaration, {.name = name, .type = type_text(p, d, x.type), .is_mut = true});
+        auto const dimensions = array_dimensions(p, x.type);
+        d.write_local(declaration,
+                      {.name = name, .type = type_text(p, d, x.type), .dimensions = dimensions, .is_mut = true});
         line(declaration);
 
-        auto const& planned = p.structs[p.struct_of_type[index_of(x.type)]];
         auto const arguments = p.e.at(x.node.as<flat_construct>().arguments);
+        if (is_array(x.type))
+        {
+            for (auto i = isize(0); i < arguments.size(); ++i)
+                line(cc::format("{}[{}] = {};", name, i, expr(arguments[i]).text));
+            return;
+        }
+        auto const& planned = p.structs[p.struct_of_type[index_of(x.type)]];
         for (auto i = isize(0); i < arguments.size() && i < planned.member_of.size(); ++i)
             if (planned.member_of[i] >= 0)
                 line(cc::format("{}.{} = {};", name, planned.members[planned.member_of[i]].name, expr(arguments[i]).text));
@@ -145,7 +158,8 @@ struct writer
         if (needs_member_assignment(x))
         {
             // A construction in the middle of an expression: every expression is pure, so building it first changes nothing.
-            auto name = p.names.mint(cc::format("{}_value", type_text(p, d, x.type)));
+            auto name = p.names.mint(is_array(x.type) ? cc::string("array_value")
+                                                      : cc::format("{}_value", type_text(p, d, x.type)));
             build_struct(x, name);
             return {.text = cc::move(name)};
         }
@@ -247,6 +261,11 @@ struct writer
             {
                 auto const buffer = wrapped(expr(b.buffer), level::primary);
                 result = {.text = cc::format("{}[{}]", buffer, expr(b.index).text), .binds = level::primary};
+            },
+            [&](flat_element const& a)
+            {
+                auto const object = wrapped(expr(a.object), level::primary);
+                result = {.text = cc::format("{}[{}]", object, expr(a.index).text), .binds = level::primary};
             },
             [&](flat_member const& member)
             {
@@ -350,7 +369,10 @@ struct writer
         }
         auto const text = is_valid(value) ? expr(value, true).text : cc::string();
         auto declaration = cc::string();
-        d.write_local(declaration, {.name = name, .type = type_text(p, d, local.type), .value = text, .is_mut = is_mut});
+        auto const dimensions = array_dimensions(p, local.type);
+        d.write_local(
+            declaration,
+            {.name = name, .type = type_text(p, d, local.type), .value = text, .dimensions = dimensions, .is_mut = is_mut});
         line(declaration);
     }
 
@@ -514,6 +536,8 @@ cc::string_view sgl::emit::impl::type_text(plan const& p, dialect const& d, chec
         if (p.m.builtins->is_known(id))
             return p.m.builtins->at(id).spelled_in(d.language());
     }
+    if (is_valid(type) && p.m.at(type).kind == check::type_kind::array)
+        return p.array_texts[p.array_of_type[index_of(type)]];
     return p.structs[p.struct_of_type[index_of(type)]].name;
 }
 

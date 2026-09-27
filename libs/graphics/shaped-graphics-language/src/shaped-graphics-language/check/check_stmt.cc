@@ -222,8 +222,17 @@ void checker::check_assign(function_scope& scope, ast::stmt_id id, ast::assign_s
     auto const value = is_plain && place != error_type ? check_expected(scope, assign.value, place)
                                                        : check_expr(scope, assign.value);
 
+    // An array element is part of the local that holds it, and a buffer element is a place of its own.
+    auto const kind_of_object = [&](ast::index const& indexed)
+    {
+        auto const object = out.files[file].type_at(indexed.object);
+        return object != type_id::none ? out.at(object).kind : type_kind::error;
+    };
+
     // A buffer element is a place of its own: `work.dst[i] = v`, and only where the buffer is `mut`.
-    auto const* const indexed = ast::is_valid(assign.target) ? ast.at(assign.target).node.try_as<ast::index>() : nullptr;
+    auto const* indexed = ast::is_valid(assign.target) ? ast.at(assign.target).node.try_as<ast::index>() : nullptr;
+    if (indexed != nullptr && kind_of_object(*indexed) == type_kind::array)
+        indexed = nullptr;
     if (indexed != nullptr)
     {
         auto const object = out.files[file].type_at(indexed->object);
@@ -233,19 +242,32 @@ void checker::check_assign(function_scope& scope, ast::stmt_id id, ast::assign_s
                    "this buffer is read-only; `mut buffer[T]` declares one a shader writes");
     }
 
-    // The place is otherwise a mutable local, or a field of one at any depth; a property is read-only (CHK-236).
+    // The place is otherwise a mutable local, or a field or an element of one at any depth; a property is read-only
+    // (CHK-236), and so is an array's length (CHK-288).
     auto root = assign.target;
     auto property = ast::expr_id::none;
-    while (ast::is_valid(root) && ast.at(root).node.is<ast::member>())
+    while (ast::is_valid(root))
     {
-        if (out.files[file].target_at(root).kind == target_kind::overload && !ast::is_valid(property))
+        auto const& node = ast.at(root).node;
+        if (auto const* const element = node.try_as<ast::index>();
+            element != nullptr && kind_of_object(*element) == type_kind::array)
+        {
+            root = element->object;
+            continue;
+        }
+        if (!node.is<ast::member>())
+            break;
+        auto const kind = out.files[file].target_at(root).kind;
+        if ((kind == target_kind::overload || kind == target_kind::array_length) && !ast::is_valid(property))
             property = root;
-        root = ast.at(root).node.as<ast::member>().object;
+        root = node.as<ast::member>().object;
     }
     if (indexed == nullptr && place != error_type && ast::is_valid(property))
         report(diagnostic_kind::not_assignable, file, span_of(file, assign.target),
-               cc::format("{} is a property, which is read-only",
-                          text_of(file, ast.at(property).node.as<ast::member>().name)));
+               out.files[file].target_at(property).kind == target_kind::array_length
+                   ? cc::string("an array's length is part of its type, and never assigned")
+                   : cc::format("{} is a property, which is read-only",
+                                text_of(file, ast.at(property).node.as<ast::member>().name)));
     else if (indexed == nullptr && place != error_type && ast::is_valid(root))
     {
         auto const* const n = ast.at(root).node.try_as<ast::name>();

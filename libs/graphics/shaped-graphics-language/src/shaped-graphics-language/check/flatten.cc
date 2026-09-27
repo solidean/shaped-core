@@ -413,6 +413,14 @@ struct flattener
                 return enum_value(type, id, where.index);
             if (where.kind == target_kind::binding_member)
                 return add_expr(type, id, flat_binding_member{.binding = where.symbol, .member = where.index});
+            // CHK-288: a constant, and an object with an effect still runs for it
+            if (where.kind == target_kind::array_length)
+            {
+                auto const object = flatten_expr(m->object);
+                if (calls_impure(object, 0))
+                    add_stmt({.file = file(), .expr = id}, flat_eval{.value = object});
+                return add_expr(type, id, flat_int_literal{.value = where.index});
+            }
             if (where.kind != target_kind::field)
                 return fail();
             auto const object = flatten_expr(m->object);
@@ -420,14 +428,30 @@ struct flattener
         }
         if (auto const* const indexed = e.node.try_as<ast::index>())
         {
-            // The check pass let only a buffer element through, so the object is a resource and the index an int.
             auto const arguments = ast().at(indexed->arguments);
+            auto const object_type = tables().type_at(indexed->object);
+            // CHK-287: one element per index, `grid[i, j]` being `grid[i][j]`
+            if (is_valid(object_type) && c.out.at(object_type).kind == type_kind::array)
+            {
+                auto object = flatten_expr(indexed->object);
+                auto element_type = object_type;
+                for (auto const& a : arguments)
+                {
+                    element_type = c.out.at(element_type).element;
+                    auto const index = flatten_expr(a.value);
+                    object = add_expr(element_type, id, flat_element{.object = object, .index = index});
+                }
+                return object;
+            }
+            // The check pass let only a buffer element through otherwise, so the object is a resource.
             if (arguments.size() != 1)
                 return fail();
             auto const buffer = flatten_expr(indexed->object);
             auto const index = flatten_expr(arguments[0].value);
             return add_expr(type, id, flat_buffer_element{.buffer = buffer, .index = index});
         }
+        if (auto const* const literal = e.node.try_as<ast::array>())
+            return flatten_array_literal(id, type, *literal);
         if (auto const* const call = e.node.try_as<ast::call>())
             return flatten_call(id, type, where, *call);
         if (auto const* const cast = e.node.try_as<ast::cast>())
@@ -506,8 +530,67 @@ struct flattener
         return value.has_value() ? add_expr(type, id, flat_literal{.value = value.value()}) : fail();
     }
 
+    /// `[a, b, c]` of an array type, its elements in the order written (EVAL-91).
+    flat_expr_id flatten_array_literal(ast::expr_id id, type_id type, ast::array const& literal)
+    {
+        auto values = cc::vector<flat_expr_id>();
+        for (auto const& element : ast().at(literal.elements))
+            values.push_back(flatten_expr(element.value));
+        // a target may build one in any order, so two with an effect run first, in order
+        auto with_effect = 0;
+        for (auto const v : values)
+            with_effect += calls_impure(v, 0) ? 1 : 0;
+        if (with_effect >= 2)
+            for (auto& v : values)
+                if (calls_impure(v, 0))
+                {
+                    auto const local = add_local(local_kind::temporary, "element", entry.at(v).type);
+                    add_stmt({.file = file(), .expr = id}, flat_let{.local = local, .value = v});
+                    v = local_ref(local, id);
+                }
+        return add_expr(type, id, flat_construct{.arguments = add_list(values)});
+    }
+
+    /// CHK-289: `T[N].filled(v)` is a local every element of which is assigned `v`, evaluated once.
+    flat_expr_id flatten_filled(ast::expr_id id, type_id type, ast::call const& call)
+    {
+        auto const arguments = ast().at(call.arguments);
+        if (arguments.size() != 1 || !is_valid(type))
+            return fail();
+        auto const where = origin{.file = file(), .expr = id};
+        auto const& info = c.out.at(type);
+        auto const value = flatten_expr(arguments[0].value);
+        if (!is_valid(value))
+            return fail();
+
+        auto const label = add_label("filled");
+        auto body = cc::vector<flat_stmt_id>();
+        auto filler = value;
+        if (!is_substitutable(value))
+        {
+            auto const held = add_local(local_kind::let, "fill", info.element);
+            body.push_back(make_stmt(where, flat_let{.local = held, .value = value}));
+            filler = local_ref(held, id);
+        }
+        auto const result = add_local(local_kind::var, "filled", type);
+        body.push_back(make_stmt(where, flat_var{.local = result}));
+        auto const index = add_local(local_kind::index, "i", int_type());
+        auto const element
+            = add_expr(info.element, id, flat_element{.object = local_ref(result, id), .index = local_ref(index, id)});
+        flat_stmt_id const store[] = {make_stmt(where, flat_assign{.place = element, .value = filler})};
+        body.push_back(make_stmt(where, flat_for{.label = add_label("fill"),
+                                                 .index = index,
+                                                 .first = add_expr(int_type(), id, flat_int_literal{.value = 0}),
+                                                 .end = add_expr(int_type(), id, flat_int_literal{.value = info.count}),
+                                                 .body = add_list(store)}));
+        body.push_back(make_stmt(where, flat_leave{.target = label, .value = local_ref(result, id)}));
+        return add_expr(type, id, flat_block{.label = label, .body = add_list(body)});
+    }
+
     flat_expr_id flatten_call(ast::expr_id id, type_id type, target const& where, ast::call const& call)
     {
+        if (where.kind == target_kind::array_filled)
+            return flatten_filled(id, type, call);
         if (sgl::is_valid(call.op))
         {
             auto const spelling = c.text_of(file(), c.file_of(file()).at(call.op).where);
@@ -1411,6 +1494,8 @@ struct flattener
     /// that holds it.
     flat_expr_id read_of_place(flat_expr_id place, ast::expr_id target)
     {
+        if (has_array_index(place))
+            return reread(place, target);
         if (!is_valid(place) || !entry.at(place).node.is<flat_buffer_element>())
             return flatten_expr(target);
 
@@ -1428,6 +1513,45 @@ struct flattener
         auto const buffer_again = add_expr(buffer.type, indexed.object, buffer.node);
         auto const index_again = once.later == once.first ? again(once.first, arguments[0].value) : once.later;
         return add_expr(x.type, target, flat_buffer_element{.buffer = buffer_again, .index = index_again});
+    }
+
+    [[nodiscard]] bool has_array_index(flat_expr_id id) const
+    {
+        for (auto depth = 0; is_valid(id) && depth < k_max_inline_depth; ++depth)
+        {
+            auto const& node = entry.at(id).node;
+            if (node.is<flat_element>())
+                return true;
+            auto const* const member = node.try_as<flat_member>();
+            if (member == nullptr)
+                return false;
+            id = member->object;
+        }
+        return false;
+    }
+
+    /// The place `id` read a second time, each array index in it evaluated once: the place keeps the first evaluation,
+    /// and the read takes the local that holds it (EVAL-14).
+    flat_expr_id reread(flat_expr_id id, ast::expr_id from)
+    {
+        // by value: evaluating once adds nodes, and the arrays move
+        auto const x = entry.at(id);
+        if (auto const* const member = x.node.try_as<flat_member>())
+        {
+            auto const object = reread(member->object, from);
+            return add_expr(x.type, from, flat_member{.object = object, .member = member->member});
+        }
+        if (auto const* const element = x.node.try_as<flat_element>())
+        {
+            auto const object = reread(element->object, from);
+            auto const once = evaluate_once(element->index, "index", from);
+            entry.exprs[index_of(id)].node = flat_element{.object = element->object, .index = once.first};
+            auto const index = once.later == once.first ? again(once.first, from) : once.later;
+            return add_expr(x.type, from, flat_element{.object = object, .index = index});
+        }
+        if (x.node.is<flat_local_ref>())
+            return again(id, from);
+        return fail();
     }
 
     void flatten_for(origin from, ast::stmt_id id, ast::for_stmt const& loop)

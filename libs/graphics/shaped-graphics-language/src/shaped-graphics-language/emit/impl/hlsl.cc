@@ -53,9 +53,10 @@ public:
     void write_local(cc::string& out, local_declaration const& local) const override
     {
         if (local.value.empty())
-            out.appendf("{} {};", local.type, local.name);
+            out.appendf("{} {}{};", local.type, local.name, local.dimensions);
         else
-            out.appendf("{}{} {} = {};", local.is_mut ? "" : "const ", local.type, local.name, local.value);
+            out.appendf("{}{} {}{} = {};", local.is_mut ? "" : "const ", local.type, local.name, local.dimensions,
+                        local.value);
     }
 
     void write_eval(cc::string& out, cc::string_view value) const override { out.appendf("{};", value); }
@@ -118,7 +119,7 @@ public:
             else if (member.interpolate.sampling == sampling::sample)
                 out += "sample ";
         }
-        out.appendf("{} {}", type_text(p, *this, member.type), member.name);
+        out.appendf("{} {}{}", type_text(p, *this, member.type), member.name, array_dimensions(p, member.type));
         if (owner != nullptr)
             if (auto const semantic = semantic_of(*owner, member); !semantic.empty())
                 out.appendf(" : {}", semantic);

@@ -365,6 +365,11 @@ struct classifier
             case check::target_kind::receiver:
                 set(t, token_class::self_, is_declaration);
                 break;
+            case check::target_kind::array_length:
+                set(t, token_class::field, is_declaration);
+                break;
+            case check::target_kind::array_filled:
+                break;
             }
         }
     }

@@ -37,6 +37,12 @@ void append_zero(checked_module const& m, type_id type, cc::vector<scalar>& leav
         leaves.push_back({.kind = value_kind::scalar_int, .bits = 0});
         return;
     }
+    if (is_valid(type) && m.at(type).kind == type_kind::array)
+    {
+        for (auto i = 0; i < m.at(type).count; ++i)
+            append_zero(m, m.at(type).element, leaves, depth + 1);
+        return;
+    }
     for (auto const& member : members_of(m, type))
         append_zero(m, member.type, leaves, depth + 1);
 }
@@ -139,6 +145,23 @@ struct machine
         return {};
     }
 
+    /// Where element `index` of an array of `type` starts among its scalars; outside it is a program error (EVAL-90).
+    flow element_offset(type_id type, value const& index, isize& offset, isize& count)
+    {
+        if (index.leaves.size() != 1 || index.leaves[0].kind != value_kind::scalar_int)
+            return type_error("an array index that is no int");
+        if (!is_valid(type) || m.at(type).kind != type_kind::array)
+            return type_error("an element of what is no array");
+        auto const& info = m.at(type);
+        auto const at = isize(index.leaves[0].as_int());
+        if (at < 0 || at >= info.count)
+            return fail(run_status::program_error,
+                        cc::format("the index {} is out of bounds of {}", at, m.name_of(type)));
+        count = leaf_count_of(m, info.element);
+        offset = at * count;
+        return {};
+    }
+
     flow call(flat_expr const& x, flat_call const& c, value& result)
     {
         auto args = cc::vector<value>();
@@ -209,10 +232,15 @@ struct machine
             return type_error("a buffer the inputs do not hold");
 
         auto const count = leaf_count_of(m, element_type);
+        if (count <= 0 || out.buffers[buffer].leaves.size() % count != 0)
+            return type_error(cc::format("a buffer of {} scalars, which holds no whole number of its elements",
+                                         out.buffers[buffer].leaves.size()));
+        // EVAL-90: no target agrees on an index past the end, so a correct program never has one
         auto const at = isize(index.leaves[0].as_int());
-        if (count <= 0 || at < 0 || (at + 1) * count > out.buffers[buffer].leaves.size())
-            return type_error(
-                cc::format("the element {} of a buffer of {} scalars", at, out.buffers[buffer].leaves.size()));
+        auto const length = out.buffers[buffer].leaves.size() / count;
+        if (at < 0 || at >= length)
+            return fail(run_status::program_error,
+                        cc::format("the index {} is out of bounds of a buffer of {} elements", at, length));
         offset = at * count;
         return {};
     }
@@ -315,6 +343,26 @@ struct machine
                                               .subspan({.offset = offset, .size = leaf_count_of(m, x.type)}));
             return {};
         }
+        if (auto const* const element = x.node.try_as<flat_element>())
+        {
+            auto object = value();
+            if (auto const f = eval(element->object, object); !f.is_normal())
+                return f;
+            auto index = value();
+            if (auto const f = eval(element->index, index); !f.is_normal())
+                return f;
+            auto offset = isize(0);
+            auto count = isize(0);
+            if (auto const f = element_offset(e.at(element->object).type, index, offset, count); !f.is_normal())
+                return f;
+            if (offset + count > object.leaves.size())
+                return type_error("a value with fewer scalars than its type");
+            result.type = x.type;
+            result.leaves.clear();
+            result.leaves.push_back_range(
+                cc::span<scalar const>(object.leaves).subspan({.offset = offset, .size = count}));
+            return {};
+        }
         if (auto const* const member = x.node.try_as<flat_member>())
         {
             auto object = value();
@@ -395,12 +443,18 @@ struct machine
         return {};
     }
 
-    flow assign(flat_expr_id place, value const& v)
+    /// Where a place lies in its local: evaluates its array indices, the one nearest the local first (EVAL-14).
+    flow locate_place(flat_expr_id place, local_id& local, isize& offset, type_id& type)
     {
-        // the path from the place down to its local, innermost member first
-        auto path = cc::vector<i32>();
+        // the steps from the place down to its local, innermost first: a member, or an element's index expression
+        struct step
+        {
+            i32 member = -1;
+            flat_expr_id index = flat_expr_id::none;
+        };
+        auto path = cc::vector<step>();
         auto id = place;
-        auto local = local_id::none;
+        local = local_id::none;
         for (auto i = 0; i < k_max_depth && is_known(e, id); ++i)
         {
             auto const& x = e.at(id);
@@ -409,27 +463,61 @@ struct machine
                 local = ref->local;
                 break;
             }
+            if (auto const* const element = x.node.try_as<flat_element>())
+            {
+                path.push_back({.index = element->index});
+                id = element->object;
+                continue;
+            }
             auto const* const member = x.node.try_as<flat_member>();
             if (member == nullptr)
                 break;
-            path.push_back(member->member);
+            path.push_back({.member = member->member});
             id = member->object;
         }
         if (!is_known(e, local) || !e.at(local).is_mut)
             return type_error("an assignment to what is no mutable local");
 
-        auto& target = locals[index_of(local)];
-        auto type = e.at(local).type;
-        auto offset = isize(0);
+        type = e.at(local).type;
+        offset = 0;
         for (auto k = path.size() - 1; k >= 0; --k)
         {
+            if (is_valid(path[k].index))
+            {
+                auto index = value();
+                if (auto const f = eval(path[k].index, index); !f.is_normal())
+                    return f;
+                auto at = isize(0);
+                auto count = isize(0);
+                if (auto const f = element_offset(type, index, at, count); !f.is_normal())
+                    return f;
+                offset += at;
+                type = m.at(type).element;
+                continue;
+            }
             auto const members = members_of(m, type);
-            if (path[k] < 0 || path[k] >= members.size())
+            if (path[k].member < 0 || path[k].member >= members.size())
                 return type_error("an assignment to a member its type does not have");
-            for (auto i = 0; i < path[k]; ++i)
+            for (auto i = 0; i < path[k].member; ++i)
                 offset += leaf_count_of(m, members[i].type);
-            type = members[path[k]].type;
+            type = members[path[k].member].type;
         }
+        return {};
+    }
+
+    flow assign(flat_expr_id place, value const& v)
+    {
+        auto local = local_id::none;
+        auto offset = isize(0);
+        auto type = type_id::none;
+        if (auto const f = locate_place(place, local, offset, type); !f.is_normal())
+            return f;
+        return write(local, offset, type, v);
+    }
+
+    flow write(local_id local, isize offset, type_id type, value const& v)
+    {
+        auto& target = locals[index_of(local)];
         auto const count = leaf_count_of(m, type);
         if (v.leaves.size() != count || offset + count > target.leaves.size())
             return type_error("an assignment of a value of the wrong size");
@@ -625,10 +713,16 @@ struct machine
                 = is_known(e, a->place) ? e.at(a->place).node.try_as<flat_buffer_element>() : nullptr;
             if (element != nullptr)
                 return store_element(*element, e.at(a->place).type, a->value);
+            // EVAL-14: the place's indices, then the value
+            auto local = local_id::none;
+            auto offset = isize(0);
+            auto type = type_id::none;
+            if (auto const f = locate_place(a->place, local, offset, type); !f.is_normal())
+                return f;
             auto v = value();
             if (auto const f = eval(a->value, v); !f.is_normal())
                 return f;
-            return assign(a->place, v);
+            return write(local, offset, type, v);
         }
         if (auto const* const p = s.node.try_as<flat_print>())
         {

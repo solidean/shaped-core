@@ -68,7 +68,9 @@ cc::string spelling_of(check::type_info const& t, checked_module const& m)
 
 type_id checker::resource_type(check::type_info info)
 {
-    info.spelled = spelling_of(info, out);
+    // an array is spelled by `array_type`, from its element's name
+    if (info.kind != type_kind::array)
+        info.spelled = spelling_of(info, out);
     // Interned, as a buffer is: two mentions of `texture_2d[float4]` are one type.
     for (auto i = isize(0); i < out.types.size(); ++i)
         if (out.types[i] == info)

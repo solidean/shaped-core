@@ -1,0 +1,73 @@
+// `T[N]` is N values of T, a value like a struct: copied where it is passed, and read and written by element
+
+fun sum(xs: float[5]) -> float:
+    let mut total = 0.0
+    for i in 0 ..< xs.length:
+        total += xs[i]
+    return total
+
+fun blur(taps: float[5], weights: float[5]) -> float:
+    let mut total = 0.0
+    for i in 0 ..< taps.length:
+        total += taps[i] * weights[i]
+    return total
+
+fun weights() -> float[5] => [0.0625, 0.25, 0.375, 0.25, 0.0625]
+
+test weights().length == 5
+test weights()[2] == 0.375
+test sum(weights()) == 1.0
+test blur([1.0, 1.0, 1.0, 1.0, 1.0], weights()) == 1.0
+
+// a literal's type is its first element's where no array is expected
+test:
+    let odd = [1, 3, 5]
+    odd[0] + odd[1] + odd[2] == 9
+
+// filled, for a large one
+test:
+    let mut histogram = uint[256].filled(0)
+    histogram[3] += 1
+    histogram[3] += 1
+    histogram[3] == 2
+    histogram[4] == 0
+
+// one group holds every dimension, outermost first
+test:
+    let mut grid: int[2, 3] = [[1, 2, 3], [4, 5, 6]]
+    grid[1, 0] = 7
+    grid.length == 2
+    grid[0].length == 3
+    grid[1][0] == 7
+    grid[1, 2] == 6
+
+// an array is copied where it is assigned
+test:
+    let mut a = [1.0, 2.0]
+    let b = a
+    a[0] = 5.0
+    b[0] == 1.0
+
+// an array in a struct
+struct polygon:
+    corners: float2[3]
+    count: int
+
+test:
+    let mut p = polygon(corners = [float2(0.0, 0.0), float2(1.0, 0.0), float2(0.0, 1.0)], count = 3)
+    p.corners[2].y = 2.0
+    p.corners[2].y == 2.0
+
+struct varyings:
+    @position position: hpos4
+    uv: float2
+
+@pixel struct target:
+    color: float4
+
+@pixel fun banded_ps(p: varyings) -> target:
+    let band = (p.uv.x * 4.0) as int
+    let palette = [float4(1.0, 0.0, 0.0, 1.0), float4(0.0, 1.0, 0.0, 1.0), float4(0.0, 0.0, 1.0, 1.0), float4(1.0, 1.0, 1.0, 1.0)]
+    let mut ramp = float[4].filled(0.25)
+    ramp[band] = 1.0
+    return { color = palette[band] * ramp[band] }

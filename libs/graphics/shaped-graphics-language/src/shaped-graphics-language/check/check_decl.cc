@@ -335,6 +335,8 @@ type_id checker::resolve_type(i32 file, ast::expr_id expr, function_scope const*
         else if (auto const applied_resource = resolve_resource_applied(file, expr, *applied);
                  applied_resource != type_id::none)
             result = applied_resource;
+        else if (ast::is_valid(applied->object) && is_type_name(file, applied->object))
+            result = resolve_array(file, expr, *applied, scope);
         else
             unsupported(file, where, "type arguments");
     }
@@ -362,8 +364,27 @@ type_id checker::resolve_type(i32 file, ast::expr_id expr, function_scope const*
 type_id checker::resolve_value_type(i32 file, ast::expr_id expr, function_scope const* scope)
 {
     auto const type = resolve_type(file, expr, scope);
-    if (type == checked_module::error_type || !is_resource(out.at(type).kind))
+    if (type == checked_module::error_type)
         return type;
+    // CHK-286: a binding array is a binding member, whose length only the host knows
+    auto innermost = type;
+    while (out.at(innermost).kind == type_kind::array)
+    {
+        if (out.at(innermost).count == 0)
+        {
+            report(diagnostic_kind::wrong_kind_of_name, file, span_of(file, expr),
+                   "an array without a length is a binding array, which only a binding member may be");
+            return checked_module::error_type;
+        }
+        innermost = out.at(innermost).element;
+    }
+    if (!is_resource(out.at(innermost).kind))
+        return type;
+    if (innermost != type)
+    {
+        unsupported(file, span_of(file, expr), "an array of resources as a value; a binding array is a binding member");
+        return checked_module::error_type;
+    }
     unsupported(file, span_of(file, expr),
                 out.at(type).kind == type_kind::buffer
                     ? "a buffer as a value; a buffer is a binding member, read as `values[i]`"
@@ -484,6 +505,19 @@ ast::range_of<member_info> checker::compile_members(i32 file,
             type = is_struct ? resolve_value_type(file, f.type) : resolve_type(file, f.type);
         else
             report(diagnostic_kind::missing_type, file, f.name, name);
+
+        // CHK-291: an array's layout in a block is the struct-buffer work's to settle
+        if (!is_struct && type != checked_module::error_type && out.at(type).kind == type_kind::array)
+        {
+            auto innermost = type;
+            while (out.at(innermost).kind == type_kind::array)
+                innermost = out.at(innermost).element;
+            unsupported(file, span_of(file, f.type),
+                        is_resource(out.at(innermost).kind)
+                            ? "a binding array"
+                            : "an array in a constant block, whose layout no rule settles yet");
+            type = checked_module::error_type;
+        }
 
         // CHK-214: a binding member is a slot of the group's layout, and a void one fills none.
         if (!is_struct && type == checked_module::void_type)

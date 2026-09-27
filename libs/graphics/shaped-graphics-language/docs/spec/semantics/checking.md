@@ -570,6 +570,23 @@ Nothing in a body uses a feature yet, so a `require` in a test's body is `unused
 * **CHK-186** `@compute` and `@raytracing` on a pipeline are `unsupported-yet`.
 * **CHK-187** Breaking one of CHK-175 to CHK-185 is `invalid-pipeline`, unless a rule names another kind, and its detail says what broke.
 
+## Arrays
+
+`T[N]` is N values of `T`, a value like a struct: copied where it is passed or assigned, and read and written by element.
+
+* **CHK-285** A square group applied to a complete type in a type position makes an array of it: `float[5]`, `polygon[3]`, `texture_2d[float4][64]`.
+  Every length is an `int` literal or an `int` `const`, at least 1, or `invalid-constant-argument`.
+  An array of arrays is one group, outermost first, `float[3, 5]` for three arrays of five; two groups in a row are `wrong-kind-of-name` ([why](why/checking.md#chk-285)).
+* **CHK-286** `T[]`, a group with no length, is an array whose length the host binds, which only a binding member may be; anywhere else it is `wrong-kind-of-name`.
+* **CHK-287** `xs[i]` is an element of an array, and `xs[i, j]` is `xs[i][j]`: one `int` index per dimension, at most as many as the array has.
+* **CHK-288** `xs.length` is an array's length, an `int` constant, and the one member an array has; it is never assigned.
+* **CHK-289** `T[N].filled(v)` is an array of `T[N]` whose every element is `v`, which converts to `T` as an argument does.
+* **CHK-290** A square literal converts to the array type expected where it stands, with exactly as many elements, each converting to the element type.
+  Where no array is expected it is an array of its first element's type, and every other element converts to that.
+  It holds at least one element, and no name and no splat.
+* **CHK-291** An array in a constant block, in a buffer's element or in a struct that crosses a stage edge is `unsupported-yet`, until a layout rule settles it.
+  A binding array, an array of resources as a binding member, is `unsupported-yet` too.
+
 ## Uniformity
 
 A barrier waits for every thread of its workgroup, and a derivative compares a pixel with the other three of its quad.
@@ -733,7 +750,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `duplicate-declaration` | CHK-12, CHK-28, CHK-241 |
 | `dependency-cycle` | CHK-18, CHK-136 |
 | `unknown-name` | CHK-24, CHK-62, CHK-245 |
-| `wrong-kind-of-name` | CHK-24, CHK-54, CHK-79, CHK-237, CHK-247, CHK-199, CHK-200, CHK-202, CHK-203, CHK-205, CHK-279 |
+| `wrong-kind-of-name` | CHK-24, CHK-54, CHK-79, CHK-237, CHK-247, CHK-199, CHK-200, CHK-202, CHK-203, CHK-205, CHK-279, CHK-285, CHK-286 |
 | `missing-type` | CHK-26 |
 | `unknown-builtin` | CHK-31 |
 | `expected-body` | CHK-32, CHK-236 |
@@ -771,7 +788,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `literal-needs-type` | CHK-257, CHK-268 |
 | `shift-out-of-range` | CHK-270 |
 | `missing-sampler` | CHK-279 |
-| `invalid-constant-argument` | CHK-280 |
+| `invalid-constant-argument` | CHK-280, CHK-285 |
 | `non-uniform-control-flow` | CHK-282 |
 
 ## Open

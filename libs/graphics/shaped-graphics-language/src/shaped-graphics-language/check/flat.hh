@@ -260,7 +260,17 @@ struct sgl::check::flat_buffer_element
     constexpr bool operator==(flat_buffer_element const&) const = default;
 };
 
-/// A value of the node's struct type from one value per field, in field order.
+/// `object[index]` on an array value: its element, read or, as a place, assigned.
+/// The index is evaluated after the object; outside `0 ..< length` it is a program error (EVAL-90).
+struct sgl::check::flat_element
+{
+    flat_expr_id object = flat_expr_id::none;
+    flat_expr_id index = flat_expr_id::none;
+
+    constexpr bool operator==(flat_element const&) const = default;
+};
+
+/// A value of the node's struct type from one value per field, in field order, or of its array type, one per element.
 /// A splat is gone: its fields stand here one by one.
 struct sgl::check::flat_construct
 {
@@ -334,6 +344,7 @@ struct sgl::check::flat_expr
                 flat_binding_member,
                 flat_member,
                 flat_buffer_element,
+                flat_element,
                 flat_construct,
                 flat_call,
                 flat_not,

@@ -204,3 +204,26 @@ TEST("sgl tests - a run that reaches discard ends as discarded, which only @expe
     CHECK(ran_through.status == sgl::test::test_status::failed);
     CHECK(ran_through.detail == "it was to discard, and it ran to its end");
 }
+
+TEST("sgl tests - an array index outside the array is a program error, read or written")
+{
+    // EVAL-90: no target agrees on what an index past the end does, so a correct program never has one
+    auto const checked
+        = check_sources(read_prelude(), "test:\n    let xs = [1, 2, 3]\n    let i = 3\n    xs[i] == 0\n"
+                                        "test:\n    let mut xs = [1, 2, 3]\n    let i = -1\n    xs[i] = 4\n"
+                                        "    xs[0] == 1\n"
+                                        "test:\n    let grid: int[2, 2] = [[1, 2], [3, 4]]\n    let j = 2\n"
+                                        "    grid[1, j] == 0\n"
+                                        "test:\n    let xs = [1, 2, 3]\n    let i = 2\n    xs[i] == 3\n");
+    auto files = cc::vector<sgl::check::module_file>();
+    for (auto i = isize(0); i < checked.files.size(); ++i)
+        files.push_back({.file = checked.files[i], .ast = checked.asts[i]});
+    REQUIRE(checked.module.tests.size() == 4);
+    for (auto i = isize(0); i < 3; ++i)
+    {
+        auto const r = sgl::test::run_test(checked.module, files, i);
+        CHECK(r.status == sgl::test::test_status::program_error).dump("test", i);
+        CHECK(r.detail.contains("out of bounds")).dump(r.detail);
+    }
+    CHECK(sgl::test::run_test(checked.module, files, 3).status == sgl::test::test_status::passed);
+}

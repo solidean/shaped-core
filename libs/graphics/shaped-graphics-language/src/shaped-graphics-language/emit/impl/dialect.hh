@@ -16,6 +16,8 @@ struct local_declaration
     cc::string_view type;
     /// Empty for a local that is declared now and filled member by member afterwards.
     cc::string_view value;
+    /// HLSL's array lengths, `[3][5]`, which it writes after the name; empty wherever the type says them.
+    cc::string_view dimensions;
     bool is_mut = false;
 };
 

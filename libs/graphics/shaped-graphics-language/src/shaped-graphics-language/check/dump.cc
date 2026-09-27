@@ -188,6 +188,7 @@ struct dumper
                      },
                      [&](flat_bool_literal const& l) { out.appendf("(lit {}", l.value ? "true" : "false"); },
                      [&](flat_buffer_element const& b) { operands("elem", b.buffer, b.index); },
+                     [&](flat_element const& a) { operands("at", a.object, a.index); },
                      [&](flat_enum_value const& v)
                      {
                          auto const cases = m.at(m.at(x.type).cases);

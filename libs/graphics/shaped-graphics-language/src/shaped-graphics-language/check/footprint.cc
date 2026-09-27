@@ -94,6 +94,12 @@ cc::vector<slot_footprint> footprint_of(checked_module const& m, flat_entry_poin
                 place = member->object;
                 continue;
             }
+            // an array element is part of its local, and its index an ordinary read
+            if (auto const* const element = x.node.try_as<flat_element>())
+            {
+                place = element->object;
+                continue;
+            }
             if (auto const* const element = x.node.try_as<flat_buffer_element>())
             {
                 auto const* const buffer = impl::is_known(e, element->buffer)

@@ -449,6 +449,15 @@ struct checker
     [[nodiscard]] type_id buffer_type(type_id element, bool is_mut);
     /// `buffer[T]` in a type position, which is the `index` node `buffer` heads.
     [[nodiscard]] type_id resolve_buffer(i32 file, ast::expr_id expr, ast::index const& node, function_scope const* scope);
+    /// `T[N]` and `T[a, b]` in a type position; the caller has ruled out `buffer` and every resource.
+    [[nodiscard]] type_id resolve_array(i32 file, ast::expr_id expr, ast::index const& node, function_scope const* scope);
+    /// The interned `element[count]`, spelled outermost first.
+    [[nodiscard]] type_id array_type(type_id element, i32 count);
+    /// Whether `expr` in a type position names a complete type, so that a group applied to it makes an array of it.
+    /// Reports nothing, so a caller may still read the group as something else.
+    [[nodiscard]] bool is_type_name(i32 file, ast::expr_id expr) const;
+    /// An array's length as written: an int literal or a `const`; none for anything else.
+    [[nodiscard]] cc::optional<i32> constant_count(i32 file, ast::expr_id expr);
     /// A texture, image or sampler type, interned like `buffer_type`; `info` needs no `spelled`.
     [[nodiscard]] type_id resource_type(type_info info);
     /// The resource type a bare name in a type position names — a depth texture or a sampler — and `none` otherwise.
@@ -633,6 +642,10 @@ struct checker
     type_id resolve_literal(function_scope& scope, ast::expr_id expr, type_id to, i32 literal);
     /// `expr` where the type `to` is expected, which a literal converts to (CHK-82); reports a value of another type.
     type_id check_expected(function_scope& scope, ast::expr_id expr, type_id to, cc::string_view what = {});
+    /// A square literal: of the array type `to` where one is expected, and of its first element's type otherwise.
+    type_id check_array_literal(function_scope& scope, ast::expr_id expr, type_id to);
+    /// `T[N].filled(v)`, which `check_dot_call` hands over once its object names an array type.
+    type_id check_filled(function_scope& scope, ast::expr_id id, ast::call const& call);
     /// Gives each literal argument of a chosen call the type of the parameter it fills.
     void commit_literals(function_scope& scope,
                          call_arguments const& arguments,
