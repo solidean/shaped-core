@@ -57,6 +57,29 @@ TEST("sg access_state - a first access that both reads and writes is spelled out
     CHECK(!!b.src_access.is_empty()); // nothing was in flight, so there is nothing to wait for
 }
 
+TEST("sg access_state - a first read and write through one writable view is still a freebie")
+{
+    // A shader loading and storing the same `mut` buffer: one UAV access to the API, which it infers like any other.
+    // Spelling it out would name SYNC_NONE after the entry barrier already touched the resource, which D3D12 rejects.
+    sg::resource_access_state s;
+    s.declare(compute, access_flag::storage_read | shader_write);
+    CHECK(!s.flush().needed);
+}
+
+TEST("sg access_state - storage reads do not order against each other, and a write orders after them")
+{
+    sg::resource_access_state s;
+    s.declare(compute, access_flag::storage_read);
+    CHECK(!s.flush().needed);
+    s.declare(compute, access_flag::storage_read);
+    CHECK(!s.flush().needed);
+
+    s.declare(compute, shader_write);
+    auto const b = s.flush();
+    REQUIRE(b.needed);
+    CHECK(b.src_access.has(access_flag::storage_read));
+}
+
 TEST("sg access_state - read after write emits a RAW barrier")
 {
     sg::resource_access_state s;

@@ -233,7 +233,8 @@ private:
 
     /// Declare access on everything the bound groups name — the shape a draw and a dispatch share.
     /// It does not flush: the op does, once, after adding whatever else it reads.
-    void declare_bound_groups(pipeline_stage_flags stages);
+    /// Declares every bound group's views at an op of `stages`, as `footprint` says the code touches them.
+    void declare_bound_groups(pipeline_stage_flags stages, sg::impl::pipeline_footprint const* footprint);
 
     /// Forget what the bound groups named, at the end of a rendering scope and of the recording.
     ///
@@ -246,7 +247,8 @@ private:
     ///
     /// An array binding is the one thing a dispatch cannot infer, so this is the caller's declaration being applied
     /// rather than a derived one — and a bound array binding nothing declared is an error, not "no access".
-    void declare_array_accesses();
+    /// `pipeline` is the bound compute or raytracing pipeline, whose footprint says what the code does to each array.
+    void declare_array_accesses(sg::impl::pipeline_footprint const* footprint, void const* pipeline);
 
     /// Patch the inline-constants shadow, for whichever pipeline kind is bound.
     ///

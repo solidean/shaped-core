@@ -169,6 +169,8 @@ cc::result<metal_binding_group_handle> metal_context::create_metal_binding_group
         auto const is_array = b.is_array() && shape != sg::view_shape::acceleration_structure;
         auto array = metal_binding_group::array_binding{.name = cc::string(b.name),
                                                         .is_texture = shape == sg::view_shape::texture,
+                                                        .binding = isize(index),
+                                                        .bound_as = sg::view_class_of(b),
                                                         .elements = {}};
 
         for (auto element = isize(0); element < provided.size(); ++element)
@@ -220,7 +222,8 @@ cc::result<metal_binding_group_handle> metal_context::create_metal_binding_group
                 if (is_array)
                     array.elements.push_back({.texture = texture_view->texture});
                 else
-                    bound_textures.push_back({.texture = texture_view->texture, .bound_as = sg::view_class_of(view)});
+                    bound_textures.push_back(
+                        {.texture = texture_view->texture, .bound_as = sg::view_class_of(view), .binding = isize(index)});
                 continue;
             }
 
@@ -239,7 +242,8 @@ cc::result<metal_binding_group_handle> metal_context::create_metal_binding_group
             if (is_array)
                 array.elements.push_back({.buffer = buffer_view->buffer});
             else
-                bound_buffers.push_back({.buffer = buffer_view->buffer, .bound_as = sg::view_class_of(view)});
+                bound_buffers.push_back(
+                    {.buffer = buffer_view->buffer, .bound_as = sg::view_class_of(view), .binding = isize(index)});
         }
 
         if (is_array)

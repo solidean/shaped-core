@@ -4,6 +4,7 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/optional.hh>
 #include <clean-core/string/string.hh>
+#include <shaped-graphics/barrier/footprint.hh>
 #include <shaped-graphics/binding/binding.hh>
 #include <shaped-graphics/binding/shader_stage.hh>
 #include <shaped-graphics/context/capabilities.hh>
@@ -79,6 +80,11 @@ struct sg::compiled_shader
     /// An unknown shader is built as a portable one would be, and only the backend can still refuse it.
     /// slib sets it for an SGL shader once a compile settles, so a cached shader never carries it.
     cc::optional<feature_set> required_features;
+
+    /// What the code does to each binding, which barrier inference follows at dispatch.
+    /// A compiler's reflection gives a `reflected` one; slib replaces it with SGL's `exact` one once a compile settles.
+    /// Unknown (`none`) where nothing could tell, and then every writable view counts as written.
+    shader_footprint footprint;
 
     // Deferred: constant-buffer member layouts, root/push constants, content hash, I/O signatures.
 };

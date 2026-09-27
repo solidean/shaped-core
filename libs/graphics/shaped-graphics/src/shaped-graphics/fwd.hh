@@ -231,6 +231,9 @@ struct binding;
 struct compiler_info;
 struct compute_dimensions;
 struct compiled_shader;
+enum class footprint_source : u8; // how far a shader's footprint can be trusted (see barrier/footprint.hh)
+struct slot_footprint;            // how one shader's code touches one binding
+struct shader_footprint;          // every binding a shader's code touches, and how
 
 // Bind path: group schema (binding_group_layout) -> pipeline interface (pipeline_layout) -> pipeline
 // (compute_pipeline) -> instance (binding_group). See binding/binding_group_layout.hh / binding/pipeline_layout.hh /
@@ -277,6 +280,9 @@ void notify_transfer_drained(sg::context& ctx); // a drain reached zero; defined
 struct stat_counts;                             // what one command list counted while recording (context/metrics.hh)
 class stat_totals;                              // a context's running stat totals
 class gpu_wait_scope;                           // times a CPU wait on the GPU into gpu_wait_nanoseconds
+struct slot_use;                                // how a pipeline's code touches one binding slot (barrier/footprint.hh)
+class pipeline_footprint;                       // a pipeline's footprint, resolved against its layout
+struct view_access;                             // the access and stages a bound view is declared with at an op
 // the counts `cmd` recorded, for its backend to fold in at submit; defined in command_list/command_list.cc
 stat_counts const& recorded_stats(command_list const& cmd);
 void record_stats(sg::stats const& delta); // each non-zero counted stat as one CC_RECORD_ACCUM; context/metrics.cc
@@ -312,6 +318,9 @@ namespace impl
 {
 // records the target set and formats of a raster pipeline a backend just built; defined in raster/raster_pipeline.cc
 void set_targets(raster_pipeline const& pipeline, cc::string_view target_set, raster_target_formats const& formats);
+// records what a pipeline's code does to each binding; defined beside each pipeline kind
+void set_footprint(compute_pipeline const& pipeline, pipeline_footprint footprint);
+void set_footprint(raster_pipeline const& pipeline, pipeline_footprint footprint);
 } // namespace impl
 
 // Draw recording (see command_list/raster.hh) — vertex/index buffer views + draw parameters.
@@ -324,6 +333,10 @@ struct draw_indexed_config;
 // Ray-tracing pipeline + shader table (see raytracing/raytracing_pipeline.hh / raytracing/raytracing_shader_table.hh). A
 // DXR state object plus a table of shader identifiers; dispatched via cmd.raytracing.dispatch_rays.
 class raytracing_pipeline;
+namespace impl
+{
+void set_footprint(raytracing_pipeline const& pipeline, pipeline_footprint footprint);
+} // namespace impl
 struct raytracing_pipeline_description; // {layout, raygen/miss/hit/callable shaders, limits} — input to create
 struct hit_shader;                      // {closest_hit, any_hit, intersection} — one hit group's shaders
 class raytracing_shader_table;

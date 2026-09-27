@@ -10,18 +10,50 @@ There is no public `declare_access`. What a resource is used as follows from the
 
 - `cmd.upload` ⇒ `copy_write` on the destination; `cmd.download` ⇒ `copy_read` on the source.
 - `cmd.copy` ⇒ `copy_read` on src plus `copy_write` on dst, and a self-copy is one combined access.
-- A compute `dispatch` ⇒ each bound view's class: `readonly` and `texture` ⇒ `shader_read`, `readwrite` and `image` ⇒ `shader_write`.
-  `constants` ⇒ `constants_read`, and `acceleration_structure` ⇒ `accel_read`.
+- A dispatch, a draw or a trace ⇒ what the bound pipeline's code does to each bound view, which is its **footprint** (below).
 
 The mapping lives in [access_inference.hh](../../src/shaped-graphics/barrier/access_inference.hh), so every backend agrees on the semantics.
+
+### Access follows the footprint
+
+**A pipeline carries its footprint: what its code does to each binding, and in which stages.**
+A group is declared once and bound to many pipelines, so the access its layout allows is the union over all of them.
+One pipeline usually does less: a `mut buffer` an entry point only loads from is a read to that pipeline, and a binding it never names is untouched.
+[footprint.hh](../../src/shaped-graphics/barrier/footprint.hh) holds it; a compiled shader carries one, and pipeline creation resolves every stage's against the layout.
+
+At an op, each bound view is declared with the footprint's access and stages, and its layout still comes from its view class.
+
+- **An untouched binding is not declared at all** — no hazard, and no layout transition.
+  That is sound only while the footprint covers everything the shader statically uses, which holds because SGL computes it on the tree its emitter prints.
+- **A read through a writable view is `storage_read`**, not `shader_read`: D3D12 wants `UNORDERED_ACCESS` before any access through a UAV, whatever the shader does.
+  A storage read and write together are the one access the API infers at first use, so they take the first-write freebie.
+- **Stages narrow too**: a slot only the pixel shader reads is declared at `fragment`, so a barrier before it does not stall vertex work.
+
+Where a footprint comes from decides how far it narrows:
+
+- `exact` — SGL's own analysis, after inlining.
+- `reflected` — a compiler's reflection: a binding it omits is untouched, one it keeps is used as its declaration allows.
+- `none` — nothing is known, and every view counts as its class says: a writable view is written.
+
+A footprint naming a binding the layout does not hold is keyed differently from it, and is not used at all rather than read as "untouched".
+
+**A check a shader edit can flip logs and degrades; it never asserts.**
+Hot reload replaces a shader under a running program, so a declaration that disagreed with the old code may disagree with the new one at any frame.
+Such a mismatch logs an error once per pipeline and binding and falls back to a barrier that covers both sides.
+Only a mistake in the host's own code — a declaration naming no bound array, an element out of range — asserts.
 
 **The one exception — arrays / bindless.**
 Element usage of a resource *array* bound to a shader cannot be inferred: the shader may index only some elements, or use them differently.
 So the caller declares it explicitly, split by resource family since buffers carry no layout.
 `declare_array_buffer_access` takes `array_buffer_access` `{index, stages, access}`; `declare_array_texture_access` takes `array_texture_access`, which also names the required `layout`.
 A declaration applies to the next dispatch only, resolved by binding name against the bound groups' array elements and tracked exactly like an inferred scalar access.
-Declarations are **accounted for**: the dispatch asserts that every bound array binding was declared — an empty element span declares "unused", a missing declaration is a bug.
-Declaring a vacant (null-handle) or out-of-range element asserts too.
+The footprint still says whether the code touches the array at all:
+
+- an array the code never indexes needs no declaration;
+- one it indexes and nobody declared logs an error, and every element is covered — one global barrier for the buffers, and a transition for each texture whose layout is wrong;
+- a declared access the code cannot perform logs an error, and the barrier covers the declaration and the code together.
+
+Declaring a vacant (null-handle) or out-of-range element, or an array no bound group holds, asserts.
 See [bindings — array bindings](bindings.md#array-bindings).
 
 ## The vocabulary is backend-neutral

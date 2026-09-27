@@ -151,8 +151,9 @@ Three rules distinguish an array binding from a scalar one:
   Which elements a shader indexes, and how, cannot be read from the binding, so array bindings skip the automatic hazard tracking scalar bindings get.
   The dispatching caller declares the touched elements via `cmd.compute.declare_array_buffer_access` / `declare_array_texture_access`, applied to the next dispatch only.
   The raytracing scope has the same pair.
-- **Every bound array binding must be declared before each dispatch** — the backend asserts it.
-  A missing declaration is a bug, never "no access"; an empty element span is the way to say "unused this dispatch".
+- **Every array the pipeline's code indexes must be declared before each dispatch.**
+  A missing one logs an error and costs a global barrier over every element, since a hot-reloaded shader can start indexing an array at any frame.
+  An empty element span says "unused this dispatch", and an array the code never indexes needs no declaration at all.
 
 Element resources are still kept alive by the group, exactly like scalar bindings.
 Arrays of samplers, constants buffers or acceleration structures are not supported.

@@ -9,7 +9,7 @@ using namespace cc::primitive_defines;
 
 // Array bindings end to end: reflection yields the array counts, a group binds a partially vacant
 // element list (null descriptors for the vacant ones), and the dispatch declares which elements it reads via
-// declare_array_*_access — the accounting rule that every bound array binding must be declared included.
+// declare_array_*_access — and what an array the shader indexes costs when nobody declared it.
 
 namespace
 {
@@ -169,7 +169,8 @@ ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - array bindings: partial fill, declared a
     CHECK(data[1] == u32(texel_value));
 }
 
-ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - array bindings: the accounting rule", (sg::context_handle const& handle))
+ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - array bindings: an undeclared array logs once and is covered by a global barrier",
+                     (sg::context_handle const& handle))
 {
     auto comp = ssc::dxc::compiler::create();
     REQUIRE(comp.has_value());
@@ -226,15 +227,18 @@ ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - array bindings: the accounting rule", (s
     REQUIRE(g1 != nullptr);
     REQUIRE(g2 != nullptr);
 
-    // A dispatch with an undeclared bound array binding trips the accounting assert.
+    // A hot-reloaded shader can start indexing an array at any frame, so an undeclared one is an error that is logged
+    // rather than asserted, once per pipeline and array however many dispatches meet it, and the dispatch still runs.
+    nx::expect_error("declared no access for an array its pipeline's code indexes", nx::exactly(2));
+    for (auto i = 0; i < 2; ++i)
     {
         auto disp = ctx.create_command_list();
         disp->compute.bind_pipeline(*pipeline);
         disp->compute.bind_group(0, *g0);
         disp->compute.bind_group(1, *g1);
         disp->compute.bind_group(2, *g2);
-        CHECK_ASSERTS(disp->compute.dispatch_groups(1));
-        ctx.drop_command_list(cc::move(disp));
+        disp->compute.dispatch_groups(1);
+        ctx.submit_command_list(cc::move(disp));
     }
 
     // Empty-span declarations say "unused" and satisfy the accounting; the dispatch then runs.

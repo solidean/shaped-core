@@ -743,7 +743,7 @@ cmd.compute.dispatch_threads(x, y, z)    // void — dispatch ceil(threads / wor
 cmd.compute.declare_array_buffer_access(name, elements)  // void — per-element access for a buffer array/bindless binding, next dispatch only
 cmd.compute.declare_array_texture_access(name, elements) // void — same for a texture array (elements also carry a layout)
                                                          // (scalar bindings are inferred; arrays can't be — declare them; cmd.raytracing has the same pair)
-                                                         // ACCOUNTED FOR: dispatch asserts every bound array binding was declared; empty span = "unused"
+                                                         // an array the code indexes and nobody declared LOGS and gets a global barrier; one it never indexes needs none
 
 // raster_pipeline — a graphics PSO. Owns its shaders; formats/state baked in. Draws via cmd.raster (above).
 //   bind_pipeline ASSERTS the rendering's color count/formats, depth format and sample count equal pipeline.target_formats()
@@ -765,8 +765,10 @@ sg::vertex_input_layout           // { small_vector<vertex_input_slot,8> slots; 
 //   blend presets: sg::blend_alpha, sg::blend_premultiplied_alpha, sg::blend_additive — opaque is an unset `blend`
 //   vertex_attribute_format {f32,vec2f,vec3f,vec4f, i32.., u32.., rgba8_unorm, rgba8_uint}   index_format {uint16, uint32}
 raster_pipeline.cached_pipeline_data()  // -> pinned_data<byte const> — serialized PSO blob; persist + feed back via desc.cached_pipeline (empty if unsupported)
-// Access is inferred from each op (upload⇒copy_write, dispatch⇒bound views' access); no public
-// declare_access. Concurrent command lists are fine — each takes a tracking slot. See docs/concepts/barriers.md.
+// Access is inferred from each op (upload⇒copy_write, dispatch⇒what the pipeline's FOOTPRINT says its code does to each view);
+// an untouched binding costs no barrier, a mut buffer only loaded is storage_read. No public declare_access.
+// pipeline.footprint() / compiled_shader.footprint (exact from SGL, reflected from DXC, none = every writable view written).
+// Concurrent command lists are fine — each takes a tracking slot. See docs/concepts/barriers.md.
 ```
 
 ## acceleration structures — ray-tracing blas / tlas  (see docs/concepts/acceleration-structures.md)

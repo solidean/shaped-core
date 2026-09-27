@@ -1,5 +1,7 @@
 #pragma once
 
+#include <clean-core/error/optional.hh>
+#include <shaped-graphics/barrier/footprint.hh>
 #include <shaped-graphics/barrier/resource_access.hh>
 #include <shaped-graphics/resource/views.hh>
 
@@ -28,6 +30,35 @@ namespace sg
         return access_flag::accel_read;
     }
     return access_flag::shader_read; // unreachable for the closed set above
+}
+} // namespace sg
+
+/// What a bound view is declared with at an op: its access and the stages it happens in.
+struct sg::impl::view_access
+{
+    access_flags access;
+    pipeline_stage_flags stages;
+};
+
+namespace sg
+{
+/// How an op whose pipeline has `footprint` touches the view bound at slot `binding` of group `group` as `bound_as`.
+///
+/// Nothing where the code never touches the slot, which is what makes an untouched binding cost no barrier.
+/// A pipeline with no known footprint falls back to the view's class, at every stage of the op.
+[[nodiscard]] inline cc::optional<impl::view_access> access_at(impl::pipeline_footprint const* footprint,
+                                                               int group,
+                                                               isize binding,
+                                                               view_class bound_as,
+                                                               pipeline_stage_flags op_stages)
+{
+    if (footprint == nullptr || !footprint->is_known())
+        return impl::view_access{.access = shader_access_of(bound_as), .stages = op_stages};
+    auto const use = footprint->use_of(group, binding);
+    if (!use.is_touched())
+        return {};
+    auto const stages = use.stages & op_stages;
+    return impl::view_access{.access = use.access, .stages = stages.is_empty() ? op_stages : stages};
 }
 
 /// The layout a bound texture view of this class needs (the single inference point for the texture bind

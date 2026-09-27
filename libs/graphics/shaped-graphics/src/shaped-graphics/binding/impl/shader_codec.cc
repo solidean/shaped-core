@@ -259,6 +259,15 @@ cc::vector<byte> encode_compiled_shader(compiled_shader const& shader)
     put_bool(out, shader.color_output_count.has_value());
     put_u32(out, u32(shader.color_output_count.value_or(0)));
 
+    put_u32(out, u32(shader.footprint.source));
+    put_u64(out, u64(shader.footprint.slots.size()));
+    for (auto const& slot : shader.footprint.slots)
+    {
+        put_string(out, slot.name);
+        put_u32(out, slot.access.bits);
+        put_bool(out, slot.dynamic_index);
+    }
+
     return out;
 }
 
@@ -311,6 +320,21 @@ cc::optional<compiled_shader> decode_compiled_shader(cc::span<byte const> bytes)
     auto const color_outputs = i32(r.get_u32());
     if (has_color_outputs)
         shader.color_output_count = color_outputs;
+
+    auto const source = r.get_u32();
+    if (source > u32(footprint_source::exact))
+        return {};
+    shader.footprint.source = footprint_source(source);
+    // A slot is at least its name's length prefix, its access and its flag.
+    auto const slot_count = r.get_count(13);
+    for (auto i = isize(0); r.ok && i < slot_count; ++i)
+    {
+        auto slot = slot_footprint();
+        slot.name = r.get_string();
+        slot.access = access_flags::create_from_bits(r.get_u32());
+        slot.dynamic_index = r.get_bool();
+        shader.footprint.slots.push_back(cc::move(slot));
+    }
 
     // Trailing bytes mean this is not the blob we think it is, so it is refused like any other inconsistency.
     if (!r.ok || r.pos != bytes.size())

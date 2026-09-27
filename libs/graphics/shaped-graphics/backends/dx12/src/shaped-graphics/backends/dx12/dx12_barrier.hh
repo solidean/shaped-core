@@ -39,20 +39,30 @@ namespace sg::backend::dx12
 /// Requires enhanced-barrier support (ID3D12GraphicsCommandList7).
 void submit_barriers(ID3D12GraphicsCommandList* list,
                      cc::span<D3D12_BUFFER_BARRIER const> buffer_barriers,
-                     cc::span<D3D12_TEXTURE_BARRIER const> texture_barriers);
+                     cc::span<D3D12_TEXTURE_BARRIER const> texture_barriers,
+                     cc::span<D3D12_GLOBAL_BARRIER const> global_barriers = {});
+
+/// Folds a buffer barrier into `global`, which then orders everything `b` did and more.
+/// A global barrier starts as `D3D12_GLOBAL_BARRIER{}` with both accesses NO_ACCESS; see make_empty_global_barrier.
+void merge_into_global_barrier(D3D12_GLOBAL_BARRIER& global, D3D12_BUFFER_BARRIER const& b);
+
+/// A global barrier that orders nothing yet, for merge_into_global_barrier to widen.
+[[nodiscard]] D3D12_GLOBAL_BARRIER make_empty_global_barrier();
 
 /// Adds the batch `submit_barriers` would emit to `sink`'s stats: its records by kind, and one call if it is not empty.
 /// `sink` is a list's sg::impl::stat_counts or the context's sg::impl::stat_totals.
 template <class Sink>
 void count_barriers(Sink& sink,
                     cc::span<D3D12_BUFFER_BARRIER const> buffer_barriers,
-                    cc::span<D3D12_TEXTURE_BARRIER const> texture_barriers)
+                    cc::span<D3D12_TEXTURE_BARRIER const> texture_barriers,
+                    cc::span<D3D12_GLOBAL_BARRIER const> global_barriers = {})
 {
-    if (buffer_barriers.empty() && texture_barriers.empty())
+    if (buffer_barriers.empty() && texture_barriers.empty() && global_barriers.empty())
         return;
     sink.add(sg::stat::barrier_calls);
     sink.add(sg::stat::buffer_barriers, buffer_barriers.size());
     sink.add(sg::stat::texture_barriers, texture_barriers.size());
+    sink.add(sg::stat::global_barriers, global_barriers.size());
     auto transitions = isize(0);
     for (auto const& t : texture_barriers)
         if (t.LayoutBefore != t.LayoutAfter)

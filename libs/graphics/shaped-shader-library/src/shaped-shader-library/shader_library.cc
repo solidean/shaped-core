@@ -49,6 +49,14 @@ void apply(sg::compiled_shader& shader, host_facts const& facts)
                 b.name = r.name;
                 break;
             }
+    // A reflected footprint names bindings as the compiler saw them, so it takes the same renames.
+    for (auto& slot : shader.footprint.slots)
+        for (auto const& r : facts.renames)
+            if (slot.name == r.reflected)
+            {
+                slot.name = r.name;
+                break;
+            }
     if (facts.color_output_count.has_value())
         shader.color_output_count = facts.color_output_count;
     shader.target_set = facts.target_set;

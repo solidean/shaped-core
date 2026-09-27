@@ -36,6 +36,10 @@ enum class sg::access_flag : sg::u32
     depth_write, // depth/stencil write:    DX12 DEPTH_STENCIL_WRITE / Vk DEPTH_STENCIL_ATTACHMENT_WRITE
     accel_read,  // AS read/trace:          DX12 / Vk ACCELERATION_STRUCTURE_READ
     accel_write, // AS build:               DX12 / Vk ACCELERATION_STRUCTURE_WRITE
+
+    // Through a writable (UAV / storage) view, as a pipeline's footprint names them.
+    storage_read,  // read, not written:      DX12 UNORDERED_ACCESS / Vk SHADER_STORAGE_READ
+    shader_atomic, // an atomic, ordered as a read and a write: DX12 UNORDERED_ACCESS / Vk SHADER_STORAGE_READ|WRITE
 };
 
 CC_FLAG_ENUM_INDEXED(sg, access_flag, u32);
@@ -107,7 +111,7 @@ namespace sg
 /// The accesses that constitute an *unordered write* — one the hardware does not auto-serialize, so a following access, read or write, needs an explicit barrier.
 /// Color/depth target writes are excluded: they are ROP-ordered (globally serialized) and act as ordered freebies.
 inline constexpr access_flags unordered_write_accesses
-    = access_flag::shader_write | access_flag::copy_write | access_flag::accel_write;
+    = access_flag::shader_write | access_flag::copy_write | access_flag::accel_write | access_flag::shader_atomic;
 
 /// True if `a` contains an unordered write.
 [[nodiscard]] constexpr bool is_unordered_write(access_flags a)
@@ -119,7 +123,13 @@ inline constexpr access_flags unordered_write_accesses
 /// An op can carry both halves at once — a copy whose source and destination are the same resource does.
 inline constexpr access_flags read_accesses
     = access_flag::constants_read | access_flag::index_read | access_flag::vertex_read | access_flag::shader_read
-    | access_flag::copy_read | access_flag::indirect_read | access_flag::depth_read | access_flag::accel_read;
+    | access_flag::copy_read | access_flag::indirect_read | access_flag::depth_read | access_flag::accel_read
+    | access_flag::storage_read | access_flag::shader_atomic;
+
+/// The accesses of a writable (UAV / storage) view: an API infers them as the ONE access that view makes, so a read and a
+/// write among them do not need telling apart the way a copy's source and destination do.
+inline constexpr access_flags storage_accesses
+    = access_flag::storage_read | access_flag::shader_write | access_flag::shader_atomic;
 
 /// True if `a` observes the resource at all, whatever else it does to it.
 [[nodiscard]] constexpr bool has_read_access(access_flags a)

@@ -20,6 +20,7 @@ add_library(shaped-graphics
     src/shaped-graphics/query/gpu_timestamp.cc
     src/shaped-graphics/raytracing/acceleration_structure.cc
     src/shaped-graphics/barrier/command_list_slot.cc
+    src/shaped-graphics/barrier/footprint.cc
     src/shaped-graphics/binding/binding.cc
     src/shaped-graphics/binding/impl/binding_conflicts.cc
     src/shaped-graphics/binding/impl/portability.cc
@@ -122,6 +123,7 @@ target_sources(shaped-graphics
     src/shaped-graphics/barrier/resource_access.hh
     src/shaped-graphics/barrier/resource_access_state.hh
     src/shaped-graphics/barrier/access_inference.hh
+    src/shaped-graphics/barrier/footprint.hh
     src/shaped-graphics/resource/subresource.hh
     src/shaped-graphics/barrier/subresource_state.hh
     src/shaped-graphics/resource/views.hh

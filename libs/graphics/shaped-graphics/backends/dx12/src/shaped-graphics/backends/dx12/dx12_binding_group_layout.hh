@@ -49,6 +49,17 @@ public:
     /// -1 for a static sampler, which is in neither table: it lives in the root signature.
     cc::vector<int> slot_by_binding;
 
+    /// The position in `bindings()` of the view at `view_slot`, which is what a pipeline's footprint is keyed by.
+    /// A scan: it is asked once per view when a group is created, never at a dispatch.
+    [[nodiscard]] isize binding_of_view_slot(isize view_slot) const
+    {
+        auto const all = bindings();
+        for (isize b = 0; b < all.size(); ++b)
+            if (all[b].type != sg::binding_type::sampler && slot_by_binding[b] == int(view_slot))
+                return b;
+        return -1;
+    }
+
     /// The RegisterSpace of a range whose binding states none: the pipeline layout writes the group's slot in its place.
     ///
     /// A binding without a space is one that fixes no group of its own, which is every binding of an SGL group.

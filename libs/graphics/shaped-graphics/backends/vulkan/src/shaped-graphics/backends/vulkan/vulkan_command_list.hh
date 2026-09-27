@@ -95,6 +95,10 @@ public:
     // Declared for the current op and awaiting the pre-op flush; empty between ops.
     cc::vector<vulkan_buffer const*> _pending_barrier_buffers;
     cc::vector<VkBufferMemoryBarrier2> _pending_buffer_barriers;
+
+    // Buffers of an array a dispatch declared nothing for, whose barriers this op folds into one memory barrier.
+    // Their tracked state still moves per buffer; only the emission is shared.
+    cc::vector<vulkan_buffer const*> _global_barrier_buffers;
     cc::vector<vulkan_texture const*> _pending_barrier_textures;
     cc::vector<VkImageMemoryBarrier2> _pending_image_barriers;
 
@@ -114,6 +118,10 @@ public:
     // The layout supplies each slot's schema; the groups supply the resources whose accesses are declared at dispatch.
     vulkan_pipeline_layout const* _bound_pipeline_layout = nullptr;
     cc::vector<vulkan_binding_group const*> _bound_groups;
+    // The bound compute or raytracing pipeline's footprint, which the dispatch declares its groups' accesses from.
+    // The pipeline itself is kept alive by keep_bound.
+    sg::impl::pipeline_footprint const* _bound_footprint = nullptr;
+    void const* _bound_footprint_owner = nullptr; // the pipeline, which a footprint mismatch is logged against
 
     /// What was bound, held until the list is consumed: a group or pipeline dropped between its bind and the draw that reads it must still be there.
     cc::vector<std::shared_ptr<void const>> _bound_keep_alive;
@@ -149,6 +157,7 @@ public:
     // The graphics bind + input-assembly state, all scoped to the rendering scope that set it up.
     vulkan_pipeline_layout const* _bound_raster_layout = nullptr;
     cc::vector<vulkan_binding_group const*> _bound_raster_groups;
+    sg::impl::pipeline_footprint const* _bound_raster_footprint = nullptr;
     cc::vector<vulkan_buffer const*> _bound_vertex_buffers;
     vulkan_buffer const* _bound_index_buffer = nullptr;
 
@@ -188,8 +197,13 @@ public:
     void record_acceleration_structure_build(built_acceleration_structure const& built);
 
     /// Resolves the pending array declares against the bound groups and tracks each named element.
-    // Also the accounting pass: a bound array binding with no declaration is an error.
-    void declare_array_accesses();
+    // An array the code indexes and nobody declared is covered by a global barrier, and logged against `pipeline`.
+    void declare_array_accesses(void const* pipeline);
+
+    /// Declares every bound group's views at an op of `op_stages`, as `footprint` says the code touches them.
+    void declare_group_accesses(cc::span<vulkan_binding_group const* const> groups,
+                                sg::impl::pipeline_footprint const* footprint,
+                                sg::pipeline_stage_flags op_stages);
 
     // Every resource this list has tracked, so submit can finalize each slot and drop can discard it.
     // Public so the context can walk it at submit; deduplicated by mark_recorded.

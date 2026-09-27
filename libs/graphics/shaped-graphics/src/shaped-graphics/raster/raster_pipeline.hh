@@ -115,6 +115,10 @@ public:
     /// Empty only for a pipeline a backend built outside the context's creation paths.
     [[nodiscard]] cc::optional<raster_target_formats> const& target_formats() const { return _target_formats; }
 
+    /// What this pipeline's code does to each binding, resolved against its layout, which dispatch follows for barriers.
+    /// Unknown when any stage's shader carried none.
+    [[nodiscard]] impl::pipeline_footprint const& footprint() const { return _footprint; }
+
 protected:
     raster_pipeline() = default;
 
@@ -126,6 +130,9 @@ private:
                                   cc::string_view target_set,
                                   raster_target_formats const& formats);
 
+    friend void impl::set_footprint(raster_pipeline const& pipeline, impl::pipeline_footprint footprint);
+
     cc::string _target_set;
     cc::optional<raster_target_formats> _target_formats;
+    impl::pipeline_footprint _footprint;
 };

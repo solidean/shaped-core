@@ -47,20 +47,29 @@ namespace sg::backend::vulkan
 /// Records one `vkCmdPipelineBarrier2` for everything staged, or nothing at all when both spans are empty.
 void submit_barriers(VkCommandBuffer cmd,
                      cc::span<VkBufferMemoryBarrier2 const> buffer_barriers,
-                     cc::span<VkImageMemoryBarrier2 const> image_barriers);
+                     cc::span<VkImageMemoryBarrier2 const> image_barriers,
+                     cc::span<VkMemoryBarrier2 const> memory_barriers = {});
+
+/// Folds a buffer barrier into `global`, which then orders everything `b` did and more.
+void merge_into_memory_barrier(VkMemoryBarrier2& global, VkBufferMemoryBarrier2 const& b);
+
+/// A memory barrier that orders nothing yet, for merge_into_memory_barrier to widen.
+[[nodiscard]] VkMemoryBarrier2 make_empty_memory_barrier();
 
 /// Adds the batch `submit_barriers` would record to `sink`'s stats: its records by kind, and one call if it is not empty.
 /// `sink` is a list's sg::impl::stat_counts or the context's sg::impl::stat_totals.
 template <class Sink>
 void count_barriers(Sink& sink,
                     cc::span<VkBufferMemoryBarrier2 const> buffer_barriers,
-                    cc::span<VkImageMemoryBarrier2 const> image_barriers)
+                    cc::span<VkImageMemoryBarrier2 const> image_barriers,
+                    cc::span<VkMemoryBarrier2 const> memory_barriers = {})
 {
-    if (buffer_barriers.empty() && image_barriers.empty())
+    if (buffer_barriers.empty() && image_barriers.empty() && memory_barriers.empty())
         return;
     sink.add(sg::stat::barrier_calls);
     sink.add(sg::stat::buffer_barriers, buffer_barriers.size());
     sink.add(sg::stat::texture_barriers, image_barriers.size());
+    sink.add(sg::stat::global_barriers, memory_barriers.size());
     auto transitions = isize(0);
     for (auto const& b : image_barriers)
         if (b.oldLayout != b.newLayout)
