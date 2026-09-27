@@ -1,5 +1,6 @@
 #include "features.hh"
 
+#include <clean-core/algorithm/sort.hh>
 #include <clean-core/thread/async_coroutine.hh>
 
 using namespace cc::primitive_defines;
@@ -19,7 +20,7 @@ cc::shared_async<sgl_lsp::test_run> sgl_lsp::run_tests(cc::shared_ptr<analysis> 
             out.is_stopped = true;
             co_return out;
         }
-        // the interpreter reads the flag too, so a test that runs long stops within microseconds, with threads
+        // the interpreter reads the flag too, so with threads a test that runs long stops within a fraction of a millisecond
         auto result = sgl::test::run_test(a->module, files, i32(t), {.stop = &stop->is_raised});
         if (result.status == sgl::test::test_status::stopped)
         {
@@ -66,11 +67,14 @@ sgl_lsp::check_results_params sgl_lsp::check_results_of(test_run const& run, lsp
         auto is_met = true;
         for (auto const& d : a.diagnostics)
             if (d.what.kind == sgl::diagnostic_kind::unmet_expectation && d.file == user)
-                for (auto const& e : test.expectations)
-                    is_met = is_met && d.what.where != e.where;
+                for (auto const& expectation : test.expectations)
+                    is_met = is_met && d.what.where != expectation.where;
         out.marks.push_back(
             {.range = range_of(a, user, test.where, e), .passed = is_met ? 1 : 0, .failed = is_met ? 0 : 1});
     }
+
+    // in source order: a helper's assert is placed where a test first reached it, and a judged test's mark last
+    cc::sort_by(out.marks, [](check_mark const& m) { return (i64(m.range.start.line) << 32) | m.range.start.character; });
     return out;
 }
 

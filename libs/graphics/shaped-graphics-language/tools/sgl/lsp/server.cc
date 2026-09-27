@@ -1,5 +1,6 @@
 #include "server.hh"
 
+#include <clean-core/record/log.hh>
 #include <clean-core/thread/async_coroutine.hh>
 
 using namespace cc::primitive_defines;
@@ -34,6 +35,14 @@ template <class R>
 [[nodiscard]] cc::shared_async<lsp::answer<R>> answer_now(R value)
 {
     return cc::make_async_from_value(lsp::answer<R>(cc::move(value)));
+}
+
+/// Why `a`, ready and without a value, has none.
+template <class T>
+[[nodiscard]] cc::string error_text_of(cc::async<T>& a)
+{
+    auto const* const e = a.try_error();
+    return e != nullptr ? e->underlying().to_string() : cc::string("no value");
 }
 
 [[nodiscard]] lsp::response_error cancelled()
@@ -117,6 +126,17 @@ sgl_lsp::language_server::language_server()
         });
 }
 
+sgl_lsp::language_server::~language_server()
+{
+    impl_stop_test_runs();
+}
+
+void sgl_lsp::language_server::impl_stop_test_runs()
+{
+    for (auto const& [uri, stop] : _test_runs)
+        stop->is_raised.store(true);
+}
+
 void sgl_lsp::language_server::impl_on_document(cc::string_view uri)
 {
     // whatever still runs for the version before is worthless now
@@ -136,31 +156,46 @@ void sgl_lsp::language_server::impl_on_document(cc::string_view uri)
     auto stop = cc::make_shared<lsp::cancel_flag>();
     _test_runs[cc::string(uri)] = stop;
     auto const e = _server.encoding();
+    auto const document = _server.workspace().snapshot().share(uri);
     _server.when_ready(cc::move(checking),
-                       [this, stop, e](cc::async<cc::shared_ptr<analysis>>& checked)
+                       [this, stop, e, document](cc::async<cc::shared_ptr<analysis>>& checked)
                        {
-                           if (stop->is_raised.load() || !checked.has_value())
+                           // stale: a later version publishes in its place
+                           if (stop->is_raised.load())
                                return;
+                           if (!checked.has_value())
+                           {
+                               CC_LOG_ERROR("checking {} at version {} failed: {}", document->uri, document->version,
+                                            error_text_of(checked));
+                               return;
+                           }
                            auto const& a = checked.value();
                            _server.notify("textDocument/publishDiagnostics",
                                           lsp::publish_diagnostics_params{.uri = a->document->uri,
                                                                           .version = a->document->version,
                                                                           .diagnostics = diagnostics_of(*a, {}, e)});
 
-                           _server.when_ready(run_tests(a, stop),
-                                              [this, stop, e](cc::async<test_run>& ran)
-                                              {
-                                                  if (stop->is_raised.load() || !ran.has_value() || ran.value().is_stopped)
-                                                      return;
-                                                  auto const& run = ran.value();
-                                                  auto const& a = *run.checked;
-                                                  _server.notify("textDocument/publishDiagnostics",
-                                                                 lsp::publish_diagnostics_params{
-                                                                     .uri = a.document->uri,
-                                                                     .version = a.document->version,
-                                                                     .diagnostics = diagnostics_of(a, run.results, e),
-                                                                 });
-                                                  _server.notify("sgl/checkResults", check_results_of(run, e));
-                                              });
+                           _server.when_ready(
+                               run_tests(a, stop),
+                               [this, stop, e, document](cc::async<test_run>& ran)
+                               {
+                                   if (stop->is_raised.load() || (ran.has_value() && ran.value().is_stopped))
+                                       return;
+                                   if (!ran.has_value())
+                                   {
+                                       CC_LOG_ERROR("running the tests of {} at version {} failed: {}", document->uri,
+                                                    document->version, error_text_of(ran));
+                                       return;
+                                   }
+                                   auto const& run = ran.value();
+                                   auto const& a = *run.checked;
+                                   _server.notify("textDocument/publishDiagnostics",
+                                                  lsp::publish_diagnostics_params{
+                                                      .uri = a.document->uri,
+                                                      .version = a.document->version,
+                                                      .diagnostics = diagnostics_of(a, run.results, e),
+                                                  });
+                                   _server.notify("sgl/checkResults", check_results_of(run, e));
+                               });
                        });
 }

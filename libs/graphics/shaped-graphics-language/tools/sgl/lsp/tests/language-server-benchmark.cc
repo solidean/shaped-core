@@ -53,9 +53,8 @@ BENCHMARK("sgl lsp - analyzing a sample, against a cached prelude parse and a fr
                    });
 }
 
-// The longest a single test holds the server when it runs to its fuel limit, a million steps by default.
-// Stopping between tests cannot interrupt it; this is the number that decides whether the interpreter should read a
-// stop flag itself.
+// What a test costs that runs to its fuel limit, a million steps by default, when nothing stops it.
+// A new version stops it early, since the interpreter reads the stop flag every 4096 steps.
 BENCHMARK("sgl lsp - a test that runs to its fuel limit")
 {
     auto const doc = document_of("test:\n    let mut i = 0\n    while i >= 0:\n        i = i + 1\n    i < 0\n");

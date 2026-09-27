@@ -25,7 +25,8 @@ namespace sgl_lsp
 [[nodiscard]] lsp::semantic_tokens_legend semantic_tokens_legend();
 [[nodiscard]] lsp::semantic_tokens semantic_tokens_of(analysis const& a, lsp::position_encoding e);
 
-/// A hint ` : type` after each unannotated `let` in `visible`, which inserts itself when accepted.
+/// The hints in `visible`: ` : type` after each unannotated `let`, and `-> type` before the `=>` of each inferred result.
+/// Each inserts itself when accepted, except where the type may not be written.
 [[nodiscard]] cc::vector<lsp::inlay_hint> inlay_hints_of(analysis const& a, lsp::range visible, lsp::position_encoding e);
 
 } // namespace sgl_lsp
@@ -41,7 +42,8 @@ struct sgl_lsp::test_run
 namespace sgl_lsp
 {
 
-/// Runs the document's tests one at a time on compute, yielding between them, and stops early once `stop` is raised.
+/// Runs the document's tests one at a time on compute, yielding between them, and stops once `stop` is raised, inside a
+/// test too.
 [[nodiscard]] cc::shared_async<test_run> run_tests(cc::shared_ptr<analysis> a, cc::shared_ptr<lsp::cancel_flag> stop);
 
 } // namespace sgl_lsp
@@ -54,7 +56,7 @@ struct sgl_lsp::check_mark
     i32 failed = 0;
 };
 
-/// The params of `sgl/checkResults`: every site of the document, summed over the tests of `run`.
+/// The params of `sgl/checkResults`: every site of the document, summed over the tests of `run`, in source order.
 /// A test judged by the diagnostics it expects is one more mark, on its `test` keyword: passed when they all occurred.
 struct sgl_lsp::check_results_params
 {

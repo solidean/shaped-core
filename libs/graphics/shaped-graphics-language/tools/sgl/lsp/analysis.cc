@@ -91,9 +91,9 @@ sgl_lsp::analysis_cache::handle sgl_lsp::analysis_cache::of(lsp::snapshot const&
     if (!document)
         return {};
     auto& e = _entries[cc::string(uri)];
-    if (e.version != document->version || !e.analysis)
+    if (e.document.get() != document.get() || !e.analysis)
     {
-        e.version = document->version;
+        e.document = document;
         e.analysis = cc::make_async_lazy([document] { return analyze(document); });
     }
     return e.analysis;

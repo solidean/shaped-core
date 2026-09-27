@@ -65,7 +65,7 @@ namespace sgl_lsp
 [[nodiscard]] cc::shared_ptr<analysis> analyze(cc::shared_ptr<lsp::document> document);
 } // namespace sgl_lsp
 
-/// One analysis per open document and version, shared by every request that asks for it.
+/// One analysis per open document as one change left it, shared by every request that asks for it.
 /// Touched on the thread driving the server only.
 class sgl_lsp::analysis_cache
 {
@@ -73,15 +73,16 @@ public:
     using handle = cc::shared_async<cc::shared_ptr<analysis>>;
 
     /// The analysis of `uri` as `snap` has it; an empty handle when the document is not open there.
-    /// A cold handle: whoever awaits it starts it, and a second caller for the same version shares the first's.
+    /// A cold handle: whoever awaits it starts it, and a second caller for the same document shares the first's.
     [[nodiscard]] handle of(lsp::snapshot const& snap, cc::string_view uri);
 
     void forget(cc::string_view uri) { _entries.erase(uri); }
 
 private:
+    /// Keyed on the document itself, which every change makes anew: a version is the client's to repeat, as a reopen does.
     struct entry
     {
-        i32 version = -1;
+        cc::shared_ptr<lsp::document> document;
         handle analysis;
     };
     cc::map<cc::string, entry> _entries;
