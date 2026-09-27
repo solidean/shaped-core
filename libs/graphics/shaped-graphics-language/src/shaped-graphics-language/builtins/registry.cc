@@ -223,7 +223,7 @@ spelling sgl::builtins::infix(cc::string_view op)
     auto binds = precedence::comparison;
     if (op == "+" || op == "-")
         binds = precedence::additive;
-    else if (op == "*" || op == "/")
+    else if (op == "*" || op == "/" || op == "%")
         binds = precedence::multiplicative;
     else
         CC_ASSERT(op == "<" || op == "<=" || op == ">" || op == ">=" || op == "==" || op == "!=",

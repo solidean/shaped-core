@@ -209,7 +209,8 @@ binding affine:
 * **EMIT-48** An immutable local is a named constant: `const T name = value;` in HLSL and `let name: T = value;` in WGSL.
 * **EMIT-49** A float literal is the shortest decimal text that reads back as its value, always with a decimal point, and without a suffix.
 * **EMIT-50** A literal that is infinite or not a number is `non-finite-literal`.
-* **EMIT-51** An `@operator` builtin is its operator: `+`, `-`, `*`, `/`, the six comparisons, and the prefix `-`; the products of a matrix are EMIT-43.
+* **EMIT-51** An `@operator` builtin is its operator: `+`, `-`, `*`, `/`, `%`, the six comparisons, and the prefix `-`; the products of a matrix are EMIT-43.
+* **EMIT-110** A float `%` is `fmod(a, b)` in MSL, which has no `%` of floats; HLSL's and WGSL's `%` of floats already mean EVAL-83's remainder.
   Parentheses follow the tree, and an operand of equal precedence on the right keeps them.
 * **EMIT-52** Every other builtin function is a call of the target's function of that name, and `mix` is `lerp` in HLSL.
 * **EMIT-53** A construction of a builtin type is a call of the target's type, on one line: `float3(x, y, z)`, `vec3f(x, y, z)`.

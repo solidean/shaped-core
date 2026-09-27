@@ -25,6 +25,9 @@ enum class sgl::test::test_status : sgl::u8
     /// The run read a `var` nothing assigned, a mistake of the program the check pass cannot see yet.
     /// A status of its own, so `@expect(.fail)` never passes on it.
     uninitialized_read,
+    /// The run met a value no target defines an operation for, such as an integer divisor of zero.
+    /// A status of its own for the same reason: it is a mistake of the program, never a check that failed.
+    program_error,
     /// The test has no flat tree: its body did not check, which a diagnostic already says.
     not_run,
     /// The test expects diagnostics, so whether they occurred is its verdict, and `contain_expected` gives it.

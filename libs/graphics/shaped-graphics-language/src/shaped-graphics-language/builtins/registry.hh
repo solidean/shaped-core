@@ -71,6 +71,10 @@ using helper_writer = cc::string (*)(helper_context const&);
 /// The interpreter has checked their number and kind against the parameter types before it calls, and checks the result's after.
 /// So one evaluator serves a whole family: `in.size() / 2` is the width of a componentwise binary operation.
 using evaluator = void (*)(cc::span<check::scalar const> in, cc::vector<check::scalar>& out);
+
+/// Why the call has no behaviour for these arguments, or empty when it has one; given what an evaluator is given.
+/// A value no correct shader produces is left undefined on every target, and this is how the interpreter reports it.
+using undefined_check = cc::string_view (*)(cc::span<check::scalar const> in);
 } // namespace sgl::builtins
 
 enum class sgl::builtins::spelling_kind : sgl::u8
@@ -146,6 +150,8 @@ struct sgl::builtins::function_record
     /// Zero or more whole `///` lines, without the line break of the last one.
     cc::string doc;
     evaluator evaluate = nullptr;
+    /// Empty for a builtin defined for every argument; otherwise the interpreter asks it before evaluating.
+    undefined_check undefined_when = nullptr;
     spelling write;
     /// Takes screen-space derivatives implicitly, as a sample that picks its own level does.
     /// WGSL then judges the control flow around every call by its uniformity rules, which HLSL and MSL do not have.
@@ -218,7 +224,7 @@ namespace sgl::builtins
 [[nodiscard]] written write_infix(cc::string_view op, precedence own, written lhs, written rhs);
 
 /// `a op b` at the level `op` has in every target.
-/// `op` must be one of `+ - * / < <= > >= == !=`.
+/// `op` must be one of `+ - * / % < <= > >= == !=`.
 [[nodiscard]] spelling infix(cc::string_view op);
 
 /// The names of the types the compiler itself needs: a literal's type, a condition's, a clip-space position's.

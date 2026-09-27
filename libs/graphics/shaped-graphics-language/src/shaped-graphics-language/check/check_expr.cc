@@ -956,6 +956,16 @@ type_id checker::resolve_overload(function_scope& scope,
                           spelling));
         return error_type;
     }
+    // CHK-268: `/` and `%` are the operators whose integer and float answers differ, so over integer literals alone
+    // `1 / 3` would be a silent 0 that literal folding is meant to refuse; the literal says which is meant instead
+    if (is_integer_literals && (spelling == "operator /" || spelling == "operator %"))
+    {
+        report(diagnostic_kind::literal_needs_type, file, where,
+               cc::format("{} of integer literals alone says nothing of whether it divides integers or floats; write "
+                          "a float literal such as 1.0, or `as` a type",
+                          spelling));
+        return error_type;
+    }
     // CHK-256: the spelling says what the writer means, and is checked on the target it chose
     if (written_as == call_spelling::dot_read && chosen_symbol.role != function_role::property)
         report(diagnostic_kind::call_spelling, file, where,

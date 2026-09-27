@@ -17,7 +17,8 @@ What the compiler carries today is the [spec](spec/_index.md); a construct it do
   The general feature is a type parameterized on an integer or an enum value, which math templated on a dimension wants as well, and it lets code branch on the value.
 - **Scoped extensions.** An extension inside a type's block is `unsupported-yet` (CHK-237).
   It is meant to extend the type it names where that block alone sees it, as when implementing a method.
-- **Literal folding.** `7 / 2` is refused while no `/` takes `int` (CHK-257); folding literal subtrees is what [literal-types.md](spec/incubator/literal-types.md) sketches in its place.
+- **Literal folding.** `1 / 3` over integer literals alone is refused (CHK-268), and so is an operator over them that only a float takes (CHK-257).
+  Folding literal subtrees is what [literal-types.md](spec/incubator/literal-types.md) sketches in their place.
 - **Texture methods past 2D.** `sample`, `load`, `store` and `size` cover 2D shapes, with the sampler always passed.
   A default sampler per texture, the other shapes and subscripts are [texture-methods.md](spec/incubator/texture-methods.md).
 - **Features used in a body.** Only a binding member uses a feature today, so a body's `require` can only declare one for its entry point (CHK-262).

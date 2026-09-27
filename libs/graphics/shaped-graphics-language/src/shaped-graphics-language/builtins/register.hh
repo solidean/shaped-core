@@ -35,7 +35,31 @@ void add_infix(registry& r,
                cc::string_view lhs,
                cc::string_view rhs,
                cc::string_view result,
-               evaluator evaluate);
+               evaluator evaluate,
+               undefined_check undefined_when = nullptr);
+
+/// `@pure @operator("op") fun name(a: lhs, b: rhs) -> result`, with a spelling of its own.
+void add_operator(registry& r,
+                  cc::string_view op,
+                  cc::string_view name,
+                  cc::string_view lhs,
+                  cc::string_view rhs,
+                  cc::string_view result,
+                  evaluator evaluate,
+                  spelling write,
+                  undefined_check undefined_when = nullptr);
+
+/// `/` and `%` of `int`, `uint` and their vectors, componentwise, each reading its kind off its leaves.
+/// Both truncate toward zero, as every target does: `-7 / 2 == -3` and `-7 % 3 == -1`.
+void divide_integers(cc::span<check::scalar const> in, cc::vector<check::scalar>& out);
+void remainder_integers(cc::span<check::scalar const> in, cc::vector<check::scalar>& out);
+/// A zero divisor, and the one quotient that overflows `int`: the values no target agrees on.
+[[nodiscard]] cc::string_view integer_division_undefined(cc::span<check::scalar const> in);
+
+/// `a % b` of floats, componentwise: `a - b * trunc(a / b)`, WGSL's definition, which HLSL's `fmod` shares.
+void remainder_floats(cc::span<check::scalar const> in, cc::vector<check::scalar>& out);
+/// `a % b` in HLSL and WGSL, `fmod(a, b)` in MSL, which has no `%` of floats.
+[[nodiscard]] spelling float_remainder();
 
 /// `@pure @operator("-") fun name(x: type) -> type`, written `-x` by every target.
 void add_negate(registry& r, cc::string_view name, cc::string_view type, evaluator evaluate);

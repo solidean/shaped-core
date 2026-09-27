@@ -182,6 +182,12 @@ An operator over literals alone meets whatever operators the prelude declares, a
 The call names no type, so no answer is the reader's, and the error asks for one.
 Folding literals in the front end would settle it for good, as the [literal-types](../../incubator/literal-types.md) incubator sketches, and nothing written under this rule changes meaning then.
 
+## CHK-268
+
+`/` and `%` are where an integer answer and a float answer differ, and a reader of `1 / 3` cannot tell which the writer meant.
+Folding literals, which the [literal-types](../../incubator/literal-types.md) incubator sketches, makes that expression an error rather than a silent `0`.
+Refusing it now means nothing written today changes meaning when folding lands, which is CHK-257's reason carried over to the day `int` gained a `/`.
+
 ## CHK-81
 
 A literal converting by a call of the type's name gets defaults, named arguments, named-only parameters and the evaluation order from the call rules.

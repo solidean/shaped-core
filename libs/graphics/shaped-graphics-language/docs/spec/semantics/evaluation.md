@@ -17,6 +17,9 @@ A listing here is the dump of a flat tree, shortened: a label is `$name`, and a 
 * **EVAL-4** Two trees **behave the same** when every input gives them the same result and the same trace.
 * **EVAL-5** An implementation may produce anything that behaves the same as the structured form: this is the **as-if rule** ([why](why/evaluation.md#eval-5)).
 * **EVAL-6** A `float` is a 32-bit IEEE number, an `int` is 32 bits, signed, and its arithmetic wraps, and a `bool` is true or false.
+* **EVAL-83** An integer `/` truncates toward zero, and `%` is what it leaves, with the sign of its left operand: `-7 / 2` is `-3` and `-7 % 3` is `-1`.
+  A float `%` is `a - b * trunc(a / b)`, with the sign of `a` the same way.
+* **EVAL-84** An integer `/` or `%` by zero, and the most negative `int` divided by `-1`, have no value: a run that reaches one has no behaviour past it ([why](why/evaluation.md#eval-84)).
 * **EVAL-7** A struct value is one value per field, in field order.
 * **EVAL-64** An enum value is the `int` value of one of its type's cases, and `==` and `!=` over two of them compare those `int`s.
   `bool` is the exception: it is a `@builtin` enum (CHK-218), and its value is `false` or `true`, compared by the prelude's `==`.
@@ -188,11 +191,11 @@ fun graded(a: float) -> float:
 * **EVAL-41** A run that reads a `var` holding nothing, or ends a block expression or the root block without a value, has no behaviour.
 * **EVAL-42** The as-if rule promises nothing about such a run ([why](why/evaluation.md#eval-42)).
 * **EVAL-43** The machine reports each as a status of its own, and a tree that is ill typed or malformed as a type error; it never asserts.
+* **EVAL-85** An operation that has no value for its operands, by EVAL-84 and its like, is the status `program-error`, which names the operation ([why](why/evaluation.md#eval-84)).
 * **EVAL-44** A run is bounded by a fuel count, one unit per statement, per expression node and per iteration, and running out is a status as well.
 
 ## Open
 
 * Definite assignment: a `let` without a value is what would let a program read a `var` that holds nothing, and the check pass carries none yet.
-* What an `int` division by zero is, which is why `int` has no `/` yet.
 * Whether `float` arithmetic is exact across targets; the machine computes in `f32`, and a target may fuse or reorder.
 * Whether a pattern that has an effect is worth the ordering EVAL-68 has to promise, which a pattern language would make sharper ([patterns](../incubator/patterns.md)).

@@ -194,14 +194,17 @@ void sgl::builtins::register_vector_math(registry& r)
         add_infix(r, "-", named("subtract", type), type, type, type, subtract);
         add_infix(r, "*", named("multiply", type), type, type, type, multiply);
         add_infix(r, "/", named("divide", type), type, type, type, divide);
+        add_operator(r, "%", named("remainder", type), type, type, type, remainder_floats, float_remainder());
     }
 
-    r.add_comment("// integer vectors wrap componentwise, and division is left out as it is for their scalars");
+    r.add_comment("// integer vectors wrap componentwise, and divide componentwise as their scalars do");
     for (auto const type : integer_vectors)
     {
         add_infix(r, "+", named("add", type), type, type, type, add_bits);
         add_infix(r, "-", named("subtract", type), type, type, type, subtract_bits);
         add_infix(r, "*", named("multiply", type), type, type, type, multiply_bits);
+        add_infix(r, "/", named("divide", type), type, type, type, divide_integers, integer_division_undefined);
+        add_infix(r, "%", named("remainder", type), type, type, type, remainder_integers, integer_division_undefined);
     }
 
     r.add_comment("// a direction adds to a direction; what `vec3 * vec3` would mean is a question, so it is no "

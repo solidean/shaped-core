@@ -138,12 +138,15 @@
 // float
 @builtin @pure @operator("*") fun multiply(a: float, b: float) -> float
 @builtin @pure @operator("/") fun divide(a: float, b: float) -> float
+@builtin @pure @operator("%") fun remainder(a: float, b: float) -> float
 @builtin @pure @operator("+") fun add(a: float, b: float) -> float
 @builtin @pure @operator("-") fun subtract(a: float, b: float) -> float
 @builtin @pure @operator("-") fun negate(x: float) -> float
 
-// int: division is left out until the language says what dividing by zero is
+// int: `/` and `%` truncate toward zero, and a zero divisor has no value on any target
 @builtin @pure @operator("*") fun multiply_int(a: int, b: int) -> int
+@builtin @pure @operator("/") fun divide_int(a: int, b: int) -> int
+@builtin @pure @operator("%") fun remainder_int(a: int, b: int) -> int
 @builtin @pure @operator("+") fun add_int(a: int, b: int) -> int
 @builtin @pure @operator("-") fun subtract_int(a: int, b: int) -> int
 @builtin @pure @operator("-") fun negate_int(x: int) -> int
@@ -152,8 +155,10 @@
 @builtin @pure fun max(a: int, b: int) -> int
 @builtin @pure fun clamp(x: int, low: int, high: int) -> int
 
-// uint: division is left out, as it is for int
+// uint: a zero divisor has no value, as for int
 @builtin @pure @operator("*") fun multiply_uint(a: uint, b: uint) -> uint
+@builtin @pure @operator("/") fun divide_uint(a: uint, b: uint) -> uint
+@builtin @pure @operator("%") fun remainder_uint(a: uint, b: uint) -> uint
 @builtin @pure @operator("+") fun add_uint(a: uint, b: uint) -> uint
 @builtin @pure @operator("-") fun subtract_uint(a: uint, b: uint) -> uint
 @builtin @pure fun min(a: uint, b: uint) -> uint
@@ -219,34 +224,49 @@
 @builtin @pure @operator("-") fun subtract_float2(a: float2, b: float2) -> float2
 @builtin @pure @operator("*") fun multiply_float2(a: float2, b: float2) -> float2
 @builtin @pure @operator("/") fun divide_float2(a: float2, b: float2) -> float2
+@builtin @pure @operator("%") fun remainder_float2(a: float2, b: float2) -> float2
 @builtin @pure @operator("+") fun add_color(a: float3, b: float3) -> float3
 @builtin @pure @operator("-") fun subtract_color(a: float3, b: float3) -> float3
 @builtin @pure @operator("*") fun multiply_color(a: float3, b: float3) -> float3
 @builtin @pure @operator("/") fun divide_color(a: float3, b: float3) -> float3
+@builtin @pure @operator("%") fun remainder_color(a: float3, b: float3) -> float3
 @builtin @pure @operator("+") fun add_float4(a: float4, b: float4) -> float4
 @builtin @pure @operator("-") fun subtract_float4(a: float4, b: float4) -> float4
 @builtin @pure @operator("*") fun multiply_float4(a: float4, b: float4) -> float4
 @builtin @pure @operator("/") fun divide_float4(a: float4, b: float4) -> float4
+@builtin @pure @operator("%") fun remainder_float4(a: float4, b: float4) -> float4
 
-// integer vectors wrap componentwise, and division is left out as it is for their scalars
+// integer vectors wrap componentwise, and divide componentwise as their scalars do
 @builtin @pure @operator("+") fun add_int2(a: int2, b: int2) -> int2
 @builtin @pure @operator("-") fun subtract_int2(a: int2, b: int2) -> int2
 @builtin @pure @operator("*") fun multiply_int2(a: int2, b: int2) -> int2
+@builtin @pure @operator("/") fun divide_int2(a: int2, b: int2) -> int2
+@builtin @pure @operator("%") fun remainder_int2(a: int2, b: int2) -> int2
 @builtin @pure @operator("+") fun add_int3(a: int3, b: int3) -> int3
 @builtin @pure @operator("-") fun subtract_int3(a: int3, b: int3) -> int3
 @builtin @pure @operator("*") fun multiply_int3(a: int3, b: int3) -> int3
+@builtin @pure @operator("/") fun divide_int3(a: int3, b: int3) -> int3
+@builtin @pure @operator("%") fun remainder_int3(a: int3, b: int3) -> int3
 @builtin @pure @operator("+") fun add_int4(a: int4, b: int4) -> int4
 @builtin @pure @operator("-") fun subtract_int4(a: int4, b: int4) -> int4
 @builtin @pure @operator("*") fun multiply_int4(a: int4, b: int4) -> int4
+@builtin @pure @operator("/") fun divide_int4(a: int4, b: int4) -> int4
+@builtin @pure @operator("%") fun remainder_int4(a: int4, b: int4) -> int4
 @builtin @pure @operator("+") fun add_uint2(a: uint2, b: uint2) -> uint2
 @builtin @pure @operator("-") fun subtract_uint2(a: uint2, b: uint2) -> uint2
 @builtin @pure @operator("*") fun multiply_uint2(a: uint2, b: uint2) -> uint2
+@builtin @pure @operator("/") fun divide_uint2(a: uint2, b: uint2) -> uint2
+@builtin @pure @operator("%") fun remainder_uint2(a: uint2, b: uint2) -> uint2
 @builtin @pure @operator("+") fun add_uint3(a: uint3, b: uint3) -> uint3
 @builtin @pure @operator("-") fun subtract_uint3(a: uint3, b: uint3) -> uint3
 @builtin @pure @operator("*") fun multiply_uint3(a: uint3, b: uint3) -> uint3
+@builtin @pure @operator("/") fun divide_uint3(a: uint3, b: uint3) -> uint3
+@builtin @pure @operator("%") fun remainder_uint3(a: uint3, b: uint3) -> uint3
 @builtin @pure @operator("+") fun add_uint4(a: uint4, b: uint4) -> uint4
 @builtin @pure @operator("-") fun subtract_uint4(a: uint4, b: uint4) -> uint4
 @builtin @pure @operator("*") fun multiply_uint4(a: uint4, b: uint4) -> uint4
+@builtin @pure @operator("/") fun divide_uint4(a: uint4, b: uint4) -> uint4
+@builtin @pure @operator("%") fun remainder_uint4(a: uint4, b: uint4) -> uint4
 
 // a direction adds to a direction; what `vec3 * vec3` would mean is a question, so it is no operator
 @builtin @pure @operator("+") fun add_vec3(a: vec3, b: vec3) -> vec3

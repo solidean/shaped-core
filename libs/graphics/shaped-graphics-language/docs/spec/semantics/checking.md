@@ -380,7 +380,9 @@ fun shade(k: float) -> float:
   A default costs nothing, so `f(x)` beside `f(x, y = 1)` leaves `f(v)` without a best.
 * **CHK-255** Among matching candidates whose chains are of equal length at every argument, a function of a type scope is better than one found by name at the call.
 * **CHK-257** An operator whose operands are all integer literals, and whose best candidate converts one of them, is the normal error `literal-needs-type` ([why](why/checking.md#chk-257)).
-  So `7 / 2` is an error while no `/` takes `int`, and `7.0 / 2` is the float one.
+  `7.0 / 2` is the float `/`, since one operand is no integer literal.
+* **CHK-268** A `/` or a `%` whose operands are all integer literals is the normal error `literal-needs-type`, although `int` has both ([why](why/checking.md#chk-268)).
+  So `1 / 3` is an error, and `1.0 / 3`, `(1 as int) / 3` and a division of two `int` locals are not.
 * **CHK-71** No matching candidate is the normal error `no-matching-overload`, and its detail spells the call with its argument types and says why each candidate did not match.
 * **CHK-72** Matching candidates without a best are the normal error `ambiguous-overload` ([why](why/checking.md#chk-72)).
 * **CHK-73** The best matching candidate is the call's target, and its return type is the call's type.
@@ -702,7 +704,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `literal-not-representable` | CHK-60, CHK-61, CHK-253 |
 | `call-spelling` | CHK-256 |
 | `literal-conversion-result` | CHK-85 |
-| `literal-needs-type` | CHK-257 |
+| `literal-needs-type` | CHK-257, CHK-268 |
 
 ## Open
 

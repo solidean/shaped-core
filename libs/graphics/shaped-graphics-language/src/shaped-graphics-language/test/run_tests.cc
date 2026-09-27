@@ -169,6 +169,8 @@ cc::string_view sgl::test::to_string(test_status s)
         return "judged-by-diagnostics";
     case test_status::uninitialized_read:
         return "uninitialized-read";
+    case test_status::program_error:
+        return "program-error";
     case test_status::internal_error:
         return "internal-error";
     case test_status::stopped:
@@ -286,6 +288,9 @@ test_result sgl::test::run_test(checked_module const& m, cc::span<module_file co
         break;
     case run_status::uninitialized_read:
         result.status = test_status::uninitialized_read;
+        break;
+    case run_status::program_error:
+        result.status = test_status::program_error;
         break;
     case run_status::fell_off_the_end:
     case run_status::type_error:
@@ -410,6 +415,9 @@ located_diagnostic sgl::test::diagnostic_of(checked_module const& m, test_result
         break;
     case test_status::uninitialized_read:
         detail = cc::format("the run read a variable nothing assigned: {}", r.detail);
+        break;
+    case test_status::program_error:
+        detail = cc::format("the run has no behaviour past this: {}", r.detail);
         break;
     case test_status::internal_error:
         detail = cc::format("the compiler wrote a tree it cannot run: {}", r.detail);

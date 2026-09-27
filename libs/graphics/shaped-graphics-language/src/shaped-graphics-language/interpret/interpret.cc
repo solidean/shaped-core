@@ -164,6 +164,9 @@ struct machine
                 is_typed = is_typed && leaf.kind == m.builtins->at(type).leaf_kind;
             in.push_back_range(args[k].leaves);
         }
+        if (is_typed && record->undefined_when != nullptr)
+            if (auto const why = record->undefined_when(in); !why.empty())
+                return fail(run_status::program_error, cc::format("{}, in a call of '{}'", why, record->name));
         if (is_typed)
             record->evaluate(in, result.leaves);
 
@@ -789,6 +792,8 @@ cc::string_view sgl::check::to_string(run_status s)
         return "type-error";
     case run_status::uninitialized_read:
         return "uninitialized-read";
+    case run_status::program_error:
+        return "program-error";
     case run_status::assertion_failed:
         return "assertion-failed";
     case run_status::stopped:

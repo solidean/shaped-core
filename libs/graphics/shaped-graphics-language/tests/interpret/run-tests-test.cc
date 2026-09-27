@@ -142,3 +142,25 @@ TEST("sgl tests - a raised stop flag ends a run as stopped, and nothing is judge
     CHECK(r.status == sgl::test::test_status::stopped);
     CHECK(!r.is_passed()); // a stopped run is no pass
 }
+
+TEST("sgl tests - an integer divisor of zero is a program error, and no expectation of a failed check passes on it")
+{
+    // Division by zero has no value on any target, so the interpreter stops rather than invent one.
+    // `@expect(.fail)` expects a false check, which this is not, so the test with it fails too.
+    auto const checked = check_sources(read_prelude(), "test:\n    let zero = 0\n    7 / zero == 0\n"
+                                                       "@expect(.fail)\ntest:\n    let zero = 0\n    7 % zero == 1\n"
+                                                       "test:\n    let n = -2147483647 - 1\n    n / -1 == n\n"
+                                                       "test:\n    let zero: uint = 0\n    (7 as uint) / zero == 0\n");
+    auto files = cc::vector<sgl::check::module_file>();
+    for (auto i = isize(0); i < checked.files.size(); ++i)
+        files.push_back({.file = checked.files[i], .ast = checked.asts[i]});
+    REQUIRE(checked.module.tests.size() == 4);
+    for (auto i = isize(0); i < 4; ++i)
+    {
+        auto const r = sgl::test::run_test(checked.module, files, i);
+        CHECK(r.status == sgl::test::test_status::program_error).dump("test", i);
+        CHECK(!r.is_passed()).dump("test", i);
+    }
+    CHECK(sgl::test::run_test(checked.module, files, 0).detail.contains("divided by zero"));
+    CHECK(sgl::test::run_test(checked.module, files, 2).detail.contains("most negative int"));
+}

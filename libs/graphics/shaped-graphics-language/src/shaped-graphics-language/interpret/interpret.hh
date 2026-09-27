@@ -51,6 +51,8 @@ enum class sgl::check::run_status : sgl::u8
     type_error,
     /// A `var` was read before anything was assigned to it.
     uninitialized_read,
+    /// An operation met a value no target defines it for, such as an integer divisor of zero; `outcome::detail` says which.
+    program_error,
     /// An `assert` was false; the run stopped there (EVAL-76).
     assertion_failed,
     /// The caller raised `run_limits::stop`; what the run had found so far means nothing.
