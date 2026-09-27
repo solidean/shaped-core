@@ -237,11 +237,11 @@ fun shade(k: float) -> float:
 | on | the known attributes |
 |---|---|
 | a function | `@builtin`, `@pure`, `@operator`, `@vertex`, `@pixel`, `@compute`, `@stages`, `@shadowable` |
-| a struct | `@builtin`, `@vertex`, `@pixel`, `@shadowable` |
+| a struct | `@builtin`, `@vertex`, `@pixel`, `@shadowable`, `@no_padding` |
 | an enum | `@builtin`, `@shadowable` |
 | a const | `@shadowable` |
 | a test | `@expect` |
-| a binding | `@inline`, `@shadowable` |
+| a binding | `@inline`, `@shadowable`, `@no_padding` |
 | a binding member | `@unfilterable`, `@non_filtering` |
 | a struct field | `@position`, `@thread_id`, `@per_instance`, `@stream` |
 | a pipeline | `@raster`, `@compute`, `@raytracing` |
