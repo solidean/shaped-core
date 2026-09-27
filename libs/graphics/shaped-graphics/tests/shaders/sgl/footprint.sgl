@@ -38,3 +38,35 @@ pipeline shifted:
     pixel = flat_ps
     cull = .none
     format = .rgba8_unorm
+
+// One draw's pixel shader writes a buffer and the next one's reads it, inside one rendering: the hazard a backend can
+// only order by leaving the pass, except dx12, which has none to leave.
+// Every pixel owns the element its own position maps to, so a read that raced ahead of the write finds a zero.
+binding marks:
+    hits: mut buffer[float]
+
+@vertex fun marks_vs(v: shift_corner){marks} -> shift_varyings:
+    return { position = hpos4(v.position.x, v.position.y, 0.0, 1.0) }
+
+fun pixel_index(p: shift_varyings) -> int => (p.position.y as int) * 4 + (p.position.x as int)
+
+@pixel fun mark_ps(p: shift_varyings){marks} -> shift_target:
+    let i = pixel_index(p)
+    marks.hits[i] = (i + 1) as float
+    return { color = float4(0.0, 1.0, 0.0, 1.0) }
+
+@pixel fun read_ps(p: shift_varyings){marks} -> shift_target:
+    let v = marks.hits[pixel_index(p)] / 255.0
+    return { color = float4(v, v, v, 1.0) }
+
+pipeline marking:
+    vertex = marks_vs
+    pixel = mark_ps
+    cull = .none
+    format = .rgba8_unorm
+
+pipeline reading:
+    vertex = marks_vs
+    pixel = read_ps
+    cull = .none
+    format = .rgba8_unorm

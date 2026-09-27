@@ -242,3 +242,116 @@ ASYNC_INVOCABLE_TEST("sg - a draw pays for the buffer its vertex stage reads, an
     // Nothing above waits on the draw, so the test settles it before it ends.
     co_await ctx->idle_completion();
 }
+
+namespace
+{
+constexpr auto k_side = 4;
+
+/// Draws `first` then `second` into one rendering, both over `hits`, and returns the target's bytes and the stats the
+/// list cost; the target and `hits` are settled by a list of their own first, so only the two draws are counted.
+cc::shared_async<cc::pair<cc::vector<byte>, sg::stats>> two_draws(sg::context& ctx,
+                                                                  sg::raster_pipeline const& first,
+                                                                  sg::raster_pipeline const& second,
+                                                                  sg::buffer<float> const& hits)
+{
+    auto const layout = ctx.cached.acquire_binding_group_layout<shaders::marks>();
+    auto const corners
+        = ctx.persistent.create_buffer_from_data(cc::vector<shaders::shift_corner>{{.position = tg::vec3f(-1, -1, 0)},
+                                                                                   {.position = tg::vec3f(3, -1, 0)},
+                                                                                   {.position = tg::vec3f(-1, 3, 0)}},
+                                                 sg::buffer_usage::vertex_buffer);
+    auto const image
+        = ctx.persistent.create_texture_2d({.format = sg::pixel_format::rgba8_unorm,
+                                            .width = k_side,
+                                            .height = k_side,
+                                            .usage = sg::texture_usage::render_target | sg::texture_usage::copy_src});
+
+    {
+        auto cmd = ctx.create_command_list();
+        {
+            auto pass = cmd->raster.render_to(
+                shaders::shift_target{.color = image.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 1))});
+        }
+        auto warm = cmd->download.data_from_buffer(hits);
+        ctx.submit_command_list(cc::move(cmd));
+        (void)co_await warm.data();
+    }
+
+    auto cmd = ctx.create_command_list();
+    auto const group
+        = ctx.transient.create_binding_group(*cmd, layout, shaders::marks{.hits = hits.as_readwrite_buffer()});
+    auto const before = ctx.metrics.stats();
+    {
+        auto pass = cmd->raster.render_to(shaders::shift_target{.color = image.as_render_target_view()});
+        pass.bind_vertex_buffers({corners.as_vertex_buffer()});
+        pass.bind_pipeline(first);
+        pass.bind_group(0, *group);
+        pass.draw({.vertex_range = {.offset = 0, .size = 3}, .instance_range = {.offset = 0, .size = 1}});
+        pass.bind_pipeline(second);
+        pass.bind_group(0, *group);
+        pass.draw({.vertex_range = {.offset = 0, .size = 3}, .instance_range = {.offset = 0, .size = 1}});
+    }
+    ctx.submit_command_list(cc::move(cmd));
+    auto const d = ctx.metrics.stats() - before;
+
+    auto readback = ctx.create_command_list();
+    auto const future = readback->download.bytes_from_texture(image.raw());
+    ctx.submit_command_list(cc::move(readback));
+    auto const bytes = co_await future.bytes();
+    auto pixels = cc::vector<byte>();
+    pixels.push_back_range(bytes.span());
+    co_return cc::pair<cc::vector<byte>, sg::stats>{cc::move(pixels), d};
+}
+} // namespace
+
+ASYNC_INVOCABLE_TEST("sg - a draw reading what the previous draw's pixel shader wrote splits the pass, except on dx12",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+
+    auto const marking = co_await ctx->cached.acquire_raster_pipeline(shaders::footprint.marking);
+    auto const reading = co_await ctx->cached.acquire_raster_pipeline(shaders::footprint.reading);
+    // Zeroed, so a read that raced ahead of the write reads 0 rather than whatever the allocation held.
+    auto const hits
+        = ctx->persistent.create_buffer_from_data(cc::vector<float>::create_filled(k_side * k_side, 0.0f),
+                                                  sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
+
+    auto const [pixels, d] = co_await two_draws(*ctx, *marking, *reading, hits);
+
+    // `mark_ps` writes `index + 1` and `read_ps` scales it by 1/255, so texel i reads back as i + 1.
+    REQUIRE(pixels.size() == k_side * k_side * 4);
+    auto wrong = 0;
+    for (auto i = 0; i < k_side * k_side; ++i)
+    {
+        auto const delta = int(u8(pixels[i * 4])) - (i + 1);
+        wrong += delta < -1 || delta > 1 ? 1 : 0;
+    }
+    CHECK(wrong == 0);
+
+    // dx12 binds its targets without a pass to leave, so the write is ordered by a barrier alone.
+    sg_test::require_counted(d, sg::stat::render_pass_splits);
+    CHECK(d[sg::stat::render_pass_splits] == (ctx->backend() == sg::backend_kind::dx12 ? 0 : 1));
+}
+
+ASYNC_INVOCABLE_TEST("sg - two draws that only read one buffer never split the pass", (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+
+    auto const reading = co_await ctx->cached.acquire_raster_pipeline(shaders::footprint.reading);
+    auto const hits
+        = ctx->persistent.create_buffer_from_data(cc::vector<float>::create_filled(k_side * k_side, 0.0f),
+                                                  sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
+
+    // The buffer is bound read-write both times and only ever loaded, so nothing orders the second draw after the first.
+    auto const [pixels, d] = co_await two_draws(*ctx, *reading, *reading, hits);
+    REQUIRE(pixels.size() == k_side * k_side * 4);
+
+    sg_test::require_counted(d, sg::stat::render_pass_splits);
+    CHECK(d[sg::stat::render_pass_splits] == 0);
+    sg_test::require_counted(d, sg::stat::buffer_barriers);
+    CHECK(d[sg::stat::buffer_barriers] == 0);
+}
