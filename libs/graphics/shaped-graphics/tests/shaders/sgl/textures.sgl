@@ -36,6 +36,19 @@ binding sampled:
     if xy.x < sampled.dst.size().x and xy.y < sampled.dst.size().y:
         sampled.dst.store(xy, sampled.src.sample(uv, sampled.smp, level = 0.0))
 
+// A sampler of the file rather than of a group: the pipeline layout of every entry point that samples through it holds it.
+// It clamps where sg's default sampler repeats, so a layout that dropped it samples other texels.
+sampler clamped:
+    filter = .nearest
+    address = .clamp_edge
+
+// Shifted by half the texture, so the first half of each axis samples outside it and clamps to its edge.
+@compute(8, 8) fun copy_clamped(@thread_id id: int3){sampled}:
+    let xy = int2(id.x, id.y)
+    let uv = ((xy as float2) + float2(0.5, 0.5)) / (sampled.src.size(0) as float2) - float2(0.5, 0.5)
+    if xy.x < sampled.dst.size().x and xy.y < sampled.dst.size().y:
+        sampled.dst.store(xy, sampled.src.sample(uv, clamped, level = 0.0))
+
 // A full-screen quad whose pixel stage samples a texture: `sample` without a `level` picks its level from derivatives,
 // which only a pixel stage has, so it is @stages(.pixel) and a compute entry point may not reach it.
 @vertex struct screen_vertex:
@@ -65,3 +78,17 @@ binding material:
     return {
         color = material.albedo.sample(p.uv, material.nearest)
     }
+
+// The quad again, sampled through the file's sampler at a quarter texel off twice the coordinate, so the outer pixels
+// fall outside the texture and clamp.
+@pixel fun clamped_ps(p: textured_input){material} -> textured_target:
+    return {
+        color = material.albedo.sample(p.uv * 2.0 - float2(0.4375, 0.4375), clamped)
+    }
+
+// Only its pixel stage reaches the sampler, and the one layout of both stages holds it.
+pipeline clamped_draw:
+    vertex = screen_vs
+    pixel = clamped_ps
+    cull = .none
+    format = .rgba8_unorm
