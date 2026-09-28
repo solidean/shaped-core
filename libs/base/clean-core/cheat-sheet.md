@@ -379,6 +379,8 @@ cc::format_to(cc::span<char>(buf, n), "{}", v);  // -> isize, non-allocating; re
 //   (Or just give T a member to_string() for the plain "{}" case.)
 //   An integer wider than u64: cc::format_wide_integer(sink, spec, negative, digits(base, upper) -> string_view)
 //   plus cc::validate_integer_format_spec(spec) — cc does the grammar, the type supplies raw digits.
+//   A float newtype: cc::format_value(out, spec, as_float) plus cc::validate_float_format_spec(spec);
+//   cc::is_shortest_float_format_spec(spec) -> true when no precision/type, i.e. shortest round-trip digits are wanted.
 
 #include <clean-core/string/print.hh>            // print/println -> stdout, eprint/eprintln -> stderr (via fwrite)
 cc::print(sv);  cc::println("done");             // raw string_view (braces NOT interpreted); println() = just '\n'
