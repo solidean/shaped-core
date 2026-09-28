@@ -654,7 +654,7 @@ cc::string sgl_test::differential_failure(checked_module const& m,
         return report(cc::format("the generated program is not scoped: {}", violation), nullptr, nullptr);
 
     auto const core = legalize(m, structured, options);
-    if (auto const violation = find_core_violation(core); violation.has_value())
+    if (auto const violation = find_core_violation(m, core); violation.has_value())
         return report(cc::format("the legalized tree is not core: {}", violation.value().reason), &core, nullptr);
 
     if (auto const violation = scope_violation(core); !violation.empty())

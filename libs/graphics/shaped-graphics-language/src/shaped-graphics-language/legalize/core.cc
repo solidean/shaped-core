@@ -42,8 +42,45 @@ bool reads_mutable_local(flat_entry_point const& e, flat_expr_id id, int depth)
     return result;
 }
 
+bool takes_derivatives_at(checked_module const& m, flat_entry_point const& e, flat_expr_id id, int depth)
+{
+    if (!is_known(e, id) || depth > k_max_depth)
+        return true;
+    auto const& x = e.at(id);
+    if (auto const* const c = x.node.try_as<flat_call>())
+        if (auto const* const record = m.builtin_function(c->intrinsic); record != nullptr && record->uses_derivatives)
+            return true;
+    auto result = false;
+    for_each_operand(e, x,
+                     [&](flat_expr_id operand) { result = result || takes_derivatives_at(m, e, operand, depth + 1); });
+    return result;
+}
+
+/// True when an index of the place `id` has an effect: an element's, a buffer element's, at any step of it.
+bool index_has_effect(flat_entry_point const& e, flat_expr_id id)
+{
+    for (auto depth = 0; is_known(e, id) && depth < k_max_depth; ++depth)
+    {
+        auto const& node = e.at(id).node;
+        if (auto const* const element = node.try_as<flat_buffer_element>())
+            return has_effect_at(e, element->index, 0);
+        if (auto const* const element = node.try_as<flat_element>())
+        {
+            if (has_effect_at(e, element->index, 0))
+                return true;
+            id = element->object;
+        }
+        else if (auto const* const member = node.try_as<flat_member>())
+            id = member->object;
+        else
+            return false;
+    }
+    return false;
+}
+
 struct core_checker
 {
+    checked_module const& m;
     flat_entry_point const& e;
     cc::optional<core_violation> found;
 
@@ -152,6 +189,10 @@ struct core_checker
                     return violation("an assignment of a void value, which no target holds");
                 expr(s.place, 0);
                 expr(s.value, 0);
+                if (!found.has_value() && index_has_effect(e, s.place) && has_effect_at(e, s.value, 0))
+                    violation("an assignment whose place's index and value both have an effect, since a target may "
+                              "write the value's first",
+                              s.place);
             },
             [&](flat_print const& s) { expr(s.value, 0); }, //
             [&](flat_eval const& s)
@@ -187,6 +228,10 @@ struct core_checker
                 if (!found.has_value() && (has_effect_at(e, s.end, 0) || reads_mutable_local(e, s.end, 0)))
                     violation("a `for` whose end has an effect or reads a mutable local, since a target evaluates it "
                               "before every iteration",
+                              s.end);
+                if (!found.has_value() && takes_derivatives_at(m, e, s.end, 0))
+                    violation("a `for` whose end takes derivatives, since a target evaluates it before every "
+                              "iteration, and after a divergent break in part of a quad",
                               s.end);
                 breakable_body({.is_loop = true, .label = s.label}, s.body, depth + 1);
             },
@@ -247,16 +292,22 @@ struct core_checker
 };
 } // namespace
 
-cc::optional<sgl::check::core_violation> sgl::check::find_core_violation(flat_entry_point const& e)
+cc::optional<sgl::check::core_violation> sgl::check::find_core_violation(checked_module const& m,
+                                                                         flat_entry_point const& e)
 {
-    auto c = core_checker{.e = e};
+    auto c = core_checker{.m = m, .e = e};
     c.body(e.body, 0);
     return cc::move(c.found);
 }
 
-bool sgl::check::is_core(flat_entry_point const& e)
+bool sgl::check::is_core(checked_module const& m, flat_entry_point const& e)
 {
-    return !find_core_violation(e).has_value();
+    return !find_core_violation(m, e).has_value();
+}
+
+bool sgl::check::takes_derivatives(checked_module const& m, flat_entry_point const& e, flat_expr_id id)
+{
+    return takes_derivatives_at(m, e, id, 0);
 }
 
 bool sgl::check::has_effect(flat_entry_point const& e, flat_expr_id id)

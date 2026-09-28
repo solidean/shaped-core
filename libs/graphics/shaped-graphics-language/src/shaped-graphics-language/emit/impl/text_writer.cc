@@ -116,13 +116,21 @@ struct writer
         auto const& x = p.e.at(id);
         if (needs_member_assignment(x))
             return true;
-        // HLSL hands an atomic's value before through an out parameter, which a statement of its own declares
-        if (auto const* const c = x.node.try_as<flat_call>(); c != nullptr && d.language() == builtins::language::hlsl)
-            if (auto const* const record = p.m.builtin_function(c->intrinsic); record != nullptr && record->is_atomic)
-                return true;
+        if (is_hlsl_atomic(id))
+            return true;
         auto result = false;
         check::impl::for_each_operand(p.e, x, [&](flat_expr_id operand) { result = result || writes_lines(operand); });
         return result;
+    }
+
+    /// An atomic call in HLSL, which hands its value before through an out parameter a statement of its own declares.
+    [[nodiscard]] bool is_hlsl_atomic(flat_expr_id id) const
+    {
+        if (d.language() != builtins::language::hlsl)
+            return false;
+        auto const* const c = p.e.at(id).node.try_as<flat_call>();
+        auto const* const record = c != nullptr ? p.m.builtin_function(c->intrinsic) : nullptr;
+        return record != nullptr && record->is_atomic;
     }
 
     bool needs_member_assignment(flat_expr const& x) const
@@ -686,11 +694,9 @@ struct writer
                      [&](flat_eval const& v)
                      {
                          // an atomic HLSL writes as statements alone has nothing left to evaluate
-                         if (writes_lines(v.value) && p.e.at(v.value).node.is<flat_call>())
+                         if (is_hlsl_atomic(v.value))
                          {
-                             if (auto const rendered = expr(v.value);
-                                 !rendered.text.empty() && d.language() != builtins::language::hlsl)
-                                 line(cc::format("{};", rendered.text));
+                             (void)expr(v.value);
                              return;
                          }
                          // A call that gives nothing is a statement as it stands, in every target.

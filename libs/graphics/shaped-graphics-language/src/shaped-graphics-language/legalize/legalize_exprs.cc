@@ -226,7 +226,7 @@ struct expr_lowering
     {
         // by value: pinning appends to the tree
         auto copy = out.e.at(place);
-        auto pin_index = [&](flat_expr_id index)
+        auto pinned = [&](flat_expr_id index)
         {
             auto const pin = out.let("index", index);
             out.e.locals[index_of(pin.local)].kind = local_kind::temporary;
@@ -234,9 +234,9 @@ struct expr_lowering
             return out.local(pin.local);
         };
         if (auto* const element = copy.node.try_as<flat_buffer_element>())
-            element->index = pin_index(element->index);
+            element->index = pinned(element->index);
         else if (auto* const element = copy.node.try_as<flat_element>())
-            element->index = pin_index(element->index);
+            element->index = pinned(element->index);
         else
             return place;
         out.e.exprs.push_back(cc::move(copy));
@@ -575,8 +575,35 @@ struct expr_lowering
         }
     }
 
-    /// EVAL-14: a buffer element's index is evaluated before the value that is stored to it.
+    /// True when an index of a place must be pinned ahead of the value stored to it (EVAL-14).
     /// What evaluating the value moves in front runs after the index, so an index it could change is pinned first.
+    /// A target may write the value's effect ahead of the place's, as HLSL does with an atomic's, so an index with an
+    /// effect is pinned too wherever the value has one.
+    [[nodiscard]] bool must_pin_index(flat_expr_id index, flat_expr_id value, stmt_list const& value_pre) const
+    {
+        if (options.skip_pinning || !is_known(out.e, index))
+            return false;
+        if (has_effect(out.e, index) && is_known(out.e, value) && has_effect(out.e, value))
+            return true;
+        if (value_pre.empty())
+            return false;
+        auto moved = assigned_locals{.e = out.e};
+        for (auto const id : value_pre)
+            moved.stmt(id, 0);
+        return has_effect(out.e, index) || reads_any(out.e, index, moved);
+    }
+
+    /// A `let` of `index` at the end of `into`, and the local that holds it.
+    flat_expr_id pin_index(flat_expr_id index, stmt_list& into)
+    {
+        out.from = out.e.at(index).from;
+        auto const pin = out.let("index", index);
+        out.e.locals[index_of(pin.local)].kind = local_kind::temporary;
+        into.push_back(pin.stmt);
+        return out.local(pin.local);
+    }
+
+    /// EVAL-14: a buffer element's index is evaluated before the value that is stored to it.
     template <class Attributed>
     void lower_assign(flat_assign const& assign, Attributed&& attributed, stmt_list& into)
     {
@@ -591,20 +618,8 @@ struct expr_lowering
         auto index = lower_expr(written.index, into);
         auto value_pre = stmt_list();
         auto const value = lower_expr(assign.value, value_pre);
-        if (!value_pre.empty() && !options.skip_pinning && is_known(out.e, index))
-        {
-            auto moved = assigned_locals{.e = out.e};
-            for (auto const id : value_pre)
-                moved.stmt(id, 0);
-            if (has_effect(out.e, index) || reads_any(out.e, index, moved))
-            {
-                out.from = out.e.at(index).from;
-                auto const pin = out.let("index", index);
-                out.e.locals[index_of(pin.local)].kind = local_kind::temporary;
-                into.push_back(pin.stmt);
-                index = out.local(pin.local);
-            }
-        }
+        if (must_pin_index(index, value, value_pre))
+            index = pin_index(index, into);
         if (index != written.index)
         {
             out.from = x.from;
@@ -651,21 +666,9 @@ struct expr_lowering
                 indices[k] = lower_expr(element->index, into);
         auto value_pre = stmt_list();
         auto const value = lower_expr(assign.value, value_pre);
-        if (!value_pre.empty() && !options.skip_pinning)
-        {
-            auto moved = assigned_locals{.e = out.e};
-            for (auto const id : value_pre)
-                moved.stmt(id, 0);
-            for (auto& index : indices)
-                if (is_known(out.e, index) && (has_effect(out.e, index) || reads_any(out.e, index, moved)))
-                {
-                    out.from = out.e.at(index).from;
-                    auto const pin = out.let("index", index);
-                    out.e.locals[index_of(pin.local)].kind = local_kind::temporary;
-                    into.push_back(pin.stmt);
-                    index = out.local(pin.local);
-                }
-        }
+        for (auto& index : indices)
+            if (must_pin_index(index, value, value_pre))
+                index = pin_index(index, into);
 
         // the place again, over the lowered indices
         auto place = root;
@@ -714,7 +717,10 @@ struct expr_lowering
         auto lowered = lower_operands(bounds, into);
 
         // A target evaluates the end before every iteration, so it must give the same value every time.
-        if (is_known(out.e, lowered[1]) && (has_effect(out.e, lowered[1]) || reads_mutable(out.e, lowered[1])))
+        // One that takes derivatives is hoisted too: after a divergent `break` the re-test would run in part of a quad.
+        if (is_known(out.e, lowered[1])
+            && (has_effect(out.e, lowered[1]) || reads_mutable(out.e, lowered[1])
+                || takes_derivatives(out.m, out.e, lowered[1])))
         {
             out.from = from;
             if (is_known(out.e, lowered[0]) && has_effect(out.e, lowered[0]))

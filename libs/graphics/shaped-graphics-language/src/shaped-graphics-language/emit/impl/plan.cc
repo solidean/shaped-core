@@ -112,7 +112,7 @@ struct validator
 
     void tree()
     {
-        if (auto const violation = find_core_violation(e); violation.has_value())
+        if (auto const violation = find_core_violation(m, e); violation.has_value())
             report(error_kind::not_core, e.function, violation.value().reason);
         for (auto const& s : e.stmts)
             if (s.node.is<flat_print>())

@@ -318,8 +318,8 @@ b.set_body({…});  b.e                      // a statement joins no list until 
                                            // a span given to a method must not alias the tree (it grows while read)
 
 #include <shaped-graphics-language/legalize/core.hh>
-sgl::check::is_core(e)                     // the definition of the core form
-sgl::check::find_core_violation(e)         // -> cc::optional<core_violation { reason, stmt, expr }>: the FIRST offending node
+sgl::check::is_core(m, e)                  // the definition of the core form
+sgl::check::find_core_violation(m, e)      // -> cc::optional<core_violation { reason, stmt, expr }>: the FIRST offending node
 sgl::check::has_effect(e, expr_id)         // a call that is not pure, or a block
 
 #include <shaped-graphics-language/legalize/legalize.hh>

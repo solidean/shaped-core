@@ -47,7 +47,7 @@ TEST("sgl samples - helpers checks without a diagnostic, and every call is gone 
             if (auto const* const call = x.node.try_as<flat_call>())
                 CHECK(sgl::is_valid(call->intrinsic));
         auto const core = legalize(m, e);
-        CHECK(!find_core_violation(core).has_value());
+        CHECK(!find_core_violation(m, core).has_value());
     }
 
     // `to_clip` reads the binding, and the entry point that calls it lists it
@@ -204,7 +204,7 @@ TEST("sgl samples - the pipeline is total over helpers: every truncation checks,
         for (auto const& e : m.entry_points)
         {
             auto const core = legalize(m, e);
-            CHECK(!find_core_violation(core).has_value());
+            CHECK(!find_core_violation(m, core).has_value());
             (void)sgl::emit::emit_entry_point(m, core, sgl::emit::target::wgsl);
         }
     }

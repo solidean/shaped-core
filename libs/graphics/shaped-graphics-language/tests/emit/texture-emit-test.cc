@@ -437,3 +437,30 @@ TEST("sgl emit - a binding array takes consecutive registers, and a marked index
     // WebGPU has no binding arrays, so WGSL refuses by the feature rather than guessing
     CHECK(sgl::emit::dump_errors(emit_source(arrays, 0, target::wgsl)).contains("binding_arrays"));
 }
+
+TEST("sgl emit - a `for` end that takes derivatives is evaluated once, ahead of the loop")
+{
+    // LEGAL-7: re-tested after a divergent `break`, the sample would run in part of a quad
+    constexpr auto source = "binding material:\n"
+                            "    @sampler(smp) albedo: texture_2d[float4]\n"
+                            "    smp: sampler\n"
+                            "\n"
+                            "struct pixel_input:\n"
+                            "    @position position: hpos4\n"
+                            "    uv: float2\n"
+                            "\n"
+                            "@pixel struct target:\n"
+                            "    color: float4\n"
+                            "\n"
+                            "@pixel fun ps(p: pixel_input){material} -> target:\n"
+                            "    let mut c = float4(0.0, 0.0, 0.0, 1.0)\n"
+                            "    for i in 0 ..< ((material.albedo.sample(float2(0.5, 0.5)).x * 4.0) as int):\n"
+                            "        if p.uv.x < 0.5 => break\n"
+                            "        c.x += 1.0\n"
+                            "    return {color = c}\n";
+    CHECK(text_of(source, target::wgsl)
+              .contains("    let i_end: i32 = i32(textureSample(material_albedo, material_smp, vec2f(0.5, 0.5)).x * "
+                        "4.0);\n"
+                        "    for (var i: i32 = 0; i < i_end; i++) {\n"));
+    CHECK(text_of(source, target::hlsl_dx12).contains("i < i_end; "));
+}

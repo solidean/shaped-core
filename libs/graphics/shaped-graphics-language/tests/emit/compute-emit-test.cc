@@ -249,3 +249,64 @@ TEST("sgl emit - an atomic is WGSL's atomic type, and HLSL's integer that Interl
                         "    InterlockedMax(stats_hits[0], slot, atomic_before_1);\n"
                         "}\n"));
 }
+
+TEST("sgl emit - HLSL writes subtract, load and store as the Interlocked updates it has")
+{
+    constexpr auto source = "@workgroup binding shared:\n"
+                            "    hits: atomic[int]\n"
+                            "\n"
+                            "binding work:\n"
+                            "    values: mut buffer[int]\n"
+                            "\n"
+                            "@compute(64) fun cs(@thread_id id: int3){shared, work}:\n"
+                            "    let a = shared.hits.subtract(id.x + 1)\n"
+                            "    let b = shared.hits.load()\n"
+                            "    shared.hits.store(7)\n"
+                            "    work.values[id.x] = a + b\n";
+    auto const hlsl = text_of(source, target::hlsl_dx12);
+    // HLSL has no InterlockedSubtract, and an `or` with nothing reads the value in the order of the updates
+    CHECK(hlsl.contains("    InterlockedAdd(shared_hits, -(id.x + 1), atomic_before);\n"));
+    CHECK(hlsl.contains("    InterlockedOr(shared_hits, 0, atomic_before_1);\n"));
+    CHECK(hlsl.contains("    InterlockedExchange(shared_hits, 7, atomic_before_2);\n"));
+}
+
+TEST("sgl emit - a call whose argument holds an atomic is written, not only the atomic")
+{
+    // the atomic's lines stand ahead of the statement, and the store that reads its value still follows them
+    constexpr auto source = "@workgroup binding shared:\n"
+                            "    hits: atomic[int]\n"
+                            "\n"
+                            "binding work:\n"
+                            "    target: out image_2d[.r32_float]\n"
+                            "\n"
+                            "@compute(8, 8) fun cs(@thread_id id: int3){shared, work}:\n"
+                            "    work.target.store(int2(id.x, id.y), shared.hits.add(1) as float)\n";
+    CHECK(text_of(source, target::hlsl_dx12)
+              .contains("    int atomic_before;\n"
+                        "    InterlockedAdd(shared_hits, 1, atomic_before);\n"
+                        "    work_target[int2(id.x, id.y)] = float(atomic_before);\n"));
+    CHECK(text_of(source, target::wgsl)
+              .contains("    textureStore(work_target, vec2i(id.x, id.y), vec4f(f32(atomicAdd(&shared_hits, 1)), 0.0, "
+                        "0.0, 0.0));\n"));
+}
+
+TEST("sgl emit - an assignment's index is evaluated before its value, where both update an atomic")
+{
+    // EVAL-14, which HLSL would break by writing the value's InterlockedAdd first (LEGAL-55)
+    constexpr auto source = "@workgroup binding shared:\n"
+                            "    hits: atomic[int]\n"
+                            "    vals: int[8]\n"
+                            "\n"
+                            "@compute(64) fun cs(){shared}:\n"
+                            "    shared.vals[shared.hits.add(2)] = shared.hits.add(20)\n";
+    CHECK(text_of(source, target::hlsl_dx12)
+              .contains("    int atomic_before;\n"
+                        "    InterlockedAdd(shared_hits, 2, atomic_before);\n"
+                        "    const int index = atomic_before;\n"
+                        "    int atomic_before_1;\n"
+                        "    InterlockedAdd(shared_hits, 20, atomic_before_1);\n"
+                        "    shared_vals[index] = atomic_before_1;\n"));
+    CHECK(text_of(source, target::wgsl)
+              .contains("    let index: i32 = atomicAdd(&shared_hits, 2);\n"
+                        "    shared_vals[index] = atomicAdd(&shared_hits, 20);\n"));
+}
