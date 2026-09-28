@@ -5,6 +5,7 @@
 #include <clean-core/string/string.hh>
 #include <shaped-graphics-language/check/checked_module.hh>
 #include <shaped-graphics-language/emit/emit.hh>
+#include <shaped-graphics-language/emit/impl/memory_form.hh>
 
 /// Everything about one entry point that is decided before a line of text exists: what is declared, under which name, at which address.
 /// A writer reads the plan and the flat tree, and decides nothing but spelling.
@@ -47,7 +48,7 @@ struct planned_member
     check::tessellation_factor factor = {};
     /// The position among the members without `@position`; -1 on a `plain` struct and on the position itself.
     i32 location = -1;
-    /// The byte offset in an inline binding's block; -1 everywhere else.
+    /// The byte offset in a constant block; -1 everywhere else.
     i32 offset = -1;
 };
 
@@ -87,6 +88,9 @@ struct planned_constants
     /// A group's block is the first resource of its group, at slot 0; -1 for the `@inline` block, which takes no group.
     i32 group = -1;
     i32 slot = -1;
+    /// The block as its target has to declare it to reach SGL's offsets, named `block_name`; absent where it declares
+    /// the members as they are.
+    cc::optional<memory_form> form;
 };
 
 /// A resource member of a binding — a buffer, a texture, an image or a sampler — rather than a field of a block.
@@ -110,6 +114,9 @@ struct planned_resource
     i32 slot = 0;
     /// A binding array's length; 1 for any other resource.
     i32 count = 1;
+    /// A buffer's element as its target has to declare it to reach SGL's stride and offsets; absent where the element
+    /// type as it is does.
+    cc::optional<memory_form> element_form;
 };
 
 /// One member of a `@workgroup` binding: memory the workgroup shares, which no host binds.
@@ -196,7 +203,7 @@ struct plan
 /// Appends what keeps `e` from being written, which is the same for every target.
 void validate(check::checked_module const& m, check::flat_entry_point const& e, cc::vector<error>& errors);
 
-/// How each target hands a stage input to an entry point (EMIT-113): its type there, and what marks it.
+/// How each target hands a stage input to an entry point (EMIT-127): its type there, and what marks it.
 struct stage_input_spelling
 {
     cc::string_view hlsl_type;
@@ -225,7 +232,7 @@ void validate_edge_struct(check::checked_module const& m, check::type_id type, s
 /// What only a list can get wrong, an `@inline` binding that does not stand last, is `validate`'s.
 void validate_binding(check::checked_module const& m, check::symbol_id id, cc::vector<error>& errors);
 
-/// Where the members of an `@inline` block land, which is the same in every target or `validate_binding` refused it.
+/// Where the members of a constant block land, by HLSL's constant-buffer packing on every target (layout.hh).
 struct block_placement
 {
     /// Parallel to the members.
@@ -238,6 +245,9 @@ struct block_placement
 
 /// `members` must belong to a binding that passed `validate_binding`.
 [[nodiscard]] block_placement place_block(check::checked_module const& m, cc::span<check::member_info const> members);
+
+/// Every constant block and buffer element of `p`, as its target's text declares it.
+[[nodiscard]] cc::vector<emitted_layout> layouts_of(plan const& p);
 
 /// `e` must have passed `validate`.
 [[nodiscard]] plan make_plan(check::checked_module const& m, check::flat_entry_point const& e, target t);

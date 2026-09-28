@@ -283,12 +283,7 @@ type_id checker::resolve_buffer(i32 file, ast::expr_id expr, ast::index const& n
     if (element == checked_module::error_type)
         return checked_module::error_type;
 
-    // A struct element needs a layout rule the four targets agree on, which the spec's bindings file leaves open.
-    if (out.builtin_type_of(element) == nullptr && out.at(element).kind != type_kind::atomic)
-    {
-        unsupported(file, span_of(file, arguments[0].value), "a buffer of anything but a scalar or a vector");
-        return checked_module::error_type;
-    }
+    // Whether the element can stand in memory is the emitter's to judge, as it is for a block's members.
     return buffer_type(element, false);
 }
 
@@ -695,7 +690,7 @@ void checker::compile_struct(symbol_id id)
     auto const is_pixel = find_attribute(file, d.attributes, "pixel") != nullptr;
 
     // An edge struct's attributes may be pipeline settings, which every pipeline it is an edge of starts from.
-    cc::string_view const known[] = {"builtin", "vertex", "pixel", "shadowable"};
+    cc::string_view const known[] = {"builtin", "vertex", "pixel", "shadowable", "no_padding"};
     judge_attributes(file, d.attributes, known, "a struct",
                      is_vertex || is_pixel ? setting_scope::description : setting_scope::none);
 
@@ -725,6 +720,7 @@ void checker::compile_struct(symbol_id id)
         .is_opaque = s.is_opaque,
         // A struct has no compute edge: a compute entry point has no stage struct at all.
         .edge = stage_of(is_vertex, is_pixel, false, false, false, false),
+        .is_no_padding = find_attribute(file, d.attributes, "no_padding") != nullptr,
     });
     out.symbols[index_of(id)].type = type;
 }
@@ -957,7 +953,7 @@ void checker::compile_binding(symbol_id id)
     auto const& d = ast_of(file).at(decl);
     auto const& b = d.node.as<ast::binding_decl>();
 
-    cc::string_view const known[] = {"inline", "workgroup", "shadowable"};
+    cc::string_view const known[] = {"inline", "workgroup", "shadowable", "no_padding"};
     judge_attributes(file, d.attributes, known, "a binding");
     auto const is_workgroup = find_attribute(file, d.attributes, "workgroup") != nullptr;
 
@@ -1013,6 +1009,7 @@ void checker::compile_binding(symbol_id id)
         .symbol = id,
         .is_inline = is_inline,
         .is_workgroup = is_workgroup,
+        .is_no_padding = find_attribute(file, d.attributes, "no_padding") != nullptr,
         .members = members,
         .declared = declared,
         .required = declared | used,

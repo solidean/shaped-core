@@ -33,6 +33,11 @@ What the compiler carries today is the [spec](spec/_index.md); a construct it do
   A compute shader or a stage acquired on its own has no frozen part: its reload compiles, and its pipeline is then refused by the feature's name.
 - **Unsigned literals by suffix.** A literal takes a `uint` wherever one is expected (CHK-253), and `1u` is `unsupported-yet` (CHK-61).
   Whether the suffix is needed at all is the question [literal-types.md](spec/incubator/literal-types.md) holds.
+- **Arrays and `mat3` in GPU memory.** Neither type exists yet, and their layout is decided (the spec's emitting file, "Open").
+  In a constant block an array element starts a row: `slib::row<T>` pads a shorter one to 16 bytes on the host, and WGSL reads it through `array<vec4f, N>`.
+  A `mat3` is three rows in a block and 36 bytes in a buffer's element, and a memory form splits its columns where a target sizes it otherwise.
+- **The layout double check on dxil.** slib compares what SPIR-V and WGSL place against what SGL states, and reads no DXIL layout: the bytecode carries no reflection container to read it from.
+  dx12's packing is SGL's own rule, so this is the target least likely to disagree, and a DXIL arm would need the container kept beside the bytecode.
 - **File-scope samplers.** A `sampler name:` at file scope is a pipeline layout's `sg::bound_sampler`, which vulkan and metal do not bind yet (sg's TODO.md).
   Once they do, it needs an HLSL address outside every group's space, and the generated `acquire_pipeline` to fill `static_samplers`.
   It will join the pipeline layout of every entry point that uses it, transitively; until it lands, it is `unsupported-yet`, never refused as invalid.

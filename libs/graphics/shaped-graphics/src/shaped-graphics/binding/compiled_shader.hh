@@ -47,8 +47,8 @@ struct sg::compute_dimensions
     int z = 1;
 };
 
-/// A successfully compiled shader: the bytecode blob and its extracted metadata + reflection, ready to build a pipeline from or cache.
-/// Reflection (the `bindings`) is stored inline.
+/// A successfully compiled shader: the bytecode blob and its metadata, ready to build a pipeline from or cache.
+/// For HLSL and WGSL the metadata is the compiler's reflection; an SGL shader states all of it itself, and its compiler contributes only `bytecode` and `compiler`.
 /// A pure value; share it via compiled_shader_handle.
 struct sg::compiled_shader
 {
@@ -59,7 +59,7 @@ struct sg::compiled_shader
     /// The opaque bytecode, in `format`. An owning, shareable, immutable byte blob.
     cc::pinned_data<byte const> bytecode;
 
-    /// Reflected resource bindings — a flat list; per-set grouping is derived by the consumer.
+    /// The resource bindings the code uses — a flat list; per-set grouping is derived by the consumer.
     cc::vector<binding> bindings;
 
     /// Compute workgroup size, present only for a compute `stage`.
@@ -78,11 +78,11 @@ struct sg::compiled_shader
     /// The features a device needs to run it, which pipeline creation refuses a device without.
     /// Empty is the portable baseline, and nullopt is unknown: a compiler that cannot tell, such as one reading HLSL, says so.
     /// An unknown shader is built as a portable one would be, and only the backend can still refuse it.
-    /// slib sets it for an SGL shader once a compile settles, so a cached shader never carries it.
+    /// SGL states it, and a compiler's cache holds the compiler's own result, so a cached shader never carries it.
     cc::optional<feature_set> required_features;
 
     /// What the code does to each binding, which barrier inference follows at dispatch.
-    /// A compiler's reflection gives a `reflected` one; slib replaces it with SGL's `exact` one once a compile settles.
+    /// SGL states an `exact` one; a compiler's reflection gives a `reflected` one.
     /// Unknown (`none`) where nothing could tell, and then every writable view counts as written.
     shader_footprint footprint;
 

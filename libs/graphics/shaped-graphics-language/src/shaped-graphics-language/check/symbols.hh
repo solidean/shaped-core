@@ -203,6 +203,8 @@ struct sgl::check::type_info
     bool is_opaque = false;
     /// `@vertex struct` is a vertex input and `@pixel struct` a set of render targets.
     stage edge = stage::none;
+    /// `@no_padding`: a layout that leaves a gap before any of its members is an error wherever it is placed.
+    bool is_no_padding = false;
     /// The element of a `buffer` or an `array`; `none` for every other kind.
     type_id element = type_id::none;
     /// An `array`'s length; 0 for `T[]`, whose length the host binds (CHK-286).
@@ -456,6 +458,8 @@ struct sgl::check::binding_info
     bool is_inline = false;
     /// `@workgroup`: the members are memory each workgroup of a dispatch shares, which no host binds (CHK-292).
     bool is_workgroup = false;
+    /// `@no_padding`: a gap before any member of its constant block is an error.
+    bool is_no_padding = false;
     ast::range_of<member_info> members;
     /// What its own `require` lines name, which declares them for every entry point listing it (CHK-262).
     feature_set declared;

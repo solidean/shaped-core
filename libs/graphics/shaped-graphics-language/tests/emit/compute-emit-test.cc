@@ -136,7 +136,7 @@ TEST("sgl emit - every id a dispatch hands over is a parameter of its own, conve
 
 TEST("sgl emit - HLSL counts a vertex and an instance from the draw's base, so the text adds it back")
 {
-    // EMIT-114: every other target counts from the draw's first vertex and instance, which is SGL's meaning
+    // EMIT-128: every other target counts from the draw's first vertex and instance, which is SGL's meaning
     constexpr auto source = "struct varyings:\n"
                             "    @position position: hpos4\n"
                             "\n"

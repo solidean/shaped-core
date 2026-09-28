@@ -32,7 +32,7 @@ enum class sgl::emit::error_kind : sgl::u8
     unsupported,
     /// A vertex input member whose semantic would start with `SV_`, which dx12 reads as a system value.
     system_value_semantic,
-    /// The members of an inline binding land on different offsets in HLSL, in WGSL and in MSL.
+    /// Unused since every target is made to follow SGL's own layout; kept so the ids of the kinds after it do not move.
     layout_mismatch,
     /// A literal that is infinite or not a number, which no target can spell.
     non_finite_literal,
@@ -45,6 +45,10 @@ enum class sgl::emit::error_kind : sgl::u8
     too_many_groups,
     /// An entry point that needs a feature no device of this target has, which the detail names.
     target_lacks_feature,
+    /// A struct placed both in a constant block and in a storage buffer, whose two rules would give it two layouts.
+    layout_conflict,
+    /// A gap before a member of a `@no_padding` struct or binding, which the detail places.
+    padding_forbidden,
 };
 
 struct sgl::emit::error
@@ -69,6 +73,33 @@ struct sgl::emit::bound_name
     bool operator==(bound_name const&) const = default;
 };
 
+/// One value of GPU memory as the text declares it: its name, dotted into a nested struct, and its offset from the start.
+struct sgl::emit::emitted_field
+{
+    /// `l.t.color`, each step as the text spells the member.
+    cc::string name;
+    i32 offset = 0;
+
+    bool operator==(emitted_field const&) const = default;
+};
+
+/// A constant block or a buffer's element, laid out as the text declares it, which a compiler reflecting the text reports.
+/// It is SGL's layout as this target spells it: the fields of a memory form where the target needs one (memory_form.hh).
+struct sgl::emit::emitted_layout
+{
+    /// The global the block or the buffer is read through.
+    cc::string global;
+    /// The bytes one element of a buffer takes; 0 for a block.
+    i32 stride = 0;
+    /// Every builtin value, in memory order; empty for a buffer of a builtin, which only its stride describes.
+    cc::vector<emitted_field> fields;
+
+    bool operator==(emitted_layout const& rhs) const
+    {
+        return global == rhs.global && stride == rhs.stride && ast::impl::is_equal(fields, rhs.fields);
+    }
+};
+
 /// Either the text or the reasons there is none.
 struct sgl::emit::emitted_text
 {
@@ -83,6 +114,8 @@ struct sgl::emit::emitted_text
     /// A pixel entry point's render targets: how many, and the `@pixel struct` it returns; -1 and empty otherwise.
     i32 color_targets = -1;
     cc::string target_struct;
+    /// Every constant block and buffer element the text declares, as it declares them.
+    cc::vector<emitted_layout> layouts;
     cc::vector<error> errors;
 
     [[nodiscard]] bool has_text() const { return errors.empty(); }
@@ -91,7 +124,7 @@ struct sgl::emit::emitted_text
     {
         return text == rhs.text && entry_point == rhs.entry_point && ast::impl::is_equal(bound_names, rhs.bound_names)
             && color_targets == rhs.color_targets && target_struct == rhs.target_struct
-            && ast::impl::is_equal(errors, rhs.errors);
+            && ast::impl::is_equal(layouts, rhs.layouts) && ast::impl::is_equal(errors, rhs.errors);
     }
 };
 

@@ -32,14 +32,17 @@ struct shader_payload;
 struct shader_bindings;
 struct wgsl_declarations;
 
+// a bool as GPU memory holds one (gpu_bool.hh)
+struct gpu_bool;
+
 // shader packages
 enum class shader_language;
 struct shader_source_description;
-struct binding_rename;
 struct preprocessed_source;
+struct block_field;
+struct block_layout;
 struct shader_definition;
 struct shader_package;
-struct listed_group; // one group an entry point lists, for reflection_mismatch
 class shader_compiler;
 class shader_asset;
 class shader_library;

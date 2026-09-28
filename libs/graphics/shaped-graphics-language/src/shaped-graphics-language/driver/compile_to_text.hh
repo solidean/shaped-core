@@ -5,6 +5,7 @@
 #include <clean-core/string/string_view.hh>
 #include <shaped-graphics-language/check/footprint.hh>
 #include <shaped-graphics-language/check/symbols.hh>
+#include <shaped-graphics-language/driver/describe.hh>
 #include <shaped-graphics-language/emit/emit.hh>
 
 /// One entry point of one SGL source, asked for as the text of one target.
@@ -22,6 +23,32 @@ struct sgl::text_request
     bool run_tests = false;
 };
 
+/// One slot the text declares for the host to bind: a block of constants or a resource, with every fact its API needs.
+/// Enums are spelled as the sg enum value they are, as `sgl describe` spells them; empty where a fact does not apply.
+struct sgl::interface_binding
+{
+    /// What the host binds it by: `work.values` for a resource, the binding's own name for a block of constants.
+    cc::string name;
+    /// As the text spells it, which is what the target's compiler reflects.
+    cc::string emitted;
+    /// `constant` for a block of constants.
+    described_member_kind kind = described_member_kind::constant;
+    /// The `@inline` block, which takes no group and rides as inline constants.
+    bool is_inline = false;
+    /// The group it is listed at, counted without the `@inline` binding, and its slot there; -1 and 0 for the `@inline` block.
+    i32 group = -1;
+    i32 slot = 0;
+    /// Whether the entry point's code reaches it; the text declares every slot of every binding it lists either way.
+    bool is_used = false;
+    /// A block's size in bytes, where its last constant ends; 0 for a resource.
+    i32 block_size = 0;
+    cc::string access;
+    cc::string texture_dimension;
+    cc::string sample_type;
+    cc::string image_format;
+    cc::string sampler_type;
+};
+
 /// The text of one entry point, and the name that text declares it under.
 struct sgl::emitted_source
 {
@@ -29,9 +56,11 @@ struct sgl::emitted_source
     /// The source's name, unless the target reserves it: HLSL and MSL both reserve words an SGL author may pick.
     /// A caller compiling the text asks for THIS name.
     cc::string entry_point;
-    /// What each resource the text declares is called there, and what the host calls it: `work.values`.
-    /// A caller renames the compiler's reflected bindings with it, so no target's identifier rules reach the host.
-    cc::vector<emit::bound_name> bound_names;
+    /// Every slot the text declares, in the order of the binding list and then of each binding's slots.
+    /// This is the interface a host builds against; a compiler's reflection of the text can only confirm it.
+    cc::vector<interface_binding> bindings;
+    /// A compute entry point's grid; `{1, 1, 1}` for every other stage.
+    i32 workgroup[3] = {1, 1, 1};
     /// A pixel entry point's render targets: how many, and the `@pixel struct` it returns; -1 and empty otherwise.
     i32 color_targets = -1;
     cc::string target_struct;
@@ -39,6 +68,8 @@ struct sgl::emitted_source
     check::feature_set features;
     /// What the entry point's code does to each binding it lists, keyed by host name; a slot it never touches is absent.
     cc::vector<check::slot_footprint> footprint;
+    /// Every constant block and buffer element as the text declares it, which a compiler reflecting the text reports.
+    cc::vector<emit::emitted_layout> layouts;
 };
 
 namespace sgl

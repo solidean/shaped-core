@@ -32,7 +32,6 @@ target_sources(shaped-rendering
     FILES
     src/shaped-rendering/fwd.hh
     src/shaped-rendering/all.hh
-    src/shaped-rendering/gpu_types.hh
     src/shaped-rendering/input.hh
     src/shaped-rendering/blit_routine.hh
     src/shaped-rendering/box_filter_mipmap_routine.hh
@@ -152,7 +151,6 @@ if(SC_BUILD_TESTS)
         tests/imgui-input-test.cc
         tests/imgui-settings-test.cc
         tests/imgui-style-test.cc
-        tests/gpu-types-test.cc
         tests/shader-package-test.cc
     )
     sc_nexus_binary(shaped-rendering-test KINDS tests ${SG_WARP_TEST_BINARY_ARGS})

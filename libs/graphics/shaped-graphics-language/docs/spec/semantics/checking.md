@@ -240,11 +240,11 @@ fun shade(k: float) -> float:
 | on | the known attributes |
 |---|---|
 | a function | `@builtin`, `@pure`, `@operator`, `@vertex`, `@pixel`, `@compute`, `@stages`, `@shadowable` |
-| a struct | `@builtin`, `@vertex`, `@pixel`, `@shadowable` |
+| a struct | `@builtin`, `@vertex`, `@pixel`, `@shadowable`, `@no_padding` |
 | an enum | `@builtin`, `@shadowable` |
 | a const | `@shadowable` |
 | a test | `@expect` |
-| a binding | `@inline`, `@shadowable` |
+| a binding | `@inline`, `@shadowable`, `@no_padding` |
 | a binding member | `@unfilterable`, `@non_filtering` |
 | a struct field | `@position`, `@per_instance`, `@stream`, `@interpolate`, `@format` on a `@vertex struct`, `@depth` and `@sample_mask` on a `@pixel struct` |
 | a parameter | the stage inputs of CHK-271 |

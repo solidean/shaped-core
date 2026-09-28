@@ -78,6 +78,8 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/emit/emit.cc
     src/shaped-graphics-language/emit/reserved_words.cc
     src/shaped-graphics-language/emit/impl/hlsl.cc
+    src/shaped-graphics-language/emit/impl/layout.cc
+    src/shaped-graphics-language/emit/impl/memory_form.cc
     src/shaped-graphics-language/emit/impl/msl.cc
     src/shaped-graphics-language/emit/impl/plan.cc
     src/shaped-graphics-language/emit/impl/text_writer.cc
@@ -229,6 +231,8 @@ target_sources(shaped-graphics-language
     src/shaped-graphics-language/emit/emit.hh
     src/shaped-graphics-language/emit/reserved_words.hh
     src/shaped-graphics-language/emit/impl/dialect.hh
+    src/shaped-graphics-language/emit/impl/layout.hh
+    src/shaped-graphics-language/emit/impl/memory_form.hh
     src/shaped-graphics-language/emit/impl/plan.hh
 
     src/shaped-graphics-language/driver/compile_to_text.hh
@@ -375,6 +379,7 @@ if(SC_BUILD_TESTS)
         tests/emit/compute-emit-test.cc
         tests/emit/case-emit-test.cc
         tests/emit/enum-emit-test.cc
+        tests/emit/layout-emit-test.cc
 
         tests/driver/classify-test.cc
         tests/driver/compile-to-text-test.cc

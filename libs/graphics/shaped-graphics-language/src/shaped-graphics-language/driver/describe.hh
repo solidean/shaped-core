@@ -61,6 +61,8 @@ struct sgl::described_binding_member
     i32 slot = -1;
     /// A binding array's length; 1 for any other resource and for a constant.
     i32 count = 1;
+    /// A buffer's bytes per element, by the storage rule; 0 for every other kind.
+    i32 stride = 0;
     /// What the host binds a resource by, `binding.member`; empty for a constant.
     /// slib renames the compiled shader's reflected binding to it, so it is the name sg sees.
     cc::string host_name;
@@ -120,6 +122,28 @@ struct sgl::described_struct
     cc::vector<described_struct_member> members;
     /// The members' structural hash (`check::structural_hash`), as 32 hex digits: what a hot reload compares.
     cc::string shape;
+};
+
+/// One field of a struct in GPU memory, where the struct's address space places it.
+struct sgl::described_memory_member
+{
+    cc::string name;
+    cc::string type;
+    i32 offset = 0;
+    i32 size = 0;
+};
+
+/// A struct that stands in GPU memory, placed by the rule of the one address space it is in (the spec's layout rules).
+/// A struct in both a constant block and a storage buffer is `layout-conflict`, so each has exactly one layout.
+struct sgl::described_memory_struct
+{
+    cc::string name;
+    /// `constants` or `storage`.
+    cc::string space;
+    /// Where the last member ends; a buffer of it strides by this.
+    i32 size = 0;
+    /// Without a void member, which takes no room.
+    cc::vector<described_memory_member> members;
 };
 
 struct sgl::described_entry_point
@@ -187,6 +211,8 @@ struct sgl::module_description
     /// In source order.
     cc::vector<described_binding> bindings;
     cc::vector<described_struct> structs;
+    /// Every struct a binding places in GPU memory, each after every struct it holds.
+    cc::vector<described_memory_struct> memory_structs;
     cc::vector<described_entry_point> entry_points;
     cc::vector<described_pipeline> pipelines;
 };

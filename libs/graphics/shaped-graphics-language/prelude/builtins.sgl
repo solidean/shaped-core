@@ -63,6 +63,11 @@
 @shadowable(false)
 @builtin struct mat4
 
+/// A bool as GPU memory holds one: four bytes, 0 for false and anything else for true.
+/// `x as bool32` and `x as bool` convert; a bool itself has no layout.
+@shadowable(false)
+@builtin struct bool32
+
 /// 32 bits, signed; its arithmetic wraps.
 @shadowable(false)
 @builtin struct int
@@ -341,6 +346,10 @@
 @builtin @pure @operator("as") fun convert_int4_to_uint4(x: int4) -> uint4
 @builtin @pure @operator("as") fun convert_uint4_to_float4(x: uint4) -> float4
 @builtin @pure @operator("as") fun convert_uint4_to_int4(x: uint4) -> int4
+
+// A bool32 is a bool as GPU memory holds one, and `as` is how either becomes the other
+@builtin @pure @operator("as") fun convert_bool_to_bool32(x: bool) -> bool32
+@builtin @pure @operator("as") fun convert_bool32_to_bool(x: bool32) -> bool
 
 // bits of int, uint and their vectors, componentwise; a shift counts in the left side's own type,
 // and only its low five bits count, so `x << 33` of a runtime 33 is `x << 1`

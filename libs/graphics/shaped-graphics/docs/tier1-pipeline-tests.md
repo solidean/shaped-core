@@ -59,7 +59,7 @@ A combinatorial sweep — every blend factor against every op — narrows to a c
 ## Draw and dispatch parameters
 
 - `first_vertex`, `vertex_offset` (the base vertex), `first_instance` and `instance_count`, each read back through `@vertex_index` and `@instance_index` into a flat varying.
-  SGL states both include the draw's base on every backend (EMIT-114), so these tests are what pins it on each.
+  SGL states both include the draw's base on every backend (EMIT-128), so these tests are what pins it on each.
 - 16- and 32-bit indices, and a first index that is odd.
 - `dispatch_threads` against `dispatch_groups`, with a partial last group: every thread writes its `@thread_id`, and one workgroup counts its threads with an atomic in workgroup memory.
 - Viewport and scissor, the stencil reference and the blend constants set per draw.

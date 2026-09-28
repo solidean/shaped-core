@@ -73,14 +73,14 @@ public:
             out += k_indent;
             if (member.is_position)
                 out += "@builtin(position) ";
-            // EMIT-116: WGSL has no conservative depth, and the promise changes no result, so it is dropped
+            // EMIT-130: WGSL has no conservative depth, and the promise changes no result, so it is dropped
             else if (member.output == check::pixel_output::sample_mask)
                 out += "@builtin(sample_mask) ";
             else if (member.output != check::pixel_output::color)
                 out += "@builtin(frag_depth) ";
             else if (member.location >= 0)
                 out.appendf("@location({}) ", member.location);
-            // EMIT-115: only what differs from perspective at the centre is written
+            // EMIT-129: only what differs from perspective at the centre is written
             using kind = check::interpolation::kind_t;
             using sampling = check::interpolation::sampling_t;
             auto const& i = member.interpolate;
@@ -100,16 +100,35 @@ public:
         out.appendf("const {}: i32 = {};\n", name, value);
     }
 
+    /// A root's memory form: its pieces as fields, each where SGL's layout puts it (memory_form.hh).
+    static void write_form(cc::string& out, memory_form const& form)
+    {
+        out.appendf("struct {} {{\n", form.name);
+        for (auto const& f : form.fields)
+            out.appendf("{}{}: {},\n", k_indent, f.name, f.type);
+        out += "}\n\n";
+    }
+
+    void write_block_struct(cc::string& out, plan const& p, planned_constants const& block) const
+    {
+        if (block.form.has_value())
+            return write_form(out, block.form.value());
+        out.appendf("struct {} {{\n", block.block_name);
+        write_members(out, block.members, p);
+        out += "}\n\n";
+    }
+
     void write_group(cc::string& out,
                      plan const& p,
                      planned_constants const* block,
                      cc::span<planned_resource const> buffers) const override
     {
+        for (auto const& b : buffers)
+            if (b.element_form.has_value())
+                write_form(out, b.element_form.value());
         if (block != nullptr)
         {
-            out.appendf("struct {} {{\n", block->block_name);
-            write_members(out, block->members, p);
-            out += "}\n\n";
+            write_block_struct(out, p, *block);
             out.appendf("@group({}) @binding({}) var<uniform> {}: {};\n", block->group, block->slot, block->name,
                         block->block_name);
         }
@@ -125,7 +144,8 @@ public:
         // WGSL has no static sampler: the layout carries it, and the group binds it (slib's WGSL notes).
         if (t.kind == type_kind::buffer)
             out.appendf("{} var<storage, {}> {}: {};\n", address, b.is_mut ? "read_write" : "read", b.name,
-                        resource_text(p, b.type));
+                        b.element_form.has_value() ? cc::format("array<{}>", b.element_form.value().name)
+                                                   : resource_text(p, b.type));
         else
             out.appendf("{} var {}: {};\n", address, b.name, resource_text(p, b.type));
     }
@@ -160,13 +180,12 @@ public:
 
     void write_declarations(cc::string& out, plan const& p) const override
     {
-        // EMIT-113: `@builtin(primitive_index)` is an extension of WGSL, which the text enables first.
+        // EMIT-127: `@builtin(primitive_index)` is an extension of WGSL, which the text enables first.
         for (auto const& input : p.e.stage_inputs)
             if (input.input == check::stage_input::primitive_id)
                 out += "enable primitive_index;\n\n";
         write_enum_constants(out, p, *this);
         write_buffers(out, p, *this);
-
         for (auto const& s : p.structs)
         {
             out.appendf("struct {} {{\n", s.name);
@@ -181,9 +200,7 @@ public:
         if (!p.constants.has_value())
             return;
         auto const& c = p.constants.value();
-        out.appendf("struct {} {{\n", c.block_name);
-        write_members(out, c.members, p);
-        out += "}\n\n";
+        write_block_struct(out, p, c);
         out.appendf("@group({}) @binding({}) var<uniform> {}: {};\n\n", k_inline_constants_group,
                     k_inline_constants_binding, c.name, c.block_name);
     }

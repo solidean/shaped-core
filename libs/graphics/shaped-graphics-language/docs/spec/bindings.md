@@ -358,8 +358,9 @@ A group-scope static sampler takes a slot like any sampler, since sg matches it 
 **SGL states every fact of a binding itself.**
 Dimension, sample type, image format, access and sampler kind are in the declaration, and `sgl describe` hands each to the host.
 The generated group's table is what the host builds its layout from, so that is where every fact reaches sg.
-A compiled shader only has to fit that layout, and sg's fit check compares a binding's name, slot, count and kind — never the facts beyond them.
-The WGSL SGL writes states all of them, which a test holds to the generated table; HLSL states the dimension, and the vulkan text an image's format as `[[vk::image_format]]`.
+The compiled shader states them too, from the same declaration: slib builds it from what SGL says, and takes only the bytecode from the target's compiler.
+That compiler's reflection of the text is compared on every compile, and a disagreement is logged as the SGL bug it is, never used.
+The WGSL SGL writes states every fact; HLSL states the dimension, and the vulkan text an image's format as `[[vk::image_format]]`.
 HLSL cannot say `unfilterable` at all, which costs nothing, since dx12 and vulkan read none of it.
 Building the layout by reflecting the WGSL instead was declined: that text is written from the same declaration, so reading it back is `sgl describe` with a parser in between.
 And `texture_2d<f32>` fits a filterable and an unfilterable layout alike, so the reflection could not even recover `@unfilterable`.
@@ -441,7 +442,8 @@ WGSL gives each resource its own `@group`/`@binding`, and HLSL declares each at 
 A group's plain members are one constant buffer at the group's slot 0, named after the binding, and its resources follow it in declaration order.
 MSL declines every group until slib has a compiler that turns its text into a metallib.
 
-A struct element type, `bytes`, `constants[T]` and a file-scope `sampler` all parse and are then reported.
+`bytes`, `constants[T]` and a file-scope `sampler` all parse and are then reported.
+A struct element type is placed by the storage rule of [the layout rules](semantics/emitting.md#layout).
 A file-scope sampler waits for slib to carry a pipeline layout's static samplers, which it has no spelling for yet.
 That is deliberate.
 The shape is decided, so it is written down here and the AST constructs it.
@@ -451,7 +453,6 @@ A shader using one then gets a diagnostic that names the feature, rather than a 
 
 * `values.length` — WGSL, HLSL and SPIR-V can all answer it without packing data, and MSL cannot: a Metal buffer argument is a pointer and carries no length.
   Until metal is a target with a compiler behind it, a shader passes the count in.
-* The layout of a struct element type: our own rules, portable across the four targets, with explicit padding where they need it, and the generated host struct matching byte for byte.
 * A buffer as a field of a struct, which is `unsupported-yet` like every buffer outside a binding member.
   It could be allowed where the buffer is hoisted and stays uniform across every use, a scalarization of the struct that inlining makes possible.
 * The functions over textures and images — sampling, loads, stores and sizes — and a default sampler on a texture member ([texture-methods.md](incubator/texture-methods.md)).

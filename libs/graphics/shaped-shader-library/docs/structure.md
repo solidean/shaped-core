@@ -69,7 +69,8 @@ src/shaped-shader-library/
     dxc_compiler.hh/.cc           [done]        hlsl -> dxil via ssc::dxc; only when SLIB_HAS_DXC
     wgsl_compiler.hh/.cc          [done]        wgsl -> wgsl: the source handed on, reflected by the above
     sgl_compiler.hh/.cc           [tracer]      sgl -> whatever the wrapped compiler builds: SGL's pipeline as
-                                                `preprocess`, then that compiler's `compile` and reflection
+                                                `preprocess`, stating the whole compiled shader; the wrapped
+                                                compiler adds the bytecode, and its reflection is only compared
   impl/
     reload_watcher.hh/.cc         [done]        cc::threaded_actor; parks on the mailbox and lets the
                                                 filesystem wake it, else polls; stages + drives recompiles

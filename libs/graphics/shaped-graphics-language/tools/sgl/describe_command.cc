@@ -66,6 +66,8 @@ void write_binding(babel::json::object_writer& o, sgl::described_binding const& 
         }
         mo.write("access", cc::string_view(m.access));
         mo.write("slot", m.slot);
+        if (m.kind == sgl::described_member_kind::buffer)
+            mo.write("stride", m.stride);
         // a binding array's length, which is 1 for any other resource
         if (m.count > 1)
             mo.write("count", m.count);
@@ -121,6 +123,22 @@ void write_struct(babel::json::object_writer& o, sgl::described_struct const& s)
             mo.write("format", cc::string_view(m.format));
         if (!m.output.empty())
             mo.write("output", cc::string_view(m.output));
+    }
+}
+
+void write_memory_struct(babel::json::object_writer& o, sgl::described_memory_struct const& s)
+{
+    o.write("name", cc::string_view(s.name));
+    o.write("space", cc::string_view(s.space));
+    o.write("size", s.size);
+    auto members = o.write_array("members");
+    for (auto const& m : s.members)
+    {
+        auto mo = members.write_object(babel::json::layout::compact);
+        mo.write("name", cc::string_view(m.name));
+        mo.write("type", cc::string_view(m.type));
+        mo.write("offset", m.offset);
+        mo.write("size", m.size);
     }
 }
 
@@ -238,6 +256,14 @@ cc::result<cc::string> to_json(sgl::module_description const& d)
             {
                 auto o = structs.write_object();
                 write_struct(o, s);
+            }
+        }
+        {
+            auto structs = root.write_array("memory_structs");
+            for (auto const& s : d.memory_structs)
+            {
+                auto o = structs.write_object();
+                write_memory_struct(o, s);
             }
         }
         {

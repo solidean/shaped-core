@@ -56,6 +56,16 @@ public:
             .compiler = {.name = cc::string("slib-wgsl"), .version = cc::string("1"), .signature = cc::string()},
         });
     }
+
+    [[nodiscard]] cc::optional<cc::vector<slib::block_layout>> reflect_layouts(sg::compiled_shader const& shader) const override
+    {
+        // A WGSL shader's bytecode is its text.
+        auto const text = cc::string_view(reinterpret_cast<char const*>(shader.bytecode.data()), shader.bytecode.size());
+        auto declared = slib::parse_wgsl_declarations(text);
+        if (declared.has_error())
+            return {};
+        return cc::move(declared.value().layouts);
+    }
 };
 } // namespace
 

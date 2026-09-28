@@ -85,7 +85,7 @@ public:
                 return "SV_InsideTessFactor";
             return cc::format("SGL{}", member.location);
         case struct_role::render_targets:
-            // EMIT-116: the depth and the sample mask are outputs of their own
+            // EMIT-130: the depth and the sample mask are outputs of their own
             switch (member.output)
             {
             case check::pixel_output::depth:
@@ -117,7 +117,7 @@ public:
         // Stated on every matrix, so no `-Zpr` and no `#pragma pack_matrix` can turn one around.
         if (type_text(p, *this, member.type) == "float4x4")
             out += "column_major ";
-        // EMIT-115: a stage link's interpolation, as HLSL's qualifiers spell it
+        // EMIT-129: a stage link's interpolation, as HLSL's qualifiers spell it
         if (owner != nullptr && owner->role == struct_role::stage_link)
         {
             using kind = check::interpolation::kind_t;
@@ -231,8 +231,7 @@ public:
     void write_declarations(cc::string& out, plan const& p) const override
     {
         write_enum_constants(out, p, *this);
-        write_buffers(out, p, *this);
-
+        // A struct stands ahead of the groups, whose blocks and buffers may hold it.
         for (auto const& s : p.structs)
         {
             out.appendf("struct {}\n{{\n", s.name);
@@ -240,6 +239,8 @@ public:
                 write_member(out, &s, member, p);
             out += "};\n\n";
         }
+        write_buffers(out, p, *this);
+
         for (auto const& w : p.workgroup)
             write_workgroup(out, w, p);
         if (!p.workgroup.empty())
@@ -379,7 +380,7 @@ public:
             auto const& spelled = spelling_of(p.e.stage_inputs[i].input);
             parameters.push_back(
                 cc::format("{} {} : {}", spelled.hlsl_type, p.stage_input_names[i], spelled.hlsl_semantic));
-            // EMIT-114: HLSL counts from the draw's base, and shader model 6.8 says where the draw started
+            // EMIT-128: HLSL counts from the draw's base, and shader model 6.8 says where the draw started
             if (has_base(p, p.e.stage_inputs[i].input))
                 parameters.push_back(cc::format("uint {} : {}", p.stage_input_bases[i],
                                                 p.e.stage_inputs[i].input == check::stage_input::vertex_index

@@ -134,6 +134,104 @@ ASYNC_INVOCABLE_TEST("sg - a group's plain members reach the shader through the 
         CHECK(data[i] == (float(i) * 3.0f + 1.0f) * 0.5f - 2.0f);
 }
 
+// The generated structs are the layout, padding included: `particle` strides by 36 and `step`'s block puts `after` at 28.
+static_assert(sizeof(shaders::particle) == 36);
+static_assert(sizeof(shaders::glow) == 12);
+
+ASYNC_INVOCABLE_TEST("sg - SGL's layout reaches the shader byte for byte through the structs a package generates",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+
+    auto const pipeline = co_await shaders::layout.advance.acquire_pipeline(*ctx);
+    auto const group_layout = ctx->cached.acquire_binding_group_layout<shaders::step>();
+
+    constexpr auto count = 64;
+    auto initial = cc::vector<shaders::particle>();
+    for (auto i = 0; i < count; ++i)
+        initial.push_back({.mass = float(i),
+                           .velocity = tg::vec3f(float(i), float(2 * i), float(3 * i)),
+                           .color = tg::vec4f(1, 2, 3, 4),
+                           .alive = i % 2 == 0});
+    auto const items = ctx->persistent.create_buffer_from_data(
+        cc::move(initial), sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
+
+    auto cmd = ctx->create_command_list();
+    auto const group = ctx->transient.create_binding_group(*cmd, group_layout,
+                                                           shaders::step{.dt = 0.5f,
+                                                                         .push = tg::vec3f(1, 2, 3),
+                                                                         .shade = {.color = tg::vec3f(2, 0, 0)},
+                                                                         .after = 10.0f,
+                                                                         .items = items.as_readwrite_buffer()});
+    cmd->compute.bind_pipeline(*pipeline);
+    cmd->compute.bind_group(0, *group);
+    cmd->compute.dispatch_threads(count);
+    auto const future = cmd->download.data_from_buffer(items);
+    ctx->submit_command_list(cc::move(cmd));
+
+    auto const data = co_await future.data();
+    REQUIRE(data.size() == isize(count));
+    for (auto i = 0; i < count; ++i)
+    {
+        auto const& p = data[i];
+        auto const is_alive = i % 2 == 0;
+        CHECK(p.mass == (is_alive ? float(i) + 10.0f : float(i)));
+        auto const velocity = tg::vec3f(float(i), float(2 * i), float(3 * i));
+        CHECK(p.velocity == (is_alive ? velocity + tg::vec3f(0.5f, 1.0f, 1.5f) : velocity));
+        CHECK(p.color == (is_alive ? tg::vec4f(2, 4, 6, 8) : tg::vec4f(1, 2, 3, 4)));
+        CHECK(bool(p.alive) == false);
+    }
+}
+
+static_assert(sizeof(shaders::pair) == 20);
+
+ASYNC_INVOCABLE_TEST("sg - a buffer's element packs tight on every backend, across a row and at a 12-byte stride",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+
+    auto const pipeline = co_await shaders::layout.spread.acquire_pipeline(*ctx);
+    auto const group_layout = ctx->cached.acquire_binding_group_layout<shaders::stretch>();
+
+    constexpr auto count = 64;
+    auto pairs = cc::vector<shaders::pair>();
+    auto dirs = cc::vector<tg::vec3f>();
+    for (auto i = 0; i < count; ++i)
+    {
+        pairs.push_back({.a = tg::vec2f(float(i), 1), .b = tg::vec3f(1, 2, float(i))});
+        dirs.push_back(tg::vec3f(float(i), 0, 1));
+    }
+    auto const usage = sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src;
+    auto const pair_buffer = ctx->persistent.create_buffer_from_data(cc::move(pairs), usage);
+    auto const dir_buffer = ctx->persistent.create_buffer_from_data(cc::move(dirs), usage);
+
+    auto cmd = ctx->create_command_list();
+    auto const group = ctx->transient.create_binding_group(
+        *cmd, group_layout,
+        shaders::stretch{.pairs = pair_buffer.as_readwrite_buffer(), .dirs = dir_buffer.as_readwrite_buffer()});
+    cmd->compute.bind_pipeline(*pipeline);
+    cmd->compute.bind_group(0, *group);
+    cmd->compute.dispatch_threads(count);
+    auto const pairs_back = cmd->download.data_from_buffer(pair_buffer);
+    auto const dirs_back = cmd->download.data_from_buffer(dir_buffer);
+    ctx->submit_command_list(cc::move(cmd));
+
+    auto const got_pairs = co_await pairs_back.data();
+    auto const got_dirs = co_await dirs_back.data();
+    REQUIRE(got_pairs.size() == isize(count));
+    REQUIRE(got_dirs.size() == isize(count));
+    for (auto i = 0; i < count; ++i)
+    {
+        CHECK(got_pairs[i].a == tg::vec2f(float(2 * i), 2));
+        CHECK(got_pairs[i].b == tg::vec3f(1 + float(i), 2, float(i) + 1));
+        CHECK(got_dirs[i] == tg::vec3f(float(3 * i), 0, 3));
+    }
+}
+
 ASYNC_INVOCABLE_TEST("sg - a pipeline whose shader does not fit its layout is refused at creation",
                      (sg::context_handle const& ctx))
 {

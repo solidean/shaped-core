@@ -3,7 +3,9 @@
 #include <clean-core/string/format.hh>
 #include <shaped-graphics-language/check/resources.hh>
 #include <shaped-graphics-language/check/structural_hash.hh>
+#include <shaped-graphics-language/driver/impl/describe_binding.hh>
 #include <shaped-graphics-language/driver/impl/front_end.hh>
+#include <shaped-graphics-language/emit/impl/layout.hh>
 #include <shaped-graphics-language/emit/impl/plan.hh>
 #include <shaped-graphics-language/legalize/legalize.hh>
 
@@ -110,80 +112,6 @@ described_binding_member describe_resource(check::checked_module const& m,
     return result;
 }
 
-described_binding describe_binding(check::checked_module const& m, check::symbol const& s)
-{
-    auto const& b = m.bindings[s.info];
-    auto const members = m.at(b.members);
-    auto result = described_binding{.name = s.name,
-                                    .is_inline = b.is_inline,
-                                    .shape = check::hex_of(check::structural_hash(m, members))};
-
-    if (b.is_inline)
-    {
-        auto const placed = emit_impl::place_block(m, members);
-        for (auto i = isize(0); i < members.size(); ++i)
-            result.members.push_back({.name = members[i].name,
-                                      .kind = described_member_kind::constant,
-                                      .type = cc::string(m.name_of(members[i].type)),
-                                      .offset = placed.offsets[i],
-                                      .size = placed.sizes[i]});
-        result.block_size = placed.size;
-        return result;
-    }
-
-    // Numbered as the emitter numbers them: the constant block first when there is one, then the resources in
-    // declaration order, each the next slot of its group.
-    auto const plain = emit_impl::plain_members_of(m, b);
-    auto const placed = emit_impl::place_block(m, plain);
-    if (!plain.empty())
-    {
-        result.block_size = placed.size;
-        result.block_slot = 0;
-        result.block_host_name = s.name;
-    }
-    auto slot = emit_impl::first_resource_slot(m, b);
-    auto next_constant = isize(0);
-    for (auto const& whole : members)
-    {
-        // a binding array is described as its element, taking one slot per element
-        auto member = whole;
-        auto count = 1;
-        if (auto const& t = m.at(whole.type);
-            t.kind == check::type_kind::array && check::is_resource(m.at(t.element).kind))
-        {
-            member.type = t.element;
-            count = t.count;
-        }
-        auto const& t = m.at(member.type);
-        if (t.kind == check::type_kind::buffer)
-        {
-            result.members.push_back({.name = member.name,
-                                      .kind = described_member_kind::buffer,
-                                      .type = cc::string(m.name_of(t.element)),
-                                      .slot = slot,
-                                      .count = count,
-                                      .host_name = cc::format("{}.{}", s.name, member.name),
-                                      .access = cc::string(t.is_mut ? "read_write" : "read")});
-            slot += count;
-            continue;
-        }
-        if (check::is_resource(t.kind))
-        {
-            auto described = describe_resource(m, member, slot, cc::format("{}.{}", s.name, member.name));
-            described.count = count;
-            result.members.push_back(cc::move(described));
-            slot += count;
-            continue;
-        }
-        result.members.push_back({.name = member.name,
-                                  .kind = described_member_kind::constant,
-                                  .type = cc::string(m.name_of(member.type)),
-                                  .offset = placed.offsets[next_constant],
-                                  .size = placed.sizes[next_constant]});
-        ++next_constant;
-    }
-    return result;
-}
 
 described_struct describe_struct(check::checked_module const& m, check::type_info const& t)
 {
@@ -203,6 +131,25 @@ described_struct describe_struct(check::checked_module const& m, check::type_inf
                      : member.output != check::pixel_output::color       ? cc::string("depth")
                                                                          : cc::string(),
              .is_per_instance = member.is_per_instance});
+    return result;
+}
+
+described_memory_struct describe_memory_struct(check::checked_module const& m,
+                                               check::type_id type,
+                                               emit_impl::address_space space)
+{
+    auto const placed = emit_impl::place_struct(m, type, space);
+    auto result = described_memory_struct{
+        .name = cc::string(m.name_of(type)),
+        .space = cc::string(space == emit_impl::address_space::constants ? "constants" : "storage"),
+        .size = placed.size};
+    auto const members = m.at(m.at(type).members);
+    for (auto i = isize(0); i < members.size(); ++i)
+        if (members[i].type != check::checked_module::void_type)
+            result.members.push_back({.name = members[i].name,
+                                      .type = cc::string(m.name_of(members[i].type)),
+                                      .offset = placed.offsets[i],
+                                      .size = placed.sizes[i]});
     return result;
 }
 
@@ -333,6 +280,82 @@ described_pipeline describe_pipeline(check::checked_module const& m, check::pipe
 }
 } // namespace
 
+sgl::described_binding sgl::driver::impl::describe_binding(check::checked_module const& m, check::symbol const& s)
+{
+    auto const& b = m.bindings[s.info];
+    auto const members = m.at(b.members);
+    auto result = described_binding{.name = s.name,
+                                    .is_inline = b.is_inline,
+                                    .shape = check::hex_of(check::structural_hash(m, members))};
+
+    if (b.is_inline)
+    {
+        auto const placed = sgl::emit::impl::place_block(m, members);
+        for (auto i = isize(0); i < members.size(); ++i)
+            result.members.push_back({.name = members[i].name,
+                                      .kind = described_member_kind::constant,
+                                      .type = cc::string(m.name_of(members[i].type)),
+                                      .offset = placed.offsets[i],
+                                      .size = placed.sizes[i]});
+        result.block_size = placed.size;
+        return result;
+    }
+
+    // Numbered as the emitter numbers them: the constant block first when there is one, then the resources in
+    // declaration order, each the next slot of its group.
+    auto const plain = sgl::emit::impl::plain_members_of(m, b);
+    auto const placed = sgl::emit::impl::place_block(m, plain);
+    if (!plain.empty())
+    {
+        result.block_size = placed.size;
+        result.block_slot = 0;
+        result.block_host_name = s.name;
+    }
+    auto slot = sgl::emit::impl::first_resource_slot(m, b);
+    auto next_constant = isize(0);
+    for (auto const& whole : members)
+    {
+        // a binding array is described as its element, taking one slot per element
+        auto member = whole;
+        auto count = 1;
+        if (auto const& t = m.at(whole.type);
+            t.kind == check::type_kind::array && check::is_resource(m.at(t.element).kind))
+        {
+            member.type = t.element;
+            count = t.count;
+        }
+        auto const& t = m.at(member.type);
+        if (t.kind == check::type_kind::buffer)
+        {
+            result.members.push_back({.name = member.name,
+                                      .kind = described_member_kind::buffer,
+                                      .type = cc::string(m.name_of(t.element)),
+                                      .slot = slot,
+                                      .count = count,
+                                      .stride = sgl::emit::impl::element_stride(m, t.element),
+                                      .host_name = cc::format("{}.{}", s.name, member.name),
+                                      .access = cc::string(t.is_mut ? "read_write" : "read")});
+            slot += count;
+            continue;
+        }
+        if (check::is_resource(t.kind))
+        {
+            auto described = describe_resource(m, member, slot, cc::format("{}.{}", s.name, member.name));
+            described.count = count;
+            result.members.push_back(cc::move(described));
+            slot += count;
+            continue;
+        }
+        result.members.push_back({.name = member.name,
+                                  .kind = described_member_kind::constant,
+                                  .type = cc::string(m.name_of(member.type)),
+                                  .offset = placed.offsets[next_constant],
+                                  .size = placed.sizes[next_constant]});
+        ++next_constant;
+    }
+    return result;
+}
+
 cc::result<sgl::module_description, cc::string> sgl::describe(describe_request const& request)
 {
     auto const front = driver::impl::run_front_end(request.source, request.source_name);
@@ -342,6 +365,7 @@ cc::result<sgl::module_description, cc::string> sgl::describe(describe_request c
     auto const& m = front.module;
     auto errors = cc::vector<emit::error>();
     auto result = module_description();
+    auto described = cc::vector<check::symbol_id>();
 
     // Only the program's own declarations: the prelude describes nothing, and an imported module describes itself.
     for (auto i = isize(0); i < m.symbols.size(); ++i)
@@ -359,7 +383,10 @@ cc::result<sgl::module_description, cc::string> sgl::describe(describe_request c
             auto const before = errors.size();
             emit_impl::validate_binding(m, id, errors);
             if (errors.size() == before)
-                result.bindings.push_back(describe_binding(m, s));
+            {
+                result.bindings.push_back(driver::impl::describe_binding(m, s));
+                described.push_back(id);
+            }
         }
         else if (s.kind == check::symbol_kind::structure && check::is_valid(s.type))
         {
@@ -372,6 +399,25 @@ cc::result<sgl::module_description, cc::string> sgl::describe(describe_request c
             emit_impl::validate_edge_struct(m, s.type, role, errors);
             if (errors.size() == before)
                 result.structs.push_back(describe_struct(m, t));
+        }
+    }
+
+    // The structs the described bindings place in memory, each once and after what it holds.
+    for (auto const id : described)
+    {
+        for (auto const space : {emit_impl::address_space::constants, emit_impl::address_space::storage})
+        {
+            auto structs = cc::vector<check::type_id>();
+            emit_impl::collect_placed_structs(m, id, space, structs);
+            for (auto const type : structs)
+            {
+                auto const name = m.name_of(type);
+                auto is_known = false;
+                for (auto const& known : result.memory_structs)
+                    is_known = is_known || known.name == name;
+                if (!is_known)
+                    result.memory_structs.push_back(describe_memory_struct(m, type, space));
+            }
         }
     }
 

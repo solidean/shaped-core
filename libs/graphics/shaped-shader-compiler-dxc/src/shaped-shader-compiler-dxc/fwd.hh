@@ -17,6 +17,8 @@ class shader_cache;
 struct shader_description;
 struct compile_options;
 struct preprocessed_source;
+struct reflected_field;
+struct reflected_block;
 
 // The compile_options vocabulary (see compile_options.hh).
 enum class compile_target;
