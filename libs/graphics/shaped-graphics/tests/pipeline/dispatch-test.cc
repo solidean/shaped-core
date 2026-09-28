@@ -111,14 +111,22 @@ ASYNC_INVOCABLE_TEST("sg - int, uint and float4 buffer elements keep their types
     auto cmd = ctx->create_command_list();
     auto const persistent = ctx->persistent.create_binding_group(layout, views(all[0]));
     auto const transient = ctx->transient.create_binding_group(*cmd, layout, views(all[1]));
+    auto groups = cc::vector<sg::binding_group const*>{persistent.get(), transient.get()};
     // A staging group is set binding by binding, by the name the generated struct gives each member.
-    auto staging = ctx->persistent.create_staging_binding_group(layout);
-    staging->set_binding("typed.ints", all[2].ints.as_readwrite_buffer());
-    staging->set_binding("typed.uints", all[2].uints.as_readwrite_buffer());
-    staging->set_binding("typed.vectors", all[2].vectors.as_readwrite_buffer());
-    auto const snapshot = staging->snapshot();
+    // WebGPU has none, since it has no binding arrays either.
+    auto const has_staging = ctx->supports(sg::feature::binding_arrays);
+    auto snapshot = sg::binding_group_handle();
+    if (has_staging)
+    {
+        auto staging = ctx->persistent.create_staging_binding_group(layout);
+        staging->set_binding("typed.ints", all[2].ints.as_readwrite_buffer());
+        staging->set_binding("typed.uints", all[2].uints.as_readwrite_buffer());
+        staging->set_binding("typed.vectors", all[2].vectors.as_readwrite_buffer());
+        snapshot = staging->snapshot();
+        groups.push_back(snapshot.get());
+    }
     cmd->compute.bind_pipeline(*pipeline);
-    for (auto const* group : {persistent.get(), transient.get(), snapshot.get()})
+    for (auto const* group : groups)
     {
         cmd->compute.bind_group(0, *group);
         cmd->compute.dispatch_threads(count);
@@ -135,7 +143,7 @@ ASYNC_INVOCABLE_TEST("sg - int, uint and float4 buffer elements keep their types
     ctx->submit_command_list(cc::move(cmd));
 
     constexpr char const* kinds[] = {"persistent", "transient", "staging"};
-    for (auto k = 0; k < 3; ++k)
+    for (auto k = 0; k < (has_staging ? 3 : 2); ++k)
     {
         auto const ints = co_await futures[k].data();
         auto const uints = co_await ufutures[k].data();
@@ -149,17 +157,59 @@ ASYNC_INVOCABLE_TEST("sg - int, uint and float4 buffer elements keep their types
     }
 }
 
-ASYNC_INVOCABLE_TEST("sg - a buffer view's offset is where the shader's index 0 lands, and a read-only and a "
-                     "read-write view of one buffer work side by side",
+ASYNC_INVOCABLE_TEST("sg - a buffer view's offset is where the shader's index 0 lands, and its size is where it ends",
                      (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
     if (!sg_test::shaders_reach(*ctx))
         SKIP("no compiler builds this binary's shaders into a format this context accepts");
 
-    // One buffer of 4 × 64 ints: quarter 1 is the source view, quarter 2 the target view, and quarters 0 and 3 are
-    // bystanders a view that ignored its offset or its size would reach.
+    // The source is quarter 1 of one buffer and the target quarter 2 of another, each of 4 × 64 ints.
+    // Quarters 0 and 3 are bystanders a view that ignored its offset or its size would reach.
     // 64 ints are 256 bytes, which is the strictest storage-offset alignment any backend asks for.
+    constexpr int quarter = 64;
+    auto const pipeline = co_await shaders::dispatch.copy_within.acquire_pipeline(*ctx);
+    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::within>();
+    auto numbered = cc::vector<i32>();
+    for (auto i = 0; i < 4 * quarter; ++i)
+        numbered.push_back(i);
+    auto const usage
+        = sg::buffer_usage::readonly_buffer | sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src;
+    auto const from = ctx->persistent.create_buffer_from_data(numbered, usage);
+    auto const into = ctx->persistent.create_buffer_from_data(cc::vector<i32>::create_filled(4 * quarter, -1), usage);
+
+    auto cmd = ctx->create_command_list();
+    auto const group = ctx->transient.create_binding_group(
+        *cmd, layout,
+        shaders::within{.source = from.as_readonly_buffer({.offset = quarter, .size = quarter}),
+                        .target = into.as_readwrite_buffer({.offset = 2 * quarter, .size = quarter})});
+    cmd->compute.bind_pipeline(*pipeline);
+    cmd->compute.bind_group(0, *group);
+    cmd->compute.dispatch_threads(quarter);
+    auto const back = cmd->download.data_from_buffer(into);
+    ctx->submit_command_list(cc::move(cmd));
+
+    auto const got = co_await back.data();
+    REQUIRE(got.size() == 4 * quarter);
+    for (auto i = 0; i < 4 * quarter; ++i)
+    {
+        auto const expected = i >= 2 * quarter && i < 3 * quarter ? i - quarter + 1 : -1;
+        CHECK(got[i] == expected).context(cc::format("element {}", i));
+    }
+}
+
+ASYNC_INVOCABLE_TEST("sg - a read-only and a read-write view of one buffer work side by side in one dispatch",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    // WebGPU refuses a buffer written in a dispatch and bound there another way too, even through disjoint ranges.
+    // sg does not refuse it itself yet, which libs/graphics/shaped-graphics/docs/tier1-pipeline-tests.md carries.
+    if (ctx->backend() == sg::backend_kind::webgpu)
+        SKIP("webgpu refuses one buffer both written and read in a dispatch");
+
+    // Quarter 1 of one buffer is the source view and quarter 2 the target view, beside bystanders in 0 and 3.
     constexpr int quarter = 64;
     auto const pipeline = co_await shaders::dispatch.copy_within.acquire_pipeline(*ctx);
     auto const layout = ctx->cached.acquire_binding_group_layout<shaders::within>();

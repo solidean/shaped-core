@@ -5,7 +5,7 @@
 Tier 1 ([testing.md](testing.md#tier-1--backend-agnostic-api-tests-tests)) runs one test body against every backend, and it is where sg's pipeline semantics belong.
 `tests/pipeline/` executes them: every value of every fixed-function enum, the draw and dispatch parameters, and the binding semantics.
 SGL's pixel-stage rules run there too, as do every texture shape and sampler field and the geometry and tessellation stages.
-They run on dx12 and vulkan with validation on; webgpu and metal are yet to be shown running them.
+They run on dx12 and vulkan with validation on, and on webgpu through Dawn under node; metal is yet to be shown running them.
 What this file keeps is what is left, and what the tests found that sg or SGL should grow.
 
 ## The harness
@@ -43,13 +43,15 @@ A combinatorial sweep — every blend factor against every op — narrows to a c
 
 ## Binding semantics, executed
 
+- **One buffer written and read through two views of one dispatch** runs on dx12 and vulkan, and WebGPU refuses it even for disjoint ranges.
+  sg refuses nothing itself yet, so a program that does it works on two backends and fails validation on the third; the test skips on webgpu.
 - A buffer view's size, which SGL cannot observe yet: it has no buffer length, which WGSL's `arrayLength` and HLSL's `GetDimensions` both give.
 - Bound state from one rendering scope to the next, which wants a raster pipeline with a binding array; a dispatch's group not leaking into a draw is executed.
 
 ## SGL semantics that only a GPU pins
 
-`tests/pipeline/pixel-semantics-test.cc` and `draw-params-test.cc` pin each on dx12 and vulkan.
-What metal and webgpu still have to be shown doing:
+`tests/pipeline/pixel-semantics-test.cc` and `draw-params-test.cc` pin each on dx12, vulkan and webgpu.
+What metal still has to be shown doing:
 
 - **A discarded pixel still takes part in its quad's derivatives.**
   WGSL demotes; MSL's `discard_fragment` may end the pixel, and the emulation SGL's TODO describes waits on the test on metal.
