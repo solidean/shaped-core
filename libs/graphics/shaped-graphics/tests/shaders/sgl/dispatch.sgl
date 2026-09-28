@@ -1,0 +1,46 @@
+// Dispatch shapes, inline constants and binding semantics, as the GPU runs them.
+
+// Per dispatch: the row a dispatch's threads start at, and a marker that names the dispatch.
+@inline binding pass:
+    row: int
+    marker: int
+
+binding grid:
+    stamps: mut buffer[int4]
+    counts: mut buffer[int]
+
+@workgroup binding tally:
+    threads: atomic[int]
+
+// Every thread stamps its thread id, its workgroup and its index within the workgroup, and the dispatch's marker,
+// at the cell of a 16-wide grid its thread id names.
+// Each workgroup also counts its own threads, into the cell of the grid's first column its first thread stamps.
+@compute(4, 2) fun stamp(@thread_id id: int3, @workgroup_id g: int3, @local_thread_index local: int){grid, pass, tally}:
+    if local == 0 => tally.threads.store(0)
+    workgroup_barrier()
+    tally.threads.add(1)
+    let at = (id.y + pass.row) * 16 + id.x
+    grid.stamps[at] = int4(id.x, id.y, g.x + 10 * g.y, local * 1000 + pass.marker)
+    workgroup_barrier()
+    if local == 0 => grid.counts[at] = tally.threads.load()
+
+// Elements of int, uint and float4 each keep their type: a shift of a negative int is arithmetic, of a uint above
+// the int range logical, and a float4 is reordered whole.
+binding typed:
+    ints: mut buffer[int]
+    uints: mut buffer[uint]
+    vectors: mut buffer[float4]
+
+@compute(64) fun typed_step(@thread_id id: int3){typed}:
+    typed.ints[id.x] = typed.ints[id.x] >> 1
+    typed.uints[id.x] = typed.uints[id.x] >> 1
+    let v = typed.vectors[id.x]
+    typed.vectors[id.x] = float4(v.w, v.z, v.y, v.x) * 2.0
+
+// A read-only and a read-write view, which the tests make views of one buffer.
+binding within:
+    source: buffer[int]
+    target: mut buffer[int]
+
+@compute(64) fun copy_within(@thread_id id: int3){within}:
+    within.target[id.x] = within.source[id.x] + 1

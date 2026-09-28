@@ -48,16 +48,12 @@ A combinatorial sweep — every blend factor against every op — narrows to a c
 
 ## Draw and dispatch parameters
 
-- `dispatch_threads` against `dispatch_groups`, with a partial last group: every thread writes its `@thread_id`, and one workgroup counts its threads with an atomic in workgroup memory.
-- Inline constants that change per draw and per dispatch.
+- Inline constants that change per draw; per dispatch is executed.
 
 ## Binding semantics, executed
 
-- A buffer view with an offset and a size: the shader sees exactly that range.
-- `int`, `uint` and `float4` element buffers.
-- Transient, persistent and staging groups, each driving the same pipeline.
-- A read-only and a read-write view of one buffer.
-- Two to four groups at once, rebound between dispatches, and one group shared by two pipelines of one layout.
+- A buffer view's size, which SGL cannot observe yet: it has no buffer length, which WGSL's `arrayLength` and HLSL's `GetDimensions` both give.
+- Three and more groups at once; two are executed.
 - Bound state across `render_to` scopes: a group bound in one scope is not bound in the next, and a compute-bound group does not leak into a draw.
 
 ## SGL semantics that only a GPU pins
