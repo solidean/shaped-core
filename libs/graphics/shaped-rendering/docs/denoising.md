@@ -138,9 +138,9 @@ sv takes the scene signal from its trace hash with the camera left out; a caller
 
 - **The native members need nothing sg does not have.**
 - **The vendor members need a declared native scope in sg**, per backend, dx12 first.
-  Opening it names the resources foreign code will touch and how, so sg emits their barriers.
+  Opening it names the resources foreign code will touch and how, so sg emits their barriers and records the declared states.
   It then hands out the native list and resources.
-  Closing it records the declared states and invalidates the list's cached bindings.
+  Closing it only forgets the list's cached bindings, which the caller rebinds before its next draw or dispatch.
   Without it a vendor SDK would bypass sg's barrier tracking silently.
 - **OIDN on a GPU needs exportable memory and shared fences in sg.**
   OIDN on the CPU needs neither: download, filter, upload.

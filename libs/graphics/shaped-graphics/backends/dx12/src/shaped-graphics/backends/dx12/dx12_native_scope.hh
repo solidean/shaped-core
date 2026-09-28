@@ -39,21 +39,20 @@ namespace sg::backend::dx12
 /// Lets foreign code — a vendor SDK, a capture tool — record onto an sg command list, without sg losing track of what
 /// it touched.
 ///
-/// This is the **one sanctioned escape hatch** out of sg's barrier model, and the second place an access is declared
-/// rather than inferred (array bindings are the first).
+/// This is a sanctioned escape hatch out of sg's barrier model.
 /// Everything else infers access from the operation, which foreign code makes impossible: sg cannot see the call, so
-/// the caller names what it will touch and how.
+/// the caller names what it will touch and how, as it does for array bindings.
 ///
 /// Opening transitions every named resource into the declared access, and records that as its state, so the next sg
 /// operation on it barriers from there.
 /// Closing forgets the list's bind state, because foreign code is free to set its own descriptor heaps, root signature
-/// and pipeline — so the next sg draw or dispatch rebinds from scratch rather than trusting what it last set.
+/// and pipeline.
+/// sg never rebinds by itself, so the caller must bind a pipeline again before the next draw or dispatch — one that
+/// does not asserts.
 ///
 /// **A caller that under-declares corrupts the tracker**: sg will believe a state the GPU is not in, and the result is
 /// a validation error on one machine and wrong pixels on another.
 /// Declare every resource the foreign call touches, and nothing it does not — the debug layer catches the first half.
-///
-/// The scope holds no lifetime: the handles it is given must outlive it, as they must outlive the list's recording.
 class sg::backend::dx12::dx12_native_scope
 {
 public:
@@ -68,7 +67,8 @@ public:
     dx12_native_scope(dx12_native_scope const&) = delete;
     dx12_native_scope& operator=(dx12_native_scope const&) = delete;
 
-    /// Forgets the list's bind state, so sg rebinds everything the foreign code may have replaced.
+    /// Forgets the list's bind state, since the foreign code may have replaced it.
+    /// sg never rebinds by itself: the caller binds a pipeline again before the next draw or dispatch.
     ~dx12_native_scope();
 
     /// The list to record onto — the same one sg records into, so the foreign work lands in submission order.

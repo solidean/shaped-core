@@ -62,11 +62,12 @@ public:
     /// The transition is computed from the texture's tracked layout, so it composes with whatever the frame's render pass left it in.
     void transition_texture_to(dx12_texture_handle const& texture, sg::texture_layout layout);
 
-    /// Drop what this list believes it has bound — pipeline, groups, and the raster scope's vertex and index buffers.
+    /// Drop what this list believes it has bound — pipeline, groups, footprint, and the raster scope's vertex and index buffers.
     ///
     /// For after foreign code recorded onto the native list (see dx12_native_scope): it may have set its own
-    /// descriptor heaps, root signature and pipeline, so sg's next draw or dispatch must rebind rather than trust
-    /// what it last set.
+    /// descriptor heaps, root signature and pipeline.
+    /// sg never rebinds by itself, so the caller must bind a pipeline again before the next draw or dispatch — one
+    /// that does not asserts.
     /// Touches no GPU state itself — the rebind does.
     void forget_bind_state();
 

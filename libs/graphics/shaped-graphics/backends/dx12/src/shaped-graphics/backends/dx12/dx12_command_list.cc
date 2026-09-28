@@ -173,6 +173,8 @@ void dx12_command_list::forget_bind_state()
 {
     _bound_pipeline_layout = nullptr;
     _bound_groups.clear();
+    _bound_footprint = nullptr;
+    _bound_footprint_owner = nullptr;
     _bound_raster_layout = nullptr;
     _bound_raster_groups.clear();
     _bound_vertex_buffers.clear();
@@ -320,6 +322,7 @@ void dx12_command_list::compute_set_inline_constants(cc::span<byte const> data, 
 void dx12_command_list::compute_dispatch(int x, int y, int z)
 {
     CC_ASSERT(x >= 0 && y >= 0 && z >= 0, "dispatch group counts must be non-negative");
+    CC_ASSERT(_bound_pipeline_layout != nullptr, "bind a compute pipeline before dispatch");
 
     // dx12 binds targets with OMSetRenderTargets rather than a real render pass, so this would likely work here —
     // but Vulkan rejects a dispatch inside a render-pass instance outright, and the barriers below would transition

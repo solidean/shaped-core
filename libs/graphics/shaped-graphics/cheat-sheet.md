@@ -992,6 +992,7 @@ auto const native = sg::backend::dx12::dx12_native_scope::open(cmd,   // -> dx12
     {{.buffer = buf, .access = sg::access_flag::shader_read}});
 native.list() / native.device()        // -> ID3D12GraphicsCommandList* / ID3D12Device*
 native.resource(tex)                   // -> ID3D12Resource*; ASSERTS on a handle the scope did not declare
-// open transitions each declared resource and records that as its state; ~scope forgets the list's bind state, so sg rebinds
+// open transitions each declared resource and records that as its state; ~scope forgets the list's bind state
+// sg never rebinds by itself: bind a pipeline again before the next draw or dispatch — one that does not ASSERTS
 // under-declaring corrupts the tracker: declare everything the foreign call touches, and nothing it does not
 ```
