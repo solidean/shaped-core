@@ -19,6 +19,90 @@
 
 using namespace cc::primitive_defines;
 
+namespace
+{
+/// An image for the oracles: what OIDN is compared against has to reach every part of the input it prepares.
+struct oracle_scene
+{
+    cc::vector<tg::vec3f> color;
+    cc::vector<tg::vec3f> albedo;
+    cc::vector<tg::vec3f> normal;
+};
+
+/// A textured, bumpy surface whose radiance spans ten decades.
+///
+/// Radiance runs log-linearly from 1e-7 at one corner to 1e3 at the other, so it crosses the transfer curve's linear
+/// toe, its power segment and its log tail, where a narrow range would test only one.
+/// Each 16-pixel cell is a hemisphere bump, so a normal's x and y take both signs: a swapped or negated component
+/// in the input packing then changes the image rather than hiding under a constant `(0, 0, 1)`.
+[[nodiscard]] oracle_scene make_oracle_scene(int size)
+{
+    auto scene = oracle_scene();
+    for (auto y = 0; y < size; ++y)
+        for (auto x = 0; x < size; ++x)
+        {
+            auto const bright = ((x / 16 + y / 16) % 2) == 0;
+            auto const a = bright ? tg::vec3f(0.8f, 0.6f, 0.3f) : tg::vec3f(0.1f, 0.2f, 0.5f);
+
+            auto const u = (f32(x % 16) + 0.5f) / 8.0f - 1.0f;
+            auto const v = (f32(y % 16) + 0.5f) / 8.0f - 1.0f;
+            auto const r2 = u * u + v * v;
+            auto const n = r2 < 1.0f ? tg::vec3f(u, v, tg::sqrt(1.0f - r2)) : tg::vec3f(0, 0, 1);
+
+            auto const t = f32(x + y) / f32(cc::max(2 * size - 2, 1));
+            auto const radiance = tg::pow(10.0f, -7.0f + 10.0f * t);
+            auto const speckle = 0.35f + f32((x * 7 + y * 13) % 11) / 11.0f;
+
+            scene.albedo.push_back(a);
+            scene.normal.push_back(n);
+            scene.color.push_back(a * (speckle * radiance));
+        }
+    return scene;
+}
+
+/// How far `got` is from `reference`, relative to the reference, over every pixel.
+///
+/// Relative because the scene spans ten decades, where an absolute difference would weigh only the brightest corner;
+/// floored at 1e-3 so a value near zero does not turn rounding into an error.
+struct oracle_error
+{
+    f64 mean = 0.0;
+    f64 worst = 0.0;
+    tg::vec2i worst_at = tg::vec2i(0, 0);
+};
+
+/// The oracles' bounds on the relative difference, about a decade above what this machine returns.
+///
+/// Measured over the scene above, every pixel: a mean of 8.8e-07 and a worst of 1.2e-05 for the base network,
+/// 1.1e-06 and 1.2e-05 for the small one, and 9.1e-07 and 1.6e-05 tiled.
+/// Two mistakes they have to see, measured: padding the tensor by repeating the image's edge instead of with zeros
+/// moves the mean to 2.5e-02 and the worst to 0.78, and decoding subnormal fp16 weights one exponent too high moves
+/// them to 4.4e-05 and 6.7e-04.
+constexpr f64 k_oracle_mean = 1e-5;
+constexpr f64 k_oracle_worst = 2e-4;
+
+[[nodiscard]] oracle_error compare_to_reference(cc::span<tg::vec4f const> got, cc::span<tg::vec3f const> reference, int size)
+{
+    auto error = oracle_error();
+    auto total = 0.0;
+    for (auto y = 0; y < size; ++y)
+        for (auto x = 0; x < size; ++x)
+            for (auto c = 0; c < 3; ++c)
+            {
+                auto const theirs = f64(reference[y * size + x][c]);
+                auto const d = tg::abs(f64(got[y * size + x][c]) - theirs) / cc::max(tg::abs(theirs), 1e-3);
+                total += d;
+                if (d > error.worst)
+                {
+                    error.worst = d;
+                    error.worst_at = tg::vec2i(x, y);
+                }
+            }
+    error.mean = total / f64(size * size * 3);
+    return error;
+}
+} // namespace
+
 // The whole U-Net: nine packed channels in, sixteen convolutions, four pools, four upsamples, three channels out.
 //
 // What this can check on its own is that the graph HOLDS TOGETHER — every layer finds weights of the width its
@@ -35,8 +119,8 @@ ASYNC_INVOCABLE_TEST("sr - the denoise network runs end to end", (sg::context_ha
     (void)sr_test::shader_fixtures(); // sr's one library, alive for the whole binary
 
     // Deliberately NOT a multiple of sixteen, and not square.
-    // Four pools need one, so the network pads its tensors up and repeats the image's edge into the padding — an
-    // arbitrary view size is the normal case, and an aligned one would never exercise that.
+    // Four pools need one, so the network pads its tensors up with zeros — an arbitrary view size is the normal case,
+    // and an aligned one would never exercise that.
     constexpr auto k_width = 40;
     constexpr auto k_height = 24;
     auto const extent = tg::vec2i(k_width, k_height);
@@ -187,24 +271,14 @@ ASYNC_INVOCABLE_TEST("sr - the network agrees with OIDN's own filter", (sg::cont
             FAIL(cc::format("a network shader did not compile: {}", shader->try_error()->underlying().to_string()));
     }
 
-    constexpr auto k_size = 64;
+    // Not a multiple of sixteen, so the right and bottom edges are next to padding, and every pixel is compared.
+    constexpr auto k_size = 72;
     auto const extent = tg::vec2i(k_size, k_size);
 
-    // A lit, textured surface with speckle on it — the kind of image the weights were trained over, rather than a
-    // pattern chosen to be easy.
-    auto color3 = cc::vector<tg::vec3f>();
-    auto albedo3 = cc::vector<tg::vec3f>();
-    auto normal3 = cc::vector<tg::vec3f>();
-    for (auto y = 0; y < k_size; ++y)
-        for (auto x = 0; x < k_size; ++x)
-        {
-            auto const bright = ((x / 16 + y / 16) % 2) == 0;
-            auto const a = bright ? tg::vec3f(0.8f, 0.6f, 0.3f) : tg::vec3f(0.1f, 0.2f, 0.5f);
-            auto const speckle = 0.35f + f32((x * 7 + y * 13) % 11) / 11.0f;
-            albedo3.push_back(a);
-            color3.push_back(a * speckle);
-            normal3.push_back(tg::vec3f(0, 0, 1));
-        }
+    auto const scene = make_oracle_scene(k_size);
+    auto const& color3 = scene.color;
+    auto const& albedo3 = scene.albedo;
+    auto const& normal3 = scene.normal;
 
     // Both networks, each against the quality whose weights it is: the small one is OIDN's `fast`, the base one its
     // `balanced`.
@@ -269,46 +343,21 @@ ASYNC_INVOCABLE_TEST("sr - the network agrees with OIDN's own filter", (sg::cont
         auto const got = co_await readback.data();
         REQUIRE(got.size() == k_size * k_size);
 
-        // Reported as the worst and the mean over the interior, because the two say different things: a wrong constant
-        // moves the mean, and a wrong index usually moves one region a lot while leaving the rest alone.
-        auto worst = 0.0f;
-        auto worst_at = tg::vec2i(0, 0);
-        auto total = 0.0;
-        auto samples = 0;
-        for (auto y = 4; y < k_size - 4; ++y)
-            for (auto x = 4; x < k_size - 4; ++x)
-                for (auto c = 0; c < 3; ++c)
-                {
-                    auto const mine = got[y * k_size + x][c];
-                    auto const theirs = reference[y * k_size + x][c];
-                    auto const d = tg::abs(mine - theirs);
-                    total += d;
-                    ++samples;
-                    if (d > worst)
-                    {
-                        worst = d;
-                        worst_at = tg::vec2i(x, y);
-                    }
-                }
-
-        // The bounds have roughly a decade of headroom over what this machine actually returns for the base network — a
-        // mean of 4.9e-07 and a worst of 4.3e-06, which is what sixteen layers of fp32 on the GPU against OIDN's own CPU
-        // inference costs.
-        // Loose enough not to chase a driver, and tight enough to see a weight decoded one exponent off: doubling the
-        // subnormal weights alone moves the mean to 1.0e-05.
-        auto const mean = f32(total / f64(samples));
-        CHECK(mean < 5e-6f).context(cc::format("{}: mean difference {} over {} samples", label, mean, samples));
-        CHECK(worst < 5e-5f)
-            .context(cc::format("{}: worst difference {} at {},{} (ours {}, OIDN {})", label, worst, worst_at[0],
-                                worst_at[1], got[worst_at[1] * k_size + worst_at[0]][0],
-                                reference[worst_at[1] * k_size + worst_at[0]][0]));
+        // Reported as the worst and the mean, because the two say different things: a wrong constant moves the mean,
+        // and a wrong index or a wrong padding usually moves one region a lot while leaving the rest alone.
+        auto const e = compare_to_reference(got, reference, k_size);
+        auto const at = e.worst_at[1] * k_size + e.worst_at[0];
+        CHECK(e.mean < k_oracle_mean).context(cc::format("{}: mean relative difference {}", label, e.mean));
+        CHECK(e.worst < k_oracle_worst)
+            .context(cc::format("{}: worst relative difference {} at {},{} (ours {}, OIDN {})", label, e.worst,
+                                e.worst_at[0], e.worst_at[1], got[at][0], reference[at][0]));
 
         // And the comparison was worth making: OIDN's own output has to differ from what went in, or "we agree" would
         // only be saying that neither of us did anything.
         auto changed = 0.0;
         for (auto n = 0; n < k_size * k_size; ++n)
             for (auto c = 0; c < 3; ++c)
-                changed += f64(tg::abs(reference[n][c] - color3[n][c]));
+                changed += tg::abs(f64(reference[n][c]) - f64(color3[n][c])) / cc::max(f64(color3[n][c]), 1e-3);
         CHECK(changed / f64(k_size * k_size * 3) > 0.01)
             .context(cc::format("OIDN changed the image by {} per channel, which is close enough to nothing that "
                                 "agreeing "
@@ -700,23 +749,14 @@ ASYNC_INVOCABLE_TEST("sr - the tiled network agrees with OIDN's own filter", (sg
 
     REQUIRE(co_await sr::impl::oidn_prewarm_pipelines(ctx)).context("the network's pipelines did not build");
 
-    constexpr auto k_size = 384;
+    // Not a multiple of sixteen either, so the last tile row and column sit next to the padding.
+    constexpr auto k_size = 392;
     auto const extent = tg::vec2i(k_size, k_size);
 
-    auto color3 = cc::vector<tg::vec3f>();
-    auto albedo3 = cc::vector<tg::vec3f>();
-    auto normal3 = cc::vector<tg::vec3f>();
-    for (auto y = 0; y < k_size; ++y)
-        for (auto x = 0; x < k_size; ++x)
-        {
-            auto const coarse = ((x / 24 + y / 24) % 2) == 0;
-            auto const a = coarse ? tg::vec3f(0.8f, 0.6f, 0.3f) : tg::vec3f(0.1f, 0.2f, 0.5f);
-            auto const gradient = f32(x + y) / f32(2 * k_size);
-            auto const speckle = 0.35f + f32((x * 7 + y * 13) % 11) / 11.0f;
-            albedo3.push_back(a);
-            color3.push_back(tg::vec3f(a[0] * speckle * (0.5f + gradient), a[1] * speckle, a[2] * speckle));
-            normal3.push_back(tg::vec3f(0, 0, 1));
-        }
+    auto const scene = make_oracle_scene(k_size);
+    auto const& color3 = scene.color;
+    auto const& albedo3 = scene.albedo;
+    auto const& normal3 = scene.normal;
 
     auto reference = cc::vector<tg::vec3f>::create_filled(size_t(k_size * k_size), tg::vec3f(0, 0, 0));
     REQUIRE(sr_test::oidn_filter_reference(color3, albedo3, normal3, extent, reference));
@@ -744,11 +784,11 @@ ASYNC_INVOCABLE_TEST("sr - the tiled network agrees with OIDN's own filter", (sg
         return out;
     };
 
-    // 288 forces a genuinely tiled run: the tensor is 288 and the interior is the 128 left after 80 on each side,
-    // so a 384 image takes three tiles per axis.
+    // 288 forces a genuinely tiled run: it chooses a 272 tensor whose interior is the 112 left after 80 on each side,
+    // so a 392 image takes four tiles per axis.
     auto network = sr::impl::oidn_network();
     REQUIRE(network.create(ctx, extent, 288));
-    REQUIRE(network.tile_counts() == tg::vec2i(3, 3))
+    REQUIRE(network.tile_counts() == tg::vec2i(4, 4))
         .context(cc::format("tiled {}x{}", network.tile_counts()[0], network.tile_counts()[1]));
     REQUIRE(network.prepare());
 
@@ -769,29 +809,12 @@ ASYNC_INVOCABLE_TEST("sr - the tiled network agrees with OIDN's own filter", (sg
     auto const got = co_await readback.data();
     REQUIRE(got.size() == k_size * k_size);
 
-    auto worst = 0.0f;
-    auto worst_at = tg::vec2i(0, 0);
-    auto total = 0.0;
-    auto samples = 0;
-    for (auto y = 4; y < k_size - 4; ++y)
-        for (auto x = 4; x < k_size - 4; ++x)
-            for (auto c = 0; c < 3; ++c)
-            {
-                auto const d = tg::abs(got[y * k_size + x][c] - reference[y * k_size + x][c]);
-                total += d;
-                ++samples;
-                if (d > worst)
-                {
-                    worst = d;
-                    worst_at = tg::vec2i(x, y);
-                }
-            }
-
-    auto const mean = f32(total / f64(samples));
-    // The same bounds the untiled oracle carries, and this machine returns a mean of 4.9e-07 and a worst of 6.6e-06
-    // against them — so tiling costs nothing measurable in agreement with Intel.
-    CHECK(mean < 5e-6f).context(cc::format("mean difference {} over {} samples", mean, samples));
-    CHECK(worst < 5e-5f).context(cc::format("worst difference {} at {},{} (mean {})", worst, worst_at[0], worst_at[1], mean));
+    // The same bounds the untiled oracle carries: tiling has to cost nothing measurable in agreement with Intel.
+    auto const e = compare_to_reference(got, reference, k_size);
+    CHECK(e.mean < k_oracle_mean).context(cc::format("mean relative difference {}", e.mean));
+    CHECK(e.worst < k_oracle_worst)
+        .context(cc::format("worst relative difference {} at {},{} (mean {})", e.worst, e.worst_at[0], e.worst_at[1],
+                            e.mean));
 }
 
 // The tile is CHOSEN rather than taken as large as it may be, and this is what that has to mean.

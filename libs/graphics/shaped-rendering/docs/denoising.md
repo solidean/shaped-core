@@ -61,7 +61,7 @@ The base one is what OIDN's balanced quality runs, and the small one what its fa
     80 is where the receptive field ends: tiled and whole agree to a mean below 1e-6 at 80, differ by 1.4e-03 at 64, and by 2.8e-01 with no overlap.
     OIDN derives its own overlap as `round_up(receptiveField / 2, tileAlignment)`, which puts its base model in the same range.
   - Every tile's origin is a multiple of sixteen, the grid four pools need, and an edge tile is shifted inward to end where the whole run's padded tensor ends.
-    So a tile reads exactly the input pixels the whole run reads.
+    So a tile sees exactly the input the whole run sees, including the zero padding past the image, as OIDN pads.
   - An axis that fits under the cap stays one span, whatever the other axis needs.
   - Within the cap, `oidn_options::max_tile` with a default of 512, `create` picks per axis the tile that computes the fewest pixels rather than the largest.
     Over 1920x1080 a 512 tile computes more than a 448 one, because its interior divides the image badly.
@@ -129,11 +129,13 @@ The oracle below is what makes each step cheap to try: a step either keeps the o
 `oidn-network-test.cc` runs Intel's own filter over the same input and compares, through `tests/oidn_reference.hh`.
 The library it needs is fetched on request, with `uv run extern/oidn/fetch-oidn.py`, and the comparison skips without it.
 
-- Untiled, over 64x64: a mean difference of 4.9e-07 and a worst of 4.3e-06.
-- The small network, untiled over 64x64 against Intel's fast quality: a mean of 4.7e-07 and a worst of 3.6e-06.
-- Tiled, nine tiles over 384x384 at a 288 cap: a mean of 4.9e-07 and a worst of 6.6e-06.
-- Reading the weights in the wrong source layout moves the mean to 0.29, and decoding subnormal weights one exponent off moves it to 1.0e-05.
-  The bounds sit a decade above the measured values, between the two.
+The scene spans ten decades of radiance over hemisphere-bump normals, at sizes that are not a multiple of sixteen, and every pixel is compared by relative difference.
+
+- Untiled, over 72x72: a mean relative difference of 8.8e-07 and a worst of 1.2e-05.
+- The small network, untiled over 72x72 against Intel's fast quality: a mean of 1.1e-06 and a worst of 1.2e-05.
+- Tiled, sixteen tiles over 392x392 at a 288 cap: a mean of 9.1e-07 and a worst of 1.6e-05.
+- Padding with the image's edge instead of zeros moves the mean to 2.5e-02, and decoding subnormal weights one exponent off moves it to 4.4e-05.
+  The bounds, 1e-5 on the mean and 2e-4 on the worst, sit about a decade above the measured values and below both mistakes.
 
 It is the only test that can catch a self-consistent mistake: every other one checks a piece against its own definition.
 
@@ -250,7 +252,7 @@ sv takes the scene signal from its trace hash with the camera left out; a caller
 - **OIDN needs nothing sg does not have either**, because the member runs the network rather than the library.
 - **The vendor SDKs are fetched on request, never by default.**
   DLSS and FSR sit in sr behind `SR_HAS_<VENDOR>` and link PRIVATE, like SDL3.
-  Intel's OIDN library is on request too, for the oracle test alone; its 1.8 MB of weights are a default fetch, since the member runs them.
+  Intel's OIDN library is on request too, for the oracle test alone; its 2.5 MB of weights, two networks, are a default fetch, since the member runs them.
 
 ## Seeing it
 

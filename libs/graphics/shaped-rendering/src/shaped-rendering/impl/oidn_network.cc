@@ -689,7 +689,7 @@ bool oidn_network::execute(sg::command_list& cmd,
             //
             // The bound is the image rounded up to sixteen, not the image: an origin must stay a multiple of sixteen
             // or the tile pools over different windows than the whole run does.
-            // The at most fifteen rows or columns past the image are then the same edge repeat the whole run pads with.
+            // The at most fifteen rows or columns past the image are then the same zeros the whole run pads with.
             auto const clamp_origin
                 = [](int want, int tensor, int image) { return cc::clamp(want, 0, round_up(image) - tensor); };
             auto const tensor_origin

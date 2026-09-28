@@ -124,7 +124,7 @@ public:
     /// Takes the process's weights (read on the first create) and allocates every feature map for `image_extent`.
     ///
     /// The TENSORS are allocated at that size rounded up to a multiple of 16, because four pools halve it four times.
-    /// The padding repeats the image's edge rather than being black, and nothing is written back for it.
+    /// The padding is zero in every channel, as OIDN pads, and nothing is written back for it.
     /// False when the weights are missing or are not the network this was written against, which is logged once.
     ///
     /// `max_tile` caps the tensors rather than the image: an image larger than it is run in overlapping tiles, and

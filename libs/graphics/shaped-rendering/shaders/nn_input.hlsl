@@ -17,14 +17,15 @@ struct nn_input_constants
     uint width;
     uint height;
 
-    /// The IMAGE's extent. Everything past it is the padding, and reads there are clamped to the edge rather than
-    /// left at zero — a black border would be an edge the network can see, and it would filter towards it.
+    /// The IMAGE's extent. Everything past it is the padding, and it is zero in every channel.
+    /// That is what OIDN writes there and what the weights were trained against; repeating the edge instead moves
+    /// the output along the right and bottom borders.
     uint source_width;
     uint source_height;
 
     /// Where this tile's tensor starts in the image: never negative, and always a multiple of sixteen.
-    /// An edge tile is shifted inward to end where the whole run's padded tensor ends, so its reads past the image
-    /// are the same clamped edge the whole run pads with.
+    /// An edge tile is shifted inward to end where the whole run's padded tensor ends, so its texels past the image
+    /// are the same zeros the whole run pads with.
     int source_offset_x;
     int source_offset_y;
 
@@ -55,10 +56,19 @@ using namespace nn_input_bindings;
     if (id.x >= gConstants.width || id.y >= gConstants.height)
         return;
 
-    // Clamped into the image, so both the padding and a tile's overhang repeat its edge.
+    // Twelve, not nine: every tensor's channel count is padded to a multiple of four so the convolution can read
+    // four at a time, and the three padding channels carry a hard zero rather than whatever was in memory.
+    uint const base = (id.y * gConstants.width + id.x) * 12u;
+
+    // Past the image, the padding and a tile's overhang alike are zero in every channel.
     int2 const sample = int2(gConstants.source_offset_x + int(id.x), gConstants.source_offset_y + int(id.y));
-    int3 const p = int3(clamp(sample.x, 0, int(gConstants.source_width) - 1),
-                        clamp(sample.y, 0, int(gConstants.source_height) - 1), 0);
+    if (sample.x >= int(gConstants.source_width) || sample.y >= int(gConstants.source_height))
+    {
+        [unroll] for (uint c = 0; c < 12u; ++c)
+            gTarget[base + c] = 0.0;
+        return;
+    }
+    int3 const p = int3(max(sample, int2(0, 0)), 0);
 
     float3 color = sanitize(gColor.Load(p).rgb) * gConstants.input_scale;
     color = max(color, float3(0, 0, 0));
@@ -66,12 +76,8 @@ using namespace nn_input_bindings;
 
     float3 const albedo = clamp(sanitize(gAlbedo.Load(p).rgb), 0.0, 1.0);
 
-    // A missing normal reads as zero and maps to the middle of the range, which is what an absent guide should be.
     float3 const normal = clamp(sanitize(gNormal.Load(p).rgb), -1.0, 1.0) * 0.5 + 0.5;
 
-    // Twelve, not nine: every tensor's channel count is padded to a multiple of four so the convolution can read
-    // four at a time, and the three padding channels carry a hard zero rather than whatever was in memory.
-    uint const base = (id.y * gConstants.width + id.x) * 12u;
     gTarget[base + 0] = color.x;
     gTarget[base + 1] = color.y;
     gTarget[base + 2] = color.z;
