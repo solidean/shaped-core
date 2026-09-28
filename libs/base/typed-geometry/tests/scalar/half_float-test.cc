@@ -300,26 +300,50 @@ TEST("tg f16 - a NaN is unordered")
     }
 }
 
-TEST("tg f16 - comparison matches f32's")
+// The reference never lets a NaN reach a float comparison: a pair with a NaN is unordered by definition, and every
+// other pair compares the exact f64 values.
+// GCC 14 at -O2 got the NaN pairs wrong when all seven float comparisons shared one expression, while each alone was right.
+TEST("tg f16 - comparison is the numeric order")
 {
-    auto mismatches = 0;
-    auto first_a = u16(0);
-    auto first_b = u16(0);
+    enum : int
+    {
+        op_equal,
+        op_not_equal,
+        op_less,
+        op_less_equal,
+        op_greater,
+        op_greater_equal,
+        op_three_way,
+        op_count,
+    };
+    int mismatches[op_count] = {};
+    u16 first_a[op_count] = {};
+    u16 first_b[op_count] = {};
+
     auto const check_pair = [&](u16 a, u16 b)
     {
         auto const x = f16::make_from_bits(a);
         auto const y = f16::make_from_bits(b);
-        auto const fx = x.to_f32();
-        auto const fy = y.to_f32();
-        auto const ok = (x == y) == (fx == fy) && (x != y) == (fx != fy) && (x < y) == (fx < fy)
-                     && (x <= y) == (fx <= fy) && (x > y) == (fx > fy) && (x >= y) == (fx >= fy)
-                     && (x <=> y) == (fx <=> fy);
-        if (!ok && mismatches == 0)
+        auto const unordered = tg::impl::half_bits_are_nan(a) || tg::impl::half_bits_are_nan(b);
+        auto const ra = reference_value(a);
+        auto const rb = reference_value(b);
+
+        auto const record = [&](int op, bool ok)
         {
-            first_a = a;
-            first_b = b;
-        }
-        mismatches += ok ? 0 : 1;
+            if (!ok && mismatches[op] == 0)
+            {
+                first_a[op] = a;
+                first_b[op] = b;
+            }
+            mismatches[op] += ok ? 0 : 1;
+        };
+        record(op_equal, (x == y) == (!unordered && ra == rb));
+        record(op_not_equal, (x != y) == (unordered || ra != rb));
+        record(op_less, (x < y) == (!unordered && ra < rb));
+        record(op_less_equal, (x <= y) == (!unordered && ra <= rb));
+        record(op_greater, (x > y) == (!unordered && ra > rb));
+        record(op_greater_equal, (x >= y) == (!unordered && ra >= rb));
+        record(op_three_way, (x <=> y) == (unordered ? std::partial_ordering::unordered : ra <=> rb));
     };
 
     u16 const specials[] = {0x0000, 0x8000, 0x0001, 0x8001, 0x03ff, 0x0400, 0x3c00, 0xbc00, 0x3c01,
@@ -335,22 +359,10 @@ TEST("tg f16 - comparison matches f32's")
     auto const count = nx::is_thorough() ? 50'000'000 : 500'000;
     for (auto i = 0; i < count; ++i)
         check_pair(random_half(rng), random_half(rng));
-    CHECK(mismatches == 0).dump("first a", first_a).dump("first b", first_b);
 
-    if (mismatches != 0) // spell out the first failing pair, one operator per CHECK
-    {
-        auto const x = f16::make_from_bits(first_a);
-        auto const y = f16::make_from_bits(first_b);
-        auto const fx = x.to_f32();
-        auto const fy = y.to_f32();
-        CHECK((x == y) == (fx == fy));
-        CHECK((x != y) == (fx != fy));
-        CHECK((x < y) == (fx < fy));
-        CHECK((x <= y) == (fx <= fy));
-        CHECK((x > y) == (fx > fy));
-        CHECK((x >= y) == (fx >= fy));
-        CHECK((x <=> y) == (fx <=> fy));
-    }
+    char const* const names[op_count] = {"==", "!=", "<", "<=", ">", ">=", "<=>"};
+    for (auto op = 0; op < op_count; ++op)
+        CHECK(mismatches[op] == 0).context(names[op]).dump("first a", first_a[op]).dump("first b", first_b[op]);
 }
 
 TEST("tg f16 - rounding on the bits matches f32's, for every value")
