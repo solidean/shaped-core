@@ -78,6 +78,7 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
         presets = dev.apply_overrides(
             presets, root=ctx.root,
             toolset=args.toolset, build_suffix=args.build_suffix, build_dir=args.build_dir,
+            example_backend=args.example_backend,
         )
     except dev.ToolsetError as e:
         ctx.die(str(e))

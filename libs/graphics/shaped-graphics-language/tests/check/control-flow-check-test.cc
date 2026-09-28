@@ -361,6 +361,23 @@ TEST("sgl check - a call is a block named after its callee: arguments bound in o
              "target))\n");
 }
 
+TEST("sgl check - a conversion the program declares is inlined like any call, and runs")
+{
+    constexpr auto helpers = "struct meters:\n"
+                             "    value: float\n"
+                             "\n"
+                             "@operator(\"as\") fun to_meters(x: float) -> meters => meters(x * 4.0)\n"
+                             "\n";
+    constexpr auto lines = "let m = p.a as meters\n"
+                           "let x = m.value\n";
+    CHECK(structured_dump(helpers, lines).contains("(block $to_meters"));
+
+    auto const checked = check_program(grey_source(helpers, lines));
+    REQUIRE(checked.module.entry_points.size() == 1);
+    auto const& m = checked.module;
+    CHECK(sgl::check::dump(sgl::check::interpret(m, m.entry_points[0], test_inputs(m))) == "ok 1 1 1 1");
+}
+
 TEST("sgl check - a function inlined twice gets distinct names, and an arrow body is one leave")
 {
     CHECK(structured_dump("fun half(x: float) -> float => x * 0.5\n"

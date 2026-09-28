@@ -207,6 +207,31 @@ TEST("sgl emit - a group's plain member is a field of the constant buffer the gr
     CHECK(e.errors[0].detail == "a member of type 'bool' in a binding: 'scene.lit'");
 }
 
+TEST("sgl emit - a group's constant buffer states every member's offset on vulkan, so no compiler flag lays it out")
+{
+    auto const source
+        = with_edges("binding scene:\n"
+                     "    exposure: float\n"
+                     "    gamma: float\n"
+                     "    jitter: float2\n"
+                     "    tint: float3\n"
+                     "\n"
+                     "@pixel fun main_ps(p: pixel_input){scene} -> frame:\n"
+                     "    return {\n"
+                     "        color = float4(..scene.tint, scene.exposure + scene.gamma + scene.jitter.x)\n"
+                     "    }\n");
+    CHECK(emit_source(source, 0, target::hlsl_vulkan)
+              .text.contains("struct scene_data\n"
+                             "{\n"
+                             "    [[vk::offset(0)]] float exposure;\n"
+                             "    [[vk::offset(4)]] float gamma;\n"
+                             "    [[vk::offset(8)]] float2 jitter;\n"
+                             "    [[vk::offset(16)]] float3 tint;\n"
+                             "};\n"));
+    // dx12 gets none, as the push-constant block does not (EMIT-40): it packs a constant buffer this way by itself.
+    CHECK(!emit_source(source, 0, target::hlsl_dx12).text.contains("vk::offset"));
+}
+
 TEST("sgl emit - an inline block whose members would sit elsewhere in one target than in another is an error")
 {
     CHECK(errors_of(with_edges("@inline binding look:\n"
@@ -390,5 +415,60 @@ TEST("sgl emit - the reserved words differ by target and hold no word twice")
                 if (words[i] == words[j])
                     duplicates.appendf("{} ", words[i]);
         CHECK(duplicates == "");
+    }
+}
+
+TEST("sgl emit - a local named after a function is a local of its own in the text")
+{
+    // CHK-105: every module-level name is taken before a local is minted
+    auto const wgsl = text_of(with_edges("fun helper(k: float) -> float:\n"
+                                         "    return k * 2.0\n"
+                                         "@pixel fun main_ps(p: pixel_input) -> frame:\n"
+                                         "    let helper = helper p.normal.x\n"
+                                         "    return { color = float4(helper, helper, helper, 1.0) }\n"),
+                              target::wgsl);
+    CHECK(wgsl.contains("let helper_1: f32"));
+}
+
+TEST("sgl emit - a function of the user file with a prelude function's parameter types is the one called")
+{
+    // CHK-192: the call is the inlined body of the user file's `dot`, not the builtin
+    auto const wgsl = text_of(with_edges("fun dot(a: vec3, b: vec3) -> float => 7.0\n"
+                                         "@pixel fun main_ps(p: pixel_input) -> frame:\n"
+                                         "    let d = dot(p.normal, p.normal)\n"
+                                         "    return { color = float4(d, d, d, 1.0) }\n"),
+                              target::wgsl);
+    CHECK(wgsl.contains("7.0"));
+    CHECK(!wgsl.contains("dot("));
+}
+
+TEST("sgl emit - a struct that shadows one of the prelude is written under a name of its own")
+{
+    // the prelude's `light` reaches the entry point through `lit`, and the user file's through `dim`
+    auto sources = cc::vector<cc::string_view>();
+    for (auto const& p : sgl::prelude_files())
+        sources.push_back(p.source);
+    sources.push_back("struct light:\n"
+                      "    a: float\n"
+                      "fun lit(k: float) -> light:\n"
+                      "    return { a = k }\n");
+    auto const user = with_edges("struct light:\n"
+                                 "    b: float\n"
+                                 "fun dim(k: float) -> light:\n"
+                                 "    return { b = k * 0.5 }\n"
+                                 "@pixel fun main_ps(p: pixel_input) -> frame:\n"
+                                 "    let l = lit p.normal.x\n"
+                                 "    let m = dim l.a\n"
+                                 "    return { color = float4(l.a, m.b, 0.0, 1.0) }\n");
+    sources.push_back(user);
+    auto const checked = check_files(sources);
+    REQUIRE(reports_of(checked) == "");
+
+    for (auto const t : sgl::emit::all_targets())
+    {
+        auto const e = sgl::emit::emit(checked.module, 0, t);
+        CHECK(sgl::emit::dump_errors(e) == "");
+        CHECK(e.text.contains("struct light"));
+        CHECK(e.text.contains("struct light_1"));
     }
 }

@@ -10,6 +10,8 @@ It is the "inline" path because the copy is inlined into the caller's command st
 The trade-off is capacity: the ring bounds how many bytes an epoch may upload inline before it must wait for space.
 It is the right tool for per-frame, small-to-medium, must-be-visible-now writes — constants, instance data, dynamic geometry.
 For bulk asset streaming see [async upload](upload.async.md).
+A buffer that only needs its initial contents is created filled instead, by `create_buffer_from_data` and its siblings.
+On `ctx.transient` they take the command list and record through this path, because a transient resource can never be the target of an async upload.
 
 ## Why a ring buffer, keyed to epochs
 

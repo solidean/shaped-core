@@ -92,3 +92,5 @@ dlss_rr                      [planned]  needs sg's declared native scope
 fsr_rr                       [planned]  the same seams as dlss_rr
 nrd                          [planned]  waits for a tracer that splits diffuse from specular
 ```
+
+`shaped-rendering/denoise-playground` is the example: a small path tracer, every knob live, and a split between the raw image and the denoised one.

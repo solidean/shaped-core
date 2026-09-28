@@ -165,8 +165,8 @@ INVOCABLE_TEST("ssc::dxc + dx12 - ctx.cached dedups raster pipelines and keys ev
     differs("the depth comparison", [](auto& d) { d.depth_stencil.depth_compare = sg::compare_op::greater; });
     differs("the stencil test", [](auto& d) { d.depth_stencil.stencil_test = true; });
     differs("a stencil mask", [](auto& d) { d.depth_stencil.stencil_read_mask = 0x0F; });
-    differs("a front stencil op", [](auto& d) { d.depth_stencil.front.pass = sg::stencil_op::replace; });
-    differs("a back stencil op", [](auto& d) { d.depth_stencil.back.pass = sg::stencil_op::replace; });
+    differs("a front stencil op", [](auto& d) { d.depth_stencil.stencil_front.pass = sg::stencil_op::replace; });
+    differs("a back stencil op", [](auto& d) { d.depth_stencil.stencil_back.pass = sg::stencil_op::replace; });
     differs("the depth-stencil format", [](auto& d) { d.depth_stencil_format = sg::pixel_format::depth32_float; });
     differs("the sample count", [](auto& d) { d.sample_count = 4; });
     differs("a vertex attribute offset", [](auto& d) { d.vertex_input.attributes[0].offset = 4; });

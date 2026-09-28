@@ -3,6 +3,7 @@
 #include <clean-core/container/map.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/error/optional.hh>
 #include <clean-core/error/result.hh>
 #include <clean-core/string/string.hh>
 #include <shaped-graphics/binding/binding.hh>
@@ -34,6 +35,11 @@
 /// A binding nobody wires reads zero at runtime and looks like a shader bug, so the demand is that you say what it holds — not that it holds anything.
 /// An array element is allowed to stay vacant, and clearing an array counts: `unset_array` and even an empty range say "deliberately empty".
 /// The exception is a static sampler, which lives in the root signature and has no descriptor here to set.
+///
+/// **A view the device lacks the feature for is refused at the snapshot, not at the set**, as create_binding_group refuses it at creation.
+/// The refused view is never written, and the snapshot fails until the binding is replaced whole — `set_binding` or `set_array`.
+/// Replacing one element of an array does not lift it, since the group cannot tell which element was the refused one.
+/// See libs/graphics/shaped-graphics/docs/concepts/bindings.md, "Features".
 ///
 /// Snapshots are independent of the builder and of each other: mutating after a snapshot only dirties the cache,
 /// and each snapshot stays valid — with its resources kept alive — for as long as anyone holds its handle.
@@ -126,7 +132,7 @@ public:
 
     /// The current state as an immutable binding_group.
     /// Returns the previous snapshot unchanged while nothing has been set since — so an unchanged frame costs nothing and rebinds nothing.
-    /// Throws sg::binding_group_exception when the group cannot be minted (descriptor-heap exhaustion).
+    /// Throws sg::binding_group_exception when the group cannot be minted: descriptor-heap exhaustion, or a view the device lacks the feature for.
     [[nodiscard]] binding_group_handle snapshot();
 
     [[nodiscard]] cc::result<binding_group_handle> try_snapshot();
@@ -167,6 +173,9 @@ private:
 
         int first_descriptor = -1; // in the view heap, or the sampler heap for a sampler binding; -1 = no descriptor
         bool touched = false;      // set at least once — what snapshot() demands of every settable binding
+
+        // Why a view set here was refused; only replacing the whole binding lifts it.
+        cc::optional<cc::string> refusal;
     };
 
     [[nodiscard]] binding_slot checked_slot_of(cc::string_view name) const;
@@ -193,4 +202,8 @@ private:
 
     binding_group_handle _snapshot;
     bool _dirty = true;
+
+    // The device's feature::float32_filtering, stamped by the persistent scope right after the backend creates the group.
+    friend class sg::context_persistent_scope;
+    bool _float32_filtering = true;
 };

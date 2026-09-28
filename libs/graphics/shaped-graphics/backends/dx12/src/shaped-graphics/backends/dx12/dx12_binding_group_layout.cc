@@ -64,11 +64,10 @@ cc::result<dx12_binding_group_layout_handle> dx12_binding_group_layout::create(
         {
             if (auto const* sd = find_static(b.name); sd != nullptr)
             {
-                // A static sampler is baked into the root signature from here, before any slot is known.
-                CC_ASSERT(b.space.has_value(), "a static sampler needs an explicit register space on dx12");
+                // Baked into the root signature, with `space_of_slot` resolved there like a range's.
                 for (int i = 0; i < int(b.count); ++i)
-                    layout->static_sampler_descs.push_back(to_d3d12_static_sampler_desc(
-                        *sd, UINT(b.index) + UINT(i), b.space.value(), D3D12_SHADER_VISIBILITY_ALL));
+                    layout->static_sampler_descs.push_back(
+                        to_d3d12_static_sampler_desc(*sd, UINT(b.index) + UINT(i), space, D3D12_SHADER_VISIBILITY_ALL));
                 ++matched_static;
 
                 // In neither table: it lives in the root signature, so a slot naming it has nothing to bind.

@@ -343,8 +343,8 @@ cc::result<std::unique_ptr<raster_pipeline_build>> prepare_raster_pipeline(webgp
         s.format = to_wgpu_format(desc.depth_stencil_format);
         s.depthWriteEnabled = ds.depth_test && ds.depth_write ? WGPUOptionalBool_True : WGPUOptionalBool_False;
         s.depthCompare = ds.depth_test ? to_wgpu_compare(ds.depth_compare) : WGPUCompareFunction_Always;
-        s.stencilFront = to_wgpu_stencil_face(ds.front, ds.stencil_test);
-        s.stencilBack = to_wgpu_stencil_face(ds.back, ds.stencil_test);
+        s.stencilFront = to_wgpu_stencil_face(ds.stencil_front, ds.stencil_test);
+        s.stencilBack = to_wgpu_stencil_face(ds.stencil_back, ds.stencil_test);
         s.stencilReadMask = ds.stencil_test ? ds.stencil_read_mask : 0xFF;
         s.stencilWriteMask = ds.stencil_test ? ds.stencil_write_mask : 0;
         s.depthBias = i32(desc.rasterization.depth_bias);

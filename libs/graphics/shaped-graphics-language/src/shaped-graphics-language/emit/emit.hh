@@ -9,8 +9,8 @@
 /// The text a graphics API compiles, written from one flat entry point of a checked module.
 ///
 /// A target is a text format together with the addressing rules of the backend that reads it.
-/// So the two HLSL targets are two outputs: they differ in how a location and the inline constants are addressed.
-/// WGSL and MSL carry their final addresses; HLSL names each resource's group and leaves its register to slib's binding pass.
+/// So the two HLSL targets are two outputs: they differ in how a location, a group resource and the inline constants are addressed.
+/// Every target carries its final addresses, so no later pass numbers what the text declares.
 enum class sgl::emit::target : sgl::u8
 {
     hlsl_dx12,
@@ -41,6 +41,8 @@ enum class sgl::emit::error_kind : sgl::u8
     /// A flat tree in the structured form, which `check::legalize` has to take to the core form first.
     /// The detail is the first violation `check::find_core_violation` names.
     not_core,
+    /// An entry point listing more groups than sg binds, which is three besides the inline constants.
+    too_many_groups,
 };
 
 struct sgl::emit::error
@@ -59,7 +61,7 @@ struct sgl::emit::bound_name
 {
     /// As the text spells it, which is what the target's compiler reflects.
     cc::string emitted;
-    /// `binding.member` for a buffer, the binding's own name for a block of constants.
+    /// `binding.member` for a resource, the binding's own name for a block of constants.
     cc::string host;
 
     bool operator==(bound_name const&) const = default;
@@ -73,7 +75,8 @@ struct sgl::emit::emitted_text
     /// The name the text actually declares the entry point under, which is the source's unless this target reserves it.
     /// A caller compiling the text has to ask for THIS name, not the one it requested.
     cc::string entry_point;
-    /// Every buffer and block of constants the text declares, so a caller can rename what the compiler reflects.
+    /// Every resource and block of constants the text declares, samplers included.
+    /// A caller renames what the compiler reflects by it.
     cc::vector<bound_name> bound_names;
     /// A pixel entry point's render targets: how many, and the `@pixel struct` it returns; -1 and empty otherwise.
     i32 color_targets = -1;

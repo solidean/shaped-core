@@ -355,8 +355,8 @@ cc::hash128 pipeline_cache::compute_raster_pipeline_key(raster_pipeline_descript
     b.add_bool(desc.depth_stencil.stencil_test);
     b.add_pod(desc.depth_stencil.stencil_read_mask);
     b.add_pod(desc.depth_stencil.stencil_write_mask);
-    add_stencil_face(desc.depth_stencil.front);
-    add_stencil_face(desc.depth_stencil.back);
+    add_stencil_face(desc.depth_stencil.stencil_front);
+    add_stencil_face(desc.depth_stencil.stencil_back);
 
     b.add_pod(u64(desc.color_targets.size()));
     for (auto const& t : desc.color_targets)

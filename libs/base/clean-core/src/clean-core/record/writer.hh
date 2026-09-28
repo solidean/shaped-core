@@ -104,6 +104,12 @@ CC_COLD_FUNC bool writer_rotate(isize needed);
 /// Accounts one event this thread could not write, for the next gap event to report.
 CC_COLD_FUNC void writer_account_drop(isize bytes, u64 cycles);
 
+/// The largest payload one event can carry: what a whole chunk holds, less the preamble every fresh chunk opens with
+/// and this event's own header.
+/// A payload past it cannot be written whole however the chunks fall, so it is truncated and flagged.
+/// Zero while the system is down.
+[[nodiscard]] isize max_event_payload();
+
 /// Writes the ambient delta a thread deferred when it left every context; see note_ambient_change.
 CC_COLD_FUNC void flush_ambient_reset();
 
@@ -193,14 +199,24 @@ CC_FORCE_INLINE void record_event(rec::desc const& d, PayloadT const& payload)
 }
 
 /// Reserves an event of up to `max_payload` bytes, to be filled and committed by the caller.
+///
+/// **`min_payload` is what the caller refuses to be cut below**, and a chunk whose tail is shorter is left behind for a
+/// fresh one.
+/// A floor of one byte takes whatever tail there is, which is right only for a payload that stays useful cut short —
+/// `rec::impl::emit_section`'s `key=value` stamp lines, and the stacktrace event that sizes its frame count to what fit.
+/// It is wrong for a payload a consumer reads as a whole, because that cut lands at an offset set by the log volume
+/// rather than by anything about the payload, and nothing downstream can tell.
+/// Asking for more than the tail costs the rest of that chunk, so a caller states what it needs rather than the most it
+/// might use.
+///
 /// Returns a closed writer when the site is disabled or the stream could not take the event.
-[[nodiscard]] rec::event_writer open_event(rec::desc const& d, isize max_payload);
+[[nodiscard]] rec::event_writer open_event(rec::desc const& d, isize max_payload, isize min_payload);
 } // namespace cc::rec
 
 /// A reserved but unpublished event whose payload the caller fills in place.
 ///
-/// This is what a formatted log message wants: reserve the remaining space, format straight into it, then publish only
-/// the bytes that were actually written — no temporary buffer and no copy.
+/// It is for a payload built where it will stay: reserve, write into `payload()`, then publish only the bytes that were
+/// actually written.
 /// An open writer that is never committed leaves the chunk untouched, which is what makes abandoning one safe.
 ///
 /// **Nothing else may record on this thread while a writer is open**, since both would claim the same cursor.
@@ -243,7 +259,7 @@ struct cc::rec::event_writer
     void commit(isize payload_size, u16 extra_flags = rec::impl::flag_none);
 
 private:
-    friend rec::event_writer rec::open_event(rec::desc const&, isize);
+    friend rec::event_writer rec::open_event(rec::desc const&, isize, isize);
 
     byte* _base = nullptr;
     isize _capacity = 0;

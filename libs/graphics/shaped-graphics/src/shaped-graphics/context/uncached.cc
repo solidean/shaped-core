@@ -5,6 +5,7 @@
 #include <clean-core/thread/async_coroutine.hh>
 #include <shaped-graphics/binding/binding.hh> // binding::count
 #include <shaped-graphics/binding/impl/binding_conflicts.hh>
+#include <shaped-graphics/binding/impl/portability.hh>
 #include <shaped-graphics/binding/layout_fit.hh>
 #include <shaped-graphics/binding/pipeline_layout.hh>
 #include <shaped-graphics/compute/compute_pipeline.hh> // compute_pipeline_description::shader
@@ -86,11 +87,22 @@ cc::string_view target_set_of(sg::raster_pipeline_description const& desc)
     return desc.fragment_shader.value().target_set;
 }
 
+/// The targets a pipeline built from `desc` must be bound with.
+sg::raster_target_formats target_formats_of(sg::raster_pipeline_description const& desc)
+{
+    auto formats
+        = sg::raster_target_formats{.depth_stencil = desc.depth_stencil_format, .sample_count = desc.sample_count};
+    for (auto const& target : desc.color_targets)
+        formats.color.push_back(target.format);
+    return formats;
+}
+
 cc::shared_async<sg::raster_pipeline_handle> named(cc::shared_async<sg::raster_pipeline_handle> built,
-                                                   cc::string target_set)
+                                                   cc::string target_set,
+                                                   sg::raster_target_formats formats)
 {
     auto pipeline = co_await built;
-    sg::impl::set_target_set(*pipeline, target_set);
+    sg::impl::set_targets(*pipeline, target_set, formats);
     co_return pipeline;
 }
 } // namespace
@@ -122,6 +134,10 @@ cc::result<binding_group_layout_handle> context_uncached_scope::try_create_bindi
             return cc::error(cc::format("binding_group_layout: '{}' is an unbounded array (count 0), which sg does "
                                         "not support — declare a bounded count and treat it as capacity",
                                         b.name));
+
+    if (auto unsupported = impl::find_unsupported_binding(_ctx.supports(feature::extended_storage_formats), bindings);
+        unsupported.has_value())
+        return cc::error(cc::move(unsupported.value()));
 
     return _ctx.try_create_binding_group_layout(bindings, static_samplers, lifetime_scope::persistent);
 }
@@ -176,7 +192,7 @@ cc::result<raster_pipeline_handle> context_uncached_scope::try_create_raster_pip
 
     auto r = _ctx.try_create_raster_pipeline(desc, lifetime_scope::persistent);
     if (r.has_value())
-        impl::set_target_set(*r.value(), target_set_of(desc));
+        impl::set_targets(*r.value(), target_set_of(desc), target_formats_of(desc));
     return r;
 }
 
@@ -198,10 +214,7 @@ cc::shared_async<raster_pipeline_handle> context_uncached_scope::create_raster_p
 
     // A backend may settle the build from a callback of its own, so the name is set once it has.
     auto built = _ctx.create_raster_pipeline_async(desc, lifetime_scope::persistent);
-    auto const target_set = target_set_of(desc);
-    if (target_set.empty())
-        return built;
-    return named(cc::move(built), cc::string(target_set));
+    return named(cc::move(built), cc::string(target_set_of(desc)), target_formats_of(desc));
 }
 
 raytracing_pipeline_handle context_uncached_scope::create_raytracing_pipeline(raytracing_pipeline_description const& desc)

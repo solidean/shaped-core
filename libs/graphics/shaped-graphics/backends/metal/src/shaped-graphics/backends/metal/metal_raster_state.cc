@@ -173,4 +173,48 @@ MTL::ColorWriteMask color_write_mask_of(sg::color_write_mask mask)
         out |= MTL::ColorWriteMaskAlpha;
     return out;
 }
+
+MTL::VertexFormat vertex_format_of(sg::vertex_attribute_format format)
+{
+    switch (format)
+    {
+    case sg::vertex_attribute_format::f32:
+        return MTL::VertexFormatFloat;
+    case sg::vertex_attribute_format::vec2f:
+        return MTL::VertexFormatFloat2;
+    case sg::vertex_attribute_format::vec3f:
+        return MTL::VertexFormatFloat3;
+    case sg::vertex_attribute_format::vec4f:
+        return MTL::VertexFormatFloat4;
+
+    case sg::vertex_attribute_format::i32:
+        return MTL::VertexFormatInt;
+    case sg::vertex_attribute_format::vec2i:
+        return MTL::VertexFormatInt2;
+    case sg::vertex_attribute_format::vec3i:
+        return MTL::VertexFormatInt3;
+    case sg::vertex_attribute_format::vec4i:
+        return MTL::VertexFormatInt4;
+
+    case sg::vertex_attribute_format::u32:
+        return MTL::VertexFormatUInt;
+    case sg::vertex_attribute_format::vec2u:
+        return MTL::VertexFormatUInt2;
+    case sg::vertex_attribute_format::vec3u:
+        return MTL::VertexFormatUInt3;
+    case sg::vertex_attribute_format::vec4u:
+        return MTL::VertexFormatUInt4;
+
+    case sg::vertex_attribute_format::rgba8_unorm:
+        return MTL::VertexFormatUChar4Normalized;
+    case sg::vertex_attribute_format::rgba8_uint:
+        return MTL::VertexFormatUChar4;
+    }
+    return MTL::VertexFormatInvalid;
+}
+
+MTL::IndexType index_type_of(sg::index_format format)
+{
+    return format == sg::index_format::uint32 ? MTL::IndexTypeUInt32 : MTL::IndexTypeUInt16;
+}
 } // namespace sg::backend::metal

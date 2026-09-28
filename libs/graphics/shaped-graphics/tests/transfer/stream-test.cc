@@ -709,6 +709,16 @@ ASYNC_INVOCABLE_TEST("sg stream - a compressed texture with a partial last block
     desc.width = 16;
     desc.height = 10;
     desc.usage = sg::texture_usage::copy_src | sg::texture_usage::copy_dst;
+
+    // WebGPU core has no such texture at all, so there sg refuses it by name rather than handing Dawn one to reject.
+    // A loader asks the description first; creating one anyway throws.
+    if (!c.supports(sg::feature::unaligned_block_compression))
+    {
+        CHECK(desc.unaligned_block_error(false).contains("unaligned_block_compression"));
+        CHECK_THROWS(c.persistent.create_raw_texture(desc));
+        co_return;
+    }
+
     auto tex = c.persistent.create_raw_texture(desc);
     REQUIRE(tex != nullptr);
 

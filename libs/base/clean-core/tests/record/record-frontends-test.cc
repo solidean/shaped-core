@@ -23,6 +23,31 @@ enum class widget_kind : u8
     round = 3,
     square = 7,
 };
+
+/// Logs while it is being formatted, so an outer message's format runs a nested `log_write`.
+struct logs_while_formatted
+{
+    cc::string_view to_string() const
+    {
+        CC_LOG_INFO("inner {}", 42);
+        return "VALUE";
+    }
+};
+
+/// Logs from a helper rather than from the formatter itself, and that message's own argument logs too.
+void log_from_helper()
+{
+    CC_LOG_INFO("middle-head {} middle-tail", logs_while_formatted{});
+}
+
+struct logs_through_a_helper
+{
+    cc::string_view to_string() const
+    {
+        log_from_helper();
+        return "OUTER-VALUE";
+    }
+};
 } // namespace
 
 //
@@ -49,7 +74,7 @@ REC_TEST("record/log - a message with no arguments costs the stream no payload a
     CHECK(e.value().text.empty());
 }
 
-REC_TEST("record/log - a formatted message is written straight into the chunk")
+REC_TEST("record/log - a formatted message records its formatted text")
 {
     rec_fixture const fixture(deterministic_config());
 
@@ -64,6 +89,50 @@ REC_TEST("record/log - a formatted message is written straight into the chunk")
     auto const e = c.first_named("uploaded {} bytes to {}");
     REQUIRE(e.has_value());
     CHECK(e.value().text == "uploaded 4096 bytes to gpu");
+}
+
+REC_TEST("record/log - a message logged from inside a formatter leaves the outer message whole")
+{
+    rec_fixture const fixture(deterministic_config());
+
+    collector c;
+    {
+        scoped_listener const reg(c);
+        CC_LOG_INFO("outer-head {} outer-tail", logs_while_formatted{});
+        cc::rec::flush_blocking();
+    }
+
+    auto const inner = c.first_named("inner {}");
+    REQUIRE(inner.has_value());
+    CHECK(inner.value().text == "inner 42");
+
+    auto const outer = c.first_named("outer-head {} outer-tail");
+    REQUIRE(outer.has_value());
+    CHECK(outer.value().text == "outer-head VALUE outer-tail");
+}
+
+REC_TEST("record/log - messages nested two deep through a helper each keep their own text")
+{
+    rec_fixture const fixture(deterministic_config());
+
+    collector c;
+    {
+        scoped_listener const reg(c);
+        CC_LOG_INFO("outer-head {} outer-tail", logs_through_a_helper{});
+        cc::rec::flush_blocking();
+    }
+
+    auto const inner = c.first_named("inner {}");
+    REQUIRE(inner.has_value());
+    CHECK(inner.value().text == "inner 42");
+
+    auto const middle = c.first_named("middle-head {} middle-tail");
+    REQUIRE(middle.has_value());
+    CHECK(middle.value().text == "middle-head VALUE middle-tail");
+
+    auto const outer = c.first_named("outer-head {} outer-tail");
+    REQUIRE(outer.has_value());
+    CHECK(outer.value().text == "outer-head OUTER-VALUE outer-tail");
 }
 
 REC_TEST("record/log - levels gate independently, and the gate is the domain's")

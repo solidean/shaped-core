@@ -9,6 +9,7 @@
 #include <shaped-graphics/raster/blend_state.hh>
 #include <shaped-graphics/raster/depth_stencil_state.hh>
 #include <shaped-graphics/raster/primitive_topology.hh>
+#include <shaped-graphics/raster/raster_target_formats.hh>
 #include <shaped-graphics/raster/rasterization_state.hh>
 #include <shaped-graphics/raster/vertex_input.hh>
 #include <shaped-graphics/resource/pixel_format.hh>
@@ -110,6 +111,10 @@ public:
     /// The description's `target_set`: the name of the targets this pipeline writes, or empty.
     [[nodiscard]] cc::string_view target_set() const { return _target_set; }
 
+    /// The target formats and sample count this pipeline was built for, which binding it checks a rendering against.
+    /// Empty only for a pipeline a backend built outside the context's creation paths.
+    [[nodiscard]] cc::optional<raster_target_formats> const& target_formats() const { return _target_formats; }
+
 protected:
     raster_pipeline() = default;
 
@@ -117,7 +122,10 @@ protected:
     bool _used_cached_pipeline = false;
 
 private:
-    friend void impl::set_target_set(raster_pipeline const& pipeline, cc::string_view target_set);
+    friend void impl::set_targets(raster_pipeline const& pipeline,
+                                  cc::string_view target_set,
+                                  raster_target_formats const& formats);
 
     cc::string _target_set;
+    cc::optional<raster_target_formats> _target_formats;
 };

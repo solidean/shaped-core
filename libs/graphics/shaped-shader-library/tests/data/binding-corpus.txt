@@ -13,7 +13,7 @@
 #   --- hlsl            the snippet, verbatim, its first line being line 1 of every error message below
 #   --- groups          the expected parse, or nothing at all when the snippet declares no group
 #   <namespace> group=<n>
-#     <name> index=<i> type=<sg::binding_type> count=<n> [dim=<sg::texture_view_dimension>]
+#     <name> index=<i> type=<sg::binding_type> count=<n> [dim=<sg::texture_view_dimension>] [format=<sg::pixel_format>]
 #     static <name> [<sg::sampler field>=<value>]...   every field that differs from sg::sampler's default,
 #                                                      in the order sg::sampler declares them
 #   inline_constants <name> space=<n> type=<T> size=<bytes>   the space is always the reserved one,
@@ -1293,3 +1293,111 @@ vertex_input vs_input slot=0
   position float3 POSITION0 @0
 vertex_input instance_input slot=1 per_instance
   center float3 TEXCOORD0 @0
+
+
+--- case a format attribute names a storage texture's format by sg's own name
+--- hlsl
+#pragma sc group 0
+namespace post
+{
+#pragma sc format rgba8_unorm
+    RWTexture2D<float4> dst;
+    RWTexture2D<float> acc;
+}
+--- groups
+post group=0
+  dst index=0 type=readwrite_texture count=1 dim=tex_2d format=rgba8_unorm
+  acc index=1 type=readwrite_texture count=1 dim=tex_2d
+
+
+--- case a format attribute describes a storage texture and nothing else
+--- hlsl
+#pragma sc group 0
+namespace post
+{
+#pragma sc format rgba8_unorm
+    Texture2D<float4> src;
+}
+--- error
+line 4: 'format' describes a storage texture, and 'src' is not one
+
+
+--- case a format attribute takes a format a storage texture can have
+--- hlsl
+#pragma sc group 0
+namespace post
+{
+#pragma sc format rgba7_unorm
+    RWTexture2D<float4> dst;
+}
+--- error
+line 4: 'rgba7_unorm' is no format a storage texture can have
+
+
+--- case a format attribute with nothing after it names no texture
+--- hlsl
+#pragma sc group 0
+namespace post
+{
+    RWTexture2D<float4> dst;
+#pragma sc format rgba8_unorm
+}
+--- error
+line 5: a 'format' attribute must stand before a storage texture in a group
+
+
+--- case a format attribute names one format, not two
+--- hlsl
+#pragma sc group 0
+namespace post
+{
+#pragma sc format rgba8_unorm r8_unorm
+    RWTexture2D<float4> dst;
+}
+--- error
+line 4: 'format' takes one storage format, as sg::pixel_format names it: `#pragma sc format rgba8_unorm`
+
+
+--- case a format attribute names its format bare, never as a key
+--- hlsl
+#pragma sc group 0
+namespace post
+{
+#pragma sc format format=rgba8_unorm
+    RWTexture2D<float4> dst;
+}
+--- error
+line 4: 'format' takes one storage format, as sg::pixel_format names it: `#pragma sc format rgba8_unorm`
+
+
+--- case a format attribute naming no format is an error
+--- hlsl
+#pragma sc group 0
+namespace post
+{
+#pragma sc format
+    RWTexture2D<float4> dst;
+}
+--- error
+line 4: 'format' takes one storage format, as sg::pixel_format names it: `#pragma sc format rgba8_unorm`
+
+
+--- case a format at file scope is an error, even standing before a storage texture
+--- hlsl
+#pragma sc format rgba8_unorm
+RWTexture2D<float4> dst;
+--- error
+line 1: a 'format' attribute must stand before a storage texture in a group
+
+
+--- case a format and a static before one declaration is an error, since each describes a different kind
+--- hlsl
+#pragma sc group 0
+namespace post
+{
+#pragma sc format rgba8_unorm
+#pragma sc static address=clamp_edge
+    SamplerState samp;
+}
+--- error
+line 5: two attributes stand before one declaration

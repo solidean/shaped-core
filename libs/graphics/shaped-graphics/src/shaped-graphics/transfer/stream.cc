@@ -4,6 +4,7 @@
 #include <shaped-graphics/resource/impl/texture_copy_region.hh>
 #include <shaped-graphics/resource/raw_buffer.hh>
 #include <shaped-graphics/resource/raw_texture.hh>
+#include <shaped-graphics/transfer/impl/async_target.hh>
 #include <shaped-graphics/transfer/stream.hh>
 
 namespace sg
@@ -52,6 +53,7 @@ stream_upload_handle context_stream_scope::bytes_to_buffer(raw_buffer_handle buf
                                                            stream_scope scope)
 {
     CC_ASSERT(buffer != nullptr, "stream upload target buffer is null");
+    impl::assert_async_transfer_target(*buffer);
     CC_ASSERT(offset_in_bytes >= 0 && offset_in_bytes + data.size() <= buffer->size_in_bytes(),
               "stream upload range is out of the buffer's bounds");
     assert_buffer_scope(buffer, scope);
@@ -73,6 +75,7 @@ stream_upload_handle context_stream_scope::bytes_to_texture(raw_texture_handle t
                                                             stream_scope scope)
 {
     CC_ASSERT(texture != nullptr, "stream upload target texture is null");
+    impl::assert_async_transfer_target(*texture);
     impl::assert_valid_subresource(texture, subresource);
     texture_region const box = region.has_value() ? region.value() : impl::full_subresource_region(texture, subresource);
     impl::assert_texture_region_in_bounds(texture, subresource, box);
@@ -89,6 +92,7 @@ stream_upload_handle context_stream_scope::from_source_to_buffer(raw_buffer_hand
                                                                  stream_scope scope)
 {
     CC_ASSERT(buffer != nullptr, "stream upload target buffer is null");
+    impl::assert_async_transfer_target(*buffer);
     CC_ASSERT(source != nullptr, "stream upload source is null");
     CC_ASSERT(offset_in_bytes >= 0 && offset_in_bytes <= buffer->size_in_bytes(), "stream upload offset is out of the "
                                                                                   "buffer's bounds");
@@ -103,6 +107,7 @@ stream_upload_handle context_stream_scope::from_source_to_texture(raw_texture_ha
                                                                   stream_scope scope)
 {
     CC_ASSERT(texture != nullptr, "stream upload target texture is null");
+    impl::assert_async_transfer_target(*texture);
     CC_ASSERT(source != nullptr, "stream upload source is null");
     impl::assert_valid_subresource(texture, subresource);
     texture_region const box = region.has_value() ? region.value() : impl::full_subresource_region(texture, subresource);
@@ -120,6 +125,7 @@ stream_download_handle context_stream_scope::bytes_from_buffer(raw_buffer_handle
                                                                stream_scope scope)
 {
     CC_ASSERT(buffer != nullptr, "stream download source buffer is null");
+    impl::assert_async_transfer_target(*buffer);
     CC_ASSERT(size_in_bytes >= 0, "stream download size must be non-negative");
     CC_ASSERT(offset_in_bytes >= 0 && offset_in_bytes + size_in_bytes <= buffer->size_in_bytes(),
               "stream download range is out of the buffer's bounds");
@@ -140,6 +146,7 @@ stream_download_handle context_stream_scope::bytes_from_texture(raw_texture_hand
                                                                 stream_scope scope)
 {
     CC_ASSERT(texture != nullptr, "stream download source texture is null");
+    impl::assert_async_transfer_target(*texture);
     impl::assert_valid_subresource(texture, subresource);
     texture_region const box = region.has_value() ? region.value() : impl::full_subresource_region(texture, subresource);
     impl::assert_texture_region_in_bounds(texture, subresource, box);
@@ -158,6 +165,7 @@ stream_download_handle context_stream_scope::to_sink_from_buffer(raw_buffer_hand
                                                                  stream_scope scope)
 {
     CC_ASSERT(buffer != nullptr, "stream download source buffer is null");
+    impl::assert_async_transfer_target(*buffer);
     CC_ASSERT(sink, "stream download sink is empty");
     CC_ASSERT(size_in_bytes >= 0, "stream download size must be non-negative");
     CC_ASSERT(offset_in_bytes >= 0 && offset_in_bytes + size_in_bytes <= buffer->size_in_bytes(),
@@ -176,6 +184,7 @@ stream_download_handle context_stream_scope::to_sink_from_texture(raw_texture_ha
                                                                   stream_scope scope)
 {
     CC_ASSERT(texture != nullptr, "stream download source texture is null");
+    impl::assert_async_transfer_target(*texture);
     CC_ASSERT(sink, "stream download sink is empty");
     impl::assert_valid_subresource(texture, subresource);
     texture_region const box = region.has_value() ? region.value() : impl::full_subresource_region(texture, subresource);

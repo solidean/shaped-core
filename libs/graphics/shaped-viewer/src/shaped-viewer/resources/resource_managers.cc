@@ -435,7 +435,10 @@ texture_id texture_manager::acquire(texture_data const& texture)
     // is fixed at creation — so the choice is made here rather than where the generation is recorded.
     // An sRGB format carries no typed UAV and a compressed one is neither writable nor renderable, which leaves the
     // compressed case with no path at all; it allocates only the levels its file supplied.
-    auto const compute_mips = sg::supports_typed_uav(texture.format);
+    // A storage format outside the portable set is writable only where the device grants extended storage formats.
+    auto const compute_mips
+        = sg::supports_typed_uav(texture.format)
+       && (sg::is_portable_storage_format(texture.format) || _ctx.supports(sg::feature::extended_storage_formats));
     auto const raster_mips = !compute_mips && sg::is_render_target_format(texture.format);
 
     // The full chain is allocated up front even when only the base level is supplied, so generating the rest

@@ -2,11 +2,14 @@
 #include <shaped-graphics/context/context.hh>
 #include <shaped-graphics/context/upload.hh>
 #include <shaped-graphics/resource/impl/texture_copy_region.hh>
+#include <shaped-graphics/transfer/impl/async_target.hh>
 
 namespace sg
 {
 void context_upload_scope::bytes_to_buffer(raw_buffer_handle buffer, cc::pinned_data<byte const> data, isize offset_in_bytes)
 {
+    CC_ASSERT(buffer != nullptr, "async upload target buffer is null");
+    impl::assert_async_transfer_target(*buffer);
     _ctx.async_upload_bytes_to_buffer(cc::move(buffer), cc::move(data), offset_in_bytes);
 }
 
@@ -16,6 +19,8 @@ void context_upload_scope::bytes_to_texture(raw_texture_handle texture,
                                             cc::optional<texture_region> region)
 {
     // No region copies the whole subresource; a given region is used as-is, bounds-checked, and an empty one is a no-op.
+    CC_ASSERT(texture != nullptr, "async upload target texture is null");
+    impl::assert_async_transfer_target(*texture);
     impl::assert_valid_subresource(texture, subresource);
     texture_region const box = region.has_value() ? region.value() : impl::full_subresource_region(texture, subresource);
     impl::assert_texture_region_in_bounds(texture, subresource, box);

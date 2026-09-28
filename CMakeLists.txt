@@ -37,8 +37,8 @@ option(SC_BUILD_EXAMPLES "Build the *-example executables" ${PROJECT_IS_TOP_LEVE
 # Every graphical example resolves it through sc_resolve_example_backend: a named backend that was not built is a
 # configure error, one an example does not support gives a stub target under that example's name, and `auto` takes
 # the example's own first choice. See docs/platforms.md.
-set(SC_EXAMPLE_BACKEND "auto" CACHE STRING "Backend the graphics examples build against: auto, dx12, vulkan or webgpu")
-set_property(CACHE SC_EXAMPLE_BACKEND PROPERTY STRINGS auto dx12 vulkan webgpu)
+set(SC_EXAMPLE_BACKEND "auto" CACHE STRING "Backend the graphics examples build against: auto, dx12, vulkan, webgpu or metal")
+set_property(CACHE SC_EXAMPLE_BACKEND PROPERTY STRINGS auto dx12 vulkan webgpu metal)
 
 # Threading mode for the whole project. OFF reaches the compiler as CC_SINGLE_THREADED, which forces
 # clean-core's CC_HAS_THREADS to 0 (see src/clean-core/common/macros.hh); the *-singlethreaded presets set

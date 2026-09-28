@@ -38,6 +38,12 @@ cc::string_view type_name_at(parsed_file const& file, ast::file_ast const& ast, 
     auto const* const n = ast.at(type).node.try_as<ast::name>();
     return n != nullptr ? file.text_of(n->where) : cc::string_view();
 }
+
+/// The whole text of a type position, which is how a resource pattern is keyed.
+cc::string_view type_text_at(parsed_file const& file, ast::file_ast const& ast, ast::expr_id type)
+{
+    return ast::is_valid(type) ? file.text_of(file.at(ast.at(type).form).where) : cc::string_view();
+}
 } // namespace
 
 cc::string_view type_record::spelled_in(language l) const
@@ -154,12 +160,13 @@ void registry::finalize()
         record.parameters.clear();
         for (auto const& p : ast.at(f->parameters))
         {
-            auto const type = find_type(type_name_at(file, ast, p.type));
-            CC_ASSERT(is_valid(type), "a builtin signature that names a type nobody registered");
-            record.parameters.push_back(type);
+            auto const text = type_text_at(file, ast, p.type);
+            CC_ASSERT(!text.empty(), "a builtin signature with a parameter that has no type");
+            record.parameters.push_back(cc::string(text));
         }
         record.result = find_type(type_name_at(file, ast, f->return_type));
-        CC_ASSERT(is_valid(record.result), "a builtin signature whose result is no registered type");
+        CC_ASSERT(is_valid(record.result) || !ast::is_valid(f->return_type), "a builtin signature whose result is no "
+                                                                             "registered type");
         CC_ASSERT(record.evaluate != nullptr, "a builtin function without an evaluator");
         CC_ASSERT(record.write.kind != spelling_kind::custom || record.write.custom != nullptr, "a custom spelling "
                                                                                                 "without a writer");
@@ -174,7 +181,7 @@ builtin_type_id registry::find_type(cc::string_view name) const
     return builtin_type_id::none;
 }
 
-builtin_id registry::find_function(cc::string_view name, cc::span<builtin_type_id const> parameters) const
+builtin_id registry::find_function(cc::string_view name, cc::span<cc::string_view const> parameters) const
 {
     for (auto i = isize(0); i < functions.size(); ++i)
     {

@@ -28,16 +28,11 @@ bool raytracing_supported(sg::context_handle const& ctx)
     return supported;
 }
 
-// A build-input vertex buffer with one triangle (3 float3 positions), uploaded and submitted.
+// A build-input vertex buffer with one triangle (3 float3 positions), filled through ctx.upload.
 sg::raw_buffer_handle make_triangle_vertices(sg::context_handle const& ctx)
 {
     float const verts[9] = {0, 0, 0, 1, 0, 0, 0, 1, 0};
-    auto const buf = ctx->persistent.create_raw_buffer(
-        sizeof(verts), sg::buffer_usage::accel_structure_build_input | sg::buffer_usage::copy_dst);
-    auto cmd = ctx->create_command_list();
-    cmd->upload.data_to_buffer(buf, cc::span<float const>(verts, 9));
-    ctx->submit_command_list(cc::move(cmd));
-    return buf;
+    return ctx->persistent.create_buffer_from_data(verts, sg::buffer_usage::accel_structure_build_input).raw();
 }
 } // namespace
 
@@ -81,7 +76,7 @@ ASYNC_INVOCABLE_TEST("sg - builds a triangle blas and a tlas", (sg::context_hand
     CHECK(!tlas->is_expired());
 }
 
-INVOCABLE_TEST("sg - builds a procedural (aabb) blas", (sg::context_handle const& ctx))
+ASYNC_INVOCABLE_TEST("sg - builds a procedural (aabb) blas", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
     if (!raytracing_supported(ctx))
@@ -89,13 +84,7 @@ INVOCABLE_TEST("sg - builds a procedural (aabb) blas", (sg::context_handle const
 
     // One AABB: 6 floats (min.xyz, max.xyz).
     float const aabb[6] = {0, 0, 0, 1, 1, 1};
-    auto const buf = ctx->persistent.create_raw_buffer(
-        sizeof(aabb), sg::buffer_usage::accel_structure_build_input | sg::buffer_usage::copy_dst);
-    {
-        auto up = ctx->create_command_list();
-        up->upload.data_to_buffer(buf, cc::span<float const>(aabb, 6));
-        ctx->submit_command_list(cc::move(up));
-    }
+    auto const buf = ctx->persistent.create_buffer_from_data(aabb, sg::buffer_usage::accel_structure_build_input).raw();
 
     sg::blas_aabbs g;
     g.aabbs = buf;
@@ -108,9 +97,12 @@ INVOCABLE_TEST("sg - builds a procedural (aabb) blas", (sg::context_handle const
 
     CHECK(blas->size_in_bytes() > 0);
     CHECK(!blas->is_expired());
+
+    // The build input was filled through ctx.upload, whose copy must not outlive the test.
+    co_await ctx->idle_completion();
 }
 
-INVOCABLE_TEST("sg - acceleration-structure builds validate their inputs", (sg::context_handle const& ctx))
+ASYNC_INVOCABLE_TEST("sg - acceleration-structure builds validate their inputs", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
     if (!raytracing_supported(ctx))
@@ -139,4 +131,7 @@ INVOCABLE_TEST("sg - acceleration-structure builds validate their inputs", (sg::
         CHECK_ASSERTS(cmd->raytracing.build_tlas(cc::span<sg::tlas_instance const>(&inst, 1)));
         ctx->drop_command_list(cc::move(cmd));
     }
+
+    // The build input was filled through ctx.upload, whose copy must not outlive the test.
+    co_await ctx->idle_completion();
 }

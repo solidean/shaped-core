@@ -98,12 +98,14 @@ if(SC_BUILD_TESTS)
         tests/metal-compute-test.cc
         tests/metal-present-test.cc
         tests/metal-query-test.cc
+        tests/metal-raster-barrier-test.cc
         tests/metal-raster-test.cc
         tests/metal-raytracing-test.cc
         tests/metal-test.cc
         tests/metal-texture-test.cc
         tests/metal-transfer-test.cc
         tests/metal-validation-test.cc
+        tests/metal-vertex-input-test.cc
     )
     sc_nexus_binary(shaped-graphics-metal-test KINDS tests)
 

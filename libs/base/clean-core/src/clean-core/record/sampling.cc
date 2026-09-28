@@ -303,7 +303,7 @@ void write_sample(sample const& s, cc::span<void* const> frames)
     auto const count = s.capture.count;
     auto const payload_bytes = cc::rec::impl::sample_frames_offset + count * isize(sizeof(u64));
 
-    auto writer = cc::rec::open_event(d, payload_bytes);
+    auto writer = cc::rec::open_event(d, payload_bytes, payload_bytes);
     if (!writer.is_open())
         return;
 

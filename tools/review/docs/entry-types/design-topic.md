@@ -10,7 +10,7 @@ What it has instead is a set of choices, and the entry's whole job is to make on
 ## The groups a design review has
 
 `framing`, `topics`, `open-questions`, `tooling`, `finalize` — not the changeset groups.
-`framing` is context-exempt like `meta`; everything in `topics` and `open-questions` owes all three tiers.
+`framing` orients the review the way `meta` does, so like `meta` it owes no `intro`; every round in `topics` and `open-questions` that asks something does.
 
 - **`framing`**, at `010`: what problem this is, and what would count as solved.
   It stands in for both `orientation` and `verdict`, which are changeset types.
@@ -68,5 +68,4 @@ Where the answer is genuinely cheap to change later, say that too, and expect a 
 
 - **An implementation plan.** The review settles what to build; how to sequence it is the plan's job.
 - **Anything the answer cannot change.** A topic whose options all lead to the same code is a note, not a question.
-- **A summary of the other entries.** The tiers already carry what a reader needs; a topic that restates the framing
-  teaches the reader that the collapsed sections are noise.
+- **A summary of the other entries.** Each entry already introduces what it leans on, and a topic that restates the framing teaches the reader to skim.

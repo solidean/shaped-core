@@ -1,5 +1,6 @@
 #include "record-test-types.hh"
 
+#include <clean-core/common/log.hh>
 #include <clean-core/common/profiling.hh>
 #include <clean-core/container/pinned_data.hh>
 #include <clean-core/container/vector.hh>
@@ -210,7 +211,7 @@ REC_TEST("record - an open writer publishes only what was written, and flags tru
                            cc::rec::desc::variable_payload);
 
         {
-            auto writer = cc::rec::open_event(text_desc, 16);
+            auto writer = cc::rec::open_event(text_desc, 16, 1);
             REQUIRE(writer.is_open());
             auto const out = writer.payload();
             REQUIRE(out.size() >= 5);
@@ -223,6 +224,209 @@ REC_TEST("record - an open writer publishes only what was written, and flags tru
     }
 
     CHECK(c.count_named("open-writer") == 1);
+}
+
+REC_TEST("record - open_event takes a fresh chunk rather than cut a caller below min_payload")
+{
+    auto cfg = deterministic_config();
+    cfg.chunk_bytes = 8 * 1024;
+    rec_fixture const fixture(cfg);
+
+    collector c;
+    {
+        scoped_listener const reg(c);
+
+        CC_REC_DEFINE_DESC(probe_desc, cc::rec::event_kind::log, cc::rec::level::info,
+                           cc::rec::enable_bit_of(cc::rec::level::info), "min-payload", nullptr, nullptr, 0,
+                           cc::rec::desc::variable_payload);
+
+        // Walk the cursor to a known offset, so the tail below is a fact rather than an accident of what ran before.
+        // Committing `available - 536` leaves room for a 512-byte payload and its header, since a commit advances the
+        // cursor by the header plus the payload rounded up to the eight-byte grid.
+        constexpr isize wanted_tail = 512;
+        {
+            auto probe = cc::rec::open_event(probe_desc, 1 << 20, 1);
+            REQUIRE(probe.is_open());
+            auto const available = probe.payload().size();
+            REQUIRE(available > wanted_tail + 64);
+            probe.commit(available - wanted_tail - 24);
+        }
+
+        // A floor of one byte takes whatever tail is there.
+        // Abandoning the writer leaves the chunk untouched, so the tail is still there for the next one.
+        {
+            auto const tail = cc::rec::open_event(probe_desc, 4096, 1);
+            REQUIRE(tail.is_open());
+            CHECK(tail.payload().size() == wanted_tail);
+        }
+
+        // Naming a minimum the tail cannot meet leaves that chunk behind instead of cutting the payload to fit.
+        {
+            auto whole = cc::rec::open_event(probe_desc, 4096, 4096);
+            REQUIRE(whole.is_open());
+            CHECK(whole.payload().size() >= 4096);
+            whole.commit(4096);
+        }
+
+        cc::rec::flush_blocking();
+    }
+
+    CHECK(c.count_named("min-payload") == 2); // the cursor walk and the 4 KiB event; the tail probe was abandoned
+    CHECK(c.count_named("record.chunk_acquired") > 1);
+}
+
+REC_TEST("record - a pinned value on a chunk tail too short for it takes a fresh chunk")
+{
+    auto cfg = deterministic_config();
+    cfg.chunk_bytes = 8 * 1024;
+    rec_fixture const fixture(cfg);
+
+    cc::rec::recording_listener capture;
+    {
+        scoped_listener const reg(capture);
+
+        CC_REC_DEFINE_DESC(probe_desc, cc::rec::event_kind::log, cc::rec::level::info,
+                           cc::rec::enable_bit_of(cc::rec::level::info), "tail-walk", nullptr, nullptr, 0,
+                           cc::rec::desc::variable_payload);
+
+        // A 32-byte tail: a 24-byte header and 8 bytes of payload, short of the 16 a pinned value needs.
+        constexpr isize wanted_tail = 8;
+        {
+            auto probe = cc::rec::open_event(probe_desc, 1 << 20, 1);
+            REQUIRE(probe.is_open());
+            auto const available = probe.payload().size();
+            REQUIRE(available > wanted_tail + 64);
+            probe.commit(available - wanted_tail - 24);
+        }
+        {
+            auto const tail = cc::rec::open_event(probe_desc, 64, 1);
+            REQUIRE(tail.is_open());
+            REQUIRE(tail.payload().size() == wanted_tail);
+        }
+
+        auto payload = cc::vector<byte>();
+        payload.resize_to_constructed(64, byte(0xCD));
+        auto const pinned = cc::make_pinned_data(cc::move(payload)).reinterpret_as<byte const>();
+        CC_RECORD_PINNED("tail.pin", pinned);
+
+        cc::rec::flush_blocking();
+    }
+
+    auto const rec = capture.take();
+
+    isize seen = 0;
+    rec.for_each_event(
+        [&](cc::rec::chunk_view const&, cc::rec::event_view const& e)
+        {
+            if (e.name() != "tail.pin")
+                return;
+
+            ++seen;
+            auto const bytes = e.field_as_bytes("value");
+            REQUIRE(bytes.size() == 64);
+            CHECK(bytes[63] == byte(0xCD));
+        });
+
+    CHECK(seen == 1);
+}
+
+REC_TEST("record - a formatted message is cut by its own cap, never by where the chunk ended")
+{
+    auto cfg = deterministic_config();
+    cfg.chunk_bytes = 8 * 1024; // a few hundred bytes of message rotates every handful of records
+    rec_fixture const fixture(cfg);
+
+    collector c;
+    constexpr isize message_count = 256;
+    {
+        scoped_listener const reg(c);
+
+        for (isize i = 0; i < message_count; ++i)
+        {
+            // The length walks, so a chunk boundary cannot keep landing between two messages instead of inside one.
+            auto const padding = cc::string::create_filled(512 + i % 64, '.');
+            CC_LOG_INFO("probe {} {} tail", padding, i);
+        }
+
+        cc::rec::flush_blocking();
+    }
+
+    // The marker sits at the END of every message, past where a chunk's tail would have cut it.
+    isize seen = 0;
+    for (auto const& e : c.snapshot())
+    {
+        if (cc::string_view(e.name) != "probe {} {} tail")
+            continue;
+
+        ++seen;
+        CHECK(cc::string_view(e.text).ends_with("tail"));
+    }
+
+    CHECK(seen == message_count);
+    CHECK(c.count_named("record.gap") == 0); // grow_unbounded never drops
+}
+
+REC_TEST("record - a message is whole up to log_payload_cap and truncated past it")
+{
+    rec_fixture const fixture(deterministic_config()); // 64 KiB chunks
+    auto const cap = cc::rec::impl::log_payload_cap();
+
+    // The cap is what one chunk holds once its preamble is paid for, so a 64 KiB chunk caps a little under 64 KiB.
+    REQUIRE(cap > 32 * 1024 + 8);
+    REQUIRE(cap < 64 * 1024);
+
+    collector c;
+    {
+        scoped_listener const reg(c);
+
+        // Eight times the old 4 KiB ceiling, and still under the cap.
+        auto const inside = cc::string::create_filled(32 * 1024, 'x');
+        CC_LOG_INFO("big {} end", inside);
+
+        auto const outside = cc::string::create_filled(cap + 4096, 'y');
+        CC_LOG_INFO("huge {} end", outside);
+
+        cc::rec::flush_blocking();
+    }
+
+    auto const whole = c.first_named("big {} end");
+    REQUIRE(whole.has_value());
+    CHECK(whole.value().text.size() == 32 * 1024 + 8); // "big " + padding + " end"
+    CHECK(cc::string_view(whole.value().text).ends_with("end"));
+
+    // Cut at the cap rather than dropped, and never below it: the reservation lands on a fresh chunk, which holds at
+    // least what the cap promises and sometimes the gap event's worth more.
+    auto const cut = c.first_named("huge {} end");
+    REQUIRE(cut.has_value());
+    CHECK(cut.value().text.size() >= cap);
+    CHECK(cut.value().text.size() < cap + 4096);
+}
+
+REC_TEST("record - the shipped chunk size writes a megabyte-sized message whole")
+{
+    auto cfg = deterministic_config();
+    cfg.chunk_bytes = 1 << 20; // what cc::rec::config ships with
+    cfg.budget_bytes = 8 * (1 << 20);
+    rec_fixture const fixture(cfg);
+
+    // A mebibyte chunk spends its preamble and its header and still clears a million bytes, which is the size this
+    // cap exists to cover.
+    CHECK(cc::rec::impl::log_payload_cap() >= 1'000'000);
+
+    collector c;
+    {
+        scoped_listener const reg(c);
+
+        auto const padding = cc::string::create_filled(1'000'000, 'z');
+        CC_LOG_INFO("mb {} end", padding);
+
+        cc::rec::flush_blocking();
+    }
+
+    auto const whole = c.first_named("mb {} end");
+    REQUIRE(whole.has_value());
+    CHECK(whole.value().text.size() == 1'000'000 + 7); // "mb " + padding + " end"
+    CHECK(cc::string_view(whole.value().text).ends_with("end"));
 }
 
 REC_TEST("record - a recording is a value that replays")

@@ -51,6 +51,7 @@ sv::perspective_projection       // { angle_d vertical_fov; f64 aspect_ratio; f6
 sv::camera_gpu::from(cam)        // -> camera_gpu (the GPU basis: forward/right_scaled/up_scaled); aspect comes from projection.aspect_ratio
 sv::render_settings              // { int samples_per_pixel, max_bounces; sr::denoise_settings denoise; } — per-layer integration controls (no light/sky: those are on the view)
                                  //   denoise defaults to method none; NOTHING in it restarts accumulation (see "Denoising" below)
+                                 //   sv owns denoise.fresh_samples and overwrites whatever a caller set: each half of the hand-off runs with its own value
 sv::scene_item                   // { scene_item_kind kind; mesh_id mesh; instance_id instance; hash128 permutation; tg::affine_transform3f transform; } — triangle_mesh only for now
                                  //   mint one with resources.acquire_scene_item(mesh); the three ids have to come from ONE material resolution
                                  //   build the placement with tg's factories (make_rotation(quat), make_translation(vec), make_from_linear_mat(mat3)) and tg::compose
@@ -778,18 +779,15 @@ A layer with no lights falls back to `layer::fallback_light` — `sv::default_fa
   `pt_guides.hlsli` holds all three guide functions apart from the tracer's bindings, which is what lets `bsdf_probe.hlsl` assert on them.
 - **Four more temporal slots per such layer**: `temporal_id::normal_guide`, `depth_guide`, `albedo_guide` (diffuse) and `denoised`, declared by `temporal_inputs_of`.
   A layer that may denoise temporally adds `frame_samples` and `motion_guide`; the first holds the temporal member's own history, the second the last camera.
-- **A split-signal member adds three more**: `temporal_id::frame_diffuse`, `frame_specular` and `hit_distance_guide`, all three or none.
-  The two radiance halves sum to `frame_samples` exactly, so a member reading them sees the same frame the others do rather than a second trace.
-  Declared like the specular pair, but WRITTEN only when the member that actually resolves on this device reads them — `automatic` declares them everywhere and splits nowhere it would go unread.
+- **The split signals are in the tracer, not yet in sv.** `pt_trace_desc::frame_diffuse`, `frame_specular` and `guide_hit_distance`, behind the frame
+  block's `write_split`, are what a split-signal member will read; the two halves sum to `frame_output` exactly.
+  Nothing in `view_renderer` binds them yet, so no temporal slot exists for them — that lands with the first member that reads them.
 - **The temporal history restarts on a scene change, never on camera motion** — its signal is the trace hash with the camera left out.
   The raygen blends the guides beside the mean on a count of their own, so turning denoising on mid-estimate restarts nothing.
 - **A denoiser still compiling declines the frame**, so a capture never saves the raw mean where a denoised image was asked for.
   One that cannot run presents the raw mean and logs once.
 - **Only the plan path denoises.** `view_renderer::execute`, the single-view entry point, still returns the raw accumulator.
 
-The `view_renderer` builds `pt_frame_constants_gpu` from the view's first `area_light` plus `render_settings::samples_per_pixel` / `max_bounces`.
-A view with an empty `area_lights` list falls back to an overhead rect facing down, so the scene is lit even without matching emissive geometry.
-That is unlike a Cornell box, whose light rect must match the emitter.
 The view's `background` (RGB SH) is packed to `background_gpu` and bound at b1.
 The flat and path-tracer misses both reconstruct from it the environment radiance an escaped ray sees; the shadow miss carries visibility only.
 

@@ -25,6 +25,41 @@ bool checker::is_int3(type_id type) const
     return record != nullptr && record->name == "int3";
 }
 
+/// `@stages(.pixel)` or `@stages(.vertex, .pixel)`: a bad argument reports and leaves every stage.
+sgl::u8 checker::stages_of(i32 file, ast::attribute const* a)
+{
+    if (a == nullptr)
+        return k_every_stage;
+
+    // CHK-208: each argument is one stage as an enum case; the function is reached only from an entry point of one.
+    auto result = u8(0);
+    auto const arguments = ast_of(file).at(a->arguments);
+    for (auto const& argument : arguments)
+    {
+        auto const* const dot
+            = ast::is_valid(argument.value) ? ast_of(file).at(argument.value).node.try_as<ast::leading_dot>() : nullptr;
+        auto const name = dot != nullptr ? text_of(file, dot->name) : cc::string_view();
+        auto const s = name == "vertex"  ? stage::vertex
+                     : name == "pixel"   ? stage::pixel
+                     : name == "compute" ? stage::compute
+                                         : stage::none;
+        if (!argument.name.empty() || argument.is_splat || s == stage::none)
+        {
+            report(diagnostic_kind::invalid_attribute_arguments, file, a->name,
+                   "@stages takes the stages a function may be reached from: `@stages(.pixel)`, `@stages(.vertex, "
+                   ".pixel)`");
+            return k_every_stage;
+        }
+        result = u8(result | stage_bit(s));
+    }
+    if (arguments.empty())
+    {
+        report(diagnostic_kind::invalid_attribute_arguments, file, a->name, "@stages names at least one stage");
+        return k_every_stage;
+    }
+    return result;
+}
+
 /// `@compute(64)` or `@compute(8, 8, 1)`: the axes nobody wrote are 1, and a bad argument reports and stays 1.
 cc::fixed_array<sgl::i32, 3> checker::workgroup_of(i32 file, ast::attribute const* a)
 {
@@ -101,7 +136,7 @@ type_id checker::buffer_type(type_id element, bool is_mut)
     return id;
 }
 
-type_id checker::resolve_buffer(i32 file, ast::expr_id expr, ast::index const& node)
+type_id checker::resolve_buffer(i32 file, ast::expr_id expr, ast::index const& node, function_scope const* scope)
 {
     auto const where = span_of(file, expr);
     auto const arguments = ast_of(file).at(node.arguments);
@@ -111,7 +146,7 @@ type_id checker::resolve_buffer(i32 file, ast::expr_id expr, ast::index const& n
         return checked_module::error_type;
     }
 
-    auto const element = resolve_type(file, arguments[0].value);
+    auto const element = resolve_type(file, arguments[0].value, scope);
     if (element == checked_module::error_type)
         return checked_module::error_type;
 
@@ -125,7 +160,7 @@ type_id checker::resolve_buffer(i32 file, ast::expr_id expr, ast::index const& n
     return buffer_type(element, false);
 }
 
-type_id checker::resolve_type(i32 file, ast::expr_id expr)
+type_id checker::resolve_type(i32 file, ast::expr_id expr, function_scope const* scope)
 {
     if (!ast::is_valid(expr))
         return checked_module::error_type;
@@ -137,11 +172,22 @@ type_id checker::resolve_type(i32 file, ast::expr_id expr)
     if (!e.attributes.empty())
         unsupported(file, where, "an attribute on a type");
 
-    if (auto const* const n = e.node.try_as<ast::name>())
+    auto const* const n = e.node.try_as<ast::name>();
+    auto const resource = n != nullptr ? resolve_resource_name(file, expr, text_of(file, n->where)) : type_id::none;
+    if (resource != type_id::none)
+        result = resource;
+    else if (n != nullptr)
     {
         auto const text = text_of(file, n->where);
-        auto const* const found = names.get_ptr(text);
-        if (found == nullptr || found->empty())
+        auto const* const found = names_seen_from(file).get_ptr(text);
+        // CHK-54: types and values share one namespace, so a local hides a type of its name
+        if (auto const* const local = scope != nullptr ? scope->find_local(text) : nullptr)
+        {
+            set_target(file, expr, local->where);
+            report(diagnostic_kind::wrong_kind_of_name, file, where,
+                   cc::format("{} is a local, and a type stands here", text));
+        }
+        else if (found == nullptr || found->empty())
             report(diagnostic_kind::unknown_name, file, where, text);
         else
         {
@@ -162,7 +208,10 @@ type_id checker::resolve_type(i32 file, ast::expr_id expr)
     else if (auto const* const applied = e.node.try_as<ast::index>())
     {
         if (is_named(file, applied->object, "buffer"))
-            result = resolve_buffer(file, expr, *applied);
+            result = resolve_buffer(file, expr, *applied, scope);
+        else if (auto const applied_resource = resolve_resource_applied(file, expr, *applied);
+                 applied_resource != type_id::none)
+            result = applied_resource;
         else
             unsupported(file, where, "type arguments");
     }
@@ -176,15 +225,9 @@ type_id checker::resolve_type(i32 file, ast::expr_id expr)
         unsupported(file, where, "a qualified type name");
     else if (auto const* const q = e.node.try_as<ast::qualified_type>())
     {
-        auto const inner = resolve_type(file, q->type);
-        auto const is_buffer = inner != checked_module::error_type && out.at(inner).kind == type_kind::buffer;
-        if (q->access == ast::type_access::write_only)
-            // No target has a write-only buffer, and only a storage texture needs one, which is unbuilt.
-            unsupported(file, where, "an `out` resource");
-        else if (is_buffer)
-            result = buffer_type(out.at(inner).element, true);
-        else if (inner != checked_module::error_type)
-            report(diagnostic_kind::wrong_kind_of_name, file, where, "only a resource may be `mut`, and this is a value");
+        auto const inner = resolve_type(file, q->type, scope);
+        if (inner != checked_module::error_type)
+            result = qualify_resource(file, expr, inner, q->access);
     }
     else if (!e.node.is<ast::invalid_expr>())
         unsupported(file, where, "this expression as a type");
@@ -193,18 +236,21 @@ type_id checker::resolve_type(i32 file, ast::expr_id expr)
     return result;
 }
 
-type_id checker::resolve_value_type(i32 file, ast::expr_id expr)
+type_id checker::resolve_value_type(i32 file, ast::expr_id expr, function_scope const* scope)
 {
-    auto const type = resolve_type(file, expr);
-    if (type == checked_module::error_type || out.at(type).kind != type_kind::buffer)
+    auto const type = resolve_type(file, expr, scope);
+    if (type == checked_module::error_type || !is_resource(out.at(type).kind))
         return type;
-    unsupported(file, span_of(file, expr), "a buffer as a value; a buffer is a binding member, read as `values[i]`");
+    unsupported(file, span_of(file, expr),
+                out.at(type).kind == type_kind::buffer
+                    ? "a buffer as a value; a buffer is a binding member, read as `values[i]`"
+                    : "a texture, an image or a sampler as a value; each is a binding member, handed to a builtin");
     return checked_module::error_type;
 }
 
 type_id checker::type_of_builtin(cc::string_view name, i32 file, source_span where)
 {
-    auto const* const found = names.get_ptr(name);
+    auto const* const found = prelude_names.get_ptr(name);
     if (found != nullptr && !found->empty())
     {
         auto const id = found->front();
@@ -218,7 +264,10 @@ type_id checker::type_of_builtin(cc::string_view name, i32 file, source_span whe
 
 // ---- structs and bindings -------------------------------------------------------------------------------------------
 
-ast::range_of<member_info> checker::compile_members(i32 file, ast::range_of<ast::decl_id> members, bool is_struct)
+ast::range_of<member_info> checker::compile_members(i32 file,
+                                                    ast::range_of<ast::decl_id> members,
+                                                    bool is_struct,
+                                                    bool is_target_struct)
 {
     auto const& ast = ast_of(file);
     auto const owner = is_struct ? cc::string_view("a struct field") : cc::string_view("a binding member");
@@ -229,6 +278,28 @@ ast::range_of<member_info> checker::compile_members(i32 file, ast::range_of<ast:
         auto const& d = ast.at(member);
         auto const where = span_of(file, member);
 
+        if (auto const* const smp = d.node.try_as<ast::sampler_decl>(); smp != nullptr && !is_struct)
+        {
+            // CHK-204: a static sampler of the group, a member whose type is the sampler its settings make.
+            auto const name = text_of(file, smp->name);
+            auto is_duplicate = false;
+            for (auto const& other : collected)
+                is_duplicate = is_duplicate || other.name == name;
+            if (is_duplicate)
+            {
+                report(diagnostic_kind::duplicate_declaration, file, smp->name, name);
+                continue;
+            }
+            judge_attributes(file, d.attributes, {}, owner);
+            auto const state = compile_sampler(file, *smp);
+            collected.push_back({
+                .name = name,
+                .type = resource_type({.kind = type_kind::sampler, .is_comparison = state.compare >= 0}),
+                .static_sampler = i32(out.samplers.size()),
+            });
+            out.samplers.push_back(state);
+            continue;
+        }
         if (d.node.is<ast::property_decl>())
             unsupported(file, where, "a property");
         else if (d.node.is<ast::fun_decl>())
@@ -246,9 +317,11 @@ ast::range_of<member_info> checker::compile_members(i32 file, ast::range_of<ast:
         auto const name = text_of(file, f.name);
 
         cc::string_view const known_on_field[] = {"position", "thread_id", "per_instance", "stream"};
+        cc::string_view const known_on_member[] = {"unfilterable", "non_filtering"};
         judge_attributes(file, f.attributes,
-                         is_struct ? cc::span<cc::string_view const>(known_on_field) : cc::span<cc::string_view const>(),
-                         owner);
+                         is_struct ? cc::span<cc::string_view const>(known_on_field)
+                                   : cc::span<cc::string_view const>(known_on_member),
+                         owner, is_target_struct ? setting_scope::target : setting_scope::none);
         judge_attributes(file, d.attributes, {}, owner);
         if (f.is_mut)
             unsupported(file, f.name, "a mut member");
@@ -270,6 +343,19 @@ ast::range_of<member_info> checker::compile_members(i32 file, ast::range_of<ast:
         else
             report(diagnostic_kind::missing_type, file, f.name, name);
 
+        // CHK-202 and CHK-203: each attribute names what only one kind of member can be.
+        auto const* const unfilterable = find_attribute(file, f.attributes, "unfilterable");
+        auto const* const non_filtering = find_attribute(file, f.attributes, "non_filtering");
+        auto const& t = out.at(type);
+        if (unfilterable != nullptr && type != checked_module::error_type
+            && (t.kind != type_kind::texture || t.is_depth || !out.name_of(t.element).starts_with("float")))
+            report(diagnostic_kind::wrong_kind_of_name, file, unfilterable->name,
+                   "only a texture of floats is filtered, so only one can be @unfilterable");
+        if (non_filtering != nullptr && type != checked_module::error_type
+            && (t.kind != type_kind::sampler || t.is_comparison))
+            report(diagnostic_kind::wrong_kind_of_name, file, non_filtering->name,
+                   "only a `sampler` member can be @non_filtering");
+
         collected.push_back({
             .name = name,
             .type = type,
@@ -278,6 +364,8 @@ ast::range_of<member_info> checker::compile_members(i32 file, ast::range_of<ast:
             .is_thread_id = find_attribute(file, f.attributes, "thread_id") != nullptr,
             .is_per_instance = find_attribute(file, f.attributes, "per_instance") != nullptr,
             .stream = stream_of(file, find_attribute(file, f.attributes, "stream")),
+            .is_unfilterable = unfilterable != nullptr,
+            .is_non_filtering = non_filtering != nullptr,
         });
     }
 
@@ -293,8 +381,13 @@ void checker::compile_struct(symbol_id id)
     auto const& d = ast_of(file).at(decl);
     auto const& s = d.node.as<ast::struct_decl>();
 
+    auto const is_vertex = find_attribute(file, d.attributes, "vertex") != nullptr;
+    auto const is_pixel = find_attribute(file, d.attributes, "pixel") != nullptr;
+
+    // An edge struct's attributes may be pipeline settings, which every pipeline it is an edge of starts from.
     cc::string_view const known[] = {"builtin", "vertex", "pixel"};
-    judge_attributes(file, d.attributes, known, "a struct");
+    judge_attributes(file, d.attributes, known, "a struct",
+                     is_vertex || is_pixel ? setting_scope::description : setting_scope::none);
 
     auto const is_builtin = find_attribute(file, d.attributes, "builtin") != nullptr;
     if (is_builtin)
@@ -308,12 +401,10 @@ void checker::compile_struct(symbol_id id)
     else if (s.is_opaque)
         report(diagnostic_kind::opaque_struct_needs_builtin, file, s.name, out.at(id).name);
 
-    auto const is_vertex = find_attribute(file, d.attributes, "vertex") != nullptr;
-    auto const is_pixel = find_attribute(file, d.attributes, "pixel") != nullptr;
     if (is_vertex && is_pixel)
         unsupported(file, s.name, "a struct of two stages");
 
-    auto const members = compile_members(file, s.members, true);
+    auto const members = compile_members(file, s.members, true, is_pixel);
 
     // The type exists only now, so a field that needs its own struct found a cycle and not a type.
     auto const type = type_id(out.types.size());
@@ -430,10 +521,17 @@ void checker::compile_binding(symbol_id id)
     }
 
     auto const members = compile_members(file, b.members, false);
+    auto const is_inline = find_attribute(file, d.attributes, "inline") != nullptr;
+    // CHK-205: an `@inline` binding holds constants only, so a static sampler in one has nowhere to go.
+    if (is_inline)
+        for (auto const member : ast_of(file).at(b.members))
+            if (auto const* const smp = ast_of(file).at(member).node.try_as<ast::sampler_decl>())
+                report(diagnostic_kind::wrong_kind_of_name, file, smp->name,
+                       "an @inline binding holds constants only, and a sampler is none");
     out.symbols[index_of(id)].info = i32(out.bindings.size());
     out.bindings.push_back({
         .symbol = id,
-        .is_inline = find_attribute(file, d.attributes, "inline") != nullptr,
+        .is_inline = is_inline,
         .members = members,
     });
 }
@@ -449,8 +547,12 @@ void checker::compile_function(symbol_id id)
     auto const& f = d.node.as<ast::fun_decl>();
     auto is_failed = false;
 
-    cc::string_view const known[] = {"builtin", "pure", "operator", "vertex", "pixel", "compute"};
-    judge_attributes(file, d.attributes, known, "a function");
+    // An entry point's attributes may be pipeline settings, which every pipeline it is a stage of starts from.
+    auto const is_raster_entry = find_attribute(file, d.attributes, "vertex") != nullptr
+                              || find_attribute(file, d.attributes, "pixel") != nullptr;
+    cc::string_view const known[] = {"builtin", "pure", "operator", "vertex", "pixel", "compute", "stages"};
+    judge_attributes(file, d.attributes, known, "a function",
+                     is_raster_entry ? setting_scope::description : setting_scope::none);
 
     if (!f.type_parameters.empty())
     {
@@ -463,6 +565,7 @@ void checker::compile_function(symbol_id id)
         is_failed = true;
     }
 
+    auto const is_builtin = find_attribute(file, d.attributes, "builtin") != nullptr;
     auto parameters = cc::vector<parameter>();
     for (auto const& p : ast.at(f.parameters))
     {
@@ -484,9 +587,10 @@ void checker::compile_function(symbol_id id)
                 is_failed = true;
             }
 
+        // CHK-206: a builtin alone may take a resource, and its parameter is then a pattern of one (CHK-207).
         auto type = checked_module::error_type;
         if (ast::is_valid(p.type))
-            type = resolve_value_type(file, p.type);
+            type = is_builtin ? resolve_pattern_type(file, p.type) : resolve_value_type(file, p.type);
         else if (f.receiver == ast::receiver_kind::none || &p != &ast.at(f.parameters).front())
             report(diagnostic_kind::missing_type, file, span_of(file, p.form), name);
         is_failed = is_failed || type == checked_module::error_type;
@@ -513,7 +617,7 @@ void checker::compile_function(symbol_id id)
         }
 
         auto const text = text_of(file, n->where);
-        auto const* const found = names.get_ptr(text);
+        auto const* const found = names_seen_from(file).get_ptr(text);
         if (found == nullptr || found->empty())
         {
             report(diagnostic_kind::unknown_name, file, where, text);
@@ -550,13 +654,12 @@ void checker::compile_function(symbol_id id)
     if (find_attribute(file, d.attributes, "builtin") != nullptr)
     {
         // The record is the overload: the name and the parameter types together, as the registry read them from its own text.
-        auto types = cc::vector<builtin_type_id>();
+        auto types = cc::vector<cc::string_view>();
         auto is_silent = false;
         for (auto const& p : parameters)
         {
             is_silent = is_silent || p.type == checked_module::error_type;
-            auto const& type = out.at(p.type);
-            types.push_back(is_valid(type.symbol) ? out.at(type.symbol).intrinsic_type : builtin_type_id::none);
+            types.push_back(out.name_of(p.type));
         }
         auto const intrinsic = builtins.find_function(out.at(id).name, types);
         if (is_valid(intrinsic))
@@ -598,6 +701,7 @@ void checker::compile_function(symbol_id id)
         .entry_stage = stage_of(is_vertex, is_pixel, compute != nullptr),
         .workgroup = {workgroup[0], workgroup[1], workgroup[2]},
         .is_pure = find_attribute(file, d.attributes, "pure") != nullptr,
+        .stages = stages_of(file, find_attribute(file, d.attributes, "stages")),
     });
     out.parameters.push_back_range(parameters);
     out.binding_lists.push_back_range(bindings);

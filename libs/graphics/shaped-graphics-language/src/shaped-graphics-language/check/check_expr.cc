@@ -10,14 +10,6 @@ namespace
 {
 constexpr auto error_type = checked_module::error_type;
 constexpr auto nothing_type = checked_module::nothing_type;
-
-local_name const* find_local(function_scope const& scope, cc::string_view name)
-{
-    for (auto i = scope.locals.size() - 1; i >= 0; --i)
-        if (scope.locals[i].name == name)
-            return &scope.locals[i];
-    return nullptr;
-}
 } // namespace
 
 // ---- bodies ---------------------------------------------------------------------------------------------------------
@@ -37,8 +29,7 @@ void checker::check_body(symbol_id id)
     auto scope = function_scope{.function = id, .file = file, .result = info.result};
     for (auto const& p : out.at(info.parameters))
     {
-        if (names.contains(p.name))
-            unsupported(file, ast.at(p.field).name, "a parameter that shadows a module-level name");
+        // CHK-54: a parameter may have the name of a module-level symbol, which it hides in the body.
         scope.locals.push_back({
             .name = text_of(file, ast.at(p.field).name),
             .where = {.kind = target_kind::parameter, .index = i32(p.field)},
@@ -171,6 +162,39 @@ void checker::convert_object(function_scope& scope, ast::expr_id object, type_id
 
 // ---- expressions ----------------------------------------------------------------------------------------------------
 
+type_id checker::check_cast(function_scope& scope, ast::expr_id id, ast::cast const& node)
+{
+    auto const file = scope.file;
+    auto const where = span_of(file, id);
+    auto const from = check_expr(scope, node.value);
+    auto const to = resolve_value_type(file, node.type);
+    if (from == error_type || to == error_type)
+        return error_type;
+    if (from == to)
+        return to;
+
+    // Overloads of `as` differ in their result as well, so the one that matches both ends is the conversion.
+    auto const* const candidates = operators.get_ptr("as");
+    if (candidates != nullptr)
+        for (auto const candidate : *candidates)
+        {
+            if (demand(candidate, file, where) != symbol_state::checked)
+                continue;
+            auto const& info = out.functions[out.at(candidate).info];
+            auto const parameters = out.at(info.parameters);
+            if (parameters.size() != 1 || parameters[0].type != from || info.result != to)
+                continue;
+            set_target(file, id, {.kind = target_kind::overload, .symbol = candidate});
+            // A conversion the program declares is a call like any other, inlined where it stands.
+            if (!is_valid(out.at(candidate).intrinsic))
+                note_program_call(scope, candidate, where);
+            return to;
+        }
+    report(diagnostic_kind::no_matching_overload, file, where,
+           cc::format("{} as {}: no conversion", out.name_of(from), out.name_of(to)));
+    return error_type;
+}
+
 type_id checker::check_expr(function_scope& scope, ast::expr_id expr)
 {
     if (!ast::is_valid(expr))
@@ -200,8 +224,8 @@ type_id checker::check_expr(function_scope& scope, ast::expr_id expr)
         [&](ast::qualified_type const&) { return not_yet("a resource type"); },
         [&](ast::tuple const&) { return not_yet("a tuple"); }, [&](ast::array const&) { return not_yet("an array"); },
         [&](ast::object const&) { return not_yet("an object with no struct to convert to"); },
-        [&](ast::comparison_chain const& chain) { return check_chain(scope, expr, chain); },
-        [&](ast::cast const&) { return not_yet("as"); }, [&](ast::membership const&) { return not_yet("in"); },
+        [&](ast::comparison_chain const& chain) { return check_chain(scope, expr, chain); }, [&](ast::cast const& node)
+        { return check_cast(scope, expr, node); }, [&](ast::membership const&) { return not_yet("in"); },
         [&](ast::ascription const&) { return not_yet("a type ascription"); },
         [&](ast::range const&) { return not_yet("a range"); }, [&](ast::lambda const&) { return not_yet("a lambda"); },
         [&](ast::case_expr const& c) { return check_case(scope, expr, c, true); },
@@ -266,13 +290,13 @@ type_id checker::check_name(function_scope& scope, ast::expr_id id, ast::name co
     auto const where = span_of(file, id);
     auto const text = text_of(file, name.where);
 
-    if (auto const* const local = find_local(scope, text))
+    if (auto const* const local = scope.find_local(text))
     {
         set_target(file, id, local->where);
         return local->type;
     }
 
-    auto const* const found = names.get_ptr(text);
+    auto const* const found = names_seen_from(file).get_ptr(text);
     if (found == nullptr || found->empty())
     {
         report(diagnostic_kind::unknown_name, file, where, text);
@@ -292,6 +316,10 @@ type_id checker::check_name(function_scope& scope, ast::expr_id id, ast::name co
         break;
     case symbol_kind::binding:
         unsupported(file, where, "a binding as a value");
+        break;
+    case symbol_kind::pipeline:
+        report(diagnostic_kind::wrong_kind_of_name, file, where,
+               cc::format("{} is a pipeline, which the host acquires and no shader reads", text));
         break;
     case symbol_kind::unsupported:
         break;
@@ -317,9 +345,9 @@ type_id checker::check_member(function_scope& scope, ast::expr_id id, ast::membe
     // `constants.view_projection`: a binding is no value, so the object is looked at before it is checked
     auto const* const object_name
         = ast::is_valid(member.object) ? ast.at(member.object).node.try_as<ast::name>() : nullptr;
-    if (object_name != nullptr && find_local(scope, text_of(file, object_name->where)) == nullptr)
+    if (object_name != nullptr && scope.find_local(text_of(file, object_name->where)) == nullptr)
     {
-        auto const* const found = names.get_ptr(text_of(file, object_name->where));
+        auto const* const found = names_seen_from(file).get_ptr(text_of(file, object_name->where));
         if (found != nullptr && !found->empty() && out.at(found->front()).kind == symbol_kind::binding)
         {
             auto const binding = found->front();
@@ -349,6 +377,17 @@ type_id checker::check_member(function_scope& scope, ast::expr_id id, ast::membe
             if (type != error_type && out.at(type).kind == type_kind::buffer && id != subscripted)
             {
                 unsupported(file, span_of(file, id), "a buffer as a value; read an element of it, as in `values[i]`");
+                return error_type;
+            }
+            auto is_handed = false;
+            for (auto const h : handed)
+                is_handed = is_handed || h == id;
+            if (type != error_type && is_resource(out.at(type).kind) && out.at(type).kind != type_kind::buffer
+                && !is_handed)
+            {
+                unsupported(
+                    file, span_of(file, id),
+                    cc::format("{} as a value; hand it to a builtin, as in `DEBUG_load(t, xy, 0)`", out.name_of(type)));
                 return error_type;
             }
             return type;
@@ -416,7 +455,9 @@ call_arguments checker::check_arguments(function_scope& scope, ast::range_of<ast
             result.is_poisoned = true;
         }
 
+        handed.push_back(a.value);
         auto const type = check_expr(scope, a.value);
+        handed.pop_back();
         if (type == error_type)
         {
             result.is_poisoned = true;
@@ -511,7 +552,7 @@ type_id checker::check_call(function_scope& scope, ast::expr_id id, ast::call co
     }
 
     auto const text = text_of(file, n->where);
-    if (auto const* const local = find_local(scope, text))
+    if (auto const* const local = scope.find_local(text))
     {
         set_target(file, call.callee, local->where);
         (void)check_arguments(scope, call.arguments, false);
@@ -519,7 +560,7 @@ type_id checker::check_call(function_scope& scope, ast::expr_id id, ast::call co
         return error_type;
     }
 
-    auto const* const found = names.get_ptr(text);
+    auto const* const found = names_seen_from(file).get_ptr(text);
     if (found == nullptr || found->empty())
     {
         (void)check_arguments(scope, call.arguments, false);
@@ -533,12 +574,26 @@ type_id checker::check_call(function_scope& scope, ast::expr_id id, ast::call co
     case symbol_kind::structure:
         return construct(scope, id, call.callee, first, check_arguments(scope, call.arguments, true));
     case symbol_kind::function:
-        return resolve_overload(scope, id, call.callee, *found, check_arguments(scope, call.arguments, false), text);
+    {
+        auto const result
+            = resolve_overload(scope, id, call.callee, *found, check_arguments(scope, call.arguments, false), text);
+        if (result != error_type)
+            judge_filtering(file, where, call.arguments);
+        return result;
+    }
     case symbol_kind::binding:
         (void)check_arguments(scope, call.arguments, false);
         set_target(file, call.callee, {.kind = target_kind::symbol, .symbol = first});
         report(diagnostic_kind::wrong_kind_of_name, file, callee_where,
                cc::format("{} is a binding, and a call needs a function or a struct", text));
+        return error_type;
+    case symbol_kind::enumeration:
+    case symbol_kind::pipeline:
+        (void)check_arguments(scope, call.arguments, false);
+        set_target(file, call.callee, {.kind = target_kind::symbol, .symbol = first});
+        report(diagnostic_kind::wrong_kind_of_name, file, callee_where,
+               cc::format("{} is {}, and a call needs a function or a struct", text,
+                          out.at(first).kind == symbol_kind::pipeline ? "a pipeline" : "an enum"));
         return error_type;
     case symbol_kind::unsupported:
         (void)check_arguments(scope, call.arguments, false);
@@ -614,7 +669,7 @@ type_id checker::resolve_overload(function_scope& scope,
         auto const parameters = out.at(out.functions[out.at(candidate).info].parameters);
         auto is_match = !arguments.is_poisoned && parameters.size() == arguments.types.size();
         for (auto i = isize(0); is_match && i < parameters.size(); ++i)
-            is_match = parameters[i].type == arguments.types[i];
+            is_match = takes(parameters[i].type, arguments.types[i]);
         if (is_match)
             matches.push_back(candidate);
     }
@@ -625,6 +680,12 @@ type_id checker::resolve_overload(function_scope& scope,
             report(diagnostic_kind::no_matching_overload, file, where, signature_text(spelling, arguments.types));
         return error_type;
     }
+    // CHK-192: a match of the program's file hides every match of the prelude
+    auto is_program_match = false;
+    for (auto const m : matches)
+        is_program_match = is_program_match || !is_prelude_file(out.at(m).file);
+    if (is_program_match)
+        matches.remove_all_where([&](symbol_id m) { return is_prelude_file(out.at(m).file); });
     if (matches.size() > 1)
     {
         report(diagnostic_kind::ambiguous_overload, file, where,
@@ -639,22 +700,28 @@ type_id checker::resolve_overload(function_scope& scope,
     if (is_valid(out.at(chosen).intrinsic))
         return out.functions[out.at(chosen).info].result;
 
+    note_program_call(scope, chosen, where);
+    return out.functions[out.at(chosen).info].result;
+}
+
+void checker::note_program_call(function_scope const& scope, symbol_id callee, source_span where)
+{
+    auto const file = scope.file;
     // A call of a function of the program is inlined, so it is an edge recursion is looked for along.
-    calls.push_back({.caller = scope.function, .callee = chosen, .file = file, .where = where});
+    calls.push_back({.caller = scope.function, .callee = callee, .file = file, .where = where});
 
     // Bindings are an effect: what the callee reads, the caller has to list, and so on up to the entry point.
     auto const listed = out.at(out.functions[out.at(scope.function).info].bindings);
-    for (auto const needed : out.at(out.functions[out.at(chosen).info].bindings))
+    for (auto const needed : out.at(out.functions[out.at(callee).info].bindings))
     {
         auto is_listed = false;
         for (auto const l : listed)
             is_listed = is_listed || l == needed;
         if (!is_listed)
             report(diagnostic_kind::binding_not_listed, file, where,
-                   cc::format("{} needs {}, which is not in the binding list of {}", out.at(chosen).name,
+                   cc::format("{} needs {}, which is not in the binding list of {}", out.at(callee).name,
                               out.at(needed).name, out.at(scope.function).name));
     }
-    return out.functions[out.at(chosen).info].result;
 }
 
 type_id checker::check_logical(function_scope& scope, ast::expr_id id, ast::call const& call)
@@ -712,7 +779,7 @@ bool checker::is_out_of_the_running(symbol_id candidate, cc::span<type_id const>
     auto const parameters = out.at(out.functions[s.info].parameters);
     auto is_match = parameters.size() == types.size();
     for (auto i = isize(0); is_match && i < parameters.size(); ++i)
-        is_match = parameters[i].type == types[i];
+        is_match = takes(parameters[i].type, types[i]);
     return !is_match;
 }
 

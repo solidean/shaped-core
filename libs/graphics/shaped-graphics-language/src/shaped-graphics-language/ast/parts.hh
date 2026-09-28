@@ -83,6 +83,18 @@ struct sgl::ast::body
     constexpr bool operator==(body const&) const = default;
 };
 
+/// `path = value`, one line of a `pipeline` block.
+/// The left side is a place rather than a name, `color_targets.albedo.blend`, which is why this is no `argument`.
+struct sgl::ast::setting
+{
+    form_id form = form_id::none;
+    /// A name or a `member` chain; an `invalid` expression for a left side that is neither.
+    expr_id path = expr_id::none;
+    expr_id value = expr_id::none;
+
+    constexpr bool operator==(setting const&) const = default;
+};
+
 /// `pattern => result`, one line of a `case` block.
 struct sgl::ast::case_arm
 {

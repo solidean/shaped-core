@@ -129,6 +129,32 @@ namespace sg::backend::metal
 inline constexpr MTL::ResourceOptions k_buffer_options
     = MTL::ResourceStorageModePrivate | MTL::ResourceHazardTrackingModeUntracked;
 
+/// The MSL buffer index sg's inline constants arrive at, one past the group a pipeline layout cannot reach.
+///
+/// Metal has no root constants and no push constants: everything a shader reads is an address in the argument table.
+/// So a `set_inline_constants` call stages the block and binds its address here, and MSL declares the block as an
+/// ordinary `constant T& name [[buffer(4)]]`.
+/// SPIRV-Cross emits a push-constant block as a buffer whose index the caller chooses, so this is that choice.
+inline constexpr int k_inline_constants_buffer_index = sg::reserved_binding_group + 1;
+
+/// The MSL buffer index vertex-input slot 0 arrives at; slot `n` is this plus `n`.
+///
+/// A vertex buffer is bound through the argument table here, not through a `setVertexBuffer` the MTL4 render encoder
+/// does not have — so an input slot needs a buffer index of its own, above everything the bind path can name.
+/// `MTLVertexBufferLayoutDescriptor` at this index is what the vertex descriptor declares, and the two halves have to
+/// agree: the pipeline's layout index and the address the draw binds.
+inline constexpr int k_vertex_buffer_base_index = k_inline_constants_buffer_index + 1;
+
+/// The buffer slots one command list's argument table holds: the groups, the reserved one, inline constants, and
+/// every vertex-input slot.
+///
+/// Metal allows 31, so this is sg's budget rather than the API's — and the static_assert below is what says so.
+inline constexpr int k_argument_table_buffer_count = k_vertex_buffer_base_index + sg::max_vertex_buffers;
+
+static_assert(k_argument_table_buffer_count <= 31,
+              "the metal argument table has 31 buffer slots, and sg's budget "
+              "no longer fits");
+
 /// Switch Metal's API validation layer on for this process, and make a violation abort rather than log.
 ///
 /// **Call it from `main`, before any Metal call.**

@@ -50,8 +50,8 @@ def _answered(pairs: list[tuple[Entry, AnswerFile]]) -> list[tuple[Entry, Answer
 def pr_comment(cfg: ReviewConfig, pairs: list[tuple[Entry, AnswerFile]]) -> str:
     """A single standalone comment: instructions only, no conversation, no open questions.
 
-    The per-goal shape is that context tiers and the overview never appear.
-    They exist so the maintainer could judge a point, and they tell the author nothing they do not already know.
+    The per-goal shape is that the overview never appears.
+    It exists so the maintainer could judge a point, and it tells the author nothing they do not already know.
     Which entries appear is not a goal question — every answered one does, tagged with its group so the synthesis step can weigh it.
     """
     lines = ["<!-- draft: read it before posting; the tool assembled it, it did not decide it -->", ""]

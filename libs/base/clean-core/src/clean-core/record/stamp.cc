@@ -117,7 +117,7 @@ void emit_section(rec::desc const& d, cc::span<byte const> bytes)
     if (bytes.empty())
         return;
 
-    auto writer = rec::open_event(d, bytes.size());
+    auto writer = rec::open_event(d, bytes.size(), 1);
     if (!writer.is_open())
         return;
 

@@ -297,10 +297,11 @@ struct vertex_type_layout;
 class raster_pipeline;
 struct color_target_state;          // {format, blend, write_mask} — one color target's PSO state
 struct raster_pipeline_description; // {layout, shaders, vertex_input, state, ...} — input to create_raster_pipeline
+struct raster_target_formats;       // {color formats, depth format, sample count} a pipeline is compiled for
 namespace impl
 {
-// names the target set of a raster pipeline a backend just built; defined in raster/raster_pipeline.cc
-void set_target_set(raster_pipeline const& pipeline, cc::string_view target_set);
+// records the target set and formats of a raster pipeline a backend just built; defined in raster/raster_pipeline.cc
+void set_targets(raster_pipeline const& pipeline, cc::string_view target_set, raster_target_formats const& formats);
 } // namespace impl
 
 // Draw recording (see command_list/raster.hh) — vertex/index buffer views + draw parameters.
