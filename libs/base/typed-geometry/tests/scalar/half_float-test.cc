@@ -274,10 +274,38 @@ TEST("tg f16 - classification")
     CHECK(!f16().sign_bit());
 }
 
+TEST("tg f16 - a NaN is unordered")
+{
+    for (auto const nan : {f16::quiet_nan, f16::make_from_bits(0x7c01), f16::make_from_bits(0xffff)})
+    {
+        for (auto const other : {f16::quiet_nan, f16(1), f16(), f16::infinity})
+        {
+            CHECK(!(nan == other));
+            CHECK(nan != other);
+            CHECK(!(nan < other));
+            CHECK(!(nan <= other));
+            CHECK(!(nan > other));
+            CHECK(!(nan >= other));
+            CHECK((nan <=> other) == std::partial_ordering::unordered);
+            CHECK((other <=> nan) == std::partial_ordering::unordered);
+
+            // the f32 side the exhaustive test holds f16 against
+            auto const fnan = nan.to_f32();
+            auto const fother = other.to_f32();
+            CHECK(fnan != fnan);
+            CHECK(!(fnan == fother));
+            CHECK(!(fnan < fother));
+            CHECK((fnan <=> fother) == std::partial_ordering::unordered);
+        }
+    }
+}
+
 TEST("tg f16 - comparison matches f32's")
 {
     auto mismatches = 0;
-    auto const check_pair = [&mismatches](u16 a, u16 b)
+    auto first_a = u16(0);
+    auto first_b = u16(0);
+    auto const check_pair = [&](u16 a, u16 b)
     {
         auto const x = f16::make_from_bits(a);
         auto const y = f16::make_from_bits(b);
@@ -286,6 +314,11 @@ TEST("tg f16 - comparison matches f32's")
         auto const ok = (x == y) == (fx == fy) && (x != y) == (fx != fy) && (x < y) == (fx < fy)
                      && (x <= y) == (fx <= fy) && (x > y) == (fx > fy) && (x >= y) == (fx >= fy)
                      && (x <=> y) == (fx <=> fy);
+        if (!ok && mismatches == 0)
+        {
+            first_a = a;
+            first_b = b;
+        }
         mismatches += ok ? 0 : 1;
     };
 
@@ -302,7 +335,22 @@ TEST("tg f16 - comparison matches f32's")
     auto const count = nx::is_thorough() ? 50'000'000 : 500'000;
     for (auto i = 0; i < count; ++i)
         check_pair(random_half(rng), random_half(rng));
-    CHECK(mismatches == 0);
+    CHECK(mismatches == 0).dump("first a", first_a).dump("first b", first_b);
+
+    if (mismatches != 0) // spell out the first failing pair, one operator per CHECK
+    {
+        auto const x = f16::make_from_bits(first_a);
+        auto const y = f16::make_from_bits(first_b);
+        auto const fx = x.to_f32();
+        auto const fy = y.to_f32();
+        CHECK((x == y) == (fx == fy));
+        CHECK((x != y) == (fx != fy));
+        CHECK((x < y) == (fx < fy));
+        CHECK((x <= y) == (fx <= fy));
+        CHECK((x > y) == (fx > fy));
+        CHECK((x >= y) == (fx >= fy));
+        CHECK((x <=> y) == (fx <=> fy));
+    }
 }
 
 TEST("tg f16 - rounding on the bits matches f32's, for every value")
