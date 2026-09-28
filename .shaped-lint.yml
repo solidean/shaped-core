@@ -119,7 +119,7 @@ rules:
 
   - kind: deny-include
     value: [<stdexcept>, <exception>]
-    reason: prefer returning a cc::result; where something is genuinely exceptional, reach the std types through clean-core/error/exception.hh
+    reason: prefer returning a cc::result; where something is genuinely exceptional, derive from cc::exception (clean-core/error/exception_base.hh), or reach the std types through clean-core/error/exception.hh
 
   - kind: deny-include
     value: <cstring>

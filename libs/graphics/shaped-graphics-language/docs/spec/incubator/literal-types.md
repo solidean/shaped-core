@@ -25,7 +25,8 @@ A tuple that holds a literal has a type that holds a literal type, and what that
 **Where the call model already stands.**
 A number literal converts to any numeric type that holds it ([CHK-253](../semantics/checking.md#calls-and-overloads)).
 Leaving its default type is one step of its chain, so the candidate keeping it there is shorter.
-An operator over integer literals alone that only a float operator takes is an error today ([CHK-257](../semantics/checking.md#calls-and-overloads)), which is the error half of the folding below.
+An operator over integer literals alone that only a float operator takes is an error today ([CHK-257](../semantics/checking.md#calls-and-overloads)).
+So is `/` or `%` over them, although `int` has both (CHK-313); together they are the error half of the folding below.
 Literal types would refine that rather than replace it.
 
 **Folding what is literal alone.**

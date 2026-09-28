@@ -237,6 +237,12 @@ struct sgl::ast::continue_expr
     constexpr bool operator==(continue_expr const&) const = default;
 };
 
+/// `discard`: the pixel ends with no effect, whatever it would have written (AST-148).
+struct sgl::ast::discard_expr
+{
+    constexpr bool operator==(discard_expr const&) const = default;
+};
+
 /// An unfused `{…}` whose elements are all `name: type`.
 struct sgl::ast::struct_type
 {
@@ -317,6 +323,7 @@ struct sgl::ast::expr
                 yield_expr,
                 break_expr,
                 continue_expr,
+                discard_expr,
                 struct_type,
                 function_type,
                 with_bindings,

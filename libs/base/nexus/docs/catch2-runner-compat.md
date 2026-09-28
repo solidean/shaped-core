@@ -77,6 +77,7 @@ When no filter matches any test or alias **name**, the filters are re-read as gl
 The rules are `cc::glob_matches`': `?` is one character, `*` a run not crossing `/`, and `**` one that does.
 On top of that a filter that is not already anchored also matches as a path *suffix*, which is what lets a bare filename or a repo-relative fragment reach an absolute path.
 A filter naming a directory stands for its subtree.
+An invocable test runs only through the alias named after it, and that alias carries the invocable's own location, so a file of invocables selects its instances too.
 Separators are normalized (`\` and `/` are the same, and git-bash's `/c/x` is `C:\x`), and matching folds case.
 
 A file match selects exactly like a substring filter does — it is **never** an exact name, so it opens neither the disabled nor the bucket gate.

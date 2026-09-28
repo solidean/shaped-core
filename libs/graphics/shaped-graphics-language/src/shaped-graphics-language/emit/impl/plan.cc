@@ -26,18 +26,20 @@ cc::string_view role_name(struct_role role)
         return "stage-to-stage struct";
     case struct_role::render_targets:
         return "render target struct";
+    case struct_role::patch_constants:
+        return "factors struct";
     }
     return "";
 }
 
-/// True for a function name some builtin is written as in this target: a local of that name would hide it.
+/// True for a name some builtin writes in this target: a local of that name would hide it.
 /// Read from the registry, so a new builtin needs no entry in a target's list of reserved words.
 bool is_called_by_a_builtin(checked_module const& m, emit::target t, cc::string_view name)
 {
     if (m.builtins == nullptr)
         return false;
     for (auto const& f : m.builtins->functions)
-        if (f.write.kind == builtins::spelling_kind::call && f.called_in(language_of(t)) == name)
+        if (f.writes_name(language_of(t), name))
             return true;
     return false;
 }
@@ -47,12 +49,17 @@ struct_role input_role(flat_entry_point const& e)
     // A compute parameter crosses no edge: it is a system value, or a struct of them.
     if (e.entry_stage == stage::compute)
         return struct_role::plain;
+    // the geometry and the tessellation stages take an array of what the stage before hands on
     return e.entry_stage == stage::vertex ? struct_role::vertex_input : struct_role::stage_link;
 }
 
 struct_role result_role(flat_entry_point const& e)
 {
-    return e.entry_stage == stage::vertex ? struct_role::stage_link : struct_role::render_targets;
+    if (e.entry_stage == stage::tessellation_control)
+        return struct_role::patch_constants;
+    return e.entry_stage == stage::vertex || e.entry_stage == stage::tessellation_evaluation
+             ? struct_role::stage_link
+             : struct_role::render_targets;
 }
 
 struct validator
@@ -77,6 +84,12 @@ struct validator
         {
             ++listed;
             auto const& s = m.at(id);
+            // workgroup memory is listed like a group and takes none: no host binds it
+            if (m.bindings[s.info].is_workgroup)
+            {
+                --listed;
+                continue;
+            }
             if (!m.bindings[s.info].is_inline)
             {
                 // Refused on every target, so an entry point written for one is written for all of them.
@@ -99,7 +112,7 @@ struct validator
 
     void tree()
     {
-        if (auto const violation = find_core_violation(e); violation.has_value())
+        if (auto const violation = find_core_violation(m, e); violation.has_value())
             report(error_kind::not_core, e.function, violation.value().reason);
         for (auto const& s : e.stmts)
             if (s.node.is<flat_print>())
@@ -131,7 +144,9 @@ struct validator
             else if (auto const* c = x.node.try_as<flat_call>())
             {
                 auto const* const record = m.builtin_function(c->intrinsic);
-                if (record == nullptr || record->parameters.size() != e.at(c->arguments).size())
+                auto const expected
+                    = record == nullptr ? -1 : record->parameters.size() + (record->takes_element ? 1 : 0);
+                if (record == nullptr || expected != e.at(c->arguments).size())
                     report(
                         error_kind::malformed_tree, e.function,
                         cc::format("a call of '{}' with {} arguments", m.at(c->callee).name, e.at(c->arguments).size()));
@@ -161,6 +176,8 @@ struct planner
     plan& p;
     /// Every spelling a struct or an enum case was given.
     cc::set<cc::string> type_spellings;
+    /// Where a factors struct's locations start: after the control point's, which SPIR-V counts in the same space.
+    i32 patch_location_base = 0;
 
     /// A name of the program as this target may spell it: itself, or with a trailing underscore where it is reserved.
     cc::string spell(cc::string_view name)
@@ -206,24 +223,62 @@ struct planner
         return members_of(p.m.at(range), has_locations);
     }
 
-    cc::vector<planned_member> members_of(cc::span<member_info const> members, bool has_locations)
+    cc::vector<planned_member> members_of(cc::span<member_info const> members, bool has_locations, i32 first_location = 0)
     {
         auto result = cc::vector<planned_member>();
-        auto next_location = 0;
+        auto next_location = first_location;
         for (auto const& member : members)
             result.push_back({
                 .name = spell_member(member.name, members),
                 .source_name = member.name,
                 .type = member.type,
                 .is_position = has_locations && member.is_position,
-                .location = has_locations && !member.is_position ? next_location++ : -1,
+                .interpolate = member.interpolate,
+                .output = member.output,
+                .factor = member.factor,
+                .location = has_locations && !member.is_position && member.output == check::pixel_output::color
+                                 && member.factor == check::tessellation_factor::none
+                              ? next_location++
+                              : -1,
             });
         return result;
+    }
+
+    /// An array type's spelling, after its element's, whose role is the array's: a patch's control points link stages.
+    void need_array(type_id type, struct_role role)
+    {
+        if (p.array_of_type[index_of(type)] != -1)
+            return;
+        auto const& info = p.m.at(type);
+        need(info.element, role);
+        need_enum(info.element);
+        auto const element = element_text(info.element);
+        auto const is_hlsl = p.which == emit::target::hlsl_dx12 || p.which == emit::target::hlsl_vulkan;
+        p.array_of_type[index_of(type)] = i32(p.array_texts.size());
+        p.array_texts.push_back(is_hlsl ? element : cc::format("array<{}, {}>", element, info.count));
+    }
+
+    /// What an array's element is spelled as, which `type_text` answers once the plan is done.
+    cc::string element_text(type_id type) const
+    {
+        if (auto const* const record = p.m.builtin_type_of(type))
+            return cc::string(record->spelled_in(language_of(p.which)));
+        auto const& info = p.m.at(type);
+        if (info.kind == type_kind::enumeration)
+            return cc::string(builtin_spelling(p, builtins::k_int));
+        if (info.kind == type_kind::array)
+            return p.array_texts[p.array_of_type[index_of(type)]];
+        if (info.kind == type_kind::atomic)
+            return cc::string(atomic_text(p, type));
+        return p.structs[p.struct_of_type[index_of(type)]].name;
     }
 
     /// Post-order, so a struct stands after every struct it holds, which HLSL needs and WGSL does not mind.
     void need(type_id type, struct_role role)
     {
+        // a binding array is declared with its resource, and has no type of its own to spell
+        if (is_valid(type) && !is_builtin_type(p.m, type) && p.m.at(type).kind == type_kind::array)
+            return p.m.takes_slots(type) ? void() : need_array(type, role);
         if (!is_valid(type) || is_builtin_type(p.m, type) || p.m.at(type).kind != type_kind::structure)
             return;
         if (p.struct_of_type[index_of(type)] != -1)
@@ -247,7 +302,8 @@ struct planner
             .type = type,
             .name = spell_type(p.m.at(info.symbol).name),
             .role = role,
-            .members = members_of(written, role != struct_role::plain),
+            .members = members_of(written, role != struct_role::plain,
+                                  role == struct_role::patch_constants ? patch_location_base : 0),
             .member_of = cc::move(member_of),
         });
     }
@@ -277,24 +333,30 @@ struct planner
         {
             auto const& s = p.m.at(id);
             auto const& b = p.m.bindings[s.info];
-            if (b.is_inline)
+            if (b.is_inline || b.is_workgroup)
                 continue; // sg addresses the inline constants itself, so they take no group of their own
             auto slot = first_resource_slot(p.m, b);
             auto const members = p.m.at(b.members);
             for (auto i = isize(0); i < members.size(); ++i)
             {
-                auto const& t = p.m.at(members[i].type);
+                // a binding array is its element's resource, at as many consecutive slots as it has elements
+                auto const& whole = p.m.at(members[i].type);
+                auto const is_array = whole.kind == type_kind::array;
+                auto const& t = is_array ? p.m.at(whole.element) : whole;
                 if (!check::is_resource(t.kind))
                     continue;
+                auto const count = is_array ? whole.count : 1;
                 p.resources.push_back({.binding = id,
                                        .member = i32(i),
                                        .name = p.names.mint(cc::format("{}_{}", s.name, members[i].name)),
                                        .host_name = cc::format("{}.{}", s.name, members[i].name),
-                                       .type = members[i].type,
+                                       .type = is_array ? whole.element : members[i].type,
                                        .element = t.element,
                                        .is_mut = t.is_mut,
                                        .group = group,
-                                       .slot = slot++});
+                                       .slot = slot,
+                                       .count = count});
+                slot += count;
             }
             ++group;
         }
@@ -308,7 +370,7 @@ struct planner
         {
             auto const& s = p.m.at(id);
             auto const& b = p.m.bindings[s.info];
-            if (b.is_inline)
+            if (b.is_inline || b.is_workgroup)
                 continue;
             auto const plain = plain_members_of(p.m, b);
             if (!plain.empty())
@@ -328,10 +390,32 @@ struct planner
                     planned.members[i].offset = placed.offsets[i];
                 auto next = 0;
                 for (auto const& member : p.m.at(b.members))
-                    planned.block_member_of.push_back(check::is_resource(p.m.at(member.type).kind) ? -1 : next++);
+                    planned.block_member_of.push_back(p.m.takes_slots(member.type) ? -1 : next++);
                 p.group_blocks.push_back(cc::move(planned));
             }
             ++group;
+        }
+    }
+
+    /// Every member of a `@workgroup` binding is a variable of its own, minted `<binding>_<member>`.
+    void workgroup_memory()
+    {
+        for (auto const id : p.e.bindings)
+        {
+            auto const& s = p.m.at(id);
+            auto const& b = p.m.bindings[s.info];
+            if (!b.is_workgroup)
+                continue;
+            auto const members = p.m.at(b.members);
+            for (auto i = isize(0); i < members.size(); ++i)
+            {
+                need(members[i].type, struct_role::plain);
+                need_enum(members[i].type);
+                p.workgroup.push_back({.binding = id,
+                                       .member = i32(i),
+                                       .name = p.names.mint(cc::format("{}_{}", s.name, members[i].name)),
+                                       .type = members[i].type});
+            }
         }
     }
 
@@ -363,14 +447,22 @@ struct planner
     void struct_offsets()
     {
         for (auto const id : p.e.bindings)
-            for (auto const& member : p.m.at(p.m.bindings[p.m.at(id).info].members))
+        {
+            auto const& b = p.m.bindings[p.m.at(id).info];
+            // workgroup memory is laid out by each target alone
+            if (b.is_workgroup)
+                continue;
+            for (auto const& member : p.m.at(b.members))
             {
-                auto const& t = p.m.at(member.type);
+                auto const& whole = p.m.at(member.type);
+                auto const& t
+                    = p.m.takes_slots(member.type) && whole.kind == type_kind::array ? p.m.at(whole.element) : whole;
                 if (t.kind == type_kind::buffer)
                     offsets_of(t.element, address_space::storage);
                 else if (!check::is_resource(t.kind))
                     offsets_of(member.type, address_space::constants);
             }
+        }
     }
 
     void offsets_of(type_id type, address_space space)
@@ -432,12 +524,46 @@ sgl::builtins::language sgl::emit::impl::language_of(target t)
     return builtins::language::hlsl;
 }
 
+sgl::i32 sgl::emit::impl::workgroup_of(plan const& p, check::symbol_id binding, i32 member)
+{
+    for (auto i = isize(0); i < p.workgroup.size(); ++i)
+        if (p.workgroup[i].binding == binding && p.workgroup[i].member == member)
+            return i32(i);
+    return -1;
+}
+
 sgl::i32 sgl::emit::impl::resource_of(plan const& p, check::symbol_id binding, i32 member)
 {
     for (auto i = isize(0); i < p.resources.size(); ++i)
         if (p.resources[i].binding == binding && p.resources[i].member == member)
             return i32(i);
     return -1;
+}
+
+cc::string_view sgl::emit::impl::atomic_text(plan const& p, check::type_id type)
+{
+    auto const is_signed = p.m.name_of(p.m.at(type).element) == builtins::k_int;
+    switch (p.which)
+    {
+    case target::hlsl_dx12:
+    case target::hlsl_vulkan:
+        return is_signed ? "int" : "uint";
+    case target::wgsl:
+        return is_signed ? "atomic<i32>" : "atomic<u32>";
+    case target::msl:
+        return is_signed ? "atomic_int" : "atomic_uint";
+    }
+    return {};
+}
+
+cc::string sgl::emit::impl::array_dimensions(plan const& p, check::type_id type)
+{
+    if (p.which != target::hlsl_dx12 && p.which != target::hlsl_vulkan)
+        return {};
+    auto result = cc::string();
+    for (; is_valid(type) && p.m.at(type).kind == type_kind::array; type = p.m.at(type).element)
+        result.appendf("[{}]", p.m.at(type).count);
+    return result;
 }
 
 cc::string_view sgl::emit::impl::builtin_spelling(plan const& p, cc::string_view name)
@@ -485,8 +611,10 @@ void sgl::emit::impl::validate_edge_struct(check::checked_module const& m,
                     break;
                 }
 
+        // a tessellation factor is an array HLSL passes as a system value, which crosses as no member does
         auto const* const record = m.builtin_type_of(member.type);
-        if (record == nullptr || !record->crosses_edges)
+        auto const is_factor = role == struct_role::patch_constants && member.factor != check::tessellation_factor::none;
+        if ((record == nullptr || !record->crosses_edges) && !is_factor)
             report(error_kind::unsupported, info.symbol,
                    cc::format("a member of type '{}' in a {}: '{}.{}'", m.name_of(member.type), role_name(role), name,
                               member.name));
@@ -539,6 +667,9 @@ void sgl::emit::impl::validate_binding(check::checked_module const& m, check::sy
 
     auto const& s = m.at(id);
     auto const& b = m.bindings[s.info];
+    // workgroup memory is laid out by each target alone, since no host writes it
+    if (b.is_workgroup)
+        return;
 
     // A plain member is a constant of a block: the `@inline` one, or the constant buffer its group owns.
     // A resource is a slot of its own in a group, and has no place in an `@inline` block; a buffer's element is placed too.
@@ -546,14 +677,16 @@ void sgl::emit::impl::validate_binding(check::checked_module const& m, check::sy
     for (auto const& member : m.at(b.members))
     {
         auto const& t = m.at(member.type);
-        if (!b.is_inline && check::is_resource(t.kind))
+        if (!b.is_inline && m.takes_slots(member.type))
         {
-            if (t.kind == check::type_kind::buffer && !is_placeable(m, t.element))
+            // a binding array of buffers places its element as a lone buffer does
+            auto const& r = t.kind == check::type_kind::array ? m.at(t.element) : t;
+            if (r.kind == check::type_kind::buffer && !is_placeable(m, r.element))
             {
                 is_placed = false;
-                auto const inner = first_unplaceable(m, t.element);
+                auto const inner = first_unplaceable(m, r.element);
                 report(error_kind::unsupported,
-                       cc::format("a buffer of '{}' in a binding: '{}.{}'{}", m.name_of(t.element), s.name, member.name,
+                       cc::format("a buffer of '{}' in a binding: '{}.{}'{}", m.name_of(r.element), s.name, member.name,
                                   inner.contains("bool") ? ", whose bool has no layout; bool32 has one" : ""));
             }
             continue;
@@ -615,7 +748,7 @@ cc::vector<sgl::check::member_info> sgl::emit::impl::plain_members_of(check::che
 {
     auto result = cc::vector<check::member_info>();
     for (auto const& member : m.at(b.members))
-        if (!check::is_resource(m.at(member.type).kind))
+        if (!m.takes_slots(member.type))
             result.push_back(member);
     return result;
 }
@@ -648,16 +781,24 @@ void sgl::emit::impl::validate(check::checked_module const& m, check::flat_entry
     if (e.input == e.result && e.entry_stage != stage::compute)
         v.report(error_kind::unsupported, e.function,
                  cc::format("one struct as both the parameter and the result: '{}'", m.name_of(e.input)));
-    // The struct spelling of the thread id needs the signedness question settled first (the spec's bindings file).
-    if (e.entry_stage == stage::compute && !e.takes_thread_id)
-        v.report(error_kind::unsupported, e.function,
-                 "a @compute fun whose parameter is a struct; write `@thread_id id: int3` for now");
 
     // A compute entry point has no pipeline edge at either end, so neither struct is judged as one.
     if (e.entry_stage != stage::compute)
     {
-        v.edge_struct(e.input, input_role(e));
-        if (e.input != e.result)
+        // the geometry and the tessellation stages take an array of what crosses, and a geometry stage hands its
+        // vertices on through its stream rather than its result
+        auto input = e.input;
+        if (check::is_valid(input) && m.at(input).kind == type_kind::array)
+            input = m.at(input).element;
+        if (check::is_valid(input))
+            v.edge_struct(input, input_role(e));
+        if (e.entry_stage == stage::geometry)
+        {
+            for (auto const& local : e.locals)
+                if (local.kind == check::local_kind::parameter && m.at(local.type).kind == type_kind::stream)
+                    v.edge_struct(m.at(local.type).element, struct_role::stage_link);
+        }
+        else if (input != e.result)
             v.edge_struct(e.result, result_role(e));
     }
     v.bindings();
@@ -669,17 +810,38 @@ sgl::emit::impl::plan sgl::emit::impl::make_plan(check::checked_module const& m,
     auto result = plan{.m = m, .e = e, .which = t, .names = e.names};
     // Reserved first, so nothing minted below can be one of them.
     for (auto const word : reserved_words(t))
-        result.names.taken.push_back(word);
+        (void)result.names.reserve(word);
     if (m.builtins != nullptr)
         for (auto const& f : m.builtins->functions)
+        {
             if (f.write.kind == builtins::spelling_kind::call)
-                result.names.taken.push_back(f.called_in(language_of(t)));
+                (void)result.names.reserve(f.called_in(language_of(t)));
+            for (auto const name : f.names_in(language_of(t)))
+                (void)result.names.reserve(name);
+        }
     result.struct_of_type.resize_to_filled(m.types.size(), -1);
     result.enum_of_type.resize_to_filled(m.types.size(), -1);
+    result.array_of_type.resize_to_filled(m.types.size(), -1);
 
     auto p = planner{.p = result};
+    // a tessellation stage's control points take the first locations, and its factors struct's members the next
+    if (check::is_valid(e.input) && m.at(e.input).kind == type_kind::array
+        && (e.entry_stage == stage::tessellation_control || e.entry_stage == stage::tessellation_evaluation))
+        for (auto const& member : m.at(m.at(m.at(e.input).element).members))
+            p.patch_location_base += member.is_position ? 0 : 1;
     p.need(e.input, input_role(e));
     p.need(e.result, result_role(e));
+    // the geometry stage's stream, and the evaluation stage's factors, are parameters after the first
+    for (auto const& local : e.locals)
+    {
+        if (local.kind != check::local_kind::parameter)
+            continue;
+        auto const& t = m.at(local.type);
+        if (t.kind == type_kind::stream)
+            p.need(t.element, struct_role::stage_link);
+        if (e.entry_stage == stage::tessellation_evaluation && t.kind == type_kind::structure && local.type != e.input)
+            p.need(local.type, struct_role::patch_constants);
+    }
     for (auto const& local : e.locals)
     {
         p.need(local.type, struct_role::plain);
@@ -694,22 +856,111 @@ sgl::emit::impl::plan sgl::emit::impl::make_plan(check::checked_module const& m,
     for (auto const id : e.bindings)
         for (auto const& member : m.at(m.bindings[m.at(id).info].members))
         {
-            auto const& t = m.at(member.type);
+            auto const& whole = m.at(member.type);
+            auto const& t = m.takes_slots(member.type) && whole.kind == type_kind::array ? m.at(whole.element) : whole;
             p.need(t.kind == type_kind::buffer ? t.element : member.type, struct_role::plain);
         }
     // `spell` is what mints `<name>_` where the target reserves the name or a builtin is called by it.
     result.entry_name = p.spell(e.name);
+    if (e.entry_stage == stage::tessellation_control)
+    {
+        result.patch_function = result.names.mint(cc::format("{}_patch", e.name));
+        result.point_index = result.names.mint("point_index");
+    }
     p.constants();
     p.group_blocks();
     p.resources();
+    p.workgroup_memory();
     p.memory_forms();
     p.struct_offsets();
     // The check pass minted the locals, so a buffer or a block minted above never took one's name.
     for (auto const& local : e.locals)
         result.locals.push_back(p.spell(local.name));
-    if (e.entry_stage == stage::compute && !result.locals.empty())
-        result.dispatch_name = result.names.mint(cc::format("{}_in", result.locals[0]));
+    for (auto const& input : e.stage_inputs)
+    {
+        auto const& local = result.locals[index_of(input.local)];
+        result.stage_input_names.push_back(result.names.mint(cc::format("{}_in", local)));
+        result.stage_input_bases.push_back(result.names.mint(cc::format("{}_base", local)));
+    }
     return result;
+}
+
+bool sgl::emit::impl::has_base(plan const& p, check::stage_input input)
+{
+    auto const is_hlsl = p.which == target::hlsl_dx12 || p.which == target::hlsl_vulkan;
+    return is_hlsl && (input == check::stage_input::vertex_index || input == check::stage_input::instance_index);
+}
+
+sgl::emit::impl::stage_input_spelling const& sgl::emit::impl::spelling_of(check::stage_input input)
+{
+    using check::stage_input;
+    static constexpr stage_input_spelling k_vertex_index
+        = {"uint", "SV_VertexID", "u32", "vertex_index", "uint", "vertex_id"};
+    static constexpr stage_input_spelling k_instance_index
+        = {"uint", "SV_InstanceID", "u32", "instance_index", "uint", "instance_id"};
+    static constexpr stage_input_spelling k_front_facing
+        = {"bool", "SV_IsFrontFace", "bool", "front_facing", "bool", "front_facing"};
+    static constexpr stage_input_spelling k_sample_index
+        = {"uint", "SV_SampleIndex", "u32", "sample_index", "uint", "sample_id"};
+    static constexpr stage_input_spelling k_sample_mask
+        = {"uint", "SV_Coverage", "u32", "sample_mask", "uint", "sample_mask"};
+    static constexpr stage_input_spelling k_primitive_id
+        = {"uint", "SV_PrimitiveID", "u32", "primitive_index", "uint", "primitive_id"};
+    static constexpr stage_input_spelling k_thread_id
+        = {"uint3", "SV_DispatchThreadID", "vec3u", "global_invocation_id", "uint3", "thread_position_in_grid"};
+    static constexpr stage_input_spelling k_local_thread_id
+        = {"uint3", "SV_GroupThreadID", "vec3u", "local_invocation_id", "uint3", "thread_position_in_threadgroup"};
+    static constexpr stage_input_spelling k_local_thread_index
+        = {"uint", "SV_GroupIndex", "u32", "local_invocation_index", "uint", "thread_index_in_threadgroup"};
+    static constexpr stage_input_spelling k_workgroup_id
+        = {"uint3", "SV_GroupID", "vec3u", "workgroup_id", "uint3", "threadgroup_position_in_grid"};
+    // its HLSL type is the domain's, which the parameter states: `float3` for triangles, `float2` otherwise
+    static constexpr stage_input_spelling k_domain_location
+        = {"float3", "SV_DomainLocation", "vec3f", "", "float3", ""};
+    switch (input)
+    {
+    case stage_input::vertex_index:
+        return k_vertex_index;
+    case stage_input::instance_index:
+        return k_instance_index;
+    case stage_input::is_front_facing:
+        return k_front_facing;
+    case stage_input::sample_index:
+        return k_sample_index;
+    case stage_input::sample_mask:
+        return k_sample_mask;
+    case stage_input::primitive_id:
+        return k_primitive_id;
+    case stage_input::thread_id:
+        return k_thread_id;
+    case stage_input::local_thread_id:
+        return k_local_thread_id;
+    case stage_input::local_thread_index:
+        return k_local_thread_index;
+    case stage_input::workgroup_id:
+        return k_workgroup_id;
+    case stage_input::domain_location:
+        return k_domain_location;
+    case stage_input::none:
+        break;
+    }
+    CC_UNREACHABLE("a stage input without a spelling");
+}
+
+cc::string sgl::emit::impl::stage_input_value(plan const& p, isize index)
+{
+    auto const& input = p.e.stage_inputs[index];
+    auto const& raw = p.stage_input_names[index];
+    auto const type = check::info_of(input.input).type;
+    auto const is_wgsl = p.which == target::wgsl;
+    // HLSL counts a vertex and an instance from the draw's base, and DXC keeps that meaning on vulkan (EMIT-128).
+    auto const value
+        = has_base(p, input.input) ? cc::format("{} + {}", raw, p.stage_input_bases[index]) : cc::string(raw);
+    if (type == "int")
+        return cc::format("{}({})", is_wgsl ? "i32" : "int", value);
+    if (type == "int3")
+        return cc::format("{}({})", is_wgsl ? "vec3i" : "int3", value);
+    return value;
 }
 
 namespace
@@ -769,9 +1020,9 @@ cc::vector<sgl::emit::emitted_layout> sgl::emit::impl::layouts_of(plan const& p)
         auto layout = emitted_layout{.global = r.name, .stride = element_stride(p.m, r.element)};
         if (r.element_form.has_value())
             layout.fields = fields_of(r.element_form.value());
-        else if (p.m.builtin_type_of(r.element) == nullptr)
+        else if (auto const at = p.struct_of_type[index_of(r.element)]; at >= 0)
         {
-            auto const& s = p.structs[p.struct_of_type[index_of(r.element)]];
+            auto const& s = p.structs[at];
             layout.fields
                 = fields_of(p, s.members, s.member_of, p.m.at(p.m.at(r.element).members), address_space::storage);
         }

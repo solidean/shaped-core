@@ -2,6 +2,7 @@
 
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/memory/unique_ptr.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
 #include <shaped-graphics-language/ast/file_ast.hh>
@@ -14,11 +15,14 @@ namespace sgl::driver::impl
 /// One source checked against the prelude, which is what every driver starts from.
 ///
 /// `module` refers into `files` and `asts`, so the three move together and are never copied apart.
+/// A prelude file points into `parsed_prelude()`, shared by every compile; the rest into `owned_files` and `owned_asts`.
 struct front_end
 {
     cc::span<prelude_file const> prelude;
-    cc::vector<parsed_file> files;
-    cc::vector<ast::file_ast> asts;
+    cc::vector<parsed_file const*> files;
+    cc::vector<ast::file_ast const*> asts;
+    cc::vector<cc::unique_ptr<parsed_file>> owned_files;
+    cc::vector<cc::unique_ptr<ast::file_ast>> owned_asts;
     check::checked_module module;
     cc::string_view source_name;
     /// The file the source is: behind the prelude, or the prelude's own file when it is one (`prelude_file_of`).

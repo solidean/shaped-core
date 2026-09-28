@@ -200,6 +200,8 @@ public:
         case sg::feature::readwrite_image_formats:
         case sg::feature::float32_filtering:
         case sg::feature::multisampled_array_textures:
+        case sg::feature::primitive_index:
+        case sg::feature::sample_rate_shading:
             return true;
         case sg::feature::extended_image_formats:
             return _extended_image_formats;

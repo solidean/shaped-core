@@ -305,6 +305,7 @@ struct nullopt_t;
 template <class T>
 struct optional;
 
+struct exception;
 struct result_exception;
 struct any_error;
 template <class E>

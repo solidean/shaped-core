@@ -16,9 +16,15 @@ enum class sgl::check::feature : sgl::u8
     readwrite_image_formats,
     multisampled_array_textures,
     raytracing,
+    /// `@primitive_id` in the pixel stage, which vulkan gives only with the geometry stage and WGSL behind an extension.
+    primitive_index,
+    /// `@sample_index` and per-sample interpolation, which vulkan gives only with `sampleRateShading`.
+    sample_rate_shading,
+    geometry_shader,
+    tessellation_shader,
 };
 
-CC_FLAG_ENUM_INDEXED(sgl::check, feature, u8);
+CC_FLAG_ENUM_INDEXED(sgl::check, feature, u16);
 
 namespace sgl::check
 {
@@ -30,6 +36,10 @@ inline constexpr cc::string_view k_feature_names[] = {
     "readwrite_image_formats",     //
     "multisampled_array_textures", //
     "raytracing",                  //
+    "primitive_index",             //
+    "sample_rate_shading",         //
+    "geometry_shader",             //
+    "tessellation_shader",         //
 };
 inline constexpr isize k_feature_count = isize(sizeof(k_feature_names) / sizeof(k_feature_names[0]));
 

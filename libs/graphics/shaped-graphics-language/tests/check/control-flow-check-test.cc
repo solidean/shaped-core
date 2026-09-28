@@ -71,7 +71,7 @@ TEST("sgl check - an assignment names a mutable local, or a member of one")
           == "no-matching-overload user:[b -= b] operator -(bool, bool)\n");
     CHECK(reports_for("binding frame:\n    exposure: float\nfun f(k: float){frame} -> float:\n    frame.exposure = k\n"
                       "    return k\n")
-          == "not-assignable user:[frame.exposure] frame is a binding, which no shader writes\n");
+          == "not-assignable user:[frame.exposure] frame is a binding the host fills, which no shader writes\n");
 }
 
 TEST("sgl check - a block is a scope: a local ends with it, and a later local shadows an earlier one")

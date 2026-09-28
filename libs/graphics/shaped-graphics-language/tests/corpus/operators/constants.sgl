@@ -1,0 +1,47 @@
+// an expression of constants is folded as WGSL folds it when it creates the shader, and refused where WGSL refuses it,
+// so that an entry point is written for every target or none (CHK-310 to CHK-312)
+
+// what an int holds folds, the most negative int among it, and a uint wraps as WGSL folds it
+test (1 << 30) == 1073741824 and (-1 << 31) == -2147483647 - 1
+test (0 as uint) - 1 == 0xffff'ffff and ~(0 as uint) + 1 == 0
+
+// a runtime value keeps EVAL's wrapping: only a constant is refused
+test:
+    let big = 2147483647
+    big + 1 == -2147483647 - 1
+
+@expect(error = "constant-not-representable")
+test (1 << 31) == 0
+
+@expect(error = "constant-not-representable")
+test 2147483647 + 1 == 0
+
+@expect(error = "constant-not-representable")
+test (3 as uint) << 31 == 0
+
+@expect(error = "constant-not-representable")
+test (-1) as uint == 0xffff'ffff
+
+@expect(error = "constant-not-representable")
+test sqrt(-1.0) == 0.0
+
+@expect(error = "constant-not-representable")
+test 1.0 / 0.0 > 0.0
+
+// a constant count out of 0 to 31 is refused whatever it shifts, and a constant zero divisor whatever it divides
+@expect(error = "shift-out-of-range")
+test:
+    let x = 1
+    (x << (30 + 3)) == 2
+
+@expect(error = "constant-without-value")
+test:
+    let x = 7
+    x / (1 - 1) == 0
+
+// a call EVAL leaves without a value is wrong on every run
+@expect(error = "constant-without-value")
+test asin(2.0) == 0.0
+
+@expect(error = "constant-without-value")
+test atan2(0.0, 0.0) == 0.0

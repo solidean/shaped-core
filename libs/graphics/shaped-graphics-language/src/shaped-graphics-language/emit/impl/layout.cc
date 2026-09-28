@@ -86,6 +86,9 @@ cc::string sgl::emit::impl::first_unplaceable(check::checked_module const& m, ch
 {
     if (auto const* const record = m.builtin_type_of(type))
         return record->hlsl_layout.size != 0 ? cc::string() : cc::format(": {}", m.name_of(type));
+    // an atomic stands in memory as the integer it updates
+    if (is_valid(type) && m.at(type).kind == type_kind::atomic)
+        return first_unplaceable(m, m.at(type).element);
     if (!is_struct(m, type))
         return cc::format(": {}", m.name_of(type));
     for (auto const& member : m.at(m.at(type).members))
@@ -117,6 +120,8 @@ sgl::i32 sgl::emit::impl::element_stride(check::checked_module const& m, check::
 {
     if (auto const* const record = m.builtin_type_of(element))
         return record->hlsl_layout.size;
+    if (m.at(element).kind == check::type_kind::atomic)
+        return element_stride(m, m.at(element).element);
     return place_struct(m, element, address_space::storage).size;
 }
 
@@ -160,9 +165,15 @@ void sgl::emit::impl::collect_placed_structs(check::checked_module const& m,
                                              address_space space,
                                              cc::vector<check::type_id>& out)
 {
-    for (auto const& member : m.at(m.bindings[m.at(binding).info].members))
+    auto const& b = m.bindings[m.at(binding).info];
+    // workgroup memory is laid out by each target alone, since no host writes it
+    if (b.is_workgroup)
+        return;
+    for (auto const& member : m.at(b.members))
     {
-        auto const& t = m.at(member.type);
+        // a binding array of buffers holds its element as a lone buffer does
+        auto const& whole = m.at(member.type);
+        auto const& t = m.takes_slots(member.type) && whole.kind == check::type_kind::array ? m.at(whole.element) : whole;
         if (space == address_space::storage && t.kind == check::type_kind::buffer)
             collect_structs(m, t.element, out);
         else if (space == address_space::constants && !check::is_resource(t.kind))

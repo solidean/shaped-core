@@ -115,6 +115,7 @@ struct sgl::check::flat_builder
     flat_stmt_id continue_(label_id target);
     flat_stmt_id once(cc::span<flat_stmt_id const> body);
     flat_stmt_id break_();
+    flat_stmt_id discard();
     flat_stmt_id return_(flat_expr_id value);
 
     ast::range_of<flat_expr_id> expr_list(cc::span<flat_expr_id const> list);

@@ -209,9 +209,13 @@ TEST("sgl check - a number literal with a dot or an exponent is a float, and not
     CHECK(body_reports("let i = 99'999'999'999'999'999'999\nreturn k\n")
           == "unsupported-yet user:[99'999'999'999'999'999'999] an integer literal beyond 64 bits\n");
     CHECK(body_reports("return 0.5f32\n")
-          == "unsupported-yet user:[0.5f32] a number literal with a prefix, a suffix or a p exponent\n");
-    CHECK(body_reports("return 0xff\n")
-          == "unsupported-yet user:[0xff] a number literal with a prefix, a suffix or a p exponent\n");
+          == "unsupported-yet user:[0.5f32] a number literal with a suffix or a p exponent\n");
+    // CHK-269: a hex or binary literal is a number like any other, held to the type asked of it
+    CHECK(body_reports("return 0xff\n") == "");
+    CHECK(body_reports("let u: uint = 0xffff'ffff\nreturn k\n") == "");
+    CHECK(body_reports("let i = 0xffff'ffff\nreturn k\n")
+          == "literal-not-representable user:[0xffff'ffff] int does not hold 0xffff'ffff\n");
+    CHECK(body_reports("let i: int = -0x8000'0000\nlet b: int = 0b1010\nreturn k\n") == "");
     CHECK(body_reports("let s = \"text\"\nreturn k\n") == "unsupported-yet user:[\"text\"] a string literal\n");
 
     // The literal's type is the prelude's `float`, so a module without one says so.
@@ -481,4 +485,43 @@ TEST("sgl check - a mismatch between two types of one name says so, and notes wh
           == "type-mismatch user:[make()] expected thing, got thing, two different types of that name\n"
              "  note user:[thing] the thing expected is declared here\n"
              "  note prelude:[thing] the thing given is declared here\n");
+}
+
+TEST("sgl check - a constant an inlined call makes of its parameters is judged as WGSL folds it, at the call")
+{
+    // CHK-310: an argument that is a literal stands for its parameter, so WGSL sees `1 << 31` and refuses it
+    constexpr auto shifted = "fun shifted(n: int) -> int => 1 << n\n"
+                             "binding res:\n    ints: mut buffer[int]\n\n"
+                             "@compute(1) fun cs(@thread_id id: int3){res}:\n";
+    CHECK(reports_for(cc::format("{}    res.ints[0] = shifted(30)\n", shifted)) == "");
+    CHECK(reports_for(cc::format("{}    res.ints[0] = shifted(31)\n", shifted))
+          == "constant-not-representable user:[1 << n] `1 << n` is an int shifted left past its sign, which WGSL "
+             "refuses in a constant\n"
+             "  note user:[shifted(31)] reached through this call, whose arguments stand in for its parameters\n");
+    // a runtime argument keeps EVAL-86's wrapping, and a let holds no constant
+    CHECK(reports_for(cc::format("{}    res.ints[0] = shifted(id.x)\n", shifted)) == "");
+    CHECK(reports_for(cc::format("{}    let n = 31\n    res.ints[0] = shifted(n)\n", shifted)) == "");
+
+    // two entry points inlining one function report it once
+    CHECK(reports_for(cc::format("{}    res.ints[0] = shifted(31)\n"
+                                 "@compute(1) fun cs2(@thread_id id: int3){{res}}:\n    res.ints[0] = shifted(31)\n",
+                                 shifted))
+          == "constant-not-representable user:[1 << n] `1 << n` is an int shifted left past its sign, which WGSL "
+             "refuses in a constant\n"
+             "  note user:[shifted(31)] reached through this call, whose arguments stand in for its parameters\n");
+}
+
+TEST("sgl check - a constant count or divisor is judged alone, whatever stands beside it")
+{
+    constexpr auto head = "binding res:\n    ints: mut buffer[int]\n    floats: mut buffer[float]\n\n"
+                          "@compute(1) fun cs(@thread_id id: int3){res}:\n";
+    CHECK(reports_for(cc::format("{}    res.ints[0] = id.x >> (40 - 9)\n", head)) == "");
+    CHECK(reports_for(cc::format("{}    res.ints[0] = id.x << (40 - 8)\n", head))
+              .contains("shift-out-of-range user:[id.x << (40 - 8)] `id.x << (40 - 8)` shifts by 32"));
+    CHECK(reports_for(cc::format("{}    res.ints[0] = id.x % (2 - 2)\n", head))
+              .contains("constant-without-value user:[id.x % (2 - 2)]"));
+    CHECK(reports_for(cc::format("{}    res.ints[0] = (int2(id.x, 1) / int2(1, 0)).x\n", head))
+              .contains("constant-without-value"));
+    // a float divided by a constant zero at run time is an infinity every target gives alike
+    CHECK(reports_for(cc::format("{}    res.floats[0] = (id.x as float) / 0.0\n", head)) == "");
 }

@@ -34,6 +34,7 @@ Control flow and expressions:
 * `return` - leaves the nearest enclosing `fun`, named or anonymous ([AST-112](syntax/ast.md#jumps))
 * `yield` - **experimental**; gives a value block its value: `yield expression` ([AST-108](syntax/ast.md#value-blocks-and-yield))
 * `continue` - continue next loop iteration
+* `discard` - ends a pixel with no effect; a jump, which only a pixel stage may reach ([CHK-277](semantics/checking.md#entry-points))
 * `break` - breaks from loop iteration
 * `case` - generalized if expression
 

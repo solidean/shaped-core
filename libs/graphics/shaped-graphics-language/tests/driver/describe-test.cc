@@ -424,3 +424,40 @@ struct link:
     CHECK(error.contains("stage-not-allowed"));
     CHECK(error.contains("store is @stages without it"));
 }
+
+TEST("sgl describe - workgroup memory has no host side, so the host is told nothing of it")
+{
+    auto const d = described("@workgroup binding tile:\n"
+                             "    values: float[64]\n"
+                             "\n"
+                             "binding work:\n"
+                             "    sums: mut buffer[float]\n"
+                             "\n"
+                             "@compute(64) fun cs(@local_thread_index li: int){tile, work}:\n"
+                             "    tile.values[li] = 1.0\n"
+                             "    workgroup_barrier()\n"
+                             "    if li == 0 => work.sums[0] = tile.values[63]\n");
+    REQUIRE(d.bindings.size() == 1);
+    CHECK(d.bindings[0].name == "work");
+    REQUIRE(d.entry_points.size() == 1);
+    REQUIRE(d.entry_points[0].bindings.size() == 1);
+    CHECK(d.entry_points[0].bindings[0] == "work");
+}
+
+TEST("sgl describe - a binding array is its element's binding, with a count and as many slots")
+{
+    auto const d = described("require binding_arrays\n"
+                             "\n"
+                             "binding materials:\n"
+                             "    albedo: texture_2d[float4][8]\n"
+                             "    params: buffer[float4][2]\n");
+    REQUIRE(d.bindings.size() == 1);
+    auto const& members = d.bindings[0].members;
+    REQUIRE(members.size() == 2);
+    CHECK(members[0].type == "texture_2d[float4]");
+    CHECK(members[0].slot == 0);
+    CHECK(members[0].count == 8);
+    CHECK(members[1].type == "float4");
+    CHECK(members[1].slot == 8);
+    CHECK(members[1].count == 2);
+}

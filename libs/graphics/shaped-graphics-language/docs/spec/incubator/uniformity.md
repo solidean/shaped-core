@@ -17,27 +17,37 @@ It follows where a value may differ between invocations — a stage input, a sto
 Either the control flow is annotated as uniform, with `@uniform` or something like it, where the author knows more than the analysis can prove.
 Or the gradient is computed before the branch, where every pixel of the quad still runs, and the sample inside takes it explicitly through the `grad` form of `sample`.
 
-**It replaces a stopgap.**
-Today the WGSL text of an entry point that samples opens with `diagnostic(off, derivative_uniformity);` ([EMIT-103](../semantics/emitting.md#bindings)).
-That keeps Tint quiet and leaves the undefined result in place.
-Once SGL judges uniformity, that directive goes, and WGSL's own analysis agrees with SGL's or finds nothing SGL has not already refused.
+**It replaced a stopgap.**
+The WGSL text of an entry point that sampled used to open with `diagnostic(off, derivative_uniformity);`, which kept Tint quiet and left the undefined result in place.
 
-## What it touches
+## What it touched
 
-* Checking: a pass over the inlined flat tree of each entry point, and a diagnostic kind for a sample in non-uniform control flow.
-* The builtin registry: which builtins take implicit derivatives, which the record already says for the emitters.
-* Syntax: an attribute on an `if`, a loop or a `case` that asserts it is uniform, or some other place to state it.
-* Texture methods: a `sample` that takes explicit gradients, and the derivative builtins to compute them ([texture-methods.md](texture-methods.md)).
-* Emitting: the WGSL directive is removed.
+* Checking: a pass over the core tree of each entry point, and the diagnostic kind `non-uniform-control-flow` for a call in non-uniform control flow.
+* The builtin registry: a record says whether its builtin takes derivatives implicitly or is a barrier, and the pass reads that alone.
+* Texture methods: `sample(…, grad_x = …, grad_y = …)` takes explicit gradients, and `ddx` and `ddy` compute them ([texture-methods.md](texture-methods.md)).
+* Emitting: the WGSL directive is gone.
+* Syntax is untouched: an annotation that asserts a branch uniform is still open.
 
 ## Already fixed by the syntax
 
 * Attributes attach to declarations and take parsed arguments, so a statement attribute would be a new place for one rather than a new form.
 * `@stages` already keeps an implicit-derivative sample out of every stage but the pixel stage.
 
+## What exists
+
+The pass is CHK-282 to CHK-284, over the core tree of each entry point, for barriers and for every builtin that takes derivatives.
+It judges an index into a binding array too, which is marked `nonuniform` or proven uniform (CHK-300).
+**Soundness is the invariant, not agreement with Tint.**
+The pass must be sound for every target: whatever it accepts reaches each barrier and each derivative in uniform control flow.
+It need not refuse everything Tint refuses.
+Where Tint's analysis is coarser than ours and refuses a sound program, the WGSL text silences Tint's check for it.
+No such program is known yet, so no mechanism exists for it; one is built when the first one turns up.
+The pass starts from WGSL's rules, and is coarser than them in one place:
+a local set anywhere in non-uniform control flow is non-uniform everywhere, where WGSL follows each assignment.
+
 ## Open
 
-* Whether the analysis is WGSL's rules, which are conservative and specified, or a finer one that proves more programs uniform.
+* Whether a finer analysis proves more programs uniform than WGSL's rules, and what silencing Tint for them then looks like.
 * Where `@uniform` stands: on the branch, on the value it tests, or on a function's parameter.
 * Whether an annotated branch is trusted, or checked at run time in a debug build.
-* Whether other derivative consumers — `ddx`, `ddy`, `fwidth` — follow the same rule once they exist, and barriers in compute.
+* Subgroup operations, which need the same judgement once they exist.

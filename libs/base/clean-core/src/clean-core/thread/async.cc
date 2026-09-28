@@ -1,5 +1,6 @@
 #include <clean-core/common/time.hh>
 #include <clean-core/error/exception.hh> // std::exception, to classify one that escaped a compute frame
+#include <clean-core/error/exception_base.hh>
 #include <clean-core/memory/node_allocation.hh>
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_node.hh>
@@ -861,6 +862,10 @@ cc::string cc::impl::async_describe_current_exception()
     catch (std::exception const& e)
     {
         return cc::string("exception escaped an async frame: ") + e.what();
+    }
+    catch (cc::exception const& e)
+    {
+        return cc::string("exception escaped an async frame: ") + e.message();
     }
     catch (...)
     {
