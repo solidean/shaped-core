@@ -22,9 +22,9 @@ Each library arrives as one versioned real file plus the unversioned and soname 
 Each also carries an RPATH of `$ORIGIN/../lib`, `@loader_path/../lib` on macOS, and finds its siblings only through it.
 So an install that drops the links, or that moves the libraries to bin/ as a Windows-shaped install would, produces a directory that looks complete and loads nothing.
 
-NOT EVERY PLATFORM HAS A RELEASE.
-Upstream publishes x64 Windows, x86_64 Linux and arm64 macOS.
-The other machines those systems run on are declared in `unavailable_on` and skipped here rather than handed an archive built for a different instruction set.
+NOT EVERY MACHINE IS PINNED.
+Upstream publishes no asset for windows-arm64 or linux-arm64, and its macos-x64 asset is deliberately unpinned.
+All three are declared in `unavailable_on` and skipped here rather than handed an archive built for a different instruction set.
 
 Re-running is idempotent; pass --force to re-download anyway.
 """

@@ -3,7 +3,7 @@
 # requires-python = ">=3.10"
 # dependencies = ["pyyaml>=6"]
 # ///
-"""Self-test for deps_manifest's host resolution: which upstream is available on which machine.
+"""Self-test for deps_manifest: which upstream is available on which machine, and what a `github-files` list must hold.
 
 This is the one manifest question a wrong answer does not report.
 An upstream declared available where it publishes nothing is fetched anyway, and the archive — built for another
@@ -112,8 +112,8 @@ def test_unknown_machine_keeps_an_upstream_without_arch_keys() -> None:
         check("bare linux on linux-riscv64", deps_manifest.one(_manifest_with(["linux"])).is_available, False)
 
 
-def test_oidn_matches_the_published_assets() -> None:
-    # Upstream publishes x64 Windows, x86_64 Linux and arm64 macOS, and nothing else.
+def test_oidn_matches_the_pinned_assets() -> None:
+    # Upstream has no asset for windows-arm64 or linux-arm64, and its macos-x64 one is deliberately unpinned.
     got = availability(EXTERN / "oidn")
     want = {("windows", "x64"): True, ("windows", "arm64"): False,
             ("linux", "x64"): True, ("linux", "arm64"): False,
@@ -128,6 +128,51 @@ def test_dxc_matches_the_published_assets() -> None:
             ("linux", "x64"): True, ("linux", "arm64"): False,
             ("macos", "x64"): False, ("macos", "arm64"): False}
     check("DXC availability", got, want)
+
+
+def test_unavailable_host_resolves_no_pin_or_asset() -> None:
+    # OIDN declares `pin_hash_linux` and `asset_linux`, which name the x86_64 archive; an arm64 host must not see them.
+    with on_machine("aarch64"):
+        oidn = deps_manifest.one(EXTERN / "oidn")
+        check("OIDN pin_hash on linux-aarch64", oidn.pin_hash, "")
+        check("OIDN asset on linux-aarch64", oidn.asset, "")
+    with on_machine("x86_64"):
+        check("OIDN asset on linux-x86_64", deps_manifest.one(EXTERN / "oidn").asset, "oidn-2.5.1.x86_64.linux.tar.gz")
+
+
+def _files_manifest(files: list[dict], pin_hash: str | None = None) -> Path:
+    directory = Path(tempfile.mkdtemp())
+    pin = pin_hash
+    if pin is None:
+        pin = deps_manifest.files_pin(files) if all("sha256" in f for f in files) else "0" * 64
+    entry = {"name": "Probe", "source": "github-files", "track": "default-branch", "digest_algo": "sha256",
+             "pin_hash": pin, "license": "MIT", "license_text": "probe", "files": files}
+    (directory / "dependency.yml").write_text(yaml.safe_dump({"upstreams": [entry]}), encoding="utf-8")
+    return directory
+
+
+def _refused(what: str, directory: Path, needle: str) -> None:
+    try:
+        deps_manifest.one(directory)
+        failures.append(f"{what} was accepted")
+    except ValueError as error:
+        if needle not in str(error):
+            failures.append(f"{what} was refused for another reason: {error}")
+
+
+def test_github_files_are_checked_at_load() -> None:
+    # `.install/pin.txt` is compared against `pin_hash` alone, so a file digest bumped without it must fail at load.
+    good = [{"path": "a.txt", "sha256": "1" * 64}, {"path": "sub/b.tza", "sha256": "2" * 64}]
+    check("consistent github-files manifest loads", len(deps_manifest.one(_files_manifest(good)).files), 2)
+    _refused("mismatched pin_hash", _files_manifest(good, pin_hash="0" * 64), "hashes to")
+    _refused("a files entry without sha256", _files_manifest([{"path": "a.txt"}]), "sha256")
+    for bad in ("/etc/passwd", "C:/weights.tza", "../escape.tza", "sub/../../escape.tza", r"sub\..\..\escape.tza"):
+        _refused(f"files path {bad!r}", _files_manifest([{"path": bad, "sha256": "1" * 64}]), "inside the install")
+
+
+def test_real_oidn_weights_manifest_loads() -> None:
+    weights = deps_manifest.one(EXTERN / "oidn-weights")
+    check("OIDN-Weights pin_hash matches its files", weights.pin_hash, deps_manifest.files_pin(weights.files))
 
 
 def _manifest_with(unavailable_on: list[str]) -> Path:
@@ -168,7 +213,7 @@ def main() -> int:
         for line in failures:
             print(f"  {line}")
         return 1
-    print("manifest-self-test: OK (host resolution, unknown machines, availability across 6 hosts, key validation)")
+    print("manifest-self-test: OK (host resolution, unknown machines, availability across 6 hosts, key validation, github-files)")
     return 0
 
 

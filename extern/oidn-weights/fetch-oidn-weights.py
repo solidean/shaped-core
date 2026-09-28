@@ -6,8 +6,8 @@
 """Download the pinned Open Image Denoise weights into extern/oidn-weights/.install.
 
 These are the trained networks behind `sr::denoise_method::oidn`, and they arrive WITHOUT the library that usually
-carries them: 1.8 MB of weights rather than 53 MB of runtime, because shaped-rendering runs the network in its own
-compute shaders rather than calling Intel's inference.
+carries them: two files and 2.5 MB of weights rather than 53 MB of runtime, because shaped-rendering runs the network
+in its own compute shaders rather than calling Intel's inference.
 
 Apache-2.0, the same license as OIDN itself, and fetched on every configure, where the library is fetched only on request.
 
@@ -43,16 +43,6 @@ MEDIA = "https://media.githubusercontent.com/media/RenderKit/oidn-weights/{tag}/
 RAW = "https://raw.githubusercontent.com/RenderKit/oidn-weights/{tag}/{path}"
 
 
-def pin_over(files: list[dict]) -> str:
-    """The digest over the whole set, which is what pin.txt records.
-
-    Over `path sha256` lines rather than over the bytes: it has to change when a file is ADDED or REMOVED, not only
-    when one of them changes, and that is exactly what a list of names plus hashes says.
-    """
-    lines = "".join(f"{f['path']} {f['sha256']}\n" for f in files)
-    return hashlib.sha256(lines.encode("utf-8")).hexdigest()
-
-
 def fetch(tag: str, entry: dict, into: Path) -> None:
     """Download one pinned file, verify its digest, and place it under `into`."""
     host = MEDIA if entry.get("lfs") else RAW
@@ -77,14 +67,10 @@ def main() -> None:
     parser.add_argument("--force", action="store_true", help="re-download even when the pin already matches")
     args = parser.parse_args()
 
+    # Loading refuses a `pin_hash` that disagrees with `files`, so this pin covers every file below.
     upstream = deps_manifest.one(DEST)
     files = upstream.files
-    pin = pin_over(files)
-
-    # The manifest's own pin must agree with the list it sits above, or the staleness check every other tool runs would
-    # be comparing against a number nothing derived.
-    if pin != upstream.pin_hash:
-        sys.exit(f"dependency.yml: `pin_hash` is {upstream.pin_hash}, but the file list hashes to {pin}.")
+    pin = upstream.pin_hash
 
     if not args.force and PIN_FILE.is_file() and PIN_FILE.read_text(encoding="utf-8").strip() == pin:
         print("OIDN weights already installed")

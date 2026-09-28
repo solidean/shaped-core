@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.28)
 
 # The trained Open Image Denoise networks, without the library that usually carries them.
 #
-# There is nothing to compile and nothing to link: what arrives is one 1.8 MB blob of weights that shaped-rendering
+# There is nothing to compile and nothing to link: what arrives is two files and 2.5 MB of weights that shaped-rendering
 # reads at run time and uploads to the GPU, because it runs the network in its own compute shaders.
 # So this exposes a PATH rather than a target.
 set(OIDN_WEIGHTS_INSTALL ${CMAKE_CURRENT_SOURCE_DIR}/.install)

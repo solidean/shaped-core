@@ -15,9 +15,10 @@ This module is imported, not run, so it carries no PEP 723 block — but it need
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import hashlib
 import platform
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 import yaml
 
@@ -62,7 +63,7 @@ class Upstream:
     # For `track: tags`, a regex selecting which tags are versions at all — upstreams tag far more than releases.
     # Empty means the default "looks like a version number" pattern.
     tag_pattern: str = ""
-    # Host keys this upstream has no release for at all — see `HOST_KEYS` for the spelling.
+    # Host keys we pin nothing for, because upstream has no release there or we deliberately skip it — see `HOST_KEYS` for the spelling.
     # Distinct from a missing per-OS key, which stays an error: that means nobody has looked, and this means somebody did.
     unavailable_on: list[str] = field(default_factory=list)
     license_files: list[str] = field(default_factory=list)
@@ -94,23 +95,12 @@ class Upstream:
         """Whether this upstream hydrates a gitignored `.install/` rather than being committed.
 
         True for `on-request` too: it installs exactly the same way, and every pin and path rule below is the same.
-        What differs is who runs the fetch, which is `is_on_request`.
         """
         return self.install in ("fetched", "on-request")
 
     @property
-    def is_on_request(self) -> bool:
-        """Whether a person has to fetch this by hand, so an absent install is the normal state rather than a failure."""
-        return self.install == "on-request"
-
-    @property
-    def is_installed(self) -> bool:
-        """Whether the install is actually on disk, which for an `on-request` upstream is usually false."""
-        return not self.is_fetched or self.pin_file.is_file()
-
-    @property
     def is_available(self) -> bool:
-        """Whether this upstream has a release for the host at all.
+        """Whether this upstream is pinned for the host at all.
 
         False means the manifest says so deliberately — see `unavailable_on`.
         Such an upstream carries no pin and no asset here, so every field that would name one is empty.
@@ -141,6 +131,15 @@ class Upstream:
     def license_paths(self) -> list[Path]:
         """`license_files` resolved against the dependency directory."""
         return [self.directory / p for p in self.license_files]
+
+
+def files_pin(files: list[dict]) -> str:
+    """The `pin_hash` of a `github-files` upstream: the sha256 over its UTF-8 `<path> <sha256>` lines, in order.
+
+    Over names plus hashes rather than over the bytes, so adding or removing a file changes the pin as surely as changing one does.
+    """
+    lines = "".join(f"{f['path']} {f['sha256']}\n" for f in files)
+    return hashlib.sha256(lines.encode("utf-8")).hexdigest()
 
 
 def manifest_path(directory: Path) -> Path:
@@ -268,15 +267,19 @@ def _build(path: Path, directory: Path, entry: object) -> Upstream:
         )
     host_unavailable = host_is_unavailable(unavailable)
 
+    # An unavailable host resolves every per-OS field to "", even where the OS key is declared.
+    # An arch-qualified `unavailable_on` key would otherwise hand linux-arm64 the x86_64 pin and asset.
     def per_os(key: str, *, required: bool) -> str:
         host_key = f"{key}_{suffix}"
         if host_key in entry:
-            return need(host_key)
-        if any(k.startswith(f"{key}_") for k in entry):
+            value = need(host_key)
+        elif any(k.startswith(f"{key}_") for k in entry):
             if host_unavailable:
                 return ""
             raise ValueError(f"{path}: upstream {entry.get('name', '?')!r} declares per-OS `{key}` but none for {suffix}")
-        return need(key) if required else str(entry.get(key, ""))
+        else:
+            value = need(key) if required else str(entry.get(key, ""))
+        return "" if host_unavailable else value
 
     up = Upstream(
         name=need("name"),
@@ -310,9 +313,30 @@ def _build(path: Path, directory: Path, entry: object) -> Upstream:
         raise ValueError(f"{path}: {up.name}: `install` must be one of {sorted(INSTALLS)}, got {up.install!r}")
     if up.digest_algo not in DIGEST_ALGOS:
         raise ValueError(f"{path}: {up.name}: `digest_algo` must be one of {sorted(DIGEST_ALGOS)}, got {up.digest_algo!r}")
-    if up.source == "github-files" and not up.files:
-        raise ValueError(f"{path}: {up.name}: `source: github-files` needs a `files` list")
+    if up.source == "github-files":
+        _check_files(path, up)
     if not up.license_files and not up.license_text:
         raise ValueError(f"{path}: {up.name}: needs `license_files` or `license_text`")
 
     return up
+
+
+def _check_files(path: Path, up: Upstream) -> None:
+    """Refuses a `github-files` list that is incomplete, escapes `.install/`, or disagrees with `pin_hash`.
+
+    Every staleness check compares `.install/pin.txt` against `pin_hash` alone, so the pin must agree with the list whenever the manifest loads.
+    A file digest bumped without the pin would otherwise leave every checkout on the old file, reported current.
+    """
+    if not up.files:
+        raise ValueError(f"{path}: {up.name}: `source: github-files` needs a `files` list")
+    for entry in up.files:
+        for key in ("path", "sha256"):
+            if not isinstance(entry.get(key), str) or not entry[key]:
+                raise ValueError(f"{path}: {up.name}: every `files` entry needs `{key}`, got {entry}")
+        # Both spellings, so a backslash cannot smuggle a `..` or a drive past the check on either host.
+        spellings = (PurePosixPath(entry["path"]), PureWindowsPath(entry["path"]))
+        if any(p.is_absolute() or p.anchor or ".." in p.parts for p in spellings):
+            raise ValueError(f"{path}: {up.name}: `files` path {entry['path']!r} must stay inside the install")
+    pin = files_pin(up.files)
+    if up.is_available and pin != up.pin_hash:
+        raise ValueError(f"{path}: {up.name}: `pin_hash` is {up.pin_hash}, but the `files` list hashes to {pin}")

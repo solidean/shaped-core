@@ -19,7 +19,8 @@ upstreams:
     pin_hash_linux: 743c3e2aff8c220d5d70fe6cb970fb3d36f2702d2693c61d1d148e404cf37cd6
     asset_macos: oidn-2.5.1.arm64.macos.tar.gz
     pin_hash_macos: 98e0aca8e7ab69e9f4f0191582a500fd8b0d9085d68662f18ab6469e934a6efd
-    # The release is per-architecture as well as per-OS, and these three machines have no asset at all.
+    # The release is per-architecture as well as per-OS.
+    # windows-arm64 and linux-arm64 have no asset; macos-x64 has one, deliberately unpinned.
     # Each pinned archive is built for exactly one instruction set, so fetching it anywhere else gets as far as the linker refusing the import library.
     unavailable_on: [windows-arm64, linux-arm64, macos-x64]
     license: Apache-2.0
@@ -47,6 +48,7 @@ upstreams:
       So fetch-oidn.py carries symlinks through, keeps both oneTBB spellings, and leaves the Unix libraries in lib/ rather than flattening them into bin/ as the Windows shape would suggest.
       It checks the installed names rather than only their count, because all three of those mistakes produced an install with a plausible number of files in it.
 
-      x64 WINDOWS, x86_64 LINUX AND arm64 macOS ARE THE WHOLE RELEASE.
-      `unavailable_on` names the three remaining machines, which are skipped rather than handed an archive for another instruction set.
-      The x86_64 macOS asset exists upstream and stays deliberately unpinned, since Apple silicon is the tier this repo targets.
+      x64 WINDOWS, x86_64 LINUX AND arm64 macOS ARE WHAT WE PIN.
+      Upstream publishes no asset for windows-arm64 or linux-arm64.
+      The x86_64 macOS asset exists and stays deliberately unpinned, since Apple silicon is the tier this repo targets.
+      `unavailable_on` names all three, which are skipped rather than handed an archive for another instruction set.

@@ -91,7 +91,7 @@ option(SC_USE_VENDORED_SQLITE "Build the fetched SQLite in extern/sqlite/.instal
 option(SC_USE_VENDORED_OIDN "Wrap the fetched Open Image Denoise in extern/oidn/.install (OFF expects an external `oidn` target)" ON)
 
 # The trained networks, a dependency of their own because shaped-rendering runs them itself rather than calling Intel's inference.
-# 1.8 MB of weights instead of 53 MB of runtime, fetched on every configure since the member cannot run without them.
+# Two files and 2.5 MB of weights instead of 53 MB of runtime, fetched on every configure since the member cannot run without them.
 option(SC_USE_VENDORED_OIDN_WEIGHTS "Use the fetched OIDN weights in extern/oidn-weights/.install" ON)
 
 # Also gated on SC_MIMALLOC: with the default resource on operator new nothing links mimalloc, so building it would be
