@@ -199,6 +199,8 @@ private:
     };
 
     [[nodiscard]] shader_compiler const* find_compiler(shader_language language, sg::shader_format format) const;
+    [[nodiscard]] std::shared_ptr<shader_compiler const> find_shared_compiler(shader_language language,
+                                                                              sg::shader_format format) const;
 
     /// The package that owns `virtual_path`. Every asset path lies under exactly one.
     [[nodiscard]] package_entry const& package_of(cc::string_view virtual_path) const;
@@ -222,7 +224,8 @@ private:
     std::shared_ptr<shader_library> _alive;
 
     mount_table _mounts;
-    cc::vector<std::unique_ptr<shader_compiler>> _compilers;
+    /// Shared, so a compile still settling keeps the compiler it reads its layouts through, even once replaced.
+    cc::vector<std::shared_ptr<shader_compiler const>> _compilers;
     cc::vector<shader_asset_handle> _assets;
 
     cc::vector<package_entry> _packages;

@@ -1,5 +1,6 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/string/format.hh>
+#include <shaped-shader-compiler-dxc/block_reflection.hh>
 #include <shaped-shader-compiler-dxc/impl/reflection.hh>
 #include <spirv_reflect.h>
 
@@ -68,6 +69,41 @@ namespace
         if (cc::string_view(module.entry_points[i].name) == name)
             return &module.entry_points[i];
     return nullptr;
+}
+/// Every builtin value below `members`, each named by the member path down to it and placed from `base`.
+void collect_fields(SpvReflectBlockVariable const* members,
+                    uint32_t count,
+                    isize base,
+                    cc::string_view prefix,
+                    cc::vector<reflected_field>& out)
+{
+    for (uint32_t i = 0; i < count; ++i)
+    {
+        auto const& m = members[i];
+        auto name = prefix.empty() ? cc::string(m.name != nullptr ? m.name : "")
+                                   : cc::format("{}.{}", prefix, m.name != nullptr ? m.name : "");
+        if (m.member_count == 0)
+            out.push_back({.name = cc::move(name), .offset = base + isize(m.offset)});
+        else
+            collect_fields(m.members, m.member_count, base + isize(m.offset), name, out);
+    }
+}
+
+/// `block` as the module lays it out: a storage buffer's one member is its runtime array, whose element is what repeats.
+reflected_block block_of(cc::string_view name, SpvReflectBlockVariable const& block, bool is_storage)
+{
+    auto result = reflected_block{.name = cc::string(name)};
+    // A runtime array's block variable reports no dimension and no stride; the type it names carries both.
+    auto const* const array_type = is_storage && block.member_count == 1 ? block.members[0].type_description : nullptr;
+    if (array_type != nullptr && array_type->op == SpvOpTypeRuntimeArray)
+    {
+        auto const& array = block.members[0];
+        result.stride = isize(array_type->traits.array.stride);
+        collect_fields(array.members, array.member_count, 0, "", result.fields);
+        return result;
+    }
+    collect_fields(block.members, block.member_count, 0, "", result.fields);
+    return result;
 }
 } // namespace
 
@@ -202,3 +238,46 @@ cc::result<reflected_shader> reflect_spirv(cc::span<byte const> spirv, sg::shade
     return out;
 }
 } // namespace ssc::dxc::impl
+
+cc::result<cc::vector<ssc::dxc::reflected_block>> ssc::dxc::reflect_spirv_blocks(cc::span<byte const> spirv)
+{
+    SpvReflectShaderModule module = {};
+    if (auto const r = spvReflectCreateShaderModule(size_t(spirv.size()), spirv.data(), &module);
+        r != SPV_REFLECT_RESULT_SUCCESS)
+        return cc::error(cc::format("SPIR-V reflection failed to parse the module (code {})", int(r)));
+    struct module_guard
+    {
+        SpvReflectShaderModule* m;
+        ~module_guard() { spvReflectDestroyShaderModule(m); }
+    } const guard{&module};
+
+    auto out = cc::vector<reflected_block>();
+    uint32_t count = 0;
+    if (auto const r = spvReflectEnumerateDescriptorBindings(&module, &count, nullptr); r != SPV_REFLECT_RESULT_SUCCESS)
+        return cc::error(cc::format("SPIR-V reflection failed to count descriptor bindings (code {})", int(r)));
+    auto bindings = cc::vector<SpvReflectDescriptorBinding*>::create_defaulted(isize(count));
+    if (count > 0)
+        if (auto const r = spvReflectEnumerateDescriptorBindings(&module, &count, bindings.data());
+            r != SPV_REFLECT_RESULT_SUCCESS)
+            return cc::error(cc::format("SPIR-V reflection failed to read descriptor bindings (code {})", int(r)));
+    for (auto const* b : bindings)
+    {
+        auto const is_uniform = b->descriptor_type == SPV_REFLECT_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        auto const is_storage = b->descriptor_type == SPV_REFLECT_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        if (is_uniform || is_storage)
+            out.push_back(impl::block_of(b->name != nullptr ? b->name : "", b->block, is_storage));
+    }
+
+    uint32_t push_count = 0;
+    if (auto const r = spvReflectEnumeratePushConstantBlocks(&module, &push_count, nullptr);
+        r != SPV_REFLECT_RESULT_SUCCESS)
+        return cc::error(cc::format("SPIR-V reflection failed to count push-constant blocks (code {})", int(r)));
+    auto blocks = cc::vector<SpvReflectBlockVariable*>::create_defaulted(isize(push_count));
+    if (push_count > 0)
+        if (auto const r = spvReflectEnumeratePushConstantBlocks(&module, &push_count, blocks.data());
+            r != SPV_REFLECT_RESULT_SUCCESS)
+            return cc::error(cc::format("SPIR-V reflection failed to read push-constant blocks (code {})", int(r)));
+    for (auto const* block : blocks)
+        out.push_back(impl::block_of(block->name != nullptr ? block->name : "", *block, false));
+    return out;
+}

@@ -216,6 +216,12 @@ public:
             auto binding = sg::binding{};
             CC_RETURN_IF_ERROR(to_binding(b, binding));
             result.bindings.push_back(cc::move(binding));
+            if (b.address_space == "uniform" || b.address_space == "storage")
+            {
+                auto layout = block_layout_of(b);
+                CC_RETURN_IF_ERROR(layout);
+                result.layouts.push_back(cc::move(layout.value()));
+            }
         }
         sg::apply_stage_visibility(result.bindings, result.stage);
         return result;
@@ -242,6 +248,7 @@ private:
 
     struct struct_member
     {
+        cc::string name;
         parsed_type type;
         cc::vector<token> explicit_size; // empty when absent; unevaluated like every other integer argument
         cc::vector<token> explicit_align;
@@ -509,7 +516,7 @@ private:
             auto type = read_type();
             CC_RETURN_IF_ERROR(type);
 
-            auto member = struct_member{.type = cc::move(type.value())};
+            auto member = struct_member{.name = cc::string(member_name.value().text), .type = cc::move(type.value())};
             for (auto const& a : attrs)
                 if ((a.name == "size" || a.name == "align") && a.args.size() == 1)
                     (a.name == "size" ? member.explicit_size : member.explicit_align) = a.args[0];
@@ -819,6 +826,66 @@ private:
             if (e.wgsl == f)
                 return e.format;
         return {};
+    }
+
+    /// Every builtin value below `type`, placed from `base` by the same rules `layout_of` applies.
+    cc::result<cc::unit> fields_of(parsed_type const& type_in,
+                                   isize base,
+                                   cc::string_view name,
+                                   int line,
+                                   cc::vector<slib::block_field>& out) const
+    {
+        auto const& type = resolved(type_in);
+        auto const* members = _structs.get_ptr(type.name);
+        if (members == nullptr)
+        {
+            out.push_back({.name = cc::string(name), .offset = base});
+            return cc::unit{};
+        }
+        auto offset = isize(0);
+        for (auto const& m : *members)
+        {
+            auto layout = layout_of(m.type, line);
+            CC_RETURN_IF_ERROR(layout);
+            auto member_align = layout.value().align;
+            auto member_size = layout.value().size;
+            if (!m.explicit_align.empty())
+            {
+                auto value = integer_of(m.explicit_align, line);
+                CC_RETURN_IF_ERROR(value);
+                member_align = isize(value.value());
+            }
+            if (!m.explicit_size.empty())
+            {
+                auto value = integer_of(m.explicit_size, line);
+                CC_RETURN_IF_ERROR(value);
+                member_size = isize(value.value());
+            }
+            offset = cc::int_round_up_to_multiple(offset, member_align);
+            auto const inner = name.empty() ? cc::string(m.name) : cc::format("{}.{}", name, m.name);
+            CC_RETURN_IF_ERROR(fields_of(m.type, base + offset, inner, line, out));
+            if (member_size.has_value())
+                offset += member_size.value();
+        }
+        return cc::unit{};
+    }
+
+    /// A uniform's struct, or a storage buffer's `array<T>` element, as WGSL places it.
+    cc::result<slib::block_layout> block_layout_of(pending_binding const& p) const
+    {
+        auto result = slib::block_layout{.global = p.name};
+        auto const& type = resolved(p.type);
+        if (type.name == "array" && !type.args.empty())
+        {
+            auto element = layout_of(type.args[0], p.line);
+            CC_RETURN_IF_ERROR(element);
+            result.stride = cc::int_round_up_to_multiple(element.value().size.value_or(0), element.value().align);
+            if (_structs.get_ptr(resolved(type.args[0]).name) != nullptr)
+                CC_RETURN_IF_ERROR(fields_of(type.args[0], 0, "", p.line, result.fields));
+            return result;
+        }
+        CC_RETURN_IF_ERROR(fields_of(type, 0, "", p.line, result.fields));
+        return result;
     }
 
     cc::result<cc::unit> to_binding(pending_binding const& p, sg::binding& b) const

@@ -152,7 +152,7 @@ The `sgl-prelude` step of `dev.py check` refuses a generated file that differs f
 `sgl::emit::emit` writes one entry point as readable text for `hlsl_dx12`, `hlsl_vulkan`, `wgsl` or `msl`, with exactly the types and the binding it needs.
 One walker reads the flat tree, and a target is a small spelling layer over it.
 How a builtin is written comes from its record: a call under a name per target, an infix or a prefix operator, or a writer of its own for the few that are neither.
-The size and alignment the `layout-mismatch` check places a member by are fields of the type's record.
+The size and alignment the layout rules place a value by, and each target's own, are fields of the type's record (`emit/impl/layout.hh`, `emit/impl/memory_form.hh`).
 
 * Every target carries its **final addresses**: member order is the location, and an `@inline binding` sits where sg expects inline constants.
   HLSL writes a group's resources at the register or `[[vk::binding]]` sg's backends give its slot, so no binding pass reads SGL's text.

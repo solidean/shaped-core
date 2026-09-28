@@ -702,7 +702,6 @@ def emit_header(manifest: Manifest, entries: Entries) -> str:
 
     out.append("/// Pass to slib::shader_library::add_package. The handles above are null until you do.\n")
     out.append("slib::shader_package const& package();\n")
-    out.append(sgl_host_code.emit_check_reflection_decl(entries.sgl, stems))
     if bindings:
         out.append("\n/// Empty while every generated binding table still describes the shader it came from.\n")
         out.append("///\n")
@@ -797,11 +796,11 @@ def emit_source(manifest: Manifest, files: list[ShaderFile], bindings: list[Bind
         out.append("#include <clean-core/common/utility.hh> // cc::memcpy\n")
     if any(b["inline"] for _, b in sgl.bindings):
         out.append("#include <shaped-shader-library/binding/binding_groups.hh> // slib::inline_constants_space\n")
-    if sgl.vertex_inputs:
+    if sgl.vertex_inputs or sgl.memory_structs or any(b["inline"] for _, b in sgl.bindings):
         out.append("#include <cstddef> // offsetof\n")
     if sgl_host_code.entry_wrappers(sgl, {f.path: f.stem for f in files}) or sgl.pipelines:
         out.append("#include <clean-core/thread/async_coroutine.hh>\n")
-        out.append("#include <shaped-shader-library/shader_asset.hh> // slib::reflection_mismatch\n")
+        out.append("#include <shaped-shader-library/shader_asset.hh> // slib::acquire_compute_pipeline\n")
     if sgl.pipelines:
         out.append("#include <shaped-shader-library/impl/pipeline_fields.hh> // a pipeline's settings, as field writes\n")
     out.append("\n")
@@ -866,7 +865,6 @@ def emit_source(manifest: Manifest, files: list[ShaderFile], bindings: list[Bind
         stems = {f.path: f.stem for f in files}
         out.append(sgl_host_code.emit_pipelines_impl(manifest.name, manifest.namespace, sgl, stems,
                                                     sgl_host_code.entry_wrappers(sgl, stems)))
-    out.append(sgl_host_code.emit_check_reflection(manifest.namespace, sgl, {f.path: f.stem for f in files}))
 
     if bindings:
         out.append(f"\ncc::string {manifest.namespace}::self_check()\n{{\n")

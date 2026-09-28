@@ -16,7 +16,6 @@ That little is exactly what a reader of a capture wants to see, so each target s
 Both share one dialect in the implementation, and a fourth target is one more file.
 
 MSL came as that one file: a dialect, a reserved-word list and a case, and the walk over the tree did not change.
-What it did change is a rule every target shares, since MSL's block layout joined the comparison of EMIT-41.
 
 ## EMIT-4
 
@@ -47,6 +46,7 @@ An error for a name that is only a problem in one target was then the bigger sur
 DXC packs a push-constant block tightly, whatever `-fvk-use-dx-layout` says, so `{float3; float; mat4}` would sit elsewhere than on dx12.
 Nothing reports the difference: both modules compile, and the shader reads its members from the wrong bytes.
 An offset on every member makes SPIR-V agree with the one layout the host fills, and it is there for the reader too.
+A nested struct states its own members' offsets on its declaration, which is the one struct every use of it shares (EMIT-114).
 dx12 gets no attribute, since DXC warns about a `vk::` attribute it ignores there.
 
 ## EMIT-46
@@ -78,10 +78,31 @@ A vertex buffer has no index in the text at all: `[[stage_in]]` reads through th
 
 ## EMIT-62
 
-MSL's `float3` is sixteen bytes, so the `float` that HLSL and WGSL put into its tail starts a new row in MSL.
-`packed_float3` is twelve bytes and would agree, but it is another type, and every read of it would want a conversion.
-Refusing the block keeps one host struct for every backend, which is what EMIT-13 asks for.
-The layout of a vertex input is not the struct's: `[[attribute(i)]]` reads through the vertex descriptor, so EMIT-62 is about blocks only.
+MSL's `float3` is sixteen bytes, so the `float` that HLSL and WGSL put into its tail would start a new row in MSL.
+Refusing the block, as this rule once did, refused the most common struct in GPU memory on every target because of one.
+`packed_float3` is twelve bytes, MSL converts it to and from `float3` on assignment, and a component reads as it does on a `float3`.
+SPIRV-Cross writes the same for the same reason.
+The layout of a vertex input is not the struct's: `[[attribute(i)]]` reads through the vertex descriptor, so EMIT-62 is about GPU memory only.
+
+## EMIT-112
+
+One C++ struct copied into what every target reads needs one layout, and the targets' own rules disagree on it.
+HLSL's is the one the rules take: dx12 then needs nothing, and every other target can be made to reach it.
+Rejecting what one target cannot place natively was the alternative, and it rejects a `{float; float3}` block and a buffer of `float3` everywhere because of one target.
+A rule of GPU alignment instead, as std430 and WGSL place, only moves the cost.
+A `float3` member then needs padding in the host struct that nobody wrote, and dx12 needs a `packoffset` on every member.
+MSL's 16-byte `float3` would still need a memory form.
+WGSL can only raise an alignment, never lower one, so a vector it would align further than SGL's offset becomes scalars; MSL has packed vectors for the same case.
+Vulkan's relaxed block layout refuses a few of these layouts: a member packed into a nested struct's last row, a vector across a row of a buffer's element, a 12-byte stride.
+`scalarBlockLayout` admits all of them, and nearly every Vulkan device has it, so sg's vulkan backend requires it rather than SGL narrowing its rules for devices without it.
+Only the root that needs it becomes a memory form: the rest reads in a capture as the source does (EMIT-46), and the form is invisible to the program.
+
+## EMIT-116
+
+Reordering members is how a compiler packs a struct tighter, and it is planned: a `{float; float4; float}` block takes three rows where `{float4; float; float}` takes two.
+Promising declaration order now would make that a breaking change for every host that computed an offset by hand.
+The generated struct already follows whatever the compiler chose, so a host that uses it loses nothing.
+A host that needs a fixed layout, such as memory shared with a hand-written struct, will ask for one by annotation rather than by accident.
 
 ## EMIT-63
 

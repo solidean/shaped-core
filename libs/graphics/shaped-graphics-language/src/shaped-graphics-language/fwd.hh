@@ -28,6 +28,7 @@ struct line_column;
 struct text_request;
 struct tested_source;
 struct emitted_source;
+struct interface_binding;
 struct prelude_file;
 
 enum class token_class : u8;
@@ -42,6 +43,8 @@ struct described_binding_member;
 struct described_binding;
 struct described_struct_member;
 struct described_struct;
+struct described_memory_member;
+struct described_memory_struct;
 struct described_entry_point;
 struct described_pipeline_setting;
 struct described_pipeline;
@@ -306,4 +309,6 @@ enum class error_kind : u8;
 struct error;
 struct emitted_text;
 struct bound_name;
+struct emitted_field;
+struct emitted_layout;
 } // namespace sgl::emit

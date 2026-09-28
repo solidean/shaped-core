@@ -188,8 +188,7 @@ public:
     void write_declarations(cc::string& out, plan const& p) const override
     {
         write_enum_constants(out, p, *this);
-        write_buffers(out, p, *this);
-
+        // A struct stands ahead of the groups, whose blocks and buffers may hold it.
         for (auto const& s : p.structs)
         {
             out.appendf("struct {}\n{{\n", s.name);
@@ -197,6 +196,8 @@ public:
                 write_member(out, &s, member, p);
             out += "};\n\n";
         }
+        write_buffers(out, p, *this);
+
 
         if (!p.constants.has_value())
             return;

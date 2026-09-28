@@ -612,8 +612,8 @@ And one construct that is not a layout to reproduce at all:
 Two `static_assert`s guard the result, and both are generated: the struct's total size against the size the generator computed, and **every member's `offsetof` against the offset it computed**.
 Size alone would pass a mirror whose fields are in the wrong places and whose padding happens to add up.
 
-The generated code spells its members as plain `u32` and friends, duplicating any small helper it needs rather than reaching for `sr::gpu_boolean`.
-shaped-rendering sits above slib, so generated package code cannot see it.
+The generated code spells its members as plain `u32` and friends, and a `bool` as `unsigned`.
+An SGL package's `bool32` is `slib::gpu_bool` instead.
 
 ### The generated vertex layout
 

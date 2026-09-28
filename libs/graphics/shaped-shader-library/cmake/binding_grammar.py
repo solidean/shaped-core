@@ -277,7 +277,7 @@ VALUE_TYPES: dict[str, tuple[str, int, int, int, str | None]] = {
     "uint2": ("unsigned[2]", 8, 4, 4, "vec2u"),
     "uint3": ("unsigned[3]", 12, 4, 4, "vec3u"),
     "uint4": ("unsigned[4]", 16, 4, 4, "vec4u"),
-    # Four bytes in a constant block, and no vertex attribute format at all -- the reason sr::gpu_boolean exists.
+    # Four bytes in a constant block, and no vertex attribute format at all -- the reason slib::gpu_bool exists.
     "bool": ("unsigned", 4, 4, 4, None),
     # Every matrix is column-major and the PASS writes that, exactly as it writes an address.
     # A shader declares `float4x3` and the rewrite makes it `column_major float4x3`, so the declaration is immune

@@ -69,7 +69,7 @@ A record that fits none of them is built by hand and added with `r.add(function_
 A type record carries its declaration as SGL text, opaque or with fields, and what every target needs to know about it.
 
 * **Its name per target**: `float3`, `vec3f`, `float3`.
-* **Its size and alignment in a constant block, per target**, which is what the `layout-mismatch` check of an `@inline binding` compares.
+* **Its size and alignment in GPU memory, per target**: HLSL's are what SGL's layout rules place it by, and WGSL's and MSL's decide where a target needs a memory form.
   A size of 0 means the type has no place in a block, which is `bool` today.
 * **What a value is to the interpreter**: how many scalars, and of which kind.
 * **Whether it may be a member of a struct that crosses a stage edge.**

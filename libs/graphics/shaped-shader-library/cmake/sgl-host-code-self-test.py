@@ -191,7 +191,7 @@ FILE = SglFile(path="shadow.sgl")
 
 @test
 def a_group_has_a_field_per_view_and_per_dynamic_sampler():
-    header = sgl_host_code.emit_group("pkg", "ns", FILE, GROUP)
+    header = sgl_host_code.emit_group("pkg", {}, "ns", FILE, GROUP)
     expect_in("sg::texture_view_cube depth_map;", header, "a cube texture's field")
     expect_in("sg::image_view_3d<sg::pixel_format::r32_uint> counts;", header, "a 3d image's field, typed on its format")
     expect_in("sg::readwrite_buffer_view<float> weights;", header, "a mut buffer's field, its view by access")
@@ -202,7 +202,7 @@ def a_group_has_a_field_per_view_and_per_dynamic_sampler():
 
 @test
 def a_groups_static_sampler_is_declared_and_its_dynamic_one_gathered():
-    source = sgl_host_code.emit_group_impl("pkg", "ns", FILE, GROUP)
+    source = sgl_host_code.emit_group_impl("pkg", {}, "ns", FILE, GROUP)
     expect_in('{.name = "shadow_compare", .sampler = {.min_filter = sg::sampler_filter::linear, '
               ".compare = sg::compare_op::less}}", source, "the static sampler's table entry")
     expect_in("return k_sgl_samplers_shadow;", source, "declared_samplers")

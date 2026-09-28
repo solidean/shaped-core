@@ -37,9 +37,9 @@ TEST("sgl check - a buffer member and its mut form are types")
 
 TEST("sgl check - what a buffer's element may be")
 {
-    // A struct element needs a layout rule the four targets agree on, which the spec's bindings file leaves open.
+    // A struct element is placed by the storage rule, which the emitter judges; the check pass takes any type.
     CHECK(reports_for(cc::string("struct particle:\n    mass: float\n\n") + listing("    items: buffer[particle]\n"))
-              .contains("a buffer of anything but a scalar or a vector"));
+          == "");
 
     CHECK(reports_for(listing("    x: buffer[float, int]\n")).contains("a buffer takes one element type"));
     CHECK(reports_for(listing("    x: buffer[not_a_type]\n")).contains("unknown-name"));

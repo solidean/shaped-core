@@ -29,6 +29,7 @@ target_sources(shaped-shader-compiler-dxc
     src/shaped-shader-compiler-dxc/preprocessed_source.hh
     src/shaped-shader-compiler-dxc/compiler.hh
     src/shaped-shader-compiler-dxc/shader_cache.hh
+    src/shaped-shader-compiler-dxc/block_reflection.hh
 )
 
 target_compile_features(shaped-shader-compiler-dxc PUBLIC cxx_std_23)

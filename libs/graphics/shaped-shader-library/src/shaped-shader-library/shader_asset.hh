@@ -114,13 +114,6 @@ private:
     mutable cc::mutex<state> _state;
 };
 
-/// One group an entry point lists: the position that numbers it, and the bindings its generated type declares.
-struct slib::listed_group
-{
-    int position = 0;
-    cc::span<sg::binding const> bindings;
-};
-
 namespace slib
 {
 /// The compute pipeline of `asset` over `layout`, once the shader has compiled for `ctx`.
@@ -132,13 +125,4 @@ namespace slib
 [[nodiscard]] sg::async_compute_pipeline acquire_compute_pipeline(sg::context* ctx,
                                                                   shader_asset_handle asset,
                                                                   sg::pipeline_layout_handle layout);
-
-/// What keeps `compiled`'s reflection from fitting the groups `entry` lists, one line each; empty where it fits.
-///
-/// sg::describe_layout_misfit against the layout the list states, which is where the rules are.
-/// `inline_block` is the listed `@inline` binding.
-[[nodiscard]] cc::string reflection_mismatch(cc::string_view entry,
-                                             sg::compiled_shader const& compiled,
-                                             cc::span<listed_group const> listed,
-                                             cc::optional<sg::binding> const& inline_block);
 } // namespace slib

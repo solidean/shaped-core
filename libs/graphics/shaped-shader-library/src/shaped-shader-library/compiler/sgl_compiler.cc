@@ -1,8 +1,12 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/async.hh> // sg::async_compiled_shader is a cc::shared_async
+#include <shaped-graphics-language/check/resources.hh>
 #include <shaped-graphics-language/driver/compile_to_text.hh>
+#include <shaped-graphics/binding/binding.hh>
+#include <shaped-shader-library/binding/binding_groups.hh> // slib::inline_constants_space
 #include <shaped-shader-library/compiler/sgl_compiler.hh>
+#include <shaped-shader-library/impl/pipeline_fields.hh> // the pixel formats by name
 
 using namespace cc::primitive_defines;
 
@@ -41,6 +45,106 @@ static_assert(
     }
 }
 
+// sgl names a texture's shape as sg names its view dimension, member for member.
+static_assert(
+    []
+    {
+        for (auto i = isize(0); i < isize(sizeof(sgl::check::k_shapes) / sizeof(sgl::check::k_shapes[0])); ++i)
+            if (isize(sgl::check::k_shapes[i].shape) != i)
+                return false;
+        return isize(sgl::check::texture_shape::cube_array) == isize(sg::texture_view_dimension::cube_array);
+    }(),
+    "sgl::check::texture_shape is sg::texture_view_dimension member for member");
+
+[[nodiscard]] sg::texture_view_dimension dimension_of(cc::string_view name)
+{
+    for (auto const& info : sgl::check::k_shapes)
+        if (info.sg_name == name)
+            return sg::texture_view_dimension(info.shape);
+    CC_UNREACHABLE("SGL names every texture dimension as sg does");
+}
+
+[[nodiscard]] sg::pixel_format pixel_format_of(cc::string_view name)
+{
+    for (auto const& c : slib::impl::fields::cases_pixel_format)
+        if (c.name == name)
+            return sg::pixel_format(c.value);
+    CC_UNREACHABLE("SGL names every image format as sg does");
+}
+
+[[nodiscard]] sg::access_mode access_of(cc::string_view name)
+{
+    return name == "read_write" ? sg::access_mode::read_write
+         : name == "write"      ? sg::access_mode::write
+                                : sg::access_mode::read;
+}
+
+[[nodiscard]] sg::texture_sample_type sample_type_of(cc::string_view name)
+{
+    return name == "unfilterable_float" ? sg::texture_sample_type::unfilterable_float
+         : name == "depth"              ? sg::texture_sample_type::depth
+         : name == "sint"               ? sg::texture_sample_type::sint
+         : name == "uint"               ? sg::texture_sample_type::uint
+                                        : sg::texture_sample_type::filterable_float;
+}
+
+[[nodiscard]] sg::sampler_binding_type sampler_type_of(cc::string_view name)
+{
+    return name == "comparison"    ? sg::sampler_binding_type::comparison
+         : name == "non_filtering" ? sg::sampler_binding_type::non_filtering
+                                   : sg::sampler_binding_type::filtering;
+}
+
+/// `b` as sg sees it on `format`: dx12 numbers a group as a register space, vulkan and WebGPU as a set.
+[[nodiscard]] sg::binding binding_of(sgl::interface_binding const& b, sg::shader_format format, sg::shader_stage stage)
+{
+    auto result = sg::binding{.name = b.name,
+                              .reflected_name = b.emitted == b.name ? cc::string() : b.emitted,
+                              .index = u32(b.slot),
+                              .count = 1u};
+    auto const is_dx12 = format == sg::shader_format::dxil;
+    if (b.is_inline)
+    {
+        // dx12 reads the inline block at b0 of slib's reserved space; every other backend places it by its own rule.
+        if (is_dx12)
+            result.space = slib::inline_constants_space;
+    }
+    else if (is_dx12)
+        result.space = u32(b.group);
+    else
+        result.group_index = u32(b.group);
+
+    switch (b.kind)
+    {
+    case sgl::described_member_kind::constant:
+        result.type = sg::binding_type::constants_buffer;
+        // A block is read in rows of 16 bytes, which is the size every target's compiler states it as.
+        result.block_size = isize((b.block_size + 15) / 16 * 16);
+        break;
+    case sgl::described_member_kind::buffer:
+        result.type = sg::binding_type::buffer;
+        result.access = access_of(b.access);
+        break;
+    case sgl::described_member_kind::texture:
+        result.type = sg::binding_type::texture;
+        result.texture_dimension = dimension_of(b.texture_dimension);
+        result.sample_type = sample_type_of(b.sample_type);
+        break;
+    case sgl::described_member_kind::image:
+        result.type = sg::binding_type::image;
+        result.access = access_of(b.access);
+        result.texture_dimension = dimension_of(b.texture_dimension);
+        result.image_format = pixel_format_of(b.image_format);
+        break;
+    case sgl::described_member_kind::sampler:
+        result.type = sg::binding_type::sampler;
+        result.sampler_type = sampler_type_of(b.sampler_type);
+        break;
+    }
+    result.visibility.set(stage);
+    return result;
+}
+
 class sgl_shader_compiler final : public slib::shader_compiler
 {
 public:
@@ -77,22 +181,34 @@ public:
              .target = _target});
         if (text.has_error())
             return cc::error(cc::format("SGL reported errors:\n{}", text.error()));
-        // The name the text declares, which is the source's unless this target reserves it.
-        auto result = slib::preprocessed_source{.source = cc::move(text.value().text),
-                                                .entry_point = cc::move(text.value().entry_point)};
-        for (auto& bound : text.value().bound_names)
-            result.renamed_bindings.push_back({.reflected = cc::move(bound.emitted), .name = cc::move(bound.host)});
-        result.color_targets = text.value().color_targets;
-        result.target_struct = cc::move(text.value().target_struct);
+        auto const& emitted = text.value();
+        auto shader = sg::compiled_shader{.stage = desc.stage,
+                                          .format = _inner->target_format(),
+                                          .entry_point = emitted.entry_point};
+        auto result = slib::preprocessed_source{.source = emitted.text, .entry_point = emitted.entry_point};
+        for (auto const& b : emitted.bindings)
+        {
+            auto binding = binding_of(b, shader.format, shader.stage);
+            if (b.is_used)
+                shader.bindings.push_back(binding);
+            result.declared_bindings.push_back(cc::move(binding));
+        }
+        if (stage == sgl::check::stage::compute)
+            shader.workgroup_size
+                = sg::compute_dimensions{.x = emitted.workgroup[0], .y = emitted.workgroup[1], .z = emitted.workgroup[2]};
+        if (emitted.color_targets >= 0)
+            shader.color_output_count = emitted.color_targets;
+        shader.target_set = emitted.target_struct;
+
         auto features = sg::feature_set();
         for (auto i = isize(0); i < sgl::check::k_feature_count; ++i)
-            if (text.value().features.has(sgl::check::feature(i)))
+            if (emitted.features.has(sgl::check::feature(i)))
                 features.set(sg::feature_from_string(sgl::check::k_feature_names[i]).value());
-        result.required_features = features;
+        shader.required_features = features;
 
         // The words SGL's slots are spelled in, turned into the access sg's barrier tracker declares.
-        result.footprint.source = sg::footprint_source::exact;
-        for (auto const& slot : text.value().footprint)
+        shader.footprint.source = sg::footprint_source::exact;
+        for (auto const& slot : emitted.footprint)
         {
             auto access = sg::access_flags();
             if (slot.view == sgl::check::slot_view::constants)
@@ -102,7 +218,15 @@ public:
                                                                       : sg::access_flag::shader_read;
             if (slot.writes)
                 access |= sg::access_flag::shader_write;
-            result.footprint.slots.push_back({.name = slot.host_name, .access = access, .dynamic_index = false});
+            shader.footprint.slots.push_back({.name = slot.host_name, .access = access, .dynamic_index = false});
+        }
+        result.stated = cc::move(shader);
+        for (auto const& l : emitted.layouts)
+        {
+            auto layout = slib::block_layout{.global = l.global, .stride = l.stride};
+            for (auto const& f : l.fields)
+                layout.fields.push_back({.name = f.name, .offset = f.offset});
+            result.layouts.push_back(cc::move(layout));
         }
         return result;
     }
@@ -110,6 +234,11 @@ public:
     [[nodiscard]] sg::async_compiled_shader compile(slib::shader_source_description const& desc) const override
     {
         return _inner->compile(desc);
+    }
+
+    [[nodiscard]] cc::optional<cc::vector<slib::block_layout>> reflect_layouts(sg::compiled_shader const& shader) const override
+    {
+        return _inner->reflect_layouts(shader);
     }
 
 private:

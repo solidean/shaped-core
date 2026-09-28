@@ -132,9 +132,10 @@ struct pixel_input
 * **EMIT-36** An `@inline binding` is a struct of its members and one global of that struct, which has the binding's name.
 * **EMIT-37** The global is where `sg` expects inline constants, by the table below.
 * **EMIT-38** A second `@inline` binding is `unsupported`, and so is one that is not the last of the list.
-* **EMIT-39** A member of an `@inline` binding is of a builtin type whose record has a size in a block, which `bool` has not, or it is `unsupported`.
-* **EMIT-40** A member's offset follows HLSL's packing of a constant buffer, and `hlsl-vulkan` states it on every member ([why](why/emitting.md#emit-40)).
-* **EMIT-41** A member that WGSL's layout or MSL's places at another offset is `layout-mismatch`, and its detail gives the offset in each.
+* **EMIT-39** A plain member of a binding, and a buffer's element, is a value that can stand in GPU memory, or it is `unsupported`.
+  That is a builtin whose record has a size there, or a struct of such values; `bool` has no size, and the detail names `bool32`, which has one.
+* **EMIT-40** Every value in GPU memory is placed by [the layout rules](#layout), and `hlsl-vulkan` states each offset as `[[vk::offset]]` ([why](why/emitting.md#emit-40)).
+* **EMIT-41** Retired: every target is made to follow the layout rules (EMIT-112), so no offset differs between them, and `layout-mismatch` is reported by nothing.
 
 | target | the global |
 |---|---|
@@ -147,11 +148,11 @@ A binding that is not `@inline` is a group.
 
 * **EMIT-82** A group's number is its position in the entry point's binding list, the `@inline` binding skipped.
 * **EMIT-83** A group's plain members are a struct of their own and one constant buffer of it, named after the binding, at slot 0.
-* **EMIT-84** A group's plain members are placed by EMIT-39 to EMIT-41, as the members of an `@inline` binding are.
+* **EMIT-84** A group's plain members are placed by EMIT-39 and EMIT-40, as the members of an `@inline` binding are.
 * **EMIT-85** A buffer member is one global whose name is minted from `<binding>_<member>`, and a group's constant buffer is named after the binding, as any declaration is.
 * **EMIT-86** HLSL writes each declaration of a group at file scope, under the name EMIT-85 minted for it, and each carries its address by EMIT-104 ([why](why/emitting.md#emit-86)).
 * **EMIT-87** The struct of a group's constant buffer stands ahead of the group's declarations ([why](why/emitting.md#emit-87)).
-  `hlsl-vulkan` states every member's offset on it, as EMIT-40 does for an `@inline` binding.
+  `hlsl-vulkan` states every member's offset on it, as EMIT-40 says.
 * **EMIT-88** WGSL writes each resource of a group as `@group(N) @binding(slot)`: the constant buffer as `var<uniform>`, a buffer as a `var<storage>` array, `read` or `read_write`.
 * **EMIT-89** MSL writes no group and no compute entry point yet: an entry point that lists a group, or is `@compute`, is `unsupported`.
   How a group will read in MSL is in [bindings.md](../bindings.md#how-a-group-reaches-sg).
@@ -215,7 +216,7 @@ binding affine:
 * **EMIT-53** A construction of a builtin type is a call of the target's type, on one line: `float3(x, y, z)`, `vec3f(x, y, z)`.
 * **EMIT-73** The operand of a prefix `-` that is no name, call or member stands in parentheses, so `-(-0.4)` never reads as a decrement.
 * **EMIT-74** How a builtin is written is a field of its registry record: a call under a name per target, an infix or a prefix operator, or a writer of its own ([why](why/emitting.md#emit-74)).
-  No emitter holds a list of builtins, and the size and alignment EMIT-40, EMIT-41 and EMIT-62 place a member by are fields of the type's record.
+  No emitter holds a list of builtins, and the size and alignment the layout rules and each target's own rule place a value by are fields of the type's record.
 * **EMIT-75** A value that is evaluated and dropped is a statement of its own: `value;` in HLSL, `_ = value;` in WGSL, and `(void)(value);` in MSL ([why](why/emitting.md#emit-75)).
 * **EMIT-54** A construction of a struct of the program is `name(a, b)` in WGSL.
 * **EMIT-55** In HLSL it is a local that is declared and then assigned member by member; a returned one is minted from `result` ([why](why/emitting.md#emit-55)).
@@ -259,7 +260,7 @@ The rules above say HLSL and WGSL by name; these say what `msl` writes in the sa
 * **EMIT-59** The entry point is a `vertex` or a `fragment` function, and its SGL parameter carries `[[stage_in]]`; a compute entry point is EMIT-89's.
 * **EMIT-60** A member with `@position` is `[[position]]`.
 * **EMIT-61** A member at location i is `[[attribute(i)]]` in a vertex input, `[[user(sgli)]]` in a stage link, and `[[color(i)]]` in a render target struct.
-* **EMIT-62** In a block, MSL places `float3` at a multiple of 16 and gives it 16 bytes, and everything else as WGSL does ([why](why/emitting.md#emit-62)).
+* **EMIT-62** MSL's own rule places `float3` at a multiple of 16 and gives it 16 bytes, so a block's `float3` is `packed_float3` in its memory form (EMIT-113) ([why](why/emitting.md#emit-62)).
 * **EMIT-63** The product is `m * v`, an immutable local is `const T name = value;`, and a struct is built as EMIT-55 builds it ([why](why/emitting.md#emit-63)).
 * **EMIT-64** A float literal has no suffix in MSL either ([why](why/emitting.md#emit-64)).
 
@@ -274,7 +275,34 @@ vertex pixel_input main_vs(cube_vertex v [[stage_in]], constant constants_data& 
 }
 ```
 
-So `{float3; float}` is `layout-mismatch`: the `float` is at byte 12 in HLSL and in WGSL, and at byte 16 in MSL.
+So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 on every target, as the layout rules say.
+
+## Layout
+
+Every value in GPU memory — a constant block or a buffer's element — is placed by one rule per address space, the same on every target.
+The C++ struct a package generates is that layout byte for byte, padding included, so the host copies it in as it is.
+**That struct is the only thing the host may rely on**: without an annotation, where a member lands is the compiler's choice (EMIT-116).
+EMIT-110 and EMIT-111 describe today's choice, not a promise.
+
+* **EMIT-110** A constant block, a group's plain members or an `@inline` binding, is placed by HLSL's constant-buffer packing.
+  It is read in rows of 16 bytes, and a value that would cross a row starts the next one.
+  A `float4`, a matrix and a nested struct start a row, and what follows a nested struct packs against its last member.
+* **EMIT-111** A buffer's element is placed by dx12's structured-buffer packing: each value right behind the one before, every one 4-byte aligned.
+  A buffer strides by its element's size, which is where its last value ends.
+* **EMIT-112** Each target is made to follow the two rules ([why](why/emitting.md#emit-112)).
+  `hlsl-dx12` writes nothing, since they are its own rules.
+  `hlsl-vulkan` states every offset, which sg's vulkan backend admits by requiring `scalarBlockLayout`.
+  WGSL and MSL write a root as its memory form wherever their own rule would place one of its values elsewhere.
+* **EMIT-113** A memory form is one struct of the root's builtin values in memory order, with padding fields where the layout leaves room.
+  A value the target places at its offset natively is a field of its own type.
+  A vector that it does not is split into scalar fields in WGSL, and is its `packed_` type in MSL; a matrix is split into its scalars.
+  A read of a value rebuilds it from its fields, and a write stores each field; a whole struct is stored once into a local, then field by field.
+* **EMIT-114** A struct placed both in a constant block and in a buffer's element would have two layouts, and is `layout-conflict`.
+* **EMIT-115** `@no_padding` on a struct or on a binding makes a gap before any of its members `padding-forbidden`, and the detail says where.
+  The rest of a block's last row follows no member, so it is no gap.
+* **EMIT-116** A layout carries no guarantee without an annotation that asks for one ([why](why/emitting.md#emit-116)).
+  The compiler may place members in another order than they are declared, to pack them tighter.
+  Host code reaches GPU memory through the generated struct, never through offsets or an order it assumed.
 
 ## Error kinds
 
@@ -285,7 +313,9 @@ So `{float3; float}` is `layout-mismatch`: the `float` is at byte 12 in HLSL and
 | `unsupported` | EMIT-12, EMIT-33, EMIT-34, EMIT-38, EMIT-39, EMIT-67, EMIT-81, EMIT-89, EMIT-107 |
 | `reserved-entry-point-name` | none: retired by EMIT-21 |
 | `system-value-semantic` | EMIT-32 |
-| `layout-mismatch` | EMIT-41 |
+| `layout-mismatch` | none: retired by EMIT-41 |
+| `layout-conflict` | EMIT-114 |
+| `padding-forbidden` | EMIT-115 |
 | `non-finite-literal` | EMIT-50 |
 | `malformed-tree` | a flat tree the check pass does not produce |
 | `not-core` | EMIT-66 |
@@ -296,7 +326,10 @@ So `{float3; float}` is `layout-mismatch`: the `float` is at byte 12 in HLSL and
 
 * GLSL, which comes through the same seam.
 * A Metal compiler for the MSL text, and the buffer index of EMIT-58, which sg's metal backend has yet to adopt.
-* Whether a block member becomes `packed_float3` in MSL, which would let `{float3; float}` through at the price of a conversion on every read.
+* Arrays in GPU memory, which SGL has no type for yet.
+  In a constant block every element starts a row, as HLSL places it: an element shorter than a row is `array<vec4f, N>` read through `.x` in WGSL, and `slib::row<T>` on the host.
+* An annotation that fixes a layout, `@layout(.hlsl)` or `@layout(.cpp)`, for memory a host fills without the generated struct; until it exists, EMIT-116 says nothing is fixed.
+* `mat3`, which SGL has no type for yet: three rows in a constant block (44 bytes), 36 bytes in a buffer's element, and its columns split in a memory form.
 * Whether an emit error becomes a diagnostic with a span; today it names a symbol and carries a detail.
 * Whether the size of an inline block has to agree between targets as its offsets do; WGSL rounds it up to 16 bytes.
 * How a vertex input's dx12 semantic is chosen once a member wants one that is not its name.

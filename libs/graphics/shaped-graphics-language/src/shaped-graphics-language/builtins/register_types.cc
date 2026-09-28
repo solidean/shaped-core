@@ -111,6 +111,20 @@ void sgl::builtins::register_types(registry& r)
         .leaf_count = 16,
     });
 
+    r.add(type_record{
+        .declaration = "struct bool32",
+        .doc = "/// A bool as GPU memory holds one: four bytes, 0 for false and anything else for true.\n"
+               "/// `x as bool32` and `x as bool` convert; a bool itself has no layout.",
+        .hlsl = "uint",
+        .wgsl = "u32",
+        .msl = "uint",
+        .hlsl_layout = {.size = 4, .alignment = 4},
+        .wgsl_layout = {.size = 4, .alignment = 4},
+        .msl_layout = {.size = 4, .alignment = 4},
+        .leaf_kind = value_kind::scalar_uint,
+        .leaf_count = 1,
+    });
+
     r.add(scalar_of(k_int_family, "/// 32 bits, signed; its arithmetic wraps."));
     add_vectors(r, k_int_family);
     r.add(scalar_of(k_uint_family, "/// 32 bits, unsigned; its arithmetic wraps."));

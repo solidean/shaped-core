@@ -168,7 +168,7 @@ TEST("portable-hlsl spike - Q14f an array starts a row, and the total rounds up 
 
 TEST("portable-hlsl spike - Q14e a bool is four bytes, not one")
 {
-    // Which is the reason sr::gpu_boolean exists.
+    // Which is the reason slib::gpu_bool exists.
     check_rule("bool is four bytes", "    bool a;\n    float probe;", 16);
 }
 

@@ -7,6 +7,7 @@
 #include <clean-core/string/string_view.hh>
 #include <shaped-graphics/binding/binding.hh>
 #include <shaped-graphics/binding/compiled_shader.hh>
+#include <shaped-shader-library/compiler/block_layout.hh>
 #include <shaped-shader-library/fwd.hh>
 
 /// What a WGSL module declares at module scope: its one entry point, and the resources it binds.
@@ -30,6 +31,9 @@ struct slib::wgsl_declarations
     ///     That is the `bound_sampler` binding a WebGPU backend places back at k.
     ///   - anything else there is refused.
     cc::vector<sg::binding> bindings;
+
+    /// Every `var<uniform>` and `var<storage>` as WGSL's own rules lay it out, named by the variable.
+    cc::vector<block_layout> layouts;
 };
 
 namespace slib

@@ -11,7 +11,6 @@
 #include <shaped-rendering/capture.hh>
 #include <shaped-rendering/denoise.hh>
 #include <shaped-rendering/fwd.hh>
-#include <shaped-rendering/gpu_types.hh>
 #include <shaped-rendering/imgui_context.hh>
 #include <shaped-rendering/imgui_routine.hh>
 #include <shaped-rendering/imgui_style.hh>
