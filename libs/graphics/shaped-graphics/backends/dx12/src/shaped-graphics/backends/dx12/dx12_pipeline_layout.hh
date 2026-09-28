@@ -52,5 +52,6 @@ public:
     /// back sampling through that other sampler.
     /// The driver accepted the blob and reported no error; a blob stored in such a process was wrong too, and persisted.
     /// Seen on an RTX 5070 Ti with driver 32.0.15.9186; a pipeline without static samplers restores correctly there.
+    /// docs/bugs-external/d3d12-cached-pso-static-sampler-mixup reproduces it standalone, and says when to retire this.
     bool has_static_samplers = false;
 };
