@@ -1,6 +1,7 @@
+#include "oidn_reference.hh"
+
 #include <clean-core/string/format.hh>
 #include <nexus/test.hh>
-#include <shaped-rendering/impl/oidn_device.hh>
 
 // The OIDN dependency, and whether this build can actually reach it.
 //
@@ -12,28 +13,28 @@
 
 TEST("sr - the OIDN dependency links and reports its version")
 {
-    if (!sr::impl::oidn_is_compiled_in())
+    if (!sr_test::oidn_is_compiled_in())
     {
-        CHECK(sr::impl::oidn_version().empty());
-        CHECK(!sr::impl::oidn_has_device());
+        CHECK(sr_test::oidn_version().empty());
+        CHECK(!sr_test::oidn_has_device());
         return;
     }
 
     // Major version rather than the exact string: the buffer contract and the filter names are what move with it,
     // and pinning the patch here would make every bump a test edit.
-    auto const version = sr::impl::oidn_version();
+    auto const version = sr_test::oidn_version();
     CHECK(version.starts_with("2.")).context(cc::format("OIDN reports version '{}'", version));
 }
 
-// The CPU device, which is the one the member runs on and the one that needs no vendor hardware.
+// The CPU device, which is the one the oracle filters on and the one that needs no vendor hardware.
 //
 // Skipped rather than failed where OIDN was not fetched, because that is a legitimate build; where it WAS fetched,
 // a device that does not come up is a broken install rather than an absent one.
 TEST("sr - an OIDN CPU device comes up")
 {
-    if (!sr::impl::oidn_is_compiled_in())
-        SKIP("OIDN was not fetched into this build (extern/oidn/fetch-oidn.py)");
+    if (!sr_test::oidn_is_compiled_in())
+        SKIP("OIDN was not fetched into this build (uv run extern/oidn/fetch-oidn.py)");
 
-    CHECK(sr::impl::oidn_has_device())
+    CHECK(sr_test::oidn_has_device())
         .context("OIDN linked but no CPU device — its core and device modules have to sit beside this binary");
 }

@@ -1,16 +1,16 @@
+#include "oidn_reference.hh"
+
 #include <OpenImageDenoise/oidn.hpp>
 #include <clean-core/record/log.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/string.hh>
-#include <shaped-rendering/impl/oidn_device.hh>
 
-// OIDN, confined to this one TU.
-//
-// The seam above names no OIDN type, so nothing of the library reaches a public header of ours or a consumer's
-// translation unit — the same confinement `impl/nrd_instance.cc` gives NRD.
+// OIDN, confined to this one TU; the header names none of its types.
 
-namespace sr::impl
+namespace sr_test
 {
+using namespace cc::primitive_defines;
+
 bool oidn_is_compiled_in()
 {
     return true;
@@ -88,4 +88,4 @@ bool oidn_has_device()
     char const* message = nullptr;
     return device.getError(message) == oidn::Error::None;
 }
-} // namespace sr::impl
+} // namespace sr_test

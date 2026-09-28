@@ -6,6 +6,8 @@
 #include <shaped-rendering/impl/oidn_network.hh>
 #include <shaped-rendering/impl/tza.hh>
 
+using namespace cc::primitive_defines;
+
 // The tensor archive OIDN stores its trained network in, and the network it describes.
 //
 // The shapes matter more than the parse here.
@@ -17,7 +19,7 @@
 namespace
 {
 /// The pinned blob, or empty when the weights were not fetched into this build.
-[[nodiscard]] cc::vector<cc::byte> load_weights()
+[[nodiscard]] cc::vector<byte> load_weights()
 {
     auto const path = cc::string(SR_OIDN_WEIGHTS_DIR) + "/rt_hdr_alb_nrm.tza";
 
@@ -36,32 +38,32 @@ namespace
 /// A tensor archive written by hand, little-endian like the real one, so a malformed case needs no file on disk.
 struct archive_writer
 {
-    cc::vector<cc::byte> bytes;
+    cc::vector<byte> bytes;
 
-    void put_u8(cc::u32 v) { bytes.push_back(cc::byte(v & 0xFF)); }
-    void put_u16(cc::u32 v)
+    void put_u8(u32 v) { bytes.push_back(byte(v & 0xFF)); }
+    void put_u16(u32 v)
     {
         for (auto i = 0; i < 2; ++i)
             put_u8(v >> (8 * i));
     }
-    void put_u32(cc::u64 v)
+    void put_u32(u64 v)
     {
         for (auto i = 0; i < 4; ++i)
-            put_u8(cc::u32(v >> (8 * i)));
+            put_u8(u32(v >> (8 * i)));
     }
-    void put_u64(cc::u64 v)
+    void put_u64(u64 v)
     {
         for (auto i = 0; i < 8; ++i)
-            put_u8(cc::u32(v >> (8 * i)));
+            put_u8(u32(v >> (8 * i)));
     }
     void put_chars(cc::string_view s)
     {
         for (auto const ch : s)
-            put_u8(cc::u32(cc::u8(ch)));
+            put_u8(u32(u8(ch)));
     }
 
     /// The header, with the table at `table_offset`.
-    void header(cc::u64 table_offset)
+    void header(u64 table_offset)
     {
         put_u16(0x41D7);
         put_u8(2);
@@ -140,17 +142,17 @@ TEST("sr - a corrupt tensor archive is refused rather than followed")
 
     CHECK(sr::impl::read_tza({}).empty());
 
-    cc::byte not_an_archive[] = {cc::byte(1), cc::byte(2), cc::byte(3), cc::byte(4)};
+    byte not_an_archive[] = {byte(1), byte(2), byte(3), byte(4)};
     CHECK(sr::impl::read_tza(not_an_archive).empty());
 
     // A well-formed header whose table offset points past the end.
-    cc::byte header[12] = {};
-    header[0] = cc::byte(0xD7);
-    header[1] = cc::byte(0x41);
-    header[2] = cc::byte(2);
-    header[3] = cc::byte(0);
+    byte header[12] = {};
+    header[0] = byte(0xD7);
+    header[1] = byte(0x41);
+    header[2] = byte(2);
+    header[3] = byte(0);
     for (auto i = 4; i < 12; ++i)
-        header[i] = cc::byte(0xFF);
+        header[i] = byte(0xFF);
     CHECK(sr::impl::read_tza(header).empty());
 
     // A table claiming more tensors than its bytes could describe is refused before anything is sized by it.
@@ -170,7 +172,7 @@ TEST("sr - a corrupt tensor archive is refused rather than followed")
         w.put_chars("w");
         w.put_u8(3);
         for (auto i = 0; i < 3; ++i)
-            w.put_u32(cc::u64(1) << 30);
+            w.put_u32(u64(1) << 30);
         w.put_chars("abc");
         w.put_chars("h");
         w.put_u64(0);
@@ -202,7 +204,7 @@ TEST("sr - a corrupt tensor archive is refused rather than followed")
         CHECK(whole[0].data.size() == 8);
 
         for (auto size = 0; size < w.bytes.size(); ++size)
-            CHECK(sr::impl::read_tza(cc::span<cc::byte const>(w.bytes).subspan({.offset = 0, .size = size})).empty())
+            CHECK(sr::impl::read_tza(cc::span<byte const>(w.bytes).subspan({.offset = 0, .size = size})).empty())
                 .context(cc::format("a {}-byte prefix of a {}-byte archive", size, w.bytes.size()));
     }
 }
@@ -215,8 +217,8 @@ TEST("sr - a half widens to the float it encodes")
 {
     struct pair
     {
-        cc::u16 half = 0;
-        cc::f32 value = 0.0f;
+        u16 half = 0;
+        f32 value = 0.0f;
     };
     constexpr pair cases[] = {
         {0x0000, 0.0f},
@@ -235,7 +237,7 @@ TEST("sr - a half widens to the float it encodes")
         CHECK(sr::impl::half_to_float(c.half) == c.value)
             .context(cc::format("half {} widened to {} rather than {}", c.half, sr::impl::half_to_float(c.half), c.value));
 
-    CHECK(cc::bit_cast<cc::u32>(sr::impl::half_to_float(0x8000)) == 0x80000000u).context("negative zero keeps its sign");
+    CHECK(cc::bit_cast<u32>(sr::impl::half_to_float(0x8000)) == 0x80000000u).context("negative zero keeps its sign");
     CHECK(sr::impl::half_to_float(0x7C00) > 3.0e38f).context("infinity");
     auto const nan = sr::impl::half_to_float(0x7E00);
     CHECK(nan != nan).context("NaN");

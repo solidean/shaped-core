@@ -10,4 +10,4 @@ rules:
 
   - kind: allow-include
     value: <OpenImageDenoise/oidn.hpp>
-    reason: Intel's denoiser library, confined to impl/oidn_device.cc — the seam it implements names no OIDN type
+    reason: Intel's denoiser library, the OIDN member's test oracle, confined to tests/oidn_reference.cc

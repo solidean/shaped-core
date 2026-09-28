@@ -1,3 +1,4 @@
+#include "oidn_reference.hh"
 #include "shader_fixtures.hh"
 
 #include <clean-core/common/utility.hh>
@@ -8,7 +9,6 @@
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
-#include <shaped-rendering/impl/oidn_device.hh>
 #include <shaped-rendering/impl/oidn_network.hh>
 #include <shaped-rendering/oidn_denoise_routine.hh>
 #include <shaped-rendering/shaders.hh>
@@ -170,7 +170,7 @@ ASYNC_INVOCABLE_TEST("sr - the network agrees with OIDN's own filter", (sg::cont
     REQUIRE(ctx_h != nullptr);
     auto& ctx = *ctx_h;
 
-    if (!sr::impl::oidn_is_compiled_in() || !sr::impl::oidn_has_device())
+    if (!sr_test::oidn_is_compiled_in() || !sr_test::oidn_has_device())
         SKIP("OIDN itself was not fetched, so there is nothing to compare against "
              "(uv run extern/oidn/fetch-oidn.py)");
     if (!sr::impl::oidn_weights_present())
@@ -208,7 +208,7 @@ ASYNC_INVOCABLE_TEST("sr - the network agrees with OIDN's own filter", (sg::cont
         }
 
     auto reference = cc::vector<tg::vec3f>::create_filled(size_t(k_size * k_size), tg::vec3f(0, 0, 0));
-    REQUIRE(sr::impl::oidn_filter_reference(color3, albedo3, normal3, extent, reference));
+    REQUIRE(sr_test::oidn_filter_reference(color3, albedo3, normal3, extent, reference));
 
     auto const make = [&]
     {
@@ -674,7 +674,7 @@ ASYNC_INVOCABLE_TEST("sr - the tiled network agrees with OIDN's own filter", (sg
     REQUIRE(ctx_h != nullptr);
     auto& ctx = *ctx_h;
 
-    if (!sr::impl::oidn_is_compiled_in() || !sr::impl::oidn_has_device())
+    if (!sr_test::oidn_is_compiled_in() || !sr_test::oidn_has_device())
         SKIP("OIDN itself was not fetched, so there is nothing to compare against "
              "(uv run extern/oidn/fetch-oidn.py)");
     if (!sr::impl::oidn_weights_present())
@@ -703,7 +703,7 @@ ASYNC_INVOCABLE_TEST("sr - the tiled network agrees with OIDN's own filter", (sg
         }
 
     auto reference = cc::vector<tg::vec3f>::create_filled(size_t(k_size * k_size), tg::vec3f(0, 0, 0));
-    REQUIRE(sr::impl::oidn_filter_reference(color3, albedo3, normal3, extent, reference));
+    REQUIRE(sr_test::oidn_filter_reference(color3, albedo3, normal3, extent, reference));
 
     auto const make = [&]
     {

@@ -3,7 +3,6 @@
 #include <clean-core/thread/async_coroutine.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-rendering/impl/denoise_images.hh>
-#include <shaped-rendering/impl/oidn_device.hh>
 #include <shaped-rendering/impl/oidn_network.hh>
 #include <shaped-rendering/oidn_denoise_routine.hh>
 #include <sr_shaders.hh>

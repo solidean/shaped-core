@@ -12,7 +12,7 @@ namespace
 /// between a truncated download and a crash is that every one of these is checked.
 struct cursor
 {
-    cc::span<cc::byte const> blob;
+    cc::span<byte const> blob;
     i64 at = 0;
     bool bad = false;
 
@@ -87,7 +87,7 @@ i64 tza_tensor::element_count() const
     return count;
 }
 
-cc::vector<tza_tensor> read_tza(cc::span<cc::byte const> blob)
+cc::vector<tza_tensor> read_tza(cc::span<byte const> blob)
 {
     auto c = cursor{.blob = blob};
 
