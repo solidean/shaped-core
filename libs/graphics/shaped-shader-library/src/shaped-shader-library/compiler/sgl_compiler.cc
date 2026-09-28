@@ -220,7 +220,7 @@ public:
                 access |= sg::access_flag::shader_write;
             shader.footprint.slots.push_back({.name = slot.host_name, .access = access, .dynamic_index = false});
         }
-        result.interface = cc::move(shader);
+        result.stated = cc::move(shader);
         for (auto const& l : emitted.layouts)
         {
             auto layout = slib::block_layout{.global = l.global, .stride = l.stride};

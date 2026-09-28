@@ -40,11 +40,11 @@ struct slib::preprocessed_source
     /// The library then takes nothing from the compile but those two, and the compiler's reflection only confirms the rest.
     /// `target_set` is the bare name of the target struct, which the library qualifies with the package's namespace.
     /// nullopt for every other compiler, whose shader is what the compile reflects.
-    cc::optional<sg::compiled_shader> interface;
+    cc::optional<sg::compiled_shader> stated;
     /// Every binding the text declares, used or not, which is what a compiler reflecting the text may report.
-    /// Empty without an `interface`.
+    /// Empty without `stated`.
     cc::vector<sg::binding> declared_bindings;
-    /// Every constant block and buffer element the text declares, laid out as the text states; empty without an `interface`.
+    /// Every constant block and buffer element the text declares, laid out as the text states; empty without `stated`.
     cc::vector<block_layout> layouts;
 };
 

@@ -146,7 +146,7 @@ cc::string layout_mismatch(cc::span<slib::block_layout const> reflected, cc::spa
 /// `compiled`'s own reflection is compared against the interface on the way, and a difference is an SGL bug that is
 /// logged, never used: SGL wrote the text, so it is what the text means.
 sg::compiled_shader assembled(sg::compiled_shader compiled,
-                              sg::compiled_shader interface,
+                              sg::compiled_shader stated,
                               cc::span<sg::binding const> declared,
                               cc::span<slib::block_layout const> layouts,
                               slib::shader_compiler const& compiler,
@@ -154,17 +154,17 @@ sg::compiled_shader assembled(sg::compiled_shader compiled,
 {
     {
         CC_RECORD_SCOPE("slib.reflection_check");
-        auto mismatch = reflection_mismatch(compiled, interface, declared);
+        auto mismatch = reflection_mismatch(compiled, stated, declared);
         if (auto const reflected = compiler.reflect_layouts(compiled); reflected.has_value())
             mismatch += layout_mismatch(reflected.value(), layouts);
         if (!mismatch.empty())
             CC_LOG_ERROR("the compiler's reflection of '{}' ({}) disagrees with SGL, whose interface is used:\n{}",
-                         label, interface.entry_point, mismatch);
+                         label, stated.entry_point, mismatch);
     }
-    interface.bytecode = cc::move(compiled.bytecode);
-    interface.compiler = cc::move(compiled.compiler);
-    interface.compiler.signature = cc::format("{} sgl", interface.compiler.signature);
-    return interface;
+    stated.bytecode = cc::move(compiled.bytecode);
+    stated.compiler = cc::move(compiled.compiler);
+    stated.compiler.signature = cc::format("{} sgl", stated.compiler.signature);
+    return stated;
 }
 
 struct sgl_interface
@@ -177,22 +177,22 @@ struct sgl_interface
     cc::string label;
 };
 
-sg::async_compiled_shader assembled_once_settled(sg::async_compiled_shader built, sgl_interface interface)
+sg::async_compiled_shader assembled_once_settled(sg::async_compiled_shader built, sgl_interface pending)
 {
     auto shader = co_await built;
-    co_return assembled(cc::move(shader), cc::move(interface.shader), interface.declared, interface.layouts,
-                        *interface.compiler, interface.label);
+    co_return assembled(cc::move(shader), cc::move(pending.shader), pending.declared, pending.layouts,
+                        *pending.compiler, pending.label);
 }
 
 /// `built` as the shader SGL's interface describes, once it settles.
 /// Assembled after the compile rather than inside it, so a compiler's cache holds only what the compiler reflected.
 /// A compile that settled already stays settled, as a WGSL one does.
-sg::async_compiled_shader with_interface(sg::async_compiled_shader built, sgl_interface interface)
+sg::async_compiled_shader with_interface(sg::async_compiled_shader built, sgl_interface pending)
 {
     if (!built->has_value())
-        return assembled_once_settled(cc::move(built), cc::move(interface));
-    return cc::make_async_from_value(assembled(*built->try_value(), cc::move(interface.shader), interface.declared,
-                                               interface.layouts, *interface.compiler, interface.label));
+        return assembled_once_settled(cc::move(built), cc::move(pending));
+    return cc::make_async_from_value(assembled(*built->try_value(), cc::move(pending.shader), pending.declared,
+                                               pending.layouts, *pending.compiler, pending.label));
 }
 
 sg::async_compiled_shader make_failed_shader(cc::string message)
@@ -491,15 +491,15 @@ void slib::shader_library::_compile_text(compile_outcome& outcome,
     }
 
     desc.source = cc::move(preprocessed.value().source);
-    auto interface = cc::optional<sgl_interface>();
-    if (preprocessed.value().interface.has_value())
+    auto pending = cc::optional<sgl_interface>();
+    if (preprocessed.value().stated.has_value())
     {
-        interface = sgl_interface{.shader = cc::move(preprocessed.value().interface.value()),
-                                  .declared = cc::move(preprocessed.value().declared_bindings),
-                                  .layouts = cc::move(preprocessed.value().layouts),
-                                  .compiler = compiler,
-                                  .label = cc::string::create_copy_of(label)};
-        auto& target_set = interface.value().shader.target_set;
+        pending = sgl_interface{.shader = cc::move(preprocessed.value().stated.value()),
+                                .declared = cc::move(preprocessed.value().declared_bindings),
+                                .layouts = cc::move(preprocessed.value().layouts),
+                                .compiler = compiler,
+                                .label = cc::string::create_copy_of(label)};
+        auto& target_set = pending.value().shader.target_set;
         if (!target_set.empty())
             target_set = host_namespace.empty() ? cc::string() : cc::format("{}::{}", host_namespace, target_set);
     }
@@ -528,7 +528,7 @@ void slib::shader_library::_compile_text(compile_outcome& outcome,
         desc.source = cc::move(rewritten.value());
     }
     outcome.shader = compiler->compile(desc);
-    if (interface.has_value())
-        outcome.shader = with_interface(cc::move(outcome.shader), cc::move(interface.value()));
+    if (pending.has_value())
+        outcome.shader = with_interface(cc::move(outcome.shader), cc::move(pending.value()));
     _backlog.track(outcome.shader);
 }
