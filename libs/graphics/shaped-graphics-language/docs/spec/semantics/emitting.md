@@ -6,7 +6,7 @@ An emitter writes the text a graphics API compiles, from one flat tree of a [che
 It carries what [cube.sgl](../../../tests/samples/cube.sgl) needs, and compute entry points, groups, buffers, enums and `case` besides; every other construct is `unsupported`.
 The cube's text has met its readers: DXC compiles both HLSL targets, and WebGPU compiles the WGSL.
 [sgl-cube](../../../../../../examples/graphics/sgl-cube/sgl_cube.cc) draws the same picture on all three, and no rule below had to change for it.
-**The MSL text has not been through a Metal compiler yet**: its rules are pinned as text, and nothing has compiled or drawn with it.
+**The MSL text has met its reader too**: slib's Metal compiler compiles it, and sg's tier-1 tests draw and dispatch with it on a Metal device.
 Back to the [semantics](_index.md); the reasons are in [why/emitting.md](why/emitting.md).
 
 ## Targets
@@ -29,7 +29,6 @@ Back to the [semantics](_index.md); the reasons are in [why/emitting.md](why/emi
 * **EMIT-11** An entry point the module does not hold is `unknown-entry-point`.
 * **EMIT-12** A construct that no emitter carries yet is `unsupported`, and its detail names the construct; an emitter never guesses an address.
 * **EMIT-13** No error depends on the target but EMIT-109's and EMIT-122's: an entry point is written for every target or for none ([why](why/emitting.md#emit-13)).
-  The exception is `msl`, which refuses what a Metal entry point takes as an argument.
 * **EMIT-109** An entry point that needs a feature no device of the target has is `target-lacks-feature`, and its detail names the feature.
   Today that is `wgsl` against `binding_arrays`, `multisampled_array_textures`, `raytracing`, `geometry_shader` and `tessellation_shader`.
   The shader chose it by `require`, so a portable shader still meets EMIT-13's promise.
@@ -376,7 +375,6 @@ EMIT-110 and EMIT-111 describe today's choice, not a promise.
 ## Open
 
 * GLSL, which comes through the same seam.
-* A Metal compiler for the MSL text, and the buffer index of EMIT-58, which sg's metal backend has yet to adopt.
 * Arrays in GPU memory, which the checker refuses today (CHK-291).
   In a constant block every element starts a row, as HLSL places it: an element shorter than a row is `array<vec4f, N>` read through `.x` in WGSL, and `slib::row<T>` on the host.
 * An annotation that fixes a layout, `@layout(.hlsl)` or `@layout(.cpp)`, for memory a host fills without the generated struct; until it exists, EMIT-116 says nothing is fixed.

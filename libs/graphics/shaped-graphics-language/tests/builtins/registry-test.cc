@@ -290,7 +290,7 @@ TEST("sgl builtins - every name a custom writer or a helper writes is reserved b
     CHECK(unreserved == "");
 }
 
-TEST("sgl builtins - a texture method's MSL and a barrier's, which no entry point reaches until MSL takes a group")
+TEST("sgl builtins - a texture method's MSL and a barrier's, pinned as text")
 {
     auto const& r = builtins::default_registry();
     // the call a record writes, with its arguments already written as the names of their parameters

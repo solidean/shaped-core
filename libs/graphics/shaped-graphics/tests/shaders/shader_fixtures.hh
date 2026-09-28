@@ -25,7 +25,6 @@ slib::shader_library& shader_fixtures();
 
 /// Whether any registered compiler connects a fixture package's language to a format `ctx` accepts.
 ///
-/// The edges are SGL to WGSL, to a metallib on Apple targets, and to DXIL and SPIR-V where DXC exists.
 /// A test that needs a shader asks this first and SKIPs rather than failing on an acquire that cannot succeed.
 /// Derived from the library rather than from a backend name, so a new edge needs nothing here.
 [[nodiscard]] bool shaders_reach(sg::context const& ctx);

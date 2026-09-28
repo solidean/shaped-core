@@ -448,10 +448,10 @@ Everything not named here is the diagnostic `unsupported-yet`, never a guess.
 * `atomic[uint]` and `atomic[int]`, in a `mut buffer` and in workgroup memory, with every update but a compare-exchange.
 * A resource's host name, its path `binding.member` ([CHK-171](semantics/checking.md#bindings)), which the text reports beside the identifier it minted.
 
-Three targets write a group, and the fourth declines rather than guessing.
+Every target writes a group.
 WGSL gives each resource its own `@group`/`@binding`, and HLSL declares each at file scope with `register(<class>slot, spaceN)` on dx12 and `[[vk::binding(slot, N)]]` on vulkan.
+MSL writes the group as one argument buffer whose member `[[id(slot)]]` is each slot, as [MSL](#how-a-group-reaches-sg) below shows and EMIT-89 states.
 A group's plain members are one constant buffer at the group's slot 0, named after the binding, and its resources follow it in declaration order.
-MSL declines every group until slib has a compiler that turns its text into a metallib.
 
 `bytes`, `constants[T]` and a file-scope `sampler` all parse and are then reported.
 A struct element type is placed by the storage rule of [the layout rules](semantics/emitting.md#layout).
