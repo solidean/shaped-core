@@ -266,8 +266,31 @@ TEST("sgl emit layout - a struct in both a constant block and a buffer has two l
                     "\n"
                     "@compute(64) fun main(@thread_id id: int3){work}:\n"
                     "    let x = work.many[id.x].a + work.one.a\n")
-          == "layout-conflict 'pair' is in a constant block of 'work' and in a storage buffer of 'work'\n"
-             "layout-conflict 'pair' is in a storage buffer of 'work' and in a constant block of 'work'\n");
+          == "layout-conflict 'pair' is in a constant block of 'work' and in a storage buffer of 'work'\n");
+
+    // One conflict is one error, whichever of the two bindings finds it, and whichever order they are listed in.
+    auto const across = [](cc::string_view list)
+    {
+        return errors_of(cc::format("struct pair:\n"
+                                    "    a: float\n"
+                                    "    b: float3\n"
+                                    "\n"
+                                    "binding one:\n"
+                                    "    p: pair\n"
+                                    "\n"
+                                    "binding two:\n"
+                                    "    items: mut buffer[pair]\n"
+                                    "\n"
+                                    "@compute(64) fun main(@thread_id id: int3){{{}}}:\n"
+                                    "    two.items[id.x] = two.items[id.x + 1]\n",
+                                    list));
+    };
+    auto const once
+        = cc::string("layout-conflict 'pair' is in a constant block of 'one' and in a storage buffer of 'two'\n");
+    CHECK(across("one, two") == once);
+    CHECK(across("two, one") == once);
+    // The struct has one layout for the whole module, so listing only the buffer's side still meets the conflict.
+    CHECK(across("two") == once);
 }
 
 TEST("sgl emit layout - @no_padding refuses a gap before a member, and never the tail")
@@ -316,6 +339,23 @@ TEST("sgl emit layout - @no_padding refuses a gap before a member, and never the
           == "padding-forbidden in @no_padding 'particle', as a constant block places it: 'velocity' starts at byte "
              "16, "
              "12 bytes past where 'mass' ends\n");
+
+    // The gap is the struct's, so two bindings placing it find one error between them.
+    auto const twice = cc::string_view("@no_padding struct particle:\n"
+                                       "    mass: float\n"
+                                       "    velocity: float4\n"
+                                       "\n"
+                                       "binding near:\n"
+                                       "    one: particle\n"
+                                       "\n"
+                                       "binding far:\n"
+                                       "    other: particle\n"
+                                       "\n"
+                                       "@compute(64) fun main(@thread_id id: int3){near, far}:\n"
+                                       "    let x = near.one.mass + far.other.mass\n");
+    CHECK(errors_of(twice)
+          == "padding-forbidden in @no_padding 'particle', as a constant block places it: 'velocity' starts at byte "
+             "16, 12 bytes past where 'mass' ends\n");
 }
 
 TEST("sgl emit layout - a bool has no layout, and bool32 is the bool GPU memory holds")

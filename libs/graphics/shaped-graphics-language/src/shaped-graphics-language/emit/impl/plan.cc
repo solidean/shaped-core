@@ -527,6 +527,15 @@ void sgl::emit::impl::validate_binding(check::checked_module const& m, check::sy
 {
     auto const report = [&](error_kind kind, cc::string detail)
     { errors.push_back({.kind = kind, .symbol = id, .detail = cc::move(detail)}); };
+    // What is about a struct rather than this binding, which every binding placing the struct finds the same.
+    auto const report_on_struct = [&](error_kind kind, check::type_id type, cc::string detail)
+    {
+        auto e = error{.kind = kind, .symbol = m.at(type).symbol, .detail = cc::move(detail)};
+        for (auto const& known : errors)
+            if (known == e)
+                return;
+        errors.push_back(cc::move(e));
+    };
 
     auto const& s = m.at(id);
     auto const& b = m.bindings[s.info];
@@ -574,9 +583,12 @@ void sgl::emit::impl::validate_binding(check::checked_module const& m, check::sy
                 collect_placed_structs(m, info.symbol, other, theirs);
                 if (!contains(theirs, type))
                     continue;
-                report(error_kind::layout_conflict,
-                       cc::format("'{}' is in a {} of '{}' and in a {} of '{}'", m.name_of(type), space_name(space),
-                                  s.name, space_name(other), m.at(info.symbol).name));
+                // Worded from the constant block's side, so the binding on either side finds the same error.
+                auto const is_constants = space == address_space::constants;
+                report_on_struct(error_kind::layout_conflict, type,
+                                 cc::format("'{}' is in a constant block of '{}' and in a storage buffer of '{}'",
+                                            m.name_of(type), is_constants ? s.name : m.at(info.symbol).name,
+                                            is_constants ? m.at(info.symbol).name : s.name));
                 break;
             }
     }
@@ -592,8 +604,9 @@ void sgl::emit::impl::validate_binding(check::checked_module const& m, check::sy
         for (auto const type : structs)
             if (m.at(type).is_no_padding)
                 for (auto& gap : padding_of(m, m.at(m.at(type).members), space))
-                    report(error_kind::padding_forbidden, cc::format("in @no_padding '{}', as a {} places it: {}",
-                                                                     m.name_of(type), space_name(space), gap));
+                    report_on_struct(error_kind::padding_forbidden, type,
+                                     cc::format("in @no_padding '{}', as a {} places it: {}", m.name_of(type),
+                                                space_name(space), gap));
     }
 }
 
