@@ -210,3 +210,108 @@ ASYNC_INVOCABLE_TEST("sg - each primitive_topology assembles one vertex list int
                     .context(cc::format("topology {}, probe ({}, {})", int(e.topology), probes[i].x, probes[i].y));
     }
 }
+
+ASYNC_INVOCABLE_TEST("sg - a second scope's target_op keeps, clears or discards what the first drew",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+
+    // The first scope clears to red and draws white over the left half.
+    // The second scope opens with the op under test and draws green over column 3 only.
+    // Preserve keeps the white and the red around column 3, clear replaces both by its own color, and discard's
+    // contents are undefined, so only column 3 is read after it.
+    constexpr int width = 4;
+    auto const red = tg::vec4f(1, 0, 0, 1);
+    auto const green = tg::vec4f(0, 1, 0, 1);
+    auto const blue = tg::vec4f(0, 0, 1, 1);
+    sg_test::rect const rects[] = {
+        sg_test::rect_at(0, 0, 2, 1, width, 1, 0.5f, white),
+        sg_test::rect_at(3, 0, 4, 1, width, 1, 0.5f, green),
+    };
+    auto const batch = sg_test::rect_batch(*ctx, rects);
+    auto const pipeline = co_await rect_pipeline(*ctx, [](sg::raster_pipeline_description&) {});
+
+    for (auto const op : {sg::target_op::preserve, sg::target_op::clear, sg::target_op::discard})
+    {
+        auto const pixels = co_await sg_test::draw_offscreen_passes(
+            *ctx,
+            {.width = width,
+             .height = 1,
+             .colors = {sg::pixel_format::rgba16_float},
+             .target_set = shaders::rect_target::name,
+             .clear_color = red},
+            [&](sg::command_list& cmd, sg_test::offscreen_targets const& targets)
+            {
+                {
+                    auto scope = cmd.raster.render_to(targets.cleared());
+                    scope.bind_pipeline(*pipeline);
+                    batch.draw(scope, 0);
+                }
+                auto second = targets.preserved();
+                second.color_targets[0].op = op;
+                second.color_targets[0].clear_color = blue;
+                auto scope = cmd.raster.render_to(second);
+                scope.bind_pipeline(*pipeline);
+                batch.draw(scope, 1);
+            });
+
+        auto const& target = pixels[0];
+        CHECK(target.rgba_float(3, 0) == green);
+        if (op == sg::target_op::preserve)
+        {
+            CHECK(target.rgba_float(0, 0) == white);
+            CHECK(target.rgba_float(2, 0) == red);
+        }
+        if (op == sg::target_op::clear)
+        {
+            CHECK(target.rgba_float(0, 0) == blue);
+            CHECK(target.rgba_float(2, 0) == blue);
+        }
+    }
+}
+
+ASYNC_INVOCABLE_TEST("sg - a viewport maps clip space onto its pixels, and a scissor set per draw clips each draw",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+
+    // One rect over all of clip space, drawn three times into an 8 × 4 target, each draw to its own row band:
+    //  1. a viewport over columns 4 to 7 of rows 0 and 1, with the full scissor;
+    //  2. the full viewport scissored to columns 1 and 2 of row 2;
+    //  3. the full viewport scissored to column 6 of row 3, set between two draws of one scope.
+    constexpr int width = 8;
+    constexpr int height = 4;
+    sg_test::rect const whole[] = {sg_test::rect_at(0, 0, width, height, width, height, 0.5f, white)};
+    auto const batch = sg_test::rect_batch(*ctx, whole);
+    auto const pipeline = co_await rect_pipeline(*ctx, [](sg::raster_pipeline_description&) {});
+    auto const box = [](int x0, int y0, int x1, int y1) { return tg::aabb2i(tg::pos2i(x0, y0), tg::pos2i(x1, y1)); };
+
+    auto const pixels = co_await sg_test::draw_offscreen(
+        *ctx,
+        {.width = width,
+         .height = height,
+         .colors = {sg::pixel_format::rgba16_float},
+         .target_set = shaders::rect_target::name},
+        [&](sg::rendering_scope& scope)
+        {
+            scope.bind_pipeline(*pipeline);
+            scope.set_viewport({.offset = tg::pos2f(4, 0), .size = tg::vec2f(4, 2)});
+            batch.draw(scope, 0);
+            scope.set_viewport({.offset = tg::pos2f(0, 0), .size = tg::vec2f(width, height)});
+            scope.set_scissor(box(1, 2, 3, 3));
+            batch.draw(scope, 0);
+            scope.set_scissor(box(6, 3, 7, 4));
+            batch.draw(scope, 0);
+        });
+
+    for (auto y = 0; y < height; ++y)
+        for (auto x = 0; x < width; ++x)
+        {
+            auto const expected = (y < 2 && x >= 4) || (y == 2 && (x == 1 || x == 2)) || (y == 3 && x == 6);
+            CHECK(drawn(pixels[0], x, y) == expected).context(cc::format("pixel ({}, {})", x, y));
+        }
+}

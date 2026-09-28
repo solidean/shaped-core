@@ -391,6 +391,7 @@ if(SC_BUILD_TESTS)
             tests/pipeline/depth-stencil-test.cc
             tests/pipeline/blend-test.cc
             tests/pipeline/raster-state-test.cc
+            tests/pipeline/draw-params-test.cc
         )
         sc_add_shader_package(
             TARGET     shaped-graphics-test
@@ -407,6 +408,7 @@ if(SC_BUILD_TESTS)
                 sync.sgl:*
                 binding_arrays.sgl:*
                 rects.sgl:*
+                draws.sgl:*
         )
     endif()
 

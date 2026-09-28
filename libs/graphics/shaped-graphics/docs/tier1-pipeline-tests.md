@@ -39,7 +39,6 @@ The shape that gives it: one target, a row of small quads, one quad per enum val
 Two values that could agree on the chosen inputs get a second quad with inputs that separate them.
 
 - **`vertex_attribute_format`**: one attribute per format, each fed bytes whose decoded value is distinct from what any other format would decode them to — the normalized formats included.
-- **`target_op`**: load against clear against the previous contents; `discard` leaves undefined contents, so it gets a test that it runs, and nothing it produced is read.
 - **Texture view dimensions**: each shape sampled at one texel whose value encodes its layer, face or slice, so a wrong dimension reads a wrong value.
 - **Sampler address and filter modes**: samples outside 0..1 where repeat, mirror and clamp differ, and at half a texel where nearest and linear differ.
   Comparison samplers get every `compare_op` again, as the depth test does.
@@ -50,12 +49,7 @@ A combinatorial sweep — every blend factor against every op — narrows to a c
 
 ## Draw and dispatch parameters
 
-- `first_vertex`, `vertex_offset` (the base vertex), `first_instance` and `instance_count`, each read back through `@vertex_index` and `@instance_index` into a flat varying.
-  SGL states both include the draw's base on every backend (EMIT-128), so these tests are what pins it on each.
-- 16- and 32-bit indices, and a first index that is odd.
 - `dispatch_threads` against `dispatch_groups`, with a partial last group: every thread writes its `@thread_id`, and one workgroup counts its threads with an atomic in workgroup memory.
-- Viewport and scissor, the stencil reference and the blend constants set per draw.
-- `bind_vertex_buffers` from a first slot other than 0.
 - Inline constants that change per draw and per dispatch.
 
 ## Binding semantics, executed
