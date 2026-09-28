@@ -154,6 +154,17 @@ struct cc::custom::formatter<wide_int>
 // Runtime behavior
 // =========================================================================================================
 
+TEST("format - a float spec asks for shortest digits exactly when it has no presentation type")
+{
+    // a precision without f/e/g is ignored for a float, so it still means shortest
+    CHECK(cc::is_shortest_float_format_spec(""));
+    CHECK(cc::is_shortest_float_format_spec(">8"));
+    CHECK(cc::is_shortest_float_format_spec(".2"));
+    CHECK(!cc::is_shortest_float_format_spec("f"));
+    CHECK(!cc::is_shortest_float_format_spec(".2f"));
+    CHECK(!cc::is_shortest_float_format_spec("e"));
+}
+
 TEST("format - wide integers")
 {
     auto const two_64 = wide_int{.negative = false, .magnitude = {0, 1}};
