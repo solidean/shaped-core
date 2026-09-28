@@ -87,9 +87,9 @@ TEST("sr - the OIDN weights parse into the network the shaders expect")
     // arithmetic that has to keep holding is spelled out beside each one.
     struct layer
     {
-        char const* name;
-        int out_channels;
-        int in_channels;
+        char const* name = nullptr;
+        int out_channels = 0;
+        int in_channels = 0;
     };
     constexpr layer layers[] = {
         {"enc_conv0", 32, 9}, // 3 radiance + 3 albedo + 3 normal

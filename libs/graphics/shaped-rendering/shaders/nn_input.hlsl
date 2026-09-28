@@ -22,9 +22,9 @@ struct nn_input_constants
     uint source_width;
     uint source_height;
 
-    /// Where this tile's tensor starts in the image, which is its interior's origin less the overlap.
-    /// Negative on the first tile of a row or column, and that is the point: the clamp below then repeats the edge
-    /// exactly as it does for the padding, so an edge tile sees what an interior one does.
+    /// Where this tile's tensor starts in the image: never negative, and always a multiple of sixteen.
+    /// An edge tile is shifted inward to end where the whole run's padded tensor ends, so its reads past the image
+    /// are the same clamped edge the whole run pads with.
     int source_offset_x;
     int source_offset_y;
 

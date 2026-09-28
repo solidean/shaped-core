@@ -65,11 +65,11 @@ enum feature : int
 /// The widths are NOT here: they are read out of the weights, which is what keeps this table a topology.
 struct conv_step
 {
-    char const* name;
-    int source;
-    int skip;
-    int target;
-    int level; // 0 full resolution, 1 half, and so on
+    char const* name = nullptr;
+    int source = 0;
+    int skip = 0;
+    int target = 0;
+    int level = 0; // 0 full resolution, 1 half, and so on
 };
 
 /// The sixteen convolutions, in order, exactly as `UNetFilter::addUNet` builds them.
@@ -89,9 +89,9 @@ constexpr int k_conv_count = int(sizeof(k_convs) / sizeof(k_convs[0]));
 /// The four pools, each taking a convolution's output down one level.
 struct resample_step
 {
-    int source;
-    int target;
-    int level; // the level of the SMALLER of the two
+    int source = 0;
+    int target = 0;
+    int level = 0; // the level of the SMALLER of the two
 };
 
 constexpr resample_step k_pools[] = {

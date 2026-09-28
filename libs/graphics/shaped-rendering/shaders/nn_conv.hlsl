@@ -14,8 +14,7 @@
 // the wave, so putting `o` innermost makes one weight load touch one or two cache lines instead of sixty-four rows
 // scattered `9 * in_channels` floats apart.
 // `sr::impl::oidn_network` does that transpose once when it uploads them.
-// It is worth about 1.1x at the same blocking, and 1.25x once the blocking is re-tuned — cheaper weights move the
-// best run of texels from 32 down to 16.
+// It is worth about 1.1x at the same blocking, and 1.25x once the run of texels per thread is re-tuned for it.
 //
 // Padding is ZERO and the output keeps the input's width and height, which is what OIDN's convolutions do — its
 // descriptor gives the destination the source's H and W, and the skip connections could not concatenate otherwise.
@@ -93,7 +92,7 @@ using namespace nn_conv_bindings;
     // The bias sits after every weight of the layer, so one buffer carries both.
     float const bias = gWeights[gConstants.bias_offset + o];
 
-    float sums[NN_CONV_TEXELS];
+    float sums[NN_CONV_TEXELS] = (float[NN_CONV_TEXELS])0;
     [unroll] for (uint s = 0; s < NN_CONV_TEXELS; ++s)
         sums[s] = bias;
 
@@ -113,10 +112,10 @@ using namespace nn_conv_bindings;
 
         // Where each column of the window sits, worked out ONCE for the row rather than per input channel.
         //
-        // The bounds test and the concat split do not depend on the channel, so leaving them in the inner loop meant
-        // thirty-four branches for every ninety-six multiply-adds.
-        uint texels[NN_CONV_TEXELS + 2];
-        bool inside[NN_CONV_TEXELS + 2];
+        // The bounds test and the concat split do not depend on the channel, so the inner loop would repeat them for
+        // every input channel it reads.
+        uint texels[NN_CONV_TEXELS + 2] = (uint[NN_CONV_TEXELS + 2])0;
+        bool inside[NN_CONV_TEXELS + 2] = (bool[NN_CONV_TEXELS + 2])0;
         [unroll] for (uint j = 0; j < NN_CONV_TEXELS + 2; ++j)
         {
             int const sx = int(x0) + int(j) - 1;
@@ -130,9 +129,8 @@ using namespace nn_conv_bindings;
         // Which half of the concatenation a channel comes from is decided once per channel, not once per element.
         // FOUR input channels at a time, which is the whole reason every tensor's channel count is padded to four.
         //
-        // A channel is contiguous within a texel, so one float4 fetches four of them; the eighteen loads that used to
-        // cover one channel now cover four. They were two thirds of this shader's time, measured by hoisting them out
-        // of the loop and watching a 256x256 tile fall from 7.4 ms to 2.6.
+        // A channel is contiguous within a texel, so one float4 fetches four of them.
+        // The input reads were two thirds of this shader's time before they were batched; denoising.md has the numbers.
         for (uint i = 0; i < in_channels; i += 4u)
         {
             bool const from_a = i < a;
@@ -140,7 +138,7 @@ using namespace nn_conv_bindings;
             uint const c4 = (from_a ? i : i - a) >> 2;
 
             // One row of the window, read once and spent on all three kernel columns and all four channels.
-            float4 v[NN_CONV_TEXELS + 2];
+            float4 v[NN_CONV_TEXELS + 2] = (float4[NN_CONV_TEXELS + 2])0;
             [unroll] for (uint j = 0; j < NN_CONV_TEXELS + 2; ++j)
             {
                 uint const at = texels[j] * stride4 + c4;
@@ -148,8 +146,8 @@ using namespace nn_conv_bindings;
             }
 
             // The weights cannot come four at a time with them: `o` is innermost, so consecutive input channels are
-            // `out_channels` apart. That is the right trade, because a weight load serves sixteen texels and an input
-            // load serves one.
+            // `out_channels` apart.
+            // That is the right trade, because a weight load serves NN_CONV_TEXELS texels and an input load serves one.
             [unroll] for (uint d = 0; d < 4u; ++d)
             {
                 uint const at_w = row + (i + d) * out_channels + o;
