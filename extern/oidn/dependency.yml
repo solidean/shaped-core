@@ -1,12 +1,11 @@
 # Pin and license for the upstream fetched here.
 # fetch-oidn.py reads its pin from this file; the per-OS asset layout and the install plan stay in the script.
-# tools/dev/lib/pipeline/prereqs.py scans this file for the `pin_hash:` line to decide whether .install/ is current,
-# without paying to start Python — keep that key on a line of its own.
+# It is `on-request`, so no configure step fetches it; `dev.py deps list` reports whether .install/ is current.
 
 upstreams:
   - name: OIDN
     homepage: https://www.openimagedenoise.org
-    install: fetched
+    install: on-request
     source: github-release
     repo: https://github.com/RenderKit/oidn
     track: github-releases
@@ -25,23 +24,23 @@ upstreams:
     unavailable_on: [windows-arm64, linux-arm64, macos-x64]
     license: Apache-2.0
     license_files: [.install/LICENSE.txt, .install/LICENSE-third-party-programs.txt, .install/LICENSE-oneTBB.txt]
-    used_by: shaped-rendering — sr::denoise_method::oidn
+    used_by: shaped-rendering-test — the reference oracle sr::denoise_method::oidn is compared against
     notes: |
-      Intel Open Image Denoise: a trained denoiser for path-traced images, and the one non-native member that runs without vendor hardware.
-      Apache-2.0, so it is `fetched` like SDL3 rather than `on-request` like the two NVIDIA SDKs — nothing here is a license a person has to accept.
-      `prereqs.ensure_oidn` hydrates it on configure, and SC_SKIP_OIDN is the way out for a checkout that does not want to pay 53 MB for it.
+      Intel Open Image Denoise, the library, which nothing we ship links.
+      shaped-rendering runs the trained network in its own compute shaders from extern/oidn-weights, so this is only the reference an oracle test compares that output against.
 
-      IT IS BIG, AND THAT WAS THE OPEN QUESTION.
+      FETCHED ON REQUEST, because only that oracle uses it.
+      The license is no obstacle — Apache-2.0 asks nobody to accept anything — but 53 MB is not worth paying on every configure for one test.
+      Nothing in dev.py fetches it; `uv run extern/oidn/fetch-oidn.py` does, and without it the oracle tests SKIP.
+
+      IT IS BIG, and no install plan can change that.
       The Windows archive is 56.6 MB compressed and 83.1 MB unpacked across 34 files.
-      Nearly all of it is one file: OpenImageDenoise_core.dll at 50.6 MB, which is where the trained weights live, so no install plan can make this dependency small.
-      The CPU-only subset fetch-oidn.py installs is 16 files and 52.8 MB unpacked — the same order as SDL3's 49.6 MB, which is already fetched by default, which is what settles the policy.
+      Nearly all of it is one file: OpenImageDenoise_core.dll at 50.6 MB, which is where the trained weights live.
+      The CPU-only subset fetch-oidn.py installs is 16 files and 52.8 MB unpacked.
 
-      CPU ONLY FOR NOW, which is a size decision AND a capability one.
+      CPU ONLY, because the oracle needs nothing more.
       Dropping the CUDA, HIP and SYCL device modules and their Level Zero loaders saves 22 MB of the 83.
-      They would buy nothing yet: OIDN's GPU devices run on their own API and share memory with ours through an OS handle, which needs exportable memory and shared fences that sg does not have.
-      See libs/graphics/shaped-graphics/docs/TODO.md.
-      OIDN on the CPU needs neither, because it goes through the existing download and upload.
-      When sg grows those, the extract list here grows with them.
+      The CPU device reads and writes ordinary memory, which is all a test comparing two images needs.
 
       ALL THREE LAYOUTS ARE NOW UNPACKED, and the two Unix ones differ from Windows in three ways that all matter.
       Each library is one versioned real file plus the unversioned and soname symlinks onto it, oneTBB is named `tbb` rather than Windows' `tbb12`, and every library carries an RPATH of `$ORIGIN/../lib`.

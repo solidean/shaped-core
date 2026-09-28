@@ -1,27 +1,26 @@
 cmake_minimum_required(VERSION 3.28)
 
-# Intel Open Image Denoise (OIDN): the trained spatial denoise member behind sr::denoise_method::oidn.
+# Intel Open Image Denoise (OIDN), the library: the reference the shaped-rendering-test oracle compares sr::denoise_method::oidn against.
+# Nothing we ship links it; the member itself runs the network from extern/oidn-weights in our own compute shaders.
 #
-# Fetched rather than vendored, and fetched BY DEFAULT rather than on request: it is Apache-2.0, so unlike the two
-# NVIDIA SDKs beside it there is no license anyone has to accept.
-# fetch-oidn.py hydrates .install/ and dev.py runs it on demand, exactly as it does for SDL3 and DXC.
+# Fetched ON REQUEST: no configure step runs fetch-oidn.py, so .install/ is normally absent and the oracle tests SKIP.
+# `uv run extern/oidn/fetch-oidn.py` hydrates .install/, and the next configure picks it up.
 #
 # An IMPORTED target rather than a build: what arrives is headers plus prebuilt libraries, and building OIDN from
 # source would drag in oneDNN and a training-weights pipeline.
 #
-# CPU ONLY. The install carries no CUDA, HIP or SYCL device module, because OIDN's GPU devices share memory with ours
-# through an OS handle and sg has no exportable memory yet — see libs/graphics/shaped-graphics/docs/TODO.md.
+# CPU ONLY: the install carries no CUDA, HIP or SYCL device module, because the oracle needs none.
 set(OIDN_INSTALL ${CMAKE_CURRENT_SOURCE_DIR}/.install)
 
 if(NOT EXISTS "${OIDN_INSTALL}/pin.txt")
     message(FATAL_ERROR
         "OIDN is not installed (${OIDN_INSTALL} is missing). Fetch it once with:\n"
         "    uv run extern/oidn/fetch-oidn.py\n"
-        "dev.py does this on demand; see tools/dev/lib/pipeline/prereqs.py.")
+        "Nothing fetches it for you — see extern/oidn/dependency.yml for why.")
 endif()
 
 # The facade library is what a consumer links; the core beside it carries the trained weights and is loaded by it.
-# GLOBAL so shaped-rendering, a sibling add_subdirectory, can link it.
+# GLOBAL so shaped-rendering-test, under a sibling add_subdirectory, can link it.
 add_library(oidn SHARED IMPORTED GLOBAL)
 if(WIN32)
     set_target_properties(oidn PROPERTIES

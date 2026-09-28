@@ -20,6 +20,8 @@ from __future__ import annotations
 
 import sys
 import tempfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 import yaml
@@ -59,6 +61,55 @@ def test_arch_key_covers_both_spellings() -> None:
     check("host_arch_key spellings", sorted(set(deps_manifest.HOST_ARCH_KEYS)), ["arm64", "x64"])
     check("host_keys shape", len(deps_manifest.host_keys()), 2)
     check("host_keys is os-first", deps_manifest.host_keys()[0], deps_manifest.host_os_key())
+
+
+@contextmanager
+def on_machine(machine: str, os_key: str = "linux") -> Iterator[None]:
+    """Run the body as though `platform.machine()` said `machine` on an `os_key` host."""
+    real_machine = deps_manifest.platform.machine
+    real_os = deps_manifest.host_os_key
+    try:
+        deps_manifest.platform.machine = lambda: machine
+        deps_manifest.host_os_key = lambda: os_key
+        yield
+    finally:
+        deps_manifest.platform.machine = real_machine
+        deps_manifest.host_os_key = real_os
+
+
+def test_machine_spellings_map_onto_arch_keys() -> None:
+    # Windows reports AMD64, Linux x86_64 and aarch64, macOS arm64; anything else names no arch key at all.
+    for machine, want in (("AMD64", "x64"), ("x86_64", "x64"), ("aarch64", "arm64"), ("arm64", "arm64"),
+                          ("riscv64", None), ("ppc64le", None), ("i686", None)):
+        with on_machine(machine):
+            check(f"host_arch_key on {machine}", deps_manifest.host_arch_key(), want)
+            want_keys = ["linux"] if want is None else ["linux", f"linux-{want}"]
+            check(f"host_keys on {machine}", deps_manifest.host_keys(), want_keys)
+
+
+def test_unknown_machine_is_refused_by_a_per_arch_upstream() -> None:
+    # An upstream that ships per machine on this OS ships nothing for a machine it never names.
+    # Reading riscv64 as x64 would install an x86_64 archive there, which is what this case pins shut.
+    for machine in ("riscv64", "ppc64le", "i686"):
+        with on_machine(machine):
+            check(f"OIDN on linux-{machine}", deps_manifest.one(EXTERN / "oidn").is_available, False)
+            check(f"DXC on linux-{machine}", deps_manifest.one(EXTERN / "dxc").is_available, False)
+    with on_machine("x86_64"):
+        check("OIDN on linux-x86_64", deps_manifest.one(EXTERN / "oidn").is_available, True)
+        check("DXC on linux-x86_64", deps_manifest.one(EXTERN / "dxc").is_available, True)
+    with on_machine("aarch64"):
+        check("OIDN on linux-aarch64", deps_manifest.one(EXTERN / "oidn").is_available, False)
+    with on_machine("AMD64", os_key="windows"):
+        check("OIDN on windows-AMD64", deps_manifest.one(EXTERN / "oidn").is_available, True)
+
+
+def test_unknown_machine_keeps_an_upstream_without_arch_keys() -> None:
+    # A list naming only other OSes, or none at all, says nothing about machines, so an unknown one stays available.
+    with on_machine("riscv64"):
+        check("macos-only list on linux-riscv64", deps_manifest.one(_manifest_with(["macos"])).is_available, True)
+        check("windows-arm64 list on linux-riscv64",
+              deps_manifest.one(_manifest_with(["windows-arm64"])).is_available, True)
+        check("bare linux on linux-riscv64", deps_manifest.one(_manifest_with(["linux"])).is_available, False)
 
 
 def test_oidn_matches_the_published_assets() -> None:
@@ -117,7 +168,7 @@ def main() -> int:
         for line in failures:
             print(f"  {line}")
         return 1
-    print("manifest-self-test: OK (host resolution, availability across 6 hosts, key validation)")
+    print("manifest-self-test: OK (host resolution, unknown machines, availability across 6 hosts, key validation)")
     return 0
 
 

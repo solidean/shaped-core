@@ -86,14 +86,13 @@ option(SC_USE_VENDORED_SDL3 "Build the fetched SDL3 in extern/sdl3/.install (OFF
 # babel-serializer keeps its sqlite API always available and reports an unfetched backend at runtime.
 option(SC_USE_VENDORED_SQLITE "Build the fetched SQLite in extern/sqlite/.install (OFF expects an external `sqlite` target)" ON)
 
-# OIDN is fetched on demand like SDL3, not on request like the two NVIDIA SDKs: it is Apache-2.0, so there is no
-# license a person has to accept, and it is wanted on every platform.
-# shaped-rendering gates its trained denoise member on the `oidn` target existing and reports `unsupported` without it.
+# The OIDN library is only the reference shaped-rendering-test's oracle compares sr::denoise_method::oidn against, and nothing we ship links it.
+# So it is fetched ON REQUEST — `uv run extern/oidn/fetch-oidn.py` — rather than on every configure, and the oracle tests SKIP without the `oidn` target.
 option(SC_USE_VENDORED_OIDN "Wrap the fetched Open Image Denoise in extern/oidn/.install (OFF expects an external `oidn` target)" ON)
 
-    # The trained networks, which are a dependency of their own because shaped-rendering runs them itself rather than
-    # calling Intel's inference — 1.8 MB of weights instead of 53 MB of runtime.
-    option(SC_USE_VENDORED_OIDN_WEIGHTS "Use the fetched OIDN weights in extern/oidn-weights/.install" ON)
+# The trained networks, a dependency of their own because shaped-rendering runs them itself rather than calling Intel's inference.
+# 1.8 MB of weights instead of 53 MB of runtime, fetched on every configure since the member cannot run without them.
+option(SC_USE_VENDORED_OIDN_WEIGHTS "Use the fetched OIDN weights in extern/oidn-weights/.install" ON)
 
 # Also gated on SC_MIMALLOC: with the default resource on operator new nothing links mimalloc, so building it would be
 # dead weight in exactly the sanitizer builds that are already the slowest.
@@ -147,7 +146,7 @@ if(SC_USE_VENDORED_METAL_CPP AND APPLE)
     add_subdirectory(metal-cpp)
 endif()
 
-# The four fetched deps below are host-side, so a cross-target build must not pick them up.
+# The fetched deps below are host-side, so a cross-target build must not pick them up.
 # dev.py already declines to fetch them for such a preset (_NON_NATIVE in tools/dev/lib/pipeline/prereqs.py);
 # the pin.txt guards only see whether some *earlier native* configure left an install behind, which on a developer
 # machine it has. Without this a wasm build links host binaries CI never sees -- a prebuilt libdxcompiler, an SDL
@@ -161,8 +160,12 @@ if(EMSCRIPTEN OR ANDROID OR IOS)
     set(_sc_host_side_deps OFF)
 endif()
 
+# A subdirectory that is not added must not leave the CACHE INTERNAL values an earlier configure set behind.
+# Otherwise switching an option off, or deleting an .install/, keeps consumers staging and compiling in paths that are gone.
 if(_sc_host_side_deps AND SC_USE_VENDORED_DXC AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/dxc/.install/pin.txt")
     add_subdirectory(dxc)
+else()
+    unset(DXC_RUNTIME_DLLS CACHE)
 endif()
 
 if(_sc_host_side_deps AND SC_USE_VENDORED_ZYDIS AND SC_BUILD_TOOLS AND SC_ARCH_X64 AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/zydis/.install/pin.txt")
@@ -179,8 +182,12 @@ endif()
 
 if(_sc_host_side_deps AND SC_USE_VENDORED_OIDN AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/oidn/.install/pin.txt")
     add_subdirectory(oidn)
+else()
+    unset(OIDN_RUNTIME_LIBRARIES CACHE)
 endif()
 
 if(_sc_host_side_deps AND SC_USE_VENDORED_OIDN_WEIGHTS AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/oidn-weights/.install/pin.txt")
     add_subdirectory(oidn-weights)
+else()
+    unset(OIDN_WEIGHTS_DIR CACHE)
 endif()

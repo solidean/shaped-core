@@ -5,16 +5,15 @@
 # ///
 """Download the pinned Open Image Denoise release into extern/oidn/.install.
 
-OIDN backs shaped-rendering's `sr::denoise_method::oidn`, the trained spatial denoise member.
+The library is only the reference shaped-rendering-test's oracle compares `sr::denoise_method::oidn` against.
+The member itself runs the network from extern/oidn-weights in our own compute shaders, and nothing we ship links this.
 
-Unlike the two NVIDIA SDKs this IS fetched for you: OIDN is Apache-2.0, so there is no license anyone has to accept,
-and dev.py hydrates it on demand exactly as it does SDL3 and DXC.
+**Nothing runs this for you.**
+It is `install: on-request`: 53 MB is not worth paying on every configure for one test, so a person runs this script when they want the oracle, and the oracle tests SKIP without it.
 
 **A CPU-ONLY SUBSET is installed**, not the whole archive.
-The release ships device modules for CUDA, HIP and SYCL that together weigh 22 MB and that nothing can use yet: OIDN's
-GPU devices share memory with ours through an OS handle, which needs exportable memory and shared fences sg does not
-have. The CPU device needs neither — it reads and writes ordinary memory, which is what a download and an upload
-already produce.
+The release ships device modules for CUDA, HIP and SYCL that together weigh 22 MB, and the oracle needs none of them.
+The CPU device reads and writes ordinary memory, which is all a test comparing two images needs.
 
 Members are selected BY BASENAME rather than by directory, since the releases disagree about where a library lives.
 
@@ -201,7 +200,7 @@ def main() -> None:
     upstream = deps_manifest.one(DEST)
     if not upstream.is_available:
         # Exit 0: a platform upstream does not build for is a fact about the release, not a failure of this run.
-        # shaped-rendering sees no `oidn` target, compiles impl/oidn_null.cc and reports the member unsupported.
+        # CMake then sees no `oidn` target, and the oracle tests SKIP.
         print(f"OIDN publishes no release for {'/'.join(deps_manifest.host_keys())} — skipping")
         return
 
@@ -248,6 +247,8 @@ def main() -> None:
 
     (staging / "pin.txt").write_text(upstream.pin_hash + "\n", encoding="utf-8")
 
+    # pin.txt goes first, so an rmtree that fails partway — a running binary holding a DLL open — leaves no pin claiming a good install.
+    PIN_FILE.unlink(missing_ok=True)
     if INSTALL.exists():
         shutil.rmtree(INSTALL)
     staging.rename(INSTALL)

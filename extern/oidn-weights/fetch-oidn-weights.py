@@ -9,7 +9,7 @@ These are the trained networks behind `sr::denoise_method::oidn`, and they arriv
 carries them: 1.8 MB of weights rather than 53 MB of runtime, because shaped-rendering runs the network in its own
 compute shaders rather than calling Intel's inference.
 
-Apache-2.0, the same license as OIDN itself, so this is fetched on demand like every other permissive dependency.
+Apache-2.0, the same license as OIDN itself, and fetched on every configure, where the library is fetched only on request.
 
 **The weights come from media.githubusercontent.com, and only the weights.**
 The .tza files are Git LFS-tracked and raw.githubusercontent.com serves their POINTER text — 132 bytes that would fail
@@ -103,6 +103,8 @@ def main() -> None:
 
     (staging / "pin.txt").write_text(pin + "\n", encoding="utf-8")
 
+    # pin.txt goes first, so an rmtree that fails partway leaves no pin claiming a good install.
+    PIN_FILE.unlink(missing_ok=True)
     if INSTALL.exists():
         shutil.rmtree(INSTALL)
     staging.rename(INSTALL)

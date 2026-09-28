@@ -14,5 +14,5 @@ if(NOT EXISTS "${OIDN_WEIGHTS_INSTALL}/pin.txt")
         "dev.py does this on demand; see tools/dev/lib/pipeline/prereqs.py.")
 endif()
 
-# Cached so shaped-rendering can stage the blob beside a consuming binary, as it does OIDN's own runtime.
+# Cached so shaped-rendering, a sibling add_subdirectory, can compile the path in as SR_OIDN_WEIGHTS_DIR.
 set(OIDN_WEIGHTS_DIR "${OIDN_WEIGHTS_INSTALL}" CACHE INTERNAL "directory holding the pinned OIDN .tza weights")

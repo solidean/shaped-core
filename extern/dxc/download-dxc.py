@@ -262,7 +262,7 @@ def main() -> int:
     # Installing an archive built for another instruction set is worse than installing nothing.
     # CMake reads the presence of .install as "DXC is available", and every dependent target then fails to link against it.
     if not up.is_available:
-        host = f"{deps_manifest.host_os_key()} ({deps_manifest.host_arch_key()})"
+        host = f"{deps_manifest.host_os_key()} ({deps_manifest.host_arch_key() or platform.machine()})"
         print(f"dxc: upstream publishes no {host} build — skipping (DXC stays unavailable)")
         return 0
 

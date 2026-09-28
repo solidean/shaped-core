@@ -36,7 +36,9 @@ HOST_ARCH_KEYS = ("x64", "arm64")
 HOST_KEYS = HOST_OS_KEYS + tuple(f"{os_key}-{arch}" for os_key in HOST_OS_KEYS for arch in HOST_ARCH_KEYS)
 # `vendored` is committed in-tree; `fetched` hydrates a gitignored .install/ on demand, so it can be absent or stale on a given checkout.
 # `bundled` arrives inside another upstream in the same directory — Zycore, which the Zydis amalgamation folds in — so it has no install state of its own.
-INSTALLS = {"vendored", "fetched", "bundled"}
+# `on-request` hydrates the same way `fetched` does and is NEVER run for you: no configure step fetches it.
+# So it is normally ABSENT, and everything reading a manifest has to cope with that — a license collector above all.
+INSTALLS = {"vendored", "fetched", "bundled", "on-request"}
 
 
 @dataclass(frozen=True)
@@ -89,7 +91,22 @@ class Upstream:
 
     @property
     def is_fetched(self) -> bool:
-        return self.install == "fetched"
+        """Whether this upstream hydrates a gitignored `.install/` rather than being committed.
+
+        True for `on-request` too: it installs exactly the same way, and every pin and path rule below is the same.
+        What differs is who runs the fetch, which is `is_on_request`.
+        """
+        return self.install in ("fetched", "on-request")
+
+    @property
+    def is_on_request(self) -> bool:
+        """Whether a person has to fetch this by hand, so an absent install is the normal state rather than a failure."""
+        return self.install == "on-request"
+
+    @property
+    def is_installed(self) -> bool:
+        """Whether the install is actually on disk, which for an `on-request` upstream is usually false."""
+        return not self.is_fetched or self.pin_file.is_file()
 
     @property
     def is_available(self) -> bool:
@@ -98,7 +115,7 @@ class Upstream:
         False means the manifest says so deliberately — see `unavailable_on`.
         Such an upstream carries no pin and no asset here, so every field that would name one is empty.
         """
-        return not any(key in self.unavailable_on for key in host_keys())
+        return not host_is_unavailable(self.unavailable_on)
 
     @property
     def install_dir(self) -> Path:
@@ -181,13 +198,18 @@ def host_os_key() -> str:
     return "linux"
 
 
-def host_arch_key() -> str:
-    """The architecture half of a host key: `x64` or `arm64`.
+def host_arch_key() -> str | None:
+    """The architecture half of a host key: `x64`, `arm64`, or None for any other machine.
 
-    Anything that is not a recognised 64-bit ARM machine reads as `x64`, since every target this repo builds is one or the other.
-    A third architecture should fail loudly downstream rather than silently name a key nothing declares.
+    Linux spells them `x86_64` and `aarch64` where Windows says `AMD64` and macOS `arm64`.
+    None is not a default to be filled in: an x64 key must never match a riscv64, ppc64le or i686 host, since that host cannot run what an x64 asset holds.
     """
-    return "arm64" if platform.machine().lower() in ("arm64", "aarch64") else "x64"
+    machine = platform.machine().lower()
+    if machine in ("amd64", "x86_64"):
+        return "x64"
+    if machine in ("arm64", "aarch64"):
+        return "arm64"
+    return None
 
 
 def host_keys() -> list[str]:
@@ -195,9 +217,26 @@ def host_keys() -> list[str]:
 
     An upstream that ships nothing for the platform lists the bare OS key.
     One that ships for some of its machines lists the arch-qualified key instead, and matching against both is what lets either spelling mean what it says.
+    A host of an unrecognised architecture has only the bare OS key.
     """
     os_key = host_os_key()
-    return [os_key, f"{os_key}-{host_arch_key()}"]
+    arch = host_arch_key()
+    if arch is None:
+        return [os_key]
+    return [os_key, f"{os_key}-{arch}"]
+
+
+def host_is_unavailable(unavailable_on: list[str]) -> bool:
+    """Whether an `unavailable_on` list rules out this host.
+
+    On a host of an unrecognised architecture, naming ANY arch-qualified key for its OS rules it out as well.
+    Such a list says the upstream ships per machine on that OS, and none of those machines is this one.
+    """
+    if any(key in unavailable_on for key in host_keys()):
+        return True
+    if host_arch_key() is None:
+        return any(key.startswith(f"{host_os_key()}-") for key in unavailable_on)
+    return False
 
 
 def _build(path: Path, directory: Path, entry: object) -> Upstream:
@@ -227,7 +266,7 @@ def _build(path: Path, directory: Path, entry: object) -> Upstream:
             f"{path}: upstream {entry.get('name', '?')!r} lists unknown `unavailable_on` key(s) {unknown} — "
             f"must be one of {list(HOST_KEYS)}"
         )
-    host_unavailable = any(key in unavailable for key in host_keys())
+    host_unavailable = host_is_unavailable(unavailable)
 
     def per_os(key: str, *, required: bool) -> str:
         host_key = f"{key}_{suffix}"
