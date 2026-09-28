@@ -15,7 +15,7 @@ Bigger design intent lives in [structure.md](structure.md).
   Three pieces, none of them in sr: slib passes DXC no flag and has no option to (ssc has a raw `extra_args`, hashed into the shader cache key, that nothing plumbs);
   sg has no capability to gate on, though the webgpu backend already has the shape for one in `k_optional_features`;
   and the C++ mirror problem in [binding-preprocessor.md](../../shaped-shader-library/docs/binding-preprocessor.md) is about constant blocks, which this network does not use.
-  Its weights already arrive as fp16, and `from_half` widens them on load.
+  Its weights already arrive as fp16, and `tg::f16` widens them on load.
   **Expect memory rather than speed.**
   The convolution is bound by cache lines rather than bytes, which is why reading four channels at once bought 1.4x and not 4x, and an 8-byte `half4` costs the same line as a 16-byte `float4`.
   What the memory buys is a larger tile, and tile size is the lever that still pays.

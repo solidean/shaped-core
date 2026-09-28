@@ -18,11 +18,6 @@
 /// honest: a changed layer count fails to find its tensor, and a changed width fails the shape test beside it.
 namespace sr::impl
 {
-/// fp16 bits widened to fp32, subnormals, infinities and NaNs included.
-///
-/// Local because typed-geometry has no half conversion yet; it is the one place the repo reads fp16.
-[[nodiscard]] f32 half_to_float(u16 h);
-
 /// The weights file, checked against the network's topology and packed for the convolution shader.
 ///
 /// None of it depends on an image, so one copy serves every network in the process.

@@ -3,7 +3,6 @@
 #include <clean-core/streams/file_stream.hh>
 #include <clean-core/string/format.hh>
 #include <nexus/test.hh>
-#include <shaped-rendering/impl/oidn_network.hh>
 #include <shaped-rendering/impl/tza.hh>
 
 using namespace cc::primitive_defines;
@@ -230,38 +229,4 @@ TEST("sr - a corrupt tensor archive is refused rather than followed")
             CHECK(sr::impl::read_tza(cc::span<byte const>(w.bytes).subspan({.offset = 0, .size = size})).empty())
                 .context(cc::format("a {}-byte prefix of a {}-byte archive", size, w.bytes.size()));
     }
-}
-
-// fp16 widened, against values written out rather than computed by a second implementation.
-//
-// Subnormals are the case worth pinning: a trained network's smallest weights are exactly those, and getting their
-// exponent off by one doubles every one of them without moving the oracle's mean far enough to notice.
-TEST("sr - a half widens to the float it encodes")
-{
-    struct pair
-    {
-        u16 half = 0;
-        f32 value = 0.0f;
-    };
-    constexpr pair cases[] = {
-        {0x0000, 0.0f},
-        {0x0001, 5.9604644775390625e-08f}, // 2^-24, the smallest subnormal
-        {0x0200, 3.0517578125e-05f},       // 2^-15, a subnormal one shift from normal
-        {0x03FF, 6.0975551605224609e-05f}, // the largest subnormal
-        {0x0400, 6.103515625e-05f},        // 2^-14, the smallest normal
-        {0x3C00, 1.0f},
-        {0x3555, 0.333251953125f},
-        {0xC000, -2.0f},
-        {0x7BFF, 65504.0f}, // the largest finite half
-        {0x8001, -5.9604644775390625e-08f},
-    };
-
-    for (auto const& c : cases)
-        CHECK(sr::impl::half_to_float(c.half) == c.value)
-            .context(cc::format("half {} widened to {} rather than {}", c.half, sr::impl::half_to_float(c.half), c.value));
-
-    CHECK(cc::bit_cast<u32>(sr::impl::half_to_float(0x8000)) == 0x80000000u).context("negative zero keeps its sign");
-    CHECK(sr::impl::half_to_float(0x7C00) > 3.0e38f).context("infinity");
-    auto const nan = sr::impl::half_to_float(0x7E00);
-    CHECK(nan != nan).context("NaN");
 }

@@ -9,6 +9,7 @@
 #include <shaped-rendering/impl/oidn_network.hh>
 #include <shaped-rendering/impl/tza.hh>
 #include <sr_shaders.hh>
+#include <typed-geometry/scalar/half_float.hh>
 
 namespace sr::impl
 {
@@ -137,38 +138,6 @@ constexpr int k_conv_texels = 8;
 /// Reads, checks and packs one weights file, which is what `oidn_load_weights` does once per network per process.
 [[nodiscard]] cc::optional<oidn_weights> load_weights_from_disk(oidn_network_size size);
 } // namespace
-
-f32 half_to_float(u16 h)
-{
-    auto const sign = u32(h >> 15) << 31;
-    auto exponent = u32((h >> 10) & 0x1F);
-    auto mantissa = u32(h & 0x3FF);
-
-    if (exponent == 0)
-    {
-        if (mantissa == 0)
-            return cc::bit_cast<f32>(sign); // a signed zero
-
-        // Subnormal: shift until the implicit bit appears, and take one off the exponent per shift.
-        // A subnormal is `mantissa * 2^-24`, which is `1.m * 2^(-14 - shifts)` once normalized.
-        auto shifts = 0;
-        while ((mantissa & 0x400) == 0)
-        {
-            mantissa <<= 1;
-            ++shifts;
-        }
-        mantissa &= 0x3FF;
-        return cc::bit_cast<f32>(sign | (u32(127 - 15 + 1 - shifts) << 23) | (mantissa << 13));
-    }
-
-    if (exponent == 0x1F)
-    {
-        // Infinity or NaN, which the trained weights do not contain but a corrupt file would.
-        return cc::bit_cast<f32>(sign | 0x7F800000u | (mantissa << 13));
-    }
-
-    return cc::bit_cast<f32>(sign | ((exponent + 127 - 15) << 23) | (mantissa << 13));
-}
 
 bool oidn_weights_present()
 {
@@ -339,7 +308,8 @@ cc::optional<oidn_weights> load_weights_from_disk(oidn_network_size size)
         };
 
         // Read a half at a time with an explicit byte order, since the file offsets need not be aligned for a u16.
-        auto const half_at = [](tza_tensor const& t, i64 index) { return cc::load_bytes_le<u16>(t.data, index * 2); };
+        auto const half_at = [](tza_tensor const& t, i64 index)
+        { return tg::f16::make_from_bits(cc::load_bytes_le<u16>(t.data, index * 2)).to_f32(); };
         for (auto k = 0; k < 9; ++k)
             for (auto i = 0; i < stored_in; ++i)
             {
@@ -348,14 +318,13 @@ cc::optional<oidn_weights> load_weights_from_disk(oidn_network_size size)
                 {
                     // oihw: o major, then i, then the 3x3 — so one element is at ((o * in + i) * 9 + k).
                     auto const live = j >= 0 && o < src.out_channels;
-                    packed.push_back(live ? half_to_float(half_at(*src.weight, (o * src.in_channels + j) * 9 + k))
-                                          : 0.0f);
+                    packed.push_back(live ? half_at(*src.weight, (o * src.in_channels + j) * 9 + k) : 0.0f);
                 }
             }
 
         out.bias_offsets.push_back(u32(packed.size()));
         for (auto o = 0; o < stored_out; ++o)
-            packed.push_back(o < src.out_channels ? half_to_float(half_at(*src.bias, o)) : 0.0f);
+            packed.push_back(o < src.out_channels ? half_at(*src.bias, o) : 0.0f);
     }
 
     return out;
