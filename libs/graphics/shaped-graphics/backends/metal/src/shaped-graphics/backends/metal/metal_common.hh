@@ -155,6 +155,11 @@ static_assert(k_argument_table_buffer_count <= 31,
               "the metal argument table has 31 buffer slots, and sg's budget "
               "no longer fits");
 
+/// The sampler slots one command list's argument table holds, which is where each `bound_sampler` goes.
+/// A bound sampler at register `n` is MSL's `[[sampler(n)]]`, set straight into the table rather than into an argument buffer.
+/// 16 is what Metal guarantees every stage, so a register at or above it is refused at layout creation.
+inline constexpr int k_argument_table_sampler_count = 16;
+
 /// Switch Metal's API validation layer on for this process, and make a violation abort rather than log.
 ///
 /// **Call it from `main`, before any Metal call.**

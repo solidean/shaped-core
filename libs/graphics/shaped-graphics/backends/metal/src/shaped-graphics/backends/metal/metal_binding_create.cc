@@ -75,8 +75,34 @@ cc::result<metal_pipeline_layout_handle> metal_context::create_metal_pipeline_la
                              "multiple of 4");
     }
 
+    // Each bound sampler is set into the argument table's sampler slot its register names, `[[sampler(n)]]` in MSL.
+    // The state comes from the context's cache, which already outlives every command list that names it.
+    auto bound = cc::vector<metal_pipeline_layout::bound_sampler_state>();
+    for (isize i = 0; i < desc.static_samplers.size(); ++i)
+    {
+        auto const& s = desc.static_samplers[i];
+        if (!sg::is_sampler(s.binding.type))
+            return cc::error(cc::format("pipeline_layout: bound sampler '{}' is not a sampler binding", s.binding.name));
+        if (int(s.binding.index) >= k_argument_table_sampler_count)
+            return cc::error(cc::format("pipeline_layout: bound sampler '{}' takes register {}, and metal has {} "
+                                        "sampler slots",
+                                        s.binding.name, s.binding.index, k_argument_table_sampler_count));
+        for (isize j = 0; j < i; ++j)
+            if (desc.static_samplers[j].binding.index == s.binding.index)
+                return cc::error(cc::format("pipeline_layout: bound samplers '{}' and '{}' both take register {}, "
+                                            "which is one metal sampler slot",
+                                            desc.static_samplers[j].binding.name, s.binding.name, s.binding.index));
+
+        auto* const state = _samplers.acquire(_device, s.sampler);
+        if (state == nullptr)
+            return cc::error(cc::format("pipeline_layout: the device refused bound sampler '{}'", s.binding.name));
+        bound.push_back({.slot = int(s.binding.index), .id = state->gpuResourceID()});
+    }
+
     auto const hash = sg::impl::pipeline_layout_hash(desc);
-    return std::make_shared<metal_pipeline_layout const>(hash, desc);
+    auto layout = std::make_shared<metal_pipeline_layout>(hash, desc);
+    layout->_bound_samplers = cc::move(bound);
+    return metal_pipeline_layout_handle(cc::move(layout));
 }
 
 cc::result<sg::staging_binding_group_handle> metal_context::create_metal_staging_binding_group(

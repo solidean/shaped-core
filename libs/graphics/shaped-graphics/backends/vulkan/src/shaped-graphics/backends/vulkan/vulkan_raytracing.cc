@@ -407,6 +407,7 @@ void vulkan_command_list::raytracing_bind_pipeline(sg::raytracing_pipeline const
     vkCmdBindPipeline(_buffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, rp->_pipeline);
 
     _bound_pipeline_layout = rp->layout.get();
+    _bound_pipeline_layout->bind_embedded_samplers(_buffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR);
     _bound_groups.clear_resize_to_filled(_bound_pipeline_layout->_groups.size(), nullptr);
     _bound_footprint = &pipeline.footprint();
     _bound_footprint_owner = &pipeline;

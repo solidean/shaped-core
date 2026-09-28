@@ -32,6 +32,7 @@ void vulkan_command_list::compute_bind_pipeline(sg::compute_pipeline const& pipe
 
     // A new pipeline may declare a different number of slots, so the bound groups reset to one null per slot.
     _bound_pipeline_layout = vp->layout.get();
+    _bound_pipeline_layout->bind_embedded_samplers(_buffer, VK_PIPELINE_BIND_POINT_COMPUTE);
     _bound_groups.clear_resize_to_filled(_bound_pipeline_layout->_groups.size(), nullptr);
     _bound_footprint = &pipeline.footprint();
     _bound_footprint_owner = &pipeline;

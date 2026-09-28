@@ -228,6 +228,7 @@ void vulkan_command_list::raster_bind_pipeline(sg::raster_pipeline const& pipeli
 
     // The topology is baked into the pipeline, so unlike dx12 there is no separate IA topology call.
     _bound_raster_layout = rp->layout.get();
+    _bound_raster_layout->bind_embedded_samplers(_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS);
     _bound_raster_groups.clear_resize_to_filled(_bound_raster_layout->_groups.size(), nullptr);
     _bound_raster_footprint = &pipeline.footprint();
     _bound_raster_footprint_owner = &pipeline;

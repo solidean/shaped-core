@@ -114,7 +114,6 @@ Tier 2 keeps one native-route smoke test per backend — an embedded blob, compu
 - **`workgroup_count`** is no stage input of SGL at all, since no backend gives it to a shader; hidden inline constants written per dispatch would.
 - **Workgroup memory above 16 KiB** is refused as over the portable limit; a feature for a larger budget, which dx12 and Apple GPUs have, would lift it.
 - **Storage writes and atomics in a vertex stage** need a feature, `vertex_stores`, which WebGPU's core lacks.
-- **File-scope samplers** are unbound on vulkan and metal, so SGL refuses them for now.
 - **Unbounded binding arrays**, `T[]`, are SGL's spelling and `unsupported-yet`, since sg refuses a binding of count 0 on every backend.
 - **A footprint that names an array element**, `albedo[2]: read`, would let a pass skip `declare_array_texture_access` for a constant index.
   SGL's footprint names the whole binding array today, which is correct and asks for the declaration every time.

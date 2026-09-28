@@ -13,6 +13,11 @@
 ///
 /// `pipeline_layout_description::inline_constants` becomes a push-constant range.
 /// Its size must be a multiple of 4, which sg validates, and Vulkan caps the total at maxPushConstantsSize.
+///
+/// **Each `bound_sampler` is set `sg::reserved_binding_group`, binding `index + 1`**, the address webgpu gives it too.
+/// That set holds embedded immutable samplers, which live in the set layout rather than in the descriptor buffer.
+/// So nothing allocates or writes a descriptor for them, and `bind_embedded_samplers` is the whole of binding them.
+/// Set slots between the caller's groups and the reserved one are empty layouts, since a pipeline layout numbers its sets contiguously.
 class sg::backend::vulkan::vulkan_pipeline_layout final : public sg::pipeline_layout
 {
 public:
@@ -33,6 +38,10 @@ public:
     {
     }
 
+    /// Binds the reserved set's embedded samplers, where the layout has any.
+    /// Called after every pipeline bind, since binding another layout's sets may disturb set 3.
+    void bind_embedded_samplers(VkCommandBuffer buffer, VkPipelineBindPoint bind_point) const;
+
     ~vulkan_pipeline_layout() override;
 
     /// Destroys the backend objects now; see sg::pipeline_layout::release_backend_objects.
@@ -47,4 +56,11 @@ public:
     /// Push-constant size in bytes; 0 when the description declares none.
     /// Read when validating a set_inline_constants call against what the layout actually reserved.
     int _inline_constants_bytes = 0;
+
+    /// The reserved set's layout, and the empty ones filling the slots below it; null and empty without bound samplers.
+    VkDescriptorSetLayout _reserved_set_layout = VK_NULL_HANDLE;
+    VkDescriptorSetLayout _empty_set_layout = VK_NULL_HANDLE;
+
+    /// The immutable samplers the reserved set layout names, owned here since they must outlive it.
+    cc::vector<VkSampler> _bound_samplers;
 };

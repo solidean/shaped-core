@@ -16,6 +16,7 @@ struct sg::backend::vulkan::vulkan_descriptor_functions
     PFN_vkGetDescriptorEXT get_descriptor = nullptr;
     PFN_vkCmdBindDescriptorBuffersEXT cmd_bind_descriptor_buffers = nullptr;
     PFN_vkCmdSetDescriptorBufferOffsetsEXT cmd_set_descriptor_offsets = nullptr;
+    PFN_vkCmdBindDescriptorBufferEmbeddedSamplersEXT cmd_bind_embedded_samplers = nullptr;
 
     /// Fetches every entry point; returns false when any is missing, which means the extension is not really there.
     [[nodiscard]] bool load(VkDevice device);
