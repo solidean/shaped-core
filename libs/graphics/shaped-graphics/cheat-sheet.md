@@ -215,7 +215,7 @@ sg::create_dx12_context(dx12_config = {})          // -> cc::result<context_hand
 
 ```cpp
 #include <shaped-graphics/exceptions.hh>
-sg::exception                    // base; .message() -> cc::string_view. catch this for "any sg failure"
+sg::exception                    // base, a cc::exception; .message() -> cc::string_view. catch this for "any sg failure"
 sg::device_lost_exception        // device lost (sticky); .reason(). from submit/advance/fence waits + throwing creates
 sg::allocation_exception         // resource/heap OOM or exhaustion; .size_in_bytes()
 sg::pipeline_creation_exception  // binding_group_layout / pipeline_layout / compute|raster|raytracing pipeline build failure; .entry_point()

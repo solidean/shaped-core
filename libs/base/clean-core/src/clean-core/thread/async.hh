@@ -83,7 +83,7 @@ template <class E>
 concept async_error_from_exception_capable
     = requires(cc::string_view m) { cc::custom::async_error_from_exception_trait<E>::make(m); };
 
-/// Describe the exception CURRENTLY BEING HANDLED: a std::exception's what(), or a fixed text for anything else.
+/// Describe the exception CURRENTLY BEING HANDLED: a std::exception's what(), a cc::exception's message(), or a fixed text for anything else.
 /// Callable only from inside a catch handler — it rethrows internally to classify, and a bare throw with nothing in flight terminates.
 /// Out-of-line and untemplated because it is the one place needing <exception>, which keeps that out of this header.
 [[nodiscard]] cc::string async_describe_current_exception();
