@@ -235,9 +235,9 @@ TEST("sgl builtins - every name a custom writer or a helper writes is reserved b
         builtins::language language;
         sgl::emit::target target;
     };
-    each const languages[] = {{builtins::language::hlsl, sgl::emit::target::hlsl_dx12},
-                              {builtins::language::wgsl, sgl::emit::target::wgsl},
-                              {builtins::language::msl, sgl::emit::target::msl}};
+    each const languages[] = {{.language = builtins::language::hlsl, .target = sgl::emit::target::hlsl_dx12},
+                              {.language = builtins::language::wgsl, .target = sgl::emit::target::wgsl},
+                              {.language = builtins::language::msl, .target = sgl::emit::target::msl}};
     auto unreserved = cc::string();
     for (auto const& f : r.functions)
     {
@@ -334,6 +334,19 @@ TEST("sgl builtins - a texture method's MSL and a barrier's, which no entry poin
     cc::string_view const size_names[] = {"", ""};
     cc::string_view const size_args[] = {"t", "2"};
     CHECK(msl("size", size_types, size_names, size_args) == "int3(t.get_width(2), t.get_height(2), t.get_depth(2))");
+
+    // C++ leaves a left shift of a negative int undefined, so an int shifts as the uint of its bits; a uint needs no cast
+    cc::string_view const positional_pair[] = {"", ""};
+    cc::string_view const shift_args[] = {"v", "n"};
+    cc::string_view const int_pair[] = {"int", "int"};
+    cc::string_view const int2_pair[] = {"int2", "int2"};
+    cc::string_view const uint_pair[] = {"uint", "uint"};
+    CHECK(msl("shift_left_int", int_pair, positional_pair, shift_args)
+          == "as_type<int>(as_type<uint>(v) << uint(n & 31))");
+    CHECK(msl("shift_left_int2", int2_pair, positional_pair, shift_args)
+          == "as_type<int2>(as_type<uint2>(v) << uint2(n & 31))");
+    CHECK(msl("shift_right_int", int_pair, positional_pair, shift_args) == "v >> (n & 31)");
+    CHECK(msl("shift_left_uint", uint_pair, positional_pair, shift_args) == "v << (n & 31)");
 
     // Metal has one barrier, and the memory it orders is its argument
     CHECK(msl("workgroup_barrier", {}, {}, {}) == "threadgroup_barrier(mem_flags::mem_threadgroup)");

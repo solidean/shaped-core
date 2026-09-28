@@ -68,10 +68,18 @@ written write_bitwise(call_context const& c)
 
 /// `a << b` everywhere, where HLSL masks the count to its low five bits and WGSL does at run time;
 /// WGSL takes the count as unsigned, and MSL leaves a count past 31 undefined, so it masks.
+/// MSL is C++, where a left shift of a negative int is undefined, so an int shifts as the uint of its bits there.
 template <bool IsLeft, int Width, bool IsSigned>
 written write_shift(call_context const& c)
 {
     auto const op = IsLeft ? "<<" : ">>";
+    if (c.target == language::msl && IsLeft && IsSigned)
+    {
+        auto const uint_type = Width == 1 ? cc::string("uint") : cc::format("uint{}", Width);
+        auto const int_type = Width == 1 ? cc::string("int") : cc::format("int{}", Width);
+        return {.text = cc::format("as_type<{}>(as_type<{}>({}) << {}({} & 31))", int_type, uint_type,
+                                   c.arguments[0].text, uint_type, operand(c.arguments[1]))};
+    }
     auto count = operand(c.arguments[1]);
     if (c.target == language::wgsl && IsSigned)
         count = Width == 1 ? cc::format("u32({})", count) : cc::format("vec{}u({})", Width, count);
@@ -79,6 +87,8 @@ written write_shift(call_context const& c)
         count = cc::format("({} & 31)", count);
     return {.text = cc::format("{} {} {}", operand(c.arguments[0]), op, count), .binds = precedence::bitwise};
 }
+
+constexpr cc::string_view k_as_type[] = {"as_type"};
 
 struct integer_type
 {
@@ -118,7 +128,7 @@ void sgl::builtins::register_bit_math(registry& r)
         add_operator(r, "^", cc::format("bit_xor{}", suffix), t.name, t.name, t.name, bit_xor,
                      {.kind = spelling_kind::custom, .custom = write_bitwise<'^'>});
         add_operator(r, "<<", cc::format("shift_left{}", suffix), t.name, t.name, t.name, shift_left,
-                     {.kind = spelling_kind::custom, .custom = t.shift_left});
+                     {.kind = spelling_kind::custom, .custom = t.shift_left, .msl_names = k_as_type});
         add_operator(r, ">>", cc::format("shift_right{}", suffix), t.name, t.name, t.name, shift_right,
                      {.kind = spelling_kind::custom, .custom = t.shift_right});
         r.add(function_record{
