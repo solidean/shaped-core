@@ -27,7 +27,7 @@ cc::shared_async<sg_test::offscreen_pixels> read_back(cc::vector<sg::bytes_futur
             .format = desc.colors[i],
             .width = desc.width,
             .height = desc.height,
-            .bytes = cc::vector<cc::byte>::create_copy_of(bytes),
+            .bytes = cc::vector<byte>::create_copy_of(bytes),
         });
     }
     co_return result;

@@ -389,6 +389,8 @@ if(SC_BUILD_TESTS)
             tests/barrier/footprint-barrier-test.cc
             tests/pipeline/pipeline_harness.cc
             tests/pipeline/depth-stencil-test.cc
+            tests/pipeline/blend-test.cc
+            tests/pipeline/raster-state-test.cc
         )
         sc_add_shader_package(
             TARGET     shaped-graphics-test

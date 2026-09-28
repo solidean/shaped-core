@@ -21,8 +21,16 @@
 
 namespace sg_test
 {
+using namespace cc::primitive_defines;
+
+struct offscreen;
+struct target_pixels;
+struct offscreen_pixels;
+struct offscreen_targets;
+} // namespace sg_test
+
 /// The targets `draw_offscreen` creates, and what each starts as.
-struct offscreen
+struct sg_test::offscreen
 {
     int width = 0;
     int height = 1;
@@ -34,25 +42,25 @@ struct offscreen
 
     tg::vec4f clear_color = tg::vec4f(0, 0, 0, 0);
     float clear_depth = 1.0f;
-    cc::u8 clear_stencil = 0;
+    u8 clear_stencil = 0;
 };
 
 /// One target read back, rows top to bottom and tightly packed.
-struct target_pixels
+struct sg_test::target_pixels
 {
     sg::pixel_format format = sg::pixel_format::undefined;
     int width = 0;
     int height = 0;
-    cc::vector<cc::byte> bytes;
+    cc::vector<byte> bytes;
 
     /// The texel at (x, y) as `T`, which must be the texel's size.
     template <class T>
     [[nodiscard]] T at(int x, int y) const
     {
-        CC_ASSERT(cc::isize(sizeof(T)) * width * height == bytes.size(), "T is not this target's texel size");
+        CC_ASSERT(isize(sizeof(T)) * width * height == bytes.size(), "T is not this target's texel size");
         CC_ASSERT(x >= 0 && x < width && y >= 0 && y < height, "the texel is outside the target");
         auto value = T();
-        cc::memcpy(&value, bytes.data() + (cc::isize(y) * width + x) * cc::isize(sizeof(T)), sizeof(T));
+        cc::memcpy(&value, bytes.data() + (isize(y) * width + x) * isize(sizeof(T)), sizeof(T));
         return value;
     }
 
@@ -64,15 +72,15 @@ struct target_pixels
 };
 
 /// Every color target of one `draw_offscreen`, in the order `offscreen::colors` named them.
-struct offscreen_pixels
+struct sg_test::offscreen_pixels
 {
     cc::vector<target_pixels> colors;
 
-    [[nodiscard]] target_pixels const& operator[](cc::isize i) const { return colors[i]; }
+    [[nodiscard]] target_pixels const& operator[](isize i) const { return colors[i]; }
 };
 
 /// The targets a recording draws into, for a test that opens more than one rendering scope.
-struct offscreen_targets
+struct sg_test::offscreen_targets
 {
     cc::vector<sg::raw_texture_handle> colors;
     sg::raw_texture_handle depth_stencil;
@@ -84,6 +92,8 @@ struct offscreen_targets
     [[nodiscard]] sg::rendering_info preserved() const;
 };
 
+namespace sg_test
+{
 /// Creates the described targets, records `record` into one command list, submits it, and reads every color target back.
 /// `record` opens its own rendering scopes, so a test may draw into the targets more than once.
 /// It runs before this returns, so it may capture by reference.
@@ -108,5 +118,5 @@ struct offscreen_targets
 }
 
 /// An IEEE half's bits as a float.
-[[nodiscard]] float half_to_float(cc::u16 bits);
+[[nodiscard]] float half_to_float(u16 bits);
 } // namespace sg_test

@@ -24,7 +24,9 @@ Without them each test repeats the forty lines of setup `raster-test.cc` carries
 A draw covers whole pixels, a check reads interior pixels only, and a value is chosen exact in its format — rgba8 in steps of 1/255, r32f and rgba16f in powers of two.
 Where rasterization rules or precision may differ, the check takes a tolerance and says why.
 
-**One `.sgl` fixture per topic**, beside the ones in `tests/shaders/sgl/`: `depth_stencil.sgl`, `blend.sgl`, `vertex_input.sgl`, `dispatch.sgl`, `bindings.sgl`.
+**One `.sgl` fixture per topic**, beside the ones in `tests/shaders/sgl/`.
+`rects.sgl` serves the fixed-function state: rects placed per instance at pixel boundaries, each with a depth and a color.
+`vertex_input.sgl`, `dispatch.sgl` and `bindings.sgl` are still to come.
 A pipeline's state is swept through `acquire_raster_pipeline(p, {}, customize)`, so one SGL pipeline serves every value of an enum.
 
 ## The enum zoo
@@ -36,17 +38,6 @@ That is the property to design for: a test in which `.less` and `.less_equal` bo
 The shape that gives it: one target, a row of small quads, one quad per enum value, each with inputs chosen so that every value of the enum produces a different pixel from the same inputs.
 Two values that could agree on the chosen inputs get a second quad with inputs that separate them.
 
-- **`compare_op`**: a depth buffer pre-filled with a staircase, a quad per op at a depth equal to one step.
-  Less, equal and greater then pass distinct pixel sets, and `.never` and `.always` bracket them.
-- **`stencil_op`**, per face: a known stencil value per quad, then each op with a reference and masks.
-  They are chosen so that keep, zero, replace, the two increments, the two decrements and invert all leave different values.
-  The wrapping and clamping increments differ only at the ends of the range, so one quad starts at 255 and one at 0.
-- **`blend_factor` and `blend_op`**: source and destination colours whose channels are distinct powers of two in a float target, so every factor yields a distinct product.
-  The blend constant and each channel of the write mask get a quad of their own.
-- **`cull_mode` × `front_face`**: one clockwise and one counter-clockwise triangle, drawn under all six combinations.
-- **`fill_mode`**: a triangle whose interior pixel is empty in wireframe and set when filled, where the device has the feature.
-- **`primitive_topology`**: one vertex list drawn as each topology, with vertices placed so that points, lines, strips and lists cover different pixel sets.
-  A line's pixels are read at safe centres only.
 - **`vertex_attribute_format`**: one attribute per format, each fed bytes whose decoded value is distinct from what any other format would decode them to — the normalized formats included.
 - **`target_op`**: load against clear against the previous contents; `discard` leaves undefined contents, so it gets a test that it runs, and nothing it produced is read.
 - **Texture view dimensions**: each shape sampled at one texel whose value encodes its layer, face or slice, so a wrong dimension reads a wrong value.
@@ -108,6 +99,12 @@ Tier 2 keeps one native-route smoke test per backend — an embedded blob, compu
 **Metal's copies stay** until metal runs tier-1 shaders, which the SGL-to-MSL-to-`newLibraryWithSource` path in flight is what brings.
 
 ## sg follow-ups this plan found
+
+- **`blend_factor` has no constant factor**, so `set_blend_constants` has no observable effect and the blend test cannot pin it.
+  `constant` and `one_minus_constant` exist on every backend.
+- **A point list needs its point size written on vulkan without `VK_KHR_maintenance5`, and on metal.**
+  sg enables maintenance5 wherever the device has it, which makes an unwritten size 1.0; SGL writes none.
+  DXC refuses `[[vk::builtin("PointSize")]]` on an `out` parameter, so SGL would write it as a member of the vertex stage's output struct.
 
 - **`vertex_attribute_format`** has 32-bit components and two 8-bit formats; half floats, 16-bit integers and normalized values, `snorm8x4` and `unorm10_10_10_2` are missing.
   SGL's `@format` takes each case once sg has it (CHK-275).
