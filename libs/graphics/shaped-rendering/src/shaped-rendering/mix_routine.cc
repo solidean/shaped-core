@@ -48,7 +48,7 @@ cc::shared_async<cc::unit> mix_routine::init(sg::routine_init_scope scope)
     auto const* const constants_binding = [&]() -> sg::binding const*
     {
         for (auto const& b : compiled->bindings)
-            if (b.type == sg::binding_type::uniform_buffer)
+            if (b.type == sg::binding_type::constants_buffer)
                 return &b;
         return nullptr;
     }();

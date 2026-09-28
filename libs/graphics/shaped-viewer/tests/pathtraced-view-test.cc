@@ -403,12 +403,11 @@ ASYNC_INVOCABLE_TEST("sv::pathtrace_routine - the split signals sum to the frame
 
     auto const make = [&](sg::pixel_format format)
     {
-        return ctx.persistent.create_texture_2d({.format = format,
-                                                 .width = size[0],
-                                                 .height = size[1],
-                                                 .usage = sg::texture_usage::readonly_texture
-                                                        | sg::texture_usage::readwrite_texture
-                                                        | sg::texture_usage::copy_src});
+        return ctx.persistent.create_texture_2d(
+            {.format = format,
+             .width = size[0],
+             .height = size[1],
+             .usage = sg::texture_usage::texture | sg::texture_usage::image | sg::texture_usage::copy_src});
     };
 
     // rgba32_float throughout, so the sum is compared at the precision the raygen computed it in rather than at
@@ -429,11 +428,11 @@ ASYNC_INVOCABLE_TEST("sv::pathtrace_routine - the split signals sum to the frame
             records.push_back(resources.describe_instance(cmd, item.mesh, item.instance));
 
             auto const frame = ctx.transient.create_buffer<sv::pt_frame_constants_gpu>(
-                1, sg::buffer_usage::uniform_buffer | sg::buffer_usage::copy_dst);
+                1, sg::buffer_usage::constants_buffer | sg::buffer_usage::copy_dst);
             cmd.upload.pod_to_buffer(frame, fc);
 
             auto const background = ctx.transient.create_buffer<sv::background_gpu>(
-                1, sg::buffer_usage::uniform_buffer | sg::buffer_usage::copy_dst);
+                1, sg::buffer_usage::constants_buffer | sg::buffer_usage::copy_dst);
             cmd.upload.pod_to_buffer(background, sv::background_gpu::from(sv::background{}));
 
             auto const instance_table = ctx.transient.create_buffer<sv::instance_gpu>(

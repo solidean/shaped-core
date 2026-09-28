@@ -130,25 +130,25 @@ cc::shared_async<cc::unit> pathtrace_routine::init_once(sg::routine_init_scope s
 {
     auto& ctx = scope.context();
     _guide_normal_stand_in = ctx.persistent.create_texture_2d(
-        {.format = sg::pixel_format::rgba16_float, .width = 1, .height = 1, .usage = sg::texture_usage::readwrite_texture});
+        {.format = sg::pixel_format::rgba16_float, .width = 1, .height = 1, .usage = sg::texture_usage::image});
     _guide_depth_stand_in = ctx.persistent.create_texture_2d(
-        {.format = sg::pixel_format::r32_float, .width = 1, .height = 1, .usage = sg::texture_usage::readwrite_texture});
+        {.format = sg::pixel_format::r32_float, .width = 1, .height = 1, .usage = sg::texture_usage::image});
     _guide_albedo_stand_in = ctx.persistent.create_texture_2d(
-        {.format = sg::pixel_format::rgba16_float, .width = 1, .height = 1, .usage = sg::texture_usage::readwrite_texture});
+        {.format = sg::pixel_format::rgba16_float, .width = 1, .height = 1, .usage = sg::texture_usage::image});
     _guide_specular_albedo_stand_in = ctx.persistent.create_texture_2d(
-        {.format = sg::pixel_format::rgba16_float, .width = 1, .height = 1, .usage = sg::texture_usage::readwrite_texture});
+        {.format = sg::pixel_format::rgba16_float, .width = 1, .height = 1, .usage = sg::texture_usage::image});
     _guide_roughness_stand_in = ctx.persistent.create_texture_2d(
-        {.format = sg::pixel_format::r16_float, .width = 1, .height = 1, .usage = sg::texture_usage::readwrite_texture});
+        {.format = sg::pixel_format::r16_float, .width = 1, .height = 1, .usage = sg::texture_usage::image});
     _frame_output_stand_in = ctx.persistent.create_texture_2d(
-        {.format = sg::pixel_format::rgba16_float, .width = 1, .height = 1, .usage = sg::texture_usage::readwrite_texture});
+        {.format = sg::pixel_format::rgba16_float, .width = 1, .height = 1, .usage = sg::texture_usage::image});
     _frame_diffuse_stand_in = ctx.persistent.create_texture_2d(
-        {.format = sg::pixel_format::rgba16_float, .width = 1, .height = 1, .usage = sg::texture_usage::readwrite_texture});
+        {.format = sg::pixel_format::rgba16_float, .width = 1, .height = 1, .usage = sg::texture_usage::image});
     _frame_specular_stand_in = ctx.persistent.create_texture_2d(
-        {.format = sg::pixel_format::rgba16_float, .width = 1, .height = 1, .usage = sg::texture_usage::readwrite_texture});
+        {.format = sg::pixel_format::rgba16_float, .width = 1, .height = 1, .usage = sg::texture_usage::image});
     _guide_hit_distance_stand_in = ctx.persistent.create_texture_2d(
-        {.format = sg::pixel_format::rg16_float, .width = 1, .height = 1, .usage = sg::texture_usage::readwrite_texture});
+        {.format = sg::pixel_format::rg16_float, .width = 1, .height = 1, .usage = sg::texture_usage::image});
     _guide_motion_stand_in = ctx.persistent.create_texture_2d(
-        {.format = sg::pixel_format::rg32_float, .width = 1, .height = 1, .usage = sg::texture_usage::readwrite_texture});
+        {.format = sg::pixel_format::rg32_float, .width = 1, .height = 1, .usage = sg::texture_usage::image});
     co_return;
 }
 
