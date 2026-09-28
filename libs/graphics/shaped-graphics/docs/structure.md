@@ -224,8 +224,9 @@ pipeline             [in progress]  compute + raster pipelines and the bind path
 sampler              [in progress]  sampler + static/dynamic samplers. A group's static sampler (named_sampler on the
                                   group layout) binds on all four: dx12 root-sig static samplers, vulkan immutable
                                   samplers, metal argument-buffer entries, webgpu the layout's own sampler.
-                                  A pipeline-level one (bound_sampler) binds on dx12 and webgpu; vulkan and metal
-                                  refuse the pipeline layout. dx12 keeps dynamic ones in a separate sampler heap
+                                  A pipeline-level one (bound_sampler) binds on all four too: dx12 root-sig static
+                                  samplers, vulkan and webgpu the reserved group, metal the argument table's sampler
+                                  slots. dx12 keeps dynamic ones in a separate sampler heap
 accel structures     [in progress]  ray-tracing blas/tlas: recorded build on cmd.raytracing (build_blas for
                                   triangles + procedural AABBs, build_tlas, is_supported), result sized from a
                                   prebuild query with transient scratch, persistent handles across epochs;
