@@ -40,6 +40,22 @@ cc::string_view kind_name(sgl::described_member_kind k)
     return "constant";
 }
 
+void write_settings(babel::json::object_writer& so, sgl::described_sampler const& st)
+{
+    so.write("min_filter", cc::string_view(st.min_filter));
+    so.write("mag_filter", cc::string_view(st.mag_filter));
+    so.write("mip_filter", cc::string_view(st.mip_filter));
+    so.write("address_u", cc::string_view(st.address_u));
+    so.write("address_v", cc::string_view(st.address_v));
+    so.write("address_w", cc::string_view(st.address_w));
+    if (!st.compare.empty())
+        so.write("compare", cc::string_view(st.compare));
+    so.write("max_anisotropy", st.max_anisotropy);
+    so.write("min_lod", st.min_lod);
+    so.write("max_lod", st.max_lod);
+    so.write("mip_lod_bias", st.mip_lod_bias);
+}
+
 void write_binding(babel::json::object_writer& o, sgl::described_binding const& b)
 {
     o.write("name", cc::string_view(b.name));
@@ -84,20 +100,8 @@ void write_binding(babel::json::object_writer& o, sgl::described_binding const& 
         optional("sampler_type", m.sampler_type);
         if (m.static_sampler.has_value())
         {
-            auto const& st = m.static_sampler.value();
             auto so = mo.write_object("static_sampler", babel::json::layout::compact);
-            so.write("min_filter", cc::string_view(st.min_filter));
-            so.write("mag_filter", cc::string_view(st.mag_filter));
-            so.write("mip_filter", cc::string_view(st.mip_filter));
-            so.write("address_u", cc::string_view(st.address_u));
-            so.write("address_v", cc::string_view(st.address_v));
-            so.write("address_w", cc::string_view(st.address_w));
-            if (!st.compare.empty())
-                so.write("compare", cc::string_view(st.compare));
-            so.write("max_anisotropy", st.max_anisotropy);
-            so.write("min_lod", st.min_lod);
-            so.write("max_lod", st.max_lod);
-            so.write("mip_lod_bias", st.mip_lod_bias);
+            write_settings(so, m.static_sampler.value());
         }
     }
 }
@@ -161,10 +165,25 @@ void write_entry_point(babel::json::object_writer& o, sgl::described_entry_point
         for (auto const& name : e.features)
             list.write(cc::string_view(name));
     }
+    {
+        auto list = o.write_array("samplers", babel::json::layout::compact);
+        for (auto const& name : e.samplers)
+            list.write(cc::string_view(name));
+    }
     // One `slot: access` per touched slot, the way a corpus pin spells it.
     auto list = o.write_array("footprint", babel::json::layout::compact);
     for (auto const& slot : e.footprint)
         list.write(cc::string_view(sgl::check::footprint_text(cc::span<sgl::check::slot_footprint const>(&slot, 1))));
+}
+
+void write_file_sampler(babel::json::object_writer& o, sgl::described_file_sampler const& s)
+{
+    o.write("name", cc::string_view(s.name));
+    o.write("index", s.index);
+    o.write("sampler_type", cc::string_view(s.sampler_type));
+    o.write("shape", cc::string_view(s.shape));
+    auto so = o.write_object("settings", babel::json::layout::compact);
+    write_settings(so, s.settings);
 }
 
 void write_pipeline(babel::json::object_writer& o, sgl::described_pipeline const& p)
@@ -191,6 +210,11 @@ void write_pipeline(babel::json::object_writer& o, sgl::described_pipeline const
     {
         auto list = o.write_array("features", babel::json::layout::compact);
         for (auto const& name : p.features)
+            list.write(cc::string_view(name));
+    }
+    {
+        auto list = o.write_array("samplers", babel::json::layout::compact);
+        for (auto const& name : p.samplers)
             list.write(cc::string_view(name));
     }
     {
@@ -274,11 +298,19 @@ cc::result<cc::string> to_json(sgl::module_description const& d)
                 write_entry_point(o, e);
             }
         }
-        auto pipelines = root.write_array("pipelines");
-        for (auto const& p : d.pipelines)
         {
-            auto o = pipelines.write_object();
-            write_pipeline(o, p);
+            auto pipelines = root.write_array("pipelines");
+            for (auto const& p : d.pipelines)
+            {
+                auto o = pipelines.write_object();
+                write_pipeline(o, p);
+            }
+        }
+        auto samplers = root.write_array("samplers");
+        for (auto const& s : d.samplers)
+        {
+            auto o = samplers.write_object();
+            write_file_sampler(o, s);
         }
     }
     return w.finish();

@@ -46,6 +46,19 @@ struct sgl::described_sampler
     f32 mip_lod_bias = 0.0f;
 };
 
+/// A file-scope `sampler name:`, a static sampler of the pipeline layout of every entry point that uses it.
+struct sgl::described_file_sampler
+{
+    cc::string name;
+    /// Its position among the file's samplers in declaration order, which is its index in every pipeline layout.
+    i32 index = 0;
+    /// Its `sg::sampler_binding_type`: `filtering`, `non_filtering` or `comparison`.
+    cc::string sampler_type;
+    described_sampler settings;
+    /// The settings' structural hash (`check::structural_hash`), as 32 hex digits: what a hot reload compares.
+    cc::string shape;
+};
+
 struct sgl::described_binding_member
 {
     cc::string name;
@@ -159,6 +172,8 @@ struct sgl::described_entry_point
     cc::vector<cc::string> features;
     /// What its code does to each binding it lists, a slot it never touches left out (the spec's bindings file, "Footprint").
     cc::vector<check::slot_footprint> footprint;
+    /// The file-scope samplers its code reaches, which its pipeline layout carries, in index order.
+    cc::vector<cc::string> samplers;
 };
 
 /// One field of a pipeline's description, as the check pass resolved it.
@@ -196,12 +211,14 @@ struct sgl::described_pipeline
     cc::vector<cc::string> targets;
     /// What its stages need of a device together, as `described_entry_point::features`.
     cc::vector<cc::string> features;
+    /// The file-scope samplers any of its stages reaches, in index order.
+    cc::vector<cc::string> samplers;
     /// In the order they apply, each over the ones before it.
     cc::vector<described_pipeline_setting> settings;
     /// The paths the host states at acquire, whose last setting is `.host`, in the order first set so.
     cc::vector<cc::string> open;
     /// What the host's generated code is built against, one `key = value` line each, in a fixed order:
-    /// the layout, the inline constants, the vertex input and the target set, each as `name@shape`.
+    /// the layout, the inline constants, the vertex input and the target set, each as `name@shape`, and the samplers.
     /// Then the stages by name, then `features`, then the last setting of every format and of the sample count.
     /// A build bakes these, and a hot reload that finds any of them changed keeps what it had.
     cc::vector<cc::string> frozen;
@@ -216,6 +233,8 @@ struct sgl::module_description
     cc::vector<described_memory_struct> memory_structs;
     cc::vector<described_entry_point> entry_points;
     cc::vector<described_pipeline> pipelines;
+    /// The file-scope samplers, in index order.
+    cc::vector<described_file_sampler> samplers;
 };
 
 struct sgl::describe_request

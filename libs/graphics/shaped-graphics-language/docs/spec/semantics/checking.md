@@ -307,6 +307,10 @@ fun shade(k: float) -> float:
   An offset's literals are from -8 to 7, and a comparison's `level` is the literal `0.0`; anything else is `invalid-constant-argument`.
 * **CHK-281** A call that samples a depth texture through a sampler that filters is `type-mismatch`, as CHK-210 is for an `@unfilterable` texture.
   A comparison takes a `comparison_sampler`, which is none of the samplers this counts.
+* **CHK-314** A `sampler name:` at file scope is a symbol whose type is `comparison_sampler` where it sets `compare`, and `sampler` otherwise.
+  Its settings and its attributes are judged as CHK-204 judges a binding's static sampler.
+  It is used by its name, handed to a builtin as CHK-206 says, and it filters as a static sampler does for CHK-210 and CHK-281.
+  Its name anywhere else is `unsupported-yet`, and so is its name in a test, which samples no texture.
 
 ```sgl
 @inline binding constants:
@@ -841,7 +845,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 
 | kind | reported by |
 |---|---|
-| `unsupported-yet` | CHK-8, CHK-61, CHK-213, CHK-237, CHK-291, CHK-299, CHK-307 |
+| `unsupported-yet` | CHK-8, CHK-61, CHK-213, CHK-237, CHK-291, CHK-299, CHK-307, CHK-314 |
 | `duplicate-declaration` | CHK-12, CHK-28, CHK-241 |
 | `dependency-cycle` | CHK-18, CHK-136 |
 | `unknown-name` | CHK-24, CHK-62, CHK-245 |

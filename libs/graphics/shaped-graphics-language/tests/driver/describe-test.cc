@@ -461,3 +461,76 @@ TEST("sgl describe - a binding array is its element's binding, with a count and 
     CHECK(members[1].slot == 8);
     CHECK(members[1].count == 2);
 }
+
+namespace
+{
+/// Two file-scope samplers, the first reached by the pixel stage alone and the second by nothing.
+constexpr cc::string_view k_file_samplers = "sampler edge:\n"
+                                            "    filter = .nearest\n"
+                                            "    address = .clamp_edge\n"
+                                            "\n"
+                                            "sampler shadow:\n"
+                                            "    compare = .less\n"
+                                            "    max_lod = 4.0\n"
+                                            "\n"
+                                            "binding material:\n"
+                                            "    albedo: texture_2d[float4]\n"
+                                            "\n"
+                                            "struct pixel_input:\n"
+                                            "    @position position: hpos4\n"
+                                            "    uv: float2\n"
+                                            "\n"
+                                            "@pixel struct target:\n"
+                                            "    color: float4\n"
+                                            "\n"
+                                            "@vertex fun vs(@vertex_index i: int){material} -> pixel_input:\n"
+                                            "    return {position = hpos4(0.0, 0.0, 0.0, 1.0), uv = float2(0.0, 0.0)}\n"
+                                            "\n"
+                                            "@pixel fun ps(p: pixel_input){material} -> target:\n"
+                                            "    return {color = material.albedo.sample(p.uv, edge)}\n"
+                                            "\n"
+                                            "pipeline drawn:\n"
+                                            "    vertex = vs\n"
+                                            "    pixel = ps\n"
+                                            "    format = .rgba8_unorm\n";
+} // namespace
+
+TEST("sgl describe - a file-scope sampler is described with its index, and each layout names the ones it holds")
+{
+    auto const d = described(k_file_samplers);
+
+    REQUIRE(d.samplers.size() == 2);
+    CHECK(d.samplers[0].name == "edge");
+    CHECK(d.samplers[0].index == 0);
+    CHECK(d.samplers[0].sampler_type == "non_filtering");
+    CHECK(d.samplers[0].settings.min_filter == "nearest");
+    CHECK(d.samplers[0].settings.address_v == "clamp_edge");
+    CHECK(d.samplers[1].name == "shadow");
+    CHECK(d.samplers[1].index == 1);
+    CHECK(d.samplers[1].sampler_type == "comparison");
+    CHECK(d.samplers[1].settings.compare == "less");
+    CHECK(d.samplers[1].settings.max_lod == 4.0f);
+    CHECK(d.samplers[0].shape != d.samplers[1].shape);
+
+    // an entry point names only what its own code reaches, and the pipeline what any of its stages does
+    REQUIRE(d.entry_points.size() == 2);
+    CHECK(d.entry_points[0].samplers.empty());
+    REQUIRE(d.entry_points[1].samplers.size() == 1);
+    CHECK(d.entry_points[1].samplers[0] == "edge");
+    REQUIRE(d.pipelines.size() == 1);
+    REQUIRE(d.pipelines[0].samplers.size() == 1);
+    CHECK(d.pipelines[0].samplers[0] == "edge");
+
+    // a reload that changes a sampler's settings changes the layout, so the build freezes them
+    auto const frozen = [](sgl::module_description const& m)
+    {
+        for (auto const& line : m.pipelines[0].frozen)
+            if (line.starts_with("samplers = "))
+                return line;
+        return cc::string();
+    };
+    CHECK(frozen(d) == cc::format("samplers = edge@{}", d.samplers[0].shape));
+    auto source = cc::string(k_file_samplers);
+    source.replace_all("address = .clamp_edge", "address = .repeat");
+    CHECK(frozen(described(source)) != frozen(d));
+}

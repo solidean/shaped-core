@@ -115,6 +115,13 @@ cc::hash128 check::structural_hash(checked_module const& m, cc::span<member_info
     return cc::hash128::create(b.written_bytes(), 0);
 }
 
+cc::hash128 check::structural_hash(sampler_state const& s)
+{
+    auto b = cc::byte_stream_builder();
+    fold_sampler(b, s);
+    return cc::hash128::create(b.written_bytes(), 0);
+}
+
 cc::string check::hex_of(cc::hash128 hash)
 {
     return cc::format("{:016x}{:016x}", hash.high, hash.low);

@@ -797,7 +797,11 @@ void checker::declare(i32 file, ast::decl_id decl)
             if (!c.name.empty())
                 add_symbol(named(symbol_kind::constant, c.name), c.name);
         },
-        [&](ast::sampler_decl const& s) { unsupported_symbol(s.name, "sampler"); },
+        [&](ast::sampler_decl const& s)
+        {
+            if (!s.name.empty())
+                add_symbol(named(symbol_kind::sampler, s.name), s.name);
+        },
         [&](ast::pipeline_decl const& p)
         {
             // Without a name it is the file's pipeline, named `pipeline`; a second one is a duplicate like any other.
@@ -878,6 +882,9 @@ void checker::compile(symbol_id id)
         break;
     case symbol_kind::constant:
         compile_const(id);
+        break;
+    case symbol_kind::sampler:
+        compile_file_sampler(id);
         break;
     case symbol_kind::test:
         // A test's signature is made where it is found, and its body is checked with the others.

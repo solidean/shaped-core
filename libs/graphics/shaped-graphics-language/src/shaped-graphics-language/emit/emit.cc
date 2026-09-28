@@ -172,6 +172,8 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
         result.bound_names.push_back({.emitted = block.name, .host = block.host_name});
     for (auto const& buffer : plan.resources)
         result.bound_names.push_back({.emitted = buffer.name, .host = buffer.host_name});
+    for (auto const& s : plan.samplers)
+        result.bound_names.push_back({.emitted = s.name, .host = s.host_name});
     result.layouts = impl::layouts_of(plan);
     if (e.entry_stage == check::stage::pixel && e.result != check::type_id::none)
     {

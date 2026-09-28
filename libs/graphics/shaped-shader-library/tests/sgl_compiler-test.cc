@@ -8,8 +8,8 @@
 #include <shaped-graphics-language/check/resources.hh>
 #include <shaped-graphics-language/emit/impl/plan.hh>
 #include <shaped-graphics/binding/compiled_shader.hh>
-#include <shaped-graphics/fwd.hh>                          // sg::max_binding_groups
-#include <shaped-shader-library/binding/binding_groups.hh> // slib::inline_constants_space, slib::rewrite_binding_groups
+#include <shaped-graphics/fwd.hh> // sg::max_binding_groups
+#include <shaped-shader-library/binding/binding_groups.hh> // slib::inline_constants_space, slib::bound_samplers_space, slib::rewrite_binding_groups
 #include <shaped-shader-library/compiler/dxc_compiler.hh>
 #include <shaped-shader-library/compiler/sgl_compiler.hh>
 #include <shaped-shader-library/compiler/wgsl_compiler.hh>
@@ -419,6 +419,66 @@ ASYNC_TEST("slib sgl compiler - every compiler behind an edge reflects the group
         }
         CHECK(addresses == expected);
         CHECK(cs.bindings.size() == 6);
+    }
+}
+
+// A file-scope sampler is a pipeline layout's static sampler, and each compiler reflects it where sg binds one.
+// A reflection that disagreed would be logged as an error, which fails the test on its own.
+ASYNC_TEST("slib sgl compiler - a file-scope sampler is stated at the address each target binds a static sampler at",
+           exclusive("slib-shader-library"))
+{
+    constexpr auto source
+        = cc::string_view("sampler unused:\n"
+                          "    filter = .linear\n"
+                          "\n"
+                          "sampler edge:\n"
+                          "    filter = .nearest\n"
+                          "    address = .clamp_edge\n"
+                          "\n"
+                          "binding post:\n"
+                          "    src: texture_2d[float4]\n"
+                          "    dst: out image_2d[.rgba8_unorm]\n"
+                          "\n"
+                          "@compute(8, 8) fun copy(@thread_id id: int3){post}:\n"
+                          "    let xy = int2(id.x, id.y)\n"
+                          "    post.dst.store(xy, post.src.sample(float2(-0.5, 1.5), edge, level = 0.0))\n");
+
+    slib::shader_library lib;
+    add_sgl_compilers(lib);
+
+    for (auto const format : lib.supported_formats(slib::shader_language::sgl))
+    {
+        auto const node = lib.compile_source(source, sg::shader_stage::compute, "copy", format,
+                                             {.language = slib::shader_language::sgl, .label = "file-sampler.sgl"});
+        co_await cc::async_settled(node);
+        auto const& cs = value_of(node);
+        auto const* const edge = find_binding(cs, "edge");
+        REQUIRE(edge != nullptr);
+        CHECK(edge->type == sg::binding_type::sampler);
+        CHECK(edge->sampler_type == sg::sampler_binding_type::non_filtering);
+        // dx12's own space; vulkan's binding 0 of the reserved set is the inline constants', and slib's WGSL reader
+        // takes the one off again
+        switch (format)
+        {
+        case sg::shader_format::dxil:
+            CHECK(edge->space == slib::bound_samplers_space);
+            CHECK(!edge->group_index.has_value());
+            CHECK(edge->index == 1);
+            break;
+        case sg::shader_format::spirv:
+            CHECK(edge->group_index == u32(sg::reserved_binding_group));
+            CHECK(edge->index == 2);
+            break;
+        default:
+            CHECK(edge->group_index == u32(sg::reserved_binding_group));
+            CHECK(edge->index == 1);
+            break;
+        }
+        CHECK(find_binding(cs, "unused") == nullptr);
+        // barriers track what a group binds, and a static sampler is no resource of one
+        for (auto const& slot : cs.footprint.slots)
+            CHECK(slot.name != "edge");
+        CHECK(cs.footprint.slots.size() == 2);
     }
 }
 

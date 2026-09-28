@@ -35,7 +35,10 @@ struct sgl::interface_binding
     described_member_kind kind = described_member_kind::constant;
     /// The `@inline` block, which takes no group and rides as inline constants.
     bool is_inline = false;
-    /// The group it is listed at, counted without the `@inline` binding, and its slot there; -1 and 0 for the `@inline` block.
+    /// A file-scope sampler, a static sampler of the pipeline layout that no group holds: `slot` is its index there.
+    bool is_file_sampler = false;
+    /// The group it is listed at, counted without the `@inline` binding, and its slot there.
+    /// -1 and 0 for the `@inline` block, and -1 and its index for a file-scope sampler.
     i32 group = -1;
     i32 slot = 0;
     /// A binding array's length, taking `count` consecutive slots from `slot`; 1 for everything else.
@@ -58,7 +61,8 @@ struct sgl::emitted_source
     /// The source's name, unless the target reserves it: HLSL and MSL both reserve words an SGL author may pick.
     /// A caller compiling the text asks for THIS name.
     cc::string entry_point;
-    /// Every slot the text declares, in the order of the binding list and then of each binding's slots.
+    /// Every slot the text declares, in the order of the binding list and then of each binding's slots, and then the
+    /// file-scope samplers its code reaches.
     /// This is the interface a host builds against; a compiler's reflection of the text can only confirm it.
     cc::vector<interface_binding> bindings;
     /// A compute entry point's grid; `{1, 1, 1}` for every other stage.

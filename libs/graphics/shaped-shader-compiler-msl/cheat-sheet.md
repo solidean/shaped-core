@@ -76,8 +76,10 @@ device T*                -> readwrite_structured_buffer              (a `const` 
 raytracing::*_acceleration_structure -> acceleration_structure
 T name[k]                -> count = k, occupying k CONSECUTIVE indices
 constant T& x [[buffer(4)]] on the entry point -> the INLINE-CONSTANTS block: constants_buffer, no group, no space
+sampler s [[sampler(i)]] on the entry point     -> the layout's STATIC sampler of index i (sg::bound_sampler), no group, no space
 // GOTCHA: any other [[buffer]] / [[texture]] / [[sampler]] on the entry point itself is an ERROR — the backend binds
-//   only argument buffers (group N at [[buffer(N)]], N <= sg::reserved_binding_group) and the inline block.
+//   only argument buffers (group N at [[buffer(N)]], N <= sg::reserved_binding_group), the inline block and the
+//   static samplers.
 // GOTCHA: `#pragma sc numthreads x y z` counts only in the lines DIRECTLY above the signature (blank, pragma and
 //   [[attribute]] lines between are fine); a kernel never inherits the pragma of one above it.
 // GOTCHA: every `device T*` is STRUCTURED. MSL spells a raw byte-addressed buffer identically, so the text cannot

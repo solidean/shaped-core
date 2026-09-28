@@ -341,6 +341,8 @@ struct flattener
             return add_expr(x.type, from, *v);
         if (auto const* const m = x.node.try_as<flat_binding_member>())
             return add_expr(x.type, from, *m);
+        if (auto const* const smp = x.node.try_as<flat_file_sampler>())
+            return add_expr(x.type, from, *smp);
         if (auto const* const element = x.node.try_as<flat_element>())
         {
             auto const object = again(element->object, from);
@@ -369,8 +371,8 @@ struct flattener
         return fail();
     }
 
-    /// True for a texture, an image, a sampler or a buffer read from its binding: it is no value a local could hold,
-    /// and it stands wherever it is named, since naming one has no effect.
+    /// True for a texture, an image, a sampler or a buffer read from its binding, and a file-scope sampler: it is no
+    /// value a local could hold, and it stands wherever it is named, since naming one has no effect.
     [[nodiscard]] bool is_resource_member(flat_expr_id id) const
     {
         if (!is_valid(id) || !is_resource(c.out.at(entry.at(id).type).kind))
@@ -378,7 +380,7 @@ struct flattener
         // an element of a binding array, at an index that reads the same wherever it stands
         if (auto const* const element = entry.at(id).node.try_as<flat_element>())
             return entry.at(element->object).node.is<flat_binding_member>() && is_substitutable_index(element->index);
-        return entry.at(id).node.is<flat_binding_member>();
+        return entry.at(id).node.is<flat_binding_member>() || entry.at(id).node.is<flat_file_sampler>();
     }
 
     /// A value that is read more than once and evaluated once, where it stands.
@@ -443,6 +445,9 @@ struct flattener
             if (where.kind == target_kind::symbol && c.out.at(where.symbol).kind == symbol_kind::constant
                 && c.out.at(where.symbol).state == symbol_state::checked)
                 return constant_value(type, id, c.out.constants[c.out.at(where.symbol).info]);
+            if (where.kind == target_kind::symbol && c.out.at(where.symbol).kind == symbol_kind::sampler
+                && c.out.at(where.symbol).state == symbol_state::checked)
+                return add_expr(type, id, flat_file_sampler{.sampler = where.symbol});
             return fail();
         }
         if (auto const* const m = e.node.try_as<ast::member>())

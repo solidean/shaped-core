@@ -152,6 +152,8 @@ struct classifier
             return token_class::pipeline;
         case check::symbol_kind::constant:
             return token_class::constant;
+        case check::symbol_kind::sampler:
+            return token_class::binding_member;
         case check::symbol_kind::function:
             switch (s.role)
             {

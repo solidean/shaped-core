@@ -421,6 +421,24 @@ struct planner
         }
     }
 
+    /// EMIT-133: each file-scope sampler the code reaches, once, at the index its declaration order gives it.
+    void file_samplers()
+    {
+        for (auto const& x : p.e.exprs)
+        {
+            auto const* const smp = x.node.try_as<check::flat_file_sampler>();
+            if (smp == nullptr || sampler_of(p, smp->sampler) >= 0)
+                continue;
+            auto const& s = p.m.at(smp->sampler);
+            auto const index = file_sampler_index(p.m, smp->sampler);
+            auto at = isize(0);
+            while (at < p.samplers.size() && p.samplers[at].index < index)
+                ++at;
+            p.samplers.insert_at(
+                at, {.symbol = smp->sampler, .name = spell(s.name), .host_name = s.name, .type = s.type, .index = index});
+        }
+    }
+
     /// What WGSL and MSL need to reach SGL's layout, where their own rule would not (memory_form.hh).
     void memory_forms()
     {
@@ -532,6 +550,22 @@ sgl::i32 sgl::emit::impl::workgroup_of(plan const& p, check::symbol_id binding, 
         if (p.workgroup[i].binding == binding && p.workgroup[i].member == member)
             return i32(i);
     return -1;
+}
+
+sgl::i32 sgl::emit::impl::sampler_of(plan const& p, check::symbol_id symbol)
+{
+    for (auto i = isize(0); i < p.samplers.size(); ++i)
+        if (p.samplers[i].symbol == symbol)
+            return i32(i);
+    return -1;
+}
+
+sgl::i32 sgl::emit::impl::file_sampler_index(check::checked_module const& m, check::symbol_id symbol)
+{
+    auto index = 0;
+    for (auto i = isize(0); i < index_of(symbol); ++i)
+        index += m.symbols[i].kind == check::symbol_kind::sampler ? 1 : 0;
+    return index;
 }
 
 sgl::i32 sgl::emit::impl::resource_of(plan const& p, check::symbol_id binding, i32 member)
@@ -873,6 +907,7 @@ sgl::emit::impl::plan sgl::emit::impl::make_plan(check::checked_module const& m,
     p.group_blocks();
     p.resources();
     p.workgroup_memory();
+    p.file_samplers();
     p.memory_forms();
     p.struct_offsets();
     // The check pass minted the locals, so a buffer or a block minted above never took one's name.

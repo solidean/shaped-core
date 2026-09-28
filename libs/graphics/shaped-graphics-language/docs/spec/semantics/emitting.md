@@ -201,6 +201,11 @@ A binding that is not `@inline` is a group.
   The class is `b` for the constant buffer, `u` for an image and a `mut` buffer, `s` for a sampler, and `t` for every other resource.
 * **EMIT-105** An entry point that lists more than three groups is `too-many-groups` on every target, since sg binds three besides the inline constants.
   Only the entry point's list counts: a function that is no entry point takes the groups its caller hands it, which are no addresses of their own.
+* **EMIT-133** A file-scope sampler the entry point's code reaches is one global named as the sampler is, and one the code does not reach is not declared.
+  Its index i is its position among the module's file-scope samplers in declaration order, so every entry point and every stage states the same one.
+  It stands where sg binds a pipeline layout's static sampler of index i: `register(s<i>, space10)` in `hlsl-dx12`, and `[[vk::binding(i + 1, 3)]]` in `hlsl-vulkan`.
+  WGSL writes it as `@group(3) @binding(i + 1)`, since binding 0 of sg's own group is the inline constants', and MSL as the entry point's parameter `sampler name [[sampler(i)]]`.
+  Its type is EMIT-99's, and its settings reach the layout from `sgl describe` as a group's static sampler's do.
 
 | SGL | HLSL | WGSL |
 |---|---|---|

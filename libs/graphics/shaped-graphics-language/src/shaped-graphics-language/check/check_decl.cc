@@ -333,6 +333,7 @@ type_id checker::resolve_type(i32 file, ast::expr_id expr, function_scope const*
                        cc::format("{} is a {}, and a type stands here", text,
                                   kind == symbol_kind::function   ? "function"
                                   : kind == symbol_kind::constant ? "const"
+                                  : kind == symbol_kind::sampler  ? "sampler"
                                                                   : "binding"));
         }
     }

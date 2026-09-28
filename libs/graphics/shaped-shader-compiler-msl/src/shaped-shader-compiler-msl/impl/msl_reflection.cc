@@ -583,6 +583,23 @@ cc::result<ssc::msl::impl::reflection> ssc::msl::impl::reflect(cc::string_view s
             continue;
         }
 
+        // A sampler slot of the argument table is a pipeline layout's static sampler, `sg::bound_sampler`, at its index.
+        // It reflects with no group and no space, since no group holds it.
+        if (sampler_index >= 0 && buffer_index < 0 && texture_index < 0)
+        {
+            auto binding = binding_of(param.value(), cc::string_view(entry_point));
+            if (binding.has_error())
+                return cc::error(cc::move(binding).error());
+            if (binding.value().type != sg::binding_type::sampler)
+                return cc::error(cc::format("'{}' of '{}' sits at [[sampler({})]], so it must be a `sampler`",
+                                            param.value().name, entry_point, sampler_index));
+
+            binding.value().index = u32(sampler_index);
+            binding.value().visibility = stage;
+            result.bindings.push_back(cc::move(binding.value()));
+            continue;
+        }
+
         // Anything else bound straight on the entry point is an address the backend never sets.
         auto kind = cc::string_view("sampler");
         auto index = sampler_index;
