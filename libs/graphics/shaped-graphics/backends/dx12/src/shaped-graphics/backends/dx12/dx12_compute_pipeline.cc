@@ -23,6 +23,8 @@ cc::result<dx12_compute_pipeline_handle> dx12_compute_pipeline::create(ID3D12Dev
     desc.pRootSignature = pipeline->layout->root_signature.Get();
     desc.CS.pShaderBytecode = shader.bytecode.data();
     desc.CS.BytecodeLength = SIZE_T(shader.bytecode.size());
+    if (pipeline->layout->has_static_samplers)
+        cached_pipeline = {}; // see dx12_pipeline_layout::has_static_samplers
     if (!cached_pipeline.empty())
     {
         desc.CachedPSO.pCachedBlob = cached_pipeline.data();

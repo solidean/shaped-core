@@ -273,17 +273,13 @@ ASYNC_INVOCABLE_TEST("sg - an SGL pixel shader samples a texture at the level it
     CHECK(mismatches == 0);
 }
 
-// A file-scope sampler is the pipeline layout's rather than a group's: it clamps, and sg's default sampler repeats.
-ASYNC_INVOCABLE_TEST("sg - an SGL shader samples through a sampler of the file, which its pipeline layout holds",
-                     (sg::context_handle const& ctx))
+namespace
 {
-    REQUIRE(ctx != nullptr);
-    if (!sg_test::shaders_reach(*ctx))
-        SKIP("no compiler builds this binary's shaders into a format this context accepts");
-
-    auto const pipeline = co_await shaders::textures.copy_clamped.acquire_pipeline(*ctx);
+/// How many bytes `pipeline`, a build of `textures.copy_clamped`, gets wrong: texel (x, y) samples texel (x - 8, y - 8)
+/// at its centre, and the first half of each axis clamps to texel 0.
+cc::shared_async<int> clamped_copy_mismatches(sg::context_handle ctx, sg::compute_pipeline_handle pipeline)
+{
     auto const layout = ctx->cached.acquire_binding_group_layout<shaders::sampled>();
-
     auto const src = make_texture(ctx, sg::pixel_format::rgba8_unorm, sg::texture_usage::texture);
     auto const dst = make_texture(ctx, sg::pixel_format::rgba8_unorm, sg::texture_usage::image);
     auto const texels = pattern();
@@ -302,9 +298,8 @@ ASYNC_INVOCABLE_TEST("sg - an SGL shader samples through a sampler of the file, 
     auto const written = cmd->download.bytes_from_texture(dst.raw());
     ctx->submit_command_list(cc::move(cmd));
 
-    // Texel (x, y) samples texel (x - 8, y - 8) at its centre, and the first half of each axis clamps to texel 0.
     auto const copied = co_await written.bytes();
-    REQUIRE(copied.size() == texels.size());
+    CC_ASSERT(copied.size() == texels.size(), "the copy reads back whole");
     auto const half = k_extent / 2;
     auto mismatches = 0;
     for (auto y = 0; y < k_extent; ++y)
@@ -314,7 +309,56 @@ ASYNC_INVOCABLE_TEST("sg - an SGL shader samples through a sampler of the file, 
             for (auto c = 0; c < 4; ++c)
                 mismatches += copied[(y * k_extent + x) * 4 + c] != texels[from + c] ? 1 : 0;
         }
-    CHECK(mismatches == 0);
+    co_return mismatches;
+}
+} // namespace
+
+// A file-scope sampler is the pipeline layout's rather than a group's: it clamps, and sg's default sampler repeats.
+ASYNC_INVOCABLE_TEST("sg - an SGL shader samples through a sampler of the file, which its pipeline layout holds",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+
+    auto const pipeline = co_await shaders::textures.copy_clamped.acquire_pipeline(*ctx);
+    CHECK((co_await clamped_copy_mismatches(ctx, pipeline)) == 0);
+}
+
+ASYNC_INVOCABLE_TEST("sg - a pipeline over static samplers keeps its own sampler when a cached blob seeds it",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+
+    // One shader under two layouts that differ only in their bound sampler's address mode.
+    // A dx12 driver restored a blob of the clamping pipeline as the repeating twin whenever the process had built only
+    // the twin, which the file-sampler test above met depending on the order tests ran in.
+    // One process cannot build that blob without building the clamping pipeline first, which hides the fault.
+    // So what is pinned is the rule that avoids it: on dx12 such a pipeline never takes a blob.
+    auto const& shader = co_await shaders::textures.copy_clamped->acquire(*ctx);
+    auto const layout_with = [&](sg::sampler_address_mode address)
+    {
+        sg::bound_sampler const samplers[]
+            = {{.binding = {.name = "clamped", .space = 10u, .index = 0, .count = 1, .type = sg::binding_type::sampler},
+                .sampler = {.min_filter = sg::sampler_filter::nearest,
+                            .mag_filter = sg::sampler_filter::nearest,
+                            .address_u = address,
+                            .address_v = address}}};
+        return ctx->cached.acquire_pipeline_layout<shaders::sampled>(samplers);
+    };
+    auto const clamping = layout_with(sg::sampler_address_mode::clamp_edge);
+    auto const first = co_await ctx->uncached.create_compute_pipeline_async({.shader = shader, .layout = clamping});
+    auto const twin = co_await ctx->uncached.create_compute_pipeline_async(
+        {.shader = shader, .layout = layout_with(sg::sampler_address_mode::repeat)});
+    auto const rebuilt = co_await ctx->uncached.create_compute_pipeline_async(
+        {.shader = shader, .layout = clamping, .cached_pipeline = first->cached_pipeline_data()});
+
+    if (ctx->backend() == sg::backend_kind::dx12)
+        CHECK(!rebuilt->used_cached_pipeline());
+    CHECK((co_await clamped_copy_mismatches(ctx, twin)) != 0); // the twin repeats, so the check can tell them apart
+    CHECK((co_await clamped_copy_mismatches(ctx, rebuilt)) == 0);
 }
 
 // The same sampler in a `pipeline` whose vertex stage does not reach it: the one layout of both stages holds it.

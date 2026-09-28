@@ -45,4 +45,10 @@ public:
 
     int inline_constants_root_param = -1; ///< root-parameter index of the 32-bit-constants param, -1 if none
     int inline_constants_num_32bit = 0;   ///< block_size / 4, for full-replace size validation
+
+    /// Whether the root signature carries a static sampler, a group's or the layout's own.
+    /// **A pipeline over one is never built from a cached blob.**
+    /// The driver can hand back a PSO built for another root signature whose static samplers differ, once the process
+    /// has built that one: tests/compute/compute-texture-test.cc's file-sampler test failed that way, order-dependently.
+    bool has_static_samplers = false;
 };
