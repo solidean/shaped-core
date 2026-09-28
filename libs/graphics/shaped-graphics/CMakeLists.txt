@@ -395,6 +395,7 @@ if(SC_BUILD_TESTS)
             tests/pipeline/vertex-input-test.cc
             tests/pipeline/dispatch-test.cc
             tests/pipeline/pixel-semantics-test.cc
+            tests/pipeline/sampler-test.cc
         )
         sc_add_shader_package(
             TARGET     shaped-graphics-test
@@ -415,6 +416,7 @@ if(SC_BUILD_TESTS)
                 vertex_input.sgl:*
                 dispatch.sgl:*
                 pixel_semantics.sgl:*
+                sampling.sgl:*
         )
     endif()
 

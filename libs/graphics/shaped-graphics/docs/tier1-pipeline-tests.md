@@ -39,8 +39,7 @@ The shape that gives it: one target, a row of small quads, one quad per enum val
 Two values that could agree on the chosen inputs get a second quad with inputs that separate them.
 
 - **Texture view dimensions**: each shape sampled at one texel whose value encodes its layer, face or slice, so a wrong dimension reads a wrong value.
-- **Sampler address and filter modes**: samples outside 0..1 where repeat, mirror and clamp differ, and at half a texel where nearest and linear differ.
-  Comparison samplers get every `compare_op` again, as the depth test does.
+- **The sampler fields no explicit-level probe reaches**: `address_w`, which only a 3D texture reads, and `max_anisotropy` and `mip_lod_bias`, which want a pixel stage's derivatives.
 
 **Default and `--thorough`.**
 Each test runs every value by default when it is one draw per value into one target.
