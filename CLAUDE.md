@@ -43,6 +43,7 @@ One-liner per library:
   The `scalar_traits` seam, `vec`/`pos`/`comp`/`bivec`/`mat`/`quat` and the first `geometry/` primitives exist.
   So does `tg::fixed_int<Bits>` (`fi128`, `fi192`, …): wrapping two's-complement integers for exact predicates, with `tg::mul<fi192>(a, b)`-style arithmetic across widths.
   Up to 256 bits that arithmetic is loop-free, from a committed generator.
+  So is `tg::f16` (`half_float`): IEEE binary16 with explicit conversions, and arithmetic rounded once per operation so it matches a GPU computing in half.
   Everything above them — transforms, queries, curves, symbolic, mesh — is planned.
   Namespace `tg`. Depends on clean-core.
   Early stage — see its [docs/structure.md](libs/base/typed-geometry/docs/structure.md) roadmap.

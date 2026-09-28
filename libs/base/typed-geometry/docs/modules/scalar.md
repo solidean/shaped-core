@@ -6,7 +6,7 @@
 
 `scalar/` is the bottom of typed-geometry, and owns everything about the **element type `T`** the geometric types are generic over.
 That is the capability seam (`scalar_traits`), the scalar free functions built on it (`one`, `sqrt`, `abs`, `sin`, `cos`, `sin_cos`, `atan2`, `pow`, `log`, `round`), and constants such as `pi`.
-Scalar-like *newtypes* that are still one number in spirit belong here too — `angle` today.
+Scalar-like *newtypes* that are still one number in spirit belong here too — `angle`, `fixed_int` and `half_float` today.
 It must not depend on `linalg` or anything above it — geometric types are instantiated over scalar types, never the other way around.
 
 ## What belongs here
@@ -125,6 +125,36 @@ It needs integers of a chosen width, and arithmetic whose result width the calle
 - **`x.sign()` is the predicate's answer**: -1, 0 or +1 from the OR of the limbs and the sign bit, without a branch or a comparison.
 - **A `fixed_int` is a scalar**, so `vec<3, fi64>` exists — and its operations wrap at the element width, so a dot product over `fi64` is computed in `fi64`.
   Width-aware `dot` and `cross` belong to a predicate layer on top of this one.
+
+### `half_float` is binary16, with a GPU's arithmetic
+
+`tg::half_float`, spelled `tg::f16`, is IEEE 754 binary16: a struct over its 16 bits, the same type on every compiler.
+The compilers' `_Float16` is not used as the type, because it does not exist under MSVC and brings C's implicit conversions and excess precision where it does.
+The hardware is still used, inside the conversions.
+
+- **Conversions are explicit both ways**, as every tg constructor is, so `h + 1.0f` does not compile.
+  Widening is exact.
+  Narrowing rounds to nearest with ties to even, overflows to infinity, and turns a NaN into a quiet NaN keeping its sign and the top of its payload.
+  An f64 and an integer narrow directly; through f32 they could round twice.
+- **The conversion is a portable bit-level kernel, with hardware only where the build target already guarantees it.**
+  That is F16C where `__F16C__` is defined (cl.exe: `/arch:AVX2`), and AArch64's native conversion.
+  A run-time CPU check cannot help a single conversion: an F16C body cannot be inlined into a caller compiled for baseline x64.
+  Constant evaluation always takes the portable kernel, so every conversion is `constexpr`.
+  The F16C path was checked bit-identical to the portable kernel over all 2^32 narrowings and all 65,536 widenings.
+- **Arithmetic computes in f32 and rounds once, which is exactly binary16's own arithmetic for `+ - * /` and `sqrt`.**
+  f32 carries 24 bits, and double rounding is harmless from 2p+2 = 24; the tests hold it against an f64 reference.
+  So CPU code over f16 computes what a GPU computing in half does, and every operation in a chain rounds.
+  For heavy math the pattern is to widen once, compute in f32 and narrow at the end.
+  An ARM64 target with native half arithmetic uses it, since the results are the same bits.
+  Fused multiply-add does not share the property: via f32 it is not correctly rounded, via f64 it is.
+- **An operation works on the bits when it is a pure bit operation, or when baseline x64 would otherwise pay a library call.**
+  Negation, `abs`, classification, comparison, `floor`/`ceil`/`round` and the base-two family do; everything that rounds goes through f32.
+  Baseline x64 has no rounding instruction and converts in software, and there the bits win 1.5× on a comparison, 2.2× on `floor` and 2.5× on `scale_by_pow2`.
+  `tests/benchmarks/half_float-benchmark.cc` measures both formulations.
+- **f16 claims every capability family**, the transcendental ones computing in f32's libm with one final rounding — the same kind of error f32's own libm has.
+- **`{}` prints the shortest digits that read back as the same f16**, so `tg::f16(0.1f)` prints `0.1`, and the largest value `65500`.
+  A precision or a presentation type prints the exact value instead.
+- **No span conversion and no vector aliases yet.** Both are niche until a caller needs them; `tg::vec<3, tg::f16>` works as it is.
 
 ## See also
 
