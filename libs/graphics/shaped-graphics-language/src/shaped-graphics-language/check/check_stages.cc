@@ -11,6 +11,25 @@ using namespace sgl::check::impl;
 namespace
 {
 constexpr auto error_type = checked_module::error_type;
+// CHK-301: vulkan's guaranteed maxGeometryOutputVertices, and D3D's bound on the scalars of all of them, which is
+// vulkan's guaranteed maxGeometryTotalOutputComponents too
+constexpr auto k_max_geometry_vertices = 256;
+constexpr auto k_max_geometry_scalars = 1024;
+
+/// The scalars a value of `type` is: what D3D and vulkan count of a geometry stage's output vertex.
+i32 scalars_of(checked_module const& m, type_id type)
+{
+    if (auto const* const record = m.builtin_type_of(type))
+        return record->leaf_count;
+    auto const& t = m.at(type);
+    if (t.kind == type_kind::array)
+        return t.count * scalars_of(m, t.element);
+    auto count = 0;
+    if (t.kind == type_kind::structure)
+        for (auto const& member : m.at(t.members))
+            count += scalars_of(m, member.type);
+    return count;
+}
 
 } // namespace
 
@@ -26,11 +45,11 @@ i32 checker::max_vertices_of(i32 file, ast::attribute const& a)
                         && classify_number(text) == number_class::plain_integer
                      ? parse_plain_integer(text)
                      : cc::optional<i32>();
-    // CHK-301: what HLSL's `maxvertexcount` takes, which the targets that have the stage share
-    if (!n.has_value() || n.value() < 1 || n.value() > 1024)
+    // CHK-301: vulkan guarantees 256 output vertices; the scalars they carry are judged with the stream
+    if (!n.has_value() || n.value() < 1 || n.value() > k_max_geometry_vertices)
     {
         report(diagnostic_kind::invalid_attribute_arguments, file, a.name,
-               "@geometry takes how many vertices it appends at most, an int from 1 to 1024: `@geometry(max_vertices = "
+               "@geometry takes how many vertices it appends at most, an int from 1 to 256: `@geometry(max_vertices = "
                "6)`");
         return 1;
     }
@@ -49,6 +68,12 @@ checker::tessellation_mode checker::tessellation_of(i32 file, ast::attribute con
         auto const* const dot
             = ast::is_valid(argument.value) ? ast_of(file).at(argument.value).node.try_as<ast::leading_dot>() : nullptr;
         auto const value = dot != nullptr ? text_of(file, dot->name) : cc::string_view();
+        if ((key == "partitioning" && has_partitioning) || (key == "winding" && has_winding))
+        {
+            report(diagnostic_kind::invalid_attribute_arguments, file, argument.name,
+                   cc::format("@tessellation_control names {} once", key));
+            return result;
+        }
         if (key == "partitioning" && (value == "integer" || value == "fractional_even" || value == "fractional_odd"))
         {
             result.partitioning = value == "integer"         ? tessellation_partitioning::integer
@@ -104,7 +129,7 @@ void checker::judge_primitive_stage(symbol_id id, cc::function_ref<void(cc::stri
     auto const parameters = out.at(info.parameters);
     auto const name = stage_name(info.entry_stage);
 
-    // the stage inputs, each of this stage and each once; every other parameter is judged by the stage below
+    // the stage inputs, each of this stage, of its type and each once; every other parameter is judged by the stage below
     auto values = cc::vector<parameter const*>();
     auto seen = cc::vector<stage_input>();
     for (auto const& parameter : parameters)
@@ -117,10 +142,20 @@ void checker::judge_primitive_stage(symbol_id id, cc::function_ref<void(cc::stri
         auto const& input = info_of(parameter.input);
         if (input.in_stage != info.entry_stage && (input.also_in & stage_bit(info.entry_stage)) == 0)
             invalid(cc::format("@{} is no input of the {} stage", input.name, name));
+        // the domain's type is the factors struct's, which CHK-306 judges below
+        else if (parameter.input != stage_input::domain_location && out.name_of(parameter.type) != input.type)
+            invalid(cc::format("a @{} parameter is an {}", input.name, input.type));
         for (auto const other : seen)
             if (other == parameter.input)
                 invalid(cc::format("@{} is taken twice", input.name));
         seen.push_back(parameter.input);
+    }
+    // CHK-302, CHK-304, CHK-306: what the stage before hands on comes first, as a raster stage's stage struct does
+    if (!parameters.empty() && parameters[0].input != stage_input::none)
+    {
+        invalid(cc::format("a @{} fun takes {} first, and stage inputs after it", name,
+                           info.entry_stage == stage::geometry ? "its primitive's vertices" : "the patch"));
+        return;
     }
 
     // an array of the struct the stage before hands on, as long as `lengths` allows
@@ -135,6 +170,13 @@ void checker::judge_primitive_stage(symbol_id id, cc::function_ref<void(cc::stri
             return error_type;
         }
         return p->type;
+    };
+    // CHK-304, CHK-306: both tessellation stages take the patch, which D3D and vulkan bound alike
+    auto const judge_patch = [&](parameter const* p)
+    {
+        if (auto const patch = judge_array(p, "the patch");
+            patch != error_type && (out.at(patch).count < 1 || out.at(patch).count > 32))
+            invalid("a patch holds from 1 to 32 control points");
     };
     // a struct that reaches the rasterizer has one @position, of type hpos4
     auto const judge_position = [&](type_id link, cc::string_view what)
@@ -177,6 +219,12 @@ void checker::judge_primitive_stage(symbol_id id, cc::function_ref<void(cc::stri
             invalid("a geometry stage appends to its stream, so the stream is `mut`");
         else if (judge_position(stream.element, "what a geometry stage appends") != 1)
             invalid("what a geometry stage appends reaches the rasterizer, so it has one @position field");
+        else if (auto const scalars = scalars_of(out, stream.element);
+                 info.max_vertices * scalars > k_max_geometry_scalars)
+            invalid(cc::format("its {} vertices of {} scalars each are {}, and a geometry stage appends at most {} "
+                               "scalars: `max_vertices` is at most {} for {}",
+                               info.max_vertices, scalars, info.max_vertices * scalars, k_max_geometry_scalars,
+                               k_max_geometry_scalars / scalars, out.name_of(stream.element)));
         return;
     }
 
@@ -227,9 +275,7 @@ void checker::judge_primitive_stage(symbol_id id, cc::function_ref<void(cc::stri
             invalid("a @tessellation_control fun takes the patch, and stage inputs");
             return;
         }
-        if (auto const patch = judge_array(values[0], "the patch");
-            patch != error_type && (out.at(patch).count < 1 || out.at(patch).count > 32))
-            invalid("a patch holds from 1 to 32 control points");
+        judge_patch(values[0]);
         if (out.at(info.result).kind != type_kind::structure || out.builtin_type_of(info.result) != nullptr)
             invalid("a @tessellation_control fun returns its patch's factors struct");
         else
@@ -243,7 +289,7 @@ void checker::judge_primitive_stage(symbol_id id, cc::function_ref<void(cc::stri
         invalid("a @tessellation_evaluation fun takes the patch, the factors struct, and `@domain_location`");
         return;
     }
-    (void)judge_array(values[0], "the patch");
+    judge_patch(values[0]);
     auto const domain = out.at(values[1]->type).kind == type_kind::structure ? judge_factors(values[1]->type) : 0;
     auto has_location = false;
     for (auto const& parameter : parameters)

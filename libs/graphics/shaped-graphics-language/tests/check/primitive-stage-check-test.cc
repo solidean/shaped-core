@@ -68,14 +68,58 @@ TEST("sgl check - a geometry stage takes one primitive's vertices and appends to
     CHECK(reports("tri: varyings[3], stream: mut triangle_stream[varyings]", "stream.emit(tri[0].color)")
               .contains("the vertex it appends"));
 
-    // CHK-301: an int literal from 1 to 1024
+    // CHK-301: an int literal from 1 to 256
     CHECK(with_head("@geometry(max_vertices = 0)\nfun g(tri: varyings[3], stream: mut triangle_stream[varyings]):\n"
                     "    stream.end_strip()\n")
-              .contains("an int from 1 to 1024"));
+              .contains("an int from 1 to 256"));
     CHECK(with_head("@geometry(max_vertices = 3)\nfun g(tri: varyings[3], stream: mut triangle_stream[varyings]) -> "
                     "int:\n"
                     "    return 1\n")
               .contains("a @geometry fun returns nothing"));
+}
+
+TEST("sgl check - a geometry stage appends at most 256 vertices and 1024 scalars")
+{
+    constexpr auto gs = "struct corner:\n    @position position: hpos4\n"
+                        "@geometry(max_vertices = {})\nfun g(tri: {}[3], stream: mut triangle_stream[{}]):\n"
+                        "    stream.end_strip()\n";
+    // vulkan guarantees 256 vertices, whatever they carry
+    CHECK(with_head(cc::format(gs, 256, "corner", "corner")) == "");
+    CHECK(with_head(cc::format(gs, 257, "corner", "corner")).contains("an int from 1 to 256"));
+    // varyings is an hpos4 and a float3, 7 scalars, and D3D bounds all of them at 1024
+    CHECK(with_head(cc::format(gs, 146, "varyings", "varyings")) == "");
+    CHECK(with_head(cc::format(gs, 147, "varyings", "varyings"))
+              .contains("its 147 vertices of 7 scalars each are 1029, and a geometry stage appends at most 1024 "
+                        "scalars: `max_vertices` is at most 146 for varyings"));
+}
+
+TEST("sgl check - each primitive stage takes what the stage before hands on first, and stage inputs after it")
+{
+    // the emitters take the first parameter as what the stage before hands on
+    CHECK(with_head("@geometry(max_vertices = 3)\n"
+                    "fun g(@primitive_id prim: int, tri: varyings[3], stream: mut triangle_stream[varyings]):\n"
+                    "    stream.end_strip()\n")
+              .contains("a @geometry fun takes its primitive's vertices first, and stage inputs after it"));
+    CHECK(with_head("@tessellation_control(partitioning = .integer, winding = .clockwise)\n"
+                    "fun tc(@primitive_id prim: int, patch: control_point[3]) -> tri_factors:\n"
+                    "    return { edges = [1.0, 1.0, 1.0], inside = 1.0, bulge = 0.0 }\n")
+              .contains("a @tessellation_control fun takes the patch first, and stage inputs after it"));
+    CHECK(with_head("@tessellation_evaluation\n"
+                    "fun te(@domain_location uvw: float3, patch: control_point[3], f: tri_factors) -> varyings:\n"
+                    "    return { position = hpos4(0.0, 0.0, 0.0, 1.0), color = uvw }\n")
+              .contains("a @tessellation_evaluation fun takes the patch first, and stage inputs after it"));
+}
+
+TEST("sgl check - a primitive stage's stage input is of its type")
+{
+    CHECK(with_head("@geometry(max_vertices = 3)\n"
+                    "fun g(tri: varyings[3], @primitive_id prim: float3, stream: mut triangle_stream[varyings]):\n"
+                    "    stream.end_strip()\n")
+              .contains("a @primitive_id parameter is an int"));
+    CHECK(with_head("@tessellation_control(partitioning = .integer, winding = .clockwise)\n"
+                    "fun tc(patch: control_point[3], @primitive_id prim: uint) -> tri_factors:\n"
+                    "    return { edges = [1.0, 1.0, 1.0], inside = 1.0, bulge = 0.0 }\n")
+              .contains("a @primitive_id parameter is an int"));
 }
 
 TEST("sgl check - a stream is no value, and only a geometry stage appends to one")
@@ -97,6 +141,9 @@ TEST("sgl check - a control stage names its partitioning and winding, takes a pa
               .contains("`winding = .clockwise` or `.counter_clockwise`"));
     CHECK(with_head(cc::format(tc, "(partitioning = .pow2, winding = .clockwise)", 3, "tri_factors", factors))
               .contains("@tessellation_control takes `partitioning = .integer`"));
+    CHECK(with_head(cc::format(tc, "(partitioning = .integer, winding = .clockwise, partitioning = .fractional_odd)", 3,
+                               "tri_factors", factors))
+              .contains("@tessellation_control names partitioning once"));
     CHECK(
         with_head(cc::format(tc, mode, 33, "tri_factors", factors)).contains("a patch holds from 1 to 32 control points"));
     CHECK(with_head(cc::format(tc, mode, 3, "varyings",
@@ -129,6 +176,10 @@ TEST("sgl check - an evaluation stage takes the patch, its factors and where in 
     CHECK(with_head(cc::format(te, "")).contains("takes `@domain_location`"));
     CHECK(with_head(cc::format(te, ", @domain_location uv: float2"))
               .contains("the domain location of a triangle is a float3"));
+    CHECK(with_head("@tessellation_evaluation\n"
+                    "fun te(patch: control_point[33], f: tri_factors, @domain_location uvw: float3) -> varyings:\n"
+                    "    return { position = hpos4(0.0, 0.0, 0.0, 1.0), color = uvw }\n")
+              .contains("a patch holds from 1 to 32 control points"));
 }
 
 TEST("sgl check - each stage needs its feature, and a stage input is taken only by its stages")

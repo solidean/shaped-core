@@ -643,7 +643,9 @@ Two optional stages stand between the vertex and the pixel stage, each an entry 
 HLSL writes them on dx12 and vulkan; WebGPU and Metal have neither, so WGSL and MSL refuse by the feature.
 
 * **CHK-301** `@geometry(max_vertices = N)` makes an entry point of the geometry stage, which needs `geometry_shader`.
-  `N` is an `int` literal from 1 to 1024, and the entry point returns nothing.
+  `N` is an `int` literal from 1 to 256, and the entry point returns nothing.
+  `N` vertices of `T`, the stream's struct, carry at most 1024 scalars: `hpos4` and `float4` count 4, `float3` 3, and an array its length times its element's.
+  Those are what vulkan guarantees and what D3D allows, and breaking the second is `invalid-entry-point`.
 * **CHK-302** Its first parameter is an array of the struct the stage before it returns, one primitive long.
   A primitive is 1 vertex for a point, 2 for a line, 3 for a triangle, 4 for a line with adjacency and 6 for a triangle with adjacency.
   Stage inputs follow it, `@primitive_id` among them, and its last parameter is `mut point_stream[T]`, `mut line_stream[T]` or `mut triangle_stream[T]`.
@@ -652,11 +654,15 @@ HLSL writes them on dx12 and vulkan; WebGPU and Metal have neither, so WGSL and 
 * **CHK-304** `@tessellation_control(partitioning = p, winding = w)` makes an entry point of the tessellation control stage, which needs `tessellation_shader`.
   `p` is `.integer`, `.fractional_even` or `.fractional_odd`, and `w` is `.clockwise` or `.counter_clockwise`.
   Power-of-two partitioning is none of them, since vulkan lacks it.
-  It takes one parameter besides its stage inputs, the patch: an array of from 1 to 32 of the struct the vertex stage returns, and it returns a **factors struct**.
+  Its first parameter is the patch: an array of from 1 to 32 of the struct the vertex stage returns.
+  Stage inputs follow it, and it returns a **factors struct**; no other parameter stands.
+  A repeated argument is `invalid-attribute-arguments`.
 * **CHK-305** A factors struct has exactly one `@edge_factors` member, `float[2]`, `float[3]` or `float[4]`, which makes its domain isolines, triangles or quads.
   It has one `@inside_factors` member, `float` for triangles and `float[2]` for quads, and none for isolines; any other member reaches the evaluation stage as it is.
 * **CHK-306** `@tessellation_evaluation` makes an entry point of the tessellation evaluation stage, which needs `tessellation_shader`.
-  It takes the patch as the control stage takes it, the control stage's factors struct, and `@domain_location`: a `float3` for triangles and a `float2` otherwise.
+  Its first parameter is the patch, from 1 to 32 control points as the control stage takes it.
+  Then it takes the control stage's factors struct, and `@domain_location`: a `float3` for triangles and a `float2` otherwise.
+  Stage inputs stand anywhere after the patch.
   It returns the struct the stage after it takes.
 * **CHK-307** A pipeline names the stages as `geometry = f`, `tessellation_control = f` and `tessellation_evaluation = f`; the two tessellation stages come together.
   Each stage takes what the one before it returns, by CHK-183's rule, and the struct that reaches the rasterizer carries exactly one `@position`.
