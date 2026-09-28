@@ -387,6 +387,8 @@ if(SC_BUILD_TESTS)
             tests/compute/compute-texture-test.cc
             tests/raster/raster-test.cc
             tests/barrier/footprint-barrier-test.cc
+            tests/pipeline/pipeline_harness.cc
+            tests/pipeline/depth-stencil-test.cc
         )
         sc_add_shader_package(
             TARGET     shaped-graphics-test
@@ -402,6 +404,7 @@ if(SC_BUILD_TESTS)
                 layout.sgl:*
                 sync.sgl:*
                 binding_arrays.sgl:*
+                rects.sgl:*
         )
     endif()
 
