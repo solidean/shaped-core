@@ -140,13 +140,18 @@ void vulkan_command_list::declare_group_accesses(cc::span<vulkan_binding_group c
     }
 }
 
-void vulkan_command_list::declare_array_accesses(void const* pipeline, sg::pipeline_stage_flags op_stages)
+void vulkan_command_list::declare_array_accesses(cc::span<vulkan_binding_group const* const> groups,
+                                                 sg::impl::pipeline_footprint const* footprint,
+                                                 void const* pipeline,
+                                                 sg::pipeline_stage_flags op_stages,
+                                                 cc::vector<vulkan_array_buffer_declare>& buffer_declares,
+                                                 cc::vector<vulkan_array_texture_declare>& texture_declares)
 {
-    // Which elements of an array a shader indexes cannot be inferred, so the caller declares them per dispatch.
+    // Which elements of an array a shader indexes cannot be inferred, so the caller declares them per op.
     // How those declarations meet what the code does to the array is sg::impl::plan_array_declarations' to decide.
     auto const find_array_binding = [&](cc::string_view name, bool want_texture) -> vulkan_array_binding const*
     {
-        for (auto const* group : _bound_groups)
+        for (auto const* group : groups)
             if (group != nullptr)
                 for (auto const& ab : group->array_bindings)
                     if (ab.name == name && ab.is_texture == want_texture)
@@ -155,7 +160,7 @@ void vulkan_command_list::declare_array_accesses(void const* pipeline, sg::pipel
     };
 
     // A mistake in the host's own declarations asserts, whatever the code does with the array.
-    for (auto const& declare : _pending_array_buffer_declares)
+    for (auto const& declare : buffer_declares)
     {
         auto const* const ab = find_array_binding(declare.name, false);
         CC_ASSERT(ab != nullptr, "declare_array_buffer_access names no buffer array binding of a bound group");
@@ -165,7 +170,7 @@ void vulkan_command_list::declare_array_accesses(void const* pipeline, sg::pipel
             CC_ASSERT(!ab->elements[e.index].is_vacant(), "declared array element is vacant (nothing is bound there)");
         }
     }
-    for (auto const& declare : _pending_array_texture_declares)
+    for (auto const& declare : texture_declares)
     {
         auto const* const ab = find_array_binding(declare.name, true);
         CC_ASSERT(ab != nullptr, "declare_array_texture_access names no texture array binding of a bound group");
@@ -176,11 +181,11 @@ void vulkan_command_list::declare_array_accesses(void const* pipeline, sg::pipel
         }
     }
 
-    for (auto group = 0; group < int(_bound_groups.size()); ++group)
+    for (auto group = 0; group < int(groups.size()); ++group)
     {
-        if (_bound_groups[group] == nullptr)
+        if (groups[group] == nullptr)
             continue;
-        for (auto const& ab : _bound_groups[group]->array_bindings)
+        for (auto const& ab : groups[group]->array_bindings)
         {
             auto declared = sg::impl::array_declarations();
             auto const gather = [&](auto const& declares)
@@ -197,13 +202,13 @@ void vulkan_command_list::declare_array_accesses(void const* pipeline, sg::pipel
                     }
             };
             if (ab.is_texture)
-                gather(_pending_array_texture_declares);
+                gather(texture_declares);
             else
-                gather(_pending_array_buffer_declares);
+                gather(buffer_declares);
 
             auto use = cc::optional<sg::impl::slot_use>();
-            if (_bound_footprint != nullptr && _bound_footprint->is_known())
-                use = _bound_footprint->use_of(group, ab.binding);
+            if (footprint != nullptr && footprint->is_known())
+                use = footprint->use_of(group, ab.binding);
             auto const plan = sg::impl::plan_array_declarations(pipeline, ab.name, use, ab.bound_as, op_stages, declared);
 
             switch (plan.how)
@@ -213,7 +218,7 @@ void vulkan_command_list::declare_array_accesses(void const* pipeline, sg::pipel
             case sg::impl::array_plan::mode::as_declared:
                 if (ab.is_texture)
                 {
-                    for (auto const& declare : _pending_array_texture_declares)
+                    for (auto const& declare : texture_declares)
                         if (declare.name == ab.name)
                             for (auto const& e : declare.elements)
                             {
@@ -224,7 +229,7 @@ void vulkan_command_list::declare_array_accesses(void const* pipeline, sg::pipel
                 }
                 else
                 {
-                    for (auto const& declare : _pending_array_buffer_declares)
+                    for (auto const& declare : buffer_declares)
                         if (declare.name == ab.name)
                             for (auto const& e : declare.elements)
                                 track_buffer_access(*ab.elements[e.index].buffer, e.stages, e.access | plan.widen_by);
@@ -251,8 +256,8 @@ void vulkan_command_list::declare_array_accesses(void const* pipeline, sg::pipel
         }
     }
 
-    _pending_array_buffer_declares.clear();
-    _pending_array_texture_declares.clear();
+    buffer_declares.clear();
+    texture_declares.clear();
 }
 
 void vulkan_command_list::compute_dispatch(int x, int y, int z)
@@ -266,7 +271,8 @@ void vulkan_command_list::compute_dispatch(int x, int y, int z)
     declare_group_accesses(_bound_groups, _bound_footprint, sg::pipeline_stage_flag::compute);
 
     // Array bindings are not auto-tracked — apply (and account for) the caller's explicit declarations.
-    declare_array_accesses(_bound_footprint_owner, sg::pipeline_stage_flag::compute);
+    declare_array_accesses(_bound_groups, _bound_footprint, _bound_footprint_owner, sg::pipeline_stage_flag::compute,
+                           _pending_array_buffer_declares, _pending_array_texture_declares);
 
     // Emit every hazard the bound resources declared, batched, right before the dispatch consumes them.
     flush_barriers();

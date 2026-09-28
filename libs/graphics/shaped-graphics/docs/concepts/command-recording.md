@@ -61,8 +61,8 @@ Access is **inferred** from each operation rather than declared — an upload im
 Uploading, downloading and copying the *same* buffer in one list therefore works.
 
 One thing is not inferable: per-element access for an array / bindless binding, since the shader may index only some elements or use them differently.
-`cmd.compute.declare_array_*_access` (mirrored on `cmd.raytracing`) declares it for the next dispatch.
-The dispatch asserts every bound array binding was declared — an empty span declares "unused".
+`declare_array_*_access` on `cmd.compute`, `cmd.raytracing` or `cmd.raster` declares it for that bind point's next dispatch or draw.
+An array the code indexes and nobody declared logs an error and is covered whole — an empty span declares "unused".
 See [bindings — array bindings](bindings.md#array-bindings).
 [barriers](barriers.md) owns the state machine, and its slot model is why several lists may record against the same resource concurrently.
 
@@ -94,7 +94,7 @@ An epoch advance does **not** deliver a download — it drains the GPU, and the 
 1. **A list is consumed exactly once**, by submit or by drop, both through the context.
 2. **A list cannot span epochs** — enforced per list, and in aggregate at `advance_epoch`.
 3. **Recording is single-threaded per list**; concurrent lists are fine and each takes its own access-tracking slot.
-4. **Access is inferred, never declared.** The one exception is array/bindless elements, declared per dispatch via `declare_array_*_access` and accounted for.
+4. **Access is inferred, never declared.** The one exception is array/bindless elements, declared per dispatch or draw via `declare_array_*_access` and accounted for.
 5. **A scope is pinned to its list** — no copy, no move, no independent lifetime.
 6. **Draws require an open rendering scope**, and `begin_rendering` / `end_rendering` must balance.
 

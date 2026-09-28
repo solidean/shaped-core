@@ -324,6 +324,8 @@ cmd.raster.bind_index_buffer(ibuf->as_index_buffer(sg::index_format::uint16))  /
 cmd.raster.set_viewport(vp) / .set_scissor(rect)       // void — override the scope's viewport / scissor
 cmd.raster.set_stencil_reference(u32) / .set_blend_constants(tg::vec4f)  // void — dynamic depth-stencil / blend state
 cmd.raster.set_inline_constants(data|POD, offset={})   // void — root/push constants (same as cmd.compute)
+cmd.raster.declare_array_buffer_access(name, elements) / declare_array_texture_access(name, elements)  // void — as on cmd.compute, next draw only
+                                                         //   each element's `stages` is what it is tracked at: a table only the fragment shader indexes says fragment
 cmd.raster.draw({.vertex_range={.offset=0,.size=3}, .instance_range={.offset=0,.size=1}})   // void — ranges are cc::offset_size {first, count}
 cmd.raster.draw_indexed({.index_range={.offset=0,.size=N}, .instance_range={.offset=0,.size=1}, .vertex_offset=0})  // void
 //   GOTCHA: view.offset_in_bytes + index_range.offset*index_size must be 4-byte aligned (sg::index_buffer_offset_alignment).
@@ -742,7 +744,7 @@ cmd.compute.dispatch_groups(x, y, z)     // void — dispatch x*y*z workgroups
 cmd.compute.dispatch_threads(x, y, z)    // void — dispatch ceil(threads / workgroup_size) groups per axis
 cmd.compute.declare_array_buffer_access(name, elements)  // void — per-element access for a buffer array/bindless binding, next dispatch only
 cmd.compute.declare_array_texture_access(name, elements) // void — same for a texture array (elements also carry a layout)
-                                                         // (scalar bindings are inferred; arrays can't be — declare them; cmd.raytracing has the same pair)
+                                                         // (scalar bindings are inferred; arrays can't be — declare them; cmd.raytracing and cmd.raster have the same pair)
                                                          // an array the code indexes and nobody declared LOGS and gets a global barrier; one it never indexes needs none
 
 // raster_pipeline — a graphics PSO. Owns its shaders; formats/state baked in. Draws via cmd.raster (above).
@@ -766,7 +768,7 @@ sg::vertex_input_layout           // { small_vector<vertex_input_slot,8> slots; 
 //   vertex_attribute_format {f32,vec2f,vec3f,vec4f, i32.., u32.., rgba8_unorm, rgba8_uint}   index_format {uint16, uint32}
 raster_pipeline.cached_pipeline_data()  // -> pinned_data<byte const> — serialized PSO blob; persist + feed back via desc.cached_pipeline (empty if unsupported)
 // Access is inferred from each op (upload⇒copy_write, dispatch⇒what the pipeline's FOOTPRINT says its code does to each view);
-// an untouched binding costs no barrier, a mut buffer only loaded is storage_read. No public declare_access.
+// an untouched binding costs no barrier, a mut buffer only loaded is storage_read. No public declare_access; only array elements are declared.
 // pipeline.footprint() / compiled_shader.footprint (exact from SGL, reflected from DXC, none = every writable view written).
 // Concurrent command lists are fine — each takes a tracking slot. See docs/concepts/barriers.md.
 ```

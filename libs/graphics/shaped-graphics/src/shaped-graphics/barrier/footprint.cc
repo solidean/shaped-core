@@ -178,8 +178,8 @@ sg::impl::array_plan sg::impl::plan_array_declarations(void const* pipeline,
 
     if (!declared.named)
     {
-        log_footprint_mismatch_once(pipeline, name,
-                                    "a dispatch declared no access for a bound array, so every element is covered");
+        log_footprint_mismatch_once(
+            pipeline, name, "a dispatch or draw declared no access for a bound array, so every element is covered");
         return cover_all();
     }
     if (!declared.any_element)
@@ -187,7 +187,8 @@ sg::impl::array_plan sg::impl::plan_array_declarations(void const* pipeline,
         if (!code_writes)
             return {.how = array_plan::mode::skip};
         log_footprint_mismatch_once(pipeline, name,
-                                    "a dispatch declared an array unused that its pipeline's code writes, so every "
+                                    "a dispatch or draw declared an array unused that its pipeline's code writes, so "
+                                    "every "
                                     "element is covered");
         return cover_all();
     }
@@ -197,14 +198,16 @@ sg::impl::array_plan sg::impl::plan_array_declarations(void const* pipeline,
     if (code_writes && !is_unordered_write(declared.access))
     {
         log_footprint_mismatch_once(pipeline, name,
-                                    "a dispatch declared no write to an array its pipeline's code writes, so every "
+                                    "a dispatch or draw declared no write to an array its pipeline's code writes, so "
+                                    "every "
                                     "declared element is covered for the write too");
         return {.how = array_plan::mode::as_declared, .widen_by = use.value().access};
     }
     if (!use.value().access.has_all(declared.access))
     {
         log_footprint_mismatch_once(pipeline, name,
-                                    "a dispatch declared an array access its pipeline's code does not perform, so the "
+                                    "a dispatch or draw declared an array access its pipeline's code does not perform, "
+                                    "so the "
                                     "barrier covers both");
         return {.how = array_plan::mode::as_declared, .widen_by = use.value().access};
     }

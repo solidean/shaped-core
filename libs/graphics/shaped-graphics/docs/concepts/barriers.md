@@ -47,7 +47,8 @@ Only a mistake in the host's own code — a declaration naming no bound array, a
 Element usage of a resource *array* bound to a shader cannot be inferred: the shader may index only some elements, or use them differently.
 So the caller declares it explicitly, split by resource family since buffers carry no layout.
 `declare_array_buffer_access` takes `array_buffer_access` `{index, stages, access}`; `declare_array_texture_access` takes `array_texture_access`, which also names the required `layout`.
-A declaration applies to the next dispatch only, resolved by binding name against the bound groups' array elements and tracked exactly like an inferred scalar access.
+A declaration applies to the next dispatch or draw only, resolved by binding name against the bound groups' array elements and tracked exactly like an inferred scalar access.
+The compute, raytracing and raster scopes each carry the pair; a draw tracks each element at the stages its declaration names, not at `vertex | fragment`.
 The footprint still says whether the code touches the array at all:
 
 - an array the code never indexes needs no declaration, and one declared anyway is dropped;
