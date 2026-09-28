@@ -72,6 +72,10 @@ enum class sg::feature
     /// A pixel shader may run per sample: read `@sample_index`, or interpolate a member at each sample.
     /// Vulkan gives it only with the `sampleRateShading` device feature; D3D12, Metal and WebGPU always.
     sample_rate_shading,
+
+    /// A raster pipeline may fill triangles as wireframe (`fill_mode::wireframe`).
+    /// WebGPU has no wireframe fill at all, and Vulkan gives it only with the `fillModeNonSolid` device feature.
+    wireframe_fill,
 };
 
 CC_FLAG_ENUM_INDEXED(sg, feature, cc::u16);
@@ -96,8 +100,9 @@ inline constexpr feature k_all_features[] = {
     feature::multisampled_array_textures,
     feature::primitive_index,
     feature::sample_rate_shading,
+    feature::wireframe_fill,
 };
-static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize(feature::sample_rate_shading) + 1,
+static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize(feature::wireframe_fill) + 1,
               "k_all_features lists every feature");
 
 /// The enumerator's name, `raytracing`, which is also what SGL's `require` spells it as.
@@ -131,6 +136,8 @@ static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize
         return "primitive_index";
     case feature::sample_rate_shading:
         return "sample_rate_shading";
+    case feature::wireframe_fill:
+        return "wireframe_fill";
     }
     return "";
 }

@@ -202,6 +202,7 @@ public:
         case sg::feature::multisampled_array_textures:
         case sg::feature::primitive_index:
         case sg::feature::sample_rate_shading:
+        case sg::feature::wireframe_fill:
             return true;
         case sg::feature::extended_image_formats:
             return _extended_image_formats;

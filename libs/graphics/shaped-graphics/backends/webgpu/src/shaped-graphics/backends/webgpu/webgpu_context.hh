@@ -132,6 +132,7 @@ public:
             // `@builtin(sample_index)` and `@interpolate(…, sample)` are core WGSL.
             return true;
         case sg::feature::raytracing:
+        case sg::feature::wireframe_fill:
         case sg::feature::geometry_shader:
         case sg::feature::tessellation_shader:
         case sg::feature::binding_arrays:

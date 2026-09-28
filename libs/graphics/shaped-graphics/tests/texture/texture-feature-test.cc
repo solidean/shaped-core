@@ -8,6 +8,8 @@
 #include <shaped-graphics/resource/raw_texture.hh>
 #include <shaped-graphics/resource/texture.hh>
 
+using namespace cc::primitive_defines;
+
 // Each form below is refused where the device lacks its feature and built where it has it, on every backend alike.
 
 namespace
@@ -88,7 +90,7 @@ INVOCABLE_TEST("sg - a 32-bit float view on a filterable binding needs float32_f
 INVOCABLE_TEST("sg - a pipeline-level static sampler builds a layout on every backend, and two at one register do not",
                (sg::context_handle const& ctx))
 {
-    auto const at = [](cc::string_view name, cc::u32 index)
+    auto const at = [](cc::string_view name, u32 index)
     {
         return sg::bound_sampler{
             .binding = {.name = name, .space = 0u, .index = index, .type = sg::binding_type::sampler},

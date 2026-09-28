@@ -586,6 +586,14 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
         for (auto const* name : k_raytracing_extensions)
             device_extensions.push_back(name);
 
+    // A point is one pixel in sg, as WebGPU has it, and SGL's vertex stages write no point size.
+    // Vulkan draws a point list only from a stage that writes one, unless maintenance5 makes an unwritten size 1.0.
+    // Optional, since it is above the 1.3 floor: without it a point list drawn with such a shader fails validation.
+    char const* const maintenance5_names[] = {VK_KHR_MAINTENANCE_5_EXTENSION_NAME};
+    bool const maintenance5_supported = device_extensions_available(best_device, maintenance5_names);
+    if (maintenance5_supported)
+        device_extensions.push_back(VK_KHR_MAINTENANCE_5_EXTENSION_NAME);
+
     // Logical device with a single graphics queue.
     // Every feature is enabled up front, whether or not the milestone using it has landed: a feature costs nothing
     // unused, and enabling them one at a time means re-editing this chain for each.
@@ -693,7 +701,7 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     // which is a binding group sg's raster scope accepts.
     // `shaderStorageImageExtendedFormats` is enabled wherever the device has it.
     // sg::feature::extended_image_formats reports it together with bgra8_unorm's per-format storage support.
-    // So are the geometry and tessellation stages and per-sample shading, which sg::feature reports the same way:
+    // So are the geometry and tessellation stages, per-sample shading and wireframe fill, which sg::feature reports the same way:
     // a pipeline that uses one without the device feature enabled fails validation, whatever the device has.
     auto supported = VkPhysicalDeviceFeatures{};
     vkGetPhysicalDeviceFeatures(best_device, &supported);
@@ -703,13 +711,21 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
         .features = {.geometryShader = supported.geometryShader,
                      .tessellationShader = supported.tessellationShader,
                      .sampleRateShading = supported.sampleRateShading,
+                     .fillModeNonSolid = supported.fillModeNonSolid,
                      .fragmentStoresAndAtomics = VK_TRUE,
                      .shaderStorageImageExtendedFormats = supported.shaderStorageImageExtendedFormats},
     };
 
+    auto maintenance5_features = VkPhysicalDeviceMaintenance5FeaturesKHR{
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_5_FEATURES_KHR,
+        .pNext = &core_features,
+        .maintenance5 = VK_TRUE,
+    };
+
     auto const device_info = VkDeviceCreateInfo{
         .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
-        .pNext = &core_features,
+        .pNext = maintenance5_supported ? static_cast<void const*>(&maintenance5_features)
+                                        : static_cast<void const*>(&core_features),
         .queueCreateInfoCount = u32(queue_infos.size()),
         .pQueueCreateInfos = queue_infos.data(),
         .enabledExtensionCount = u32(device_extensions.size()),

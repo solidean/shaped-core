@@ -97,7 +97,8 @@ ctx.supports(sg::feature::raytracing)              // bool — THE capability qu
                                                    //   | multisampled_array_textures (false on webgpu: no tex_2d_ms_array binding)
                                                    //   | primitive_index (a pixel shader's SV_PrimitiveID; vulkan needs geometryShader, false on webgpu)
                                                    //   | sample_rate_shading (per-sample pixel shading; vulkan needs sampleRateShading)
-                                                   //   vulkan's geometry, tessellation and sample-rate answers are the device features creation enabled
+                                                   //   | wireframe_fill (fill_mode::wireframe; false on webgpu, vulkan needs fillModeNonSolid)
+                                                   //   vulkan's geometry, tessellation, sample-rate and wireframe answers are the device features creation enabled
                                                    //   binding_arrays false (webgpu) = no count > 1 bindings, no staging_binding_group, no bindless_array
                                                    //   the per-scope bools (cmd.raytracing.is_supported(), cmd.query.is_supported(),
                                                    //   ctx.supports_headless_present()) all forward here, so there is one answer per question

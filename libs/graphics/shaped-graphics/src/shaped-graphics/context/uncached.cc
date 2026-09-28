@@ -60,6 +60,8 @@ cc::optional<cc::string> refusal_of(sg::raster_pipeline_description const& desc,
                           "sg::feature::tessellation_shader");
     if (desc.geometry_shader.has_value() && !supported.has(sg::feature::geometry_shader))
         return cc::string("the pipeline has a geometry stage, and this device lacks sg::feature::geometry_shader");
+    if (desc.rasterization.fill == sg::fill_mode::wireframe && !supported.has(sg::feature::wireframe_fill))
+        return cc::string("the pipeline fills wireframe, and this device lacks sg::feature::wireframe_fill");
     if (auto conflict = sg::impl::find_binding_conflict(stages); conflict.has_value())
         return conflict;
     if (auto missing = sg::impl::find_missing_feature(supported, stages); missing.has_value())

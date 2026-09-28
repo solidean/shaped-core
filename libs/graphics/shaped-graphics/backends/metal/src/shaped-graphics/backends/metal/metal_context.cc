@@ -136,6 +136,9 @@ bool metal_context::supports(sg::feature f) const
     case sg::feature::sample_rate_shading:
         // `[[primitive_id]]` and `[[sample_id]]` exist on every Apple GPU this backend's Metal 4 floor admits.
         return true;
+    case sg::feature::wireframe_fill:
+        // `MTLTriangleFillModeLines` is on every Apple GPU.
+        return true;
     case sg::feature::geometry_shader:
     case sg::feature::tessellation_shader:
         // Metal has never had either stage; a caller asking gets a permanent answer rather than a temporary one.
