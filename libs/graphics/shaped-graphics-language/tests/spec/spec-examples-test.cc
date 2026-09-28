@@ -293,14 +293,15 @@ void require_total(cc::string_view source, cc::string_view where, cc::string& fa
                                  sgl::emit::to_string(t));
         }
 }
-} // namespace
 
-TEST("sgl spec - every example of the spec and every sample compiles for every target or says why, and nothing asserts")
+/// Every example of the spec files under `prefix` through `require_total`, and how many there were.
+int require_total_under(cc::string_view prefix, cc::string& failures)
 {
-    auto failures = cc::string();
     auto sources = 0;
     for (auto const file : spec_files)
     {
+        if (!file.starts_with(prefix))
+            continue;
         auto const path = cc::string(SGL_SPEC_DIR) + "/" + file;
         for (auto const& e : examples_of(read_text(path)))
         {
@@ -308,14 +309,41 @@ TEST("sgl spec - every example of the spec and every sample compiles for every t
             require_total(e.source, cc::format("{}:{}", file, e.line), failures);
         }
     }
+    return sources;
+}
+} // namespace
+
+// Each compile checks the whole prelude, so the examples are split by area to run in parallel.
+TEST("sgl spec - every example of the syntax compiles for every target or says why, and nothing asserts")
+{
+    auto failures = cc::string();
+    CHECK(require_total_under("syntax/", failures) > 10);
+    CHECK(failures == "");
+}
+
+TEST("sgl spec - every example of the checking pass compiles for every target or says why, and nothing asserts")
+{
+    auto failures = cc::string();
+    CHECK(require_total_under("semantics/checking.md", failures) > 10);
+    (void)require_total_under("semantics/why/checking.md", failures);
+    CHECK(failures == "");
+}
+
+TEST("sgl spec - every other example, and every sample, compiles for every target or says why, and nothing asserts")
+{
+    auto failures = cc::string();
+    auto sources = 0;
+    for (auto const file : spec_files)
+        if (!file.starts_with("syntax/") && !file.ends_with("checking.md"))
+            sources += require_total_under(file, failures);
     for (auto const sample : {"basic-raster.sgl", "control-flow.sgl", "cube.sgl", "helpers.sgl", "matrices.sgl",
                               "members-and-bindings.sgl", "pipeline.sgl"})
     {
         ++sources;
         require_total(read_text(cc::string(SGL_SAMPLES_DIR) + "/" + sample), sample, failures);
     }
+    CHECK(sources > 10);
     CHECK(failures == "");
-    CHECK(sources > 50);
 }
 
 namespace

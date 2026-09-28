@@ -187,7 +187,9 @@ TEST("sgl samples - the pipeline is total over helpers: every truncation checks,
     auto const prelude = read_prelude();
     auto const source = read_helpers();
     // A prime stride cuts through every kind of token over the length of the file.
-    for (auto length = isize(0); length < source.size(); length += 7)
+    // Each length checks against the whole prelude, so the default run takes a coarser one.
+    auto const stride = nx::is_thorough() ? 7 : 31;
+    for (auto length = isize(0); length < source.size(); length += stride)
     {
         auto const checked = check_sources(prelude, cc::string_view(source).subview({.offset = 0, .size = length}));
         auto const& m = checked.module;
