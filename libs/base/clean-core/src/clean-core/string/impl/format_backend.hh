@@ -227,13 +227,12 @@ consteval void validate_float_format_spec(string_view spec)
         cc::impl::format_error(error);
 }
 
-/// Whether a float spec asks for the shortest round-trip digits: no precision and no presentation type.
+/// Whether a float spec asks for the shortest round-trip digits: no presentation type, since without one a precision is ignored.
 /// Width, fill, alignment, sign and grouping do not change which digits are printed, so they are allowed.
 /// A narrower float type uses it to pick digits that round-trip at its own precision rather than a float's.
 [[nodiscard]] constexpr bool is_shortest_float_format_spec(string_view spec)
 {
-    auto const s = cc::impl::format_parse_spec(spec);
-    return s.precision == -1 && s.presentation == '\0';
+    return cc::impl::format_parse_spec(spec).presentation == '\0';
 }
 } // namespace cc
 

@@ -20,7 +20,7 @@
 /// Conversions are explicit both ways.
 /// Widening is exact; narrowing rounds to nearest with ties to even, overflows to infinity and keeps a NaN a NaN.
 /// Arithmetic computes in f32 and rounds once, which for + - * / and sqrt is exactly binary16's own arithmetic.
-/// So CPU code over f16 matches a GPU computing in half bit for bit, while each operation in a chain rounds.
+/// It matches a GPU computing in half only for unfused `+ - *` under round-to-nearest-even with subnormals kept; each operation in a chain rounds.
 /// For heavy math, widen once, compute in f32, and narrow at the end.
 ///
 ///     auto const h = tg::f16(0.1f);           // 0.0999755859375
@@ -141,8 +141,8 @@ inline constexpr half_float pi<half_float> = half_float(3.14159265358979323846);
 
 namespace literals
 {
-/// `0.1_f16` narrows the literal's long double through f64, so it can round twice where long double is wider than f64 —
-/// only for a literal within 2^-53 of the midpoint between two halves.
+/// The compiler has already rounded the decimal literal, and it narrows through f64, so a literal within half an f64 ulp
+/// of the midpoint between two halves can round the wrong way.
 [[nodiscard]] constexpr half_float operator""_f16(long double v)
 {
     return half_float(f64(v));
@@ -219,9 +219,8 @@ struct cc::custom::hash_trait<tg::half_float>
 };
 
 /// Takes a float spec.
-/// Without a precision or a presentation type it prints the shortest digits that read back as the same f16, so
-/// `tg::f16(0.1f)` prints `0.1`; that same rule prints the largest f16 as `65500`.
-/// With either, it prints the exact value, `{:.0f}` giving `65504`.
+/// Without a presentation type it prints the shortest digits that read back as the same f16, so `tg::f16(0.1f)` prints `0.1`; that same rule prints the largest f16 as `65500`.
+/// With `f`, `e` or `g` it prints the exact value to that precision, `{:.0f}` giving `65504`.
 template <>
 struct cc::custom::formatter<tg::half_float>
 {

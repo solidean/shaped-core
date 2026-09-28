@@ -483,7 +483,7 @@ TEST("tg f16 - a full scalar in tg's generic types")
     auto const with_negative_zero = tg::vec<3, f16>(f16(3), f16(-0.0f), f16(4));
     CHECK(v == with_negative_zero);
 
-    // pi / 180 rounds to f16 before the multiply, so 180 degrees lands one step below pi, as it would on a GPU
+    // pi / 180 rounds to f16 before the multiply, so 180 degrees lands one step below pi
     auto const a = tg::angle<f16>::make_from_degree(f16(180));
     CHECK(a.radians() == f16(180) * (tg::pi<f16> / f16(180)));
     CHECK(tg::pi<f16>.bits() == 0x4248);
@@ -508,6 +508,7 @@ TEST("tg f16 - printing")
     CHECK(cc::format("{}", f16::max) == "65500"); // the shortest digits that read back as the largest half
     CHECK(cc::format("{:.0f}", f16::max) == "65504");
     CHECK(cc::format("{:.5f}", f16(0.1f)) == "0.09998");
+    CHECK(cc::format("{:.2}", f16(0.1f)) == "0.1"); // without a type the precision is ignored, as for a float
     CHECK(cc::format("{:>6}", f16(0.1f)) == "   0.1");
     CHECK(cc::format("{}", f16::infinity) == cc::format("{}", tg::scale_by_pow2(1.0f, 1000)));
 

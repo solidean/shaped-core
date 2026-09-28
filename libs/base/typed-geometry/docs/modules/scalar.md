@@ -126,7 +126,7 @@ It needs integers of a chosen width, and arithmetic whose result width the calle
 - **A `fixed_int` is a scalar**, so `vec<3, fi64>` exists — and its operations wrap at the element width, so a dot product over `fi64` is computed in `fi64`.
   Width-aware `dot` and `cross` belong to a predicate layer on top of this one.
 
-### `half_float` is binary16, with a GPU's arithmetic
+### `half_float` is binary16, correctly rounded
 
 `tg::half_float`, spelled `tg::f16`, is IEEE 754 binary16: a struct over its 16 bits, the same type on every compiler.
 The compilers' `_Float16` is not used as the type, because it does not exist under MSVC and brings C's implicit conversions and excess precision where it does.
@@ -143,17 +143,19 @@ The hardware is still used, inside the conversions.
   The F16C path was checked bit-identical to the portable kernel over all 2^32 narrowings and all 65,536 widenings.
 - **Arithmetic computes in f32 and rounds once, which is exactly binary16's own arithmetic for `+ - * /` and `sqrt`.**
   f32 carries 24 bits, and double rounding is harmless from 2p+2 = 24; the tests hold it against an f64 reference.
-  So CPU code over f16 computes what a GPU computing in half does, and every operation in a chain rounds.
+  Every operation in a chain rounds.
   For heavy math the pattern is to widen once, compute in f32 and narrow at the end.
   An ARM64 target with native half arithmetic uses it, since the results are the same bits.
   Fused multiply-add does not share the property: via f32 it is not correctly rounded, via f64 it is.
+- **A GPU matches only unfused `+ - *`**, and only where the shader runs with round-to-nearest-even and preserved fp16 subnormals.
+  Division and sqrt are approximate on GPUs, compilers fuse `a * b + c`, and `min16float` need not be binary16.
 - **An operation works on the bits when it is a pure bit operation, or when baseline x64 would otherwise pay a library call.**
   Negation, `abs`, classification, comparison, `floor`/`ceil`/`round` and the base-two family do; everything that rounds goes through f32.
   Baseline x64 has no rounding instruction and converts in software, and there the bits win 1.5× on a comparison, 2.2× on `floor` and 2.5× on `scale_by_pow2`.
   `tests/benchmarks/half_float-benchmark.cc` measures both formulations.
 - **f16 claims every capability family**, the transcendental ones computing in f32's libm with one final rounding — the same kind of error f32's own libm has.
 - **`{}` prints the shortest digits that read back as the same f16**, so `tg::f16(0.1f)` prints `0.1`, and the largest value `65500`.
-  A precision or a presentation type prints the exact value instead.
+  A presentation type (`f`, `e`, `g`) prints the exact value instead.
 - **No span conversion and no vector aliases yet.** Both are niche until a caller needs them; `tg::vec<3, tg::f16>` works as it is.
 
 ## See also
