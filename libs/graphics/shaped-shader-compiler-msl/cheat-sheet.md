@@ -69,7 +69,8 @@ struct frame { texture2d<float> albedo [[id(0)]]; };     ->  group_index = the [
 kernel void k(constant frame& f [[buffer(0)]])               index       = the member's [[id(n)]]
                                                              space       = absent (MSL has no register spaces)
 
-texture*<...>            -> readonly_texture, + texture_dimension     (access::write / read_write -> readwrite_texture)
+texture*<...>            -> texture, + texture_dimension            (a stated access::read / write / read_write -> image)
+depth*<float>            -> texture, + texture_dimension, sample_type = depth
 sampler                  -> sampler
 constant T& / constant T*-> constants_buffer
 device T*                -> readwrite_structured_buffer              (a `const` pointee -> readonly_structured_buffer)

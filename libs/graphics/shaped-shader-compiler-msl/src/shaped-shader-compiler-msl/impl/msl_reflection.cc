@@ -274,10 +274,22 @@ namespace
 /// It must equal `sg::backend::metal::k_inline_constants_buffer_index`, which ssc::msl cannot include.
 constexpr auto k_inline_constants_buffer_index = isize(sg::reserved_binding_group + 1);
 
-/// The texture kind a `texture*` type names, with `tex_2d` standing for the plain one.
+/// The texture kind a `texture*` or `depth*` type names, with `tex_2d` standing for the plain one.
 [[nodiscard]] cc::optional<sg::texture_view_dimension> texture_dimension_of(cc::string_view type)
 {
     // Longest first: `texture2d_array` also contains `texture2d`.
+    if (has_word(type, "depthcube_array"))
+        return sg::texture_view_dimension::cube_array;
+    if (has_word(type, "depthcube"))
+        return sg::texture_view_dimension::cube;
+    if (has_word(type, "depth2d_ms_array"))
+        return sg::texture_view_dimension::tex_2d_ms_array;
+    if (has_word(type, "depth2d_ms"))
+        return sg::texture_view_dimension::tex_2d_ms;
+    if (has_word(type, "depth2d_array"))
+        return sg::texture_view_dimension::tex_2d_array;
+    if (has_word(type, "depth2d"))
+        return sg::texture_view_dimension::tex_2d;
     if (has_word(type, "texturecube_array"))
         return sg::texture_view_dimension::cube_array;
     if (has_word(type, "texturecube"))
@@ -312,9 +324,13 @@ constexpr auto k_inline_constants_buffer_index = isize(sg::reserved_binding_grou
     {
         binding.texture_dimension = dimension;
 
-        // `access::read` is the default when the type does not say, and only a writable one is a storage image.
+        // An access the type states makes it a storage image, `access::read` included, which is how SGL writes a
+        // read-only one; the default, `access::sample`, is a sampled texture.
         auto const writes = has_word(type, "write") || has_word(type, "read_write");
-        binding.type = writes ? sg::binding_type::image : sg::binding_type::texture;
+        auto const is_image = writes || has_word(type, "read");
+        binding.type = is_image ? sg::binding_type::image : sg::binding_type::texture;
+        if (type.starts_with("depth"))
+            binding.sample_type = sg::texture_sample_type::depth;
         binding.access = !writes                      ? sg::access_mode::read
                        : has_word(type, "read_write") ? sg::access_mode::read_write
                                                       : sg::access_mode::write;

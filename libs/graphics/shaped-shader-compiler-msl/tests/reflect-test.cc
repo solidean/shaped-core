@@ -136,6 +136,39 @@ kernel void blur(constant outputs& o [[buffer(0)]]) { (void)o; }
     CHECK(r.value().bindings[0].access == sg::access_mode::read_write);
 }
 
+TEST("ssc::msl reflect - a texture that states `access::read` is a read-only storage image, not a sampled texture")
+{
+    // MSL's default access is `sample`, so a stated `read` is the one spelling a read-only image has.
+    constexpr char const* source = R"(
+struct inputs { texture2d<float, access::read> history [[id(0)]]; texture2d<float, access::sample> albedo [[id(1)]]; };
+kernel void resolve(constant inputs& i [[buffer(0)]]) { (void)i; }
+)";
+
+    auto r = ssc::msl::impl::reflect(source, "resolve", sg::shader_stage::compute);
+    REQUIRE(r.has_value());
+    REQUIRE(r.value().bindings.size() == 2);
+    CHECK(r.value().bindings[0].type == sg::binding_type::image);
+    CHECK(r.value().bindings[0].access == sg::access_mode::read);
+    CHECK(r.value().bindings[1].type == sg::binding_type::texture);
+}
+
+TEST("ssc::msl reflect - a depth texture is a texture of its shape, whose samples are depth")
+{
+    constexpr char const* source = R"(
+struct shadows { depth2d<float> map [[id(0)]]; depthcube_array<float> cubes [[id(1)]]; depth2d_ms<float> msaa [[id(2)]]; };
+kernel void light(constant shadows& s [[buffer(0)]]) { (void)s; }
+)";
+
+    auto r = ssc::msl::impl::reflect(source, "light", sg::shader_stage::compute);
+    REQUIRE(r.has_value());
+    REQUIRE(r.value().bindings.size() == 3);
+    CHECK(r.value().bindings[0].type == sg::binding_type::texture);
+    CHECK(r.value().bindings[0].texture_dimension == sg::texture_view_dimension::tex_2d);
+    CHECK(r.value().bindings[0].sample_type == sg::texture_sample_type::depth);
+    CHECK(r.value().bindings[1].texture_dimension == sg::texture_view_dimension::cube_array);
+    CHECK(r.value().bindings[2].texture_dimension == sg::texture_view_dimension::tex_2d_ms);
+}
+
 TEST("ssc::msl reflect - a resource bound straight on the entry point is refused, since the backend binds none")
 {
     // The metal backend sets group N's argument buffer at [[buffer(N)]] and never a texture or a sampler slot.
