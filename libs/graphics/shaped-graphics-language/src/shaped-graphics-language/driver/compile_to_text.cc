@@ -23,7 +23,7 @@ bool is_reached(check::checked_module const& m, check::flat_entry_point const& l
         auto const* const b = x.node.try_as<check::flat_binding_member>();
         if (b == nullptr || b->binding != binding)
             continue;
-        auto const is_resource = !info.is_inline && check::is_resource(m.at(members[b->member].type).kind);
+        auto const is_resource = !info.is_inline && m.takes_slots(members[b->member].type);
         if ((is_resource ? b->member : -1) == member)
             return true;
     }
@@ -48,6 +48,9 @@ cc::vector<interface_binding> interface_of(check::checked_module const& m,
     for (auto const id : legal.bindings)
     {
         auto const& s = m.at(id);
+        // workgroup memory takes no group, and no host binds it
+        if (m.bindings[s.info].is_workgroup)
+            continue;
         auto const is_inline = m.bindings[s.info].is_inline;
         auto const described = driver::impl::describe_binding(m, s);
         if (is_inline || described.block_slot == 0)
@@ -71,6 +74,7 @@ cc::vector<interface_binding> interface_of(check::checked_module const& m,
                               .kind = member.kind,
                               .group = group,
                               .slot = member.slot,
+                              .count = member.count,
                               .is_used = is_reached(m, legal, id, i32(i)),
                               .access = member.access,
                               .texture_dimension = member.texture_dimension,

@@ -101,7 +101,7 @@ static_assert(
     auto result = sg::binding{.name = b.name,
                               .reflected_name = b.emitted == b.name ? cc::string() : b.emitted,
                               .index = u32(b.slot),
-                              .count = 1u};
+                              .count = u32(b.count)};
     auto const is_dx12 = format == sg::shader_format::dxil;
     if (b.is_inline)
     {
