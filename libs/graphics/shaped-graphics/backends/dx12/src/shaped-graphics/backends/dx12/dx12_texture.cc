@@ -42,7 +42,7 @@ D3D12_RESOURCE_DESC texture_resource_desc(sg::texture_description const& d)
     desc.DepthOrArraySize = UINT16(slices_or_depth);
 
     desc.MipLevels = UINT16(d.mip_levels);
-    desc.Format = to_dxgi_format(d.format);
+    desc.Format = to_dxgi_resource_format(d.format, d.usage.has(sg::texture_usage::texture));
     desc.SampleDesc.Count = UINT(d.sample_count);
     desc.SampleDesc.Quality = 0;
     desc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN; // driver-chosen optimal tiling
