@@ -81,11 +81,13 @@ type_id checker::resource_type(check::type_info info)
     if (info.kind != type_kind::array)
         info.spelled = spelling_of(info, out);
     // Interned, as a buffer is: two mentions of `texture_2d[float4]` are one type.
-    for (auto i = isize(0); i < out.types.size(); ++i)
-        if (out.types[i] == info)
-            return type_id(i);
+    auto& alike = interned_types[info.spelled];
+    for (auto const id : alike)
+        if (out.at(id) == info)
+            return id;
     auto const id = type_id(out.types.size());
     out.types.push_back(cc::move(info));
+    alike.push_back(id);
     return id;
 }
 

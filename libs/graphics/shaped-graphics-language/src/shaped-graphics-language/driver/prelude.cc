@@ -1,9 +1,11 @@
 #include "prelude.hh"
 
 #include <clean-core/common/macros.hh>
+#include <clean-core/container/vector.hh>
 #include <clean-core/string/char_predicates.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/uri.hh>
+#include <shaped-graphics-language/ast/build.hh>
 #include <shaped-graphics-language/builtins/registry.hh>
 
 cc::span<sgl::prelude_file const> sgl::prelude_files()
@@ -15,6 +17,22 @@ cc::span<sgl::prelude_file const> sgl::prelude_files()
         {.name = "core.sgl", .source = impl::embedded_core_prelude()},
     };
     return files;
+}
+
+cc::span<sgl::parsed_prelude_file const> sgl::parsed_prelude()
+{
+    static auto const parsed = []
+    {
+        auto out = cc::vector<parsed_prelude_file>();
+        for (auto const& f : prelude_files())
+        {
+            auto file = parse(f.source);
+            auto ast = ast::build(file);
+            out.push_back({.file = cc::move(file), .ast = cc::move(ast)});
+        }
+        return out;
+    }();
+    return parsed;
 }
 
 namespace

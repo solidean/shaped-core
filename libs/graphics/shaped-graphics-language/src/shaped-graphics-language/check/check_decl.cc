@@ -255,17 +255,17 @@ bool checker::is_named(i32 file, ast::expr_id expr, cc::string_view name) const
 type_id checker::buffer_type(type_id element, bool is_mut)
 {
     // Interned, because type equality is id equality: two mentions of `buffer[float]` are one type.
-    for (auto i = isize(0); i < out.types.size(); ++i)
+    auto spelled = cc::format("{}buffer[{}]", is_mut ? "mut " : "", out.name_of(element));
+    auto& alike = interned_types[spelled];
+    for (auto const id : alike)
     {
-        auto const& t = out.types[i];
+        auto const& t = out.at(id);
         if (t.kind == type_kind::buffer && t.element == element && t.is_mut == is_mut)
-            return type_id(i);
+            return id;
     }
     auto const id = type_id(out.types.size());
-    out.types.push_back({.kind = type_kind::buffer,
-                         .element = element,
-                         .is_mut = is_mut,
-                         .spelled = cc::format("{}buffer[{}]", is_mut ? "mut " : "", out.name_of(element))});
+    out.types.push_back({.kind = type_kind::buffer, .element = element, .is_mut = is_mut, .spelled = cc::move(spelled)});
+    alike.push_back(id);
     return id;
 }
 

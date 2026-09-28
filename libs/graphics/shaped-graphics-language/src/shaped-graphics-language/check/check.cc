@@ -1,5 +1,6 @@
 #include "check.hh"
 
+#include <clean-core/common/hash.hh>
 #include <clean-core/common/utility.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/from_string.hh>
@@ -559,10 +560,26 @@ cc::vector<symbol_id> checker::candidates_of(i32 file, cc::string_view name, typ
 
 void checker::judge_redeclarations()
 {
+    // Two overloads can clash only when their parameters hash alike, so each meets only the earlier ones that do.
+    auto const signature_hash = [&](symbol const& s) -> u64
+    {
+        auto h = u64(0);
+        for (auto const& p : out.at(out.functions[s.info].parameters))
+            h = cc::make_hash(h, u32(p.type), p.name, p.is_named_only);
+        return h;
+    };
     auto const judge = [&](cc::span<symbol_id const> set)
     {
+        if (set.size() < 2)
+            return;
+        auto earlier = cc::map<u64, cc::vector<isize>>();
         for (auto i = isize(0); i < set.size(); ++i)
-            for (auto j = isize(0); j < i; ++j)
+        {
+            auto const& candidate = out.at(set[i]);
+            if (candidate.kind != symbol_kind::function || candidate.info < 0)
+                continue;
+            auto& alike = earlier[signature_hash(candidate)];
+            for (auto const j : alike)
             {
                 auto const& a = out.at(set[j]);
                 auto const& b = out.at(set[i]);
@@ -589,6 +606,8 @@ void checker::judge_redeclarations()
                 // No call could choose between the two, so the later one is out of every lookup.
                 out.symbols[index_of(later)].state = symbol_state::failed;
             }
+            alike.push_back(i);
+        }
     };
     for (auto const& [name, ids] : prelude_names)
         judge(ids);

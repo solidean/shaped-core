@@ -8,16 +8,12 @@ sgl_lsp::prelude const& sgl_lsp::the_prelude()
 {
     static auto const p = []
     {
-        auto out = prelude();
+        auto out = prelude{.files = sgl::parsed_prelude()};
         for (auto const& f : sgl::prelude_files())
         {
             out.names.push_back(cc::string(f.name));
-            out.files.push_back(sgl::parse(cc::string(f.source)));
             out.indices.push_back(lsp::text_index(f.source));
         }
-        // only now: an AST names its file by reference, and the vector is complete
-        for (auto const& f : out.files)
-            out.asts.push_back(sgl::ast::build(f));
         return out;
     }();
     return p;
@@ -29,7 +25,7 @@ cc::vector<sgl::check::module_file> sgl_lsp::analysis::module_files() const
     auto out = cc::vector<sgl::check::module_file>();
     for (auto i = isize(0); i < p.files.size(); ++i)
         out.push_back(i == own_file ? sgl::check::module_file{.file = file, .ast = ast}
-                                    : sgl::check::module_file{.file = p.files[i], .ast = p.asts[i]});
+                                    : sgl::check::module_file{.file = p.files[i].file, .ast = p.files[i].ast});
     if (own_file < p.files.size())
         out.push_back({.file = empty_file, .ast = empty_ast});
     else
@@ -42,7 +38,7 @@ cc::string_view sgl_lsp::analysis::text_of(i32 f) const
     auto const& p = the_prelude();
     if (f == own_file)
         return document->text;
-    return f < p.files.size() ? cc::string_view(p.files[f].source) : cc::string_view();
+    return f < p.files.size() ? cc::string_view(p.files[f].file.source) : cc::string_view();
 }
 
 lsp::text_index const& sgl_lsp::analysis::index_of(i32 f) const

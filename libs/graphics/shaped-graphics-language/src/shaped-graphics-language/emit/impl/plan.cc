@@ -730,11 +730,11 @@ sgl::emit::impl::plan sgl::emit::impl::make_plan(check::checked_module const& m,
     auto result = plan{.m = m, .e = e, .which = t, .names = e.names};
     // Reserved first, so nothing minted below can be one of them.
     for (auto const word : reserved_words(t))
-        result.names.taken.push_back(word);
+        (void)result.names.reserve(word);
     if (m.builtins != nullptr)
         for (auto const& f : m.builtins->functions)
             if (f.write.kind == builtins::spelling_kind::call)
-                result.names.taken.push_back(f.called_in(language_of(t)));
+                (void)result.names.reserve(f.called_in(language_of(t)));
     result.struct_of_type.resize_to_filled(m.types.size(), -1);
     result.enum_of_type.resize_to_filled(m.types.size(), -1);
     result.array_of_type.resize_to_filled(m.types.size(), -1);

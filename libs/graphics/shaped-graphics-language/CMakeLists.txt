@@ -388,9 +388,7 @@ if(SC_BUILD_TESTS)
         tests/samples/matrices-sample-test.cc
         tests/samples/samples-test.cc
     )
-    # TEMPORARY: every compile parses and checks the whole prelude, twice parsed, which grew fivefold with the texture methods.
-    # A sanitizer or debug build then spends over a minute on the suite; a prelude checked once per process would lift this.
-    sc_nexus_binary(shaped-graphics-language-test KINDS tests TIMEOUT 180)
+    sc_nexus_binary(shaped-graphics-language-test KINDS tests)
 
     # The spec's `sgl` fences are test input, read from the source tree so an edited example needs no reconfigure.
     target_compile_definitions(shaped-graphics-language-test

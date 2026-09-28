@@ -29,6 +29,7 @@ struct text_request;
 struct tested_source;
 struct emitted_source;
 struct prelude_file;
+struct parsed_prelude_file;
 
 enum class token_class : u8;
 struct classified_span;

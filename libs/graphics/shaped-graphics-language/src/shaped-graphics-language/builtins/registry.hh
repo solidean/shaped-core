@@ -1,5 +1,6 @@
 #pragma once
 
+#include <clean-core/container/map.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/function/function_ref.hh>
@@ -220,6 +221,10 @@ struct sgl::builtins::registry
     cc::vector<type_record> types;
     cc::vector<function_record> functions;
     cc::vector<registry_item> items;
+    /// Every overload of a name, in registration order; filled by `finalize`, which is when a record learns its name.
+    cc::map<cc::string, cc::vector<builtin_id>> functions_by_name;
+    /// The overloads whose name, parameters and named-only names hash alike (`signature_hash`); filled by `finalize` too.
+    cc::map<u64, cc::vector<builtin_id>> functions_by_signature;
 
     builtin_type_id add(type_record record);
     builtin_id add(function_record record);
@@ -238,6 +243,7 @@ struct sgl::builtins::registry
     /// `none` for a name no type was registered under.
     [[nodiscard]] builtin_type_id find_type(cc::string_view name) const;
     /// The overload of `name` that takes exactly `parameters`, named-only as `named_only` says; `none` when there is none.
+    /// Both lookups read `functions_by_name`, so the registry must be finalized.
     [[nodiscard]] builtin_id find_function(cc::string_view name,
                                            cc::span<cc::string_view const> parameters,
                                            cc::span<cc::string_view const> named_only) const;

@@ -2,6 +2,7 @@
 
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/macros.hh>
+#include <clean-core/container/set.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/variant.hh>
 #include <clean-core/container/vector.hh>
@@ -111,8 +112,10 @@ template <class T>
 /// emitter goes on minting from the same value.
 struct sgl::check::name_mint
 {
-    /// Every name handed out or reserved so far.
+    /// Every name handed out or reserved so far, in that order, and the same names as a set to look them up in.
+    /// Both are written by `reserve` and `mint` alone.
     cc::vector<cc::string> taken;
+    cc::set<cc::string> index;
 
     [[nodiscard]] bool is_taken(cc::string_view name) const;
 

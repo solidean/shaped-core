@@ -1,6 +1,7 @@
 #include "registry.hh"
 
 #include <clean-core/common/assert.hh>
+#include <clean-core/common/hash.hh>
 #include <clean-core/common/utility.hh>
 #include <clean-core/string/format.hh>
 #include <shaped-graphics-language/ast/build.hh>
@@ -12,6 +13,16 @@ using namespace sgl::builtins;
 
 namespace
 {
+/// One hash of a signature, alike for `cc::string` and `cc::string_view` spellings of it.
+template <class Text>
+u64 signature_hash(cc::string_view name, cc::span<Text const> parameters, cc::span<Text const> named_only)
+{
+    auto h = cc::make_hash(name, parameters.size());
+    for (auto i = isize(0); i < parameters.size(); ++i)
+        h = cc::make_hash(h, cc::string_view(parameters[i]), cc::string_view(named_only[i]));
+    return h;
+}
+
 constexpr cc::string_view k_header
     = "// GENERATED FILE - DO NOT EDIT.\n"
       "//\n"
@@ -174,6 +185,15 @@ void registry::finalize()
         CC_ASSERT(record.write.kind != spelling_kind::custom || record.write.custom != nullptr, "a custom spelling "
                                                                                                 "without a writer");
     }
+
+    functions_by_name.clear();
+    functions_by_signature.clear();
+    for (auto i = isize(0); i < functions.size(); ++i)
+    {
+        auto const& f = functions[i];
+        functions_by_name[f.name].push_back(builtin_id(i));
+        functions_by_signature[signature_hash<cc::string>(f.name, f.parameters, f.named_only)].push_back(builtin_id(i));
+    }
 }
 
 builtin_type_id registry::find_type(cc::string_view name) const
@@ -189,26 +209,26 @@ builtin_id registry::find_function(cc::string_view name,
                                    cc::span<cc::string_view const> named_only) const
 {
     CC_ASSERT(named_only.size() == parameters.size(), "one named-only name, or an empty one, per parameter");
-    for (auto i = isize(0); i < functions.size(); ++i)
+    auto const* const overloads = functions_by_signature.get_ptr(signature_hash(name, parameters, named_only));
+    if (overloads == nullptr)
+        return builtin_id::none;
+    for (auto const id : *overloads)
     {
-        auto const& f = functions[i];
+        auto const& f = at(id);
         if (f.name != name || f.parameters.size() != parameters.size())
             continue;
         auto is_match = true;
         for (auto k = isize(0); k < parameters.size(); ++k)
             is_match = is_match && f.parameters[k] == parameters[k] && f.named_only[k] == named_only[k];
         if (is_match)
-            return builtin_id(i);
+            return id;
     }
     return builtin_id::none;
 }
 
 bool registry::has_function_named(cc::string_view name) const
 {
-    for (auto const& f : functions)
-        if (f.name == name)
-            return true;
-    return false;
+    return functions_by_name.contains(name);
 }
 
 cc::string sgl::builtins::wrapped(written w, precedence needed)

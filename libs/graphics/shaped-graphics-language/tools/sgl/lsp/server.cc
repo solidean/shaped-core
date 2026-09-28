@@ -121,7 +121,7 @@ sgl_lsp::language_server::language_server()
             auto const& prelude = the_prelude();
             for (auto i = isize(0); i < prelude.names.size(); ++i)
                 if (prelude.uri_of(i) == p.uri)
-                    return answer_now(prelude_text{.text = prelude.files[i].source});
+                    return answer_now(prelude_text{.text = prelude.files[i].file.source});
             return cc::make_async_from_value(lsp::answer<prelude_text>(cc::error(
                 lsp::response_error{.code = lsp::error_code::invalid_params, .message = "no such prelude file"})));
         });
