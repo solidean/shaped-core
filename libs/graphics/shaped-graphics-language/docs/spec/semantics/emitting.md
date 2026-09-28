@@ -159,7 +159,8 @@ struct pixel_input
 * **EMIT-35** The bindings an emitter writes are the ones the entry point's binding list names.
 * **EMIT-36** An `@inline binding` is a struct of its members and one global of that struct, which has the binding's name.
 * **EMIT-37** The global is where `sg` expects inline constants, by the table below.
-* **EMIT-38** A second `@inline` binding is `unsupported`, and so is one that is not the last of the list.
+* **EMIT-38** A second `@inline` binding is `unsupported`, and so is one a group of the list follows.
+  `@workgroup` memory is bound by no host, so it may stand on either side of it.
 * **EMIT-39** A plain member of a binding, and a buffer's element, is a value that can stand in GPU memory, or it is `unsupported`.
   That is a builtin whose record has a size there, or a struct of such values; `bool` has no size, and the detail names `bool32`, which has one.
 * **EMIT-40** Every value in GPU memory is placed by [the layout rules](#layout), and `hlsl-vulkan` states each offset as `[[vk::offset]]` ([why](why/emitting.md#emit-40)).

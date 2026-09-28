@@ -78,20 +78,25 @@ struct validator
     void bindings()
     {
         auto inline_count = 0;
-        auto listed = 0;
         auto groups = 0;
+        auto inline_binding = cc::optional<symbol_id>();
+        auto reported_order = false;
         for (auto const id : e.bindings)
         {
-            ++listed;
             auto const& s = m.at(id);
-            // workgroup memory is listed like a group and takes none: no host binds it
+            // workgroup memory is listed like a group and takes none: no host binds it, so it may stand anywhere
             if (m.bindings[s.info].is_workgroup)
-            {
-                --listed;
                 continue;
-            }
             if (!m.bindings[s.info].is_inline)
             {
+                // The inline binding is skipped when numbering, so a group after it would move under the host.
+                if (inline_binding.has_value() && !reported_order)
+                {
+                    reported_order = true;
+                    report(error_kind::unsupported, inline_binding.value(),
+                           cc::format("an @inline binding that is not the last of the list: '{}'",
+                                      m.at(inline_binding.value()).name));
+                }
                 // Refused on every target, so an entry point written for one is written for all of them.
                 if (groups++ == k_max_groups)
                     report(error_kind::too_many_groups, id,
@@ -99,10 +104,7 @@ struct validator
                                       k_max_groups, k_max_groups));
                 continue;
             }
-            // Listed and skipped when numbering, so it has to stand last or a group would move under the host.
-            if (listed != e.bindings.size())
-                report(error_kind::unsupported, id,
-                       cc::format("an @inline binding that is not the last of the list: '{}'", s.name));
+            inline_binding = id;
             if (++inline_count == 2)
                 report(error_kind::unsupported, id, cc::format("a second @inline binding: '{}'", s.name));
         }

@@ -125,6 +125,25 @@ TEST("sgl emit - an @inline binding takes no group, and stands last")
                                  "    return {color = float4(v, v, v, 1.0)}\n";
     CHECK(errors_for(wrong_order, target::wgsl)
           == "unsupported an @inline binding that is not the last of the list: 'tuning'\n");
+
+    // Workgroup memory is bound by no host, so it may stand after the inline constants or before them.
+    constexpr auto with_workgroup = "binding work:\n"
+                                    "    values: mut buffer[float]\n"
+                                    "\n"
+                                    "@workgroup binding scratch:\n"
+                                    "    seen: float\n"
+                                    "\n"
+                                    "@inline binding tuning:\n"
+                                    "    scale: float\n"
+                                    "\n"
+                                    "@compute(64) fun before(@thread_id id: int3){work, scratch, tuning}:\n"
+                                    "    scratch.seen = tuning.scale\n"
+                                    "    work.values[id.x] = scratch.seen\n"
+                                    "\n"
+                                    "@compute(64) fun after(@thread_id id: int3){work, tuning, scratch}:\n"
+                                    "    scratch.seen = tuning.scale\n"
+                                    "    work.values[id.x] = scratch.seen\n";
+    CHECK(errors_for(with_workgroup, target::wgsl) == "");
 }
 
 TEST("sgl emit - MSL declines a buffer rather than writing text no compiler takes")
