@@ -14,7 +14,7 @@ struct table_traits
 {
     cc::string_view name;
     cc::string_view hlsl_type; ///< how the table is spelled in the declaration the pass reads
-    sg::binding_type type = sg::binding_type::readonly_texture;
+    sg::binding_type type = sg::binding_type::texture;
     sg::texture_view_dimension dimension = sg::texture_view_dimension::tex_2d; ///< ignored for `buffers`
     u32 default_count = 0;
 };
@@ -49,10 +49,7 @@ constexpr table_traits traits[] = {
      .hlsl_type = "Texture3D",
      .dimension = sg::texture_view_dimension::tex_3d,
      .default_count = 128},
-    {.name = "gBindlessBuffers",
-     .hlsl_type = "ByteAddressBuffer",
-     .type = sg::binding_type::readonly_raw_buffer,
-     .default_count = 4096},
+    {.name = "gBindlessBuffers", .hlsl_type = "ByteAddressBuffer", .type = sg::binding_type::bytes, .default_count = 4096},
 };
 
 static_assert(sizeof(traits) / sizeof(traits[0]) == u32(sv::bindless_table::count_), "one row per table");
@@ -128,7 +125,7 @@ cc::vector<sg::binding> sv::make_bindless_bindings(bindless_config const& cfg)
 
         // The dimension is sg's rather than HLSL's: a backend needs it to synthesize a dimension-correct null
         // descriptor for a vacant element, and the pass reads it off the declared type for a scalar binding only.
-        if (t.type == sg::binding_type::readonly_texture)
+        if (t.type == sg::binding_type::texture)
             binding.texture_dimension = t.dimension;
     }
     return r;

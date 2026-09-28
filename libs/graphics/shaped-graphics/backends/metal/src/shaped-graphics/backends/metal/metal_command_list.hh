@@ -231,9 +231,10 @@ private:
     /// The render encoder of the open rendering scope; null outside one.
     [[nodiscard]] MTL4::RenderCommandEncoder* render_encoder() const { return _render_encoder; }
 
-    /// Declare access on everything the bound groups name — the shape a draw and a dispatch share.
+    /// Declares every bound group's views at an op of `stages`, as `footprint` says the code touches them — the shape
+    /// a draw and a dispatch share.
     /// It does not flush: the op does, once, after adding whatever else it reads.
-    void declare_bound_groups(pipeline_stage_flags stages);
+    void declare_bound_groups(pipeline_stage_flags stages, sg::impl::pipeline_footprint const* footprint);
 
     /// Forget what the bound groups named, at the end of a rendering scope and of the recording.
     ///
@@ -245,8 +246,11 @@ private:
     /// Declare what the pending `declare_array_*_access` calls named, and clear them.
     ///
     /// An array binding is the one thing a dispatch cannot infer, so this is the caller's declaration being applied
-    /// rather than a derived one — and a bound array binding nothing declared is an error, not "no access".
-    void declare_array_accesses();
+    /// rather than a derived one, met with what `footprint` says the code does as sg::impl::plan_array_declarations decides.
+    /// `pipeline` is the bound compute or raytracing pipeline, which a mismatch is logged against.
+    void declare_array_accesses(sg::impl::pipeline_footprint const* footprint,
+                                void const* pipeline,
+                                sg::pipeline_stage_flags op_stages);
 
     /// Patch the inline-constants shadow, for whichever pipeline kind is bound.
     ///

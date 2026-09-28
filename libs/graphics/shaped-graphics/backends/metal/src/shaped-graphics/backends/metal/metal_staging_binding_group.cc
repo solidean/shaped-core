@@ -104,6 +104,7 @@ cc::result<sg::binding_group_handle> metal_staging_binding_group::mint()
 {
     if (_sampler_refused)
         return cc::error("staging_binding_group: the metal device refused a sampler state for this group");
+    _ctx.stat_totals().add(sg::stat::binding_groups_created);
 
     auto const scope = autorelease_scope();
 
@@ -159,8 +160,10 @@ cc::result<sg::binding_group_handle> metal_staging_binding_group::mint()
         return out;
     };
 
-    for (auto const& b : typed_layout.bindings())
+    auto const all_bindings = typed_layout.bindings();
+    for (isize binding = 0; binding < all_bindings.size(); ++binding)
     {
+        auto const& b = all_bindings[binding];
         auto const shape = sg::shape_of(b.type);
         auto const count = isize(b.count < 1 ? 1 : b.count);
         auto const is_array = b.is_array() && shape != sg::view_shape::acceleration_structure;
@@ -168,23 +171,25 @@ cc::result<sg::binding_group_handle> metal_staging_binding_group::mint()
         if (!is_array)
         {
             // The bound view is gone by now — a snapshot keeps the resource, not what it was bound through — so the
-            // access class comes from the layout's binding type instead.
+            // view class comes from the layout's binding instead.
             // The two agree by construction: `sg::accepts` is what let the view be staged here at all.
-            auto const access = sg::access_of(b.type);
+            auto const bound_as = sg::view_class_of(b);
 
             for (auto element = isize(0); element < count; ++element)
             {
                 auto const resource = slot_resource(isize(b.index) + element);
                 if (resource.buffer != nullptr)
-                    bound.push_back({.buffer = resource.buffer, .access = access});
+                    bound.push_back({.buffer = resource.buffer, .bound_as = bound_as, .binding = binding});
                 if (resource.texture != nullptr)
-                    bound_textures.push_back({.texture = resource.texture, .access = access});
+                    bound_textures.push_back({.texture = resource.texture, .bound_as = bound_as, .binding = binding});
             }
             continue;
         }
 
         auto array = metal_binding_group::array_binding{.name = cc::string(b.name),
                                                         .is_texture = shape == sg::view_shape::texture,
+                                                        .binding = binding,
+                                                        .bound_as = sg::view_class_of(b),
                                                         .elements = {}};
         for (auto element = isize(0); element < count; ++element)
             array.elements.push_back(slot_resource(isize(b.index) + element));

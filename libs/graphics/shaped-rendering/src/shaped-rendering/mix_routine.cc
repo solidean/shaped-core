@@ -95,8 +95,8 @@ bool mix_routine::execute(sg::command_list& cmd, sg::texture_2d const& destinati
 
     auto const group = ctx.transient.create_binding_group(cmd, self->_group_layout,
                                                           shaders::mix_bindings{
-                                                              .gSource = source.as_readonly_view(),
-                                                              .gDestination = destination.as_readwrite_view(),
+                                                              .gSource = source.as_texture_view(),
+                                                              .gDestination = destination.as_any_image_view(),
                                                           });
 
     cmd.compute.bind_pipeline(*self->_pipeline);

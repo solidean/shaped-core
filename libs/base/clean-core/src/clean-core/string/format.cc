@@ -1,5 +1,7 @@
 #include "format.hh"
 
+#include <clean-core/function/function_ref.hh>
+
 #include <charconv>
 
 using namespace cc::primitive_defines;
@@ -288,6 +290,63 @@ void format_write_decorated_number(format_sink const& sink,
     }
 }
 
+namespace
+{
+struct integer_presentation
+{
+    int base = 10;
+    bool upper = false;
+    string_view prefix;
+};
+
+integer_presentation integer_presentation_of(format_spec const& spec)
+{
+    switch (spec.presentation)
+    {
+    case 'x':
+        return {.base = 16, .upper = false, .prefix = spec.alternate ? cc::string_view("0x") : cc::string_view()};
+    case 'X':
+        return {.base = 16, .upper = true, .prefix = spec.alternate ? cc::string_view("0X") : cc::string_view()};
+    case 'o':
+        return {.base = 8, .upper = false, .prefix = spec.alternate ? cc::string_view("0o") : cc::string_view()};
+    case 'b':
+        return {.base = 2, .upper = false, .prefix = spec.alternate ? cc::string_view("0b") : cc::string_view()};
+    case 'B':
+        return {.base = 2, .upper = false, .prefix = spec.alternate ? cc::string_view("0B") : cc::string_view()};
+    default:
+        return {}; // 'd' or '\0'
+    }
+}
+
+// Groups (decimal by 3, binary/hex/octal by 4) and decorates raw magnitude digits.
+void write_integer_digits(format_sink const& sink,
+                          format_spec const& spec,
+                          bool negative,
+                          integer_presentation const& p,
+                          string_view digits)
+{
+    if (spec.group == '\0')
+    {
+        format_write_decorated_number(sink, spec, negative, p.prefix, digits);
+        return;
+    }
+
+    int const grp = p.base == 10 ? 3 : 4;
+    char grouped[format_chars_int_max * 2];
+    if (digits.size() * 2 <= isize(sizeof grouped))
+    {
+        isize const gn = group_digits(cc::span<char>(grouped, isize(sizeof grouped)), digits, spec.group, grp);
+        format_write_decorated_number(sink, spec, negative, p.prefix, cc::string_view(grouped, gn));
+        return;
+    }
+
+    // only a wide integer's digits outgrow the stack buffer
+    auto wide = cc::string::create_uninitialized(digits.size() * 2);
+    isize const gn = group_digits(cc::span<char>(wide.data(), wide.size()), digits, spec.group, grp);
+    format_write_decorated_number(sink, spec, negative, p.prefix, cc::string_view(wide.data(), gn));
+}
+} // namespace
+
 void format_integer(format_sink const& sink, format_spec const& spec, bool negative, u64 magnitude)
 {
     // 'c': emit the value as a single character
@@ -298,52 +357,26 @@ void format_integer(format_sink const& sink, format_spec const& spec, bool negat
         return;
     }
 
-    int base = 10;
-    bool upper = false;
-    string_view prefix;
-    switch (spec.presentation)
-    {
-    case 'x':
-        base = 16;
-        prefix = spec.alternate ? cc::string_view("0x") : cc::string_view();
-        break;
-    case 'X':
-        base = 16;
-        upper = true;
-        prefix = spec.alternate ? cc::string_view("0X") : cc::string_view();
-        break;
-    case 'o':
-        base = 8;
-        prefix = spec.alternate ? cc::string_view("0o") : cc::string_view();
-        break;
-    case 'b':
-        base = 2;
-        prefix = spec.alternate ? cc::string_view("0b") : cc::string_view();
-        break;
-    case 'B':
-        base = 2;
-        prefix = spec.alternate ? cc::string_view("0B") : cc::string_view();
-        break;
-    default: // 'd' or '\0'
-        base = 10;
-        break;
-    }
-
+    auto const p = integer_presentation_of(spec);
     char buf[format_chars_int_max];
-    isize const n = format_chars_from_u64(cc::span<char>(buf, format_chars_int_max), magnitude, base, upper);
-    string_view digits = cc::string_view(buf, n);
-
-    // optional digit grouping: decimal by 3, binary/hex/octal by 4
-    char grouped[format_chars_int_max * 2];
-    if (spec.group != '\0')
-    {
-        int const grp = base == 10 ? 3 : 4;
-        isize const gn = group_digits(cc::span<char>(grouped, isize(sizeof grouped)), digits, spec.group, grp);
-        digits = cc::string_view(grouped, gn);
-    }
-
-    format_write_decorated_number(sink, spec, negative, prefix, digits);
+    isize const n = format_chars_from_u64(cc::span<char>(buf, format_chars_int_max), magnitude, p.base, p.upper);
+    write_integer_digits(sink, spec, negative, p, cc::string_view(buf, n));
 }
+} // namespace cc::impl
+
+void cc::format_wide_integer(format_sink const& out,
+                             string_view spec,
+                             bool negative,
+                             function_ref<string_view(int base, bool upper)> digits)
+{
+    using namespace cc::impl;
+    auto const s = format_parse_spec(spec);
+    auto const p = integer_presentation_of(s);
+    write_integer_digits(out, s, negative, p, digits(p.base, p.upper));
+}
+
+namespace cc::impl
+{
 
 // -----------------------------------------------------------------------------------------------------
 // render loop (shares the grammar parser in format_spec.hh with the compile-time validator)

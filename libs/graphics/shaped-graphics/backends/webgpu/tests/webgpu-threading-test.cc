@@ -49,7 +49,8 @@ ASYNC_TEST("sg webgpu - the free-threaded surface works from a pool worker", mai
                                                  .group_index = 0,
                                                  .index = 0,
                                                  .count = 1,
-                                                 .type = sg::binding_type::readwrite_structured_buffer}},
+                                                 .type = sg::binding_type::buffer,
+                                                 .access = sg::access_mode::read_write}},
                                     sg::compute_dimensions{.x = 64});
     auto group_layout = ctx->cached.acquire_binding_group_layout(shader.bindings);
     auto pipeline_layout = ctx->cached.acquire_pipeline_layout({.groups = {group_layout}});

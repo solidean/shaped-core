@@ -27,7 +27,7 @@ namespace
     desc.dimension = sg::texture_dimension::d2;
     desc.width = 16;
     desc.height = 16;
-    desc.usage = sg::texture_usage::readonly_texture;
+    desc.usage = sg::texture_usage::texture;
     return sg::texture_2d::from_raw(ctx->persistent.create_raw_texture(desc));
 }
 
@@ -39,7 +39,7 @@ namespace
             .space = 0,
             .index = 0,
             .count = count,
-            .type = sg::binding_type::readonly_texture,
+            .type = sg::binding_type::texture,
             .texture_dimension = sg::texture_view_dimension::tex_2d};
 }
 
@@ -100,7 +100,7 @@ INVOCABLE_TEST("sg - staging binding group caches an unchanged snapshot", (sg::c
 
     auto const tex = make_texture(ctx);
     auto const slot = staging->slot_of("Textures");
-    staging->set_array_element(slot, 2, tex.as_readonly_view());
+    staging->set_array_element(slot, 2, tex.as_texture_view());
     CHECK(staging->is_dirty());
 
     auto const first = staging->snapshot();
@@ -109,7 +109,7 @@ INVOCABLE_TEST("sg - staging binding group caches an unchanged snapshot", (sg::c
     // No set in between: the same group comes back, so an unchanged frame rebinds nothing and copies nothing.
     CHECK(staging->snapshot() == first);
 
-    staging->set_array_element(slot, 5, tex.as_readonly_view());
+    staging->set_array_element(slot, 5, tex.as_texture_view());
     CHECK(staging->is_dirty());
     CHECK(staging->snapshot() != first);
 }
@@ -124,13 +124,13 @@ INVOCABLE_TEST("sg - a staging snapshot survives later mutation", (sg::context_h
     REQUIRE(staging != nullptr);
 
     auto const slot = staging->slot_of("Textures");
-    staging->set_array_element(slot, 0, make_texture(ctx).as_readonly_view());
+    staging->set_array_element(slot, 0, make_texture(ctx).as_texture_view());
     auto const held = staging->snapshot();
     REQUIRE(held != nullptr);
 
     // The held snapshot is immutable and keeps its own resources alive — mutating the builder only dirties it.
     staging->unset_array_element(slot, 0);
-    staging->set_array_element(slot, 3, make_texture(ctx).as_readonly_view());
+    staging->set_array_element(slot, 3, make_texture(ctx).as_texture_view());
     CHECK(staging->snapshot() != held);
     CHECK(held != nullptr);
 }
@@ -169,13 +169,13 @@ INVOCABLE_TEST("sg - setting a whole staging array clears what the run does not 
     auto const slot = staging->slot_of("Textures");
 
     auto const tex = make_texture(ctx);
-    staging->set_array_element(slot, 0, tex.as_readonly_view());
-    staging->set_array_element(slot, 3, tex.as_readonly_view());
+    staging->set_array_element(slot, 0, tex.as_texture_view());
+    staging->set_array_element(slot, 3, tex.as_texture_view());
     auto const filled = staging->snapshot();
     REQUIRE(filled != nullptr);
 
     // set_array REPLACES the array: elements 0 and 3 go vacant even though this run never mentions them.
-    sg::raw_view const one[] = {tex.as_readonly_view()};
+    sg::raw_view const one[] = {tex.as_texture_view()};
     staging->set_array(slot, 1, one);
     CHECK(staging->is_dirty());
     CHECK(staging->snapshot() != filled);
@@ -201,11 +201,11 @@ INVOCABLE_TEST("sg - staging binding group demands its scalar bindings", (sg::co
 
     CHECK_ASSERTS(staging->snapshot());
 
-    staging->set_binding("Textures", make_texture(ctx).as_readonly_view());
+    staging->set_binding("Textures", make_texture(ctx).as_texture_view());
     CHECK(staging->snapshot() != nullptr);
 
     // Once set it stays set: a scalar has no unset, it is only ever set to another view.
-    staging->set_binding("Textures", make_texture(ctx).as_readonly_view());
+    staging->set_binding("Textures", make_texture(ctx).as_texture_view());
     CHECK(staging->snapshot() != nullptr);
 }
 
@@ -246,8 +246,8 @@ INVOCABLE_TEST("sg - a staging setter rejects the wrong binding shape", (sg::con
     auto const scalar_slot = scalar->slot_of("Textures");
 
     // Nothing here picks an element for you: an array takes the array family, a scalar takes set_binding.
-    CHECK_ASSERTS(array->set_binding(array_slot, tex.as_readonly_view()));
-    CHECK_ASSERTS(scalar->set_array_element(scalar_slot, 0, tex.as_readonly_view()));
+    CHECK_ASSERTS(array->set_binding(array_slot, tex.as_texture_view()));
+    CHECK_ASSERTS(scalar->set_array_element(scalar_slot, 0, tex.as_texture_view()));
     CHECK_ASSERTS(scalar->unset_array_element(scalar_slot, 0));
     CHECK_ASSERTS(scalar->unset_array(scalar_slot));
 }
@@ -263,15 +263,15 @@ INVOCABLE_TEST("sg - staging element indices are bounds-checked", (sg::context_h
     auto const slot = staging->slot_of("Textures");
 
     auto const tex = make_texture(ctx);
-    sg::raw_view const two[] = {tex.as_readonly_view(), tex.as_readonly_view()};
+    sg::raw_view const two[] = {tex.as_texture_view(), tex.as_texture_view()};
 
-    CHECK_ASSERTS(staging->set_array_element(slot, 4, tex.as_readonly_view()));
-    CHECK_ASSERTS(staging->set_array_element(slot, -1, tex.as_readonly_view()));
+    CHECK_ASSERTS(staging->set_array_element(slot, 4, tex.as_texture_view()));
+    CHECK_ASSERTS(staging->set_array_element(slot, -1, tex.as_texture_view()));
     CHECK_ASSERTS(staging->unset_array_element(slot, 4));
     CHECK_ASSERTS(staging->set_array_range(slot, 3, two)); // 3 + 2 > 4
     CHECK_ASSERTS(staging->set_array(slot, 3, two));
     CHECK_ASSERTS(staging->unset_array_range(slot, 2, 3));
-    CHECK_ASSERTS(staging->set_array_element(sg::binding_slot::invalid, 0, tex.as_readonly_view()));
+    CHECK_ASSERTS(staging->set_array_element(sg::binding_slot::invalid, 0, tex.as_texture_view()));
 }
 
 INVOCABLE_TEST("sg - a staging setter rejects a view of the wrong kind", (sg::context_handle const& ctx))

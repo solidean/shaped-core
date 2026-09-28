@@ -33,6 +33,14 @@ inline cc::string builtins_text()
     return cc::string(sgl::prelude_files()[0].source);
 }
 
+/// `builtins_text()` with every `@shadowable(false)` taken out, for a test of what a shadowed builtin type still means.
+inline cc::string shadowable_builtins_text()
+{
+    auto text = builtins_text();
+    text.replace_all("@shadowable(false)\n", "");
+    return text;
+}
+
 } // namespace sgl_test
 
 /// Stands for the library's own prelude, both files of it, which every test here checks against unless it brings one.
@@ -122,8 +130,25 @@ inline cc::string reports_of(checked_sources const& s)
         if (!d.detail.empty())
             out.appendf(" {}", d.detail);
         out += "\n";
+        // A related note stands under its diagnostic, indented: `  note user:[let x = k] x is declared here`.
+        for (auto const& n : d.notes)
+        {
+            auto note_text = s.files[n.file].text_of(n.where);
+            if (auto const end = note_text.find('\n'); end >= 0)
+                note_text = note_text.subview({.offset = 0, .size = end});
+            out.appendf("  note {}:[{}] {}\n", n.file == s.user_file() ? "user" : "prelude", note_text, n.message);
+        }
     }
     return out;
+}
+
+/// The last symbol of `name` that a declaration wrote, which a synthesized constructor of that name is not.
+inline sgl::check::symbol const& symbol_named(sgl::check::checked_module const& m, cc::string_view name)
+{
+    for (auto i = m.symbols.size() - 1; i >= 0; --i)
+        if (m.symbols[i].name == name && m.symbols[i].role != sgl::check::function_role::constructor)
+            return m.symbols[i];
+    CC_UNREACHABLE("no symbol of that name");
 }
 
 /// `user` checked against the library's prelude, as `reports_of` writes it.

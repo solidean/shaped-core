@@ -23,7 +23,7 @@ namespace
 sg::texture_layout native_layout_for(sg::access_flags access)
 {
     if (access.has(sg::access_flag::shader_write))
-        return sg::texture_layout::shader_readwrite;
+        return sg::texture_layout::shader_image;
     if (access.has(sg::access_flag::color_write))
         return sg::texture_layout::render_target;
     if (access.has(sg::access_flag::depth_write))
@@ -31,7 +31,7 @@ sg::texture_layout native_layout_for(sg::access_flags access)
     if (access.has(sg::access_flag::copy_write))
         return sg::texture_layout::copy_dst;
     if (access.has(sg::access_flag::shader_read))
-        return sg::texture_layout::shader_readonly;
+        return sg::texture_layout::shader_texture;
     if (access.has(sg::access_flag::depth_read))
         return sg::texture_layout::depth_readonly;
     if (access.has(sg::access_flag::copy_read))

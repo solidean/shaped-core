@@ -3,6 +3,7 @@
 #include <clean-core/container/set.hh>
 #include <clean-core/string/format.hh>
 #include <shaped-graphics-language/check/resources.hh>
+#include <shaped-graphics-language/emit/impl/layout.hh>
 #include <shaped-graphics-language/emit/reserved_words.hh>
 #include <shaped-graphics-language/legalize/core.hh>
 
@@ -12,33 +13,6 @@ using namespace sgl;
 using namespace sgl::check;
 using namespace sgl::emit;
 using namespace sgl::emit::impl;
-
-/// Where a member lands in each target's constant block; a size of 0 means the type has no place in one.
-struct member_layout
-{
-    builtins::block_layout hlsl;
-    builtins::block_layout wgsl;
-    builtins::block_layout msl;
-};
-
-member_layout layout_of(checked_module const& m, type_id type)
-{
-    auto const* const record = m.builtin_type_of(type);
-    if (record == nullptr)
-        return {};
-    return {.hlsl = record->hlsl_layout, .wgsl = record->wgsl_layout, .msl = record->msl_layout};
-}
-
-i32 round_up(i32 value, i32 alignment)
-{
-    return (value + alignment - 1) / alignment * alignment;
-}
-
-/// HLSL packs by rows of 16: a value starts a fresh row when it is aligned to one, or when it does not fit the rest of this one.
-i32 hlsl_offset(i32 at, builtins::block_layout l)
-{
-    return l.alignment >= 16 || at % 16 + l.size > 16 ? round_up(at, 16) : at;
-}
 
 cc::string_view role_name(struct_role role)
 {
@@ -165,6 +139,19 @@ struct validator
             else if (x.node.is<flat_construct>() && m.at(x.type).is_opaque)
                 report(error_kind::malformed_tree, e.function,
                        cc::format("a construction of the opaque '{}'", m.name_of(x.type)));
+
+            // EMIT-107: every field of it is void, and a struct of no member is no struct in WGSL.
+            auto const& t = m.at(x.type);
+            auto is_all_void = t.kind == type_kind::structure && t.members.count > 0 && !is_builtin_type(m, x.type);
+            if (is_all_void)
+                for (auto const& member : m.at(t.members))
+                    is_all_void = is_all_void && member.type == checked_module::void_type;
+            if (is_all_void)
+            {
+                report(error_kind::unsupported, e.function,
+                       cc::format("the struct '{}', whose every field is void", m.name_of(x.type)));
+                break;
+            }
         }
     }
 };
@@ -245,22 +232,30 @@ struct planner
         p.struct_of_type[index_of(type)] = -2;
 
         auto const& info = p.m.at(type);
+        auto written = cc::vector<member_info>();
+        auto member_of = cc::vector<i32>();
         for (auto const& member : p.m.at(info.members))
+        {
             need(member.type, struct_role::plain);
+            member_of.push_back(member.type == check::checked_module::void_type ? -1 : i32(written.size()));
+            if (member.type != check::checked_module::void_type)
+                written.push_back(member);
+        }
 
         p.struct_of_type[index_of(type)] = i32(p.structs.size());
         p.structs.push_back({
             .type = type,
             .name = spell_type(p.m.at(info.symbol).name),
             .role = role,
-            .members = members_of(info.members, role != struct_role::plain),
+            .members = members_of(written, role != struct_role::plain),
+            .member_of = cc::move(member_of),
         });
     }
 
     /// Every case of it, in declaration order, since a reader wants the set and not the subset an arm named.
     void need_enum(type_id type)
     {
-        if (!is_valid(type) || p.m.at(type).kind != type_kind::enumeration)
+        if (!p.m.is_plain_enum(type))
             return;
         if (p.enum_of_type[index_of(type)] != -1)
             return;
@@ -337,6 +332,61 @@ struct planner
                 p.group_blocks.push_back(cc::move(planned));
             }
             ++group;
+        }
+    }
+
+    /// What WGSL and MSL need to reach SGL's layout, where their own rule would not (memory_form.hh).
+    void memory_forms()
+    {
+        auto const form_of_block = [&](planned_constants& block)
+        {
+            auto const& b = p.m.bindings[p.m.at(block.symbol).info];
+            block.form = memory_form_of(p.m, plain_members_of(p.m, b), address_space::constants, 0, p.which);
+            if (block.form.has_value())
+                block.form.value().name = block.block_name;
+        };
+        if (p.constants.has_value())
+            form_of_block(p.constants.value());
+        for (auto& block : p.group_blocks)
+            form_of_block(block);
+        for (auto& r : p.resources)
+        {
+            if (p.m.at(r.type).kind != type_kind::buffer)
+                continue;
+            r.element_form = element_form_of(p.m, r.element, p.which);
+            if (r.element_form.has_value())
+                r.element_form.value().name = p.names.mint(cc::format("{}_memory", p.m.name_of(r.element)));
+        }
+    }
+
+    /// Each struct in GPU memory states where its members sit, which `hlsl-vulkan` writes as `[[vk::offset]]`.
+    void struct_offsets()
+    {
+        for (auto const id : p.e.bindings)
+            for (auto const& member : p.m.at(p.m.bindings[p.m.at(id).info].members))
+            {
+                auto const& t = p.m.at(member.type);
+                if (t.kind == type_kind::buffer)
+                    offsets_of(t.element, address_space::storage);
+                else if (!check::is_resource(t.kind))
+                    offsets_of(member.type, address_space::constants);
+            }
+    }
+
+    void offsets_of(type_id type, address_space space)
+    {
+        auto structs = cc::vector<type_id>();
+        collect_structs(p.m, type, structs);
+        for (auto const s : structs)
+        {
+            auto const at = p.struct_of_type[index_of(s)];
+            if (at < 0)
+                continue;
+            auto& planned = p.structs[at];
+            auto const placed = place_struct(p.m, s, space);
+            for (auto i = isize(0); i < planned.member_of.size(); ++i)
+                if (planned.member_of[i] >= 0)
+                    planned.members[planned.member_of[i]].offset = placed.offsets[i];
         }
     }
 
@@ -462,50 +512,101 @@ void sgl::emit::impl::validate_edge_struct(check::checked_module const& m,
     }
 }
 
+namespace
+{
+bool contains(cc::span<check::type_id const> types, check::type_id type)
+{
+    for (auto const t : types)
+        if (t == type)
+            return true;
+    return false;
+}
+} // namespace
+
 void sgl::emit::impl::validate_binding(check::checked_module const& m, check::symbol_id id, cc::vector<error>& errors)
 {
     auto const report = [&](error_kind kind, cc::string detail)
     { errors.push_back({.kind = kind, .symbol = id, .detail = cc::move(detail)}); };
+    // What is about a struct rather than this binding, which every binding placing the struct finds the same.
+    auto const report_on_struct = [&](error_kind kind, check::type_id type, cc::string detail)
+    {
+        auto e = error{.kind = kind, .symbol = m.at(type).symbol, .detail = cc::move(detail)};
+        for (auto const& known : errors)
+            if (known == e)
+                return;
+        errors.push_back(cc::move(e));
+    };
 
     auto const& s = m.at(id);
     auto const& b = m.bindings[s.info];
 
     // A plain member is a constant of a block: the `@inline` one, or the constant buffer its group owns.
-    // A resource is a slot of its own in a group, and has no place in an `@inline` block.
+    // A resource is a slot of its own in a group, and has no place in an `@inline` block; a buffer's element is placed too.
     auto is_placed = true;
     for (auto const& member : m.at(b.members))
     {
-        if (!b.is_inline && check::is_resource(m.at(member.type).kind))
+        auto const& t = m.at(member.type);
+        if (!b.is_inline && check::is_resource(t.kind))
+        {
+            if (t.kind == check::type_kind::buffer && !is_placeable(m, t.element))
+            {
+                is_placed = false;
+                auto const inner = first_unplaceable(m, t.element);
+                report(error_kind::unsupported,
+                       cc::format("a buffer of '{}' in a binding: '{}.{}'{}", m.name_of(t.element), s.name, member.name,
+                                  inner.contains("bool") ? ", whose bool has no layout; bool32 has one" : ""));
+            }
             continue;
-        if (layout_of(m, member.type).hlsl.size != 0)
+        }
+        if (is_placeable(m, member.type))
             continue;
         is_placed = false;
+        auto const inner = first_unplaceable(m, member.type);
         report(error_kind::unsupported,
-               cc::format("a member of type '{}' in {}: '{}.{}'", m.name_of(member.type),
-                          b.is_inline ? "an @inline binding" : "a binding", s.name, member.name));
+               cc::format("a member of type '{}' in {}: '{}.{}'{}", m.name_of(member.type),
+                          b.is_inline ? "an @inline binding" : "a binding", s.name, member.name,
+                          inner.contains("bool") ? ", whose bool has no layout; bool32 has one" : ""));
     }
     if (!is_placed)
         return;
 
-    auto hlsl = 0;
-    auto wgsl = 0;
-    auto msl = 0;
-    for (auto const& member : plain_members_of(m, b))
+    // A struct has one layout, so it stands in one address space; two rules would give it two.
+    for (auto const space : {address_space::constants, address_space::storage})
     {
-        auto const l = layout_of(m, member.type);
-        hlsl = hlsl_offset(hlsl, l.hlsl);
-        wgsl = round_up(wgsl, l.wgsl.alignment);
-        msl = round_up(msl, l.msl.alignment);
-        if (hlsl != wgsl || hlsl != msl)
-        {
-            report(error_kind::layout_mismatch, cc::format("'{}.{}' is at byte {} in HLSL, at byte {} in WGSL and at "
-                                                           "byte {} in MSL",
-                                                           s.name, member.name, hlsl, wgsl, msl));
-            return;
-        }
-        hlsl += l.hlsl.size;
-        wgsl += l.wgsl.size;
-        msl += l.msl.size;
+        auto const other = space == address_space::constants ? address_space::storage : address_space::constants;
+        auto mine = cc::vector<check::type_id>();
+        collect_placed_structs(m, id, space, mine);
+        for (auto const type : mine)
+            for (auto const& info : m.bindings)
+            {
+                auto theirs = cc::vector<check::type_id>();
+                collect_placed_structs(m, info.symbol, other, theirs);
+                if (!contains(theirs, type))
+                    continue;
+                // Worded from the constant block's side, so the binding on either side finds the same error.
+                auto const is_constants = space == address_space::constants;
+                report_on_struct(error_kind::layout_conflict, type,
+                                 cc::format("'{}' is in a constant block of '{}' and in a storage buffer of '{}'",
+                                            m.name_of(type), is_constants ? s.name : m.at(info.symbol).name,
+                                            is_constants ? m.at(info.symbol).name : s.name));
+                break;
+            }
+    }
+
+    auto const plain = plain_members_of(m, b);
+    if (b.is_no_padding)
+        for (auto& gap : padding_of(m, plain, address_space::constants))
+            report(error_kind::padding_forbidden, cc::format("in the block of @no_padding '{}': {}", s.name, gap));
+    for (auto const space : {address_space::constants, address_space::storage})
+    {
+        auto structs = cc::vector<check::type_id>();
+        collect_placed_structs(m, id, space, structs);
+        for (auto const type : structs)
+            if (m.at(type).is_no_padding)
+                for (auto& gap : padding_of(m, m.at(m.at(type).members), space))
+                    report_on_struct(error_kind::padding_forbidden, type,
+                                     cc::format("in @no_padding '{}', as a {} places it: {}", m.name_of(type),
+                                                space_name(space), gap));
     }
 }
 
@@ -537,18 +638,8 @@ sgl::emit::impl::planned_constants const* sgl::emit::impl::block_of(plan const& 
 sgl::emit::impl::block_placement sgl::emit::impl::place_block(check::checked_module const& m,
                                                               cc::span<check::member_info const> members)
 {
-    auto result = block_placement();
-    auto offset = 0;
-    for (auto const& member : members)
-    {
-        auto const l = layout_of(m, member.type).hlsl;
-        offset = hlsl_offset(offset, l);
-        result.offsets.push_back(offset);
-        result.sizes.push_back(l.size);
-        offset += l.size;
-    }
-    result.size = offset;
-    return result;
+    auto placed = place(m, members, address_space::constants);
+    return {.offsets = cc::move(placed.offsets), .sizes = cc::move(placed.sizes), .size = placed.size};
 }
 
 void sgl::emit::impl::validate(check::checked_module const& m, check::flat_entry_point const& e, cc::vector<error>& errors)
@@ -599,15 +690,92 @@ sgl::emit::impl::plan sgl::emit::impl::make_plan(check::checked_module const& m,
         p.need(x.type, struct_role::plain);
         p.need_enum(x.type);
     }
+    // A struct in a block or a buffer is declared whether or not the code reads it whole.
+    for (auto const id : e.bindings)
+        for (auto const& member : m.at(m.bindings[m.at(id).info].members))
+        {
+            auto const& t = m.at(member.type);
+            p.need(t.kind == type_kind::buffer ? t.element : member.type, struct_role::plain);
+        }
     // `spell` is what mints `<name>_` where the target reserves the name or a builtin is called by it.
     result.entry_name = p.spell(e.name);
     p.constants();
     p.group_blocks();
     p.resources();
+    p.memory_forms();
+    p.struct_offsets();
     // The check pass minted the locals, so a buffer or a block minted above never took one's name.
     for (auto const& local : e.locals)
         result.locals.push_back(p.spell(local.name));
     if (e.entry_stage == stage::compute && !result.locals.empty())
         result.dispatch_name = result.names.mint(cc::format("{}_in", result.locals[0]));
+    return result;
+}
+
+namespace
+{
+/// The leaves of `members` placed in `space`, each named as the text spells the members on its way down.
+/// `member_of` maps a member to its position in `planned`, as a planned struct's does; empty where they are parallel.
+cc::vector<emitted_field> fields_of(plan const& p,
+                                    cc::span<planned_member const> planned,
+                                    cc::span<i32 const> member_of,
+                                    cc::span<member_info const> members,
+                                    address_space space)
+{
+    auto result = cc::vector<emitted_field>();
+    for (auto const& leaf : place(p.m, members, space).leaves)
+    {
+        auto const top = member_of.empty() ? leaf.path[0] : member_of[leaf.path[0]];
+        auto name = cc::string(planned[top].name);
+        auto type = members[leaf.path[0]].type;
+        for (auto i = isize(1); i < leaf.path.size(); ++i)
+        {
+            auto const& s = p.structs[p.struct_of_type[index_of(type)]];
+            name.appendf(".{}", s.members[s.member_of[leaf.path[i]]].name);
+            type = p.m.at(p.m.at(type).members)[leaf.path[i]].type;
+        }
+        result.push_back({.name = cc::move(name), .offset = leaf.offset});
+    }
+    return result;
+}
+
+cc::vector<emitted_field> fields_of(memory_form const& form)
+{
+    auto result = cc::vector<emitted_field>();
+    for (auto const& f : form.fields)
+        result.push_back({.name = f.name, .offset = f.offset});
+    return result;
+}
+} // namespace
+
+cc::vector<sgl::emit::emitted_layout> sgl::emit::impl::layouts_of(plan const& p)
+{
+    auto result = cc::vector<emitted_layout>();
+    auto const block = [&](planned_constants const& c)
+    {
+        auto const plain = plain_members_of(p.m, p.m.bindings[p.m.at(c.symbol).info]);
+        result.push_back({.global = c.name,
+                          .fields = c.form.has_value() ? fields_of(c.form.value())
+                                                       : fields_of(p, c.members, {}, plain, address_space::constants)});
+    };
+    if (p.constants.has_value())
+        block(p.constants.value());
+    for (auto const& c : p.group_blocks)
+        block(c);
+    for (auto const& r : p.resources)
+    {
+        if (p.m.at(r.type).kind != type_kind::buffer)
+            continue;
+        auto layout = emitted_layout{.global = r.name, .stride = element_stride(p.m, r.element)};
+        if (r.element_form.has_value())
+            layout.fields = fields_of(r.element_form.value());
+        else if (p.m.builtin_type_of(r.element) == nullptr)
+        {
+            auto const& s = p.structs[p.struct_of_type[index_of(r.element)]];
+            layout.fields
+                = fields_of(p, s.members, s.member_of, p.m.at(p.m.at(r.element).members), address_space::storage);
+        }
+        result.push_back(cc::move(layout));
+    }
     return result;
 }

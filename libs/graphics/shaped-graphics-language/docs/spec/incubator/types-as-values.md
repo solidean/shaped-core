@@ -65,7 +65,18 @@ The bet rests on the [function model](function-model.md): every function inlines
 * `->` stands only in function types and return types, so its right-hand side is always a type position.
 * `type` is a keyword, and one of its meanings is the type of types.
 
+## `void`, the one special case today
+
+`void` is its type in a type position and that type's one value anywhere else ([CHK-215](../semantics/checking.md#void)).
+The tentative rule of this note makes that a consequence rather than a case: a type position const-evaluates its expression and reinterprets the value as a type.
+`int` is a value of type `type` whose value is the type `int`, and reinterpreting it gives that type.
+`(int, int)` is a tuple of two types, and reinterpreting it gives the tuple type.
+`void` is the unit value, and reinterpreting it gives the type `void`.
+Until that rule is worked through on enough examples, the check pass hard-codes the reading of `void` by position.
+
 ## Open
+
+* Whether `()`, the empty tuple, is also the unit value, as it is in the ML family; it is left out until its use as a value is common enough to want two spellings.
 
 * The exact set of normal forms: identifiers, tuples and object literals certainly, and what else.
 * How the `struct_type` node `{pos: hpos4, uv: vec2}` fits the normal forms: its members are fields, while `{int, int}` is a value of types.

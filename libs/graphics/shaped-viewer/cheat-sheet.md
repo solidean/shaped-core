@@ -1031,7 +1031,7 @@ sv::layout_routine::execute(scope, window_id, draws, textures)    // borders + p
   byte budget can't hold a frame's working set, `get_ptr` returns null and the renderer asserts.
 - **Indexed and non-indexed are separate paths end to end** — nothing is de-indexed and no index buffer is synthesized.
   `mesh_record::is_indexed` says which a record is, and it reaches the path tracer's closest-hit through `instance_gpu::is_indexed`, per instance.
-  The flat `pbr_raytrace_routine` still carries it per frame, in `frame_constants_gpu::mesh_is_indexed` — an `sr::gpu_boolean`, so the plain `bool` off the record assigns straight into it.
+  The flat `pbr_raytrace_routine` still carries it per frame, in `frame_constants_gpu::mesh_is_indexed` — an `slib::gpu_bool`, so the plain `bool` off the record assigns straight into it.
   A test driving that routine directly must set it, or it will read `Indices` as if it were real.
   A non-indexed record binds the manager's stand-in there, which no shader reads.
 - **Calling `view.camera(...)` every frame restarts the accumulation every frame** — by design, since an animated view has no history worth blending.

@@ -28,11 +28,13 @@ void command_list_compute_scope::bind_group(int group_index, binding_group const
 
 void command_list_compute_scope::dispatch_groups(int x, int y, int z)
 {
+    _cmd._stats.add(stat::dispatches);
     _cmd.compute_dispatch(x, y, z);
 }
 
 void command_list_compute_scope::dispatch_threads(int x, int y, int z)
 {
+    _cmd._stats.add(stat::dispatches);
     _cmd.compute_dispatch(ceil_div(x, _bound_wg_x), ceil_div(y, _bound_wg_y), ceil_div(z, _bound_wg_z));
 }
 

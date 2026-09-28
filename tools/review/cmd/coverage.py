@@ -44,6 +44,8 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
 
     entries = ctx.entries(paths)
     thin = ctx.thinly_discharged(entries)
+    discharged = ctx.discharged(entries)
+    done = sum(1 for c in live if c.id in discharged or c.discharged_by_reason)
 
     if args.json:
         print(json.dumps({
@@ -51,6 +53,7 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
             "uncovered": len(uncovered),
             "changes": len(live),
             "bulk": len(bulk_ids),
+            "discharged": done,
             "runs": [{"path": p, "side": s, "start": lo, "end": hi} for p, s, lo, hi in uncovered.runs()],
             # The human report lists these under the runs, so a script reading the JSON must see them too:
             # an uncovered count with an empty `runs` reads as a bug in the reader rather than a file atom nobody claimed.
@@ -61,8 +64,8 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
         return
 
     print(f"{len(net) - len(uncovered)}/{len(net)} atoms accounted for by {len(live)} changes")
-    if bulk_ids:
-        print(f"{len(bulk_ids)} bulk claims carry their own reason")
+    # Progress rather than a gate: an undischarged change is work still to do, and `changes --undischarged` lists it.
+    print(f"{done}/{len(live)} changes discharged" + (f", {len(bulk_ids)} of them by a bulk claim's reason" if bulk_ids else ""))
 
     if thin:
         # Accounted for and not read is the failure this names, and it is invisible in both gates.
@@ -88,4 +91,4 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
         print(f"  ... and {len(runs) - len(shown)} more runs; --full lists them")
     for atom in sorted(uncovered.files, key=lambda a: (a.path, a.kind)):
         print(f"  {atom.describe()}")
-    print(f"`uv run review.py ingest {args.name} --rest` gives them ids")
+    print(f"`{ctx.invocation} ingest {args.name} --rest` gives them ids")

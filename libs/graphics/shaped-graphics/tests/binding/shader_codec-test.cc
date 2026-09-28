@@ -22,15 +22,15 @@ sg::compiled_shader make_shader()
     shader.bytecode = cc::make_pinned_data(cc::span<byte const>(code));
 
     shader.bindings.push_back(
-        {.name = "Output", .index = 1, .count = 2, .type = sg::binding_type::readwrite_structured_buffer});
+        {.name = "Output", .index = 1, .count = 2, .type = sg::binding_type::buffer, .access = sg::access_mode::read_write});
     shader.bindings.push_back(
-        {.name = "Params", .space = 1, .index = 0, .count = 1, .type = sg::binding_type::uniform_buffer, .block_size = 64});
+        {.name = "Params", .space = 1, .index = 0, .count = 1, .type = sg::binding_type::constants_buffer, .block_size = 64});
     shader.bindings.push_back({.name = "Albedo",
                                .group_index = 0,
                                .space = 0,
                                .index = 2,
                                .count = 1,
-                               .type = sg::binding_type::readonly_texture,
+                               .type = sg::binding_type::texture,
                                .texture_dimension = sg::texture_view_dimension::cube_array});
 
     // Every field the encoder writes has to appear on some binding here, or "round-trips every field" is a claim the
@@ -39,7 +39,7 @@ sg::compiled_shader make_shader()
                                .space = 0,
                                .index = 2,
                                .count = 1,
-                               .type = sg::binding_type::readonly_texture,
+                               .type = sg::binding_type::texture,
                                .texture_dimension = sg::texture_view_dimension::cube_array,
                                .visibility = sg::shader_stage::fragment | sg::shader_stage::compute,
                                .sample_type = sg::texture_sample_type::unfilterable_float});
@@ -47,11 +47,11 @@ sg::compiled_shader make_shader()
                                .space = 0,
                                .index = 3,
                                .count = 1,
-                               .type = sg::binding_type::readwrite_texture,
+                               .type = sg::binding_type::image,
+                               .access = sg::access_mode::write,
                                .texture_dimension = sg::texture_view_dimension::tex_2d,
                                .visibility = sg::shader_stages(sg::shader_stage::compute),
-                               .storage_format = sg::pixel_format::rgba8_unorm,
-                               .storage_access = sg::storage_access::write});
+                               .image_format = sg::pixel_format::rgba8_unorm});
     shader.bindings.push_back({.name = "Shadow",
                                .space = 0,
                                .index = 4,
@@ -61,6 +61,10 @@ sg::compiled_shader make_shader()
                                .sampler_type = sg::sampler_binding_type::comparison});
 
     shader.compiler = {.name = "dxc", .version = "1.8", .signature = "-T cs_6_8 -E main"};
+
+    // A reflected footprint is what a compiler hands back, so a cached shader carries it.
+    shader.footprint = sg::reflected_footprint(shader.bindings);
+    shader.footprint.slots[0].dynamic_index = true;
     return shader;
 }
 
@@ -87,13 +91,15 @@ bool same(sg::compiled_shader const& a, sg::compiled_shader const& b)
         if (x.block_size.has_value() && x.block_size.value() != y.block_size.value())
             return false;
         // A field left out here is a field the encoder may silently drop, which is what this comparison is for.
-        if (x.texture_dimension != y.texture_dimension || x.storage_format != y.storage_format
-            || x.sample_type != y.sample_type || x.sampler_type != y.sampler_type || x.storage_access != y.storage_access)
+        if (x.texture_dimension != y.texture_dimension || x.image_format != y.image_format
+            || x.sample_type != y.sample_type || x.sampler_type != y.sampler_type || x.access != y.access)
             return false;
         if (x.visibility != y.visibility)
             return false;
     }
     if (a.color_output_count != b.color_output_count)
+        return false;
+    if (a.footprint != b.footprint)
         return false;
     if (a.workgroup_size.has_value() != b.workgroup_size.has_value())
         return false;
@@ -188,4 +194,22 @@ TEST("sg shader codec refuses a length larger than the blob holding it")
     // Both must come back as nothing rather than as a reservation the input chose.
     CHECK(!sg::impl::decode_compiled_shader(with_huge_length_at(entry_point_length_offset)).has_value());
     CHECK(!sg::impl::decode_compiled_shader(with_huge_length_at(bytecode_length_offset)).has_value());
+}
+
+TEST("sg reflected footprint - a binding touched as its declaration allows, and a sampler not at all")
+{
+    auto const shader = make_shader();
+    auto const& fp = shader.footprint;
+    CHECK(fp.source == sg::footprint_source::reflected);
+
+    // A writable buffer is read and written through its view, which is one storage access.
+    REQUIRE(fp.find("Output") != nullptr);
+    CHECK(fp.find("Output")->access == (sg::access_flag::storage_read | sg::access_flag::shader_write));
+    CHECK(fp.find("Params")->access == sg::access_flags(sg::access_flag::constants_read));
+    CHECK(fp.find("Albedo")->access == sg::access_flags(sg::access_flag::shader_read));
+
+    // A write-only image is written and never read, so nothing orders a read after it.
+    CHECK(fp.find("Target")->access == sg::access_flags(sg::access_flag::shader_write));
+    CHECK(fp.find("Shadow") == nullptr);
+    CHECK(fp.find("Unbound") == nullptr);
 }

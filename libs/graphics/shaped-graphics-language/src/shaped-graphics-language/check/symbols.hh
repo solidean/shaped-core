@@ -4,6 +4,7 @@
 #include <clean-core/string/string.hh>
 #include <shaped-graphics-language/ast/file_ast.hh>
 #include <shaped-graphics-language/builtins/ids.hh>
+#include <shaped-graphics-language/check/features.hh>
 #include <shaped-graphics-language/check/ids.hh>
 
 /// What the check pass knows about the declarations of a module: its types, its symbols and the per-file side tables.
@@ -14,8 +15,8 @@ enum class sgl::check::type_kind : sgl::u8
     /// The type of whatever did not check.
     /// It equals every type for the purpose of reporting, so one error never causes a second diagnostic.
     error,
-    /// What a function without a return type returns: no value, so nothing can hold it.
-    nothing,
+    /// `void`, what a function without a return type returns.
+    void_,
     /// A declared `struct`, builtin or not; two declarations are two types, whatever their fields.
     structure,
     /// A declared `enum`: a closed set of named `int` values that converts to nothing (CHK-142, CHK-150).
@@ -52,7 +53,7 @@ inline constexpr u8 k_every_stage = 0xFF;
 } // namespace sgl::check
 
 /// What a shader may do with an image: unmarked, `mut` and `out` (the spec's bindings file, "Access").
-enum class sgl::check::image_access : sgl::u8
+enum class sgl::check::access_mode : sgl::u8
 {
     read,
     read_write,
@@ -105,6 +106,8 @@ struct sgl::check::type_info
     bool is_opaque = false;
     /// `@vertex struct` is a vertex input and `@pixel struct` a set of render targets.
     stage edge = stage::none;
+    /// `@no_padding`: a layout that leaves a gap before any of its members is an error wherever it is placed.
+    bool is_no_padding = false;
     /// The element of a `buffer`; `none` for every other kind.
     type_id element = type_id::none;
     /// Whether a `buffer` may be written: `mut buffer[T]` against `buffer[T]`.
@@ -113,12 +116,12 @@ struct sgl::check::type_info
     texture_shape shape = {};
     /// A `texture` that holds depth, which takes no `element`.
     bool is_depth = false;
-    /// A position in `k_storage_formats` for an `image`; -1 for every other kind.
+    /// A position in `k_image_formats` for an `image`; -1 for every other kind.
     i32 format = -1;
-    image_access access = image_access::read;
+    access_mode access = access_mode::read;
     /// A `sampler` that compares.
     bool is_comparison = false;
-    /// How a resource type is written, `out image2d[.rgba8_unorm]`; empty for a declared type, which its symbol names.
+    /// How a resource type is written, `out image_2d[.rgba8_unorm]`; empty for a declared type, which its symbol names.
     cc::string spelled;
 
     bool operator==(type_info const&) const = default;
@@ -170,7 +173,11 @@ enum class sgl::check::symbol_kind : sgl::u8
     binding,
     /// A `pipeline` declaration; an unnamed one is named `pipeline`.
     pipeline,
-    /// A named declaration this phase has no meaning for yet: `const`, `type`, `sampler`.
+    /// A file-scope `const`, whose value is known before anything runs.
+    constant,
+    /// A `test`, which has no name and which no lookup finds; `info` is its synthesized signature.
+    test,
+    /// A named declaration this phase has no meaning for yet: `type`, `sampler`.
     /// It is always `failed`, and it exists so its name resolves to the error type and not to `unknown-name`.
     unsupported,
 };
@@ -185,6 +192,21 @@ enum class sgl::check::symbol_state : sgl::u8
     checked,
     /// Nothing about it can be relied on; whatever needs it gets the error type and reports nothing further.
     failed,
+};
+
+/// What a function is to the call model, which calls every one of them the same way (CHK-69).
+enum class sgl::check::function_role : sgl::u8
+{
+    /// Declared at file scope, found by its name where it is visible.
+    free,
+    /// A `fun` of a type scope whose first parameter is `self` (CHK-234).
+    method,
+    /// A `fun` of a type scope without `self` (CHK-235).
+    static_,
+    /// `name => value`, a function of a type scope whose one parameter is `self` (CHK-236).
+    property,
+    /// The function of a struct's name that takes its fields (CHK-239); its declaration is the struct's.
+    constructor,
 };
 
 /// One module-level declaration, named by the file it stands in and its declaration there.
@@ -203,17 +225,52 @@ struct sgl::check::symbol
     cc::string operator_spelling;
     /// A struct's type.
     type_id type = type_id::none;
-    /// A position in `checked_module::functions`, `bindings` or `pipelines`, by `kind`; -1 before it is compiled.
+    /// A position in `checked_module::functions`, `bindings`, `pipelines` or `constants`, by `kind`; -1 before it is compiled.
     i32 info = -1;
+    /// False under `@shadowable(false)`: a declaration or a local of its name is then an error rather than hiding it.
+    bool is_shadowable = true;
+    /// For a function: which kind of function it is.
+    function_role role = function_role::free;
+    /// The struct or enum whose type scope holds this function; `none` for a free function.
+    /// A constructor's owner is its struct, although the constructor stands in the struct's scope and not in its own.
+    symbol_id owner = symbol_id::none;
 
     bool operator==(symbol const&) const = default;
+};
+
+enum class sgl::check::constant_kind : sgl::u8
+{
+    integer,
+    real,
+    /// A case of an enum; for `bool`, whose cases are its two values, the case is the value.
+    enum_case,
+};
+
+/// The value of a `const`, which is known before anything runs.
+struct sgl::check::constant_info
+{
+    symbol_id symbol = symbol_id::none;
+    type_id type = type_id::none;
+    constant_kind kind = constant_kind::integer;
+    i32 integer = 0;
+    f64 real = 0;
+    /// A position in the `cases` of `type`, for an `enum_case`.
+    i32 case_index = -1;
+
+    bool operator==(constant_info const&) const = default;
 };
 
 struct sgl::check::parameter
 {
     cc::string name;
     type_id type = type_id::none;
+    /// In the file of the function; for a constructor, the struct field the parameter stands for.
+    /// `none` for the `self` a property takes without writing it.
     ast::field_id field = ast::field_id::none;
+    /// A call may leave the parameter out, and its default is then evaluated where the call stands (EVAL-81).
+    bool has_default = false;
+    /// Filled by name alone (CHK-244).
+    bool is_named_only = false;
     /// Carries `@thread_id`, which a compute entry point may write instead of a struct.
     bool is_thread_id = false;
 
@@ -237,6 +294,9 @@ struct sgl::check::function_info
     bool is_pure = false;
     /// The stages an entry point may be of to reach it, one bit per `stage` (`stage_bit`); every stage without `@stages`.
     u8 stages = k_every_stage;
+    /// For an entry point, the features a device needs to run it: what it uses, never what it merely declares (CHK-263).
+    /// Empty for every other function.
+    feature_set features;
 
     constexpr bool operator==(function_info const&) const = default;
 };
@@ -246,7 +306,13 @@ struct sgl::check::binding_info
     symbol_id symbol = symbol_id::none;
     /// `@inline`: the members ride as inline constants, which an emitter must know.
     bool is_inline = false;
+    /// `@no_padding`: a gap before any member of its constant block is an error.
+    bool is_no_padding = false;
     ast::range_of<member_info> members;
+    /// What its own `require` lines name, which declares them for every entry point listing it (CHK-262).
+    feature_set declared;
+    /// `declared` and whatever its members use: what every entry point listing it needs of a device (CHK-261).
+    feature_set required;
 
     constexpr bool operator==(binding_info const&) const = default;
 };
@@ -344,6 +410,8 @@ enum class sgl::check::target_kind : sgl::u8
     binding_member,
     /// On a `member` or a `leading_dot`: case `index` of the enum `symbol`.
     enum_case,
+    /// `self` in a method or a property, and so the object of a member a bare name reads through it (CHK-245).
+    receiver,
 };
 
 /// What an expression refers to, for an editor: go to definition, hover, rename.
@@ -356,18 +424,72 @@ struct sgl::check::target
     constexpr bool operator==(target const&) const = default;
 };
 
-/// The side tables over one file's untouched AST, both parallel to `file_ast::exprs`.
+/// One argument a call wrote, in the order it wrote them, which is the order they are evaluated in (EVAL-80).
+struct sgl::check::written_argument
+{
+    /// In the file of the call.
+    ast::expr_id expr = ast::expr_id::none;
+    /// A splat is one written argument per field of its value; this is that field, and -1 for no splat.
+    i32 splat_member = -1;
+
+    constexpr bool operator==(written_argument const&) const = default;
+};
+
+/// How one call's written arguments fill the parameters of the function resolution chose.
+struct sgl::check::call_record
+{
+    symbol_id callee = symbol_id::none;
+    ast::range_of<written_argument> written;
+    /// One per parameter of `callee`: a position in `written`, or -1 where the parameter takes its default.
+    ast::range_of<i32> slots;
+
+    constexpr bool operator==(call_record const&) const = default;
+};
+
+/// Why a candidate did not take a call's arguments (CHK-252, CHK-70), or `none` where it did.
+enum class sgl::check::miss_reason : sgl::u8
+{
+    none,
+    no_such_parameter,
+    filled_twice,
+    positional_out_of_slot,
+    positional_to_named_only,
+    too_many,
+    missing_argument,
+    /// Every argument bound, and `argument` does not convert to `parameter`.
+    no_conversion,
+};
+
+/// One candidate of a call that matched nothing, and why: what a "did you mean" is written from.
+struct sgl::check::near_miss
+{
+    i32 file = 0;
+    ast::expr_id call = ast::expr_id::none;
+    symbol_id candidate = symbol_id::none;
+    miss_reason reason = miss_reason::none;
+    /// A position in the call's written arguments, and one in the candidate's parameters; -1 where it is about neither.
+    i32 argument = -1;
+    i32 parameter = -1;
+
+    constexpr bool operator==(near_miss const&) const = default;
+};
+
+/// The side tables over one file's untouched AST, each parallel to `file_ast::exprs`.
 struct sgl::check::file_tables
 {
     /// `none` for an expression nothing checked; an expression in a type position has the type it names.
     cc::vector<type_id> type_of;
     cc::vector<target> target_of;
+    /// A position in `checked_module::call_records` for a call that resolved, -1 for every other expression.
+    cc::vector<i32> call_of;
 
     [[nodiscard]] type_id type_at(ast::expr_id id) const { return type_of[ast::index_of(id)]; }
     [[nodiscard]] target const& target_at(ast::expr_id id) const { return target_of[ast::index_of(id)]; }
+    [[nodiscard]] i32 call_at(ast::expr_id id) const { return call_of[ast::index_of(id)]; }
 
     [[nodiscard]] bool operator==(file_tables const& rhs) const
     {
-        return ast::impl::is_equal(type_of, rhs.type_of) && ast::impl::is_equal(target_of, rhs.target_of);
+        return ast::impl::is_equal(type_of, rhs.type_of) && ast::impl::is_equal(target_of, rhs.target_of)
+            && ast::impl::is_equal(call_of, rhs.call_of);
     }
 };

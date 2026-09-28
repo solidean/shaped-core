@@ -296,22 +296,22 @@ void create_texture_view(ID3D12Device* device, sg::raw_texture_view const& view,
     ID3D12Resource* const resource = tex->_resource.Get();
     DXGI_FORMAT const format = to_dxgi_format(view.format);
 
-    switch (view.access)
+    switch (view.bound_as)
     {
-    case sg::view_class::readonly:
+    case sg::view_class::texture:
     {
         D3D12_SHADER_RESOURCE_VIEW_DESC const desc = texture_srv_desc(view, format);
         device->CreateShaderResourceView(resource, &desc, dst);
         return;
     }
-    case sg::view_class::readwrite:
+    case sg::view_class::image:
     {
         D3D12_UNORDERED_ACCESS_VIEW_DESC const desc = texture_uav_desc(view, format);
         device->CreateUnorderedAccessView(resource, nullptr, &desc, dst); // no counter resource
         return;
     }
     default:
-        CC_UNREACHABLE("unhandled texture view access class");
+        CC_UNREACHABLE("a texture view is a texture or an image");
     }
 }
 
@@ -335,11 +335,11 @@ void create_buffer_view(ID3D12Device* device, sg::raw_buffer_view const& view, D
 {
     ID3D12Resource* const resource = resource_of(view);
 
-    switch (view.access)
+    switch (view.bound_as)
     {
-    case sg::view_class::uniform:
+    case sg::view_class::constants:
     {
-        CC_ASSERT(resource != nullptr, "uniform buffer view over an empty buffer");
+        CC_ASSERT(resource != nullptr, "constants buffer view over an empty buffer");
         D3D12_CONSTANT_BUFFER_VIEW_DESC desc = {};
         desc.BufferLocation = resource->GetGPUVirtualAddress() + UINT64(view.offset_in_bytes);
         desc.SizeInBytes = UINT((view.size_in_bytes + 255) & ~isize(255)); // CBV size is 256-aligned
@@ -351,7 +351,7 @@ void create_buffer_view(ID3D12Device* device, sg::raw_buffer_view const& view, D
         D3D12_SHADER_RESOURCE_VIEW_DESC desc = {};
         desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
         desc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
-        if (view.shape == sg::view_shape::raw)
+        if (view.shape == sg::view_shape::bytes)
         {
             desc.Format = DXGI_FORMAT_R32_TYPELESS;
             desc.Buffer.FirstElement = UINT64(view.offset_in_bytes / 4);
@@ -373,7 +373,7 @@ void create_buffer_view(ID3D12Device* device, sg::raw_buffer_view const& view, D
     {
         D3D12_UNORDERED_ACCESS_VIEW_DESC desc = {};
         desc.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
-        if (view.shape == sg::view_shape::raw)
+        if (view.shape == sg::view_shape::bytes)
         {
             desc.Format = DXGI_FORMAT_R32_TYPELESS;
             desc.Buffer.FirstElement = UINT64(view.offset_in_bytes / 4);
@@ -391,10 +391,13 @@ void create_buffer_view(ID3D12Device* device, sg::raw_buffer_view const& view, D
         device->CreateUnorderedAccessView(resource, nullptr, &desc, dst); // no counter resource
         return;
     }
+    case sg::view_class::texture:
+    case sg::view_class::image:
+        CC_UNREACHABLE("texture and image views are created via create_texture_view, not create_buffer_view");
     case sg::view_class::acceleration_structure:
         CC_UNREACHABLE("acceleration-structure views are created via create_accel_view, not create_buffer_view");
     }
-    CC_UNREACHABLE("unhandled view access class");
+    CC_UNREACHABLE("unhandled view view class");
 }
 
 void create_null_view(ID3D12Device* device, sg::binding const& binding, D3D12_CPU_DESCRIPTOR_HANDLE dst)
@@ -403,24 +406,22 @@ void create_null_view(ID3D12Device* device, sg::binding const& binding, D3D12_CP
     // every vacant element; only the SRV/UAV dimension has to match the shader's declaration.
     switch (binding.type)
     {
-    case sg::binding_type::readonly_raw_buffer:
-    case sg::binding_type::readonly_structured_buffer:
-    case sg::binding_type::readwrite_raw_buffer:
-    case sg::binding_type::readwrite_structured_buffer:
+    case sg::binding_type::bytes:
+    case sg::binding_type::buffer:
     {
-        bool const is_raw = sg::shape_of(binding.type) == sg::view_shape::raw;
-        auto const view = sg::raw_buffer_view{.access = sg::access_of(binding.type),
+        bool const is_bytes = sg::shape_of(binding.type) == sg::view_shape::bytes;
+        auto const view = sg::raw_buffer_view{.bound_as = sg::view_class_of(binding),
                                               .shape = sg::shape_of(binding.type),
                                               .buffer = nullptr,
-                                              .stride_in_bytes = is_raw ? 0 : 4};
-        if (view.access == sg::view_class::readonly)
+                                              .stride_in_bytes = is_bytes ? 0 : 4};
+        if (view.bound_as == sg::view_class::readonly)
         {
             D3D12_SHADER_RESOURCE_VIEW_DESC desc = {};
             desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
             desc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
-            desc.Format = is_raw ? DXGI_FORMAT_R32_TYPELESS : DXGI_FORMAT_UNKNOWN;
+            desc.Format = is_bytes ? DXGI_FORMAT_R32_TYPELESS : DXGI_FORMAT_UNKNOWN;
             desc.Buffer.StructureByteStride = UINT(view.stride_in_bytes);
-            if (is_raw)
+            if (is_bytes)
                 desc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_RAW;
             device->CreateShaderResourceView(nullptr, &desc, dst);
         }
@@ -428,27 +429,27 @@ void create_null_view(ID3D12Device* device, sg::binding const& binding, D3D12_CP
         {
             D3D12_UNORDERED_ACCESS_VIEW_DESC desc = {};
             desc.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
-            desc.Format = is_raw ? DXGI_FORMAT_R32_TYPELESS : DXGI_FORMAT_UNKNOWN;
+            desc.Format = is_bytes ? DXGI_FORMAT_R32_TYPELESS : DXGI_FORMAT_UNKNOWN;
             desc.Buffer.StructureByteStride = UINT(view.stride_in_bytes);
-            if (is_raw)
+            if (is_bytes)
                 desc.Buffer.Flags = D3D12_BUFFER_UAV_FLAG_RAW;
             device->CreateUnorderedAccessView(nullptr, nullptr, &desc, dst);
         }
         return;
     }
-    case sg::binding_type::readonly_texture:
-    case sg::binding_type::readwrite_texture:
+    case sg::binding_type::texture:
+    case sg::binding_type::image:
     {
         CC_ASSERT(binding.texture_dimension.has_value(), "a vacant texture element needs the binding's "
                                                          "texture_dimension (reflection fills it; hand-written "
                                                          "bindings must set it)");
         // Reuse the dimension mapping through a synthetic null-handle view; the default subresource range
         // (one mip, one slice) is inert on a null descriptor.
-        auto const view = sg::raw_texture_view{.access = sg::access_of(binding.type),
+        auto const view = sg::raw_texture_view{.bound_as = sg::view_class_of(binding),
                                                .texture = nullptr,
                                                .view_dimension = binding.texture_dimension.value(),
                                                .format = sg::pixel_format::rgba8_unorm};
-        if (view.access == sg::view_class::readonly)
+        if (view.bound_as == sg::view_class::texture)
         {
             D3D12_SHADER_RESOURCE_VIEW_DESC const desc = texture_srv_desc(view, DXGI_FORMAT_R8G8B8A8_UNORM);
             device->CreateShaderResourceView(nullptr, &desc, dst);
@@ -460,7 +461,7 @@ void create_null_view(ID3D12Device* device, sg::binding const& binding, D3D12_CP
         }
         return;
     }
-    case sg::binding_type::uniform_buffer:
+    case sg::binding_type::constants_buffer:
     {
         // A null CBV: BufferLocation 0, size 0 — a legal descriptor whose loads read zero.
         D3D12_CONSTANT_BUFFER_VIEW_DESC const desc = {};

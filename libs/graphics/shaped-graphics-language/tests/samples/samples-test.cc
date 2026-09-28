@@ -54,7 +54,7 @@ TEST("sgl samples - the raster shader builds an AST without a diagnostic and wit
     CHECK(!dump.contains("<missing>"));
 
     CHECK(dump.starts_with("(module example)\n(binding frame\n  (field view : mat4)\n"));
-    CHECK(dump.contains("(field tex_color : (index texture2d rgba8))"));
+    CHECK(dump.contains("(field tex_color : (index texture_2d rgba8))"));
     // The sample's sampler has only a comment under it.
     CHECK(dump.contains("(sampler bilinear)\n"));
     CHECK(dump.contains("(struct{@vertex} basic_vertex\n  (field pos : pos3)\n"));
@@ -95,7 +95,7 @@ TEST("sgl samples - members and bindings parse and build without a diagnostic")
     // A local binding with a property that reaches a local, then a nested function and a lambda.
     CHECK(dump.contains("  (binding timing\n    (field time : float)\n    (property phase => (call:infix * t "
                         "num:0.5)))\n"));
-    CHECK(dump.contains("  (fun weight (params (field l : light)) -> float => "));
+    CHECK(dump.contains("  (fun weight (params (field l : light)) => "));
     CHECK(dump.contains("  (let contribution = (lambda (params (field l)) => "));
     CHECK(dump.contains("      (branch (call:infix >= bounce max_bounces) => (break total))"));
     CHECK(dump.contains("(chain num:0.0 <= (call:paren (member brdf luminance) total) < num:1.0)"));

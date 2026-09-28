@@ -5,6 +5,7 @@
 #include <clean-core/error/result.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
+#include <shaped-graphics-language/check/footprint.hh>
 #include <shaped-graphics-language/check/symbols.hh>
 
 /// What the host side of one SGL source is generated from: its binding groups, its pipeline-edge structs and its entry points.
@@ -20,9 +21,9 @@ enum class sgl::described_member_kind : sgl::u8
     constant,
     /// A `buffer[T]`, which the host binds as a resource of its own.
     buffer,
-    /// A sampled texture, `texture2d[float4]` or a depth texture.
+    /// A sampled texture, `texture_2d[float4]` or a depth texture.
     texture,
-    /// A storage texture, `out image2d[.rgba8_unorm]`.
+    /// A storage texture, `out image_2d[.rgba8_unorm]`.
     image,
     /// A sampler: one the host binds, or a static one of the group, which carries `sampler_state`.
     sampler,
@@ -49,16 +50,16 @@ struct sgl::described_binding_member
 {
     cc::string name;
     described_member_kind kind = described_member_kind::constant;
-    /// A constant's type, a buffer's element, and any other resource's whole spelling: `out image2d[.rgba8_unorm]`.
+    /// A constant's type, a buffer's element, and any other resource's whole spelling: `out image_2d[.rgba8_unorm]`.
     cc::string type;
-    /// A resource the shader may write: `mut buffer[T]`, or an `out` or `mut` image.
-    bool is_mut = false;
     /// A constant's byte offset in its block; -1 for a resource.
     i32 offset = -1;
     /// A constant's size in bytes; 0 for a resource.
     i32 size = 0;
     /// A resource's position among its binding's resources; -1 for a constant.
     i32 slot = -1;
+    /// A buffer's bytes per element, by the storage rule; 0 for every other kind.
+    i32 stride = 0;
     /// What the host binds a resource by, `binding.member`; empty for a constant.
     /// slib renames the compiled shader's reflected binding to it, so it is the name sg sees.
     cc::string host_name;
@@ -68,9 +69,10 @@ struct sgl::described_binding_member
     cc::string texture_dimension;
     /// A texture's `sg::texture_sample_type`: `filterable_float`, `depth`, ….
     cc::string sample_type;
-    /// An image's `sg::pixel_format` and `sg::storage_access`: `rgba8_unorm`, `write`.
-    cc::string storage_format;
-    cc::string storage_access;
+    /// An image's `sg::pixel_format`: `rgba8_unorm`.
+    cc::string image_format;
+    /// Every resource's `sg::access_mode`: `read`, `write` or `read_write`.
+    cc::string access;
     /// A sampler's `sg::sampler_binding_type`: `filtering`, `non_filtering` or `comparison`.
     cc::string sampler_type;
     /// A static sampler of the group; absent for one the host binds.
@@ -115,6 +117,28 @@ struct sgl::described_struct
     cc::string shape;
 };
 
+/// One field of a struct in GPU memory, where the struct's address space places it.
+struct sgl::described_memory_member
+{
+    cc::string name;
+    cc::string type;
+    i32 offset = 0;
+    i32 size = 0;
+};
+
+/// A struct that stands in GPU memory, placed by the rule of the one address space it is in (the spec's layout rules).
+/// A struct in both a constant block and a storage buffer is `layout-conflict`, so each has exactly one layout.
+struct sgl::described_memory_struct
+{
+    cc::string name;
+    /// `constants` or `storage`.
+    cc::string space;
+    /// Where the last member ends; a buffer of it strides by this.
+    i32 size = 0;
+    /// Without a void member, which takes no room.
+    cc::vector<described_memory_member> members;
+};
+
 struct sgl::described_entry_point
 {
     cc::string name;
@@ -123,6 +147,10 @@ struct sgl::described_entry_point
     i32 workgroup[3] = {1, 1, 1};
     /// The binding list in the order written, which is the order of the pipeline layout's groups with any `@inline` one last.
     cc::vector<cc::string> bindings;
+    /// The `sg::feature`s a device needs to run it, by name, in the enum's order.
+    cc::vector<cc::string> features;
+    /// What its code does to each binding it lists, a slot it never touches left out (the spec's bindings file, "Footprint").
+    cc::vector<check::slot_footprint> footprint;
 };
 
 /// One field of a pipeline's description, as the check pass resolved it.
@@ -154,13 +182,15 @@ struct sgl::described_pipeline
     cc::string target_set;
     /// The members of `target_set`, in location order.
     cc::vector<cc::string> targets;
+    /// What its stages need of a device together, as `described_entry_point::features`.
+    cc::vector<cc::string> features;
     /// In the order they apply, each over the ones before it.
     cc::vector<described_pipeline_setting> settings;
     /// The paths the host states at acquire, whose last setting is `.host`, in the order first set so.
     cc::vector<cc::string> open;
     /// What the host's generated code is built against, one `key = value` line each, in a fixed order:
-    /// the layout, the inline constants, the vertex input and the target set, each as `name@shape`, then the last
-    /// setting of every format and of the sample count.
+    /// the layout, the inline constants, the vertex input and the target set, each as `name@shape`, then `features`,
+    /// then the last setting of every format and of the sample count.
     /// A build bakes these, and a hot reload that finds any of them changed keeps what it had.
     cc::vector<cc::string> frozen;
 };
@@ -170,6 +200,8 @@ struct sgl::module_description
     /// In source order.
     cc::vector<described_binding> bindings;
     cc::vector<described_struct> structs;
+    /// Every struct a binding places in GPU memory, each after every struct it holds.
+    cc::vector<described_memory_struct> memory_structs;
     cc::vector<described_entry_point> entry_points;
     cc::vector<described_pipeline> pipelines;
 };

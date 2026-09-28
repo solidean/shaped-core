@@ -32,7 +32,8 @@ namespace sgl::check
 /// - X5: a leave or a continue that crosses a `once` or a loop sets a flag and breaks; the flag is tested after each crossed construct.
 ///
 /// Every name it introduces comes from the entry point's mint.
-/// A tree that is core already comes back unchanged, and a `once` or a `break` of the input is read as a block and a leave.
+/// A tree that is core already comes back meaning the same, and a `once` or a `break` of the input is read as a block and a leave.
+/// What comes back is compacted: every node is reachable from the body, and every expression has one parent.
 /// Total: a malformed tree gives a tree, which `find_core_violation` may still refuse.
 /// `m` must be the module `e` stands in, and it must declare `bool` for a flag to have a type.
 [[nodiscard]] flat_entry_point legalize(checked_module const& m,

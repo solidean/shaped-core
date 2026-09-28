@@ -98,8 +98,16 @@ Not preferences that decide a case — options the maintainer wants **beside the
   The counter-proposal was "the driver may hold tags, or the child may, never both": deadlock-free by the same argument top-level exclusion is, and relaxable later.
   **It loses on a high-level wrapper's public surface**, where the maintainer wants the complete shape on day one: "if we don't have api for this day 1 we might have friction adding it in the future".
   Inside that surface, where a relaxation reaches no caller, the strict rule was still the one chosen — ratios as named presets, a free ratio left to add later.
+  **It also loses where it breaks the one model a design is built on.**
+  A design for SGL's calls recommended that a free call `foo(a)` not search the type scope of `a`, on C++'s ADL record.
+  The answer was yes: free and dot calls are then stylistic choices, so a generic function never favours one spelling to stay general.
+  In the maintainer's words, "the language will be in beta for some time … we don't need to design as defensive as the C++ standard right now".
+  Price the strict option against the model's consistency, and not only against what it would cost to relax later.
 - **Deleting a legacy spelling, beside accommodating it.**
   When a new design has to grow a rule only to keep an old spelling working, ask whether the spelling is needed at all; removing it deletes the question along with the rule.
+  **The same holds for a convenience a finding runs into.**
+  SGL read a bare field name in a method through `self`, and two lookups that start from a name skipped the receiver, so `frame.x` found a binding.
+  The fix offered was to route both through the receiver; the answer was to require `self.` and delete the convenience, which removed the bug and every lookup that would have had to remember it.
 
 ## A PR arrives red, and fixing it is the review's job
 
@@ -167,6 +175,12 @@ The **highest-value-per-effort** category, because it is what the GitHub diff vi
   The change that falsified them never touched the line.
   When a change adds the Nth member of a set, grep the old cardinality across the subsystem before reading anything else.
   Adding deflate beside zstd and lz4 left four such sentences wrong, three in files the branch itself edited.
+  **The fix is to drop the count, not to update it.** Say what kinds of member there are, name one as an example, and claim no exhaustiveness.
+  A review once recommended turning sg's "three such forms" into an exact list of what each backend judges, and got this back:
+
+  ```raw
+  do we really want to enumerate them explicitly here? we might get different backends in the future. [...] why commit to a number that becomes stale in the comment? why not just say some features are runtime grants by a backend, some are currently something a backend cannot grant at all and might even refuse to generate the shader for. name an example. but dont claim exhaustiveness
+  ```
 - **"The only X" is a count too.** *The only*, *the single exception*, *nothing else* read as emphasis and are arithmetic, and a reader uses them to stop looking.
   Enumerate on the way past — whether you are reading one in the branch or about to write one in the comment.
 
@@ -239,6 +253,18 @@ A pointer says the same as a block quote, and the block quote is what turns "you
 - **Exceptions are for infrequent failures that must bubble past frames that cannot help** — a device reset, an allocation the subsystem above can recover from.
 
 Look for **an assert on anything from outside the program** — a file, a shader, a device — and for **a fallible operation offering only one surface**.
+**A shader is outside the program because hot reload changes it under a running one.**
+A design review recommended asserting when a dispatch declared an array write that the shader's reflected footprint rules out, and the answer was:
+
+```raw
+careful about the last one: it must only log, not assert. imagine you comment out the write during hot reload - you do NOT want that to tear down the program due to that.
+```
+
+The same answer turned an existing assert into a log: a missing declaration logs an error and falls back to a conservative barrier.
+So a check whose outcome a shader edit can flip logs and degrades safely, and only a check on the host's own code may assert.
+**A read of diagnostics never asserts either**, even on a real misuse.
+A review proposed asserting when a caller indexed a stat the backend does not count, and the answer was "metric reads tearing down programs is nasty".
+`is_counted` documents the trap, and a HUD reading a zero is harmless.
 The house pattern is a `try_*` fallible core plus a thin throwing façade.
 
 ### A 64-bit hash is not an identity
@@ -263,11 +289,34 @@ The TODO settles that the capability is missing; it usually leaves open what hap
 Per-permutation samplers let the first permutation claim a register for the whole pipeline, and the TODO recorded it honestly.
 Asserting on a *conflicting* claim costs nothing and turns an unexplainable image into a message.
 
+### A construct the language means to grow into is refused as `unsupported-yet`
+
+In SGL, a refusal is a normal error only where the construct will never mean anything.
+Where the intent is to support it later, the refusal is `unsupported-yet`, even when no design for it is written down yet.
+A review recommended refusing an extension written inside a type's block as `member-not-allowed-here`:
+
+```raw
+but we refuse it with unsupported-yet. the intent is later that it attaches to the type. but you only see it if the extension method itself is in scope
+```
+
+Record the intent where the refusal is specified and in the library's TODO, so the next session does not read the refusal as a ban.
+
 ### A design option is priced on the design, never on what is built so far
 
 **What an in-progress implementation happens to support is not an argument for or against a shape.**
 Recommending free functions over methods because the checker had no method calls yet was called "a bad habit": "we can postpone or stub if we want to use things that are not implemented yet".
 Price each option on the language or API itself, and state the build plan separately: implement, stub behind a marked temporary, or defer.
+
+### A default is priced on the path callers actually take
+
+When generated code states a field on every path, the default only matters where a caller writes the value by hand, and that is the escape hatch rather than the design.
+A binding's `access` defaulting to `read` was raised because a hand-written image binding that forgot it would silently turn read-only:
+
+```raw
+hand-writing bindings is a very uncommon escape hatch. part of sgl's purpose is to auto-gen bindings
+```
+
+Name the default's exposure — which paths leave it unset — before offering to change its type or its value.
 
 ### "No callers in the repo" is not evidence of dead code
 
@@ -299,6 +348,13 @@ there are a few other PRs in the pipeline for more denoisers. I would say we kee
 ```
 
 The correctness half still applies: a field whose presence *changes the meaning* of another input is worth naming even when kept.
+
+**It binds a field frozen into a format as much as one in an API.**
+A shader footprint carried a `dynamic_index` flag nothing read yet, now encoded in the shader cache, and the review recommended dropping it until a reader existed:
+
+```raw
+ehm dont just drop things that are definitely coming up. like that's a really nasty habit to have.
+```
 
 ### Improving HLSL-only machinery waits for the SGL port
 
@@ -502,8 +558,20 @@ The shapes this takes, each seen at least once:
 - **Beware two mechanisms with similar names.** A cache-key claim was true of the DXC compile key and false of the slib asset key, and named neither.
 - **A prescribed drain, wait or guard is a claim about what is outstanding.** "2 async items leaked, settle `background_work`" — the items were stream uploads `background_work` does not cover.
   Name what leaked before naming the remedy.
+- **A comment stating the mechanism is not the line that proves it.** A settle fix was found to hold a lock across continuations.
+  The evidence was the comment above the push loop: "pushing resumes whoever depended on the node".
+  The push only enqueued each dependent on a scheduler.
+  So the deadlock hazard, the "continuations must not block" rule and a per-context guard were all recommended against code that could not reach them.
+  The maintainer's question — "is this something user code commonly needs to abide to" — is what sent the review to `route_after_schedule`, one grep the draft had skipped.
 - **Look for the configuration that makes the race deterministic before writing the item.** A `singlethreaded-*` preset removes exactly the concurrency a one-run finding depends on.
   Two minutes there convert "I saw it once" into a named mechanism.
+
+### A language change is reviewed by running programs against its numbered rules
+
+Where a change comes with a spec of numbered rules, each rule is a claim a ten-line program can check, and reading the checker finds only some of the gaps.
+A review of SGL's call model confirmed nearly all of its defects this way, half of them by an agent told to write a probe per rule and run it.
+The ones reading alone missed were rules applied in one lookup and skipped in another, such as a literal receiver that `foo(2)` converts and `(2).foo()` does not.
+**Pay attention to a probe that "did not check" with no diagnostic**: a test the compiler dropped silently passes every gate that only counts errors.
 
 ### Check whether the code already does the thing you are asking for
 
@@ -557,6 +625,15 @@ A limit derived from the input is worked out against the path just read, and a s
 An allocation ceiling correct for adaptive RLE would have rejected legal old-format files whose flat path expands 4 bytes into 255 pixels.
 The honest conclusion — no linear bound exists, use a sane constant — superseded a recommendation the maintainer had already approved.
 **Catching this after approval is normal; that is what the adversarial pass is for.**
+
+### A summary of what the review landed is checked against its own commits
+
+A `land-changes` comment describes commits the reviewer just wrote, and that is where a summary drifts most.
+The summary is written from what the fix was meant to do, and the commit does slightly less or slightly else.
+One draft said a fix counted "a callee's asserts" when it counted every assert of the run, and said the second of two expectations "always" saw `passed` when that held only if the first was met.
+It also said a doc "no longer" described something that three of its lines still partly did.
+**Read the diff of each commit while writing its bullet, and name every hunk a reader will see.**
+A sort comparator, a `nan` spelling or a nested-test case left out of the comment is a hunk the author cannot account for.
 
 ### A second citation is a second claim
 

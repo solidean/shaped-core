@@ -150,13 +150,7 @@ type_id checker::resolve_buffer(i32 file, ast::expr_id expr, ast::index const& n
     if (element == checked_module::error_type)
         return checked_module::error_type;
 
-    // A struct element needs a layout rule the four targets agree on, which the spec's bindings file leaves open.
-    auto const& info = out.at(element);
-    if (info.kind != type_kind::structure || !sgl::is_valid(out.at(info.symbol).intrinsic_type))
-    {
-        unsupported(file, span_of(file, arguments[0].value), "a buffer of anything but a scalar or a vector");
-        return checked_module::error_type;
-    }
+    // Whether the element can stand in memory is the emitter's to judge, as it is for a block's members.
     return buffer_type(element, false);
 }
 
@@ -174,7 +168,9 @@ type_id checker::resolve_type(i32 file, ast::expr_id expr, function_scope const*
 
     auto const* const n = e.node.try_as<ast::name>();
     auto const resource = n != nullptr ? resolve_resource_name(file, expr, text_of(file, n->where)) : type_id::none;
-    if (resource != type_id::none)
+    if (e.node.is<ast::void_ref>())
+        result = checked_module::void_type;
+    else if (resource != type_id::none)
         result = resource;
     else if (n != nullptr)
     {
@@ -202,7 +198,9 @@ type_id checker::resolve_type(i32 file, ast::expr_id expr, function_scope const*
             else if (kind != symbol_kind::unsupported)
                 report(diagnostic_kind::wrong_kind_of_name, file, where,
                        cc::format("{} is a {}, and a type stands here", text,
-                                  kind == symbol_kind::function ? "function" : "binding"));
+                                  kind == symbol_kind::function   ? "function"
+                                  : kind == symbol_kind::constant ? "const"
+                                                                  : "binding"));
         }
     }
     else if (auto const* const applied = e.node.try_as<ast::index>())
@@ -254,8 +252,9 @@ type_id checker::type_of_builtin(cc::string_view name, i32 file, source_span whe
     if (found != nullptr && !found->empty())
     {
         auto const id = found->front();
-        if (out.at(id).kind == symbol_kind::structure && demand(id, file, where) == symbol_state::checked
-            && is_valid(out.at(id).intrinsic_type))
+        auto const kind = out.at(id).kind;
+        if ((kind == symbol_kind::structure || kind == symbol_kind::enumeration)
+            && demand(id, file, where) == symbol_state::checked && is_valid(out.at(id).intrinsic_type))
             return out.at(id).type;
     }
     report(diagnostic_kind::unknown_name, file, where, cc::format("{}, which the prelude must declare @builtin", name));
@@ -300,11 +299,13 @@ ast::range_of<member_info> checker::compile_members(i32 file,
             out.samplers.push_back(state);
             continue;
         }
-        if (d.node.is<ast::property_decl>())
-            unsupported(file, where, "a property");
-        else if (d.node.is<ast::fun_decl>())
-            unsupported(file, where, "a method");
-        else if (!d.node.is<ast::field_decl>() && !d.node.is<ast::invalid_decl>())
+        // A struct's properties and methods are functions of its type scope, compiled as symbols of their own.
+        auto const is_function = d.node.is<ast::property_decl>() || d.node.is<ast::fun_decl>();
+        if (is_function && !is_struct)
+            unsupported(file, where, d.node.is<ast::property_decl>() ? "a property of a binding" : "a method");
+        // a `require` of a binding is read by compile_binding, and one in a struct was reported by the AST pass
+        else if (!is_function && !d.node.is<ast::field_decl>() && !d.node.is<ast::invalid_decl>()
+                 && !d.node.is<ast::test_decl>() && !d.node.is<ast::require_decl>())
             unsupported(file, where, "this member");
 
         auto const* const line = d.node.try_as<ast::field_decl>();
@@ -325,8 +326,8 @@ ast::range_of<member_info> checker::compile_members(i32 file,
         judge_attributes(file, d.attributes, {}, owner);
         if (f.is_mut)
             unsupported(file, f.name, "a mut member");
-        if (ast::is_valid(f.default_value))
-            unsupported(file, span_of(file, f.default_value), "a default value");
+        if (!is_struct && f.is_named_only)
+            unsupported(file, f.name, "a named-only binding member");
 
         auto is_duplicate = false;
         for (auto const& other : collected)
@@ -342,6 +343,14 @@ ast::range_of<member_info> checker::compile_members(i32 file,
             type = is_struct ? resolve_value_type(file, f.type) : resolve_type(file, f.type);
         else
             report(diagnostic_kind::missing_type, file, f.name, name);
+
+        // CHK-214: a binding member is a slot of the group's layout, and a void one fills none.
+        if (!is_struct && type == checked_module::void_type)
+        {
+            report(diagnostic_kind::type_mismatch, file, span_of(file, f.type),
+                   cc::format("{} is void, and a binding member has to hold something", name));
+            type = checked_module::error_type;
+        }
 
         // CHK-202 and CHK-203: each attribute names what only one kind of member can be.
         auto const* const unfilterable = find_attribute(file, f.attributes, "unfilterable");
@@ -385,7 +394,7 @@ void checker::compile_struct(symbol_id id)
     auto const is_pixel = find_attribute(file, d.attributes, "pixel") != nullptr;
 
     // An edge struct's attributes may be pipeline settings, which every pipeline it is an edge of starts from.
-    cc::string_view const known[] = {"builtin", "vertex", "pixel"};
+    cc::string_view const known[] = {"builtin", "vertex", "pixel", "shadowable", "no_padding"};
     judge_attributes(file, d.attributes, known, "a struct",
                      is_vertex || is_pixel ? setting_scope::description : setting_scope::none);
 
@@ -415,6 +424,7 @@ void checker::compile_struct(symbol_id id)
         .is_opaque = s.is_opaque,
         // A struct has no compute edge: a compute entry point has no stage struct at all.
         .edge = stage_of(is_vertex, is_pixel, false),
+        .is_no_padding = find_attribute(file, d.attributes, "no_padding") != nullptr,
     });
     out.symbols[index_of(id)].type = type;
 }
@@ -426,7 +436,17 @@ void checker::compile_enum(symbol_id id)
     auto const& ast = ast_of(file);
     auto const& e = ast.at(decl).node.as<ast::enum_decl>();
 
-    judge_attributes(file, ast.at(decl).attributes, {}, "an enum");
+    cc::string_view const known[] = {"builtin", "shadowable"};
+    judge_attributes(file, ast.at(decl).attributes, known, "an enum");
+    // A builtin enum is written as its record says, `bool` as the target's bool, and not as the `int` of its cases.
+    if (find_attribute(file, ast.at(decl).attributes, "builtin") != nullptr)
+    {
+        auto const intrinsic = builtins.find_type(out.at(id).name);
+        if (is_valid(intrinsic))
+            out.symbols[index_of(id)].intrinsic_type = intrinsic;
+        else
+            report(diagnostic_kind::unknown_builtin, file, e.name, out.at(id).name);
+    }
 
     auto collected = cc::vector<enum_case_info>();
     auto next_value = cc::optional<i32>(0);
@@ -440,11 +460,9 @@ void checker::compile_enum(symbol_id id)
         if (c == nullptr)
         {
             // A field in an `enum` is a normal error the AST pass already reported (AST-86).
-            if (d.node.is<ast::property_decl>())
-                unsupported(file, where, "a property");
-            else if (d.node.is<ast::fun_decl>())
-                unsupported(file, where, "a method");
-            else if (!d.node.is<ast::field_decl>() && !d.node.is<ast::invalid_decl>())
+            // Its properties and methods are functions of its type scope, compiled as symbols of their own.
+            if (!d.node.is<ast::property_decl>() && !d.node.is<ast::fun_decl>() && !d.node.is<ast::field_decl>()
+                && !d.node.is<ast::invalid_decl>() && !d.node.is<ast::test_decl>())
                 unsupported(file, where, "a declaration in an enum");
             continue;
         }
@@ -503,6 +521,135 @@ void checker::compile_enum(symbol_id id)
     out.symbols[index_of(id)].type = type;
 }
 
+bool checker::is_shadowable_by(i32 file, ast::range_of<ast::attribute> attributes) const
+{
+    auto const* const a = find_attribute(file, attributes, "shadowable");
+    if (a == nullptr)
+        return true;
+    auto const arguments = ast_of(file).at(a->arguments);
+    return !(arguments.size() == 1 && ast::is_valid(arguments[0].value)
+             && text_of(file, span_of(file, arguments[0].value)) == "false");
+}
+
+void checker::judge_shadowing(i32 file, cc::string_view name, source_span where)
+{
+    // CHK-220: a local or a parameter hides a module-level symbol of its name (CHK-54), unless that one says it may not.
+    auto const* const found = names_seen_from(file).get_ptr(name);
+    if (found == nullptr)
+        return;
+    for (auto const s : *found)
+        if (!out.at(s).is_shadowable)
+        {
+            report(diagnostic_kind::shadows_unshadowable, file, where, cc::format("{} is @shadowable(false)", name));
+            return;
+        }
+}
+
+void checker::compile_const(symbol_id id)
+{
+    auto const file = out.at(id).file;
+    auto const decl = out.at(id).declaration;
+    auto const& ast = ast_of(file);
+    auto const& d = ast.at(decl);
+    auto const& c = d.node.as<ast::const_decl>();
+    constexpr auto error_type = checked_module::error_type;
+
+    cc::string_view const known[] = {"shadowable"};
+    judge_attributes(file, d.attributes, known, "a const");
+
+    auto const fail = [&] { out.symbols[index_of(id)].state = symbol_state::failed; };
+    if (!ast::is_valid(c.value))
+    {
+        unsupported(file, c.name, "a const without a value");
+        return fail();
+    }
+
+    // CHK-219: a literal, an enum case or another const, which is all a value known before the program runs is yet.
+    auto const& value = ast.at(c.value);
+    auto const where = span_of(file, c.value);
+    auto info = constant_info{.symbol = id};
+    auto is_negated = false;
+    auto literal = c.value;
+    if (auto const* const call = value.node.try_as<ast::call>();
+        call != nullptr && call->spelling == ast::call_spelling::prefix && sgl::is_valid(call->op)
+        && text_of(file, file_of(file).at(call->op).where) == "-" && ast.at(call->arguments).size() == 1)
+    {
+        is_negated = true;
+        literal = ast.at(call->arguments)[0].value;
+    }
+
+    if (ast::is_valid(literal) && ast.at(literal).node.is<ast::literal>())
+    {
+        auto const text = text_of(file, span_of(file, literal));
+        auto const number = classify_number(text);
+        if (number == number_class::plain_integer && parse_plain_integer(text).has_value())
+        {
+            info.kind = constant_kind::integer;
+            info.integer = is_negated ? -parse_plain_integer(text).value() : parse_plain_integer(text).value();
+            info.type = type_of_builtin(builtins::k_int, file, where);
+        }
+        else if (number == number_class::plain_float && parse_plain_float(text).has_value())
+        {
+            info.kind = constant_kind::real;
+            info.real = is_negated ? -parse_plain_float(text).value() : parse_plain_float(text).value();
+            info.type = type_of_builtin(builtins::k_float, file, where);
+        }
+        else
+        {
+            unsupported(file, where, "a const whose literal is no plain int or float");
+            return fail();
+        }
+    }
+    else if (value.node.is<ast::member>() || value.node.is<ast::name>())
+    {
+        auto scope = function_scope{.file = file};
+        auto const type = check_expr(scope, c.value);
+        if (type == error_type)
+            return fail();
+        auto const& target = out.files[file].target_at(c.value);
+        if (target.kind == target_kind::enum_case)
+        {
+            info.kind = constant_kind::enum_case;
+            info.case_index = target.index;
+            info.type = type;
+        }
+        else if (target.kind == target_kind::symbol && out.at(target.symbol).kind == symbol_kind::constant)
+        {
+            info = out.constants[out.at(target.symbol).info];
+            info.symbol = id;
+        }
+        else
+        {
+            unsupported(file, where, "a const whose value is no literal, no enum case and no const");
+            return fail();
+        }
+    }
+    else
+    {
+        unsupported(file, where, "a const whose value is no literal, no enum case and no const");
+        return fail();
+    }
+    if (info.type == error_type)
+        return fail();
+
+    if (ast::is_valid(c.type))
+    {
+        auto const declared = resolve_value_type(file, c.type);
+        if (declared != error_type && declared != info.type)
+        {
+            tell_apart(report(diagnostic_kind::type_mismatch, file, where,
+                              cc::format("expected {}, got {}", out.name_of(declared), out.name_of(info.type))),
+                       declared, info.type);
+            return fail();
+        }
+    }
+
+    set_type(file, c.value, info.type);
+    out.symbols[index_of(id)].type = info.type;
+    out.symbols[index_of(id)].info = i32(out.constants.size());
+    out.constants.push_back(info);
+}
+
 void checker::compile_binding(symbol_id id)
 {
     auto const file = out.at(id).file;
@@ -510,7 +657,7 @@ void checker::compile_binding(symbol_id id)
     auto const& d = ast_of(file).at(decl);
     auto const& b = d.node.as<ast::binding_decl>();
 
-    cc::string_view const known[] = {"inline"};
+    cc::string_view const known[] = {"inline", "shadowable", "no_padding"};
     judge_attributes(file, d.attributes, known, "a binding");
 
     if (ast::is_valid(b.composition))
@@ -520,7 +667,23 @@ void checker::compile_binding(symbol_id id)
         return;
     }
 
+    // CHK-260: its own `require` lines grant its members what their file does not.
+    auto declared = feature_set();
+    for (auto const member : ast_of(file).at(b.members))
+        if (auto const* const r = ast_of(file).at(member).node.try_as<ast::require_decl>())
+        {
+            judge_attributes(file, ast_of(file).at(member).attributes, {}, "a require");
+            declared |= read_require(file, *r, require_scope::binding, id);
+        }
+
+    // `compile` restores whatever grant was in effect around this binding.
+    auto used = feature_set();
+    granted = declared;
+    used_features = &used;
     auto const members = compile_members(file, b.members, false);
+    granted = {};
+    used_features = nullptr;
+
     auto const is_inline = find_attribute(file, d.attributes, "inline") != nullptr;
     // CHK-205: an `@inline` binding holds constants only, so a static sampler in one has nowhere to go.
     if (is_inline)
@@ -532,7 +695,10 @@ void checker::compile_binding(symbol_id id)
     out.bindings.push_back({
         .symbol = id,
         .is_inline = is_inline,
+        .is_no_padding = find_attribute(file, d.attributes, "no_padding") != nullptr,
         .members = members,
+        .declared = declared,
+        .required = declared | used,
     });
 }
 
@@ -550,20 +716,33 @@ void checker::compile_function(symbol_id id)
     // An entry point's attributes may be pipeline settings, which every pipeline it is a stage of starts from.
     auto const is_raster_entry = find_attribute(file, d.attributes, "vertex") != nullptr
                               || find_attribute(file, d.attributes, "pixel") != nullptr;
-    cc::string_view const known[] = {"builtin", "pure", "operator", "vertex", "pixel", "compute", "stages"};
+    cc::string_view const known[]
+        = {"builtin", "pure", "operator", "vertex", "pixel", "compute", "stages", "shadowable", "expect"};
     judge_attributes(file, d.attributes, known, "a function",
                      is_raster_entry ? setting_scope::description : setting_scope::none);
+    read_footprint_pin(id, file, d.attributes,
+                       is_raster_entry || find_attribute(file, d.attributes, "compute") != nullptr);
 
     if (!f.type_parameters.empty())
     {
         unsupported(file, f.name, "a generic function");
         is_failed = true;
     }
-    if (f.receiver != ast::receiver_kind::none)
+    // CHK-234: `self` is the receiver of a method, a parameter of its type; `mut self` waits for places (CHK-134)
+    auto receiver = checked_module::error_type;
+    if (f.receiver == ast::receiver_kind::mut_self)
     {
-        unsupported(file, f.name, "a function that takes self");
+        unsupported(file, f.name, "mut self");
         is_failed = true;
     }
+    else if (f.receiver == ast::receiver_kind::self && out.at(id).role != function_role::method)
+    {
+        report(diagnostic_kind::wrong_kind_of_name, file, f.name,
+               "self is the receiver of a method, and this function belongs to no type");
+        is_failed = true;
+    }
+    else if (f.receiver == ast::receiver_kind::self)
+        receiver = receiver_of(id);
 
     auto const is_builtin = find_attribute(file, d.attributes, "builtin") != nullptr;
     auto parameters = cc::vector<parameter>();
@@ -572,13 +751,9 @@ void checker::compile_function(symbol_id id)
         auto const name = text_of(file, p.name);
         cc::string_view const known_on_parameter[] = {"thread_id"};
         judge_attributes(file, p.attributes, known_on_parameter, "a parameter");
-        if (p.is_mut)
+        // `mut self` was reported as itself
+        if (p.is_mut && f.receiver != ast::receiver_kind::mut_self)
             unsupported(file, p.name, "a mut parameter");
-        if (ast::is_valid(p.default_value))
-        {
-            unsupported(file, span_of(file, p.default_value), "a default argument");
-            is_failed = true;
-        }
 
         for (auto const& other : parameters)
             if (other.name == name && name != "_")
@@ -589,9 +764,12 @@ void checker::compile_function(symbol_id id)
 
         // CHK-206: a builtin alone may take a resource, and its parameter is then a pattern of one (CHK-207).
         auto type = checked_module::error_type;
+        auto const is_receiver = f.receiver != ast::receiver_kind::none && &p == &ast.at(f.parameters).front();
         if (ast::is_valid(p.type))
             type = is_builtin ? resolve_pattern_type(file, p.type) : resolve_value_type(file, p.type);
-        else if (f.receiver == ast::receiver_kind::none || &p != &ast.at(f.parameters).front())
+        else if (is_receiver)
+            type = receiver;
+        else
             report(diagnostic_kind::missing_type, file, span_of(file, p.form), name);
         is_failed = is_failed || type == checked_module::error_type;
 
@@ -599,6 +777,8 @@ void checker::compile_function(symbol_id id)
         parameters.push_back({.name = name,
                               .type = type,
                               .field = ast::field_id(index),
+                              .has_default = ast::is_valid(p.default_value),
+                              .is_named_only = p.is_named_only,
                               .is_thread_id = find_attribute(file, p.attributes, "thread_id") != nullptr});
     }
 
@@ -641,8 +821,8 @@ void checker::compile_function(symbol_id id)
         }
     }
 
-    // Without `-> T` a block body returns nothing, and an arrow body returns what its expression is.
-    auto result = checked_module::nothing_type;
+    // Without `-> T` a block body returns `void`, and an arrow body returns what its expression is.
+    auto result = checked_module::void_type;
     auto const infers_result = !ast::is_valid(f.return_type) && f.body.kind == ast::body_kind::arrow;
     if (ast::is_valid(f.return_type))
         result = resolve_value_type(file, f.return_type);
@@ -727,6 +907,98 @@ void checker::compile_function(symbol_id id)
         out.symbols[index_of(id)].state = symbol_state::failed;
 }
 
+void checker::compile_constructor(symbol_id id)
+{
+    auto const structure = out.at(id).owner;
+    auto const file = out.at(id).file;
+    auto const where = ast_of(file).at(out.at(structure).declaration).node.as<ast::struct_decl>().name;
+    auto const is_checked = demand(structure, file, where) == symbol_state::checked;
+
+    auto parameters = cc::vector<parameter>();
+    auto result = checked_module::error_type;
+    if (is_checked)
+    {
+        result = out.at(structure).type;
+        for (auto const& m : out.at(out.at(result).members))
+        {
+            auto const& f = ast_of(file).at(m.field);
+            parameters.push_back({.name = m.name,
+                                  .type = m.type,
+                                  .field = m.field,
+                                  .has_default = ast::is_valid(f.default_value),
+                                  .is_named_only = f.is_named_only});
+        }
+    }
+
+    out.symbols[index_of(id)].info = i32(out.functions.size());
+    out.functions.push_back({
+        .symbol = id,
+        .parameters = {.first = u32(out.parameters.size()), .count = u32(parameters.size())},
+        .result = result,
+        .is_pure = true,
+    });
+    out.parameters.push_back_range(parameters);
+    // A construction has no body of its own, so there is nothing to check and nothing to inline.
+    notes.push_back({.is_body_checked = true, .is_body_sound = true});
+    if (!is_checked)
+        out.symbols[index_of(id)].state = symbol_state::failed;
+}
+
+type_id checker::receiver_of(symbol_id id)
+{
+    auto const owner = out.at(id).owner;
+    if (!is_valid(owner))
+        return checked_module::error_type;
+    auto const& o = out.at(owner);
+    auto const& decl = ast_of(o.file).at(o.declaration).node;
+    auto const* const s = decl.try_as<ast::struct_decl>();
+    auto const where = s != nullptr ? s->name : decl.as<ast::enum_decl>().name;
+    if (demand(owner, o.file, where) != symbol_state::checked)
+        return checked_module::error_type;
+    return out.at(owner).type;
+}
+
+void checker::compile_property(symbol_id id)
+{
+    auto const file = out.at(id).file;
+    auto const& d = ast_of(file).at(out.at(id).declaration);
+    auto const& p = d.node.as<ast::property_decl>();
+    judge_attributes(file, d.attributes, {}, "a property");
+
+    // CHK-236: one parameter, `self`, which nobody writes
+    auto const self = receiver_of(id);
+    auto is_failed = self == checked_module::error_type;
+    auto const infers_result = !ast::is_valid(p.return_type);
+    auto result = infers_result ? checked_module::error_type : resolve_value_type(file, p.return_type);
+    is_failed = is_failed || (!infers_result && result == checked_module::error_type);
+    // a member line without a body does not parse as a property, so this is an extension's
+    if (p.body.kind == ast::body_kind::none)
+    {
+        report(diagnostic_kind::expected_body, file, p.name, out.at(id).name);
+        is_failed = true;
+    }
+
+    auto const parameters = cc::vector<parameter>{{.name = "self", .type = self}};
+    out.symbols[index_of(id)].info = i32(out.functions.size());
+    out.functions.push_back({
+        .symbol = id,
+        .parameters = {.first = u32(out.parameters.size()), .count = u32(parameters.size())},
+        .result = result,
+    });
+    out.parameters.push_back_range(parameters);
+    notes.push_back({.infers_result = infers_result});
+
+    // Its value is its result, so a property without `-> T` is checked now, as an arrow body without one is.
+    if (infers_result)
+    {
+        if (!is_failed)
+            check_body(id);
+        is_failed = is_failed || out.functions[out.at(id).info].result == checked_module::error_type;
+    }
+    if (is_failed)
+        out.symbols[index_of(id)].state = symbol_state::failed;
+}
+
 void checker::judge_entry_point(symbol_id id)
 {
     auto const& s = out.at(id);
@@ -750,7 +1022,7 @@ void checker::judge_entry_point(symbol_id id)
     if (info.entry_stage == stage::compute)
     {
         // A compute entry point is dispatched over a grid and hands nothing back.
-        if (info.result != checked_module::nothing_type)
+        if (info.result != checked_module::void_type)
             invalid("a @compute fun returns nothing");
 
         // Its one parameter is the thread id itself, or a struct whose fields are system values.

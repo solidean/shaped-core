@@ -14,6 +14,7 @@ import argparse
 from pathlib import Path
 
 import tools.review as review
+from tools.review.lib.render.markdown import strip_raw
 
 from . import args as a
 from .context import Context
@@ -42,7 +43,7 @@ def find(ctx: Context, name: str) -> tuple[review.Entry, str]:
     for entry in ctx.entries(paths):
         blocks = [b for b in entry.blocks if b.type == ARTIFACT_BLOCK]
         if blocks:
-            holders.append((entry, blocks[-1].prose.strip()))
+            holders.append((entry, strip_raw(blocks[-1].prose.strip())))
 
     if not holders:
         ctx.die(

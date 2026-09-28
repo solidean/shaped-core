@@ -7,7 +7,7 @@ namespace sg::backend::dx12
 {
 class dx12_tlas;
 
-/// Creates the native D3D12 view (CBV / SRV / UAV) for buffer `view` into the CPU descriptor slot `dst`, dispatching on (view.access, view.shape).
+/// Creates the native D3D12 view (CBV / SRV / UAV) for buffer `view` into the CPU descriptor slot `dst`, dispatching on (view.bound_as, view.shape).
 /// The view's buffer must be a dx12_buffer.
 /// This is the point where the erased sg::raw_buffer_view becomes a concrete backend descriptor.
 void create_buffer_view(ID3D12Device* device, sg::raw_buffer_view const& view, D3D12_CPU_DESCRIPTOR_HANDLE dst);

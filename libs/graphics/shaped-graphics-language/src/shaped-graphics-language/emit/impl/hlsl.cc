@@ -130,7 +130,7 @@ public:
     void write_resource(cc::string& out, plan const& p, planned_resource const& b) const
     {
         auto const& t = p.m.at(b.type);
-        auto const format = t.kind == type_kind::image ? k_storage_formats[t.format].spirv : cc::string_view();
+        auto const format = t.kind == type_kind::image ? k_image_formats[t.format].spirv : cc::string_view();
         write_addressed(out, resource_text(p, b.type), b.name, register_class_of(t), b.group, b.slot, format);
     }
 
@@ -188,8 +188,7 @@ public:
     void write_declarations(cc::string& out, plan const& p) const override
     {
         write_enum_constants(out, p, *this);
-        write_buffers(out, p, *this);
-
+        // A struct stands ahead of the groups, whose blocks and buffers may hold it.
         for (auto const& s : p.structs)
         {
             out.appendf("struct {}\n{{\n", s.name);
@@ -197,6 +196,8 @@ public:
                 write_member(out, &s, member, p);
             out += "};\n\n";
         }
+        write_buffers(out, p, *this);
+
 
         if (!p.constants.has_value())
             return;

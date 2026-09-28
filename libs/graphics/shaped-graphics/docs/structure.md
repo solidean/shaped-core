@@ -117,7 +117,7 @@ src/shaped-graphics/
     texture_traits.hh             [done]        compile-time shape (dimension / array / cube / multisampled) + view-factory parameter bags
     texture_descriptions.hh       [done]        shape-specific description structs feeding the typed create_texture_* calls
     texture_region.hh             [done]        a texel box within one subresource, for host↔device copies
-    views.hh                      [in progress] typed buffer views (uniform/readonly/readwrite<T>, byte=raw) + the erased raw_view;
+    views.hh                      [in progress] typed buffer views (constants/readonly/readwrite<T>, byte=bytes) + the erased raw_view;
                                                 texture SRV/UAV + render_target / depth_stencil views; texel buffer views deferred
     vertex_buffer_view.hh         [done]        buffer + byte range + stride
     index_buffer_view.hh          [done]        buffer + index_format + byte range
@@ -236,11 +236,14 @@ raytracing pipeline  [in progress]  raytracing_pipeline + shader table + cmd.ray
 gpu queries          [in progress]  cmd.query.record_gpu_timestamp -> gpu_timestamp; pooled query heaps leased
                                   per list, one batched inline readback per heap at submit; real on all three
                                   backends. Deferred: occlusion + pipeline-statistics queries
-gpu metrics          [in progress]  ctx.query_gpu_memory -> { budget, usage } and adapter().dedicated_video_memory_bytes;
-                                  dx12 QueryVideoMemoryInfo, vulkan VK_EXT_memory_budget. ctx.read_gpu_counters +
+gpu metrics          [in progress]  ctx.metrics.query_gpu_memory -> { budget, usage } and adapter().dedicated_video_memory_bytes;
+                                  dx12 QueryVideoMemoryInfo, vulkan VK_EXT_memory_budget. ctx.metrics.read_gpu_counters +
                                   sg::gpu_load_sampler -> busiest engine; Windows reads the GPU Engine perf counters
                                   through PDH. sg.gpu stamps a recording. Deferred: gpu_busy_percent on Linux and
                                   IOKit on macOS, where the counters still refuse
+stats                [done]         ctx.metrics.stats -> sg::stats, monotone i64 totals per sg::stat on every backend:
+                                  work, submits, barriers as emitted, transfer bytes per path, creations, GPU waits.
+                                  A list counts at submit; advance_epoch records each epoch's change into cc::rec
 swapchain / surface  [in progress]  ctx.create_swapchain -> sg::swapchain (acquire_backbuffer -> render_target_view;
                                   present via ctx.submit_command_list_and_present; once-per-epoch auto-resize;
                                   vsync/immediate; HDR flag); dx12 real (IDXGISwapChain3 flip model, back buffers as

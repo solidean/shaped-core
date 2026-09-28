@@ -41,6 +41,8 @@ One-liner per library:
   It takes `babel-data` rather than all of babel for a reason of its own: every `*-test` binary links nexus, so a nexus dependency is a repo-wide tax and only externals-free libraries belong there.
 * **`libs/base/typed-geometry`** — strongly-typed C++23 math & geometry.
   The `scalar_traits` seam, `vec`/`pos`/`comp`/`bivec`/`mat`/`quat` and the first `geometry/` primitives exist.
+  So does `tg::fixed_int<Bits>` (`fi128`, `fi192`, …): wrapping two's-complement integers for exact predicates, with `tg::mul<fi192>(a, b)`-style arithmetic across widths.
+  Up to 256 bits that arithmetic is loop-free, from a committed generator.
   Everything above them — transforms, queries, curves, symbolic, mesh — is planned.
   Namespace `tg`. Depends on clean-core.
   Early stage — see its [docs/structure.md](libs/base/typed-geometry/docs/structure.md) roadmap.
@@ -100,11 +102,16 @@ One-liner per library:
 * **`libs/graphics/shaped-shader-compiler-dxc`** — a lean DXC wrapper: HLSL → `sg::compiled_shader` (bytecode + reflection), plus an async content-keyed cache.
   Namespace `ssc::dxc`. Depends on shaped-graphics.
   Windows-only, and built only once `extern/dxc` has fetched DXC.
+* **`libs/graphics/shaped-shader-compiler-msl`** — the Metal wrapper: MSL → `sg::compiled_shader` (a metallib, or MSL source where Apple's separately-installed Metal toolchain is absent).
+  Reflection reads the source text, because a metallib carries none and Metal's own reflection needs a device and a built pipeline.
+  Namespace `ssc::msl`. Depends on shaped-graphics.
+  Apple-only, and built there **unconditionally** — the toolchain is a run-time lookup rather than a configure gate, since one arm needs no toolchain at all.
 * **`libs/graphics/shaped-shader-library`** — shader packages + hot reloading:
   any target declares its shaders via `sc_add_shader_package` and gets typed C++ symbols; `acquire(ctx)` returns bytecode in a format that context accepts.
-  A package is written in HLSL, WGSL or **SGL**, and an SGL package is one source for dx12, vulkan and webgpu.
-  `slib::create_sgl_compiler(inner)` is that edge: sgl's pipeline as `preprocess`, then the DXC or WGSL compiler that was there already.
-  Namespace `slib`. Depends on shaped-graphics, plus shaped-graphics-language privately and shaped-shader-compiler-dxc where DXC exists — **sg does not depend on it**.
+  A package is written in HLSL, WGSL, MSL or **SGL**, and an SGL package is one source for dx12, vulkan, webgpu and metal.
+  `slib::create_sgl_compiler(inner)` is that edge: sgl's pipeline as `preprocess`, then the DXC, WGSL or metal compiler that was there already.
+  Namespace `slib`. Depends on shaped-graphics, plus shaped-graphics-language privately.
+  The compiler edges are optional: shaped-shader-compiler-dxc where DXC exists, shaped-shader-compiler-msl on Apple — **sg does not depend on it**.
 * **`libs/graphics/shaped-rendering`** — concrete render routines on top of sg's routine framework (mipmap gen, tonemapping, texture compression, …).
   Namespace `sr`. Depends on shaped-graphics + shaped-shader-library (routines acquire their shaders through it), plus the vendored `imgui` bundle (Dear ImGui + ImPlot + ImGuizmo).
   Hosts the **Dear ImGui renderer** (`sr::imgui_context` + `sr::imgui_routine`), drawn entirely through sg — see [docs/imgui.md](libs/graphics/shaped-rendering/docs/imgui.md).
@@ -115,12 +122,15 @@ One-liner per library:
   **That fetch is on request and nothing performs it for you** — `uv run extern/dlss/fetch-dlss.py` — because its license is NVIDIA's rather than one a build accepts on anyone's behalf.
 * **`libs/graphics/shaped-graphics-language`** — SGL, our own shading language, and its whole toolchain in one library: compiler, linter, formatter, language server.
   One `.sgl` source compiles to readable shader text for dx12, vulkan, webgpu and metal, and slib's SGL compiler edge is what calls it.
-  [examples/graphics/sgl-cube](examples/graphics/sgl-cube/shaders/cube.sgl) draws one on dx12, vulkan and webgpu; the metal text has met no Metal compiler yet.
+  [examples/graphics/sgl-cube](examples/graphics/sgl-cube/shaders/cube.sgl) draws one on dx12, vulkan, webgpu and metal, from that one source.
   **To write SGL**: [docs/spec/](libs/graphics/shaped-graphics-language/docs/spec/_index.md) is the language.
   `uv run dev.py run sgl -- emit <file> --entry <name> --target <t>` shows what a shader becomes.
+  **A rule of the language is tested as a `test` in a corpus file** under `tests/corpus/`, run by `uv run dev.py run sgl -- test <file>`; a C++ `TEST` is for what SGL cannot say yet.
   The compiler carries a deliberately thin slice of the language so far, and everything else is the one diagnostic `unsupported-yet`, never a guess.
   **To work on the compiler**: [docs/architecture.md](libs/graphics/shaped-graphics-language/docs/architecture.md) is the map.
   `prelude/builtins.sgl` is generated from the C++ builtin registry and checked by `dev.py check`, so never edit it by hand.
+  **`sgl lsp` is the language server**, a shallow shim that translates what the library answers into LSP; the VS Code extension in `tools/vscode-extension/` is its client.
+  [docs/lsp.md](libs/graphics/shaped-graphics-language/docs/lsp.md) is its design.
   Namespace `sgl`. Depends on clean-core alone, which must stay so: an editor links it to parse.
   Early stage.
 * **`libs/graphics/shaped-viewer`** — professional, RTX-enabled visualization renderer with a dev-friendly API.
@@ -250,6 +260,9 @@ The loop is **run `dev.py`, then diagnose with `repo_tools`** — `build_diag` a
   OFF points it at `cc::system_memory_resource` and links no mimalloc, which is what lets a sanitizer see through our allocations — so the `sanitize-*` presets set it OFF.
   Independent of `SANITIZE`, and no API or layout changes with it; only in-place resize does, since the system resource always declines.
   See [docs/platforms.md](docs/platforms.md#default-allocator-sc_mimalloc).
+* `SC_CHECK_WIDE_ARITH` (default OFF) checks typed-geometry's `fixed_int` claims — a result width, a shift amount — at runtime → `TG_CHECK_WIDE_ARITH`.
+  Off by default because they sit in predicate hot loops; the `debug-nopch` presets turn it on, so `check` exercises it.
+  See [docs/platforms.md](docs/platforms.md#wide-arithmetic-checks-sc_check_wide_arith).
 
 ---
 
@@ -442,6 +455,7 @@ A stale "no cc:: equivalent yet" reason sends the next author back to the old wa
 | Run pre-commit checks            | `uv run dev.py check --fix`                                       |
 | Re-check an already-made commit  | `uv run dev.py check --commit <rev>` (a range works too; a single commit means its first-parent diff, so a merge yields all it brought in) |
 | Sanity-check the toolchain       | `uv run dev.py doctor`                                            |
+| Install a repo tool into your editor | `uv run dev.py install` (lists them; `install sgl-vscode` links the SGL extension) |
 | List presets / targets           | `uv run dev.py list-presets` / `list-targets`                     |
 | Pin a compiler version           | `uv run dev.py build --toolset <ver>` (`list-toolsets` shows them) |
 | Review a PR, a branch or a design | `uv run review.py init <name> --range A..B --goal <goal>` ([readme](tools/review/readme.md); the `reviewing-a-pr` skill drives it) |

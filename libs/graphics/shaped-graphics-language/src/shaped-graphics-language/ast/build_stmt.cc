@@ -112,7 +112,8 @@ stmt_id builder::expression_statement(form_id form)
     auto const has_effect = is_application || node.is<return_expr>() || node.is<yield_expr>() || node.is<break_expr>()
                          || node.is<continue_expr>() || node.is<case_expr>() || node.is<loop_expr>()
                          || node.is<with_bindings>() || node.is<invalid_expr>();
-    if (!has_effect)
+    // AST-140: in a test a line of type `bool` is a check, and only the check pass knows a line's type.
+    if (!has_effect && !is_in_test_body())
         report(diagnostic_kind::no_effect, form);
     return make_stmt(form, attributes, expr_stmt{.value = value});
 }

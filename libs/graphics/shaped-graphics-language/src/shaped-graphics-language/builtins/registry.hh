@@ -154,7 +154,7 @@ struct sgl::builtins::function_record
     /// Read back from the signature by `finalize`.
     cc::string name;
     /// Each parameter's type as the signature spells it: a builtin type's name, or a resource pattern such as
-    /// `out image2d[float4]`, which the check pass matches by the same spelling.
+    /// `out image_2d[float4]`, which the check pass matches by the same spelling.
     cc::vector<cc::string> parameters;
     /// `none` for a function that gives nothing, which only one with an effect can be.
     builtin_type_id result = builtin_type_id::none;
@@ -224,6 +224,7 @@ namespace sgl::builtins
 /// The names of the types the compiler itself needs: a literal's type, a condition's, a clip-space position's.
 constexpr cc::string_view k_float = "float";
 constexpr cc::string_view k_int = "int";
+constexpr cc::string_view k_uint = "uint";
 constexpr cc::string_view k_bool = "bool";
 constexpr cc::string_view k_hpos4 = "hpos4";
 

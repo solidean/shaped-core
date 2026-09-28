@@ -37,14 +37,6 @@ namespace
     return MTL::LoadActionLoad;
 }
 
-/// What happens to an attachment at pass end.
-///
-/// `discard` means the contents are undefined afterwards, so there is nothing to store — which on a tiler is a real
-/// bandwidth saving rather than bookkeeping.
-[[nodiscard]] MTL::StoreAction store_action_of(sg::target_op op)
-{
-    return op == sg::target_op::discard ? MTL::StoreActionDontCare : MTL::StoreActionStore;
-}
 } // namespace
 
 metal_command_list::metal_command_list(metal_context& ctx,
@@ -360,6 +352,8 @@ void metal_command_list::flush_barriers()
     // publishes rather than leaving it to the end of the list.
     // So a mask clamping to nothing here is not a lost dependency: it is one the boundary pair already covers.
     ++_barriers_emitted;
+    _stats.add(sg::stat::global_barriers);
+    _stats.add(sg::stat::barrier_calls);
 
     if (_render_encoder == nullptr)
     {
@@ -737,11 +731,11 @@ void metal_command_list::compute_dispatch(int x, int y, int z)
 
     // Everything the bound groups name is read by this dispatch, so it is declared now rather than at bind time: a
     // group bound and then rebound before any dispatch never ran, and should leave no barrier behind.
-    declare_bound_groups(sg::pipeline_stage_flag::compute);
+    declare_bound_groups(sg::pipeline_stage_flag::compute, &_bound_compute->footprint());
 
     // The array bindings are declared from what the caller said rather than from what is bound, and they join the
     // same flush so one op emits one barrier.
-    declare_array_accesses();
+    declare_array_accesses(&_bound_compute->footprint(), _bound_compute, sg::pipeline_stage_flag::compute);
     flush_barriers();
 
     auto const size = _bound_compute->workgroup_size();
@@ -837,17 +831,22 @@ void metal_command_list::compute_declare_array_texture_access(cc::string_view bi
     _pending_array_texture_declares.push_back(cc::move(declare));
 }
 
-void metal_command_list::declare_array_accesses()
+void metal_command_list::declare_array_accesses(sg::impl::pipeline_footprint const* footprint,
+                                                void const* pipeline,
+                                                sg::pipeline_stage_flags op_stages)
 {
+    // Which elements of an array a shader indexes cannot be inferred, so the caller declares them per dispatch.
+    // How those declarations meet what the code does to the array is sg::impl::plan_array_declarations' to decide.
     auto const find_array = [&](cc::string_view name, bool want_texture) -> metal_binding_group::array_binding const*
     {
-        for (auto const& slot_arrays : _group_arrays)
-            for (auto const& array : slot_arrays)
+        for (auto group = 0; group < int(sg::max_binding_groups); ++group)
+            for (auto const& array : _group_arrays[group])
                 if (array.name == name && array.is_texture == want_texture)
                     return &array;
         return nullptr;
     };
 
+    // A mistake in the host's own declarations asserts, whatever the code does with the array.
     for (auto const& declare : _pending_array_buffer_declares)
     {
         auto const* const array = find_array(declare.name, false);
@@ -855,12 +854,10 @@ void metal_command_list::declare_array_accesses()
         for (auto const& e : declare.elements)
         {
             CC_ASSERT(e.index >= 0 && e.index < array->elements.size(), "declared array element index out of range");
-            auto const& element = array->elements[e.index];
-            CC_ASSERT(!element.is_vacant(), "declared array element is vacant (nothing is bound there)");
-            declare_buffer(element.buffer, e.stages, e.access);
+            CC_ASSERT(!array->elements[e.index].is_vacant(), "declared array element is vacant (nothing is bound "
+                                                             "there)");
         }
     }
-
     for (auto const& declare : _pending_array_texture_declares)
     {
         auto const* const array = find_array(declare.name, true);
@@ -868,39 +865,75 @@ void metal_command_list::declare_array_accesses()
         for (auto const& e : declare.elements)
         {
             CC_ASSERT(e.index >= 0 && e.index < array->elements.size(), "declared array element index out of range");
-            auto const& element = array->elements[e.index];
-            CC_ASSERT(!element.is_vacant(), "declared array element is vacant (nothing is bound there)");
-            declare_texture(element.texture, e.stages, e.access);
+            CC_ASSERT(!array->elements[e.index].is_vacant(), "declared array element is vacant (nothing is bound "
+                                                             "there)");
         }
     }
 
-#if CC_ASSERT_ENABLED
-    // The other direction of the same accounting: an array binding nobody declared is an error rather than "no
-    // access", because its elements are otherwise tracked by nothing at all.
-    // An empty span is how a caller says a bound array is unused by this op.
-    for (auto const& slot_arrays : _group_arrays)
-        for (auto const& array : slot_arrays)
+    // An MTL4 barrier names stages and never a resource, so covering every element still costs one barrier.
+    for (auto group = 0; group < int(sg::max_binding_groups); ++group)
+        for (auto const& array : _group_arrays[group])
         {
-            auto declared = false;
+            auto declared = sg::impl::array_declarations();
+            auto const gather = [&](auto const& declares)
+            {
+                for (auto const& declare : declares)
+                    if (declare.name == array.name)
+                    {
+                        declared.named = true;
+                        for (auto const& e : declare.elements)
+                        {
+                            declared.any_element = true;
+                            declared.access |= e.access;
+                        }
+                    }
+            };
             if (array.is_texture)
-            {
-                for (auto const& declare : _pending_array_texture_declares)
-                    declared |= declare.name == array.name;
-            }
+                gather(_pending_array_texture_declares);
             else
+                gather(_pending_array_buffer_declares);
+
+            auto use = cc::optional<sg::impl::slot_use>();
+            if (footprint != nullptr && footprint->is_known())
+                use = footprint->use_of(group, array.binding);
+            auto const plan
+                = sg::impl::plan_array_declarations(pipeline, array.name, use, array.bound_as, op_stages, declared);
+
+            switch (plan.how)
             {
-                for (auto const& declare : _pending_array_buffer_declares)
-                    declared |= declare.name == array.name;
+            case sg::impl::array_plan::mode::skip:
+                break;
+            case sg::impl::array_plan::mode::as_declared:
+                if (array.is_texture)
+                {
+                    for (auto const& declare : _pending_array_texture_declares)
+                        if (declare.name == array.name)
+                            for (auto const& e : declare.elements)
+                                declare_texture(array.elements[e.index].texture, e.stages, e.access | plan.widen_by);
+                }
+                else
+                {
+                    for (auto const& declare : _pending_array_buffer_declares)
+                        if (declare.name == array.name)
+                            for (auto const& e : declare.elements)
+                                declare_buffer(array.elements[e.index].buffer, e.stages, e.access | plan.widen_by);
+                }
+                break;
+            case sg::impl::array_plan::mode::cover_all:
+                for (auto const& element : array.elements)
+                {
+                    if (element.buffer != nullptr)
+                        declare_buffer(element.buffer, plan.cover_stages, plan.cover_access);
+                    else if (element.texture != nullptr)
+                        declare_texture(element.texture, plan.cover_stages, plan.cover_access);
+                }
+                break;
             }
-            CC_ASSERT(declared, "a bound array binding has no declare_array_*_access for this dispatch "
-                                "(declare an empty span if it is unused)");
         }
-#endif
 
     _pending_array_buffer_declares.clear();
     _pending_array_texture_declares.clear();
 }
-
 
 void metal_command_list::raster_bind_vertex_buffers(int first_slot, cc::span<vertex_buffer_view const> views)
 {
@@ -1007,19 +1040,22 @@ void metal_command_list::raster_draw_indexed(draw_indexed_config const& config)
         NS::Integer(config.vertex_offset), NS::UInteger(config.instance_range.offset));
 }
 
-void metal_command_list::declare_bound_groups(pipeline_stage_flags stages)
+void metal_command_list::declare_bound_groups(pipeline_stage_flags stages, sg::impl::pipeline_footprint const* footprint)
 {
-    // **Each binding is declared under its own access class**, which is what makes a read after a read free.
-    // Declaring `shader_read | shader_write` for everything instead made each op meet the previous one's unordered
-    // write, so a draw loop over one readonly group emitted one barrier per draw.
+    // **Each binding is declared with what the code does to it**, which is what makes a read after a read free and
+    // an untouched binding cost nothing.
+    // Without a footprint that is its view class, as if every writable view were written.
     // libs/graphics/shaped-graphics/docs/concepts/barriers.md is explicit that a bind emits nothing, and that reads do
     // not order against each other.
-    for (auto const& slot_buffers : _group_buffers)
-        for (auto const& bound : slot_buffers)
-            declare_buffer(bound.buffer, stages, sg::shader_access_of(bound.access));
-    for (auto const& slot_textures : _group_textures)
-        for (auto const& bound : slot_textures)
-            declare_texture(bound.texture, stages, sg::shader_access_of(bound.access));
+    for (auto group = 0; group < int(sg::max_binding_groups); ++group)
+    {
+        for (auto const& bound : _group_buffers[group])
+            if (auto const a = sg::access_at(footprint, group, bound.binding, bound.bound_as, stages); a.has_value())
+                declare_buffer(bound.buffer, a.value().stages, a.value().access);
+        for (auto const& bound : _group_textures[group])
+            if (auto const a = sg::access_at(footprint, group, bound.binding, bound.bound_as, stages); a.has_value())
+                declare_texture(bound.texture, a.value().stages, a.value().access);
+    }
 
     // A bound acceleration structure is read and never written by the work that traces it, which is why this one
     // declare is narrower than the two above.
@@ -1048,7 +1084,8 @@ void metal_command_list::declare_raster_draw(bool indexed)
     place_inline_constants();
 
     // The bound groups, keyed to the two stages a draw runs in — the same policy compute_dispatch applies to its own.
-    declare_bound_groups(sg::pipeline_stage_flag::vertex | sg::pipeline_stage_flag::fragment);
+    declare_bound_groups(sg::pipeline_stage_flag::vertex | sg::pipeline_stage_flag::fragment,
+                         _bound_raster != nullptr ? &_bound_raster->footprint() : nullptr);
 
     // **A draw refuses an array binding rather than requiring a declare for it**, because the raster scope has no
     // declare_array_*_access to give one: the pair is on the compute and raytracing scopes alone.
@@ -1106,11 +1143,11 @@ void metal_command_list::open_render_encoder(bool force_load)
     auto const scope = autorelease_scope();
     auto* const descriptor = MTL4::RenderPassDescriptor::alloc()->init();
 
-    // A reopened pass loads and stores whatever the last one left, because the caller's clear or discard already
-    // happened when the scope opened — honouring it again would wipe what the draws before the reopen produced.
+    // A reopened pass loads whatever the last one left, because the caller's clear or discard already happened when
+    // the scope opened — honouring it again would wipe what the draws before the reopen produced.
+    // Every encoder stores: `target_op` says what happens at the scope's start, and a discarded target keeps what it
+    // draws, which a later reopen then loads.
     auto const load_of = [force_load](sg::target_op op) { return force_load ? MTL::LoadActionLoad : load_action_of(op); };
-    auto const store_of
-        = [force_load](sg::target_op op) { return force_load ? MTL::StoreActionStore : store_action_of(op); };
 
     auto width = 0;
     auto height = 0;
@@ -1124,7 +1161,7 @@ void metal_command_list::open_render_encoder(bool force_load)
         attachment->setLevel(NS::UInteger(target.view.range().mip_range.start));
         attachment->setSlice(NS::UInteger(target.view.range().array_range.start));
         attachment->setLoadAction(load_of(target.op));
-        attachment->setStoreAction(store_of(target.op));
+        attachment->setStoreAction(MTL::StoreActionStore);
         attachment->setClearColor(MTL::ClearColor(target.clear_color[0], target.clear_color[1], target.clear_color[2],
                                                   target.clear_color[3]));
 
@@ -1142,7 +1179,7 @@ void metal_command_list::open_render_encoder(bool force_load)
         attachment->setLevel(NS::UInteger(target.view.range().mip_range.start));
         attachment->setSlice(NS::UInteger(target.view.range().array_range.start));
         attachment->setLoadAction(load_of(target.op));
-        attachment->setStoreAction(store_of(target.op));
+        attachment->setStoreAction(MTL::StoreActionStore);
         attachment->setClearDepth(target.clear_depth);
 
         // A combined format is two attachments in Metal's model, where sg names one target.
@@ -1155,7 +1192,7 @@ void metal_command_list::open_render_encoder(bool force_load)
             stencil->setLevel(NS::UInteger(target.view.range().mip_range.start));
             stencil->setSlice(NS::UInteger(target.view.range().array_range.start));
             stencil->setLoadAction(load_of(target.op));
-            stencil->setStoreAction(store_of(target.op));
+            stencil->setStoreAction(MTL::StoreActionStore);
             stencil->setClearStencil(target.clear_stencil);
         }
 
@@ -1211,6 +1248,7 @@ void metal_command_list::reopen_render_encoder()
     _render_encoder = nullptr;
 
     ++_pass_reopens;
+    _stats.add(sg::stat::render_pass_splits);
     open_render_encoder(true);
 
     // Encoder state does not survive the boundary, so everything the scope set is replayed onto the new encoder.
@@ -1377,8 +1415,8 @@ void metal_command_list::raytracing_dispatch_rays(raytracing_shader_table const&
     // The same declare-then-flush rhythm a dispatch uses, at the raytracing stage — a bound TLAS surfaces as
     // accel_read through the group's own declare.
     place_inline_constants();
-    declare_bound_groups(sg::pipeline_stage_flag::raytracing);
-    declare_array_accesses();
+    declare_bound_groups(sg::pipeline_stage_flag::raytracing, &_bound_raytracing->footprint());
+    declare_array_accesses(&_bound_raytracing->footprint(), _bound_raytracing, sg::pipeline_stage_flag::raytracing);
     flush_barriers();
 
     auto* const encoder = compute_encoder();

@@ -198,8 +198,8 @@ void staging_binding_group::write_run(binding_slot slot, int first_element, cc::
 
     for (auto const& view : views)
     {
-        CC_ASSERT(accepts(b.type, view), "staging_binding_group: the bound view does not match the binding's declared "
-                                         "kind");
+        CC_ASSERT(accepts(b, view), "staging_binding_group: the bound view does not match the binding's declared "
+                                    "kind");
 
         // A bound view always carries a resource, since an empty element is cleared rather than bound as a null handle.
         // Visited by arm, so a new raw_view arm has to answer this question rather than fall into a default.

@@ -22,6 +22,19 @@ let d = (..lit, 1)     // does the 1 stay a literal inside the tuple?
 **This needs to propagate through structural types**, which is where the semantics become muddy.
 A tuple that holds a literal has a type that holds a literal type, and what that means when the tuple is stored, passed or compared is not worked out.
 
+**Where the call model already stands.**
+A number literal converts to any numeric type that holds it ([CHK-253](../semantics/checking.md#calls-and-overloads)).
+Leaving its default type is one step of its chain, so the candidate keeping it there is shorter.
+An operator over integer literals alone that only a float operator takes is an error today ([CHK-257](../semantics/checking.md#calls-and-overloads)), which is the error half of the folding below.
+Literal types would refine that rather than replace it.
+
+**Folding what is literal alone.**
+A subtree of number literals and operators, with no call of a function, is folded in the front end into a new literal, and the language guarantees it.
+Anything touching a float literal becomes a float literal.
+`1 / 3` is then an error rather than a silent `0`: it is written `1.0 / 3`, `1 / 3.0` or `(1 as int) / 3`.
+Afterwards "what is the type of `1 + 2`" stops being a question, since no builtin operator ever sees a call of literals alone.
+Nothing folds yet; the folding is meant to run in 64-bit arithmetic first, where a literal is already held, with extended precision as the refinement.
+
 ## What it touches
 
 * The type system: literal types for integers and floats, and the types built from them.
@@ -40,6 +53,5 @@ A tuple that holds a literal has a type that holds a literal type, and what that
 
 * Whether a literal type survives inside a tuple or an object that is bound to a name.
 * What a generic function sees when it is called with a literal.
-* Whether an integer literal coerces to a float type, or only to the integer types.
 * Whether a literal that does not fit the type asked of it is an error at the literal or at the use.
 * The tracer avoids all of it: its shaders write `1.0` where a float is meant.

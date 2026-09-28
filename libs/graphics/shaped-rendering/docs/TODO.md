@@ -12,7 +12,7 @@ Bigger design intent lives in [structure.md](structure.md).
   A tracer that accumulates the second moment would give it a measured per-pixel variance instead, which is what SVGF uses.
 - Port the native denoise members to SGL once it is feature-complete enough for them.
   They are HLSL today, so `sr::query_denoise_support` answers false on webgpu and metal — SGL is what reaches those backends.
-  It also removes the four hand-written "find the uniform_buffer binding" loops the members and the playground example use to build their pipeline layouts.
+  It also removes the four hand-written "find the constants_buffer binding" loops the members and the playground example use to build their pipeline layouts.
   An SGL package generates `inline_binding()` for its constants instead.
 - Two denoise tests worth having and not written yet.
   A method switch on one history — à-trous then SVGF on the same `sr::denoise_history` — which is the one branch of `denoise_history::_prepare` nothing covers.

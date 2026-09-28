@@ -40,6 +40,8 @@ class SglFile:
     path: str
     bindings: list[dict] = field(default_factory=list)
     structs: list[dict] = field(default_factory=list)
+    # The structs its bindings place in GPU memory, each after every struct it holds.
+    memory_structs: list[dict] = field(default_factory=list)
     entry_points: list[dict] = field(default_factory=list)
     pipelines: list[dict] = field(default_factory=list)
 
@@ -69,6 +71,8 @@ class SglEntries:
     vertex_inputs: list[tuple[SglFile, dict]] = field(default_factory=list)
     render_targets: list[tuple[SglFile, dict]] = field(default_factory=list)
     pipelines: list[tuple[SglFile, dict]] = field(default_factory=list)
+    # (file, the described struct) for every struct a generated binding places in GPU memory, innermost first.
+    memory_structs: list[tuple[SglFile, dict]] = field(default_factory=list)
 
 
 def describe(tool: Path, source: Path, shown_as: str) -> SglFile:
@@ -79,7 +83,8 @@ def describe(tool: Path, source: Path, shown_as: str) -> SglFile:
         raise DescriptionError(f"'{shown_as}' does not compile, so nothing is generated from it:\n{said}")
     data = json.loads(result.stdout)
     return SglFile(path=shown_as, bindings=data["bindings"], structs=data["structs"],
-                   entry_points=data["entry_points"], pipelines=data.get("pipelines", []))
+                   memory_structs=data.get("memory_structs", []), entry_points=data["entry_points"],
+                   pipelines=data.get("pipelines", []))
 
 
 def resolve(package: str, entries: list[str], source_dir: Path, tool: Path | None) -> SglEntries:
@@ -109,6 +114,11 @@ def resolve(package: str, entries: list[str], source_dir: Path, tool: Path | Non
             return
         seen.add((kind, *key))
         getattr(out, kind).append(item)
+        # A binding's C++ type names the structs it places in memory, so each of those is generated with it.
+        if kind == "bindings":
+            described = item[0]
+            for s in described.memory_structs:
+                add("memory_structs", (described.path, s["name"]), (described, s))
 
     for entry in entries:
         parts = entry.split(":")

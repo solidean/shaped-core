@@ -93,7 +93,7 @@ This is an experiment that may be built back if it turns out to cost more than i
 
 ## Open
 
-* How the call site marks an argument passed to a `mut` parameter.
+* How the call site marks an argument passed to a `mut` parameter, and whether `mut self` is marked by the dot alone.
 * What a function value is as a type; that it is a compile-time entity is settled in [inferred-comptime.md](inferred-comptime.md).
 * The rules for ray tracing function tables.
 * Whether compile-time functions and `[]` parameters are one mechanism or two.

@@ -59,6 +59,8 @@ enum class sgl::diagnostic_kind : sgl::u8
     expected_member,
     expected_case_arm,
     expected_name,
+    /// A declaration, a field or a parameter named by a reserved name, whose meaning is fixed: `enum void:`.
+    reserved_name,
     expected_pattern,
     expected_parameter,
     expected_body,
@@ -68,6 +70,7 @@ enum class sgl::diagnostic_kind : sgl::u8
     /// The owner has no such member: a method in a `binding`, a field in an `enum`, a case in a `struct`.
     member_not_allowed_here,
     default_not_allowed_here,
+    named_only_not_allowed_here,
     missing_parameter_list,
     signature_out_of_order,
     duplicate_signature_list,
@@ -153,12 +156,40 @@ enum class sgl::diagnostic_kind : sgl::u8
     duplicate_case_pattern,
     /// An arm of a `case` that is a value and that neither produces one nor exits.
     missing_value_in_arm,
-    /// A form some backend lacks, which only a function that opts into its feature may use (the bindings spec, "Features").
+    /// A form some backend lacks, used where no `require` grants its feature.
     needs_feature,
-    /// A function reached from an entry point of a stage its `@stages` leaves out, `DEBUG_sample` in a compute shader.
+    /// A `require` of a name that is no feature a shader can use.
+    unknown_feature,
+    /// An entry point that uses a feature it does not declare: not by its file, a binding it lists, or its own body.
+    feature_not_declared,
+    /// A `require` in a body that nothing needed; a warning.
+    unused_require,
+    /// A function reached from an entry point of a stage its `@stages` leaves out, `sample` in a compute shader.
     stage_not_allowed,
     /// A `pipeline` whose stages do not fit together, or a setting that names no field or has a value it cannot.
     invalid_pipeline,
+    /// A declaration, a local or a parameter whose name would hide a `@shadowable(false)` symbol.
+    shadows_unshadowable,
+    /// A test that reads a parameter, a local or a binding member of the function it stands in; it runs on its own.
+    test_captures_runtime_value,
+    /// A test whose last code line is no check, so it could pass without having checked anything.
+    test_must_end_in_check,
+    /// A test that ran, and did not pass: a false check, a false assert, or a run that ended another way.
+    test_failed,
+    /// An `@expect` whose diagnostic did not occur in its test.
+    unmet_expectation,
+    /// A type scope that holds two kinds of thing under one name: a field and a method, a property and a method.
+    member_name_clash,
+    /// `a.foo` whose target is no property, or `a.foo()` whose target is one.
+    call_spelling,
+    /// A number literal where one type is expected that cannot hold it exactly.
+    literal_not_representable,
+    /// A literal converted to `T` by a function of `T`'s name that returns another type.
+    literal_conversion_result,
+    /// An operator over integer literals alone that only an operator of another type takes: `7 / 2` without an int `/`.
+    literal_needs_type,
+    /// An entry point whose flat tree, with every call inlined, nests deeper than the compiler walks.
+    nesting_too_deep,
 };
 
 namespace sgl
@@ -166,6 +197,10 @@ namespace sgl
 
 /// The stable kebab-case name of a kind, e.g. "undelimited-string".
 [[nodiscard]] cc::string_view to_string(diagnostic_kind kind);
+
+/// One sentence a reader understands without knowing the kind's name, e.g. "a bracket that is opened and never closed".
+/// It is what a diagnostic says when the pass that reported it has no detail of its own.
+[[nodiscard]] cc::string_view summary_of(diagnostic_kind kind);
 
 [[nodiscard]] severity default_severity_of(diagnostic_kind kind);
 

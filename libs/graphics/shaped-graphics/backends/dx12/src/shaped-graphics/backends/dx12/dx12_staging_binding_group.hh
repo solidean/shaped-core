@@ -50,7 +50,7 @@ private:
         dx12_buffer_handle buffer;
         dx12_texture_handle texture;
         sg::subresource_range range;
-        sg::view_class access = sg::view_class::readonly;
+        sg::view_class bound_as = sg::view_class::readonly;
     };
 
     [[nodiscard]] cc::result<cc::unit> initialize();

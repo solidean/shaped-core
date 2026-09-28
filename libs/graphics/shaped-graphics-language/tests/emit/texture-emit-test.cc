@@ -8,9 +8,9 @@ namespace
 /// One of each resource a post-processing pass has: sample a texture, write one image, accumulate into another.
 constexpr cc::string_view k_blur = "binding post:\n"
                                    "    texel_size: float2\n"
-                                   "    src: texture2d[float4]\n"
-                                   "    dst: out image2d[.rgba8_unorm]\n"
-                                   "    acc: mut image2d[.r32_float]\n"
+                                   "    src: texture_2d[float4]\n"
+                                   "    dst: out image_2d[.rgba8_unorm]\n"
+                                   "    acc: mut image_2d[.r32_float]\n"
                                    "    sampler bilinear:\n"
                                    "        filter = .linear\n"
                                    "        address = .clamp_edge\n"
@@ -18,9 +18,9 @@ constexpr cc::string_view k_blur = "binding post:\n"
                                    "@compute(8, 8) fun blur(@thread_id id: int3){post}:\n"
                                    "    let xy = int2(id.x, id.y)\n"
                                    "    let uv = ((xy as float2) + float2(0.5, 0.5)) * post.texel_size\n"
-                                   "    let c = DEBUG_sample_level(post.src, uv, 0.0, post.bilinear)\n"
-                                   "    DEBUG_store(post.dst, xy, c)\n"
-                                   "    DEBUG_store(post.acc, xy, DEBUG_load(post.acc, xy) + c.x)\n";
+                                   "    let c = post.src.sample(uv, post.bilinear, level = 0.0)\n"
+                                   "    post.dst.store(xy, c)\n"
+                                   "    post.acc.store(xy, post.acc.load(xy) + c.x)\n";
 
 cc::string text_of(cc::string_view source, target t)
 {
@@ -90,11 +90,11 @@ TEST("sgl emit - textures, images and a static sampler are resources of the grou
 TEST("sgl emit - each texture shape and depth is its target's own type, and 1D is 2D on WebGPU")
 {
     constexpr auto shapes = "binding set:\n"
-                            "    a: texture1d[float]\n"
-                            "    b: texture2d_array[uint4]\n"
+                            "    a: texture_1d[float]\n"
+                            "    b: texture_2d_array[uint4]\n"
                             "    c: texture_cube[float3]\n"
-                            "    d: texture2d_depth\n"
-                            "    e: image3d[.rgba16_float]\n"
+                            "    d: texture_2d_depth\n"
+                            "    e: image_3d[.rgba16_float]\n"
                             "    f: comparison_sampler\n"
                             "\n"
                             "@compute(1) fun cs(@thread_id id: int3){set}:\n"
@@ -124,7 +124,7 @@ TEST("sgl emit - MSL declines a group of textures as it declines one of buffers"
 TEST("sgl emit - a pixel stage samples with the level its derivatives pick")
 {
     constexpr auto lit = "binding material:\n"
-                         "    albedo: texture2d[float3]\n"
+                         "    albedo: texture_2d[float3]\n"
                          "    smp: sampler\n"
                          "\n"
                          "struct pixel_input:\n"
@@ -135,7 +135,7 @@ TEST("sgl emit - a pixel stage samples with the level its derivatives pick")
                          "    color: float4\n"
                          "\n"
                          "@pixel fun ps(p: pixel_input){material} -> target:\n"
-                         "    let c = DEBUG_sample(material.albedo, p.uv, material.smp)\n"
+                         "    let c = material.albedo.sample(p.uv, material.smp)\n"
                          "    return {color = float4(c.x, c.y, c.z, 1.0)}\n";
     CHECK(text_of(lit, target::wgsl).contains("let c: vec3f = textureSample(material_albedo, material_smp, p.uv).xyz;\n"));
     CHECK(text_of(lit, target::hlsl_dx12)
@@ -145,15 +145,14 @@ TEST("sgl emit - a pixel stage samples with the level its derivatives pick")
 
 TEST("sgl emit - a size is one HLSL helper per texture type, declared once however often it is called")
 {
-    constexpr auto sized
-        = "binding set:\n"
-          "    a: texture2d[float4]\n"
-          "    b: texture2d[uint]\n"
-          "    c: out image2d[.rgba8_unorm]\n"
-          "\n"
-          "@compute(8, 8) fun cs(@thread_id id: int3){set}:\n"
-          "    let s = DEBUG_size(set.a, 0) + DEBUG_size(set.a, 1) + DEBUG_size(set.b, 0) + DEBUG_size(set.c)\n"
-          "    DEBUG_store(set.c, s, float4(1.0, 1.0, 1.0, 1.0))\n";
+    constexpr auto sized = "binding set:\n"
+                           "    a: texture_2d[float4]\n"
+                           "    b: texture_2d[uint]\n"
+                           "    c: out image_2d[.rgba8_unorm]\n"
+                           "\n"
+                           "@compute(8, 8) fun cs(@thread_id id: int3){set}:\n"
+                           "    let s = set.a.size(0) + set.a.size(1) + set.b.size(0) + set.c.size()\n"
+                           "    set.c.store(s, float4(1.0, 1.0, 1.0, 1.0))\n";
     auto const hlsl = text_of(sized, target::hlsl_dx12);
     CHECK(hlsl.contains("int2 sgl_size(Texture2D<float4> t, int level)\n"
                         "{\n"
@@ -180,14 +179,14 @@ TEST("sgl emit - a size is one HLSL helper per texture type, declared once howev
 TEST("sgl emit - a helper is declared by the entry point that calls it, and by no other of the module")
 {
     constexpr auto two = "binding set:\n"
-                         "    a: texture2d[float4]\n"
-                         "    c: out image2d[.rgba8_unorm]\n"
+                         "    a: texture_2d[float4]\n"
+                         "    c: out image_2d[.rgba8_unorm]\n"
                          "\n"
                          "@compute(8, 8) fun sized(@thread_id id: int3){set}:\n"
-                         "    DEBUG_store(set.c, DEBUG_size(set.a, 0), float4(1.0, 1.0, 1.0, 1.0))\n"
+                         "    set.c.store(set.a.size(0), float4(1.0, 1.0, 1.0, 1.0))\n"
                          "\n"
                          "@compute(8, 8) fun plain(@thread_id id: int3){set}:\n"
-                         "    DEBUG_store(set.c, int2(id.x, id.y), float4(1.0, 1.0, 1.0, 1.0))\n";
+                         "    set.c.store(int2(id.x, id.y), float4(1.0, 1.0, 1.0, 1.0))\n";
     CHECK(text_of(two, target::hlsl_dx12).contains("int2 sgl_size(Texture2D<float4> t, int level)\n"));
 
     auto const second = emit_source(two, 1, target::hlsl_dx12);
@@ -200,13 +199,13 @@ TEST("sgl emit - a local named as a builtin the text calls is renamed, and the c
 {
     // WGSL's texture functions are predeclared, so a local of the same name would shadow the call.
     constexpr auto shadowing = "binding set:\n"
-                               "    src: texture2d[float4]\n"
-                               "    dst: out image2d[.rgba8_unorm]\n"
+                               "    src: texture_2d[float4]\n"
+                               "    dst: out image_2d[.rgba8_unorm]\n"
                                "\n"
                                "@compute(8, 8) fun cs(@thread_id id: int3){set}:\n"
                                "    let xy = int2(id.x, id.y)\n"
                                "    let textureLoad = id.z\n"
-                               "    DEBUG_store(set.dst, xy, DEBUG_load(set.src, xy, textureLoad))\n";
+                               "    set.dst.store(xy, set.src.load(xy, textureLoad))\n";
     auto const wgsl = text_of(shadowing, target::wgsl);
     CHECK(wgsl.contains("    let textureLoad_: i32 = id.z;\n"));
     CHECK(wgsl.contains("    textureStore(set_dst, xy, vec4f(textureLoad(set_src, xy, textureLoad_)));\n"));
@@ -216,12 +215,12 @@ TEST("sgl emit - a local named as a builtin the text calls is renamed, and the c
 
     // `sgl_size` is the helper's name, so HLSL reserves it even where no helper is declared.
     constexpr auto sized = "binding set:\n"
-                           "    a: texture2d[float4]\n"
-                           "    c: out image2d[.rgba8_unorm]\n"
+                           "    a: texture_2d[float4]\n"
+                           "    c: out image_2d[.rgba8_unorm]\n"
                            "\n"
                            "@compute(8, 8) fun cs(@thread_id id: int3){set}:\n"
                            "    let sgl_size = int2(id.x, id.y)\n"
-                           "    DEBUG_store(set.c, DEBUG_size(set.a, 0) + sgl_size, float4(1.0, 1.0, 1.0, 1.0))\n";
+                           "    set.c.store(set.a.size(0) + sgl_size, float4(1.0, 1.0, 1.0, 1.0))\n";
     auto const hlsl = text_of(sized, target::hlsl_dx12);
     CHECK(hlsl.contains("    const int2 sgl_size_ = int2(id.x, id.y);\n"));
     CHECK(hlsl.contains("sgl_size(set_a, 0) + sgl_size_"));
@@ -230,13 +229,13 @@ TEST("sgl emit - a local named as a builtin the text calls is renamed, and the c
 TEST("sgl emit - an int or a uint image pads a narrow store with zeros of its own kind in WGSL")
 {
     constexpr auto integers = "binding set:\n"
-                              "    i: out image2d[.r32_sint]\n"
-                              "    u: out image2d[.r32_uint]\n"
+                              "    i: out image_2d[.r32_sint]\n"
+                              "    u: out image_2d[.r32_uint]\n"
                               "\n"
                               "@compute(8, 8) fun cs(@thread_id id: int3){set}:\n"
                               "    let xy = int2(id.x, id.y)\n"
-                              "    DEBUG_store(set.i, xy, id.x)\n"
-                              "    DEBUG_store(set.u, xy, id.x as uint)\n";
+                              "    set.i.store(xy, id.x)\n"
+                              "    set.u.store(xy, id.x as uint)\n";
     auto const wgsl = text_of(integers, target::wgsl);
     CHECK(wgsl.contains("    textureStore(set_i, xy, vec4i(id.x, 0, 0, 0));\n"));
     CHECK(wgsl.contains("    textureStore(set_u, xy, vec4u(u32(id.x), 0u, 0u, 0u));\n"));
@@ -245,6 +244,37 @@ TEST("sgl emit - an int or a uint image pads a narrow store with zeros of its ow
     CHECK(hlsl.contains("RWTexture2D<int> set_i : register(u0, space0);\n"));
     CHECK(hlsl.contains("RWTexture2D<uint> set_u : register(u1, space0);\n"));
     CHECK(hlsl.contains("    set_u[xy] = uint(id.x);\n"));
+}
+
+TEST("sgl emit - a granted image format is written like any portable one")
+{
+    constexpr auto narrow = "require extended_image_formats\n"
+                            "\n"
+                            "binding set:\n"
+                            "    r: out image_2d[.r8_unorm]\n"
+                            "\n"
+                            "@compute(8, 8) fun cs(@thread_id id: int3){set}:\n"
+                            "    set.r.store(int2(id.x, id.y), 0.5)\n";
+    CHECK(text_of(narrow, target::wgsl).contains("var set_r: texture_storage_2d<r8unorm, write>;\n"));
+    CHECK(text_of(narrow, target::hlsl_vulkan)
+              .contains("[[vk::binding(0, 0)]] [[vk::image_format(\"r8\")]] RWTexture2D<float> set_r;\n"));
+    CHECK(text_of(narrow, target::hlsl_dx12).contains("RWTexture2D<float> set_r : register(u0, space0);\n"));
+}
+
+TEST("sgl emit - WGSL refuses an entry point needing a feature WebGPU never has, by its name")
+{
+    // EMIT-109: the one refusal by feature that depends on the target; a device of every other target may have it.
+    constexpr auto layered = "require multisampled_array_textures\n"
+                             "\n"
+                             "binding set:\n"
+                             "    layers: texture_2d_ms_array[float4]\n"
+                             "\n"
+                             "@compute(1) fun cs(@thread_id id: int3){set}:\n"
+                             "    let unused = id.x\n";
+    CHECK(sgl::emit::dump_errors(emit_source(layered, 0, target::wgsl))
+          == "target-lacks-feature cs needs multisampled_array_textures, which WebGPU does not have\n");
+    CHECK(text_of(layered, target::hlsl_dx12).contains("Texture2DMSArray<float4> set_layers : register(t0, space0);\n"));
+    CHECK(text_of(layered, target::hlsl_vulkan).contains("[[vk::binding(0, 0)]] Texture2DMSArray<float4> set_layers;\n"));
 }
 
 TEST("sgl emit - a static sampler that compares is a comparison sampler, and its settings stay out of the text")
@@ -269,7 +299,7 @@ TEST("sgl emit - WGSL lets an implicit-derivative sample stand in non-uniform co
 {
     // Tint refuses what HLSL accepts, so the directive keeps the program written for every target (EMIT-103).
     constexpr auto branched = "binding material:\n"
-                              "    albedo: texture2d[float4]\n"
+                              "    albedo: texture_2d[float4]\n"
                               "    smp: sampler\n"
                               "\n"
                               "struct pixel_input:\n"
@@ -282,7 +312,7 @@ TEST("sgl emit - WGSL lets an implicit-derivative sample stand in non-uniform co
                               "@pixel fun ps(p: pixel_input){material} -> target:\n"
                               "    let mut c = float4(0.0, 0.0, 0.0, 1.0)\n"
                               "    if p.uv.x < 0.5:\n"
-                              "        c = DEBUG_sample(material.albedo, p.uv, material.smp)\n"
+                              "        c = material.albedo.sample(p.uv, material.smp)\n"
                               "    return {color = c}\n";
     CHECK(text_of(branched, target::wgsl)
               .contains("// Generated: the SGL source is what to edit.\n"
@@ -294,4 +324,19 @@ TEST("sgl emit - WGSL lets an implicit-derivative sample stand in non-uniform co
 
     // A sample at an explicit level takes no derivative, so it leaves Tint's analysis on.
     CHECK(!text_of(k_blur, target::wgsl).contains("diagnostic"));
+}
+
+TEST("sgl emit - a builtin's default fills the level a call leaves out, and a texture stays where it is named")
+{
+    // The default makes the call bind its arguments first, and a texture is no value a local could hold.
+    auto const source = cc::string_view("binding frame:\n"
+                                        "    src: texture_2d[float4]\n"
+                                        "@compute(8, 8) fun main_cs(@thread_id id: int3){frame}:\n"
+                                        "    let c = frame.src.load(int2(id.x, id.y))\n"
+                                        "    let s = frame.src.size()\n");
+    auto const wgsl = text_of(source, target::wgsl);
+    CHECK(wgsl.contains("textureLoad(frame_src, xy, 0)"));
+    CHECK(wgsl.contains("textureDimensions(frame_src, 0)"));
+    auto const hlsl = text_of(source, target::hlsl_dx12);
+    CHECK(hlsl.contains("frame_src.Load(int3(xy, 0))"));
 }

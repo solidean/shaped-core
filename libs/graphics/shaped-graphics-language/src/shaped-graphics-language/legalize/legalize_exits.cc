@@ -606,7 +606,8 @@ struct compactor
                                 n.arms = arms(n.arms, depth);
                                 n.default_body = body(ids_of(in, n.default_body), depth + 1);
                             },
-                            [&](flat_return& n) { n.value = expr(n.value, 0); });
+                            [&](flat_return& n) { n.value = expr(n.value, 0); },
+                            [&](flat_check& n) { n.body = body(ids_of(in, n.body), depth + 1); });
             out.e.stmts.push_back(cc::move(copy));
             copies.push_back(flat_stmt_id(out.e.stmts.size() - 1));
         }
@@ -631,6 +632,8 @@ flat_entry_point sgl::check::impl::compacted(checked_module const& m, flat_entry
     header.expr_lists.clear();
     header.stmt_lists.clear();
     header.arms.clear();
+    header.check_sites.clear();
+    header.check_nodes.clear();
     header.body = {};
     auto c = compactor{.in = e, .out = flat_builder::extend(m, cc::move(header))};
     c.out.e.body = c.body(body, 0);
@@ -639,13 +642,17 @@ flat_entry_point sgl::check::impl::compacted(checked_module const& m, flat_entry
 
 flat_entry_point sgl::check::legalize(checked_module const& m, flat_entry_point const& e, legalize_options const& options)
 {
+    // Compacted even when it is core already: what legalize returns has nothing unreachable in it and nothing shared,
+    // which is what lets a pass over its arrays stand for the tree.
     if (is_core(e))
-        return e;
+        return compacted(m, e, ids_of(e, e.body));
     auto out = flat_builder::extend(m, e);
+    out.set_body(erase_checks(out, ids_of(out.e, out.e.body)));
     out.set_body(lower_expressions(out, options));
     out.set_body(lower_cases(out));
     // Again, for the conditions the chain form of C1 wrote; on a tree that holds no block it changes nothing.
     auto const without_blocks = lower_expressions(out, options);
     auto const without_leaves = lower_exits(out, without_blocks, options);
-    return compacted(m, out.e, without_leaves);
+    auto const without_void = erase_void(out, without_leaves);
+    return compacted(m, out.e, without_void);
 }

@@ -43,7 +43,7 @@ cc::result<vulkan_pipeline_layout_handle> vulkan_pipeline_layout::create(vulkan_
     if (desc.inline_constants.has_value())
     {
         auto const& b = desc.inline_constants.value();
-        CC_ASSERT(b.type == sg::binding_type::uniform_buffer, "inline constants must be a uniform_buffer binding");
+        CC_ASSERT(b.type == sg::binding_type::constants_buffer, "inline constants must be a constants_buffer binding");
         CC_ASSERT(b.block_size.has_value() && b.block_size.value() > 0 && b.block_size.value() % 4 == 0,
                   "inline constants need a block_size that is a positive multiple of 4");
         inline_bytes = int(b.block_size.value());

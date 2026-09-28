@@ -73,10 +73,10 @@ TEST("sg dx12 - a native access names the layout its texture must be in")
 {
     // Write beats read, and the shader family beats the copy one: foreign code given both does the write, and a
     // layout that only admits reads would be wrong for it.
-    CHECK(dx12::native_layout_for(sg::access_flag::shader_read) == sg::texture_layout::shader_readonly);
-    CHECK(dx12::native_layout_for(sg::access_flag::shader_write) == sg::texture_layout::shader_readwrite);
+    CHECK(dx12::native_layout_for(sg::access_flag::shader_read) == sg::texture_layout::shader_texture);
+    CHECK(dx12::native_layout_for(sg::access_flag::shader_write) == sg::texture_layout::shader_image);
     CHECK(dx12::native_layout_for(sg::access_flag::shader_read | sg::access_flag::shader_write)
-          == sg::texture_layout::shader_readwrite);
+          == sg::texture_layout::shader_image);
     CHECK(dx12::native_layout_for(sg::access_flag::copy_read) == sg::texture_layout::copy_src);
     CHECK(dx12::native_layout_for(sg::access_flag::copy_write) == sg::texture_layout::copy_dst);
     CHECK(dx12::native_layout_for(sg::access_flag::shader_read | sg::access_flag::copy_write)
@@ -84,5 +84,5 @@ TEST("sg dx12 - a native access names the layout its texture must be in")
 
     // An access the table does not name asks for the layout every access can use.
     CHECK(dx12::native_layout_for({}) == sg::texture_layout::general);
-    CHECK(dx12::native_layout_for(sg::access_flag::uniform_read) == sg::texture_layout::general);
+    CHECK(dx12::native_layout_for(sg::access_flag::constants_read) == sg::texture_layout::general);
 }

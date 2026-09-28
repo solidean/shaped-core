@@ -42,16 +42,14 @@ namespace
 {
     switch (t)
     {
-    case sg::binding_type::uniform_buffer:
+    case sg::binding_type::constants_buffer:
         return VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    case sg::binding_type::readonly_structured_buffer:
-    case sg::binding_type::readwrite_structured_buffer:
-    case sg::binding_type::readonly_raw_buffer:
-    case sg::binding_type::readwrite_raw_buffer:
+    case sg::binding_type::buffer:
+    case sg::binding_type::bytes:
         return VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    case sg::binding_type::readonly_texture:
+    case sg::binding_type::texture:
         return VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-    case sg::binding_type::readwrite_texture:
+    case sg::binding_type::image:
         return VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
     case sg::binding_type::sampler:
         return VK_DESCRIPTOR_TYPE_SAMPLER;
@@ -100,7 +98,7 @@ VkImageView vulkan_image_view_cache::acquire_attachment(sg::raw_texture_handle c
     auto const& vk_texture = static_cast<vulkan_texture const&>(*texture);
 
     // The identity of an attachment view is its resource plus everything that reaches vkCreateImageView.
-    // An attachment is never a shader view, so the two access-class-carrying fields keep their defaults.
+    // An attachment is never a shader view, so the two view-class-carrying fields keep their defaults.
     auto const key = vulkan_image_view_key{.texture_identity = vk_texture._identity,
                                            .dimension = dimension,
                                            .format = format,
@@ -142,7 +140,7 @@ VkImageView vulkan_image_view_cache::acquire(sg::raw_texture_view const& view)
     auto const& texture = static_cast<vulkan_texture const&>(*view.texture);
     auto const key = vulkan_image_view_key{
         .texture_identity = texture._identity,
-        .access = view.access,
+        .bound_as = view.bound_as,
         .dimension = view.view_dimension,
         .format = view.format,
         .range = view.range,
@@ -209,16 +207,14 @@ isize descriptor_size_of(vulkan_context const& ctx, sg::binding_type type)
     auto const& p = ctx.descriptor_buffer_properties();
     switch (type)
     {
-    case sg::binding_type::uniform_buffer:
+    case sg::binding_type::constants_buffer:
         return isize(p.uniformBufferDescriptorSize);
-    case sg::binding_type::readonly_structured_buffer:
-    case sg::binding_type::readwrite_structured_buffer:
-    case sg::binding_type::readonly_raw_buffer:
-    case sg::binding_type::readwrite_raw_buffer:
+    case sg::binding_type::buffer:
+    case sg::binding_type::bytes:
         return isize(p.storageBufferDescriptorSize);
-    case sg::binding_type::readonly_texture:
+    case sg::binding_type::texture:
         return isize(p.sampledImageDescriptorSize);
-    case sg::binding_type::readwrite_texture:
+    case sg::binding_type::image:
         return isize(p.storageImageDescriptorSize);
     case sg::binding_type::sampler:
         return isize(p.samplerDescriptorSize);
@@ -278,7 +274,7 @@ void write_view_descriptor(vulkan_context& ctx,
         // The layout a descriptor is read in.
         // RADV reports descriptorBufferImageLayoutIgnored, but the spec does not guarantee that — so the honest
         // answer is the layout the access tracker actually transitions to for this view class.
-        image.imageLayout = vk_layout_from(sg::shader_layout_of(texture_view->access));
+        image.imageLayout = vk_layout_from(sg::shader_layout_of(texture_view->bound_as));
 
         if (type == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE)
             info.data.pStorageImage = &image;

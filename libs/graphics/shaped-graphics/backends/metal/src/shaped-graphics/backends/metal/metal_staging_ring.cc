@@ -2,6 +2,7 @@
 
 #include <clean-core/record/log.hh>
 #include <clean-core/string/format.hh>
+#include <shaped-graphics/context/metrics.hh>
 
 namespace sg::backend::metal
 {
@@ -106,6 +107,8 @@ metal_staging_ring::reservation metal_staging_ring::reserve(isize size)
 
     // No room, so this transfer gets storage of its own rather than an error.
     // A single transfer larger than the whole ring lands here too, and is perfectly legitimate.
+    if (_totals != nullptr)
+        _totals->add(sg::stat::bytes_inline_overflow, size);
     auto* const dedicated = _device->newBuffer(NS::UInteger(size > 0 ? size : 1), k_staging_options);
     if (dedicated == nullptr)
         return {}; // an invalid reservation: the caller's transfer fails rather than the process

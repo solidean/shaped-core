@@ -12,6 +12,10 @@ Add entries as we discover them, and remove them as they land.
 - **Combined `sincos`.**
   `tg::sin_cos` calls `sin` and `cos` separately, where libm's combined `sincos` entry point is cheaper.
   Add it as a `scalar_traits` operation and have `sin_cos` prefer it.
+- **`fixed_int`: what the first cut leaves out.**
+  Mixed signed / unsigned heterogeneous operands, and generated loop-free widening shifts.
+  Generated bit counts and float conversions, both short loops today.
+  The bounded quotient's remainder at the divisor's width, where the divisor's bound allows it.
 
 ## linalg
 

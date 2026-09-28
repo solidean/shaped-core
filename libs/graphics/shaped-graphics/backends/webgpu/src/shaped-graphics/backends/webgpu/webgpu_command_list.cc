@@ -69,6 +69,10 @@ void webgpu_command_list::end_open_pass()
         wgpuRenderPassEncoderEnd(render_pass());
         _render_pass = {};
         _raster.needs_full_apply = true;
+
+        // The next pass orders after everything this one did, so nothing it read or wrote is a hazard any more.
+        _pass_reads.clear();
+        _pass_writes.clear();
     }
 }
 
@@ -106,6 +110,9 @@ sg::submission_token webgpu_context::submit_webgpu_command_list(std::unique_ptr<
 
     auto const token = sg::submission_token(_next_submission++);
     notify_when_queue_done(u64(token), 0);
+
+    _stats.fold(sg::impl::recorded_stats(*cmd));
+    _stats.add(sg::stat::command_lists_submitted);
 
     // A later write to a span lands after this submit, so the spans are free again.
     if (cmd->_holds_upload_ring)

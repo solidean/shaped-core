@@ -88,7 +88,9 @@ void add_vectors(registry& r, scalar_family const& family)
 
 void sgl::builtins::register_types(registry& r)
 {
-    r.add_comment("// A struct line without a block is opaque: there is no member to name.");
+    r.add_comment("// A struct line without a block is opaque: there is no member to name.\n"
+                  "// A builtin type is @shadowable(false): a program's own `int` would be a second type that reads "
+                  "the same.");
     r.add(scalar_of(k_float_family, ""));
     add_vectors(r, k_float_family);
     r.add(vector_of(k_float_family, "vec3", 3, "/// A direction: it has a length, and a translation leaves it alone."));
@@ -109,10 +111,28 @@ void sgl::builtins::register_types(registry& r)
         .leaf_count = 16,
     });
 
+    r.add(type_record{
+        .declaration = "struct bool32",
+        .doc = "/// A bool as GPU memory holds one: four bytes, 0 for false and anything else for true.\n"
+               "/// `x as bool32` and `x as bool` convert; a bool itself has no layout.",
+        .hlsl = "uint",
+        .wgsl = "u32",
+        .msl = "uint",
+        .hlsl_layout = {.size = 4, .alignment = 4},
+        .wgsl_layout = {.size = 4, .alignment = 4},
+        .msl_layout = {.size = 4, .alignment = 4},
+        .leaf_kind = value_kind::scalar_uint,
+        .leaf_count = 1,
+    });
+
     r.add(scalar_of(k_int_family, "/// 32 bits, signed; its arithmetic wraps."));
     add_vectors(r, k_int_family);
     r.add(scalar_of(k_uint_family, "/// 32 bits, unsigned; its arithmetic wraps."));
     add_vectors(r, k_uint_family);
-    r.add(scalar_of(k_bool_family, ""));
+    // A builtin enum: `bool.true` is a case like any other, and the record says the targets write it as their bool.
+    // `false` comes first, so the zero value of a bool is false.
+    auto boolean = scalar_of(k_bool_family, "");
+    boolean.declaration = "enum bool:\n    false\n    true";
+    r.add(cc::move(boolean));
     add_vectors(r, k_bool_family);
 }
