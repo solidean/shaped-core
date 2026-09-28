@@ -191,22 +191,23 @@ denoise_outcome nrd_denoise_routine::execute(sg::command_list& cmd,
     // Everything the tracer produces, in NRD's encodings.
     // The motion guide is NOT repacked: NRD reads ours untouched, with the sign and scale on its common settings.
     auto const repack_group = ctx.transient.create_binding_group(
-        self->_repack_layout, shaders::nrd_repack_bindings{
-                                  .gDiffuse = in.color.as_readonly_view(),
-                                  .gSpecular = in.specular.as_readonly_view(),
-                                  .gNormal = in.guides.normal.as_readonly_view(),
-                                  .gRoughness = in.guides.roughness.as_readonly_view(),
-                                  .gDepth = in.guides.depth.as_readonly_view(),
-                                  .gHitDistance = in.guides.hit_distance.as_readonly_view(),
-                                  .gAlbedo = in.guides.albedo.as_readonly_view(),
-                                  .gSpecularAlbedo = in.guides.specular_albedo.as_readonly_view(),
-                                  .gNormalRoughness = history._state[slot_normal_roughness].as_readwrite_view(),
-                                  .gViewZ = history._state[slot_view_z].as_readwrite_view(),
-                                  .gDiffuseRadianceHitDistance = history._state[slot_diffuse_in].as_readwrite_view(),
-                                  .gSpecularRadianceHitDistance = history._state[slot_specular_in].as_readwrite_view(),
-                                  .gDiffuseFactor = history._state[slot_diffuse_factor].as_readwrite_view(),
-                                  .gSpecularFactor = history._state[slot_specular_factor].as_readwrite_view(),
-                              });
+        cmd, self->_repack_layout,
+        shaders::nrd_repack_bindings{
+            .gDiffuse = in.color.as_readonly_view(),
+            .gSpecular = in.specular.as_readonly_view(),
+            .gNormal = in.guides.normal.as_readonly_view(),
+            .gRoughness = in.guides.roughness.as_readonly_view(),
+            .gDepth = in.guides.depth.as_readonly_view(),
+            .gHitDistance = in.guides.hit_distance.as_readonly_view(),
+            .gAlbedo = in.guides.albedo.as_readonly_view(),
+            .gSpecularAlbedo = in.guides.specular_albedo.as_readonly_view(),
+            .gNormalRoughness = history._state[slot_normal_roughness].as_readwrite_view(),
+            .gViewZ = history._state[slot_view_z].as_readwrite_view(),
+            .gDiffuseRadianceHitDistance = history._state[slot_diffuse_in].as_readwrite_view(),
+            .gSpecularRadianceHitDistance = history._state[slot_specular_in].as_readwrite_view(),
+            .gDiffuseFactor = history._state[slot_diffuse_factor].as_readwrite_view(),
+            .gSpecularFactor = history._state[slot_specular_factor].as_readwrite_view(),
+        });
 
     auto const hit_distance = impl::nrd_hit_distance_parameters();
 
@@ -258,13 +259,14 @@ denoise_outcome nrd_denoise_routine::execute(sg::command_list& cmd,
         return outcome_of(denoise_status::failed, restarted);
 
     auto const resolve_group = ctx.transient.create_binding_group(
-        self->_resolve_layout, shaders::nrd_resolve_bindings{
-                                   .gDiffuseRadianceHitDistance = history._state[slot_diffuse_out].as_readonly_view(),
-                                   .gSpecularRadianceHitDistance = history._state[slot_specular_out].as_readonly_view(),
-                                   .gDiffuseFactor = history._state[slot_diffuse_factor].as_readonly_view(),
-                                   .gSpecularFactor = history._state[slot_specular_factor].as_readonly_view(),
-                                   .gOutput = in.output.as_readwrite_view(),
-                               });
+        cmd, self->_resolve_layout,
+        shaders::nrd_resolve_bindings{
+            .gDiffuseRadianceHitDistance = history._state[slot_diffuse_out].as_readonly_view(),
+            .gSpecularRadianceHitDistance = history._state[slot_specular_out].as_readonly_view(),
+            .gDiffuseFactor = history._state[slot_diffuse_factor].as_readonly_view(),
+            .gSpecularFactor = history._state[slot_specular_factor].as_readonly_view(),
+            .gOutput = in.output.as_readwrite_view(),
+        });
 
     cmd.compute.bind_pipeline(*self->_resolve_pipeline);
     cmd.compute.bind<shaders::nrd_resolve_bindings>(*resolve_group);

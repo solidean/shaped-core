@@ -560,7 +560,10 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     {
         if (!denoising)
             return static_cast<impl::temporal_slot*>(nullptr);
-        auto const resolved = sr::resolve_denoise_method(ctx, l.settings.denoise, true);
+        // The split signals are this frame's own samples, so it is the temporal member's answer that decides.
+        auto fresh = l.settings.denoise;
+        fresh.fresh_samples = true;
+        auto const resolved = sr::resolve_denoise_method(ctx, fresh);
         return sr::required_guides(resolved).has(sr::denoise_guide::split_diffuse_specular) ? rec.temporal.get_ptr(id)
                                                                                             : nullptr;
     };
