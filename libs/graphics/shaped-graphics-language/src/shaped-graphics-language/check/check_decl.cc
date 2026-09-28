@@ -606,6 +606,23 @@ ast::range_of<member_info> checker::compile_members(i32 file,
             else
                 judge_feature(file, span_of(file, f.type), "a binding array", feature::binding_arrays);
         }
+        // CHK-291: an array deeper in a block's struct, or anywhere in a buffer's element, waits for its layout too
+        else if (!is_struct && !is_workgroup && type != checked_module::error_type)
+        {
+            auto const& t = out.at(type);
+            auto const is_buffer = t.kind == type_kind::buffer;
+            auto const root = is_buffer ? t.element : type;
+            if (auto const path = array_path(root); !path.empty())
+            {
+                // a path starting `: ` is the root itself
+                unsupported(file, span_of(file, f.type),
+                            cc::format("an array in {}, {}, whose layout no rule places yet",
+                                       is_buffer ? "a buffer's element" : "a constant block",
+                                       path.starts_with(":") ? cc::string(out.name_of(root))
+                                                             : cc::format("{}{}", out.name_of(root), path)));
+                type = checked_module::error_type;
+            }
+        }
 
         // CHK-214: a binding member is a slot of the group's layout, and a void one fills none.
         if (!is_struct && type == checked_module::void_type)
@@ -1411,6 +1428,12 @@ void checker::judge_entry_point(symbol_id id)
     if (workgroup_bytes > k_portable_workgroup_bytes)
         invalid(cc::format("its @workgroup bindings hold {} bytes, and a workgroup has {} on every target",
                            workgroup_bytes, k_portable_workgroup_bytes));
+
+    // CHK-291: what crosses a stage edge holds no array until a target gives it a location per element
+    for (auto const& parameter : parameters)
+        if (parameter.input == stage_input::none)
+            judge_edge_arrays(file, where, parameter.type);
+    judge_edge_arrays(file, where, info.result);
 
     // CHK-301 to CHK-306: the geometry and the tessellation stages take arrays of vertices, and are judged apart
     if (info.entry_stage == stage::geometry || info.entry_stage == stage::tessellation_control

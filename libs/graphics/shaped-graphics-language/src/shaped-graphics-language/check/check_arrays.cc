@@ -247,6 +247,41 @@ bool checker::holds_resource(type_id type) const
     return false;
 }
 
+cc::string checker::array_path(type_id type) const
+{
+    if (type == checked_module::error_type || out.builtin_type_of(type) != nullptr)
+        return {};
+    auto const& t = out.at(type);
+    if (t.kind == type_kind::array)
+        return cc::format(": {}", out.name_of(type));
+    if (t.kind != type_kind::structure)
+        return {};
+    for (auto const& m : out.at(t.members))
+    {
+        if (m.type == type || m.factor != tessellation_factor::none)
+            continue;
+        if (auto inner = array_path(m.type); !inner.empty())
+            return cc::format(".{}{}", m.name, inner);
+    }
+    return {};
+}
+
+void checker::judge_edge_arrays(i32 file, source_span where, type_id type)
+{
+    // a patch and a geometry stage's vertices are arrays of the struct that crosses, and a stream holds it
+    while (type != checked_module::error_type && out.builtin_type_of(type) == nullptr
+           && (out.at(type).kind == type_kind::array || out.at(type).kind == type_kind::stream))
+        type = out.at(type).element;
+    if (type == checked_module::error_type || out.builtin_type_of(type) != nullptr
+        || out.at(type).kind != type_kind::structure)
+        return;
+    if (auto const path = array_path(type); !path.empty())
+        unsupported(file, where,
+                    cc::format("an array crossing a stage edge, in {}{}, which takes a location per element no target "
+                               "gives yet",
+                               out.name_of(type), path));
+}
+
 i32 checker::workgroup_size_of(type_id type) const
 {
     // a type's size, rounded up to its alignment, as WGSL strides an array of it

@@ -463,6 +463,11 @@ struct checker
     [[nodiscard]] bool holds_resource(type_id type) const;
     /// An atomic, or an array of them.
     [[nodiscard]] bool holds_atomic(type_id type) const;
+    /// CHK-291: the path from `type` down to the first array it holds, through struct members, as `.corners: float2[3]`.
+    /// Empty when it holds none; a tessellation factor member is skipped, since it is an array by design (CHK-305).
+    [[nodiscard]] cc::string array_path(type_id type) const;
+    /// CHK-291: refuses each array a struct crossing a stage edge holds, reported at `where` of `file`.
+    void judge_edge_arrays(i32 file, source_span where, type_id type);
     /// `atomic[uint]` and `atomic[int]` in a type position.
     [[nodiscard]] type_id resolve_atomic(i32 file, ast::expr_id expr, ast::index const& node, function_scope const* scope);
     /// CHK-297: an expression of an atomic's type, which only a builtin's argument may be.

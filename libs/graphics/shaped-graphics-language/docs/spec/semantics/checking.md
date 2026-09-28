@@ -610,7 +610,9 @@ Nothing in a body uses a feature yet, so a `require` in a test's body is `unused
 * **CHK-290** A square literal converts to the array type expected where it stands, with exactly as many elements, each converting to the element type.
   Where no array is expected it is an array of its first element's type, and every other element converts to that.
   It holds at least one element, and no name and no splat.
-* **CHK-291** An array in a constant block, in a buffer's element or in a struct that crosses a stage edge is `unsupported-yet`, until a layout rule settles it.
+* **CHK-291** An array in a constant block, in a buffer's element or in a struct that crosses a stage edge is `unsupported-yet`, at any depth of the structs holding it.
+  The detail names the path down to it.
+  A tessellation factor is an array by design (CHK-305), and workgroup memory has no host side, so neither counts.
 * **CHK-299** A binding member `T[N]` of a texture, an image or a buffer is a **binding array**, which needs `binding_arrays`.
   Its `N` is at least 2, or it is `invalid-constant-argument`: one resource is a plain member.
   It is read by element alone, `name[i]`, and naming it whole is `wrong-kind-of-name`; an element is the resource, which only a builtin takes.

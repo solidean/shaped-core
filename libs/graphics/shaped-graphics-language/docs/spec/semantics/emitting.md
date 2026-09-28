@@ -372,10 +372,11 @@ EMIT-110 and EMIT-111 describe today's choice, not a promise.
 
 * GLSL, which comes through the same seam.
 * A Metal compiler for the MSL text, and the buffer index of EMIT-58, which sg's metal backend has yet to adopt.
-* Arrays in GPU memory, which SGL has no type for yet.
+* Arrays in GPU memory, which the checker refuses today (CHK-291).
   In a constant block every element starts a row, as HLSL places it: an element shorter than a row is `array<vec4f, N>` read through `.x` in WGSL, and `slib::row<T>` on the host.
 * An annotation that fixes a layout, `@layout(.hlsl)` or `@layout(.cpp)`, for memory a host fills without the generated struct; until it exists, EMIT-116 says nothing is fixed.
-* `mat3`, which SGL has no type for yet: three rows in a constant block (44 bytes), 36 bytes in a buffer's element, and its columns split in a memory form.
+* `mat3`, which SGL has no type for yet: its three columns each start a row in a constant block (44 bytes), it is 36 bytes in a buffer's element, and its columns split in a memory form.
+  The host holds a block's as `slib::gpu_mat3` and a buffer's as `tg::mat3f`, which is those 36 bytes.
 * Whether an emit error becomes a diagnostic with a span; today it names a symbol and carries a detail.
 * Whether the size of an inline block has to agree between targets as its offsets do; WGSL rounds it up to 16 bytes.
 * How a vertex input's dx12 semantic is chosen once a member wants one that is not its name.
