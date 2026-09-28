@@ -257,6 +257,7 @@ if(SC_BUILD_TESTS)
         tests/barrier/subresource-test.cc
         tests/barrier/slot-test.cc
         tests/barrier/slot-recording-test.cc
+        tests/barrier/array-plan-test.cc
         tests/context/stats-recording-test.cc
     )
     sc_nexus_binary(shaped-graphics-test KINDS tests ${SG_WARP_TEST_BINARY_ARGS})

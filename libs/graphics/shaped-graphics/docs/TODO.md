@@ -157,18 +157,6 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
     Finer would be to notice it per window and stop mid-copy, releasing the source with it.
     Pure quality of implementation: the bytes are unobservable either way, and what it buys is releasing a large source sooner.
 - **Barriers + access tracking.** See [concepts/barriers.md](concepts/barriers.md). Still open:
-  - **array bindings in raster draws** — the one gap here that a real renderer will hit, so it is spelled out rather than listed.
-    `declare_array_buffer_access` / `declare_array_texture_access` live on the compute scope and the raytracing scope alone.
-    `command_list_raster_scope` has neither, and there is no `raster_declare_array_*` virtual for one to dispatch to.
-    A dispatch therefore resolves its declares against the bound groups, and a draw cannot.
-    dx12, vulkan and metal each assert `"array bindings are not supported in raster draws yet"` on a bound array binding.
-    [concepts/bindings.md](concepts/bindings.md#array-bindings) states that refusal as the contract.
-    webgpu has no binding arrays at all, so there is nothing there to refuse.
-    **What it costs is any bindless material table on a draw.**
-    sv's tables work today only because it path-traces, declaring them through `cmd.raytracing` in `gpu_resource_manager`; the moment a raster path wants one it stops at this assert.
-    Closing it is the declare pair on the raster scope, a `raster_declare_array_*` virtual, and the resolution in three backends — the compute path's shape, at the vertex and fragment stages.
-    webgpu would have to gain binding arrays first.
-    Nothing subtle blocks it; it has simply never been the blocking thing.
   - a per-draw/dispatch **escape hatch** disabling automatic transitions where the caller knows its resources are already in the right layout;
   - folding the redundant `_open_command_lists` epoch-advance counter into the slot allocator's live count.
 - **Raster pipeline + draws.** See [concepts/raster-pipeline.md](concepts/raster-pipeline.md). Still open:
