@@ -148,6 +148,13 @@ constexpr int k_conv_texels = 8;
     return cc::bit_cast<f32>(sign | ((exponent + 127 - 15) << 23) | (mantissa << 13));
 }
 
+/// `v` rounded up to a multiple of sixteen, and at least sixteen.
+/// Four pools halve a tensor four times, so every tensor extent and every tile origin lives on this grid.
+[[nodiscard]] int round_up(int v)
+{
+    return ((cc::max(v, 1) + 15) / 16) * 16;
+}
+
 /// The extent at `level`, where each level halves.
 [[nodiscard]] tg::vec2i level_extent(tg::vec2i extent, int level)
 {
@@ -171,9 +178,6 @@ bool oidn_network::create(sg::context& ctx, tg::vec2i image_extent, int max_tile
 {
     _ctx = &ctx;
     _image_extent = image_extent;
-
-    // Four pools halve the tensor four times, so it is sized to a multiple of sixteen whatever the image is.
-    auto const round_up = [](int v) { return ((cc::max(v, 1) + 15) / 16) * 16; };
 
     // One tile or many, decided here and nowhere else.
     //
@@ -220,13 +224,24 @@ bool oidn_network::create(sg::context& ctx, tg::vec2i image_extent, int max_tile
             return chosen;
         };
 
-        _extent = tg::vec2i(cc::min(whole[0], best_extent(image_extent[0], cap)),
-                            cc::min(whole[1], best_extent(image_extent[1], cap)));
+        // An axis that fits under the cap stays one untiled span, whatever the other axis needs.
+        // Tiling it anyway would compute the same tensor once per tile row, since every one of them clamps to 0.
+        for (auto a = 0; a < 2; ++a)
+        {
+            if (whole[a] <= cap)
+            {
+                _extent[a] = whole[a];
+                _tile_step[a] = whole[a];
+                _tile_counts[a] = 1;
+                continue;
+            }
 
-        // The interior has to be a real advance, or the loop below would not terminate.
-        _tile_step = tg::vec2i(cc::max(_extent[0] - 2 * _overlap, 16), cc::max(_extent[1] - 2 * _overlap, 16));
-        _tile_counts = tg::vec2i((image_extent[0] + _tile_step[0] - 1) / _tile_step[0],
-                                 (image_extent[1] + _tile_step[1] - 1) / _tile_step[1]);
+            _extent[a] = cc::min(whole[a], best_extent(image_extent[a], cap));
+
+            // The interior has to be a real advance, or the loop in `execute` would not terminate.
+            _tile_step[a] = cc::max(_extent[a] - 2 * _overlap, 16);
+            _tile_counts[a] = (image_extent[a] + _tile_step[a] - 1) / _tile_step[a];
+        }
     }
 
     auto const extent = _extent;
@@ -435,7 +450,6 @@ i64 oidn_network::feature_bytes_for(tg::vec2i image_extent) const
     if (_feature_channels.size() != f_count)
         return 0;
 
-    auto const round_up = [](int v) { return ((cc::max(v, 1) + 15) / 16) * 16; };
     auto const extent = tg::vec2i(round_up(image_extent[0]), round_up(image_extent[1]));
 
     auto total = i64(0);
@@ -630,13 +644,13 @@ bool oidn_network::execute(sg::command_list& cmd,
             auto const interior = tg::vec2i(cc::min(_tile_step[0], _image_extent[0] - interior_origin[0]),
                                             cc::min(_tile_step[1], _image_extent[1] - interior_origin[1]));
 
-            // An edge tile is SHIFTED INWARD rather than allowed to hang over the image.
+            // An edge tile is SHIFTED INWARD, to end where the whole run's padded tensor ends.
             //
-            // Hanging over would fill the overhang by repeating the border pixel, and that smear is an image the whole-frame
-            // run never sees — so it moves the result, and it moves it further the wider the overlap is.
-            // Shifting instead means every tile's tensor is real content, and the border is where the network finds it.
-            auto const clamp_origin = [](int want, int tensor, int image)
-            { return image <= tensor ? 0 : cc::clamp(want, 0, image - tensor); };
+            // The bound is the image rounded up to sixteen, not the image: an origin must stay a multiple of sixteen
+            // or the tile pools over different windows than the whole run does.
+            // The at most fifteen rows or columns past the image are then the same edge repeat the whole run pads with.
+            auto const clamp_origin
+                = [](int want, int tensor, int image) { return cc::clamp(want, 0, round_up(image) - tensor); };
             auto const tensor_origin
                 = tg::vec2i(clamp_origin(interior_origin[0] - _overlap, _extent[0], _image_extent[0]),
                             clamp_origin(interior_origin[1] - _overlap, _extent[1], _image_extent[1]));

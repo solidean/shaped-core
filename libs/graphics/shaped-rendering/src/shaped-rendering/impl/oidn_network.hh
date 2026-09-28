@@ -86,8 +86,9 @@ public:
 
     /// How much of a tile is discarded on each side, so its interior sees what a whole-image run would.
     ///
-    /// 80 is where the network's receptive field is covered, and it was measured rather than derived: the same image
-    /// tiled and whole agrees BIT FOR BIT at 80, is 1.4e-03 out at 64, and 2.8e-01 out with no overlap at all.
+    /// 80 is where the network's receptive field is covered, and it was measured rather than derived.
+    /// The same image tiled and whole agrees to a mean below 1e-6 at 80, is 1.4e-03 out at 64, and 2.8e-01 out with
+    /// no overlap at all.
     /// So this is not a tolerance to trade against — below it the answer is wrong, and above it nothing improves.
     static constexpr int k_tile_overlap = 80;
 
