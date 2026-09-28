@@ -464,3 +464,25 @@ TEST("sgl emit - a `for` end that takes derivatives is evaluated once, ahead of 
                         "    for (var i: i32 = 0; i < i_end; i++) {\n"));
     CHECK(text_of(source, target::hlsl_dx12).contains("i < i_end; "));
 }
+
+TEST("sgl emit - a marked index keeps its mark when a later argument moves it into a local")
+{
+    // `pick` returns early, so its value is computed ahead of the call, and the index ahead of that
+    constexpr auto pinned = "require binding_arrays\n"
+                            "\n"
+                            "binding mats:\n"
+                            "    texs: texture_2d[float4][4]\n"
+                            "\n"
+                            "binding results:\n"
+                            "    values: mut buffer[float4]\n"
+                            "\n"
+                            "fun pick(x: int) -> int:\n"
+                            "    if x == 0 => return 1\n"
+                            "    return 0\n"
+                            "\n"
+                            "@compute(64) fun cs(@thread_id id: int3){mats, results}:\n"
+                            "    results.values[id.x] = mats.texs[nonuniform (id.x % 4)].load(int2(pick(id.x), 0))\n";
+    auto const dx12 = text_of(pinned, target::hlsl_dx12);
+    CHECK(dx12.contains("const int index = id.x % 4;\n"));
+    CHECK(dx12.contains("mats_texs[NonUniformResourceIndex(index)].Load("));
+}

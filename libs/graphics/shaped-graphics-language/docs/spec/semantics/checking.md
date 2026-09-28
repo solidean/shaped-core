@@ -609,6 +609,7 @@ Nothing in a body uses a feature yet, so a `require` in a test's body is `unused
   An access word stands before it and qualifies its element: `out image_2d[.rgba8_unorm][4]`.
 * **CHK-300** An index into a binding array that the uniformity pass cannot prove the same in every invocation is `non-uniform-index` unless it is `nonuniform i` ([why](why/checking.md#chk-300)).
   `nonuniform i` is its argument unchanged, and on an index the pass proves uniform it is the warning `needless-nonuniform`.
+  It stands only as the whole index into a binding array, `textures[nonuniform i]`; anywhere else, a `let` or an index into a value array included, it is `wrong-kind-of-name`.
 
 ## Workgroup memory
 
@@ -828,7 +829,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `duplicate-declaration` | CHK-12, CHK-28, CHK-241 |
 | `dependency-cycle` | CHK-18, CHK-136 |
 | `unknown-name` | CHK-24, CHK-62, CHK-245 |
-| `wrong-kind-of-name` | CHK-24, CHK-54, CHK-79, CHK-237, CHK-247, CHK-199, CHK-200, CHK-202, CHK-203, CHK-205, CHK-279, CHK-285, CHK-286, CHK-292, CHK-296, CHK-297, CHK-299 |
+| `wrong-kind-of-name` | CHK-24, CHK-54, CHK-79, CHK-237, CHK-247, CHK-199, CHK-200, CHK-202, CHK-203, CHK-205, CHK-279, CHK-285, CHK-286, CHK-292, CHK-296, CHK-297, CHK-299, CHK-300 |
 | `missing-type` | CHK-26 |
 | `unknown-builtin` | CHK-31 |
 | `expected-body` | CHK-32, CHK-236 |

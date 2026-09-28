@@ -300,6 +300,8 @@ struct checker
     cc::vector<call_edge> calls;
     /// The object `check_index` is checking right now: the one place a buffer may stand as an expression.
     ast::expr_id subscripted = ast::expr_id::none;
+    /// The index into a binding array `check_index` is checking right now: the one place `nonuniform i` may stand.
+    ast::expr_id binding_index = ast::expr_id::none;
     /// The arguments of the call being checked, which a texture, an image or a sampler may stand as (CHK-206).
     cc::vector<ast::expr_id> handed;
     /// Parallel to `out.tests`: what a test in a function body sees of that function, and the function.

@@ -268,3 +268,60 @@ TEST("sgl check - an image the shader also stores to differs between threads, na
     CHECK(images("work.one.load(int2(0, 0))").contains("is loaded from work.one, which the shader also stores to"));
     CHECK(images("work.many[1].load(int2(0, 0))").contains("is loaded from work.many, which the shader also stores to"));
 }
+
+TEST("sgl check - `nonuniform i` stands only as the index into a binding array")
+{
+    auto const marked = [](cc::string_view body)
+    {
+        return reports_for(cc::format("require binding_arrays\n\n"
+                                      "binding materials:\n"
+                                      "    texs: texture_2d[float4][8]\n"
+                                      "\n"
+                                      "binding results:\n"
+                                      "    values: mut buffer[float4]\n"
+                                      "\n"
+                                      "@compute(64) fun cs(@thread_id id: int3){{materials, results}}:\n"
+                                      "{}",
+                                      body));
+    };
+    CHECK(marked("    results.values[id.x] = materials.texs[nonuniform id.x].load(int2(0, 0))\n") == "");
+
+    // CHK-300: elsewhere the mark would ask a target for what it does not need, or for nothing at all
+    constexpr auto misplaced = "`nonuniform i` marks an index into a binding array, and stands only as one";
+    auto const in_let = marked("    let j = nonuniform id.x\n"
+                               "    results.values[id.x] = materials.texs[j].load(int2(0, 0))\n");
+    CHECK(in_let.contains("wrong-kind-of-name"));
+    CHECK(in_let.contains(misplaced));
+    CHECK(marked("    let xs = [1.0, 2.0]\n"
+                 "    results.values[id.x] = float4(xs[nonuniform (id.x % 2)], 0.0, 0.0, 0.0)\n")
+              .contains(misplaced));
+    CHECK(marked("    results.values[nonuniform id.x] = float4(0.0, 0.0, 0.0, 0.0)\n").contains(misplaced));
+    CHECK(marked("    results.values[id.x] = materials.texs[nonuniform (nonuniform id.x)].load(int2(0, 0))\n")
+              .contains(misplaced));
+}
+
+TEST("sgl check - a marked index stays marked when an argument after it moves it into a local")
+{
+    auto const loaded = [](cc::string_view index)
+    {
+        return reports_for(cc::format("require binding_arrays\n\n"
+                                      "binding materials:\n"
+                                      "    texs: texture_2d[float4][4]\n"
+                                      "\n"
+                                      "binding results:\n"
+                                      "    values: mut buffer[float4]\n"
+                                      "\n"
+                                      "fun pick(x: int) -> int:\n"
+                                      "    if x == 0 => return 1\n"
+                                      "    return 0\n"
+                                      "\n"
+                                      "@compute(64) fun cs(@thread_id id: int3, @workgroup_id g: int3){{materials, "
+                                      "results}}:\n"
+                                      "    results.values[id.x] = materials.texs[{}].load(int2(pick(id.x), 0))\n",
+                                      index));
+    };
+    // `pick` returns early, so its value is computed ahead of the load, and the index ahead of that
+    CHECK(loaded("nonuniform (id.x % 4)") == "");
+    CHECK(loaded("id.x % 4").contains("non-uniform-index"));
+    CHECK(loaded("nonuniform (g.x % 4)").contains("needless-nonuniform"));
+}

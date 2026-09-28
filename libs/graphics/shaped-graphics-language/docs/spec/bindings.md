@@ -301,6 +301,7 @@ let fixed = materials.albedo[materials.slot].sample(p.uv)
 * An index the uniformity pass cannot prove the same in every invocation is marked `nonuniform i`, or refused (CHK-300).
   Forgetting the mark is silent on the GPU: some hardware reads one invocation's descriptor for its whole wave.
   A mark on an index the pass proves uniform is a warning, since it pays for nothing.
+  The mark stands only as the index itself; on a `let` or on a value array's index it would mean nothing, and is refused.
 * `T[]`, whose length the host binds, is the spelling an unbounded array has, and `unsupported-yet` until sg binds one.
   An array of samplers, and one of more than one dimension, are `unsupported-yet` too.
 * HLSL writes `Texture2D<float4> albedo[64]` and `NonUniformResourceIndex` around a marked index; WebGPU has no binding arrays, so WGSL refuses by the feature.

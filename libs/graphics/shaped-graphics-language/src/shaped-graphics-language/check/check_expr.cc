@@ -189,7 +189,12 @@ type_id checker::check_index(function_scope& scope, ast::expr_id id, ast::index 
     auto result = object;
     for (auto const& a : arguments)
     {
+        auto const outer_index = binding_index;
+        binding_index = kind == type_kind::array && is_resource(out.at(out.at(result).element).kind)
+                          ? a.value
+                          : ast::expr_id::none;
         auto const index = check_expr(scope, a.value);
+        binding_index = outer_index;
         if (index != error_type && index != int_type)
             report(diagnostic_kind::type_mismatch, file, span_of(file, a.value),
                    cc::format("{} is indexed by an int, and this is a {}",
@@ -1083,7 +1088,17 @@ type_id checker::resolve_overload(function_scope& scope,
     if (chosen_symbol.role == function_role::constructor)
         set_type(file, callee, info.result);
     if (is_valid(out.at(chosen).intrinsic))
+    {
+        // CHK-300: the mark is what an index into a binding array is written with, and on anything else it means nothing
+        auto const* const record = out.builtin_function(out.at(chosen).intrinsic);
+        if (record != nullptr && record->is_nonuniform_mark && id != binding_index)
+        {
+            report(diagnostic_kind::wrong_kind_of_name, file, where,
+                   "`nonuniform i` marks an index into a binding array, and stands only as one: `t[nonuniform i]`");
+            return error_type;
+        }
         return info.result;
+    }
 
     // A construction is written where it stands, and the defaults of its fields with it, so what they call is reached.
     note_program_call(scope, chosen, where);

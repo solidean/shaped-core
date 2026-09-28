@@ -1,5 +1,6 @@
 #include <clean-core/common/utility.hh>
 #include <clean-core/string/format.hh>
+#include <shaped-graphics-language/builtins/registry.hh>
 #include <shaped-graphics-language/legalize/core.hh>
 #include <shaped-graphics-language/legalize/impl/legalizer.hh>
 #include <shaped-graphics-language/legalize/impl/walk.hh>
@@ -228,10 +229,25 @@ struct expr_lowering
         auto copy = out.e.at(place);
         auto pinned = [&](flat_expr_id index)
         {
-            auto const pin = out.let("index", index);
+            // `nonuniform i` pins `i`, and marks the pinned local, since a mark is read only where it indexes (CHK-300)
+            auto const mark = out.e.at(index);
+            auto const* const call = mark.node.try_as<flat_call>();
+            auto const* const record = call != nullptr ? out.m.builtin_function(call->intrinsic) : nullptr;
+            auto const is_marked = record != nullptr && record->is_nonuniform_mark;
+            auto const pin = out.let("index", is_marked ? out.e.at(call->arguments)[0] : index);
             out.e.locals[index_of(pin.local)].kind = local_kind::temporary;
             pre.insert_at(at++, pin.stmt);
-            return out.local(pin.local);
+            if (!is_marked)
+                return out.local(pin.local);
+            flat_expr_id const arguments[] = {out.local(pin.local)};
+            auto const from = out.from;
+            out.from = mark.from;
+            auto const result = out.add_expr(mark.type, flat_call{.callee = call->callee,
+                                                                  .intrinsic = call->intrinsic,
+                                                                  .is_pure = call->is_pure,
+                                                                  .arguments = out.expr_list(arguments)});
+            out.from = from;
+            return result;
         };
         if (auto* const element = copy.node.try_as<flat_buffer_element>())
             element->index = pinned(element->index);

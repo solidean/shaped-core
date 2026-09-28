@@ -523,7 +523,8 @@ struct writer
                 auto const object = wrapped(expr(a.object), level::primary);
                 auto index = expr(a.index).text;
                 // EMIT-121: a marked index into a binding array tells HLSL, and SPIR-V through it, that it may differ
-                if (d.language() == builtins::language::hlsl && is_nonuniform_mark(a.index))
+                if (d.language() == builtins::language::hlsl && is_nonuniform_mark(a.index)
+                    && p.m.takes_slots(p.e.at(a.object).type))
                     index = cc::format("NonUniformResourceIndex({})", index);
                 result = {.text = cc::format("{}[{}]", object, index), .binds = level::primary};
             },

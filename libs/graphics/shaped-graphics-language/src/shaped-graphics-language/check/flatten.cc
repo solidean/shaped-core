@@ -294,6 +294,20 @@ struct flattener
         return ref != nullptr && !entry.at(ref->local).is_mut;
     }
 
+    /// What `nonuniform i` marks, `i`; none for anything else.
+    [[nodiscard]] flat_expr_id marked_by_nonuniform(flat_expr_id id) const
+    {
+        auto const* const call = is_valid(id) ? entry.at(id).node.try_as<flat_call>() : nullptr;
+        auto const* const record = call != nullptr ? c.out.builtin_function(call->intrinsic) : nullptr;
+        return record != nullptr && record->is_nonuniform_mark ? entry.at(call->arguments)[0] : flat_expr_id::none;
+    }
+
+    /// An index that may stand in several places: a substitutable one, or `nonuniform i` of one, the mark kept on it.
+    [[nodiscard]] bool is_substitutable_index(flat_expr_id id) const
+    {
+        return is_substitutable(id) || is_substitutable(marked_by_nonuniform(id));
+    }
+
     /// A construction of literals alone, such as a texel offset, which a target may take only as it is written.
     [[nodiscard]] bool is_literal_construction(flat_expr_id id) const
     {
@@ -333,6 +347,15 @@ struct flattener
             auto const index = again(element->index, from);
             return add_expr(x.type, from, flat_element{.object = object, .index = index});
         }
+        // the mark stays where it was written, which is what a diagnostic about it points at
+        if (auto const marked = marked_by_nonuniform(id); is_valid(marked))
+        {
+            flat_expr_id const arguments[] = {again(marked, from)};
+            auto copy = x;
+            copy.node.as<flat_call>().arguments = add_list(arguments);
+            entry.exprs.push_back(cc::move(copy));
+            return flat_expr_id(entry.exprs.size() - 1);
+        }
         if (auto const* const made = x.node.try_as<flat_construct>())
         {
             // copied first: `again` appends to the lists the view reads
@@ -354,7 +377,7 @@ struct flattener
             return false;
         // an element of a binding array, at an index that reads the same wherever it stands
         if (auto const* const element = entry.at(id).node.try_as<flat_element>())
-            return entry.at(element->object).node.is<flat_binding_member>() && is_substitutable(element->index);
+            return entry.at(element->object).node.is<flat_binding_member>() && is_substitutable_index(element->index);
         return entry.at(id).node.is<flat_binding_member>();
     }
 
@@ -646,11 +669,20 @@ struct flattener
         auto const x = entry.at(place);
         auto bind = [&](flat_expr_id index)
         {
-            if (is_substitutable(index))
+            if (is_substitutable_index(index))
                 return index;
-            auto const local = add_local(local_kind::temporary, "index", entry.at(index).type);
-            add_stmt({.file = file(), .expr = id}, flat_let{.local = local, .value = index});
-            return local_ref(local, id);
+            // `nonuniform i` binds `i`, and marks the bound local, since a mark is read only where it indexes (CHK-300)
+            auto const marked = marked_by_nonuniform(index);
+            auto const value = is_valid(marked) ? marked : index;
+            auto const local = add_local(local_kind::temporary, "index", entry.at(value).type);
+            add_stmt({.file = file(), .expr = id}, flat_let{.local = local, .value = value});
+            if (!is_valid(marked))
+                return local_ref(local, id);
+            flat_expr_id const arguments[] = {local_ref(local, id)};
+            auto mark = entry.at(index);
+            mark.node.as<flat_call>().arguments = add_list(arguments);
+            entry.exprs.push_back(cc::move(mark));
+            return flat_expr_id(entry.exprs.size() - 1);
         };
         if (auto const* const element = x.node.try_as<flat_buffer_element>())
         {
