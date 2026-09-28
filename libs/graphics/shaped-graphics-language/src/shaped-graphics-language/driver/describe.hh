@@ -123,6 +123,8 @@ struct sgl::described_struct_member
     cc::string format;
     /// A `@pixel struct` member that is no color target: "depth" or "sample_mask"; empty for a color target.
     cc::string output;
+    /// A vertex input member's dx12 semantic, which its input layout names it by (EMIT-28); empty on a `@pixel struct`.
+    cc::string semantic;
     bool is_per_instance = false;
 };
 

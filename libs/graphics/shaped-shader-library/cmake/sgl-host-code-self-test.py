@@ -247,10 +247,12 @@ MESH = {
     "name": "mesh_vertex",
     "edge": "vertex",
     "members": [
-        {"name": "position", "type": "float3", "location": 0, "stream": "per_vertex", "per_instance": False},
+        {"name": "position", "type": "float3", "location": 0, "stream": "per_vertex", "per_instance": False,
+         "semantic": "POSITION"},
         {"name": "color", "type": "float4", "location": 1, "stream": "per_vertex", "per_instance": False,
-         "format": "rgba8_unorm"},
-        {"name": "material", "type": "uint", "location": 2, "stream": "per_vertex", "per_instance": False},
+         "format": "rgba8_unorm", "semantic": "COLOR"},
+        {"name": "material", "type": "uint", "location": 2, "stream": "per_vertex", "per_instance": False,
+         "semantic": "MATERIAL"},
     ],
 }
 

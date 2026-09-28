@@ -244,6 +244,9 @@ struct stage_input_spelling
 
 /// The buffer a vertex input member is read from (EMIT-92): its `@stream`, else `per_instance` or `per_vertex`.
 [[nodiscard]] cc::string stream_of(check::member_info const& member);
+/// The dx12 semantic of each member of the `@vertex struct` `t`, parallel to its members (EMIT-28).
+/// The emitted text and the host's input layout both take them from here, so the two always name a member alike.
+[[nodiscard]] cc::vector<cc::string> vertex_semantics(check::checked_module const& m, check::type_info const& t);
 
 /// Appends what keeps a struct from standing at one edge of the pipeline in `role`, whichever entry point uses it.
 void validate_edge_struct(check::checked_module const& m, check::type_id type, struct_role role, cc::vector<error>& errors);

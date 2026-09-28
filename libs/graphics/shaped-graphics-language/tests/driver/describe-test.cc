@@ -223,6 +223,14 @@ TEST("sgl describe - a vertex input's members say which buffer they come from, a
     CHECK(mesh.members[2].stream == "normals");
     CHECK(mesh.members[2].location == 2); // a stream moves no location
 
+    // The dx12 semantic the host's input layout names each member by, as the emitted text does (EMIT-28).
+    CHECK(mesh.members[0].semantic == "POSITION");
+    CHECK(split.structs[1].members[0].semantic.empty()); // a render target has none
+    auto const crowded = described(cc::string("@vertex struct crowded:\n    uv1: vec3\n    uv1_: vec3\n\n") + edges);
+    REQUIRE(crowded.structs.size() == 2);
+    CHECK(crowded.structs[0].members[0].semantic == "UV1_");
+    CHECK(crowded.structs[0].members[1].semantic == "UV1__");
+
     // Where a stream means nothing, it is refused rather than ignored.
     CHECK(error_of(R"(@vertex struct v:
     position: pos3

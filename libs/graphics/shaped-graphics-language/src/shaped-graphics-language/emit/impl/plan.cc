@@ -922,6 +922,33 @@ sgl::emit::impl::plan sgl::emit::impl::make_plan(check::checked_module const& m,
     return result;
 }
 
+cc::vector<cc::string> sgl::emit::impl::vertex_semantics(check::checked_module const& m, check::type_info const& t)
+{
+    auto result = cc::vector<cc::string>();
+    for (auto const& member : m.at(t.members))
+    {
+        auto semantic = cc::string(member.name);
+        for (auto& c : semantic.as_mutable_span())
+            if (c >= 'a' && c <= 'z')
+                c = char(c - 'a' + 'A');
+        // HLSL reads a trailing number as the semantic's index, and dx12 refuses a name that ends in one
+        if (!semantic.empty() && semantic.back() >= '0' && semantic.back() <= '9')
+            semantic += '_';
+        // a name that another member took, ignoring case, moves on rather than colliding
+        auto const taken = [&]
+        {
+            for (auto const& other : result)
+                if (other == semantic)
+                    return true;
+            return false;
+        };
+        while (taken())
+            semantic += '_';
+        result.push_back(cc::move(semantic));
+    }
+    return result;
+}
+
 bool sgl::emit::impl::has_base(plan const& p, check::stage_input input)
 {
     auto const is_hlsl = p.which == target::hlsl_dx12 || p.which == target::hlsl_vulkan;

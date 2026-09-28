@@ -25,19 +25,6 @@ constexpr cc::string_view k_texture_names[]
 constexpr cc::string_view k_image_names[]
     = {"RWTexture1D", "RWTexture1DArray", "RWTexture2D", "RWTexture2DArray", "", "", "RWTexture3D", "", ""};
 
-/// `position` -> `POSITION`, which is how a dx12 input layout names a vertex attribute.
-/// `uv1` -> `UV1_`: HLSL reads a trailing number as the semantic's index, and dx12 refuses a name that ends in one.
-cc::string vertex_semantic(cc::string_view name)
-{
-    auto result = cc::string(name);
-    for (auto& c : result.as_mutable_span())
-        if (c >= 'a' && c <= 'z')
-            c = char(c - 'a' + 'A');
-    if (!result.empty() && result.back() >= '0' && result.back() <= '9')
-        result += '_';
-    return result;
-}
-
 /// Both HLSL targets: one language, and two ways of saying where a thing lives.
 class hlsl_dialect final : public dialect
 {
@@ -74,14 +61,21 @@ public:
     }
 
     /// SPIR-V has no semantics, so vulkan takes the location as an attribute and keeps the semantic HLSL's grammar asks for.
-    cc::string semantic_of(planned_struct const& s, planned_member const& member) const
+    cc::string semantic_of(planned_struct const& s, planned_member const& member, plan const& p) const
     {
         if (member.is_position)
             return "SV_Position";
         switch (s.role)
         {
         case struct_role::vertex_input:
-            return vertex_semantic(member.source_name);
+        {
+            auto const at = &member - s.members.data();
+            auto const semantics = vertex_semantics(p.m, p.m.at(s.type));
+            for (auto i = isize(0); i < s.member_of.size(); ++i)
+                if (s.member_of[i] == at)
+                    return semantics[i];
+            return "";
+        }
         case struct_role::stage_link:
             return cc::format("SGL{}", member.location);
         case struct_role::patch_constants:
@@ -154,7 +148,7 @@ public:
         }
         out.appendf("{} {}{}", type_text(p, *this, member.type), member.name, array_dimensions(p, member.type));
         if (owner != nullptr)
-            if (auto const semantic = semantic_of(*owner, member); !semantic.empty())
+            if (auto const semantic = semantic_of(*owner, member, p); !semantic.empty())
                 out.appendf(" : {}", semantic);
         out += ";\n";
     }

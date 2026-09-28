@@ -335,6 +335,25 @@ TEST("sgl emit - a vertex member whose name ends in a digit gets a semantic that
     CHECK(hlsl.contains("    float2 uv0 : UV0_;\n    float2 uv1 : UV1_;\n"));
 }
 
+TEST("sgl emit - a vertex member whose semantic another member took moves on")
+{
+    // `uv1_` would be `UV1_` too, and so would `UV1`, since a semantic ignores case.
+    auto const source = cc::string("@vertex struct crowded:\n"
+                                   "    uv1: float2\n"
+                                   "    uv1_: float2\n"
+                                   "    UV1: float2\n"
+                                   "\n"
+                                   "struct pixel_input:\n"
+                                   "    @position position: hpos4\n"
+                                   "\n"
+                                   "@vertex fun main_vs(v: crowded) -> pixel_input:\n"
+                                   "    return {\n"
+                                   "        position = hpos4(v.uv1.x, v.uv1_.y, v.UV1.x, 1.0)\n"
+                                   "    }\n");
+    CHECK(text_of(source, target::hlsl_dx12)
+              .contains("    float2 uv1 : UV1_;\n    float2 uv1_ : UV1__;\n    float2 UV1 : UV1___;\n"));
+}
+
 TEST("sgl emit - a pixel stage's depth and sample mask are outputs, not color targets")
 {
     auto const source = cc::string("struct varyings:\n"

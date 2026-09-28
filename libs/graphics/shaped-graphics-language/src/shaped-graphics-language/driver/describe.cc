@@ -121,6 +121,8 @@ described_struct describe_struct(check::checked_module const& m, check::type_inf
                                    .edge = t.edge,
                                    .shape = check::hex_of(check::structural_hash(m, m.at(t.members)))};
     auto location = 0;
+    auto const semantics = t.edge == check::stage::vertex ? emit_impl::vertex_semantics(m, t) : cc::vector<cc::string>();
+    auto index = isize(0);
     for (auto const& member : m.at(t.members))
         result.members.push_back(
             {.name = member.name,
@@ -132,6 +134,7 @@ described_struct describe_struct(check::checked_module const& m, check::type_inf
              .output = member.output == check::pixel_output::sample_mask ? cc::string("sample_mask")
                      : member.output != check::pixel_output::color       ? cc::string("depth")
                                                                          : cc::string(),
+             .semantic = t.edge == check::stage::vertex ? semantics[index++] : cc::string(),
              .is_per_instance = member.is_per_instance});
     return result;
 }

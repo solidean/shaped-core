@@ -115,6 +115,8 @@ const light_kind_sun: i32 = 2;
 * **EMIT-27** A member with `@position` is `SV_Position` in HLSL and `@builtin(position)` in WGSL, and it takes no location.
 * **EMIT-28** A member of a vertex input at location i has the dx12 semantic of its name in upper case, `[[vk::location(i)]]` in vulkan, and `@location(i)` in WGSL.
   A name that ends in a digit gets a `_` after it, `uv1` -> `UV1_`, since HLSL reads a trailing number as the semantic's index.
+  A semantic an earlier member of the struct took, ignoring case, gets a `_` after it until it is its own: `uv1` then `uv1_` is `UV1_` then `UV1__`.
+  `sgl describe` states each member's semantic, which is what the host's input layout names the member by.
 * **EMIT-29** A member of a stage link at location i has the generated semantic `SGLi`, `[[vk::location(i)]]` in vulkan, and `@location(i)` in WGSL.
 * **EMIT-30** A member of a render target struct at location i is `SV_Targeti` in HLSL and `@location(i)` in WGSL.
 * **EMIT-31** A semantic is made from the name as the program writes it, whatever EMIT-18 made of the member.
