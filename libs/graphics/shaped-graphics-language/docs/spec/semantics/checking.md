@@ -396,7 +396,17 @@ fun shade(k: float) -> float:
 * **CHK-255** Among matching candidates whose chains are of equal length at every argument, a function of a type scope is better than one found by name at the call.
 * **CHK-257** An operator whose operands are all integer literals, and whose best candidate converts one of them, is the normal error `literal-needs-type` ([why](why/checking.md#chk-257)).
   `7.0 / 2` is the float `/`, since one operand is no integer literal.
-* **CHK-270** A `<<` or a `>>` whose count is an integer literal outside 0 to 31 is the normal error `shift-out-of-range`; a count computed at run time keeps its low five bits (EVAL-86).
+* **CHK-270** A `<<` or a `>>` whose count is a constant outside 0 to 31 is the normal error `shift-out-of-range`, whatever it shifts; a count computed at run time keeps its low five bits (EVAL-86).
+* **CHK-310** A **constant** is a literal, an enum value, or a construction, a member, a logical operator or a call of a `@pure` builtin whose operands are all constants.
+  It is judged on the flat tree of each entry point and each test, where a literal argument of an inlined call stands for its parameter (EVAL-48), and folded by the abstract machine.
+  A `let` holds no constant, even of one: WGSL folds what it creates the shader from, and a local is no part of that.
+  WGSL refuses at shader creation what CHK-270, CHK-311 and CHK-312 refuse, so they hold on every target, and an entry point is written for all of them or none (EMIT-13).
+* **CHK-311** A call with no value is the normal error `constant-without-value`.
+  That is an integer `/` or `%` by a constant with a zero component, whatever it divides, and a call of constants that EVAL-84 or EVAL-87 leaves without a value.
+* **CHK-312** A call of constants whose value its type cannot hold is the normal error `constant-not-representable`, which WGSL folds exactly and refuses.
+  That is an `int` sum, difference, product, negation, absolute value or left shift outside the `int`s, and a `uint` shifted left past its top bit.
+  It is also a negative `int` converted to `uint`, and a `float` result that is infinite or NaN.
+  A `uint` sum, difference and product wrap, as WGSL folds them.
 * **CHK-268** A `/` or a `%` whose operands are all integer literals is the normal error `literal-needs-type`, although `int` has both ([why](why/checking.md#chk-268)).
   So `1 / 3` is an error, and `1.0 / 3`, `(1 as int) / 3` and a division of two `int` locals are not.
 * **CHK-71** No matching candidate is the normal error `no-matching-overload`, and its detail spells the call with its argument types and says why each candidate did not match.
@@ -866,6 +876,8 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `literal-conversion-result` | CHK-85 |
 | `literal-needs-type` | CHK-257, CHK-268 |
 | `shift-out-of-range` | CHK-270 |
+| `constant-without-value` | CHK-311 |
+| `constant-not-representable` | CHK-312 |
 | `missing-sampler` | CHK-279 |
 | `invalid-constant-argument` | CHK-280, CHK-285, CHK-299, CHK-309 |
 | `non-uniform-control-flow` | CHK-282 |

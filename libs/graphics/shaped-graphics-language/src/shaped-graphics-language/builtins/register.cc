@@ -109,6 +109,74 @@ cc::string_view impl::integer_division_undefined(cc::span<scalar const> in)
     return {};
 }
 
+namespace
+{
+/// True where some int component of `a op b`, taken exactly, is outside the ints; a uint component never is.
+template <class Op>
+bool is_outside_ints(cc::span<scalar const> in, Op&& op)
+{
+    auto const width = in.size() / 2;
+    for (auto i = isize(0); i < width; ++i)
+    {
+        if (in[i].kind != value_kind::scalar_int)
+            continue;
+        auto const exact = op(i64(in[i].as_int()), i64(in[width + i].as_int()));
+        if (exact < -2147483648ll || exact > 2147483647ll)
+            return true;
+    }
+    return false;
+}
+} // namespace
+
+cc::string_view impl::sum_unrepresentable(cc::span<scalar const> in)
+{
+    return is_outside_ints(in, [](i64 a, i64 b) { return a + b; }) ? "an int sum outside the ints" : "";
+}
+
+cc::string_view impl::difference_unrepresentable(cc::span<scalar const> in)
+{
+    return is_outside_ints(in, [](i64 a, i64 b) { return a - b; }) ? "an int difference outside the ints" : "";
+}
+
+cc::string_view impl::product_unrepresentable(cc::span<scalar const> in)
+{
+    return is_outside_ints(in, [](i64 a, i64 b) { return a * b; }) ? "an int product outside the ints" : "";
+}
+
+cc::string_view impl::negation_unrepresentable(cc::span<scalar const> in)
+{
+    for (auto const& x : in)
+        if (x.kind == value_kind::scalar_int && x.bits == k_int_min_bits)
+            return "the most negative int negated";
+    return {};
+}
+
+cc::string_view impl::shift_left_unrepresentable(cc::span<scalar const> in)
+{
+    auto const width = in.size() / 2;
+    for (auto i = isize(0); i < width; ++i)
+    {
+        auto const count = in[width + i].bits & 31u;
+        if (in[i].kind == value_kind::scalar_int)
+        {
+            auto const exact = i64(in[i].as_int()) * (i64(1) << count);
+            if (exact < -2147483648ll || exact > 2147483647ll)
+                return "an int shifted left past its sign";
+        }
+        else if ((u64(in[i].bits) << count) >> 32 != 0)
+            return "a uint shifted left past its top bit";
+    }
+    return {};
+}
+
+cc::string_view impl::negative_as_uint(cc::span<scalar const> in)
+{
+    for (auto const& x : in)
+        if (x.kind == value_kind::scalar_int && x.as_int() < 0)
+            return "a negative int converted to uint";
+    return {};
+}
+
 void impl::remainder_floats(cc::span<scalar const> in, cc::vector<scalar>& out)
 {
     auto const width = in.size() / 2;
@@ -169,9 +237,11 @@ cc::string_view impl::clamp_undefined(cc::span<scalar const> in)
     {
         auto const low = in[width + i];
         auto const high = in[2 * width + i];
-        auto const is_above = low.kind == value_kind::scalar_float ? low.as_float() > high.as_float()
-                            : low.kind == value_kind::scalar_int   ? low.as_int() > high.as_int()
-                                                                   : low.bits > high.bits;
+        auto is_above = low.bits > high.bits;
+        if (low.kind == value_kind::scalar_float)
+            is_above = low.as_float() > high.as_float();
+        else if (low.kind == value_kind::scalar_int)
+            is_above = low.as_int() > high.as_int();
         if (is_above)
             return "clamp whose low bound is above its high one";
     }

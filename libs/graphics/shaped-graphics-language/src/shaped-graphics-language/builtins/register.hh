@@ -62,6 +62,18 @@ void remainder_integers(cc::span<check::scalar const> in, cc::vector<check::scal
 /// A zero divisor, and the one quotient that overflows `int`: the values no target agrees on.
 [[nodiscard]] cc::string_view integer_division_undefined(cc::span<check::scalar const> in);
 
+/// What WGSL refuses where every operand is constant, componentwise (CHK-312).
+/// A constant int is folded exactly, so a value outside the ints is an error there; a uint wraps, as WGSL folds it.
+[[nodiscard]] cc::string_view sum_unrepresentable(cc::span<check::scalar const> in);
+[[nodiscard]] cc::string_view difference_unrepresentable(cc::span<check::scalar const> in);
+[[nodiscard]] cc::string_view product_unrepresentable(cc::span<check::scalar const> in);
+/// The most negative int, negated or made absolute.
+[[nodiscard]] cc::string_view negation_unrepresentable(cc::span<check::scalar const> in);
+/// An int shifted left past its sign, or a uint past its top bit.
+[[nodiscard]] cc::string_view shift_left_unrepresentable(cc::span<check::scalar const> in);
+/// A negative int converted to uint.
+[[nodiscard]] cc::string_view negative_as_uint(cc::span<check::scalar const> in);
+
 /// `a % b` of floats, componentwise: `a - b * trunc(a / b)`, WGSL's definition, which HLSL's `fmod` shares.
 void remainder_floats(cc::span<check::scalar const> in, cc::vector<check::scalar>& out);
 /// `a % b` in HLSL and WGSL, `fmod(a, b)` in MSL, which has no `%` of floats.

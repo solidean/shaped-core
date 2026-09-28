@@ -165,6 +165,15 @@ namespace sgl::check
                                 run_inputs const& inputs,
                                 run_limits const& limits = {});
 
+/// True where `id` is a constant of `e`: a literal, an enum value, or a construction, a member, a logical operator or
+/// a call of a `@pure` builtin whose operands are all constants.
+/// It is what WGSL folds when it creates the shader, so what the check pass judges of constants (CHK-310).
+[[nodiscard]] bool is_constant(checked_module const& m, flat_entry_point const& e, flat_expr_id id);
+
+/// The value of constant `id` on the abstract machine: `ok` with it as the result, or `program_error` where some call
+/// under it has none (EVAL-85); a `type_error` for an `id` that is no constant.
+[[nodiscard]] outcome evaluate_constant(checked_module const& m, flat_entry_point const& e, flat_expr_id id);
+
 /// `ok 1.5` with one ` | print …` per printed value, then one ` | buffer …` per buffer, for a failing test to show.
 [[nodiscard]] cc::string dump(outcome const& o);
 } // namespace sgl::check

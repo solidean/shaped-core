@@ -188,8 +188,12 @@ enum class sgl::diagnostic_kind : sgl::u8
     literal_conversion_result,
     /// An operator over integer literals alone that only an operator of another type takes, or `/` and `%` over them.
     literal_needs_type,
-    /// A shift whose count is a literal outside 0 to 31, which can only be a mistake.
+    /// A shift whose count is a constant outside 0 to 31, which can only be a mistake.
     shift_out_of_range,
+    /// A call of constants that has no value, or an integer divided by a constant zero: wrong on every run.
+    constant_without_value,
+    /// A constant whose value its type cannot hold, which WGSL refuses when it creates the shader.
+    constant_not_representable,
     /// A texture method called without its sampler, on a texture whose binding member names none by `@sampler`.
     missing_sampler,
     /// An argument a target takes only as a constant, such as a texel offset, given a value computed at run time or a

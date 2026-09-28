@@ -143,6 +143,10 @@ void sgl::builtins::register_conversions(registry& r)
                     .signature = cc::format("@pure @operator(\"as\") fun convert_{}_to_{}(x: {}) -> {}", source, target,
                                             source, target),
                     .evaluate = converter_to(to.kind),
+                    // WGSL folds a constant exactly, and no uint holds a negative int (CHK-312)
+                    .unrepresentable_when_constant
+                    = from.kind == value_kind::scalar_int && to.kind == value_kind::scalar_uint ? impl::negative_as_uint
+                                                                                                : nullptr,
                     .write = {.hlsl = target, .wgsl = wgsl, .msl = target},
                 });
             }

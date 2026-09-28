@@ -129,8 +129,11 @@ void sgl::builtins::register_bit_math(registry& r)
                      {.kind = spelling_kind::custom, .custom = write_bitwise<'^'>});
         add_operator(r, "<<", cc::format("shift_left{}", suffix), t.name, t.name, t.name, shift_left,
                      {.kind = spelling_kind::custom, .custom = t.shift_left, .msl_names = k_as_type});
+        r.functions.back().unrepresentable_when_constant = shift_left_unrepresentable;
+        r.functions.back().judged_last = judged_operand::shift_count;
         add_operator(r, ">>", cc::format("shift_right{}", suffix), t.name, t.name, t.name, shift_right,
                      {.kind = spelling_kind::custom, .custom = t.shift_right});
+        r.functions.back().judged_last = judged_operand::shift_count;
         r.add(function_record{
             .signature = cc::format("@pure @operator(\"~\") fun bit_not{}(x: {}) -> {}", suffix, t.name, t.name),
             .evaluate = bit_not,

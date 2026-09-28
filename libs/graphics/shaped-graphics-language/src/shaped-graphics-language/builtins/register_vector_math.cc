@@ -201,10 +201,15 @@ void sgl::builtins::register_vector_math(registry& r)
     for (auto const type : integer_vectors)
     {
         add_infix(r, "+", named("add", type), type, type, type, add_bits);
+        r.functions.back().unrepresentable_when_constant = sum_unrepresentable;
         add_infix(r, "-", named("subtract", type), type, type, type, subtract_bits);
+        r.functions.back().unrepresentable_when_constant = difference_unrepresentable;
         add_infix(r, "*", named("multiply", type), type, type, type, multiply_bits);
+        r.functions.back().unrepresentable_when_constant = product_unrepresentable;
         add_infix(r, "/", named("divide", type), type, type, type, divide_integers, integer_division_undefined);
+        r.functions.back().judged_last = judged_operand::divisor;
         add_infix(r, "%", named("remainder", type), type, type, type, remainder_integers, integer_division_undefined);
+        r.functions.back().judged_last = judged_operand::divisor;
     }
 
     r.add_comment("// a direction adds to a direction; what `vec3 * vec3` would mean is a question, so it is no "

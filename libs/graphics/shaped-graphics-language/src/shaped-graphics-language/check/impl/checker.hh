@@ -519,6 +519,8 @@ struct checker
     void index_builtin_symbols();
     /// CHK-282: every barrier and every call that takes derivatives stands where all invocations of its group arrive.
     void judge_uniformity(flat_entry_point const& structured);
+    /// CHK-270, CHK-311 and CHK-312: every constant of the tree folded, and what WGSL would refuse of it reported.
+    void judge_constants(flat_entry_point const& structured);
     /// The prelude symbol that declares `id`; `none` for a record no declaration names.
     [[nodiscard]] symbol_id symbol_declaring(builtin_id id) const;
     /// A literal, an enum case, a `const`, or a construction of those: what a target takes where it takes no value.

@@ -218,6 +218,10 @@ cc::string_view sgl::to_string(diagnostic_kind kind)
         return "literal-needs-type";
     case diagnostic_kind::shift_out_of_range:
         return "shift-out-of-range";
+    case diagnostic_kind::constant_without_value:
+        return "constant-without-value";
+    case diagnostic_kind::constant_not_representable:
+        return "constant-not-representable";
     case diagnostic_kind::missing_sampler:
         return "missing-sampler";
     case diagnostic_kind::invalid_constant_argument:
@@ -441,7 +445,11 @@ cc::string_view sgl::summary_of(diagnostic_kind kind)
     case diagnostic_kind::literal_needs_type:
         return "an operator over literals alone that only another type provides";
     case diagnostic_kind::shift_out_of_range:
-        return "a shift by a literal count outside 0 to 31";
+        return "a shift by a constant count outside 0 to 31";
+    case diagnostic_kind::constant_without_value:
+        return "a call of constants that has no value, or an integer divided by a constant zero";
+    case diagnostic_kind::constant_not_representable:
+        return "a constant whose value its type cannot hold";
     case diagnostic_kind::missing_sampler:
         return "a texture sampled without a sampler, and without a `@sampler` to supply one";
     case diagnostic_kind::invalid_constant_argument:
@@ -567,6 +575,8 @@ sgl::severity sgl::default_severity_of(diagnostic_kind kind)
     case diagnostic_kind::literal_conversion_result:
     case diagnostic_kind::literal_needs_type:
     case diagnostic_kind::shift_out_of_range:
+    case diagnostic_kind::constant_without_value:
+    case diagnostic_kind::constant_not_representable:
     case diagnostic_kind::missing_sampler:
     case diagnostic_kind::invalid_constant_argument:
     case diagnostic_kind::non_uniform_control_flow:

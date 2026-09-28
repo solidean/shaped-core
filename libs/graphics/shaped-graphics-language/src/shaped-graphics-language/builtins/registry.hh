@@ -102,6 +102,16 @@ enum class sgl::builtins::spelling_kind : sgl::u8
     custom,
 };
 
+/// The last argument of a call, which WGSL judges alone where it is constant, whatever stands beside it.
+enum class sgl::builtins::judged_operand : sgl::u8
+{
+    none,
+    /// A shift's count, which is 0 to 31 (CHK-270).
+    shift_count,
+    /// An integer divisor, no component of which is zero (CHK-311).
+    divisor,
+};
+
 /// How every target writes a call of one builtin function.
 struct sgl::builtins::spelling
 {
@@ -174,6 +184,12 @@ struct sgl::builtins::function_record
     evaluator evaluate = nullptr;
     /// Empty for a builtin defined for every argument; otherwise the interpreter asks it before evaluating.
     undefined_check undefined_when = nullptr;
+    /// Why WGSL refuses a call whose every argument is constant although EVAL gives it a value, such as an int sum
+    /// outside the ints; empty where WGSL folds it (CHK-312).
+    /// Given what an evaluator is given, and asked only where `undefined_when` found nothing.
+    undefined_check unrepresentable_when_constant = nullptr;
+    /// The argument the check pass judges alone where it is constant.
+    judged_operand judged_last = judged_operand::none;
     spelling write;
     /// A texture method called without its sampler, which the texture's `@sampler` supplies at the call (CHK-279).
     /// The flattener calls this record instead, with the sampler inserted after the coordinate; `none` for every other.

@@ -1826,9 +1826,9 @@ void checker::flatten_test(i32 index)
     // by value: flattening appends to the module's vectors
     auto const test = out.tests[index];
     auto const info = out.at(test.symbol).info;
-    // A test that expects a diagnostic is never run (CHK-232), and one whose text an earlier phase found an error in has
-    // been reported already: flattening either could only add a second diagnostic to the first.
-    if (test.expects_diagnostics() || has_syntax_error_in(test.file, test.extent))
+    // One whose text an earlier phase found an error in has been reported already: flattening it could only add a
+    // second diagnostic to the first.
+    if (has_syntax_error_in(test.file, test.extent))
         return;
     if (!notes[info].is_body_sound || !inlines_whole(test.symbol))
         return;
@@ -1846,6 +1846,18 @@ void checker::flatten_test(i32 index)
     for (auto const stmt : ast_of(test.file).at(body.statements))
         f.flatten_stmt(stmt);
 
+    // A test that expects a diagnostic is never run (CHK-232), so its tree is judged for its constants alone.
+    // Nothing else of the tree is reported: what it expects stands in its text, where the check pass found it already.
+    if (test.expects_diagnostics())
+    {
+        if (!f.is_failed)
+        {
+            f.entry.body = f.add_list(f.block);
+            judge_constants(f.entry);
+        }
+        return;
+    }
+
     // CHK-227: once, however many trees inline the function the assert stands in
     for (auto const& a : f.effectful_asserts)
         report_once(diagnostic_kind::unsupported_yet, a.file, span_of(a.file, a.expr),
@@ -1859,6 +1871,7 @@ void checker::flatten_test(i32 index)
     if (f.is_failed || !f.stage_violations.empty())
         return;
     f.entry.body = f.add_list(f.block);
+    judge_constants(f.entry);
     out.tests[index].unit = i32(out.test_units.size());
     out.test_units.push_back(cc::move(f.entry));
 }
@@ -1957,6 +1970,7 @@ void checker::flatten_entry_point(symbol_id id)
     if (f.is_failed || !f.stage_violations.empty() || reaches_discard || (info.stages & stage_bit(info.entry_stage)) == 0)
         return;
     f.entry.body = f.add_list(f.block);
+    judge_constants(f.entry);
     judge_uniformity(f.entry);
     out.entry_points.push_back(cc::move(f.entry));
 }

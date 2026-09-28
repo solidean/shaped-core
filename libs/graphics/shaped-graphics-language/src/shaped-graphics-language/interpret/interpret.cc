@@ -1124,6 +1124,58 @@ outcome sgl::check::interpret(checked_module const& m,
     return cc::move(run.out);
 }
 
+bool sgl::check::is_constant(checked_module const& m, flat_entry_point const& e, flat_expr_id id)
+{
+    if (!is_known(e, id))
+        return false;
+    auto const& x = e.at(id);
+    auto const all_constant = [&](ast::range_of<flat_expr_id> range)
+    {
+        if (!is_known(e, range))
+            return false;
+        for (auto const argument : e.at(range))
+            if (!is_constant(m, e, argument))
+                return false;
+        return true;
+    };
+    if (x.node.is<flat_literal>() || x.node.is<flat_int_literal>() || x.node.is<flat_bool_literal>()
+        || x.node.is<flat_enum_value>())
+        return true;
+    if (auto const* const construct = x.node.try_as<flat_construct>())
+        return all_constant(construct->arguments);
+    if (auto const* const member = x.node.try_as<flat_member>())
+        return is_constant(m, e, member->object);
+    if (auto const* const n = x.node.try_as<flat_not>())
+        return is_constant(m, e, n->operand);
+    if (auto const* const a = x.node.try_as<flat_and>())
+        return is_constant(m, e, a->lhs) && is_constant(m, e, a->rhs);
+    if (auto const* const o = x.node.try_as<flat_or>())
+        return is_constant(m, e, o->lhs) && is_constant(m, e, o->rhs);
+    if (auto const* const c = x.node.try_as<flat_call>())
+    {
+        auto const* const record = m.builtin_function(c->intrinsic);
+        return c->is_pure && record != nullptr && record->evaluate != nullptr && !record->is_atomic
+            && all_constant(c->arguments);
+    }
+    return false;
+}
+
+outcome sgl::check::evaluate_constant(checked_module const& m, flat_entry_point const& e, flat_expr_id id)
+{
+    auto const inputs = run_inputs();
+    auto const limits = run_limits();
+    auto run = machine{.m = m, .e = e, .inputs = inputs, .limits = limits, .fuel = limits.fuel};
+    if (!is_constant(m, e, id))
+    {
+        run.type_error("an expression that is no constant");
+        return cc::move(run.out);
+    }
+    auto result = value();
+    if (run.eval(id, result).is_normal())
+        run.out.result = cc::move(result);
+    return cc::move(run.out);
+}
+
 cc::string sgl::check::dump(outcome const& o)
 {
     auto const write = [](cc::string& out, value const& v)
