@@ -1,7 +1,11 @@
 #include "describe.hh"
 
 #include <clean-core/string/format.hh>
+#include <shaped-graphics-language/check/resources.hh>
+#include <shaped-graphics-language/check/structural_hash.hh>
+#include <shaped-graphics-language/driver/impl/describe_binding.hh>
 #include <shaped-graphics-language/driver/impl/front_end.hh>
+#include <shaped-graphics-language/emit/impl/layout.hh>
 #include <shaped-graphics-language/emit/impl/plan.hh>
 #include <shaped-graphics-language/legalize/legalize.hh>
 
@@ -11,63 +15,109 @@ namespace
 {
 namespace emit_impl = sgl::emit::impl;
 
-described_binding describe_binding(check::checked_module const& m, check::symbol const& s)
+/// What kind of sampler `member` is to a layout: a static one says so by its settings, a bound one by its declaration.
+cc::string_view sampler_type_of(check::checked_module const& m, check::member_info const& member)
 {
-    auto const& b = m.bindings[s.info];
-    auto const members = m.at(b.members);
-    auto result = described_binding{.name = s.name, .is_inline = b.is_inline};
-
-    if (b.is_inline)
+    auto const& t = m.at(member.type);
+    if (t.is_comparison)
+        return "comparison";
+    if (member.is_non_filtering)
+        return "non_filtering";
+    if (member.static_sampler >= 0)
     {
-        auto const placed = emit_impl::place_block(m, members);
-        for (auto i = isize(0); i < members.size(); ++i)
-            result.members.push_back({.name = members[i].name,
-                                      .kind = described_member_kind::constant,
-                                      .type = cc::string(m.name_of(members[i].type)),
-                                      .offset = placed.offsets[i],
-                                      .size = placed.sizes[i]});
-        result.block_size = placed.size;
-        return result;
+        auto const& state = m.samplers[member.static_sampler];
+        if (state.min_filter == 0 && state.mag_filter == 0 && state.mip_filter == 0)
+            return "non_filtering";
     }
+    return "filtering";
+}
 
-    // Numbered as the emitter numbers them: the constant block first when there is one, then the buffers in
-    // declaration order, each the next slot of its group.
-    auto const plain = emit_impl::plain_members_of(m, b);
-    auto const placed = emit_impl::place_block(m, plain);
-    if (!plain.empty())
+/// A texture's `sg::texture_sample_type`, which the declaration states whole (the spec's bindings file, "Sample types").
+cc::string_view sample_type_of(check::checked_module const& m, check::member_info const& member)
+{
+    auto const& t = m.at(member.type);
+    if (t.is_depth)
+        return "depth";
+    auto const element = m.name_of(t.element);
+    if (element.starts_with("uint"))
+        return "uint";
+    if (element.starts_with("int"))
+        return "sint";
+    return member.is_unfilterable || t.shape == check::texture_shape::d2_ms ? "unfilterable_float" : "filterable_float";
+}
+
+// An `sg::access_mode` name; SGL's own enum orders its members differently, so it is never cast across.
+cc::string_view access_name(check::access_mode access)
+{
+    switch (access)
     {
-        result.block_size = placed.size;
-        result.block_slot = 0;
-        result.block_host_name = s.name;
+    case check::access_mode::read:
+        return "read";
+    case check::access_mode::read_write:
+        return "read_write";
+    case check::access_mode::write:
+        return "write";
     }
-    auto slot = emit_impl::first_buffer_slot(m, b);
-    auto next_constant = isize(0);
-    for (auto const& member : members)
+    return "read";
+}
+
+described_binding_member describe_resource(check::checked_module const& m,
+                                           check::member_info const& member,
+                                           i32 slot,
+                                           cc::string host_name)
+{
+    auto const& t = m.at(member.type);
+    auto result = described_binding_member{.name = member.name,
+                                           .slot = slot,
+                                           .host_name = cc::move(host_name),
+                                           .access = cc::string("read")};
+    switch (t.kind)
     {
-        auto const& t = m.at(member.type);
-        if (t.kind != check::type_kind::buffer)
+    case check::type_kind::texture:
+        result.kind = described_member_kind::texture;
+        result.type = cc::string(m.name_of(member.type));
+        result.texture_dimension = cc::string(check::info_of(t.shape).sg_name);
+        result.sample_type = cc::string(sample_type_of(m, member));
+        break;
+    case check::type_kind::image:
+        result.kind = described_member_kind::image;
+        result.type = cc::string(m.name_of(member.type));
+        result.texture_dimension = cc::string(check::info_of(t.shape).sg_name);
+        result.image_format = cc::string(check::k_image_formats[t.format].name);
+        result.access = cc::string(access_name(t.access));
+        break;
+    default:
+        result.kind = described_member_kind::sampler;
+        result.type = cc::string(m.name_of(member.type));
+        result.sampler_type = cc::string(sampler_type_of(m, member));
+        if (member.static_sampler >= 0)
         {
-            result.members.push_back({.name = member.name,
-                                      .kind = described_member_kind::constant,
-                                      .type = cc::string(m.name_of(member.type)),
-                                      .offset = placed.offsets[next_constant],
-                                      .size = placed.sizes[next_constant]});
-            ++next_constant;
-            continue;
+            auto const& state = m.samplers[member.static_sampler];
+            result.static_sampler = described_sampler{
+                .min_filter = cc::string(check::k_sampler_filters[state.min_filter]),
+                .mag_filter = cc::string(check::k_sampler_filters[state.mag_filter]),
+                .mip_filter = cc::string(check::k_sampler_filters[state.mip_filter]),
+                .address_u = cc::string(check::k_sampler_addresses[state.address_u]),
+                .address_v = cc::string(check::k_sampler_addresses[state.address_v]),
+                .address_w = cc::string(check::k_sampler_addresses[state.address_w]),
+                .compare = state.compare >= 0 ? cc::string(check::k_compare_ops[state.compare]) : cc::string(),
+                .max_anisotropy = state.max_anisotropy,
+                .min_lod = state.min_lod,
+                .max_lod = state.max_lod,
+                .mip_lod_bias = state.mip_lod_bias,
+            };
         }
-        result.members.push_back({.name = member.name,
-                                  .kind = described_member_kind::buffer,
-                                  .type = cc::string(m.name_of(t.element)),
-                                  .is_mut = t.is_mut,
-                                  .slot = slot++,
-                                  .host_name = cc::format("{}.{}", s.name, member.name)});
+        break;
     }
     return result;
 }
 
+
 described_struct describe_struct(check::checked_module const& m, check::type_info const& t)
 {
-    auto result = described_struct{.name = m.at(t.symbol).name, .edge = t.edge};
+    auto result = described_struct{.name = m.at(t.symbol).name,
+                                   .edge = t.edge,
+                                   .shape = check::hex_of(check::structural_hash(m, m.at(t.members)))};
     auto location = 0;
     for (auto const& member : m.at(t.members))
         result.members.push_back({.name = member.name,
@@ -78,16 +128,191 @@ described_struct describe_struct(check::checked_module const& m, check::type_inf
     return result;
 }
 
-described_entry_point describe_entry_point(check::checked_module const& m, check::flat_entry_point const& e)
+described_memory_struct describe_memory_struct(check::checked_module const& m,
+                                               check::type_id type,
+                                               emit_impl::address_space space)
+{
+    auto const placed = emit_impl::place_struct(m, type, space);
+    auto result = described_memory_struct{
+        .name = cc::string(m.name_of(type)),
+        .space = cc::string(space == emit_impl::address_space::constants ? "constants" : "storage"),
+        .size = placed.size};
+    auto const members = m.at(m.at(type).members);
+    for (auto i = isize(0); i < members.size(); ++i)
+        if (members[i].type != check::checked_module::void_type)
+            result.members.push_back({.name = members[i].name,
+                                      .type = cc::string(m.name_of(members[i].type)),
+                                      .offset = placed.offsets[i],
+                                      .size = placed.sizes[i]});
+    return result;
+}
+
+cc::vector<cc::string> feature_names(check::feature_set features)
+{
+    auto result = cc::vector<cc::string>();
+    for (auto i = isize(0); i < check::k_feature_count; ++i)
+        if (features.has(check::feature(i)))
+            result.push_back(cc::string(check::k_feature_names[i]));
+    return result;
+}
+
+/// `legal` is `e` legalized, which is the tree the footprint is read from.
+described_entry_point describe_entry_point(check::checked_module const& m,
+                                           check::flat_entry_point const& e,
+                                           check::flat_entry_point const& legal)
 {
     auto result = described_entry_point{.name = e.name, .stage = e.entry_stage};
     for (auto axis = 0; axis < 3; ++axis)
         result.workgroup[axis] = e.workgroup[axis];
     for (auto const id : e.bindings)
         result.bindings.push_back(m.at(id).name);
+    result.features = feature_names(e.features);
+    result.footprint = check::footprint_of(m, legal);
+    return result;
+}
+
+described_pipeline describe_pipeline(check::checked_module const& m, check::pipeline_info const& p)
+{
+    auto result = described_pipeline{.name = m.at(p.symbol).name, .vertex = m.at(p.vertex).name};
+    if (check::is_valid(p.pixel))
+        result.pixel = m.at(p.pixel).name;
+    for (auto const b : m.at(p.layout))
+        result.layout.push_back(m.at(b).name);
+    if (check::is_valid(p.inline_constants))
+        result.inline_constants = m.at(p.inline_constants).name;
+    result.vertex_input = m.name_of(p.vertex_input);
+    if (check::is_valid(p.target_set))
+    {
+        result.target_set = m.name_of(p.target_set);
+        for (auto const& member : m.at(m.at(p.target_set).members))
+            result.targets.push_back(member.name);
+    }
+    auto features = m.functions[m.at(p.vertex).info].features;
+    if (check::is_valid(p.pixel))
+        features |= m.functions[m.at(p.pixel).info].features;
+    result.features = feature_names(features);
+
+    auto const settings = m.at(p.settings);
+    for (auto const& s : settings)
+        result.settings.push_back({.path = s.path,
+                                   .kind = s.kind,
+                                   .integer = s.integer,
+                                   .real = s.real,
+                                   .enum_case = s.enum_case,
+                                   .enum_name = s.enum_name});
+
+    // The frozen part, which a reload compares line by line: a declaration by its name and its shape.
+    auto const shaped = [&](check::type_id type)
+    { return cc::format("{}@{}", m.name_of(type), check::hex_of(check::structural_hash(m, type))); };
+    auto const bound = [&](check::symbol_id b)
+    {
+        return cc::format("{}@{}", m.at(b).name,
+                          check::hex_of(check::structural_hash(m, m.at(m.bindings[m.at(b).info].members))));
+    };
+    auto layout = cc::string();
+    for (auto const b : m.at(p.layout))
+        layout += cc::format("{}{}", layout.empty() ? "" : ", ", bound(b));
+    result.frozen.push_back(cc::format("layout = {}", layout));
+    result.frozen.push_back(
+        cc::format("inline constants = {}", check::is_valid(p.inline_constants) ? bound(p.inline_constants) : ""));
+    result.frozen.push_back(cc::format("vertex input = {}", shaped(p.vertex_input)));
+    result.frozen.push_back(
+        cc::format("target set = {}", check::is_valid(p.target_set) ? shaped(p.target_set) : cc::string()));
+    // A device lacking a feature a reload now needs would refuse the pipeline, so the build's needs are frozen too.
+    auto needs = cc::string();
+    for (auto const& name : result.features)
+        needs += cc::format("{}{}", needs.empty() ? "" : ", ", name);
+    result.frozen.push_back(cc::format("features = {}", needs));
+    for (auto i = isize(0); i < settings.size(); ++i)
+    {
+        auto const& s = settings[i];
+        auto const is_frozen
+            = s.path.ends_with(".format") || s.path == "depth_stencil_format" || s.path == "sample_count";
+        auto is_last = true;
+        for (auto j = i + 1; j < settings.size(); ++j)
+            is_last = is_last && settings[j].path != s.path;
+        if (!is_frozen || !is_last)
+            continue;
+        auto const value = s.kind == check::setting_kind::host      ? cc::string(".host")
+                         : s.kind == check::setting_kind::enum_case ? cc::format(".{}", s.enum_case)
+                                                                    : cc::format("{}", s.integer);
+        result.frozen.push_back(cc::format("{} = {}", s.path, value));
+    }
+
+    // Open is where the last word is `.host`: a later setting of that field takes it back.
+    for (auto i = isize(0); i < settings.size(); ++i)
+    {
+        auto is_last = true;
+        for (auto j = i + 1; j < settings.size(); ++j)
+            is_last = is_last && settings[j].path != settings[i].path;
+        if (is_last && settings[i].kind == check::setting_kind::host)
+            result.open.push_back(settings[i].path);
+    }
     return result;
 }
 } // namespace
+
+sgl::described_binding sgl::driver::impl::describe_binding(check::checked_module const& m, check::symbol const& s)
+{
+    auto const& b = m.bindings[s.info];
+    auto const members = m.at(b.members);
+    auto result = described_binding{.name = s.name,
+                                    .is_inline = b.is_inline,
+                                    .shape = check::hex_of(check::structural_hash(m, members))};
+
+    if (b.is_inline)
+    {
+        auto const placed = sgl::emit::impl::place_block(m, members);
+        for (auto i = isize(0); i < members.size(); ++i)
+            result.members.push_back({.name = members[i].name,
+                                      .kind = described_member_kind::constant,
+                                      .type = cc::string(m.name_of(members[i].type)),
+                                      .offset = placed.offsets[i],
+                                      .size = placed.sizes[i]});
+        result.block_size = placed.size;
+        return result;
+    }
+
+    // Numbered as the emitter numbers them: the constant block first when there is one, then the resources in
+    // declaration order, each the next slot of its group.
+    auto const plain = sgl::emit::impl::plain_members_of(m, b);
+    auto const placed = sgl::emit::impl::place_block(m, plain);
+    if (!plain.empty())
+    {
+        result.block_size = placed.size;
+        result.block_slot = 0;
+        result.block_host_name = s.name;
+    }
+    auto slot = sgl::emit::impl::first_resource_slot(m, b);
+    auto next_constant = isize(0);
+    for (auto const& member : members)
+    {
+        auto const& t = m.at(member.type);
+        if (t.kind == check::type_kind::buffer)
+        {
+            result.members.push_back({.name = member.name,
+                                      .kind = described_member_kind::buffer,
+                                      .type = cc::string(m.name_of(t.element)),
+                                      .slot = slot++,
+                                      .stride = sgl::emit::impl::element_stride(m, t.element),
+                                      .host_name = cc::format("{}.{}", s.name, member.name),
+                                      .access = cc::string(t.is_mut ? "read_write" : "read")});
+            continue;
+        }
+        if (check::is_resource(t.kind))
+        {
+            result.members.push_back(describe_resource(m, member, slot++, cc::format("{}.{}", s.name, member.name)));
+            continue;
+        }
+        result.members.push_back({.name = member.name,
+                                  .kind = described_member_kind::constant,
+                                  .type = cc::string(m.name_of(member.type)),
+                                  .offset = placed.offsets[next_constant],
+                                  .size = placed.sizes[next_constant]});
+        ++next_constant;
+    }
+    return result;
+}
 
 cc::result<sgl::module_description, cc::string> sgl::describe(describe_request const& request)
 {
@@ -98,6 +323,7 @@ cc::result<sgl::module_description, cc::string> sgl::describe(describe_request c
     auto const& m = front.module;
     auto errors = cc::vector<emit::error>();
     auto result = module_description();
+    auto described = cc::vector<check::symbol_id>();
 
     // Only the program's own declarations: the prelude describes nothing, and an imported module describes itself.
     for (auto i = isize(0); i < m.symbols.size(); ++i)
@@ -112,7 +338,10 @@ cc::result<sgl::module_description, cc::string> sgl::describe(describe_request c
             auto const before = errors.size();
             emit_impl::validate_binding(m, id, errors);
             if (errors.size() == before)
-                result.bindings.push_back(describe_binding(m, s));
+            {
+                result.bindings.push_back(driver::impl::describe_binding(m, s));
+                described.push_back(id);
+            }
         }
         else if (s.kind == check::symbol_kind::structure && check::is_valid(s.type))
         {
@@ -128,14 +357,38 @@ cc::result<sgl::module_description, cc::string> sgl::describe(describe_request c
         }
     }
 
+    // The structs the described bindings place in memory, each once and after what it holds.
+    for (auto const id : described)
+    {
+        for (auto const space : {emit_impl::address_space::constants, emit_impl::address_space::storage})
+        {
+            auto structs = cc::vector<check::type_id>();
+            emit_impl::collect_placed_structs(m, id, space, structs);
+            for (auto const type : structs)
+            {
+                auto const name = m.name_of(type);
+                auto is_known = false;
+                for (auto const& known : result.memory_structs)
+                    is_known = is_known || known.name == name;
+                if (!is_known)
+                    result.memory_structs.push_back(describe_memory_struct(m, type, space));
+            }
+        }
+    }
+
     // What only an entry point can get wrong: its list, its signature and its body.
     for (auto const& e : m.entry_points)
     {
         auto const before = errors.size();
-        emit_impl::validate(m, check::legalize(m, e), errors);
+        auto const legal = check::legalize(m, e);
+        emit_impl::validate(m, legal, errors);
         if (errors.size() == before)
-            result.entry_points.push_back(describe_entry_point(m, e));
+            result.entry_points.push_back(describe_entry_point(m, e, legal));
     }
+
+    for (auto const& p : m.pipelines)
+        if (m.at(p.symbol).file == front.program_file())
+            result.pipelines.push_back(describe_pipeline(m, p));
 
     if (!errors.empty())
     {

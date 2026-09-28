@@ -1,4 +1,6 @@
+#include <clean-core/container/pinned_data.hh>
 #include <clean-core/container/span.hh>
+#include <clean-core/container/vector.hh>
 #include <clean-core/fwd.hh> // cc::byte, cc::u32
 #include <nexus/test.hh>
 #include <shaped-graphics/binding/binding.hh>
@@ -9,6 +11,7 @@
 #include <shaped-graphics/resource/buffer.hh>
 #include <shaped-graphics/resource/raw_buffer.hh>
 #include <shaped-graphics/resource/raw_texture.hh>
+#include <shaped-graphics/transfer/stream.hh>
 #include <shaped-graphics/types.hh>
 
 using namespace cc::primitive_defines;
@@ -56,9 +59,9 @@ INVOCABLE_TEST("sg error handling - buffer view factories validate usage and bou
     auto buf = ctx->persistent.create_raw_buffer(256, copy_both);
     REQUIRE(buf != nullptr);
 
-    CHECK_ASSERTS(sg::buffer<u32[4]>::from_raw(buf).as_uniform_buffer()); // lacks uniform_buffer usage
-    CHECK_ASSERTS(sg::buffer<u32>::from_raw(buf).as_readonly_buffer());   // lacks readonly_buffer usage
-    CHECK_ASSERTS(sg::buffer<u32>::from_raw(buf).as_readwrite_buffer());  // lacks readwrite_buffer usage
+    CHECK_ASSERTS(sg::buffer<u32[4]>::from_raw(buf).as_constants_buffer()); // lacks constants_buffer usage
+    CHECK_ASSERTS(sg::buffer<u32>::from_raw(buf).as_readonly_buffer());     // lacks readonly_buffer usage
+    CHECK_ASSERTS(sg::buffer<u32>::from_raw(buf).as_readwrite_buffer());    // lacks readwrite_buffer usage
 
     // A readonly buffer accepts a readonly view but must still reject an out-of-range or negative range.
     auto ro = ctx->persistent.create_raw_buffer(256, sg::buffer_usage::readonly_buffer);
@@ -67,15 +70,15 @@ INVOCABLE_TEST("sg error handling - buffer view factories validate usage and bou
     CHECK_ASSERTS(sg::buffer<u32>::from_raw(ro).as_readonly_buffer({.offset = -1, .size = 1}));   // negative offset
 }
 
-INVOCABLE_TEST("sg error handling - uniform view requires 256-byte-aligned offset", (sg::context_handle const& ctx))
+INVOCABLE_TEST("sg error handling - constants view requires 256-byte-aligned offset", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
 
-    auto ub = ctx->persistent.create_raw_buffer(1024, sg::buffer_usage::uniform_buffer);
+    auto ub = ctx->persistent.create_raw_buffer(1024, sg::buffer_usage::constants_buffer);
     REQUIRE(ub != nullptr);
 
-    // A uniform block offset must be 256-byte aligned (element 8 of a 16-byte block -> byte 128).
-    CHECK_ASSERTS(sg::buffer<u32[4]>::from_raw(ub).as_uniform_buffer(8));
+    // A constants block offset must be 256-byte aligned (element 8 of a 16-byte block -> byte 128).
+    CHECK_ASSERTS(sg::buffer<u32[4]>::from_raw(ub).as_constants_buffer(8));
 }
 
 INVOCABLE_TEST("sg error handling - texture creation validates its shape", (sg::context_handle const& ctx))
@@ -119,6 +122,36 @@ INVOCABLE_TEST("sg error handling - inline upload validates its arguments", (sg:
     CHECK_ASSERTS(cmd->upload.bytes_to_buffer(dst, bytes, -1));  // negative offset
 
     ctx->drop_command_list(cc::move(cmd));
+}
+
+// ctx.upload, ctx.download and ctx.stream copy on the transfer queue, which nothing orders against the epoch boundary that recycles a transient resource.
+// So each must refuse a transient target at the call, rather than let the copy land in storage another epoch already owns.
+INVOCABLE_TEST("sg error handling - async transfers refuse a transient target", (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+
+    auto const buffer = ctx->transient.create_raw_buffer(256, copy_both);
+    auto const texture
+        = ctx->transient.create_texture_2d({.format = sg::pixel_format::rgba8_unorm,
+                                            .width = 4,
+                                            .height = 4,
+                                            .usage = sg::texture_usage::copy_src | sg::texture_usage::copy_dst});
+    REQUIRE(buffer != nullptr);
+    CHECK(buffer->scope() == sg::lifetime_scope::transient);
+    CHECK(texture.raw()->scope() == sg::lifetime_scope::transient);
+    CHECK(ctx->persistent.create_raw_buffer(16, copy_both)->scope() == sg::lifetime_scope::persistent);
+
+    auto const bytes = cc::make_pinned_data(cc::vector<byte>::create_filled(64, byte(1)));
+    auto const pixels = cc::make_pinned_data(cc::vector<byte>::create_filled(4 * 4 * 4, byte(1)));
+
+    CHECK_ASSERTS(ctx->upload.bytes_to_buffer(buffer, bytes));
+    CHECK_ASSERTS(ctx->upload.bytes_to_texture(texture.raw(), pixels));
+    CHECK_ASSERTS((void)ctx->download.bytes_from_buffer(buffer, 0, 64));
+    CHECK_ASSERTS((void)ctx->download.bytes_from_texture(texture.raw()));
+    CHECK_ASSERTS((void)ctx->stream.bytes_to_buffer(buffer, bytes));
+    CHECK_ASSERTS((void)ctx->stream.bytes_to_texture(texture.raw(), pixels));
+    CHECK_ASSERTS((void)ctx->stream.bytes_from_buffer(buffer, 0, 64));
+    CHECK_ASSERTS((void)ctx->stream.bytes_from_texture(texture.raw()));
 }
 
 INVOCABLE_TEST("sg error handling - inline download validates its arguments", (sg::context_handle const& ctx))
@@ -208,7 +241,7 @@ INVOCABLE_TEST("sg error handling - an unbounded binding array is an error, not 
         .space = 0,
         .index = 0,
         .count = 0,
-        .type = sg::binding_type::readonly_texture,
+        .type = sg::binding_type::texture,
         .texture_dimension = sg::texture_view_dimension::tex_2d,
     };
     auto const bindings = cc::span<sg::binding const>(&unbounded, 1);
@@ -232,7 +265,8 @@ INVOCABLE_TEST("sg error handling - binding group wiring errors throw", (sg::con
         .space = 0,
         .index = 0,
         .count = 1,
-        .type = sg::binding_type::readwrite_structured_buffer,
+        .type = sg::binding_type::buffer,
+        .access = sg::access_mode::read_write,
     };
     auto layout = ctx->cached.acquire_binding_group_layout(cc::span<sg::binding const>(&b, 1));
     REQUIRE(layout != nullptr);

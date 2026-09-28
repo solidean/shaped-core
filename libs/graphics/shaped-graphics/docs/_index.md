@@ -41,6 +41,7 @@ Where a concept doc has a per-backend section, it sits at the end, so the body s
   the frame loop, shutdown, and how device loss surfaces.
 - [backends](concepts/backends.md) — what a backend is, why we duplicate rather than abstract across them, and how each backend carries its own tests (feature smoke + backend-internal invariants).
 - [epochs](concepts/epochs.md) — frame-level GPU resource lifetime + CPU↔GPU synchronization: the epoch counter/fence, advance/retire, deferred deletion, and finalizers.
+- [metrics](concepts/metrics.md) — `ctx.metrics`: the stats every backend counts, when a reading includes what, and which stats a backend cannot see.
 - [gpu-metrics](concepts/gpu-metrics.md) — GPU memory and load: why they live in sg rather than cc, and why the board size and the process budget are not the same scale.
 - [threading](concepts/threading.md) — the per-backend `thread_model`: which context operations are concurrency-safe and which must be externally synchronized.
 - [command recording](concepts/command-recording.md) — `sg::command_list`: single-use, submit-or-drop-once, bound to its epoch,

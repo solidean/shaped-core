@@ -22,7 +22,7 @@ sg::epoch dx12_context::completed_epoch() const
     return sg::epoch(v < u64(sg::epoch::first) ? first_minus_one : v);
 }
 
-void dx12_context::advance_epoch()
+void dx12_context::do_advance_epoch()
 {
     CC_ASSERT(!_is_shut_down, "cannot advance a shut-down context");
     CC_ASSERT(_open_command_lists.load(std::memory_order_relaxed) == 0, "all command lists opened this epoch must be "
@@ -131,7 +131,10 @@ void dx12_context::block_until_submissions_complete()
         CC_ASSERT(event != nullptr, "CreateEventW failed for the submission fence wait");
         HRESULT const hr = _submission_fence->SetEventOnCompletion(target, event);
         CC_ASSERT(SUCCEEDED(hr), "ID3D12Fence::SetEventOnCompletion failed");
-        WaitForSingleObject(event, INFINITE);
+        {
+            auto const waited = sg::impl::gpu_wait_scope(_stats);
+            WaitForSingleObject(event, INFINITE);
+        }
         CloseHandle(event);
 
         // A removed device completes every pending wait immediately, since the fence jumps to UINT64_MAX.
@@ -239,7 +242,10 @@ void dx12_context::wait_for_epoch(sg::epoch e)
             CC_ASSERT(event != nullptr, "CreateEventW failed for the epoch fence wait");
             HRESULT const hr = _epoch_fence->SetEventOnCompletion(target, event);
             CC_ASSERT(SUCCEEDED(hr), "ID3D12Fence::SetEventOnCompletion failed");
-            WaitForSingleObject(event, INFINITE);
+            {
+                auto const waited = sg::impl::gpu_wait_scope(_stats);
+                WaitForSingleObject(event, INFINITE);
+            }
             CloseHandle(event);
 
             // A removed device completes every pending fence wait immediately, since the fence jumps to UINT64_MAX.

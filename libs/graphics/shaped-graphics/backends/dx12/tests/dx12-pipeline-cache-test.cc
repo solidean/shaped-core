@@ -34,7 +34,8 @@ sg::compiled_shader make_double_shader()
         .space = 0,
         .index = 0,
         .count = 1,
-        .type = sg::binding_type::readwrite_structured_buffer,
+        .type = sg::binding_type::buffer,
+        .access = sg::access_mode::read_write,
     });
     return shader;
 }
@@ -110,7 +111,7 @@ INVOCABLE_TEST("sg pipeline_cache - static samplers participate in the layout ke
     // A texture SRV (t0) plus one static sampler (s0). The sampler is baked into the layout, so it must
     // be part of the cache key: the same bindings with a different static sampler is a different layout.
     sg::binding const bindings[] = {
-        {.name = "Tex", .space = 0, .index = 0, .count = 1, .type = sg::binding_type::readonly_texture},
+        {.name = "Tex", .space = 0, .index = 0, .count = 1, .type = sg::binding_type::texture},
         {.name = "Samp", .space = 0, .index = 0, .count = 1, .type = sg::binding_type::sampler},
     };
     sg::named_sampler const clamp[] = {{.name = "Samp", .sampler = {.address_u = sg::sampler_address_mode::clamp_edge}}};
@@ -162,7 +163,7 @@ INVOCABLE_TEST("sg pipeline_cache - pipeline-level static samplers participate i
     sg::context& ctx = *handle;
 
     sg::binding const bindings[] = {
-        {.name = "Tex", .space = 0, .index = 0, .count = 1, .type = sg::binding_type::readonly_texture},
+        {.name = "Tex", .space = 0, .index = 0, .count = 1, .type = sg::binding_type::texture},
     };
     auto gl = ctx.cached.acquire_binding_group_layout(bindings);
     REQUIRE(gl != nullptr);
@@ -195,7 +196,12 @@ INVOCABLE_TEST("sg pipeline_cache - inline constants participate in the pipeline
     sg::context& ctx = *handle;
 
     sg::binding const bindings[] = {
-        {.name = "Out", .space = 0, .index = 0, .count = 1, .type = sg::binding_type::readwrite_structured_buffer},
+        {.name = "Out",
+         .space = 0,
+         .index = 0,
+         .count = 1,
+         .type = sg::binding_type::buffer,
+         .access = sg::access_mode::read_write},
     };
     auto gl = ctx.cached.acquire_binding_group_layout(bindings);
     REQUIRE(gl != nullptr);
@@ -210,7 +216,7 @@ INVOCABLE_TEST("sg pipeline_cache - inline constants participate in the pipeline
                                          .space = 0,
                                          .index = 0,
                                          .count = 1,
-                                         .type = sg::binding_type::uniform_buffer,
+                                         .type = sg::binding_type::constants_buffer,
                                          .block_size = block_size};
         return d;
     };

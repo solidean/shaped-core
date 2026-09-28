@@ -70,20 +70,6 @@ ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - two-slot pipeline layout: swap the slot-
     REQUIRE(pipeline != nullptr);
 
     // Buffers: A[i]=i, and two slot-1 inputs B1[i]=1, B2[i]=100. Out is read back after each dispatch.
-    auto const byte_size = isize(count) * isize(sizeof(u32));
-    auto a_buf
-        = ctx.persistent.create_raw_buffer(byte_size, sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);
-    auto b1_buf
-        = ctx.persistent.create_raw_buffer(byte_size, sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);
-    auto b2_buf
-        = ctx.persistent.create_raw_buffer(byte_size, sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);
-    auto out_buf
-        = ctx.persistent.create_raw_buffer(byte_size, sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
-    REQUIRE(a_buf != nullptr);
-    REQUIRE(b1_buf != nullptr);
-    REQUIRE(b2_buf != nullptr);
-    REQUIRE(out_buf != nullptr);
-
     cc::vector<u32> a_data;
     cc::vector<u32> b1_data;
     cc::vector<u32> b2_data;
@@ -93,13 +79,15 @@ ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - two-slot pipeline layout: swap the slot-
         b1_data.push_back(1);
         b2_data.push_back(100);
     }
-
-    // Upload the inputs.
-    auto up = ctx.create_command_list();
-    up->upload.data_to_buffer(a_buf, a_data);
-    up->upload.data_to_buffer(b1_buf, b1_data);
-    up->upload.data_to_buffer(b2_buf, b2_data);
-    ctx.submit_command_list(cc::move(up));
+    auto a_buf = ctx.persistent.create_buffer_from_data(cc::move(a_data), sg::buffer_usage::readonly_buffer).raw();
+    auto b1_buf = ctx.persistent.create_buffer_from_data(cc::move(b1_data), sg::buffer_usage::readonly_buffer).raw();
+    auto b2_buf = ctx.persistent.create_buffer_from_data(cc::move(b2_data), sg::buffer_usage::readonly_buffer).raw();
+    auto out_buf = ctx.persistent.create_raw_buffer(isize(count) * isize(sizeof(u32)),
+                                                    sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
+    REQUIRE(a_buf != nullptr);
+    REQUIRE(b1_buf != nullptr);
+    REQUIRE(b2_buf != nullptr);
+    REQUIRE(out_buf != nullptr);
 
     // Groups: slot 0 = {A, Out} (bound once), slot 1 = two groups over B1 / B2 (swapped between dispatches).
     sg::named_view const g0_views[] = {

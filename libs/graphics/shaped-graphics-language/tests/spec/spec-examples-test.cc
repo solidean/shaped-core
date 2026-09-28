@@ -1,4 +1,5 @@
 #include <clean-core/common/utility.hh>
+#include <clean-core/container/map.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/streams/file_stream.hh>
 #include <clean-core/string/format.hh>
@@ -7,6 +8,7 @@
 #include <shaped-graphics-language/debug/dump.hh>
 #include <shaped-graphics-language/driver/compile_to_text.hh>
 #include <shaped-graphics-language/driver/describe.hh>
+#include <shaped-graphics-language/driver/test_source.hh>
 #include <shaped-graphics-language/syntax/parsed_file.hh>
 
 using namespace cc::primitive_defines;
@@ -19,6 +21,7 @@ constexpr cc::string_view spec_files[] = {
     "_index.md",
     "keywords.md",
     "notation.md",
+    "pipelines.md",
     "syntax/_index.md",
     "syntax/line-tree.md",
     "syntax/tokens.md",
@@ -182,6 +185,71 @@ TEST("sgl spec - every checked example in the spec parses the way its fence says
 
 namespace
 {
+/// The rule id a line of the spec defines, `CHK-12`, or empty for any other line.
+/// A definition is a bullet that starts with the id in bold; a bold id anywhere else is a mention of it.
+cc::string_view defined_rule_of(cc::string_view line)
+{
+    if (!line.starts_with("* **"))
+        return {};
+    auto const rest = line.subview({.start = 4, .end = line.size()});
+    auto const end = rest.find(cc::string_view("**"), 0);
+    if (end < 0)
+        return {};
+    auto const id = rest.subview({.start = 0, .end = end});
+    auto const dash = id.find('-');
+    if (dash < 1 || dash + 1 == id.size())
+        return {};
+    for (auto i = isize(0); i < id.size(); ++i)
+    {
+        auto const ch = id[i];
+        auto const is_expected = i < dash ? ch >= 'A' && ch <= 'Z' : i == dash || (ch >= '0' && ch <= '9');
+        if (!is_expected)
+            return {};
+    }
+    return id;
+}
+} // namespace
+
+TEST("sgl spec - every rule id is defined exactly once")
+{
+    // Rules live in the files of the syntax and the semantics; a why file and the incubator only mention them.
+    auto first_seen = cc::map<cc::string, cc::string>();
+    auto failures = cc::string();
+    for (auto const file : spec_files)
+    {
+        if (!(file.starts_with("syntax/") || file.starts_with("semantics/")) || file.contains("/why/"))
+            continue;
+        auto const text = read_text(cc::string(SGL_SPEC_DIR) + "/" + file);
+        auto line_number = 0;
+        auto at = isize(0);
+        while (at < text.size())
+        {
+            auto end = text.find('\n', at);
+            if (end < 0)
+                end = text.size();
+            auto line = cc::string_view(text).subview({.start = at, .end = end});
+            if (line.ends_with('\r'))
+                line.remove_suffix(1);
+            at = end + 1;
+            ++line_number;
+
+            auto const id = defined_rule_of(line);
+            if (id.empty())
+                continue;
+            auto const where = cc::format("{}:{}", file, line_number);
+            if (auto const* const earlier = first_seen.get_ptr(id))
+                failures.appendf("{}: {} is defined again, first at {}\n", where, id, *earlier);
+            else
+                first_seen[cc::string(id)] = where;
+        }
+    }
+    CHECK(failures == "");
+    // A reader that recognized no rule at all would pass the check above.
+    CHECK(first_seen.size() > 500);
+}
+
+namespace
+{
 /// The names after `fun` on every line that declares an entry point, which is what `compile_to_text` is asked for.
 /// A scan rather than a parse: a source that does not check still has entry points to ask for, and each must fail cleanly.
 cc::vector<cc::string> entry_points_of(cc::string_view source)
@@ -240,12 +308,66 @@ TEST("sgl spec - every example of the spec and every sample compiles for every t
             require_total(e.source, cc::format("{}:{}", file, e.line), failures);
         }
     }
-    for (auto const sample :
-         {"basic-raster.sgl", "control-flow.sgl", "cube.sgl", "helpers.sgl", "matrices.sgl", "members-and-bindings.sgl"})
+    for (auto const sample : {"basic-raster.sgl", "control-flow.sgl", "cube.sgl", "helpers.sgl", "matrices.sgl",
+                              "members-and-bindings.sgl", "pipeline.sgl"})
     {
         ++sources;
         require_total(read_text(cc::string(SGL_SAMPLES_DIR) + "/" + sample), sample, failures);
     }
     CHECK(failures == "");
     CHECK(sources > 50);
+}
+
+namespace
+{
+/// One `sgl` fence of the spec that holds a test.
+struct spec_fence
+{
+    cc::string file;
+    int line = 0;
+    cc::string source;
+};
+
+/// True where a line of `source` declares a test, which is what makes a fence something to run.
+bool holds_test(cc::string_view source)
+{
+    auto at = isize(0);
+    while (at < source.size())
+    {
+        auto end = source.find('\n', at);
+        if (end < 0)
+            end = source.size();
+        auto line = source.subview({.start = at, .end = end});
+        at = end + 1;
+        while (line.starts_with(' '))
+            line.remove_prefix(1);
+        if (line.starts_with("test ") || line.starts_with("test:") || line.starts_with("@expect"))
+            return true;
+    }
+    return false;
+}
+} // namespace
+
+INVOCABLE_TEST("sgl spec - an example that holds a test checks clean and passes it", (spec_fence const& f))
+{
+    auto const tested = sgl::test_source(f.source, cc::format("{}:{}", f.file, f.line));
+    CHECK(tested.errors == "");
+    CHECK(tested.warnings == "");
+    CHECK(tested.tests_run + tested.tests_expecting_diagnostics == tested.test_count);
+}
+
+TEST("sgl spec - the tests of every example run")
+{
+    // A fence without a test is fine here; it is the corpus that holds a file to having one.
+    auto found = 0;
+    for (auto const file : spec_files)
+        for (auto const& e : examples_of(read_text(cc::format("{}/{}", SGL_SPEC_DIR, file))))
+            if (e.kind == fence_kind::valid && holds_test(e.source))
+            {
+                ++found;
+                nx::invoke_tests(cc::format("{}:{}", file, e.line),
+                                 spec_fence{.file = cc::string(file), .line = e.line, .source = e.source});
+            }
+    // the spec shows tests, so finding none means the scan broke
+    REQUIRE(found > 0);
 }

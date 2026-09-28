@@ -78,10 +78,10 @@ TEST("sgl describe - a buffer group numbers its buffers and names each by its pa
     REQUIRE(work.members.size() == 2);
     CHECK(work.members[0].kind == sgl::described_member_kind::buffer);
     CHECK(work.members[0].type == "float");
-    CHECK(!work.members[0].is_mut);
+    CHECK(work.members[0].access == "read");
     CHECK(work.members[0].slot == 0);
     CHECK(work.members[0].host_name == "work.src");
-    CHECK(work.members[1].is_mut);
+    CHECK(work.members[1].access == "read_write");
     CHECK(work.members[1].slot == 1);
     CHECK(work.members[1].host_name == "work.dst");
 
@@ -90,6 +90,43 @@ TEST("sgl describe - a buffer group numbers its buffers and names each by its pa
     CHECK(d.entry_points[0].workgroup[0] == 64);
     CHECK(d.entry_points[0].workgroup[1] == 2);
     CHECK(d.entry_points[0].workgroup[2] == 1);
+}
+
+TEST("sgl describe - an entry point and a pipeline name the sg features a device needs for them")
+{
+    // Both stages may use the image format the file requires, and only the pixel stage lists what does.
+    auto const d = described(R"(require extended_image_formats, raytracing
+
+binding narrow:
+    r: out image_2d[.r8_unorm]
+
+@vertex struct vertex_input:
+    pos: pos3
+
+struct pixel_input:
+    @position position: hpos4
+
+@pixel struct target:
+    color: float4
+
+@vertex fun main_vs(v: vertex_input) -> pixel_input => {position = hpos4(v.pos.x, v.pos.y, v.pos.z, 1.0)}
+
+@pixel fun main_ps(p: pixel_input){narrow} -> target:
+    return {color = float4(1.0, 1.0, 1.0, 1.0)}
+
+pipeline:
+    vertex = main_vs
+    pixel = main_ps
+    color_targets.color.format = .rgba8_unorm
+)");
+
+    REQUIRE(d.entry_points.size() == 2);
+    CHECK(d.entry_points[0].features.empty());
+    REQUIRE(d.entry_points[1].features.size() == 1);
+    CHECK(d.entry_points[1].features[0] == "extended_image_formats");
+    REQUIRE(d.pipelines.size() == 1);
+    REQUIRE(d.pipelines[0].features.size() == 1);
+    CHECK(d.pipelines[0].features[0] == "extended_image_formats");
 }
 
 TEST("sgl describe - a group no entry point lists is still described, and still judged")
@@ -211,4 +248,179 @@ struct pixel_input:
 
 )") + edges)
               .contains("@stream takes one name"));
+}
+
+TEST("sgl describe - a pipeline: its stages, its layout, its settings in order, and what the host states")
+{
+    auto const d = described(read_text(cc::string(SGL_SAMPLES_DIR) + "/pipeline.sgl"));
+
+    REQUIRE(d.pipelines.size() == 1);
+    auto const& p = d.pipelines[0];
+    CHECK(p.name == "pipeline");
+    CHECK(p.vertex == "main_vs");
+    CHECK(p.pixel == "main_ps");
+    // `constants` is @inline, so it is no group of the layout.
+    CHECK(p.layout.empty());
+    CHECK(p.inline_constants == "constants");
+    CHECK(p.vertex_input == "cube_vertex");
+    CHECK(p.target_set == "target");
+    REQUIRE(p.targets.size() == 1);
+    CHECK(p.targets[0] == "color");
+
+    // The @pixel struct's attribute first, then the declaration's lines.
+    REQUIRE(p.settings.size() == 5);
+    CHECK(p.settings[0].path == "color_targets.color.format");
+    CHECK(p.settings[0].kind == sgl::check::setting_kind::host);
+    CHECK(p.settings[1].path == "rasterization.cull");
+    CHECK(p.settings[1].enum_case == "back");
+    CHECK(p.settings[2].path == "depth_stencil.depth_test");
+    CHECK(p.settings[2].integer == 1);
+    CHECK(p.settings[4].path == "depth_stencil_format");
+    CHECK(p.settings[4].enum_case == "depth32_float");
+
+    REQUIRE(p.open.size() == 1);
+    CHECK(p.open[0] == "color_targets.color.format");
+}
+
+TEST("sgl describe - a later setting takes a part back from the host")
+{
+    auto const d = described(read_text(cc::string(SGL_SAMPLES_DIR) + "/pipeline.sgl")
+                             + "pipeline fixed:\n"
+                               "    vertex = main_vs\n    pixel = main_ps\n    format = .bgra8_unorm\n");
+    REQUIRE(d.pipelines.size() == 2);
+    CHECK(d.pipelines[1].name == "fixed");
+    CHECK(d.pipelines[1].open.empty());
+}
+
+TEST("sgl describe - a struct's shape is its members, and not its name")
+{
+    // A pipeline's host code is built against these shapes, so a hot reload compares them.
+    auto const shape_of = [](cc::string_view vertex_struct)
+    {
+        auto const d = described(cc::string(vertex_struct)
+                                 + "struct link:\n    @position p: hpos4\n"
+                                   "@vertex fun vs(v: vin) -> link:\n    return { p = hpos4(..v.p, 1.0) }\n");
+        REQUIRE(d.structs.size() == 1);
+        return d.structs[0].shape;
+    };
+    auto const base = shape_of("@vertex struct vin:\n    p: pos3\n");
+    CHECK(base.size() == 32);
+
+    // Only the same file described again gives the same shape.
+    CHECK(shape_of("@vertex struct vin:\n    p: pos3\n") == base);
+    // A member added, renamed or retyped is a new shape, which is what a reload must not miss.
+    CHECK(shape_of("@vertex struct vin:\n    p: pos3\n    q: float4\n") != base);
+    CHECK(shape_of("@vertex struct vin:\n    p: pos3\n    q: float4\n")
+          != shape_of("@vertex struct vin:\n    p: pos3\n    r: float4\n"));
+    CHECK(shape_of("@vertex struct vin:\n    p: float3\n") != base);
+    // An attribute the host lays buffers out by is part of it.
+    CHECK(shape_of("@vertex struct vin:\n    @per_instance p: pos3\n") != base);
+
+    // Bindings have one too, over their members.
+    auto const binding_shape = [](cc::string_view member)
+    {
+        auto const d
+            = described(cc::string("@inline binding constants:\n") + member
+                        + "@vertex struct vin:\n    p: pos3\n"
+                          "struct link:\n    @position p: hpos4\n"
+                          "@vertex fun vs(v: vin){constants} -> link:\n    return { p = hpos4(..v.p, 1.0) }\n");
+        REQUIRE(d.bindings.size() == 1);
+        return d.bindings[0].shape;
+    };
+    CHECK(binding_shape("    scale: float\n") == binding_shape("    scale: float\n"));
+    CHECK(binding_shape("    scale: float\n") != binding_shape("    scale: float\n    bias: float\n"));
+}
+
+TEST("sgl describe - a group's shape holds every fact of its textures, images and samplers")
+{
+    // A reload that missed one of these would keep a layout the new shader no longer matches.
+    auto const shape_of
+        = [](cc::string_view name, cc::string_view t, cc::string_view i, cc::string_view s, cc::string_view filter)
+    {
+        auto const d = described(cc::format(
+            "binding {}:\n    {}\n    {}\n    {}\n    sampler st:\n        filter = .{}\n", name, t, i, s, filter));
+        REQUIRE(d.bindings.size() == 1);
+        return d.bindings[0].shape;
+    };
+    auto const t = "t: texture_2d[float4]";
+    auto const i = "i: out image_2d[.r32_float]";
+    auto const s = "s: sampler";
+    auto const base = shape_of("set", t, i, s, "linear");
+    CHECK(base.size() == 32);
+    CHECK(shape_of("set", t, i, s, "linear") == base);
+    // The binding's name is no part of it, as a struct's is not.
+    CHECK(shape_of("other", t, i, s, "linear") == base);
+
+    CHECK(shape_of("set", "t: texture_2d[float2]", i, s, "linear") != base);
+    CHECK(shape_of("set", "t: texture_2d_array[float4]", i, s, "linear") != base);
+    CHECK(shape_of("set", "t: texture_2d_depth", i, s, "linear") != base);
+    CHECK(shape_of("set", "@unfilterable t: texture_2d[float4]", i, s, "linear") != base);
+    CHECK(shape_of("set", t, "i: out image_2d[.rgba8_unorm]", s, "linear") != base);
+    CHECK(shape_of("set", t, "i: mut image_2d[.r32_float]", s, "linear") != base);
+    CHECK(shape_of("set", t, i, "s: comparison_sampler", "linear") != base);
+    CHECK(shape_of("set", t, i, "@non_filtering s: sampler", "linear") != base);
+    CHECK(shape_of("set", t, i, s, "nearest") != base);
+}
+
+TEST("sgl describe - a texture's sample type and a sampler's binding type, as the declaration states them")
+{
+    auto const d = described(R"(binding set:
+    f: texture_2d[float4]
+    u: texture_2d[uint4]
+    n: texture_2d[int]
+    z: texture_2d_depth
+    @unfilterable r: texture_2d[float4]
+    ms: texture_2d_ms[float4]
+    strip: texture_1d[float]
+    bound: sampler
+    compares: comparison_sampler
+    sampler crisp:
+        filter = .nearest
+    sampler shadow:
+        compare = .less
+)");
+    REQUIRE(d.bindings.size() == 1);
+    auto const& set = d.bindings[0];
+    REQUIRE(set.members.size() == 11);
+    CHECK(set.members[0].sample_type == "filterable_float");
+    CHECK(set.members[1].sample_type == "uint");
+    CHECK(set.members[2].sample_type == "sint");
+    CHECK(set.members[3].sample_type == "depth");
+    CHECK(set.members[4].sample_type == "unfilterable_float");
+    CHECK(set.members[5].sample_type == "unfilterable_float");
+    CHECK(set.members[5].texture_dimension == "tex_2d_ms");
+    // WGSL writes a 1D texture as a 2D one, and the host still creates a 1D one: sg's backend makes it 2D.
+    CHECK(set.members[6].texture_dimension == "tex_1d");
+    CHECK(set.members[7].sampler_type == "filtering");
+    CHECK(set.members[8].sampler_type == "comparison");
+    CHECK(set.members[9].sampler_type == "non_filtering");
+    CHECK(set.members[9].static_sampler.has_value());
+    CHECK(set.members[10].sampler_type == "comparison");
+    REQUIRE(set.members[10].static_sampler.has_value());
+    CHECK(set.members[10].static_sampler.value().compare == "less");
+
+    // No plain member, so no constant block: the resources number from slot 0.
+    CHECK(set.block_slot == -1);
+    CHECK(set.members[0].slot == 0);
+    CHECK(set.members[10].slot == 10);
+    CHECK(set.members[0].host_name == "set.f");
+}
+
+TEST("sgl describe - an image store is refused in a vertex stage, which core WebGPU gives no writable storage")
+{
+    auto const error = error_of(R"(binding tex:
+    dst: out image_2d[.rgba8_unorm]
+
+@vertex struct vin:
+    p: pos3
+
+struct link:
+    @position p: hpos4
+
+@vertex fun vs(v: vin){tex} -> link:
+    tex.dst.store(int2(0, 0), float4(1.0, 1.0, 1.0, 1.0))
+    return { p = hpos4(..v.p, 1.0) }
+)");
+    CHECK(error.contains("stage-not-allowed"));
+    CHECK(error.contains("store is @stages without it"));
 }

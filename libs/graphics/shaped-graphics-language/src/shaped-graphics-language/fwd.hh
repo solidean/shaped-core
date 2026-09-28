@@ -26,15 +26,28 @@ struct diagnostic;
 struct line_column;
 
 struct text_request;
+struct tested_source;
 struct emitted_source;
+struct interface_binding;
 struct prelude_file;
 
+enum class token_class : u8;
+struct classified_span;
+struct classify_options;
+struct unannotated_binding;
+struct inferred_result;
+
 enum class described_member_kind : u8;
+struct described_sampler;
 struct described_binding_member;
 struct described_binding;
 struct described_struct_member;
 struct described_struct;
+struct described_memory_member;
+struct described_memory_struct;
 struct described_entry_point;
+struct described_pipeline_setting;
+struct described_pipeline;
 struct module_description;
 struct describe_request;
 
@@ -75,6 +88,7 @@ enum class body_kind : u8;
 struct body;
 struct case_arm;
 struct if_branch;
+struct setting;
 
 enum class literal_kind : u8;
 enum class call_spelling : u8;
@@ -82,6 +96,7 @@ struct invalid_expr;
 struct literal;
 struct name;
 struct self_ref;
+struct void_ref;
 struct wildcard;
 struct leading_dot;
 struct member;
@@ -126,6 +141,7 @@ enum class receiver_kind : u8;
 struct invalid_decl;
 struct module_decl;
 struct use_decl;
+struct require_decl;
 struct fun_decl;
 struct struct_decl;
 struct enum_decl;
@@ -133,7 +149,9 @@ struct type_decl;
 struct const_decl;
 struct binding_decl;
 struct sampler_decl;
+struct pipeline_decl;
 struct notation_decl;
+struct test_decl;
 struct field_decl;
 struct property_decl;
 struct enum_case_decl;
@@ -148,6 +166,7 @@ enum class language : u8;
 enum class precedence : u8;
 struct written;
 struct call_context;
+struct helper_context;
 enum class spelling_kind : u8;
 struct spelling;
 struct block_layout;
@@ -167,6 +186,12 @@ enum class local_id : i32;
 enum class label_id : i32;
 
 enum class type_kind : u8;
+enum class texture_shape : u8;
+enum class access_mode : u8;
+enum class feature : u8;
+struct sampler_state;
+struct shape_info;
+struct image_format_info;
 struct type_info;
 struct member_info;
 struct enum_case_info;
@@ -174,12 +199,24 @@ struct enum_case_info;
 enum class stage : u8;
 enum class symbol_kind : u8;
 enum class symbol_state : u8;
+enum class function_role : u8;
 struct symbol;
+enum class constant_kind : u8;
+struct constant_info;
 struct parameter;
 struct function_info;
 struct binding_info;
+enum class setting_kind : u8;
+enum class setting_source : u8;
+struct pipeline_setting;
+enum class pipeline_kind : u8;
+struct pipeline_info;
 enum class target_kind : u8;
 struct target;
+struct written_argument;
+struct call_record;
+enum class miss_reason : u8;
+struct near_miss;
 struct file_tables;
 
 struct origin;
@@ -221,8 +258,14 @@ struct flat_continue;
 struct flat_once;
 struct flat_break;
 struct flat_return;
+enum class check_node_kind : u8;
+struct flat_check_node;
+struct flat_check_site;
+struct flat_check;
 struct flat_stmt;
 struct flat_entry_point;
+enum class slot_view : u8; // which kind of view a footprint slot is bound through (check/footprint.hh)
+struct slot_footprint;     // how an entry point's code touches one slot of a binding
 struct flat_builder;
 
 struct core_violation;
@@ -234,14 +277,30 @@ struct buffer_contents;
 enum class run_status : u8;
 struct run_inputs;
 struct run_limits;
+struct check_failure;
+struct site_tally;
 struct outcome;
 
 struct legalize_options;
 
+enum class expectation_kind : u8;
+struct test_expectation;
+struct test_info;
+struct related_note;
 struct located_diagnostic;
 struct checked_module;
 struct module_file;
 } // namespace sgl::check
+
+namespace sgl::test
+{
+enum class test_status : u8;
+struct narrowed_part;
+struct check_report;
+struct site_mark;
+struct test_result;
+struct test_options;
+} // namespace sgl::test
 
 namespace sgl::emit
 {
@@ -250,4 +309,6 @@ enum class error_kind : u8;
 struct error;
 struct emitted_text;
 struct bound_name;
+struct emitted_field;
+struct emitted_layout;
 } // namespace sgl::emit

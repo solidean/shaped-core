@@ -16,9 +16,9 @@ state: open
 severity: bug
 ---
 
-## context/delta
+## intro
 
-What this entry adds over the ones before it.
+Whether a table that grows mid-submit can leave a stale index, and the two fixes on the table.
 
 ## changes  CHANGE-7Q2M CHANGE-K3PP
 show: collapsed
@@ -41,7 +41,7 @@ So an agent writing one cannot leave the file unbalanced; the worst it can do is
 ## Front matter
 
 `id` and `title` are required.
-`group`, `state`, `severity` and `resolved-by` are known; anything else is preserved verbatim, so a review can carry fields the tool has no opinion on.
+`group`, `state`, `severity`, `resolved-by`, `context` and `planned` are known; anything else is preserved verbatim, so a review can carry fields the tool has no opinion on.
 
 `state` is `open`, `obsolete` or `superseded`.
 `severity` is `bug`, `design`, `api`, `docs`, `nit`, `question` or `lgtm`.
@@ -53,9 +53,6 @@ Filenames are `NNN-slug.md` with gaps — `010`, `020`, `030` — so a later rou
 | type | takes | what it is |
 |---|---|---|
 | `intro` | — | what the entry is about and the options on the table, before any fact; always shown, and drawn first in its round |
-| `context/cold` | — | for a reader new to the change *and* the codebase; collapsed by default, ~150 words |
-| `context/repo` | — | knows the codebase, new to the change; collapsed by default, ~120 words |
-| `context/delta` | — | what this entry adds over the previous ones; always shown |
 | `auto-acknowledge` | — | this entry is reference material, so reading it is not something to record |
 | `artifact` | — | the exact text the review will publish, read back by `review artifact` and `review post` |
 | `prose` | — | the body of the point, written neutrally; `glossary: true` makes its bold leads terms |
@@ -67,19 +64,16 @@ Filenames are `NNN-slug.md` with gaps — `010`, `020`, `030` — so a later rou
 
 **A round that asks something opens with an `intro`.**
 One line on what the entry is about, then the options as a list, and nothing about which is better.
-The context tiers are collapsed and supply what a reader lacks; the intro is what the visible part of the round is read against.
+The intro is what the rest of the round is read against.
 Without it an entry opens in the middle of its argument, and the reader reconstructs the question from the facts before they can weigh any of them.
 
 The page draws an intro first in its round wherever it sits in the file, so appending one late still leads.
 `validate` warns about a round that has an open ask and no intro, and a finalized round is exempt because it cannot be edited.
+A round whose only question is the synthetic acknowledgement is exempt too: it has no options for an intro to list.
 
-The word limits on the context tiers warn rather than fail.
-They exist because a collapsed tier nobody can skim is a tier nobody opens.
-
-All three are required on every entry whose group is not `meta`, `finalize` or `framing`, for as long as it still has an ask waiting for an answer, and `validate` reports a missing one as an error.
-An entry whose asks are all finalized is past the point of needing them, and adding tiers there would edit a question the maintainer has already read.
-An entry is answered on its own, out of order, by someone not carrying the changeset in their head, and the tiers are what make that possible.
-Each is scoped to that entry's subject rather than to the change as a whole — otherwise every cold tier restates the same paragraph and nobody opens one again.
+**An entry is answered on its own, out of order, by someone not carrying the changeset in their head.**
+So its prose introduces every term it leans on where the term first appears, rather than assuming the entries above it were read.
+There is no separate background block for that, and [the settled call](../../../docs/guides/reviewing-prs.md#an-entry-carries-no-context-blocks) says why.
 
 An `artifact` block is markdown destined for somewhere else, so it is the one block whose body wants headings of its own.
 **They have to start at `###`.**
@@ -111,6 +105,8 @@ That is the same reason the attribute whitelist exists.
 ### `show:` is required on a `changes` block
 
 `show: visible` opens the diffs; `show: collapsed` puts them one click away.
+A collapsed block is drawn as one line, `85 changes in 12 files`, and its cards are fetched only when it is opened, each card fetching its own diff in turn.
+A comment on a diff line is drawn outside the fold, where it is seen without opening anything.
 There is no default, on purpose: a default would make the quiet choice the unconsidered one, and this choice is about the reader's attention rather than about formatting.
 
 The question to answer is **can this entry be decided without the code?**
@@ -127,7 +123,6 @@ A block's identity is `<entry>/r<round>/<name>`, and it is **derived** rather th
 The name is the block's type, indexed only when that type repeats within the same entry *and* round — and then all of them are indexed.
 Two prose blocks in round 2 are `prose#1` and `prose#2`; one on its own is `prose`, never a bare `prose` beside a `prose#2`.
 An `ask` is named by its heading, which is already unique.
-A `context/cold` becomes `context-cold`, since the identity is slash-separated.
 
 **`prose` and `prose#1` resolve to the same block.**
 That alias is what keeps an anchor taken mid-round valid after a later append turns the round's only prose block into the first of two.
@@ -137,6 +132,7 @@ Blocks are only ever appended and a frozen round cannot change, so a later block
 
 `name:` is optional, for a block the agent expects to point at later.
 Two blocks of one round answering to the same name is a parse error, since a name is what a comment and a `supersedes:` anchor on.
+An ask's heading and a `name:` on any other block share that one name space, so `## prose` with `name: foo` beside `## ask  foo` collides.
 
 `review show` prints each block's name beside its type, which is where an agent reads one off.
 
@@ -200,6 +196,59 @@ against each other and the shape of the argument has to be legible before the wo
 Nothing stops another block using it, and an entry that prices nothing should not.
 
 Only the first line of a list item is matched, and only inside a list: a paragraph opening `pro:` is left alone.
+
+## `context:` — where a short path looks first
+
+A backticked path resolves three ways: the exact path, a unique suffix, a unique basename.
+In a tree whose tests mirror its sources, or that holds several trees shadowing each other, a bare `mod.rs` or `compile.rs` is ambiguous almost everywhere, and every writer spends a fix round on it.
+
+`context:` names the folder an entry is about, and a short path is looked for under it first.
+
+```markdown
+---
+id: 240
+title: stage 8 records its decisions
+context: src/stages/08_ring_ir/
+---
+```
+
+- **Under the folder first, then everywhere.**
+  A path with one match under the context resolves to it, and with several the shallowest wins, so `server.hh` names the context's own file over a namesake in a subfolder.
+  Only matches at the same depth are ambiguous among themselves.
+  One with none there resolves repository-wide exactly as without a context, so `src/lib.rs` still works from an entry about stage 8.
+- **A block can narrow it again** with its own `context:`, which replaces the entry's for that block — the one block about the tests, say.
+- **The folder is itself a reference**, resolved the same three ways, so `08_ring_ir/` is enough where it is unique.
+  One that names no folder, or several, is a validation error rather than a context silently doing nothing.
+- The default is the repository root, which is what an entry without the key gets.
+- A literal is resolved once per entry, by the first block that names it, because the page matches literals entry-wide.
+
+An ambiguous reference lists every candidate as a full path in backticks, ready to paste, and names `context:` as the other remedy.
+
+## `planned:` — files a design will create
+
+A design review names files that do not exist yet, and marking every one `new:` drowns the entry in prefixes.
+`planned:` names the folder the design will create, once, and what the entry names under it is drawn as new.
+
+```markdown
+---
+id: 310
+title: the language server's wire layer
+planned: src/lsp/
+---
+```
+
+- **A path that resolves nowhere is planned when it lies under the folder**, and so is a bare file name such as `framing.hh`.
+  It renders as a `new:` path does, with a hover note naming the folder, and is never a validation error.
+- **A real file always wins.**
+  The plan is consulted only for what resolves nowhere, so it never shadows a file that exists, and an ambiguous name stays ambiguous.
+- **Folders under it are planned too**, `src/lsp/wire/` included.
+  A bare folder name is not: a fence is full of `word/` spans, and each would silently become a planned folder.
+- **A path outside the folder keeps every error**, which is what keeps a typo elsewhere loud.
+- **The folder is never resolved**, since it does not exist yet; a leading `./` and a trailing `/` are ignored.
+- **A block can name its own** with `planned:`, which replaces the entry's for that block, the way `context:` does.
+- **A bare name counts only with a suffix some tracked file uses**, the rule every reference follows.
+  A file of a kind the tree has not seen yet is named with a `/`, under the folder.
+  Anything wider turns every `p.node` field access in a fence into a planned file.
 
 ## `raw:` — a span that is not a reference
 
@@ -289,6 +338,10 @@ A typo'd `discharge:` degrading into a sentence — dropping the discharge witho
 
 A body whose first line is blank has no prelude at all.
 That is the escape hatch for prose that genuinely must start with `something:`.
+
+**On an ask the escape is nearly always a slip**, and a silent one: a blank line under `## ask name` turns the `discharges:` below it into a sentence that discharges nothing.
+So `validate` warns about an open ask whose prelude is followed by a blank line and then a key an ask accepts, with the line to fix.
+The `round:` the tool stamps under a heading does not hide it, since the blank line is still where it was.
 
 ## Asks
 

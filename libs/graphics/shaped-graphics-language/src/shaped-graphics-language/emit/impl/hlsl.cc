@@ -1,17 +1,25 @@
 #include "dialect.hh"
 
 #include <clean-core/string/format.hh>
+#include <shaped-graphics-language/check/resources.hh>
 
 namespace
 {
+/// The space slib's binding pass gives the inline constants of a dx12 pipeline, `slib::inline_constants_space`.
+/// sgl does not link slib, so the number is repeated here, and the pipeline layout sg builds is what it has to match.
+constexpr auto k_inline_constants_space = 9;
+
 using namespace sgl;
 using namespace sgl::check;
 using namespace sgl::emit;
 using namespace sgl::emit::impl;
 
-/// The space slib's binding pass gives the inline constants of a dx12 pipeline, `slib::inline_constants_space`.
-/// sgl does not link slib, so the number is repeated here, and the pipeline layout sg builds is what it has to match.
-constexpr auto k_dx12_inline_constants_space = 9;
+/// HLSL's texture and image types, parallel to `texture_shape`; an image has no multisampled or cube form.
+constexpr cc::string_view k_texture_names[]
+    = {"Texture1D",        "Texture1DArray", "Texture2D",   "Texture2DArray",  "Texture2DMS",
+       "Texture2DMSArray", "Texture3D",      "TextureCube", "TextureCubeArray"};
+constexpr cc::string_view k_image_names[]
+    = {"RWTexture1D", "RWTexture1DArray", "RWTexture2D", "RWTexture2DArray", "", "", "RWTexture3D", "", ""};
 
 /// `position` -> `POSITION`, which is how a dx12 input layout names a vertex attribute.
 cc::string upper_cased(cc::string_view name)
@@ -94,49 +102,93 @@ public:
         out.appendf("static const int {} = {};\n", name, value);
     }
 
-    /// slib's binding pass owns every address in the text it reads, and this pragma is the one thing we write.
-    /// A group's block is a `ConstantBuffer` of a struct declared ahead of the namespace, which the pass requires.
+    /// Each resource of a group carries its final address: `space` is the group and the register is the slot on
+    /// dx12, `[[vk::binding(slot, group)]]` on vulkan.
+    /// A group's block is a `ConstantBuffer` of a struct declared ahead of it.
     void write_group(cc::string& out,
                      plan const& p,
                      planned_constants const* block,
-                     cc::span<planned_buffer const> buffers) const override
+                     cc::span<planned_resource const> buffers) const override
     {
         if (block != nullptr)
         {
-            // No `[[vk::offset]]` here, unlike the push-constant block: in a descriptor set `-fvk-use-dx-layout` already
-            // gives vulkan dx12's layout, and slib's pass refuses an offset written by hand.
+            // Every member states its offset on vulkan, as the push-constant block's do, so no compiler flag decides
+            // the layout.
             out.appendf("struct {}\n{{\n", block->block_name);
-            for (auto member : block->members)
-            {
-                member.offset = -1;
+            for (auto const& member : block->members)
                 write_member(out, nullptr, member, p);
-            }
             out += "};\n\n";
         }
-        out.appendf("#pragma sc group {}\n", block != nullptr ? block->group : buffers[0].group);
-        out.appendf("namespace {}\n{{\n", block != nullptr ? block->group_name : buffers[0].group_name);
         if (block != nullptr)
-            out.appendf("    ConstantBuffer<{}> {};\n", block->block_name, block->name);
+            write_addressed(out, cc::format("ConstantBuffer<{}>", block->block_name), block->name, 'b', block->group,
+                            block->slot, {});
         for (auto const& b : buffers)
-            out.appendf("    {}StructuredBuffer<{}> {};\n", b.is_mut ? "RW" : "", type_text(p, *this, b.element), b.name);
-        out += "}\n\n";
+            write_resource(out, p, b);
+        out += "\n";
     }
 
-    [[nodiscard]] cc::string buffer_reference(planned_buffer const& b) const override
+    void write_resource(cc::string& out, plan const& p, planned_resource const& b) const
     {
-        return cc::format("{}::{}", b.group_name, b.name);
+        auto const& t = p.m.at(b.type);
+        auto const format = t.kind == type_kind::image ? k_image_formats[t.format].spirv : cc::string_view();
+        write_addressed(out, resource_text(p, b.type), b.name, register_class_of(t), b.group, b.slot, format);
     }
 
-    [[nodiscard]] cc::string block_reference(planned_constants const& b) const override
+    /// One declaration of a group with its address; `format` is an image's `[[vk::image_format]]`, which vulkan's
+    /// SPIR-V wants and dx12 leaves to the view.
+    void write_addressed(cc::string& out,
+                         cc::string_view type,
+                         cc::string_view name,
+                         char register_class,
+                         i32 group,
+                         i32 slot,
+                         cc::string_view format) const
     {
-        return b.group >= 0 ? cc::format("{}::{}", b.group_name, b.name) : b.name;
+        if (_is_vulkan)
+        {
+            out.appendf("[[vk::binding({}, {})]] ", slot, group);
+            if (!format.empty())
+                out.appendf("[[vk::image_format(\"{}\")]] ", format);
+            out.appendf("{} {};\n", type, name);
+        }
+        else
+            out.appendf("{} {} : register({}{}, space{});\n", type, name, register_class, slot, group);
+    }
+
+    /// dx12's register class: `u` for what the shader writes, `s` for a sampler, `t` for every other resource.
+    [[nodiscard]] static char register_class_of(check::type_info const& t)
+    {
+        if (t.kind == type_kind::sampler)
+            return 's';
+        if (t.kind == type_kind::image || (t.kind == type_kind::buffer && t.is_mut))
+            return 'u';
+        return 't';
+    }
+
+    [[nodiscard]] cc::string resource_text(plan const& p, type_id type) const override
+    {
+        auto const& t = p.m.at(type);
+        switch (t.kind)
+        {
+        case type_kind::buffer:
+            return cc::format("{}StructuredBuffer<{}>", t.is_mut ? "RW" : "", type_text(p, *this, t.element));
+        case type_kind::texture:
+            // A depth texture samples to one float, which is how HLSL declares it.
+            return cc::format("{}<{}>", k_texture_names[isize(t.shape)],
+                              t.is_depth ? cc::string_view("float") : type_text(p, *this, t.element));
+        case type_kind::image:
+            return cc::format("{}<{}>", k_image_names[isize(t.shape)], builtin_spelling(p, texel_name_of(t.format)));
+        case type_kind::sampler:
+            return t.is_comparison ? "SamplerComparisonState" : "SamplerState";
+        default:
+            return {};
+        }
     }
 
     void write_declarations(cc::string& out, plan const& p) const override
     {
         write_enum_constants(out, p, *this);
-        write_buffers(out, p, *this);
-
+        // A struct stands ahead of the groups, whose blocks and buffers may hold it.
         for (auto const& s : p.structs)
         {
             out.appendf("struct {}\n{{\n", s.name);
@@ -144,6 +196,8 @@ public:
                 write_member(out, &s, member, p);
             out += "};\n\n";
         }
+        write_buffers(out, p, *this);
+
 
         if (!p.constants.has_value())
             return;
@@ -156,7 +210,7 @@ public:
             out.appendf("[[vk::push_constant]] ConstantBuffer<{}> {};\n\n", c.block_name, c.name);
         else
             out.appendf("ConstantBuffer<{}> {} : register(b0, space{});\n\n", c.block_name, c.name,
-                        k_dx12_inline_constants_space);
+                        k_inline_constants_space);
     }
 
     void write_function_head(cc::string& out, plan const& p) const override

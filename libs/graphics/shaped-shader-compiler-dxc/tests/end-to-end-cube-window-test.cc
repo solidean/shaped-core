@@ -216,7 +216,7 @@ TEST("ssc::dxc + dx12 - spinning cube in a window", nx::config::manual)
         .space = 0,
         .index = 0,
         .count = 1,
-        .type = sg::binding_type::uniform_buffer,
+        .type = sg::binding_type::constants_buffer,
         .block_size = isize(sizeof(tg::mat4f)),
     };
     auto pipeline_layout = ctx.cached.acquire_pipeline_layout(pld);
@@ -236,16 +236,8 @@ TEST("ssc::dxc + dx12 - spinning cube in a window", nx::config::manual)
     auto pipeline = cc::async_blocking_get(ctx.cached.acquire_raster_pipeline(desc));
     REQUIRE(pipeline != nullptr);
 
-    // Upload the cube's vertices once, in their own list so the buffer decays to COMMON before draws read it.
-    cc::vector<vertex> const cube = make_cube();
-    auto vbuf = ctx.persistent.create_raw_buffer(isize(cube.size()) * isize(sizeof(vertex)),
-                                                 sg::buffer_usage::vertex_buffer | sg::buffer_usage::copy_dst);
-    REQUIRE(vbuf != nullptr);
-    {
-        auto up = ctx.create_command_list();
-        up->upload.data_to_buffer(vbuf, cc::span<vertex const>(cube));
-        ctx.submit_command_list(cc::move(up));
-    }
+    auto const vbuf = ctx.persistent.create_buffer_from_data(make_cube(), sg::buffer_usage::vertex_buffer);
+    REQUIRE(vbuf.raw() != nullptr);
 
     // Depth buffer, (re)created to match the swapchain size (which follows the window).
     sg::raw_texture_handle depth_tex;
@@ -308,8 +300,8 @@ TEST("ssc::dxc + dx12 - spinning cube in a window", nx::config::manual)
             });
             cmd->raster.bind_pipeline(*pipeline);
             cmd->raster.set_inline_constants(mvp);
-            cmd->raster.bind_vertex_buffers({sg::buffer<vertex>::from_raw(vbuf).as_vertex_buffer()});
-            cmd->raster.draw({.vertex_range = {.offset = 0, .size = isize(cube.size())}});
+            cmd->raster.bind_vertex_buffers({vbuf.as_vertex_buffer()});
+            cmd->raster.draw({.vertex_range = {.offset = 0, .size = vbuf.element_count()}});
         }
         ctx.submit_command_list_and_present(*sc, cc::move(cmd));
         ctx.advance_epoch();

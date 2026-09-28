@@ -1,0 +1,67 @@
+// Textures, images and samplers in a group: the SGL fixture for sampling, loading and storing texels.
+// Each is called as a method on the texture or image, which is the builtin's first argument.
+
+binding post:
+    texel_size: float2
+    src: texture_2d[float4]
+    dst: out image_2d[.rgba8_unorm]
+    acc: mut image_2d[.r32_float]
+    sampler bilinear:
+        filter = .linear
+        address = .clamp_edge
+
+binding sampled:
+    src: texture_2d[float4]
+    smp: sampler
+    dst: out image_2d[.rgba8_unorm]
+
+// Sampled at texel centres, so a filtering sampler gives each texel back unchanged.
+@compute(8, 8) fun copy_accumulate(@thread_id id: int3){post}:
+    let xy = int2(id.x, id.y)
+    let uv = ((xy as float2) + float2(0.5, 0.5)) * post.texel_size
+    let c = post.src.sample(uv, post.bilinear, level = 0.0)
+    post.dst.store(xy, c)
+    post.acc.store(xy, post.acc.load(xy) + c.x)
+
+// The same copy with `post` listed second, so the one group layout and its static sampler sit at slot 1 here and slot 0 above.
+@compute(8, 8) fun copy_second_slot(@thread_id id: int3){sampled, post}:
+    let xy = int2(id.x, id.y)
+    let uv = ((xy as float2) + float2(0.5, 0.5)) * post.texel_size
+    sampled.dst.store(xy, post.src.sample(uv, post.bilinear, level = 0.0))
+
+// The same copy through a sampler the host binds, sized by the texture it reads and the image it writes.
+@compute(8, 8) fun copy_dynamic(@thread_id id: int3){sampled}:
+    let xy = int2(id.x, id.y)
+    let uv = ((xy as float2) + float2(0.5, 0.5)) / (sampled.src.size(0) as float2)
+    if xy.x < sampled.dst.size().x and xy.y < sampled.dst.size().y:
+        sampled.dst.store(xy, sampled.src.sample(uv, sampled.smp, level = 0.0))
+
+// A full-screen quad whose pixel stage samples a texture: `sample` without a `level` picks its level from derivatives,
+// which only a pixel stage has, so it is @stages(.pixel) and a compute entry point may not reach it.
+@vertex struct screen_vertex:
+    corner: float3
+    uv: float2
+
+struct textured_input:
+    @position position: hpos4
+    uv: float2
+
+@pixel struct textured_target:
+    color: float4
+
+binding material:
+    albedo: texture_2d[float4]
+    sampler nearest:
+        filter = .nearest
+        address = .clamp_edge
+
+@vertex fun screen_vs(v: screen_vertex){material} -> textured_input:
+    return {
+        position = hpos4(v.corner.x, v.corner.y, 0.0, 1.0)
+        uv = v.uv
+    }
+
+@pixel fun textured_ps(p: textured_input){material} -> textured_target:
+    return {
+        color = material.albedo.sample(p.uv, material.nearest)
+    }

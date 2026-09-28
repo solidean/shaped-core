@@ -32,17 +32,27 @@ struct shader_payload;
 struct shader_bindings;
 struct wgsl_declarations;
 
+// a bool as GPU memory holds one (gpu_bool.hh)
+struct gpu_bool;
+
 // shader packages
 enum class shader_language;
 struct shader_source_description;
-struct binding_rename;
 struct preprocessed_source;
+struct block_field;
+struct block_layout;
 struct shader_definition;
 struct shader_package;
-struct listed_group; // one group an entry point lists, for reflection_mismatch
 class shader_compiler;
 class shader_asset;
 class shader_library;
+
+// declared pipelines
+enum class setting_kind : u8;
+struct pipeline_setting;
+struct open_part;
+struct pipeline_definition;
+struct pipeline_configuration;
 
 /// A shared filesystem.
 /// std::shared_ptr because the handle is polymorphic: cc::shared_ptr's default traits place the refcount at an offset derived from sizeof(T), so it cannot hold a derived object through a base handle.

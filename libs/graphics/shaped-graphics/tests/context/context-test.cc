@@ -246,11 +246,10 @@ ASYNC_INVOCABLE_TEST("sg - idle_completion drains the actors, not just the GPU",
 {
     REQUIRE(ctx != nullptr);
 
-    auto const src = ctx->persistent.create_buffer<u32>(4, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
+    u32 const values[] = {1, 2, 3, 4};
+    auto const src = ctx->persistent.create_buffer_from_data(values, sg::buffer_usage::copy_src);
 
     auto cmd = ctx->create_command_list();
-    u32 const values[] = {1, 2, 3, 4};
-    cmd->upload.data_to_buffer(src, cc::span<u32 const>(values));
     auto const future = cmd->download.data_from_buffer(src);
     (void)ctx->submit_command_list(cc::move(cmd));
     ctx->advance_epoch();

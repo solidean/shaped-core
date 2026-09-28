@@ -3,7 +3,7 @@
 #include <clean-core/common/macros.hh>
 #include <clean-core/fwd.hh>
 
-// Portable extended-precision integer primitives: the 64x64 -> 128 multiplies, and the carry/borrow-propagating add/sub that wider arithmetic is built from.
+// Portable extended-precision integer primitives that wider arithmetic is built from: the 64x64 -> 128 multiplies, the carry/borrow-propagating add/sub, and the 128 ÷ 64 division step.
 // Hash mixers, bignum and fixed-point are the callers.
 // All are constexpr.
 //
@@ -11,12 +11,12 @@
 //   * clang/gcc, every arch incl. ARM/WASM: __int128, so the whole job is a builtin 128-bit op.
 //     Best codegen, constexpr, and the compiler emits the native MUL/UMULH and ADC/SBB itself.
 //   * MSVC cl.exe has no __int128, so it uses intrinsics.
-//     x64 has _umul128 / _mul128 / _addcarry_u64 / _subborrow_u64.
+//     x64 has _umul128 / _mul128 / _addcarry_u64 / _subborrow_u64 / _udiv128.
 //     ARM64 has __umulh / __mulh for the multiplies but no carry intrinsic, so add/sub take the plain-u64 fallback.
 //     None of the intrinsics are usable in a constant expression, so `if !consteval` routes constant evaluation to the plain-u64 fallback below.
 
 // The MSVC intrinsics below are declared by intrinsics.hh rather than pulled in with <intrin.h>, which costs
-// tens of thousands of lines for the six we use.
+// tens of thousands of lines for the handful we use.
 // It expands to nothing on clang and gcc, which have __int128.
 #include <clean-core/platform/intrinsics.hh>
 
@@ -55,6 +55,15 @@ struct cc::borrowing_sub_result
     u64 borrow = 0;
 
     [[nodiscard]] friend constexpr bool operator==(borrowing_sub_result const&, borrowing_sub_result const&) = default;
+};
+
+/// The quotient and remainder of a 128 ÷ 64 division (see udiv128).
+struct cc::udiv128_result
+{
+    u64 quotient = 0;
+    u64 remainder = 0;
+
+    [[nodiscard]] friend constexpr bool operator==(udiv128_result const&, udiv128_result const&) = default;
 };
 
 namespace cc
@@ -114,6 +123,61 @@ namespace impl
 }
 } // namespace impl
 #endif
+
+namespace impl
+{
+// Unlike the fallbacks above, this one is compiled everywhere, so the tests pin it on clang too.
+// It is the only path MSVC ARM64 has, and no local build reaches that one.
+[[nodiscard]] constexpr int wide_count_leading_zeroes(u64 x)
+{
+    auto n = 0;
+    for (auto step = 32; step > 0; step /= 2)
+        if ((x >> (64 - step)) == 0)
+        {
+            n += step;
+            x <<= step;
+        }
+    return n;
+}
+
+[[nodiscard]] constexpr udiv128_result wide_udiv128(u128 n, u64 d)
+{
+    // Hacker's Delight divlu: normalize the divisor, then produce the quotient as two 32-bit digits.
+    // Each digit estimate from the top divisor digit is at most two too large, and the loops correct it.
+    u64 const b = 1ull << 32;
+    auto const s = wide_count_leading_zeroes(d);
+    d <<= s;
+    u64 const vn1 = d >> 32;
+    u64 const vn0 = d & 0xffffffffu;
+    u64 const un32 = s == 0 ? n.hi : (n.hi << s) | (n.lo >> (64 - s));
+    u64 const un10 = n.lo << s;
+    u64 const un1 = un10 >> 32;
+    u64 const un0 = un10 & 0xffffffffu;
+
+    u64 q1 = un32 / vn1;
+    u64 rhat = un32 - q1 * vn1;
+    while (q1 >= b || q1 * vn0 > b * rhat + un1)
+    {
+        --q1;
+        rhat += vn1;
+        if (rhat >= b)
+            break;
+    }
+
+    u64 const un21 = un32 * b + un1 - q1 * d;
+    u64 q0 = un21 / vn1;
+    rhat = un21 - q0 * vn1;
+    while (q0 >= b || q0 * vn0 > b * rhat + un0)
+    {
+        --q0;
+        rhat += vn1;
+        if (rhat >= b)
+            break;
+    }
+
+    return {q1 * b + q0, (un21 * b + un0 - q0 * d) >> s};
+}
+} // namespace impl
 
 /// Full 128-bit product of two unsigned 64-bit values (never overflows).
 [[nodiscard]] constexpr u128 umul128(u64 a, u64 b)
@@ -199,6 +263,37 @@ namespace impl
         return {out, bw};
     }
     return impl::wide_sub_with_borrow(a, b, borrow_in);
+#endif
+}
+
+/// Divides the 128-bit n by d.
+/// n.hi must be less than d, which is exactly the condition for the quotient to fit 64 bits; d != 0 follows from it.
+/// Violating it traps on x64 rather than returning a wrong answer, and is undefined elsewhere.
+[[nodiscard]] constexpr udiv128_result udiv128(u128 n, u64 d)
+{
+#if defined(CC_COMPILER_CLANG) || defined(CC_COMPILER_GCC)
+#if defined(CC_ARCH_X64)
+    // __int128 division is a call to __udivti3, a full 128 ÷ 128; DIV is the 128 ÷ 64 the precondition allows.
+    if !consteval
+    {
+        u64 q = 0;
+        u64 r = 0;
+        __asm__("divq %[d]" : "=a"(q), "=d"(r) : [d] "rm"(d), "a"(n.lo), "d"(n.hi));
+        return {q, r};
+    }
+#endif
+    __uint128_t const nn = (static_cast<__uint128_t>(n.hi) << 64) | n.lo;
+    return {u64(nn / d), u64(nn % d)};
+#else // CC_COMPILER_MSVC
+#if defined(CC_ARCH_X64)
+    if !consteval
+    {
+        u64 r = 0;
+        u64 const q = _udiv128(n.hi, n.lo, d, &r);
+        return {q, r};
+    }
+#endif
+    return impl::wide_udiv128(n, d);
 #endif
 }
 } // namespace cc

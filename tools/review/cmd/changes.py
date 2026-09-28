@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import fnmatch
 import json
+import re
 
 import tools.review as review
 
@@ -42,7 +43,12 @@ def path_filter(selector: str):
     excludes = [t[1:] for t in terms if t.startswith("!")]
 
     def hit(path: str, term: str) -> bool:
-        return fnmatch.fnmatch(path, term) if any(c in term for c in "*?[") else path.startswith(term)
+        if not any(c in term for c in "*?["):
+            return path.startswith(term)
+        # gitignore-style: a glob without a `/` matches a file name anywhere, and `*` never crosses a `/`, `**` does
+        if "/" not in term:
+            return fnmatch.fnmatchcase(path.rsplit("/", 1)[-1], term)
+        return _glob_re(term).fullmatch(path) is not None
 
     def keeps(path: str) -> bool:
         if any(hit(path, t) for t in excludes):
@@ -109,3 +115,35 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
 
     accounted = sum(1 for _, holders in rows if holders)
     print(f"\n{accounted}/{len(rows)} discharged")
+
+
+def _glob_re(glob: str) -> re.Pattern[str]:
+    """A path glob as a regex: `**` spans folders, `*` and `?` stay within one, `[...]` is a character class."""
+    out = ""
+    i = 0
+    while i < len(glob):
+        c = glob[i]
+        if glob.startswith("**/", i):
+            out += "(?:.*/)?"
+            i += 3
+            continue
+        if glob.startswith("**", i):
+            out += ".*"
+            i += 2
+            continue
+        if c == "*":
+            out += "[^/]*"
+        elif c == "?":
+            out += "[^/]"
+        elif c == "[":
+            end = glob.find("]", i + 1)
+            if end < 0:
+                out += re.escape(c)
+            else:
+                out += glob[i:end + 1]
+                i = end + 1
+                continue
+        else:
+            out += re.escape(c)
+        i += 1
+    return re.compile(out)

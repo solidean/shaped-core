@@ -42,7 +42,7 @@ A goal is mandatory, and `init` refuses without one, because it decides what the
 
 | goal | the artifact | what changes |
 |---|---|---|
-| `pr-comment` | one standalone comment for the author | entries become instructions; context and open questions are dropped from the artifact |
+| `pr-comment` | one standalone comment for the author | entries become instructions; the overview and open questions are dropped from the artifact |
 | `land-changes` | a work order for this session | entries carry `resolved-by:`, and `sync` marking their changes superseded is the evidence the fix landed |
 | `design` | the decisions, as input to a plan | no changeset at all — no ledger, no coverage gate, entries only |
 
@@ -60,9 +60,9 @@ Goals combine: `--goal pr-comment --goal land-changes` is a review of someone el
 | `ingest --rest` | ids for whatever nothing claims yet |
 | `ingest --dry-run` / `--stats` | what a sweep would create, and the shape of the change set, before committing to it |
 | `coverage <name>` | gate 1 and the discharge progress, with the uncovered runs listed; also names changes only a meta or orientation entry claims |
-| `changes <name>` | the ledger: every change, and which ask accounts for it. `--undischarged`, `--path` (comma-OR'd prefixes or globs, `!` subtracts), `--ids` |
+| `changes <name>` | the ledger: every change, and which ask accounts for it. `--undischarged`, `--path` (comma-OR'd prefixes or gitignore-style globs, where `*` stays in one folder and `**` crosses them; `!` subtracts), `--ids` |
 | `list` | the reviews in this repository, and where each one stands |
-| `validate <name>` | every entry parses, every change id resolves; run it before serving a round |
+| `validate <name> [ENTRY...]` | every entry parses, every change id resolves; run it before serving a round. Entries narrow it to a slug, a number or a range like `200..299`, and only those are parsed, so parallel writers each check their own block |
 | `generate <name>` | write or refresh the overview and coverage entries |
 | `append <name> <entry>` | add blocks to an entry from stdin or `--file`, stamped with the round; **how a later round answers an earlier one** |
 | `title <name> "<text>"` | name the review after reading it, which is what the tab and the navigation show |
@@ -111,6 +111,8 @@ The maintainer answers whenever, says so, and the agent runs `delta <name> --fin
   That is what makes "bulk the merge of `main`" safe on a follow-up review, where the resolutions are the only part of the merge that is the branch's work.
 - **A plain `ingest` never re-creates what a bulk claim covers.**
   It skips a new hunk lying wholly inside one, so re-running it after a head move keeps the decision the bulk recorded.
+- **A command's hint names the tool the way it was invoked.**
+  `next: uv run C:/work/shaped-core/review.py --dir <dir> ingest <name>` is what `init` prints when run from another repository, so a hint pastes as it stands wherever the tool was run from.
 - **A review is scratch, so nothing outside it may cite an entry.**
   Entry numbers, ask names and round numbers are addresses within one folder under `.tmp/` that is deleted, renumbered
   and re-ingested freely.
@@ -131,6 +133,9 @@ The maintainer answers whenever, says so, and the agent runs `delta <name> --fin
   An ask that has already been answered cannot be — that is what `follows:` is for.
 - **Every file an entry names becomes a link**, resolved three ways: the exact path, a unique suffix, a bare basename.
   Ambiguous is a validation error, and so is unresolved — mark the exceptions `new:` (a file this change will create) or `old:` (one it removes).
+  An ambiguous one lists every candidate as a path to paste.
+  `context: <folder>` in an entry's front matter, or on one block, is where a short path is looked for first, which is the fix for a tree whose tests mirror its sources.
+  `planned: <folder>` is the design review's counterpart: a path under that folder, or a bare name, that resolves nowhere is drawn as a file the design will create rather than failing.
   **A reference in a finalized round never fails `validate`**, ambiguity included: a finalized ask is immutable, so nothing could fix it there.
   Carrying out what the round decided is what breaks it — a `new:` path now exists and links like any other, and a path that is gone is drawn as removed.
   Where the round's head is on record the text is read against that tree, which follows a file that moved and names the commit on hover.
@@ -163,8 +168,12 @@ The maintainer answers whenever, says so, and the agent runs `delta <name> --fin
   It discharges nothing, so filing there costs the coverage gate nothing.
 - **A `changes` block must declare `show: visible` or `show: collapsed`.**
   There is no default, because the choice is about the reader's attention: most entries are decidable without opening the diff.
+  A collapsed block costs the page one line: its cards and their diffs are fetched when it is opened, so an lgtm entry discharging a hundred changes loads as fast as one discharging two.
 - **`finalize` drops nothing by group.** Every answered entry appears, tagged with its group, because the artifact is
   input to a synthesis step rather than something to paste unread.
+- **`finalize` tags an answer a later follow-up replaced.**
+  Every answer is still gathered, and one an answered `follows:` ask refined or reversed names that follow-up.
+  Printed unmarked, the overridden answer read as a second rule, and it came first.
 - **Only one server per review.** `serve` refuses a taken port rather than sharing it, and says so when another review
   in this repo is already up.
 - **`restart` returns, and `serve` does not.**

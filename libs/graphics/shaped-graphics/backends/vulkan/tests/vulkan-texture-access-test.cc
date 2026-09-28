@@ -42,7 +42,7 @@ TEST("sg vulkan - combining a sampled and a storage view degrades to general")
 {
     // Vulkan has no layout serving both, so GENERAL is the only correct answer — and it is slower to sample from,
     // which is why it reports degraded rather than ok.
-    auto const c = vulkan::combine_layouts(sg::texture_layout::shader_readonly, sg::texture_layout::shader_readwrite);
+    auto const c = vulkan::combine_layouts(sg::texture_layout::shader_texture, sg::texture_layout::shader_image);
     CHECK(c.layout == sg::texture_layout::general);
     CHECK(c.result == vulkan::layout_combine::degraded);
 }
@@ -57,13 +57,13 @@ TEST("sg vulkan - combining with general is free, and a real mismatch is a confl
     CHECK(same.result == vulkan::layout_combine::ok);
 
     // A copy destination and a sampled read cannot coexist in one operation.
-    auto const bad = vulkan::combine_layouts(sg::texture_layout::copy_dst, sg::texture_layout::shader_readonly);
+    auto const bad = vulkan::combine_layouts(sg::texture_layout::copy_dst, sg::texture_layout::shader_texture);
     CHECK(bad.result == vulkan::layout_combine::conflict);
 }
 
 TEST("sg vulkan - the entry transition comes out of finalize, not out of the list's own flush")
 {
-    auto access = tracker(sg::texture_layout::shader_readonly);
+    auto access = tracker(sg::texture_layout::shader_texture);
     access.declare(k_first, whole(single()), sg::pipeline_stage_flag::copy, sg::access_flag::copy_write,
                    sg::texture_layout::copy_dst);
 
@@ -78,7 +78,7 @@ TEST("sg vulkan - the entry transition comes out of finalize, not out of the lis
     // The discard from UNDEFINED is the initial transition's job, and it has already run by the time this barrier
     // executes.
     // What the entry barrier starts from is the layout the texture is really in.
-    CHECK(entry[0].barrier.src_layout == sg::texture_layout::shader_readonly);
+    CHECK(entry[0].barrier.src_layout == sg::texture_layout::shader_texture);
 }
 
 TEST("sg vulkan - the initial transition is claimed exactly once")
@@ -123,13 +123,13 @@ TEST("sg vulkan - every finalize commits its layout")
 
     // The next list therefore finds it in copy_dst, and its entry barrier starts there.
     access.declare(k_second, whole(single()), sg::pipeline_stage_flag::fragment, sg::access_flag::shader_read,
-                   sg::texture_layout::shader_readonly);
+                   sg::texture_layout::shader_texture);
     CHECK(access.flush(k_second).empty());
 
     auto const entry = access.finalize(k_second);
     REQUIRE(entry.size() == 1);
     CHECK(entry[0].barrier.src_layout == sg::texture_layout::copy_dst);
-    CHECK(entry[0].barrier.dst_layout == sg::texture_layout::shader_readonly);
+    CHECK(entry[0].barrier.dst_layout == sg::texture_layout::shader_texture);
 }
 
 TEST("sg vulkan - a concurrently recorded list enters from what the earlier one left, not from what it assumed")
@@ -137,20 +137,20 @@ TEST("sg vulkan - a concurrently recorded list enters from what the earlier one 
     // Two lists open at once, and the case the entry model exists for.
     // Neither can know what the texture will be in when it submits, so neither records a transition into it: the
     // second list's entry barrier is computed at ITS finalize, by which time the first has committed copy_dst.
-    auto access = tracker(sg::texture_layout::shader_readonly);
+    auto access = tracker(sg::texture_layout::shader_texture);
 
     access.declare(k_first, whole(single()), sg::pipeline_stage_flag::copy, sg::access_flag::copy_write,
                    sg::texture_layout::copy_dst);
     CHECK(access.flush(k_first).empty());
     access.declare(k_second, whole(single()), sg::pipeline_stage_flag::fragment, sg::access_flag::shader_read,
-                   sg::texture_layout::shader_readonly);
+                   sg::texture_layout::shader_texture);
     CHECK(access.flush(k_second).empty());
     CHECK(access.active_slot_count() == 2);
 
     // The first list enters from the layout the texture starts in, and leaves it in copy_dst.
     auto const first_entry = access.finalize(k_first);
     REQUIRE(first_entry.size() == 1);
-    CHECK(first_entry[0].barrier.src_layout == sg::texture_layout::shader_readonly);
+    CHECK(first_entry[0].barrier.src_layout == sg::texture_layout::shader_texture);
     CHECK(first_entry[0].barrier.dst_layout == sg::texture_layout::copy_dst);
 
     // The second enters from copy_dst — what is really there — although it recorded while the texture was elsewhere.
@@ -158,12 +158,12 @@ TEST("sg vulkan - a concurrently recorded list enters from what the earlier one 
     auto const second_entry = access.finalize(k_second);
     REQUIRE(second_entry.size() == 1);
     CHECK(second_entry[0].barrier.src_layout == sg::texture_layout::copy_dst);
-    CHECK(second_entry[0].barrier.dst_layout == sg::texture_layout::shader_readonly);
+    CHECK(second_entry[0].barrier.dst_layout == sg::texture_layout::shader_texture);
 }
 
 TEST("sg vulkan - a dropped list leaves the current layout alone")
 {
-    auto access = tracker(sg::texture_layout::shader_readonly);
+    auto access = tracker(sg::texture_layout::shader_texture);
     access.declare(k_first, whole(single()), sg::pipeline_stage_flag::copy, sg::access_flag::copy_write,
                    sg::texture_layout::copy_dst);
     (void)access.flush(k_first);
@@ -176,7 +176,7 @@ TEST("sg vulkan - a dropped list leaves the current layout alone")
     (void)access.flush(k_second);
     auto const entry = access.finalize(k_second);
     REQUIRE(entry.size() == 1);
-    CHECK(entry[0].barrier.src_layout == sg::texture_layout::shader_readonly);
+    CHECK(entry[0].barrier.src_layout == sg::texture_layout::shader_texture);
 }
 
 TEST("sg vulkan - mip levels are tracked independently")
@@ -205,10 +205,10 @@ TEST("sg vulkan - one texture bound twice to one op yields one barrier")
 
     // Declared twice for the same op with the same layout; the flush merges them.
     access.declare(k_first, whole(single()), sg::pipeline_stage_flag::fragment, sg::access_flag::shader_read,
-                   sg::texture_layout::shader_readonly);
+                   sg::texture_layout::shader_texture);
     CHECK(access.mark_pending_barrier(k_first));
     access.declare(k_first, whole(single()), sg::pipeline_stage_flag::compute, sg::access_flag::shader_read,
-                   sg::texture_layout::shader_readonly);
+                   sg::texture_layout::shader_texture);
     CHECK(!access.mark_pending_barrier(k_first)); // already enqueued for this op
 
     CHECK(access.flush(k_first).empty()); // the entry transition is the submit's, and both declares merged into it

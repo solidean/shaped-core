@@ -131,6 +131,17 @@ void add_shader(cc::byte_stream_builder& b, compiled_shader const& s)
     b.add(s.bytecode.span());
     b.add_string(s.entry_point);
     b.add_string(s.compiler.signature);
+
+    // Identical bytecode almost always means an identical footprint, but an SGL and an HLSL compile can share bytecode
+    // and differ in how exact theirs is.
+    b.add_pod(u32(s.footprint.source));
+    b.add_pod(u64(s.footprint.slots.size()));
+    for (auto const& slot : s.footprint.slots)
+    {
+        b.add_string(slot.name);
+        b.add_pod(slot.access.bits);
+        b.add_bool(slot.dynamic_index);
+    }
 }
 
 void add_optional_shader(cc::byte_stream_builder& b, cc::optional<compiled_shader> const& s)
@@ -187,7 +198,7 @@ bcache::blob_cache* pipeline_cache::resolve_blob_cache()
 
 bcache::cache_key pipeline_cache::persistent_key(context& ctx, cc::hash128 pipeline_key, cc::string_view kind) const
 {
-    auto const& adapter = ctx.adapter();
+    auto const& adapter = ctx.metrics.adapter();
 
     auto& b = cc::byte_stream_builder::thread_local_scratch();
     b.add_pod(pipeline_key);
@@ -355,8 +366,8 @@ cc::hash128 pipeline_cache::compute_raster_pipeline_key(raster_pipeline_descript
     b.add_bool(desc.depth_stencil.stencil_test);
     b.add_pod(desc.depth_stencil.stencil_read_mask);
     b.add_pod(desc.depth_stencil.stencil_write_mask);
-    add_stencil_face(desc.depth_stencil.front);
-    add_stencil_face(desc.depth_stencil.back);
+    add_stencil_face(desc.depth_stencil.stencil_front);
+    add_stencil_face(desc.depth_stencil.stencil_back);
 
     b.add_pod(u64(desc.color_targets.size()));
     for (auto const& t : desc.color_targets)

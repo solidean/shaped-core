@@ -9,10 +9,28 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   `vkCmdPipelineBarrier2`, and it wants writing when a member needs it.
   Two smaller gaps in the dx12 one: it declares whole textures rather than subresource ranges, and a resource the
   foreign code touches without declaring is caught only by the debug layer.
+- **A barrier-only dx12 submit once landed outside any test.**
+  One full `dev.py check` failed `shaped-graphics-test` on debug-nopch with the debug layer's "recorded only Barrier commands" warning, logged under no test owner.
+  The message is allowlisted, but only inside a test, so an unowned one fails the run.
+  It did not reproduce in 105 further runs of the suite on that preset, 60 of them under concurrent load.
+  Ruled out by reading: the copy-queue windows record only copies, `prepare_texture_for_async` and routine ticks run on the test's thread, and shutdown submits nothing.
+  A barrier-only list is almost always an entry pre-list, whose need depends on submit order, which fits a rare failure; which thread submitted without an owner is unknown.
+  Next step when it recurs: have the dx12 relay name the raising thread, and attach a stack to this one message.
+- **A footprint is only as exact as the code the emitter prints.**
+  SGL removes no dead code yet, so a use behind a constant-false branch still counts, and costs the barrier it implies.
+  Dead-code removal belongs on the tree both the emitter and the footprint read, never in the footprint alone, since an untouched slot records no layout transition.
+- **An atomic has its own access flag and nothing reads it differently yet.**
+  `shader_atomic` orders as a read and a write, which is what both D3D12 and Vulkan formally want between two atomic dispatches.
+  Letting atomic-after-atomic run free is a tracker change once SGL has atomics to set the flag.
 - **Exportable memory and shared fences.**
   OIDN's GPU devices run on their own API (CUDA, HIP, SYCL, Metal) and share memory with ours through an OS handle.
   That wants an "exportable" usage on buffer and texture creation, a way to read the handle, and a fence shared both ways.
   Not needed for OIDN on the CPU, which goes through the existing download and upload; built with the OIDN member.
+- **A pipeline-level static sampler (`bound_sampler`) is bound by dx12 and webgpu only.**
+  vulkan created the `VkSampler`s and bound them to no set, and metal read `static_samplers` not at all, so a shader sampling through one read nothing.
+  Both now refuse a pipeline layout that carries one, rather than building a pipeline that samples garbage.
+  Closing it is a reserved descriptor set of immutable samplers on vulkan, at `sg::reserved_binding_group` as webgpu has it, and the same argument buffer slot on metal.
+  SGL's file-scope `sampler name:` waits on this, and a group's name-matched static sampler is what works everywhere meanwhile.
 
 - **The metal backend serializes no pipeline blob.**
   `compute_pipeline::cached_pipeline_data()` returns empty there and `used_cached_pipeline()` is always false, so a
@@ -109,7 +127,7 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
 
     ```
     auto cmd = ctx->create_command_list();
-    cmd->ensure_layout(tex, sg::texture_layout::shader_readonly);  // entry requirement recorded
+    cmd->ensure_layout(tex, sg::texture_layout::shader_texture);  // entry requirement recorded
     ctx->upload.bytes_to_texture(tex, pinned);                     // fixup settles COMMON, job enqueued
     ctx->submit_command_list(cc::move(cmd));                       // entry barrier moves it to SHADER_RESOURCE
     ```
@@ -136,7 +154,18 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
     Finer would be to notice it per window and stop mid-copy, releasing the source with it.
     Pure quality of implementation: the bytes are unobservable either way, and what it buys is releasing a large source sooner.
 - **Barriers + access tracking.** See [concepts/barriers.md](concepts/barriers.md). Still open:
-  - **array bindings in raster draws** — compute/RT dispatches resolve `declare_array_*_access` against the bound groups, but the raster scope has no declare pair and asserts on a bound array binding;
+  - **array bindings in raster draws** — the one gap here that a real renderer will hit, so it is spelled out rather than listed.
+    `declare_array_buffer_access` / `declare_array_texture_access` live on the compute scope and the raytracing scope alone.
+    `command_list_raster_scope` has neither, and there is no `raster_declare_array_*` virtual for one to dispatch to.
+    A dispatch therefore resolves its declares against the bound groups, and a draw cannot.
+    dx12, vulkan and metal each assert `"array bindings are not supported in raster draws yet"` on a bound array binding.
+    [concepts/bindings.md](concepts/bindings.md#array-bindings) states that refusal as the contract.
+    webgpu has no binding arrays at all, so there is nothing there to refuse.
+    **What it costs is any bindless material table on a draw.**
+    sv's tables work today only because it path-traces, declaring them through `cmd.raytracing` in `gpu_resource_manager`; the moment a raster path wants one it stops at this assert.
+    Closing it is the declare pair on the raster scope, a `raster_declare_array_*` virtual, and the resolution in three backends — the compute path's shape, at the vertex and fragment stages.
+    webgpu would have to gain binding arrays first.
+    Nothing subtle blocks it; it has simply never been the blocking thing.
   - a per-draw/dispatch **escape hatch** disabling automatic transitions where the caller knows its resources are already in the right layout;
   - folding the redundant `_open_command_lists` epoch-advance counter into the slot allocator's live count.
 - **Raster pipeline + draws.** See [concepts/raster-pipeline.md](concepts/raster-pipeline.md). Still open:
@@ -146,6 +175,9 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   - a **backend-neutral numeric `location`** on `sg::vertex_attribute`, replacing the HLSL `semantic` string.
     The vulkan backend currently numbers a SPIR-V location by an attribute's index in `vertex_input_layout::attributes`.
     That makes the shader's `[[vk::location(N)]]` annotations part of the contract — see `vulkan_raster_pipeline.cc`.
+  - **`rotating-cube` has no metal arm**, and it is the one example that still cannot get one.
+    Its source is HLSL, DXC publishes no macOS build, and nothing turns HLSL into MSL on this host — so the cube reaches metal through `sgl-cube` instead, from a package rather than an embedded blob.
+    `metal-cube` was the stand-in for that and is gone, along with its copy of the geometry, the camera maths, the hand-written vertex layout and the checked-in metallib.
 - **Acceleration structures.** See [concepts/acceleration-structures.md](concepts/acceleration-structures.md).
   The abstract types already carry the stats a refit needs — build and update scratch sizes, and the flags.
   Still open:
@@ -154,22 +186,41 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   - **compaction** — BLAS `allow_compaction`, query the compacted size, copy into a smaller buffer;
   - **compaction** on both backends, which is the one build-time flag neither implements.
 - **A group's implicit constant buffer is one upload each.**
-  `create_binding_group` allocates a buffer for a generated group's plain members and fills it through `ctx.upload`, one allocation and one copy per group.
+  `create_binding_group` allocates a buffer for a generated group's plain members and fills it with one copy per group.
+  On `ctx.transient` that copy is recorded inline into the `cmd` the call takes, and on `ctx.persistent` it goes through `ctx.upload`.
   A per-frame group wants a transient constant-buffer writer instead: a ring in host-visible device memory (ReBAR where there is some), suballocated per epoch and written in place.
-- **The metal barrier clamp has outlived the premise it was written under, and needs checking on a Mac.**
-  `metal_command_list::flush_barriers` clamps its stage pair to what a compute encoder accepts, above a comment saying
-  nothing is lost "while every op recorded here is a copy or a dispatch — a raster dependency will need the
-  queue-scoped form or an encoder boundary, which is the raster milestone's problem".
-  Raster landed after that was written, so the premise no longer holds.
-  The render encoder does open with `barrierAfterQueueStages(MTL::StageAll, MTL::StageAll, …)` and close with
-  `barrierAfterStages(MTL::StageAll, MTL::StageAll, …)`, which looks like it covers the case.
-  Read that with the queue barrier pair's limit in mind: it carries visibility, and a queue wait between two commits
-  leaves the consumer half with nothing to find, which is why cross-list *ordering* now rides the submission timeline
-  instead.
-  What has not been established is whether a fragment-stage dependency can reach `flush_barriers` and be silently
-  clamped away, and that cannot be established without a Metal device.
-  If the encoder-boundary pair does cover it, replace the comment with that invariant and name the two call sites,
-  rather than leaving a deferral to a milestone that has already arrived.
+- **A resource's lifetime scope is stamped after construction, through a friend.**
+  `raw_buffer::scope()` / `raw_texture::scope()` read a `mutable` field that `context_transient_scope` sets on the handle the backend just returned.
+  Every backend already receives `allocation_info::scope` when it creates a resource, so each could forward it to the `raw_buffer` / `raw_texture` constructor instead.
+  The field then becomes `const` and the friend goes away.
+  It touches all eight backend resource classes and the four test fakes that construct the bases, metal's included, for no behavioural change.
+  So it is its own change rather than part of the one that added the stamp.
+
+- **The metal encoder-boundary barrier pair is emitted but not proved.**
+  `flush_barriers` now emits on whichever encoder is open, clamped to the stages that encoder accepts, and every
+  encoder publishes its work as it closes — so a dependency crossing an encoder boundary is carried by that publish
+  plus the queue wait the next encoder opens with, rather than by the encoder-scoped barrier that cannot reach across
+  one.
+  That replaced the clamp's old "a raster dependency is the raster milestone's problem" comment, which had outlived
+  its premise.
+  What is *not* established is that the pair is load-bearing.
+  `sg metal - a draw reads the vertex buffer a dispatch in the same list wrote` covers the path and passes with the
+  publish removed, because a four-thread dispatch finishes well before the pass it precedes on an M4.
+  A test that would catch the ordering needs a dispatch long enough to lose the race, which trades a sharp test for a
+  slow one — so the pair stands on Apple's documented model rather than on an oracle of ours.
+  The in-pass case is one step better off: a fragment-stage producer closes and reopens the pass, and
+  `metal_command_list::pass_reopens` makes that observable, so `sg metal - a draw sees what the previous draw's
+  fragment shader wrote` asserts the mechanism fired rather than only that the pixels came out right.
+  The ordering itself is still the same race, and still not what a 4x4 draw can prove.
+
+- **An odd first index into a 16-bit index buffer is refused everywhere, and closing that would need a shifted copy.**
+  `sg::index_buffer_offset_alignment` is now a portable rule every backend asserts, so the failure is the same on all
+  of them rather than metal-only — see [concepts/raster-pipeline.md](concepts/raster-pipeline.md).
+  What it costs is real: a sub-mesh whose first index happens to be odd is a legal D3D12 and Vulkan draw that sg
+  rejects, so a caller pads the range or uses 32-bit indices.
+  Lifting it means staging a shifted copy of the index range, which needs a copy the render pass it sits inside cannot
+  record — so it wants a pre-pass fixup or an aligned index allocator, and neither is worth building before something
+  hits it.
 
 - **The metal tier-2 tests block on `block_until_idle` where they could await `idle_completion()`.**
   `.shaped-lint.yml` allows that by name.
@@ -177,24 +228,21 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   That build no longer exists: `SC_THREADS=OFF` is refused on Apple targets, per [docs/platforms.md](../../../../docs/platforms.md#threading-sc_threads).
   So the conversion is unblocked whenever someone wants it.
 
-- **No metal shader toolchain exists.**
-  `sg::shader_format::metal_lib` implies one does, and nothing in the tree produces a metallib.
-  `shaped-shader-library` has no metal arm, and the only metallibs are hand-compiled test fixtures checked in beside their `.metal` sources.
-  So the metal backend's ray-tracing and compute paths are reachable by a caller who brings their own bytecode and by nobody else.
-  The agreed shape for a fixture is HLSL run through SPIRV-Cross once by hand, with all three artifacts checked in.
-  That matters because the argument-buffer layout was chosen to match what SPIRV-Cross emits, so a hand-written kernel would pin a convention no real pipeline produces.
-  **What blocks it is DXC, and only on the host.**
-  Microsoft ships no macOS release binary, and building it from source is an LLVM-scale build.
-  [extern/dxc/dependency.yml](../../../../extern/dxc/dependency.yml) records that as `unavailable_on: [macos]`.
-  SPIRV-Cross is not vendored at all, but it is plain CMake and would build here; it is not the constraint.
+- **The metal shader toolchain is MSL-only, and the tier-2 fixtures are still hand-compiled.**
+  `shaped-shader-compiler-msl` compiles MSL to a metallib, or to MSL source where Apple's separately installed Metal toolchain is absent.
+  slib's `create_metal_compiler` is the edge, and an SGL package reaches metal through it.
+  So a shader authored in SGL compiles for metal like any other target, and the gap that is left is narrower than it was.
 
-  That splits the work into two pieces with different costs, and they are worth deciding separately.
-  Regenerating the *fixtures* needs DXC once, on any machine — the artifacts are checked in either way, so a Windows or Linux host does it and macOS never needs a compiler.
-  A *toolchain* — a metal arm in `shaped-shader-library`, compiling at build time — is what genuinely needs DXC where the build runs, and there is no macOS path to HLSL → SPIR-V today.
-  Apple's own `metal` command-line compiler is the third shape.
-  It takes MSL rather than HLSL, so it would serve metallibs while giving up the one-source-two-backends property the HLSL route exists for.
+  **What remains is HLSL.**
+  `sv`'s path tracer is written in HLSL against the DXR pipeline path, and there is no macOS route from HLSL to anything metal reads.
+  DXC publishes no macOS binary, and SPIRV-Cross is unvendored.
+  Porting `sv` to metal therefore means either an SGL rewrite of its shaders or an HLSL route built elsewhere.
 
-  **The stand-in is `backends/metal/tests/raytrace.metal`**, hand-written and marked temporary in its own comment — regenerate it from HLSL once the toolchain exists.
+  **And the tier-2 fixtures are still `xxd -i` dumps**: `double_compute.metallib.h` and its neighbours, with their reflection written by hand beside them.
+  Compiling them through the wrapper at build time would drop the dumps.
+  The cost is that the tier-2 binary would then require the Metal toolchain component, a trade worth making deliberately rather than in passing.
+  `ssc::msl end to end - the reflected bindings build the layout the backend encodes` now checks that a reflected layout and the encoded one agree.
+  That is the property the hand-written fixtures could never pin.
 
 - **Metal implements refit, compaction and placement natively, and sg exposes none of them.**
   Recorded here so the eventual surface is designed against three APIs rather than two.
@@ -224,7 +272,7 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   It is load-bearing on the wasm builds without threads, where every one of those atomics keeps its interlock for a concurrency that cannot happen.
 - **Views.** See [concepts/views.md](concepts/views.md). Still deferred:
   - **texel buffer views** — a format-decoded linear buffer (`Buffer<T>` / `samplerBuffer`);
-  - **reflection-driven validation** of a view's `T` and access class against the shader;
+  - **reflection-driven validation** of a view's `T` and view class against the shader;
   - the `raw_view` **name** is provisional (`raw_view` vs `raw_binding`).
 - **An optional clear value on `texture_description`.**
   D3D12 takes a `D3D12_CLEAR_VALUE` at resource creation and uses it to pick a fast-clear path.
@@ -330,6 +378,18 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
 - **Tier 2 / legacy backends:** metal, then opengl, webgl.
   webgpu exists on wasm; what it still owes is its own item below.
 
+- **There is no SGL to metallib edge, so the shader-using half of the tier-1 sweep skips on metal.**
+  `shader_fixtures.cc` registers SGL to WGSL and, where DXC exists, to DXIL and SPIR-V.
+  A metal context accepts none of those, so every tier-1 test that acquires a shader is offered a format it cannot
+  take — eleven of them, across `compute-test.cc`, `raster-test.cc` and `sgl-package-test.cc`.
+  They now ask `sg_test::shaders_reach` and SKIP rather than failing on an acquire that cannot succeed.
+  **CI never saw this**: its macOS runner has no Metal 4 device, so the whole metal driver skips there, and the
+  failure only appears on a Mac that has one.
+  Closing it is an SGL-to-MSL compiler, at which point the guard answers true and the eleven start running with
+  nothing to revert.
+  `sg - the SGL fixtures reach at least one format on every build` is what keeps the guard from quietly skipping them
+  on every backend instead.
+
 - **The webgpu backend's remaining gaps.**
   - **The WGSL twins of sg's tier-1 shader tests.**
     The shader package and the routine tests need DXC, so on wasm no tier-1 test dispatches or draws.
@@ -338,7 +398,7 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   - **Per-test attribution of WebGPU errors.**
     One arriving after the test that caused it lands on the driver; an error scope per invocation would name the test.
   - **A stream whose source has nothing ready cannot be waited for** when a list touches its resource, so that list sees what landed so far and a warning.
-  - **Storage views ignore `depth_slice_range`**, which WebGPU cannot express.
+  - **Image views ignore `depth_slice_range`**, which WebGPU cannot express.
   - **emdawnwebgpu passes `WGPU_QUERY_SET_INDEX_UNDEFINED` to JS as 4294967295**, which wgpu refuses and Dawn accepts.
     Each query set's last slot is a discard target until that is fixed — docs/bugs-external/webgpu-timestamp-write-index-sentinel.
   - **A native Dawn build**, an additive CMake gate over the same sources.

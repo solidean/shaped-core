@@ -21,8 +21,10 @@ struct expected_binding
     cc::string_view name;
     u32 index = 0;
     u32 count = 1;
-    sg::binding_type type = sg::binding_type::uniform_buffer;
+    sg::binding_type type = sg::binding_type::constants_buffer;
+    sg::access_mode access = sg::access_mode::read;
     cc::optional<sg::texture_view_dimension> dimension;
+    cc::optional<sg::pixel_format> image_format;
 };
 
 struct expected_group
@@ -67,13 +69,11 @@ struct name_of_binding_type
 };
 
 constexpr name_of_binding_type k_binding_types[] = {
-    {"uniform_buffer", sg::binding_type::uniform_buffer},
-    {"readonly_structured_buffer", sg::binding_type::readonly_structured_buffer},
-    {"readwrite_structured_buffer", sg::binding_type::readwrite_structured_buffer},
-    {"readonly_raw_buffer", sg::binding_type::readonly_raw_buffer},
-    {"readwrite_raw_buffer", sg::binding_type::readwrite_raw_buffer},
-    {"readonly_texture", sg::binding_type::readonly_texture},
-    {"readwrite_texture", sg::binding_type::readwrite_texture},
+    {"constants_buffer", sg::binding_type::constants_buffer},
+    {"buffer", sg::binding_type::buffer},
+    {"bytes", sg::binding_type::bytes},
+    {"texture", sg::binding_type::texture},
+    {"image", sg::binding_type::image},
     {"sampler", sg::binding_type::sampler},
     {"acceleration_structure", sg::binding_type::acceleration_structure},
 };
@@ -397,15 +397,48 @@ constexpr name_of_dimension k_dimensions[] = {
                     binding.count = cc::from_string<u32>(c.value()).value();
                 else if (auto const t = value_of(word, "type"); t.has_value())
                 {
+                    // A misspelled value would otherwise leave the default, and the C++ half would pass a line the Python half rejects.
+                    auto known = false;
                     for (auto const& entry : k_binding_types)
                         if (entry.name == t.value())
+                        {
                             binding.type = entry.value;
+                            known = true;
+                        }
+                    if (!known)
+                        FAIL(cc::format("binding corpus: unknown type '{}'", t.value()));
+                }
+                else if (auto const a = value_of(word, "access"); a.has_value())
+                {
+                    if (a.value() == "read")
+                        binding.access = sg::access_mode::read;
+                    else if (a.value() == "write")
+                        binding.access = sg::access_mode::write;
+                    else if (a.value() == "read_write")
+                        binding.access = sg::access_mode::read_write;
+                    else
+                        FAIL(cc::format("binding corpus: unknown access '{}'", a.value()));
                 }
                 else if (auto const d = value_of(word, "dim"); d.has_value())
                 {
                     for (auto const& entry : k_dimensions)
                         if (entry.name == d.value())
                             binding.dimension = entry.value;
+                }
+                else if (auto const f = value_of(word, "format"); f.has_value())
+                {
+                    // Only the formats a case names; an unknown one leaves the expectation empty and fails loudly.
+                    struct named_format
+                    {
+                        cc::string_view name;
+                        sg::pixel_format value;
+                    };
+                    constexpr named_format formats[] = {{"rgba8_unorm", sg::pixel_format::rgba8_unorm},
+                                                        {"r32_float", sg::pixel_format::r32_float},
+                                                        {"bgra8_unorm", sg::pixel_format::bgra8_unorm}};
+                    for (auto const& entry : formats)
+                        if (entry.name == f.value())
+                            binding.image_format = entry.value;
                 }
             }
             current.groups.back().bindings.push_back(binding);
@@ -576,7 +609,8 @@ TEST("slib - the binding corpus parses as it says it does")
                 auto const& want = expected.bindings[b];
 
                 if (binding.name != want.name || binding.index != want.index || binding.count != want.count
-                    || binding.type != want.type || binding.texture_dimension != want.dimension)
+                    || binding.type != want.type || binding.access != want.access
+                    || binding.texture_dimension != want.dimension)
                     CC_LOG_ERROR("[corpus] '{}' binding {} is '{}' index={} count={} type={} dim={}, expected '{}' "
                                  "index={} count={} type={} dim={}",
                                  c.name, b, binding.name, binding.index, binding.count, name_of(binding.type),
@@ -587,7 +621,9 @@ TEST("slib - the binding corpus parses as it says it does")
                 CHECK(binding.index == want.index);
                 CHECK(binding.count == want.count);
                 CHECK(binding.type == want.type);
+                CHECK(binding.access == want.access);
                 CHECK(binding.texture_dimension == want.dimension);
+                CHECK(binding.image_format == want.image_format);
 
                 // The group number is both the SPIR-V set and the HLSL space, so every binding carries it twice.
                 REQUIRE(binding.group_index.has_value());
@@ -857,6 +893,28 @@ TEST("slib - the SPIR-V arm writes the attribute before the declaration")
 
     // Nothing DXIL-only leaks into this arm, and nothing Vulkan-only into the other.
     CHECK(!rewritten.value().contains("register("));
+}
+
+TEST("slib - a storage texture's format reaches SPIR-V as an image format, and DXIL leaves it to the view")
+{
+    constexpr cc::string_view source = "#pragma sc group 0\n"
+                                       "namespace post\n"
+                                       "{\n"
+                                       "#pragma sc format r32_float\n"
+                                       "    RWTexture2D<float> acc;\n"
+                                       "#pragma sc format bgra8_unorm\n"
+                                       "    RWTexture2D<float4> swizzled;\n"
+                                       "}\n";
+    auto const spirv = slib::rewrite_binding_groups(source, sg::shader_format::spirv);
+    REQUIRE(spirv.has_value());
+    CHECK(spirv.value().contains("[[vk::binding(0, 0)]] [[vk::image_format(\"r32f\")]] RWTexture2D<float> acc;"));
+    // SPIR-V has no bgra8 image format, so that one is left to the device.
+    CHECK(spirv.value().contains("[[vk::binding(1, 0)]] RWTexture2D<float4> swizzled;"));
+
+    auto const dxil = slib::rewrite_binding_groups(source, sg::shader_format::dxil);
+    REQUIRE(dxil.has_value());
+    CHECK(!dxil.value().contains("vk::image_format"));
+    CHECK(dxil.value().contains("RWTexture2D<float> acc : register(u0, space0);"));
 }
 
 TEST("slib - a source carrying no attribute comes back byte for byte")

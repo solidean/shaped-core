@@ -222,6 +222,18 @@ TEST("node_allocation - cross-thread free then reuse (basic)")
 
 // The next two tests read cc::impl::node_orphan_slab_count(), and the orphan bins are process-global rather than per-resource.
 // So ANY concurrently exiting thread that owned slabs moves the number, not just another reader — which is why this is a barrier and not a tag.
+//
+// **`exclusive()` serializes tests, and that is not the same as owning the bins.**
+// The binary's own threads keep running under the barrier, and every refill they make pops an orphan
+// (`pop_orphan` in node_allocation.cc), so the count drifts DOWN under a test as readily as a stray thread exit
+// moves it up.
+// An equality against a snapshot is therefore not a claim either test can make — it failed as `18 == 20` on the
+// threaded wasm build, where the count fell because unrelated orphans were adopted mid-test.
+// What each test asserts instead is the regression it exists to catch, with the slab's identity carrying the rest.
+
+/// The slabs the worker below fills, and the number the bin would grow by if their reclamation regressed.
+constexpr int k_worker_slabs = 3;
+
 TEST("node_allocation - thread-exit reclaims fully-free slabs to backing", exclusive())
 {
     auto const before = cc::impl::node_orphan_slab_count();
@@ -233,18 +245,19 @@ TEST("node_allocation - thread-exit reclaims fully-free slabs to backing", exclu
         {
             cc::node_allocator worker(cc::default_node_memory_resource);
             cc::vector<cc::node_allocation<T8B>> nodes;
-            for (int i = 0; i < usable_slots<T8B>() * 3; ++i)
+            for (int i = 0; i < usable_slots<T8B>() * k_worker_slabs; ++i)
                 nodes.push_back(cc::node_allocation<T8B>::create_from(worker, u64(i)));
             nodes.clear(); // free everything on the owner thread before `worker` is destroyed
         })
         .join();
 
-    CHECK(cc::impl::node_orphan_slab_count() == before); // orphan bins untouched -> slabs went to backing
+    // Orphaning a fully-free slab is a uniform path, so the regression orphans all `k_worker_slabs` at once rather
+    // than one of them — which is what this rules out while leaving room for the bin's unrelated traffic.
+    CHECK(cc::impl::node_orphan_slab_count() < before + k_worker_slabs);
 }
 
 TEST("node_allocation - abandoned slab is adopted by a later thread", exclusive())
 {
-    auto const before = cc::impl::node_orphan_slab_count();
     int const usable = usable_slots<T8B>();
 
     // producer thread fills exactly one slab, hands every (live) node to a shared vector, then exits.
@@ -267,7 +280,9 @@ TEST("node_allocation - abandoned slab is adopted by a later thread", exclusive(
         CHECK(base_of(shared[i]) == producer_base);
         CHECK(shared[i].ptr->value == u64(i));
     }
-    CHECK(cc::impl::node_orphan_slab_count() == before + 1); // exactly one slab orphaned
+    // The bin's own count says nothing here — see the note above the previous test — so what stands for "orphaned
+    // rather than returned to backing" is the slab itself: its nodes are still live and still readable above, which
+    // a slab handed back to the backing resource would not guarantee.
 
     // free the whole batch on the consumer (main) thread -> routes to the orphaned slab's remote bitmap
     // (the owner token is the dead producer's, never this thread's)
@@ -286,6 +301,9 @@ TEST("node_allocation - abandoned slab is adopted by a later thread", exclusive(
     for (int i = 0; i < usable; ++i)
         CHECK(consumer_nodes[i].ptr->value == u64(7000 + i));
 
-    CHECK(cc::impl::node_orphan_slab_count() == before); // the orphan was adopted -> bin drained
+    // **Adoption is proven by the base, not by the count.** Every allocation above came from `producer_base`, so the
+    // consumer's refill took the producer's slab out of the orphan bin rather than mallocing a fresh one — which is
+    // the whole property, and the one claim the process-global bin cannot invalidate.
+    CHECK(base_of(consumer_nodes[0]) == producer_base);
 }
 #endif

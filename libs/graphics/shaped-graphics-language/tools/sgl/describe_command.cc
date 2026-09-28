@@ -32,10 +32,29 @@ cc::string_view stage_name(sgl::check::stage s)
     return "none";
 }
 
+cc::string_view kind_name(sgl::described_member_kind k)
+{
+    switch (k)
+    {
+    case sgl::described_member_kind::constant:
+        return "constant";
+    case sgl::described_member_kind::buffer:
+        return "buffer";
+    case sgl::described_member_kind::texture:
+        return "texture";
+    case sgl::described_member_kind::image:
+        return "image";
+    case sgl::described_member_kind::sampler:
+        return "sampler";
+    }
+    return "constant";
+}
+
 void write_binding(babel::json::object_writer& o, sgl::described_binding const& b)
 {
     o.write("name", cc::string_view(b.name));
     o.write("inline", b.is_inline);
+    o.write("shape", cc::string_view(b.shape));
     o.write("block_size", b.block_size);
     if (b.block_slot >= 0)
     {
@@ -47,18 +66,45 @@ void write_binding(babel::json::object_writer& o, sgl::described_binding const& 
     {
         auto mo = members.write_object(babel::json::layout::compact);
         mo.write("name", cc::string_view(m.name));
-        mo.write("kind", m.kind == sgl::described_member_kind::buffer ? "buffer" : "constant");
+        mo.write("kind", kind_name(m.kind));
         mo.write("type", cc::string_view(m.type));
-        if (m.kind == sgl::described_member_kind::buffer)
-        {
-            mo.write("mut", m.is_mut);
-            mo.write("slot", m.slot);
-            mo.write("host_name", cc::string_view(m.host_name));
-        }
-        else
+        if (m.kind == sgl::described_member_kind::constant)
         {
             mo.write("offset", m.offset);
             mo.write("size", m.size);
+            continue;
+        }
+        mo.write("access", cc::string_view(m.access));
+        mo.write("slot", m.slot);
+        if (m.kind == sgl::described_member_kind::buffer)
+            mo.write("stride", m.stride);
+        mo.write("host_name", cc::string_view(m.host_name));
+        // The sg enum values a binding of this kind states, each written only where it applies.
+        auto const optional = [&](cc::string_view key, cc::string const& value)
+        {
+            if (!value.empty())
+                mo.write(key, cc::string_view(value));
+        };
+        optional("texture_dimension", m.texture_dimension);
+        optional("sample_type", m.sample_type);
+        optional("image_format", m.image_format);
+        optional("sampler_type", m.sampler_type);
+        if (m.static_sampler.has_value())
+        {
+            auto const& st = m.static_sampler.value();
+            auto so = mo.write_object("static_sampler", babel::json::layout::compact);
+            so.write("min_filter", cc::string_view(st.min_filter));
+            so.write("mag_filter", cc::string_view(st.mag_filter));
+            so.write("mip_filter", cc::string_view(st.mip_filter));
+            so.write("address_u", cc::string_view(st.address_u));
+            so.write("address_v", cc::string_view(st.address_v));
+            so.write("address_w", cc::string_view(st.address_w));
+            if (!st.compare.empty())
+                so.write("compare", cc::string_view(st.compare));
+            so.write("max_anisotropy", st.max_anisotropy);
+            so.write("min_lod", st.min_lod);
+            so.write("max_lod", st.max_lod);
+            so.write("mip_lod_bias", st.mip_lod_bias);
         }
     }
 }
@@ -67,6 +113,7 @@ void write_struct(babel::json::object_writer& o, sgl::described_struct const& s)
 {
     o.write("name", cc::string_view(s.name));
     o.write("edge", stage_name(s.edge));
+    o.write("shape", cc::string_view(s.shape));
     auto members = o.write_array("members");
     for (auto const& m : s.members)
     {
@@ -82,6 +129,22 @@ void write_struct(babel::json::object_writer& o, sgl::described_struct const& s)
     }
 }
 
+void write_memory_struct(babel::json::object_writer& o, sgl::described_memory_struct const& s)
+{
+    o.write("name", cc::string_view(s.name));
+    o.write("space", cc::string_view(s.space));
+    o.write("size", s.size);
+    auto members = o.write_array("members");
+    for (auto const& m : s.members)
+    {
+        auto mo = members.write_object(babel::json::layout::compact);
+        mo.write("name", cc::string_view(m.name));
+        mo.write("type", cc::string_view(m.type));
+        mo.write("offset", m.offset);
+        mo.write("size", m.size);
+    }
+}
+
 void write_entry_point(babel::json::object_writer& o, sgl::described_entry_point const& e)
 {
     o.write("name", cc::string_view(e.name));
@@ -91,9 +154,87 @@ void write_entry_point(babel::json::object_writer& o, sgl::described_entry_point
         for (auto const n : e.workgroup)
             grid.write(n);
     }
-    auto list = o.write_array("bindings", babel::json::layout::compact);
-    for (auto const& name : e.bindings)
-        list.write(cc::string_view(name));
+    {
+        auto list = o.write_array("bindings", babel::json::layout::compact);
+        for (auto const& name : e.bindings)
+            list.write(cc::string_view(name));
+    }
+    {
+        auto list = o.write_array("features", babel::json::layout::compact);
+        for (auto const& name : e.features)
+            list.write(cc::string_view(name));
+    }
+    // One `slot: access` per touched slot, the way a corpus pin spells it.
+    auto list = o.write_array("footprint", babel::json::layout::compact);
+    for (auto const& slot : e.footprint)
+        list.write(cc::string_view(sgl::check::footprint_text(cc::span<sgl::check::slot_footprint const>(&slot, 1))));
+}
+
+void write_pipeline(babel::json::object_writer& o, sgl::described_pipeline const& p)
+{
+    o.write("name", cc::string_view(p.name));
+    o.write("vertex", cc::string_view(p.vertex));
+    o.write("pixel", cc::string_view(p.pixel));
+    {
+        auto list = o.write_array("layout", babel::json::layout::compact);
+        for (auto const& name : p.layout)
+            list.write(cc::string_view(name));
+    }
+    o.write("inline", cc::string_view(p.inline_constants));
+    o.write("vertex_input", cc::string_view(p.vertex_input));
+    o.write("target_set", cc::string_view(p.target_set));
+    {
+        auto list = o.write_array("targets", babel::json::layout::compact);
+        for (auto const& name : p.targets)
+            list.write(cc::string_view(name));
+    }
+    {
+        auto list = o.write_array("features", babel::json::layout::compact);
+        for (auto const& name : p.features)
+            list.write(cc::string_view(name));
+    }
+    {
+        auto settings = o.write_array("settings");
+        for (auto const& s : p.settings)
+        {
+            auto so = settings.write_object(babel::json::layout::compact);
+            so.write("path", cc::string_view(s.path));
+            switch (s.kind)
+            {
+            case sgl::check::setting_kind::boolean:
+                so.write("kind", "bool");
+                so.write("value", s.integer != 0);
+                break;
+            case sgl::check::setting_kind::integer:
+                so.write("kind", "int");
+                so.write("value", s.integer);
+                break;
+            case sgl::check::setting_kind::real:
+                so.write("kind", "float");
+                so.write("value", s.real);
+                break;
+            case sgl::check::setting_kind::enum_case:
+                so.write("kind", "case");
+                so.write("value", cc::string_view(s.enum_case));
+                so.write("enum", cc::string_view(s.enum_name));
+                break;
+            case sgl::check::setting_kind::host:
+                so.write("kind", "host");
+                break;
+            case sgl::check::setting_kind::none:
+                so.write("kind", "none");
+                break;
+            }
+        }
+    }
+    {
+        auto open = o.write_array("open", babel::json::layout::compact);
+        for (auto const& path : p.open)
+            open.write(cc::string_view(path));
+    }
+    auto frozen = o.write_array("frozen");
+    for (auto const& line : p.frozen)
+        frozen.write(cc::string_view(line));
 }
 
 cc::result<cc::string> to_json(sgl::module_description const& d)
@@ -117,11 +258,27 @@ cc::result<cc::string> to_json(sgl::module_description const& d)
                 write_struct(o, s);
             }
         }
-        auto entries = root.write_array("entry_points");
-        for (auto const& e : d.entry_points)
         {
-            auto o = entries.write_object();
-            write_entry_point(o, e);
+            auto structs = root.write_array("memory_structs");
+            for (auto const& s : d.memory_structs)
+            {
+                auto o = structs.write_object();
+                write_memory_struct(o, s);
+            }
+        }
+        {
+            auto entries = root.write_array("entry_points");
+            for (auto const& e : d.entry_points)
+            {
+                auto o = entries.write_object();
+                write_entry_point(o, e);
+            }
+        }
+        auto pipelines = root.write_array("pipelines");
+        for (auto const& p : d.pipelines)
+        {
+            auto o = pipelines.write_object();
+            write_pipeline(o, p);
         }
     }
     return w.finish();
@@ -134,10 +291,10 @@ COMMAND("describe")
 {
     auto path = cc::string();
     auto out_path = cc::string();
-    auto args
-        = nx::args({.name = "sgl describe",
-                    .description = "Describes the bindings, the vertex and pixel structs and the entry points "
-                                   "of an SGL file as JSON, or prints the diagnostics that keep it from compiling."});
+    auto args = nx::args(
+        {.name = "sgl describe",
+         .description = "Describes the bindings, the vertex and pixel structs, the entry points and the "
+                        "pipelines of an SGL file as JSON, or prints the diagnostics that keep it from compiling."});
     args.positional("FILE", path, {.desc = "the SGL source"});
     args.arg({"out"}, out_path, {.desc = "write the JSON here instead of to stdout", .metavar = "PATH"});
     if (auto const r = args.parse(nx::test_args()); r.should_exit())

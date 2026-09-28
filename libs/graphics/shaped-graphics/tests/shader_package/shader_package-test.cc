@@ -25,8 +25,9 @@ TEST("sg - a consumer's shader package registers")
     REQUIRE(sg::test::shaders::double_values.compute.main != nullptr);
     CHECK(sg::test::shaders::double_values.compute.main->stage() == sg::shader_stage::compute);
     CHECK(sg::test::shaders::double_values.compute.main->entry_point() == "main");
+    // One definition per entry point rather than per file, which is why fragment_hazard.hlsl counts three.
     CHECK(sg::test::shaders::package().definitions.size()
-          == 3); // double_values, pattern_fill (routine-test), ping_pong (transient-benchmark)
+          == 6); // double_values, fragment_hazard x3 (fragment-write-hazard-test), pattern_fill, ping_pong
 }
 
 ASYNC_INVOCABLE_TEST("sg - a consumer's shader compiles for the context it is acquired with",

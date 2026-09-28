@@ -58,6 +58,14 @@ cc::string_view sgl::emit::to_string(error_kind kind)
         return "malformed-tree";
     case error_kind::not_core:
         return "not-core";
+    case error_kind::too_many_groups:
+        return "too-many-groups";
+    case error_kind::target_lacks_feature:
+        return "target-lacks-feature";
+    case error_kind::layout_conflict:
+        return "layout-conflict";
+    case error_kind::padding_forbidden:
+        return "padding-forbidden";
     }
     return "";
 }
@@ -111,6 +119,21 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
     if (!result.errors.empty())
         return result;
 
+    // EMIT-109: WebGPU has none of these on any device, and the text would spell a type WGSL does not have.
+    if (t == target::wgsl)
+    {
+        auto const never = check::feature_set(check::feature::binding_arrays)
+                         | check::feature::multisampled_array_textures | check::feature::raytracing;
+        for (auto i = isize(0); i < check::k_feature_count; ++i)
+            if (e.features.has(check::feature(i)) && never.has(check::feature(i)))
+                result.errors.push_back({.kind = error_kind::target_lacks_feature,
+                                         .symbol = e.function,
+                                         .detail = cc::format("{} needs {}, which WebGPU does not have", e.name,
+                                                              check::k_feature_names[i])});
+        if (!result.errors.empty())
+            return result;
+    }
+
     auto plan = impl::make_plan(m, e, t);
     // EMIT-13's two exceptions, which wait for a Metal compiler to be checked against.
     // A kernel and a buffer are both entry-point arguments in Metal, which this writer does not build yet.
@@ -121,11 +144,12 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
                                  .detail = "a compute entry point, which MSL writes as a kernel"});
         return result;
     }
-    if (t == target::msl && (!plan.buffers.empty() || !plan.group_blocks.empty()))
+    if (t == target::msl && (!plan.resources.empty() || !plan.group_blocks.empty()))
     {
         result.errors.push_back({.kind = error_kind::unsupported,
                                  .symbol = e.function,
-                                 .detail = "a buffer binding, which MSL takes as an entry-point argument"});
+                                 .detail = "a binding group, which MSL takes as an argument buffer of the entry "
+                                           "point"});
         return result;
     }
     result.text = impl::write_text(plan, impl::dialect_of(t));
@@ -134,8 +158,9 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
         result.bound_names.push_back({.emitted = plan.constants.value().name, .host = plan.constants.value().host_name});
     for (auto const& block : plan.group_blocks)
         result.bound_names.push_back({.emitted = block.name, .host = block.host_name});
-    for (auto const& buffer : plan.buffers)
+    for (auto const& buffer : plan.resources)
         result.bound_names.push_back({.emitted = buffer.name, .host = buffer.host_name});
+    result.layouts = impl::layouts_of(plan);
     if (e.entry_stage == check::stage::pixel && e.result != check::type_id::none)
     {
         result.color_targets = i32(m.at(m.at(e.result).members).size());

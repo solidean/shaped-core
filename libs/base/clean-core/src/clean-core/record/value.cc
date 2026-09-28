@@ -1,6 +1,7 @@
 #include "value.hh"
 
 #include <clean-core/common/utility.hh>
+#include <clean-core/record/log.hh>
 
 using namespace cc::primitive_defines;
 
@@ -8,7 +9,12 @@ void cc::rec::impl::record_text_value(cc::rec::desc const& d, cc::string_view te
 {
     constexpr auto header_bytes = isize(sizeof(u32));
 
-    auto writer = rec::open_event(d, header_bytes + text.size());
+    // Whole below the log cap, and cut at the cap past it, so a huge text does not abandon a chunk tail every call.
+    auto wanted = header_bytes + text.size();
+    if (wanted > rec::impl::log_max_payload) [[unlikely]]
+        wanted = rec::impl::log_payload_cap();
+
+    auto writer = rec::open_event(d, wanted, wanted);
     if (!writer.is_open())
         return;
 
@@ -29,7 +35,7 @@ void cc::rec::impl::record_named_value(cc::rec::desc const& d, void const* value
 {
     constexpr auto length_bytes = isize(sizeof(u32));
 
-    auto writer = rec::open_event(d, value_size + length_bytes + name.size());
+    auto writer = rec::open_event(d, value_size + length_bytes + name.size(), value_size + length_bytes);
     if (!writer.is_open())
         return;
 

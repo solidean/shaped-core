@@ -201,6 +201,7 @@ void vulkan_command_list::raster_end_rendering()
     // The graphics bind + IA state is scoped to the pass it was set up in.
     _bound_raster_layout = nullptr;
     _bound_raster_groups.clear();
+    _bound_raster_footprint = nullptr;
     _bound_vertex_buffers.clear();
     _bound_index_buffer = nullptr;
 }
@@ -225,6 +226,7 @@ void vulkan_command_list::raster_bind_pipeline(sg::raster_pipeline const& pipeli
     // The topology is baked into the pipeline, so unlike dx12 there is no separate IA topology call.
     _bound_raster_layout = rp->layout.get();
     _bound_raster_groups.clear_resize_to_filled(_bound_raster_layout->_groups.size(), nullptr);
+    _bound_raster_footprint = &pipeline.footprint();
 }
 
 void vulkan_command_list::raster_bind_group(int group_index, sg::binding_group const& group)
@@ -285,10 +287,14 @@ void vulkan_command_list::raster_bind_vertex_buffers(int first_slot, cc::span<sg
 void vulkan_command_list::raster_bind_index_buffer(sg::index_buffer_view const& view)
 {
     CC_ASSERT(view.buffer != nullptr, "index_buffer_view has no buffer");
+    CC_ASSERT(view.offset_in_bytes % sg::index_buffer_offset_alignment == 0,
+              "an index_buffer_view's offset must be 4-byte aligned — see sg::index_buffer_offset_alignment");
     auto const& buf = as_vulkan_buffer(view.buffer);
     vkCmdBindIndexBuffer(_buffer, buf._buffer, VkDeviceSize(view.offset_in_bytes),
                          view.format == sg::index_format::uint16 ? VK_INDEX_TYPE_UINT16 : VK_INDEX_TYPE_UINT32);
     _bound_index_buffer = &buf;
+    _index_format = view.format;
+    _index_view_offset_in_bytes = view.offset_in_bytes;
 }
 
 void vulkan_command_list::raster_set_viewport(sg::viewport const& vp)
@@ -348,22 +354,12 @@ void vulkan_command_list::raster_set_inline_constants(cc::span<byte const> data,
 void vulkan_command_list::declare_raster_draw_barriers(bool indexed)
 {
     // Bound groups' shader reads/writes, same policy as compute_dispatch, keyed to the graphics stages.
+    // The raster scope has no declare_array_*_access yet, so an array binding here would go untracked.
     for (auto const* bound_group : _bound_raster_groups)
-    {
-        if (bound_group == nullptr)
-            continue;
-
-        // The raster scope has no declare_array_*_access yet, so an array binding here would go untracked.
-        CC_ASSERT(bound_group->array_bindings.empty(), "array bindings are not supported in raster draws yet");
-        for (auto const& view : bound_group->hazard_views)
-            if (view.buffer != nullptr)
-                track_buffer_access(*view.buffer, sg::pipeline_stage_flag::vertex | sg::pipeline_stage_flag::fragment,
-                                    sg::shader_access_of(view.access));
-        for (auto const& tv : bound_group->texture_hazard_views)
-            (void)track_texture_access(*tv.texture, tv.range,
-                                       sg::pipeline_stage_flag::vertex | sg::pipeline_stage_flag::fragment,
-                                       sg::shader_access_of(tv.access), sg::shader_layout_of(tv.access));
-    }
+        CC_ASSERT(bound_group == nullptr || bound_group->array_bindings.empty(), "array bindings are not supported in "
+                                                                                 "raster draws yet");
+    declare_group_accesses(_bound_raster_groups, _bound_raster_footprint,
+                           sg::pipeline_stage_flag::vertex | sg::pipeline_stage_flag::fragment);
 
     // The input assembler reads the bound vertex buffers; an indexed draw also fetches the index buffer.
     for (auto const* vb : _bound_vertex_buffers)
@@ -395,6 +391,14 @@ void vulkan_command_list::raster_draw_indexed(sg::draw_indexed_config const& con
     CC_ASSERT(config.index_range.offset >= 0 && config.index_range.size >= 0, "index range must be non-negative");
     CC_ASSERT(config.instance_range.offset >= 0 && config.instance_range.size >= 0, "instance range must be "
                                                                                     "non-negative");
+
+    // **An index fetch starts on a 4-byte boundary**, and `index_range.offset` counts indices rather than bytes — so
+    // an aligned view is not enough on its own.
+    // Metal is the backend that cannot do otherwise, and it answers a misaligned fetch by drawing part of the mesh
+    // with no error and no validation message; the rule is sg's so that it fails here too.
+    CC_ASSERT(sg::is_aligned_index_fetch(_index_format, _index_view_offset_in_bytes, config.index_range.offset),
+              "an odd first index into a 16-bit index buffer starts the fetch off a 4-byte boundary. Use an even "
+              "first index, or 32-bit indices — sg::is_aligned_index_fetch answers it without asserting");
 
     declare_raster_draw_barriers(true);
     flush_barriers();

@@ -9,19 +9,21 @@ namespace sg::backend::dx12
 {
 namespace
 {
-[[nodiscard]] D3D12_DESCRIPTOR_RANGE_TYPE range_type_of(sg::binding_type t)
+[[nodiscard]] D3D12_DESCRIPTOR_RANGE_TYPE range_type_of(sg::binding const& b)
 {
-    switch (sg::access_of(t))
+    switch (sg::view_class_of(b))
     {
-    case sg::view_class::uniform:
+    case sg::view_class::constants:
         return D3D12_DESCRIPTOR_RANGE_TYPE_CBV;
     case sg::view_class::readonly:
+    case sg::view_class::texture:
     case sg::view_class::acceleration_structure: // an AS is bound as an SRV (RAYTRACING_ACCELERATION_STRUCTURE)
         return D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
     case sg::view_class::readwrite:
+    case sg::view_class::image:
         return D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
     }
-    CC_UNREACHABLE("unhandled binding access class");
+    CC_UNREACHABLE("unhandled binding view class");
 }
 } // namespace
 
@@ -64,11 +66,10 @@ cc::result<dx12_binding_group_layout_handle> dx12_binding_group_layout::create(
         {
             if (auto const* sd = find_static(b.name); sd != nullptr)
             {
-                // A static sampler is baked into the root signature from here, before any slot is known.
-                CC_ASSERT(b.space.has_value(), "a static sampler needs an explicit register space on dx12");
+                // Baked into the root signature, with `space_of_slot` resolved there like a range's.
                 for (int i = 0; i < int(b.count); ++i)
-                    layout->static_sampler_descs.push_back(to_d3d12_static_sampler_desc(
-                        *sd, UINT(b.index) + UINT(i), b.space.value(), D3D12_SHADER_VISIBILITY_ALL));
+                    layout->static_sampler_descs.push_back(
+                        to_d3d12_static_sampler_desc(*sd, UINT(b.index) + UINT(i), space, D3D12_SHADER_VISIBILITY_ALL));
                 ++matched_static;
 
                 // In neither table: it lives in the root signature, so a slot naming it has nothing to bind.
@@ -91,7 +92,7 @@ cc::result<dx12_binding_group_layout_handle> dx12_binding_group_layout::create(
         }
 
         D3D12_DESCRIPTOR_RANGE range = {};
-        range.RangeType = range_type_of(b.type);
+        range.RangeType = range_type_of(b);
         range.NumDescriptors = b.count;
         range.BaseShaderRegister = b.index; // (space, index) -> (register space, register); register-type from the kind
         range.RegisterSpace = space;

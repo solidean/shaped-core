@@ -377,6 +377,8 @@ cc::format_to(cc::span<char>(buf, n), "{}", v);  // -> isize, non-allocating; re
 //   static void format(cc::format_sink, cc::string_view spec, T const&) + static consteval void validate(spec).
 //   Delegate to the standard grammar via cc::format_value(sink, spec, v) / cc::validate_format_spec(spec).
 //   (Or just give T a member to_string() for the plain "{}" case.)
+//   An integer wider than u64: cc::format_wide_integer(sink, spec, negative, digits(base, upper) -> string_view)
+//   plus cc::validate_integer_format_spec(spec) — cc does the grammar, the type supplies raw digits.
 
 #include <clean-core/string/print.hh>            // print/println -> stdout, eprint/eprintln -> stderr (via fwrite)
 cc::print(sv);  cc::println("done");             // raw string_view (braces NOT interpreted); println() = just '\n'
@@ -499,6 +501,7 @@ cc::store_bytes_le<u64>(bytes, offset, v);  cc::store_bytes_be<i16>(bytes, offse
 #include <clean-core/math/wide_arith.hh>          // portable extended-precision int primitives (constexpr)
 cc::umul128(a, b);  cc::imul128(a, b);            // 64x64 -> {lo, hi} (u128 / i128); never overflows
 cc::add_with_carry(a, b, carry_in=0);            // -> {value, carry}; sub_with_borrow -> {value, borrow}
+cc::udiv128(n, d);                               // u128 / u64 -> {quotient, remainder}; n.hi < d is the precondition
 
 #include <clean-core/math/random.hh>
 cc::random rng(seed);                     // deterministic PCG32; MOVE-ONLY (use .clone() to duplicate a stream)
@@ -1059,9 +1062,10 @@ Recording sites — every name below MUST be a compile-time constant, since it l
 ```cpp
 #include <clean-core/common/log.hh>          // CC_LOG_*
 CC_LOG_INFO("shader cache warmed");          // no payload at all: the text IS the descriptor
-CC_LOG_WARNING("fell back to {} after {}", name, reason); // formatted straight into the chunk, no temp buffer
+CC_LOG_WARNING("fell back to {} after {}", name, reason); // a formatter may itself log; the texts stay apart
 CC_LOG_TRACE / _DEBUG / _INFO / _WARNING / _ERROR         // trace+debug off by default; error captures a stack
-                                             // too long for the chunk => truncated and flagged, never dropped
+                                             // formatted once into a per-thread buffer, then copied in whole
+                                             // past 1 MiB (or one chunk) => truncated and flagged, never dropped
 
 #include <clean-core/common/profiling.hh>    // scopes, values, markers, stats
 CC_RECORD_SCOPE();                           // times the block, named after the enclosing function
@@ -1163,7 +1167,7 @@ e.field_as_bytes("value");                   // -> span<byte const>; the origina
 // Prefer CC_RECORD: a static name costs the stream nothing, a runtime one is copied into every event.
 CC_RECORD_STAT("queue_depth", cc::rec::unit_count, n);     // the CURRENT reading; summing snapshots is meaningless
 CC_RECORD_ACCUM("bytes_uploaded", cc::rec::unit_bytes, n); // a DELTA to add up
-// units: unit_count, unit_bytes, unit_seconds, unit_ratio, unit_hertz — or define your own cc::rec::unit
+// units: unit_count, unit_bytes, unit_seconds, unit_nanoseconds (integer durations), unit_ratio, unit_hertz — or define your own cc::rec::unit
 ```
 
 The low-level seam the above expand into:
@@ -1175,7 +1179,9 @@ CC_RECORD_EVENT_WITH(cc::rec::event_kind::value, cc::rec::category::values, "upl
 
 cc::rec::is_recording(desc);               // -> bool; the gate on its own
 cc::rec::record_event(desc, payload);      // POD payload, cc::span<byte const>, or nothing
-auto w = cc::rec::open_event(desc, 256);   // reserve, fill w.payload() in place, then w.commit(n) — no temp buffer
+auto w = cc::rec::open_event(desc, 256, 256); // reserve, fill w.payload() in place, then w.commit(n)
+                                           // 3rd arg: the floor it refuses to be cut below, taking a fresh chunk instead
+                                           // 1 takes any tail, so only a payload useful cut short passes it
 cc::rec::set_current_thread_record_name("worker");
 cc::rec::seal_current_thread_chunk();      // hand this thread's tail over without waiting for the chunk to fill
 ```

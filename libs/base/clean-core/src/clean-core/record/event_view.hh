@@ -19,6 +19,8 @@
 struct cc::rec::thread_info
 {
     cc::thread_id id = cc::thread_id::invalid;
+    /// Never shared by two threads, not even after one of them exited and was reaped: key per-thread state by it.
+    /// Not dense either, so it is no position in an array.
     u32 index = 0;
 
     /// What cc::rec::set_current_thread_record_name last set, or empty.
@@ -52,7 +54,9 @@ public:
         return cc::span<rec::field const>(desc->fields, isize(desc->field_count));
     }
 
-    /// True when the payload was cut short because the chunk ran out.
+    /// True when the payload was cut short: the caller committed more than it had reserved.
+    /// For a log message that means the text was past `rec::impl::log_max_payload`, or longer than one whole chunk —
+    /// never that this chunk happened to end here.
     [[nodiscard]] bool is_truncated() const { return (flags & rec::impl::flag_truncated) != 0; }
 
     // generic field access, so a consumer that has never heard of the payload can still read it

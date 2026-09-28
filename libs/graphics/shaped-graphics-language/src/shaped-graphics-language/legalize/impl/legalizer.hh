@@ -32,6 +32,12 @@ using stmt_list = cc::vector<flat_stmt_id>;
 /// Rules X1 to X5 over what `lower_expressions` returned: no block and no leave is left.
 [[nodiscard]] stmt_list lower_exits(flat_builder& out, stmt_list const& body, legalize_options const& options);
 
+/// Rule V0, first: no check and no `assert` is left, since no target writes one, and neither is what computed its condition.
+[[nodiscard]] stmt_list erase_checks(flat_builder& out, stmt_list const& body);
+
+/// Rule V1, last: no local, assignment or result of type void is left, and what evaluating one did stays as an `eval`.
+[[nodiscard]] stmt_list erase_void(flat_builder& out, stmt_list const& body);
+
 /// `e` with `body` as its body and only the nodes `body` reaches, numbered in the order a walk meets them.
 [[nodiscard]] flat_entry_point compacted(checked_module const& m, flat_entry_point const& e, stmt_list const& body);
 } // namespace sgl::check::impl

@@ -57,7 +57,8 @@ flat_builder flat_builder::extend(checked_module const& m, flat_entry_point e)
 type_id flat_builder::type_named(cc::string_view name) const
 {
     for (auto const& s : m.symbols)
-        if (s.kind == symbol_kind::structure && s.name == name)
+        // the prelude's symbols come first, so a struct of the user file that shadows one is never the one found
+        if ((s.kind == symbol_kind::structure || s.kind == symbol_kind::enumeration) && s.name == name)
             return s.type;
     return type_id::none;
 }

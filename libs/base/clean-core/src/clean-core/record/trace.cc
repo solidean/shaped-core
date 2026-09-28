@@ -54,7 +54,7 @@ void cc::rec::impl::record_relation_members(cc::rec::desc const& d, cc::span<cc:
     auto const count = cc::min(members.size(), max_relation_members);
     auto const payload_bytes = isize(sizeof(u32)) + count * isize(sizeof(u64));
 
-    auto writer = rec::open_event(d, payload_bytes);
+    auto writer = rec::open_event(d, payload_bytes, payload_bytes);
     if (!writer.is_open())
         return;
 

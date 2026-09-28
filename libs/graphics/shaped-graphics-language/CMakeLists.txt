@@ -33,7 +33,9 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/ast/dump.cc
 
     src/shaped-graphics-language/builtins/register.cc
+    src/shaped-graphics-language/builtins/register_conversions.cc
     src/shaped-graphics-language/builtins/register_scalar_math.cc
+    src/shaped-graphics-language/builtins/register_textures.cc
     src/shaped-graphics-language/builtins/register_transforms.cc
     src/shaped-graphics-language/builtins/register_types.cc
     src/shaped-graphics-language/builtins/register_vector_math.cc
@@ -42,32 +44,49 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/check/check.cc
     src/shaped-graphics-language/check/check_case.cc
     src/shaped-graphics-language/check/check_decl.cc
+    src/shaped-graphics-language/check/check_pipeline.cc
     src/shaped-graphics-language/check/check_expr.cc
+    src/shaped-graphics-language/check/check_features.cc
+    src/shaped-graphics-language/check/check_footprint.cc
+    src/shaped-graphics-language/check/check_resources.cc
     src/shaped-graphics-language/check/check_stmt.cc
+    src/shaped-graphics-language/check/check_test.cc
     src/shaped-graphics-language/check/dump.cc
     src/shaped-graphics-language/check/flat.cc
     src/shaped-graphics-language/check/flat_builder.cc
+    src/shaped-graphics-language/check/structural_hash.cc
     src/shaped-graphics-language/check/flatten.cc
+    src/shaped-graphics-language/check/footprint.cc
 
     src/shaped-graphics-language/legalize/core.cc
     src/shaped-graphics-language/legalize/legalize_cases.cc
     src/shaped-graphics-language/legalize/legalize_exits.cc
     src/shaped-graphics-language/legalize/legalize_exprs.cc
+    src/shaped-graphics-language/legalize/legalize_erase.cc
 
     src/shaped-graphics-language/interpret/interpret.cc
+
+    src/shaped-graphics-language/test/run_tests.cc
 
     src/shaped-graphics-language/emit/emit.cc
     src/shaped-graphics-language/emit/reserved_words.cc
     src/shaped-graphics-language/emit/impl/hlsl.cc
+    src/shaped-graphics-language/emit/impl/layout.cc
+    src/shaped-graphics-language/emit/impl/memory_form.cc
     src/shaped-graphics-language/emit/impl/msl.cc
     src/shaped-graphics-language/emit/impl/plan.cc
     src/shaped-graphics-language/emit/impl/text_writer.cc
     src/shaped-graphics-language/emit/impl/wgsl.cc
 
     src/shaped-graphics-language/driver/compile_to_text.cc
+    src/shaped-graphics-language/driver/test_source.cc
     src/shaped-graphics-language/driver/describe.cc
+    src/shaped-graphics-language/driver/pipeline_fields.cc
     src/shaped-graphics-language/driver/impl/front_end.cc
     src/shaped-graphics-language/driver/prelude.cc
+    src/shaped-graphics-language/driver/classify.cc
+    src/shaped-graphics-language/driver/inferred_results.cc
+    src/shaped-graphics-language/driver/unannotated_bindings.cc
 )
 
 # The prelude is two files, and only one of them is embedded.
@@ -108,6 +127,7 @@ if(_sgl_prelude_literals STREQUAL "")
     set(_sgl_prelude_literals " \"\"")
 endif()
 
+# The same file names the prelude's directory, which tells the library's own prelude files from a user's files of the same names.
 # Written only when it differs, so a configure that changes nothing recompiles nothing.
 # Not file(CONFIGURE): SGL spells an attribute `@name`, and two of them on one line would read as a CMake variable.
 set(_sgl_prelude_generated "${CMAKE_CURRENT_BINARY_DIR}/generated/prelude.generated.cc")
@@ -121,6 +141,8 @@ constexpr char const* k_prelude =${_sgl_prelude_literals};
 } // namespace
 
 cc::string_view sgl::impl::embedded_core_prelude() { return k_prelude; }
+
+cc::string_view sgl::impl::prelude_directory() { return R\"sglprelude(${CMAKE_CURRENT_SOURCE_DIR}/prelude)sglprelude\"; }
 ")
 set(_sgl_prelude_existing "")
 if(EXISTS "${_sgl_prelude_generated}")
@@ -180,8 +202,11 @@ target_sources(shaped-graphics-language
     src/shaped-graphics-language/check/checked_module.hh
     src/shaped-graphics-language/check/dump.hh
     src/shaped-graphics-language/check/flat.hh
+    src/shaped-graphics-language/check/footprint.hh
     src/shaped-graphics-language/check/flat_builder.hh
+    src/shaped-graphics-language/check/structural_hash.hh
     src/shaped-graphics-language/check/ids.hh
+    src/shaped-graphics-language/check/resources.hh
     src/shaped-graphics-language/check/symbols.hh
     src/shaped-graphics-language/check/impl/checker.hh
 
@@ -193,15 +218,24 @@ target_sources(shaped-graphics-language
     src/shaped-graphics-language/interpret/interpret.hh
     src/shaped-graphics-language/interpret/scalar.hh
 
+    src/shaped-graphics-language/test/run_tests.hh
+
     src/shaped-graphics-language/emit/emit.hh
     src/shaped-graphics-language/emit/reserved_words.hh
     src/shaped-graphics-language/emit/impl/dialect.hh
+    src/shaped-graphics-language/emit/impl/layout.hh
+    src/shaped-graphics-language/emit/impl/memory_form.hh
     src/shaped-graphics-language/emit/impl/plan.hh
 
     src/shaped-graphics-language/driver/compile_to_text.hh
+    src/shaped-graphics-language/driver/test_source.hh
     src/shaped-graphics-language/driver/describe.hh
+    src/shaped-graphics-language/driver/pipeline_fields.hh
     src/shaped-graphics-language/driver/impl/front_end.hh
     src/shaped-graphics-language/driver/prelude.hh
+    src/shaped-graphics-language/driver/classify.hh
+    src/shaped-graphics-language/driver/inferred_results.hh
+    src/shaped-graphics-language/driver/unannotated_bindings.hh
 )
 
 # Require at least C++23 for this target; the final -std is chosen by the top-level project.
@@ -220,16 +254,58 @@ target_compile_options(shaped-graphics-language PUBLIC $<$<CXX_COMPILER_ID:MSVC>
 # Run it through `uv run dev.py run sgl -- <command> …`; `dev.py check`'s `sgl-prelude` step does.
 # Gated like tools/: a dependent that adds shaped-core as a subdirectory wants the library and not our binaries.
 if(SC_BUILD_TOOLS)
+    # The Language Server Protocol, knowing no SGL: it links clean-core and babel-data alone, so an SGL include in it
+    # fails to compile. It is what a shared LSP library would be extracted from.
+    add_library(sgl-lsp-protocol STATIC
+        tools/sgl/lsp/protocol/fwd.hh
+        tools/sgl/lsp/protocol/fwd.cc
+        tools/sgl/lsp/protocol/json.hh
+        tools/sgl/lsp/protocol/types.hh
+        tools/sgl/lsp/protocol/types.cc
+        tools/sgl/lsp/protocol/framing.hh
+        tools/sgl/lsp/protocol/framing.cc
+        tools/sgl/lsp/protocol/text_index.hh
+        tools/sgl/lsp/protocol/text_index.cc
+        tools/sgl/lsp/protocol/documents.hh
+        tools/sgl/lsp/protocol/documents.cc
+        tools/sgl/lsp/protocol/server.hh
+        tools/sgl/lsp/protocol/server.cc
+        tools/sgl/lsp/protocol/log_listener.hh
+        tools/sgl/lsp/protocol/log_listener.cc
+        tools/sgl/lsp/protocol/stdio_host.hh
+        tools/sgl/lsp/protocol/stdio_host.cc
+    )
+    target_link_libraries(sgl-lsp-protocol PUBLIC clean-core babel-data)
+
     add_executable(sgl
         tools/sgl/main.cc
         tools/sgl/files.hh
         tools/sgl/describe_command.cc
         tools/sgl/emit_command.cc
         tools/sgl/prelude_command.cc
+        tools/sgl/test_command.cc
+        tools/sgl/lsp_command.cc
+        # the SGL half of the language server, which translates what the library answers into LSP
+        tools/sgl/lsp/analysis.hh
+        tools/sgl/lsp/analysis.cc
+        tools/sgl/lsp/features.hh
+        tools/sgl/lsp/diagnostics.cc
+        tools/sgl/lsp/semantic_tokens.cc
+        tools/sgl/lsp/inlay_hints.cc
+        tools/sgl/lsp/run_tests.cc
+        tools/sgl/lsp/server.hh
+        tools/sgl/lsp/server.cc
+        # the tests of the language server, both halves; `sgl` carries them as a nexus binary of kind `tests`
+        tools/sgl/lsp/tests/lsp-test-support.hh
+        tools/sgl/lsp/tests/protocol-test.cc
+        tools/sgl/lsp/tests/server-test.cc
+        tools/sgl/lsp/tests/language-server-test.cc
+        tools/sgl/lsp/tests/language-server-benchmark.cc
     )
-    sc_nexus_binary(sgl KINDS tool)
+    sc_nexus_binary(sgl KINDS tool tests)
     # babel-data writes `describe`'s JSON; the tool may take it, and the library must not.
-    target_link_libraries(sgl PRIVATE shaped-graphics-language babel-data nexus)
+    target_link_libraries(sgl PRIVATE shaped-graphics-language sgl-lsp-protocol babel-data nexus)
+    target_compile_definitions(sgl PRIVATE SGL_SAMPLES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/samples")
 endif()
 
 # Test executable
@@ -254,16 +330,25 @@ if(SC_BUILD_TESTS)
         tests/builtins/registry-test.cc
 
         tests/check/check-test-support.hh
+        tests/corpus/corpus-test.cc
         tests/check/binding-check-test.cc
         tests/check/case-check-test.cc
+        tests/check/footprint-check-test.cc
         tests/check/control-flow-check-test.cc
         tests/check/cube-test.cc
+        tests/check/stage-check-test.cc
+        tests/check/feature-check-test.cc
         tests/check/declaration-check-test.cc
+        tests/check/pipeline-check-test.cc
         tests/check/enum-check-test.cc
         tests/check/expression-check-test.cc
+        tests/check/test-check-test.cc
         tests/check/source-flat-test-support.hh
 
+        tests/interpret/check-run-test.cc
+        tests/interpret/expect-test.cc
         tests/interpret/interpret-test.cc
+        tests/interpret/run-tests-test.cc
 
         tests/legalize/flat-test-support.hh
         tests/legalize/random-program.hh
@@ -276,13 +361,17 @@ if(SC_BUILD_TESTS)
         tests/emit/cube-emit-test.cc
         tests/emit/emit-test.cc
         tests/emit/buffer-emit-test.cc
+        tests/emit/texture-emit-test.cc
         tests/emit/compute-emit-test.cc
         tests/emit/case-emit-test.cc
         tests/emit/enum-emit-test.cc
+        tests/emit/layout-emit-test.cc
 
+        tests/driver/classify-test.cc
         tests/driver/compile-to-text-test.cc
         tests/driver/describe-test.cc
         tests/driver/source-differential-test.cc
+        tests/driver/test-source-test.cc
 
         tests/spec/spec-examples-test.cc
 
@@ -297,6 +386,8 @@ if(SC_BUILD_TESTS)
         PRIVATE
         SGL_SPEC_DIR="${CMAKE_CURRENT_SOURCE_DIR}/docs/spec"
         SGL_SAMPLES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/samples"
+        # the corpus is walked when the test runs, so a new file needs no entry here
+        SGL_CORPUS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/corpus"
         SGL_PRELUDE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/prelude")
 
     target_link_libraries(shaped-graphics-language-test

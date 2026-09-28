@@ -184,13 +184,8 @@ ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - geometry shader amplifies a point into a
 
     // A single point at the target center — the geometry shader expands it into the triangle.
     pos_vertex const verts[1] = {{{0.0f, 0.0f, 0.0f}}};
-    auto vbuf = ctx.persistent.create_raw_buffer(isize(sizeof(verts)),
-                                                 sg::buffer_usage::vertex_buffer | sg::buffer_usage::copy_dst);
+    auto vbuf = ctx.persistent.create_buffer_from_data(verts, sg::buffer_usage::vertex_buffer).raw();
     REQUIRE(vbuf != nullptr);
-
-    auto up = ctx.create_command_list();
-    up->upload.data_to_buffer(vbuf, cc::span<pos_vertex const>(verts));
-    ctx.submit_command_list(cc::move(up));
 
     auto cmd = ctx.create_command_list();
     {
@@ -281,13 +276,8 @@ ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - tessellation (hull + domain) renders a p
         {{-0.8f, -0.8f, 0.0f}},
         {{0.8f, -0.8f, 0.0f}},
     };
-    auto vbuf = ctx.persistent.create_raw_buffer(isize(sizeof(verts)),
-                                                 sg::buffer_usage::vertex_buffer | sg::buffer_usage::copy_dst);
+    auto vbuf = ctx.persistent.create_buffer_from_data(verts, sg::buffer_usage::vertex_buffer).raw();
     REQUIRE(vbuf != nullptr);
-
-    auto up = ctx.create_command_list();
-    up->upload.data_to_buffer(vbuf, cc::span<pos_vertex const>(verts));
-    ctx.submit_command_list(cc::move(up));
 
     auto cmd = ctx.create_command_list();
     {

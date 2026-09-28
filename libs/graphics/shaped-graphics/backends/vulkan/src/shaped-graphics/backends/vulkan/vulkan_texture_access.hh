@@ -82,7 +82,7 @@ namespace sg::backend::vulkan
         return {a, layout_combine::ok};
 
     auto const is_shader = [](sg::texture_layout l)
-    { return l == sg::texture_layout::shader_readonly || l == sg::texture_layout::shader_readwrite; };
+    { return l == sg::texture_layout::shader_texture || l == sg::texture_layout::shader_image; };
     if (is_shader(a) && is_shader(b))
         return {sg::texture_layout::general, layout_combine::degraded};
 

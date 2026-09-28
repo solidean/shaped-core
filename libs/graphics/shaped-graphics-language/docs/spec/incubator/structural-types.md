@@ -22,40 +22,10 @@ A literal's members are synthesized from its elements:
 The shorthand is the **only** difference between `{}` and `()`.
 Named elements are allowed in every position of all three literals.
 
-**A struct has no user-written constructor.**
-
-```sgl sketch
-struct A:
-    a: float
-    b: float = 2
-```
-
-declares the type and synthesizes a function of the same name:
-
-```sgl sketch
-fun A(a: float, b: float = 2) -> A
-```
-
-**A field's default may use the fields before it.**
-The defaults become the default arguments of the synthesized function, and default arguments are evaluated left to right.
-
-```sgl sketch
-struct falloff:
-    radius: float
-    inner: float = radius * 0.5
-    sharpness: float = 1 / (radius - inner)
-```
-
-```sgl sketch
-fun falloff(radius: float, inner: float = radius * 0.5, sharpness: float = 1 / (radius - inner)) -> falloff
-```
-
-Field order is the only rule this needs, and the AST checks none of it ([AST-116](../syntax/ast.md#members)).
-
-Writing `A(2)` names that function rather than the type.
-So construction is an ordinary function call with ordinary rules for defaults and named arguments.
-Objects are always complete: the only partially initialized state exists inside the synthesized function, which is not user code.
-There are no rules about partially constructed objects because no user can observe one.
+**A struct is built by calling a function, and a literal converts by calling it.**
+That part is normative now: the synthesized constructor is [CHK-239](../semantics/checking.md#members-and-constructors).
+A literal written where a struct is expected converts by [CHK-81](../semantics/checking.md#literals).
+What stays here is the structural world itself: what a tuple or an object is once it is a value rather than a literal written in place.
 
 **The structural world converts implicitly** wherever the members line up:
 
@@ -79,9 +49,7 @@ It is pointless for one member and pays off for several.
 
 * The AST phase: an assignment directly inside a paren literal is a named element, not an assignment.
 * The type system: structural equality up to member order for named members, positional for unnamed ones.
-* Conversion rules between structural values, and from structural values to nominal types at a call.
-* Overload and default-argument resolution, since struct construction is a call.
-* Name resolution: a field default sees the fields declared before it, the way a default argument sees the parameters before it.
+* Conversion rules between structural values, which CHK-83 leaves out: only a literal written in place converts today.
 
 ## Already fixed by the syntax
 
@@ -94,7 +62,6 @@ It is pointless for one member and pays off for several.
 ## Open
 
 * Whether `(a = 1, 2)` — an unnamed element after a named one — is allowed, and what its index is.
-* Whether a structural value converts to a nominal struct implicitly, or only at a call to the synthesized function.
 * How `[1, 2, 3]` relates to `array[int, 3]`: the same type, or convertible.
 * `.=` does not tokenize as one operator today; "a dot followed by an operator character opens an operator" would be the additive change.
 * Whether member order of a `{}` literal is observable anywhere, for example in buffer layout.

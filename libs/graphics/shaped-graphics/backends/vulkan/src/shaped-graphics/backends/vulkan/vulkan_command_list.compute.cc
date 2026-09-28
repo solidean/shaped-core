@@ -33,6 +33,8 @@ void vulkan_command_list::compute_bind_pipeline(sg::compute_pipeline const& pipe
     // A new pipeline may declare a different number of slots, so the bound groups reset to one null per slot.
     _bound_pipeline_layout = vp->layout.get();
     _bound_groups.clear_resize_to_filled(_bound_pipeline_layout->_groups.size(), nullptr);
+    _bound_footprint = &pipeline.footprint();
+    _bound_footprint_owner = &pipeline;
 }
 
 void vulkan_command_list::compute_bind_group(int group_index, sg::binding_group const& group)
@@ -114,75 +116,140 @@ void vulkan_command_list::compute_declare_array_texture_access(cc::string_view b
     _pending_array_texture_declares.push_back(cc::move(declare));
 }
 
-void vulkan_command_list::declare_array_accesses()
+void vulkan_command_list::declare_group_accesses(cc::span<vulkan_binding_group const* const> groups,
+                                                 sg::impl::pipeline_footprint const* footprint,
+                                                 sg::pipeline_stage_flags op_stages)
 {
-    // The bound groups' array bindings, resolved by name — also the accounting set: every array binding must be
-    // covered by a declaration, since which elements a shader indexes cannot be inferred and silently skipping one
-    // would leave its resources untracked (wrong layouts, missed hazards).
+    for (auto group = 0; group < int(groups.size()); ++group)
+    {
+        auto const* bound_group = groups[group];
+        if (bound_group == nullptr)
+            continue;
+
+        for (auto const& view : bound_group->hazard_views)
+            if (view.buffer != nullptr)
+                if (auto const a = sg::access_at(footprint, group, view.binding, view.bound_as, op_stages); a.has_value())
+                    track_buffer_access(*view.buffer, a.value().stages, a.value().access);
+
+        // A bound texture also moves to the layout its view class needs, a sampled one to shader_texture and a
+        // storage one to shader_image, but only where the code touches it at all.
+        for (auto const& tv : bound_group->texture_hazard_views)
+            if (auto const a = sg::access_at(footprint, group, tv.binding, tv.bound_as, op_stages); a.has_value())
+                (void)track_texture_access(*tv.texture, tv.range, a.value().stages, a.value().access,
+                                           sg::shader_layout_of(tv.bound_as));
+    }
+}
+
+void vulkan_command_list::declare_array_accesses(void const* pipeline, sg::pipeline_stage_flags op_stages)
+{
+    // Which elements of an array a shader indexes cannot be inferred, so the caller declares them per dispatch.
+    // How those declarations meet what the code does to the array is sg::impl::plan_array_declarations' to decide.
     auto const find_array_binding = [&](cc::string_view name, bool want_texture) -> vulkan_array_binding const*
     {
-        for (auto const* bound_group : _bound_groups)
-        {
-            if (bound_group == nullptr)
-                continue;
-            for (auto const& ab : bound_group->array_bindings)
-                if (ab.name == name && ab.is_texture == want_texture)
-                    return &ab;
-        }
+        for (auto const* group : _bound_groups)
+            if (group != nullptr)
+                for (auto const& ab : group->array_bindings)
+                    if (ab.name == name && ab.is_texture == want_texture)
+                        return &ab;
         return nullptr;
     };
 
+    // A mistake in the host's own declarations asserts, whatever the code does with the array.
     for (auto const& declare : _pending_array_buffer_declares)
     {
-        auto const* ab = find_array_binding(declare.name, false);
+        auto const* const ab = find_array_binding(declare.name, false);
         CC_ASSERT(ab != nullptr, "declare_array_buffer_access names no buffer array binding of a bound group");
         for (auto const& e : declare.elements)
         {
             CC_ASSERT(e.index >= 0 && e.index < int(ab->elements.size()), "declared array element index out of range");
-            auto const& element = ab->elements[e.index];
-            CC_ASSERT(!element.is_vacant(), "declared array element is vacant (nothing is bound there)");
-            track_buffer_access(*element.buffer, e.stages, e.access);
+            CC_ASSERT(!ab->elements[e.index].is_vacant(), "declared array element is vacant (nothing is bound there)");
         }
     }
-
     for (auto const& declare : _pending_array_texture_declares)
     {
-        auto const* ab = find_array_binding(declare.name, true);
+        auto const* const ab = find_array_binding(declare.name, true);
         CC_ASSERT(ab != nullptr, "declare_array_texture_access names no texture array binding of a bound group");
         for (auto const& e : declare.elements)
         {
             CC_ASSERT(e.index >= 0 && e.index < int(ab->elements.size()), "declared array element index out of range");
-            auto const& element = ab->elements[e.index];
-            CC_ASSERT(!element.is_vacant(), "declared array element is vacant (nothing is bound there)");
-            (void)track_texture_access(*element.texture, element.range, e.stages, e.access, e.layout);
+            CC_ASSERT(!ab->elements[e.index].is_vacant(), "declared array element is vacant (nothing is bound there)");
         }
     }
 
-#if CC_ASSERT_ENABLED
-    // The reverse direction of the accounting: an undeclared array binding is a hard error, not "no access" — an
-    // empty-span declaration is the way to say a dispatch touches no elements of an array.
-    for (auto const* bound_group : _bound_groups)
+    for (auto group = 0; group < int(_bound_groups.size()); ++group)
     {
-        if (bound_group == nullptr)
+        if (_bound_groups[group] == nullptr)
             continue;
-        for (auto const& ab : bound_group->array_bindings)
+        for (auto const& ab : _bound_groups[group]->array_bindings)
         {
-            bool declared = false;
+            auto declared = sg::impl::array_declarations();
+            auto const gather = [&](auto const& declares)
+            {
+                for (auto const& declare : declares)
+                    if (declare.name == ab.name)
+                    {
+                        declared.named = true;
+                        for (auto const& e : declare.elements)
+                        {
+                            declared.any_element = true;
+                            declared.access |= e.access;
+                        }
+                    }
+            };
             if (ab.is_texture)
-            {
-                for (auto const& declare : _pending_array_texture_declares)
-                    declared |= declare.name == ab.name;
-            }
+                gather(_pending_array_texture_declares);
             else
+                gather(_pending_array_buffer_declares);
+
+            auto use = cc::optional<sg::impl::slot_use>();
+            if (_bound_footprint != nullptr && _bound_footprint->is_known())
+                use = _bound_footprint->use_of(group, ab.binding);
+            auto const plan = sg::impl::plan_array_declarations(pipeline, ab.name, use, ab.bound_as, op_stages, declared);
+
+            switch (plan.how)
             {
-                for (auto const& declare : _pending_array_buffer_declares)
-                    declared |= declare.name == ab.name;
+            case sg::impl::array_plan::mode::skip:
+                break;
+            case sg::impl::array_plan::mode::as_declared:
+                if (ab.is_texture)
+                {
+                    for (auto const& declare : _pending_array_texture_declares)
+                        if (declare.name == ab.name)
+                            for (auto const& e : declare.elements)
+                            {
+                                auto const& element = ab.elements[e.index];
+                                (void)track_texture_access(*element.texture, element.range, e.stages,
+                                                           e.access | plan.widen_by, e.layout);
+                            }
+                }
+                else
+                {
+                    for (auto const& declare : _pending_array_buffer_declares)
+                        if (declare.name == ab.name)
+                            for (auto const& e : declare.elements)
+                                track_buffer_access(*ab.elements[e.index].buffer, e.stages, e.access | plan.widen_by);
+                }
+                break;
+            case sg::impl::array_plan::mode::cover_all:
+                // One memory barrier for the buffers rather than one per element.
+                for (auto const& element : ab.elements)
+                {
+                    if (element.buffer != nullptr)
+                    {
+                        track_buffer_access(*element.buffer, plan.cover_stages, plan.cover_access);
+                        _global_barrier_buffers.insert(element.buffer.get());
+                    }
+                    else if (element.texture != nullptr)
+                    {
+                        // A memory barrier moves no layout, so a texture still gets its own transition where it needs one.
+                        (void)track_texture_access(*element.texture, element.range, plan.cover_stages,
+                                                   plan.cover_access, sg::shader_layout_of(ab.bound_as));
+                    }
+                }
+                break;
             }
-            CC_ASSERT(declared, "a bound array binding has no declare_array_*_access for this dispatch (declare an "
-                                "empty span if it is unused)");
         }
     }
-#endif
 
     _pending_array_buffer_declares.clear();
     _pending_array_texture_declares.clear();
@@ -196,24 +263,10 @@ void vulkan_command_list::compute_dispatch(int x, int y, int z)
     // Declare each bound group's shader accesses before the dispatch: the tracker emits any hazard barrier (a prior
     // copy_write → shader_read RAW, a WAW between two dispatches), and — unlike dx12 — carries the access across
     // command lists, since Vulkan has no state decay to ride on.
-    for (auto const* bound_group : _bound_groups)
-    {
-        if (bound_group == nullptr)
-            continue;
-
-        for (auto const& view : bound_group->hazard_views)
-            if (view.buffer != nullptr)
-                track_buffer_access(*view.buffer, sg::pipeline_stage_flag::compute, sg::shader_access_of(view.access));
-
-        // Bound textures also transition to the layout their access class needs (a sampled texture to
-        // shader_readonly, a storage texture to shader_readwrite) — the inferred layout is shader_layout_of.
-        for (auto const& tv : bound_group->texture_hazard_views)
-            (void)track_texture_access(*tv.texture, tv.range, sg::pipeline_stage_flag::compute,
-                                       sg::shader_access_of(tv.access), sg::shader_layout_of(tv.access));
-    }
+    declare_group_accesses(_bound_groups, _bound_footprint, sg::pipeline_stage_flag::compute);
 
     // Array bindings are not auto-tracked — apply (and account for) the caller's explicit declarations.
-    declare_array_accesses();
+    declare_array_accesses(_bound_footprint_owner, sg::pipeline_stage_flag::compute);
 
     // Emit every hazard the bound resources declared, batched, right before the dispatch consumes them.
     flush_barriers();

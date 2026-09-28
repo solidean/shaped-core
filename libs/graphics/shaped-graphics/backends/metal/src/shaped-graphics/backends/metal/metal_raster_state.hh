@@ -7,6 +7,8 @@
 #include <shaped-graphics/raster/depth_stencil_state.hh>
 #include <shaped-graphics/raster/primitive_topology.hh>
 #include <shaped-graphics/raster/rasterization_state.hh>
+#include <shaped-graphics/raster/vertex_input.hh>
+#include <shaped-graphics/resource/index_buffer_view.hh> // sg::index_size_in_bytes, and the alignment rule it carries
 
 // Translating sg's raster state into Metal's.
 //
@@ -35,4 +37,14 @@ namespace sg::backend::metal
 [[nodiscard]] MTL::BlendFactor blend_factor_of(sg::blend_factor factor);
 [[nodiscard]] MTL::BlendOperation blend_op_of(sg::blend_op op);
 [[nodiscard]] MTL::ColorWriteMask color_write_mask_of(sg::color_write_mask mask);
+
+/// The MTLVertexFormat one vertex attribute decodes with.
+///
+/// sg's attribute set is the intersection every backend supports, so each enumerator has a Metal counterpart and the
+/// mapping is total.
+[[nodiscard]] MTL::VertexFormat vertex_format_of(sg::vertex_attribute_format format);
+
+/// The MTLIndexType an indexed draw fetches with.
+/// The width itself is `sg::index_size_in_bytes`, which is what turns a first-index into a byte offset.
+[[nodiscard]] MTL::IndexType index_type_of(sg::index_format format);
 } // namespace sg::backend::metal

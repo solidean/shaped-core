@@ -1,0 +1,25 @@
+// a test stands wherever a declaration may, and runs on its own
+
+struct light:
+    power: float
+    test light(2.0).power == 2.0
+
+enum mode:
+    on
+    off
+    test mode.on != mode.off
+
+const limit = 3
+
+fun clamp_count(n: int) -> int:
+    // a const crosses into a test
+    test limit == 3
+    let count = n
+    // a local of the test hides one of the function, which it could not read anyway
+    test:
+        let count = 5
+        count > limit
+    if n > limit => return limit
+    return count
+
+test clamp_count(9) == 3 and clamp_count(2) == 2

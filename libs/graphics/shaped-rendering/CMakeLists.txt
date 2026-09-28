@@ -11,6 +11,9 @@ add_library(shaped-rendering
     src/shaped-rendering/window.cc
     src/shaped-rendering/blit_routine.cc
     src/shaped-rendering/box_filter_mipmap_routine.cc
+    src/shaped-rendering/denoise.cc
+    src/shaped-rendering/atrous_denoise_routine.cc
+    src/shaped-rendering/svgf_denoise_routine.cc
     src/shaped-rendering/raster_box_filter_mipmap_routine.cc
     src/shaped-rendering/imgui_context.cc
     src/shaped-rendering/imgui_routine.cc
@@ -29,10 +32,13 @@ target_sources(shaped-rendering
     FILES
     src/shaped-rendering/fwd.hh
     src/shaped-rendering/all.hh
-    src/shaped-rendering/gpu_types.hh
     src/shaped-rendering/input.hh
     src/shaped-rendering/blit_routine.hh
     src/shaped-rendering/box_filter_mipmap_routine.hh
+    src/shaped-rendering/denoise.hh
+    src/shaped-rendering/atrous_denoise_routine.hh
+    src/shaped-rendering/svgf_denoise_routine.hh
+    src/shaped-rendering/impl/denoise_images.hh
     src/shaped-rendering/raster_box_filter_mipmap_routine.hh
     src/shaped-rendering/window.hh
     src/shaped-rendering/imgui_context.hh
@@ -116,6 +122,18 @@ sc_add_shader_package(
         box_filter_mipmap.hlsl:compute:main_3d_cs
         raster_box_filter_mipmap.hlsl:vertex:main_vs
         raster_box_filter_mipmap.hlsl:fragment:main_ps
+        atrous_denoise.hlsl:compute:main_cs
+        atrous_denoise.hlsl:binding:atrous_bindings
+        atrous_denoise.hlsl:constants:gConstants
+        svgf_temporal.hlsl:compute:main_cs
+        svgf_temporal.hlsl:binding:svgf_temporal_bindings
+        svgf_temporal.hlsl:constants:gConstants
+        svgf_variance.hlsl:compute:main_cs
+        svgf_variance.hlsl:binding:svgf_variance_bindings
+        svgf_variance.hlsl:constants:gConstants
+        svgf_atrous.hlsl:compute:main_cs
+        svgf_atrous.hlsl:binding:svgf_atrous_bindings
+        svgf_atrous.hlsl:constants:gConstants
 )
 
 # Test executable.
@@ -133,7 +151,6 @@ if(SC_BUILD_TESTS)
         tests/imgui-input-test.cc
         tests/imgui-settings-test.cc
         tests/imgui-style-test.cc
-        tests/gpu-types-test.cc
         tests/shader-package-test.cc
     )
     sc_nexus_binary(shaped-rendering-test KINDS tests ${SG_WARP_TEST_BINARY_ARGS})
@@ -174,6 +191,7 @@ if(SC_BUILD_TESTS)
             tests/imgui-manual-test.cc
             tests/box-filter-mipmap-test.cc
             tests/raster-box-filter-mipmap-test.cc
+            tests/denoise-test.cc
         )
         target_link_libraries(shaped-rendering-test PRIVATE shaped-graphics-dx12)
 
@@ -192,3 +210,5 @@ if(SC_BUILD_TESTS)
     # Browser test runner (Emscripten only); a no-op on native toolchains.
     sc_add_nexus_web_runner(shaped-rendering-test)
 endif()
+
+add_subdirectory(examples)

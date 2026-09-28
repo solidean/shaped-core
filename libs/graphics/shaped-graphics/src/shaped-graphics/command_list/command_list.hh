@@ -10,8 +10,10 @@
 #include <shaped-graphics/command_list/raster.hh>
 #include <shaped-graphics/command_list/raytracing.hh>
 #include <shaped-graphics/command_list/upload.hh>
+#include <shaped-graphics/context/metrics.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/query/gpu_timestamp.hh>
+#include <shaped-graphics/raster/raster_target_formats.hh>
 
 /// Records GPU work, and is submitted through the context that created it.
 /// Single-use and single-threaded: recorded by one thread, then submitted or dropped exactly once, in the epoch it was opened in.
@@ -189,6 +191,13 @@ protected:
     epoch _epoch = epoch::invalid;
     class context* _context = nullptr; // the creating context; outlives this list
 
+    // What this list recorded, folded into the context's stats when it submits.
+    // A backend adds the barriers it emits; the scopes add draws, dispatches and inline transfers.
+    impl::stat_counts _stats;
+
+    friend impl::stat_counts const& impl::recorded_stats(command_list const& cmd);
+
 private:
-    cc::string _rendering_target_set; // of the open rendering, or empty
+    cc::string _rendering_target_set;                       // of the open rendering, or empty
+    cc::optional<raster_target_formats> _rendering_formats; // of the open rendering, or empty when none is open
 };

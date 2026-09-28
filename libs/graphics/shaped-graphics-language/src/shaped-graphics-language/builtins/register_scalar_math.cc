@@ -118,12 +118,57 @@ void clamp_int(leaves in, result& out)
     out.push_back(scalar::of(in[2].as_int() < low ? in[2].as_int() : low));
 }
 
+// ---- uint: every operation is on the bits, which is exactly unsigned wrapping ----------------------------------------
+
+void add_uint(leaves in, result& out)
+{
+    out.push_back(scalar::of_uint(in[0].bits + in[1].bits));
+}
+void subtract_uint(leaves in, result& out)
+{
+    out.push_back(scalar::of_uint(in[0].bits - in[1].bits));
+}
+void multiply_uint(leaves in, result& out)
+{
+    out.push_back(scalar::of_uint(in[0].bits * in[1].bits));
+}
+void less_uint(leaves in, result& out)
+{
+    out.push_back(scalar::of(in[0].bits < in[1].bits));
+}
+void less_equal_uint(leaves in, result& out)
+{
+    out.push_back(scalar::of(in[0].bits <= in[1].bits));
+}
+void greater_uint(leaves in, result& out)
+{
+    out.push_back(scalar::of(in[0].bits > in[1].bits));
+}
+void greater_equal_uint(leaves in, result& out)
+{
+    out.push_back(scalar::of(in[0].bits >= in[1].bits));
+}
+void min_uint(leaves in, result& out)
+{
+    out.push_back(scalar::of_uint(in[1].bits < in[0].bits ? in[1].bits : in[0].bits));
+}
+void max_uint(leaves in, result& out)
+{
+    out.push_back(scalar::of_uint(in[0].bits < in[1].bits ? in[1].bits : in[0].bits));
+}
+void clamp_uint(leaves in, result& out)
+{
+    auto const low = in[0].bits < in[1].bits ? in[1].bits : in[0].bits;
+    out.push_back(scalar::of_uint(in[2].bits < low ? in[2].bits : low));
+}
+
 struct comparison
 {
     cc::string_view op;
     cc::string_view name;
     evaluator of_float;
     evaluator of_int;
+    evaluator of_uint;
 };
 } // namespace
 
@@ -155,19 +200,33 @@ void sgl::builtins::register_scalar_math(registry& r)
     add_function(r, "max", {"a", "int", "b", "int"}, "int", max_int);
     add_function(r, "clamp", {"x", "int", "low", "int", "high", "int"}, "int", clamp_int);
 
-    r.add_comment("// comparisons, of float and of int");
+    r.add_comment("// uint: division is left out, as it is for int");
+    add_infix(r, "*", "multiply_uint", "uint", "uint", "uint", multiply_uint);
+    add_infix(r, "+", "add_uint", "uint", "uint", "uint", add_uint);
+    add_infix(r, "-", "subtract_uint", "uint", "uint", "uint", subtract_uint);
+    add_function(r, "min", {"a", "uint", "b", "uint"}, "uint", min_uint);
+    add_function(r, "max", {"a", "uint", "b", "uint"}, "uint", max_uint);
+    add_function(r, "clamp", {"x", "uint", "low", "uint", "high", "uint"}, "uint", clamp_uint);
+
+    r.add_comment("// comparisons, of float, of int and of uint");
     comparison const comparisons[] = {
-        {.op = "<", .name = "less", .of_float = less, .of_int = less_int},
-        {.op = "<=", .name = "less_equal", .of_float = less_equal, .of_int = less_equal_int},
-        {.op = ">", .name = "greater", .of_float = greater, .of_int = greater_int},
-        {.op = ">=", .name = "greater_equal", .of_float = greater_equal, .of_int = greater_equal_int},
-        {.op = "==", .name = "equal", .of_float = equal, .of_int = equal_bits},
-        {.op = "!=", .name = "not_equal", .of_float = not_equal, .of_int = not_equal_bits},
+        {.op = "<", .name = "less", .of_float = less, .of_int = less_int, .of_uint = less_uint},
+        {.op = "<=", .name = "less_equal", .of_float = less_equal, .of_int = less_equal_int, .of_uint = less_equal_uint},
+        {.op = ">", .name = "greater", .of_float = greater, .of_int = greater_int, .of_uint = greater_uint},
+        {.op = ">=",
+         .name = "greater_equal",
+         .of_float = greater_equal,
+         .of_int = greater_equal_int,
+         .of_uint = greater_equal_uint},
+        {.op = "==", .name = "equal", .of_float = equal, .of_int = equal_bits, .of_uint = equal_bits},
+        {.op = "!=", .name = "not_equal", .of_float = not_equal, .of_int = not_equal_bits, .of_uint = not_equal_bits},
     };
     for (auto const& c : comparisons)
         add_infix(r, c.op, c.name, "float", "float", "bool", c.of_float);
     for (auto const& c : comparisons)
         add_infix(r, c.op, cc::format("{}_int", c.name), "int", "int", "bool", c.of_int);
+    for (auto const& c : comparisons)
+        add_infix(r, c.op, cc::format("{}_uint", c.name), "uint", "uint", "bool", c.of_uint);
 
     r.add_comment("// bool: `and`, `or` and `not` are the language's own, since no function could leave an operand "
                   "unevaluated");

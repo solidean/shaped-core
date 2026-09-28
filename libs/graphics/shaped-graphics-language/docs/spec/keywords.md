@@ -11,13 +11,16 @@ Definitions:
 * `fun` without a name - an anonymous function in expression position, `fun (x) => x + 1` ([AST-101](syntax/ast.md#lambdas-case-and-loop))
 * `let` - declares a variable (TODO: or `var`?)
 * `mut` - marks a variable as mutable, and a binding member as read-write: `dst: mut buffer[float]` ([AST-128](syntax/ast.md#types))
-* `out` - marks a binding member as write-only, which only a storage texture is ([bindings](bindings.md#access))
+* `out` - marks a binding member as write-only, which only an image is ([bindings](bindings.md#access))
 * `struct` - defines a new structure type
 * `enum` - defines a new enum type
 * `binding` - defines a new binding group
-* `sampler` - declares a static sampler
+* `sampler` - declares a static sampler, at file scope or in a binding; in a type position it denotes the sampler type ([bindings](bindings.md#samplers))
+* `pipeline` - declares a pipeline: its stages and the configuration compiled into it ([pipelines](pipelines.md))
+* `test` - declares a test: a body the check pass runs on its own, where a line of type `bool` is a check ([AST-138](syntax/ast.md#declarations))
 * `const` - real constants
 * `use` - import other modules
+* `require` - declares the non-portable features a file, a binding or a body may use, as `sg::feature` names them ([Features](semantics/checking.md#features))
 * `module` - declares a module
 * `type` - declares a type alias or a template arg (or denotes the type of types)
 
@@ -56,20 +59,19 @@ A reserved name is no keyword: the form parser reads it as an identifier, and it
 It never starts a keyword form, so `self.x = 0` is an assignment.
 
 * `self` - the receiver of a method or a property; the AST reads it as `self_ref` ([AST-13](syntax/ast.md#atoms))
+* `void` - the unit type in a type position, and its one value anywhere else; the AST reads it as `void_ref` ([AST-137](syntax/ast.md#atoms))
 
 ## Open
 
-* Whether `true` and `false` are keywords or constants of the prelude; until that is decided the AST reads them as ordinary names, and they are not reserved.
+Nothing is open today.
 
 Settled:
 
+* `true` and `false` are no keywords: they are `@shadowable(false)` consts of the prelude over the cases of `bool` ([CHK-222](semantics/checking.md#consts)).
 * `out` is a keyword and `in` / `inout` / `ref` are not: the only access a resource needs beyond read and `mut` is write-only.
-* `buffer`, `bytes`, `constants` and the texture types are types rather than keywords, since they take type arguments like any other type.
+* `buffer`, `bytes`, `constants`, the texture types and the image types are types rather than keywords, since they take type arguments like any other type.
+* `sampler` stays a keyword even where it names a type, since the word is one concept: a sampler, static or bound.
 * `@inline` stays an annotation: it says where a binding lives rather than what it is.
-
-TODO:
-
-* A dynamic `sampler` as a binding member collides with the `sampler` keyword ([bindings](bindings.md#open)).
 
 Notes:
 

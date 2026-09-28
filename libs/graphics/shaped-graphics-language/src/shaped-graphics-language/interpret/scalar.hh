@@ -10,6 +10,7 @@ enum class sgl::check::value_kind : sgl::u8
     none,
     scalar_float,
     scalar_int,
+    scalar_uint,
     boolean,
 };
 
@@ -22,9 +23,12 @@ struct sgl::check::scalar
     [[nodiscard]] static scalar of(f32 v);
     [[nodiscard]] static scalar of(i32 v);
     [[nodiscard]] static scalar of(bool v);
+    /// Named rather than overloaded, so an integer literal never has to pick between `i32` and `u32`.
+    [[nodiscard]] static scalar of_uint(u32 v) { return {.kind = value_kind::scalar_uint, .bits = v}; }
 
     [[nodiscard]] f32 as_float() const;
     [[nodiscard]] i32 as_int() const { return i32(bits); }
+    [[nodiscard]] u32 as_uint() const { return bits; }
     [[nodiscard]] bool as_bool() const { return bits != 0; }
 
     constexpr bool operator==(scalar const&) const = default;

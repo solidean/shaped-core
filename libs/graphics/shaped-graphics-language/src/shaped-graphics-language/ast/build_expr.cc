@@ -37,6 +37,21 @@ expr_id builder::type_expression(form_id form)
                 node.attributes = attributes;
             return result;
         }
+        // `mut sampler` is two keywords, so the qualified type is read by AST-135 rather than as an argument.
+        if (parts.keywords.size() == 2 && parts.arguments.empty() && !is_valid(parts.block)
+            && token_text_of(parts.keywords[1]) == "sampler")
+        {
+            auto const access = is_mut ? type_access::read_write : type_access::write_only;
+            auto const inner = make_expr(form, name{.where = at(parts.keywords[1]).where});
+            return make_expr(form, qualified_type{.access = access, .type = inner});
+        }
+    }
+    // AST-135: `sampler` is a keyword, and in a type position that keyword denotes the sampler type.
+    if (is_keyword_led(form, "sampler"))
+    {
+        auto const parts = keyword_parts_of(form);
+        if (parts.keywords.size() == 1 && parts.arguments.empty() && !is_valid(parts.block))
+            return make_expr(form, name{.where = at(parts.keywords[0]).where});
     }
     return expression(form, attribute_mode::keep);
 }
@@ -62,6 +77,8 @@ expr_id builder::expression_node(form_id form)
     case form_kind::identifier:
         if (text_of(form) == "self")
             return make_expr(form, self_ref{});
+        if (text_of(form) == "void")
+            return make_expr(form, void_ref{});
         return make_expr(form, name{.where = f.where});
     case form_kind::wildcard:
         return make_expr(form, wildcard{});
@@ -163,6 +180,9 @@ expr_id builder::curly_list_expression(form_id form)
     if (total > 0 && typed == total)
     {
         auto const fields = fields_of(form, diagnostic_kind::expected_member);
+        for (auto const& f : ast.at(fields))
+            if (f.is_named_only)
+                report(diagnostic_kind::named_only_not_allowed_here, f.form);
         return make_expr(form, struct_type{.fields = fields});
     }
     if (typed > 0)
@@ -567,6 +587,8 @@ void builder::report_jump_target(form_id form, cc::string_view keyword)
         auto const owner = owners[i].owner;
         auto const is_loop = owner == body_owner::value_loop || owner == body_owner::statement_loop;
         auto const is_one_line = owners[i].one_line == form;
+        if (owner == body_owner::test)
+            break;
 
         if (is_loop_jump)
         {

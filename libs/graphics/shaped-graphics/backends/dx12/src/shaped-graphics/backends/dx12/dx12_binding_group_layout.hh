@@ -49,6 +49,17 @@ public:
     /// -1 for a static sampler, which is in neither table: it lives in the root signature.
     cc::vector<int> slot_by_binding;
 
+    /// The position in `bindings()` of the view at `view_slot`, which is what a pipeline's footprint is keyed by.
+    /// A scan: it is asked once per view when a group is created, never at a dispatch.
+    [[nodiscard]] isize binding_of_view_slot(isize view_slot) const
+    {
+        auto const all = bindings();
+        for (isize b = 0; b < all.size(); ++b)
+            if (all[b].type != sg::binding_type::sampler && slot_by_binding[b] == int(view_slot))
+                return b;
+        return -1;
+    }
+
     /// The RegisterSpace of a range whose binding states none: the pipeline layout writes the group's slot in its place.
     ///
     /// A binding without a space is one that fixes no group of its own, which is every binding of an SGL group.
@@ -56,7 +67,7 @@ public:
     static constexpr UINT space_of_slot = ~UINT(0);
 
     // Descriptor ranges, in this group's table space, plus static sampler descs — assembled into the root signature by dx12_pipeline_layout.
-    // A range may carry `space_of_slot`, so the pipeline layout copies them rather than pointing at these.
+    // A range or a static sampler may carry `space_of_slot`, so the pipeline layout copies them rather than pointing at these.
     cc::vector<D3D12_DESCRIPTOR_RANGE> view_ranges;
     cc::vector<D3D12_DESCRIPTOR_RANGE> sampler_ranges;
     cc::vector<D3D12_STATIC_SAMPLER_DESC> static_sampler_descs;

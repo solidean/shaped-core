@@ -73,9 +73,21 @@ Every local is a local of its own, so the flat tree never sees a name twice: the
 
 ## CHK-54
 
-Whether a local may shadow a module-level name is open in [scopes](../../incubator/scopes.md).
-Both answers are easy to give later and neither is easy to take back, so the tracer gives none.
-Shadowing another local is settled, by CHK-53.
+`let length = length v` is the same refinement CHK-53 allows, and the prelude holds enough common words that forbidding it would forbid the idiom.
+An ordered scope cannot be ambiguous: the newest declaration is the one in effect, so there is nothing to report.
+One namespace keeps that rule whole — a local does not hide a name in one position and leave it visible in the next.
+
+## CHK-188
+
+A new function or type in the prelude must never break a program that already used its name.
+With one shared scope, every prelude addition would be a `duplicate-declaration` somewhere.
+Only a clash inside one unordered scope is an error, since there no order says which declaration is meant.
+Overload sets still join across the two, so declaring `dot` for a struct of the program's own adds to the prelude's `dot` rather than hiding it.
+
+## CHK-192
+
+Joined overload sets would otherwise reopen CHK-188's problem for functions: a prelude that gains a signature the program already declares makes every call of it `ambiguous-overload`.
+The rule is special to the prelude because the prelude is special: nobody writes it into the program, it is placed around every file implicitly.
 
 ## CHK-110
 
@@ -117,6 +129,64 @@ Without implicit conversions a match is exact, so two matching candidates have t
 That could be reported where the second one is declared.
 It is reported at the call because a declaration's parameter types are only known once it is compiled, which a call demands and a declaration does not.
 Once conversions exist, ambiguity at the call is the rule that is needed anyway.
+With conversions, a best candidate is needed as well: CHK-254 ranks by chain length, and two candidates that each win somewhere have no best.
+
+## CHK-243
+
+A default is a small prologue of its function: it runs where the call stands, once per call that leaves its parameter unfilled.
+But it is written in the function, and it reads what the function's scope reads.
+Resolving it where the call stands would make `shade(n)` mean something different in every file that calls it, and none of that would show in the signature.
+Checking it once at the declaration is what lets a call bind without checking an expression per candidate.
+
+## CHK-247
+
+Dot and free calls collect the same candidates so that the spelling is a choice of style and nothing else.
+A generic function then never has to prefer `a.foo()` to stay general, and no API is reachable only one way.
+Searching the first argument's type scope is argument-dependent lookup restricted to one argument, which is what keeps the set small enough to predict.
+
+## CHK-251
+
+Naming an argument for the reader's sake should cost nothing, so `make_light(color = c, 2.0)` binds.
+A positional argument whose parameter depends on the names written before it is what the rule excludes: `make_light(intensity = 2.0, c)` would bind `c` to whichever parameter was still empty.
+The strictest rule, positionals before any name, would reject the first call, and relaxing it to this one later would change nothing already written.
+
+## CHK-254
+
+A single number per candidate, the sum of its chains, would let a candidate win by being much better at one argument and worse at another, a trade the reader never asked for.
+Dominance resolves a call only where one candidate is at least as good everywhere, and every call it resolves a sum resolves the same way, so relaxing it later breaks nothing.
+
+## CHK-256
+
+The spelling says what the writer means: a property is read, a function is called.
+It takes no part in resolution, so the error always names the fix rather than reporting that nothing was found.
+A free call may reach a property so that generic code can write `length v` for anything that has a length, whether it is a property or a function.
+
+## CHK-62
+
+A bare name inside a method was first read through `self` too, and that put a field of the receiver between a local and every name of the module.
+Every lookup that starts from a name then had to know about the receiver, and two of them did not: `frame.x` in a method found a binding `frame` before a field of that name.
+Writing `self.frame.x` makes the receiver a name like any other, and a body reads the same wherever it is moved.
+A field's default is the exception that is none: it reads the constructor's parameters, and no receiver exists while they are bound.
+
+## CHK-253
+
+A literal leaving its default type is one step of its chain, so dominance alone ranks calls of literals.
+Free conversion with a count of the literals kept at their type broke ties by summing over the arguments, which CHK-254 rejects for chains.
+`f(1, 2, 3)` would then pick the candidate that keeps two literals over one that keeps the third.
+With the step, `f(1)` still picks `f(x: int)` over `f(x: float)`, and a call each candidate wins somewhere is ambiguous.
+
+## CHK-257
+
+An operator over literals alone meets whatever operators the prelude declares, and a prelude that adds one of the literals' own type would change the answer.
+`7 / 2` is `3.5` through the float `/`, and `3` through an int one.
+The call names no type, so no answer is the reader's, and the error asks for one.
+Folding literals in the front end would settle it for good, as the [literal-types](../../incubator/literal-types.md) incubator sketches, and nothing written under this rule changes meaning then.
+
+## CHK-81
+
+A literal converting by a call of the type's name gets defaults, named arguments, named-only parameters and the evaluation order from the call rules.
+There is no second set of rules for making a struct from values.
+Every function of the name takes part, so a program that adds `fun ray(.from: pos3, .to: pos3)` can write `{from = p, to = q}` where a `ray` is expected.
 
 ## CHK-106
 
@@ -197,3 +267,56 @@ No target binds by name: HLSL by register, SPIR-V by set and binding, WGSL by `@
 So the host name need not be an identifier of any target, and the path is the one name that is injective and needs no rule for a reader to learn.
 `a_b.c` and `a.b_c` stay two buffers, where any identifier built from them would clash.
 The identifier a target writes is the emitter's to mint (EMIT-85), and the text reports the pair (EMIT-95).
+
+## CHK-197
+
+SGL's semantics are the intersection of what the targets' fast native operations guarantee, and no operation pays a tax on every target to be defined where one target leaves it open.
+Each target writes `x as int` as its own native conversion, and those agree only where the truncated value fits: SPIR-V, for one, leaves every other float undefined.
+Defining saturation and a NaN of 0 would mean a clamp and a compare around every conversion on the targets that do not do it natively, in shaders where a conversion sits in the inner loop.
+A program that needs a defined result clamps before it converts, and pays for it only where it asks.
+The interpreter still has to give some value, and saturation is the choice that is right on the most hardware.
+
+## CHK-225
+
+A `bool` line is a check rather than a line under a `check` keyword, because the keyword would sit on every line of every test.
+`assert` already covers the case that stops, so a second keyword would differ from it only in going on.
+The cost is that what a statement means depends on its type, so the AST pass leaves `no-effect` in a test to the check pass (AST-140).
+A call made for its effect that returns a `bool` becomes a check without saying so, which in a test is almost always what its author forgot to write anyway.
+
+## CHK-226
+
+The rule exists so a test cannot pass vacuously by mistake: a last line that computes and checks nothing is almost always a check its author meant to write.
+EVAL-78's `no-check-ran` catches a run that checked nothing too, but only when the test runs; this rule says so when the test is checked, in the editor.
+A test whose asserts are what it checks pays one line for it, `true // why`, which also says why it checks nothing else.
+A test that expects `.fail` or `.assert` is exempt, since it cannot pass without its run failing: it is fail-closed already.
+
+## CHK-259
+
+A `require` is permission, and what an entry point needs is judged from its use (CHK-263).
+So a file-level `require` costs nothing: a vertex stage in a ray-tracing file still runs on a device that cannot trace.
+The alternative, where the file's `require` is every entry point's floor, would make the cheapest place to write it the most expensive one to have written.
+
+## CHK-261
+
+A binding is a layout the host binds whole, so what one of its members needs is needed wherever the binding is listed, read or not.
+Its own `require` is therefore a requirement of the binding and not only a grant to its members: a library that ships a binding says, in the binding, what a device must have to take it.
+
+## CHK-262
+
+A file's `require` grants everything in its file, and declares only for that file's entry points.
+A library whose file requires a feature says the file may use it, not that every shader listing one of its bindings must accept it.
+The binding's own `require` is how a library says that (CHK-261), so a user's entry point is never made non-portable by a line in a file it does not own.
+Letting a listed binding carry its needs to the entry point on its own would erase that difference, and a file-wide permission would silently become every user's requirement.
+
+## CHK-263
+
+The floor is defined by what the language counts, never by what an optimizer happens to remove.
+A floor that followed dead-code elimination would change with a compiler version or an unrelated refactor, and the host would find out on a device that lacks the feature.
+So every use the entry point reaches counts, including one behind a condition that is always false.
+A compile-time branch on a feature, `if feature raytracing:`, is the form that may leave a use out, and it is not built.
+
+## CHK-265
+
+A binding's `require` is how a library says what a device must have to take the binding, and a member need not be what uses it.
+A binding that carries an acceleration structure later, or that a caller's shader reads through a feature, states the need before anything in SGL can show it.
+So only a body's `require` can be unused: it says nothing about any binding, and it is the one place an unneeded line is certainly a mistake.

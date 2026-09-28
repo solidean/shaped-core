@@ -4,8 +4,10 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/optional.hh>
 #include <clean-core/string/string.hh>
+#include <shaped-graphics/barrier/footprint.hh>
 #include <shaped-graphics/binding/binding.hh>
 #include <shaped-graphics/binding/shader_stage.hh>
+#include <shaped-graphics/context/capabilities.hh>
 #include <shaped-graphics/fwd.hh>
 
 /// A compiled shader: a bytecode blob plus the metadata and reflection needed to build pipelines and bind resources.
@@ -25,6 +27,13 @@ enum class sg::shader_format
     metal_lib, ///< Metal library — metal
     // WGSL is SOURCE text rather than bytecode: WebGPU consumes it and compiles it itself.
     wgsl, ///< WGSL — webgpu
+    /// Metal Shading Language source — metal, compiled by the driver when a pipeline is built.
+    ///
+    /// The second source format, and it exists for the same reason `wgsl` does: producing a metallib needs Apple's
+    /// Metal toolchain, a component installed separately from Xcode, while the driver's own compiler ships with the OS.
+    /// So a host without that component emits this instead, and a shipping build asks for `metal_lib`.
+    /// New values go after this one: `impl/shader_codec.cc` encodes a format by its ordinal.
+    msl,
     // Future: dxbc.
 };
 
@@ -45,8 +54,8 @@ struct sg::compute_dimensions
     int z = 1;
 };
 
-/// A successfully compiled shader: the bytecode blob and its extracted metadata + reflection, ready to build a pipeline from or cache.
-/// Reflection (the `bindings`) is stored inline.
+/// A successfully compiled shader: the bytecode blob and its metadata, ready to build a pipeline from or cache.
+/// For HLSL and WGSL the metadata is the compiler's reflection; an SGL shader states all of it itself, and its compiler contributes only `bytecode` and `compiler`.
 /// A pure value; share it via compiled_shader_handle.
 struct sg::compiled_shader
 {
@@ -57,7 +66,7 @@ struct sg::compiled_shader
     /// The opaque bytecode, in `format`. An owning, shareable, immutable byte blob.
     cc::pinned_data<byte const> bytecode;
 
-    /// Reflected resource bindings — a flat list; per-set grouping is derived by the consumer.
+    /// The resource bindings the code uses — a flat list; per-set grouping is derived by the consumer.
     cc::vector<binding> bindings;
 
     /// Compute workgroup size, present only for a compute `stage`.
@@ -72,6 +81,17 @@ struct sg::compiled_shader
     /// A pipeline description that names no target set takes this one.
     /// slib sets it once a compile settles, so a cached shader never carries it.
     cc::string target_set;
+
+    /// The features a device needs to run it, which pipeline creation refuses a device without.
+    /// Empty is the portable baseline, and nullopt is unknown: a compiler that cannot tell, such as one reading HLSL, says so.
+    /// An unknown shader is built as a portable one would be, and only the backend can still refuse it.
+    /// SGL states it, and a compiler's cache holds the compiler's own result, so a cached shader never carries it.
+    cc::optional<feature_set> required_features;
+
+    /// What the code does to each binding, which barrier inference follows at dispatch.
+    /// SGL states an `exact` one; a compiler's reflection gives a `reflected` one.
+    /// Unknown (`none`) where nothing could tell, and then every writable view counts as written.
+    shader_footprint footprint;
 
     // Deferred: constant-buffer member layouts, root/push constants, content hash, I/O signatures.
 };

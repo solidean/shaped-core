@@ -24,6 +24,7 @@ from .grammar import (
     FRONT_KNOWN,
     FRONT_REQUIRED,
     HEADING_RE,
+    RETIRED_BLOCK_TYPES,
     SEVERITIES,
     SHOW_KINDS,
     STATES,
@@ -391,13 +392,13 @@ def _fenced_lines(lines: list[str], first_line: int, path: Path) -> set[int]:
     return inside
 
 
-def _assign_block_names(entry: Entry, path: Path) -> None:
+def _assign_block_names(entry: Entry, path: Path, pending_round: int) -> None:
     """Give every block its derived name, and refuse two blocks of one round that answer to the same one.
 
     A block that carries `name:` keeps it; an ask is named by its heading, which the grammar already keeps unique.
     Everything else is named after its type, indexed only where that type repeats within the round.
     """
-    latest = entry.newest_round
+    latest = pending_round or entry.newest_round
     groups: dict[tuple[int, str], list[Block]] = {}
     for block in entry.blocks:
         # An unstamped block belongs to the round about to stamp it, which is the same rule `acknowledgement` uses.
@@ -432,7 +433,8 @@ def _assign_block_names(entry: Entry, path: Path) -> None:
         if clash is not None:
             raise ReviewParseError(
                 path, block.line, f"two blocks of round {block.effective_round} are both named {key[1]!r}",
-                f"the other is on line {clash.line}; a block name is the anchor a comment or a `supersedes:` uses, "
+                f"the other is on line {clash.line}. An ask's heading and a `name:` on any other block, a `prose` "
+                f"included, share one name space: a block name is the anchor a comment or a `supersedes:` uses, "
                 f"so it must be unique within a round",
             )
         seen[key] = block
@@ -471,8 +473,11 @@ def _resolve_supersedes(entry: Entry, path: Path) -> None:
         target.superseded_by = block.anchor
 
 
-def parse_text(text: str, path: Path, slug: str = "") -> Entry:
+def parse_text(text: str, path: Path, slug: str = "", pending_round: int = 0) -> Entry:
     """Parse entry text, raising ReviewParseError with a line number on anything malformed.
+
+    `pending_round` is the round an unstamped block is about to be stamped with, when the caller knows it.
+    Left at 0, an unstamped block joins the entry's newest round, which is right for everything but an append.
 
     Offsets are computed against LF-normalized text, and the file's own line ending is remembered
     so a write can put it back — a splice that silently converted the whole file would not be a splice.
@@ -502,6 +507,10 @@ def parse_text(text: str, path: Path, slug: str = "") -> Entry:
             raise ReviewParseError(path, number, f"malformed block heading {heading.strip()!r}",
                                    "write `## <type>` or `## <type> <argument>`")
         block_type, head = m.group(1), (m.group(2) or "").strip()
+        if block_type in RETIRED_BLOCK_TYPES:
+            raise ReviewParseError(path, number, f"unknown block type {block_type!r}",
+                                   f"`{block_type}` was retired: write it as `## {RETIRED_BLOCK_TYPES[block_type]}`, "
+                                   "which introduces what the entry needs in its own words")
         if block_type not in BLOCK_TYPES:
             # A block type is lowercase kebab-case, so anything else here is usually a markdown heading
             # inside a block whose body is markdown — an `artifact` above all.
@@ -526,7 +535,7 @@ def parse_text(text: str, path: Path, slug: str = "") -> Entry:
         _validate_block(block, path, seen_asks)
         entry.blocks.append(block)
 
-    _assign_block_names(entry, path)
+    _assign_block_names(entry, path, pending_round)
     _resolve_supersedes(entry, path)
     return entry
 

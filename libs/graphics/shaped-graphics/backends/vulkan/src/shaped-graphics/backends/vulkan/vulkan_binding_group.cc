@@ -169,12 +169,14 @@ cc::result<vulkan_binding_group_handle> vulkan_binding_group::create_resolved(vu
 
         auto array_binding = vulkan_array_binding{.name = nv.name,
                                                   .is_texture = sg::shape_of(b.type) == sg::view_shape::texture,
+                                                  .binding = slot,
+                                                  .bound_as = sg::view_class_of(b),
                                                   .elements = {}};
 
         for (isize element = 0; element < element_views.size(); ++element)
         {
             auto const& view = element_views[element];
-            if (!sg::accepts(b.type, view))
+            if (!sg::accepts(b, view))
                 return cc::error(
                     cc::format("binding_group: element {} of '{}' does not match its declared kind", element, nv.name));
 
@@ -209,7 +211,8 @@ cc::result<vulkan_binding_group_handle> vulkan_binding_group::create_resolved(vu
                 else
                 {
                     group->referenced_textures.push_back(cc::move(texture));
-                    group->texture_hazard_views.push_back({group->referenced_textures.back(), tv->range, tv->access});
+                    group->texture_hazard_views.push_back(
+                        {group->referenced_textures.back(), tv->range, tv->bound_as, slot});
                 }
             }
             else if (auto const* bv = sg::try_as_buffer_view(view); bv != nullptr)
@@ -221,7 +224,7 @@ cc::result<vulkan_binding_group_handle> vulkan_binding_group::create_resolved(vu
                 else
                 {
                     group->referenced.push_back(cc::move(buffer));
-                    group->hazard_views.push_back({group->referenced.back(), bv->access});
+                    group->hazard_views.push_back({group->referenced.back(), bv->bound_as, slot});
                 }
             }
             else if (auto const* tv_as = sg::try_as_tlas_view(view); tv_as != nullptr && tv_as->tlas != nullptr)
@@ -230,7 +233,7 @@ cc::result<vulkan_binding_group_handle> vulkan_binding_group::create_resolved(vu
                 // dispatch — the structure object itself is not a resource the barrier vocabulary knows.
                 auto const& tlas = static_cast<vulkan_tlas const&>(*tv_as->tlas);
                 group->referenced.push_back(tlas._vulkan_storage);
-                group->hazard_views.push_back({group->referenced.back(), sg::view_class::acceleration_structure});
+                group->hazard_views.push_back({group->referenced.back(), sg::view_class::acceleration_structure, slot});
             }
             else if (is_array)
                 array_binding.elements.push_back({}); // vacant

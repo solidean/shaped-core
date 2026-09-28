@@ -30,7 +30,7 @@ struct pixel_input:
     }
 
 // what a light gives a surface that faces `n`
-fun lambert(n: vec3, towards: vec3) -> float => saturate dot(n, normalize towards)
+fun lambert(n: vec3, towards: vec3) => saturate dot(n, normalize towards)
 
 // two fixed lights: a key light, and a weaker fill light from the other side
 fun towards_light(i: int) -> vec3:
@@ -59,3 +59,14 @@ fun shade(color: float3, normal: vec3) -> float3:
     return {
         color = float4(..lit, 1.0)
     }
+
+// Solid geometry: back faces culled, and depth tested and written, so a face drawn late cannot cover a nearer one.
+// The target's format is the swapchain's, which only the host knows.
+pipeline:
+    vertex = main_vs
+    pixel = main_ps
+    cull = .back
+    depth_test = true
+    depth_write = true
+    depth_stencil_format = .depth32_float
+    format = .host

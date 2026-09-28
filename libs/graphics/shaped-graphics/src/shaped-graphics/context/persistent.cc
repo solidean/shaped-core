@@ -1,5 +1,8 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/utility.hh>
+#include <shaped-graphics/binding/binding_group_layout.hh>
+#include <shaped-graphics/binding/impl/portability.hh>
+#include <shaped-graphics/binding/staging_binding_group.hh>
 #include <shaped-graphics/context/context.hh>
 #include <shaped-graphics/context/persistent.hh>
 #include <shaped-graphics/exceptions.hh>
@@ -25,7 +28,17 @@ cc::result<raw_buffer_handle> context_persistent_scope::try_create_raw_buffer(is
                                                                               allocation_info const& alloc)
 {
     CC_ASSERT(alloc.scope == lifetime_scope::persistent, "persistent scope requires a persistent allocation");
+    _ctx._stats.add(stat::buffers_created);
     return _ctx.try_create_raw_buffer(size_in_bytes, usage, alloc);
+}
+
+raw_buffer_handle context_persistent_scope::create_raw_buffer_from_pin(cc::pinned_data<byte const> bytes,
+                                                                       buffer_usages usage,
+                                                                       allocation_info const& alloc)
+{
+    auto buffer = create_raw_buffer(bytes.size(), usage | buffer_usage::copy_dst, alloc);
+    _ctx.upload.bytes_to_buffer(buffer, cc::move(bytes));
+    return buffer;
 }
 
 // textures
@@ -45,6 +58,12 @@ cc::result<raw_texture_handle> context_persistent_scope::try_create_raw_texture(
                                                                                 allocation_info const& alloc)
 {
     CC_ASSERT(alloc.scope == lifetime_scope::persistent, "persistent scope requires a persistent allocation");
+    if (auto unsupported = impl::find_unsupported_texture(_ctx.supports(feature::extended_image_formats), desc);
+        unsupported.has_value())
+        return cc::error(cc::move(unsupported.value()));
+    if (auto error = desc.unaligned_block_error(_ctx.supports(feature::unaligned_block_compression)); !error.empty())
+        return cc::error(cc::move(error));
+    _ctx._stats.add(stat::textures_created);
     return _ctx.try_create_raw_texture(desc, alloc);
 }
 
@@ -85,6 +104,12 @@ cc::result<binding_group_handle> context_persistent_scope::try_create_binding_gr
                                                                                     cc::span<named_view const> views,
                                                                                     cc::span<named_sampler const> samplers)
 {
+    CC_ASSERT(layout != nullptr, "binding_group requires a binding_group_layout");
+    if (auto unsupported
+        = impl::find_unsupported_view(_ctx.supports(feature::float32_filtering), layout->bindings(), views);
+        unsupported.has_value())
+        return cc::error(cc::move(unsupported.value()));
+    _ctx._stats.add(stat::binding_groups_created);
     return _ctx.try_create_binding_group(cc::move(layout), views, samplers, lifetime_scope::persistent);
 }
 
@@ -104,6 +129,12 @@ cc::result<binding_group_handle> context_persistent_scope::try_create_binding_gr
                                                                                     cc::span<slotted_view const> views,
                                                                                     cc::span<named_sampler const> samplers)
 {
+    CC_ASSERT(layout != nullptr, "binding_group requires a binding_group_layout");
+    if (auto unsupported
+        = impl::find_unsupported_view(_ctx.supports(feature::float32_filtering), layout->bindings(), views);
+        unsupported.has_value())
+        return cc::error(cc::move(unsupported.value()));
+    _ctx._stats.add(stat::binding_groups_created);
     return _ctx.try_create_binding_group(cc::move(layout), views, samplers, lifetime_scope::persistent);
 }
 
@@ -120,19 +151,22 @@ staging_binding_group_handle context_persistent_scope::create_staging_binding_gr
 cc::result<staging_binding_group_handle> context_persistent_scope::try_create_staging_binding_group(
     binding_group_layout_handle layout)
 {
-    return _ctx.try_create_staging_binding_group(cc::move(layout), lifetime_scope::persistent);
+    auto created = _ctx.try_create_staging_binding_group(cc::move(layout), lifetime_scope::persistent);
+    if (created.has_value())
+        created.value()->_float32_filtering = _ctx.supports(feature::float32_filtering);
+    return created;
 }
 } // namespace sg
 
 sg::raw_view sg::context_persistent_scope::implicit_constants(cc::vector<byte> block)
 {
-    // A uniform block is read in rows of 16 bytes, and a buffer holding one is sized in 256-byte units on dx12.
+    // A constants block is read in rows of 16 bytes, and a buffer holding one is sized in 256-byte units on dx12.
     auto const view_size = cc::align_up(block.size(), isize(16));
-    auto const raw = create_raw_buffer(cc::align_up(view_size, uniform_buffer_offset_alignment),
-                                       buffer_usage::uniform_buffer | buffer_usage::copy_dst);
+    auto const raw = create_raw_buffer(cc::align_up(view_size, constants_buffer_offset_alignment),
+                                       buffer_usage::constants_buffer | buffer_usage::copy_dst);
     _ctx.upload.bytes_to_buffer(raw, cc::make_pinned_data(cc::move(block)));
-    return raw_buffer_view{.access = view_class::uniform,
-                           .shape = view_shape::uniform_block,
+    return raw_buffer_view{.bound_as = view_class::constants,
+                           .shape = view_shape::constants_block,
                            .buffer = raw,
                            .offset_in_bytes = 0,
                            .size_in_bytes = view_size};

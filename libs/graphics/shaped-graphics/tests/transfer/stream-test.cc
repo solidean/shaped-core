@@ -633,8 +633,8 @@ ASYNC_INVOCABLE_TEST("sg stream - a fresh texture resting elsewhere is streamed 
     desc.dimension = sg::texture_dimension::d2;
     desc.width = 16;
     desc.height = 16;
-    desc.usage = sg::texture_usage::readonly_texture | sg::texture_usage::copy_src | sg::texture_usage::copy_dst;
-    desc.initial_layout = sg::texture_layout::shader_readonly;
+    desc.usage = sg::texture_usage::texture | sg::texture_usage::copy_src | sg::texture_usage::copy_dst;
+    desc.initial_layout = sg::texture_layout::shader_texture;
     auto tex = c.persistent.create_raw_texture(desc);
     REQUIRE(tex != nullptr);
 
@@ -709,6 +709,16 @@ ASYNC_INVOCABLE_TEST("sg stream - a compressed texture with a partial last block
     desc.width = 16;
     desc.height = 10;
     desc.usage = sg::texture_usage::copy_src | sg::texture_usage::copy_dst;
+
+    // WebGPU core has no such texture at all, so there sg refuses it by name rather than handing Dawn one to reject.
+    // A loader asks the description first; creating one anyway throws.
+    if (!c.supports(sg::feature::unaligned_block_compression))
+    {
+        CHECK(desc.unaligned_block_error(false).contains("unaligned_block_compression"));
+        CHECK_THROWS(c.persistent.create_raw_texture(desc));
+        co_return;
+    }
+
     auto tex = c.persistent.create_raw_texture(desc);
     REQUIRE(tex != nullptr);
 

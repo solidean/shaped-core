@@ -1,8 +1,10 @@
 // Raster recording for the webgpu backend: the rendering scope, its reopen around copies, and draws.
 
 #include <clean-core/common/assert.hh>
+#include <shaped-graphics/backends/webgpu/webgpu_binding_group.hh>
 #include <shaped-graphics/backends/webgpu/webgpu_context.hh>
 #include <shaped-graphics/backends/webgpu/webgpu_format.hh>
+#include <shaped-graphics/barrier/access_inference.hh>
 
 namespace sg::backend::webgpu
 {
@@ -86,7 +88,12 @@ void webgpu_command_list::raster_begin_rendering(sg::rendering_info const& info)
     _blend_constants = WGPUColor{0, 0, 0, 0};
     _vertex_buffers.clear();
     _index_buffer = nullptr;
+    _index_resource = nullptr;
     _raster = bound_state();
+    _raster_group_objects.clear();
+    _raster_footprint = nullptr;
+    _pass_reads.clear();
+    _pass_writes.clear();
 
     _in_rendering_scope = true;
 
@@ -102,6 +109,7 @@ void webgpu_command_list::open_render_pass(bool reopen)
 
     if (reopen)
     {
+        _stats.add(sg::stat::render_pass_splits);
         for (auto& a : _color_attachments)
             a.attachment.loadOp = WGPULoadOp_Load;
         if (_has_depth)
@@ -156,7 +164,12 @@ void webgpu_command_list::raster_end_rendering()
     _has_depth = false;
     _vertex_buffers.clear();
     _index_buffer = nullptr;
+    _index_resource = nullptr;
     _raster = bound_state();
+    _raster_group_objects.clear();
+    _raster_footprint = nullptr;
+    _pass_reads.clear();
+    _pass_writes.clear();
 }
 
 void webgpu_command_list::apply_raster_state()
@@ -212,8 +225,12 @@ void webgpu_command_list::raster_bind_vertex_buffers(int first_slot, cc::span<sg
         CC_ASSERT(buffer != nullptr, "vertex buffer is not a webgpu buffer");
         touch(v.buffer);
         auto& binding = _vertex_buffers[first_slot + i];
-        binding
-            = {.buffer = buffer->raw(), .offset = u64(v.offset_in_bytes), .size = to_wgpu_range_size(v.size_in_bytes)};
+        binding = {
+            .buffer = buffer->raw(),
+            .offset = u64(v.offset_in_bytes),
+            .size = to_wgpu_range_size(v.size_in_bytes),
+            .resource = v.buffer.get(),
+        };
         if (_render_pass)
             wgpuRenderPassEncoderSetVertexBuffer(render_pass(), u32(first_slot + i), binding.buffer, binding.offset,
                                                  binding.size);
@@ -225,10 +242,15 @@ void webgpu_command_list::raster_bind_index_buffer(sg::index_buffer_view const& 
     CC_ASSERT(_in_rendering_scope, "bind_index_buffer is only valid inside a rendering scope");
     auto const* buffer = dynamic_cast<webgpu_buffer const*>(view.buffer.get());
     CC_ASSERT(buffer != nullptr, "index buffer is not a webgpu buffer");
+    CC_ASSERT(view.offset_in_bytes % sg::index_buffer_offset_alignment == 0,
+              "an index_buffer_view's offset must be 4-byte aligned — see sg::index_buffer_offset_alignment");
     touch(view.buffer);
     _index_buffer = buffer->raw();
+    _index_resource = view.buffer.get();
     _index_format = view.format == sg::index_format::uint16 ? WGPUIndexFormat_Uint16 : WGPUIndexFormat_Uint32;
     _index_offset = u64(view.offset_in_bytes);
+    _sg_index_format = view.format;
+    _index_view_offset_in_bytes = view.offset_in_bytes;
     _index_size = to_wgpu_range_size(view.size_in_bytes);
     if (_render_pass)
         wgpuRenderPassEncoderSetIndexBuffer(render_pass(), _index_buffer, _index_format, _index_offset, _index_size);
@@ -274,9 +296,61 @@ void webgpu_command_list::raster_set_blend_constants(tg::vec4f constants)
         wgpuRenderPassEncoderSetBlendConstant(render_pass(), &_blend_constants);
 }
 
+void webgpu_command_list::order_draw_within_pass(bool indexed)
+{
+    auto must_split = false;
+    auto reads = cc::vector<void const*>();
+    auto writes = cc::vector<void const*>();
+    auto const note = [&](void const* resource, bool is_write)
+    {
+        for (auto const* written : _pass_writes)
+            must_split |= written == resource;
+        if (is_write)
+            for (auto const* read : _pass_reads)
+                must_split |= read == resource;
+        (is_write ? writes : reads).push_back(resource);
+    };
+
+    auto const stages = sg::pipeline_stage_flag::vertex | sg::pipeline_stage_flag::fragment;
+    for (auto group = 0; group < int(_raster_group_objects.size()); ++group)
+    {
+        auto const* const bound_group = _raster_group_objects[group];
+        if (bound_group == nullptr)
+            continue;
+        for (auto const& r : bound_group->bound)
+        {
+            auto const a = sg::access_at(_raster_footprint, group, r.binding, r.bound_as, stages);
+            if (a.has_value())
+                note(r.resource, sg::is_unordered_write(a.value().access));
+        }
+    }
+    for (auto const& v : _vertex_buffers)
+        if (v.resource != nullptr)
+            note(v.resource, false);
+    if (indexed && _index_resource != nullptr)
+        note(_index_resource, false);
+
+    if (must_split && _render_pass)
+        end_open_pass(); // apply_raster_state reopens it, which is what orders this draw after the earlier ones
+
+    // Recorded after the split, so the reopened pass orders what follows against this draw.
+    auto const add_once = [](cc::vector<void const*>& into, void const* resource)
+    {
+        for (auto const* known : into)
+            if (known == resource)
+                return;
+        into.push_back(resource);
+    };
+    for (auto const* r : reads)
+        add_once(_pass_reads, r);
+    for (auto const* w : writes)
+        add_once(_pass_writes, w);
+}
+
 void webgpu_command_list::raster_draw(sg::draw_config const& config)
 {
     CC_ASSERT(_in_rendering_scope, "draw is only valid inside a rendering scope");
+    order_draw_within_pass(false);
     apply_raster_state();
     wgpuRenderPassEncoderDraw(render_pass(), u32(config.vertex_range.size), u32(config.instance_range.size),
                               u32(config.vertex_range.offset), u32(config.instance_range.offset));
@@ -286,6 +360,16 @@ void webgpu_command_list::raster_draw_indexed(sg::draw_indexed_config const& con
 {
     CC_ASSERT(_in_rendering_scope, "draw_indexed is only valid inside a rendering scope");
     CC_ASSERT(_index_buffer != nullptr, "draw_indexed needs a bound index buffer");
+
+    // **An index fetch starts on a 4-byte boundary**, and `index_range.offset` counts indices rather than bytes — so
+    // an aligned view is not enough on its own.
+    // Metal is the backend that cannot do otherwise, and it answers a misaligned fetch by drawing part of the mesh
+    // with no error and no validation message; the rule is sg's so that it fails here too.
+    CC_ASSERT(sg::is_aligned_index_fetch(_sg_index_format, _index_view_offset_in_bytes, config.index_range.offset),
+              "an odd first index into a 16-bit index buffer starts the fetch off a 4-byte boundary. Use an even "
+              "first index, or 32-bit indices — sg::is_aligned_index_fetch answers it without asserting");
+
+    order_draw_within_pass(true);
     apply_raster_state();
     wgpuRenderPassEncoderDrawIndexed(render_pass(), u32(config.index_range.size), u32(config.instance_range.size),
                                      u32(config.index_range.offset), config.vertex_offset,

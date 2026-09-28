@@ -128,7 +128,14 @@ public:
     /// Idempotent; the context calls it before it releases the device.
     void shutdown();
 
+    /// Where the time a wait spends blocked on the GPU is counted; null counts nothing.
+    void count_waits_into(sg::impl::stat_totals* totals) { _totals = totals; }
+
 private:
+    /// `wait_for_value`, counted into `_totals`.
+    void wait_counted(MTL::SharedEvent* event, u64 value);
+
+    sg::impl::stat_totals* _totals = nullptr;
     MTL::Device* _device = nullptr;
     MTL4::CommandQueue* _queue = nullptr;
     MTL::SharedEvent* _epoch_event = nullptr;

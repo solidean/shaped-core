@@ -8,6 +8,8 @@ that silently does not discharge, and the coverage report would report progress 
 from __future__ import annotations
 
 import argparse
+import re
+from pathlib import Path
 
 import tools.review as review
 
@@ -38,20 +40,67 @@ def mojibake_warnings(entry) -> list[str]:
     return out
 
 
+def orphan_answer_warnings(entry, answers) -> list[str]:
+    """One warning per answer whose ask is gone, which `delta` will move aside.
+
+    An acknowledgement is not one: it stops being offered once a later round asks something, and `reconcile` keeps
+    its answer, so warning about it contradicts what the next `delta` does.
+    """
+    return [
+        f"{entry.slug}: an answer to {name!r} has no ask; `delta` will orphan it"
+        for name in sorted(answers.answers)
+        if entry.ask(name) is None and not review.is_ack_name(name)
+    ]
+
+
 def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     p = sub.add_parser(NAME, help="Check every entry parses and every reference resolves")
     a.review_name(p)
+    p.add_argument("entries", nargs="*", default=[], metavar="ENTRY",
+                   help="check only these: a slug, a number (`045`), or a number range (`200..299`, either end open)")
     p.add_argument("--quiet", action="store_true", help="report nothing when everything is fine")
     return p
 
 
+_RANGE_RE = re.compile(r"^(\d*)\.\.(\d*)$")
+
+
+def select(files: list[Path], selectors: list[str]) -> tuple[list[Path], list[str]]:
+    """(the entry files the selectors name, in navigation order; the selectors that named none).
+
+    A range compares the numeric prefix, so `200..299` is a writer's block of numbers whatever the slugs say.
+    """
+    chosen: set[Path] = set()
+    unmatched: list[str] = []
+    for selector in selectors:
+        match = _RANGE_RE.match(selector)
+        if match:
+            lo = int(match.group(1)) if match.group(1) else None
+            hi = int(match.group(2)) if match.group(2) else None
+            numbers = [(f, f.stem.split("-")[0]) for f in files]
+            found = [f for f, n in numbers
+                     if n.isdigit() and (lo is None or int(n) >= lo) and (hi is None or int(n) <= hi)]
+        else:
+            found = [f for f in files if f.stem == selector] or [f for f in files if f.stem.split("-")[0] == selector]
+        if not found:
+            unmatched.append(selector)
+        chosen.update(found)
+    return [f for f in files if f in chosen], unmatched
+
+
 def run(args: argparse.Namespace, ctx: Context) -> None:
     paths, cfg = ctx.open(args.name)
-    entries = ctx.entries(paths)
+    files = paths.entry_files()
+    if args.entries:
+        # Only the selected files are parsed, so another writer's entry that is broken mid-edit does not stop this check.
+        files, unmatched = select(files, args.entries)
+        if unmatched:
+            ctx.die(f"no entry matches {', '.join(unmatched)} — a slug, a number, or a range like `200..299`")
+    # Every entry that does not parse is a problem of its own, so one broken file does not hide the next.
+    entries, broken = ctx.entries_tolerant(paths, files)
 
-    problems: list[str] = []
+    problems: list[str] = [str(e) for e in broken]
     warnings: list[str] = []
-    thin = False
 
     if cfg.has_changeset:
         problems.extend(ctx.check_references(paths, entries))
@@ -65,28 +114,24 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
     problems.extend(review.glossary_problems(entries))
 
     for entry in entries:
-        warnings.extend(review.word_warnings(entry))
         warnings.extend(mojibake_warnings(entry))
         answers = ctx.answers(paths, entry)
-        # The tiers exist so an entry can be answered on its own, so they are owed while it is still waiting for an answer.
-        # An entry whose asks are all finalized will not be answered again, and adding tiers to it would edit a question
-        # the maintainer has already read — which is the thing the immutability check exists to prevent.
-        awaiting = any(a is None or a.tentative for a in (answers.get(b.name) for b in entry.asks))
-        if awaiting and review.requires_context(entry.group):
-            absent = review.missing_context_tiers(entry)
-            if absent:
-                thin = True
-                problems.append(f"{entry.slug}: no {', '.join(absent)}")
         open_asks = {b.name for b in entry.asks if (answers.get(b.name) is None or answers.get(b.name).tentative)}
-        if review.requires_context(entry.group):
+        if not review.is_orientation(entry.group):
             for round_number in review.missing_intro_rounds(entry, open_asks):
                 warnings.append(
                     f"{entry.slug}: round {round_number} asks something with no `intro` — open it with what the entry "
                     f"is about and the options, before any fact or trade-off"
                 )
+        for block, line, key in review.attributes_read_as_prose(entry):
+            if block.name in open_asks:
+                warnings.append(
+                    f"{entry.slug}:{line}: ask {block.name!r} has a blank line above `{key}:`, so it is prose and does "
+                    f"nothing — delete the blank line, or reword a real sentence so it does not open with `{key}:`"
+                )
         # A follow-up belongs under the ask it follows, where the answer it responds to is on screen above it.
         # Naming an ask in another entry usually means a new entry was opened where a round should have been appended,
-        # which splits one thread across two files and makes the second restate the first's context.
+        # which splits one thread across two files and makes the second restate what the first established.
         for block in entry.asks:
             target = block.attrs.get("follows", "")
             if not target or entry.ask(target) is not None:
@@ -107,9 +152,7 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
                     f"a follow-up usually belongs appended to the entry it follows"
                 )
 
-        for name in sorted(answers.answers):
-            if entry.ask(name) is None:
-                warnings.append(f"{entry.slug}: an answer to {name!r} has no ask; `delta` will orphan it")
+        warnings.extend(orphan_answer_warnings(entry, answers))
 
     # A comment is written expecting an answer, so the agent may not hand back another round while one is unanswered.
     # The gate sits here rather than on the maintainer's send: they wrote the remark, and blocking their own send on it
@@ -120,6 +163,10 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
             f"append a block with `addresses: {comment.id}`, which a block that declines to act also satisfies"
         )
 
+    total = len(paths.entry_files())
+    # A broken entry was still checked, so it counts toward what the problems were found across.
+    checked = len(entries) + len(broken)
+    scope = f"{checked} of {total} entries" if args.entries else f"{checked} entries"
     groups = set(review.groups_for(cfg.goals))
     unplaced = sorted({e.group for e in entries} - groups)
     if unplaced:
@@ -133,22 +180,11 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
     for problem in problems:
         print(review.console.red(f"error: {problem}"))
 
-    if thin:
-        # Said once rather than per entry: a rule repeated twelve times reads as twelve rules.
-        print(review.console.dim(
-            f"\nEvery entry outside {', '.join(sorted(review.CONTEXT_EXEMPT_GROUPS))} carries all three context tiers"
-            f" while it is still waiting for an answer, so it can be answered on its own, out of order."
-        ))
-        print(review.console.dim(
-            "Scope each tier to that entry's own subject rather than to the change as a whole,"
-            " or every cold tier restates the same paragraph and nobody opens one again."
-        ))
-
     if problems:
-        print(review.console.red(f"\n{len(problems)} problem(s) across {len(entries)} entries"))
+        print(review.console.red(f"\n{len(problems)} problem(s) across {scope}"))
         raise SystemExit(1)
     if not args.quiet:
         # A design review has no ledger, so `check_references` never ran — claiming references resolve would be
         # reporting a check that did not happen.
         changes = ", every change id resolves" if cfg.has_changeset else ""
-        print(review.console.green(f"{len(entries)} entries parse, every file reference resolves{changes}"))
+        print(review.console.green(f"{scope} parse, every file reference resolves{changes}"))

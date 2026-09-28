@@ -64,6 +64,7 @@ cc::optional<u64> dx12_upload_inline_system::try_reserve_span(isize total)
 dx12_upload_allocation dx12_upload_inline_system::reserve_outside_ring(isize total)
 {
     warn_outside_ring(total);
+    _ctx.stat_totals().add(sg::stat::bytes_inline_overflow, total);
 
     auto staging = create_mapped_ring_buffer(_ctx._device.Get(), D3D12_HEAP_TYPE_UPLOAD,
                                              D3D12_RESOURCE_STATE_GENERIC_READ, total);

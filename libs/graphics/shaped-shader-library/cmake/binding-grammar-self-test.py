@@ -9,6 +9,7 @@
 tests/data/binding-corpus.txt is one file of HLSL snippets and the parse each must produce.
 Both halves of the pass read it -- this script, and shaped-shader-library-test's own corpus test.
 So a grammar case is added once rather than twice, and the two halves cannot drift on a case anybody thought of.
+It also compares the two halves' image-format lists as sets, which no corpus case can do for a format it never names.
 
 Run by hand as `uv run libs/graphics/shaped-shader-library/cmake/binding-grammar-self-test.py`, and by
 `uv run dev.py check` as the `shader-grammar` gate.
@@ -16,14 +17,19 @@ Run by hand as `uv run libs/graphics/shaped-shader-library/cmake/binding-grammar
 
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from binding_grammar import BindingError, parse_binding_groups  # noqa: E402
+from binding_grammar import IMAGE_FORMATS, BindingError, parse_binding_groups  # noqa: E402
 
 CORPUS = Path(__file__).parent.parent / "tests" / "data" / "binding-corpus.txt"
+
+# The C++ half's image-format table, which IMAGE_FORMATS must name exactly.
+IMAGE_FORMAT_TABLE = (Path(__file__).parent.parent / "src" / "shaped-shader-library" / "binding" / "impl"
+                        / "hlsl_image_format.cc")
 
 
 # sg::sampler's own field order, and its defaults -- what a `static` line is rendered against.
@@ -129,7 +135,7 @@ def read_corpus(text: str) -> list[Case]:
             if current.open_block == "vertex_input":
                 current.vertex_inputs[-1][1].append(" ".join(words))
                 continue
-            binding = {"name": words[0], "count": 1, "dim": None}
+            binding = {"name": words[0], "count": 1, "access": "read", "dim": None, "format": None}
             for word in words[1:]:
                 key, _, value = word.partition("=")
                 binding["index" if key == "index" else key] = int(value) if key in ("index", "count") else value
@@ -165,8 +171,9 @@ def check(case: Case) -> list[str]:
             problems.append(f"group '{name}' has {len(group.bindings)} binding(s), expected {len(expected)}")
             continue
         for binding, want in zip(group.bindings, expected):
-            got = (binding.name, binding.index, binding.count, binding.type, binding.dimension)
-            wanted = (want["name"], want["index"], want["count"], want["type"], want["dim"])
+            got = (binding.name, binding.index, binding.count, binding.type, binding.access, binding.dimension,
+                   binding.image_format)
+            wanted = (want["name"], want["index"], want["count"], want["type"], want["access"], want["dim"], want["format"])
             if got != wanted:
                 problems.append(f"binding {got}, expected {wanted}")
 
@@ -211,7 +218,28 @@ def check(case: Case) -> list[str]:
     return problems
 
 
+def image_format_problems() -> list[str]:
+    """Where the two halves' image-format lists differ, compared as sets.
+
+    The corpus reaches only the formats some case names, so a format added to one list alone would pass it.
+    """
+    table = re.findall(r'\{"(\w+)", sg::pixel_format::(\w+)', IMAGE_FORMAT_TABLE.read_text(encoding="utf-8"))
+    if len(table) < 10:
+        return [f"read only {len(table)} format(s) from {IMAGE_FORMAT_TABLE} -- the pattern is stale"]
+
+    problems = [f"'{name}' spells sg::pixel_format::{format}" for name, format in table if name != format]
+    cpp = {name for name, _ in table}
+    python = set(IMAGE_FORMATS)
+    problems += [f"'{name}' is in hlsl_image_format.cc and not in IMAGE_FORMATS" for name in sorted(cpp - python)]
+    problems += [f"'{name}' is in IMAGE_FORMATS and not in hlsl_image_format.cc" for name in sorted(python - cpp)]
+    return problems
+
+
 def main() -> int:
+    format_problems = image_format_problems()
+    for problem in format_problems:
+        print(f"[image formats] {problem}", file=sys.stderr)
+
     if not CORPUS.is_file():
         print(f"binding corpus not found at {CORPUS}", file=sys.stderr)
         return 1
@@ -232,6 +260,8 @@ def main() -> int:
 
     if failed:
         print(f"\n{failed} of {len(cases)} corpus case(s) failed", file=sys.stderr)
+        return 1
+    if format_problems:
         return 1
 
     print(f"binding grammar: {len(cases)} corpus case(s) OK")

@@ -5,12 +5,17 @@
 #include <clean-core/string/string.hh>
 #include <shaped-graphics-language/check/checked_module.hh>
 #include <shaped-graphics-language/emit/emit.hh>
+#include <shaped-graphics-language/emit/impl/memory_form.hh>
 
 /// Everything about one entry point that is decided before a line of text exists: what is declared, under which name, at which address.
 /// A writer reads the plan and the flat tree, and decides nothing but spelling.
 
 namespace sgl::emit::impl
 {
+/// How many groups an entry point may list besides its `@inline` binding, `sg::max_binding_groups`.
+/// sgl does not link sg, so the number is repeated here, and the pipeline layout sg builds is what it has to match.
+inline constexpr auto k_max_groups = 3;
+
 /// What a struct is to the entry point, which decides how its members are addressed.
 /// It comes from where the struct stands in the signature, never from the struct's own attribute.
 enum class struct_role : u8
@@ -35,7 +40,7 @@ struct planned_member
     bool is_position = false;
     /// The position among the members without `@position`; -1 on a `plain` struct and on the position itself.
     i32 location = -1;
-    /// The byte offset in an inline binding's block; -1 everywhere else.
+    /// The byte offset in a constant block; -1 everywhere else.
     i32 offset = -1;
 };
 
@@ -44,7 +49,10 @@ struct planned_struct
     check::type_id type = check::type_id::none;
     cc::string name;
     struct_role role = struct_role::plain;
+    /// Only the members a target writes: a void one holds nothing, so no target declares it (EMIT-106).
     cc::vector<planned_member> members;
+    /// Parallel to the type's members: the position in `members`, or -1 for a void member.
+    cc::vector<i32> member_of;
 };
 
 /// An enum the entry point mentions, whose every case is declared whether or not an arm names it (EMIT-77).
@@ -72,27 +80,32 @@ struct planned_constants
     /// A group's block is the first resource of its group, at slot 0; -1 for the `@inline` block, which takes no group.
     i32 group = -1;
     i32 slot = -1;
-    /// What HLSL declares the group as, as for a buffer.
-    cc::string group_name;
+    /// The block as its target has to declare it to reach SGL's offsets, named `block_name`; absent where it declares
+    /// the members as they are.
+    cc::optional<memory_form> form;
 };
 
-/// A `buffer[T]` member of a binding, which is a resource of its own rather than a field of a block.
+/// A resource member of a binding — a buffer, a texture, an image or a sampler — rather than a field of a block.
 /// Its address is the group its binding is listed at and the slot it takes among that binding's resources.
-struct planned_buffer
+struct planned_resource
 {
     check::symbol_id binding = check::symbol_id::none;
     /// A position in the binding's `members`.
     i32 member = -1;
     /// The global the shader reads and writes through, minted like any other name.
     cc::string name;
-    /// What the host binds the buffer by: `binding.member`, which no target can spell.
+    /// What the host binds the resource by: `binding.member`, which no target can spell.
     cc::string host_name;
+    /// The member's type, whose kind says which resource it is.
+    check::type_id type = check::type_id::none;
+    /// The element of a buffer; `none` for every other kind.
     check::type_id element = check::type_id::none;
     bool is_mut = false;
     i32 group = 0;
     i32 slot = 0;
-    /// What HLSL declares the group as, which is what slib's binding pass reads: `<binding>_bindings`.
-    cc::string group_name;
+    /// A buffer's element as its target has to declare it to reach SGL's stride and offsets; absent where the element
+    /// type as it is does.
+    cc::optional<memory_form> element_form;
 };
 
 struct plan
@@ -114,8 +127,8 @@ struct plan
     cc::optional<planned_constants> constants;
     /// The constant blocks of the entry point's groups, one per group with a plain member, in group order.
     cc::vector<planned_constants> group_blocks;
-    /// The buffers the entry point's bindings declare, in group then slot order.
-    cc::vector<planned_buffer> buffers;
+    /// The resources the entry point's bindings declare, in group then slot order.
+    cc::vector<planned_resource> resources;
     /// Parallel to `e.locals`.
     cc::vector<cc::string> locals;
     /// A compute entry point's parameter as the dispatch hands it over, unsigned, ahead of the `int3` the body reads;
@@ -125,19 +138,21 @@ struct plan
     check::name_mint names;
 };
 
-/// The position in `buffers` of the buffer `binding.member` names, or -1 where that member is no buffer.
-[[nodiscard]] i32 buffer_of(plan const& p, check::symbol_id binding, i32 member);
+/// The position in `resources` of the resource `binding.member` names, or -1 where that member is no resource.
+[[nodiscard]] i32 resource_of(plan const& p, check::symbol_id binding, i32 member);
 
 /// The block `binding` is read through: the `@inline` one, or its group's; null for a group with no plain member.
 [[nodiscard]] planned_constants const* block_of(plan const& p, check::symbol_id binding);
 
-/// The members of a binding that are values rather than buffers, which is every member of an `@inline` one.
+/// The members of a binding that are values rather than resources, which is every member of an `@inline` one.
 [[nodiscard]] cc::vector<check::member_info> plain_members_of(check::checked_module const& m,
                                                               check::binding_info const& b);
 
-/// The slot a group's first buffer takes: 1 behind a constant block, which takes 0, and 0 without one.
-[[nodiscard]] i32 first_buffer_slot(check::checked_module const& m, check::binding_info const& b);
+/// The slot a group's first resource takes: 1 behind a constant block, which takes 0, and 0 without one.
+[[nodiscard]] i32 first_resource_slot(check::checked_module const& m, check::binding_info const& b);
 
+/// How the target of `p` spells the builtin type named `name`, such as the texel of an image format.
+[[nodiscard]] cc::string_view builtin_spelling(plan const& p, cc::string_view name);
 /// The column of a builtin's record `t` reads; the two HLSL targets share one.
 [[nodiscard]] builtins::language language_of(target t);
 
@@ -157,7 +172,7 @@ void validate_edge_struct(check::checked_module const& m, check::type_id type, s
 /// What only a list can get wrong, an `@inline` binding that does not stand last, is `validate`'s.
 void validate_binding(check::checked_module const& m, check::symbol_id id, cc::vector<error>& errors);
 
-/// Where the members of an `@inline` block land, which is the same in every target or `validate_binding` refused it.
+/// Where the members of a constant block land, by HLSL's constant-buffer packing on every target (layout.hh).
 struct block_placement
 {
     /// Parallel to the members.
@@ -170,6 +185,9 @@ struct block_placement
 
 /// `members` must belong to a binding that passed `validate_binding`.
 [[nodiscard]] block_placement place_block(check::checked_module const& m, cc::span<check::member_info const> members);
+
+/// Every constant block and buffer element of `p`, as its target's text declares it.
+[[nodiscard]] cc::vector<emitted_layout> layouts_of(plan const& p);
 
 /// `e` must have passed `validate`.
 [[nodiscard]] plan make_plan(check::checked_module const& m, check::flat_entry_point const& e, target t);

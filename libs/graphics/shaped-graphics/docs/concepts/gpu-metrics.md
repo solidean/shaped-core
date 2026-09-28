@@ -30,10 +30,10 @@ the driver is paging.
 Draw usage against the budget; show the board size as a separate fact.
 
 ```cpp
-auto const& adapter = ctx.adapter();
+auto const& adapter = ctx.metrics.adapter();
 adapter.dedicated_video_memory_bytes;              // optional<i64> — the board; 0 is real on an integrated GPU
 
-if (auto const memory = ctx.query_gpu_memory(); memory.has_value())
+if (auto const memory = ctx.metrics.query_gpu_memory(); memory.has_value())
 {
     memory.value().budget_bytes;                   // what this process may use now
     memory.value().current_usage_bytes;            // what it is using against that
@@ -59,7 +59,7 @@ A `query_gpu_load()` returning a percentage could only work by keeping a hidden 
 `cc::cpu_load_sampler` exists to avoid — so the shapes match:
 
 ```cpp
-ctx.read_gpu_counters();                           // result<gpu_counters> — monotone busy_secs per engine class
+ctx.metrics.read_gpu_counters();                   // result<gpu_counters> — monotone busy_secs per engine class
 auto sampler = sg::gpu_load_sampler(ctx);          // holds its own baseline; borrows the context
 auto const load = sampler.sample();                // result<gpu_load>
 load.value().total;                                // f32 in [0,1] — the BUSIEST engine

@@ -71,7 +71,7 @@ sg::routine_outcome blit_routine::execute(sg::rendering_scope& scope, sg::textur
         return sg::routine_outcome::declined;
 
     auto const group = cmd.context().transient.create_binding_group(
-        self->_group_layout, {{.name = "source_texture", .view = src.as_readonly_view()}},
+        self->_group_layout, {{.name = "source_texture", .view = src.as_texture_view()}},
         {{.name = "linear_sampler",
           .sampler = {.min_filter = sg::sampler_filter::linear,
                       .mag_filter = sg::sampler_filter::linear,

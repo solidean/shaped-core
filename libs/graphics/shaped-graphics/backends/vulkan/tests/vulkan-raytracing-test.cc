@@ -31,12 +31,7 @@ namespace vulkan = sg::backend::vulkan;
 sg::raw_buffer_handle make_triangle_vertices(sg::context& ctx)
 {
     float const verts[9] = {0, 0, 0, 1, 0, 0, 0, 1, 0};
-    auto const buf = ctx.persistent.create_raw_buffer(
-        sizeof(verts), sg::buffer_usage::accel_structure_build_input | sg::buffer_usage::copy_dst);
-    auto cmd = ctx.create_command_list();
-    cmd->upload.data_to_buffer(buf, cc::span<float const>(verts, 9));
-    ctx.submit_command_list(cc::move(cmd));
-    return buf;
+    return ctx.persistent.create_buffer_from_data(verts, sg::buffer_usage::accel_structure_build_input).raw();
 }
 } // namespace
 
@@ -94,13 +89,7 @@ ASYNC_INVOCABLE_TEST("sg vulkan - builds a procedural (aabb) blas", (vulkan::vul
         SKIP("no ray tracing on this device");
 
     float const aabb[6] = {0, 0, 0, 1, 1, 1};
-    auto const buf = ctx.persistent.create_raw_buffer(
-        sizeof(aabb), sg::buffer_usage::accel_structure_build_input | sg::buffer_usage::copy_dst);
-    {
-        auto up = ctx.create_command_list();
-        up->upload.data_to_buffer(buf, cc::span<float const>(aabb, 6));
-        ctx.submit_command_list(cc::move(up));
-    }
+    auto const buf = ctx.persistent.create_buffer_from_data(aabb, sg::buffer_usage::accel_structure_build_input).raw();
 
     sg::blas_aabbs geo;
     geo.aabbs = buf;
@@ -167,7 +156,12 @@ ASYNC_INVOCABLE_TEST("sg vulkan - traces rays against a tlas", (vulkan::vulkan_c
 
     auto bindings = cc::vector<sg::binding>{
         {.name = "Scene", .group_index = 0, .index = 0, .count = 1, .type = sg::binding_type::acceleration_structure},
-        {.name = "Output", .group_index = 0, .index = 1, .count = 1, .type = sg::binding_type::readwrite_structured_buffer}};
+        {.name = "Output",
+         .group_index = 0,
+         .index = 1,
+         .count = 1,
+         .type = sg::binding_type::buffer,
+         .access = sg::access_mode::read_write}};
     auto group_layout = ctx.cached.acquire_binding_group_layout(bindings);
     auto pipeline_layout = ctx.cached.acquire_pipeline_layout(sg::pipeline_layout_description{.groups = {group_layout}});
 

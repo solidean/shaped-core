@@ -42,7 +42,8 @@ sg::compiled_shader make_double_shader()
         .space = 0,
         .index = 0,
         .count = 1,
-        .type = sg::binding_type::readwrite_structured_buffer,
+        .type = sg::binding_type::buffer,
+        .access = sg::access_mode::read_write,
     });
     return shader;
 }
@@ -226,7 +227,7 @@ INVOCABLE_TEST("sg reports which adapter it is running on", (dx12::dx12_context_
     REQUIRE(handle != nullptr);
     sg::context& ctx = *handle;
 
-    auto const& adapter = ctx.adapter();
+    auto const& adapter = ctx.metrics.adapter();
     CHECK(!adapter.name.empty());
     CHECK(adapter.vendor_id != 0);
 }

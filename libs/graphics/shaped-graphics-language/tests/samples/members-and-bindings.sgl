@@ -62,7 +62,7 @@ struct light:
 const max_bounces = 4
 type radiance_sample = (vec3, float)
 
-fun pulse(base: float){timing} -> float => base * (1.0 + sin timing.phase)
+fun pulse(base: float){timing} => base * (1.0 + sin timing.phase)
 
 fun accumulate(lights: span[light], p: pos3, t: float) -> vec3:
     // a caller supplies a library's binding locally, and a property may reach a local variable
@@ -71,7 +71,7 @@ fun accumulate(lights: span[light], p: pos3, t: float) -> vec3:
         phase => t * 0.5
 
     // a nested function may use the surrounding locals, since everything inlines
-    fun weight(l: light) -> float => l.kind.attenuation(distance(l.position, p))
+    fun weight(l: light) => l.kind.attenuation(distance(l.position, p))
 
     let contribution = l => l.radiance * weight(l)
 

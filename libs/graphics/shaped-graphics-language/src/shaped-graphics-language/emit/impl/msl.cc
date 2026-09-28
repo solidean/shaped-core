@@ -10,10 +10,7 @@ using namespace sgl::emit;
 using namespace sgl::emit::impl;
 
 /// The buffer index of the inline constants, in every stage that reads them.
-///
-/// sg's metal backend binds group N at buffer index N, and its argument table has `sg::max_binding_groups + 1` = 4 slots.
-/// So 4 is the first index no binding group can take.
-/// The backend does not bind inline constants yet, so this number is a proposal it has to adopt, not one it was read from.
+/// It must equal sg's metal `k_inline_constants_buffer_index`, which sgl cannot include.
 constexpr auto k_inline_constants_buffer = 4;
 
 class msl_dialect_t final : public dialect
@@ -76,9 +73,12 @@ public:
         out.appendf("constant int {} = {};\n", name, value);
     }
 
-    /// A Metal buffer is a parameter of the entry point rather than a global, so `emit_entry_point` declines
-    /// before a line is written; nothing reaches here.
-    void write_group(cc::string&, plan const&, planned_constants const*, cc::span<planned_buffer const>) const override
+    /// MSL declines every group (EMIT-89), so nothing asks for a resource's spelling.
+    [[nodiscard]] cc::string resource_text(plan const&, type_id) const override { return {}; }
+
+    /// A Metal buffer is a parameter of the entry point rather than a global, so MSL declines every group (EMIT-89).
+    /// Nothing reaches here.
+    void write_group(cc::string&, plan const&, planned_constants const*, cc::span<planned_resource const>) const override
     {
     }
 
@@ -87,7 +87,6 @@ public:
         out += "#include <metal_stdlib>\nusing namespace metal;\n\n";
         write_enum_constants(out, p, *this);
         write_buffers(out, p, *this);
-
         for (auto const& s : p.structs)
         {
             out.appendf("struct {}\n{{\n", s.name);
@@ -100,8 +99,13 @@ public:
             return;
         auto const& c = p.constants.value();
         out.appendf("struct {}\n{{\n", c.block_name);
-        for (auto const& member : c.members)
-            write_member(out, nullptr, member, p);
+        // Its memory form where MSL's own rule would place a member elsewhere than SGL (memory_form.hh).
+        if (c.form.has_value())
+            for (auto const& f : c.form.value().fields)
+                out.appendf("{}{} {};\n", k_indent, f.type, f.name);
+        else
+            for (auto const& member : c.members)
+                write_member(out, nullptr, member, p);
         out += "};\n\n";
     }
 

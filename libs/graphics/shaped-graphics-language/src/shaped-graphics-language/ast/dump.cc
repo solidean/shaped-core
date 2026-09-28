@@ -82,6 +82,8 @@ struct dumper
             out += "..";
         if (!a.name.empty())
         {
+            if (a.is_dotted_name)
+                out += ".";
             out += file.text_of(a.name);
             out += "=";
         }
@@ -109,7 +111,7 @@ struct dumper
             out += " mut";
         if (!f.name.empty())
         {
-            out += " ";
+            out += f.is_named_only ? " ." : " ";
             out += file.text_of(f.name);
         }
         if (is_valid(f.type))
@@ -209,7 +211,7 @@ struct dumper
                 out += file.text_of(file.at(e.form).where);
             },
             [&](name const& n) { out += file.text_of(n.where); }, [&](self_ref const&) { out += "self"; },
-            [&](wildcard const&) { out += "_"; },
+            [&](void_ref const&) { out += "void"; }, [&](wildcard const&) { out += "_"; },
             [&](leading_dot const& n)
             {
                 out += ".";
@@ -527,10 +529,29 @@ struct dumper
                     out += file.text_of(n.alias);
                 }
             },
+            [&](require_decl const& n)
+            {
+                open("require");
+                auto is_first = true;
+                for (auto const feature : ast.at(n.features))
+                {
+                    if (!is_first)
+                        out += " ";
+                    is_first = false;
+                    dump_expr(feature, depth);
+                }
+            },
             [&](fun_decl const& n)
             {
                 open("fun");
-                name_or_missing(n.name);
+                if (!n.extended_type.empty())
+                {
+                    out += file.text_of(n.extended_type);
+                    out += ".";
+                    out += file.text_of(n.name);
+                }
+                else
+                    name_or_missing(n.name);
                 if (!n.type_parameters.empty())
                 {
                     out += " ";
@@ -603,12 +624,42 @@ struct dumper
                     dump_argument(setting, depth + 1);
                 }
             },
+            [&](pipeline_decl const& n)
+            {
+                open(n.is_short_form ? "pipeline:short" : "pipeline");
+                // No name is valid here, unlike every other declaration's missing one.
+                out += n.name.empty() ? cc::string_view("<unnamed>") : file.text_of(n.name);
+                if (n.is_short_form)
+                    dump_arguments(n.stages, depth);
+                for (auto const& s : ast.at(n.settings))
+                {
+                    new_line(depth + 1);
+                    // A line that is no setting at all has only its `invalid` value.
+                    if (!is_valid(s.path))
+                    {
+                        dump_expr(s.value, depth + 1);
+                        continue;
+                    }
+                    out += "(setting ";
+                    dump_expr(s.path, depth + 1);
+                    out += " = ";
+                    dump_expr(s.value, depth + 1);
+                    out += ")";
+                }
+            },
             [&](notation_decl const& n)
             {
                 open("notation");
                 dump_expr(n.pattern, depth);
                 out += " => ";
                 dump_expr(n.replacement, depth);
+            },
+            [&](test_decl const& n)
+            {
+                // A test has no name, so nothing stands between the tag and its body.
+                out += "(test";
+                attributes(d.attributes);
+                dump_body(n.body, depth);
             },
             [&](field_decl const& n)
             {
@@ -618,7 +669,19 @@ struct dumper
             [&](property_decl const& n)
             {
                 open("property");
-                name_or_missing(n.name);
+                if (!n.extended_type.empty())
+                {
+                    out += file.text_of(n.extended_type);
+                    out += ".";
+                    out += file.text_of(n.name);
+                }
+                else
+                    name_or_missing(n.name);
+                if (is_valid(n.return_type))
+                {
+                    out += " -> ";
+                    dump_expr(n.return_type, depth);
+                }
                 dump_body(n.body, depth);
             },
             [&](enum_case_decl const& n)

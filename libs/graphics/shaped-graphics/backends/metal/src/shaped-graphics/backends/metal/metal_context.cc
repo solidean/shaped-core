@@ -11,9 +11,6 @@
 
 #include <thread>
 
-// Seams the milestone order has not reached; see libs/graphics/shaped-graphics/docs/writing-a-backend.md.
-#define SG_METAL_UNIMPLEMENTED(what) CC_UNREACHABLE(what " is not implemented in the metal backend yet")
-
 namespace sg::backend::metal
 {
 CC_REC_DEFINE_DOMAIN(g_rec_domain, "sg.metal");
@@ -48,6 +45,9 @@ cc::result<cc::unit> metal_context::create_systems(isize upload_bytes, isize dow
 
     CC_RETURN_IF_ERROR(_upload_ring.create(_device, upload_bytes, "sg inline upload ring", "upload"));
     CC_RETURN_IF_ERROR(_download_ring.create(_device, download_bytes, "sg inline download ring", "download"));
+    _upload_ring.count_overflow_into(&_stats);
+    _download_ring.count_overflow_into(&_stats);
+    _epochs.count_waits_into(&_stats);
 
     _residency.add(_upload_ring.buffer());
     _residency.add(_download_ring.buffer());
@@ -122,19 +122,29 @@ bool metal_context::supports(sg::feature f) const
         // An argument buffer holds an array at one `[[id(n)]]` like any other binding, which is what
         // `metal_staging_binding_group` and the bindless tier are built on.
         return true;
-    case sg::feature::readwrite_storage_formats:
+    case sg::feature::readwrite_image_formats:
         // Asked of the device rather than assumed: tier 2 is what lifts read-write past r32, and Metal reports the
         // tier directly instead of leaving it to be inferred from the family.
         return _device != nullptr && _device->readWriteTextureSupport() >= MTL::ReadWriteTextureTier2;
+    case sg::feature::float32_filtering:
+        return _device != nullptr && _device->supports32BitFloatFiltering();
+    case sg::feature::extended_image_formats:
+        // Apple silicon writes every uncompressed color format from a shader, which is this backend's floor.
+        return true;
+    case sg::feature::multisampled_array_textures:
+        return true;
     case sg::feature::geometry_shader:
     case sg::feature::tessellation_shader:
         // Metal has never had either stage; a caller asking gets a permanent answer rather than a temporary one.
+        return false;
+    case sg::feature::unaligned_block_compression:
+        // Not yet checked against a Metal device, so the portable answer: sg refuses rather than a driver.
         return false;
     }
     return false;
 }
 
-void metal_context::advance_epoch()
+void metal_context::do_advance_epoch()
 {
     // Before any state change, so a caller catching this still has a usable context.
     CC_ASSERT(_slots.live_count() == 0, "all command lists opened this epoch must be submitted or dropped before "
@@ -289,6 +299,9 @@ sg::submission_token metal_context::submit_command_list(std::unique_ptr<sg::comm
             options->release();
 
             _epochs.signal_submission(claimed);
+
+            _stats.fold(sg::impl::recorded_stats(list));
+            _stats.add(sg::stat::command_lists_submitted);
             return claimed;
         });
 
@@ -914,6 +927,11 @@ cc::result<sg::binding_group_layout_handle> metal_context::try_create_binding_gr
 cc::result<sg::pipeline_layout_handle> metal_context::try_create_pipeline_layout(pipeline_layout_description const& desc,
                                                                                  lifetime_scope scope)
 {
+    // Refused rather than accepted: nothing here places the samplers where a shader could read them.
+    // The gap is libs/graphics/shaped-graphics/docs/TODO.md's, and a group's name-matched static sampler is the working form.
+    if (!desc.static_samplers.empty())
+        return cc::error("pipeline_layout: a pipeline-level static sampler (bound_sampler) is not bound by the metal "
+                         "backend yet; declare it a group's static sampler instead");
     return cc::result<sg::pipeline_layout_handle>(create_metal_pipeline_layout(desc, scope));
 }
 

@@ -67,7 +67,6 @@ from .lib.entry.grammar import (
     ack_name,
     is_ack_name,
     BLOCK_TYPES,
-    CONTEXT_TIERS,
     OPTION_KINDS,
     SEVERITIES,
     STATES,
@@ -79,14 +78,13 @@ from .lib.entry.parse import parse_file as parse_entry_file
 from .lib.entry.parse import parse_text as parse_entry_text
 from .lib.entry.write import (
     append_text,
+    attributes_read_as_prose,
     check_immutable,
     check_supersedes,
     compose,
-    missing_context_tiers,
     missing_intro_rounds,
     set_block_attrs,
     stamp_rounds,
-    word_warnings,
     write_entry,
 )
 from .lib.git.diffparse import FileDiff, Hunk
@@ -96,9 +94,9 @@ from .lib.space.intervals import IntervalList
 from .lib.space.netspace import ADDED, REMOVED, FileAtom, LineSpace
 from .lib.space.netspace import build as build_net_space
 from .lib.goals.finalize import ARTIFACTS
-from .lib.goals.skeleton import CONTEXT_EXEMPT_GROUPS
+from .lib.goals.skeleton import ORIENTATION_GROUPS
 from .lib.goals.skeleton import describe as describe_group
-from .lib.goals.skeleton import finalizer_for, groups_for, requires_context, thinly_discharged
+from .lib.goals.skeleton import finalizer_for, groups_for, is_orientation, thinly_discharged
 from .lib.render.text import render_entry, render_summary
 from .lib.space.netspace import space_of
 
@@ -120,8 +118,6 @@ __all__ = [
     "Comment",
     "BLOCK_TYPES",
     "Block",
-    "CONTEXT_EXEMPT_GROUPS",
-    "CONTEXT_TIERS",
     "ANYTHING_SLUG",
     "ANYTHING_TITLE",
     "COVERAGE_SLUG",
@@ -142,6 +138,7 @@ __all__ = [
     "Ledger",
     "LineSpace",
     "OPTION_KINDS",
+    "ORIENTATION_GROUPS",
     "OVERVIEW_SLUG",
     "OVERVIEW_TITLE",
     "Option",
@@ -157,6 +154,7 @@ __all__ = [
     "allocate_many",
     "append_jsonl",
     "append_text",
+    "attributes_read_as_prose",
     "ack_name",
     "ask_canonical",
     "build_net_space",
@@ -188,8 +186,8 @@ __all__ = [
     "groups_for",
     "hash_ask",
     "is_ack_name",
+    "is_orientation",
     "load",
-    "missing_context_tiers",
     "missing_intro_rounds",
     "set_block_attrs",
     "now",
@@ -204,7 +202,6 @@ __all__ = [
     "record",
     "register",
     "render_entry",
-    "requires_context",
     "render_summary",
     "save",
     "space_of",
@@ -212,7 +209,6 @@ __all__ = [
     "stat_key",
     "thinly_discharged",
     "validate_name",
-    "word_warnings",
     "write_atomic",
     "write_entry",
     "write_json",

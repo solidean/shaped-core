@@ -65,6 +65,7 @@ struct machine
     checked_module const& m;
     flat_entry_point const& e;
     run_inputs const& inputs;
+    run_limits const& limits;
     i64 fuel = 0;
     outcome out;
 
@@ -92,7 +93,15 @@ struct machine
     bool burn()
     {
         if (--fuel >= 0)
+        {
+            // a relaxed load every 4096 steps: a stop is seen within a fraction of a millisecond, and costs the run nothing measurable
+            if (limits.stop != nullptr && (fuel & 4095) == 0 && limits.stop->load(cc::memory_order_relaxed))
+            {
+                fail(run_status::stopped, "");
+                return false;
+            }
             return true;
+        }
         fail(run_status::out_of_fuel, "");
         return false;
     }
@@ -147,19 +156,25 @@ struct machine
         auto is_typed = args.size() == record->parameters.size();
         for (auto k = isize(0); is_typed && k < args.size(); ++k)
         {
-            auto const& parameter = m.builtins->at(record->parameters[k]);
-            is_typed = args[k].leaves.size() == parameter.leaf_count;
+            // A resource parameter names no builtin type, and a resource is a value of no scalars.
+            auto const type = m.builtins->find_type(record->parameters[k]);
+            auto const leaf_count = is_valid(type) ? m.builtins->at(type).leaf_count : 0;
+            is_typed = args[k].leaves.size() == leaf_count;
             for (auto const& leaf : args[k].leaves)
-                is_typed = is_typed && leaf.kind == parameter.leaf_kind;
+                is_typed = is_typed && leaf.kind == m.builtins->at(type).leaf_kind;
             in.push_back_range(args[k].leaves);
         }
         if (is_typed)
             record->evaluate(in, result.leaves);
 
-        auto const& returned = m.builtins->at(record->result);
-        auto is_result_typed = result.leaves.size() == returned.leaf_count;
-        for (auto const& leaf : result.leaves)
-            is_result_typed = is_result_typed && leaf.kind == returned.leaf_kind;
+        auto is_result_typed = is_valid(record->result) || result.leaves.empty();
+        if (is_valid(record->result))
+        {
+            auto const& returned = m.builtins->at(record->result);
+            is_result_typed = result.leaves.size() == returned.leaf_count;
+            for (auto const& leaf : result.leaves)
+                is_result_typed = is_result_typed && leaf.kind == returned.leaf_kind;
+        }
         if (!is_typed || !is_result_typed || result.leaves.size() != leaf_count_of(m, x.type))
             return type_error(cc::format("a call of '{}' with arguments or a result of the wrong type", record->name));
         // The one way to see WHEN a call with an effect ran: its value joins the trace where the call happened.
@@ -238,7 +253,7 @@ struct machine
         }
         if (auto const* const l = x.node.try_as<flat_int_literal>())
         {
-            result.leaves.push_back(scalar::of(l->value));
+            result.leaves.push_back(l->is_unsigned ? scalar::of_uint(u32(l->value)) : scalar::of(l->value));
             return {};
         }
         if (auto const* const l = x.node.try_as<flat_bool_literal>())
@@ -348,16 +363,18 @@ struct machine
         if (auto const* const block = x.node.try_as<flat_block>())
         {
             auto const f = run_body(block->body);
+            // A void block has its one value however it ends, which is no scalars at all.
+            auto const is_void = leaf_count_of(m, x.type) == 0;
             if (f.kind == flow_kind::leave && f.label == block->label)
             {
-                if (carried.leaves.empty())
+                if (carried.leaves.empty() && !is_void)
                     return type_error("a block expression left without a value");
                 result.leaves = cc::move(carried.leaves);
                 carried = {};
                 return {};
             }
             if (f.is_normal())
-                return fail(run_status::fell_off_the_end, "a block expression");
+                return is_void ? flow{} : fail(run_status::fell_off_the_end, "a block expression");
             return f;
         }
         return type_error("an expression of a kind the machine does not know");
@@ -517,6 +534,58 @@ struct machine
         return after::propagate;
     }
 
+    /// EVAL-75: the body leaves every node's value in its `var`, and a false condition is recorded with all of them.
+    flow check(flat_check const& k)
+    {
+        if (!limits.run_checks)
+            return {};
+        if (k.site < 0 || k.site >= e.check_sites.size())
+            return type_error("a check whose site the tree does not have");
+        if (auto const f = run_body(k.body); !f.is_normal())
+            return f;
+
+        auto const& site = e.check_sites[k.site];
+        auto const nodes = e.at(site.nodes);
+        if (nodes.empty() || !is_known(e, nodes[0].value) || !is_set[index_of(nodes[0].value)])
+            return type_error("a check whose condition has no value");
+        auto const& condition = locals[index_of(nodes[0].value)];
+        if (condition.leaves.size() != 1 || condition.leaves[0].kind != value_kind::boolean)
+            return type_error("a check whose condition is no bool");
+        ++out.checks_run;
+        if (site.stops)
+            ++out.asserts_run;
+        auto& tally = out.sites[k.site];
+        if (condition.leaves[0].as_bool())
+        {
+            ++tally.passed;
+            return {};
+        }
+        ++tally.failed;
+
+        if (out.failures.size() < limits.max_failures)
+        {
+            auto failure = check_failure{.site = k.site};
+            for (auto const& node : nodes)
+            {
+                auto const known = is_known(e, node.value) && is_set[index_of(node.value)];
+                failure.values.push_back(known ? locals[index_of(node.value)] : value{.type = e.at(node.value).type});
+                failure.is_evaluated.push_back(known);
+            }
+            if (is_known(e, site.loop_variables))
+                for (auto const id : e.at(site.loop_variables))
+                {
+                    auto v = value();
+                    if (auto const f = eval(id, v); !f.is_normal())
+                        return f;
+                    failure.loop_values.push_back(cc::move(v));
+                }
+            out.failures.push_back(cc::move(failure));
+        }
+        else
+            ++out.failures_dropped;
+        return site.stops ? fail(run_status::assertion_failed, "an assert was false") : flow();
+    }
+
     flow run(flat_stmt_id id)
     {
         if (!is_known(e, id))
@@ -673,11 +742,14 @@ struct machine
         if (auto const* const r = s.node.try_as<flat_return>())
         {
             auto v = value();
-            if (auto const f = eval(r->value, v); !f.is_normal())
-                return f;
+            if (is_valid(r->value))
+                if (auto const f = eval(r->value, v); !f.is_normal())
+                    return f;
             carried = cc::move(v);
             return {.kind = flow_kind::return_};
         }
+        if (auto const* const k = s.node.try_as<flat_check>())
+            return check(*k);
         return type_error("a statement of a kind the machine does not know");
     }
 };
@@ -717,6 +789,10 @@ cc::string_view sgl::check::to_string(run_status s)
         return "type-error";
     case run_status::uninitialized_read:
         return "uninitialized-read";
+    case run_status::assertion_failed:
+        return "assertion-failed";
+    case run_status::stopped:
+        return "stopped";
     }
     return "";
 }
@@ -740,12 +816,14 @@ outcome sgl::check::interpret(checked_module const& m,
                               run_inputs const& inputs,
                               run_limits const& limits)
 {
-    auto run = machine{.m = m, .e = e, .inputs = inputs, .fuel = limits.fuel};
+    auto run = machine{.m = m, .e = e, .inputs = inputs, .limits = limits, .fuel = limits.fuel};
     run.out.buffers = inputs.buffers;
     run.is_stored.resize_to_filled(inputs.buffers.size(), false);
+    run.out.sites.resize_to_defaulted(e.check_sites.size());
     run.locals.resize_to_defaulted(e.locals.size());
     run.is_set.resize_to_filled(e.locals.size(), false);
-    if (!e.locals.empty())
+    // A test has no parameter, and its first local is one of its own.
+    if (!e.locals.empty() && e.locals[0].kind == local_kind::parameter)
     {
         run.locals[0] = inputs.parameter;
         run.is_set[0] = true;
@@ -760,7 +838,11 @@ outcome sgl::check::interpret(checked_module const& m,
         run.out.result.type = e.result;
     }
     else if (f.is_normal())
-        run.fail(run_status::fell_off_the_end, "the function");
+    {
+        // A test and a compute entry point return void, whose one value a run has however it ends.
+        if (e.result != checked_module::void_type)
+            run.fail(run_status::fell_off_the_end, "the function");
+    }
     else if (f.kind != flow_kind::failed)
         run.type_error("an exit that nothing encloses");
 
@@ -782,6 +864,8 @@ cc::string sgl::check::dump(outcome const& o)
                 out.appendf(" {}", leaf.as_float());
             else if (leaf.kind == value_kind::scalar_int)
                 out.appendf(" {}", leaf.as_int());
+            else if (leaf.kind == value_kind::scalar_uint)
+                out.appendf(" {}u", leaf.as_uint());
             else
                 out.appendf(" {}", leaf.as_bool() ? "true" : "false");
         }

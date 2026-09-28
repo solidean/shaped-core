@@ -151,6 +151,15 @@ def _build_checks(ctx: Context) -> list[dev.Check]:
         if not result.ok:
             return False
 
+        # The host code SGL groups generate, fed describe-shaped input directly, so every arm runs without a package.
+        result = dev.run_step(
+            ["uv", "run", str(runner.with_name("sgl-host-code-self-test.py"))],
+            step_type="lint", name="sgl-host-code-self-test",
+            build_dir=ctx.root / "build", cwd=ctx.root, mirror=mirror, verbose=verbose,
+        )
+        if not result.ok:
+            return False
+
         presets = ctx.resolve_presets([ctx.default_preset_name()])
         builds = dev.build(presets, ["shaped-shader-library-test"], root=ctx.root, auto_configure=True,
                            mirror=mirror, verbose=verbose)
@@ -178,13 +187,18 @@ def _build_checks(ctx: Context) -> list[dev.Check]:
 
     def check_sgl_prelude(*, fix: bool, scope: dev.ChangeScope | None, mirror: bool, verbose: bool) -> bool:
         # SGL's builtins live in a C++ registry, and prelude/builtins.sgl is that registry written out and committed.
-        # The `sgl` tool compares the two, so this gate builds it -- like `shader-grammar`, and placed beside it for
+        # slib's impl/pipeline_fields.hh is the prelude's mirror of sg's raster pipeline description, written out the same way.
+        # The `sgl` tool compares each pair, so this gate builds it -- like `shader-grammar`, and placed beside it for
         # the same reason: after every static gate, before `test`.
         # --fix rewrites the file instead.
         # That fixer stands behind `format` and breaks nothing by it: what it writes is SGL, which no other gate reads,
         # so the ordering argument about fixers and `format` does not reach it.
         # Repo-wide by nature, so scope is ignored.
         prelude = ctx.root / "libs" / "graphics" / "shaped-graphics-language" / "prelude" / "builtins.sgl"
+        fields = (ctx.root / "libs" / "graphics" / "shaped-shader-library" / "src" / "shaped-shader-library" / "impl"
+                  / "pipeline_fields.hh")
+        generated = [("prelude", prelude, "the builtin registry"),
+                     ("pipeline-fields", fields, "the prelude's mirror of sg's raster pipeline description")]
         presets = ctx.resolve_presets([ctx.default_preset_name()])
         preset = presets[0]
 
@@ -207,23 +221,105 @@ def _build_checks(ctx: Context) -> list[dev.Check]:
             dev.ui.write_line(console.red(f"sgl-prelude: target 'sgl' has no built artifact for preset {preset.name!r}"))
             return False
 
-        result = dev.run_step(
-            [str(artifact), "prelude", "--write" if fix else "--check", str(prelude)],
-            step_type="lint", name="sgl-prelude",
-            build_dir=preset.build_dir, cwd=ctx.root, mirror=mirror, verbose=verbose,
-        )
-        if result.ok:
-            rel = prelude.relative_to(ctx.root).as_posix()
-            dev.ui.write_line(f"sgl-prelude: {rel} {'written from' if fix else 'is in sync with'} the builtin registry")
+        ok = True
+        for command, path, source in generated:
+            result = dev.run_step(
+                [str(artifact), command, "--write" if fix else "--check", str(path)],
+                step_type="lint", name=f"sgl-{command}",
+                build_dir=preset.build_dir, cwd=ctx.root, mirror=mirror, verbose=verbose,
+            )
+            rel = path.relative_to(ctx.root).as_posix()
+            if result.ok:
+                dev.ui.write_line(f"sgl-prelude: {rel} {'written from' if fix else 'is in sync with'} {source}")
+                continue
+
+            # The tool's own message says where the texts part; it was captured to the step log, so it is repeated here.
+            for log in (result.stdout_log, result.stderr_log):
+                text = log.read_text(encoding="utf-8", errors="replace").rstrip() if log.exists() else ""
+                if text and not mirror:
+                    dev.ui.write_line(text)
+            dev.ui.write_line(console.red(f"sgl-prelude: run `uv run dev.py check sgl-prelude --fix` to regenerate {rel}"))
+            ok = False
+        return ok
+
+    def check_sgl_vscode_bundle(*, fix: bool, scope: dev.ChangeScope | None, mirror: bool, verbose: bool) -> bool:
+        # The SGL VS Code extension commits its esbuild bundle, so users link the folder without an `npm install`.
+        # This gate rebuilds the bundle from the pinned lockfile and compares bytes; --fix copies the fresh one over.
+        # It runs only when the scope touches the bundle's inputs, since `npm ci` is slow and nothing else feeds them.
+        import os
+        import shutil
+        import tempfile
+        from pathlib import Path
+
+        extension = ctx.root / "libs" / "graphics" / "shaped-graphics-language" / "tools" / "vscode-extension"
+        committed = extension / "dist" / "extension.js"
+        if scope is not None:
+            inputs = [extension / "src", extension / "package.json", extension / "package-lock.json", committed]
+            touched = any(p == i or p.is_relative_to(i) for p in dev.changed_files(ctx.root, scope) for i in inputs)
+            if not touched:
+                return True
+
+        # emsdk bundles a node and its npm, which is how a machine without a system node still runs this gate.
+        # `npm.cmd` by name on Windows: the extensionless `npm` beside it is a shell script CreateProcess cannot start.
+        env = dev.emsdk_env() or dict(os.environ)
+        npm = shutil.which("npm.cmd" if os.name == "nt" else "npm", path=env.get("PATH") or env.get("Path"))
+        if npm is None:
+            dev.ui.write_line("sgl-vscode-bundle: skipped -- npm not found (install node, or emsdk)")
             return True
 
-        # The tool's own message says where the texts part; it was captured to the step log, so it is repeated here.
-        for log in (result.stdout_log, result.stderr_log):
-            text = log.read_text(encoding="utf-8", errors="replace").rstrip() if log.exists() else ""
-            if text and not mirror:
-                dev.ui.write_line(text)
-        dev.ui.write_line(console.red("sgl-prelude: run `uv run dev.py check sgl-prelude --fix` to regenerate the file"))
+        result = dev.run_step(
+            [npm, "ci", "--no-audit", "--no-fund"],
+            step_type="lint", name="sgl-vscode-npm-ci",
+            build_dir=ctx.root / "build", cwd=extension, env=env, mirror=mirror, verbose=verbose,
+        )
+        if not result.ok:
+            return False
+
+        with tempfile.TemporaryDirectory() as tmp:
+            fresh = Path(tmp) / "extension.js"
+            # The same flags as package.json's `bundle` script.
+            result = dev.run_step(
+                [npm, "exec", "--", "esbuild", "src/extension.js", "--bundle", "--platform=node", "--format=cjs",
+                 "--external:vscode", "--minify", f"--outfile={fresh}"],
+                step_type="lint", name="sgl-vscode-bundle",
+                build_dir=ctx.root / "build", cwd=extension, env=env, mirror=mirror, verbose=verbose,
+            )
+            if not result.ok:
+                return False
+
+            rel = committed.relative_to(ctx.root).as_posix()
+            if committed.is_file() and committed.read_bytes() == fresh.read_bytes():
+                dev.ui.write_line(f"sgl-vscode-bundle: {rel} is in sync with its sources")
+                return True
+            if fix:
+                committed.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(fresh, committed)
+                dev.ui.write_line(f"sgl-vscode-bundle: rebuilt {rel}")
+                return True
+        dev.ui.write_line(console.red(f"sgl-vscode-bundle: {rel} is stale -- run `uv run dev.py check --fix` to rebuild it"))
         return False
+
+    def check_fixed_int_gen(*, fix: bool, scope: dev.ChangeScope | None, mirror: bool, verbose: bool) -> bool:
+        # typed-geometry commits the loop-free fixed_int specializations and their golden tests its generator writes.
+        # The generator compares (or, under --fix, rewrites) them itself; it formats with the repo's clang-format,
+        # so it runs before `format` and what it writes is already what `format` would leave.
+        # A second or two of Python, so it runs whatever the scope.
+        from tools.dev.lib.quality.format import find_clang_format
+
+        script = ctx.root / "libs" / "base" / "typed-geometry" / "tools" / "gen-fixed-int.py"
+        clang_format = find_clang_format(root=ctx.root)
+        if clang_format is None:
+            dev.ui.write_line("fixed-int-gen: skipped -- clang-format not found")
+            return True
+        result = dev.run_step(
+            [sys.executable, str(script), "--write" if fix else "--check", "--clang-format", clang_format],
+            step_type="lint", name="fixed-int-gen",
+            build_dir=ctx.root / "build", cwd=ctx.root, mirror=mirror, verbose=verbose,
+        )
+        if not result.ok:
+            dev.ui.write_line(console.red("fixed-int-gen: the committed files differ from the generator's output "
+                                          "-- run `uv run dev.py check --fix`"))
+        return result.ok
 
     def check_tests(*, fix: bool, scope: dev.ChangeScope | None, mirror: bool, verbose: bool) -> bool:
         # The variants come from dev.py's Policy tables, and a platform with no sibling for one of them simply contributes none.
@@ -270,6 +366,14 @@ def _build_checks(ctx: Context) -> list[dev.Check]:
         dev.Check("shaped-lint", "shaped-linter's own rules on what this branch changed in code and prose "
                                  "(--dirty-only, --commit or --all to rescope)",
                   True, check_shaped_lint),
+        dev.Check("sgl-vscode-bundle",
+                  "the SGL VS Code extension's committed dist/extension.js is what esbuild makes of its sources "
+                  "(--fix rebuilds it)",
+                  True, check_sgl_vscode_bundle),
+        dev.Check("fixed-int-gen",
+                  "typed-geometry's generated fixed_int headers and golden tests are what gen-fixed-int.py writes "
+                  "(--fix regenerates them)",
+                  True, check_fixed_int_gen),
         dev.Check("format", "clang-format our C++ sources, last so it formats what the linters fixed "
                             "(--dirty-only, --commit or --all to rescope)",
                   True, check_format),
@@ -284,7 +388,7 @@ def _build_checks(ctx: Context) -> list[dev.Check]:
                   "run the shared binding corpus against both halves of the binding pass",
                   False, check_shader_grammar),
         dev.Check("sgl-prelude",
-                  "SGL's prelude/builtins.sgl is what the C++ builtin registry generates (--fix rewrites it)",
+                  "SGL's prelude/builtins.sgl and slib's impl/pipeline_fields.hh are what `sgl` generates (--fix rewrites them)",
                   True, check_sgl_prelude),
         dev.Check("test",
                   "build + run the full suite on the debug, default, release, single-threaded "

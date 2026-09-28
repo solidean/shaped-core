@@ -15,8 +15,8 @@ from pathlib import Path
 
 from ..core.atomic import write_atomic
 from .askhash import hash_ask
-from .grammar import ATTR_RE, CONTEXT_TIERS, WORD_LIMITS, ReviewParseError
-from .parse import Entry, parse_text
+from .grammar import ATTR_RE, BLOCK_TYPES, ReviewParseError
+from .parse import Block, Entry, parse_text
 
 
 def _splice(text: str, edits: list[tuple[int, int, str]]) -> str:
@@ -129,40 +129,44 @@ def check_supersedes(entry: Entry, finalized: set[str]) -> None:
         )
 
 
-def missing_context_tiers(entry: Entry) -> list[str]:
-    """The context tiers this entry does not carry, in reading order.
-
-    An entry is answered on its own, out of order, by someone who is not carrying the changeset in their head.
-    All three tiers are what make that possible, and each is scoped to *this entry's subject* rather than to the change
-    as a whole — otherwise every cold tier restates the same paragraph and nobody opens one again.
-    """
-    present = {block.type for block in entry.blocks}
-    return [tier for tier in CONTEXT_TIERS if tier not in present]
-
-
 def missing_intro_rounds(entry: Entry, open_asks: set[str]) -> list[int]:
     """The rounds that ask something still open and carry no `intro` block of their own.
 
     An entry answered out of order is read cold, and a round that opens on facts makes the reader reconstruct the
     question before they can weigh anything.
     Only rounds with an open ask are owed one: a finalized round is immutable, so a warning there would have no remedy.
+    The synthetic acknowledgement is no such ask: it has no options to introduce, so a round that asks nothing else owes none.
     """
     latest = entry.newest_round
-    asking = {b.round or latest for b in entry.asks if b.name in open_asks}
+    acknowledgement = entry.acknowledgement
+    acknowledged = acknowledgement.name if acknowledgement is not None else None
+    asking = {b.round or latest for b in entry.asks if b.name in open_asks and b.name != acknowledged}
     introduced = {b.round or latest for b in entry.blocks if b.type == "intro"}
     return sorted(asking - introduced)
 
 
-def word_warnings(entry: Entry) -> list[str]:
-    """Context tiers past the length that keeps them worth collapsing."""
+def attributes_read_as_prose(entry: Entry) -> list[tuple[Block, int, str]]:
+    """(ask, line, key) for every ask whose prelude is followed by a blank line and then a key that ask accepts.
+
+    A blank line ends the prelude, so the `discharges:` below it is a sentence that discharges nothing.
+    That is the documented escape into prose, and on an ask it is almost always a slip instead, which was silent.
+    The prelude may be empty or hold only the `round:` the tool stamped in after the heading; the slip is the same.
+    """
+    allowed = BLOCK_TYPES["ask"]
     out = []
     for block in entry.blocks:
-        limit = WORD_LIMITS.get(block.type)
-        if limit is None:
+        if not block.is_ask:
             continue
-        words = len(block.prose.split())
-        if words > limit:
-            out.append(f"{entry.slug}: `{block.type}` is {words} words, past the {limit} that keeps it skimmable")
+        lines = block.raw.split("\n")[1:]
+        prelude = 0
+        while prelude < len(lines) and (m := ATTR_RE.match(lines[prelude])) and m.group(1) in allowed:
+            prelude += 1
+        if prelude >= len(lines) or lines[prelude].strip():
+            continue
+        first = next((i for i in range(prelude, len(lines)) if lines[i].strip()), None)
+        match = ATTR_RE.match(lines[first]) if first is not None else None
+        if match and match.group(1) in allowed:
+            out.append((block, block.line + 1 + first, match.group(1)))
     return out
 
 

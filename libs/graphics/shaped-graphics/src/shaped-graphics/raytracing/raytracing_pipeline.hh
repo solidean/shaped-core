@@ -85,9 +85,18 @@ public:
     /// a caller needs: there is nothing worth persisting here.
     [[nodiscard]] bool used_cached_pipeline() const { return _used_cached_pipeline; }
 
+    /// What this pipeline's code does to each binding, resolved against its layout, which dispatch follows for barriers.
+    /// Unknown when any stage's shader carried none, or named a binding the layout does not hold.
+    [[nodiscard]] impl::pipeline_footprint const& footprint() const { return _footprint; }
+
 protected:
     raytracing_pipeline() = default;
 
     /// Set by the backend during creation; see used_cached_pipeline().
     bool _used_cached_pipeline = false;
+
+private:
+    friend void impl::set_footprint(raytracing_pipeline const& pipeline, impl::pipeline_footprint footprint);
+
+    impl::pipeline_footprint _footprint;
 };

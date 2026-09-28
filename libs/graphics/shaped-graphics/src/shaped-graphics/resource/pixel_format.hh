@@ -158,7 +158,7 @@ namespace sg
     return f != pixel_format::undefined && !is_depth_format(f) && !is_compressed_format(f);
 }
 
-/// True for a format that can carry a TYPED unordered-access view — the shape `texture_usage::readwrite_texture` binds.
+/// True for a format that can carry a TYPED unordered-access view — the shape `texture_usage::image` binds.
 /// An sRGB format cannot: the transfer function is applied on sampling and on render-target writes, and neither backend
 /// defines it for a UAV write, so both reject the view outright.
 /// A block-compressed format cannot either, and a depth format is never shader-writable.
@@ -167,6 +167,40 @@ namespace sg
 [[nodiscard]] constexpr bool supports_typed_uav(pixel_format f)
 {
     return f != pixel_format::undefined && !is_depth_format(f) && !is_compressed_format(f) && !is_srgb_format(f);
+}
+
+/// True for an image format every backend accepts without asking: core WebGPU's image formats.
+/// Every other format `supports_typed_uav` allows needs `sg::feature::extended_image_formats`.
+[[nodiscard]] constexpr bool is_portable_image_format(pixel_format f)
+{
+    switch (f)
+    {
+    case pixel_format::rgba8_unorm:
+    case pixel_format::rgba8_snorm:
+    case pixel_format::rgba8_uint:
+    case pixel_format::rgba8_sint:
+    case pixel_format::rgba16_uint:
+    case pixel_format::rgba16_sint:
+    case pixel_format::rgba16_float:
+    case pixel_format::r32_float:
+    case pixel_format::r32_uint:
+    case pixel_format::r32_sint:
+    case pixel_format::rg32_float:
+    case pixel_format::rg32_uint:
+    case pixel_format::rg32_sint:
+    case pixel_format::rgba32_float:
+    case pixel_format::rgba32_uint:
+    case pixel_format::rgba32_sint:
+        return true;
+    default:
+        return false;
+    }
+}
+
+/// True for the formats core WebGPU samples but never filters: `sg::feature::float32_filtering` lifts that.
+[[nodiscard]] constexpr bool is_float32_format(pixel_format f)
+{
+    return f == pixel_format::r32_float || f == pixel_format::rg32_float || f == pixel_format::rgba32_float;
 }
 
 /// Edge length of a format's addressable block: 1 for uncompressed (one texel), 4 for BC.

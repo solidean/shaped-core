@@ -83,7 +83,7 @@ Three rules, and they are the whole grammar:
 
 - **An attribute stands on its own line and applies to the declaration after it.**
   A pragma is a line directive, so there is no trailing form: one attachment rule instead of two, and no lookahead in two directions.
-- **The first word is the attribute name**: `group`, `static`, `push_constants`, `payload`, `vertex_input`.
+- **The first word is the attribute name**: `group`, `static`, `format`, `push_constants`, `payload`, `vertex_input`, `attribute`.
   A name the pass does not know is an error naming the line, never a directive nobody reads — which is exactly what a compiler makes of it.
 - **The rest is `key=value`**, values being a bare token or a parenthesised tuple.
   No quotes, no nesting, no expressions.
@@ -153,6 +153,20 @@ The tuple form addresses them individually, in the field order `sg::sampler` dec
 The generated struct exposes what the shader declared as a constant, and `ctx.cached.acquire_binding_group_layout<G>(samplers)` takes runtime samplers for one the shader left undeclared.
 **A declared sampler wins**: passing a runtime sampler for one the shader already declared is an error, not an override.
 The merged list puts the declared samplers first and appends only names they do not already carry, so the shader wins in every build and the assertion is what names the mistake in a checked one.
+[done]
+
+### `format`
+
+```hlsl
+#pragma sc format rgba8_unorm
+RWTexture2D<float4> target;
+```
+
+A storage texture's format, named as `sg::pixel_format` names it, and only one a storage texture can have.
+The binding carries it as `image_format`, which a WebGPU layout needs before any view exists.
+On the SPIR-V arm the pass also writes `[[vk::image_format]]`, since reading an image of unknown format needs a Vulkan device feature and DXC otherwise declares none.
+DXIL takes the format from the view, so that arm writes nothing more; neither does a format SPIR-V lacks, `bgra8_unorm`.
+SGL's text never reaches this pass: for an `image_2d[.F]` member it writes `[[vk::image_format]]` itself.
 [done]
 
 ### `push_constants`
@@ -357,19 +371,19 @@ There the pass reads scalars, vectors and the `float4xC` matrices, and anything 
 
 ## The type table
 
-One table maps an HLSL type name to a register class and an `sg::binding_type`.
+One table maps an HLSL type name to a register class and an `sg::binding_type`, and a `u` register is `sg::access_mode::read_write`.
 It is the single most important piece of shared state in this design, because the rewriter and the C++ generator must agree on it exactly.
 A divergence is a resource bound to the wrong descriptor, with nothing to catch it.
 
 | HLSL | class | `sg::binding_type` |
 |---|---|---|
-| `Texture1D/2D/3D/Cube` and `*Array`, `Texture2DMS` | `t` | `readonly_texture` |
-| `RWTexture1D/2D/3D` and `*Array` | `u` | `readwrite_texture` |
-| `StructuredBuffer` | `t` | `readonly_structured_buffer` |
-| `RWStructuredBuffer` | `u` | `readwrite_structured_buffer` |
-| `ByteAddressBuffer` | `t` | `readonly_raw_buffer` |
-| `RWByteAddressBuffer` | `u` | `readwrite_raw_buffer` |
-| `ConstantBuffer` | `b` | `uniform_buffer` |
+| `Texture1D/2D/3D/Cube` and `*Array`, `Texture2DMS` | `t` | `texture` |
+| `RWTexture1D/2D/3D` and `*Array` | `u` | `image` |
+| `StructuredBuffer` | `t` | `buffer` |
+| `RWStructuredBuffer` | `u` | `buffer` |
+| `ByteAddressBuffer` | `t` | `bytes` |
+| `RWByteAddressBuffer` | `u` | `bytes` |
+| `ConstantBuffer` | `b` | `constants_buffer` |
 | `SamplerState` | `s` | `sampler` |
 | `SamplerComparisonState` | `s` | `sampler` |
 | `RaytracingAccelerationStructure` | `t` | `acceleration_structure` |
@@ -547,7 +561,7 @@ struct frame_bindings
     /// Everything else is DATA. The verbs are sg's scopes', constrained on sg::declared_binding_group:
     ///
     ///     auto const layout = ctx.cached.acquire_binding_group_layout<shaders::frame_bindings>();
-    ///     auto const g = ctx.transient.create_binding_group(layout, shaders::frame_bindings{...});
+    ///     auto const g = ctx.transient.create_binding_group(cmd, layout, shaders::frame_bindings{...});
     ///     scope.bind<shaders::frame_bindings>(*g);
     ///
     /// so the generator emits no API of its own.
@@ -598,8 +612,8 @@ And one construct that is not a layout to reproduce at all:
 Two `static_assert`s guard the result, and both are generated: the struct's total size against the size the generator computed, and **every member's `offsetof` against the offset it computed**.
 Size alone would pass a mirror whose fields are in the wrong places and whose padding happens to add up.
 
-The generated code spells its members as plain `u32` and friends, duplicating any small helper it needs rather than reaching for `sr::gpu_boolean`.
-shaped-rendering sits above slib, so generated package code cannot see it.
+The generated code spells its members as plain `u32` and friends, and a `bool` as `unsigned`.
+An SGL package's `bool32` is `slib::gpu_bool` instead.
 
 ### The generated vertex layout
 
@@ -687,7 +701,7 @@ The port asked for two things the sketch above had and the generator did not, an
 - **`create` takes a lifetime scope.** imgui rebuilds its group on every texture switch, so `persistent` would leak a descriptor allocation per frame.
 - **`bind` is generated.** It was in the sketch from the start and simply had not been emitted.
 - **An inline-constants block still reaches `pipeline_layout_description` through reflection.**
-  The generator emits the block's *mirror struct*, not its `sg::binding`, so a routine that wants the binding still scans a compiled stage for the one `uniform_buffer`.
+  The generator emits the block's *mirror struct*, not its `sg::binding`, so a routine that wants the binding still scans a compiled stage for the one `constants_buffer`.
   Worth closing, and not in the way of anything: the address is already a constant the pass wrote.
 
 Steps 2 and 3 are worth landing before the rest is designed in detail.

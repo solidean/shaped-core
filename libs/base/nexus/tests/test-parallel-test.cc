@@ -482,26 +482,42 @@ TEST("parallel - tests under -jN really do overlap", no_scheduler)
     // The overlap this asserts is real on every other platform, and unreachable in a page by construction.
     SKIP("a wasm worker cannot start while the main thread spins");
 #else
-    // Every test waits for a second one to join it, with a bounded fallback so a machine that refuses to overlap fails the CHECK instead of hanging.
+    // Every test waits for a second one to join it, with a deadline so a scheduler that genuinely serializes fails the
+    // CHECK instead of hanging.
+    //
+    // **The wait yields rather than spins, and that is the difference between overlapping and not.**
+    // `cc::spin_pause` keeps the thread runnable — spin.hh says so, and says it is never a substitute for blocking —
+    // so on a machine with fewer free cores than jobs the first body holds the core the second one needs, and the
+    // overlap this asserts cannot happen however long the spin runs.
+    // It failed exactly that way on a loaded CI runner, as `1 >= 2`.
     cc::atomic<int> live = {0};
     cc::atomic<int> peak = {0};
 
+    // One absolute deadline for the whole run rather than one per body, so a scheduler that never overlaps costs this
+    // once instead of once per test.
+    auto const deadline = cc::current_time_steady_secs() + 10.0;
+
     nx::test_registry reg;
     for (auto i = 0; i < 4; ++i)
-        reg.add_declaration(cc::format("t{}", i), {},
-                            [&live, &peak]
-                            {
-                                auto const now = live.fetch_add(1, cc::memory_order_acq_rel) + 1;
-                                for (auto observed = peak.load(cc::memory_order_acquire); observed < now;)
-                                    if (peak.compare_exchange_weak(observed, now, cc::memory_order_acq_rel))
-                                        break;
+        reg.add_declaration(
+            cc::format("t{}", i), {},
+            [&live, &peak, deadline]
+            {
+                auto const now = live.fetch_add(1, cc::memory_order_acq_rel) + 1;
+                for (auto observed = peak.load(cc::memory_order_acquire); observed < now;)
+                    if (peak.compare_exchange_weak(observed, now, cc::memory_order_acq_rel))
+                        break;
 
-                                for (auto spin = 0; spin < 1000000 && live.load(cc::memory_order_acquire) < 2; ++spin)
-                                    cc::spin_pause();
+                // Waits on `peak` rather than on `live`: the property holds once ANY two bodies have overlapped.
+                // So every later body proceeds at once, the last one included — and it is the one with no partner
+                // left to wait for.
+                // Only a run that never overlaps at all pays the deadline.
+                while (peak.load(cc::memory_order_acquire) < 2 && cc::current_time_steady_secs() < deadline)
+                    cc::this_thread_yield();
 
-                                live.fetch_sub(1, cc::memory_order_acq_rel);
-                                CHECK(true);
-                            });
+                live.fetch_sub(1, cc::memory_order_acq_rel);
+                CHECK(true);
+            });
 
     auto const schedule = nx::test_schedule::create({}, reg);
     auto const exec = nx::execute_tests(schedule, with_jobs(4));

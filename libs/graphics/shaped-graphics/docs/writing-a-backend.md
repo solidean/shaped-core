@@ -225,6 +225,17 @@ Recorded as each is met, because this is what the next backend most wants to kno
 - **Creation-path ownership transfer is a double-free waiting to happen.**
   A scope guard that unwinds partial creation must be disarmed the moment the context object is constructed, not at the end of the function.
   From construction onward the context's destructor owns those handles, and a later failure would otherwise free them twice.
+- **Where sg states a contract it does not check, every backend carries the assert.**
+  The portable layer owns the *predicate* and each backend owns the *check*, rather than sg funnelling it once before the seam.
+  Two instances so far, and they are the pattern to copy:
+  `bind_group` asserts the slot and the layout match, which [concepts/bindings.md](concepts/bindings.md) states;
+  and an indexed draw asserts `sg::is_aligned_index_fetch`, which [concepts/raster-pipeline.md](concepts/raster-pipeline.md) states.
+  The alternative — per-draw state and one check on `sg::command_list` — was weighed and rejected.
+  Every backend already stores those facts for its own reasons, so the base class would hold a second copy of each, and per-draw mutable state is what the portable layer has stayed free of.
+  What holds a new backend to it is an invocable `CHECK_ASSERTS` test in the tier-1 suite, which the runner instantiates once per registered backend.
+  [tests/command_list/index_buffer_alignment-test.cc](../tests/command_list/index_buffer_alignment-test.cc) is the worked example.
+  So a backend that forgets the check fails those tests rather than quietly accepting a call another backend rejects.
+
 - **Not every sg scope validates before it reaches you.**
   `cmd.upload.bytes_to_buffer` forwards straight to the backend seam with no checking at all, so the backend owns the null, bounds, usage and expiry contract.
   The trap is that a `CC_UNREACHABLE` stub *satisfies* the `CHECK_ASSERTS` tests for those contracts, so they pass while unimplemented and regress the moment you implement the seam.

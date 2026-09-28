@@ -198,6 +198,25 @@ consteval void validate_format_spec(string_view spec)
 {
     (void)cc::impl::format_parse_spec(spec);
 }
+
+/// Formats an integer too wide for u64 with the standard integer grammar: base, `#` prefix, sign, grouping, fill, width.
+/// `digits(base, upper)` returns the magnitude's raw digits in that base, most significant first, with no sign or prefix.
+/// The view it returns must stay valid until this call returns.
+/// This is the delegation target for a wide integer's cc::custom::formatter; pair it with validate_integer_format_spec.
+void format_wide_integer(format_sink const& out,
+                         string_view spec,
+                         bool negative,
+                         function_ref<string_view(int base, bool upper)> digits);
+
+/// Validates that `spec` is an integer spec format_wide_integer accepts: d/x/X/o/b/B, no precision, no 'c'.
+consteval void validate_integer_format_spec(string_view spec)
+{
+    auto const s = cc::impl::format_parse_spec(spec);
+    if (s.presentation == 'c')
+        cc::impl::format_error("'c' is not allowed for a wide integer");
+    if (auto const error = cc::impl::format_spec_error_for_type(s, cc::impl::format_type_tag::sint))
+        cc::impl::format_error(error);
+}
 } // namespace cc
 
 namespace cc::impl

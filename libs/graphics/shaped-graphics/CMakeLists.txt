@@ -20,8 +20,10 @@ add_library(shaped-graphics
     src/shaped-graphics/query/gpu_timestamp.cc
     src/shaped-graphics/raytracing/acceleration_structure.cc
     src/shaped-graphics/barrier/command_list_slot.cc
+    src/shaped-graphics/barrier/footprint.cc
     src/shaped-graphics/binding/binding.cc
     src/shaped-graphics/binding/impl/binding_conflicts.cc
+    src/shaped-graphics/binding/impl/portability.cc
     src/shaped-graphics/binding/layout_fit.cc
     src/shaped-graphics/binding/binding_group_layout.cc
     src/shaped-graphics/binding/pipeline_layout.cc
@@ -44,6 +46,7 @@ add_library(shaped-graphics
     src/shaped-graphics/context/impl/completion_waiter.cc
     src/shaped-graphics/context/impl/device_lifecycle.cc
     src/shaped-graphics/context/gpu_load_sampler.cc
+    src/shaped-graphics/context/metrics.cc
     src/shaped-graphics/context/persistent.cc
     src/shaped-graphics/context/transient.cc
     src/shaped-graphics/context/upload.cc
@@ -120,6 +123,7 @@ target_sources(shaped-graphics
     src/shaped-graphics/barrier/resource_access.hh
     src/shaped-graphics/barrier/resource_access_state.hh
     src/shaped-graphics/barrier/access_inference.hh
+    src/shaped-graphics/barrier/footprint.hh
     src/shaped-graphics/resource/subresource.hh
     src/shaped-graphics/barrier/subresource_state.hh
     src/shaped-graphics/resource/views.hh
@@ -128,6 +132,7 @@ target_sources(shaped-graphics
     src/shaped-graphics/binding/pipeline_layout.hh
     src/shaped-graphics/context/adapter_info.hh
     src/shaped-graphics/context/gpu_metrics.hh
+    src/shaped-graphics/context/metrics.hh
     src/shaped-graphics/binding/compiled_shader.hh
     src/shaped-graphics/binding/shader_stage.hh
     src/shaped-graphics/compute/compute_pipeline.hh
@@ -243,6 +248,7 @@ if(SC_BUILD_TESTS)
         tests/binding/binding-test.cc
         tests/binding/binding_conflicts-test.cc
         tests/binding/layout_hash-test.cc
+        tests/binding/portability-test.cc
         tests/binding/slot-table-test.cc
         tests/binding/shader_codec-test.cc
         tests/pipeline/raster_pipeline-test.cc
@@ -251,6 +257,7 @@ if(SC_BUILD_TESTS)
         tests/barrier/subresource-test.cc
         tests/barrier/slot-test.cc
         tests/barrier/slot-recording-test.cc
+        tests/context/stats-recording-test.cc
     )
     sc_nexus_binary(shaped-graphics-test KINDS tests ${SG_WARP_TEST_BINARY_ARGS})
 
@@ -268,10 +275,13 @@ if(SC_BUILD_TESTS)
         target_sources(shaped-graphics-test PRIVATE
             tests/backends/backends.cc
             tests/context/context-test.cc
+            tests/context/metrics-test.cc
             tests/context/cold-caches-test.cc
             tests/buffer/buffer-test.cc
             tests/texture/texture-create-test.cc
+            tests/texture/texture-feature-test.cc
             tests/command_list/command_list-test.cc
+            tests/command_list/index_buffer_alignment-test.cc
             tests/transfer/transfer-test.cc
             tests/transfer/transfer-fuzz-test.cc
             tests/transfer/upload-async-test.cc
@@ -335,11 +345,17 @@ if(SC_BUILD_TESTS)
             LANGUAGE   hlsl
             SHADERS
                 double_values.hlsl:compute:main
+                fragment_hazard.hlsl:vertex:vs_main
+                fragment_hazard.hlsl:fragment:ps_write
+                fragment_hazard.hlsl:fragment:ps_read
                 pattern_fill.hlsl:compute:main
                 ping_pong.hlsl:compute:main
         )
         # What tests/shaders/shader_fixtures.cc keys on: the SGL package is always there, this one is not.
         target_compile_definitions(shaped-graphics-test PRIVATE SG_TEST_HAS_HLSL_SHADERS=1)
+
+        # The one tier-1 test that executes raster shaders, for the hazard only a running GPU shows.
+        target_sources(shaped-graphics-test PRIVATE tests/command_list/fragment-write-hazard-test.cc)
 
         # Frame-shaped: what creating render targets every frame costs against keeping them, per backend.
         target_sources(shaped-graphics-test PRIVATE tests/transient/transient-benchmark.cc)
@@ -366,7 +382,9 @@ if(SC_BUILD_TESTS)
             tests/shaders/shader_fixtures.cc
             tests/shaders/sgl-package-test.cc
             tests/compute/compute-test.cc
+            tests/compute/compute-texture-test.cc
             tests/raster/raster-test.cc
+            tests/barrier/footprint-barrier-test.cc
         )
         sc_add_shader_package(
             TARGET     shaped-graphics-test
@@ -377,6 +395,9 @@ if(SC_BUILD_TESTS)
             SHADERS
                 double_values.sgl:*
                 quads.sgl:*
+                textures.sgl:*
+                footprint.sgl:*
+                layout.sgl:*
         )
     endif()
 

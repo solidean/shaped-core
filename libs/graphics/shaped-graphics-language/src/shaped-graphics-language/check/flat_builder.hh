@@ -40,6 +40,7 @@ struct sgl::check::flat_builder
     [[nodiscard]] static flat_builder extend(checked_module const& m, flat_entry_point e);
 
     /// The type of the struct named `name`, builtin or not: `"float"`, `"frag"`; `none` when there is none.
+    /// Where the user file shadows a struct of the prelude, it is the prelude's.
     [[nodiscard]] type_id type_named(cc::string_view name) const;
 
     /// `desired` goes through the mint; a `var` is mutable and nothing else is.

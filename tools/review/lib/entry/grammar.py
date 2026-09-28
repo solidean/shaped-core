@@ -30,15 +30,15 @@ from dataclasses import dataclass
 # `supersedes` retires an earlier block in the same entry without editing it.
 # A partial round leaves earlier entries out of date, and the only two moves were appending a correction that buries
 # itself at the bottom, or editing a block the maintainer has already read.
-_ANY = frozenset({"round", "name", "addresses", "supersedes"})
+#
+# `context` narrows where a short path in this block is looked for first, overriding the entry's front-matter `context:`.
+# `planned` names a folder a design will create, and overrides the entry's front-matter `planned:` the same way.
+_ANY = frozenset({"round", "name", "addresses", "supersedes", "context", "planned"})
 
 BLOCK_TYPES: dict[str, set[str]] = {
     # What the entry is about and which options are on the table, before any fact or trade-off.
     # Shown first in its round whatever its position in the file, because it is what the rest is read against.
     "intro": set(_ANY),
-    "context/cold": set(_ANY),
-    "context/repo": set(_ANY),
-    "context/delta": set(_ANY),
     # `glossary: true` says the bold leads in this block are terms.
     # An attribute rather than a scrape, because the tool would otherwise drop a paragraph that does not parse
     # as one and say nothing — the same silence the attribute whitelist exists to prevent.
@@ -46,7 +46,7 @@ BLOCK_TYPES: dict[str, set[str]] = {
     "code": _ANY | {"lang", "file"},
     "changes": _ANY | {"generated", "show"},
     "recommendation": set(_ANY),
-    "ask": {"round", "discharges", "follows", "addresses", "supersedes"},
+    "ask": {"round", "discharges", "follows", "addresses", "supersedes", "context", "planned"},
     "auto-acknowledge": set(_ANY),
     "artifact": set(_ANY),
     # An example, and what running it produced.
@@ -54,6 +54,14 @@ BLOCK_TYPES: dict[str, set[str]] = {
     # output the agent captured out of band.
     # The page draws the difference, which is a fact about which key was used rather than a promise anyone made.
     "example": _ANY | {"source", "run", "cmd", "capture", "output", "status", "sha", "at"},
+}
+
+# Block types the grammar once had, with what an entry writes today instead.
+# An old review still holds them, and naming the replacement turns a dead end into an edit.
+RETIRED_BLOCK_TYPES: dict[str, str] = {
+    "context/cold": "prose",
+    "context/repo": "prose",
+    "context/delta": "prose",
 }
 
 # What a `capture:` may ask for.
@@ -73,17 +81,12 @@ EXAMPLE_STATES = ("ok", "failed", "not-automatable")
 
 def derived_name(block_type: str, ordinal: int, *, indexed: bool) -> str:
     """The name a block carries when it declares none."""
-    base = block_type.replace("/", "-")
-    return f"{base}#{ordinal}" if indexed else base
+    return f"{block_type}#{ordinal}" if indexed else block_type
 
 
 def canonical_block_name(name: str) -> str:
     """A block name with a `#1` folded away, since the unindexed spelling means the same block."""
     return name[:-2] if name.endswith("#1") else name
-
-# The context tiers, in the order a reader meets them, with the word budget each is only useful under.
-CONTEXT_TIERS = ("context/cold", "context/repo", "context/delta")
-WORD_LIMITS = {"context/cold": 150, "context/repo": 120}
 
 # The answer key an acknowledgement is filed under, one per round.
 #
@@ -122,7 +125,7 @@ SEVERITIES = ("bug", "design", "api", "docs", "nit", "question", "lgtm")
 OPTION_KINDS = ("radio", "check", "rank")
 
 FRONT_REQUIRED = ("id", "title")
-FRONT_KNOWN = {"id", "title", "group", "state", "severity", "round", "resolved-by"}
+FRONT_KNOWN = {"id", "title", "group", "state", "severity", "round", "resolved-by", "context", "planned"}
 
 HEADING_RE = re.compile(r"^##[ \t]+(\S+)(?:[ \t]+(.*?))?[ \t]*$")
 # A fenced code block, opened by three or more backticks or tildes and closed by at least as many of the same character.

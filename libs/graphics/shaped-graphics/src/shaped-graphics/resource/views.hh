@@ -17,57 +17,60 @@
 /// A routine takes exactly the view it operates on, instead of a raw resource plus an overload set.
 /// libs/graphics/shaped-graphics/docs/concepts/views.md is the concept — the two axes, the placement rules, and the erasure model.
 ///
-/// Erasure is not one-way for buffer and texture views: each layer offers an `as_<access>()` and a `try_as_<access>()` twin back toward the typed leaves.
+/// Erasure is not one-way for buffer and texture views: each layer offers an `as_<class>()` and a `try_as_<class>()` twin back toward the typed leaves.
 /// `as_*` asserts on mismatch; `try_as_*` returns nullopt instead.
-/// A `try_as_*` tolerates the runtime access class being wrong, and on a texture arm the runtime `view_dimension` too.
+/// A `try_as_*` tolerates the runtime view class being wrong, and on a texture arm the runtime `view_dimension` too.
 /// A buffer's caller-supplied element `T` asserts either way, since a wrong element size is a claim the view's stride can disprove.
 /// Each recovery below documents only the check it adds on top of that.
 
 namespace sg
 {
-/// A view's element (`readonly` / `readwrite`) or block (`uniform`) type.
-/// Must be `byte`, the raw byte-addressed path, or a multiple of 4 bytes, since GPUs load at DWORD alignment.
+/// A view's element (`readonly` / `readwrite`) or block (`constants`) type.
+/// Must be `byte`, the byte-addressed path, or a multiple of 4 bytes, since GPUs load at DWORD alignment.
 template <class T>
 concept view_element = std::is_same_v<T, byte> || (sizeof(T) % 4 == 0);
 
-/// Placement rules a uniform (constant) buffer view must satisfy.
-/// Its byte offset must be a multiple of `uniform_buffer_offset_alignment`, and its size a multiple of 16 (std140 packing) and at most `max_uniform_buffer_size`.
-constexpr isize uniform_buffer_offset_alignment = 256; // Vk minUniformBufferOffsetAlignment / WGPU / DX12 CBV placement
-constexpr isize max_uniform_buffer_size = 65536;       // 64 KiB — DX12 max CBV / WGPU max uniform binding
+/// Placement rules a constants buffer view must satisfy.
+/// Its byte offset must be a multiple of `constants_buffer_offset_alignment`, and its size a multiple of 16 (std140 packing) and at most `max_constants_buffer_size`.
+constexpr isize constants_buffer_offset_alignment = 256; // Vk minUniformBufferOffsetAlignment / WGPU / DX12 CBV placement
+constexpr isize max_constants_buffer_size = 65536;       // 64 KiB — DX12 max CBV / WGPU max uniform binding
 
-/// Placement rules a shader-facing *storage* buffer view — readonly or readwrite, raw or structured — must satisfy.
+/// Placement rules a shader-facing *storage* buffer view — readonly or readwrite, bytes or structured — must satisfy.
 /// A view is a subrange, so it carries the binding-offset rules; `buffer<T>` is a whole buffer recast like a span and carries none of them.
 /// Both values are portable floors, hardcoded rather than queried per device, so a violation fails on a dx12 dev box rather than later on WebGPU.
 constexpr isize storage_buffer_offset_alignment
     = 256; // WGPU minStorageBufferOffsetAlignment; Vk lets an implementation require up to 256
 constexpr isize storage_buffer_size_alignment = 4; // a WGPU storage binding's size must be a multiple of 4
 
-/// A `uniform_buffer_view` block type: a `view_element` whose size obeys the uniform block rules above.
-/// `byte` is excluded — a uniform block of raw bytes is meaningless.
+/// A `constants_buffer_view` block type: a `view_element` whose size obeys the constants block rules above.
+/// `byte` is excluded — a constants block of raw bytes is meaningless.
 template <class T>
-concept uniform_element = view_element<T> && (sizeof(T) % 16 == 0) && (isize(sizeof(T)) <= max_uniform_buffer_size);
+concept constants_element = view_element<T> && (sizeof(T) % 16 == 0) && (isize(sizeof(T)) <= max_constants_buffer_size);
 
 } // namespace sg
 
 /// How a shader reads a view.
-/// Mirrors `buffer_usage`'s uniform / readonly / readwrite split.
+/// A buffer view is `constants`, `readonly` or `readwrite`, mirroring `buffer_usage`; a texture view is a `texture` or an `image`.
+/// An image's access — read, write or both — belongs to the binding, not the view, since every backend builds the same descriptor for all three.
 enum class sg::view_class
 {
-    uniform,                ///< uniform block — constant buffer / UBO (read-only)
-    readonly,               ///< read-only storage — SRV / read SSBO / sampled texture
-    readwrite,              ///< read-write storage — UAV / read-write SSBO / storage texture
+    constants,              ///< a constants block — constant buffer / UBO (read-only)
+    readonly,               ///< read-only storage buffer — SRV / read SSBO
+    readwrite,              ///< read-write storage buffer — UAV / read-write SSBO
+    texture,                ///< sampled texture — SRV / sampled image
+    image,                  ///< storage image, whatever the shader's access — UAV / storage image
     acceleration_structure, ///< ray-tracing TLAS — a read-only SRV addressed by GPU VA (no bound resource)
     // Future (with a graphics pipeline / samplers): render_target, depth_stencil, sampler.
 };
 
 /// How a view's bytes are laid out.
-/// `raw` is byte-addressed (element type `byte`), `structured` an array strided by the element type, `uniform_block` a single struct block.
+/// `bytes` is byte-addressed (element type `byte`), `structured` an array strided by the element type, `constants_block` a single struct block.
 /// `texture` is a texel grid, whose dimension / array / cube / sample count come from the bound raw_texture's description.
 enum class sg::view_shape
 {
-    uniform_block,
+    constants_block,
     structured,
-    raw,
+    bytes,
     texture,
     acceleration_structure, ///< a ray-tracing TLAS bound as an SRV — no byte layout, addressed by the AS's GPU VA
     // Future (with formats): texel (a typed buffer view).
@@ -77,7 +80,7 @@ enum class sg::view_shape
 /// HLSL `Texture2D` / `Texture2DArray` / `TextureCube` / …; Vulkan `VkImageViewType`; D3D `SRV`/`UAV_DIMENSION`.
 /// A reinterpretation the view chooses, distinct from the texture's own `texture_dimension`.
 /// One slice of a 2D array is `tex_2d`, a cube face is `tex_2d`, one cube of a cube array is `cube`.
-/// Storage (UAV) views only use the non-cube, non-multisampled members.
+/// Image views only use the non-cube, non-multisampled members.
 enum class sg::texture_view_dimension : sg::u8
 {
     tex_1d,
@@ -94,11 +97,11 @@ enum class sg::texture_view_dimension : sg::u8
 namespace sg
 {
 
-/// A dimension a storage (UAV) view may bind as: no cube, no multisampling.
-/// A cube UAV is a 2D array, and MSAA has no UAV at all.
-/// Declared here rather than beside `readwrite_texture_view` so the erased `raw_texture_view` arm can name it in its recovery accessors.
+/// A dimension an image view may bind as: no cube, no multisampling.
+/// A cube binds as an image of a 2D array, and MSAA has no image at all.
+/// Declared here rather than beside `image_view` so the erased `raw_texture_view` arm can name it in its recovery accessors.
 template <texture_view_dimension Dim>
-concept storage_view_dimension
+concept image_view_dimension
     = Dim != texture_view_dimension::cube && Dim != texture_view_dimension::cube_array
    && Dim != texture_view_dimension::tex_2d_ms && Dim != texture_view_dimension::tex_2d_ms_array;
 
@@ -106,8 +109,8 @@ concept storage_view_dimension
 // The three payload arms are also the raw binding vocabulary, for tooling that builds bindings without the typed wrappers.
 
 // The typed views below are defined qualified, and a constrained template can only be declared where its concept is — here, rather than in fwd.hh.
-template <uniform_element T>
-struct uniform_buffer_view;
+template <constants_element T>
+struct constants_buffer_view;
 template <view_element T>
 struct readonly_buffer_view;
 template <view_element T>
@@ -117,32 +120,32 @@ struct buffer_view;
 template <texture_view_dimension Dim>
 struct texture_view_traits;
 template <class Traits>
-struct readonly_texture_view;
-template <class Traits>
-    requires storage_view_dimension<Traits::dimension>
-struct readwrite_texture_view;
-template <class Traits>
 struct texture_view;
+template <class Traits, pixel_format Format>
+    requires image_view_dimension<Traits::dimension>
+struct image_view;
+template <class Traits>
+struct any_texture_view;
 
 } // namespace sg
 
-/// A buffer view's erased payload: the access class, byte layout and buffer a backend reads to build a CBV / SRV / UAV.
-/// `shape` picks the interpretation — uniform block, structured array, or raw bytes.
+/// A buffer view's erased payload: how it is bound, its byte layout and buffer, which a backend reads to build a CBV / SRV / UAV.
+/// `shape` picks the interpretation — constants block, structured array, or bytes.
 struct sg::raw_buffer_view
 {
-    view_class access = view_class::readonly;  ///< uniform / readonly / readwrite
-    view_shape shape = view_shape::structured; ///< uniform_block / structured / raw
-    raw_buffer_handle buffer;                  ///< the viewed buffer
-    isize offset_in_bytes = 0;                 ///< start of the view within the buffer
-    isize size_in_bytes = 0;                   ///< [uniform_block, raw] visible byte size
-    isize element_count = 0;                   ///< [structured] number of elements
-    isize stride_in_bytes = 0;                 ///< [structured] element stride (= sizeof(T))
+    view_class bound_as = view_class::readonly; ///< constants / readonly / readwrite
+    view_shape shape = view_shape::structured;  ///< constants_block / structured / bytes
+    raw_buffer_handle buffer;                   ///< the viewed buffer
+    isize offset_in_bytes = 0;                  ///< start of the view within the buffer
+    isize size_in_bytes = 0;                    ///< [constants_block, bytes] visible byte size
+    isize element_count = 0;                    ///< [structured] number of elements
+    isize stride_in_bytes = 0;                  ///< [structured] element stride (= sizeof(T))
 
     /// View-IDENTITY hash (the cc::make_hash protocol's hidden friend): the buffer by address, plus every
     /// field that reaches the descriptor — never the buffer's contents.
     [[nodiscard]] friend u64 hash(raw_buffer_view const& v)
     {
-        return cc::make_hash(v.buffer.get(), v.access, v.shape, v.offset_in_bytes, v.size_in_bytes, v.element_count,
+        return cc::make_hash(v.buffer.get(), v.bound_as, v.shape, v.offset_in_bytes, v.size_in_bytes, v.element_count,
                              v.stride_in_bytes);
     }
 
@@ -158,19 +161,19 @@ struct sg::raw_buffer_view
     [[nodiscard]] auto as_readonly() const; // -> readonly_buffer_view<T>
     template <view_element T>
     [[nodiscard]] auto as_readwrite() const; // -> readwrite_buffer_view<T>
-    template <uniform_element T>
-    [[nodiscard]] auto as_uniform() const; // -> uniform_buffer_view<T>
+    template <constants_element T>
+    [[nodiscard]] auto as_constants() const; // -> constants_buffer_view<T>
     template <view_element T>
     [[nodiscard]] auto try_as_readonly() const; // -> cc::optional<readonly_buffer_view<T>>
     template <view_element T>
     [[nodiscard]] auto try_as_readwrite() const; // -> cc::optional<readwrite_buffer_view<T>>
-    template <uniform_element T>
-    [[nodiscard]] auto try_as_uniform() const; // -> cc::optional<uniform_buffer_view<T>>
+    template <constants_element T>
+    [[nodiscard]] auto try_as_constants() const; // -> cc::optional<constants_buffer_view<T>>
 };
 
 /// A vacant array element: no view at all, marked explicitly.
-/// The backend synthesizes a null descriptor for it from the *binding* alone — access and shape from
-/// `binding_type`, a texture's dimension from `binding.texture_dimension` — so it carries nothing.
+/// The backend synthesizes a null descriptor for it from the *binding* alone — view class and shape from
+/// its kind and access, a texture's dimension from `binding.texture_dimension` — so it carries nothing.
 /// Only valid as an element of an array binding; a scalar binding must bind a resource.
 struct sg::vacant_view
 {
@@ -181,24 +184,24 @@ struct sg::vacant_view
     [[nodiscard]] friend bool operator==(vacant_view const&, vacant_view const&) { return true; }
 };
 
-/// A texture view's erased payload: the sampled (SRV) or storage (UAV) descriptor a backend builds over a subresource range.
+/// A texture view's erased payload: the texture (SRV) or image (UAV) descriptor a backend builds over a subresource range.
 /// Dimension and format are a reinterpretation the view chose, not the texture's shape.
 struct sg::raw_texture_view
 {
-    view_class access = view_class::readonly;                               ///< readonly (SRV) / readwrite (UAV)
+    view_class bound_as = view_class::texture;                              ///< texture (SRV) / image (UAV)
     raw_texture_handle texture;                                             ///< the viewed texture
     texture_view_dimension view_dimension = texture_view_dimension::tex_2d; ///< shader-facing SRV/UAV dimension
     pixel_format format = pixel_format::undefined; ///< the format the descriptor reads/writes as
     subresource_range range;                       ///< the mip × array-slice × aspect sub-range the view exposes
     cc::start_end depth_slice_range
-        = {.start = 0, .end = 0}; ///< [3D storage view] depth (W/Z) slice window; empty otherwise
+        = {.start = 0, .end = 0}; ///< [3D image view] depth (W/Z) slice window; empty otherwise
 
     /// View-IDENTITY hash (the cc::make_hash protocol's hidden friend): the texture by address, plus every
     /// field that reaches the descriptor — never the texture's texels.
     [[nodiscard]] friend u64 hash(raw_texture_view const& v)
     {
-        return cc::make_hash(v.texture.get(), v.access, v.view_dimension, v.format, v.range, v.depth_slice_range.start,
-                             v.depth_slice_range.end);
+        return cc::make_hash(v.texture.get(), v.bound_as, v.view_dimension, v.format, v.range,
+                             v.depth_slice_range.start, v.depth_slice_range.end);
     }
 
     /// View IDENTITY equality over the same fields `hash` above folds — a hash map keyed on views needs the
@@ -209,19 +212,19 @@ struct sg::raw_texture_view
     // Re-type this erased arm as a strongly-typed leaf of shape `Traits`, which you supply.
     // Adds a check that the runtime `view_dimension` matches `Traits::dimension`.
     template <class Traits>
-    [[nodiscard]] auto as_readonly() const; // -> readonly_texture_view<Traits>
+    [[nodiscard]] auto as_texture() const; // -> texture_view<Traits>
+    template <class Traits, pixel_format Format>
+        requires image_view_dimension<Traits::dimension>
+    [[nodiscard]] auto as_image() const; // -> image_view<Traits, Format>
     template <class Traits>
-        requires storage_view_dimension<Traits::dimension>
-    [[nodiscard]] auto as_readwrite() const; // -> readwrite_texture_view<Traits>
-    template <class Traits>
-    [[nodiscard]] auto try_as_readonly() const; // -> cc::optional<readonly_texture_view<Traits>>
-    template <class Traits>
-        requires storage_view_dimension<Traits::dimension>
-    [[nodiscard]] auto try_as_readwrite() const; // -> cc::optional<readwrite_texture_view<Traits>>
+    [[nodiscard]] auto try_as_texture() const; // -> cc::optional<texture_view<Traits>>
+    template <class Traits, pixel_format Format>
+        requires image_view_dimension<Traits::dimension>
+    [[nodiscard]] auto try_as_image() const; // -> cc::optional<image_view<Traits, Format>>
 };
 
 /// An acceleration-structure view's erased payload: the abstract TLAS, which each backend binds its own way.
-/// Its access class is always `acceleration_structure`.
+/// It is always bound as an `acceleration_structure`.
 struct sg::raw_tlas_view
 {
     tlas_handle tlas; ///< the viewed top-level acceleration structure
@@ -242,7 +245,7 @@ namespace sg
 using raw_view = cc::variant<raw_buffer_view, raw_texture_view, raw_tlas_view, vacant_view>;
 
 /// Whether the erased view is the vacant marker — an array element deliberately left empty.
-/// Gate on this before access_of / shape_of, which have no answer for a vacant element.
+/// Gate on this before view_class_of / shape_of, which have no answer for a vacant element.
 [[nodiscard]] inline bool is_vacant(raw_view const& v)
 {
     return v.try_as<vacant_view>() != nullptr;
@@ -280,17 +283,17 @@ using raw_view = cc::variant<raw_buffer_view, raw_texture_view, raw_tlas_view, v
     return v.as<raw_tlas_view>();
 }
 
-/// The access class the erased view carries — the active arm's (a tlas is always acceleration_structure).
+/// The view class the erased view carries — the active arm's (a tlas is always acceleration_structure).
 /// A vacant element has none — it takes whatever the binding says — so gate on is_vacant() first.
-[[nodiscard]] inline view_class access_of(raw_view const& v)
+[[nodiscard]] inline view_class view_class_of(raw_view const& v)
 {
-    return v.visit([](raw_buffer_view const& b) { return b.access; },  //
-                   [](raw_texture_view const& t) { return t.access; }, //
+    return v.visit([](raw_buffer_view const& b) { return b.bound_as; },  //
+                   [](raw_texture_view const& t) { return t.bound_as; }, //
                    [](raw_tlas_view const&) { return view_class::acceleration_structure; },
                    [](vacant_view const&)
                    {
-                       CC_UNREACHABLE("a vacant element has no access class — gate on is_vacant() first");
-                       return view_class::uniform;
+                       CC_UNREACHABLE("a vacant element has no view class — gate on is_vacant() first");
+                       return view_class::constants;
                    });
 }
 
@@ -304,17 +307,17 @@ using raw_view = cc::variant<raw_buffer_view, raw_texture_view, raw_tlas_view, v
                    [](vacant_view const&)
                    {
                        CC_UNREACHABLE("a vacant element has no shape — gate on is_vacant() first");
-                       return view_shape::uniform_block;
+                       return view_shape::constants_block;
                    });
 }
 
 } // namespace sg
 
-/// A uniform block of `T` — a constant buffer / UBO binding, read-only.
-template <sg::uniform_element T>
-struct sg::uniform_buffer_view
+/// A constants block of `T` — a constant buffer / UBO binding, read-only.
+template <sg::constants_element T>
+struct sg::constants_buffer_view
 {
-    static constexpr view_class access = view_class::uniform;
+    static constexpr view_class bound_as = view_class::constants;
 
     raw_buffer_handle buffer;
     isize offset_in_bytes = 0;
@@ -323,8 +326,8 @@ struct sg::uniform_buffer_view
     [[nodiscard]] raw_view to_raw() const
     {
         return raw_buffer_view{
-            .access = access,
-            .shape = view_shape::uniform_block,
+            .bound_as = bound_as,
+            .shape = view_shape::constants_block,
             .buffer = buffer,
             .offset_in_bytes = offset_in_bytes,
             .size_in_bytes = size_in_bytes,
@@ -335,11 +338,11 @@ struct sg::uniform_buffer_view
 };
 
 /// A read-only storage view of an array of `T` — SRV / read SSBO.
-/// With `T == byte` it is a raw, byte-addressed view; otherwise a structured array strided by `sizeof(T)`.
+/// With `T == byte` it is a byte-addressed view, shape `bytes`; otherwise a structured array strided by `sizeof(T)`.
 template <sg::view_element T>
 struct sg::readonly_buffer_view
 {
-    static constexpr view_class access = view_class::readonly;
+    static constexpr view_class bound_as = view_class::readonly;
 
     raw_buffer_handle buffer;
     isize offset_in_bytes = 0;
@@ -347,15 +350,15 @@ struct sg::readonly_buffer_view
 
     [[nodiscard]] raw_view to_raw() const
     {
-        constexpr bool is_raw = std::is_same_v<T, byte>;
+        constexpr bool is_bytes = std::is_same_v<T, byte>;
         return raw_buffer_view{
-            .access = access,
-            .shape = is_raw ? view_shape::raw : view_shape::structured,
+            .bound_as = bound_as,
+            .shape = is_bytes ? view_shape::bytes : view_shape::structured,
             .buffer = buffer,
             .offset_in_bytes = offset_in_bytes,
-            .size_in_bytes = is_raw ? element_count : 0,
-            .element_count = is_raw ? 0 : element_count,
-            .stride_in_bytes = is_raw ? 0 : isize(sizeof(T)),
+            .size_in_bytes = is_bytes ? element_count : 0,
+            .element_count = is_bytes ? 0 : element_count,
+            .stride_in_bytes = is_bytes ? 0 : isize(sizeof(T)),
         };
     }
 
@@ -363,11 +366,11 @@ struct sg::readonly_buffer_view
 };
 
 /// A read-write storage view of an array of `T` — UAV / read-write SSBO.
-/// With `T == byte` it is a raw, byte-addressed view; otherwise a structured array strided by `sizeof(T)`.
+/// With `T == byte` it is a byte-addressed view, shape `bytes`; otherwise a structured array strided by `sizeof(T)`.
 template <sg::view_element T>
 struct sg::readwrite_buffer_view
 {
-    static constexpr view_class access = view_class::readwrite;
+    static constexpr view_class bound_as = view_class::readwrite;
 
     raw_buffer_handle buffer;
     isize offset_in_bytes = 0;
@@ -375,32 +378,32 @@ struct sg::readwrite_buffer_view
 
     [[nodiscard]] raw_view to_raw() const
     {
-        constexpr bool is_raw = std::is_same_v<T, byte>;
+        constexpr bool is_bytes = std::is_same_v<T, byte>;
         return raw_buffer_view{
-            .access = access,
-            .shape = is_raw ? view_shape::raw : view_shape::structured,
+            .bound_as = bound_as,
+            .shape = is_bytes ? view_shape::bytes : view_shape::structured,
             .buffer = buffer,
             .offset_in_bytes = offset_in_bytes,
-            .size_in_bytes = is_raw ? element_count : 0,
-            .element_count = is_raw ? 0 : element_count,
-            .stride_in_bytes = is_raw ? 0 : isize(sizeof(T)),
+            .size_in_bytes = is_bytes ? element_count : 0,
+            .element_count = is_bytes ? 0 : element_count,
+            .stride_in_bytes = is_bytes ? 0 : isize(sizeof(T)),
         };
     }
 
     operator raw_view() const { return to_raw(); }
 };
 
-/// A buffer view of `T` whose access class is known only at runtime — the access-erased middle between the typed leaves and `raw_view`.
+/// A buffer view of `T` whose `bound_as` is known only at runtime — the erased middle between the typed leaves and `raw_view`.
 /// Each leaf converts to it implicitly, and it erases on to `raw_view`.
 /// For code that takes "any access of a buffer of `T`".
 template <sg::view_element T>
 struct sg::buffer_view
 {
-    view_class access = view_class::readonly;  ///< uniform / readonly / readwrite — runtime, unlike the leaves
-    view_shape shape = view_shape::structured; ///< uniform_block / structured / raw
+    view_class bound_as = view_class::readonly; ///< constants / readonly / readwrite — runtime, unlike the leaves
+    view_shape shape = view_shape::structured;  ///< constants_block / structured / bytes
     raw_buffer_handle buffer;
     isize offset_in_bytes = 0;
-    isize size_in_bytes = 0;   ///< [uniform_block, raw]
+    isize size_in_bytes = 0;   ///< [constants_block, bytes]
     isize element_count = 0;   ///< [structured]
     isize stride_in_bytes = 0; ///< [structured] = sizeof(T)
 
@@ -409,7 +412,7 @@ struct sg::buffer_view
     /// From a raw buffer arm, and the entry point for tooling.
     /// The leaf conversions route through here, so the field mapping lives in one place — each leaf's `to_raw()`.
     explicit buffer_view(raw_buffer_view const& a)
-      : access(a.access),
+      : bound_as(a.bound_as),
         shape(a.shape),
         buffer(a.buffer),
         offset_in_bytes(a.offset_in_bytes),
@@ -422,17 +425,17 @@ struct sg::buffer_view
     buffer_view(readonly_buffer_view<T> const& v) : buffer_view(sg::as_buffer_view(v.to_raw())) {}
     buffer_view(readwrite_buffer_view<T> const& v) : buffer_view(sg::as_buffer_view(v.to_raw())) {}
 
-    // Only where `T` is a uniform_element.
-    // The `U = T` template defers that, so `buffer_view<T>` stays well-formed for a non-uniform `T`, where naming `uniform_buffer_view<T>` would be ill-formed.
+    // Only where `T` is a constants_element.
+    // The `U = T` template defers that, so `buffer_view<T>` stays well-formed for a non-uniform `T`, where naming `constants_buffer_view<T>` would be ill-formed.
     template <class U = T>
-        requires(std::is_same_v<U, T> && uniform_element<U>)
-    buffer_view(uniform_buffer_view<U> const& v) : buffer_view(sg::as_buffer_view(v.to_raw()))
+        requires(std::is_same_v<U, T> && constants_element<U>)
+    buffer_view(constants_buffer_view<U> const& v) : buffer_view(sg::as_buffer_view(v.to_raw()))
     {
     }
 
     [[nodiscard]] raw_view to_raw() const
     {
-        return raw_buffer_view{.access = access,
+        return raw_buffer_view{.bound_as = bound_as,
                                .shape = shape,
                                .buffer = buffer,
                                .offset_in_bytes = offset_in_bytes,
@@ -443,11 +446,11 @@ struct sg::buffer_view
 
     operator raw_view() const { return to_raw(); }
 
-    // Pin the runtime `access` to a compile-time leaf — the inverse of the implicit leaf -> buffer_view conversions above.
+    // Pin the runtime `bound_as` to a compile-time leaf — the inverse of the implicit leaf -> buffer_view conversions above.
     // Adds a check that `T` matches the view's layout, so a re-type with the wrong element size is a loud error rather than a silently wrong element count.
     [[nodiscard]] readonly_buffer_view<T> as_readonly() const
     {
-        CC_ASSERT(access == view_class::readonly, "buffer_view access is not readonly");
+        CC_ASSERT(bound_as == view_class::readonly, "buffer_view is not bound as readonly");
         _assert_element_matches();
         return {.buffer = buffer,
                 .offset_in_bytes = offset_in_bytes,
@@ -455,50 +458,51 @@ struct sg::buffer_view
     }
     [[nodiscard]] readwrite_buffer_view<T> as_readwrite() const
     {
-        CC_ASSERT(access == view_class::readwrite, "buffer_view access is not readwrite");
+        CC_ASSERT(bound_as == view_class::readwrite, "buffer_view is not bound as readwrite");
         _assert_element_matches();
         return {.buffer = buffer,
                 .offset_in_bytes = offset_in_bytes,
                 .element_count = std::is_same_v<T, byte> ? size_in_bytes : element_count};
     }
-    // uniform only where `T` obeys the uniform block rules.
+    // constants only where `T` obeys the constants block rules.
     // `U = T` defers that, so `buffer_view<T>` stays valid for a non-uniform `T`.
     template <class U = T>
-        requires(std::is_same_v<U, T> && uniform_element<U>)
-    [[nodiscard]] uniform_buffer_view<U> as_uniform() const
+        requires(std::is_same_v<U, T> && constants_element<U>)
+    [[nodiscard]] constants_buffer_view<U> as_constants() const
     {
-        CC_ASSERT(access == view_class::uniform && shape == view_shape::uniform_block, "buffer_view access is not "
-                                                                                       "uniform");
+        CC_ASSERT(bound_as == view_class::constants && shape == view_shape::constants_block,
+                  "buffer_view is not bound as "
+                  "constants");
         return {.buffer = buffer, .offset_in_bytes = offset_in_bytes, .size_in_bytes = size_in_bytes};
     }
     [[nodiscard]] cc::optional<readonly_buffer_view<T>> try_as_readonly() const
     {
-        if (access != view_class::readonly)
+        if (bound_as != view_class::readonly)
             return {};
         return as_readonly();
     }
     [[nodiscard]] cc::optional<readwrite_buffer_view<T>> try_as_readwrite() const
     {
-        if (access != view_class::readwrite)
+        if (bound_as != view_class::readwrite)
             return {};
         return as_readwrite();
     }
     template <class U = T>
-        requires(std::is_same_v<U, T> && uniform_element<U>)
-    [[nodiscard]] cc::optional<uniform_buffer_view<U>> try_as_uniform() const
+        requires(std::is_same_v<U, T> && constants_element<U>)
+    [[nodiscard]] cc::optional<constants_buffer_view<U>> try_as_constants() const
     {
-        if (access != view_class::uniform || shape != view_shape::uniform_block)
+        if (bound_as != view_class::constants || shape != view_shape::constants_block)
             return {};
-        return as_uniform();
+        return as_constants();
     }
 
 private:
-    // `byte` is the raw, byte-addressed shape; any other `T` is a structured array whose stride is exactly `sizeof(T)`.
+    // `byte` is the byte-addressed `bytes` shape; any other `T` is a structured array whose stride is exactly `sizeof(T)`.
     // A mismatch means the caller picked the wrong element type, which the stride can prove, so it asserts even through `try_as_*`.
     void _assert_element_matches() const
     {
         if constexpr (std::is_same_v<T, byte>)
-            CC_ASSERT(shape == view_shape::raw, "recovering a buffer_view<byte> needs a raw (byte-addressed) view");
+            CC_ASSERT(shape == view_shape::bytes, "recovering a buffer_view<byte> needs a bytes (byte-addressed) view");
         else
         {
             CC_ASSERT(shape == view_shape::structured, "recovering a buffer_view<T> (non-byte) needs a structured "
@@ -536,14 +540,37 @@ using tv_3d = texture_view_traits<texture_view_dimension::tex_3d>;
 using tv_cube = texture_view_traits<texture_view_dimension::cube>;
 using tv_cube_array = texture_view_traits<texture_view_dimension::cube_array>;
 
+// Shape typedefs for the typed leaves — the ergonomic names, one per view dimension.
+// An image's format stays a template argument, since it is the binding contract rather than a shape.
+using texture_view_1d = texture_view<tv_1d>;
+using texture_view_1d_array = texture_view<tv_1d_array>;
+using texture_view_2d = texture_view<tv_2d>;
+using texture_view_2d_array = texture_view<tv_2d_array>;
+using texture_view_2d_ms = texture_view<tv_2d_ms>;
+using texture_view_2d_ms_array = texture_view<tv_2d_ms_array>;
+using texture_view_3d = texture_view<tv_3d>;
+using texture_view_cube = texture_view<tv_cube>;
+using texture_view_cube_array = texture_view<tv_cube_array>;
+
+template <pixel_format Format>
+using image_view_1d = image_view<tv_1d, Format>;
+template <pixel_format Format>
+using image_view_1d_array = image_view<tv_1d_array, Format>;
+template <pixel_format Format>
+using image_view_2d = image_view<tv_2d, Format>;
+template <pixel_format Format>
+using image_view_2d_array = image_view<tv_2d_array, Format>;
+template <pixel_format Format>
+using image_view_3d = image_view<tv_3d, Format>;
+
 } // namespace sg
 
-/// A read-only (sampled / SRV) texture view of dimension `Traits::dimension`, over a subresource range.
-/// Built via `texture<Traits>::as_readonly_view()` and the reinterpreting variants.
+/// A sampled (SRV) texture view of dimension `Traits::dimension`, over a subresource range.
+/// Built via `texture<Traits>::as_texture_view()` and the reinterpreting variants.
 template <class Traits>
-struct sg::readonly_texture_view
+struct sg::texture_view
 {
-    static constexpr view_class access = view_class::readonly;
+    static constexpr view_class bound_as = view_class::texture;
     static constexpr texture_view_dimension dimension = Traits::dimension;
 
     raw_texture_handle texture;
@@ -552,7 +579,7 @@ struct sg::readonly_texture_view
 
     [[nodiscard]] raw_view to_raw() const
     {
-        return raw_texture_view{.access = access,
+        return raw_texture_view{.bound_as = bound_as,
                                 .texture = texture,
                                 .view_dimension = dimension,
                                 .format = format,
@@ -562,28 +589,31 @@ struct sg::readonly_texture_view
     operator raw_view() const { return to_raw(); }
 };
 
-/// A read-write (storage / UAV) texture view of dimension `Traits::dimension`, over a single mip level.
-/// The dimension must be a `storage_view_dimension` — no cube, no MSAA.
-/// Built via `texture<Traits>::as_readwrite_view()` and friends.
-template <class Traits>
-    requires sg::storage_view_dimension<Traits::dimension>
-struct sg::readwrite_texture_view
+/// A storage (UAV) image view of dimension `Traits::dimension` and texel format `Format`, over a single mip level.
+/// The format is compile-time because it is the binding contract: WebGPU and vulkan require the view to be exactly the shader's declared format.
+/// An image whose format is chosen at runtime is an `any_texture_view` instead, recovered with `as_image<Format>()` where the format is known.
+/// The dimension must be an `image_view_dimension` — no cube, no MSAA.
+/// Whether the shader reads, writes or both is the binding's `access`, not the view's.
+/// Built via `texture<Traits>::as_image_view<Format>()` and friends.
+template <class Traits, sg::pixel_format Format>
+    requires sg::image_view_dimension<Traits::dimension>
+struct sg::image_view
 {
-    static constexpr view_class access = view_class::readwrite;
+    static constexpr view_class bound_as = view_class::image;
     static constexpr texture_view_dimension dimension = Traits::dimension;
+    static constexpr pixel_format format = Format;
 
     raw_texture_handle texture;
-    pixel_format format = pixel_format::undefined;
     subresource_range range;
 
-    /// For a 3D storage view: the half-open `[start, end)` window of depth slices the view exposes — D3D12's `FirstWSlice` / `WSize`.
+    /// For a 3D image view: the half-open `[start, end)` window of depth slices the view exposes — D3D12's `FirstWSlice` / `WSize`.
     /// Depth slices are not subresources, since a whole 3D mip is one, so they live here rather than in `range`.
     /// Empty `{0, 0}` for every non-3D view.
     cc::start_end depth_slice_range = {.start = 0, .end = 0};
 
     [[nodiscard]] raw_view to_raw() const
     {
-        return raw_texture_view{.access = access,
+        return raw_texture_view{.bound_as = bound_as,
                                 .texture = texture,
                                 .view_dimension = dimension,
                                 .format = format,
@@ -594,43 +624,43 @@ struct sg::readwrite_texture_view
     operator raw_view() const { return to_raw(); }
 };
 
-/// A texture view of dimension `Traits::dimension` whose access class is known only at runtime — the access-erased middle between the typed leaves and `raw_view`.
+/// A view of dimension `Traits::dimension` that is a texture or an image, decided only at runtime — the kind-erased middle between the typed leaves and `raw_view`.
 /// Each leaf converts to it implicitly, and it erases on to `raw_view`.
-/// For code that takes "any access of a texture view of that dimension".
+/// For code that takes "a texture or an image of that dimension".
 template <class Traits>
-struct sg::texture_view
+struct sg::any_texture_view
 {
     static constexpr texture_view_dimension dimension = Traits::dimension;
 
-    view_class access = view_class::readonly; ///< readonly / readwrite — runtime, unlike the leaves
+    view_class bound_as = view_class::texture; ///< texture / image — runtime, unlike the leaves
     raw_texture_handle texture;
     pixel_format format = pixel_format::undefined;
     subresource_range range;
     cc::start_end depth_slice_range = {.start = 0, .end = 0};
 
-    texture_view() = default;
+    any_texture_view() = default;
 
     /// From a raw texture arm, and the entry point for tooling.
     /// The leaf conversions route through here.
-    explicit texture_view(raw_texture_view const& a)
-      : access(a.access), texture(a.texture), format(a.format), range(a.range), depth_slice_range(a.depth_slice_range)
+    explicit any_texture_view(raw_texture_view const& a)
+      : bound_as(a.bound_as), texture(a.texture), format(a.format), range(a.range), depth_slice_range(a.depth_slice_range)
     {
     }
 
-    texture_view(readonly_texture_view<Traits> const& v) : texture_view(sg::as_texture_view(v.to_raw())) {}
+    any_texture_view(texture_view<Traits> const& v) : any_texture_view(sg::as_texture_view(v.to_raw())) {}
 
-    // readwrite exists only for a storage dimension.
-    // The `T = Traits` template defers that, so `texture_view<Traits>` stays well-formed for a cube or MS dimension.
-    // Naming `readwrite_texture_view<Traits>` there would be ill-formed.
-    template <class T = Traits>
-        requires(std::is_same_v<T, Traits> && storage_view_dimension<Traits::dimension>)
-    texture_view(readwrite_texture_view<T> const& v) : texture_view(sg::as_texture_view(v.to_raw()))
+    // An image exists only for an image dimension.
+    // The `T = Traits` template defers that, so `any_texture_view<Traits>` stays well-formed for a cube or MS dimension.
+    // Naming `image_view<Traits, …>` there would be ill-formed.
+    template <class T = Traits, pixel_format Format>
+        requires(std::is_same_v<T, Traits> && image_view_dimension<Traits::dimension>)
+    any_texture_view(image_view<T, Format> const& v) : any_texture_view(sg::as_texture_view(v.to_raw()))
     {
     }
 
     [[nodiscard]] raw_view to_raw() const
     {
-        return raw_texture_view{.access = access,
+        return raw_texture_view{.bound_as = bound_as,
                                 .texture = texture,
                                 .view_dimension = dimension,
                                 .format = format,
@@ -640,33 +670,34 @@ struct sg::texture_view
 
     operator raw_view() const { return to_raw(); }
 
-    // Pin the runtime `access` to a compile-time leaf — the inverse of the implicit leaf -> texture_view conversions above.
-    // The dimension, format and range are already fixed, so only the access class is being committed.
-    [[nodiscard]] readonly_texture_view<Traits> as_readonly() const
+    // Pin the runtime `bound_as` to a compile-time leaf — the inverse of the implicit leaf -> any_texture_view conversions above.
+    // The dimension and range are already fixed, so a texture commits only `bound_as`, and an image its format too.
+    [[nodiscard]] texture_view<Traits> as_texture() const
     {
-        CC_ASSERT(access == view_class::readonly, "texture_view access is not readonly");
+        CC_ASSERT(bound_as == view_class::texture, "any_texture_view is not a texture");
         return {.texture = texture, .format = format, .range = range};
     }
-    [[nodiscard]] cc::optional<readonly_texture_view<Traits>> try_as_readonly() const
+    [[nodiscard]] cc::optional<texture_view<Traits>> try_as_texture() const
     {
-        if (access != view_class::readonly)
+        if (bound_as != view_class::texture)
             return {};
-        return as_readonly();
+        return as_texture();
     }
-    template <class T = Traits>
-        requires(std::is_same_v<T, Traits> && storage_view_dimension<Traits::dimension>)
-    [[nodiscard]] readwrite_texture_view<T> as_readwrite() const
+    template <pixel_format Format, class T = Traits>
+        requires(std::is_same_v<T, Traits> && image_view_dimension<Traits::dimension>)
+    [[nodiscard]] image_view<T, Format> as_image() const
     {
-        CC_ASSERT(access == view_class::readwrite, "texture_view access is not readwrite");
-        return {.texture = texture, .format = format, .range = range, .depth_slice_range = depth_slice_range};
+        CC_ASSERT(bound_as == view_class::image, "any_texture_view is not an image");
+        CC_ASSERT(format == Format, "any_texture_view is an image of a different format");
+        return {.texture = texture, .range = range, .depth_slice_range = depth_slice_range};
     }
-    template <class T = Traits>
-        requires(std::is_same_v<T, Traits> && storage_view_dimension<Traits::dimension>)
-    [[nodiscard]] cc::optional<readwrite_texture_view<T>> try_as_readwrite() const
+    template <pixel_format Format, class T = Traits>
+        requires(std::is_same_v<T, Traits> && image_view_dimension<Traits::dimension>)
+    [[nodiscard]] cc::optional<image_view<T, Format>> try_as_image() const
     {
-        if (access != view_class::readwrite)
+        if (bound_as != view_class::image || format != Format)
             return {};
-        return as_readwrite();
+        return as_image<Format>();
     }
 };
 
@@ -679,7 +710,7 @@ struct sg::texture_view
 /// no structure built and nothing allocated, so "nothing to trace" costs nothing rather than needing a stand-in.
 struct sg::tlas_view
 {
-    static constexpr view_class access = view_class::acceleration_structure;
+    static constexpr view_class bound_as = view_class::acceleration_structure;
 
     tlas_handle tlas; ///< the top-level acceleration structure to bind; null binds the null acceleration structure
 
@@ -810,7 +841,7 @@ namespace sg
 
 // -- Erased arm -> typed leaf --
 //    Declared on the arms above, defined here now the typed views exist.
-//    Each delegates to the access-erased middle, which does the access check and the field mapping.
+//    Each delegates to the erased middle, which does the view-class check and the field mapping.
 
 template <sg::view_element T>
 auto raw_buffer_view::as_readonly() const
@@ -822,10 +853,10 @@ auto raw_buffer_view::as_readwrite() const
 {
     return buffer_view<T>(*this).as_readwrite();
 }
-template <sg::uniform_element T>
-auto raw_buffer_view::as_uniform() const
+template <sg::constants_element T>
+auto raw_buffer_view::as_constants() const
 {
-    return buffer_view<T>(*this).as_uniform();
+    return buffer_view<T>(*this).as_constants();
 }
 template <sg::view_element T>
 auto raw_buffer_view::try_as_readonly() const
@@ -837,44 +868,44 @@ auto raw_buffer_view::try_as_readwrite() const
 {
     return buffer_view<T>(*this).try_as_readwrite();
 }
-template <sg::uniform_element T>
-auto raw_buffer_view::try_as_uniform() const
+template <sg::constants_element T>
+auto raw_buffer_view::try_as_constants() const
 {
-    return buffer_view<T>(*this).try_as_uniform();
+    return buffer_view<T>(*this).try_as_constants();
 }
 
 template <class Traits>
-auto raw_texture_view::as_readonly() const
+auto raw_texture_view::as_texture() const
 {
     CC_ASSERT(view_dimension == Traits::dimension, "raw_texture_view dimension does not match Traits");
-    return texture_view<Traits>(*this).as_readonly();
+    return any_texture_view<Traits>(*this).as_texture();
 }
-template <class Traits>
-    requires sg::storage_view_dimension<Traits::dimension>
-auto raw_texture_view::as_readwrite() const
+template <class Traits, sg::pixel_format Format>
+    requires sg::image_view_dimension<Traits::dimension>
+auto raw_texture_view::as_image() const
 {
     CC_ASSERT(view_dimension == Traits::dimension, "raw_texture_view dimension does not match Traits");
-    return texture_view<Traits>(*this).as_readwrite();
+    return any_texture_view<Traits>(*this).template as_image<Format>();
 }
 template <class Traits>
-auto raw_texture_view::try_as_readonly() const
+auto raw_texture_view::try_as_texture() const
 {
     if (view_dimension != Traits::dimension)
-        return cc::optional<readonly_texture_view<Traits>>{};
-    return texture_view<Traits>(*this).try_as_readonly();
+        return cc::optional<texture_view<Traits>>{};
+    return any_texture_view<Traits>(*this).try_as_texture();
 }
-template <class Traits>
-    requires sg::storage_view_dimension<Traits::dimension>
-auto raw_texture_view::try_as_readwrite() const
+template <class Traits, sg::pixel_format Format>
+    requires sg::image_view_dimension<Traits::dimension>
+auto raw_texture_view::try_as_image() const
 {
     if (view_dimension != Traits::dimension)
-        return cc::optional<readwrite_texture_view<Traits>>{};
-    return texture_view<Traits>(*this).try_as_readwrite();
+        return cc::optional<image_view<Traits, Format>>{};
+    return any_texture_view<Traits>(*this).template try_as_image<Format>();
 }
 
 // -- `raw_view` -> typed leaf, in a single call --
 //    Each `get_if`s the matching resource arm and re-types it, so the arm being a different resource kind is the one failure these add.
-//    `as_*` assert on it; `try_as_*` return nullopt for it, as they do for a mismatched access class.
+//    `as_*` assert on it; `try_as_*` return nullopt for it, as they do for a mismatched view class.
 
 template <sg::view_element T>
 [[nodiscard]] readonly_buffer_view<T> as_readonly_buffer(raw_view const& v)
@@ -890,12 +921,12 @@ template <sg::view_element T>
     CC_ASSERT(a != nullptr, "raw_view does not hold a buffer arm");
     return a->as_readwrite<T>();
 }
-template <sg::uniform_element T>
-[[nodiscard]] uniform_buffer_view<T> as_uniform_buffer(raw_view const& v)
+template <sg::constants_element T>
+[[nodiscard]] constants_buffer_view<T> as_constants_buffer(raw_view const& v)
 {
     auto const* a = sg::try_as_buffer_view(v);
     CC_ASSERT(a != nullptr, "raw_view does not hold a buffer arm");
-    return a->as_uniform<T>();
+    return a->as_constants<T>();
 }
 template <sg::view_element T>
 [[nodiscard]] cc::optional<readonly_buffer_view<T>> try_as_readonly_buffer(raw_view const& v)
@@ -911,42 +942,42 @@ template <sg::view_element T>
         return a->try_as_readwrite<T>();
     return {};
 }
-template <sg::uniform_element T>
-[[nodiscard]] cc::optional<uniform_buffer_view<T>> try_as_uniform_buffer(raw_view const& v)
+template <sg::constants_element T>
+[[nodiscard]] cc::optional<constants_buffer_view<T>> try_as_constants_buffer(raw_view const& v)
 {
     if (auto const* a = sg::try_as_buffer_view(v))
-        return a->try_as_uniform<T>();
+        return a->try_as_constants<T>();
     return {};
 }
 
 template <class Traits>
-[[nodiscard]] readonly_texture_view<Traits> as_readonly_texture(raw_view const& v)
+[[nodiscard]] texture_view<Traits> as_texture(raw_view const& v)
 {
     auto const* a = sg::try_as_texture_view(v);
     CC_ASSERT(a != nullptr, "raw_view does not hold a texture arm");
-    return a->as_readonly<Traits>();
+    return a->as_texture<Traits>();
 }
-template <class Traits>
-    requires sg::storage_view_dimension<Traits::dimension>
-[[nodiscard]] readwrite_texture_view<Traits> as_readwrite_texture(raw_view const& v)
+template <class Traits, sg::pixel_format Format>
+    requires sg::image_view_dimension<Traits::dimension>
+[[nodiscard]] image_view<Traits, Format> as_image(raw_view const& v)
 {
     auto const* a = sg::try_as_texture_view(v);
     CC_ASSERT(a != nullptr, "raw_view does not hold a texture arm");
-    return a->as_readwrite<Traits>();
+    return a->as_image<Traits, Format>();
 }
 template <class Traits>
-[[nodiscard]] cc::optional<readonly_texture_view<Traits>> try_as_readonly_texture(raw_view const& v)
+[[nodiscard]] cc::optional<texture_view<Traits>> try_as_texture(raw_view const& v)
 {
     if (auto const* a = sg::try_as_texture_view(v))
-        return a->try_as_readonly<Traits>();
+        return a->try_as_texture<Traits>();
     return {};
 }
-template <class Traits>
-    requires sg::storage_view_dimension<Traits::dimension>
-[[nodiscard]] cc::optional<readwrite_texture_view<Traits>> try_as_readwrite_texture(raw_view const& v)
+template <class Traits, sg::pixel_format Format>
+    requires sg::image_view_dimension<Traits::dimension>
+[[nodiscard]] cc::optional<image_view<Traits, Format>> try_as_image(raw_view const& v)
 {
     if (auto const* a = sg::try_as_texture_view(v))
-        return a->try_as_readwrite<Traits>();
+        return a->try_as_image<Traits, Format>();
     return {};
 }
 } // namespace sg

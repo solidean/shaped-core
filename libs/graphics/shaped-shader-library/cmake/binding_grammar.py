@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 # The attribute names the grammar knows.
 # A name outside this set is an error rather than a directive nobody reads -- which is exactly what DXC makes
 # of it, since it ignores a pragma it does not know.
-ATTRIBUTE_NAMES = ("group", "static", "push_constants", "payload", "vertex_input", "attribute")
+ATTRIBUTE_NAMES = ("group", "static", "format", "push_constants", "payload", "vertex_input", "attribute")
 
 # HLSL constructs the pass cannot number, so they may not appear inside a group.
 REJECTED_KEYWORDS = ("namespace", "struct", "cbuffer", "tbuffer", "class", "typedef", "interface")
@@ -77,6 +77,8 @@ class Binding:
     type_offset: int
     semicolon_offset: int
     template_argument: str = ""
+    image_format: str | None = None  # an sg::pixel_format enumerator a `format` attribute named, for images
+    access: str = "read"  # an sg::access_mode enumerator: `read_write` for every `u` register
 
 
 @dataclass
@@ -181,32 +183,33 @@ class Bindings:
 # ---------------------------------------------------------------------------------------------------
 
 # HLSL type -> (register class, sg::binding_type, sg::texture_view_dimension or None).
+# A `u` register is sg::access_mode::read_write and every other one is `read`, since HLSL cannot narrow a UAV.
 # The single most important piece of shared state in the design: the rewriter and the generator must agree
 # on it exactly, because a divergence binds a resource to the wrong descriptor with nothing to catch it.
 # Keep in step with impl/hlsl_binding_types.cc.
 BINDING_TYPES: dict[str, tuple[str, str, str | None]] = {
-    "Texture1D": ("t", "readonly_texture", "tex_1d"),
-    "Texture1DArray": ("t", "readonly_texture", "tex_1d_array"),
-    "Texture2D": ("t", "readonly_texture", "tex_2d"),
-    "Texture2DArray": ("t", "readonly_texture", "tex_2d_array"),
-    "Texture2DMS": ("t", "readonly_texture", "tex_2d_ms"),
-    "Texture2DMSArray": ("t", "readonly_texture", "tex_2d_ms_array"),
-    "Texture3D": ("t", "readonly_texture", "tex_3d"),
-    "TextureCube": ("t", "readonly_texture", "cube"),
-    "TextureCubeArray": ("t", "readonly_texture", "cube_array"),
-    # A storage view has no cube and no multisampling, which is why this half of the table is shorter.
-    "RWTexture1D": ("u", "readwrite_texture", "tex_1d"),
-    "RWTexture1DArray": ("u", "readwrite_texture", "tex_1d_array"),
-    "RWTexture2D": ("u", "readwrite_texture", "tex_2d"),
-    "RWTexture2DArray": ("u", "readwrite_texture", "tex_2d_array"),
-    "RWTexture3D": ("u", "readwrite_texture", "tex_3d"),
+    "Texture1D": ("t", "texture", "tex_1d"),
+    "Texture1DArray": ("t", "texture", "tex_1d_array"),
+    "Texture2D": ("t", "texture", "tex_2d"),
+    "Texture2DArray": ("t", "texture", "tex_2d_array"),
+    "Texture2DMS": ("t", "texture", "tex_2d_ms"),
+    "Texture2DMSArray": ("t", "texture", "tex_2d_ms_array"),
+    "Texture3D": ("t", "texture", "tex_3d"),
+    "TextureCube": ("t", "texture", "cube"),
+    "TextureCubeArray": ("t", "texture", "cube_array"),
+    # An image has no cube and no multisampling, which is why this half of the table is shorter.
+    "RWTexture1D": ("u", "image", "tex_1d"),
+    "RWTexture1DArray": ("u", "image", "tex_1d_array"),
+    "RWTexture2D": ("u", "image", "tex_2d"),
+    "RWTexture2DArray": ("u", "image", "tex_2d_array"),
+    "RWTexture3D": ("u", "image", "tex_3d"),
     # `Buffer` and `RWBuffer` are deliberately absent: they are TYPED (texel) buffers, which both reflection
     # paths already refuse, and mapping them onto the structured types said sg could bind something it cannot.
-    "StructuredBuffer": ("t", "readonly_structured_buffer", None),
-    "RWStructuredBuffer": ("u", "readwrite_structured_buffer", None),
-    "ByteAddressBuffer": ("t", "readonly_raw_buffer", None),
-    "RWByteAddressBuffer": ("u", "readwrite_raw_buffer", None),
-    "ConstantBuffer": ("b", "uniform_buffer", None),
+    "StructuredBuffer": ("t", "buffer", None),
+    "RWStructuredBuffer": ("u", "buffer", None),
+    "ByteAddressBuffer": ("t", "bytes", None),
+    "RWByteAddressBuffer": ("u", "bytes", None),
+    "ConstantBuffer": ("b", "constants_buffer", None),
     "SamplerState": ("s", "sampler", None),
     "SamplerComparisonState": ("s", "sampler", None),
     "RaytracingAccelerationStructure": ("t", "acceleration_structure", None),
@@ -274,7 +277,7 @@ VALUE_TYPES: dict[str, tuple[str, int, int, int, str | None]] = {
     "uint2": ("unsigned[2]", 8, 4, 4, "vec2u"),
     "uint3": ("unsigned[3]", 12, 4, 4, "vec3u"),
     "uint4": ("unsigned[4]", 16, 4, 4, "vec4u"),
-    # Four bytes in a constant block, and no vertex attribute format at all -- the reason sr::gpu_boolean exists.
+    # Four bytes in a constant block, and no vertex attribute format at all -- the reason slib::gpu_bool exists.
     "bool": ("unsigned", 4, 4, 4, None),
     # Every matrix is column-major and the PASS writes that, exactly as it writes an address.
     # A shader declares `float4x3` and the rewrite makes it `column_major float4x3`, so the declaration is immune
@@ -380,6 +383,28 @@ def binding_rejection_reason_for(hlsl_type: str) -> str:
 def rejection_reason_for(hlsl_type: str) -> str:
     """The sentence to append to a refusal, or empty when the pass has nothing more specific to say."""
     return NARROW_COLUMN if is_matrix_type(hlsl_type) else ""
+
+
+# Every format sg::supports_typed_uav allows, by sg's name; keep in step with impl/hlsl_image_format.cc.
+IMAGE_FORMATS = (
+    "r8_unorm", "r8_snorm", "r8_uint", "r8_sint", "rg8_unorm", "rg8_snorm", "rg8_uint", "rg8_sint",
+    "rgba8_unorm", "rgba8_snorm", "rgba8_uint", "rgba8_sint", "bgra8_unorm",
+    "r16_float", "r16_uint", "r16_sint", "rg16_float", "rg16_uint", "rg16_sint", "rgba16_float", "rgba16_uint",
+    "rgba16_sint", "r32_float", "r32_uint", "r32_sint", "rg32_float", "rg32_uint", "rg32_sint", "rgba32_float",
+    "rgba32_uint", "rgba32_sint", "rgb10a2_unorm", "rg11b10_float",
+)
+
+
+def parse_image_format(attribute: Annotation) -> str:
+    """The sg::pixel_format a `format` attribute names; keep in step with impl/hlsl_image_format.cc, messages included."""
+    args = attribute.arguments
+    if len(args) != 1 or args[0][0] or len(args[0][1]) != 1:
+        raise BindingError(f"{attribute.location}: 'format' takes one image format, as sg::pixel_format names it: "
+                           "`#pragma sc format rgba8_unorm`")
+    name = args[0][1][0]
+    if name not in IMAGE_FORMATS:
+        raise BindingError(f"{attribute.location}: '{name}' is no format a storage texture can have")
+    return name
 
 
 def parse_sampler_state(attribute: Annotation) -> dict[str, str]:
@@ -971,6 +996,9 @@ class _Parser:
         if pending.name == "static":
             _Parser.reject_unclaimed_static(pending)
 
+        if pending.name == "format":
+            raise BindingError(f"{pending.location}: a 'format' attribute must stand before a storage texture in a group")
+
         if pending.name == "attribute":
             raise BindingError(
                 f"{pending.location}: an 'attribute' attribute must stand before a struct member")
@@ -993,7 +1021,7 @@ class _Parser:
         location = self.current().location
         binding = self.parse_binding(0)
 
-        if binding.type != "uniform_buffer":
+        if binding.type != "constants_buffer":
             raise BindingError(
                 f"{location}: 'push_constants' describes a ConstantBuffer, and '{binding.name}' is not one")
         if binding.count != 1:
@@ -1297,7 +1325,7 @@ class _Parser:
                 raise BindingError(f"{self.location_here()}: namespace '{group_name}' is never closed")
 
             if self.is_punctuation("}"):
-                self.reject_unclaimed_static(pending)
+                self.reject_unclaimed(pending)
                 self.at += 1
                 return bindings, statics
 
@@ -1305,7 +1333,7 @@ class _Parser:
 
             if token.kind == "annotation":
                 parsed = self.read_annotation()
-                if parsed.name != "static":
+                if parsed.name not in ("static", "format"):
                     raise BindingError(f"{token.location}: '{parsed.name}' is not an attribute of a binding")
                 if pending is not None:
                     raise BindingError(f"{token.location}: two attributes stand before one declaration")
@@ -1325,6 +1353,12 @@ class _Parser:
 
             binding = self.parse_binding(next_index)
 
+            if pending is not None and pending.name == "format":
+                if binding.type != "image":
+                    raise BindingError(
+                        f"{pending.location}: 'format' describes a storage texture, and '{binding.name}' is not one")
+                binding.image_format = parse_image_format(pending)
+                pending = None
             if pending is not None:
                 if binding.type != "sampler":
                     raise BindingError(
@@ -1406,7 +1440,7 @@ class _Parser:
 
         register_class, binding_type, dimension = entry
         return Binding(name, index, count, binding_type, dimension, register_class, type_offset, semicolon_offset,
-                       template_argument)
+                       template_argument, access="read_write" if register_class == "u" else "read")
 
 
 def parse_binding_groups(hlsl: str) -> Bindings:

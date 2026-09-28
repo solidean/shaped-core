@@ -659,6 +659,7 @@ def emit_header(manifest: Manifest, entries: Entries) -> str:
     if wrappers:
         sgl_includes += ["<shaped-graphics/context/context.hh>", "<cstddef> // std::nullptr_t",
                          "<clean-core/string/string.hh>", "<clean-core/thread/async.hh>"]
+    sgl_includes += sgl_host_code.pipeline_includes(entries.sgl)
     if sgl_includes:
         out.append("\n")
         out.extend(f"#include {header}\n" for header in dict.fromkeys(sgl_includes))
@@ -676,22 +677,31 @@ def emit_header(manifest: Manifest, entries: Entries) -> str:
         out.append("#include <shaped-graphics/resource/views.hh>\n")
     out.append(f"\nnamespace {manifest.namespace}\n{{\n")
     out.append(sgl_host_code.emit_entry_wrappers(entries.sgl, stems))
+    out.append(sgl_host_code.emit_pipelines(entries.sgl, stems))
 
     for file in files:
         out.append(f"/// {file.path}\n")
         out.append(f"struct {file.stem}_t\n{{\n")
-        for stage, entry_points in file.stages.items():
-            out.append("    struct\n    {\n")
-            for entry_point in entry_points:
-                field_type = wrappers.get((file.path, entry_point), "slib::shader_asset_handle")
-                out.append(f"        {field_type} {entry_point};\n")
-            out.append(f"    }} {stage};\n")
+        if manifest.language == "sgl":
+            # An SGL entry point carries its stage, so it needs no struct of its stage around it.
+            for entry_points in file.stages.values():
+                for entry_point in entry_points:
+                    field_type = wrappers.get((file.path, entry_point), "slib::shader_asset_handle")
+                    out.append(f"    {field_type} {entry_point};\n")
+            for described, p in entries.sgl.pipelines:
+                if described.path == file.path:
+                    out.append(f"    {sgl_host_code.pipeline_type(file.stem, p['name'])} {p['name']};\n")
+        else:
+            for stage, entry_points in file.stages.items():
+                out.append("    struct\n    {\n")
+                for entry_point in entry_points:
+                    out.append(f"        slib::shader_asset_handle {entry_point};\n")
+                out.append(f"    }} {stage};\n")
         out.append("};\n")
         out.append(f"extern {file.stem}_t {file.stem};\n\n")
 
     out.append("/// Pass to slib::shader_library::add_package. The handles above are null until you do.\n")
     out.append("slib::shader_package const& package();\n")
-    out.append(sgl_host_code.emit_check_reflection_decl(entries.sgl, stems))
     if bindings:
         out.append("\n/// Empty while every generated binding table still describes the shader it came from.\n")
         out.append("///\n")
@@ -731,7 +741,7 @@ def emit_binding_group(manifest: Manifest, entry: BindingEntry) -> str:
     out.append("/// Acquired, created and bound through the scopes that take an sg::declared_binding_group:\n")
     out.append("///\n")
     out.append(f"///     auto const layout = ctx.cached.acquire_binding_group_layout<{manifest.namespace}::{group.name}>();\n")
-    out.append(f"///     auto const g = ctx.transient.create_binding_group(layout, {manifest.namespace}::{group.name}{{...}});\n")
+    out.append(f"///     auto const g = ctx.transient.create_binding_group(cmd, layout, {manifest.namespace}::{group.name}{{...}});\n")
     out.append(f"///     scope.bind<{manifest.namespace}::{group.name}>(*g);\n")
     out.append(f"struct {group.name}\n{{\n")
 
@@ -786,11 +796,13 @@ def emit_source(manifest: Manifest, files: list[ShaderFile], bindings: list[Bind
         out.append("#include <clean-core/common/utility.hh> // cc::memcpy\n")
     if any(b["inline"] for _, b in sgl.bindings):
         out.append("#include <shaped-shader-library/binding/binding_groups.hh> // slib::inline_constants_space\n")
-    if sgl.vertex_inputs:
+    if sgl.vertex_inputs or sgl.memory_structs or any(b["inline"] for _, b in sgl.bindings):
         out.append("#include <cstddef> // offsetof\n")
-    if sgl_host_code.entry_wrappers(sgl, {f.path: f.stem for f in files}):
+    if sgl_host_code.entry_wrappers(sgl, {f.path: f.stem for f in files}) or sgl.pipelines:
         out.append("#include <clean-core/thread/async_coroutine.hh>\n")
-        out.append("#include <shaped-shader-library/shader_asset.hh> // slib::reflection_mismatch\n")
+        out.append("#include <shaped-shader-library/shader_asset.hh> // slib::acquire_compute_pipeline\n")
+    if sgl.pipelines:
+        out.append("#include <shaped-shader-library/impl/pipeline_fields.hh> // a pipeline's settings, as field writes\n")
     out.append("\n")
 
     for file in files:
@@ -821,7 +833,9 @@ def emit_source(manifest: Manifest, files: list[ShaderFile], bindings: list[Bind
                 # A wrapped SGL entry point holds its handle as `asset`.
                 wrapped = (file.path, point) in sgl_host_code.entry_wrappers(sgl, {f.path: f.stem for f in files})
                 member = f"{point}.asset" if wrapped else point
-                out.append(f"     .asset = &{manifest.namespace}::{file.stem}.{stage}.{member}}},\n")
+                # An SGL file's entry points stand directly in its struct; an HLSL file's under their stage.
+                owner = file.stem if manifest.language == "sgl" else f"{file.stem}.{stage}"
+                out.append(f"     .asset = &{manifest.namespace}::{owner}.{member}}},\n")
     out.append("};\n")
 
     for entry in bindings:
@@ -847,7 +861,10 @@ def emit_source(manifest: Manifest, files: list[ShaderFile], bindings: list[Bind
     for entry in bindings:
         out.append(emit_binding_group_impl(manifest, entry, embedded))
     out.append(sgl_host_code.emit_source(manifest.name, manifest.namespace, sgl))
-    out.append(sgl_host_code.emit_check_reflection(manifest.namespace, sgl, {f.path: f.stem for f in files}))
+    if sgl.pipelines:
+        stems = {f.path: f.stem for f in files}
+        out.append(sgl_host_code.emit_pipelines_impl(manifest.name, manifest.namespace, sgl, stems,
+                                                    sgl_host_code.entry_wrappers(sgl, stems)))
 
     if bindings:
         out.append(f"\ncc::string {manifest.namespace}::self_check()\n{{\n")
@@ -874,8 +891,12 @@ def emit_binding_table(entry: BindingEntry, embedded: list[str]) -> str:
         out.append(f"     .index = {binding.index}u,\n")
         out.append(f"     .count = {binding.count}u,\n")
         out.append(f"     .type = sg::binding_type::{binding.type},\n")
+        if binding.access != "read":
+            out.append(f"     .access = sg::access_mode::{binding.access},\n")
         if binding.dimension is not None:
             out.append(f"     .texture_dimension = sg::texture_view_dimension::{binding.dimension},\n")
+        if binding.image_format is not None:
+            out.append(f"     .image_format = sg::pixel_format::{binding.image_format},\n")
         out.append("    },\n")
     out.append("};\n")
 
@@ -920,7 +941,9 @@ def emit_self_check(manifest: Manifest, entry: BindingEntry, embedded: list[str]
     out.append("            auto const& a = parsed.bindings[i];\n")
     out.append("            auto const& b = table[i];\n")
     out.append("            if (a.name != b.name || a.index != b.index || a.count != b.count || a.type != b.type\n")
-    out.append("                || a.texture_dimension != b.texture_dimension || a.group_index != b.group_index\n")
+    out.append("                || a.access != b.access || a.texture_dimension != b.texture_dimension\n")
+    out.append("                || a.image_format != b.image_format\n")
+    out.append("                || a.group_index != b.group_index\n")
     out.append("                || a.space != b.space)\n")
     out.append(f'                return cc::format("{group.name}: binding {{}} reads as \'{{}}\', the table says \'{{}}\'",\n')
     out.append("                                  i, a.name, b.name);\n")

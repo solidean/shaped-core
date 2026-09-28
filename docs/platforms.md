@@ -169,23 +169,40 @@ The one behavioral difference is in-place resize.
 mimalloc reports its usable size and can grow a block into that slack, while the system resource always declines and the caller reallocates and copies.
 So `try_resize_bytes_in_place` returning -1 is a normal outcome rather than a platform assumption.
 
+## Wide-arithmetic checks (`SC_CHECK_WIDE_ARITH`)
+
+`SC_CHECK_WIDE_ARITH` (default `OFF`) checks typed-geometry's `fixed_int` claims at runtime; it reaches C++ as `TG_CHECK_WIDE_ARITH`, 0 or 1.
+A claim is something the caller knows and the code trusts: the result width `tg::mul<fi192>(a, b)` names, a shift amount below the width, a float that fits the integer it is converted to.
+Checked, a false claim fails `CC_ASSERT_ALWAYS` at the line that made it; unchecked, the result wraps and nothing is paid for.
+The exception is a quotient claim, `tg::div_floor<fi32>(x, w)`: unchecked, a false one is undefined, and its estimate's 128 ÷ 64 division can trap on x64.
+
+These sit in the hottest loops of exact geometry predicates, which is why they are a switch of their own rather than `CC_ASSERT`s riding on the default preset.
+`tg::checked_add` / `checked_sub` / `checked_mul` always check whatever the switch says, so the fit computation behind the `add` / `sub` / `mul` asserts is tested in every build.
+The asserts themselves are tested where the switch is on.
+
+Like `SC_THREADS` it is whole-build, never per-target: an inline function compiled with and without the check in one program is an ODR violation.
+The `debug-nopch` presets turn it on, so `dev.py check`'s debug leg exercises it on every platform.
+
 ## Example backend (`SC_EXAMPLE_BACKEND`)
 
-`SC_EXAMPLE_BACKEND` (default `auto`) picks which graphics backend the `*-example` binaries are built and linked against: `auto`, `dx12`, `vulkan` or `webgpu`.
+`SC_EXAMPLE_BACKEND` (default `auto`) picks which graphics backend the `*-example` binaries are built and linked against: `auto`, `dx12`, `vulkan`, `metal` or `webgpu`.
 
 `auto` takes the first backend an example lists that this build has, which on Windows means dx12 and on a wasm build means webgpu.
 So the setting exists to reach the others: building `rotating-cube` every way is how one example is shown to really serve all three, HLSL through DXC for the first two and WGSL for the last.
 `sgl-cube` supports all three as well, from one SGL source.
 
-No preset and no `dev.py` flag sets it, so reaching another backend is a build directory of its own, configured once by hand:
+`dev.py` sets it with `--example-backend`, a per-subcommand flag wherever `--toolset` is one:
 
 ```bash
-cmake --preset x64-windows-clang-ninja-relwithdebinfo -B build/x64-windows-clang-ninja-relwithdebinfo-vulkan -DSC_EXAMPLE_BACKEND=vulkan
-uv run dev.py example sgl-cube --capture --build-suffix vulkan --target graphics-sgl-cube-example
+uv run dev.py example sgl-cube --example-backend vulkan --capture --target graphics-sgl-cube-example
 ```
 
-The cache keeps the setting, so every later `dev.py` run with that `--build-suffix` stays on it, and the default build directory is never touched.
+**It redirects the build directory itself**, to `build/<preset>-<backend>`, exactly as `--toolset` does — two backends are two caches, and the default build directory is never touched.
+So the flag belongs on every later run for that backend rather than only the first, and dropping it means the default directory again.
 `--target` keeps the run from building every other example into the new directory just to resolve a name.
+
+Reaching for `cmake -B … -DSC_EXAMPLE_BACKEND=…` by hand instead is a trap on Windows: that configure runs without the MSVC environment `dev.py` injects.
+The tree it writes can then hang in the resource compiler rather than fail, which reads as a slow build rather than as a broken one.
 
 **Every graphical example reads it**, not only the one that supports every backend — a setting the rest ignore is a setting that lies.
 Three outcomes, and which one an example gets depends on what it supports:

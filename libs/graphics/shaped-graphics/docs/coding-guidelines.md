@@ -184,7 +184,7 @@ auto const vbuf = ctx.persistent.create_raw_buffer(count * sizeof(tg::pos3f), us
 ```
 
 The typed wrapper counts in elements, not bytes.
-Its view factories (`as_uniform_buffer()`, `as_readwrite_view()`, …) infer the element type and are `requires`-gated.
+Its view factories (`as_constants_buffer()`, `as_texture_view()`, …) infer the element type and are `requires`-gated.
 A nonsensical binding is then a compile error rather than a driver complaint.
 
 **The transfer API takes typed buffers directly** — `cmd.upload.data_to_buffer(buf, range)`,
@@ -194,6 +194,14 @@ Range element, pod value and `buffer<T>` all agree on the same `T`, so a mismatc
 and `T` never has to be spelled out.
 **A `.raw()` in a transfer call is a smell** — it means an overload is missing; add it rather than
 unwrapping at the call site.
+
+**A buffer that starts with contents is created from them** — `ctx.persistent.create_buffer_from_data(range, usage)`.
+`create_buffer_from_pod(value, usage)` and `create_buffer_from_bytes(bytes, usage)` are its one-value and byte-level siblings, and `copy_dst` is implied.
+The persistent ones fill through `ctx.upload`, with no command list.
+That holds even for a buffer the very next command list reads: the async copy starts at the call, while an inline one waits until that list executes on the GPU, which is usually much later.
+So a persistent overload taking a `command_list&` would be strictly worse, and there is deliberately none.
+The `ctx.transient` ones take the `command_list&` first and upload inline into it, since a transient resource cannot be an async target.
+`create_buffer` followed by an upload is for a buffer whose contents change after it exists.
 
 `raw_*` stays the escape hatch for byte-addressed work, and for a struct field that genuinely holds a
 `raw_buffer_handle` — a `blas_triangles`'s vertex buffer, say.
