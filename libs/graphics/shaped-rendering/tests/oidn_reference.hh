@@ -43,8 +43,8 @@ using namespace cc::primitive_defines;
 
 /// The best of `runs` timings, in seconds, of Intel's CPU filter over an `extent` image, or a negative value without it.
 ///
-/// Timed the way the CUDA figure in denoising.md was: one device created up front, its own buffers, a warm-up run,
-/// and only the filter and its sync on the clock.
+/// Timed the way the CUDA figure in libs/graphics/shaped-rendering/docs/denoising.md was.
+/// One device created up front, its own buffers, a warm-up run, and only the filter and its sync on the clock.
 [[nodiscard]] f64 oidn_time_cpu_filter(tg::vec2i extent, sr::oidn_network_size size, int runs);
 
 /// Whether a CPU device can actually be created on this machine.
