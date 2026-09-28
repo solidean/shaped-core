@@ -3,30 +3,27 @@
 *A plan, not a record: each item is deleted from here in the change that lands it.*
 
 Tier 1 ([testing.md](testing.md#tier-1--backend-agnostic-api-tests-tests)) runs one test body against every backend, and it is where sg's pipeline semantics belong.
-Today it executes a thin slice of them: SGL shaders double a buffer, bind groups by position, sample a few textures, and draw instanced and indexed quads.
-`compute/compute-sync-test.cc` runs workgroup memory, barriers, atomics and a binding array read through a `nonuniform` index.
-The fixed-function state, the draw parameters and most binding semantics are validated but never executed on a GPU.
-
-SGL can now say what these tests need: stage inputs, integer and bit arithmetic, `discard`, depth and sample-mask output, interpolation, vertex formats,
-every texture shape, barriers, workgroup memory, atomics and the maths builtins.
-So what is left is the tests themselves.
+`tests/pipeline/` executes them: every value of every fixed-function enum, the draw and dispatch parameters, and the binding semantics.
+SGL's pixel-stage rules run there too, as do every texture shape and sampler field and the geometry and tessellation stages.
+They run on dx12 and vulkan with validation on; webgpu and metal are yet to be shown running them.
+What this file keeps is what is left, and what the tests found that sg or SGL should grow.
 
 ## The harness
 
-Every test below reads as "set up, draw, expect", which two helpers make true:
+Every test reads as "set up, draw, expect", which `pipeline_harness.hh` makes true:
 
 - **`draw_offscreen`** takes a size, the target formats and a function that records the draw, and returns the pixels of every target.
-- **`dispatch_and_read`** takes a dispatch and returns a buffer's contents as typed values.
+  `draw_offscreen_passes` hands the function the command list instead, for a test that opens more than one scope.
+- **`rects.hh`'s `rect_batch`** draws rects placed per instance at pixel boundaries, or any list of points a whole-target rect stretches.
 
-Without them each test repeats the forty lines of setup `raster-test.cc` carries now.
+A compute test states its dispatch and readback in full: each one is a few lines, so a helper would save little and hide the barrier.
 
 **An oracle passes on any adapter.**
 A draw covers whole pixels, a check reads interior pixels only, and a value is chosen exact in its format — rgba8 in steps of 1/255, r32f and rgba16f in powers of two.
 Where rasterization rules or precision may differ, the check takes a tolerance and says why.
 
-**One `.sgl` fixture per topic**, beside the ones in `tests/shaders/sgl/`.
-`rects.sgl` serves the fixed-function state: rects placed per instance at pixel boundaries, each with a depth and a color.
-`vertex_input.sgl`, `dispatch.sgl` and `bindings.sgl` are still to come.
+**One `.sgl` fixture per topic**, beside the ones in `tests/shaders/sgl/`, and `rects.sgl` serves the fixed-function state.
+The others are `draws.sgl`, `vertex_input.sgl`, `dispatch.sgl`, `pixel_semantics.sgl`, `sampling.sgl`, `shapes.sgl` and `stages.sgl`.
 A pipeline's state is swept through `acquire_raster_pipeline(p, {}, customize)`, so one SGL pipeline serves every value of an enum.
 
 ## The enum zoo
@@ -82,7 +79,6 @@ Tier 2 keeps one native-route smoke test per backend — an embedded blob, compu
 - **A point list needs its point size written on vulkan without `VK_KHR_maintenance5`, and on metal.**
   sg enables maintenance5 wherever the device has it, which makes an unwritten size 1.0; SGL writes none.
   DXC refuses `[[vk::builtin("PointSize")]]` on an `out` parameter, so SGL would write it as a member of the vertex stage's output struct.
-
 - **`vertex_attribute_format`** has 32-bit components and two 8-bit formats; half floats, 16-bit integers and normalized values, `snorm8x4` and `unorm10_10_10_2` are missing.
   SGL's `@format` takes each case once sg has it (CHK-275).
 - **`workgroup_count`** is no stage input of SGL at all, since no backend gives it to a shader; hidden inline constants written per dispatch would.
