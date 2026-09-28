@@ -17,6 +17,11 @@ test close(tanh(0.5), 0.46211716)
 test floor(-1.5) == -2.0 and ceil(-1.5) == -1.0 and trunc(-1.5) == -1.0
 test round(0.5) == 0.0 and round(1.5) == 2.0 and round(-2.5) == -2.0
 test fract(-0.25) == 0.75
+
+// a rounding that lands on zero keeps its argument's sign, as a GPU's does
+test:
+    let x = -0.4
+    round(x).bits == 0x8000'0000 and trunc(x).bits == 0x8000'0000 and ceil(x).bits == 0x8000'0000
 test sign(-3.0) == -1.0 and sign(0.0) == 0.0
 
 test:
@@ -24,6 +29,12 @@ test:
     v.x == 1.0 and v.y == -2.0 and v.z == 2.0
 
 test step(0.5, 0.25) == 0.0 and step(0.5, 0.5) == 1.0
+
+// `x >= edge`, as HLSL writes it, so a NaN steps to 0
+test:
+    let zero = 0.0
+    let nan = zero / zero
+    step(0.0, nan) == 0.0 and step(nan, 1.0) == 0.0
 test smoothstep(0.0, 1.0, 0.5) == 0.5
 
 // geometry
@@ -53,6 +64,8 @@ test int.from_bits(0xffff'ffff) == -1
 
 // packing
 test pack_unorm4x8(float4(1.0, 0.0, 0.5, 1.0)) == 0xff80'00ff
+// a byte midway between two rounds up, WGSL's floor(v + 0.5): 63.5 is 64, and -63.5 is -63
+test pack_snorm4x8(float4(-0.5, 0.5, 0.0, 0.0)) == 0x0000'40c1
 test:
     let c = unpack_unorm4x8(0xff80'00ff)
     c.x == 1.0 and c.y == 0.0 and c.w == 1.0

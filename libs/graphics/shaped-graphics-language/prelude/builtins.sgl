@@ -601,7 +601,7 @@
 @builtin @pure fun reinterpret_as_int(x: uint3) -> int3
 @builtin @pure fun reinterpret_as_int(x: uint4) -> int4
 
-// packing into a uint and back: bytes rounded to nearest, and halves rounded to even
+// packing into a uint and back: bytes rounded half up, as floor(x + 0.5), and halves rounded to even
 @builtin @pure fun pack_unorm4x8(v: float4) -> uint
 @builtin @pure fun unpack_unorm4x8(u: uint) -> float4
 @builtin @pure fun pack_snorm4x8(v: float4) -> uint

@@ -91,9 +91,10 @@ f64 pow_of(f64 x, f64 y)
         return 0.0;
     return soft_exp(y * soft_log(x));
 }
+/// HLSL's `x >= edge`, so a NaN on either side gives 0.
 f64 step_of(f64 edge, f64 x)
 {
-    return x < edge ? 0.0 : 1.0;
+    return x >= edge ? 1.0 : 0.0;
 }
 
 void smoothstep(leaves in, result& out)
@@ -238,9 +239,13 @@ void reverse_bits(leaves in, result& out)
 
 // ---- packing ------------------------------------------------------------------------------------------------------
 
+/// `floor(v + 0.5)`, WGSL's rounding of a packed byte, which takes a tie up rather than to even.
+/// A NaN has no byte any target agrees on, and is 0 here, which keeps it out of a C++ conversion that has none.
 u32 byte_of(f64 v)
 {
-    return u32(i32(soft_round(v))) & 0xffu;
+    if (!(v == v))
+        return 0;
+    return u32(i32(soft_floor(v + 0.5))) & 0xffu;
 }
 void pack_unorm4x8(leaves in, result& out)
 {
@@ -413,7 +418,7 @@ cc::string pack_unorm_helper(helper_context const& c)
 {
     return hlsl_packing_helper(c, "uint sgl_pack_unorm4x8(float4 v)\n"
                                   "{\n"
-                                  "    uint4 b = uint4(round(saturate(v) * 255.0));\n"
+                                  "    uint4 b = uint4(floor(saturate(v) * 255.0 + 0.5));\n"
                                   "    return b.x | (b.y << 8) | (b.z << 16) | (b.w << 24);\n"
                                   "}\n");
 }
@@ -428,7 +433,7 @@ cc::string pack_snorm_helper(helper_context const& c)
 {
     return hlsl_packing_helper(c, "uint sgl_pack_snorm4x8(float4 v)\n"
                                   "{\n"
-                                  "    uint4 b = uint4(int4(round(clamp(v, -1.0, 1.0) * 127.0))) & 0xff;\n"
+                                  "    uint4 b = uint4(int4(floor(clamp(v, -1.0, 1.0) * 127.0 + 0.5))) & 0xff;\n"
                                   "    return b.x | (b.y << 8) | (b.z << 16) | (b.w << 24);\n"
                                   "}\n");
 }
@@ -501,8 +506,8 @@ constexpr cc::string_view k_reverse_bits_msl[] = {"reverse_bits"};
 constexpr cc::string_view k_reinterpret_hlsl[] = {"asfloat", "asint", "asuint"};
 constexpr cc::string_view k_reinterpret_wgsl[] = {"bitcast"};
 constexpr cc::string_view k_as_type[] = {"as_type"};
-constexpr cc::string_view k_pack_unorm_hlsl[] = {"round", "saturate"};
-constexpr cc::string_view k_pack_snorm_hlsl[] = {"round", "clamp"};
+constexpr cc::string_view k_pack_unorm_hlsl[] = {"floor", "saturate"};
+constexpr cc::string_view k_pack_snorm_hlsl[] = {"floor", "clamp"};
 constexpr cc::string_view k_unpack_snorm_hlsl[] = {"max"};
 constexpr cc::string_view k_pack_half_hlsl[] = {"sgl_pack_half2x16", "f32tof16"};
 constexpr cc::string_view k_pack_half_wgsl[] = {"pack2x16float"};
@@ -712,7 +717,8 @@ void sgl::builtins::register_math(registry& r)
              .wgsl_names = k_reinterpret_wgsl,
              .msl_names = k_as_type});
 
-    r.add_comment("// packing into a uint and back: bytes rounded to nearest, and halves rounded to even");
+    r.add_comment("// packing into a uint and back: bytes rounded half up, as floor(x + 0.5), and halves rounded to "
+                  "even");
     add(r, "@pure fun pack_unorm4x8(v: float4) -> uint", pack_unorm4x8,
         {.hlsl = "sgl_pack_unorm4x8",
          .wgsl = "pack4x8unorm",

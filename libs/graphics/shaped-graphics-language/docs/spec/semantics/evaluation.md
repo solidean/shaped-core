@@ -28,6 +28,10 @@ A listing here is the dump of a flat tree, shortened: a label is `$name`, and a 
   And it is `clamp` whose `low` is above its `high`, of floats and of integers alike, which MSL leaves undefined and WGSL may answer for floats with the median of the three.
 * **EVAL-88** A transcendental builtin is computed to within a few units in the last place of a `float`, and no closer ([why](why/evaluation.md#eval-88)).
   `round` is ties to even, `floor`, `ceil`, `trunc` and `fract` are exact, and a derivative in a run of one invocation is 0.
+  A rounding that lands on zero keeps the sign of its argument, so `round(-0.4)` is `-0.0`, as a GPU gives it.
+  `step(edge, x)` is 1 where `x >= edge` and 0 elsewhere, as HLSL and WGSL define it, so a NaN on either side gives 0.
+  A byte of `pack_unorm4x8` and `pack_snorm4x8` is `floor(v + 0.5)` of the scaled value, WGSL's formula, which HLSL's text writes too.
+  Metal does not promise that rounding of a value exactly midway between two bytes, so MSL may take it to the even one.
 * **EVAL-89** A `discard` ends the run with no result, as the status `discarded`: nothing after it runs, and nothing it would have printed or stored after it happens.
 * **EVAL-84** An integer `/` or `%` by zero, and the most negative `int` divided by `-1`, have no value: a run that reaches one has no behaviour past it ([why](why/evaluation.md#eval-84)).
 * **EVAL-7** A struct value is one value per field, in field order.

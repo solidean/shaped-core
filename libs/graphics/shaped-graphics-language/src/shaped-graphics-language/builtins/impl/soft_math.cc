@@ -26,6 +26,15 @@ bool is_finite(f64 x)
 {
     return x - x == 0.0;
 }
+bool is_negative(f64 x)
+{
+    return (cc::bit_cast<u64>(x) >> 63) != 0;
+}
+/// A zero with the sign of `x`, which is what rounding a value between -1 and 0 gives on a GPU.
+f64 signed_zero(f64 x)
+{
+    return is_negative(x) ? -0.0 : 0.0;
+}
 f64 infinity()
 {
     return cc::bit_cast<f64>(u64(0x7ff0000000000000ull));
@@ -109,7 +118,7 @@ f64 impl::soft_trunc(f64 x)
     if (!(absolute(x) < k_integral))
         return x;
     auto const t = f64(i64(x));
-    return t == 0.0 && x < 0.0 ? -0.0 : t;
+    return t == 0.0 ? signed_zero(x) : t;
 }
 
 f64 impl::soft_floor(f64 x)
@@ -124,12 +133,12 @@ f64 impl::soft_round(f64 x)
         return x;
     auto const below = soft_floor(x);
     auto const rest = x - below;
-    if (rest < 0.5)
-        return below == 0.0 && x < 0.0 ? -0.0 : below;
-    if (rest > 0.5)
-        return below + 1.0;
-    // a tie goes to the even neighbour
-    return soft_floor(below / 2.0) * 2.0 == below ? below : below + 1.0;
+    auto const rounded = rest < 0.5 ? below
+                       : rest > 0.5 ? below + 1.0
+                       // a tie goes to the even neighbour
+                       : soft_floor(below / 2.0) * 2.0 == below ? below
+                                                                : below + 1.0;
+    return rounded == 0.0 ? signed_zero(x) : rounded;
 }
 
 f64 impl::soft_sqrt(f64 x)
