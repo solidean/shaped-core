@@ -315,9 +315,9 @@ constexpr auto k_inline_constants_buffer_index = isize(sg::reserved_binding_grou
         // `access::read` is the default when the type does not say, and only a writable one is a storage image.
         auto const writes = has_word(type, "write") || has_word(type, "read_write");
         binding.type = writes ? sg::binding_type::image : sg::binding_type::texture;
-        binding.access = !writes            ? sg::access_mode::read
-                         : has_word(type, "read_write") ? sg::access_mode::read_write
-                                                        : sg::access_mode::write;
+        binding.access = !writes                      ? sg::access_mode::read
+                       : has_word(type, "read_write") ? sg::access_mode::read_write
+                                                      : sg::access_mode::write;
         return binding;
     }
 
