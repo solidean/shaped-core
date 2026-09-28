@@ -38,7 +38,6 @@ That is the property to design for: a test in which `.less` and `.less_equal` bo
 The shape that gives it: one target, a row of small quads, one quad per enum value, each with inputs chosen so that every value of the enum produces a different pixel from the same inputs.
 Two values that could agree on the chosen inputs get a second quad with inputs that separate them.
 
-- **`vertex_attribute_format`**: one attribute per format, each fed bytes whose decoded value is distinct from what any other format would decode them to — the normalized formats included.
 - **Texture view dimensions**: each shape sampled at one texel whose value encodes its layer, face or slice, so a wrong dimension reads a wrong value.
 - **Sampler address and filter modes**: samples outside 0..1 where repeat, mirror and clamp differ, and at half a texel where nearest and linear differ.
   Comparison samplers get every `compare_op` again, as the depth test does.

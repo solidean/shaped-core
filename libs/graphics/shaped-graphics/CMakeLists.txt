@@ -392,6 +392,7 @@ if(SC_BUILD_TESTS)
             tests/pipeline/blend-test.cc
             tests/pipeline/raster-state-test.cc
             tests/pipeline/draw-params-test.cc
+            tests/pipeline/vertex-input-test.cc
         )
         sc_add_shader_package(
             TARGET     shaped-graphics-test
@@ -409,6 +410,7 @@ if(SC_BUILD_TESTS)
                 binding_arrays.sgl:*
                 rects.sgl:*
                 draws.sgl:*
+                vertex_input.sgl:*
         )
     endif()
 
