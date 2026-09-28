@@ -28,7 +28,7 @@ Back to the [semantics](_index.md); the reasons are in [why/emitting.md](why/emi
 * **EMIT-10** A module that reported an error is the error `module-has-errors`, whichever entry point is asked for.
 * **EMIT-11** An entry point the module does not hold is `unknown-entry-point`.
 * **EMIT-12** A construct that no emitter carries yet is `unsupported`, and its detail names the construct; an emitter never guesses an address.
-* **EMIT-13** No error depends on the target but EMIT-89's, EMIT-109's and EMIT-122's: an entry point is written for every target or for none ([why](why/emitting.md#emit-13)).
+* **EMIT-13** No error depends on the target but EMIT-109's and EMIT-122's: an entry point is written for every target or for none ([why](why/emitting.md#emit-13)).
   The exception is `msl`, which refuses what a Metal entry point takes as an argument.
 * **EMIT-109** An entry point that needs a feature no device of the target has is `target-lacks-feature`, and its detail names the feature.
   Today that is `wgsl` against `binding_arrays`, `multisampled_array_textures`, `raytracing`, `geometry_shader` and `tessellation_shader`.
@@ -181,8 +181,10 @@ A binding that is not `@inline` is a group.
 * **EMIT-87** The struct of a group's constant buffer stands ahead of the group's declarations ([why](why/emitting.md#emit-87)).
   `hlsl-vulkan` states every member's offset on it, as EMIT-40 says.
 * **EMIT-88** WGSL writes each resource of a group as `@group(N) @binding(slot)`: the constant buffer as `var<uniform>`, a buffer as a `var<storage>` array, `read` or `read_write`.
-* **EMIT-89** MSL writes no group and no compute entry point yet: an entry point that lists a group, or is `@compute`, is `unsupported`.
-  How a group will read in MSL is in [bindings.md](../bindings.md#how-a-group-reaches-sg).
+* **EMIT-89** MSL writes a group as an argument buffer: a struct minted from `<binding>_arguments`, whose member `[[id(n)]]` is slot n of the group.
+  The entry point takes it as `constant T& <binding>_group [[buffer(N)]]` for group N, and [bindings.md](../bindings.md#how-a-group-reaches-sg) shows one.
+  The constant block is a pointer at slot 0, and a binding array is a C array over as many ids as it has elements.
+  The body reads each resource and the block through a local the top of the function binds under the name EMIT-85 minted, so it reads as the other targets' does.
 * **EMIT-90** A group's resources — buffers, textures, images and samplers — take the slots after its constant buffer, in declaration order, from 1, or from 0 when it has no plain member.
 * **EMIT-97** A texture, an image and a sampler member are each one global minted as a buffer's is, by EMIT-85, and each has its target's own type by the table below.
 * **EMIT-98** `hlsl-vulkan` states an image's format as `[[vk::image_format]]`, in DXC's spelling, which DXC makes a typed image of.
@@ -200,15 +202,17 @@ A binding that is not `@inline` is a group.
 * **EMIT-105** An entry point that lists more than three groups is `too-many-groups` on every target, since sg binds three besides the inline constants.
   Only the entry point's list counts: a function that is no entry point takes the groups its caller hands it, which are no addresses of their own.
 
-| SGL | HLSL | WGSL |
-|---|---|---|
-| `texture_2d[float4]` | `Texture2D<float4>` | `texture_2d<f32>` |
-| `texture_2d_depth` | `Texture2D<float>` | `texture_depth_2d` |
-| `image_2d[.rgba8_unorm]` | `RWTexture2D<float4>` | `texture_storage_2d<rgba8unorm, read>` |
-| `out image_2d[.r32_float]` | `RWTexture2D<float>` | `texture_storage_2d<r32float, write>` |
-| `sampler`, `comparison_sampler` | `SamplerState`, `SamplerComparisonState` | `sampler`, `sampler_comparison` |
+| SGL | HLSL | WGSL | MSL |
+|---|---|---|---|
+| `texture_2d[float4]` | `Texture2D<float4>` | `texture_2d<f32>` | `texture2d<float>` |
+| `texture_2d_depth` | `Texture2D<float>` | `texture_depth_2d` | `depth2d<float>` |
+| `image_2d[.rgba8_unorm]` | `RWTexture2D<float4>` | `texture_storage_2d<rgba8unorm, read>` | `texture2d<float, access::read>` |
+| `out image_2d[.r32_float]` | `RWTexture2D<float>` | `texture_storage_2d<r32float, write>` | `texture2d<float, access::write>` |
+| `sampler`, `comparison_sampler` | `SamplerState`, `SamplerComparisonState` | `sampler`, `sampler_comparison` | `sampler`, `sampler` |
 
 The other shapes follow the same pattern: HLSL's `Texture2DArray`, `TextureCube`, `Texture2DMS`, and WGSL's `texture_2d_array`, `texture_cube`, `texture_multisampled_2d`.
+MSL's are `texture2d_array`, `texturecube` and `texture2d_ms`.
+MSL's texture takes the scalar it holds rather than the vector, and a buffer is `device T*`, `const` where the shader only reads it.
 An image's HLSL element is the texel of its format, one to four wide, and a load gives that; WGSL always loads and stores four channels, so its writer narrows a load and pads a store.
 
 ```sgl
@@ -301,9 +305,10 @@ fn main_ps(p: pixel_input) -> target_ {
 The rules above say HLSL and WGSL by name; these say what `msl` writes in the same places.
 
 * **EMIT-56** After the comment of EMIT-47, the text is `#include <metal_stdlib>`, `using namespace metal;` and an empty line.
-* **EMIT-57** MSL's reserved words also hold the types and the functions of its standard library, and `main` ([why](why/emitting.md#emit-57)).
+* **EMIT-57** MSL's reserved words also hold every name the Metal toolchain declares at global scope or in `metal`, its macros included, and `main` ([why](why/emitting.md#emit-57)).
 * **EMIT-58** An `@inline binding` is a struct of its members and the parameter `constant T& name [[buffer(4)]]` of the entry point ([why](why/emitting.md#emit-58)).
-* **EMIT-59** The entry point is a `vertex` or a `fragment` function, and its SGL parameter carries `[[stage_in]]`; a compute entry point is EMIT-89's.
+* **EMIT-59** The entry point is a `vertex`, `fragment` or `kernel` function, and its SGL parameter carries `[[stage_in]]`.
+  A kernel's workgroup is the line `#pragma sc numthreads x y z` directly above it, since MSL states none and slib's Metal compiler reads it there.
 * **EMIT-60** A member with `@position` is `[[position]]`.
 * **EMIT-61** A member at location i is `[[attribute(i)]]` in a vertex input, `[[user(sgli)]]` in a stage link, and `[[color(i)]]` in a render target struct.
 * **EMIT-62** MSL's own rule places `float3` at a multiple of 16 and gives it 16 bytes, so a block's `float3` is `packed_float3` in its memory form (EMIT-113) ([why](why/emitting.md#emit-62)).
@@ -356,7 +361,7 @@ EMIT-110 and EMIT-111 describe today's choice, not a promise.
 |---|---|
 | `module-has-errors` | EMIT-10 |
 | `unknown-entry-point` | EMIT-11 |
-| `unsupported` | EMIT-12, EMIT-33, EMIT-34, EMIT-38, EMIT-39, EMIT-67, EMIT-81, EMIT-89, EMIT-107 |
+| `unsupported` | EMIT-12, EMIT-33, EMIT-34, EMIT-38, EMIT-39, EMIT-67, EMIT-81, EMIT-107 |
 | `reserved-entry-point-name` | none: retired by EMIT-21 |
 | `system-value-semantic` | EMIT-32 |
 | `layout-mismatch` | none: retired by EMIT-41 |

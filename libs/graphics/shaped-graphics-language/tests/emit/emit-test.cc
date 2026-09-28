@@ -187,13 +187,19 @@ TEST("sgl emit - a group's plain member is a field of the constant buffer the gr
                                    "    return {\n"
                                    "        color = scene.tint\n"
                                    "    }\n");
-    // Three targets write it, and MSL declines a group as it declines a buffer (EMIT-89).
     CHECK(emit_source(source, 0, target::hlsl_dx12).errors.empty());
     CHECK(emit_source(source, 0, target::hlsl_vulkan).errors.empty());
-    CHECK(!emit_source(source, 0, target::msl).errors.empty());
     auto const wgsl = emit_source(source, 0, target::wgsl).text;
     CHECK(wgsl.contains("@group(0) @binding(0) var<uniform> scene: scene_data;"));
     CHECK(wgsl.contains("scene.tint")); // a member is read through the block
+
+    // EMIT-89: MSL's group is an argument buffer, whose block is a pointer at slot 0, bound to a local of the block's name.
+    auto const msl = emit_source(source, 0, target::msl);
+    CHECK(sgl::emit::dump_errors(msl) == "");
+    CHECK(msl.text.contains("struct scene_arguments\n{\n    constant scene_data* scene [[id(0)]];\n};\n"));
+    CHECK(msl.text.contains("constant scene_arguments& scene_group [[buffer(0)]]"));
+    CHECK(msl.text.contains("    constant auto& scene = *scene_group.scene;\n"));
+    CHECK(msl.text.contains("scene.tint"));
 
     // A member with no place in a block has no address either, in a group as in an `@inline` binding.
     auto const e = emit_source(with_edges("binding scene:\n"

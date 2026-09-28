@@ -1,6 +1,8 @@
 #include "dialect.hh"
 
+#include <clean-core/common/assert.hh>
 #include <clean-core/string/format.hh>
+#include <shaped-graphics-language/check/resources.hh>
 
 namespace
 {
@@ -12,6 +14,21 @@ using namespace sgl::emit::impl;
 /// The buffer index of the inline constants, in every stage that reads them.
 /// It must equal sg's metal `k_inline_constants_buffer_index`, which sgl cannot include.
 constexpr auto k_inline_constants_buffer = 4;
+
+/// MSL's texture types, parallel to `texture_shape`, and the depth ones where a shape has one.
+constexpr cc::string_view k_texture_names[]
+    = {"texture1d",          "texture1d_array", "texture2d",   "texture2d_array",  "texture2d_ms",
+       "texture2d_ms_array", "texture3d",       "texturecube", "texturecube_array"};
+constexpr cc::string_view k_depth_names[]
+    = {"", "", "depth2d", "depth2d_array", "depth2d_ms", "depth2d_ms_array", "", "depthcube", "depthcube_array"};
+/// Parallel to `access_mode`.
+constexpr cc::string_view k_accesses[] = {"read", "read_write", "write"};
+
+/// The scalar a texture of `element` holds, which is what MSL's texture types take: `float` for any `float` width.
+cc::string_view scalar_of(cc::string_view element)
+{
+    return element.starts_with("uint") ? "uint" : element.starts_with("int") ? "int" : "float";
+}
 
 class msl_dialect_t final : public dialect
 {
@@ -111,20 +128,89 @@ public:
         out.appendf("constant int {} = {};\n", name, value);
     }
 
-    /// MSL declines every group (EMIT-89), so nothing asks for a resource's spelling.
-    [[nodiscard]] cc::string resource_text(plan const&, type_id) const override { return {}; }
-
-    /// A Metal buffer is a parameter of the entry point rather than a global, so MSL declines every group (EMIT-89).
-    /// Nothing reaches here.
-    void write_group(cc::string&, plan const&, planned_constants const*, cc::span<planned_resource const>) const override
+    [[nodiscard]] cc::string resource_text(plan const& p, type_id type) const override
     {
+        auto const& t = p.m.at(type);
+        switch (t.kind)
+        {
+        case type_kind::buffer:
+            return cc::format("{}device {}*", t.is_mut ? "" : "const ", type_text(p, *this, t.element));
+        case type_kind::texture:
+            if (t.is_depth)
+                return cc::format("{}<float>", k_depth_names[isize(t.shape)]);
+            return cc::format("{}<{}>", k_texture_names[isize(t.shape)], scalar_of(p.m.name_of(t.element)));
+        case type_kind::image:
+            return cc::format("{}<{}, access::{}>", k_texture_names[isize(t.shape)],
+                              scalar_of(builtin_spelling(p, texel_name_of(t.format))), k_accesses[isize(t.access)]);
+        case type_kind::sampler:
+            return "sampler";
+        default:
+            return {};
+        }
+    }
+
+    /// EMIT-89: a group is an argument buffer, a struct whose member `[[id(n)]]` is slot n of the group.
+    /// Its constant block is a pointer at slot 0, and a binding array is a C array over consecutive ids.
+    void write_group(cc::string& out,
+                     plan const& p,
+                     planned_constants const* block,
+                     cc::span<planned_resource const> buffers) const override
+    {
+        for (auto const& b : buffers)
+            if (b.element_form.has_value())
+                write_form(out, b.element_form.value());
+        if (block != nullptr)
+            write_block_struct(out, p, *block);
+
+        auto const group = block != nullptr ? block->group : buffers[0].group;
+        out.appendf("struct {}\n{{\n", argument_buffer_of(p, group).struct_name);
+        if (block != nullptr)
+            out.appendf("{}constant {}* {} [[id({})]];\n", k_indent, block->block_name, block->name, block->slot);
+        for (auto const& b : buffers)
+        {
+            auto const type = b.element_form.has_value()
+                                ? cc::format("{}device {}*", b.is_mut ? "" : "const ", b.element_form.value().name)
+                                : resource_text(p, b.type);
+            out.appendf("{}{} {} [[id({})]]", k_indent, type, b.name, b.slot);
+            if (b.count > 1)
+                out.appendf("[{}]", b.count);
+            out += ";\n";
+        }
+        out += "};\n\n";
+    }
+
+    [[nodiscard]] static planned_argument_buffer const& argument_buffer_of(plan const& p, i32 group)
+    {
+        for (auto const& a : p.argument_buffers)
+            if (a.group == group)
+                return a;
+        CC_UNREACHABLE("every group MSL writes was given an argument buffer by the plan");
+    }
+
+    /// A root's memory form: its pieces as fields, each where SGL's layout puts it (memory_form.hh).
+    static void write_form(cc::string& out, memory_form const& form)
+    {
+        out.appendf("struct {}\n{{\n", form.name);
+        for (auto const& f : form.fields)
+            out.appendf("{}{} {};\n", k_indent, f.type, f.name);
+        out += "};\n\n";
+    }
+
+    void write_block_struct(cc::string& out, plan const& p, planned_constants const& block) const
+    {
+        if (block.form.has_value())
+            return write_form(out, block.form.value());
+        out.appendf("struct {}\n{{\n", block.block_name);
+        for (auto const& member : block.members)
+            write_member(out, nullptr, member, p);
+        out += "};\n\n";
     }
 
     void write_declarations(cc::string& out, plan const& p) const override
     {
         out += "#include <metal_stdlib>\nusing namespace metal;\n\n";
         write_enum_constants(out, p, *this);
-        write_buffers(out, p, *this);
+        // A struct stands ahead of the groups, whose blocks and buffers may hold it.
         for (auto const& s : p.structs)
         {
             out.appendf("struct {}\n{{\n", s.name);
@@ -132,41 +218,52 @@ public:
                 write_member(out, &s, member, p);
             out += "};\n\n";
         }
+        write_buffers(out, p, *this);
 
         if (!p.constants.has_value())
             return;
-        auto const& c = p.constants.value();
-        out.appendf("struct {}\n{{\n", c.block_name);
-        // Its memory form where MSL's own rule would place a member elsewhere than SGL (memory_form.hh).
-        if (c.form.has_value())
-            for (auto const& f : c.form.value().fields)
-                out.appendf("{}{} {};\n", k_indent, f.type, f.name);
-        else
-            for (auto const& member : c.members)
-                write_member(out, nullptr, member, p);
-        out += "};\n\n";
+        write_block_struct(out, p, p.constants.value());
     }
 
-    /// MSL has no global resources, so the inline constants are a parameter, and the body reads them as it reads a global.
+    /// MSL has no global resources: the inline constants and every group are parameters, and each is bound to a local
+    /// at the top of the body under the name the other targets give their global, so the body reads them alike.
     void write_function_head(cc::string& out, plan const& p) const override
     {
-        auto list = cc::string();
+        auto parameters = cc::vector<cc::string>();
         if (check::is_valid(p.e.input))
-            list = cc::format("{} {} [[stage_in]]", type_text(p, *this, p.e.input), p.locals[0]);
+            parameters.push_back(cc::format("{} {} [[stage_in]]", type_text(p, *this, p.e.input), p.locals[0]));
         for (auto i = isize(0); i < p.e.stage_inputs.size(); ++i)
         {
             auto const& spelled = spelling_of(p.e.stage_inputs[i].input);
-            list += cc::format("{}{} {} [[{}]]", list.empty() ? "" : ", ", spelled.msl_type, p.stage_input_names[i],
-                               spelled.msl_attribute);
+            parameters.push_back(
+                cc::format("{} {} [[{}]]", spelled.msl_type, p.stage_input_names[i], spelled.msl_attribute));
         }
+        for (auto const& a : p.argument_buffers)
+            parameters.push_back(cc::format("constant {}& {} [[buffer({})]]", a.struct_name, a.parameter, a.group));
         if (p.constants.has_value())
         {
             auto const& c = p.constants.value();
-            list += cc::format("{}constant {}& {} [[buffer({})]]", list.empty() ? "" : ", ", c.block_name, c.name,
-                               k_inline_constants_buffer);
+            parameters.push_back(
+                cc::format("constant {}& {} [[buffer({})]]", c.block_name, c.name, k_inline_constants_buffer));
         }
-        out.appendf("{} {} {}({})\n{{\n", p.e.entry_stage == stage::vertex ? "vertex" : "fragment",
-                    type_text(p, *this, p.e.result), p.entry_name, list);
+        auto list = cc::string();
+        for (auto const& parameter : parameters)
+            list += cc::format("{}{}", list.empty() ? "" : ", ", parameter);
+
+        if (p.e.entry_stage == stage::compute)
+        {
+            // EMIT-59: MSL states no threadgroup shape of its own, so the line the Metal compiler reads it from does
+            out.appendf("#pragma sc numthreads {} {} {}\n", p.e.workgroup[0], p.e.workgroup[1], p.e.workgroup[2]);
+            out.appendf("kernel void {}({})\n{{\n", p.entry_name, list);
+        }
+        else
+            out.appendf("{} {} {}({})\n{{\n", p.e.entry_stage == stage::vertex ? "vertex" : "fragment",
+                        type_text(p, *this, p.e.result), p.entry_name, list);
+        for (auto const& block : p.group_blocks)
+            out.appendf("    constant auto& {} = *{}.{};\n", block.name, argument_buffer_of(p, block.group).parameter,
+                        block.name);
+        for (auto const& r : p.resources)
+            out.appendf("    constant auto& {} = {}.{};\n", r.name, argument_buffer_of(p, r.group).parameter, r.name);
         for (auto i = isize(0); i < p.e.stage_inputs.size(); ++i)
         {
             auto const local = p.e.stage_inputs[i].local;

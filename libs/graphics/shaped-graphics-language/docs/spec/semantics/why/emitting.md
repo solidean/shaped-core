@@ -64,8 +64,11 @@ Every flat expression is pure, so building a struct ahead of the statement that 
 ## EMIT-57
 
 `using namespace metal;` makes every name of the standard library visible in the global scope, where the program's structs are declared.
-A struct called `filter` or `length` would then be ambiguous at its first use, and the compiler would name a header nobody wrote.
+Metal also declares names there of its own, such as the `quad` it reserves for a type it never defines, and its headers define macros.
+A struct called `filter`, `length` or `quad` would then be ambiguous at its first use, and the compiler would name a header nobody wrote.
+So the list holds all of them, found by declaring each identifier of the toolchain's headers as a struct and as a function.
 A local only hides such a name, so reserving it there costs an underscore and nothing else.
+Declaring the program in a namespace of its own was the alternative, and it was declined: it would make MSL's entry points qualified names, and minting is how every other target handles a taken name.
 `main` is no keyword, and MSL refuses a function of that name, so by EMIT-20 an entry point called `main` is `main_` in MSL.
 
 ## EMIT-58

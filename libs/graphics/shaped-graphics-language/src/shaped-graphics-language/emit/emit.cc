@@ -147,23 +147,6 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
     }
 
     auto plan = impl::make_plan(m, e, t);
-    // EMIT-13's two exceptions, which wait for a Metal compiler to be checked against.
-    // A kernel and a buffer are both entry-point arguments in Metal, which this writer does not build yet.
-    if (t == target::msl && e.entry_stage == check::stage::compute)
-    {
-        result.errors.push_back({.kind = error_kind::unsupported,
-                                 .symbol = e.function,
-                                 .detail = "a compute entry point, which MSL writes as a kernel"});
-        return result;
-    }
-    if (t == target::msl && (!plan.resources.empty() || !plan.group_blocks.empty()))
-    {
-        result.errors.push_back({.kind = error_kind::unsupported,
-                                 .symbol = e.function,
-                                 .detail = "a binding group, which MSL takes as an argument buffer of the entry "
-                                           "point"});
-        return result;
-    }
     result.text = impl::write_text(plan, impl::dialect_of(t));
     result.entry_point = plan.entry_name;
     if (plan.constants.has_value())

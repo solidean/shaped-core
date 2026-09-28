@@ -370,24 +370,31 @@ HLSL cannot say `unfilterable` at all, which costs nothing, since dx12 and vulka
 Building the layout by reflecting the WGSL instead was declined: that text is written from the same declaration, so reading it back is `sgl describe` with a parser in between.
 And `texture_2d<f32>` fits a filterable and an unfilterable layout alike, so the reflection could not even recover `@unfilterable`.
 
-**MSL, as it is intended.**
+**MSL.**
 sg's metal backend makes a group one argument buffer at `[[buffer(group)]]`, whose member `[[id(n)]]` is slot `n` of the group.
-A texture or sampler slot holds a resource id, so a group reads in MSL as:
+A texture or sampler slot holds a resource id, so a group reads in MSL as (EMIT-89):
 
 ```cpp
-struct post_bindings
+struct post_arguments
 {
     constant post_data* post [[id(0)]];
-    texture2d<float, access::sample> src [[id(1)]];
-    texture2d<float, access::write> dst [[id(2)]];
-    sampler bilinear [[id(3)]];
+    texture2d<float> post_src [[id(1)]];
+    texture2d<float, access::write> post_dst [[id(2)]];
+    sampler post_bilinear [[id(3)]];
 };
-kernel void main0(constant post_bindings& post_group [[buffer(0)]], uint3 id_in [[thread_position_in_grid]])
+
+#pragma sc numthreads 8 8 1
+kernel void blur(uint3 id_in [[thread_position_in_grid]], constant post_arguments& post_group [[buffer(0)]])
+{
+    constant auto& post = *post_group.post;
+    constant auto& post_src = post_group.post_src;
+    ...
 ```
 
-Every call is inlined, so resources are parameters of the entry point alone.
+Every call is inlined, so resources are parameters of the entry point alone, and the locals at its top give the body the names the other targets' globals have.
 An image's access maps one-to-one onto `access::read`, `access::write` and `access::read_write`, and a depth texture is `depth2d<float>`.
-A file-scope static sampler can be a `constexpr sampler` in the text.
+A group's static sampler is a slot like any other, which the backend fills from the layout.
+A file-scope static sampler could be a `constexpr sampler` in the text.
 
 ## Footprint
 
