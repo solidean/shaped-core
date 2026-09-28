@@ -479,7 +479,8 @@ struct bsdf_sample
     bool valid; ///< false when the direction grazed the surface, total internal reflection ended it, or the pdf collapsed
 
     /// Which lobe drew it — one of the `bsdf_lobe_*` constants above.
-    /// Meaningful only when `valid`; an invalid sample reports the diffuse lobe and carries nothing.
+    /// Meaningful only when `valid`: a branch names its lobe before it can fail, so an invalid sample reports whichever
+    /// lobe was being drawn from rather than a fixed value.
     uint lobe;
 
     /// Which interior the direction crossed into: `medium_none`, `medium_transmission` or `medium_subsurface`.
