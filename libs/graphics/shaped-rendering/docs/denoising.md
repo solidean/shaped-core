@@ -82,7 +82,9 @@ One 1080p frame on the development machine's dx12 GPU, by tile cap; the default 
 | 768 | 276 ms | 602 MiB |
 
 OIDN's own CUDA device filters the same frame in 20.6 ms.
-Both were timed alike: device-resident buffers, warmed, best of several, with only the filter and its sync on the clock.
+Its CPU device takes 581 ms, and 327 ms with the small network, so the member is faster than Intel's own portable path.
+All three were timed alike: device-resident buffers, warmed, best of several, with only the filter and its sync on the clock.
+The CPU figure is `uv run dev.py test "OIDN's CPU device timed at 1080p" --manual`, with the library fetched.
 
 - **Cost is flat per computed pixel**, about 80 ms per computed megapixel.
   So the cap trades memory against the overlap computed twice, and never against quality.

@@ -16,6 +16,11 @@ cc::string oidn_version()
     return {};
 }
 
+f64 oidn_time_cpu_filter(tg::vec2i, sr::oidn_network_size, int)
+{
+    return -1.0;
+}
+
 bool oidn_has_device()
 {
     return false;

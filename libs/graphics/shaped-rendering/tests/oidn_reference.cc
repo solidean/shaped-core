@@ -1,6 +1,7 @@
 #include "oidn_reference.hh"
 
 #include <OpenImageDenoise/oidn.hpp>
+#include <clean-core/common/time.hh>
 #include <clean-core/record/log.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/string.hh>
@@ -73,6 +74,66 @@ bool oidn_filter_reference(cc::span<tg::vec3f const> color,
         return false;
     }
     return true;
+}
+
+f64 oidn_time_cpu_filter(tg::vec2i extent, sr::oidn_network_size size, int runs)
+{
+    auto device = oidn::newDevice(oidn::DeviceType::CPU);
+    if (!device)
+        return -1.0;
+    device.commit();
+
+    auto const width = size_t(extent[0]);
+    auto const height = size_t(extent[1]);
+    auto const bytes = width * height * sizeof(tg::vec3f);
+
+    // The device's own buffers, filled once, so no copy in or out is on the clock.
+    auto color = device.newBuffer(bytes);
+    auto albedo = device.newBuffer(bytes);
+    auto normal = device.newBuffer(bytes);
+    auto output = device.newBuffer(bytes);
+    auto* const c = static_cast<tg::vec3f*>(color.getData());
+    auto* const a = static_cast<tg::vec3f*>(albedo.getData());
+    auto* const n = static_cast<tg::vec3f*>(normal.getData());
+    for (auto i = size_t(0); i < width * height; ++i)
+    {
+        auto const speckle = 0.35f + f32(i * 7 % 11) / 11.0f;
+        a[i] = tg::vec3f(0.8f, 0.6f, 0.3f);
+        c[i] = a[i] * speckle;
+        n[i] = tg::vec3f(0, 0, 1);
+    }
+
+    auto filter = device.newFilter("RT");
+    filter.setImage("color", color, oidn::Format::Float3, width, height);
+    filter.setImage("albedo", albedo, oidn::Format::Float3, width, height);
+    filter.setImage("normal", normal, oidn::Format::Float3, width, height);
+    filter.setImage("output", output, oidn::Format::Float3, width, height);
+    filter.set("hdr", true);
+    filter.set("inputScale", 1.0f);
+    filter.set("quality", size == sr::oidn_network_size::small ? OIDN_QUALITY_FAST : OIDN_QUALITY_BALANCED);
+    filter.commit();
+
+    // Warm-up, which also pays for whatever the first execution allocates.
+    filter.execute();
+
+    auto best = -1.0;
+    for (auto r = 0; r < runs; ++r)
+    {
+        auto const start = cc::current_time_steady_secs();
+        filter.execute();
+        device.sync();
+        auto const took = cc::current_time_steady_secs() - start;
+        if (best < 0.0 || took < best)
+            best = took;
+    }
+
+    char const* message = nullptr;
+    if (device.getError(message) != oidn::Error::None)
+    {
+        CC_LOG_WARNING("oidn: the timed filter failed: {}", message != nullptr ? message : "(no message)");
+        return -1.0;
+    }
+    return best;
 }
 
 bool oidn_has_device()
