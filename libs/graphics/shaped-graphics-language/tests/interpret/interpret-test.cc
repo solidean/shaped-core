@@ -213,7 +213,7 @@ TEST("sgl interpret - every way a run ends without a result is a status")
         CHECK(interpret(g.m, g.e, test_inputs(g.m)).status == run_status::type_error);
         g.e.body = {.first = 7, .count = 900};
         CHECK(interpret(g.m, g.e, test_inputs(g.m)).status == run_status::type_error);
-        CHECK(find_core_violation(g.e).has_value());
+        CHECK(find_core_violation(g.m, g.e).has_value());
         CHECK(!dump_entry_point(g.m, legalize(g.m, g.e)).empty());
 
         auto h = float_function(checked.module);
@@ -229,7 +229,7 @@ TEST("sgl core - the first violation says why a tree is not core")
     auto const checked = flat_test_module();
     auto const reason_of = [](flat_builder const& b)
     {
-        auto const violation = find_core_violation(b.e);
+        auto const violation = find_core_violation(b.m, b.e);
         return violation.has_value() ? violation.value().reason : cc::string("core");
     };
     auto const bool_type = flat_builder{.m = checked.module}.type_named("bool");

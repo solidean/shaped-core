@@ -95,6 +95,9 @@ ctx.supports(sg::feature::raytracing)              // bool — THE capability qu
                                                    //   | unaligned_block_compression (false on webgpu and metal: a BC texture needs whole 4x4 blocks,
                                                    //     and create_texture THROWS on one that has not; desc.unaligned_block_error(supports) asks first)
                                                    //   | multisampled_array_textures (false on webgpu: no tex_2d_ms_array binding)
+                                                   //   | primitive_index (a pixel shader's SV_PrimitiveID; vulkan needs geometryShader, false on webgpu)
+                                                   //   | sample_rate_shading (per-sample pixel shading; vulkan needs sampleRateShading)
+                                                   //   vulkan's geometry, tessellation and sample-rate answers are the device features creation enabled
                                                    //   binding_arrays false (webgpu) = no count > 1 bindings, no staging_binding_group, no bindless_array
                                                    //   the per-scope bools (cmd.raytracing.is_supported(), cmd.query.is_supported(),
                                                    //   ctx.supports_headless_present()) all forward here, so there is one answer per question
@@ -212,7 +215,7 @@ sg::create_dx12_context(dx12_config = {})          // -> cc::result<context_hand
 
 ```cpp
 #include <shaped-graphics/exceptions.hh>
-sg::exception                    // base; .message() -> cc::string_view. catch this for "any sg failure"
+sg::exception                    // base, a cc::exception; .message() -> cc::string_view. catch this for "any sg failure"
 sg::device_lost_exception        // device lost (sticky); .reason(). from submit/advance/fence waits + throwing creates
 sg::allocation_exception         // resource/heap OOM or exhaustion; .size_in_bytes()
 sg::pipeline_creation_exception  // binding_group_layout / pipeline_layout / compute|raster|raytracing pipeline build failure; .entry_point()

@@ -75,11 +75,21 @@ struct flattener
     cc::vector<stage_violation> stage_violations;
     /// The condition of every `assert` whose run would write what outlives it, which its caller reports (CHK-227).
     cc::vector<origin> effectful_asserts;
+    /// Every `discard` the tree reaches, which only a pixel entry point may (CHK-277).
+    cc::vector<origin> discards;
 
     /// Notes a call of `callee` whose `@stages` leaves out the stage of the entry point being flattened.
     /// A test has no stage, so it may reach what any stage may.
     void judge_stage(ast::expr_id call, symbol_id callee)
     {
+        // CHK-298: a test's run is one invocation, which has no quad to take a derivative across
+        if (is_test)
+        {
+            auto const* const record = c.out.builtin_function(c.out.at(callee).intrinsic);
+            if (record != nullptr && record->uses_derivatives)
+                stage_violations.push_back({.file = file(), .call = call, .callee = callee});
+            return;
+        }
         if (entry.entry_stage == stage::none)
             return;
         auto const& s = c.out.at(callee);
@@ -284,7 +294,38 @@ struct flattener
         return ref != nullptr && !entry.at(ref->local).is_mut;
     }
 
-    /// One more node that means what the substitutable `id` means, attributed to `from`.
+    /// What `nonuniform i` marks, `i`; none for anything else.
+    [[nodiscard]] flat_expr_id marked_by_nonuniform(flat_expr_id id) const
+    {
+        auto const* const call = is_valid(id) ? entry.at(id).node.try_as<flat_call>() : nullptr;
+        auto const* const record = call != nullptr ? c.out.builtin_function(call->intrinsic) : nullptr;
+        return record != nullptr && record->is_nonuniform_mark ? entry.at(call->arguments)[0] : flat_expr_id::none;
+    }
+
+    /// An index that may stand in several places: a substitutable one, or `nonuniform i` of one, the mark kept on it.
+    [[nodiscard]] bool is_substitutable_index(flat_expr_id id) const
+    {
+        return is_substitutable(id) || is_substitutable(marked_by_nonuniform(id));
+    }
+
+    /// A construction of literals alone, such as a texel offset, which a target may take only as it is written.
+    [[nodiscard]] bool is_literal_construction(flat_expr_id id) const
+    {
+        auto const* const made = is_valid(id) ? entry.at(id).node.try_as<flat_construct>() : nullptr;
+        if (made == nullptr)
+            return false;
+        for (auto const a : entry.at(made->arguments))
+        {
+            auto const& x = entry.at(a).node;
+            auto const is_literal = x.is<flat_literal>() || x.is<flat_int_literal>() || x.is<flat_bool_literal>()
+                                 || x.is<flat_enum_value>();
+            if (!is_literal && !is_literal_construction(a))
+                return false;
+        }
+        return true;
+    }
+
+    /// One more node that means what the substitutable `id`, or a construction of literals, means, attributed to `from`.
     flat_expr_id again(flat_expr_id id, ast::expr_id from)
     {
         auto const x = entry.at(id);
@@ -300,6 +341,31 @@ struct flattener
             return add_expr(x.type, from, *v);
         if (auto const* const m = x.node.try_as<flat_binding_member>())
             return add_expr(x.type, from, *m);
+        if (auto const* const element = x.node.try_as<flat_element>())
+        {
+            auto const object = again(element->object, from);
+            auto const index = again(element->index, from);
+            return add_expr(x.type, from, flat_element{.object = object, .index = index});
+        }
+        // the mark stays where it was written, which is what a diagnostic about it points at
+        if (auto const marked = marked_by_nonuniform(id); is_valid(marked))
+        {
+            flat_expr_id const arguments[] = {again(marked, from)};
+            auto copy = x;
+            copy.node.as<flat_call>().arguments = add_list(arguments);
+            entry.exprs.push_back(cc::move(copy));
+            return flat_expr_id(entry.exprs.size() - 1);
+        }
+        if (auto const* const made = x.node.try_as<flat_construct>())
+        {
+            // copied first: `again` appends to the lists the view reads
+            auto arguments = cc::vector<flat_expr_id>();
+            for (auto const a : entry.at(made->arguments))
+                arguments.push_back(a);
+            for (auto& a : arguments)
+                a = again(a, from);
+            return add_expr(x.type, from, flat_construct{.arguments = add_list(arguments)});
+        }
         return fail();
     }
 
@@ -307,8 +373,12 @@ struct flattener
     /// and it stands wherever it is named, since naming one has no effect.
     [[nodiscard]] bool is_resource_member(flat_expr_id id) const
     {
-        return is_valid(id) && entry.at(id).node.is<flat_binding_member>()
-            && is_resource(c.out.at(entry.at(id).type).kind);
+        if (!is_valid(id) || !is_resource(c.out.at(entry.at(id).type).kind))
+            return false;
+        // an element of a binding array, at an index that reads the same wherever it stands
+        if (auto const* const element = entry.at(id).node.try_as<flat_element>())
+            return entry.at(element->object).node.is<flat_binding_member>() && is_substitutable_index(element->index);
+        return entry.at(id).node.is<flat_binding_member>();
     }
 
     /// A value that is read more than once and evaluated once, where it stands.
@@ -383,7 +453,18 @@ struct flattener
             if (where.kind == target_kind::enum_case)
                 return enum_value(type, id, where.index);
             if (where.kind == target_kind::binding_member)
-                return add_expr(type, id, flat_binding_member{.binding = where.symbol, .member = where.index});
+                return add_expr(type, id,
+                                flat_binding_member{.binding = where.symbol,
+                                                    .member = where.index,
+                                                    .is_workgroup = c.is_workgroup_binding(where.symbol)});
+            // CHK-288: a constant, and an object with an effect still runs for it
+            if (where.kind == target_kind::array_length)
+            {
+                auto const object = flatten_expr(m->object);
+                if (calls_impure(object, 0))
+                    add_stmt({.file = file(), .expr = id}, flat_eval{.value = object});
+                return add_expr(type, id, flat_int_literal{.value = where.index});
+            }
             if (where.kind != target_kind::field)
                 return fail();
             auto const object = flatten_expr(m->object);
@@ -391,14 +472,30 @@ struct flattener
         }
         if (auto const* const indexed = e.node.try_as<ast::index>())
         {
-            // The check pass let only a buffer element through, so the object is a resource and the index an int.
             auto const arguments = ast().at(indexed->arguments);
+            auto const object_type = tables().type_at(indexed->object);
+            // CHK-287: one element per index, `grid[i, j]` being `grid[i][j]`
+            if (is_valid(object_type) && c.out.at(object_type).kind == type_kind::array)
+            {
+                auto object = flatten_expr(indexed->object);
+                auto element_type = object_type;
+                for (auto const& a : arguments)
+                {
+                    element_type = c.out.at(element_type).element;
+                    auto const index = flatten_expr(a.value);
+                    object = add_expr(element_type, id, flat_element{.object = object, .index = index});
+                }
+                return object;
+            }
+            // The check pass let only a buffer element through otherwise, so the object is a resource.
             if (arguments.size() != 1)
                 return fail();
             auto const buffer = flatten_expr(indexed->object);
             auto const index = flatten_expr(arguments[0].value);
             return add_expr(type, id, flat_buffer_element{.buffer = buffer, .index = index});
         }
+        if (auto const* const literal = e.node.try_as<ast::array>())
+            return flatten_array_literal(id, type, *literal);
         if (auto const* const call = e.node.try_as<ast::call>())
             return flatten_call(id, type, where, *call);
         if (auto const* const cast = e.node.try_as<ast::cast>())
@@ -425,14 +522,18 @@ struct flattener
         return fail();
     }
 
-    /// A case of `type`; a case of `bool` is a bool literal, since a target writes a bool and not the `int` of a case.
+    /// A case of `type`; a case of a builtin enum is a literal of what the targets write it as: a bool, or an int.
     flat_expr_id enum_value(type_id type, ast::expr_id from, i32 case_index)
     {
         if (c.out.is_plain_enum(type))
             return add_expr(type, from, flat_enum_value{.case_index = case_index});
         auto const cases = c.out.at(c.out.at(type).cases);
-        auto const is_known_case = case_index >= 0 && case_index < cases.size();
-        return is_known_case ? add_expr(type, from, flat_bool_literal{.value = cases[case_index].value != 0}) : fail();
+        if (case_index < 0 || case_index >= cases.size())
+            return fail();
+        auto const value = cases[case_index].value;
+        if (c.out.builtin_type_of(type)->leaf_kind == value_kind::boolean)
+            return add_expr(type, from, flat_bool_literal{.value = value != 0});
+        return add_expr(type, from, flat_int_literal{.value = i32(value)});
     }
 
     /// A const stands for its value, written where the name stood.
@@ -473,8 +574,67 @@ struct flattener
         return value.has_value() ? add_expr(type, id, flat_literal{.value = value.value()}) : fail();
     }
 
+    /// `[a, b, c]` of an array type, its elements in the order written (EVAL-91).
+    flat_expr_id flatten_array_literal(ast::expr_id id, type_id type, ast::array const& literal)
+    {
+        auto values = cc::vector<flat_expr_id>();
+        for (auto const& element : ast().at(literal.elements))
+            values.push_back(flatten_expr(element.value));
+        // a target may build one in any order, so two with an effect run first, in order
+        auto with_effect = 0;
+        for (auto const v : values)
+            with_effect += calls_impure(v, 0) ? 1 : 0;
+        if (with_effect >= 2)
+            for (auto& v : values)
+                if (calls_impure(v, 0))
+                {
+                    auto const local = add_local(local_kind::temporary, "element", entry.at(v).type);
+                    add_stmt({.file = file(), .expr = id}, flat_let{.local = local, .value = v});
+                    v = local_ref(local, id);
+                }
+        return add_expr(type, id, flat_construct{.arguments = add_list(values)});
+    }
+
+    /// CHK-289: `T[N].filled(v)` is a local every element of which is assigned `v`, evaluated once.
+    flat_expr_id flatten_filled(ast::expr_id id, type_id type, ast::call const& call)
+    {
+        auto const arguments = ast().at(call.arguments);
+        if (arguments.size() != 1 || !is_valid(type))
+            return fail();
+        auto const where = origin{.file = file(), .expr = id};
+        auto const& info = c.out.at(type);
+        auto const value = flatten_expr(arguments[0].value);
+        if (!is_valid(value))
+            return fail();
+
+        auto const label = add_label("filled");
+        auto body = cc::vector<flat_stmt_id>();
+        auto filler = value;
+        if (!is_substitutable(value))
+        {
+            auto const held = add_local(local_kind::let, "fill", info.element);
+            body.push_back(make_stmt(where, flat_let{.local = held, .value = value}));
+            filler = local_ref(held, id);
+        }
+        auto const result = add_local(local_kind::var, "filled", type);
+        body.push_back(make_stmt(where, flat_var{.local = result}));
+        auto const index = add_local(local_kind::index, "i", int_type());
+        auto const element
+            = add_expr(info.element, id, flat_element{.object = local_ref(result, id), .index = local_ref(index, id)});
+        flat_stmt_id const store[] = {make_stmt(where, flat_assign{.place = element, .value = filler})};
+        body.push_back(make_stmt(where, flat_for{.label = add_label("fill"),
+                                                 .index = index,
+                                                 .first = add_expr(int_type(), id, flat_int_literal{.value = 0}),
+                                                 .end = add_expr(int_type(), id, flat_int_literal{.value = info.count}),
+                                                 .body = add_list(store)}));
+        body.push_back(make_stmt(where, flat_leave{.target = label, .value = local_ref(result, id)}));
+        return add_expr(type, id, flat_block{.label = label, .body = add_list(body)});
+    }
+
     flat_expr_id flatten_call(ast::expr_id id, type_id type, target const& where, ast::call const& call)
     {
+        if (where.kind == target_kind::array_filled)
+            return flatten_filled(id, type, call);
         if (sgl::is_valid(call.op))
         {
             auto const spelling = c.text_of(file(), c.file_of(file()).at(call.op).where);
@@ -500,6 +660,43 @@ struct flattener
         if (record < 0 || (where.kind != target_kind::overload && where.kind != target_kind::constructor))
             return fail();
         return flatten_bound_call(id, type, c.out.call_records[record]);
+    }
+
+    /// The element `place` names, over a local holding its index where evaluating the index twice could differ.
+    flat_expr_id with_bound_index(flat_expr_id place, ast::expr_id id)
+    {
+        // by value: binding adds nodes, and the arrays move
+        auto const x = entry.at(place);
+        auto bind = [&](flat_expr_id index)
+        {
+            if (is_substitutable_index(index))
+                return index;
+            // `nonuniform i` binds `i`, and marks the bound local, since a mark is read only where it indexes (CHK-300)
+            auto const marked = marked_by_nonuniform(index);
+            auto const value = is_valid(marked) ? marked : index;
+            auto const local = add_local(local_kind::temporary, "index", entry.at(value).type);
+            add_stmt({.file = file(), .expr = id}, flat_let{.local = local, .value = value});
+            if (!is_valid(marked))
+                return local_ref(local, id);
+            flat_expr_id const arguments[] = {local_ref(local, id)};
+            auto mark = entry.at(index);
+            mark.node.as<flat_call>().arguments = add_list(arguments);
+            entry.exprs.push_back(cc::move(mark));
+            return flat_expr_id(entry.exprs.size() - 1);
+        };
+        if (auto const* const element = x.node.try_as<flat_buffer_element>())
+        {
+            auto const buffer = element->buffer;
+            auto const index = bind(element->index);
+            return add_expr(x.type, id, flat_buffer_element{.buffer = buffer, .index = index});
+        }
+        if (auto const* const element = x.node.try_as<flat_element>())
+        {
+            auto const object = element->object;
+            auto const index = bind(element->index);
+            return add_expr(x.type, id, flat_element{.object = object, .index = index});
+        }
+        return place;
     }
 
     /// True where a call of a program function is inlined rather than written as a call of the target.
@@ -560,9 +757,16 @@ struct flattener
             auto const value = values[i];
             if (!is_valid(value))
                 return fail();
-            if (is_substitutable(value) || is_resource_member(value))
+            if (is_substitutable(value) || is_resource_member(value) || is_literal_construction(value))
             {
                 bound[i] = value;
+                continue;
+            }
+            // an atomic names the memory the call updates, and a binding array's element the resource it hands over,
+            // so either's index is bound in its stead, and never its value
+            if (auto const kind = c.out.at(entry.at(value).type).kind; kind == type_kind::atomic || is_resource(kind))
+            {
+                bound[i] = with_bound_index(value, id);
                 continue;
             }
             auto name = cc::string_view("argument");
@@ -588,7 +792,7 @@ struct flattener
             frames.push_back({.function = callee, .file = s.file, .chain = chain});
             for (auto p = isize(0); p < slots.size(); ++p)
                 if (slots[p] >= 0)
-                    bind_parameter(parameters[p], copies[p]);
+                    bind_parameter(parameters[p], copies[p], true);
             bind_defaults(parameters, slots);
             filled = cc::move(current()->bound);
             frames.remove_back();
@@ -612,6 +816,10 @@ struct flattener
                 return fail();
             arguments.push_back(value);
         }
+        // CHK-303: a stream's `emit` takes the vertex past its signature, which no slot names
+        if (auto const* const record = c.out.builtin_function(s.intrinsic); record != nullptr && record->takes_element)
+            for (auto i = slots.size(); i < bound.size(); ++i)
+                arguments.push_back(entry.at(bound[i]).node.is<flat_local_ref>() ? bound[i] : again(bound[i], id));
         add_stmt(where, flat_leave{.target = label, .value = call_of(arguments)});
         auto const body = add_list(block);
         block = cc::move(outer);
@@ -657,11 +865,43 @@ struct flattener
         if (!is_valid(s.intrinsic) || s.info < 0)
             return fail();
         auto const& info = c.out.functions[s.info];
+        auto const* const record = c.out.builtin_function(s.intrinsic);
+        if (record != nullptr && record->with_default_sampler != builtin_id::none)
+            return default_sampled_call(id, record->with_default_sampler, arguments);
         return add_expr(info.result, id,
                         flat_call{.callee = callee,
                                   .intrinsic = s.intrinsic,
                                   .is_pure = info.is_pure,
                                   .arguments = add_list(arguments)});
+    }
+
+    /// A sampling call without its sampler calls the record that takes one, with the texture's `@sampler` after the
+    /// coordinate (CHK-279); the check pass has made sure the texture names one.
+    flat_expr_id default_sampled_call(ast::expr_id id, builtin_id with_sampler, cc::span<flat_expr_id const> arguments)
+    {
+        // the texture, or the binding array it is an element of
+        auto named = arguments.size() >= 2 ? arguments[0] : flat_expr_id::none;
+        if (auto const* const element = is_valid(named) ? entry.at(named).node.try_as<flat_element>() : nullptr)
+            named = element->object;
+        auto const* const texture = is_valid(named) ? entry.at(named).node.try_as<flat_binding_member>() : nullptr;
+        if (texture == nullptr)
+            return fail();
+        auto const members = c.out.at(c.out.bindings[c.out.at(texture->binding).info].members);
+        auto const sampler = members[texture->member].default_sampler;
+        if (sampler < 0)
+            return fail();
+        // the call becomes one of the record that takes the sampler, so its arguments match its callee's parameters
+        auto const declared = c.symbol_declaring(with_sampler);
+        if (!is_valid(declared))
+            return fail();
+        auto with = cc::vector<flat_expr_id>();
+        with.push_back_range(arguments);
+        with.insert_at(
+            2, add_expr(members[sampler].type, id, flat_binding_member{.binding = texture->binding, .member = sampler}));
+        auto const& info = c.out.functions[c.out.at(declared).info];
+        return add_expr(
+            info.result, id,
+            flat_call{.callee = declared, .intrinsic = with_sampler, .is_pure = info.is_pure, .arguments = add_list(with)});
     }
 
     /// The values of a call's written arguments, in the order written.
@@ -1045,7 +1285,8 @@ struct flattener
             auto const where = origin{.file = file(), .expr = arm.result.value};
             auto const& e = ast().at(arm.result.value);
             auto const is_jump = e.node.is<ast::return_expr>() || e.node.is<ast::break_expr>()
-                              || e.node.is<ast::continue_expr>() || e.node.is<ast::yield_expr>();
+                              || e.node.is<ast::continue_expr>() || e.node.is<ast::yield_expr>()
+                              || e.node.is<ast::discard_expr>();
             if (is_jump)
                 flatten_expr_stmt(where, arm.result.value);
             else if (is_valid(value_block))
@@ -1099,7 +1340,8 @@ struct flattener
 
     /// Binds a value to parameter `p` in the current frame: a literal or an immutable local stands for it, and
     /// anything else is bound once by a `let` of the block being written.
-    void bind_parameter(parameter const& p, flat_expr_id value)
+    /// `keeps_constructions` binds a construction of literals as it stands, for a builtin that takes one only so.
+    void bind_parameter(parameter const& p, flat_expr_id value, bool keeps_constructions = false)
     {
         if (!is_valid(value))
         {
@@ -1111,7 +1353,8 @@ struct flattener
         auto const* const ref = x.node.try_as<flat_local_ref>();
         if (ref != nullptr && is_substitutable(value))
             current()->bound.push_back({.where = where, .local = ref->local});
-        else if (is_substitutable(value) || is_resource_member(value))
+        else if (is_substitutable(value) || is_resource_member(value)
+                 || (keeps_constructions && is_literal_construction(value)))
             current()->bound.push_back({.where = where, .literal = value});
         else
         {
@@ -1345,6 +1588,8 @@ struct flattener
     /// that holds it.
     flat_expr_id read_of_place(flat_expr_id place, ast::expr_id target)
     {
+        if (has_array_index(place))
+            return reread(place, target);
         if (!is_valid(place) || !entry.at(place).node.is<flat_buffer_element>())
             return flatten_expr(target);
 
@@ -1362,6 +1607,45 @@ struct flattener
         auto const buffer_again = add_expr(buffer.type, indexed.object, buffer.node);
         auto const index_again = once.later == once.first ? again(once.first, arguments[0].value) : once.later;
         return add_expr(x.type, target, flat_buffer_element{.buffer = buffer_again, .index = index_again});
+    }
+
+    [[nodiscard]] bool has_array_index(flat_expr_id id) const
+    {
+        for (auto depth = 0; is_valid(id) && depth < k_max_inline_depth; ++depth)
+        {
+            auto const& node = entry.at(id).node;
+            if (node.is<flat_element>())
+                return true;
+            auto const* const member = node.try_as<flat_member>();
+            if (member == nullptr)
+                return false;
+            id = member->object;
+        }
+        return false;
+    }
+
+    /// The place `id` read a second time, each array index in it evaluated once: the place keeps the first evaluation,
+    /// and the read takes the local that holds it (EVAL-14).
+    flat_expr_id reread(flat_expr_id id, ast::expr_id from)
+    {
+        // by value: evaluating once adds nodes, and the arrays move
+        auto const x = entry.at(id);
+        if (auto const* const member = x.node.try_as<flat_member>())
+        {
+            auto const object = reread(member->object, from);
+            return add_expr(x.type, from, flat_member{.object = object, .member = member->member});
+        }
+        if (auto const* const element = x.node.try_as<flat_element>())
+        {
+            auto const object = reread(element->object, from);
+            auto const once = evaluate_once(element->index, "index", from);
+            entry.exprs[index_of(id)].node = flat_element{.object = element->object, .index = once.first};
+            auto const index = once.later == once.first ? again(once.first, from) : once.later;
+            return add_expr(x.type, from, flat_element{.object = object, .index = index});
+        }
+        if (x.node.is<flat_local_ref>())
+            return again(id, from);
+        return fail();
     }
 
     void flatten_for(origin from, ast::stmt_id id, ast::for_stmt const& loop)
@@ -1469,6 +1753,12 @@ struct flattener
             auto const target = loops.back().value_block;
             is_failed = is_failed || !is_valid(target);
             return add_stmt(from, flat_leave{.target = target, .value = flatten_expr(b->value)});
+        }
+        if (x.node.is<ast::discard_expr>())
+        {
+            // CHK-277: only a pixel entry point may reach it, which is known once the whole body is inlined
+            discards.push_back({.file = file(), .expr = value});
+            return add_stmt(from, flat_discard{});
         }
         if (x.node.is<ast::continue_expr>())
         {
@@ -1585,9 +1875,9 @@ void checker::flatten_test(i32 index)
     // by value: flattening appends to the module's vectors
     auto const test = out.tests[index];
     auto const info = out.at(test.symbol).info;
-    // A test that expects a diagnostic is never run (CHK-232), and one whose text an earlier phase found an error in has
-    // been reported already: flattening either could only add a second diagnostic to the first.
-    if (test.expects_diagnostics() || has_syntax_error_in(test.file, test.extent))
+    // One whose text an earlier phase found an error in has been reported already: flattening it could only add a
+    // second diagnostic to the first.
+    if (has_syntax_error_in(test.file, test.extent))
         return;
     if (!notes[info].is_body_sound || !inlines_whole(test.symbol))
         return;
@@ -1605,15 +1895,32 @@ void checker::flatten_test(i32 index)
     for (auto const stmt : ast_of(test.file).at(body.statements))
         f.flatten_stmt(stmt);
 
+    // A test that expects a diagnostic is never run (CHK-232), so its tree is judged for its constants alone.
+    // Nothing else of the tree is reported: what it expects stands in its text, where the check pass found it already.
+    if (test.expects_diagnostics())
+    {
+        if (!f.is_failed)
+        {
+            f.entry.body = f.add_list(f.block);
+            judge_constants(f.entry);
+        }
+        return;
+    }
+
     // CHK-227: once, however many trees inline the function the assert stands in
     for (auto const& a : f.effectful_asserts)
         report_once(diagnostic_kind::unsupported_yet, a.file, span_of(a.file, a.expr),
                     "an assert whose condition writes a buffer, prints, or calls a builtin with an effect");
+    for (auto const& v : f.stage_violations)
+        report(diagnostic_kind::stage_not_allowed, v.file, span_of(v.file, v.call),
+               cc::format("{} takes derivatives across a quad of pixels, and a test runs one invocation",
+                          out.at(v.callee).name));
     if (f.is_failed && !f.meets_error)
         unsupported(test.file, test.where, "a test whose body reaches a construct the flat tree cannot hold yet");
-    if (f.is_failed)
+    if (f.is_failed || !f.stage_violations.empty())
         return;
     f.entry.body = f.add_list(f.block);
+    judge_constants(f.entry);
     out.tests[index].unit = i32(out.test_units.size());
     out.test_units.push_back(cc::move(f.entry));
 }
@@ -1636,22 +1943,26 @@ void checker::flatten_entry_point(symbol_id id)
     if (info.entry_stage == stage::none || !note.is_valid_entry || !inlines_whole(id))
         return;
 
-    auto const parameter = out.at(info.parameters)[0];
+    auto const parameters = out.at(info.parameters);
     // A compute entry point hands nothing back, so `nothing` is its result and not a hole.
     auto const wants_result = info.entry_stage != stage::compute;
-    if (!is_sound(parameter.type) || (wants_result && !is_sound(info.result)))
+    auto is_parameter_sound = true;
+    for (auto const& parameter : parameters)
+        is_parameter_sound = is_parameter_sound && is_sound(parameter.type);
+    if (!is_parameter_sound || (wants_result && !is_sound(info.result)))
         return;
 
     auto f = flattener{.c = *this};
     f.entry.entry_stage = info.entry_stage;
     f.entry.name = s.name;
     f.entry.function = id;
-    f.entry.input = parameter.type;
+    // CHK-271: the stage struct, when there is one, is the first parameter; every other is a stage input
+    if (!parameters.empty() && parameters[0].input == stage_input::none)
+        f.entry.input = parameters[0].type;
     f.entry.result = info.result;
     f.entry.workgroup[0] = info.workgroup[0];
     f.entry.workgroup[1] = info.workgroup[1];
     f.entry.workgroup[2] = info.workgroup[2];
-    f.entry.takes_thread_id = parameter.is_thread_id;
     f.entry.features = info.features;
     for (auto const binding : out.at(info.bindings))
         f.entry.bindings.push_back(binding);
@@ -1663,9 +1974,15 @@ void checker::flatten_entry_point(symbol_id id)
             f.entry.names.reserve(other.name);
 
     f.frames.push_back({.function = id, .file = s.file, .result = info.result});
-    auto const local = f.add_local(local_kind::parameter, parameter.name, parameter.type);
-    f.current()->bound.push_back(
-        {.where = {.kind = target_kind::parameter, .index = i32(parameter.field)}, .local = local});
+    // Every parameter is a local, in the order written: the stage struct at `locals[0]` when there is one.
+    for (auto const& parameter : parameters)
+    {
+        auto const local = f.add_local(local_kind::parameter, parameter.name, parameter.type);
+        f.current()->bound.push_back(
+            {.where = {.kind = target_kind::parameter, .index = i32(parameter.field)}, .local = local});
+        if (parameter.input != stage_input::none)
+            f.entry.stage_inputs.push_back({.input = parameter.input, .local = local});
+    }
 
     auto const& body = ast_of(s.file).at(s.declaration).node.as<ast::fun_decl>().body;
     if (ast::is_valid(body.value))
@@ -1686,6 +2003,11 @@ void checker::flatten_entry_point(symbol_id id)
         report(diagnostic_kind::stage_not_allowed, v.file, span_of(v.file, v.call),
                cc::format("{} is a {} entry point, and {} is @stages without it", s.name, stage_name(info.entry_stage),
                           out.at(v.callee).name));
+    auto const reaches_discard = info.entry_stage != stage::pixel && !f.discards.empty();
+    for (auto const& d : info.entry_stage != stage::pixel ? cc::span<origin const>(f.discards) : cc::span<origin const>())
+        report(
+            diagnostic_kind::stage_not_allowed, d.file, span_of(d.file, d.expr),
+            cc::format("{} is a {} entry point, and only a pixel stage discards", s.name, stage_name(info.entry_stage)));
     if ((info.stages & stage_bit(info.entry_stage)) == 0)
         report(diagnostic_kind::stage_not_allowed, s.file, ast_of(s.file).at(s.declaration).node.as<ast::fun_decl>().name,
                cc::format("{} is a {} entry point, and its own @stages leaves that out", s.name,
@@ -1694,7 +2016,7 @@ void checker::flatten_entry_point(symbol_id id)
     if (f.is_failed && !f.meets_error)
         unsupported(s.file, ast_of(s.file).at(s.declaration).node.as<ast::fun_decl>().name,
                     cc::format("{}: its body reaches a construct the flat tree cannot hold yet", s.name));
-    if (f.is_failed || !f.stage_violations.empty() || (info.stages & stage_bit(info.entry_stage)) == 0)
+    if (f.is_failed || !f.stage_violations.empty() || reaches_discard || (info.stages & stage_bit(info.entry_stage)) == 0)
         return;
     f.entry.body = f.add_list(f.block);
 
@@ -1710,5 +2032,7 @@ void checker::flatten_entry_point(symbol_id id)
                cc::format("'{}' nests deeper than {} levels here, with every call inlined", s.name, k_max_depth));
         return;
     }
+    judge_constants(f.entry);
+    judge_uniformity(f.entry);
     out.entry_points.push_back(cc::move(f.entry));
 }

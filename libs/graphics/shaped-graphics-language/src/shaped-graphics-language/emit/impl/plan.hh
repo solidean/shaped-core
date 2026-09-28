@@ -28,6 +28,8 @@ enum class struct_role : u8
     stage_link,
     /// The result of a pixel entry point: member i is render target i.
     render_targets,
+    /// What a tessellation control stage returns and the evaluation stage takes: its factors, and data per patch.
+    patch_constants,
 };
 
 struct planned_member
@@ -38,6 +40,12 @@ struct planned_member
     cc::string source_name;
     check::type_id type = check::type_id::none;
     bool is_position = false;
+    /// How a stage link's member is interpolated; the default everywhere else.
+    check::interpolation interpolate;
+    /// A render target struct's depth or sample mask, which takes no location; `color` everywhere else.
+    check::pixel_output output = {};
+    /// A factors struct's tessellation factors, which take no location; `none` everywhere else.
+    check::tessellation_factor factor = {};
     /// The position among the members without `@position`; -1 on a `plain` struct and on the position itself.
     i32 location = -1;
     /// The byte offset in a constant block; -1 everywhere else.
@@ -102,10 +110,24 @@ struct planned_resource
     check::type_id element = check::type_id::none;
     bool is_mut = false;
     i32 group = 0;
+    /// The first of the `count` consecutive slots it takes: a binding array takes one per element (CHK-299).
     i32 slot = 0;
+    /// A binding array's length; 1 for any other resource.
+    i32 count = 1;
     /// A buffer's element as its target has to declare it to reach SGL's stride and offsets; absent where the element
     /// type as it is does.
     cc::optional<memory_form> element_form;
+};
+
+/// One member of a `@workgroup` binding: memory the workgroup shares, which no host binds.
+struct planned_workgroup
+{
+    check::symbol_id binding = check::symbol_id::none;
+    /// A position in the binding's `members`.
+    i32 member = -1;
+    /// The variable the shader reads and writes through, minted like any other name.
+    cc::string name;
+    check::type_id type = check::type_id::none;
 };
 
 struct plan
@@ -118,26 +140,41 @@ struct plan
     cc::vector<planned_struct> structs;
     /// Parallel to `m.types`: a position in `structs`, or -1 for a builtin type and for a type nothing here needs.
     cc::vector<i32> struct_of_type;
+    /// How the target spells each array type the entry point needs: `array<f32, 5>`.
+    /// HLSL's is its innermost element's, since HLSL writes the lengths after the name (`array_dimensions`).
+    cc::vector<cc::string> array_texts;
+    /// Parallel to `m.types`: a position in `array_texts`, or -1 for a type that is no array this entry point needs.
+    cc::vector<i32> array_of_type;
     /// The enums the entry point mentions, in the order they were first needed.
     cc::vector<planned_enum> enums;
     /// Parallel to `m.types`: a position in `enums`, or -1 for a type that is no enum this entry point needs.
     cc::vector<i32> enum_of_type;
     /// What this target declares the entry point as: the source's name, or a minted one where the target reserves it.
     cc::string entry_name;
+    /// A tessellation control stage's patch-constant function, which HLSL writes its body as, and the index of the
+    /// control point its pass-through hull function hands on; empty for every other stage.
+    cc::string patch_function;
+    cc::string point_index;
     cc::optional<planned_constants> constants;
     /// The constant blocks of the entry point's groups, one per group with a plain member, in group order.
     cc::vector<planned_constants> group_blocks;
     /// The resources the entry point's bindings declare, in group then slot order.
     cc::vector<planned_resource> resources;
+    /// The members of its `@workgroup` bindings, in the order listed and then declared.
+    cc::vector<planned_workgroup> workgroup;
     /// Parallel to `e.locals`.
     cc::vector<cc::string> locals;
-    /// A compute entry point's parameter as the dispatch hands it over, unsigned, ahead of the `int3` the body reads;
+    /// Parallel to `e.stage_inputs`: each as the target hands it over, unsigned, ahead of the local the body reads;
     /// minted, so no local of the program can take it.
-    cc::string dispatch_name;
+    cc::vector<cc::string> stage_input_names;
+    /// Parallel to `e.stage_inputs`: a second parameter where a target needs one, dx12's `SV_StartInstanceLocation`.
+    cc::vector<cc::string> stage_input_bases;
     /// Holds every name above and every reserved word of the target; a writer mints what it still needs from here.
     check::name_mint names;
 };
 
+/// The position in `workgroup` of `binding.member`, or -1 where that member is no workgroup memory.
+[[nodiscard]] i32 workgroup_of(plan const& p, check::symbol_id binding, i32 member);
 /// The position in `resources` of the resource `binding.member` names, or -1 where that member is no resource.
 [[nodiscard]] i32 resource_of(plan const& p, check::symbol_id binding, i32 member);
 
@@ -153,6 +190,10 @@ struct plan
 
 /// How the target of `p` spells the builtin type named `name`, such as the texel of an image format.
 [[nodiscard]] cc::string_view builtin_spelling(plan const& p, cc::string_view name);
+/// An atomic as the target spells it: HLSL's plain integer, which `Interlocked*` updates, and WGSL's and MSL's atomic types.
+[[nodiscard]] cc::string_view atomic_text(plan const& p, check::type_id type);
+/// What HLSL writes after a declared name of `type`, `[3][5]`; empty for any other type and any other target.
+[[nodiscard]] cc::string array_dimensions(plan const& p, check::type_id type);
 /// The column of a builtin's record `t` reads; the two HLSL targets share one.
 [[nodiscard]] builtins::language language_of(target t);
 
@@ -161,6 +202,25 @@ struct plan
 
 /// Appends what keeps `e` from being written, which is the same for every target.
 void validate(check::checked_module const& m, check::flat_entry_point const& e, cc::vector<error>& errors);
+
+/// How each target hands a stage input to an entry point (EMIT-127): its type there, and what marks it.
+struct stage_input_spelling
+{
+    cc::string_view hlsl_type;
+    cc::string_view hlsl_semantic;
+    cc::string_view wgsl_type;
+    cc::string_view wgsl_builtin;
+    cc::string_view msl_type;
+    cc::string_view msl_attribute;
+};
+[[nodiscard]] stage_input_spelling const& spelling_of(check::stage_input input);
+
+/// True where the target counts `input` from the draw's base and the text adds the base back: HLSL's vertex and instance.
+[[nodiscard]] bool has_base(plan const& p, check::stage_input input);
+
+/// The line that turns a stage input as the target handed it over into the value the body reads: `int3(id_in)`.
+/// `base` is the second parameter a target needs, or empty.
+[[nodiscard]] cc::string stage_input_value(plan const& p, isize index);
 
 /// The buffer a vertex input member is read from (EMIT-92): its `@stream`, else `per_instance` or `per_vertex`.
 [[nodiscard]] cc::string stream_of(check::member_info const& member);

@@ -33,7 +33,11 @@ void fold_members(cc::byte_stream_builder& b, checked_module const& m, cc::span<
     {
         b.add_string(member.name);
         b.add_bool(member.is_position);
-        b.add_bool(member.is_thread_id);
+        b.add_pod(u8(member.interpolate.kind));
+        b.add_pod(u8(member.interpolate.sampling));
+        b.add_string(member.vertex_format);
+        b.add_pod(u8(member.output));
+        b.add_pod(u8(member.factor));
         b.add_bool(member.is_per_instance);
         b.add_string(member.stream);
         b.add_bool(member.is_unfilterable);
@@ -41,6 +45,7 @@ void fold_members(cc::byte_stream_builder& b, checked_module const& m, cc::span<
         b.add_bool(member.static_sampler >= 0);
         if (member.static_sampler >= 0)
             fold_sampler(b, m.samplers[member.static_sampler]);
+        b.add_pod(member.default_sampler);
         fold_type(b, m, member.type);
     }
 }
@@ -51,6 +56,14 @@ void fold_type(cc::byte_stream_builder& b, checked_module const& m, type_id type
     b.add_pod(u8(t.kind));
     switch (t.kind)
     {
+    case type_kind::array:
+        b.add_pod(t.count);
+        fold_type(b, m, t.element);
+        break;
+    case type_kind::atomic:
+        b.add_pod(u8(t.access));
+        fold_type(b, m, t.element);
+        break;
     case type_kind::buffer:
         b.add_bool(t.is_mut);
         fold_type(b, m, t.element);

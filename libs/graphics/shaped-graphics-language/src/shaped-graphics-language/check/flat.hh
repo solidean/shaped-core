@@ -2,6 +2,7 @@
 
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/macros.hh>
+#include <clean-core/container/set.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/variant.hh>
 #include <clean-core/container/vector.hh>
@@ -111,8 +112,10 @@ template <class T>
 /// emitter goes on minting from the same value.
 struct sgl::check::name_mint
 {
-    /// Every name handed out or reserved so far.
+    /// Every name handed out or reserved so far, in that order, and the same names as a set to look them up in.
+    /// Both are written by `reserve` and `mint` alone.
     cc::vector<cc::string> taken;
+    cc::set<cc::string> index;
 
     [[nodiscard]] bool is_taken(cc::string_view name) const;
 
@@ -236,6 +239,8 @@ struct sgl::check::flat_binding_member
     symbol_id binding = symbol_id::none;
     /// A position in the binding's `members`.
     i32 member = -1;
+    /// Of a `@workgroup` binding: memory the workgroup shares, which a store changes between two reads of it.
+    bool is_workgroup = false;
 
     constexpr bool operator==(flat_binding_member const&) const = default;
 };
@@ -260,7 +265,17 @@ struct sgl::check::flat_buffer_element
     constexpr bool operator==(flat_buffer_element const&) const = default;
 };
 
-/// A value of the node's struct type from one value per field, in field order.
+/// `object[index]` on an array value: its element, read or, as a place, assigned.
+/// The index is evaluated after the object; outside `0 ..< length` it is a program error (EVAL-90).
+struct sgl::check::flat_element
+{
+    flat_expr_id object = flat_expr_id::none;
+    flat_expr_id index = flat_expr_id::none;
+
+    constexpr bool operator==(flat_element const&) const = default;
+};
+
+/// A value of the node's struct type from one value per field, in field order, or of its array type, one per element.
 /// A splat is gone: its fields stand here one by one.
 struct sgl::check::flat_construct
 {
@@ -334,6 +349,7 @@ struct sgl::check::flat_expr
                 flat_binding_member,
                 flat_member,
                 flat_buffer_element,
+                flat_element,
                 flat_construct,
                 flat_call,
                 flat_not,
@@ -440,6 +456,13 @@ struct sgl::check::flat_for
     ast::range_of<flat_stmt_id> body;
 
     constexpr bool operator==(flat_for const&) const = default;
+};
+
+/// Ends the invocation with no effect: nothing after it runs, and what it would have written is never written.
+/// A pixel entry point's alone (CHK-277); a test's run ends as `discarded`.
+struct sgl::check::flat_discard
+{
+    constexpr bool operator==(flat_discard const&) const = default;
 };
 
 /// Starts the next iteration of the loop `target`, from any depth inside it in the structured form.
@@ -587,6 +610,7 @@ struct sgl::check::flat_stmt
                 flat_while,
                 flat_for,
                 flat_continue,
+                flat_discard,
                 flat_once,
                 flat_break,
                 flat_case,
@@ -598,6 +622,15 @@ struct sgl::check::flat_stmt
     bool operator==(flat_stmt const&) const = default;
 };
 
+/// A parameter of an entry point that the GPU fills, and the local that holds it.
+struct sgl::check::flat_stage_input
+{
+    stage_input input = stage_input::none;
+    local_id local = local_id::none;
+
+    bool operator==(flat_stage_input const&) const = default;
+};
+
 /// One entry point as one flat function.
 /// A type, a symbol and a binding are ids into the `checked_module` this value stands in.
 struct sgl::check::flat_entry_point
@@ -606,15 +639,15 @@ struct sgl::check::flat_entry_point
     /// The name as written: the host asks for it, so it is never minted.
     cc::string name;
     symbol_id function = symbol_id::none;
-    /// The one parameter, which is `locals[0]`.
+    /// The stage struct, which is `locals[0]`; `none` for an entry point that takes stage inputs alone.
     type_id input = type_id::none;
+    /// The parameters that are stage inputs, each a local of its own, in the order written (CHK-271).
+    cc::vector<flat_stage_input> stage_inputs;
     type_id result = type_id::none;
     /// The bindings of the function's `{...}` list in the order written, which is what decides the pipeline layout.
     cc::vector<symbol_id> bindings;
     /// The grid a `compute` entry point is dispatched in; `{1, 1, 1}` for every other stage.
     i32 workgroup[3] = {1, 1, 1};
-    /// The parameter carries `@thread_id` itself rather than being a struct that holds one.
-    bool takes_thread_id = false;
     /// What a device needs to run it, `function_info::features`.
     feature_set features;
 
@@ -657,7 +690,7 @@ struct sgl::check::flat_entry_point
         return entry_stage == rhs.entry_stage && name == rhs.name && function == rhs.function && input == rhs.input
             && result == rhs.result && is_equal(bindings, rhs.bindings) && workgroup[0] == rhs.workgroup[0]
             && workgroup[1] == rhs.workgroup[1] && workgroup[2] == rhs.workgroup[2]
-            && takes_thread_id == rhs.takes_thread_id && is_equal(locals, rhs.locals) && is_equal(labels, rhs.labels)
+            && is_equal(stage_inputs, rhs.stage_inputs) && is_equal(locals, rhs.locals) && is_equal(labels, rhs.labels)
             && root == rhs.root && is_equal(exprs, rhs.exprs) && is_equal(stmts, rhs.stmts)
             && is_equal(expr_lists, rhs.expr_lists) && is_equal(stmt_lists, rhs.stmt_lists) && is_equal(arms, rhs.arms)
             && is_equal(call_sites, rhs.call_sites) && is_equal(check_sites, rhs.check_sites)

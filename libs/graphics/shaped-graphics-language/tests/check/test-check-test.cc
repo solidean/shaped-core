@@ -139,3 +139,12 @@ TEST("sgl check - an assert whose condition writes is refused, and one that only
                         "    work.values[id.x] = 1.0\n")
           == "");
 }
+
+TEST("sgl check - a test takes no derivative, since its run is one invocation with no quad around it")
+{
+    auto const reports = reports_for("fun edge(x: float) -> float => ddx(x)\n\ntest edge(1.0) == 0.0\n");
+    CHECK(reports.contains("stage-not-allowed"));
+    CHECK(reports.contains("ddx takes derivatives across a quad of pixels, and a test runs one invocation"));
+    // a function that takes one is still fine where no test reaches it
+    CHECK(reports_for("fun edge(x: float) -> float => ddx(x)\n") == "");
+}

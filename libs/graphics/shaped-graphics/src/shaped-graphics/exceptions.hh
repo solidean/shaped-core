@@ -1,5 +1,6 @@
 #pragma once
 
+#include <clean-core/error/exception_base.hh>
 #include <clean-core/error/result.hh> // cc::any_error
 #include <clean-core/string/format.hh>
 #include <clean-core/string/string.hh>
@@ -7,25 +8,18 @@
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/types.hh> // buffer_usages
 
-/// Base of every shaped-graphics exception, carrying a formatted message.
-/// Catch a concrete derived type for structured context, or `sg::exception` for "any sg failure".
+/// Base of every shaped-graphics exception, carrying a formatted message in the inherited `message()`.
+/// Catch a concrete derived type for structured context, `sg::exception` for "any sg failure", or `cc::exception` for any library's.
 /// Thrown only by the throwing create façades and the submit/advance path — the `try_*` surface never throws.
 ///
 /// Example:
 ///   try { auto buf = ctx->persistent.create_raw_buffer(size, usage); ... }
 ///   catch (sg::device_lost_exception const&) { rebuild_context(); }
 ///   catch (sg::allocation_exception const& e) { shrink_and_retry(e.size_in_bytes()); }
-class sg::exception
+class sg::exception : public cc::exception
 {
 public:
-    explicit exception(cc::string message) : _message(cc::move(message)) {}
-    virtual ~exception() = default;
-
-    /// Human-readable description of the failure.
-    [[nodiscard]] cc::string_view message() const { return _message; }
-
-protected:
-    cc::string _message;
+    explicit exception(cc::string message) : cc::exception(cc::move(message)) {}
 };
 
 /// The GPU device was lost (driver reset / TDR / removed adapter).

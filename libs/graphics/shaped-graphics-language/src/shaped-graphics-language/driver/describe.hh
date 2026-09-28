@@ -57,7 +57,10 @@ struct sgl::described_binding_member
     /// A constant's size in bytes; 0 for a resource.
     i32 size = 0;
     /// A resource's position among its binding's resources; -1 for a constant.
+    /// A binding array takes `count` consecutive slots from this one.
     i32 slot = -1;
+    /// A binding array's length; 1 for any other resource and for a constant.
+    i32 count = 1;
     /// A buffer's bytes per element, by the storage rule; 0 for every other kind.
     i32 stride = 0;
     /// What the host binds a resource by, `binding.member`; empty for a constant.
@@ -103,6 +106,10 @@ struct sgl::described_struct_member
     i32 location = -1;
     /// The buffer a vertex input member is read from, and whether it steps per instance; empty on a `@pixel struct`.
     cc::string stream;
+    /// A vertex input member's `sg::vertex_attribute_format` where `@format` states one; empty for its type's own.
+    cc::string format;
+    /// A `@pixel struct` member that is no color target: "depth" or "sample_mask"; empty for a color target.
+    cc::string output;
     bool is_per_instance = false;
 };
 
@@ -146,6 +153,7 @@ struct sgl::described_entry_point
     /// A compute entry point's grid; `{1, 1, 1}` for every other stage.
     i32 workgroup[3] = {1, 1, 1};
     /// The binding list in the order written, which is the order of the pipeline layout's groups with any `@inline` one last.
+    /// A `@workgroup` binding is left out, since the host binds nothing for it.
     cc::vector<cc::string> bindings;
     /// The `sg::feature`s a device needs to run it, by name, in the enum's order.
     cc::vector<cc::string> features;
@@ -174,6 +182,10 @@ struct sgl::described_pipeline
     /// Entry point names; `pixel` is empty for a pipeline that writes depth alone.
     cc::string vertex;
     cc::string pixel;
+    /// Empty for a pipeline without the stage; the two tessellation stages are both empty or neither.
+    cc::string geometry;
+    cc::string tessellation_control;
+    cc::string tessellation_evaluation;
     /// The binding layout, in group order, and its one `@inline` binding or empty.
     cc::vector<cc::string> layout;
     cc::string inline_constants;
@@ -189,8 +201,8 @@ struct sgl::described_pipeline
     /// The paths the host states at acquire, whose last setting is `.host`, in the order first set so.
     cc::vector<cc::string> open;
     /// What the host's generated code is built against, one `key = value` line each, in a fixed order:
-    /// the layout, the inline constants, the vertex input and the target set, each as `name@shape`, then `features`,
-    /// then the last setting of every format and of the sample count.
+    /// the layout, the inline constants, the vertex input and the target set, each as `name@shape`.
+    /// Then the stages by name, then `features`, then the last setting of every format and of the sample count.
     /// A build bakes these, and a hot reload that finds any of them changed keeps what it had.
     cc::vector<cc::string> frozen;
 };

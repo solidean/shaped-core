@@ -160,25 +160,73 @@ type_id checker::check_index(function_scope& scope, ast::expr_id id, ast::index 
     subscripted = outer;
     if (object == error_type)
         return error_type;
-    if (out.at(object).kind != type_kind::buffer)
+    auto const kind = out.at(object).kind;
+    if (kind != type_kind::buffer && kind != type_kind::array)
     {
-        unsupported(file, where, "a subscript on anything but a buffer");
+        unsupported(file, where, "a subscript on anything but a buffer or an array");
         return error_type;
     }
 
+    // CHK-287: an array takes one index per dimension it has, `grid[i, j]` for `grid[i][j]`, and a buffer takes one
     auto const arguments = ast_of(file).at(node.arguments);
-    if (arguments.size() != 1 || !arguments[0].name.empty() || arguments[0].is_splat)
+    auto rank = isize(1);
+    if (kind == type_kind::array)
+        for (auto t = out.at(object).element; out.at(t).kind == type_kind::array; t = out.at(t).element)
+            ++rank;
+    auto is_plain = !arguments.empty() && arguments.size() <= rank;
+    for (auto const& a : arguments)
+        is_plain = is_plain && a.name.empty() && !a.is_splat;
+    if (!is_plain)
     {
-        report(diagnostic_kind::wrong_kind_of_name, file, where, "a buffer takes one index: `values[i]`");
+        report(diagnostic_kind::wrong_kind_of_name, file, where,
+               kind == type_kind::buffer
+                   ? cc::string("a buffer takes one index: `values[i]`")
+                   : cc::format("{} takes one to {} indices, one per dimension", out.name_of(object), rank));
         return error_type;
     }
 
-    auto const index = check_expr(scope, arguments[0].value);
     auto const int_type = type_of_builtin(builtins::k_int, file, where);
-    if (index != error_type && index != int_type)
-        report(diagnostic_kind::type_mismatch, file, span_of(file, arguments[0].value),
-               cc::format("a buffer is indexed by an int, and this is a {}", out.name_of(index)));
-    return out.at(object).element;
+    auto result = object;
+    for (auto const& a : arguments)
+    {
+        auto const outer_index = binding_index;
+        binding_index = kind == type_kind::array && is_resource(out.at(out.at(result).element).kind)
+                          ? a.value
+                          : ast::expr_id::none;
+        auto const index = check_expr(scope, a.value);
+        binding_index = outer_index;
+        if (index != error_type && index != int_type)
+            report(diagnostic_kind::type_mismatch, file, span_of(file, a.value),
+                   cc::format("{} is indexed by an int, and this is a {}",
+                              kind == type_kind::buffer ? "a buffer" : "an array", out.name_of(index)));
+        // CHK-309: a constant index names one element, and one past the end is refused by every target
+        auto const count = out.at(result).count;
+        if (auto const at = index == int_type ? constant_index(file, a.value) : cc::optional<i32>();
+            kind == type_kind::array && count > 0 && at.has_value() && (at.value() < 0 || at.value() >= count))
+            report(diagnostic_kind::invalid_constant_argument, file, span_of(file, a.value),
+                   cc::format("{} is no index into {}, whose elements are 0 ..< {}", at.value(), out.name_of(result),
+                              count));
+        result = out.at(result).element;
+    }
+    if (!judge_atomic_use(file, id, result))
+        return error_type;
+    // an element of a binding array is the resource itself, which a builtin is handed, or a buffer that is subscripted
+    if (kind == type_kind::array && is_resource(out.at(result).kind))
+    {
+        auto is_handed = false;
+        for (auto const h : handed)
+            is_handed = is_handed || h == id;
+        auto const is_buffer = out.at(result).kind == type_kind::buffer;
+        if (is_buffer ? id != subscripted : !is_handed)
+        {
+            unsupported(
+                file, where,
+                is_buffer ? cc::string("a buffer as a value; read an element of it, as in `values[i]`")
+                          : cc::format("{} as a value; call a builtin on it, as in `t.load(xy)`", out.name_of(result)));
+            return error_type;
+        }
+    }
+    return result;
 }
 
 // ---- expressions ----------------------------------------------------------------------------------------------------
@@ -261,7 +309,8 @@ type_id checker::check_expr(function_scope& scope, ast::expr_id expr)
         [&](ast::index const& node) { return check_index(scope, expr, node); },
         // AST-128: `mut buffer[float]` and its neighbours parse, and the binding model they belong to is unbuilt.
         [&](ast::qualified_type const&) { return not_yet("a resource type"); },
-        [&](ast::tuple const&) { return not_yet("a tuple"); }, [&](ast::array const&) { return not_yet("an array"); },
+        [&](ast::tuple const&) { return not_yet("a tuple"); },
+        [&](ast::array const&) { return check_array_literal(scope, expr, type_id::none); },
         [&](ast::object const&) { return not_yet("an object with no struct to convert to"); },
         [&](ast::comparison_chain const& chain) { return check_chain(scope, expr, chain); }, [&](ast::cast const& node)
         { return check_cast(scope, expr, node); }, [&](ast::membership const&) { return not_yet("in"); },
@@ -275,8 +324,9 @@ type_id checker::check_expr(function_scope& scope, ast::expr_id expr)
         },
         [&](ast::return_expr const&) { return not_yet("return as a value"); }, [&](ast::yield_expr const&)
         { return not_yet("yield as a value"); }, [&](ast::break_expr const&) { return not_yet("break as a value"); },
-        [&](ast::continue_expr const&) { return not_yet("continue as a value"); }, [&](ast::struct_type const&)
-        { return not_yet("a type as a value"); }, [&](ast::function_type const&) { return not_yet("a type as a value"); },
+        [&](ast::continue_expr const&) { return not_yet("continue as a value"); }, [&](ast::discard_expr const&)
+        { return not_yet("discard as a value"); }, [&](ast::struct_type const&) { return not_yet("a type as a value"); },
+        [&](ast::function_type const&) { return not_yet("a type as a value"); },
         // reserved, and reported by the AST pass
         [&](ast::with_bindings const&) { return error_type; });
 
@@ -316,7 +366,7 @@ type_id checker::check_literal(function_scope& scope, ast::expr_id id, ast::lite
         return type_of_builtin(builtins::k_int, file, where);
     }
     case number_class::other:
-        unsupported(file, where, "a number literal with a prefix, a suffix or a p exponent");
+        unsupported(file, where, "a number literal with a suffix or a p exponent");
         return error_type;
     case number_class::plain_float:
         break;
@@ -427,9 +477,11 @@ type_id checker::check_member(function_scope& scope, ast::expr_id id, ast::membe
             auto is_listed = false;
             for (auto const listed : out.at(out.functions[out.at(scope.function).info].bindings))
                 is_listed = is_listed || listed == binding;
+            // CHK-295: a test's run holds its own workgroup memory, which no host fills
+            is_listed = is_listed || (scope.is_test && is_workgroup_binding(binding));
             // CHK-228: a test lists no binding, and one its function lists is a value of the function's run
             auto is_captured = false;
-            if (scope.is_test && is_valid(scope.enclosing))
+            if (scope.is_test && is_valid(scope.enclosing) && !is_workgroup_binding(binding))
                 for (auto const listed : out.at(out.functions[out.at(scope.enclosing).info].bindings))
                     is_captured = is_captured || listed == binding;
             if (is_captured)
@@ -457,6 +509,17 @@ type_id checker::check_member(function_scope& scope, ast::expr_id id, ast::membe
             if (type != error_type && out.at(type).kind == type_kind::buffer && id != subscripted)
             {
                 unsupported(file, span_of(file, id), "a buffer as a value; read an element of it, as in `values[i]`");
+                return error_type;
+            }
+            if (!judge_atomic_use(file, id, type))
+                return error_type;
+            // CHK-299: a binding array is read by element, which a builtin is handed
+            if (type != error_type && out.at(type).kind == type_kind::array && holds_resource(type) && id != subscripted)
+            {
+                report(diagnostic_kind::wrong_kind_of_name, file, span_of(file, id),
+                       cc::format("{}.{} is a binding array, read by element: `{}[i]`", out.at(binding).name,
+                                  out.at(out.bindings[out.at(binding).info].members)[index].name,
+                                  text_of(file, span_of(file, id))));
                 return error_type;
             }
             auto is_handed = false;
@@ -502,6 +565,19 @@ type_id checker::check_member(function_scope& scope, ast::expr_id id, ast::membe
     auto const object = check_expr(scope, member.object);
     if (object == error_type || member.name.empty())
         return error_type;
+
+    // CHK-288: an array's length is a constant of its type, and it has no other member
+    if (out.at(object).kind == type_kind::array)
+    {
+        if (name != "length")
+        {
+            report(diagnostic_kind::unknown_member, file, member.name,
+                   cc::format("{} has no member {}; an array's one member is its length", out.name_of(object), name));
+            return error_type;
+        }
+        set_target(file, id, {.kind = target_kind::array_length, .index = out.at(object).count});
+        return type_of_builtin(builtins::k_int, file, span_of(file, id));
+    }
 
     // CHK-249: `a.foo` is the field where there is one, and a call of `foo` with `a` otherwise
     auto const& type = out.at(object);
@@ -805,7 +881,10 @@ type_id checker::check_call(function_scope& scope, ast::expr_id id, ast::call co
     }
     auto const result = resolve_overload(scope, id, call.callee, candidates, arguments, text);
     if (result != error_type)
-        judge_filtering(file, where, arguments.written);
+    {
+        judge_filtering(file, id, where, arguments.written);
+        judge_constant_arguments(file, id);
+    }
     return result;
 }
 
@@ -815,6 +894,14 @@ type_id checker::check_dot_call(function_scope& scope, ast::expr_id id, ast::cal
     auto const& ast = ast_of(file);
     auto const& member = ast.at(call.callee).node.as<ast::member>();
     auto const name = text_of(file, member.name);
+
+    // CHK-289: `T[N].filled(v)`, where `T[N]` is a type in the position of a value
+    if (auto const* const applied
+        = ast::is_valid(member.object) ? ast.at(member.object).node.try_as<ast::index>() : nullptr;
+        applied != nullptr && ast::is_valid(applied->object) && is_type_name(file, applied->object)
+        && (!ast.at(applied->object).node.is<ast::name>()
+            || scope.find_local(text_of(file, span_of(file, applied->object))) == nullptr))
+        return check_filled(scope, id, call);
 
     // `T.foo(…)`: the functions of the type scope of `T`, and `T` is no argument (CHK-248)
     auto const* const object_name
@@ -857,6 +944,8 @@ type_id checker::check_dot_call(function_scope& scope, ast::expr_id id, ast::cal
     handed.push_back(member.object);
     auto const receiver = check_expr(scope, member.object);
     handed.pop_back();
+    if (receiver != error_type && out.at(receiver).kind == type_kind::stream)
+        return check_stream_call(scope, id, call, receiver);
     auto arguments = check_arguments(scope, call.arguments, false);
     if (receiver == error_type || member.name.empty())
         return error_type;
@@ -876,7 +965,10 @@ type_id checker::check_dot_call(function_scope& scope, ast::expr_id id, ast::cal
     }
     auto const result = resolve_overload(scope, id, call.callee, candidates, arguments, name, call_spelling::dot_call);
     if (result != error_type)
-        judge_filtering(file, span_of(file, id), arguments.written);
+    {
+        judge_filtering(file, id, span_of(file, id), arguments.written);
+        judge_constant_arguments(file, id);
+    }
     return result;
 }
 
@@ -956,6 +1048,25 @@ type_id checker::resolve_overload(function_scope& scope,
                           spelling));
         return error_type;
     }
+    // CHK-270: a shift by a literal count outside the bits of an int can only be a mistake, as WGSL has it
+    if ((spelling == "operator <<" || spelling == "operator >>") && arguments.numbers.size() == 2
+        && arguments.numbers[1].is_number && arguments.numbers[1].is_integer
+        && (arguments.numbers[1].integer < 0 || arguments.numbers[1].integer > 31))
+    {
+        report(diagnostic_kind::shift_out_of_range, file, where,
+               cc::format("a shift by {} moves every bit out of 32; a count is 0 to 31", arguments.numbers[1].integer));
+        return error_type;
+    }
+    // CHK-313: `/` and `%` are the operators whose integer and float answers differ, so over integer literals alone
+    // `1 / 3` would be a silent 0 that literal folding is meant to refuse; the literal says which is meant instead
+    if (is_integer_literals && (spelling == "operator /" || spelling == "operator %"))
+    {
+        report(diagnostic_kind::literal_needs_type, file, where,
+               cc::format("{} of integer literals alone says nothing of whether it divides integers or floats; write "
+                          "a float literal such as 1.0, or `as` a type",
+                          spelling));
+        return error_type;
+    }
     // CHK-256: the spelling says what the writer means, and is checked on the target it chose
     if (written_as == call_spelling::dot_read && chosen_symbol.role != function_role::property)
         report(diagnostic_kind::call_spelling, file, where,
@@ -977,7 +1088,17 @@ type_id checker::resolve_overload(function_scope& scope,
     if (chosen_symbol.role == function_role::constructor)
         set_type(file, callee, info.result);
     if (is_valid(out.at(chosen).intrinsic))
+    {
+        // CHK-300: the mark is what an index into a binding array is written with, and on anything else it means nothing
+        auto const* const record = out.builtin_function(out.at(chosen).intrinsic);
+        if (record != nullptr && record->is_nonuniform_mark && id != binding_index)
+        {
+            report(diagnostic_kind::wrong_kind_of_name, file, where,
+                   "`nonuniform i` marks an index into a binding array, and stands only as one: `t[nonuniform i]`");
+            return error_type;
+        }
         return info.result;
+    }
 
     // A construction is written where it stands, and the defaults of its fields with it, so what they call is reached.
     note_program_call(scope, chosen, where);
@@ -1226,6 +1347,8 @@ type_id checker::check_expected(function_scope& scope, ast::expr_id expr, type_i
         auto const literal = shape_literal(scope, expr);
         return resolve_literal(scope, expr, to, literal);
     }
+    if (node.is<ast::array>() && to != error_type && out.at(to).kind == type_kind::array)
+        return check_array_literal(scope, expr, to);
     auto const type = check_expr(scope, expr);
     if (type == error_type || to == error_type)
         return type;
@@ -1342,6 +1465,7 @@ void checker::note_program_call(function_scope const& scope, symbol_id callee, s
         auto is_listed = false;
         for (auto const l : listed)
             is_listed = is_listed || l == needed;
+        is_listed = is_listed || (scope.is_test && is_workgroup_binding(needed));
         if (!is_listed && scope.is_test)
         {
             // CHK-228: a test gives a callee its bindings through a local binding, which delegation will carry

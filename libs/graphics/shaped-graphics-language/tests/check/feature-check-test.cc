@@ -75,7 +75,9 @@ TEST("sgl check - a require names a feature a shader can use, as sg names it")
     // CHK-258: an sg feature the host alone asks about is no name here.
     CHECK(reports_for("require timestamp_query\n")
           == "unknown-feature user:[timestamp_query] timestamp_query; a shader may require binding_arrays, "
-             "extended_image_formats, readwrite_image_formats, multisampled_array_textures, raytracing\n");
+             "extended_image_formats, readwrite_image_formats, multisampled_array_textures, raytracing, "
+             "primitive_index, "
+             "sample_rate_shading, geometry_shader, tessellation_shader\n");
     CHECK(reports_for("require ray_query\n").contains("unknown-feature user:[ray_query]"));
     CHECK(reports_for("require raytracing, binding_arrays\n") == "");
 }
@@ -170,4 +172,23 @@ TEST("sgl check - an entry point needs what it uses, and a feature its file perm
                                 : sgl::check::feature_set();
         CHECK(e.features == expected);
     }
+}
+
+TEST("sgl check - a stage input some device lacks needs its feature, as a binding member does")
+{
+    // CHK-272: `@primitive_id` in the pixel stage and `@sample_index` are what vulkan gives only with a device feature
+    constexpr auto edges = "struct vout:\n    @position p: hpos4\n\n@pixel struct target:\n    c: float4\n\n";
+    CHECK(reports_for(cc::string(edges)
+                      + "@pixel fun ps(v: vout, @primitive_id id: int) -> target:\n"
+                        "    return { c = float4(id as float, 0.0, 0.0, 1.0) }\n")
+              .contains("feature-not-declared user:[ps] ps needs primitive_index"));
+    CHECK(reports_for(cc::string("require primitive_index, sample_rate_shading\n") + edges
+                      + "@pixel fun ps(v: vout, @primitive_id id: int, @sample_index s: int) -> target:\n"
+                        "    return { c = float4(id as float, s as float, 0.0, 1.0) }\n")
+          == "");
+    // one every device has needs nothing
+    CHECK(reports_for(cc::string(edges)
+                      + "@pixel fun ps(v: vout, @is_front_facing f: bool) -> target:\n"
+                        "    return { c = float4(1.0, 1.0, 1.0, 1.0) }\n")
+          == "");
 }

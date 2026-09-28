@@ -182,7 +182,7 @@ void sgl::builtins::register_vector_math(registry& r)
         add_function(r, "abs", {"x", type}, type, abs_of);
         add_function(r, "min", {"a", type, "b", type}, type, min_of);
         add_function(r, "max", {"a", type, "b", type}, type, max_of);
-        add_function(r, "clamp", {"x", type, "low", type, "high", type}, type, clamp);
+        add_function(r, "clamp", {"x", type, "low", type, "high", type}, type, clamp, {}, {}, clamp_undefined);
         add_function(r, "mix", {"a", type, "b", type, "t", "float"}, type, mix, {.hlsl = "lerp"},
                      "/// `a` where `t` is 0 and `b` where it is 1.");
     }
@@ -194,14 +194,22 @@ void sgl::builtins::register_vector_math(registry& r)
         add_infix(r, "-", named("subtract", type), type, type, type, subtract);
         add_infix(r, "*", named("multiply", type), type, type, type, multiply);
         add_infix(r, "/", named("divide", type), type, type, type, divide);
+        add_operator(r, "%", named("remainder", type), type, type, type, remainder_floats, float_remainder());
     }
 
-    r.add_comment("// integer vectors wrap componentwise, and division is left out as it is for their scalars");
+    r.add_comment("// integer vectors wrap componentwise, and divide componentwise as their scalars do");
     for (auto const type : integer_vectors)
     {
         add_infix(r, "+", named("add", type), type, type, type, add_bits);
+        r.functions.back().unrepresentable_when_constant = sum_unrepresentable;
         add_infix(r, "-", named("subtract", type), type, type, type, subtract_bits);
+        r.functions.back().unrepresentable_when_constant = difference_unrepresentable;
         add_infix(r, "*", named("multiply", type), type, type, type, multiply_bits);
+        r.functions.back().unrepresentable_when_constant = product_unrepresentable;
+        add_infix(r, "/", named("divide", type), type, type, type, divide_integers, integer_division_undefined);
+        r.functions.back().judged_last = judged_operand::divisor;
+        add_infix(r, "%", named("remainder", type), type, type, type, remainder_integers, integer_division_undefined);
+        r.functions.back().judged_last = judged_operand::divisor;
     }
 
     r.add_comment("// a direction adds to a direction; what `vec3 * vec3` would mean is a question, so it is no "

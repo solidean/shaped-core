@@ -52,6 +52,14 @@ cc::optional<cc::string> refusal_of(sg::raster_pipeline_description const& desc,
         desc.tessellation_evaluation_shader.has_value() ? &desc.tessellation_evaluation_shader.value() : nullptr,
         desc.geometry_shader.has_value() ? &desc.geometry_shader.value() : nullptr,
     };
+    // a stage the device lacks is refused by its feature, whatever language its shader was written in
+    auto const has_tessellation
+        = desc.tessellation_control_shader.has_value() || desc.tessellation_evaluation_shader.has_value();
+    if (has_tessellation && !supported.has(sg::feature::tessellation_shader))
+        return cc::string("the pipeline has tessellation stages, and this device lacks "
+                          "sg::feature::tessellation_shader");
+    if (desc.geometry_shader.has_value() && !supported.has(sg::feature::geometry_shader))
+        return cc::string("the pipeline has a geometry stage, and this device lacks sg::feature::geometry_shader");
     if (auto conflict = sg::impl::find_binding_conflict(stages); conflict.has_value())
         return conflict;
     if (auto missing = sg::impl::find_missing_feature(supported, stages); missing.has_value())

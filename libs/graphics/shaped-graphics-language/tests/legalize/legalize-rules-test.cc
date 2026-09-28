@@ -62,7 +62,7 @@ struct rule_fixture
     {
         auto const& m = checked.module;
         auto const legal = legalize(m, b.e);
-        auto const violation = find_core_violation(legal);
+        auto const violation = find_core_violation(m, legal);
         CHECK(!violation.has_value());
         auto const expected = interpret(m, b.e, test_inputs(m));
         CHECK(expected.status == run_status::ok);
@@ -553,7 +553,7 @@ TEST("sgl legalize - a once and a break of the input are a block and a leave, so
     all.push_back(t.b.once({t.b.if_(t.c(), {t.b.break_()}), t.print(1.0)}));
     all.push_back(t.b.return_(t.f(0.0)));
     t.b.set_body(all);
-    CHECK(is_core(t.b.e));
+    CHECK(is_core(t.b.m, t.b.e));
     CHECK(legalize(t.checked.module, t.b.e) == t.b.e);
 
     // the same once under a block expression is legalized again, and the once is no longer needed

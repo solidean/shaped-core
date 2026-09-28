@@ -132,6 +132,9 @@ bool metal_context::supports(sg::feature f) const
         // Apple silicon writes every uncompressed color format from a shader, which is this backend's floor.
         return true;
     case sg::feature::multisampled_array_textures:
+    case sg::feature::primitive_index:
+    case sg::feature::sample_rate_shading:
+        // `[[primitive_id]]` and `[[sample_id]]` exist on every Apple GPU this backend's Metal 4 floor admits.
         return true;
     case sg::feature::geometry_shader:
     case sg::feature::tessellation_shader:

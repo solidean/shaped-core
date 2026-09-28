@@ -157,8 +157,8 @@ The size and alignment the layout rules place a value by, and each target's own,
 * Every target carries its **final addresses**: member order is the location, and an `@inline binding` sits where sg expects inline constants.
   HLSL writes a group's resources at the register or `[[vk::binding]]` sg's backends give its slot, so no binding pass reads SGL's text.
 * A name that is reserved in one target gets a trailing underscore there.
-  The function a builtin is called as is reserved from its record, so a local named `lerp` is renamed in HLSL without an entry in any list.
-  The exception is a function only a custom writer calls, such as `mul`, which stands in `emit/reserved_words.cc`.
+  Every name a builtin writes is reserved from its record, so a local named `lerp` is renamed in HLSL without an entry in any list.
+  A custom writer's own names, such as HLSL's `mul`, stand in its spelling's `hlsl_names`, `wgsl_names` and `msl_names`.
   An entry point is renamed the same way, and `emitted_text::entry_point` is the name a caller compiles.
 * **The `msl` text compiles**, through `shaped-shader-compiler-msl` and slib's metal edge.
 

@@ -7,20 +7,9 @@ namespace
 using namespace sgl;
 using namespace sgl::check;
 
-cc::string_view stage_name(stage s)
+cc::string_view stage_text(stage s)
 {
-    switch (s)
-    {
-    case stage::none:
-        return "";
-    case stage::vertex:
-        return "vertex";
-    case stage::pixel:
-        return "pixel";
-    case stage::compute:
-        return "compute";
-    }
-    return "";
+    return s == stage::none ? cc::string_view() : stage_name(s);
 }
 
 struct dumper
@@ -98,7 +87,7 @@ struct dumper
         {
             auto const& type = m.at(s.type);
             if (type.edge != stage::none)
-                out.appendf(" {}", stage_name(type.edge));
+                out.appendf(" {}", stage_text(type.edge));
             if (type.is_opaque)
                 out += " opaque";
             members(type.members);
@@ -119,7 +108,7 @@ struct dumper
         {
             auto const& f = m.functions[s.info];
             if (f.entry_stage != stage::none)
-                out.appendf(" {}", stage_name(f.entry_stage));
+                out.appendf(" {}", stage_text(f.entry_stage));
             signature(f);
         }
         out += ")\n";
@@ -188,6 +177,7 @@ struct dumper
                      },
                      [&](flat_bool_literal const& l) { out.appendf("(lit {}", l.value ? "true" : "false"); },
                      [&](flat_buffer_element const& b) { operands("elem", b.buffer, b.index); },
+                     [&](flat_element const& a) { operands("at", a.object, a.index); },
                      [&](flat_enum_value const& v)
                      {
                          auto const cases = m.at(m.at(x.type).cases);
@@ -371,6 +361,7 @@ struct dumper
                          out += ")";
                      },
                      [&](flat_continue const& c) { out.appendf("(continue ${})", label_name(e, c.target)); },
+                     [&](flat_discard const&) { out += "(discard)"; },
                      [&](flat_once const& o)
                      {
                          out += "(once";
@@ -399,11 +390,11 @@ struct dumper
     {
         if (e.locals.empty())
         {
-            out.appendf("(entry {} {} <no parameter>)\n", stage_name(e.entry_stage), e.name);
+            out.appendf("(entry {} {} <no parameter>)\n", stage_text(e.entry_stage), e.name);
             return;
         }
         auto const& parameter = e.locals.front();
-        out.appendf("(entry {} {} ({} : {})", stage_name(e.entry_stage), e.name, parameter.name,
+        out.appendf("(entry {} {} ({} : {})", stage_text(e.entry_stage), e.name, parameter.name,
                     m.name_of(parameter.type));
         if (!e.bindings.empty())
         {
@@ -422,8 +413,14 @@ struct dumper
 cc::string sgl::check::dump(checked_module const& m)
 {
     auto d = dumper{.m = m};
+    // File by file, since an extension is declared after every file and would otherwise stand among a later file's
+    auto last_file = i32(0);
     for (auto const& s : m.symbols)
-        d.dump_symbol(s);
+        last_file = s.file > last_file ? s.file : last_file;
+    for (auto file = i32(0); file <= last_file; ++file)
+        for (auto const& s : m.symbols)
+            if (s.file == file)
+                d.dump_symbol(s);
     for (auto const& e : m.entry_points)
         d.dump_entry_point(e);
     return d.out;

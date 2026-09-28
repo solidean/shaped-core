@@ -18,6 +18,6 @@
 // instead of in every library's .shaped-lint.yml.
 //
 // It is deliberately a seam rather than a wrapper.
-// A cc:: exception type may land later, and `<stdexcept>` is the heavier of the two headers and the first
-// candidate to drop when it does.
+// cc::exception, the non-std base, lives in exception_base.hh and needs neither header.
+// `<stdexcept>` is the heavier of the two and the first candidate to drop as throwers move onto it.
 // Reaching the std types through here is what makes that change one file's problem rather than a sweep.

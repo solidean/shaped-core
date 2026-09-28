@@ -64,6 +64,14 @@ enum class sg::feature
     /// A texture binding may be a multisampled 2D array (`texture_view_dimension::tex_2d_ms_array`).
     /// WebGPU has no such binding at all, and it is also how a multisampled cube is sampled.
     multisampled_array_textures,
+
+    /// A pixel shader may read which primitive it belongs to (SGL's `@primitive_id`).
+    /// Vulkan gives it only with the `geometryShader` device feature, and WebGPU behind `primitive-index`.
+    primitive_index,
+
+    /// A pixel shader may run per sample: read `@sample_index`, or interpolate a member at each sample.
+    /// Vulkan gives it only with the `sampleRateShading` device feature; D3D12, Metal and WebGPU always.
+    sample_rate_shading,
 };
 
 CC_FLAG_ENUM_INDEXED(sg, feature, cc::u16);
@@ -86,8 +94,10 @@ inline constexpr feature k_all_features[] = {
     feature::extended_image_formats,
     feature::unaligned_block_compression,
     feature::multisampled_array_textures,
+    feature::primitive_index,
+    feature::sample_rate_shading,
 };
-static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize(feature::multisampled_array_textures) + 1,
+static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize(feature::sample_rate_shading) + 1,
               "k_all_features lists every feature");
 
 /// The enumerator's name, `raytracing`, which is also what SGL's `require` spells it as.
@@ -117,6 +127,10 @@ static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize
         return "unaligned_block_compression";
     case feature::multisampled_array_textures:
         return "multisampled_array_textures";
+    case feature::primitive_index:
+        return "primitive_index";
+    case feature::sample_rate_shading:
+        return "sample_rate_shading";
     }
     return "";
 }

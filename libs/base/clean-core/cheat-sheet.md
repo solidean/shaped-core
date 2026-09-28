@@ -413,6 +413,8 @@ CC_RETURN_IF_ERROR(expr);                 // early-return the error from the cur
 
 #include <clean-core/error/exception.hh>  // the blessed route to <exception> / <stdexcept>; declares nothing itself
 // Return a result; where something is genuinely exceptional (a lost device, or_throw), throw through this header.
+#include <clean-core/error/exception_base.hh> // cc::exception: non-std base carrying message(); needs no std header
+// Derive a library's exception from it, or an async frame's error and nexus's report see no message (sg::exception does).
 ```
 
 ## Callables

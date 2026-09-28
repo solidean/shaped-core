@@ -147,8 +147,9 @@ namespace sgl::emit
 /// An address is a position: member i of an edge struct is location i, counted over the members without `@position`.
 ///
 /// Total: a module with errors, a position out of range and a construct no target carries yet are errors in the result.
-/// No error depends on `t` but three, so an entry point written for one target is written for every other: `msl`
+/// No error depends on `t` but these, so an entry point written for one target is written for every other: `msl`
 /// refuses a compute entry point and a group, which are both arguments of a Metal entry point and wait for a Metal compiler.
+/// It refuses a geometry and a tessellation entry point too, since Metal has neither stage.
 /// And `wgsl` refuses an entry point needing a feature WebGPU never has, which is portability the shader opted out of.
 /// Deterministic: equal arguments give equal text.
 [[nodiscard]] emitted_text emit(check::checked_module const& m, isize entry_point, target t);

@@ -7,11 +7,11 @@
 
 cc::string sgl::driver::impl::format_located(front_end const& front, check::located_diagnostic const& d)
 {
-    auto text = format_diagnostic(front.name_of(d.file), front.files[d.file].source, d.what, d.detail);
+    auto text = format_diagnostic(front.name_of(d.file), front.files[d.file]->source, d.what, d.detail);
     text += "\n";
     for (auto const& n : d.notes)
     {
-        text += format_note(front.name_of(n.file), front.files[n.file].source, n.where, n.message);
+        text += format_note(front.name_of(n.file), front.files[n.file]->source, n.where, n.message);
         text += "\n";
     }
     return text;
@@ -21,7 +21,7 @@ cc::vector<sgl::check::module_file> sgl::driver::impl::module_files_of(front_end
 {
     auto files = cc::vector<check::module_file>();
     for (auto i = isize(0); i < front.files.size(); ++i)
-        files.push_back({.file = front.files[i], .ast = front.asts[i]});
+        files.push_back({.file = *front.files[i], .ast = *front.asts[i]});
     return files;
 }
 
@@ -31,25 +31,37 @@ sgl::driver::impl::front_end sgl::driver::impl::run_front_end(cc::string_view so
     auto const own = prelude_file_of(source_name);
     result.program = own >= 0 ? own : i32(result.prelude.size());
 
-    // Both vectors are complete before a `module_file` refers into them.
+    // The source, and a prelude file it stands in for, are this compile's own; every other file is shared.
+    auto const own_file = [&](cc::string_view text)
+    {
+        result.owned_files.push_back(cc::make_unique<parsed_file>(parse(text)));
+        result.owned_asts.push_back(cc::make_unique<ast::file_ast>(ast::build(*result.owned_files.back())));
+        result.files.push_back(result.owned_files.back().get());
+        result.asts.push_back(result.owned_asts.back().get());
+    };
+    auto const shared = parsed_prelude();
     for (auto i = isize(0); i < result.prelude.size(); ++i)
-        result.files.push_back(parse(i == own ? source : result.prelude[i].source));
-    result.files.push_back(parse(own >= 0 ? cc::string_view() : source));
-    for (auto const& f : result.files)
-        result.asts.push_back(ast::build(f));
+        if (i == own)
+            own_file(source);
+        else
+        {
+            result.files.push_back(&shared[i].file);
+            result.asts.push_back(&shared[i].ast);
+        }
+    own_file(own >= 0 ? cc::string_view() : source);
 
     auto modules = cc::vector<check::module_file>();
     for (auto i = isize(0); i < result.prelude.size(); ++i)
-        modules.push_back({.file = result.files[i], .ast = result.asts[i]});
-    result.module = check::check(modules, {.file = result.files.back(), .ast = result.asts.back()});
+        modules.push_back({.file = *result.files[i], .ast = *result.asts[i]});
+    result.module = check::check(modules, {.file = *result.files.back(), .ast = *result.asts.back()});
 
     // Every phase's diagnostics in one list, so a test's `@expect` can take one of any phase before it is written out.
     auto all = cc::vector<check::located_diagnostic>();
     for (auto i = isize(0); i < result.files.size(); ++i)
     {
-        for (auto const& d : result.files[i].diagnostics)
+        for (auto const& d : result.files[i]->diagnostics)
             all.push_back({.what = d, .file = i32(i)});
-        for (auto const& d : result.asts[i].diagnostics)
+        for (auto const& d : result.asts[i]->diagnostics)
             all.push_back({.what = d, .file = i32(i)});
     }
     for (auto const& d : result.module.diagnostics)

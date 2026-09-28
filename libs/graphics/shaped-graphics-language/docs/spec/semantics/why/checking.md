@@ -182,6 +182,18 @@ An operator over literals alone meets whatever operators the prelude declares, a
 The call names no type, so no answer is the reader's, and the error asks for one.
 Folding literals in the front end would settle it for good, as the [literal-types](../../incubator/literal-types.md) incubator sketches, and nothing written under this rule changes meaning then.
 
+## CHK-269
+
+A hex literal is how a mask or a bit pattern is written, and a mask that means one number as a `uint` and another as an `int` is the surprise to avoid.
+Reading it as the number it spells is CHK-253 as it stands, so no rule of its own decides what it converts to.
+A pattern with the top bit set belongs in a `uint`, or is built with `int.from_bits`.
+
+## CHK-313
+
+`/` and `%` are where an integer answer and a float answer differ, and a reader of `1 / 3` cannot tell which the writer meant.
+Folding literals, which the [literal-types](../../incubator/literal-types.md) incubator sketches, makes that expression an error rather than a silent `0`.
+Refusing it now means nothing written today changes meaning when folding lands, which is CHK-257's reason carried over to the day `int` gained a `/`.
+
 ## CHK-81
 
 A literal converting by a call of the type's name gets defaults, named arguments, named-only parameters and the evaluation order from the call rules.
@@ -320,3 +332,51 @@ A compile-time branch on a feature, `if feature raytracing:`, is the form that m
 A binding's `require` is how a library says what a device must have to take the binding, and a member need not be what uses it.
 A binding that carries an acceleration structure later, or that a caller's shader reads through a feature, states the need before anything in SGL can show it.
 So only a body's `require` can be unused: it says nothing about any binding, and it is the one place an unneeded line is certainly a mistake.
+
+## CHK-271
+
+An entry point's signature is its whole interface: what the GPU hands it in `()`, what it binds in `{}`.
+That is what `sgl describe` and the pipeline check read, and what a reader looks at first.
+A stage input as a field of the stage struct was the alternative, and it would have put a member no vertex buffer feeds into the struct the host mirrors as its vertex layout.
+A builtin function such as `vertex_index()` is the other alternative, which a helper could call without being handed the id.
+It may come later as sugar over these parameters, and the [stage-interfaces](../../incubator/stage-interfaces.md) incubator holds it.
+
+## CHK-273
+
+The two axes and their names are WGSL's, which are exactly what every target has: HLSL's qualifiers and MSL's attributes spell the same combinations.
+An integer member must say `.flat` rather than being flat by default, because which vertex's value wins is part of what it means: a primitive id is right only because the first vertex's is taken.
+
+## CHK-275
+
+A format is not a type, which the vector-and-format incubator settled for render targets: a member has the type the shader computes with, and the format is an attribute.
+A vertex member follows the same rule, so one word, `@format`, says "these bytes, read as this type" on either edge of a pipeline.
+On a `@pixel struct` member it is that target's setting, and on a `@vertex struct` member it is the member's own, which is why it is never read as a setting there.
+
+## CHK-276
+
+A pixel stage's output is its return value, all of it, which is SGL's model for every stage; a depth written through a builtin call would be an output the signature hides.
+`@position` is the precedent: a marked member of a stage's struct that the stage link treats specially.
+A struct holding only `@depth` is how a depth-only pixel stage is written, which is what a shadow pass with a cut-out needs.
+
+## CHK-277
+
+A `discard` is a jump rather than a builtin call, since control flow reads as control flow: `if … => discard` ends that path the way `if … => return x` does.
+A call is no jump, so a path that discarded would still have had to produce a value.
+The portable meaning is that the pixel has no effect after it — no target, no depth, no stencil, no store — which every target keeps.
+Whether the pixel keeps running as a helper for its quad's derivatives is where the targets differ, and the writers demote wherever a target offers the choice.
+
+## CHK-285
+
+`T[N]` reads the way a C, HLSL or GLSL reader writes an array, and `texture_2d[float4][64]` is a binding array by the same rule, with no second spelling.
+Composed literally, `float[3][5]` would be five arrays of three, the reverse of what the same text means to those readers.
+Making it mean the C order instead would break aliasing: with `type row = float[5]`, `row[3]` has to be three rows.
+So several dimensions are one group, outermost first, and two groups in a row are refused rather than read one way or the other.
+`length` names the count, since the texture methods already use `size` for texels and `count` would read as a binding's descriptor count.
+
+## CHK-300
+
+The uniformity pass already knows which index is non-uniform, so the compiler could insert the mark itself.
+The author writes it instead, because it keeps the cost visible in the source.
+On hardware that needs the mark, a marked access becomes a loop over the distinct indices in the wave.
+A refactor that makes an index non-uniform then fails loudly, where an inserted mark would slow it silently.
+The strict rule is also additively relaxable: making the mark optional later breaks no program, while hiding the cost now and asking for it back later would.

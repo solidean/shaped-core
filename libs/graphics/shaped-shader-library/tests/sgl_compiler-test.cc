@@ -846,6 +846,6 @@ TEST("slib sgl compiler - an entry point of the wrong stage, and a stage SGL doe
     CHECK(wrong_kind.contains("entry point 'main_ps' is a pixel entry point"));
 
     // A stage SGL still has none of.
-    auto const no_stage = error_of(lib.compile_source(source, sg::shader_stage::geometry, "main_ps", wgsl, options));
-    CHECK(no_stage.contains("SGL has vertex, pixel and compute entry points only"));
+    auto const no_stage = error_of(lib.compile_source(source, sg::shader_stage::raygen, "main_ps", wgsl, options));
+    CHECK(no_stage.contains("SGL has no ray tracing entry points yet"));
 }

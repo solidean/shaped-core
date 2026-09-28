@@ -10,6 +10,7 @@
 #include <clean-core/common/utility.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/error/exception_base.hh>
 #include <clean-core/math/random.hh>
 #include <clean-core/memory/unique_ptr.hh>
 #include <clean-core/platform/resource_limits.hh>
@@ -1043,6 +1044,15 @@ nx::impl::async_test_sink run_async_prologue(test_context& ctx,
             .location = decl.location,
             .extra_lines = {},
             .expanded = cc::format("uncaught exception: {}", e.what()),
+        });
+    }
+    catch (cc::exception const& e)
+    {
+        ctx.errors.push_back(test_error{
+            .expr = cc::format("uncaught exception: {}", e.message()),
+            .location = decl.location,
+            .extra_lines = {},
+            .expanded = cc::format("uncaught exception: {}", e.message()),
         });
     }
     catch (...)
@@ -2188,6 +2198,15 @@ void nx::impl::run_test_body(nx::test_execution& execution,
                         .location = decl.location,
                         .extra_lines = {},
                         .expanded = cc::format("uncaught exception: {}", e.what()),
+                    });
+                }
+                catch (cc::exception const& e)
+                {
+                    ctx.errors.push_back(test_error{
+                        .expr = cc::format("uncaught exception: {}", e.message()),
+                        .location = decl.location,
+                        .extra_lines = {},
+                        .expanded = cc::format("uncaught exception: {}", e.message()),
                     });
                 }
                 catch (...)

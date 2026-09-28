@@ -44,6 +44,8 @@ struct nx::setup
     }
 
     // Registers an alias `name` expanding to `fragments` (each a driver + section path scoping into it).
+    // An alias named exactly like a declared test stands for that test, so it takes the test's location rather than `loc`.
+    // That is what lets a file filter reach an invocable through the alias that runs it, and points discovery at the test's own source.
     void define_alias(cc::string name,
                       cc::vector<alias_fragment> fragments,
                       cc::source_location loc = cc::source_location::current());

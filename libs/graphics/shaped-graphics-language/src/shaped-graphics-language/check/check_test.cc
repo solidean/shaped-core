@@ -154,7 +154,8 @@ void checker::check_test(i32 index)
     // no statement was reported where it was parsed.
     auto is_fail_closed = false;
     for (auto const& e : out.tests[index].expectations)
-        is_fail_closed = is_fail_closed || e.kind == expectation_kind::fail || e.kind == expectation_kind::assert_;
+        is_fail_closed = is_fail_closed || e.kind == expectation_kind::fail || e.kind == expectation_kind::assert_
+                      || e.kind == expectation_kind::discard;
     auto const is_empty = ast.at(body.statements).empty();
     if (!is_fail_closed && !is_empty && type != error_type && (type != bool_type || !is_valid(type)))
         report(diagnostic_kind::test_must_end_in_check, file, ast::is_valid(last) ? span_of(file, last) : test.where,
@@ -202,9 +203,11 @@ cc::vector<test_expectation> checker::expectations_of(i32 file, ast::range_of<as
             auto const case_name = dot != nullptr ? text_of(file, dot->name) : cc::string_view();
 
             // CHK-231: a run it fails, or a kind of diagnostic, with `*` for any run of characters
-            if (name.empty() && (case_name == "fail" || case_name == "assert"))
-                result.push_back(
-                    {.kind = case_name == "fail" ? expectation_kind::fail : expectation_kind::assert_, .where = where});
+            if (name.empty() && (case_name == "fail" || case_name == "assert" || case_name == "discard"))
+                result.push_back({.kind = case_name == "fail"   ? expectation_kind::fail
+                                        : case_name == "assert" ? expectation_kind::assert_
+                                                                : expectation_kind::discard,
+                                  .where = where});
             else if ((name == "error" || name == "warning") && literal != nullptr
                      && literal->kind == ast::literal_kind::quoted && text_of(file, where).size() > 2)
             {

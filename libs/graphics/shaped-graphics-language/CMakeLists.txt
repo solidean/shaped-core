@@ -33,6 +33,10 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/ast/dump.cc
 
     src/shaped-graphics-language/builtins/register.cc
+    src/shaped-graphics-language/builtins/impl/soft_math.cc
+    src/shaped-graphics-language/builtins/register_bit_math.cc
+    src/shaped-graphics-language/builtins/register_math.cc
+    src/shaped-graphics-language/builtins/register_sync.cc
     src/shaped-graphics-language/builtins/register_conversions.cc
     src/shaped-graphics-language/builtins/register_scalar_math.cc
     src/shaped-graphics-language/builtins/register_textures.cc
@@ -42,15 +46,19 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/builtins/registry.cc
 
     src/shaped-graphics-language/check/check.cc
+    src/shaped-graphics-language/check/check_arrays.cc
     src/shaped-graphics-language/check/check_case.cc
+    src/shaped-graphics-language/check/check_constants.cc
     src/shaped-graphics-language/check/check_decl.cc
     src/shaped-graphics-language/check/check_pipeline.cc
     src/shaped-graphics-language/check/check_expr.cc
     src/shaped-graphics-language/check/check_features.cc
     src/shaped-graphics-language/check/check_footprint.cc
     src/shaped-graphics-language/check/check_resources.cc
+    src/shaped-graphics-language/check/check_stages.cc
     src/shaped-graphics-language/check/check_stmt.cc
     src/shaped-graphics-language/check/check_test.cc
+    src/shaped-graphics-language/check/uniformity.cc
     src/shaped-graphics-language/check/dump.cc
     src/shaped-graphics-language/check/flat.cc
     src/shaped-graphics-language/check/flat_builder.cc
@@ -195,6 +203,7 @@ target_sources(shaped-graphics-language
     src/shaped-graphics-language/ast/impl/builder.hh
 
     src/shaped-graphics-language/builtins/ids.hh
+    src/shaped-graphics-language/builtins/impl/soft_math.hh
     src/shaped-graphics-language/builtins/register.hh
     src/shaped-graphics-language/builtins/registry.hh
 
@@ -331,7 +340,11 @@ if(SC_BUILD_TESTS)
 
         tests/check/check-test-support.hh
         tests/corpus/corpus-test.cc
+        tests/check/array-check-test.cc
+        tests/check/primitive-stage-check-test.cc
         tests/check/binding-check-test.cc
+        tests/check/texture-check-test.cc
+        tests/check/uniformity-check-test.cc
         tests/check/case-check-test.cc
         tests/check/footprint-check-test.cc
         tests/check/control-flow-check-test.cc
@@ -360,6 +373,8 @@ if(SC_BUILD_TESTS)
         tests/emit/core-emit-test.cc
         tests/emit/cube-emit-test.cc
         tests/emit/emit-test.cc
+        tests/emit/array-emit-test.cc
+        tests/emit/primitive-stage-emit-test.cc
         tests/emit/buffer-emit-test.cc
         tests/emit/texture-emit-test.cc
         tests/emit/compute-emit-test.cc

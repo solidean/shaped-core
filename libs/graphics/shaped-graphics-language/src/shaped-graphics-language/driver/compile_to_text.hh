@@ -38,6 +38,8 @@ struct sgl::interface_binding
     /// The group it is listed at, counted without the `@inline` binding, and its slot there; -1 and 0 for the `@inline` block.
     i32 group = -1;
     i32 slot = 0;
+    /// A binding array's length, taking `count` consecutive slots from `slot`; 1 for everything else.
+    i32 count = 1;
     /// Whether the entry point's code reaches it; the text declares every slot of every binding it lists either way.
     bool is_used = false;
     /// A block's size in bytes, where its last constant ends; 0 for a resource.

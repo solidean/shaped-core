@@ -255,13 +255,24 @@ TEST("sgl check - an entry point's signature follows the rules of its stage")
     CHECK(entry_reports("@vertex fun vs(v: vin) -> vout:\n    return { p = hpos4(..v.p, 1.0) }\n") == "");
 
     CHECK(entry_reports("@vertex fun vs(v: plain) -> vout:\n    return { p = hpos4(..v.p, 1.0) }\n")
-          == "invalid-entry-point user:[vs] the parameter of a @vertex fun is a @vertex struct\n");
+          == "invalid-entry-point user:[vs] the struct parameter of a @vertex fun is a @vertex struct\n");
     CHECK(entry_reports("@vertex fun vs(v: vin, w: vin) -> vout:\n    return { p = hpos4(..v.p, 1.0) }\n")
-          == "invalid-entry-point user:[vs] an entry point takes one struct parameter\n");
-    CHECK(entry_reports("@vertex fun vs(v: vin) -> plain:\n    return { p = v.p }\n")
-          == "invalid-entry-point user:[vs] a @vertex fun returns a struct with exactly one @position field\n");
+          == "invalid-entry-point user:[vs] an entry point takes its stage struct first, and stage inputs after it\n");
+    // CHK-271: a vertex stage may draw from no vertex buffer, and takes its stage inputs after its struct
+    CHECK(entry_reports("@vertex fun vs(@vertex_index i: int) -> vout:\n    return { p = hpos4(0.0, 0.0, 0.0, 1.0) }\n")
+          == "");
+    CHECK(entry_reports("@vertex fun vs(v: vin, @instance_index i: int, @vertex_index k: int) -> vout:\n"
+                        "    return { p = hpos4(..v.p, 1.0) }\n")
+          == "");
+    CHECK(entry_reports("@vertex fun vs(@vertex_index i: int, v: vin) -> vout:\n    return { p = hpos4(..v.p, 1.0) }\n")
+          == "invalid-entry-point user:[vs] an entry point takes its stage struct first, and stage inputs after it\n");
+    CHECK(entry_reports("@vertex fun vs(v: vin, @vertex_index i: uint) -> vout:\n    return { p = hpos4(..v.p, 1.0) "
+                        "}\n")
+          == "invalid-entry-point user:[vs] a @vertex_index parameter is an int\n");
+    // a vertex that a tessellation stage reads first has no @position; the pipeline asks for it where the rasterizer reads it
+    CHECK(entry_reports("@vertex fun vs(v: vin) -> plain:\n    return { p = v.p }\n") == "");
     CHECK(entry_reports("@vertex fun vs(v: vin) -> two:\n    return { a = hpos4(..v.p, 1.0), b = hpos4(..v.p, 1.0) }\n")
-          == "invalid-entry-point user:[vs] a @vertex fun returns a struct with exactly one @position field\n");
+          == "invalid-entry-point user:[vs] a @vertex fun returns a struct with at most one @position field\n");
     CHECK(entry_reports("@vertex fun vs(v: vin) -> wrong:\n    return { a = float4(..v.p, 1.0) }\n")
           == "invalid-entry-point user:[vs] the @position field of a @vertex fun is an hpos4\n");
 
@@ -269,7 +280,13 @@ TEST("sgl check - an entry point's signature follows the rules of its stage")
     CHECK(entry_reports("@pixel fun ps(v: vout) -> plain:\n    return { p = pos3(1.0, 1.0, 1.0) }\n")
           == "invalid-entry-point user:[ps] a @pixel fun returns a @pixel struct\n");
     CHECK(entry_reports("@pixel fun ps(v: float) -> target:\n    return { c = float4(v, v, v, v) }\n")
-          == "invalid-entry-point user:[ps] the parameter of an entry point is a struct with fields\n");
+          == "invalid-entry-point user:[ps] the struct parameter of an entry point is a struct with fields\n");
+    CHECK(entry_reports("@pixel fun ps(v: vout, @is_front_facing f: bool, @sample_mask m: uint) -> target:\n"
+                        "    return { c = float4(..v.p) }\n")
+          == "");
+    CHECK(entry_reports("@pixel fun ps(@is_front_facing f: bool) -> target:\n    return { c = float4(1.0, 1.0, 1.0, "
+                        "1.0) }\n")
+          == "invalid-entry-point user:[ps] a @pixel fun takes the struct its vertex stage returns\n");
     CHECK(entry_reports("@vertex @pixel fun ps(v: vout) -> target:\n    return { c = float4(..v.p) }\n")
           == "invalid-entry-point user:[ps] an entry point has one stage\n");
 }
@@ -326,4 +343,89 @@ TEST("sgl check - a type scope holds one kind of thing per name, and an extensio
     CHECK(reports_for("fun f(self) -> float => 1.0\n")
           == "wrong-kind-of-name user:[f] self is the receiver of a method, and this function belongs to no type\n");
     CHECK(reports_for("fun f() -> float => self\n") == "unknown-name user:[self] self\n");
+}
+
+TEST("sgl check - a member crossing stages says how it is interpolated, and an integer crosses only flat")
+{
+    // CHK-273
+    constexpr auto vs = "@vertex fun vs(v: vin) -> link:\n    return { p = hpos4(..v.p, 1.0), id = 1 }\n";
+    auto const with = [](cc::string_view link_member)
+    {
+        return reports_for(cc::string("@vertex struct vin:\n    p: pos3\nstruct link:\n    @position p: hpos4\n    ")
+                           + link_member + "\n" + vs);
+    };
+    CHECK(with("@interpolate(.flat) id: int") == "");
+    CHECK(with("id: int")
+          == "invalid-entry-point user:[vs] the int member 'id' crosses stages only flat: write "
+             "`@interpolate(.flat)`\n");
+    CHECK(with("@interpolate(.linear) id: int").contains("crosses stages only flat"));
+    // flat takes one vertex's value, so it has no sampling point
+    CHECK(with("@interpolate(.flat, .centroid) id: int").contains("invalid-attribute-arguments"));
+    CHECK(with("@interpolate(.sideways) id: int").contains("invalid-attribute-arguments"));
+
+    // nothing that crosses no stage edge is interpolated
+    CHECK(reports_for("@vertex struct vin:\n    @interpolate(.flat) p: pos3\nstruct vout:\n    @position p: hpos4\n"
+                      "@vertex fun vs(v: vin) -> vout:\n    return { p = hpos4(..v.p, 1.0) }\n")
+              .contains("crosses no stage edge"));
+}
+
+TEST("sgl check - a pixel stage interpolating per sample needs sample_rate_shading")
+{
+    // CHK-274
+    constexpr auto source = "struct link:\n    @position p: hpos4\n    @interpolate(.perspective, .sample) c: float4\n"
+                            "@pixel struct target:\n    c: float4\n"
+                            "@pixel fun ps(l: link) -> target:\n    return { c = l.c }\n";
+    CHECK(reports_for(source).contains("feature-not-declared user:[ps] ps needs sample_rate_shading"));
+    CHECK(reports_for(cc::string("require sample_rate_shading\n") + source) == "");
+}
+
+TEST("sgl check - a vertex member's @format names the bytes it reads, and they decode into its type")
+{
+    // CHK-275
+    auto const with = [](cc::string_view member)
+    { return reports_for(cc::string("@vertex struct vin:\n    p: float3\n    ") + member + "\n"); };
+    CHECK(with("@format(.rgba8_unorm) c: float4") == "");
+    CHECK(with("@format(.rgba8_uint) j: uint4") == "");
+    CHECK(with("@format(.rgba8_unorm) c: float3")
+          == "type-mismatch user:[format] @format(.rgba8_unorm) decodes into a float4, and the member is a float3\n");
+    CHECK(with("@format(.bgra8) c: float4").contains("invalid-attribute-arguments"));
+    // on a struct that is no vertex input, @format is no member's own
+    CHECK(reports_for("struct plain:\n    @format(.rgba8_unorm) c: float4\n").contains("unsupported-yet"));
+}
+
+TEST("sgl check - a @pixel struct's depth and sample mask are outputs of their types, one each")
+{
+    // CHK-276
+    auto const pixel = [](cc::string_view members)
+    {
+        return reports_for(cc::string("struct vout:\n    @position p: hpos4\n@pixel struct target:\n") + members
+                           + "@pixel fun ps(v: vout) -> target:\n    return target()\n");
+    };
+    CHECK(reports_for("struct vout:\n    @position p: hpos4\n@pixel struct target:\n    c: float4\n    @depth d: "
+                      "float\n"
+                      "    @sample_mask m: uint\n@pixel fun ps(v: vout) -> target:\n"
+                      "    return { c = float4(1.0, 1.0, 1.0, 1.0), d = 0.5, m = 0xff }\n")
+          == "");
+    CHECK(pixel("    @depth d: float4\n").contains("a @depth member is a float, and d is a float4"));
+    CHECK(pixel("    @sample_mask m: int\n").contains("a @sample_mask member is a uint"));
+    CHECK(pixel("    @depth(.sideways) d: float\n").contains("invalid-attribute-arguments"));
+    CHECK(pixel("    @depth a: float\n    @depth b: float\n")
+              .contains("a @pixel struct has at most one @depth member and one @sample_mask member"));
+    // only a @pixel struct writes a pixel's outputs
+    CHECK(reports_for("struct plain:\n    @depth d: float\n").contains("unsupported-yet"));
+}
+
+TEST("sgl check - only a pixel entry point may reach discard")
+{
+    // CHK-277: judged once the body is inlined, so a helper may hold one
+    constexpr auto helper = "fun cut(a: float) -> float:\n    if a < 0.5 => discard\n    return a\n";
+    CHECK(reports_for(cc::string(helper)
+                      + "struct vout:\n    @position p: hpos4\n"
+                        "@vertex fun vs(@vertex_index i: int) -> vout:\n"
+                        "    return { p = hpos4(cut(0.25), 0.0, 0.0, 1.0) }\n")
+          == "stage-not-allowed user:[discard] vs is a vertex entry point, and only a pixel stage discards\n");
+    CHECK(reports_for(cc::string(helper)
+                      + "struct vout:\n    @position p: hpos4\n@pixel struct target:\n    c: float4\n"
+                        "@pixel fun ps(v: vout) -> target:\n    return { c = float4(cut(v.p.x), 0.0, 0.0, 1.0) }\n")
+          == "");
 }
