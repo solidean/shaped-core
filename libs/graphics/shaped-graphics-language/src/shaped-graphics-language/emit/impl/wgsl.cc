@@ -1,9 +1,30 @@
 #include "dialect.hh"
 
 #include <clean-core/string/format.hh>
+#include <shaped-graphics-language/check/resources.hh>
 
 namespace
 {
+/// WGSL's texture and image types, parallel to `texture_shape`.
+/// A 1D texture is a 2D one on WebGPU, which sg creates every 1D texture as (the spec's bindings file, "Shapes").
+constexpr cc::string_view k_texture_names[]
+    = {"texture_2d", "texture_2d_array", "texture_2d",   "texture_2d_array",  "texture_multisampled_2d",
+       "",           "texture_3d",       "texture_cube", "texture_cube_array"};
+constexpr cc::string_view k_depth_names[]
+    = {"", "", "texture_depth_2d",   "texture_depth_2d_array",  "texture_depth_multisampled_2d",
+       "", "", "texture_depth_cube", "texture_depth_cube_array"};
+constexpr cc::string_view k_image_names[] = {"texture_storage_2d",
+                                             "texture_storage_2d_array",
+                                             "texture_storage_2d",
+                                             "texture_storage_2d_array",
+                                             "",
+                                             "",
+                                             "texture_storage_3d",
+                                             "",
+                                             ""};
+/// Parallel to `image_access`.
+constexpr cc::string_view k_accesses[] = {"read", "read_write", "write"};
+
 using namespace sgl;
 using namespace sgl::check;
 using namespace sgl::emit;
@@ -61,7 +82,7 @@ public:
     void write_group(cc::string& out,
                      plan const& p,
                      planned_constants const* block,
-                     cc::span<planned_buffer const> buffers) const override
+                     cc::span<planned_resource const> buffers) const override
     {
         if (block != nullptr)
         {
@@ -72,13 +93,55 @@ public:
                         block->block_name);
         }
         for (auto const& b : buffers)
-            out.appendf("@group({}) @binding({}) var<storage, {}> {}: array<{}>;\n", b.group, b.slot,
-                        b.is_mut ? "read_write" : "read", b.name, type_text(p, *this, b.element));
+            write_resource(out, p, b);
         out += "\n";
+    }
+
+    void write_resource(cc::string& out, plan const& p, planned_resource const& b) const
+    {
+        auto const& t = p.m.at(b.type);
+        auto const address = cc::format("@group({}) @binding({})", b.group, b.slot);
+        // WGSL has no static sampler: the layout carries it, and the group binds it (slib's WGSL notes).
+        if (t.kind == type_kind::buffer)
+            out.appendf("{} var<storage, {}> {}: {};\n", address, b.is_mut ? "read_write" : "read", b.name,
+                        resource_text(p, b.type));
+        else
+            out.appendf("{} var {}: {};\n", address, b.name, resource_text(p, b.type));
+    }
+
+    [[nodiscard]] cc::string resource_text(plan const& p, type_id type) const override
+    {
+        auto const& t = p.m.at(type);
+        switch (t.kind)
+        {
+        case type_kind::buffer:
+            return cc::format("array<{}>", type_text(p, *this, t.element));
+        case type_kind::texture:
+            if (t.is_depth)
+                return cc::string(k_depth_names[isize(t.shape)]);
+            return cc::format("{}<{}>", k_texture_names[isize(t.shape)], scalar_of(p, t.element));
+        case type_kind::image:
+            return cc::format("{}<{}, {}>", k_image_names[isize(t.shape)], k_storage_formats[t.format].wgsl,
+                              k_accesses[isize(t.access)]);
+        case type_kind::sampler:
+            return t.is_comparison ? "sampler_comparison" : "sampler";
+        default:
+            return {};
+        }
+    }
+
+    /// The scalar a texture of `element` samples to: `f32` for any `float` width.
+    static cc::string_view scalar_of(plan const& p, type_id element)
+    {
+        auto const name = p.m.name_of(element);
+        return name.starts_with("uint") ? "u32" : name.starts_with("int") ? "i32" : "f32";
     }
 
     void write_declarations(cc::string& out, plan const& p) const override
     {
+        // EMIT-103: a directive, so it stands ahead of every declaration.
+        if (uses_derivatives(p))
+            out += "diagnostic(off, derivative_uniformity);\n\n";
         write_enum_constants(out, p, *this);
         write_buffers(out, p, *this);
 

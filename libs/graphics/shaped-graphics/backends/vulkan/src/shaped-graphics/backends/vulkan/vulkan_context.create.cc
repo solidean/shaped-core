@@ -357,11 +357,24 @@ cc::string_view missing_required_capability(VkPhysicalDevice dev)
     VkPhysicalDeviceVulkan13Features vk13 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES};
     VkPhysicalDeviceVulkan12Features vk12
         = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES, .pNext = &vk13};
-    VkPhysicalDeviceFeatures2 features = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = &vk12};
+    VkPhysicalDeviceVulkan11Features vk11
+        = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES, .pNext = &vk12};
+    VkPhysicalDeviceFeatures2 features = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = &vk11};
     vkGetPhysicalDeviceFeatures2(dev, &features);
 
     // The epoch system rests on timeline semaphores; barriers on synchronization2; the raster scope on dynamic
     // rendering; bindless arrays on the three descriptor-indexing bits; acceleration structures on device addresses.
+    //
+    // A read-write binding in a fragment shader is a group sg lets any raster pipeline bind, and Vulkan gates the
+    // store behind a core 1.0 feature rather than behind anything the shader declares — so a device without it would
+    // take the pipeline and fail validation at the draw.
+    if (features.features.fragmentStoresAndAtomics != VK_TRUE)
+        return "fragmentStoresAndAtomics";
+    // A vertex shader reading SV_VertexID compiles to SPIR-V that declares the DrawParameters capability, since HLSL's
+    // id is the index minus the base and Vulkan's VertexIndex is not.
+    // So every HLSL vertex shader through DXC needs this, not just one that asks for the base vertex itself.
+    if (vk11.shaderDrawParameters != VK_TRUE)
+        return "shaderDrawParameters";
     if (vk12.timelineSemaphore != VK_TRUE)
         return "timelineSemaphore";
     if (vk13.synchronization2 != VK_TRUE)
@@ -661,9 +674,32 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
             });
     }
 
+    // `shaderDrawParameters` is what SPIR-V's DrawParameters capability needs enabled, and every HLSL vertex shader
+    // reading SV_VertexID declares it — see missing_required_capability.
+    auto vk11_features = VkPhysicalDeviceVulkan11Features{
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES,
+        .pNext = &vk12_features,
+        .shaderDrawParameters = VK_TRUE,
+    };
+
+    // **The core 1.0 features go through `pNext`, not `pEnabledFeatures`**: the two are mutually exclusive, and the
+    // chain already carries the 1.1, 1.2 and 1.3 structures.
+    // `fragmentStoresAndAtomics` is the one sg needs — without it a fragment shader may not write a storage buffer,
+    // which is a binding group sg's raster scope accepts.
+    // `shaderStorageImageExtendedFormats` is enabled wherever the device has it.
+    // sg::feature::extended_storage_formats reports it together with bgra8_unorm's per-format storage support.
+    auto supported = VkPhysicalDeviceFeatures{};
+    vkGetPhysicalDeviceFeatures(best_device, &supported);
+    auto core_features = VkPhysicalDeviceFeatures2{
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
+        .pNext = &vk11_features,
+        .features = {.fragmentStoresAndAtomics = VK_TRUE,
+                     .shaderStorageImageExtendedFormats = supported.shaderStorageImageExtendedFormats},
+    };
+
     auto const device_info = VkDeviceCreateInfo{
         .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
-        .pNext = &vk12_features,
+        .pNext = &core_features,
         .queueCreateInfoCount = u32(queue_infos.size()),
         .pQueueCreateInfos = queue_infos.data(),
         .enabledExtensionCount = u32(device_extensions.size()),

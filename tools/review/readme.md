@@ -42,7 +42,7 @@ A goal is mandatory, and `init` refuses without one, because it decides what the
 
 | goal | the artifact | what changes |
 |---|---|---|
-| `pr-comment` | one standalone comment for the author | entries become instructions; context and open questions are dropped from the artifact |
+| `pr-comment` | one standalone comment for the author | entries become instructions; the overview and open questions are dropped from the artifact |
 | `land-changes` | a work order for this session | entries carry `resolved-by:`, and `sync` marking their changes superseded is the evidence the fix landed |
 | `design` | the decisions, as input to a plan | no changeset at all — no ledger, no coverage gate, entries only |
 

@@ -49,9 +49,19 @@ TEST("sgl check - overloads resolve by exact argument types")
     CHECK(body_reports("return dot(v)\n") == "no-matching-overload user:[dot(v)] dot(vec3)\n");
     CHECK(body_reports("return saturate()\n") == "no-matching-overload user:[saturate()] saturate()\n");
 
-    // A second declaration with the same parameter types is no error by itself; the call cannot choose.
-    CHECK(reports_for("@builtin fun dot(x: vec3, y: vec3) -> float\nfun f(v: vec3) -> float:\n    return dot(v, v)\n")
-          == "ambiguous-overload user:[dot(v, v)] dot(vec3, vec3) has 2 candidates\n");
+    // A second declaration with the same parameter types in one scope is no error by itself; the call cannot choose.
+    CHECK(reports_for("fun g(v: vec3) -> float => v.x\nfun g(v: vec3) -> float => v.y\nfun f(v: vec3) -> float:\n"
+                      "    return g(v)\n")
+          == "ambiguous-overload user:[g(v)] g(vec3) has 2 candidates\n");
+
+    // CHK-192: across the two scopes the user file's wins, so a prelude that gains its signature later breaks nothing
+    auto const shadowed = check_sources(read_prelude(), "fun dot(x: vec3, y: vec3) -> float => 7.0\n"
+                                                        "fun f(v: vec3) -> float:\n"
+                                                        "    return dot(v, v)\n");
+    CHECK(reports_of(shadowed) == "");
+    auto const chosen = shadowed.tables().target_at(find_expr(shadowed, "dot(v, v)"));
+    CHECK(chosen.kind == target_kind::overload);
+    CHECK(shadowed.module.at(chosen.symbol).file == shadowed.user_file());
 
     // An overload on other types takes nothing away, and each call records the one it chose.
     auto const checked = check_sources(read_prelude(), "fun dot(a: pos3, b: pos3) -> float => a.x * b.x\n"
@@ -214,15 +224,35 @@ TEST("sgl check - a returned object converts structurally: every field once, typ
 TEST("sgl check - let introduces an immutable local, in order")
 {
     CHECK(body_reports("let a = b\nlet b = k\nreturn k\n") == "unknown-name user:[b] b\n");
-    // CHK-53: shadowing a local or a parameter is legal; only a module-level name is not yet
+    // CHK-53: shadowing a local or a parameter is legal
     CHECK(body_reports("let a = k\nlet a = k\nreturn k\n") == "");
     CHECK(body_reports("let k = 1.0\nreturn k\n") == "");
     CHECK(body_reports("let x : vec3 = k\nreturn k\n") == "type-mismatch user:[k] expected vec3, got float\n");
-    CHECK(body_reports("let dot = k\nreturn k\n")
-          == "unsupported-yet user:[dot] a local that shadows a module-level name\n");
     CHECK(body_reports("let mut a = k\nreturn a\n") == "");
     CHECK(body_reports("let a : float\nreturn k\n") == "unsupported-yet user:[let a : float] a let without a value\n");
     CHECK(body_reports("let (a, b) = k\nreturn k\n") == "unsupported-yet user:[(a, b)] a pattern in let\n");
+}
+
+TEST("sgl check - a local or a parameter shadows a module-level name, and hides it wherever it stands")
+{
+    // CHK-54: the value still sees what the local hides
+    CHECK(body_reports("let dot = k\nreturn dot\n") == "");
+    CHECK(body_reports("let length = length v\nreturn length\n") == "");
+    // one namespace: behind the local, the name is no function and no type
+    CHECK(body_reports("let dot = k\nreturn dot v v\n") == "unsupported-yet user:[dot] a call of a local value\n");
+    CHECK(body_reports("let float = k\nlet a : float = k\nreturn k\n")
+          == "wrong-kind-of-name user:[float] float is a local, and a type stands here\n");
+    // a literal is of the prelude's type whatever a local is named
+    CHECK(body_reports("let float = 1.0\nlet int = 2\nreturn float\n") == "");
+    // an inner block's local hides the name only up to its end
+    CHECK(body_reports("if k > 0.0:\n    let dot = k\n    return dot\nreturn dot v v\n") == "");
+
+    CHECK(reports_for("fun g(dot: float) -> float:\n    return dot\n") == "");
+    CHECK(reports_for("binding frame:\n    exposure: float\nfun g(k: float) -> float:\n    let frame = k\n    return "
+                      "frame\n")
+          == "");
+    // a parameter's type is resolved before the parameters are in scope, so it may be named after its type
+    CHECK(reports_for("struct light:\n    x: float\nfun g(light: light) -> float:\n    return light.x\n") == "");
 }
 
 TEST("sgl check - statements and expressions the tracer does not carry")
@@ -237,9 +267,20 @@ TEST("sgl check - statements and expressions the tracer does not carry")
     CHECK(body_reports("k\nreturn k\n") == "unsupported-yet user:[k] an expression statement\n");
     CHECK(body_reports("let h = x => x\nreturn k\n") == "unsupported-yet user:[x => x] a lambda\n");
     CHECK(body_reports("let t = (k, k)\nreturn k\n") == "unsupported-yet user:[(k, k)] a tuple\n");
-    CHECK(body_reports("let t = k as vec3\nreturn k\n") == "unsupported-yet user:[k as vec3] as\n");
     CHECK(body_reports("fun g(x: float) -> float => x\nreturn k\n")
           == "unsupported-yet user:[fun g(x: float) -> float => x] a declaration inside a function\n");
+}
+
+TEST("sgl check - `as` converts between float, int and uint of one width, and nothing else")
+{
+    CHECK(body_reports("let i = k as int\nlet u = i as uint\nreturn u as float\n") == "");
+    CHECK(body_reports("let w = float2(k, k) as int2\nreturn k\n") == "");
+    // A cast to the type the value has is the value.
+    CHECK(body_reports("return k as float\n") == "");
+    CHECK(body_reports("let t = k as vec3\nreturn k\n")
+          == "no-matching-overload user:[k as vec3] float as vec3: no conversion\n");
+    CHECK(body_reports("let t = c as int2\nreturn k\n")
+          == "no-matching-overload user:[c as int2] float3 as int2: no conversion\n");
 }
 
 TEST("sgl check - the side tables name what an editor asks for")

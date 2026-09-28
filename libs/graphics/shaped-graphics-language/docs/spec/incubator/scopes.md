@@ -46,6 +46,14 @@ It applies to the names of types, functions and variables, and never to the name
 * Diagnostics: a use before the declaration in an ordered scope, which can name the declaration further down.
 * Notation: the replacement table that is in effect is itself a matter of scope, since a `use` may bring notations in.
 
+## Already decided
+
+* **Every shadowing is silent.** A declaration of an inner scope may reuse any name of an outer one, of either kind of scope.
+  A local over a local, a parameter or a module-level name, and the program's file over the prelude, are [CHK-53, CHK-54 and CHK-188](../semantics/checking.md).
+* **Inside one unordered scope two declarations of one name are an error**, unless every one of them is a function: nothing orders them, so nothing says which is meant.
+  Functions are the exception because a call picks among them by its arguments.
+* A nested `struct` may thus share its name with a `binding` of the file, once nested declarations exist.
+
 ## Already fixed by the syntax
 
 * A block is the children of a line that ends in the block colon, so the extent of a scope is given by indentation alone.
@@ -57,7 +65,6 @@ It applies to the names of types, functions and variables, and never to the name
 
 * The full list of constructs that open a scope, and the kind of each: `binding`, `enum`, `case` arms, loops and plain blocks are not classified.
 * Whether a nested function is visible before its own declaration inside an ordered scope.
-* Whether a local name may shadow a module-level name, and whether that is silent, a warning or an error; shadowing another local is settled by CHK-53 of [checking](../semantics/checking.md).
 * Whether a nested function sees a variable that is declared after it in the surrounding function.
 * How a cycle between declarations of an unordered scope is reported, for example two constants that initialize each other.
 * Whether a notation brought in by a `use` inside a function applies only from that line on.

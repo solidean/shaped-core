@@ -41,13 +41,9 @@ static_assert(offsetof(sv::shaders::layout_constants, separator_color) == offset
     return tg::vec4f(uv.max[0] - uv.min[0], uv.max[1] - uv.min[1], uv.min[0], uv.min[1]);
 }
 
-/// Premultiplied source-over.
-///
 /// Premultiplied rather than straight because a view target is composited again by its own parent, and straight alpha
 /// is not associative across that chain.
-constexpr sg::blend_state over_blend
-    = {.color = {.source = sg::blend_factor::one, .target = sg::blend_factor::one_minus_src_alpha},
-       .alpha = {.source = sg::blend_factor::one, .target = sg::blend_factor::one_minus_src_alpha}};
+constexpr sg::blend_state over_blend = sg::blend_premultiplied_alpha;
 
 /// A flat fill: a node's background, or one band of its border ring.
 /// Both are one solid color and neither samples anything, which is why they share a pipeline.
@@ -228,9 +224,10 @@ sg::routine_outcome layout_routine::execute(sg::rendering_scope& scope,
             if (textures.targets.empty())
                 continue;
             group = ctx.transient.create_binding_group(
-                self->_group_layout, shaders::layout_bindings{.source_0 = textures.targets[0].as_readonly_view(),
-                                                              .source_1 = textures.targets[0].as_readonly_view(),
-                                                              .source_sampler = {}});
+                cmd, self->_group_layout,
+                shaders::layout_bindings{.source_0 = textures.targets[0].as_readonly_view(),
+                                         .source_1 = textures.targets[0].as_readonly_view(),
+                                         .source_sampler = {}});
         }
         else
         {
@@ -251,7 +248,7 @@ sg::routine_outcome layout_routine::execute(sg::rendering_scope& scope,
             auto const filter
                 = d.sampler == sampler_mode::nearest ? sg::sampler_filter::nearest : sg::sampler_filter::linear;
             group = ctx.transient.create_binding_group(
-                self->_group_layout,
+                cmd, self->_group_layout,
                 shaders::layout_bindings{.source_0 = primary->as_readonly_view(),
                                          .source_1 = secondary->as_readonly_view(),
                                          .source_sampler = {.min_filter = filter,

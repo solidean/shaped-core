@@ -225,10 +225,14 @@ void webgpu_command_list::raster_bind_index_buffer(sg::index_buffer_view const& 
     CC_ASSERT(_in_rendering_scope, "bind_index_buffer is only valid inside a rendering scope");
     auto const* buffer = dynamic_cast<webgpu_buffer const*>(view.buffer.get());
     CC_ASSERT(buffer != nullptr, "index buffer is not a webgpu buffer");
+    CC_ASSERT(view.offset_in_bytes % sg::index_buffer_offset_alignment == 0,
+              "an index_buffer_view's offset must be 4-byte aligned — see sg::index_buffer_offset_alignment");
     touch(view.buffer);
     _index_buffer = buffer->raw();
     _index_format = view.format == sg::index_format::uint16 ? WGPUIndexFormat_Uint16 : WGPUIndexFormat_Uint32;
     _index_offset = u64(view.offset_in_bytes);
+    _sg_index_format = view.format;
+    _index_view_offset_in_bytes = view.offset_in_bytes;
     _index_size = to_wgpu_range_size(view.size_in_bytes);
     if (_render_pass)
         wgpuRenderPassEncoderSetIndexBuffer(render_pass(), _index_buffer, _index_format, _index_offset, _index_size);
@@ -286,6 +290,15 @@ void webgpu_command_list::raster_draw_indexed(sg::draw_indexed_config const& con
 {
     CC_ASSERT(_in_rendering_scope, "draw_indexed is only valid inside a rendering scope");
     CC_ASSERT(_index_buffer != nullptr, "draw_indexed needs a bound index buffer");
+
+    // **An index fetch starts on a 4-byte boundary**, and `index_range.offset` counts indices rather than bytes — so
+    // an aligned view is not enough on its own.
+    // Metal is the backend that cannot do otherwise, and it answers a misaligned fetch by drawing part of the mesh
+    // with no error and no validation message; the rule is sg's so that it fails here too.
+    CC_ASSERT(sg::is_aligned_index_fetch(_sg_index_format, _index_view_offset_in_bytes, config.index_range.offset),
+              "an odd first index into a 16-bit index buffer starts the fetch off a 4-byte boundary. Use an even "
+              "first index, or 32-bit indices — sg::is_aligned_index_fetch answers it without asserting");
+
     apply_raster_state();
     wgpuRenderPassEncoderDrawIndexed(render_pass(), u32(config.index_range.size), u32(config.instance_range.size),
                                      u32(config.index_range.offset), config.vertex_offset,

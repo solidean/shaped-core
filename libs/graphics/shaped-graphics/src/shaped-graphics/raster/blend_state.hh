@@ -77,3 +77,23 @@ struct sg::blend_state
 
     [[nodiscard]] friend constexpr bool operator==(blend_state, blend_state) = default;
 };
+
+// The named blends.
+// Opaque has no preset: it is a color_target_state whose `blend` is unset.
+namespace sg
+{
+/// Straight alpha over the target: `src * src.a + dst * (1 - src.a)`, and alpha accumulating coverage.
+inline constexpr blend_state blend_alpha
+    = {.color = {.source = blend_factor::src_alpha, .target = blend_factor::one_minus_src_alpha},
+       .alpha = {.source = blend_factor::one, .target = blend_factor::one_minus_src_alpha}};
+
+/// Premultiplied source-over: the source's color is already multiplied by its alpha.
+/// Unlike straight alpha it composes, so a target that is itself composited again stays correct.
+inline constexpr blend_state blend_premultiplied_alpha
+    = {.color = {.source = blend_factor::one, .target = blend_factor::one_minus_src_alpha},
+       .alpha = {.source = blend_factor::one, .target = blend_factor::one_minus_src_alpha}};
+
+/// The source added to the target, color and alpha alike.
+inline constexpr blend_state blend_additive = {.color = {.source = blend_factor::one, .target = blend_factor::one},
+                                               .alpha = {.source = blend_factor::one, .target = blend_factor::one}};
+} // namespace sg

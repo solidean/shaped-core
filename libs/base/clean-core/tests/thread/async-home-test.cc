@@ -677,7 +677,10 @@ TEST("async home - a cold coroutine homed from outside runs every segment on tha
 
 // ---- the main home: these run in every threading mode ----
 
-TEST("async home - a main-homed node completes through pump_main_thread", nx::config::main_thread)
+// The main-thread tests below assert on cc::main_thread_scheduler() as a whole — its homed-node count, what one pump cycle runs.
+// That scheduler is the process's, and with SC_THREADS off every test's work runs on it, so another test's node can be homed there or run inside this test's pump.
+// `exclusive()` is what makes the whole scheduler this test's.
+TEST("async home - a main-homed node completes through pump_main_thread", nx::config::main_thread, nx::config::exclusive())
 {
     auto& main = cc::main_thread_scheduler();
     CHECK(main.is_owner_thread());
@@ -703,7 +706,9 @@ TEST("async home - a main-homed node completes through pump_main_thread", nx::co
     CHECK(main.homed_node_count() == 0);
 }
 
-TEST("async home - a main thread blocked on a graph runs its main-homed steps", nx::config::main_thread)
+TEST("async home - a main thread blocked on a graph runs its main-homed steps",
+     nx::config::main_thread,
+     nx::config::exclusive())
 {
     cc::atomic<u64> ran_on = {0};
     auto const body = [&]() -> cc::shared_async<int>
@@ -723,7 +728,9 @@ TEST("async home - a main thread blocked on a graph runs its main-homed steps", 
     CHECK(cc::main_thread_scheduler().homed_node_count() == 0);
 }
 
-TEST("async home - a yielding main-homed body does not pin pump_main_thread", nx::config::main_thread)
+TEST("async home - a yielding main-homed body does not pin pump_main_thread",
+     nx::config::main_thread,
+     nx::config::exclusive())
 {
     cc::atomic<int> polls = {0};
     auto const spinner = [&]() -> cc::shared_async<cc::unit>
@@ -825,7 +832,8 @@ TEST("async home - try_home_cold moves a cold factory node to another home", nx:
 }
 
 TEST("async home - a cold coroutine homed to main from outside completes through pump_main_thread",
-     nx::config::main_thread)
+     nx::config::main_thread,
+     nx::config::exclusive())
 {
     cc::atomic<u64> ran_on = {0};
     auto const body = [&ran_on]() -> cc::shared_async<int> // named: a coroutine lambda's captures live in the closure

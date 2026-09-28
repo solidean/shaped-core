@@ -138,18 +138,15 @@ ASYNC_INVOCABLE_TEST("sv - a quadric sphere is traced through a procedural BLAS"
                            .indices = primitives,
                            .is_indexed = 0});
 
-        auto const frame = ctx.transient.create_buffer<sv::pt_frame_constants_gpu>(
-            1, sg::buffer_usage::uniform_buffer | sg::buffer_usage::copy_dst);
-        cmd.upload.pod_to_buffer(frame, sv::pt_frame_constants_gpu{.camera = sv::camera_gpu::from(camera),
-                                                                   .samples_per_pixel = 8,
-                                                                   .max_bounces = 2});
+        auto const frame = ctx.transient.create_buffer_from_pod(
+            cmd,
+            sv::pt_frame_constants_gpu{.camera = sv::camera_gpu::from(camera), .samples_per_pixel = 8, .max_bounces = 2},
+            sg::buffer_usage::uniform_buffer);
 
         // A uniform environment, so the background is a known constant and anything darker than it was HIT.
-        auto const background = ctx.transient.create_buffer<sv::background_gpu>(
-            1, sg::buffer_usage::uniform_buffer | sg::buffer_usage::copy_dst);
-        cmd.upload.pod_to_buffer(
-            background,
-            sv::background_gpu::from(sv::background::uniform(tg::vec3f(env_radiance, env_radiance, env_radiance))));
+        auto const background = ctx.transient.create_buffer_from_pod(
+            cmd, sv::background_gpu::from(sv::background::uniform(tg::vec3f(env_radiance, env_radiance, env_radiance))),
+            sg::buffer_usage::uniform_buffer);
 
         auto const target = ctx.transient.create_texture_2d(
             {.format = sg::pixel_format::rgba32_float,
@@ -159,9 +156,8 @@ ASYNC_INVOCABLE_TEST("sv - a quadric sphere is traced through a procedural BLAS"
              .usage = sg::texture_usage::readonly_texture | sg::texture_usage::readwrite_texture
                     | sg::texture_usage::copy_src});
 
-        auto const instance_table = ctx.transient.create_buffer<sv::instance_gpu>(
-            records.size(), sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);
-        cmd.upload.data_to_buffer(instance_table, records);
+        auto const instance_table
+            = ctx.transient.create_buffer_from_data(cmd, records, sg::buffer_usage::readonly_buffer);
 
         auto const bindless = resources.freeze();
         auto const outcome = sv::pathtrace_routine::execute(cmd, {.frame = frame,
@@ -526,16 +522,13 @@ ASYNC_INVOCABLE_TEST("sv - the traced silhouette agrees with the CPU reference",
         records.push_back(
             {.param_buffer = primitives, .param_offset = 0, .vertices = primitives, .indices = primitives, .is_indexed = 0});
 
-        auto const frame = ctx.transient.create_buffer<sv::pt_frame_constants_gpu>(
-            1, sg::buffer_usage::uniform_buffer | sg::buffer_usage::copy_dst);
-        cmd.upload.pod_to_buffer(
-            frame, sv::pt_frame_constants_gpu{.camera = gpu_camera, .samples_per_pixel = 4, .max_bounces = 1});
+        auto const frame = ctx.transient.create_buffer_from_pod(
+            cmd, sv::pt_frame_constants_gpu{.camera = gpu_camera, .samples_per_pixel = 4, .max_bounces = 1},
+            sg::buffer_usage::uniform_buffer);
 
-        auto const background = ctx.transient.create_buffer<sv::background_gpu>(
-            1, sg::buffer_usage::uniform_buffer | sg::buffer_usage::copy_dst);
-        cmd.upload.pod_to_buffer(
-            background,
-            sv::background_gpu::from(sv::background::uniform(tg::vec3f(env_radiance, env_radiance, env_radiance))));
+        auto const background = ctx.transient.create_buffer_from_pod(
+            cmd, sv::background_gpu::from(sv::background::uniform(tg::vec3f(env_radiance, env_radiance, env_radiance))),
+            sg::buffer_usage::uniform_buffer);
 
         auto const target = ctx.transient.create_texture_2d({.format = sg::pixel_format::rgba32_float,
                                                              .width = agreement_size,
@@ -544,9 +537,8 @@ ASYNC_INVOCABLE_TEST("sv - the traced silhouette agrees with the CPU reference",
                                                                     | sg::texture_usage::readwrite_texture
                                                                     | sg::texture_usage::copy_src});
 
-        auto const instance_table = ctx.transient.create_buffer<sv::instance_gpu>(
-            records.size(), sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);
-        cmd.upload.data_to_buffer(instance_table, records);
+        auto const instance_table
+            = ctx.transient.create_buffer_from_data(cmd, records, sg::buffer_usage::readonly_buffer);
 
         auto const bindless = resources.freeze();
         auto const outcome = sv::pathtrace_routine::execute(cmd, {.frame = frame,
@@ -781,16 +773,13 @@ ASYNC_INVOCABLE_TEST("sv - a quadric batch still draws while its own permutation
         records.push_back(
             {.param_buffer = primitives, .param_offset = 0, .vertices = primitives, .indices = primitives, .is_indexed = 0});
 
-        auto const frame = ctx.transient.create_buffer<sv::pt_frame_constants_gpu>(
-            1, sg::buffer_usage::uniform_buffer | sg::buffer_usage::copy_dst);
-        cmd.upload.pod_to_buffer(
-            frame, sv::pt_frame_constants_gpu{.camera = gpu_camera, .samples_per_pixel = 2, .max_bounces = 1});
+        auto const frame = ctx.transient.create_buffer_from_pod(
+            cmd, sv::pt_frame_constants_gpu{.camera = gpu_camera, .samples_per_pixel = 2, .max_bounces = 1},
+            sg::buffer_usage::uniform_buffer);
 
-        auto const background = ctx.transient.create_buffer<sv::background_gpu>(
-            1, sg::buffer_usage::uniform_buffer | sg::buffer_usage::copy_dst);
-        cmd.upload.pod_to_buffer(
-            background,
-            sv::background_gpu::from(sv::background::uniform(tg::vec3f(env_radiance, env_radiance, env_radiance))));
+        auto const background = ctx.transient.create_buffer_from_pod(
+            cmd, sv::background_gpu::from(sv::background::uniform(tg::vec3f(env_radiance, env_radiance, env_radiance))),
+            sg::buffer_usage::uniform_buffer);
 
         auto const target = ctx.transient.create_texture_2d({.format = sg::pixel_format::rgba32_float,
                                                              .width = image_size,
@@ -799,9 +788,8 @@ ASYNC_INVOCABLE_TEST("sv - a quadric batch still draws while its own permutation
                                                                     | sg::texture_usage::readwrite_texture
                                                                     | sg::texture_usage::copy_src});
 
-        auto const instance_table = ctx.transient.create_buffer<sv::instance_gpu>(
-            records.size(), sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);
-        cmd.upload.data_to_buffer(instance_table, records);
+        auto const instance_table
+            = ctx.transient.create_buffer_from_data(cmd, records, sg::buffer_usage::readonly_buffer);
 
         auto const bindless = resources.freeze();
         auto const outcome = sv::pathtrace_routine::execute(cmd, {.frame = frame,

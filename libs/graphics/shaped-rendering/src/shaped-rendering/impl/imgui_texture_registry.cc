@@ -1,4 +1,5 @@
 #include <clean-core/common/asserts.hh>
+#include <shaped-graphics/command_list/command_list.hh>
 #include <shaped-graphics/context/context.hh>
 #include <shaped-rendering/impl/imgui_draw_math.hh>
 #include <shaped-rendering/impl/imgui_texture_registry.hh>
@@ -18,9 +19,10 @@ namespace
 }
 } // namespace
 
-void imgui_texture_registry::service_requests(sg::context& ctx, ImDrawData* draw_data)
+void imgui_texture_registry::service_requests(sg::command_list& cmd, ImDrawData* draw_data)
 {
     CC_ASSERT(draw_data != nullptr, "draw data must not be null");
+    auto& ctx = cmd.context();
 
     // Textures is a pointer into the platform IO and may legitimately be null when a caller drives texture updates itself.
     if (draw_data->Textures == nullptr)
@@ -34,7 +36,7 @@ void imgui_texture_registry::service_requests(sg::context& ctx, ImDrawData* draw
             create_texture(ctx, tex);
             break;
         case ImTextureStatus_WantUpdates:
-            update_texture(ctx, tex);
+            update_texture(cmd, tex);
             break;
         case ImTextureStatus_WantDestroy:
             // UnusedFrames counts frames since imgui last referenced it.
@@ -85,7 +87,7 @@ void imgui_texture_registry::create_texture(sg::context& ctx, ImTextureData* tex
     tex->SetStatus(ImTextureStatus_OK);
 }
 
-void imgui_texture_registry::update_texture(sg::context& ctx, ImTextureData* tex)
+void imgui_texture_registry::update_texture(sg::command_list& cmd, ImTextureData* tex)
 {
     auto const slot_index = slot_of_id(tex->GetTexID());
     CC_ASSERT(slot_index >= 0 && slot_index < _slots.size() && _slots[slot_index].raw() != nullptr,
@@ -107,7 +109,12 @@ void imgui_texture_registry::update_texture(sg::context& ctx, ImTextureData* tex
         auto const pixels
             = pack_texture_rect(reinterpret_cast<byte const*>(tex->GetPixels()), tex->GetPitch(), tex->BytesPerPixel,
                                 tg::pos2i(int(r.x), int(r.y)), tg::vec2i(int(r.w), int(r.h)));
-        ctx.upload.bytes_to_texture(
+        // On the caller's list rather than ctx.upload: by now a draw has sampled the atlas, so it is in
+        // `shader_readonly`, and the async copy queue cannot move a layout for itself — it would submit a throwaway
+        // list to do it and warn once per texture.
+        // The direct queue transitions it through the ordinary declare/flush tracker, and a glyph patch is small
+        // enough that the async path buys nothing here.
+        cmd.upload.bytes_to_texture(
             texture.raw(), pixels, {},
             sg::texture_region{.offset = tg::pos3i(int(r.x), int(r.y), 0), .size = tg::vec3i(int(r.w), int(r.h), 1)});
     };

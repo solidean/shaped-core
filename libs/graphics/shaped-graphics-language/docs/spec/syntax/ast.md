@@ -159,10 +159,11 @@ let v = {1 + 2}
 * **AST-99** The AST reads an `->` as the form tree groups it, and it regroups nothing ([OP-32](operators.md#the-precedence-ladder)).
 * **AST-100** `x : (int) -> int` is an `ascription` whose type is a `function_type`, and `a -> b -> c` is a `function_type` whose result is the `function_type` `b -> c`.
 * **AST-33** A curly group applied to an expression reads as `with_bindings`, which is reserved: the node is kept, and it is a normal error that says the construct is not supported yet.
-* **AST-128** `mut` and `out` in a type position read as `qualified_type`, which records the word and the type it qualifies: `mut buffer[float]`, `out texture2d[rgba8unorm]`.
+* **AST-128** `mut` and `out` in a type position read as `qualified_type`, which records the word and the type it qualifies: `mut buffer[float]`, `out image2d[.rgba8_unorm]`.
 * **AST-129** A `qualified_type` says what a shader does with a resource, and [bindings.md](../bindings.md) is what the words mean.
   The AST checks neither the word against the type nor the type against anything.
 * **AST-130** `mut` or `out` outside a type position is read as it is elsewhere, so `mut` keeps AST-45 and `out` in an expression is a normal error.
+* **AST-135** `sampler` alone in a type position reads as the name `sampler`: the keyword denotes the sampler type there, `smp: sampler`.
 
 ```sgl
 type blend = (vec3, vec3) -> vec3
@@ -517,6 +518,7 @@ fun update(state: particle):
 | binding | `binding name:` and a block of members | yes | yes |
 | binding composition | `binding name = other`, `binding name = (a, b)` | yes | yes |
 | sampler | `sampler name:` and a block of settings | yes | no |
+| pipeline | `pipeline name:` and a block of settings, or `pipeline name = (a, b)` | yes | no |
 | notation | `notation a => b` | yes | yes |
 | `let` | see [statements](#let-and-assignment) | no | yes |
 
@@ -611,6 +613,32 @@ fun shade_sky(v: basic_vertex){frame} -> vec3:
     return sky_library.sample_sky v.normal
 ```
 
+### Pipelines
+
+* **AST-131** A `pipeline` with a block declares a pipeline by its **settings**, one `path = value` per line.
+  The path is a name or a member chain, and the value is an expression.
+* **AST-132** The name of a `pipeline` is optional, so `pipeline:` is a pipeline without one ([pipelines](../pipelines.md) names it).
+* **AST-133** A `pipeline` with `=` is the **short form**: its right side is a round list, whose elements are the pipeline's entry points.
+  A block under the list holds settings, as AST-131's block does; the block hangs off the list, the rightmost form of the line (FORM-34).
+* **AST-134** A setting whose left side is neither a name nor a member chain is the normal error `expected-name`, and a line that is no `=` is `expected-member`.
+  Both are still read.
+
+```sgl
+pipeline:
+    vertex = main_vs
+    pixel = main_ps
+    cull = .back
+    color_targets.albedo.blend = .alpha
+
+pipeline shadow = (shadow_vs, shadow_ps)
+```
+
+| source | reads as |
+|---|---|
+| `pipeline:` | a pipeline without a name |
+| `color_targets.albedo.blend = .alpha` | a setting whose path is a member chain |
+| `pipeline shadow = (shadow_vs, shadow_ps)` | the short form, with two entry points |
+
 ## Members
 
 * **AST-77** A **member** is a statement of the block of a `struct`, an `enum` or a `binding`, or an element of a `struct_type`.
@@ -640,6 +668,7 @@ fun shade_sky(v: basic_vertex){frame} -> vec3:
 | `struct_type` | yes | yes | no | no | no | no |
 
 * **AST-86** A member that its owner does not allow is a normal error, and it is still read.
+* **AST-136** A `sampler` declaration stands at file scope or in a `binding`, and anywhere else is `declaration-not-allowed-here`; in a binding it is a member, the group's static sampler.
 * **AST-125** A `struct` line without a block is an **opaque struct**: it has no member that can be named, which a block without members does not say ([why](why/ast.md#ast-125)).
 * **AST-126** The AST accepts an opaque struct wherever a `struct` stands, and a later phase allows it for a small set of `@builtin` types only.
 * **AST-115** A case may carry a value, which is an expression: `red = 1`.
@@ -701,7 +730,7 @@ binding frame:
 * **AST-88** An attribute in the AST is the span of its name and its arguments, each read as an argument by AST-23: positional, named or a splat.
 * **AST-89** An attribute may stand on a declaration, a member, a parameter, a binding entry, a statement and an expression in a type position.
 * **AST-90** An attribute on any other expression is a normal error, and the attribute is kept.
-* **AST-91** A later phase validates every attribute against its name and the kind of its node, and an attribute it does not know is a warning.
+* **AST-91** A later phase validates every attribute against its name and the kind of its node ([CHK-38 and CHK-39](../semantics/checking.md#builtins-and-the-prelude)).
 * **AST-92** One name may mean different things on different kinds of node: `@vertex struct` is a vertex, and `@vertex fun` is the vertex stage.
 
 ```sgl

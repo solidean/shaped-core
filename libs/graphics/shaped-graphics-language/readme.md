@@ -23,6 +23,7 @@ This will also later form the basis of our shader node editing
 
 * **To write SGL**: [docs/spec/](docs/spec/_index.md) is the language, and [sgl-cube](../../../examples/graphics/sgl-cube/shaders/cube.sgl) is a shader that draws.
 * **To work on the compiler**: [docs/architecture.md](docs/architecture.md) is the map of the pipeline, and [cheat-sheet.md](cheat-sheet.md) the API.
+  [docs/TODO.md](docs/TODO.md) lists the short-term follow-ups, and the [spec incubator](docs/spec/incubator/_index.md) the far-off ideas.
 
 ## The `sgl` command line
 

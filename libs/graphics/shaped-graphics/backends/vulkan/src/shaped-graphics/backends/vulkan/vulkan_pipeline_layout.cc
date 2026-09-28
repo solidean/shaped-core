@@ -2,7 +2,6 @@
 #include <shaped-graphics/backends/vulkan/vulkan_binding_group_layout.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_context.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_pipeline_layout.hh>
-#include <shaped-graphics/backends/vulkan/vulkan_sampler.hh>
 #include <shaped-graphics/binding/impl/layout_hash.hh>
 
 namespace sg::backend::vulkan
@@ -15,6 +14,12 @@ cc::result<vulkan_pipeline_layout_handle> vulkan_pipeline_layout::create(vulkan_
     // A small_vector still heap-grows past its inline size, so this is a real check rather than a restatement.
     if (int(desc.groups.size()) > sg::max_binding_groups)
         return cc::error("pipeline_layout: more group slots than max_binding_groups");
+
+    // Refused rather than accepted: this backend binds no pipeline-level sampler to a set a shader could read.
+    // The gap is libs/graphics/shaped-graphics/docs/TODO.md's, and a group's name-matched static sampler is the working form.
+    if (!desc.static_samplers.empty())
+        return cc::error("pipeline_layout: a pipeline-level static sampler (bound_sampler) is not bound by the vulkan "
+                         "backend yet; declare it a group's static sampler instead");
 
     auto const hash = sg::impl::pipeline_layout_hash(desc);
 
@@ -29,23 +34,6 @@ cc::result<vulkan_pipeline_layout_handle> vulkan_pipeline_layout::create(vulkan_
         CC_ASSERT(vk_group != nullptr, "binding group layout is not a vulkan one");
         set_layouts.push_back(vk_group->_layout);
         groups.push_back(group);
-    }
-
-    // Pipeline-level static samplers are not part of any group, so they cannot ride a set layout's immutable slot.
-    // Vulkan has no pipeline-level sampler concept at all — the objects are created and owned here so the layout can
-    // hand them to whatever binds them, which is what keeps the sg surface honest until that path exists.
-    cc::vector<VkSampler> static_samplers;
-    for (auto const& s : desc.static_samplers)
-    {
-        auto const info = to_vk_sampler_info(s.sampler);
-        VkSampler sampler = VK_NULL_HANDLE;
-        if (VkResult const r = vkCreateSampler(ctx._device, &info, nullptr, &sampler); r != VK_SUCCESS)
-        {
-            for (auto created : static_samplers)
-                vkDestroySampler(ctx._device, created, nullptr);
-            return vulkan_error(r, "vkCreateSampler (pipeline static sampler) failed");
-        }
-        static_samplers.push_back(sampler);
     }
 
     // Inline constants become one push-constant range visible to every stage, matching how the binding itself is
@@ -76,14 +64,10 @@ cc::result<vulkan_pipeline_layout_handle> vulkan_pipeline_layout::create(vulkan_
 
     VkPipelineLayout layout = VK_NULL_HANDLE;
     if (VkResult const r = vkCreatePipelineLayout(ctx._device, &info, nullptr, &layout); r != VK_SUCCESS)
-    {
-        for (auto created : static_samplers)
-            vkDestroySampler(ctx._device, created, nullptr);
         return vulkan_error(r, "vkCreatePipelineLayout failed");
-    }
 
-    return vulkan_pipeline_layout_handle(std::make_shared<vulkan_pipeline_layout>(
-        ctx, hash, layout, cc::move(groups), cc::move(static_samplers), desc.inline_constants, inline_bytes));
+    return vulkan_pipeline_layout_handle(std::make_shared<vulkan_pipeline_layout>(ctx, hash, layout, cc::move(groups),
+                                                                                  desc.inline_constants, inline_bytes));
 }
 
 // Immediate rather than epoch-deferred, unchanged from what the destructor always did: a layout is consumed at
@@ -92,10 +76,7 @@ void vulkan_pipeline_layout::release_backend_objects()
 {
     if (_layout != VK_NULL_HANDLE)
         vkDestroyPipelineLayout(_ctx._device, _layout, nullptr);
-    for (auto sampler : _static_samplers)
-        vkDestroySampler(_ctx._device, sampler, nullptr);
     _layout = VK_NULL_HANDLE;
-    _static_samplers.clear();
 }
 
 vulkan_pipeline_layout::~vulkan_pipeline_layout()

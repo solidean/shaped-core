@@ -603,6 +603,29 @@ struct dumper
                     dump_argument(setting, depth + 1);
                 }
             },
+            [&](pipeline_decl const& n)
+            {
+                open(n.is_short_form ? "pipeline:short" : "pipeline");
+                // No name is valid here, unlike every other declaration's missing one.
+                out += n.name.empty() ? cc::string_view("<unnamed>") : file.text_of(n.name);
+                if (n.is_short_form)
+                    dump_arguments(n.stages, depth);
+                for (auto const& s : ast.at(n.settings))
+                {
+                    new_line(depth + 1);
+                    // A line that is no setting at all has only its `invalid` value.
+                    if (!is_valid(s.path))
+                    {
+                        dump_expr(s.value, depth + 1);
+                        continue;
+                    }
+                    out += "(setting ";
+                    dump_expr(s.path, depth + 1);
+                    out += " = ";
+                    dump_expr(s.value, depth + 1);
+                    out += ")";
+                }
+            },
             [&](notation_decl const& n)
             {
                 open("notation");

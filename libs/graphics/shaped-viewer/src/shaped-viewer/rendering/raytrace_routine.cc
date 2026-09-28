@@ -79,14 +79,15 @@ sg::routine_outcome pbr_raytrace_routine::execute(sg::command_list& cmd, trace_d
     // Refit isn't implemented, so the TLAS is rebuilt each frame from this frame's instances.
     auto const tlas = cmd.raytracing.build_tlas(d.instances);
 
-    auto const group = ctx.transient.create_binding_group(
-        self->_group_layout, shaders::flat_bindings{.scene = tlas->as_view(),
-                                                    .Output = d.output.as_readwrite_view(),
-                                                    .frame = d.frame.as_uniform_buffer(),
-                                                    .background = d.background.as_uniform_buffer(),
-                                                    .Materials = d.materials.as_readonly_buffer(),
-                                                    .Vertices = d.vertices.as_readonly_buffer(),
-                                                    .Indices = d.indices.as_readonly_buffer()});
+    auto const group
+        = ctx.transient.create_binding_group(cmd, self->_group_layout,
+                                             shaders::flat_bindings{.scene = tlas->as_view(),
+                                                                    .Output = d.output.as_readwrite_view(),
+                                                                    .frame = d.frame.as_uniform_buffer(),
+                                                                    .background = d.background.as_uniform_buffer(),
+                                                                    .Materials = d.materials.as_readonly_buffer(),
+                                                                    .Vertices = d.vertices.as_readonly_buffer(),
+                                                                    .Indices = d.indices.as_readonly_buffer()});
 
     cmd.raytracing.bind_pipeline(*self->_pipeline);
     cmd.raytracing.bind<shaders::flat_bindings>(*group);

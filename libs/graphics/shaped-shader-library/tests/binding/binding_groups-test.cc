@@ -23,6 +23,7 @@ struct expected_binding
     u32 count = 1;
     sg::binding_type type = sg::binding_type::uniform_buffer;
     cc::optional<sg::texture_view_dimension> dimension;
+    cc::optional<sg::pixel_format> storage_format;
 };
 
 struct expected_group
@@ -407,6 +408,21 @@ constexpr name_of_dimension k_dimensions[] = {
                         if (entry.name == d.value())
                             binding.dimension = entry.value;
                 }
+                else if (auto const f = value_of(word, "format"); f.has_value())
+                {
+                    // Only the formats a case names; an unknown one leaves the expectation empty and fails loudly.
+                    struct named_format
+                    {
+                        cc::string_view name;
+                        sg::pixel_format value;
+                    };
+                    constexpr named_format formats[] = {{"rgba8_unorm", sg::pixel_format::rgba8_unorm},
+                                                        {"r32_float", sg::pixel_format::r32_float},
+                                                        {"bgra8_unorm", sg::pixel_format::bgra8_unorm}};
+                    for (auto const& entry : formats)
+                        if (entry.name == f.value())
+                            binding.storage_format = entry.value;
+                }
             }
             current.groups.back().bindings.push_back(binding);
             break;
@@ -588,6 +604,7 @@ TEST("slib - the binding corpus parses as it says it does")
                 CHECK(binding.count == want.count);
                 CHECK(binding.type == want.type);
                 CHECK(binding.texture_dimension == want.dimension);
+                CHECK(binding.storage_format == want.storage_format);
 
                 // The group number is both the SPIR-V set and the HLSL space, so every binding carries it twice.
                 REQUIRE(binding.group_index.has_value());
@@ -857,6 +874,28 @@ TEST("slib - the SPIR-V arm writes the attribute before the declaration")
 
     // Nothing DXIL-only leaks into this arm, and nothing Vulkan-only into the other.
     CHECK(!rewritten.value().contains("register("));
+}
+
+TEST("slib - a storage texture's format reaches SPIR-V as an image format, and DXIL leaves it to the view")
+{
+    constexpr cc::string_view source = "#pragma sc group 0\n"
+                                       "namespace post\n"
+                                       "{\n"
+                                       "#pragma sc format r32_float\n"
+                                       "    RWTexture2D<float> acc;\n"
+                                       "#pragma sc format bgra8_unorm\n"
+                                       "    RWTexture2D<float4> swizzled;\n"
+                                       "}\n";
+    auto const spirv = slib::rewrite_binding_groups(source, sg::shader_format::spirv);
+    REQUIRE(spirv.has_value());
+    CHECK(spirv.value().contains("[[vk::binding(0, 0)]] [[vk::image_format(\"r32f\")]] RWTexture2D<float> acc;"));
+    // SPIR-V has no bgra8 image format, so that one is left to the device.
+    CHECK(spirv.value().contains("[[vk::binding(1, 0)]] RWTexture2D<float4> swizzled;"));
+
+    auto const dxil = slib::rewrite_binding_groups(source, sg::shader_format::dxil);
+    REQUIRE(dxil.has_value());
+    CHECK(!dxil.value().contains("vk::image_format"));
+    CHECK(dxil.value().contains("RWTexture2D<float> acc : register(u0, space0);"));
 }
 
 TEST("slib - a source carrying no attribute comes back byte for byte")

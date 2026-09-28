@@ -80,8 +80,14 @@ An attribute is validated per pair of name and node kind, in a later phase, and 
 
 ## Open
 
-* How two entry points are paired: by a pipeline declaration, by the host, or by matching types alone.
-* Whether matching is by name, by order or by both, and whether the pixel stage may take fewer members than the vertex stage returns.
+* Whether the pixel stage may take fewer members than the vertex stage returns, which would relax CHK-183 without breaking a pipeline it accepts.
+
+Decided:
+
+* Two entry points are paired by a `pipeline` declaration ([pipelines](../pipelines.md)).
+  Pairing by matching types alone was rejected: one vertex stage feeding two pixel stages would make pipelines nobody asked for, and it leaves the configuration nowhere to go.
+* Matching is by name and by order at once (CHK-183).
+  A pixel stage taking a subset of members by name was rejected by EMIT-6: a member at another position than its partner's needs one stage renumbered for the other, and each stage compiles apart.
 * Whether the pixel stage may take one struct parameter instead of one parameter per member.
 * The full list of semantics besides `@position`, and how interpolation qualifiers are spelled.
 * Depth output, and a pixel stage without color targets.

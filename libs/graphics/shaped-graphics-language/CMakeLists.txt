@@ -33,7 +33,9 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/ast/dump.cc
 
     src/shaped-graphics-language/builtins/register.cc
+    src/shaped-graphics-language/builtins/register_conversions.cc
     src/shaped-graphics-language/builtins/register_scalar_math.cc
+    src/shaped-graphics-language/builtins/register_textures.cc
     src/shaped-graphics-language/builtins/register_transforms.cc
     src/shaped-graphics-language/builtins/register_types.cc
     src/shaped-graphics-language/builtins/register_vector_math.cc
@@ -42,11 +44,14 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/check/check.cc
     src/shaped-graphics-language/check/check_case.cc
     src/shaped-graphics-language/check/check_decl.cc
+    src/shaped-graphics-language/check/check_pipeline.cc
     src/shaped-graphics-language/check/check_expr.cc
+    src/shaped-graphics-language/check/check_resources.cc
     src/shaped-graphics-language/check/check_stmt.cc
     src/shaped-graphics-language/check/dump.cc
     src/shaped-graphics-language/check/flat.cc
     src/shaped-graphics-language/check/flat_builder.cc
+    src/shaped-graphics-language/check/structural_hash.cc
     src/shaped-graphics-language/check/flatten.cc
 
     src/shaped-graphics-language/legalize/core.cc
@@ -66,6 +71,7 @@ add_library(shaped-graphics-language
 
     src/shaped-graphics-language/driver/compile_to_text.cc
     src/shaped-graphics-language/driver/describe.cc
+    src/shaped-graphics-language/driver/pipeline_fields.cc
     src/shaped-graphics-language/driver/impl/front_end.cc
     src/shaped-graphics-language/driver/prelude.cc
 )
@@ -181,7 +187,9 @@ target_sources(shaped-graphics-language
     src/shaped-graphics-language/check/dump.hh
     src/shaped-graphics-language/check/flat.hh
     src/shaped-graphics-language/check/flat_builder.hh
+    src/shaped-graphics-language/check/structural_hash.hh
     src/shaped-graphics-language/check/ids.hh
+    src/shaped-graphics-language/check/resources.hh
     src/shaped-graphics-language/check/symbols.hh
     src/shaped-graphics-language/check/impl/checker.hh
 
@@ -200,6 +208,7 @@ target_sources(shaped-graphics-language
 
     src/shaped-graphics-language/driver/compile_to_text.hh
     src/shaped-graphics-language/driver/describe.hh
+    src/shaped-graphics-language/driver/pipeline_fields.hh
     src/shaped-graphics-language/driver/impl/front_end.hh
     src/shaped-graphics-language/driver/prelude.hh
 )
@@ -258,7 +267,9 @@ if(SC_BUILD_TESTS)
         tests/check/case-check-test.cc
         tests/check/control-flow-check-test.cc
         tests/check/cube-test.cc
+        tests/check/stage-check-test.cc
         tests/check/declaration-check-test.cc
+        tests/check/pipeline-check-test.cc
         tests/check/enum-check-test.cc
         tests/check/expression-check-test.cc
         tests/check/source-flat-test-support.hh
@@ -276,6 +287,7 @@ if(SC_BUILD_TESTS)
         tests/emit/cube-emit-test.cc
         tests/emit/emit-test.cc
         tests/emit/buffer-emit-test.cc
+        tests/emit/texture-emit-test.cc
         tests/emit/compute-emit-test.cc
         tests/emit/case-emit-test.cc
         tests/emit/enum-emit-test.cc

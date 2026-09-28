@@ -67,5 +67,3 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
 
     for entry, answers in pairs:
         print(review.render_entry(entry, answers, history=args.history))
-        for warning in review.word_warnings(entry):
-            print(review.console.yellow(warning))

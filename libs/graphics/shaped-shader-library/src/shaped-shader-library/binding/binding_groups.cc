@@ -9,6 +9,7 @@
 #include <shaped-shader-library/binding/binding_groups.hh>
 #include <shaped-shader-library/binding/impl/hlsl_binding_types.hh>
 #include <shaped-shader-library/binding/impl/hlsl_sampler_state.hh>
+#include <shaped-shader-library/binding/impl/hlsl_storage_format.hh>
 #include <shaped-shader-library/binding/impl/hlsl_tokens.hh>
 #include <shaped-shader-library/binding/impl/hlsl_value_types.hh>
 
@@ -26,7 +27,7 @@ using slib::impl::to_string;
 /// A name outside this set is an error rather than a directive nobody reads — which is exactly what DXC makes of
 /// it, since it ignores a pragma it does not know.
 constexpr cc::string_view k_attribute_names[]
-    = {"group", "static", "push_constants", "payload", "vertex_input", "attribute"};
+    = {"group", "static", "format", "push_constants", "payload", "vertex_input", "attribute"};
 
 /// HLSL constructs the pass cannot number, so they may not appear inside a group.
 /// A shader that needs one moves it outside the namespace: the restriction is on where bindings are declared,
@@ -63,6 +64,8 @@ struct parsed_binding
 {
     sg::binding binding;
     cc::string_view template_argument; ///< the single `<...>` identifier, empty when there is none
+    /// What a `format` attribute makes SPIR-V state, `[[vk::image_format("rgba8")]]`; empty without one.
+    cc::string_view vulkan_format;
     char register_class = 't';
     isize type_offset = 0;      ///< where the declaration's type token begins
     isize semicolon_offset = 0; ///< where its ';' is
@@ -406,6 +409,10 @@ struct parser
         // closing brace, so a `static` at file scope fell through to the wrong message.
         if (pending.value().name == "static")
             return reject_unclaimed_static(pending);
+
+        if (pending.value().name == "format")
+            return cc::error(cc::format("{}: a 'format' attribute must stand before a storage texture in a group",
+                                        to_string(pending.value().location)));
 
         if (pending.value().name == "attribute")
             return cc::error(cc::format("{}: an 'attribute' attribute must stand before a struct member",
@@ -990,7 +997,7 @@ struct parser
 
             if (is_punctuation('}'))
             {
-                CC_RETURN_IF_ERROR(reject_unclaimed_static(pending));
+                CC_RETURN_IF_ERROR(reject_unclaimed(pending));
                 ++at;
                 return body;
             }
@@ -1001,7 +1008,7 @@ struct parser
             {
                 auto parsed = read_annotation();
                 CC_RETURN_IF_ERROR(parsed);
-                if (parsed.value().name != "static")
+                if (parsed.value().name != "static" && parsed.value().name != "format")
                     return cc::error(cc::format("{}: '{}' is not an attribute of a binding", to_string(token.location),
                                                 parsed.value().name));
                 if (pending.has_value())
@@ -1028,6 +1035,17 @@ struct parser
             auto binding = parse_binding(next_index);
             CC_RETURN_IF_ERROR(binding);
 
+            if (pending.has_value() && pending.value().name == "format")
+            {
+                if (binding.value().binding.type != sg::binding_type::readwrite_texture)
+                    return cc::error(cc::format("{}: 'format' describes a storage texture, and '{}' is not one",
+                                                to_string(pending.value().location), binding.value().binding.name));
+                auto format = slib::impl::parse_storage_format(pending.value());
+                CC_RETURN_IF_ERROR(format);
+                binding.value().binding.storage_format = format.value().format;
+                binding.value().vulkan_format = format.value().vulkan;
+                pending = cc::nullopt;
+            }
             if (pending.has_value())
             {
                 if (binding.value().binding.type != sg::binding_type::sampler)
@@ -1286,7 +1304,10 @@ cc::result<cc::string> slib::rewrite_binding_groups(cc::string_view hlsl, sg::sh
                                                     binding.binding.index, group.group)});
             else
                 edits.push_back({.offset = binding.type_offset,
-                                 .text = cc::format("[[vk::binding({}, {})]] ", binding.binding.index, group.group)});
+                                 .text = binding.vulkan_format.empty()
+                                           ? cc::format("[[vk::binding({}, {})]] ", binding.binding.index, group.group)
+                                           : cc::format("[[vk::binding({}, {})]] [[vk::image_format(\"{}\")]] ",
+                                                        binding.binding.index, group.group, binding.vulkan_format)});
         }
 
     // The inline-constants block, which is a register on one arm and an attribute on the other.

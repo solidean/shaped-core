@@ -46,7 +46,8 @@ struct sg::vertex_layout_of<ImDrawVert>
     }
 };
 
-static_assert(sizeof(ImDrawIdx) == 2, "imgui_routine binds a u16 index buffer");
+static_assert(sizeof(ImDrawIdx) == 4,
+              "imgui_routine binds a u32 index buffer — see extern/imgui/shaped/imgui/imgui_config.hh");
 
 namespace sr
 {
@@ -190,18 +191,14 @@ cc::shared_async<cc::unit> imgui_routine::init(sg::routine_init_scope scope)
     // imgui emits both windings so culling is off, and it is drawn in list order so there is no depth test.
     // Alpha blending is imgui's standard straight-alpha equation;
     // the alpha channel uses one/inv-src-alpha so compositing onto a transparent target accumulates coverage correctly rather than saturating.
-    _pipeline = ctx.cached.acquire_raster_pipeline(sg::raster_pipeline_description{
-        .layout = pipeline_layout,
-        .vertex_shader = *compiled_vs,
-        .fragment_shader = *compiled_ps,
-        .vertex_input = sg::vertex_input_layout::create<ImDrawVert>(),
-        .topology = sg::primitive_topology::triangle_list,
-        .rasterization = {.cull = sg::cull_mode::none},
-        .color_targets
-        = {{.format = params(),
-            .blend = sg::blend_state{
-                .color = {.source = sg::blend_factor::src_alpha, .target = sg::blend_factor::one_minus_src_alpha},
-                .alpha = {.source = sg::blend_factor::one, .target = sg::blend_factor::one_minus_src_alpha}}}}});
+    _pipeline = ctx.cached.acquire_raster_pipeline(
+        sg::raster_pipeline_description{.layout = pipeline_layout,
+                                        .vertex_shader = *compiled_vs,
+                                        .fragment_shader = *compiled_ps,
+                                        .vertex_input = sg::vertex_input_layout::create<ImDrawVert>(),
+                                        .topology = sg::primitive_topology::triangle_list,
+                                        .rasterization = {.cull = sg::cull_mode::none},
+                                        .color_targets = {{.format = params(), .blend = sg::blend_alpha}}});
 
     // Awaited here rather than polled in execute, so `ready` means ready.
     co_await cc::async_settled(_pipeline);
@@ -215,7 +212,7 @@ imgui_routine::geometry imgui_routine::upload_geometry(sg::command_list& cmd, Im
     auto const geo
         = geometry{.vertices = ctx.transient.create_buffer<ImDrawVert>(
                        isize(draw_data->TotalVtxCount), sg::buffer_usage::vertex_buffer | sg::buffer_usage::copy_dst),
-                   .indices = ctx.transient.create_buffer<u16>(
+                   .indices = ctx.transient.create_buffer<u32>(
                        isize(draw_data->TotalIdxCount), sg::buffer_usage::index_buffer | sg::buffer_usage::copy_dst)};
 
     // imgui keeps one vertex/index buffer per draw list; we concatenate them into one pair, and the draw loop offsets each list's commands accordingly.
@@ -225,7 +222,7 @@ imgui_routine::geometry imgui_routine::upload_geometry(sg::command_list& cmd, Im
     {
         cmd.upload.data_to_buffer(geo.vertices, cc::span<ImDrawVert const>(list->VtxBuffer.Data, list->VtxBuffer.Size),
                                   vertex_offset);
-        cmd.upload.data_to_buffer(geo.indices, cc::span<u16 const>(list->IdxBuffer.Data, list->IdxBuffer.Size),
+        cmd.upload.data_to_buffer(geo.indices, cc::span<u32 const>(list->IdxBuffer.Data, list->IdxBuffer.Size),
                                   index_offset);
         vertex_offset += isize(list->VtxBuffer.Size);
         index_offset += isize(list->IdxBuffer.Size);
@@ -253,9 +250,11 @@ sg::routine_outcome imgui_routine::execute(sg::rendering_scope& scope, ImDrawDat
 
     // Textures first, and BEFORE any refusal below: a draw may sample an atlas imgui only just grew, and imgui's own
     // bookkeeping has to keep up whether or not we can draw this frame.
-    // These go out on ctx.upload's copy queue, and the barrier tracker makes this list wait on them at submit.
+    // A new texture's bytes go out on ctx.upload's copy queue, and the barrier tracker makes this list wait on them
+    // at submit; an update is recorded straight onto this list, because by then the atlas has been sampled and the
+    // copy queue cannot move it out of `shader_readonly` for itself.
     auto textures = self.acquire_exclusive(self->_textures);
-    textures->service_requests(ctx, draw_data);
+    textures->service_requests(cmd, draw_data);
 
     // Polled rather than waited on: execute runs inside the caller's rendering scope, so nothing here may block, and
     // a throw would leave their command list unsubmitted.
@@ -315,7 +314,7 @@ sg::routine_outcome imgui_routine::execute(sg::rendering_scope& scope, ImDrawDat
                 // The layout comes from init rather than from the create: this is the frame path, and
                 // acquiring would hash the declared table and take the pipeline cache's lock per switch.
                 bound_group = ctx.transient.create_binding_group(
-                    self->_group_layout, shaders::imgui_bindings{.texture = texture.value().as_readonly_view()});
+                    cmd, self->_group_layout, shaders::imgui_bindings{.texture = texture.value().as_readonly_view()});
                 scope.bind<shaders::imgui_bindings>(*bound_group);
                 bound_texture = dc.GetTexID();
             }

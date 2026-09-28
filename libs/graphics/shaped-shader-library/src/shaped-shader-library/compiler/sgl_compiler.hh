@@ -21,8 +21,7 @@ namespace slib
 /// `cube_shaders/cube.sgl:12:5: error: unknown-name: foo`.
 /// The stages SGL has are vertex, fragment, which it calls pixel, and compute; any other stage is that kind of error as well.
 ///
-/// The emitted HLSL names each resource's group with `#pragma sc group N` and no register, so slib's binding pass runs
-/// behind this edge as it does behind HLSL; the WGSL and MSL text carries its final addresses.
+/// Every target's text carries its final addresses, HLSL's registers included, so slib's binding pass never runs behind this edge.
 /// It needs no toolchain of its own, so it exists wherever `inner` does.
 [[nodiscard]] std::unique_ptr<shader_compiler> create_sgl_compiler(std::unique_ptr<shader_compiler> inner);
 } // namespace slib

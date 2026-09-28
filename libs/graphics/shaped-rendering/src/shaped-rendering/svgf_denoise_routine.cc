@@ -14,43 +14,6 @@ using impl::is_set;
 
 namespace
 {
-// The inline-constants blocks the three shaders declare, byte for byte.
-struct temporal_constants_gpu
-{
-    u32 flags = 0;
-    f32 color_alpha_min = 0.2f;
-    f32 moments_alpha_min = 0.2f;
-    f32 max_history = 32.0f;
-    f32 normal_similarity = 0.9f;
-    f32 depth_similarity = 0.1f;
-    f32 _pad[2] = {};
-};
-
-struct variance_constants_gpu
-{
-    f32 normal_power = 128.0f;
-    f32 depth_sigma = 0.02f;
-    f32 spatial_below = 4.0f;
-    f32 _pad = 0;
-};
-
-struct atrous_constants_gpu
-{
-    i32 step = 1;
-    u32 flags = 0;
-    f32 luminance_sigma = 4.0f;
-    f32 normal_power = 128.0f;
-    f32 depth_sigma = 0.02f;
-    f32 _pad[3] = {};
-};
-
-static_assert(sizeof(temporal_constants_gpu) == sizeof(sr::shaders::svgf_temporal_constants),
-              "the temporal constants are not the size svgf_temporal.hlsl's block states");
-static_assert(sizeof(variance_constants_gpu) == sizeof(sr::shaders::svgf_variance_constants),
-              "the variance constants are not the size svgf_variance.hlsl's block states");
-static_assert(sizeof(atrous_constants_gpu) == sizeof(sr::shaders::svgf_atrous_constants),
-              "the à-trous constants are not the size svgf_atrous.hlsl's block states");
-
 // The flag bits svgf_common.hlsli declares.
 constexpr u32 k_has_albedo = 1u << 0;
 constexpr u32 k_reset = 1u << 1;
@@ -62,6 +25,10 @@ constexpr int k_scratch = 0;      // 0, 1: the à-trous passes' ping-pong
 constexpr int k_color = 2;        // 2, 3: demodulated colour, history length in alpha
 constexpr int k_moments = 4;      // 4, 5: luminance mean and mean square
 constexpr int k_normal_depth = 6; // 6, 7: the guides as the frame that wrote the history saw them
+constexpr int k_slots_used = denoise_history::state_slots; // svgf fills the history, so a ninth would grow it
+
+static_assert(k_normal_depth + 2 == k_slots_used, "svgf's slot map leaves a gap or runs past the history's state");
+static_assert(k_slots_used == denoise_history::state_slots, "svgf no longer fills the history it was sized against");
 
 /// Where a pass's compiled pieces come from, and where they land.
 struct pass_request
@@ -182,11 +149,16 @@ denoise_outcome svgf_denoise_routine::execute(sg::command_list& cmd,
     auto const extent = extent_of(in.color);
     auto const restarted = history._prepare(denoise_method::svgf, extent);
 
-    // Full floats throughout: the moments square the luminance, and the history divides by the albedo.
-    auto const format = sg::pixel_format::rgba32_float;
+    // Full floats: the moments square the luminance, and the colour history divides by the albedo, which is the range
+    // a half float loses at the dim end.
+    // The moments pair carries two channels and is allocated as two — 221 MiB per 1080p stream rather than 253.
     auto created = false;
-    for (auto i = 0; i < 8; ++i)
+    for (auto i = 0; i < k_slots_used; ++i)
+    {
+        auto const is_moments = i == k_moments || i == k_moments + 1;
+        auto const format = is_moments ? sg::pixel_format::rg32_float : sg::pixel_format::rgba32_float;
         created = impl::ensure_image(ctx, history._state[i], extent, format) || created;
+    }
 
     // A history image that was just created holds nothing, so it must not be read as one.
     auto const reset = restarted || created;
@@ -201,23 +173,24 @@ denoise_outcome svgf_denoise_routine::execute(sg::command_list& cmd,
 
     // -- temporal
     {
-        auto const group = ctx.transient.create_binding_group(
-            self->_temporal.group_layout, shaders::svgf_temporal_bindings{
-                                              .gColor = in.color.as_readonly_view(),
-                                              .gAlbedo = albedo,
-                                              .gNormal = in.guides.normal.as_readonly_view(),
-                                              .gDepth = in.guides.depth.as_readonly_view(),
-                                              .gMotion = in.guides.motion.as_readonly_view(),
-                                              .gPreviousHistory = s[k_color + prev].as_readonly_view(),
-                                              .gPreviousMoments = s[k_moments + prev].as_readonly_view(),
-                                              .gPreviousNormalDepth = s[k_normal_depth + prev].as_readonly_view(),
-                                              .gHistory = s[k_color + cur].as_readwrite_view(),
-                                              .gMoments = s[k_moments + cur].as_readwrite_view(),
-                                              .gNormalDepth = s[k_normal_depth + cur].as_readwrite_view(),
-                                          });
+        auto const group
+            = ctx.transient.create_binding_group(cmd, self->_temporal.group_layout,
+                                                 shaders::svgf_temporal_bindings{
+                                                     .gColor = in.color.as_readonly_view(),
+                                                     .gAlbedo = albedo,
+                                                     .gNormal = in.guides.normal.as_readonly_view(),
+                                                     .gDepth = in.guides.depth.as_readonly_view(),
+                                                     .gMotion = in.guides.motion.as_readonly_view(),
+                                                     .gPreviousHistory = s[k_color + prev].as_readonly_view(),
+                                                     .gPreviousMoments = s[k_moments + prev].as_readonly_view(),
+                                                     .gPreviousNormalDepth = s[k_normal_depth + prev].as_readonly_view(),
+                                                     .gHistory = s[k_color + cur].as_readwrite_view(),
+                                                     .gMoments = s[k_moments + cur].as_readwrite_view(),
+                                                     .gNormalDepth = s[k_normal_depth + cur].as_readwrite_view(),
+                                                 });
         cmd.compute.bind_pipeline(*self->_temporal.pipeline);
         cmd.compute.bind<shaders::svgf_temporal_bindings>(*group);
-        cmd.compute.set_inline_constants(temporal_constants_gpu{
+        cmd.compute.set_inline_constants(shaders::svgf_temporal_constants{
             .flags = albedo_flag | (reset ? k_reset : 0u),
             .color_alpha_min = options.color_alpha_min,
             .moments_alpha_min = options.moments_alpha_min,
@@ -230,16 +203,17 @@ denoise_outcome svgf_denoise_routine::execute(sg::command_list& cmd,
 
     // -- variance, into the first scratch image
     {
-        auto const group = ctx.transient.create_binding_group(
-            self->_variance.group_layout, shaders::svgf_variance_bindings{
-                                              .gHistory = s[k_color + cur].as_readonly_view(),
-                                              .gMoments = s[k_moments + cur].as_readonly_view(),
-                                              .gNormalDepth = s[k_normal_depth + cur].as_readonly_view(),
-                                              .gTarget = s[k_scratch].as_readwrite_view(),
-                                          });
+        auto const group
+            = ctx.transient.create_binding_group(cmd, self->_variance.group_layout,
+                                                 shaders::svgf_variance_bindings{
+                                                     .gHistory = s[k_color + cur].as_readonly_view(),
+                                                     .gMoments = s[k_moments + cur].as_readonly_view(),
+                                                     .gNormalDepth = s[k_normal_depth + cur].as_readonly_view(),
+                                                     .gTarget = s[k_scratch].as_readwrite_view(),
+                                                 });
         cmd.compute.bind_pipeline(*self->_variance.pipeline);
         cmd.compute.bind<shaders::svgf_variance_bindings>(*group);
-        cmd.compute.set_inline_constants(variance_constants_gpu{
+        cmd.compute.set_inline_constants(shaders::svgf_variance_constants{
             .normal_power = options.normal_power,
             .depth_sigma = options.depth_sigma,
             .spatial_below = options.spatial_variance_below,
@@ -254,16 +228,18 @@ denoise_outcome svgf_denoise_routine::execute(sg::command_list& cmd,
         auto const& source = s[k_scratch + i % 2];
         auto const& target = i == last ? in.output : s[k_scratch + (i + 1) % 2];
 
-        auto const group = ctx.transient.create_binding_group(
-            self->_atrous.group_layout, shaders::svgf_atrous_bindings{
-                                            .gSource = source.as_readonly_view(),
-                                            .gNormalDepth = s[k_normal_depth + cur].as_readonly_view(),
-                                            .gAlbedo = albedo,
-                                            .gTarget = target.as_readwrite_view(),
-                                        });
+        auto const group
+            = ctx.transient.create_binding_group(cmd, self->_atrous.group_layout,
+                                                 shaders::svgf_atrous_bindings{
+                                                     .gSource = source.as_readonly_view(),
+                                                     .gNormalDepth = s[k_normal_depth + cur].as_readonly_view(),
+                                                     .gAlbedo = albedo,
+                                                     .gColor = in.color.as_readonly_view(),
+                                                     .gTarget = target.as_readwrite_view(),
+                                                 });
         cmd.compute.bind_pipeline(*self->_atrous.pipeline);
         cmd.compute.bind<shaders::svgf_atrous_bindings>(*group);
-        cmd.compute.set_inline_constants(atrous_constants_gpu{
+        cmd.compute.set_inline_constants(shaders::svgf_atrous_constants{
             .step = 1 << i,
             .flags = albedo_flag | (i == last ? k_remodulate_out : 0u),
             .luminance_sigma = options.luminance_sigma,

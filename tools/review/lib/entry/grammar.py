@@ -36,9 +36,6 @@ BLOCK_TYPES: dict[str, set[str]] = {
     # What the entry is about and which options are on the table, before any fact or trade-off.
     # Shown first in its round whatever its position in the file, because it is what the rest is read against.
     "intro": set(_ANY),
-    "context/cold": set(_ANY),
-    "context/repo": set(_ANY),
-    "context/delta": set(_ANY),
     # `glossary: true` says the bold leads in this block are terms.
     # An attribute rather than a scrape, because the tool would otherwise drop a paragraph that does not parse
     # as one and say nothing — the same silence the attribute whitelist exists to prevent.
@@ -73,17 +70,12 @@ EXAMPLE_STATES = ("ok", "failed", "not-automatable")
 
 def derived_name(block_type: str, ordinal: int, *, indexed: bool) -> str:
     """The name a block carries when it declares none."""
-    base = block_type.replace("/", "-")
-    return f"{base}#{ordinal}" if indexed else base
+    return f"{block_type}#{ordinal}" if indexed else block_type
 
 
 def canonical_block_name(name: str) -> str:
     """A block name with a `#1` folded away, since the unindexed spelling means the same block."""
     return name[:-2] if name.endswith("#1") else name
-
-# The context tiers, in the order a reader meets them, with the word budget each is only useful under.
-CONTEXT_TIERS = ("context/cold", "context/repo", "context/delta")
-WORD_LIMITS = {"context/cold": 150, "context/repo": 120}
 
 # The answer key an acknowledgement is filed under, one per round.
 #

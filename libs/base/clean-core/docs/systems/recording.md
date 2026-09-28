@@ -102,12 +102,25 @@ CC_LOG_WARNING("fell back to {} after {}", name, reason);
 ```
 
 A message with no arguments costs the stream nothing beyond its header.
-One with arguments is formatted directly into the chunk's remaining space by `cc::format_to`, so there is no temporary buffer, no allocation and no copy.
+One with arguments is formatted into a per-thread buffer and then copied into the chunk in one piece.
 
 The format string doubles as the site's name, so every message from one site groups under one string whatever it formatted to.
 That is what makes "how often does this fire" answerable at all.
 
-A message too long for what is left of a chunk is **truncated and flagged, never dropped** — a truncated message is still evidence.
+**The arguments are formatted exactly once**, whatever the chunks are doing.
+A formatter may have side effects, and formatting a second time would run them twice.
+So the message is built whole first, and the stream is then asked for exactly its finished size.
+
+**Where a chunk happens to end never decides where a message ends.**
+The reservation is the size the message turned out to be, so a chunk whose tail is too short is left behind for a fresh one rather than cutting the message to fit.
+A cut at an offset that moves with the log volume is invisible to whoever reads the message back, which is how an allowlisted warning turns into an undeclared one under load.
+
+A message past `log_max_payload` (1 MiB), or longer than one whole chunk, is **truncated and flagged, never dropped**.
+A truncated message is still evidence, and both of those cuts are ones a reader can explain.
+
+It costs one copy out of the format buffer, which rests at `log_scratch_capacity` (4 KiB) per thread.
+A message that pushes it past that gives the memory back afterwards, so one enormous message does not leave its buffer resident for the life of the thread.
+A formatter that logs finds the buffer claimed, and its message formats into a local buffer instead of into the outer one's text.
 
 Levels are `trace`, `debug`, `info`, `warning`, `error`, and each gates on its own bit in the domain's mask.
 `trace` and `debug` are off by default, because a build that records them by default teaches everyone to turn logging off.

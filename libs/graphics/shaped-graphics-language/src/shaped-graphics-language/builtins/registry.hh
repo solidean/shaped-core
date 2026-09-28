@@ -52,9 +52,19 @@ struct sgl::builtins::call_context
     registry const& builtins;
 };
 
+/// What a helper writer is given: the target, and each argument's type as the target spells it.
+struct sgl::builtins::helper_context
+{
+    language target = language::hlsl;
+    cc::span<cc::string const> argument_types;
+};
+
 namespace sgl::builtins
 {
 using custom_writer = written (*)(call_context const&);
+/// A function the text declares once, ahead of the entry point, for a call the target cannot write as one expression.
+/// Empty for a target that needs none; two calls needing the same text get it once, so a helper may be an overload.
+using helper_writer = cc::string (*)(helper_context const&);
 
 /// Appends the result's scalars to `out`.
 /// `in` holds the scalars of every argument, one argument behind the other.
@@ -88,6 +98,7 @@ struct sgl::builtins::spelling
     /// How the result of an `infix` binds.
     precedence binds = precedence::primary;
     custom_writer custom = nullptr;
+    helper_writer helper = nullptr;
 };
 
 /// Where a value of a builtin type lands in a constant block; a size of 0 means it has no place in one.
@@ -136,10 +147,16 @@ struct sgl::builtins::function_record
     cc::string doc;
     evaluator evaluate = nullptr;
     spelling write;
+    /// Takes screen-space derivatives implicitly, as a sample that picks its own level does.
+    /// WGSL then judges the control flow around every call by its uniformity rules, which HLSL and MSL do not have.
+    bool uses_derivatives = false;
 
     /// Read back from the signature by `finalize`.
     cc::string name;
-    cc::vector<builtin_type_id> parameters;
+    /// Each parameter's type as the signature spells it: a builtin type's name, or a resource pattern such as
+    /// `out image2d[float4]`, which the check pass matches by the same spelling.
+    cc::vector<cc::string> parameters;
+    /// `none` for a function that gives nothing, which only one with an effect can be.
     builtin_type_id result = builtin_type_id::none;
 
     /// The name a `call` has in `l`.
@@ -185,7 +202,7 @@ struct sgl::builtins::registry
     /// `none` for a name no type was registered under.
     [[nodiscard]] builtin_type_id find_type(cc::string_view name) const;
     /// The overload of `name` that takes exactly `parameters`; `none` when there is none.
-    [[nodiscard]] builtin_id find_function(cc::string_view name, cc::span<builtin_type_id const> parameters) const;
+    [[nodiscard]] builtin_id find_function(cc::string_view name, cc::span<cc::string_view const> parameters) const;
     [[nodiscard]] bool has_function_named(cc::string_view name) const;
 
     /// The whole of `prelude/builtins.sgl`, byte for byte, in registration order.

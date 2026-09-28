@@ -1004,10 +1004,10 @@ i32 gpu_resource_manager::record_pending_work(sg::command_list& cmd)
             continue;
         }
 
-        // The format decides, and it decided already: `texture_manager::acquire` gave this texture the usage the
-        // matching routine needs, so asking the same question here lands on the same answer.
+        // `texture_manager::acquire` decided already, from the format and the device, and gave this texture the usage
+        // the matching routine needs, so the usage is the answer.
         auto const outcome
-            = sg::supports_typed_uav(record->texture.format())
+            = record->texture.raw()->usage().has(sg::texture_usage::readwrite_texture)
                 ? sr::box_filter_mipmap_routine::execute(cmd, record->texture, record->uploaded_mips)
                 : sr::raster_box_filter_mipmap_routine::execute(cmd, record->texture, record->uploaded_mips);
         if (outcome == sg::routine_outcome::declined)

@@ -6,7 +6,9 @@ namespace sg::backend::vulkan
 {
 bool vulkan_completion_group::has_reached(u64 value) const
 {
-    if (value == 0 || timeline == VK_NULL_HANDLE || ctx == nullptr)
+    // A gone device reports reached: everything it ever signaled is history, and a resource released after the context
+    // shut down asks this on its way out.
+    if (value == 0 || timeline == VK_NULL_HANDLE || ctx == nullptr || ctx->_device == VK_NULL_HANDLE)
         return true;
 
     u64 current = 0;
@@ -46,7 +48,10 @@ vulkan_completion_group_handle vulkan_completion_group_pool::acquire()
             return;
 
         // The pool is gone, so this is teardown: destroy the semaphore rather than leaking it.
-        if (g->timeline != VK_NULL_HANDLE && g->ctx != nullptr)
+        // A null device means vkDestroyDevice already ran and took the semaphore with it, so there is nothing left to
+        // destroy — and handing the loader a null device is fatal rather than ignored, which is what a resource
+        // released after the context shut down used to do.
+        if (g->timeline != VK_NULL_HANDLE && g->ctx != nullptr && g->ctx->_device != VK_NULL_HANDLE)
             vkDestroySemaphore(g->ctx->_device, g->timeline, nullptr);
         delete g;
     };

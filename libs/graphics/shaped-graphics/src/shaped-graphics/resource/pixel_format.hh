@@ -169,6 +169,40 @@ namespace sg
     return f != pixel_format::undefined && !is_depth_format(f) && !is_compressed_format(f) && !is_srgb_format(f);
 }
 
+/// True for a storage format every backend accepts without asking: core WebGPU's storage formats.
+/// Every other format `supports_typed_uav` allows needs `sg::feature::extended_storage_formats`.
+[[nodiscard]] constexpr bool is_portable_storage_format(pixel_format f)
+{
+    switch (f)
+    {
+    case pixel_format::rgba8_unorm:
+    case pixel_format::rgba8_snorm:
+    case pixel_format::rgba8_uint:
+    case pixel_format::rgba8_sint:
+    case pixel_format::rgba16_uint:
+    case pixel_format::rgba16_sint:
+    case pixel_format::rgba16_float:
+    case pixel_format::r32_float:
+    case pixel_format::r32_uint:
+    case pixel_format::r32_sint:
+    case pixel_format::rg32_float:
+    case pixel_format::rg32_uint:
+    case pixel_format::rg32_sint:
+    case pixel_format::rgba32_float:
+    case pixel_format::rgba32_uint:
+    case pixel_format::rgba32_sint:
+        return true;
+    default:
+        return false;
+    }
+}
+
+/// True for the formats core WebGPU samples but never filters: `sg::feature::float32_filtering` lifts that.
+[[nodiscard]] constexpr bool is_float32_format(pixel_format f)
+{
+    return f == pixel_format::r32_float || f == pixel_format::rg32_float || f == pixel_format::rgba32_float;
+}
+
 /// Edge length of a format's addressable block: 1 for uncompressed (one texel), 4 for BC.
 [[nodiscard]] constexpr int format_block_extent(pixel_format f)
 {

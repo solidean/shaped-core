@@ -25,7 +25,7 @@ TEST("sgl emit - a compute entry point carries its workgroup size")
     auto const wgsl = text_of(k_double, target::wgsl);
     CHECK(wgsl.contains("@compute @workgroup_size(64, 1, 1)\n"));
     CHECK(wgsl.contains("fn double_values(@builtin(global_invocation_id) id_in: vec3u) {\n"));
-    // WebGPU reports the id unsigned and SGL has one integer type, so the conversion stands at the top.
+    // WebGPU reports the id unsigned and SGL's is an int3, so the conversion stands at the top.
     CHECK(wgsl.contains("    let id: vec3i = vec3i(id_in);\n"));
     CHECK(wgsl.contains("    work_values[id.x] = work_values[id.x] * 2.0;\n"));
 
@@ -33,6 +33,26 @@ TEST("sgl emit - a compute entry point carries its workgroup size")
     CHECK(hlsl.contains("[numthreads(64, 1, 1)]\n"));
     CHECK(hlsl.contains("void double_values(uint3 id_in : SV_DispatchThreadID)\n"));
     CHECK(hlsl.contains("    const int3 id = int3(id_in);\n"));
+}
+
+TEST("sgl emit - `as` is a conversion to the target's own type")
+{
+    constexpr auto converted = "binding work:\n"
+                               "    values: mut buffer[float]\n"
+                               "\n"
+                               "@compute(64) fun cs(@thread_id id: int3){work}:\n"
+                               "    let uv = int2(id.x, id.y) as float2\n"
+                               "    let u = id.x as uint\n"
+                               "    work.values[id.x] = uv.y + (u as float)\n";
+    auto const wgsl = text_of(converted, target::wgsl);
+    CHECK(wgsl.contains("    let uv: vec2f = vec2f(vec2i(id.x, id.y));\n"));
+    CHECK(wgsl.contains("    let u: u32 = u32(id.x);\n"));
+    CHECK(wgsl.contains("uv.y + f32(u);\n"));
+
+    auto const hlsl = text_of(converted, target::hlsl_dx12);
+    CHECK(hlsl.contains("    const float2 uv = float2(int2(id.x, id.y));\n"));
+    CHECK(hlsl.contains("    const uint u = uint(id.x);\n"));
+    CHECK(hlsl.contains("uv.y + float(u);\n"));
 }
 
 TEST("sgl emit - every axis of the workgroup reaches the text")

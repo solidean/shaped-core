@@ -58,8 +58,12 @@ cc::result<dx12_pipeline_layout_handle> dx12_pipeline_layout::create(ID3D12Devic
             slot.resource_root_param = add_table(gl->view_ranges, slot_index);
         if (!gl->sampler_ranges.empty())
             slot.sampler_root_param = add_table(gl->sampler_ranges, slot_index);
-        for (auto const& ss : gl->static_sampler_descs)
+        for (auto ss : gl->static_sampler_descs)
+        {
+            if (ss.RegisterSpace == dx12_binding_group_layout::space_of_slot)
+                ss.RegisterSpace = slot_index;
             static_sampler_descs.push_back(ss);
+        }
         pl->groups.push_back(cc::move(slot));
     }
 

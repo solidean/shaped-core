@@ -296,6 +296,7 @@ struct builder
     decl_id type_declaration(statement_head const& head, keyword_parts const& parts);
     decl_id const_declaration(statement_head const& head, keyword_parts const& parts);
     decl_id sampler_declaration(statement_head const& head, keyword_parts const& parts);
+    decl_id pipeline_declaration(statement_head const& head, keyword_parts const& parts);
     decl_id notation_declaration(statement_head const& head, keyword_parts const& parts);
 
     /// The single identifier a declaration is named by; reports and yields an empty span for anything else.

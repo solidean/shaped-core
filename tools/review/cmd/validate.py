@@ -38,6 +38,19 @@ def mojibake_warnings(entry) -> list[str]:
     return out
 
 
+def orphan_answer_warnings(entry, answers) -> list[str]:
+    """One warning per answer whose ask is gone, which `delta` will move aside.
+
+    An acknowledgement is not one: it stops being offered once a later round asks something, and `reconcile` keeps
+    its answer, so warning about it contradicts what the next `delta` does.
+    """
+    return [
+        f"{entry.slug}: an answer to {name!r} has no ask; `delta` will orphan it"
+        for name in sorted(answers.answers)
+        if entry.ask(name) is None and not review.is_ack_name(name)
+    ]
+
+
 def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     p = sub.add_parser(NAME, help="Check every entry parses and every reference resolves")
     a.review_name(p)
@@ -51,7 +64,6 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
 
     problems: list[str] = []
     warnings: list[str] = []
-    thin = False
 
     if cfg.has_changeset:
         problems.extend(ctx.check_references(paths, entries))
@@ -65,20 +77,10 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
     problems.extend(review.glossary_problems(entries))
 
     for entry in entries:
-        warnings.extend(review.word_warnings(entry))
         warnings.extend(mojibake_warnings(entry))
         answers = ctx.answers(paths, entry)
-        # The tiers exist so an entry can be answered on its own, so they are owed while it is still waiting for an answer.
-        # An entry whose asks are all finalized will not be answered again, and adding tiers to it would edit a question
-        # the maintainer has already read — which is the thing the immutability check exists to prevent.
-        awaiting = any(a is None or a.tentative for a in (answers.get(b.name) for b in entry.asks))
-        if awaiting and review.requires_context(entry.group):
-            absent = review.missing_context_tiers(entry)
-            if absent:
-                thin = True
-                problems.append(f"{entry.slug}: no {', '.join(absent)}")
         open_asks = {b.name for b in entry.asks if (answers.get(b.name) is None or answers.get(b.name).tentative)}
-        if review.requires_context(entry.group):
+        if not review.is_orientation(entry.group):
             for round_number in review.missing_intro_rounds(entry, open_asks):
                 warnings.append(
                     f"{entry.slug}: round {round_number} asks something with no `intro` — open it with what the entry "
@@ -86,7 +88,7 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
                 )
         # A follow-up belongs under the ask it follows, where the answer it responds to is on screen above it.
         # Naming an ask in another entry usually means a new entry was opened where a round should have been appended,
-        # which splits one thread across two files and makes the second restate the first's context.
+        # which splits one thread across two files and makes the second restate what the first established.
         for block in entry.asks:
             target = block.attrs.get("follows", "")
             if not target or entry.ask(target) is not None:
@@ -107,9 +109,7 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
                     f"a follow-up usually belongs appended to the entry it follows"
                 )
 
-        for name in sorted(answers.answers):
-            if entry.ask(name) is None:
-                warnings.append(f"{entry.slug}: an answer to {name!r} has no ask; `delta` will orphan it")
+        warnings.extend(orphan_answer_warnings(entry, answers))
 
     # A comment is written expecting an answer, so the agent may not hand back another round while one is unanswered.
     # The gate sits here rather than on the maintainer's send: they wrote the remark, and blocking their own send on it
@@ -132,17 +132,6 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
         print(review.console.yellow(f"warning: {warning}"))
     for problem in problems:
         print(review.console.red(f"error: {problem}"))
-
-    if thin:
-        # Said once rather than per entry: a rule repeated twelve times reads as twelve rules.
-        print(review.console.dim(
-            f"\nEvery entry outside {', '.join(sorted(review.CONTEXT_EXEMPT_GROUPS))} carries all three context tiers"
-            f" while it is still waiting for an answer, so it can be answered on its own, out of order."
-        ))
-        print(review.console.dim(
-            "Scope each tier to that entry's own subject rather than to the change as a whole,"
-            " or every cold tier restates the same paragraph and nobody opens one again."
-        ))
 
     if problems:
         print(review.console.red(f"\n{len(problems)} problem(s) across {len(entries)} entries"))

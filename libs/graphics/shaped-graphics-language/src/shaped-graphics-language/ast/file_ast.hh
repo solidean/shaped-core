@@ -44,6 +44,7 @@ struct sgl::ast::file_ast
     cc::vector<attribute> attributes;
     cc::vector<case_arm> case_arms;
     cc::vector<if_branch> if_branches;
+    cc::vector<setting> settings;
     /// The child lists whose elements are nodes or tokens of their own.
     cc::vector<expr_id> expr_lists;
     cc::vector<stmt_id> stmt_lists;
@@ -69,6 +70,7 @@ struct sgl::ast::file_ast
     [[nodiscard]] cc::span<attribute const> at(range_of<attribute> r) const { return impl::slice(attributes, r); }
     [[nodiscard]] cc::span<case_arm const> at(range_of<case_arm> r) const { return impl::slice(case_arms, r); }
     [[nodiscard]] cc::span<if_branch const> at(range_of<if_branch> r) const { return impl::slice(if_branches, r); }
+    [[nodiscard]] cc::span<setting const> at(range_of<setting> r) const { return impl::slice(settings, r); }
     [[nodiscard]] cc::span<expr_id const> at(range_of<expr_id> r) const { return impl::slice(expr_lists, r); }
     [[nodiscard]] cc::span<stmt_id const> at(range_of<stmt_id> r) const { return impl::slice(stmt_lists, r); }
     [[nodiscard]] cc::span<decl_id const> at(range_of<decl_id> r) const { return impl::slice(decl_lists, r); }
@@ -79,9 +81,9 @@ struct sgl::ast::file_ast
         return impl::is_equal(exprs, rhs.exprs) && impl::is_equal(stmts, rhs.stmts) && impl::is_equal(decls, rhs.decls)
             && impl::is_equal(fields, rhs.fields) && impl::is_equal(arguments, rhs.arguments)
             && impl::is_equal(attributes, rhs.attributes) && impl::is_equal(case_arms, rhs.case_arms)
-            && impl::is_equal(if_branches, rhs.if_branches) && impl::is_equal(expr_lists, rhs.expr_lists)
-            && impl::is_equal(stmt_lists, rhs.stmt_lists) && impl::is_equal(decl_lists, rhs.decl_lists)
-            && impl::is_equal(token_lists, rhs.token_lists) && impl::is_equal(diagnostics, rhs.diagnostics)
-            && declarations == rhs.declarations;
+            && impl::is_equal(if_branches, rhs.if_branches) && impl::is_equal(settings, rhs.settings)
+            && impl::is_equal(expr_lists, rhs.expr_lists) && impl::is_equal(stmt_lists, rhs.stmt_lists)
+            && impl::is_equal(decl_lists, rhs.decl_lists) && impl::is_equal(token_lists, rhs.token_lists)
+            && impl::is_equal(diagnostics, rhs.diagnostics) && declarations == rhs.declarations;
     }
 };

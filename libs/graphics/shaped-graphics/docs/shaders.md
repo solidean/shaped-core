@@ -257,7 +257,7 @@ Four more entry kinds generate C++ from what the binding pass reads, rather than
 | `path:constants:name` | a `push_constants` block | a mirror carrying HLSL's own padding |
 
 A group struct is data rather than an API.
-`ctx.cached.acquire_binding_group_layout<G>()`, `ctx.transient.create_binding_group(layout, G{...})` and `scope.bind<G>(group)` are the verbs, and they are sg's.
+`ctx.cached.acquire_binding_group_layout<G>()`, `ctx.transient.create_binding_group(cmd, layout, G{...})` and `scope.bind<G>(group)` are the verbs, and they are sg's.
 
 **An SGL package generates from its declarations too, read by the SGL compiler rather than a parser in the build.**
 `cube.sgl:*` asks for everything a file declares, and `path:binding:name` for one group.

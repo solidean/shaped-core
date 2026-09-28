@@ -70,6 +70,12 @@ struct sg::texture_description
     /// The non-asserting counterpart of assert_valid().
     [[nodiscard]] bool is_valid() const;
 
+    /// Why this shape cannot be created on a device without `sg::feature::unaligned_block_compression`, or empty.
+    /// A block-compressed format then needs a width and height in whole blocks; `supports_unaligned` lifts that.
+    /// Creating one anyway throws rather than asserts, since the size of a texture loaded from a file is the file's;
+    /// a loader asks this first, with `ctx.supports(...)`, and pads or refuses the file itself.
+    [[nodiscard]] cc::string unaligned_block_error(bool supports_unaligned) const;
+
     /// Asserts the shape contract one invariant at a time — is_valid says what the contract is.
     /// Runs from raw_texture's constructor, and a backend calls it at the top of its create path so the contract is enforced before any fallible GPU work.
     void assert_valid() const;
@@ -145,6 +151,10 @@ public:
     /// Const because registering a finalizer is a lifetime hook.
     void add_finalizer(cc::unique_function<void()> finalizer) const { _finalizers.push_back(cc::move(finalizer)); }
 
+    /// The lifetime scope that created the texture.
+    /// Only a persistent one may be the target of ctx.upload, ctx.download or ctx.stream; a transient texture transfers inline, through a command list.
+    [[nodiscard]] lifetime_scope scope() const { return _scope; }
+
     // Expiry — a texture may be marked expired, its storage reclaimed, while handles to it still exist.
     // Naming an expired texture is invalid.
 
@@ -200,6 +210,11 @@ protected:
     texture_description _desc;
     mutable cc::vector<cc::unique_function<void()>> _finalizers; // mutable: add_finalizer is const (a lifetime hook)
     mutable std::atomic<bool> _expired = {false};                // mutable: expire() is a const lifetime hook
+
+private:
+    // Stamped by the transient scope right after the backend creates the resource, before any handle escapes.
+    friend class sg::context_transient_scope;
+    mutable lifetime_scope _scope = lifetime_scope::persistent; // mutable: handles are const, and the stamp lands on one
     mutable std::atomic<bool> _warned_async_fixup
         = {false};                                      // mutable: the warning is about the texture, not a change to it
     mutable std::atomic<u64> _warned_stream_wait = {0}; // highest stream value already warned about, or promoted

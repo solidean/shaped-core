@@ -4,8 +4,9 @@ Running list of known follow-ups.
 Bigger design intent lives in [structure.md](structure.md).
 
 - **Denoising: both halves run; what is left**, in order — shaped-rendering's [denoising.md](../../shaped-rendering/docs/denoising.md) is the design:
-  - **Measure what the guides' payload growth costs.**
-    `PtPayload` went from 26 lanes to 29 for the albedo, to 33 for the specular pair and to 38 for the split signal, on every ray rather than only primary ones.
+  - **Measure what the guides' and the split's payload growth costs.**
+    `PtPayload` went from 27 to 38 scalar components: 3 for the diffuse albedo, 4 for the specular pair, and 4 more for the split
+    (`direct_specular` and `lobe`) — on every ray rather than only primary ones.
   - **The specular and split guides are declared for `automatic` whatever the device supports**, because `build_render_plan` is a pure function with no context to ask.
     That is five textures per denoising layer on a machine no vendor member can run, which is the price of the declaration being made before the choice is.
     Only the declaration, though: the tracer writes the split lobes only when the member that resolves on this device reads them.

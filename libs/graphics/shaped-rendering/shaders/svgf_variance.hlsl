@@ -26,7 +26,7 @@ ConstantBuffer<svgf_variance_constants> gConstants;
 namespace svgf_variance_bindings
 {
     Texture2D<float4> gHistory; // rgb demodulated colour, a history length
-    Texture2D<float4> gMoments; // r mean luminance, g mean squared luminance
+    Texture2D<float2> gMoments; // r mean luminance, g mean squared luminance
     Texture2D<float4> gNormalDepth;
     RWTexture2D<float4> gTarget; // rgb colour, a variance
 }
@@ -46,7 +46,7 @@ using namespace svgf_variance_bindings;
 
     if (history_length >= gConstants.spatial_below)
     {
-        float2 m = gMoments.Load(int3(p, 0)).rg;
+        float2 m = gMoments.Load(int3(p, 0));
         gTarget[id.xy] = float4(history.rgb, max(0, m.y - m.x * m.x));
         return;
     }
@@ -65,7 +65,7 @@ using namespace svgf_variance_bindings;
             float4 nd_q = gNormalDepth.Load(int3(q, 0));
             float w = svgf_geometry_weight(nd_p.xyz, nd_p.w, nd_q.xyz, nd_q.w, float2(dx, dy), gConstants.normal_power,
                                            gConstants.depth_sigma);
-            sum_m += gMoments.Load(int3(q, 0)).rg * w;
+            sum_m += gMoments.Load(int3(q, 0)) * w;
             weight_sum += w;
         }
     }

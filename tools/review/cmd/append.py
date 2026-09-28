@@ -7,6 +7,7 @@ it was done by hand, on a file the server is reading, with no check that the res
 Nothing is ever rewritten here.
 The text is appended, the new blocks are stamped with the round about to be served, and the result is parsed before it is written —
 so a malformed addition fails with a line number instead of leaving an entry the page cannot render.
+Its file references and change ids are resolved then too, so one `validate` would reject is refused before it lands.
 """
 
 from __future__ import annotations
@@ -80,10 +81,19 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
     text = review.append_text(entry, addition)
 
     # Parsed before it is written, so a bad block is an error with a line number rather than a broken page.
+    # Parsed as the round it is about to be stamped with, or a clash would name the wrong round and find false ones.
     try:
-        merged = review.parse_entry_text(text, target)
+        merged = review.parse_entry_text(text, target, pending_round=cfg.next_round)
     except review.ReviewParseError as e:
         ctx.die(f"the result would not parse: {e}")
+
+    # A reference that does not resolve is refused here like a parse error, so the fix happens before the server reads
+    # the file rather than by hand-editing it afterwards; `validate` would report the same problems.
+    problems = ctx.reference_problems(paths, [merged])
+    if cfg.has_changeset:
+        problems.extend(ctx.check_references(paths, [merged]))
+    if problems:
+        ctx.die("the result would not validate:\n  " + "\n  ".join(problems))
 
     # Counted rather than diffed: appending moves the previous last block's end offset, so identity comparison overcounts by one.
     added = len(merged.blocks) - len(entry.blocks)
@@ -105,6 +115,3 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
     print(f"{target.stem}: appended {added} block(s) as round {cfg.next_round}")
     for name in new_asks:
         print(f"  ask {name}")
-
-    for warning in review.word_warnings(review.parse_entry_file(target)):
-        print(review.console.yellow(f"warning: {warning}"), file=sys.stderr)

@@ -204,7 +204,6 @@ public:
     void report_feedback_error(sg::device_error_kind kind, cc::string_view message);
 
     // The sg::context surface.
-    // Everything not listed here is still a stub in metal_context.cc.
     [[nodiscard]] sg::epoch current_epoch() const override { return _epochs.current(); }
     [[nodiscard]] sg::epoch completed_epoch() const override { return _epochs.completed(); }
     void advance_epoch() override;

@@ -29,7 +29,7 @@ struct sr::atrous_options
 
 /// Edge-avoiding à-trous wavelet denoising (Dammertz et al. 2010), steered by normal, depth and luminance.
 ///
-/// Spatial and native: it runs wherever sg does, and it is the member CI can test.
+/// Spatial and native: HLSL through DXC, and the member CI can test.
 /// It requires no guide, and uses whichever of albedo, normal and depth it is given.
 ///
 /// **Its luminance edge-stop scales with `1 / sqrt(sample_count)`.**

@@ -156,6 +156,11 @@ public:
     cc::fixed_vector<dx12_buffer_handle, sg::max_vertex_buffers> _bound_vertex_buffers;
     dx12_buffer_handle _bound_index_buffer;
 
+    // What the bound index buffer contributes to the alignment rule an indexed draw must satisfy.
+    // See sg::index_buffer_offset_alignment; every backend carries this check.
+    sg::index_format _index_format = sg::index_format::uint16;
+    isize _index_view_offset_in_bytes = 0;
+
     // The async-upload completions this list must observe: one entry per distinct timeline, at the highest value
     // that timeline owes it.
     // A LIST rather than a single value because completion timelines are per resource — collapsing them to one max

@@ -1,7 +1,9 @@
 #include <clean-core/thread/async.hh> // the async pipeline handles are cc::shared_async (copied here on return)
+#include <clean-core/thread/async_coroutine.hh>
 #include <shaped-graphics/context/cached.hh>
 #include <shaped-graphics/context/context.hh>
 #include <shaped-graphics/context/pipeline_cache.hh>
+#include <shaped-graphics/raster/raster_pipeline.hh>
 
 namespace sg
 {
@@ -24,6 +26,12 @@ async_compute_pipeline context_cached_scope::acquire_compute_pipeline(compute_pi
 async_raster_pipeline context_cached_scope::acquire_raster_pipeline(raster_pipeline_description const& desc)
 {
     return _ctx.pipeline_cache_ref().acquire_raster_pipeline(_ctx, desc);
+}
+
+async_raster_pipeline context_cached_scope::acquire_raster_pipeline(cc::shared_async<raster_pipeline_description> desc)
+{
+    auto const& described = co_await desc;
+    co_return co_await acquire_raster_pipeline(described);
 }
 
 async_raytracing_pipeline context_cached_scope::acquire_raytracing_pipeline(raytracing_pipeline_description const& desc)

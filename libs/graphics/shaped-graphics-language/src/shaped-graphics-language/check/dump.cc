@@ -64,6 +64,9 @@ struct dumper
         case symbol_kind::binding:
             out += "(binding ";
             break;
+        case symbol_kind::pipeline:
+            out += "(pipeline ";
+            break;
         case symbol_kind::unsupported:
             out += "(unsupported ";
             break;

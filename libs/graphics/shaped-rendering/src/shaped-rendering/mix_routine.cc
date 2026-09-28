@@ -93,11 +93,11 @@ bool mix_routine::execute(sg::command_list& cmd, sg::texture_2d const& destinati
     auto& ctx = cmd.context();
     auto const extent = extent_of(destination);
 
-    auto const group
-        = ctx.transient.create_binding_group(self->_group_layout, shaders::mix_bindings{
-                                                                      .gSource = source.as_readonly_view(),
-                                                                      .gDestination = destination.as_readwrite_view(),
-                                                                  });
+    auto const group = ctx.transient.create_binding_group(cmd, self->_group_layout,
+                                                          shaders::mix_bindings{
+                                                              .gSource = source.as_readonly_view(),
+                                                              .gDestination = destination.as_readwrite_view(),
+                                                          });
 
     cmd.compute.bind_pipeline(*self->_pipeline);
     cmd.compute.bind<shaders::mix_bindings>(*group);

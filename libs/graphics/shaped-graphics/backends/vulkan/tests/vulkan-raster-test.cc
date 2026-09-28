@@ -81,8 +81,7 @@ ASYNC_INVOCABLE_TEST("sg vulkan - a rendering scope clears, draws and stores",
         {.x = 1.0f, .y = -1.0f, .r = 1.0f, .g = 0.0f, .b = 0.0f, .a = 1.0f},
         {.x = -1.0f, .y = 1.0f, .r = 1.0f, .g = 0.0f, .b = 0.0f, .a = 1.0f},
     };
-    auto vertex_buffer = ctx.persistent.create_raw_buffer(isize(sizeof(vertices)),
-                                                          sg::buffer_usage::vertex_buffer | sg::buffer_usage::copy_dst);
+    auto vertex_buffer = ctx.persistent.create_buffer_from_data(vertices, sg::buffer_usage::vertex_buffer).raw();
     REQUIRE(vertex_buffer != nullptr);
 
     auto pipeline_layout = ctx.cached.acquire_pipeline_layout(sg::pipeline_layout_description{});
@@ -105,7 +104,6 @@ ASYNC_INVOCABLE_TEST("sg vulkan - a rendering scope clears, draws and stores",
 
     auto cmd = ctx.create_command_list();
     REQUIRE(cmd != nullptr);
-    cmd->upload.bytes_to_buffer(vertex_buffer, cc::as_bytes(cc::span<vertex const>(vertices, 3)));
 
     auto const rtv = target.as_render_target_view();
 

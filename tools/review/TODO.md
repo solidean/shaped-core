@@ -19,7 +19,7 @@ A symbol has overloads, has the same name in three namespaces, and is declared i
 So a symbol resolver has to be allowed to give up quietly and often, and the severity model the file provider uses does not carry over.
 
 **A code span is mostly not a symbol.**
-Entries are full of backticked things that look like identifiers and are not: `show: visible`, `--dirty-only`, `context/cold`, an option label, a front-matter key.
+Entries are full of backticked things that look like identifiers and are not: `show: visible`, `--dirty-only`, `intro`, an option label, a front-matter key.
 A matcher that links one of those is strictly worse than no matcher, because it teaches the reader that the underlines are noise.
 
 **The tractable subset is qualified names only** — anything with a `::` or a `.` between two identifier segments.

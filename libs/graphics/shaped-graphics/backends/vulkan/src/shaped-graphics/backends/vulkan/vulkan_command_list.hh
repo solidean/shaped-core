@@ -152,6 +152,11 @@ public:
     cc::vector<vulkan_buffer const*> _bound_vertex_buffers;
     vulkan_buffer const* _bound_index_buffer = nullptr;
 
+    // What the bound index buffer contributes to the alignment rule an indexed draw must satisfy.
+    // See sg::index_buffer_offset_alignment; every backend carries this check.
+    sg::index_format _index_format = sg::index_format::uint16;
+    isize _index_view_offset_in_bytes = 0;
+
     // The hazard declares a draw owes: the bound groups' shader accesses plus the input-assembly reads.
     void declare_raster_draw_barriers(bool indexed);
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <clean-core/container/pinned_data.hh>
+#include <clean-core/container/small_vector.hh>
 #include <shaped-graphics/backends/metal/fwd.hh>
 #include <shaped-graphics/backends/metal/metal_common.hh>
 #include <shaped-graphics/fwd.hh>
@@ -29,6 +30,7 @@ public:
                           sg::rasterization_state rasterization,
                           sg::primitive_topology topology,
                           sg::pixel_format depth_stencil_format,
+                          cc::small_vector<isize, sg::max_vertex_buffers> vertex_strides,
                           sg::pipeline_layout_handle layout)
       : _ctx(ctx),
         _state(state),
@@ -36,6 +38,7 @@ public:
         _rasterization(rasterization),
         _topology(topology),
         _depth_stencil_format(depth_stencil_format),
+        _vertex_strides(cc::move(vertex_strides)),
         _layout(cc::move(layout))
     {
     }
@@ -53,6 +56,12 @@ public:
     /// Not pipeline state on MTL4, so it exists only to check the rendering scope a draw is issued in.
     [[nodiscard]] sg::pixel_format depth_stencil_format() const { return _depth_stencil_format; }
 
+    /// The per-vertex stride of each input slot this pipeline declared, in slot order.
+    ///
+    /// The stride is pipeline state on Metal, baked into the vertex descriptor — where D3D12 takes it as a bind
+    /// parameter — so a `vertex_buffer_view` carrying a different one is a mismatch nothing below would report.
+    [[nodiscard]] cc::span<isize const> vertex_strides() const { return _vertex_strides; }
+
     /// The layout every group bound alongside this pipeline is checked against.
     [[nodiscard]] sg::pipeline_layout_handle const& layout() const { return _layout; }
 
@@ -66,5 +75,6 @@ private:
     sg::rasterization_state _rasterization;
     sg::primitive_topology _topology = sg::primitive_topology::triangle_list;
     sg::pixel_format _depth_stencil_format = sg::pixel_format::undefined;
+    cc::small_vector<isize, sg::max_vertex_buffers> _vertex_strides;
     sg::pipeline_layout_handle _layout;
 };

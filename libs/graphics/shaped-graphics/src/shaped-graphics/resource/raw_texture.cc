@@ -1,4 +1,5 @@
 #include <clean-core/common/assert.hh>
+#include <clean-core/string/format.hh>
 #include <shaped-graphics/barrier/resource_access.hh>
 #include <shaped-graphics/resource/raw_texture.hh>
 
@@ -9,6 +10,16 @@ raw_texture::~raw_texture() = default;
 raw_texture::raw_texture(texture_description const& desc) : _desc(desc)
 {
     _desc.assert_valid();
+}
+
+cc::string texture_description::unaligned_block_error(bool supports_unaligned) const
+{
+    auto const block = format_block_extent(format);
+    if (supports_unaligned || block == 1 || (width % block == 0 && height % block == 0))
+        return {};
+    return cc::format("a {}x{} texture of a block-compressed format needs whole {}x{} blocks on this device "
+                      "(ctx.supports(sg::feature::unaligned_block_compression) is false)",
+                      width, height, block, block);
 }
 
 bool texture_description::is_valid() const

@@ -147,7 +147,7 @@ struct sv::pt_trace_desc
     sg::texture_2d guide_motion;
 
     /// This frame's samples split the way a split-signal denoiser filters them, plus the first secondary hit distance
-    /// of each kind (rg16_float: diffuse in r, specular in g).
+    /// of each kind (rg32_float: diffuse in r, specular in g).
     ///
     /// All three or none, at `output`'s extent, and set exactly when the frame block's `write_split` is.
     /// `frame_diffuse` and `frame_specular` sum to `frame_output` exactly, which is what lets a member filter them

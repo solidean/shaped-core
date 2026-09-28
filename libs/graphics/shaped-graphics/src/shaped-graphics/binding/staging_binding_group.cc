@@ -1,4 +1,5 @@
 #include <clean-core/common/assert.hh>
+#include <shaped-graphics/binding/impl/portability.hh>
 #include <shaped-graphics/binding/staging_binding_group.hh>
 #include <shaped-graphics/exceptions.hh>
 
@@ -77,6 +78,7 @@ void staging_binding_group::set_binding(binding_slot slot, raw_view const& view)
                                                          "set_sampler");
     CC_ASSERT(!is_array(slot), "staging_binding_group: that binding is an array — use set_array_element / "
                                "set_array_range / set_array");
+    _slots[isize(u32(slot))].refusal = cc::nullopt;
     write_run(slot, 0, cc::span<raw_view const>(&view, 1));
     touch(slot);
 }
@@ -125,6 +127,7 @@ void staging_binding_group::set_array(binding_slot slot, int first_element, cc::
     CC_ASSERT(is_array(slot), "staging_binding_group: that binding is not an array — use set_binding");
     int const size = array_size(slot);
     int const after = first_element + int(views.size());
+    _slots[isize(u32(slot))].refusal = cc::nullopt;
 
     // Three runs at most — the head cleared, the run written, the tail cleared — so a full replacement is three
     // calls into the backend however long the array is.
@@ -169,6 +172,9 @@ cc::result<binding_group_handle> staging_binding_group::try_snapshot()
 {
     CC_ASSERT(_untouched == 0, "staging_binding_group: a binding was never set — say what it holds, even if that is "
                                "nothing (unset_array on a bindless table)");
+    for (auto const& info : _slots)
+        if (info.refusal.has_value())
+            return cc::error(cc::string(info.refusal.value()));
     if (!_dirty && _snapshot != nullptr)
         return _snapshot;
 
@@ -208,6 +214,14 @@ void staging_binding_group::write_run(binding_slot slot, int first_element, cc::
                                  "staging_binding_group: a set binds a view — clear an element through the unset_* "
                                  "family instead");
                    });
+    }
+
+    // Refused rather than written, so no backend ever sees the view; the snapshot reports it.
+    if (auto refusal = impl::find_unsupported_view(_float32_filtering, b, views); refusal.has_value())
+    {
+        _slots[isize(u32(slot))].refusal = cc::move(refusal);
+        _dirty = true;
+        return;
     }
 
     write_view_descriptors(info.first_descriptor + first_element, b, views);
