@@ -58,16 +58,11 @@ A combinatorial sweep — every blend factor against every op — narrows to a c
 
 ## SGL semantics that only a GPU pins
 
-What SGL states for every target, and each backend has to be shown to do:
+`tests/pipeline/pixel-semantics-test.cc` and `draw-params-test.cc` pin each on dx12 and vulkan.
+What metal and webgpu still have to be shown doing:
 
-- **`@vertex_index` and `@instance_index` include the base**, on dx12 through `SV_StartVertexLocation` and `SV_StartInstanceLocation`.
-  Those need shader model 6.8, which DXC 1.9 confirms for DXIL and SPIR-V alike; slib compiles at 6.8 by default.
-  With slib's `-fvk-support-nonzero-base-*` flags the SPIR-V folds to `VertexIndex` and `InstanceIndex`, as intended — at compile level; the draw test is what pins it.
-- **A discarded pixel still takes part in its quad's derivatives**: alpha-tested foliage, then a sample in the same quad.
-  WGSL demotes; MSL's `discard_fragment` may end the pixel, and the emulation SGL's TODO describes waits on this test.
-- **Flat interpolation takes the first vertex** of the primitive, on every backend.
-- **Depth output**, plain and conservative, against the depth test; **sample mask output** against a multisampled target.
-- **`gather`'s texel order**, the same four texels in the same order on every backend.
+- **A discarded pixel still takes part in its quad's derivatives.**
+  WGSL demotes; MSL's `discard_fragment` may end the pixel, and the emulation SGL's TODO describes waits on the test on metal.
 
 ## Geometry and tessellation stages
 

@@ -1,0 +1,127 @@
+// What SGL states for every target and only a GPU shows each backend doing: flat interpolation, discard beside a
+// derivative, a written depth and a written sample mask.
+
+@vertex struct tagged_corner:
+    position: float2
+    tag: int
+    depth: float
+
+struct tagged:
+    @position position: hpos4
+    @interpolate(.flat) tag: int
+
+@pixel struct tag_target:
+    value: float4
+
+@vertex fun tagged_vs(v: tagged_corner) -> tagged:
+    return {
+        position = hpos4(v.position.x, v.position.y, v.depth, 1.0)
+        tag = v.tag
+    }
+
+// A flat member takes the first vertex of its primitive, whichever target draws it.
+@pixel fun flat_ps(p: tagged) -> tag_target:
+    return {
+        value = float4(p.tag as float, 0.0, 0.0, 1.0)
+    }
+
+pipeline flat_tags:
+    vertex = tagged_vs
+    pixel = flat_ps
+    cull = .none
+    format = .rgba32_float
+
+// The pixels of column 0 discard, and their right-hand neighbours then take a derivative across them.
+// x² at pixel centres steps by 2 between columns 0 and 1 and by 6 between 2 and 3, so only a derivative that still
+// saw the discarded pixel's value reads 2.
+@pixel fun derivative_ps(p: tagged) -> tag_target:
+    let x = p.position.x
+    if x < 1.0 => discard
+    return {
+        value = float4(ddx(x * x), p.tag as float, 0.0, 1.0)
+    }
+
+pipeline discard_derivative:
+    vertex = tagged_vs
+    pixel = derivative_ps
+    cull = .none
+    format = .rgba32_float
+
+// The tag, over 100, is the depth written, whatever depth the position rasterized at.
+@pixel struct written_depth:
+    value: float4
+    @depth depth: float
+
+@pixel fun depth_ps(p: tagged) -> written_depth:
+    return {
+        value = float4(1.0, 0.0, 0.0, 1.0)
+        depth = (p.tag as float) * 0.01
+    }
+
+pipeline depth_written:
+    vertex = tagged_vs
+    pixel = depth_ps
+    cull = .none
+    format = .rgba32_float
+    depth_test = true
+    depth_compare = .less
+    depth_stencil_format = .depth32_float
+
+// The same, promising the written depth is never nearer than the rasterized one.
+@pixel struct pushed_depth:
+    value: float4
+    @depth(.greater_equal) depth: float
+
+@pixel fun push_ps(p: tagged) -> pushed_depth:
+    return {
+        value = float4(1.0, 0.0, 0.0, 1.0)
+        depth = (p.tag as float) * 0.01
+    }
+
+pipeline depth_pushed:
+    vertex = tagged_vs
+    pixel = push_ps
+    cull = .none
+    format = .rgba32_float
+    depth_test = true
+    depth_compare = .less
+    depth_stencil_format = .depth32_float
+
+// The tag is the sample mask, so a pixel writes only the samples it names.
+@pixel struct masked:
+    value: float4
+    @sample_mask covered: uint
+
+@pixel fun mask_ps(p: tagged) -> masked:
+    return {
+        value = float4(1.0, 0.0, 0.0, 1.0)
+        covered = p.tag as uint
+    }
+
+pipeline sample_masked:
+    vertex = tagged_vs
+    pixel = mask_ps
+    cull = .none
+    format = .rgba8_unorm
+    sample_count = 4
+
+// Every sample of a multisampled target, read into a buffer for the host.
+binding samples:
+    target: texture_2d_ms[float4]
+    values: mut buffer[float]
+
+@compute(1) fun read_samples(@thread_id id: int3){samples}:
+    let size = samples.target.size()
+    let pixel = int2(id.x % size.x, id.x / size.x)
+    for s in 0 ..< 4:
+        samples.values[id.x * 4 + s] = samples.target.load(pixel, sample = s).x
+
+// The four texels `gather` returns, at the centre of a 2 × 2 texture.
+binding gathered:
+    source: texture_2d[float]
+    values: mut buffer[float4]
+    sampler nearest:
+        filter = .nearest
+
+@compute(1) fun gather_centre(@thread_id id: int3){gathered}:
+    gathered.values[0] = gathered.source.gather(float2(0.5, 0.5), gathered.nearest)
