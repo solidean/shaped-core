@@ -19,6 +19,9 @@ namespace sgl::check
 /// The shape of a member list: a struct's fields or a binding's members.
 [[nodiscard]] cc::hash128 structural_hash(checked_module const& m, cc::span<member_info const> members);
 
+/// The shape of a static sampler: its settings, which a layout bakes.
+[[nodiscard]] cc::hash128 structural_hash(sampler_state const& s);
+
 /// 32 lowercase hex digits, high limb first: how `describe` writes a shape.
 [[nodiscard]] cc::string hex_of(cc::hash128 hash);
 } // namespace sgl::check

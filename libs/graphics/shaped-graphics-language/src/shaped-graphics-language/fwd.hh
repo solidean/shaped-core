@@ -40,6 +40,7 @@ struct inferred_result;
 
 enum class described_member_kind : u8;
 struct described_sampler;
+struct described_file_sampler;
 struct described_binding_member;
 struct described_binding;
 struct described_struct_member;
@@ -245,6 +246,7 @@ struct flat_case;
 struct flat_switch;
 struct flat_local_ref;
 struct flat_binding_member;
+struct flat_file_sampler;
 struct flat_member;
 struct flat_buffer_element;
 struct flat_element;

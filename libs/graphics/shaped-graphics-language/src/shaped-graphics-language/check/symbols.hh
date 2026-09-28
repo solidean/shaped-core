@@ -322,7 +322,10 @@ enum class sgl::check::symbol_kind : sgl::u8
     constant,
     /// A `test`, which has no name and which no lookup finds; `info` is its synthesized signature.
     test,
-    /// A named declaration this phase has no meaning for yet: `type`, `sampler`.
+    /// A file-scope `sampler`: a static sampler of the pipeline layout of every entry point that uses it (CHK-314).
+    /// `info` is its position in `checked_module::samplers`, and `type` the sampler type its settings make.
+    sampler,
+    /// A named declaration this phase has no meaning for yet: `type`.
     /// It is always `failed`, and it exists so its name resolves to the error type and not to `unknown-name`.
     unsupported,
 };
@@ -368,9 +371,10 @@ struct sgl::check::symbol
     builtin_type_id intrinsic_type = builtin_type_id::none;
     /// The operator of an `@operator` function, which lookup finds through this spelling and never through `name`.
     cc::string operator_spelling;
-    /// A struct's type.
+    /// A struct's type, a const's, and a file-scope sampler's.
     type_id type = type_id::none;
-    /// A position in `checked_module::functions`, `bindings`, `pipelines` or `constants`, by `kind`; -1 before it is compiled.
+    /// A position in `checked_module::functions`, `bindings`, `pipelines`, `constants` or `samplers`, by `kind`; -1
+    /// before it is compiled.
     i32 info = -1;
     /// False under `@shadowable(false)`: a declaration or a local of its name is then an error rather than hiding it.
     bool is_shadowable = true;

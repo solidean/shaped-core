@@ -67,7 +67,7 @@ struct sgl::emit::bound_name
 {
     /// As the text spells it, which is what the target's compiler reflects.
     cc::string emitted;
-    /// `binding.member` for a resource, the binding's own name for a block of constants.
+    /// `binding.member` for a resource, and its own name for a block of constants and for a file-scope sampler.
     cc::string host;
 
     bool operator==(bound_name const&) const = default;

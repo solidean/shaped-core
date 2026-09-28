@@ -507,3 +507,105 @@ TEST("sgl emit - a depth texture's level is an int, which WGSL takes whole and t
     CHECK(text_of(depth, target::wgsl).contains("textureSampleLevel(set_shadow, set_pt, p.uv, p.lod)"));
     CHECK(text_of(depth, target::hlsl_dx12).contains("set_shadow.SampleLevel(set_pt, p.uv, float(p.lod))"));
 }
+
+namespace
+{
+/// Three file-scope samplers, of which the first entry point reaches the second and third, one through a helper.
+constexpr cc::string_view k_file_samplers
+    = "sampler unused:\n"
+      "    filter = .linear\n"
+      "\n"
+      "sampler edge:\n"
+      "    filter = .nearest\n"
+      "    address = .clamp_edge\n"
+      "\n"
+      "sampler shadow:\n"
+      "    compare = .less\n"
+      "\n"
+      "binding set:\n"
+      "    src: texture_2d[float4]\n"
+      "    depth: texture_2d_depth\n"
+      "    dst: out image_2d[.rgba8_unorm]\n"
+      "\n"
+      "fun lit(uv: float2){set} -> float:\n"
+      "    return set.depth.sample_compare(uv, shadow, reference = 0.5, level = 0.0)\n"
+      "\n"
+      "@compute(8, 8) fun cs(@thread_id id: int3){set}:\n"
+      "    let xy = int2(id.x, id.y)\n"
+      "    let uv = float2(-0.5, 1.5)\n"
+      "    set.dst.store(xy, set.src.sample(uv, edge, level = 0.0) * lit(uv))\n"
+      "\n"
+      "@compute(8, 8) fun plain(@thread_id id: int3){set}:\n"
+      "    set.dst.store(int2(id.x, id.y), float4(1.0, 1.0, 1.0, 1.0))\n";
+} // namespace
+
+TEST("sgl emit - a file-scope sampler is at its declaration's index among the file's, outside every group")
+{
+    CHECK(text_of(k_file_samplers, target::hlsl_dx12)
+          == "// SGL compute entry point 'cs', written as HLSL for dx12.\n"
+             "// Generated: the SGL source is what to edit.\n"
+             "\n"
+             "Texture2D<float4> set_src : register(t0, space0);\n"
+             "Texture2D<float> set_depth : register(t1, space0);\n"
+             "RWTexture2D<float4> set_dst : register(u2, space0);\n"
+             "\n"
+             "SamplerState edge : register(s1, space10);\n"
+             "SamplerComparisonState shadow : register(s2, space10);\n"
+             "\n"
+             "[numthreads(8, 8, 1)]\n"
+             "void cs(uint3 id_in : SV_DispatchThreadID)\n"
+             "{\n"
+             "    const int3 id = int3(id_in);\n"
+             "    const int2 xy = int2(id.x, id.y);\n"
+             "    const float2 uv = float2(-0.5, 1.5);\n"
+             "    set_dst[xy] = set_src.SampleLevel(edge, uv, 0.0) * set_depth.SampleCmpLevelZero(shadow, uv, 0.5);\n"
+             "}\n");
+
+    // vulkan and WebGPU keep binding 0 of sg's own group for the inline constants, so index i is binding i + 1
+    CHECK(text_of(k_file_samplers, target::hlsl_vulkan)
+              .contains("[[vk::binding(2, 0)]] [[vk::image_format(\"rgba8\")]] RWTexture2D<float4> set_dst;\n"
+                        "\n"
+                        "[[vk::binding(2, 3)]] SamplerState edge;\n"
+                        "[[vk::binding(3, 3)]] SamplerComparisonState shadow;\n"
+                        "\n"));
+    CHECK(text_of(k_file_samplers, target::wgsl)
+              .contains("@group(0) @binding(2) var set_dst: texture_storage_2d<rgba8unorm, write>;\n"
+                        "\n"
+                        "@group(3) @binding(2) var edge: sampler;\n"
+                        "@group(3) @binding(3) var shadow: sampler_comparison;\n"
+                        "\n"));
+}
+
+TEST("sgl emit - an entry point declares only the file-scope samplers its code reaches, and binds each by its name")
+{
+    auto const cs = emit_source(k_file_samplers, 0, target::hlsl_dx12);
+    CHECK(sgl::emit::dump_errors(cs) == "");
+    CHECK(!cs.text.contains("unused"));
+    auto hosts = cc::string();
+    for (auto const& b : cs.bound_names)
+        hosts.appendf("{}={} ", b.host, b.emitted);
+    CHECK(hosts == "set.src=set_src set.depth=set_depth set.dst=set_dst edge=edge shadow=shadow ");
+
+    auto const plain = emit_source(k_file_samplers, 1, target::wgsl);
+    CHECK(sgl::emit::dump_errors(plain) == "");
+    CHECK(!plain.text.contains("sampler"));
+    CHECK(!plain.text.contains("@group(3)"));
+}
+
+TEST("sgl emit - a file-scope sampler named as a word the target reserves is renamed there, and bound by its own name")
+{
+    constexpr auto reserved
+        = "sampler register:\n"
+          "    filter = .nearest\n"
+          "\n"
+          "binding set:\n"
+          "    src: texture_2d[float4]\n"
+          "    dst: out image_2d[.rgba8_unorm]\n"
+          "\n"
+          "@compute(8, 8) fun cs(@thread_id id: int3){set}:\n"
+          "    set.dst.store(int2(id.x, id.y), set.src.sample(float2(0.5, 0.5), register, level = 0.0))\n";
+    auto const dx12 = emit_source(reserved, 0, target::hlsl_dx12);
+    CHECK(sgl::emit::dump_errors(dx12) == "");
+    CHECK(dx12.text.contains("SamplerState register_ : register(s0, space10);\n"));
+    CHECK((dx12.bound_names.back() == sgl::emit::bound_name{.emitted = "register_", .host = "register"}));
+}

@@ -150,6 +150,13 @@ public:
             out.appendf("{} var {}: {};\n", address, b.name, resource_text(p, b.type));
     }
 
+    /// sg's own group holds the inline constants at binding 0, and a static sampler at each binding after it.
+    void write_file_sampler(cc::string& out, plan const& p, planned_sampler const& s) const override
+    {
+        out.appendf("@group({}) @binding({}) var {}: {};\n", k_inline_constants_group, s.index + 1, s.name,
+                    resource_text(p, s.type));
+    }
+
     [[nodiscard]] cc::string resource_text(plan const& p, type_id type) const override
     {
         auto const& t = p.m.at(type);

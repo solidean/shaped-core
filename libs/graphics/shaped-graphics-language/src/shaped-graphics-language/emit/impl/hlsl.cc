@@ -8,6 +8,10 @@ namespace
 /// The space slib's binding pass gives the inline constants of a dx12 pipeline, `slib::inline_constants_space`.
 /// sgl does not link slib, so the number is repeated here, and the pipeline layout sg builds is what it has to match.
 constexpr auto k_inline_constants_space = 9;
+/// The space slib gives a pipeline layout's static samplers on dx12, `slib::bound_samplers_space`, repeated for the same reason.
+constexpr auto k_bound_samplers_space = 10;
+/// The descriptor set sg keeps for itself on vulkan, `sg::reserved_binding_group`, whose binding 0 no static sampler takes.
+constexpr auto k_reserved_set = 3;
 
 using namespace sgl;
 using namespace sgl::check;
@@ -196,6 +200,16 @@ public:
         }
         else
             out.appendf("{} {} : register({}{}, space{});\n", type, name, register_class, slot, group);
+    }
+
+    void write_file_sampler(cc::string& out, plan const& p, planned_sampler const& s) const override
+    {
+        if (_is_vulkan)
+            out.appendf("[[vk::binding({}, {})]] {} {};\n", s.index + 1, k_reserved_set, resource_text(p, s.type),
+                        s.name);
+        else
+            out.appendf("{} {} : register(s{}, space{});\n", resource_text(p, s.type), s.name, s.index,
+                        k_bound_samplers_space);
     }
 
     /// dx12's register class: `u` for what the shader writes, `s` for a sampler, `t` for every other resource.

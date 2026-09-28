@@ -62,7 +62,7 @@ What stands in for the design above:
 
 ## Open
 
-* A file-scope sampler as a `@sampler`, once file-scope samplers bind on vulkan and metal (TODO.md).
+* A file-scope sampler as a `@sampler`, which a call without a sampler would then hand the pipeline layout's static sampler.
 * Subscripts, `t[xy]` and `img[xy] = v`, as sugar over `load` and `store`.
 * A gather of an int or a uint texture, which every target has and the prelude does not yet.
 * `level` of a comparison anywhere but 0.0, which some target would need a feature for.

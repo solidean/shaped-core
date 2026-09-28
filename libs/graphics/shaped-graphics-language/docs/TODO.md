@@ -42,9 +42,6 @@ What the compiler carries today is the [spec](spec/_index.md); a construct it do
   WGSL passes no matrix and no array between stages, so both cross as one location per column or element.
 - **The layout double check on dxil.** slib compares what SPIR-V and WGSL place against what SGL states, and reads no DXIL layout: the bytecode carries no reflection container to read it from.
   dx12's packing is SGL's own rule, so this is the target least likely to disagree, and a DXIL arm would need the container kept beside the bytecode.
-- **File-scope samplers.** A `sampler name:` at file scope is a pipeline layout's `sg::bound_sampler`, which vulkan and metal do not bind yet (sg's TODO.md).
-  Once they do, it needs an HLSL address outside every group's space, and the generated `acquire_pipeline` to fill `static_samplers`.
-  It will join the pipeline layout of every entry point that uses it, transitively; until it lands, it is `unsupported-yet`, never refused as invalid.
 - **A linter for SGL's own style, starting with `@expect` on its own line.** An `@expect(…)` stands on the line above its `test`, never before it on the same line; every file here follows that.
   It is a rule of `@expect` and not of attributes: `@vertex fun main(…)` on one line reads fine and stays.
   The parser takes both spellings, so only a linter can hold the line.

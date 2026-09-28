@@ -46,9 +46,12 @@ d.value().bindings                         // name, is_inline, members (constant
                                            // texture / image / sampler members also carry the sg enum values of their binding:
                                            // texture_dimension, sample_type, image_format + access, sampler_type, static_sampler
 d.value().structs                          // the @vertex / @pixel structs: name, edge, members with their location
-d.value().entry_points                     // name, stage, workgroup, bindings (the list as written, @workgroup ones left out), footprint
+d.value().entry_points                     // name, stage, workgroup, bindings (the list as written, @workgroup ones left out), footprint,
+                                           // samplers: the file-scope samplers its code reaches
+d.value().samplers                         // the file-scope samplers: name, index (declaration order), sampler_type, settings, shape
 @expect(footprint = "work: read, work.values: read write")   // on an entry point: pins its footprint (CHK-267), any order
-d.value().pipelines                        // name, stages, layout, vertex_input, target_set, targets, settings, open (the `.host` paths)
+d.value().pipelines                        // name, stages, layout, vertex_input, target_set, targets, settings, open (the `.host` paths),
+                                           // samplers: the file-scope ones any stage reaches, which its one layout holds
                                            // bindings and structs carry `shape`: check::structural_hash of their members,
                                            // 32 hex digits; the type's own name is not in it. What a hot reload compares.
                                            // types are SGL spellings (`float3`, `mat4`); mapping them to a host is the reader's job
@@ -248,7 +251,8 @@ m.types  m.members                         // canonical types; types[0] is the e
                                            // `-> T` returns; fields and binding members
 m.functions  m.parameters  m.binding_lists // signatures; symbol::info is the position in functions / bindings
 m.bindings                                 // binding_info { symbol, is_inline, members }
-m.samplers                                 // sampler_state per `sampler name:` block of a binding; member_info::static_sampler indexes it
+m.samplers                                 // sampler_state per `sampler name:` block; member_info::static_sampler indexes a binding's,
+                                           // and symbol::info a file-scope one's (symbol_kind::sampler, a flat_file_sampler in a tree)
                                            // resource types (texture / image / sampler) are interned like buffers; name_of spells them
                                            // `out image_2d[.rgba8_unorm]`; check/resources.hh holds the shapes and the image formats
 m.files[f].type_at(expr_id)                // side table: type_id, none for what nothing checked
@@ -522,6 +526,8 @@ sgl::print_source(file)      // == file.source for EVERY input: the lossless inv
   A barrier, or a call that takes derivatives implicitly (`sample` without `level`, `ddx`), in non-uniform control flow is `non-uniform-control-flow`.
 - **`@sampler(name)` on a texture member names a sampler of the same binding** (CHK-279), which a method call then leaves out: `material.albedo.sample(uv)`.
   A call without a sampler on a texture without one is `missing-sampler`.
+- **A `sampler name:` at file scope is a static sampler of the pipeline layout** (CHK-314), handed to a builtin by its name: `tex.sample(uv, name)`.
+  It joins the layout of every entry point whose inlined code reaches it, at its position among the file's samplers (EMIT-133); `@sampler` cannot name one yet.
 - **Still `unsupported-yet`:** generics, `mut self` and `mut` parameters, lambdas and function values, nested functions, `use`,
   a `const` whose value is no literal, enum case or const, a `for` over anything but `a ..< b`, a `let` without a value,
   an expression statement that is no call outside a `test`, an `assert` message, and an `assert` whose condition writes.
