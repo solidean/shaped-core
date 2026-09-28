@@ -152,7 +152,11 @@ TEST("sgl driver - a broken source reports where and what, and gives no text")
           == "broken.sgl:9:24: error: unknown-name: missing\n");
 }
 
-TEST("sgl driver - a tree past the depth limit is refused by name, never as a hole a later pass trips over")
+// `main_thread` for the stack: this is the one test that deliberately builds a tree AT the limit, and the check pass
+// recurses over the AST before any flat-tree guard applies.
+// A worker thread has 512 KiB where the main thread has 8 MiB, and an unoptimized sanitizer build spends enough per
+// `check_expr` level to overflow the smaller one well before 40.
+TEST("sgl driver - a tree past the depth limit is refused by name, never as a hole a later pass trips over", main_thread)
 {
     // The `let` is a level of its own, so 39 terms reach exactly 40 levels and 40 terms reach 41.
     // Every target, since each legalizes and emits the tree the check pass handed over.
