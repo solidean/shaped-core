@@ -5,6 +5,15 @@
 #include <shaped-rendering/denoise.hh>
 #include <shaped-rendering/fwd.hh>
 
+/// Which of OIDN's trained networks runs: the same topology, at two widths.
+enum class sr::oidn_network_size : sg::u8
+{
+    /// Half the compute of `base` at the same receptive field, and visibly softer; OIDN's own `fast` quality.
+    small,
+    /// OIDN's `balanced` quality, and for HDR with an albedo and a normal also its `high`, since no large one exists.
+    base,
+};
+
 /// Options only the OIDN member has.
 struct sr::oidn_options
 {
@@ -21,6 +30,9 @@ struct sr::oidn_options
     /// It never changes the image.
     /// libs/graphics/shaped-rendering/docs/denoising.md has the measured time and memory per cap.
     i32 max_tile = 0;
+
+    /// Which trained network runs.
+    oidn_network_size network = oidn_network_size::base;
 };
 
 /// Intel Open Image Denoise: a trained spatial denoiser, run as our own compute shaders.
@@ -51,8 +63,7 @@ public:
     /// What the shared knobs map onto.
     ///
     /// `exposure` becomes the input scale, which is the one shared knob this member genuinely wants.
-    /// `quality` maps onto nothing: OIDN publishes small, base and large networks, and only the base one is fetched —
-    /// see extern/oidn-weights/dependency.yml for why.
+    /// `quality` picks the network the way OIDN's own setting does: `fast` runs the small one, the rest the base one.
     [[nodiscard]] static oidn_options options_for(denoise_settings const& settings);
 
     /// Whether this build and context can run it: the weights were fetched, and its shaders build here.

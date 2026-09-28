@@ -207,104 +207,116 @@ ASYNC_INVOCABLE_TEST("sr - the network agrees with OIDN's own filter", (sg::cont
             normal3.push_back(tg::vec3f(0, 0, 1));
         }
 
-    auto reference = cc::vector<tg::vec3f>::create_filled(size_t(k_size * k_size), tg::vec3f(0, 0, 0));
-    REQUIRE(sr_test::oidn_filter_reference(color3, albedo3, normal3, extent, reference));
-
-    auto const make = [&]
+    // Both networks, each against the quality whose weights it is: the small one is OIDN's `fast`, the base one its
+    // `balanced`.
+    for (auto const size : {sr::oidn_network_size::base, sr::oidn_network_size::small})
     {
-        return ctx.persistent.create_texture_2d({.format = sg::pixel_format::rgba32_float,
-                                                 .width = k_size,
-                                                 .height = k_size,
-                                                 .usage = sg::texture_usage::readonly_texture
-                                                        | sg::texture_usage::readwrite_texture
-                                                        | sg::texture_usage::copy_dst | sg::texture_usage::copy_src});
-    };
+        auto const label = size == sr::oidn_network_size::small ? "small" : "base";
 
-    auto const color = make();
-    auto const albedo = make();
-    auto const normal = make();
-    auto const output = make();
+        auto reference = cc::vector<tg::vec3f>::create_filled(size_t(k_size * k_size), tg::vec3f(0, 0, 0));
+        REQUIRE(sr_test::oidn_filter_reference(color3, albedo3, normal3, extent, reference, size));
 
-    auto const to_rgba = [](cc::span<tg::vec3f const> v)
-    {
-        auto out = cc::vector<tg::vec4f>();
-        out.reserve(v.size());
-        for (auto const& p : v)
-            out.push_back(tg::vec4f(p[0], p[1], p[2], 0));
-        return out;
-    };
+        auto const make = [&]
+        {
+            return ctx.persistent.create_texture_2d(
+                {.format = sg::pixel_format::rgba32_float,
+                 .width = k_size,
+                 .height = k_size,
+                 .usage = sg::texture_usage::readonly_texture | sg::texture_usage::readwrite_texture
+                        | sg::texture_usage::copy_dst | sg::texture_usage::copy_src});
+        };
 
-    auto network = sr::impl::oidn_network();
-    REQUIRE(network.create(ctx, extent)).context("the weights are present and still did not load; sr's log says why");
+        auto const color = make();
+        auto const albedo = make();
+        auto const normal = make();
+        auto const output = make();
 
-    auto ready = network.prepare();
-    for (auto attempt = 0; attempt < 16 && !ready; ++attempt)
-    {
-        cc::async_backlog const* const backlogs[] = {&ctx.backlog};
-        co_await cc::async_settled(cc::async_backlog::settled(backlogs));
-        ready = network.prepare();
-    }
-    REQUIRE(ready).context("the network's pipelines never finished building");
+        auto const to_rgba = [](cc::span<tg::vec3f const> v)
+        {
+            auto out = cc::vector<tg::vec4f>();
+            out.reserve(v.size());
+            for (auto const& p : v)
+                out.push_back(tg::vec4f(p[0], p[1], p[2], 0));
+            return out;
+        };
 
-    auto cmd = ctx.create_command_list();
-    auto const color4 = to_rgba(color3);
-    auto const albedo4 = to_rgba(albedo3);
-    auto const normal4 = to_rgba(normal3);
-    cmd->upload.bytes_to_texture(color.raw(), cc::span<tg::vec4f const>(color4).as_bytes());
-    cmd->upload.bytes_to_texture(albedo.raw(), cc::span<tg::vec4f const>(albedo4).as_bytes());
-    cmd->upload.bytes_to_texture(normal.raw(), cc::span<tg::vec4f const>(normal4).as_bytes());
+        auto network = sr::impl::oidn_network();
+        REQUIRE(network.create(ctx, extent, sr::impl::oidn_network::k_default_tile,
+                               sr::impl::oidn_network::k_tile_overlap, size))
+            .context(cc::format("{}: the weights are present and still did not load; sr's log says why", label));
 
-    REQUIRE(network.execute(*cmd, color, albedo, normal, output, 1.0f));
+        auto ready = network.prepare();
+        for (auto attempt = 0; attempt < 16 && !ready; ++attempt)
+        {
+            cc::async_backlog const* const backlogs[] = {&ctx.backlog};
+            co_await cc::async_settled(cc::async_backlog::settled(backlogs));
+            ready = network.prepare();
+        }
+        REQUIRE(ready).context("the network's pipelines never finished building");
 
-    auto const readback = sg::data_future<tg::vec4f>(cmd->download.bytes_from_texture(output.raw()));
-    ctx.submit_command_list(cc::move(cmd));
-    ctx.advance_epoch();
+        auto cmd = ctx.create_command_list();
+        auto const color4 = to_rgba(color3);
+        auto const albedo4 = to_rgba(albedo3);
+        auto const normal4 = to_rgba(normal3);
+        cmd->upload.bytes_to_texture(color.raw(), cc::span<tg::vec4f const>(color4).as_bytes());
+        cmd->upload.bytes_to_texture(albedo.raw(), cc::span<tg::vec4f const>(albedo4).as_bytes());
+        cmd->upload.bytes_to_texture(normal.raw(), cc::span<tg::vec4f const>(normal4).as_bytes());
 
-    auto const got = co_await readback.data();
-    REQUIRE(got.size() == k_size * k_size);
+        REQUIRE(network.execute(*cmd, color, albedo, normal, output, 1.0f));
 
-    // Reported as the worst and the mean over the interior, because the two say different things: a wrong constant
-    // moves the mean, and a wrong index usually moves one region a lot while leaving the rest alone.
-    auto worst = 0.0f;
-    auto worst_at = tg::vec2i(0, 0);
-    auto total = 0.0;
-    auto samples = 0;
-    for (auto y = 4; y < k_size - 4; ++y)
-        for (auto x = 4; x < k_size - 4; ++x)
-            for (auto c = 0; c < 3; ++c)
-            {
-                auto const mine = got[y * k_size + x][c];
-                auto const theirs = reference[y * k_size + x][c];
-                auto const d = tg::abs(mine - theirs);
-                total += d;
-                ++samples;
-                if (d > worst)
+        auto const readback = sg::data_future<tg::vec4f>(cmd->download.bytes_from_texture(output.raw()));
+        ctx.submit_command_list(cc::move(cmd));
+        ctx.advance_epoch();
+
+        auto const got = co_await readback.data();
+        REQUIRE(got.size() == k_size * k_size);
+
+        // Reported as the worst and the mean over the interior, because the two say different things: a wrong constant
+        // moves the mean, and a wrong index usually moves one region a lot while leaving the rest alone.
+        auto worst = 0.0f;
+        auto worst_at = tg::vec2i(0, 0);
+        auto total = 0.0;
+        auto samples = 0;
+        for (auto y = 4; y < k_size - 4; ++y)
+            for (auto x = 4; x < k_size - 4; ++x)
+                for (auto c = 0; c < 3; ++c)
                 {
-                    worst = d;
-                    worst_at = tg::vec2i(x, y);
+                    auto const mine = got[y * k_size + x][c];
+                    auto const theirs = reference[y * k_size + x][c];
+                    auto const d = tg::abs(mine - theirs);
+                    total += d;
+                    ++samples;
+                    if (d > worst)
+                    {
+                        worst = d;
+                        worst_at = tg::vec2i(x, y);
+                    }
                 }
-            }
 
-    // The bounds have roughly a decade of headroom over what this machine actually returns — a mean of 4.9e-07 and a
-    // worst of 4.3e-06, which is what sixteen layers of fp32 on the GPU against OIDN's own CPU inference costs.
-    // Loose enough not to chase a driver, and tight enough to see a weight decoded one exponent off: doubling the
-    // subnormal weights alone moves the mean to 1.0e-05.
-    auto const mean = f32(total / f64(samples));
-    CHECK(mean < 5e-6f).context(cc::format("mean difference {} over {} samples", mean, samples));
-    CHECK(worst < 5e-5f)
-        .context(cc::format("worst difference {} at {},{} (ours {}, OIDN {})", worst, worst_at[0], worst_at[1],
-                            got[worst_at[1] * k_size + worst_at[0]][0], reference[worst_at[1] * k_size + worst_at[0]][0]));
+        // The bounds have roughly a decade of headroom over what this machine actually returns for the base network — a
+        // mean of 4.9e-07 and a worst of 4.3e-06, which is what sixteen layers of fp32 on the GPU against OIDN's own CPU
+        // inference costs.
+        // Loose enough not to chase a driver, and tight enough to see a weight decoded one exponent off: doubling the
+        // subnormal weights alone moves the mean to 1.0e-05.
+        auto const mean = f32(total / f64(samples));
+        CHECK(mean < 5e-6f).context(cc::format("{}: mean difference {} over {} samples", label, mean, samples));
+        CHECK(worst < 5e-5f)
+            .context(cc::format("{}: worst difference {} at {},{} (ours {}, OIDN {})", label, worst, worst_at[0],
+                                worst_at[1], got[worst_at[1] * k_size + worst_at[0]][0],
+                                reference[worst_at[1] * k_size + worst_at[0]][0]));
 
-    // And the comparison was worth making: OIDN's own output has to differ from what went in, or "we agree" would
-    // only be saying that neither of us did anything.
-    auto changed = 0.0;
-    for (auto n = 0; n < k_size * k_size; ++n)
-        for (auto c = 0; c < 3; ++c)
-            changed += f64(tg::abs(reference[n][c] - color3[n][c]));
-    CHECK(changed / f64(k_size * k_size * 3) > 0.01)
-        .context(cc::format("OIDN changed the image by {} per channel, which is close enough to nothing that agreeing "
-                            "with it says nothing",
-                            changed / f64(k_size * k_size * 3)));
+        // And the comparison was worth making: OIDN's own output has to differ from what went in, or "we agree" would
+        // only be saying that neither of us did anything.
+        auto changed = 0.0;
+        for (auto n = 0; n < k_size * k_size; ++n)
+            for (auto c = 0; c < 3; ++c)
+                changed += f64(tg::abs(reference[n][c] - color3[n][c]));
+        CHECK(changed / f64(k_size * k_size * 3) > 0.01)
+            .context(cc::format("OIDN changed the image by {} per channel, which is close enough to nothing that "
+                                "agreeing "
+                                "with it says nothing",
+                                changed / f64(k_size * k_size * 3)));
+    }
 }
 
 // The member, through the framework rather than through the network directly.
@@ -329,6 +341,14 @@ ASYNC_INVOCABLE_TEST("sr - the OIDN member denoises through the denoise front", 
     CHECK(sr::resolve_denoise_method(ctx, {.method = sr::denoise_method::automatic}) != sr::denoise_method::oidn);
     CHECK(sr::resolve_denoise_method(ctx, {.method = sr::denoise_method::automatic, .fresh_samples = true})
           != sr::denoise_method::oidn);
+
+    // `quality` picks the network the way OIDN's own setting does.
+    CHECK(sr::oidn_denoise_routine::options_for({.quality = sr::denoise_quality::fast}).network
+          == sr::oidn_network_size::small);
+    CHECK(sr::oidn_denoise_routine::options_for({.quality = sr::denoise_quality::balanced}).network
+          == sr::oidn_network_size::base);
+    CHECK(sr::oidn_denoise_routine::options_for({.quality = sr::denoise_quality::best}).network
+          == sr::oidn_network_size::base);
 
     sr::oidn_denoise_routine::prewarm(ctx);
     (void)co_await ctx.routines.idle_completion();

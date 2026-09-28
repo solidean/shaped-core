@@ -6,6 +6,7 @@
 #include <shaped-graphics/resource/buffer.hh>
 #include <shaped-graphics/resource/texture.hh>
 #include <shaped-rendering/fwd.hh>
+#include <shaped-rendering/oidn_denoise_routine.hh>
 #include <typed-geometry/linalg/vec.hh>
 
 /// Open Image Denoise's trained U-Net, run as our own compute shaders.
@@ -43,10 +44,10 @@ struct oidn_weights
     cc::vector<i32> out_channels;
 };
 
-/// The weights, read and packed on the first call and shared by every later one.
+/// The weights of one network, read and packed on the first call for it and shared by every later one.
 ///
-/// Null when they were not fetched, or are not the network this was written against; that is logged once.
-[[nodiscard]] oidn_weights const* oidn_load_weights();
+/// Null when they were not fetched, or are not the topology this was written against; that is logged once.
+[[nodiscard]] oidn_weights const* oidn_load_weights(oidn_network_size size);
 
 /// Whether the trained weights were fetched into this build, which is what the member's availability rests on.
 ///
@@ -135,7 +136,12 @@ public:
     [[nodiscard]] bool create(sg::context& ctx,
                               tg::vec2i image_extent,
                               int max_tile = k_default_tile,
-                              int overlap = k_tile_overlap);
+                              int overlap = k_tile_overlap,
+                              oidn_network_size size = oidn_network_size::base);
+
+    /// What `create` was asked for, which is what a caller compares against to know whether to create again.
+    [[nodiscard]] oidn_network_size size() const { return _size; }
+    [[nodiscard]] int max_tile() const { return _max_tile; }
 
     /// Builds whichever pipelines have finished compiling since the last call.
     ///
@@ -188,6 +194,8 @@ private:
     void build_groups();
 
     sg::context* _ctx = nullptr;
+    oidn_network_size _size = oidn_network_size::base;
+    int _max_tile = 0;
     tg::vec2i _image_extent = tg::vec2i(0, 0);
     tg::vec2i _extent = tg::vec2i(0, 0); // the padded one the tensors are sized by — one TILE, not the image
 

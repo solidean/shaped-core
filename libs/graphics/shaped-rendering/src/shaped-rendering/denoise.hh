@@ -100,6 +100,7 @@ struct sr::denoise_settings
 
     /// Every member reads this.
     /// atrous and svgf: the number of wavelet passes (3, 4, 5).
+    /// oidn: `fast` runs its small network, the others its base one.
     denoise_quality quality = denoise_quality::balanced;
 
     /// In [0, 1]; higher keeps more detail and removes less noise.

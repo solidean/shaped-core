@@ -128,8 +128,14 @@ constexpr int k_conv_texels = 8;
 {
     return tg::vec2i(extent[0] >> level, extent[1] >> level);
 }
-/// Reads, checks and packs the weights file, which is what `oidn_load_weights` does once per process.
-[[nodiscard]] cc::optional<oidn_weights> load_weights_from_disk();
+/// The file each network is fetched as, in `k_weights_dir`.
+[[nodiscard]] char const* weights_file(oidn_network_size size)
+{
+    return size == oidn_network_size::small ? "rt_hdr_alb_nrm_small.tza" : "rt_hdr_alb_nrm.tza";
+}
+
+/// Reads, checks and packs one weights file, which is what `oidn_load_weights` does once per network per process.
+[[nodiscard]] cc::optional<oidn_weights> load_weights_from_disk(oidn_network_size size);
 } // namespace
 
 f32 half_to_float(u16 h)
@@ -174,25 +180,30 @@ bool oidn_weights_present()
         auto const dir = cc::string_view(k_weights_dir);
         if (dir.empty())
             return false;
-        return cc::file_read_stream_adapter::open(cc::string(dir) + "/rt_hdr_alb_nrm.tza").has_value();
+        for (auto const size : {oidn_network_size::small, oidn_network_size::base})
+            if (!cc::file_read_stream_adapter::open(cc::string(dir) + "/" + weights_file(size)).has_value())
+                return false;
+        return true;
     }();
     return present;
 }
 
-oidn_weights const* oidn_load_weights()
+oidn_weights const* oidn_load_weights(oidn_network_size size)
 {
     // Thread-safe by the language's rules for a function-local static, and logged at most once for the same reason.
-    static auto const loaded = load_weights_from_disk();
+    static auto const small = load_weights_from_disk(oidn_network_size::small);
+    static auto const base = load_weights_from_disk(oidn_network_size::base);
+    auto const& loaded = size == oidn_network_size::small ? small : base;
     return loaded.has_value() ? &loaded.value() : nullptr;
 }
 
 namespace
 {
-cc::optional<oidn_weights> load_weights_from_disk()
+cc::optional<oidn_weights> load_weights_from_disk(oidn_network_size size)
 {
     auto out = oidn_weights();
 
-    auto const path = cc::string(k_weights_dir) + "/rt_hdr_alb_nrm.tza";
+    auto const path = cc::string(k_weights_dir) + "/" + weights_file(size);
     auto adapter = cc::file_read_stream_adapter::open(path);
     if (adapter.has_error())
     {
@@ -351,9 +362,11 @@ cc::optional<oidn_weights> load_weights_from_disk()
 }
 } // namespace
 
-bool oidn_network::create(sg::context& ctx, tg::vec2i image_extent, int max_tile, int overlap)
+bool oidn_network::create(sg::context& ctx, tg::vec2i image_extent, int max_tile, int overlap, oidn_network_size size)
 {
     _ctx = &ctx;
+    _size = size;
+    _max_tile = max_tile;
     _image_extent = image_extent;
 
     // One tile or many, decided here and nowhere else.
@@ -423,7 +436,7 @@ bool oidn_network::create(sg::context& ctx, tg::vec2i image_extent, int max_tile
 
     auto const extent = _extent;
 
-    _source = oidn_load_weights();
+    _source = oidn_load_weights(size);
     if (_source == nullptr)
         return false;
 

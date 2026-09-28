@@ -16,7 +16,7 @@ upstreams:
 
     # The pin over the whole set: the sha256 of the `path sha256` lines below, in order.
     # One hash to compare against .install/pin.txt, while every file is still verified on its own.
-    pin_hash: ae2213b4db7202df12fa06a06d66a82553694c1dd35dd17adc535b1f274abb96
+    pin_hash: 83f1a5e24fe0b95d4e1fd293a722ccf3a0fe780f9506aa6af285ef1c0a6c153d
 
     license: Apache-2.0
     license_files: [.install/LICENSE.txt]
@@ -26,24 +26,28 @@ upstreams:
         sha256: cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30
       - path: README.md
         sha256: 38db205281c5e1be1a4514f475ea1e41d61f5bd5c39fa98c2d00057c5193838a
-      # The one network the member runs: HDR radiance with an albedo and a normal, which is the guide set sv produces.
+      # The two networks the member runs: HDR radiance with an albedo and a normal, which is the guide set sv produces.
+      # The base one is OIDN's balanced quality, and the small one its fast quality at half the compute.
       # `lfs` picks the media host: only the weights are LFS-tracked, and the two text files above are not.
       - path: rt_hdr_alb_nrm.tza
         sha256: e586ef2ff48d7fbb7611986405220ed8fc5c13ca79bfc40be4dc742fbf959e1a
         lfs: true
+      - path: rt_hdr_alb_nrm_small.tza
+        sha256: 980ea307e7825cae23ed8b1addf8de62ece84b61094795a5631ebf1c91b2e1a7
+        lfs: true
     notes: |
-      The trained weights of Intel Open Image Denoise, and 1.8 MB rather than the 53 MB the library they usually arrive inside weighs.
+      The trained weights of Intel Open Image Denoise, and 2.5 MB rather than the 53 MB the library they usually arrive inside weighs.
       Apache-2.0, the same license as the code, and the repository README says so explicitly — so they are ours to redistribute and to run against an implementation of our own.
 
       THE POINT OF FETCHING THEM SEPARATELY IS THAT WE DO NOT RUN INTEL'S INFERENCE.
       OIDN's own GPU kernels are CUDA, HIP, SYCL and Metal sources built on NVIDIA cutlass and ROCm composable_kernel — there is no portable kernel in that release to lift, and its CPU device would mean a download and an upload every frame.
       The network itself is small and ordinary: sixteen 3x3 convolutions with a bias and a ReLU, four 2x2 max pools, four nearest upsamples with a skip concat.
-      That is a set of compute shaders, so shaped-rendering runs it on every backend sg has.
+      That is a set of compute shaders, so shaped-rendering runs it itself.
 
       TRACKED ON THE DEFAULT BRANCH, not a release: this repository publishes none, so the pin is a commit.
       The .tza files are Git LFS-tracked, so they come from `media.githubusercontent.com/media/...` — `raw` serves the pointer text, which would pass no digest check here and would be a 132-byte "weights blob" if it did.
       The LICENSE and README beside them are ordinary files that `media` 404s on, which is what the per-file `lfs` flag picks between.
 
-      ONE NETWORK, deliberately.
-      The repository carries about two dozen: LDR and HDR, with and without albedo and normal, in small, base and large sizes.
-      `rt_hdr_alb_nrm` is the one that matches what the tracer produces, and each of the others is another 1-2 MB and another set of layer widths to have tested.
+      TWO NETWORKS, deliberately, of about two dozen: LDR and HDR, with and without albedo and normal, in small, base and large sizes.
+      `rt_hdr_alb_nrm` matches what the tracer produces, in base and small; there is no large one for it.
+      Colour-only and LDR would be no faster — the input width reaches only two layers — so each would be another set of layer widths to test for nothing.

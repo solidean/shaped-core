@@ -18,10 +18,10 @@ using namespace cc::primitive_defines;
 
 namespace
 {
-/// The pinned blob, or empty when the weights were not fetched into this build.
-[[nodiscard]] cc::vector<byte> load_weights()
+/// One pinned blob, or empty when the weights were not fetched into this build.
+[[nodiscard]] cc::vector<byte> load_weights(char const* file)
 {
-    auto const path = cc::string(SR_OIDN_WEIGHTS_DIR) + "/rt_hdr_alb_nrm.tza";
+    auto const path = cc::string(SR_OIDN_WEIGHTS_DIR) + "/" + file;
 
     // The adapter owns the buffer the stream reads through, so it must outlive the stream.
     auto adapter = cc::file_read_stream_adapter::open(path);
@@ -75,14 +75,7 @@ struct archive_writer
 
 TEST("sr - the OIDN weights parse into the network the shaders expect")
 {
-    auto const blob = load_weights();
-    if (blob.empty())
-        SKIP("the OIDN weights were not fetched (extern/oidn-weights/fetch-oidn-weights.py)");
-
-    auto const tensors = sr::impl::read_tza(blob);
-    REQUIRE(tensors.size() == 32).context(cc::format("{} tensors", tensors.size()));
-
-    // Every layer, with the channel counts the shaders are sized from.
+    // Every layer of both networks, with the channel counts the shaders are sized from.
     // `a` layers take a concatenation, so their input width is the upsampled feature count plus the skip's — the
     // arithmetic that has to keep holding is spelled out beside each one.
     struct layer
@@ -91,7 +84,7 @@ TEST("sr - the OIDN weights parse into the network the shaders expect")
         int out_channels = 0;
         int in_channels = 0;
     };
-    constexpr layer layers[] = {
+    constexpr layer base_layers[] = {
         {"enc_conv0", 32, 9}, // 3 radiance + 3 albedo + 3 normal
         {"enc_conv1", 32, 32},    {"enc_conv2", 48, 32},   {"enc_conv3", 64, 48},    {"enc_conv4", 80, 64},
         {"enc_conv5a", 96, 80},   {"enc_conv5b", 96, 96},  {"dec_conv4a", 112, 160}, // 96 upsampled + 64 from pool3
@@ -100,36 +93,66 @@ TEST("sr - the OIDN weights parse into the network the shaders expect")
         {"dec_conv2b", 64, 64},   {"dec_conv1a", 64, 73},                            // 64 + the 9 input channels
         {"dec_conv1b", 32, 64},   {"dec_conv0", 3, 32},                              // back to radiance
     };
+    // The same topology with every encoder at 32, which is what halves its compute.
+    constexpr layer small_layers[] = {
+        {"enc_conv0", 32, 9},   {"enc_conv1", 32, 32},  {"enc_conv2", 32, 32},
+        {"enc_conv3", 32, 32},  {"enc_conv4", 32, 32},  {"enc_conv5a", 32, 32},
+        {"enc_conv5b", 32, 32}, {"dec_conv4a", 64, 64}, // 32 upsampled + 32 from pool3
+        {"dec_conv4b", 64, 64}, {"dec_conv3a", 64, 96}, // 64 + 32 from pool2
+        {"dec_conv3b", 64, 64}, {"dec_conv2a", 64, 96}, // 64 + 32 from pool1
+        {"dec_conv2b", 32, 64}, {"dec_conv1a", 32, 41}, // 32 + the 9 input channels
+        {"dec_conv1b", 32, 32}, {"dec_conv0", 3, 32},   // back to radiance
+    };
 
-    for (auto const& l : layers)
+    struct network
     {
-        auto const* const weight = sr::impl::find_tza(tensors, cc::string(l.name) + ".weight");
-        REQUIRE(weight != nullptr).context(cc::format("{}.weight is missing", l.name));
-        REQUIRE(weight->dims.size() == 4).context(cc::format("{}.weight is not oihw", l.name));
+        char const* file = nullptr;
+        cc::span<layer const> layers;
+    };
 
-        CHECK(weight->layout == "oihw").context(cc::format("{}.weight layout is '{}'", l.name, weight->layout));
-        CHECK(weight->dims[0] == l.out_channels)
-            .context(cc::format("{}.weight has {} output channels", l.name, weight->dims[0]));
-        CHECK(weight->dims[1] == l.in_channels)
-            .context(cc::format("{}.weight has {} input channels", l.name, weight->dims[1]));
+    for (auto const& net : {network{.file = "rt_hdr_alb_nrm.tza", .layers = base_layers},
+                            network{.file = "rt_hdr_alb_nrm_small.tza", .layers = small_layers}})
+    {
+        auto const blob = load_weights(net.file);
+        if (blob.empty())
+            SKIP("the OIDN weights were not fetched (extern/oidn-weights/fetch-oidn-weights.py)");
 
-        // 3x3 everywhere, which is what lets one convolution shader serve the whole network.
-        CHECK(weight->dims[2] == 3);
-        CHECK(weight->dims[3] == 3);
+        auto const tensors = sr::impl::read_tza(blob);
+        REQUIRE(tensors.size() == 32).context(cc::format("{}: {} tensors", net.file, tensors.size()));
 
-        // Half precision everywhere, which is what the weight upload assumes.
-        CHECK(weight->element == sr::impl::tza_element::float16).context(cc::format("{}.weight is not fp16", l.name));
+        for (auto const& l : net.layers)
+        {
+            auto const* const weight = sr::impl::find_tza(tensors, cc::string(l.name) + ".weight");
+            REQUIRE(weight != nullptr).context(cc::format("{}: {}.weight is missing", net.file, l.name));
+            REQUIRE(weight->dims.size() == 4).context(cc::format("{}: {}.weight is not oihw", net.file, l.name));
 
-        auto const* const bias = sr::impl::find_tza(tensors, cc::string(l.name) + ".bias");
-        REQUIRE(bias != nullptr).context(cc::format("{}.bias is missing", l.name));
-        CHECK(bias->dims.size() == 1);
-        CHECK(bias->dims[0] == l.out_channels);
-        CHECK(bias->element == sr::impl::tza_element::float16);
+            CHECK(weight->layout == "oihw")
+                .context(cc::format("{}: {}.weight layout is '{}'", net.file, l.name, weight->layout));
+            CHECK(weight->dims[0] == l.out_channels)
+                .context(cc::format("{}: {}.weight has {} output channels", net.file, l.name, weight->dims[0]));
+            CHECK(weight->dims[1] == l.in_channels)
+                .context(cc::format("{}: {}.weight has {} input channels", net.file, l.name, weight->dims[1]));
+
+            // 3x3 everywhere, which is what lets one convolution shader serve the whole network.
+            CHECK(weight->dims[2] == 3);
+            CHECK(weight->dims[3] == 3);
+
+            // Half precision everywhere, which is what the weight upload assumes.
+            CHECK(weight->element == sr::impl::tza_element::float16)
+                .context(cc::format("{}: {}.weight is not fp16", net.file, l.name));
+
+            auto const* const bias = sr::impl::find_tza(tensors, cc::string(l.name) + ".bias");
+            REQUIRE(bias != nullptr).context(cc::format("{}: {}.bias is missing", net.file, l.name));
+            CHECK(bias->dims.size() == 1);
+            CHECK(bias->dims[0] == l.out_channels);
+            CHECK(bias->element == sr::impl::tza_element::float16);
+        }
+
+        // Every tensor's declared bytes are inside the blob and match its shape.
+        for (auto const& t : tensors)
+            CHECK(t.data.size() == t.element_count() * 2)
+                .context(cc::format("{}: {} has {} bytes", net.file, t.name, t.data.size()));
     }
-
-    // Every tensor's declared bytes are inside the blob and match its shape.
-    for (auto const& t : tensors)
-        CHECK(t.data.size() == t.element_count() * 2).context(cc::format("{} has {} bytes", t.name, t.data.size()));
 }
 
 // A blob that is not one comes back empty rather than reading past its end.

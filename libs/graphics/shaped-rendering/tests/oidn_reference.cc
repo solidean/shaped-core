@@ -27,7 +27,8 @@ bool oidn_filter_reference(cc::span<tg::vec3f const> color,
                            cc::span<tg::vec3f const> albedo,
                            cc::span<tg::vec3f const> normal,
                            tg::vec2i extent,
-                           cc::span<tg::vec3f> out)
+                           cc::span<tg::vec3f> out,
+                           sr::oidn_network_size size)
 {
     auto const count = isize(extent[0]) * isize(extent[1]);
     if (color.size() != count || albedo.size() != count || normal.size() != count || out.size() != count)
@@ -60,7 +61,7 @@ bool oidn_filter_reference(cc::span<tg::vec3f const> color,
     // different pictures — which looks like a wrong network rather than a different exposure.
     filter.set("hdr", true);
     filter.set("inputScale", 1.0f);
-    filter.set("quality", OIDN_QUALITY_BALANCED);
+    filter.set("quality", size == sr::oidn_network_size::small ? OIDN_QUALITY_FAST : OIDN_QUALITY_BALANCED);
     filter.commit();
 
     filter.execute();

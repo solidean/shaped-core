@@ -14,7 +14,10 @@ using impl::is_set;
 
 oidn_options oidn_denoise_routine::options_for(denoise_settings const& settings)
 {
-    return {.input_scale = settings.exposure};
+    return {
+        .input_scale = settings.exposure,
+        .network = settings.quality == denoise_quality::fast ? oidn_network_size::small : oidn_network_size::base,
+    };
 }
 
 bool oidn_denoise_routine::is_available(sg::context const& ctx)
@@ -72,11 +75,19 @@ denoise_outcome oidn_denoise_routine::execute(sg::command_list& cmd,
     auto const extent = extent_of(in.color);
     auto const restarted = history._prepare(denoise_method::oidn, extent);
 
+    // A network is built for one size and one tile cap as well as one extent, so a change of either rebuilds it.
+    auto const tile = options.max_tile > 0 ? options.max_tile : impl::oidn_network::k_default_tile;
+    if (history._member_state != nullptr)
+    {
+        auto const& held = *static_cast<impl::oidn_network const*>(history._member_state.get());
+        if (held.size() != options.network || held.max_tile() != tile)
+            history._member_state = nullptr;
+    }
+
     if (history._member_state == nullptr)
     {
         auto fresh = std::make_shared<impl::oidn_network>();
-        auto const tile = options.max_tile > 0 ? options.max_tile : impl::oidn_network::k_default_tile;
-        if (!fresh->create(ctx, extent, tile))
+        if (!fresh->create(ctx, extent, tile, impl::oidn_network::k_tile_overlap, options.network))
             return outcome_of(denoise_status::failed);
         history._member_state = cc::move(fresh);
     }

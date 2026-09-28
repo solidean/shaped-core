@@ -3,6 +3,7 @@
 #include <clean-core/container/span.hh>
 #include <clean-core/fwd.hh>
 #include <shaped-rendering/fwd.hh>
+#include <shaped-rendering/oidn_denoise_routine.hh>
 #include <typed-geometry/linalg/vec.hh>
 
 /// Intel's own Open Image Denoise filter, as the oracle the OIDN member is measured against.
@@ -27,15 +28,16 @@ namespace sr_test
 /// Every choice that could silently differ — the transfer curve, the weight layout, the padding, the order of the
 /// layers — shows up as a difference here and nowhere else.
 ///
-/// Configured to match what the member does: HDR radiance with an albedo and a normal, an input scale of one, and
-/// the quality whose weights are the ones we load.
+/// Configured to match what the member does: HDR radiance with an albedo and a normal, and an input scale of one.
+/// `size` picks the quality whose weights are that network: `fast` for the small one, `balanced` for the base one.
 /// `color`, `albedo` and `normal` are `extent`-sized and row-major; `out` is written the same way.
 /// False when OIDN is not compiled in, or when it refused, which is logged.
 [[nodiscard]] bool oidn_filter_reference(cc::span<tg::vec3f const> color,
                                          cc::span<tg::vec3f const> albedo,
                                          cc::span<tg::vec3f const> normal,
                                          tg::vec2i extent,
-                                         cc::span<tg::vec3f> out);
+                                         cc::span<tg::vec3f> out,
+                                         sr::oidn_network_size size = sr::oidn_network_size::base);
 
 /// Whether a CPU device can actually be created on this machine.
 ///

@@ -25,7 +25,8 @@ bool oidn_filter_reference(cc::span<tg::vec3f const>,
                            cc::span<tg::vec3f const>,
                            cc::span<tg::vec3f const>,
                            tg::vec2i,
-                           cc::span<tg::vec3f>)
+                           cc::span<tg::vec3f>,
+                           sr::oidn_network_size)
 {
     return false;
 }

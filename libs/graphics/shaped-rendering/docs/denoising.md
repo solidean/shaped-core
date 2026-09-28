@@ -39,7 +39,9 @@ So the member runs that network in five compute shaders of its own, with no vend
 They are HLSL today, so it runs where the other native members do, on dx12 and vulkan.
 
 **It is correct and portable, and far too slow for a frame loop** — roughly 0.2 s per megapixel, which is why `automatic` never picks it.
-One network is fetched, `rt_hdr_alb_nrm`: HDR radiance with an albedo and a normal, the guides the tracer writes, and the network OIDN's balanced quality uses for them.
+Two networks are fetched, both `rt_hdr_alb_nrm`: HDR radiance with an albedo and a normal, the guides the tracer writes.
+The base one is what OIDN's balanced quality runs, and the small one what its fast quality runs: the same topology with every encoder at 32 channels, at half the compute.
+`denoise_settings::quality` picks between them the same way, `fast` running the small one; there is no large network for these guides.
 
 ### How it runs
 
@@ -99,8 +101,28 @@ Both were timed alike: device-resident buffers, warmed, best of several, with on
 - **Once the member runs on WebGPU, its default limits will cap the tile before memory does.**
   `maxStorageBufferBindingSize` defaults to 128 MiB, and the largest binding is one full-resolution map of sixty-four channels.
   That is 50 MiB at the default cap, 110 MiB at 768 and 137 MiB at 1024, so the cap cannot go far past 768 on a device with default limits.
+- **The small network** runs the playground's 1600x900 frame at 6.0 fps against the base one's 3.7, tracer included, which is 1.6x of the 2x its compute predicts.
+  The table above is the base network's; the small one has no 1080p timing yet.
 - Reproducing the CUDA timing means creating `oidn::DeviceType::CUDA` in `tests/oidn_reference.cc`, with `OpenImageDenoise_device_cuda.dll` from the upstream archive beside the core.
   The fetch keeps only the CPU device.
+
+### Getting faster
+
+In order of what each buys for what it costs, with what SGL would have to grow for a port to keep up.
+The oracle below is what makes each step cheap to try: a step either keeps the output within its bounds of Intel's, or visibly does not.
+
+1. **Workgroup-memory tiling, implicit-GEMM style.**
+   A workgroup stages the input halo and a slab of weights in shared memory, and each thread computes a block of outputs by channels from registers.
+   It attacks the measured limit, memory divergence, and a well-tuned fp32 kernel lands near 60 ms at 1080p against 378 today.
+   SGL needs workgroup memory and a barrier, both available on every backend.
+2. **Fusion**: each max pool folded into the convolution before it, and each upsample and concat into the convolution after it, as OIDN does.
+   It removes eight passes and their round trips through memory.
+3. **Half precision**, behind a feature level, for storage first and arithmetic second; [TODO.md](TODO.md) has what it takes here.
+4. **Winograd F(2x2, 3x3)**, since every layer is 3x3: 2.25x fewer multiplies, less after its transforms, and worth doing only after 1.
+5. **Matrix hardware**, the remaining ~3x to OIDN's own 20.6 ms.
+   Vulkan and Metal expose it today; DirectX's is in preview and WebGPU's experimental, so it waits, and a non-matrix path stays mandatory.
+
+[compute-throughput.md](../../shaped-graphics-language/docs/spec/incubator/compute-throughput.md) records what 1, 3 and 5 ask of SGL.
 
 ### Held to Intel's output
 
@@ -108,6 +130,7 @@ Both were timed alike: device-resident buffers, warmed, best of several, with on
 The library it needs is fetched on request, with `uv run extern/oidn/fetch-oidn.py`, and the comparison skips without it.
 
 - Untiled, over 64x64: a mean difference of 4.9e-07 and a worst of 4.3e-06.
+- The small network, untiled over 64x64 against Intel's fast quality: a mean of 4.7e-07 and a worst of 3.6e-06.
 - Tiled, nine tiles over 384x384 at a 288 cap: a mean of 4.9e-07 and a worst of 6.6e-06.
 - Reading the weights in the wrong source layout moves the mean to 0.29, and decoding subnormal weights one exponent off moves it to 1.0e-05.
   The bounds sit a decade above the measured values, between the two.
