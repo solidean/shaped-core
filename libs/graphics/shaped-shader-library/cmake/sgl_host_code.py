@@ -34,27 +34,22 @@ HOST_TYPES: dict[str, tuple[str, int, str | None]] = {
     "bool32": ("slib::gpu_bool", 4, None),
 }
 
-# The package's structs in GPU memory, by name: their size, which `register_memory_structs` fills before anything is emitted.
-MEMORY_STRUCTS: dict[str, int] = {}
+def memory_structs_of(entries: SglEntries) -> dict[str, int]:
+    """Every struct the package places in GPU memory, by name, and its size: each is a host type named as SGL names it."""
+    return {s["name"]: s["size"] for _, s in entries.memory_structs}
 
 
-def register_memory_structs(entries: SglEntries) -> None:
-    """Makes every struct the package places in GPU memory a host type, named as SGL names it."""
-    MEMORY_STRUCTS.clear()
-    for _, s in entries.memory_structs:
-        MEMORY_STRUCTS[s["name"]] = s["size"]
-
-
-def host_size(sgl_type: str) -> int:
-    return MEMORY_STRUCTS[sgl_type] if sgl_type in MEMORY_STRUCTS else HOST_TYPES[sgl_type][1]
+def host_size(memory: dict[str, int], sgl_type: str) -> int:
+    return memory[sgl_type] if sgl_type in memory else HOST_TYPES[sgl_type][1]
 
 
 class HostCodeError(Exception):
     """A declaration the compiler accepts and the host has no type for yet."""
 
 
-def host_type(package: str, where: str, sgl_type: str) -> str:
-    if sgl_type in MEMORY_STRUCTS:
+def host_type(package: str, memory: dict[str, int], where: str, sgl_type: str) -> str:
+    """The C++ spelling of `sgl_type`: one of `memory`, the package's structs in GPU memory, or a builtin's."""
+    if sgl_type in memory:
         return sgl_type
     known = HOST_TYPES.get(sgl_type)
     if known is None:
@@ -85,7 +80,6 @@ def includes(entries: SglEntries) -> list[str]:
     """The headers the generated SGL types need, beyond what every package header includes."""
     if not entries.bindings and not entries.vertex_inputs and not entries.render_targets:
         return []
-    register_memory_structs(entries)
     out = ["<clean-core/container/span.hh>", "<clean-core/container/vector.hh>",
            "<shaped-graphics/binding/binding.hh>", "<shaped-graphics/binding/binding_group.hh>"]
     if entries.vertex_inputs:
@@ -122,7 +116,7 @@ def includes(entries: SglEntries) -> list[str]:
 # ---- a resource group ----------------------------------------------------------------------------------------------
 
 
-def emit_group(package: str, namespace: str, file: SglFile, binding: dict) -> str:
+def emit_group(package: str, memory: dict[str, int], namespace: str, file: SglFile, binding: dict) -> str:
     name = binding["name"]
     out = [f"\nnamespace {namespace}\n{{\n"]
     out.append(f"/// `binding {name}` of {file.path}, as the host fills it. Generated; do not edit.\n")
@@ -140,7 +134,7 @@ def emit_group(package: str, namespace: str, file: SglFile, binding: dict) -> st
     for member in binding["members"]:
         where = f"'{file.path}' `binding {name}` member '{member['name']}'"
         if member["kind"] == "constant":
-            out.append(f"    {host_type(package, where, member['type'])} {member['name']}; ///< `{member['type']}`, "
+            out.append(f"    {host_type(package, memory, where, member['type'])} {member['name']}; ///< `{member['type']}`, "
                        f"at byte {member['offset']} of the group's constant buffer\n")
             continue
         if member["kind"] == "texture":
@@ -155,7 +149,7 @@ def emit_group(package: str, namespace: str, file: SglFile, binding: dict) -> st
             if "static_sampler" not in member:
                 out.append(f"    sg::sampler {member['name']}; ///< `{member['type']}`, which the group binds\n")
             continue
-        element = host_type(package, where, member["type"])
+        element = host_type(package, memory, where, member["type"])
         is_written = member["access"] == "read_write"
         access = "readwrite" if is_written else "readonly"
         sgl_type = f"mut buffer[{member['type']}]" if is_written else f"buffer[{member['type']}]"
@@ -245,7 +239,7 @@ def binding_entry(member: dict) -> str:
     return head + f".type = sg::binding_type::sampler, .sampler_type = sg::sampler_binding_type::{member['sampler_type']}}}"
 
 
-def emit_group_impl(package: str, namespace: str, file: SglFile, binding: dict) -> str:
+def emit_group_impl(package: str, memory: dict[str, int], namespace: str, file: SglFile, binding: dict) -> str:
     name = binding["name"]
     qualified = f"{namespace}::{name}"
     resources = [m for m in binding["members"] if m["kind"] != "constant"]
@@ -290,19 +284,19 @@ def emit_group_impl(package: str, namespace: str, file: SglFile, binding: dict) 
     if has_block(binding):
         out.append(f"\nvoid {qualified}::write_constants(cc::span<cc::byte> block) const\n{{\n")
         out.append("    CC_ASSERT(block.size() >= constants_size, \"the block is smaller than the group's constant buffer\");\n")
-        out.append(pack_members(package, file, name, binding))
+        out.append(pack_members(package, memory, file, name, binding))
         out.append("}\n")
     return "".join(out)
 
 
-def pack_members(package: str, file: SglFile, name: str, binding: dict) -> str:
+def pack_members(package: str, memory: dict[str, int], file: SglFile, name: str, binding: dict) -> str:
     """Each plain member copied to the offset the compiler placed it at, its size checked against the shader's."""
     out = []
     for member in binding["members"]:
         if member["kind"] != "constant":
             continue
-        cpp = host_type(package, f"'{file.path}' `binding {name}` member '{member['name']}'", member["type"])
-        size = host_size(member["type"])
+        cpp = host_type(package, memory, f"'{file.path}' `binding {name}` member '{member['name']}'", member["type"])
+        size = host_size(memory, member["type"])
         if size != member["size"]:
             raise HostCodeError(
                 f"shader package '{package}': '{file.path}' `binding {name}` member '{member['name']}' is "
@@ -315,7 +309,7 @@ def pack_members(package: str, file: SglFile, name: str, binding: dict) -> str:
 # ---- a struct in GPU memory ---------------------------------------------------------------------------------------
 
 
-def padded_fields(package: str, where: str, members: list[dict], indent: str) -> str:
+def padded_fields(package: str, memory: dict[str, int], where: str, members: list[dict], indent: str) -> str:
     """Each member as a field, with a named padding field wherever SGL's layout leaves a gap before one.
 
     Padding is visible rather than implied, and `= {}`, so a designated initializer never has to name it.
@@ -331,7 +325,7 @@ def padded_fields(package: str, where: str, members: list[dict], indent: str) ->
             extent = "" if words == 1 else f"[{words}]"
             out.append(f"{indent}cc::u32 _pad{padding}{extent} = {{}}; ///< {gap} bytes SGL's layout leaves free\n")
             padding += 1
-        cpp = host_type(package, f"{where} member '{member['name']}'", member["type"])
+        cpp = host_type(package, memory, f"{where} member '{member['name']}'", member["type"])
         out.append(f"{indent}{cpp} {member['name']}; ///< `{member['type']}`, at byte {member['offset']}\n")
         end = member["offset"] + member["size"]
     return "".join(out)
@@ -345,14 +339,14 @@ def layout_asserts(qualified: str, members: list[dict], size: int) -> str:
     return "".join(out)
 
 
-def emit_memory_struct(package: str, namespace: str, file: SglFile, struct: dict) -> str:
+def emit_memory_struct(package: str, memory: dict[str, int], namespace: str, file: SglFile, struct: dict) -> str:
     name = struct["name"]
     space = "a constant block" if struct["space"] == "constants" else "a storage buffer"
     out = [f"\nnamespace {namespace}\n{{\n"]
     out.append(f"/// `struct {name}` of {file.path}, byte for byte as {space} holds it. Generated; do not edit.\n")
     out.append("/// Copy it into GPU memory as it is: every member sits where the shader reads it on every backend.\n")
     out.append(f"struct {name}\n{{\n")
-    out.append(padded_fields(package, f"'{file.path}' `struct {name}`", struct["members"], "    "))
+    out.append(padded_fields(package, memory, f"'{file.path}' `struct {name}`", struct["members"], "    "))
     out.append("};\n")
     out.append(f"}} // namespace {namespace}\n")
     return "".join(out)
@@ -365,7 +359,7 @@ def emit_memory_struct_impl(namespace: str, struct: dict) -> str:
 # ---- an @inline block ----------------------------------------------------------------------------------------------
 
 
-def emit_inline(package: str, namespace: str, file: SglFile, binding: dict) -> str:
+def emit_inline(package: str, memory: dict[str, int], namespace: str, file: SglFile, binding: dict) -> str:
     """An `@inline binding`: the block byte for byte as the shader reads it, padding included, and `to_block` a copy of it."""
     name = binding["name"]
     out = [f"\nnamespace {namespace}\n{{\n"]
@@ -373,7 +367,7 @@ def emit_inline(package: str, namespace: str, file: SglFile, binding: dict) -> s
     out.append("///\n")
     out.append(f"///     pass.set_inline_constants({namespace}::{name}{{...}}.to_block());\n")
     out.append(f"struct {name}\n{{\n")
-    out.append(padded_fields(package, f"'{file.path}' `@inline binding {name}`", binding["members"], "    "))
+    out.append(padded_fields(package, memory, f"'{file.path}' `@inline binding {name}`", binding["members"], "    "))
     out.append("\n")
     out.append("    /// The block's size in bytes, as the shader lays it out.\n")
     out.append(f"    static constexpr cc::isize block_size = {binding['block_size']};\n")
@@ -390,11 +384,11 @@ def emit_inline(package: str, namespace: str, file: SglFile, binding: dict) -> s
     return "".join(out)
 
 
-def emit_inline_impl(package: str, namespace: str, file: SglFile, binding: dict) -> str:
+def emit_inline_impl(package: str, memory: dict[str, int], namespace: str, file: SglFile, binding: dict) -> str:
     name = binding["name"]
     qualified = f"{namespace}::{name}"
     for member in binding["members"]:
-        host_type(package, f"'{file.path}' `@inline binding {name}` member '{member['name']}'", member["type"])
+        host_type(package, memory, f"'{file.path}' `@inline binding {name}` member '{member['name']}'", member["type"])
     out = ["\n" + layout_asserts(qualified, binding["members"], binding["block_size"])]
     out.append(f"\ncc::fixed_array<cc::byte, {qualified}::block_size> {qualified}::to_block() const\n{{\n")
     out.append("    auto block = cc::fixed_array<cc::byte, block_size>{};\n")
@@ -417,16 +411,16 @@ def emit_inline_impl(package: str, namespace: str, file: SglFile, binding: dict)
 
 
 def emit_header(package: str, namespace: str, entries: SglEntries) -> str:
-    register_memory_structs(entries)
+    memory = memory_structs_of(entries)
     out = []
     # Ahead of the bindings, whose fields and views name them.
     for file, struct in entries.memory_structs:
-        out.append(emit_memory_struct(package, namespace, file, struct))
+        out.append(emit_memory_struct(package, memory, namespace, file, struct))
     for file, binding in entries.bindings:
         if binding["inline"]:
-            out.append(emit_inline(package, namespace, file, binding))
+            out.append(emit_inline(package, memory, namespace, file, binding))
         else:
-            out.append(emit_group(package, namespace, file, binding))
+            out.append(emit_group(package, memory, namespace, file, binding))
     for file, struct in entries.vertex_inputs:
         out.append(emit_vertex_input(package, namespace, file, struct))
     for file, struct in entries.render_targets:
@@ -435,15 +429,15 @@ def emit_header(package: str, namespace: str, entries: SglEntries) -> str:
 
 
 def emit_source(package: str, namespace: str, entries: SglEntries) -> str:
-    register_memory_structs(entries)
+    memory = memory_structs_of(entries)
     out = []
     for _, struct in entries.memory_structs:
         out.append(emit_memory_struct_impl(namespace, struct))
     for file, binding in entries.bindings:
         if binding["inline"]:
-            out.append(emit_inline_impl(package, namespace, file, binding))
+            out.append(emit_inline_impl(package, memory, namespace, file, binding))
         else:
-            out.append(emit_group_impl(package, namespace, file, binding))
+            out.append(emit_group_impl(package, memory, namespace, file, binding))
     for file, struct in entries.vertex_inputs:
         out.append(emit_vertex_input_impl(package, namespace, file, struct))
     for file, struct in entries.render_targets:
@@ -511,7 +505,8 @@ def streams_of(struct: dict) -> list[tuple[str, bool, list[dict]]]:
 
 
 def vertex_format(package: str, file: SglFile, struct: str, member: dict) -> str:
-    host_type(package, f"'{file.path}' `@vertex struct {struct}` member '{member['name']}'", member["type"])
+    # A vertex attribute is a builtin, never a struct in GPU memory.
+    host_type(package, {}, f"'{file.path}' `@vertex struct {struct}` member '{member['name']}'", member["type"])
     fmt = HOST_TYPES[member["type"]][2]
     if fmt is None:
         raise HostCodeError(f"shader package '{package}': '{file.path}' `@vertex struct {struct}` member '{member['name']}' "
@@ -532,7 +527,7 @@ def emit_vertex_input(package: str, namespace: str, file: SglFile, struct: dict)
     def fields(members: list[dict], indent: str) -> str:
         out = []
         for m in members:
-            cpp = host_type(package, f"'{file.path}' `@vertex struct {name}` member '{m['name']}'", m["type"])
+            cpp = host_type(package, {}, f"'{file.path}' `@vertex struct {name}` member '{m['name']}'", m["type"])
             out.append(f"{indent}{cpp} {m['name']}; ///< location {m['location']}, `{m['name'].upper()}` on dx12\n")
         return "".join(out)
 
