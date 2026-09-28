@@ -362,6 +362,63 @@ cc::optional<oidn_weights> load_weights_from_disk(oidn_network_size size)
 }
 } // namespace
 
+oidn_tile_plan plan_tiles(tg::vec2i image, int max_tile, int overlap)
+{
+    CC_ASSERT(overlap >= 0 && overlap % 16 == 0, "the tile overlap must be a non-negative multiple of 16");
+
+    auto const whole = tg::vec2i(round_up(image[0]), round_up(image[1]));
+    // No tile smaller than an overlap on both sides plus an interior that actually advances.
+    auto const cap = round_up(cc::max(max_tile, 2 * overlap + 16));
+
+    // An image that fits is run whole with no overlap, which is both cheaper and the case every accuracy test covers.
+    if (whole[0] <= cap && whole[1] <= cap)
+        return {.extent = whole, .step = whole, .counts = tg::vec2i(1, 1), .overlap = 0};
+
+    // The tile is CHOSEN to compute the fewest pixels, not taken as large as the cap allows.
+    //
+    // Cost is flat per computed pixel, so what a tile size decides is only how much of the image is computed more
+    // than once.
+    // That is not monotonic: a tile whose interior divides the image badly computes more than a smaller one whose
+    // interior divides it well.
+    // The two axes are independent, because a tile's count along one depends on its extent along that one alone.
+    auto const best_extent = [&](int length)
+    {
+        auto chosen = 0;
+        auto computed = 0;
+        for (auto candidate = 2 * overlap + 16; candidate <= cap; candidate += 16)
+        {
+            auto const step = candidate - 2 * overlap;
+            auto const total = ((length + step - 1) / step) * candidate;
+            if (chosen == 0 || total < computed)
+            {
+                chosen = candidate;
+                computed = total;
+            }
+        }
+        return chosen;
+    };
+
+    auto plan = oidn_tile_plan{.overlap = overlap};
+    for (auto a = 0; a < 2; ++a)
+    {
+        // An axis that fits under the cap stays one untiled span, whatever the other axis needs.
+        // Tiling it anyway would compute the same tensor once per tile row, since every one of them clamps to 0.
+        if (whole[a] <= cap)
+        {
+            plan.extent[a] = whole[a];
+            plan.step[a] = whole[a];
+            plan.counts[a] = 1;
+            continue;
+        }
+
+        plan.extent[a] = cc::min(whole[a], best_extent(image[a]));
+        // The interior has to be a real advance, or the loop in `execute` would not terminate.
+        plan.step[a] = cc::max(plan.extent[a] - 2 * overlap, 16);
+        plan.counts[a] = (image[a] + plan.step[a] - 1) / plan.step[a];
+    }
+    return plan;
+}
+
 bool oidn_network::create(sg::context& ctx, tg::vec2i image_extent, int max_tile, int overlap, oidn_network_size size)
 {
     _ctx = &ctx;
@@ -369,70 +426,11 @@ bool oidn_network::create(sg::context& ctx, tg::vec2i image_extent, int max_tile
     _max_tile = max_tile;
     _image_extent = image_extent;
 
-    // One tile or many, decided here and nowhere else.
-    //
-    // An image that fits is run whole with no overlap, which is both cheaper and the case every accuracy test covers.
-    // Otherwise the tensor is the capped tile, and its interior advances by the tile less the overlap on both sides.
-    auto const whole = tg::vec2i(round_up(image_extent[0]), round_up(image_extent[1]));
-    // No tile smaller than an overlap on both sides plus an interior that actually advances.
-    auto const cap = round_up(cc::max(max_tile, 2 * overlap + 16));
-
-    if (whole[0] <= cap && whole[1] <= cap)
-    {
-        _extent = whole;
-        _overlap = 0;
-        _tile_step = whole;
-        _tile_counts = tg::vec2i(1, 1);
-    }
-    else
-    {
-        _overlap = overlap;
-
-        // The tile is CHOSEN to compute the fewest pixels, not taken as large as the cap allows.
-        //
-        // Cost is flat per computed pixel, so what a tile size decides is only how much of the image is computed more
-        // than once.
-        // That is not monotonic: a tile whose interior divides the image badly computes more than a smaller one whose
-        // interior divides it well.
-        //
-        // The two axes are independent, because a tile's count along one depends on its extent along that one alone.
-        auto const best_extent = [&](int image, int limit)
-        {
-            auto chosen = 0;
-            auto computed = 0;
-            for (auto candidate = 2 * overlap + 16; candidate <= limit; candidate += 16)
-            {
-                auto const step = candidate - 2 * overlap;
-                auto const count = (image + step - 1) / step;
-                auto const total = count * candidate;
-                if (chosen == 0 || total < computed)
-                {
-                    chosen = candidate;
-                    computed = total;
-                }
-            }
-            return chosen;
-        };
-
-        // An axis that fits under the cap stays one untiled span, whatever the other axis needs.
-        // Tiling it anyway would compute the same tensor once per tile row, since every one of them clamps to 0.
-        for (auto a = 0; a < 2; ++a)
-        {
-            if (whole[a] <= cap)
-            {
-                _extent[a] = whole[a];
-                _tile_step[a] = whole[a];
-                _tile_counts[a] = 1;
-                continue;
-            }
-
-            _extent[a] = cc::min(whole[a], best_extent(image_extent[a], cap));
-
-            // The interior has to be a real advance, or the loop in `execute` would not terminate.
-            _tile_step[a] = cc::max(_extent[a] - 2 * _overlap, 16);
-            _tile_counts[a] = (image_extent[a] + _tile_step[a] - 1) / _tile_step[a];
-        }
-    }
+    auto const plan = plan_tiles(image_extent, max_tile, overlap);
+    _extent = plan.extent;
+    _tile_step = plan.step;
+    _tile_counts = plan.counts;
+    _overlap = plan.overlap;
 
     auto const extent = _extent;
 

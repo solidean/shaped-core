@@ -180,6 +180,8 @@ if(SC_BUILD_TESTS)
         tests/imgui-settings-test.cc
         tests/imgui-style-test.cc
         tests/shader-package-test.cc
+        tests/tza-test.cc
+        tests/oidn-tiling-test.cc
     )
     sc_nexus_binary(shaped-rendering-test KINDS tests ${SG_WARP_TEST_BINARY_ARGS})
 
@@ -221,7 +223,6 @@ if(SC_BUILD_TESTS)
             tests/raster-box-filter-mipmap-test.cc
             tests/denoise-test.cc
             tests/oidn-test.cc
-            tests/tza-test.cc
             tests/nn-conv-test.cc
             tests/nn-ops-test.cc
             tests/oidn-network-test.cc
@@ -230,9 +231,14 @@ if(SC_BUILD_TESTS)
 
         # Intel's own filter, as the oracle the OIDN member is measured against, where it was fetched on request.
         # Linked here and nowhere else: the member runs the weights in its own shaders and never calls the library.
+        # Its facade loads its core and its CPU device module by name out of its own directory, so all of them have to
+        # sit beside the binary rather than only the one the link names.
         if(TARGET oidn)
             target_sources(shaped-rendering-test PRIVATE tests/oidn_reference.cc)
             target_link_libraries(shaped-rendering-test PRIVATE oidn)
+            if(OIDN_RUNTIME_LIBRARIES)
+                sc_stage_runtime_dlls(shaped-rendering-test DLLS ${OIDN_RUNTIME_LIBRARIES} TAG oidn)
+            endif()
         else()
             target_sources(shaped-rendering-test PRIVATE tests/oidn_reference_null.cc)
         endif()
@@ -243,12 +249,6 @@ if(SC_BUILD_TESTS)
     endif()
 
     target_compile_definitions(shaped-rendering-test PRIVATE SR_OIDN_WEIGHTS_DIR="${SR_OIDN_WEIGHTS_DIR_VALUE}")
-
-    # OIDN's facade loads its core and its CPU device module by name out of its own directory, so all of them have to
-    # sit beside the binary rather than only the one the link names.
-    if(OIDN_RUNTIME_LIBRARIES)
-        sc_stage_runtime_dlls(shaped-rendering-test DLLS ${OIDN_RUNTIME_LIBRARIES} TAG oidn)
-    endif()
 
     # The one test that crosses sr's window into metal's windowed presentation, which nothing else covers.
     # SDL is what hands out the CAMetalLayer, so it needs a window backend as well as the metal one.

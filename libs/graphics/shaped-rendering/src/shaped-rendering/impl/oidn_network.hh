@@ -49,6 +49,31 @@ struct oidn_weights
 /// Null when they were not fetched, or are not the topology this was written against; that is logged once.
 [[nodiscard]] oidn_weights const* oidn_load_weights(oidn_network_size size);
 
+/// How an image is cut into tiles for the network: integer arithmetic only, so it is tested without a device.
+struct oidn_tile_plan
+{
+    /// The tensors' extent, which is one tile rounded up to a multiple of 16 — the whole image when it fits.
+    tg::vec2i extent = tg::vec2i(0, 0);
+
+    /// How far the kept interior of one tile advances, per axis; the whole padded extent on an axis that is not tiled.
+    tg::vec2i step = tg::vec2i(0, 0);
+
+    /// How many tiles run per axis.
+    tg::vec2i counts = tg::vec2i(1, 1);
+
+    /// How much of each tile is discarded per side: 0 exactly when the whole image fits one tile.
+    int overlap = 0;
+};
+
+/// The tiling that computes the fewest pixels for `image` under a tile cap of `max_tile`.
+///
+/// An image that fits under the cap on both axes is one tile with no overlap.
+/// Otherwise each axis is chosen on its own: an axis under the cap stays one span, and an axis over it takes the
+/// tile extent, at most the cap, whose tile count times extent is least.
+/// `overlap` must be a non-negative multiple of 16, since a tile origin off the pools' 16-pixel grid pools over
+/// different windows than the whole run does.
+[[nodiscard]] oidn_tile_plan plan_tiles(tg::vec2i image, int max_tile, int overlap);
+
 /// Whether the trained weights were fetched into this build, which is what the member's availability rests on.
 ///
 /// Answered once per process.
