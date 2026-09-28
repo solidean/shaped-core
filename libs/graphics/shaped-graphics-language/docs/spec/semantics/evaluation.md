@@ -21,8 +21,10 @@ A listing here is the dump of a flat tree, shortened: a label is `$name`, and a 
   A float `%` is `a - b * trunc(a / b)`, with the sign of `a` the same way.
 * **EVAL-86** `&`, `|`, `^` and `~` work on the 32 bits of an `int` or a `uint`, componentwise over their vectors.
   A shift uses the low five bits of its count, `x << 33` of a count computed as 33 is `x << 1`, and `>>` is arithmetic for an `int` and logical for a `uint`.
-* **EVAL-87** A maths builtin has no value where WGSL leaves its result indeterminate, and a run that reaches one is EVAL-85's `program-error`.
+* **EVAL-87** A maths builtin has no value where a target leaves its result indeterminate, and a run that reaches one is EVAL-85's `program-error`.
   That is `pow` of a negative base or of zero to a power that is not positive, `asin` and `acos` outside -1 to 1, and `smoothstep` whose low edge is not below its high one.
+  It is also `atan2` of a zero `y` and a zero `x`, which HLSL gives as pi / 2 and SPIR-V leaves undefined.
+  And it is `clamp` whose `low` is above its `high`, of floats and of integers alike, which MSL leaves undefined and WGSL may answer for floats with the median of the three.
 * **EVAL-88** A transcendental builtin is computed to within a few units in the last place of a `float`, and no closer ([why](why/evaluation.md#eval-88)).
   `round` is ties to even, `floor`, `ceil`, `trunc` and `fract` are exact, and a derivative in a run of one invocation is 0.
 * **EVAL-89** A `discard` ends the run with no result, as the status `discarded`: nothing after it runs, and nothing it would have printed or stored after it happens.

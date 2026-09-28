@@ -116,7 +116,7 @@ void no_derivative(leaves in, result& out)
         out.push_back(scalar::of(0.0f));
 }
 
-// ---- where WGSL leaves a value indeterminate, the program has no behaviour (EVAL-84's rule) ------------------------
+// ---- where a target leaves a value indeterminate, the program has no behaviour (EVAL-87) ----------------------------
 
 cc::string_view pow_undefined(leaves in)
 {
@@ -134,6 +134,15 @@ cc::string_view inverse_trig_undefined(leaves in)
     for (auto const& x : in)
         if (x.as_float() < -1.0f || x.as_float() > 1.0f)
             return "asin or acos of a value outside -1 to 1";
+    return {};
+}
+/// HLSL's lowering gives pi / 2 there and SPIR-V's leaves it undefined, so no value is one every target has.
+cc::string_view atan2_undefined(leaves in)
+{
+    auto const width = in.size() / 2;
+    for (auto i = isize(0); i < width; ++i)
+        if (in[i].as_float() == 0.0f && in[width + i].as_float() == 0.0f)
+            return "atan2 of y and x both zero";
     return {};
 }
 cc::string_view smoothstep_undefined(leaves in)
@@ -594,7 +603,8 @@ void sgl::builtins::register_math(registry& r)
     };
 
     r.add_comment("// the maths of float and its plain vectors, componentwise; `round` is ties to even everywhere,\n"
-                  "// and a value WGSL leaves indeterminate - pow of a negative base, asin of 2 - has no behaviour");
+                  "// and a value a target leaves indeterminate - pow of a negative base, asin of 2 - has no "
+                  "behaviour");
     for (auto const& t : floats)
     {
         for (auto const& f : unaries)
@@ -603,8 +613,8 @@ void sgl::builtins::register_math(registry& r)
         add(r, cc::format("@pure fun sign(x: {}) -> {}", t.name, t.name), unary<sign_of>,
             {.kind = spelling_kind::custom, .custom = t.sign, .hlsl_names = k_sign, .wgsl_names = k_sign, .msl_names = k_sign},
             nullptr, false, "/// -1, 0 or 1, by the sign of each component.");
-        add(r, cc::format("@pure fun atan2(y: {0}, x: {0}) -> {0}", t.name), binary<soft_atan2>, {}, nullptr, false,
-            "/// The angle of (x, y), in -pi to pi; `y` comes first, as in every target.");
+        add(r, cc::format("@pure fun atan2(y: {0}, x: {0}) -> {0}", t.name), binary<soft_atan2>, {}, atan2_undefined,
+            false, "/// The angle of (x, y), in -pi to pi; `y` comes first, as in every target.");
         add(r, cc::format("@pure fun pow(x: {0}, y: {0}) -> {0}", t.name), binary<pow_of>, {}, pow_undefined);
         add(r, cc::format("@pure fun step(edge: {0}, x: {0}) -> {0}", t.name), binary<step_of>, {}, nullptr, false,
             "/// 0 where `x` is below `edge`, and 1 from it on.");

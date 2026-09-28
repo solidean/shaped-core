@@ -147,7 +147,8 @@ void impl::add_function(registry& r,
                         cc::string_view result,
                         evaluator evaluate,
                         spelling write,
-                        cc::string_view doc)
+                        cc::string_view doc,
+                        undefined_check undefined_when)
 {
     auto list = cc::string();
     for (auto i = isize(0); i + 1 < parameters.size(); i += 2)
@@ -156,8 +157,25 @@ void impl::add_function(registry& r,
         .signature = cc::format("@pure fun {}({}) -> {}", name, list, result),
         .doc = doc,
         .evaluate = evaluate,
+        .undefined_when = undefined_when,
         .write = cc::move(write),
     });
+}
+
+cc::string_view impl::clamp_undefined(cc::span<scalar const> in)
+{
+    auto const width = in.size() / 3;
+    for (auto i = isize(0); i < width; ++i)
+    {
+        auto const low = in[width + i];
+        auto const high = in[2 * width + i];
+        auto const is_above = low.kind == value_kind::scalar_float ? low.as_float() > high.as_float()
+                            : low.kind == value_kind::scalar_int   ? low.as_int() > high.as_int()
+                                                                   : low.bits > high.bits;
+        if (is_above)
+            return "clamp whose low bound is above its high one";
+    }
+    return {};
 }
 
 cc::string impl::suffix_of(cc::string_view type)

@@ -201,7 +201,7 @@ void sgl::builtins::register_scalar_math(registry& r)
     add_function(r, "abs", {"x", "int"}, "int", abs_int);
     add_function(r, "min", {"a", "int", "b", "int"}, "int", min_int);
     add_function(r, "max", {"a", "int", "b", "int"}, "int", max_int);
-    add_function(r, "clamp", {"x", "int", "low", "int", "high", "int"}, "int", clamp_int);
+    add_function(r, "clamp", {"x", "int", "low", "int", "high", "int"}, "int", clamp_int, {}, {}, clamp_undefined);
 
     r.add_comment("// uint: a zero divisor has no value, as for int");
     add_infix(r, "*", "multiply_uint", "uint", "uint", "uint", multiply_uint);
@@ -211,7 +211,7 @@ void sgl::builtins::register_scalar_math(registry& r)
     add_infix(r, "-", "subtract_uint", "uint", "uint", "uint", subtract_uint);
     add_function(r, "min", {"a", "uint", "b", "uint"}, "uint", min_uint);
     add_function(r, "max", {"a", "uint", "b", "uint"}, "uint", max_uint);
-    add_function(r, "clamp", {"x", "uint", "low", "uint", "high", "uint"}, "uint", clamp_uint);
+    add_function(r, "clamp", {"x", "uint", "low", "uint", "high", "uint"}, "uint", clamp_uint, {}, {}, clamp_undefined);
 
     r.add_comment("// comparisons, of float, of int and of uint");
     comparison const comparisons[] = {

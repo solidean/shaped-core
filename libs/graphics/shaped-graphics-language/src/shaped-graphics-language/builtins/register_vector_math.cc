@@ -182,7 +182,7 @@ void sgl::builtins::register_vector_math(registry& r)
         add_function(r, "abs", {"x", type}, type, abs_of);
         add_function(r, "min", {"a", type, "b", type}, type, min_of);
         add_function(r, "max", {"a", type, "b", type}, type, max_of);
-        add_function(r, "clamp", {"x", type, "low", type, "high", type}, type, clamp);
+        add_function(r, "clamp", {"x", type, "low", type, "high", type}, type, clamp, {}, {}, clamp_undefined);
         add_function(r, "mix", {"a", type, "b", type, "t", "float"}, type, mix, {.hlsl = "lerp"},
                      "/// `a` where `t` is 0 and `b` where it is 1.");
     }

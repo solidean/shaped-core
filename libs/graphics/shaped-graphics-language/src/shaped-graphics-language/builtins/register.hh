@@ -78,7 +78,12 @@ void add_function(registry& r,
                   cc::string_view result,
                   evaluator evaluate,
                   spelling write = {},
-                  cc::string_view doc = {});
+                  cc::string_view doc = {},
+                  undefined_check undefined_when = nullptr);
+
+/// `clamp(x, low, high)` whose `low` is above its `high`, componentwise and of any kind: MSL leaves it undefined, and
+/// WGSL refuses it where both are constant.
+[[nodiscard]] cc::string_view clamp_undefined(cc::span<check::scalar const> in);
 
 /// The suffix an operator function of `type` carries in its name: none for `float`, `_int`, `_color` for `float3`.
 /// An operator function is found through its operator alone, so the name is documentation and shows in a dump.

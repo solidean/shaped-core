@@ -403,7 +403,7 @@
 @builtin @pure @operator("~") fun bit_not_uint4(x: uint4) -> uint4
 
 // the maths of float and its plain vectors, componentwise; `round` is ties to even everywhere,
-// and a value WGSL leaves indeterminate - pow of a negative base, asin of 2 - has no behaviour
+// and a value a target leaves indeterminate - pow of a negative base, asin of 2 - has no behaviour
 @builtin @pure fun sin(x: float) -> float
 @builtin @pure fun cos(x: float) -> float
 @builtin @pure fun tan(x: float) -> float
