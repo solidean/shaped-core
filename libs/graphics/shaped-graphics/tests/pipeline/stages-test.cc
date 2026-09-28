@@ -63,8 +63,8 @@ bool drawn(sg_test::offscreen_pixels const& pixels, int x, int y)
 }
 } // namespace
 
-ASYNC_INVOCABLE_TEST("sg - a tessellated triangle patch covers its triangle, reports its domain, and winds one way "
-                     "per control stage",
+ASYNC_INVOCABLE_TEST("sg - a tessellated triangle patch covers its triangle, reports its domain, and winds as its "
+                     "control stage says",
                      (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
@@ -94,12 +94,11 @@ ASYNC_INVOCABLE_TEST("sg - a tessellated triangle patch covers its triangle, rep
                                                    });
     };
 
-    // Culling back faces with counter-clockwise fronts, one of the two windings is drawn whole and the other culled.
-    // Which is SGL's to state, and today it is `.clockwise` that draws: the winding is the domain's own, which the
-    // evaluation below mirrors against the patch's corners, the same on dx12 and vulkan.
-    // libs/graphics/shaped-graphics/docs/tier1-pipeline-tests.md carries the open question.
-    auto const cw = co_await draw_with(shaders::stages.tessellated_cw);
+    // Culling back faces with counter-clockwise fronts, the patch whose control stage says counter-clockwise is drawn
+    // whole and the clockwise one culled: the winding a control stage names is the patch's, as the evaluation below
+    // weighs its corners (CHK-304).
     auto const ccw = co_await draw_with(shaders::stages.tessellated_ccw);
+    auto const cw = co_await draw_with(shaders::stages.tessellated_cw);
     auto const culled = co_await draw_with(shaders::stages.tessellated_culled);
 
     for (auto y = 0; y < size; ++y)
@@ -110,17 +109,67 @@ ASYNC_INVOCABLE_TEST("sg - a tessellated triangle patch covers its triangle, rep
             if (side == 0)
                 continue;
             auto const where = cc::format("pixel ({}, {})", x, y);
-            CHECK(drawn(cw, x, y) == (side > 0)).context(where);
-            CHECK(!drawn(ccw, x, y)).context(where);
+            CHECK(drawn(ccw, x, y) == (side > 0)).context(where);
+            CHECK(!drawn(cw, x, y)).context(where);
             CHECK(!drawn(culled, x, y)).context(where); // an edge factor of zero culls the patch
             if (side > 0)
             {
                 auto const v = (c[0] + 1.0f) / 2.0f;
                 auto const w = (c[1] + 1.0f) / 2.0f;
-                auto const got = cw[0].rgba_float(x, y);
+                auto const got = ccw[0].rgba_float(x, y);
                 auto const near = [](float a, float b) { return a - b < 0.001f && b - a < 0.001f; };
                 CHECK((near(got[0], 1.0f - v - w) && near(got[1], v) && near(got[2], w)))
                     .context(cc::format("{}: domain ({}, {}, {})", where, got[0], got[1], got[2]));
+            }
+        }
+}
+
+ASYNC_INVOCABLE_TEST("sg - a tessellated quad patch covers its quad, reports its domain, and winds as its control "
+                     "stage says",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::tessellation_shader))
+        SKIP("this device has no tessellation stages");
+
+    // The patch is the middle half of the target, its corners counter-clockwise from the bottom left, and the
+    // evaluation stage blends them by `uv` along the bottom edge and then upwards.
+    shaders::stage_corner const corners[] = {{.position = tg::vec2f(-0.5f, -0.5f)},
+                                             {.position = tg::vec2f(0.5f, -0.5f)},
+                                             {.position = tg::vec2f(0.5f, 0.5f)},
+                                             {.position = tg::vec2f(-0.5f, 0.5f)}};
+    auto const buffer = ctx->persistent.create_buffer_from_data(corners, sg::buffer_usage::vertex_buffer);
+    auto const draw_with = [&](auto const& declared) -> cc::shared_async<sg_test::offscreen_pixels>
+    {
+        auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(declared);
+        co_return co_await sg_test::draw_offscreen(*ctx, stage_target(),
+                                                   [&](sg::rendering_scope& scope)
+                                                   {
+                                                       scope.bind_pipeline(*pipeline);
+                                                       scope.bind_vertex_buffer(buffer.as_vertex_buffer());
+                                                       scope.draw({.vertex_range = {.offset = 0, .size = 4}});
+                                                   });
+    };
+    auto const ccw = co_await draw_with(shaders::stages.quad_ccw);
+    auto const cw = co_await draw_with(shaders::stages.quad_cw);
+
+    for (auto y = 0; y < size; ++y)
+        for (auto x = 0; x < size; ++x)
+        {
+            auto const c = centre_of(x, y);
+            // pixel centres sit a quarter pixel off the patch's edges, so each is clearly in or out
+            auto const inside = c[0] > -0.5f && c[0] < 0.5f && c[1] > -0.5f && c[1] < 0.5f;
+            auto const where = cc::format("pixel ({}, {})", x, y);
+            CHECK(drawn(ccw, x, y) == inside).context(where);
+            CHECK(!drawn(cw, x, y)).context(where);
+            if (inside)
+            {
+                auto const got = ccw[0].rgba_float(x, y);
+                auto const near = [](float a, float b) { return a - b < 0.001f && b - a < 0.001f; };
+                CHECK((near(got[0], c[0] + 0.5f) && near(got[1], c[1] + 0.5f)))
+                    .context(cc::format("{}: domain ({}, {})", where, got[0], got[1]));
             }
         }
 }

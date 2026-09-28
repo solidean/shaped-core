@@ -61,10 +61,6 @@ What metal still has to be shown doing:
 `tests/pipeline/stages-test.cc` runs both stages on dx12 and vulkan, each gated by its feature.
 What is left:
 
-- **The winding a control stage names is the domain's own.**
-  A patch whose corners wind counter-clockwise is evaluated as `patch[0] * uvw.x + patch[1] * uvw.y + patch[2] * uvw.z`.
-  It is drawn under `winding = .clockwise` and culled under `.counter_clockwise`, on dx12 and vulkan alike.
-  SGL's spec does not say which it means, so either the spec says so or the emitter flips it to follow the patch.
 - **The partitioning** reaches no pixel the test reads, since a fixed integer factor tiles the same area under all three.
 - **A pipeline without the feature is refused** naming it, which only a device lacking the stage shows; the test skips on dx12 and vulkan.
 

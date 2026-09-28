@@ -115,3 +115,42 @@ pipeline primitive_ids:
     pixel = primitive_ps
     cull = .none
     format = .rgba32_float
+
+// A quad patch, its corners counter-clockwise from the bottom left, blended across by `uv`.
+struct quad_factors:
+    @edge_factors edges: float[4]
+    @inside_factors inside: float[2]
+
+@tessellation_control(partitioning = .integer, winding = .counter_clockwise)
+fun quad_ccw_tc(patch: control_point[4]) -> quad_factors:
+    return { edges = [4.0, 4.0, 4.0, 4.0], inside = [4.0, 4.0] }
+
+@tessellation_control(partitioning = .integer, winding = .clockwise)
+fun quad_cw_tc(patch: control_point[4]) -> quad_factors:
+    return { edges = [4.0, 4.0, 4.0, 4.0], inside = [4.0, 4.0] }
+
+@tessellation_evaluation
+fun quad_te(patch: control_point[4], f: quad_factors, @domain_location uv: float2) -> staged:
+    let bottom = patch[0].position + (patch[1].position - patch[0].position) * uv.x
+    let top = patch[3].position + (patch[2].position - patch[3].position) * uv.x
+    let p = bottom + (top - bottom) * uv.y
+    return {
+        position = hpos4(p.x, p.y, 0.5, 1.0)
+        color = float4(uv.x, uv.y, 0.0, 1.0)
+    }
+
+pipeline quad_ccw:
+    vertex = corner_vs
+    tessellation_control = quad_ccw_tc
+    tessellation_evaluation = quad_te
+    pixel = staged_ps
+    cull = .back
+    format = .rgba32_float
+
+pipeline quad_cw:
+    vertex = corner_vs
+    tessellation_control = quad_cw_tc
+    tessellation_evaluation = quad_te
+    pixel = staged_ps
+    cull = .back
+    format = .rgba32_float
