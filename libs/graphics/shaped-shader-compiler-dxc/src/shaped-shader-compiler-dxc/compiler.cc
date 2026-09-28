@@ -196,6 +196,8 @@ cc::result<sg::compiled_shader> compiler::compile(shader_description const& desc
     // stamped here — the one place that knows it.
     // merge_bindings then unions the stages as a pipeline's shaders are folded into one layout.
     sg::apply_stage_visibility(bindings, desc.stage);
+    // DXIL reflection reports only what the compiled code keeps, which is what makes this footprint sound.
+    auto footprint = sg::reflected_footprint(bindings);
 
     return sg::compiled_shader{
         .stage = desc.stage,
@@ -210,6 +212,7 @@ cc::result<sg::compiled_shader> compiler::compile(shader_description const& desc
             .signature = impl::join_args(args.value()),
         },
         .color_output_count = reflected.value().color_output_count,
+        .footprint = cc::move(footprint),
     };
 }
 } // namespace ssc::dxc

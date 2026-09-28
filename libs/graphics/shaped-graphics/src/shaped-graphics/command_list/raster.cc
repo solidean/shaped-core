@@ -170,6 +170,16 @@ void rendering_scope::bind_index_buffer(index_buffer_view const& view)
 {
     _cmd.raster_bind_index_buffer(view);
 }
+void rendering_scope::declare_array_buffer_access(cc::string_view binding_name,
+                                                  cc::span<array_buffer_access const> elements)
+{
+    _cmd.raster_declare_array_buffer_access(binding_name, elements);
+}
+void rendering_scope::declare_array_texture_access(cc::string_view binding_name,
+                                                   cc::span<array_texture_access const> elements)
+{
+    _cmd.raster_declare_array_texture_access(binding_name, elements);
+}
 void rendering_scope::set_viewport(viewport const& vp)
 {
     _cmd.raster_set_viewport(vp);
@@ -192,10 +202,12 @@ void rendering_scope::set_inline_constants(cc::span<byte const> data, cc::option
 }
 void rendering_scope::draw(draw_config const& config)
 {
+    _cmd._stats.add(stat::draws);
     _cmd.raster_draw(config);
 }
 void rendering_scope::draw_indexed(draw_indexed_config const& config)
 {
+    _cmd._stats.add(stat::draws);
     _cmd.raster_draw_indexed(config);
 }
 
@@ -241,6 +253,16 @@ void command_list_raster_scope::bind_index_buffer(index_buffer_view const& view)
 {
     _cmd.raster_bind_index_buffer(view);
 }
+void command_list_raster_scope::declare_array_buffer_access(cc::string_view binding_name,
+                                                            cc::span<array_buffer_access const> elements)
+{
+    _cmd.raster_declare_array_buffer_access(binding_name, elements);
+}
+void command_list_raster_scope::declare_array_texture_access(cc::string_view binding_name,
+                                                             cc::span<array_texture_access const> elements)
+{
+    _cmd.raster_declare_array_texture_access(binding_name, elements);
+}
 void command_list_raster_scope::set_viewport(viewport const& vp)
 {
     _cmd.raster_set_viewport(vp);
@@ -263,10 +285,12 @@ void command_list_raster_scope::set_inline_constants(cc::span<byte const> data, 
 }
 void command_list_raster_scope::draw(draw_config const& config)
 {
+    _cmd._stats.add(stat::draws);
     _cmd.raster_draw(config);
 }
 void command_list_raster_scope::draw_indexed(draw_indexed_config const& config)
 {
+    _cmd._stats.add(stat::draws);
     _cmd.raster_draw_indexed(config);
 }
 
@@ -294,6 +318,16 @@ void command_list_raster_manual_scope::bind_index_buffer(index_buffer_view const
 {
     _cmd.raster_bind_index_buffer(view);
 }
+void command_list_raster_manual_scope::declare_array_buffer_access(cc::string_view binding_name,
+                                                                   cc::span<array_buffer_access const> elements)
+{
+    _cmd.raster_declare_array_buffer_access(binding_name, elements);
+}
+void command_list_raster_manual_scope::declare_array_texture_access(cc::string_view binding_name,
+                                                                    cc::span<array_texture_access const> elements)
+{
+    _cmd.raster_declare_array_texture_access(binding_name, elements);
+}
 void command_list_raster_manual_scope::set_viewport(viewport const& vp)
 {
     _cmd.raster_set_viewport(vp);
@@ -316,10 +350,12 @@ void command_list_raster_manual_scope::set_inline_constants(cc::span<byte const>
 }
 void command_list_raster_manual_scope::draw(draw_config const& config)
 {
+    _cmd._stats.add(stat::draws);
     _cmd.raster_draw(config);
 }
 void command_list_raster_manual_scope::draw_indexed(draw_indexed_config const& config)
 {
+    _cmd._stats.add(stat::draws);
     _cmd.raster_draw_indexed(config);
 }
 } // namespace sg

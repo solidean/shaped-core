@@ -10,6 +10,7 @@
 #include <shaped-graphics/command_list/raster.hh>
 #include <shaped-graphics/command_list/raytracing.hh>
 #include <shaped-graphics/command_list/upload.hh>
+#include <shaped-graphics/context/metrics.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/query/gpu_timestamp.hh>
 #include <shaped-graphics/raster/raster_target_formats.hh>
@@ -149,6 +150,13 @@ protected:
     virtual void raster_bind_group(int group_index, binding_group const& group) = 0;
     virtual void raster_bind_vertex_buffers(int first_slot, cc::span<vertex_buffer_view const> views) = 0;
     virtual void raster_bind_index_buffer(index_buffer_view const& view) = 0;
+
+    // The raster twin of the compute pair above, held for the next draw rather than the next dispatch.
+    // The graphics bind point keeps its own pending declarations, since its bound groups are its own.
+    virtual void raster_declare_array_buffer_access(cc::string_view binding_name,
+                                                    cc::span<array_buffer_access const> elements) = 0;
+    virtual void raster_declare_array_texture_access(cc::string_view binding_name,
+                                                     cc::span<array_texture_access const> elements) = 0;
     virtual void raster_set_viewport(viewport const& vp) = 0;
     virtual void raster_set_scissor(tg::aabb2i const& rect) = 0;
     virtual void raster_set_stencil_reference(u32 reference) = 0;
@@ -189,6 +197,12 @@ protected:
 
     epoch _epoch = epoch::invalid;
     class context* _context = nullptr; // the creating context; outlives this list
+
+    // What this list recorded, folded into the context's stats when it submits.
+    // A backend adds the barriers it emits; the scopes add draws, dispatches and inline transfers.
+    impl::stat_counts _stats;
+
+    friend impl::stat_counts const& impl::recorded_stats(command_list const& cmd);
 
 private:
     cc::string _rendering_target_set;                       // of the open rendering, or empty

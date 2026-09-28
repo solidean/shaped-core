@@ -347,7 +347,7 @@ TEST("slib - an inline-constants block reflects at b0 in the space it named", ex
 
     auto const* constants = find_binding(compiled, "gConstants");
     REQUIRE(constants != nullptr);
-    CHECK(constants->type == sg::binding_type::uniform_buffer);
+    CHECK(constants->type == sg::binding_type::constants_buffer);
 
     // The two targets describe the same block differently, and the difference is the whole point of the feature.
     //

@@ -1,20 +1,17 @@
-# Compute throughput: workgroup memory, half precision and matrix fragments
+# Compute throughput: half precision and matrix fragments
 
 ## The idea
 
-A compute-bound kernel written in SGL today cannot reach the throughput its hardware has, because three things every fast compute kernel uses are missing.
+A compute-bound kernel written in SGL can tile through workgroup memory today, and still cannot reach the throughput its hardware has.
 The case that brought it here is shaped-rendering's OIDN member: a U-Net of sixteen 3x3 convolutions, run in HLSL at about 3.2 TFLOP/s against a 20-25 fp32 peak.
-Its route to speed is [denoising.md's "Getting faster"](../../../../shaped-rendering/docs/denoising.md#getting-faster), and each step past the first asks one of these of SGL.
+Its route to speed is [denoising.md's "Getting faster"](../../../../shaped-rendering/docs/denoising.md#getting-faster).
+The first step, implicit-GEMM tiling, needs only the [`@workgroup` bindings and barriers](../bindings.md#workgroup-memory) SGL already has.
+The steps after it ask two things of SGL, in order of what they buy for the portability they cost:
 
-In order of what they buy for the portability they cost:
-
-* **Workgroup memory and a workgroup barrier.**
-  A workgroup stages an input halo and a slab of weights once, and each thread computes a block of outputs from them.
-  That is implicit-GEMM tiling, which is how every fast portable convolution works, and it is available on dx12, vulkan, metal and webgpu alike.
-* **A 16-bit float type**, behind a feature level.
+* **A 16-bit float type**, as a [feature](../semantics/checking.md#features) a file or body `require`s.
   It halves bandwidth and workgroup-memory footprint, which buys larger tiles; packed arithmetic doubles ALU rate on some GPUs.
   DX12 has it with SM 6.2 and `-enable-16bit-types`, Vulkan with `VK_KHR_shader_float16_int8` and `VK_KHR_16bit_storage`, Metal outright, and WebGPU as the optional `shader-f16`.
-* **Matrix fragments**, behind a feature level, with a non-matrix fallback that stays mandatory.
+* **Matrix fragments**, as a feature too, with a non-matrix fallback that stays mandatory.
   Vulkan has `VK_KHR_cooperative_matrix` and Metal `simdgroup_matrix`.
   DirectX's replacement for SM 6.9's withdrawn cooperative vectors is SM 6.10's linear-algebra matrices, still in preview, and WebGPU's subgroup matrices are Dawn-experimental.
   This is what closes the last ~3x between a well-tuned fp32 kernel and OIDN's own tensor-core path.
@@ -22,16 +19,14 @@ In order of what they buy for the portability they cost:
 ## What it touches
 
 * The type system: an `f16` scalar and its vectors, and a matrix-fragment type whose shape is a compile-time value.
-* [feature-levels.md](feature-levels.md): `f16` and matrix fragments are the first features a real kernel would declare.
-* Stage interfaces: workgroup-memory declarations belong to a compute entry point, and a barrier is only meaningful inside one.
-* [uniformity.md](uniformity.md): a barrier in divergent control flow is the compute analogue of a derivative there.
+* [Features](../semantics/checking.md#features): `f16` and matrix fragments are two more a device may lack, each granted by `require`.
+* [uniformity.md](uniformity.md): a matrix operation is a subgroup-wide one, so it has the same uniformity question a barrier does.
 
 ## Already fixed by the syntax
 
-Nothing yet.
+`require` is how a non-portable feature is opted into, so neither addition needs a new mechanism for that.
 
 ## Open
 
-* Whether workgroup memory is a declaration at module scope, as HLSL's `groupshared`, or a parameter of the entry point.
 * How a matrix fragment's per-backend shape limits are expressed, since they differ by vendor and generation.
 * Whether `f16` arithmetic and `f16` storage are one feature or two, since some devices offer storage alone.

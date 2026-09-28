@@ -25,6 +25,15 @@ struct sgl::ast::use_decl
     constexpr bool operator==(use_decl const&) const = default;
 };
 
+/// `require feature`, `require a, b`
+struct sgl::ast::require_decl
+{
+    /// One `name` per feature; an `invalid` expression for an argument that is no name.
+    range_of<expr_id> features;
+
+    constexpr bool operator==(require_decl const&) const = default;
+};
+
 enum class sgl::ast::receiver_kind : sgl::u8
 {
     /// No `self`: a free function, or a static method when it is a member.
@@ -39,6 +48,8 @@ enum class sgl::ast::receiver_kind : sgl::u8
 struct sgl::ast::fun_decl
 {
     source_span name;
+    /// `T` of `fun T.name(…)`, an extension; empty for every other function (AST-142).
+    source_span extended_type;
     range_of<field> type_parameters;
     /// `self`, when written, is the first entry here as well as in `receiver`.
     range_of<field> parameters;
@@ -134,6 +145,17 @@ struct sgl::ast::notation_decl
     constexpr bool operator==(notation_decl const&) const = default;
 };
 
+/// `test:` with a block, or `test value`, which is the block of that one line (AST-138).
+/// A declaration and no statement: it never runs where it stands, and the check pass runs it on its own.
+struct sgl::ast::test_decl
+{
+    /// The `test` keyword, which attributes stand in front of: where a report names the test, and where its extent starts.
+    sgl::source_span keyword;
+    sgl::ast::body body;
+
+    constexpr bool operator==(test_decl const&) const = default;
+};
+
 /// A `field` as a member line; its attributes are on the field.
 struct sgl::ast::field_decl
 {
@@ -143,9 +165,14 @@ struct sgl::ast::field_decl
 };
 
 /// `name => value`: a computed, read-only member without a parameter list.
+/// `fun T.name => value` is the same property declared from outside its type (AST-143).
 struct sgl::ast::property_decl
 {
     source_span name;
+    /// `T` of an extension property, empty for a member line.
+    source_span extended_type;
+    /// `none` unless an extension property writes `-> type`.
+    expr_id return_type = expr_id::none;
     sgl::ast::body body;
 
     constexpr bool operator==(property_decl const&) const = default;
@@ -174,6 +201,7 @@ struct sgl::ast::decl
     cc::variant<invalid_decl,
                 module_decl,
                 use_decl,
+                require_decl,
                 fun_decl,
                 struct_decl,
                 enum_decl,
@@ -183,6 +211,7 @@ struct sgl::ast::decl
                 sampler_decl,
                 pipeline_decl,
                 notation_decl,
+                test_decl,
                 field_decl,
                 property_decl,
                 enum_case_decl>

@@ -173,14 +173,17 @@ cc::result<dx12_binding_group_handle> dx12_binding_group::create_resolved(dx12_c
         CC_ASSERT(view_filled[slot_index] == char(0), "binding_group: a binding was provided more than once");
         view_filled[slot_index] = char(1);
 
+        auto const binding = layout->binding_of_view_slot(slot_index);
         auto array_binding = dx12_array_binding{.name = nv.name,
                                                 .is_texture = sg::shape_of(s.binding.type) == sg::view_shape::texture,
+                                                .binding = binding,
+                                                .bound_as = sg::view_class_of(s.binding),
                                                 .elements = {}};
 
         for (isize element = 0; element < element_views.size(); ++element)
         {
             auto const& view = element_views[element];
-            if (!sg::accepts(s.binding.type, view))
+            if (!sg::accepts(s.binding, view))
                 return cc::error(
                     cc::format("binding_group: element {} of '{}' does not match its declared kind", element, nv.name));
 
@@ -218,7 +221,8 @@ cc::result<dx12_binding_group_handle> dx12_binding_group::create_resolved(dx12_c
                 {
                     // The trace reads the AS storage buffer — record it (kept alive + declared accel_read at dispatch).
                     group->referenced.push_back(dx_tlas->_dx12_storage);
-                    group->hazard_views.push_back({dx_tlas->_dx12_storage, sg::view_class::acceleration_structure});
+                    group->hazard_views.push_back(
+                        {dx_tlas->_dx12_storage, sg::view_class::acceleration_structure, binding});
                 }
             }
             else if (auto const* tv = sg::try_as_texture_view(view))
@@ -239,8 +243,8 @@ cc::result<dx12_binding_group_handle> dx12_binding_group::create_resolved(dx12_c
                 else
                 {
                     group->referenced_textures.push_back(cc::move(dx));
-                    group->texture_hazard_views.push_back(
-                        {group->referenced_textures.back(), tv->range, tv->access}); // → dispatch hazard declare
+                    group->texture_hazard_views.push_back({group->referenced_textures.back(), tv->range, tv->bound_as,
+                                                           binding}); // → dispatch hazard declare
                 }
             }
             else
@@ -261,8 +265,8 @@ cc::result<dx12_binding_group_handle> dx12_binding_group::create_resolved(dx12_c
                 else
                 {
                     group->referenced.push_back(cc::move(dx));
-                    group->hazard_views.push_back(
-                        {group->referenced.back(), bv.access}); // (buffer, access class) → dispatch hazard declare
+                    group->hazard_views.push_back({group->referenced.back(), bv.bound_as,
+                                                   binding}); // (buffer, view class) → dispatch hazard declare
                 }
             }
         }

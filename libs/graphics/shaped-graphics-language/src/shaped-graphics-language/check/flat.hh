@@ -2,6 +2,7 @@
 
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/macros.hh>
+#include <clean-core/container/set.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/variant.hh>
 #include <clean-core/container/vector.hh>
@@ -111,8 +112,10 @@ template <class T>
 /// emitter goes on minting from the same value.
 struct sgl::check::name_mint
 {
-    /// Every name handed out or reserved so far.
+    /// Every name handed out or reserved so far, in that order, and the same names as a set to look them up in.
+    /// Both are written by `reserve` and `mint` alone.
     cc::vector<cc::string> taken;
+    cc::set<cc::string> index;
 
     [[nodiscard]] bool is_taken(cc::string_view name) const;
 
@@ -195,10 +198,12 @@ struct sgl::check::flat_literal
     constexpr bool operator==(flat_literal const&) const = default;
 };
 
-/// Of the prelude's type `int`.
+/// Of the prelude's type `int`, or of `uint` where an integer literal converted to it (CHK-253); a `uint` keeps its
+/// bits in `value`.
 struct sgl::check::flat_int_literal
 {
     i32 value = 0;
+    bool is_unsigned = false;
 
     constexpr bool operator==(flat_int_literal const&) const = default;
 };
@@ -234,6 +239,8 @@ struct sgl::check::flat_binding_member
     symbol_id binding = symbol_id::none;
     /// A position in the binding's `members`.
     i32 member = -1;
+    /// Of a `@workgroup` binding: memory the workgroup shares, which a store changes between two reads of it.
+    bool is_workgroup = false;
 
     constexpr bool operator==(flat_binding_member const&) const = default;
 };
@@ -258,7 +265,17 @@ struct sgl::check::flat_buffer_element
     constexpr bool operator==(flat_buffer_element const&) const = default;
 };
 
-/// A value of the node's struct type from one value per field, in field order.
+/// `object[index]` on an array value: its element, read or, as a place, assigned.
+/// The index is evaluated after the object; outside `0 ..< length` it is a program error (EVAL-90).
+struct sgl::check::flat_element
+{
+    flat_expr_id object = flat_expr_id::none;
+    flat_expr_id index = flat_expr_id::none;
+
+    constexpr bool operator==(flat_element const&) const = default;
+};
+
+/// A value of the node's struct type from one value per field, in field order, or of its array type, one per element.
 /// A splat is gone: its fields stand here one by one.
 struct sgl::check::flat_construct
 {
@@ -332,6 +349,7 @@ struct sgl::check::flat_expr
                 flat_binding_member,
                 flat_member,
                 flat_buffer_element,
+                flat_element,
                 flat_construct,
                 flat_call,
                 flat_not,
@@ -440,6 +458,13 @@ struct sgl::check::flat_for
     constexpr bool operator==(flat_for const&) const = default;
 };
 
+/// Ends the invocation with no effect: nothing after it runs, and what it would have written is never written.
+/// A pixel entry point's alone (CHK-277); a test's run ends as `discarded`.
+struct sgl::check::flat_discard
+{
+    constexpr bool operator==(flat_discard const&) const = default;
+};
+
 /// Starts the next iteration of the loop `target`, from any depth inside it in the structured form.
 /// In the core form `target` is the innermost loop, and no `once` stands in between.
 struct sgl::check::flat_continue
@@ -472,6 +497,62 @@ struct sgl::check::flat_return
     flat_expr_id value = flat_expr_id::none;
 
     constexpr bool operator==(flat_return const&) const = default;
+};
+
+/// What one node of a check's condition is: the operators a report narrows through, and the leaf any other expression is.
+enum class sgl::check::check_node_kind : sgl::u8
+{
+    leaf,
+    and_,
+    or_,
+    not_,
+    /// One comparison, whose operands are the nodes `lhs` and `rhs`.
+    compare,
+    /// `a < b <= c`: an `and` of its comparisons, which share the operands between them.
+    chain,
+};
+
+/// One node of the condition of a check or an `assert`, in the order the condition is written.
+struct sgl::check::flat_check_node
+{
+    check_node_kind kind = check_node_kind::leaf;
+    origin from;
+    /// The spelling of a comparison: `<`, `==`.
+    cc::string op;
+    /// A position among the site's nodes; -1 for the whole condition.
+    i32 parent = -1;
+    /// For a comparison, its operands as positions among the site's nodes.
+    i32 lhs = -1;
+    i32 rhs = -1;
+    /// The `var` a run leaves this node's value in; it holds none where the node did not run (EVAL-11).
+    local_id value = local_id::none;
+
+    bool operator==(flat_check_node const&) const = default;
+};
+
+/// What a failing check is reported from: where it stands, and its condition as a tree of nodes.
+struct sgl::check::flat_check_site
+{
+    origin from;
+    /// An `assert`, which stops the run where it is false; a check of a test goes on.
+    bool stops = false;
+    /// A range of `flat_entry_point::check_nodes`; the first is the whole condition.
+    ast::range_of<flat_check_node> nodes;
+    /// A `flat_local_ref` per `for` of the test around the check, outermost first.
+    ast::range_of<flat_expr_id> loop_variables;
+
+    constexpr bool operator==(flat_check_site const&) const = default;
+};
+
+/// Runs `body`, which leaves the condition's value in the first node's `var`, and records the check when it is false.
+/// Structured form only: `legalize` removes it with its body, which is how no target writes a check or an `assert`.
+struct sgl::check::flat_check
+{
+    /// A position in `flat_entry_point::check_sites`.
+    i32 site = -1;
+    ast::range_of<flat_stmt_id> body;
+
+    constexpr bool operator==(flat_check const&) const = default;
 };
 
 /// One arm: the patterns that select it, and the statements it runs.
@@ -529,14 +610,25 @@ struct sgl::check::flat_stmt
                 flat_while,
                 flat_for,
                 flat_continue,
+                flat_discard,
                 flat_once,
                 flat_break,
                 flat_case,
                 flat_switch,
-                flat_return>
+                flat_return,
+                flat_check>
         node;
 
     bool operator==(flat_stmt const&) const = default;
+};
+
+/// A parameter of an entry point that the GPU fills, and the local that holds it.
+struct sgl::check::flat_stage_input
+{
+    stage_input input = stage_input::none;
+    local_id local = local_id::none;
+
+    bool operator==(flat_stage_input const&) const = default;
 };
 
 /// One entry point as one flat function.
@@ -547,15 +639,17 @@ struct sgl::check::flat_entry_point
     /// The name as written: the host asks for it, so it is never minted.
     cc::string name;
     symbol_id function = symbol_id::none;
-    /// The one parameter, which is `locals[0]`.
+    /// The stage struct, which is `locals[0]`; `none` for an entry point that takes stage inputs alone.
     type_id input = type_id::none;
+    /// The parameters that are stage inputs, each a local of its own, in the order written (CHK-271).
+    cc::vector<flat_stage_input> stage_inputs;
     type_id result = type_id::none;
     /// The bindings of the function's `{...}` list in the order written, which is what decides the pipeline layout.
     cc::vector<symbol_id> bindings;
     /// The grid a `compute` entry point is dispatched in; `{1, 1, 1}` for every other stage.
     i32 workgroup[3] = {1, 1, 1};
-    /// The parameter carries `@thread_id` itself rather than being a struct that holds one.
-    bool takes_thread_id = false;
+    /// What a device needs to run it, `function_info::features`.
+    feature_set features;
 
     cc::vector<flat_local> locals;
     cc::vector<flat_label> labels;
@@ -568,6 +662,9 @@ struct sgl::check::flat_entry_point
     /// The arms of every `case` and `switch` of this entry point.
     cc::vector<flat_arm> arms;
     cc::vector<call_site> call_sites;
+    /// Every check and `assert` of the tree, which a `flat_check` names by position; empty once the tree is core.
+    cc::vector<flat_check_site> check_sites;
+    cc::vector<flat_check_node> check_nodes;
     /// The statements of the function, in order.
     ast::range_of<flat_stmt_id> body;
 
@@ -582,6 +679,10 @@ struct sgl::check::flat_entry_point
     [[nodiscard]] tree_view<flat_stmt_id> at(ast::range_of<flat_stmt_id> r) const { return viewed(stmt_lists, r); }
     [[nodiscard]] tree_view<flat_arm> at(ast::range_of<flat_arm> r) const { return viewed(arms, r); }
     [[nodiscard]] tree_view<call_site> at(ast::range_of<call_site> r) const { return viewed(call_sites, r); }
+    [[nodiscard]] tree_view<flat_check_node> at(ast::range_of<flat_check_node> r) const
+    {
+        return viewed(check_nodes, r);
+    }
 
     [[nodiscard]] bool operator==(flat_entry_point const& rhs) const
     {
@@ -589,9 +690,10 @@ struct sgl::check::flat_entry_point
         return entry_stage == rhs.entry_stage && name == rhs.name && function == rhs.function && input == rhs.input
             && result == rhs.result && is_equal(bindings, rhs.bindings) && workgroup[0] == rhs.workgroup[0]
             && workgroup[1] == rhs.workgroup[1] && workgroup[2] == rhs.workgroup[2]
-            && takes_thread_id == rhs.takes_thread_id && is_equal(locals, rhs.locals) && is_equal(labels, rhs.labels)
+            && is_equal(stage_inputs, rhs.stage_inputs) && is_equal(locals, rhs.locals) && is_equal(labels, rhs.labels)
             && root == rhs.root && is_equal(exprs, rhs.exprs) && is_equal(stmts, rhs.stmts)
             && is_equal(expr_lists, rhs.expr_lists) && is_equal(stmt_lists, rhs.stmt_lists) && is_equal(arms, rhs.arms)
-            && is_equal(call_sites, rhs.call_sites) && body == rhs.body && names == rhs.names;
+            && is_equal(call_sites, rhs.call_sites) && is_equal(check_sites, rhs.check_sites)
+            && is_equal(check_nodes, rhs.check_nodes) && body == rhs.body && names == rhs.names;
     }
 };

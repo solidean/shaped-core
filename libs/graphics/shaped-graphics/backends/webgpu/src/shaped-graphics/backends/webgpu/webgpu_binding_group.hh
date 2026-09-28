@@ -5,6 +5,7 @@
 #include <shaped-graphics/backends/webgpu/fwd.hh>
 #include <shaped-graphics/backends/webgpu/webgpu_common.hh>
 #include <shaped-graphics/binding/binding_group.hh>
+#include <shaped-graphics/resource/views.hh>
 
 /// WebGPU implementation of sg::binding_group: one WGPUBindGroup.
 ///
@@ -34,4 +35,14 @@ public:
     wgpu_bind_group _group;
     cc::vector<sg::raw_buffer_handle> referenced_buffers;
     cc::vector<sg::raw_texture_handle> referenced_textures;
+
+    /// A bound buffer or texture, by identity, with the binding it sits at and the view it is bound through.
+    /// What a draw orders against: WebGPU tracks usage itself, but never between two draws of one pass.
+    struct bound_resource
+    {
+        void const* resource = nullptr;
+        isize binding = -1;
+        sg::view_class bound_as = sg::view_class::readonly;
+    };
+    cc::vector<bound_resource> bound;
 };

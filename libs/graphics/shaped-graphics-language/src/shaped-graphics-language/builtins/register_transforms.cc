@@ -81,6 +81,8 @@ written write_product(call_context const& c)
     return product(c, c.arguments[0], c.arguments[1]);
 }
 
+constexpr cc::string_view k_mul[] = {"mul"};
+
 void add_product(registry& r,
                  cc::string_view name,
                  cc::string_view parameter,
@@ -92,7 +94,7 @@ void add_product(registry& r,
     r.add(function_record{
         .signature = cc::format("@pure @operator(\"*\") fun {}(m: mat4, {}: {}) -> {}", name, parameter, rhs, result_type),
         .evaluate = evaluate,
-        .write = {.kind = spelling_kind::custom, .custom = write},
+        .write = {.kind = spelling_kind::custom, .custom = write, .hlsl_names = k_mul},
     });
 }
 } // namespace

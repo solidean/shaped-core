@@ -30,10 +30,15 @@ TEST("sgl check - an opaque struct needs @builtin")
           == "opaque-struct-needs-builtin @0:7+6 handle\n");
 }
 
-TEST("sgl check - a name is declared once, unless every declaration of it is a function")
+TEST("sgl check - a name is declared once, unless it is functions and at most one struct in front of them")
 {
     CHECK(reports_for("struct a:\n    x: float\nstruct a:\n    y: float\n") == "duplicate-declaration user:[a] a\n");
-    CHECK(reports_for("struct a:\n    x: float\nfun a(k: float) -> float => k\n") == "duplicate-declaration user:[a] a\n");
+    CHECK(reports_for("struct a:\n    x: float\nenum a:\n    y\n") == "duplicate-declaration user:[a] a\n");
+    CHECK(reports_for("fun a(k: float) -> float => k\nbinding a:\n    y: float\n")
+          == "duplicate-declaration user:[a] a\n");
+    // CHK-240: functions of a struct's name overload its constructor, whichever of them stands first
+    CHECK(reports_for("struct a:\n    x: float\nfun a(k: float, l: float) -> a => a(k + l)\n") == "");
+    CHECK(reports_for("fun a(k: float, l: float) -> a => a(k + l)\nstruct a:\n    x: float\n") == "");
     CHECK(reports_for("struct a:\n    x: float\n    x: float\n") == "duplicate-declaration user:[x] x\n");
     CHECK(reports_for("@builtin fun dot(a: float3, a: float3) -> float\n") == "duplicate-declaration user:[a] a\n");
 
@@ -44,14 +49,22 @@ TEST("sgl check - a name is declared once, unless every declaration of it is a f
 TEST("sgl check - the prelude is a scope around the user file's, which may shadow its names")
 {
     // the user file's struct is the one its lookups find: the prelude's vec3 has no member `weight`
-    CHECK(reports_for("struct vec3:\n    weight: float\nfun g(v: vec3) -> float:\n    return v.weight\n") == "");
+    // A builtin type is @shadowable(false), so this and the int below need a prelude whose types may be hidden.
+    auto const shadowable = shadowable_builtins_text();
+    CHECK(reports_of(check_sources(shadowable, "struct vec3:\n    weight: float\nfun g(v: vec3) -> float:\n    return "
+                                               "v.weight\n"))
+          == "");
+    // with the library's prelude it is reported once, although the struct and its constructor are two symbols
+    CHECK(reports_for("struct vec3:\n    weight: float\n")
+          == "shadows-unshadowable user:[struct vec3:] vec3 is @shadowable(false) in the prelude\n");
     CHECK(reports_for("binding dot:\n    x: float\n") == "");
     // a function hides a struct of the prelude, and a struct the prelude's functions, unless both are functions
     CHECK(reports_for("fun vec3(k: float) -> float => k\nfun g(k: float) -> float:\n    return vec3(k)\n") == "");
     CHECK(reports_for("struct dot:\n    a: float\nfun g(d: dot) -> float:\n    return d.a\n") == "");
     // what the checker needs of the prelude by name stays the prelude's: a for runs over its int
-    CHECK(reports_for("struct int:\n    a: float\nfun g(k: float) -> float:\n    for i in 0 ..< 3:\n        return k\n"
-                      "    return k\n")
+    CHECK(reports_of(check_sources(shadowable, "struct int:\n    a: float\nfun g(k: float) -> float:\n    for i in 0 "
+                                               "..< 3:\n"
+                                               "        return k\n    return k\n"))
           == "");
 
     // a prelude file never sees the user file's names
@@ -91,9 +104,8 @@ TEST("sgl check - compilation is on demand, so a declaration may stand below its
     CHECK(reports_of(checked) == "");
     // `inner` was compiled from inside `outer`, so its type exists first
     auto const& m = checked.module;
-    auto const outer = m.symbols[m.symbols.size() - 2];
-    auto const inner = m.symbols[m.symbols.size() - 1];
-    CHECK(outer.name == "outer");
+    auto const outer = symbol_named(m, "outer");
+    auto const inner = symbol_named(m, "inner");
     CHECK(sgl::check::index_of(inner.type) < sgl::check::index_of(outer.type));
 }
 
@@ -110,30 +122,74 @@ TEST("sgl check - a type is canonical: one id per struct, and the error type is 
     auto const checked = check_sources(read_prelude(), "struct a:\n    x: float\n    y: float\n");
     auto const& m = checked.module;
     CHECK(m.types[0].kind == sgl::check::type_kind::error);
-    auto const& a = m.at(m.symbols.back().type);
+    auto const& a = m.at(symbol_named(m, "a").type);
     auto const fields = m.at(a.members);
     REQUIRE(fields.size() == 2);
     CHECK(fields[0].type == fields[1].type);
     CHECK(m.name_of(fields[0].type) == "float");
 }
 
+TEST("sgl check - a const is a literal, an enum case or another const, and stands for its value")
+{
+    // CHK-219
+    CHECK(reports_for("const k = 1.5\nconst n = -3\nconst m = n\nenum e:\n    a\n    b\nconst first = e.a\n"
+                      "fun f(x: float) -> float:\n    if n < m or first == e.b => return x * k\n    return x\n")
+          == "");
+    CHECK(reports_for("const k: int = 1.5\n") == "type-mismatch user:[1.5] expected int, got float\n");
+    CHECK(reports_for("const a = b\nconst b = a\n").contains("dependency-cycle"));
+    CHECK(reports_for("const k = 1.0\nstruct a:\n    x: k\n")
+          == "wrong-kind-of-name user:[k] k is a const, and a type stands here\n");
+    // true and false are consts of the prelude, and a case over a bool that names both is exhaustive (CHK-221)
+    CHECK(reports_for("fun f(b: bool) -> float:\n    if b == true => return 1.0\n    return case b:\n"
+                      "        true => 0.5\n        false => 0.0\n")
+          == "");
+}
+
+TEST("sgl check - a @shadowable(false) symbol is hidden by nothing")
+{
+    // CHK-220: not by a declaration of the program, a local, a parameter or a for variable
+    CHECK(reports_for("const true = 1\n").contains("shadows-unshadowable"));
+    CHECK(reports_for("fun f(k: float) -> float:\n    let true = k\n    return k\n")
+          == "shadows-unshadowable user:[true] true is @shadowable(false)\n");
+    CHECK(reports_for("fun f(false: float) -> float => false\n").contains("shadows-unshadowable user:[false]"));
+    CHECK(reports_for("fun f(k: float) -> float:\n    for true in 0 ..< 3:\n        return k\n    return k\n")
+              .contains("shadows-unshadowable user:[true]"));
+    // a symbol of the program may say so of itself
+    CHECK(reports_for("@shadowable(false) const limit = 4\nfun f(limit: int) -> int => limit\n")
+          == "shadows-unshadowable user:[limit] limit is @shadowable(false)\n");
+    CHECK(reports_for("@shadowable(maybe) const limit = 4\n")
+          == "invalid-attribute-arguments user:[shadowable] @shadowable takes `false` or `true`, as in "
+             "@shadowable(false)\n");
+    // and on every declaration it stands on, where a typo would otherwise leave the symbol hidable
+    cc::string_view const declarations[] = {
+        "@shadowable(flase) struct light:\n    power: float\n", "@shadowable(flase) enum mode:\n    on\n    off\n",
+        "@shadowable(flase) fun f() -> float => 1.0\n",         "@shadowable(flase) binding frame:\n    e: float\n",
+        "@shadowable struct light:\n    power: float\n",
+    };
+    for (auto const d : declarations)
+        CHECK(reports_for(d).starts_with("invalid-attribute-arguments user:[shadowable]")).dump("source", d);
+    CHECK(reports_for("@shadowable(true) struct light:\n    power: float\n") == "");
+}
+
 TEST("sgl check - what the tracer does not carry is unsupported-yet, and names the construct")
 {
-    CHECK(reports_for("const k = 1.0\n") == "unsupported-yet user:[const k = 1.0] const\n");
+    CHECK(reports_for("const k = 2.0 * 1.0\n")
+          == "unsupported-yet user:[2.0 * 1.0] a const whose value is no literal, no enum case and no const\n");
     CHECK(reports_for("type color = float3\n") == "unsupported-yet user:[type color = float3] type alias\n");
     CHECK(reports_for("use brdf\n") == "unsupported-yet user:[use brdf] use\n");
     CHECK(reports_for("sampler s:\n    filter = .linear\n") == "unsupported-yet user:[sampler s:] sampler\n");
     CHECK(reports_for("fun id[T](x: T) -> T => x\n").starts_with("unsupported-yet user:[id] a generic function\n"));
-    CHECK(reports_for("struct a:\n    x: float\n    len => x\n") == "unsupported-yet user:[len => x] a property\n");
-    CHECK(reports_for("struct a:\n    x: float = 1.0\n") == "unsupported-yet user:[1.0] a default value\n");
+    CHECK(reports_for("struct a:\n    x: float\n    fun reset(mut self):\n        self.x = 0.0\n")
+          == "unsupported-yet user:[reset] mut self\n");
     CHECK(reports_for("binding b = constants\n") == "unsupported-yet user:[constants] a binding composition\n");
     // CHK-25: a format is no type, so a texture takes what it samples to and an image takes a format as a case.
-    CHECK(reports_for("binding b:\n    t: texture2d[rgba8]\n") == "unknown-name user:[rgba8] rgba8\n");
+    CHECK(reports_for("binding b:\n    t: texture_2d[rgba8]\n") == "unknown-name user:[rgba8] rgba8\n");
     CHECK(reports_for("@format(rgba8) struct a:\n    x: float\n")
           == "unsupported-yet user:[format] the attribute @format on a struct\n");
 
     // an unsupported declaration still owns its name, so a use of it is silent
-    CHECK(reports_for("const k = 1.0\nstruct a:\n    x: k\n") == "unsupported-yet user:[const k = 1.0] const\n");
+    CHECK(reports_for("type color = float3\nstruct a:\n    x: color\n")
+          == "unsupported-yet user:[type color = float3] type alias\n");
     // the module line is accepted
     CHECK(reports_for("module cube\nstruct a:\n    x: float\n") == "");
 }
@@ -143,7 +199,7 @@ TEST("sgl check - a function needs a body unless it is @builtin, and a generic o
     CHECK(reports_for("fun f(x: float) -> float\n") == "expected-body user:[f] f\n");
 
     auto const checked = check_sources(read_prelude(), "fun id[T](x: float) -> float => x\n");
-    CHECK(checked.module.symbols.back().state == symbol_state::failed);
+    CHECK(symbol_named(checked.module, "id").state == symbol_state::failed);
     CHECK(sgl::check::dump(checked.module).ends_with("(fun id failed)\n"));
 }
 
@@ -199,13 +255,24 @@ TEST("sgl check - an entry point's signature follows the rules of its stage")
     CHECK(entry_reports("@vertex fun vs(v: vin) -> vout:\n    return { p = hpos4(..v.p, 1.0) }\n") == "");
 
     CHECK(entry_reports("@vertex fun vs(v: plain) -> vout:\n    return { p = hpos4(..v.p, 1.0) }\n")
-          == "invalid-entry-point user:[vs] the parameter of a @vertex fun is a @vertex struct\n");
+          == "invalid-entry-point user:[vs] the struct parameter of a @vertex fun is a @vertex struct\n");
     CHECK(entry_reports("@vertex fun vs(v: vin, w: vin) -> vout:\n    return { p = hpos4(..v.p, 1.0) }\n")
-          == "invalid-entry-point user:[vs] an entry point takes one struct parameter\n");
-    CHECK(entry_reports("@vertex fun vs(v: vin) -> plain:\n    return { p = v.p }\n")
-          == "invalid-entry-point user:[vs] a @vertex fun returns a struct with exactly one @position field\n");
+          == "invalid-entry-point user:[vs] an entry point takes its stage struct first, and stage inputs after it\n");
+    // CHK-271: a vertex stage may draw from no vertex buffer, and takes its stage inputs after its struct
+    CHECK(entry_reports("@vertex fun vs(@vertex_index i: int) -> vout:\n    return { p = hpos4(0.0, 0.0, 0.0, 1.0) }\n")
+          == "");
+    CHECK(entry_reports("@vertex fun vs(v: vin, @instance_index i: int, @vertex_index k: int) -> vout:\n"
+                        "    return { p = hpos4(..v.p, 1.0) }\n")
+          == "");
+    CHECK(entry_reports("@vertex fun vs(@vertex_index i: int, v: vin) -> vout:\n    return { p = hpos4(..v.p, 1.0) }\n")
+          == "invalid-entry-point user:[vs] an entry point takes its stage struct first, and stage inputs after it\n");
+    CHECK(entry_reports("@vertex fun vs(v: vin, @vertex_index i: uint) -> vout:\n    return { p = hpos4(..v.p, 1.0) "
+                        "}\n")
+          == "invalid-entry-point user:[vs] a @vertex_index parameter is an int\n");
+    // a vertex that a tessellation stage reads first has no @position; the pipeline asks for it where the rasterizer reads it
+    CHECK(entry_reports("@vertex fun vs(v: vin) -> plain:\n    return { p = v.p }\n") == "");
     CHECK(entry_reports("@vertex fun vs(v: vin) -> two:\n    return { a = hpos4(..v.p, 1.0), b = hpos4(..v.p, 1.0) }\n")
-          == "invalid-entry-point user:[vs] a @vertex fun returns a struct with exactly one @position field\n");
+          == "invalid-entry-point user:[vs] a @vertex fun returns a struct with at most one @position field\n");
     CHECK(entry_reports("@vertex fun vs(v: vin) -> wrong:\n    return { a = float4(..v.p, 1.0) }\n")
           == "invalid-entry-point user:[vs] the @position field of a @vertex fun is an hpos4\n");
 
@@ -213,7 +280,13 @@ TEST("sgl check - an entry point's signature follows the rules of its stage")
     CHECK(entry_reports("@pixel fun ps(v: vout) -> plain:\n    return { p = pos3(1.0, 1.0, 1.0) }\n")
           == "invalid-entry-point user:[ps] a @pixel fun returns a @pixel struct\n");
     CHECK(entry_reports("@pixel fun ps(v: float) -> target:\n    return { c = float4(v, v, v, v) }\n")
-          == "invalid-entry-point user:[ps] the parameter of an entry point is a struct with fields\n");
+          == "invalid-entry-point user:[ps] the struct parameter of an entry point is a struct with fields\n");
+    CHECK(entry_reports("@pixel fun ps(v: vout, @is_front_facing f: bool, @sample_mask m: uint) -> target:\n"
+                        "    return { c = float4(..v.p) }\n")
+          == "");
+    CHECK(entry_reports("@pixel fun ps(@is_front_facing f: bool) -> target:\n    return { c = float4(1.0, 1.0, 1.0, "
+                        "1.0) }\n")
+          == "invalid-entry-point user:[ps] a @pixel fun takes the struct its vertex stage returns\n");
     CHECK(entry_reports("@vertex @pixel fun ps(v: vout) -> target:\n    return { c = float4(..v.p) }\n")
           == "invalid-entry-point user:[ps] an entry point has one stage\n");
 }
@@ -232,4 +305,127 @@ TEST("sgl check - an entry point with an error has diagnostics and no flat tree"
     auto const invalid = check_sources(
         read_prelude(), cc::string(edges) + "@pixel fun ps(v: vout) -> plain:\n    return { p = pos3(1.0, 1.0, 1.0) }\n");
     CHECK(invalid.module.entry_points.empty());
+}
+
+TEST("sgl check - a default is checked once, where it is declared, and reads only the parameters before it")
+{
+    CHECK(reports_for("fun f(x: float, y: float = true) -> float => x + y\n")
+          == "type-mismatch user:[true] the default of y is float, got bool\n");
+    CHECK(reports_for("fun f(x: float = y, y: float = 1.0) -> float => x + y\n") == "unknown-name user:[y] y\n");
+    // a field's default is its constructor parameter's, and reads the fields before it
+    CHECK(reports_for("struct s:\n    a: float = b\n    b: float = 1.0\n") == "unknown-name user:[b] b\n");
+    CHECK(reports_for("struct s:\n    a: float\n    b: float = a * 2.0\n") == "");
+}
+
+TEST("sgl check - a type scope holds one kind of thing per name, and an extension names a type")
+{
+    CHECK(reports_for("struct s:\n    x: float\n    fun x(self) -> float => 1.0\n")
+          == "member-name-clash user:[x] x is a field of s already\n");
+    CHECK(reports_for("struct s:\n    x: float\n    y => self.x\n    fun y(self, k: float) -> float => k\n")
+          == "member-name-clash user:[y] y is a property of s already\n");
+    CHECK(reports_for("enum e:\n    a\n    a => 1\n") == "member-name-clash user:[a] a is a case of e already\n");
+    // an extension is checked against the type's own members the same way
+    CHECK(reports_for("struct s:\n    x: float\nfun s.x => 1.0\n")
+          == "member-name-clash user:[x] x is a field of s already\n");
+    // methods of one name are an overload set, in the type and through extensions alike
+    CHECK(reports_for("struct s:\n    x: float\n    fun f(self) -> float => self.x\nfun s.f(self, k: float) -> float "
+                      "=> k\n")
+          == "");
+    // CHK-62: a member body reads its receiver's members through `self` alone
+    CHECK(reports_for("struct s:\n    x: float\n    fun f(self) -> float => x\n") == "unknown-name user:[x] x\n");
+    CHECK(reports_for("struct s:\n    x: float\n    y => x\n") == "unknown-name user:[x] x\n");
+
+    // CHK-237: the extended type is a struct or an enum
+    CHECK(reports_for("fun nothing.f(self) -> float => 1.0\n") == "unknown-name user:[nothing] nothing\n");
+    CHECK(reports_for("fun dot.f(self) -> float => 1.0\n")
+          == "wrong-kind-of-name user:[dot] dot is no struct and no enum, and only a type has functions of its own\n");
+    // `self` belongs to a function of a type scope
+    CHECK(reports_for("fun f(self) -> float => 1.0\n")
+          == "wrong-kind-of-name user:[f] self is the receiver of a method, and this function belongs to no type\n");
+    CHECK(reports_for("fun f() -> float => self\n") == "unknown-name user:[self] self\n");
+}
+
+TEST("sgl check - a member crossing stages says how it is interpolated, and an integer crosses only flat")
+{
+    // CHK-273
+    constexpr auto vs = "@vertex fun vs(v: vin) -> link:\n    return { p = hpos4(..v.p, 1.0), id = 1 }\n";
+    auto const with = [](cc::string_view link_member)
+    {
+        return reports_for(cc::string("@vertex struct vin:\n    p: pos3\nstruct link:\n    @position p: hpos4\n    ")
+                           + link_member + "\n" + vs);
+    };
+    CHECK(with("@interpolate(.flat) id: int") == "");
+    CHECK(with("id: int")
+          == "invalid-entry-point user:[vs] the int member 'id' crosses stages only flat: write "
+             "`@interpolate(.flat)`\n");
+    CHECK(with("@interpolate(.linear) id: int").contains("crosses stages only flat"));
+    // flat takes one vertex's value, so it has no sampling point
+    CHECK(with("@interpolate(.flat, .centroid) id: int").contains("invalid-attribute-arguments"));
+    CHECK(with("@interpolate(.sideways) id: int").contains("invalid-attribute-arguments"));
+
+    // nothing that crosses no stage edge is interpolated
+    CHECK(reports_for("@vertex struct vin:\n    @interpolate(.flat) p: pos3\nstruct vout:\n    @position p: hpos4\n"
+                      "@vertex fun vs(v: vin) -> vout:\n    return { p = hpos4(..v.p, 1.0) }\n")
+              .contains("crosses no stage edge"));
+}
+
+TEST("sgl check - a pixel stage interpolating per sample needs sample_rate_shading")
+{
+    // CHK-274
+    constexpr auto source = "struct link:\n    @position p: hpos4\n    @interpolate(.perspective, .sample) c: float4\n"
+                            "@pixel struct target:\n    c: float4\n"
+                            "@pixel fun ps(l: link) -> target:\n    return { c = l.c }\n";
+    CHECK(reports_for(source).contains("feature-not-declared user:[ps] ps needs sample_rate_shading"));
+    CHECK(reports_for(cc::string("require sample_rate_shading\n") + source) == "");
+}
+
+TEST("sgl check - a vertex member's @format names the bytes it reads, and they decode into its type")
+{
+    // CHK-275
+    auto const with = [](cc::string_view member)
+    { return reports_for(cc::string("@vertex struct vin:\n    p: float3\n    ") + member + "\n"); };
+    CHECK(with("@format(.rgba8_unorm) c: float4") == "");
+    CHECK(with("@format(.rgba8_uint) j: uint4") == "");
+    CHECK(with("@format(.rgba8_unorm) c: float3")
+          == "type-mismatch user:[format] @format(.rgba8_unorm) decodes into a float4, and the member is a float3\n");
+    CHECK(with("@format(.bgra8) c: float4").contains("invalid-attribute-arguments"));
+    // on a struct that is no vertex input, @format is no member's own
+    CHECK(reports_for("struct plain:\n    @format(.rgba8_unorm) c: float4\n").contains("unsupported-yet"));
+}
+
+TEST("sgl check - a @pixel struct's depth and sample mask are outputs of their types, one each")
+{
+    // CHK-276
+    auto const pixel = [](cc::string_view members)
+    {
+        return reports_for(cc::string("struct vout:\n    @position p: hpos4\n@pixel struct target:\n") + members
+                           + "@pixel fun ps(v: vout) -> target:\n    return target()\n");
+    };
+    CHECK(reports_for("struct vout:\n    @position p: hpos4\n@pixel struct target:\n    c: float4\n    @depth d: "
+                      "float\n"
+                      "    @sample_mask m: uint\n@pixel fun ps(v: vout) -> target:\n"
+                      "    return { c = float4(1.0, 1.0, 1.0, 1.0), d = 0.5, m = 0xff }\n")
+          == "");
+    CHECK(pixel("    @depth d: float4\n").contains("a @depth member is a float, and d is a float4"));
+    CHECK(pixel("    @sample_mask m: int\n").contains("a @sample_mask member is a uint"));
+    CHECK(pixel("    @depth(.sideways) d: float\n").contains("invalid-attribute-arguments"));
+    CHECK(pixel("    @depth a: float\n    @depth b: float\n")
+              .contains("a @pixel struct has at most one @depth member and one @sample_mask member"));
+    // only a @pixel struct writes a pixel's outputs
+    CHECK(reports_for("struct plain:\n    @depth d: float\n").contains("unsupported-yet"));
+}
+
+TEST("sgl check - only a pixel entry point may reach discard")
+{
+    // CHK-277: judged once the body is inlined, so a helper may hold one
+    constexpr auto helper = "fun cut(a: float) -> float:\n    if a < 0.5 => discard\n    return a\n";
+    CHECK(reports_for(cc::string(helper)
+                      + "struct vout:\n    @position p: hpos4\n"
+                        "@vertex fun vs(@vertex_index i: int) -> vout:\n"
+                        "    return { p = hpos4(cut(0.25), 0.0, 0.0, 1.0) }\n")
+          == "stage-not-allowed user:[discard] vs is a vertex entry point, and only a pixel stage discards\n");
+    CHECK(reports_for(cc::string(helper)
+                      + "struct vout:\n    @position p: hpos4\n@pixel struct target:\n    c: float4\n"
+                        "@pixel fun ps(v: vout) -> target:\n    return { c = float4(cut(v.p.x), 0.0, 0.0, 1.0) }\n")
+          == "");
 }

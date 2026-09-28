@@ -24,6 +24,7 @@ from .grammar import (
     FRONT_KNOWN,
     FRONT_REQUIRED,
     HEADING_RE,
+    RETIRED_BLOCK_TYPES,
     SEVERITIES,
     SHOW_KINDS,
     STATES,
@@ -112,6 +113,8 @@ class Entry:
     text: str = ""
     body_start: int = 0
     newline: str = "\n"
+    # Blocks written in a type the grammar has since retired, read as their replacement: (line, old type, new type).
+    retired: list[tuple[int, str, str]] = field(default_factory=list)
 
     @property
     def id(self) -> str:
@@ -506,6 +509,11 @@ def parse_text(text: str, path: Path, slug: str = "", pending_round: int = 0) ->
             raise ReviewParseError(path, number, f"malformed block heading {heading.strip()!r}",
                                    "write `## <type>` or `## <type> <argument>`")
         block_type, head = m.group(1), (m.group(2) or "").strip()
+        if block_type in RETIRED_BLOCK_TYPES:
+            # An old review still holds them, and dropping the whole entry would hide its answers from `show`.
+            # So the block reads as its replacement, and the loader warns rather than refuses.
+            entry.retired.append((number, block_type, RETIRED_BLOCK_TYPES[block_type]))
+            block_type = RETIRED_BLOCK_TYPES[block_type]
         if block_type not in BLOCK_TYPES:
             # A block type is lowercase kebab-case, so anything else here is usually a markdown heading
             # inside a block whose body is markdown — an `artifact` above all.

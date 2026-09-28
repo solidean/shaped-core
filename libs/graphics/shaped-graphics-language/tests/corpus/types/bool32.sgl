@@ -1,0 +1,13 @@
+// bool32 is a bool as GPU memory holds one: `as` converts either way, and the round trip keeps the value
+
+test (true as bool32) as bool == true
+test (false as bool32) as bool == false
+
+fun kept(b: bool) -> bool => (b as bool32) as bool
+
+test kept(1 < 2) and not kept(2 < 1)
+
+// a bool has no layout, so a flag in GPU memory is a bool32, and a shader converts where it reads and writes one
+fun stored(on: bool) -> bool32 => (not on) as bool32
+
+test stored(false) as bool and not (stored(true) as bool)

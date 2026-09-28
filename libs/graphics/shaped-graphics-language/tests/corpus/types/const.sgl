@@ -1,0 +1,40 @@
+// a const is a literal, an enum case or another const, and stands for its value wherever it is named
+
+const steps = 4
+const scale = -0.5
+const also_steps = steps
+
+enum mode:
+    low
+    high
+
+const default_mode = mode.high
+
+test steps == 4 and also_steps == steps
+test scale < 0.0
+
+fun weight(m: mode) -> float:
+    return case m:
+        .low => 0.25
+        .high => 1.0
+
+test weight(default_mode) == 1.0
+
+// a const whose value is a case names that case, so a case over the consts is exhaustive
+fun rank(m: mode) -> int:
+    return case m:
+        default_mode => 2
+        mode.low => 1
+
+test rank(mode.low) == 1 and rank(default_mode) == 2
+
+// a const reaches an entry point as the literal it stands for
+struct frag:
+    a: float
+
+@pixel struct target:
+    color: float4
+
+@pixel fun main_ps(p: frag) -> target:
+    let w = weight(default_mode) * scale + (steps as float)
+    return target(float4(w * p.a, 0.0, 0.0, 1.0))

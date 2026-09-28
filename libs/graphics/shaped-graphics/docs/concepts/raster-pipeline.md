@@ -101,14 +101,14 @@ An attribute's `[[attribute(n)]]` index is its position in `attributes`, the sam
 
 **webgpu** records through `wgpuRenderPassEncoderSetIndexBuffer` / `wgpuRenderPassEncoderDrawIndexed`, re-binding its pass state when a pass reopens.
 
-**No backend supports an array binding on a draw.**
-The raster scope has no `declare_array_*_access` pair, so a bound array binding cannot be accounted for: dx12, vulkan and metal each assert on one, and webgpu has no binding arrays at all.
-See [bindings](bindings.md#array-bindings) and [TODO](../TODO.md).
+**A draw declares its array bindings the way a dispatch does**, through the raster scope's `declare_array_*_access` pair, each element tracked at the stages the code touches its array in.
+webgpu has no binding arrays, so there only the empty declaration is accepted.
+See [bindings](bindings.md#array-bindings).
 
 ## Deferred
 
-**Indirect draws**, **dynamic** primitive topology and depth bias (baked into the PSO for now), **mesh / task** stages, and **array bindings in a draw**.
-Geometry and tessellation stages are **in** (dx12). See [TODO](../TODO.md).
+**Indirect draws**, **dynamic** primitive topology and depth bias (baked into the PSO for now), and **mesh / task** stages.
+Geometry and tessellation stages are **in** (dx12 and vulkan). See [TODO](../TODO.md).
 
 ## See also
 

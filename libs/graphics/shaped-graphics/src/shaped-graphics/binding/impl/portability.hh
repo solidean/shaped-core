@@ -3,6 +3,7 @@
 #include <clean-core/container/span.hh>
 #include <clean-core/error/optional.hh>
 #include <clean-core/string/string.hh>
+#include <shaped-graphics/context/capabilities.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/resource/views.hh>
 
@@ -11,12 +12,13 @@
 // See libs/graphics/shaped-graphics/docs/concepts/bindings.md, "Features".
 namespace sg::impl
 {
-/// A storage binding whose format needs `feature::extended_storage_formats`, as a message, where `extended_storage_formats` is false.
-[[nodiscard]] cc::optional<cc::string> find_unsupported_binding(bool extended_storage_formats,
+/// A binding whose access its kind cannot carry, as a message — refused whatever the device.
+/// Otherwise an image whose format needs `feature::extended_image_formats`, where `extended_image_formats` is false.
+[[nodiscard]] cc::optional<cc::string> find_unsupported_binding(bool extended_image_formats,
                                                                 cc::span<binding const> bindings);
 
-/// A storage texture whose format needs `feature::extended_storage_formats`, as a message, where `extended_storage_formats` is false.
-[[nodiscard]] cc::optional<cc::string> find_unsupported_texture(bool extended_storage_formats,
+/// A texture with image usage whose format needs `feature::extended_image_formats`, as a message, where `extended_image_formats` is false.
+[[nodiscard]] cc::optional<cc::string> find_unsupported_texture(bool extended_image_formats,
                                                                 texture_description const& desc);
 
 /// A 32-bit float view bound to a `filterable_float` binding, as a message, where `float32_filtering` is false.
@@ -31,4 +33,9 @@ namespace sg::impl
 [[nodiscard]] cc::optional<cc::string> find_unsupported_view(bool float32_filtering,
                                                              cc::span<binding const> bindings,
                                                              cc::span<slotted_view const> views);
+
+/// The first stage whose `required_features` holds one outside `supported`, as a message naming the shader and the feature.
+/// A null stage and a stage whose features are unknown are not judged.
+[[nodiscard]] cc::optional<cc::string> find_missing_feature(feature_set supported,
+                                                            cc::span<compiled_shader const* const> stages);
 } // namespace sg::impl

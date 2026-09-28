@@ -30,7 +30,7 @@ struct pixel_input:
     }
 
 // what a light gives a surface that faces `n`
-fun lambert(n: vec3, towards: vec3) -> float => saturate dot(n, normalize towards)
+fun lambert(n: vec3, towards: vec3) => saturate dot(n, normalize towards)
 
 // two fixed lights: a key light, and a weaker fill light from the other side
 fun towards_light(i: int) -> vec3:

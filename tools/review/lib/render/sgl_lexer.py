@@ -17,11 +17,12 @@ from pygments.token import Comment, Error, Keyword, Name, Number, Operator, Punc
 
 _DECLARATION_KEYWORDS = frozenset({
     "fun", "let", "mut", "out", "struct", "enum", "binding", "sampler", "pipeline", "const", "use", "module", "type",
-    "notation", "assert", "print",
+    "notation", "test", "assert", "print", "require",
 })
-# `mut buffer[float]`, `out image2d[.rgba8_unorm]`: an access word at the top of a type position leaves the position a type.
+# `mut buffer[float]`, `out image_2d[.rgba8_unorm]`: an access word at the top of a type position leaves the position a type.
 _TYPE_QUALIFIERS = frozenset({"mut", "out"})
-_CONTROL_KEYWORDS = frozenset({"if", "else", "for", "while", "loop", "return", "yield", "continue", "break", "case"})
+_CONTROL_KEYWORDS = frozenset({"if", "else", "for", "while", "loop", "return", "yield", "continue", "discard", "break",
+                               "case"})
 _WORD_OPERATORS = frozenset({"and", "or", "not", "in", "as"})
 _CONSTANTS = frozenset({"true", "false"})
 # A symbol directly after one of these names a function or a type.
@@ -214,7 +215,9 @@ def _code_tokens(line: str, closes: str):
 
 def _classify(word: str, previous_symbol: str, expects_type: bool, fused_call: bool):
     if word.startswith("@"):
-        return Name.Decorator
+        # The VS Code grammar scopes an attribute as an escape for its colour, since a theme paints a decorator like a
+        # function; the page follows the editor rather than Pygments' default.
+        return String.Escape
     if word.startswith("#"):
         return Number.Hex
     if word == "_":

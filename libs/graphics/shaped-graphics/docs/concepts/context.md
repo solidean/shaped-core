@@ -47,6 +47,7 @@ Layouts and pipelines are schemas rather than lifetime-scoped GPU memory, which 
 Shader tables are `uncached`-only: one is tied to a single pipeline, so there is nothing to dedup across callers.
 
 Beside the scopes, `ctx.routines` is the per-context render-routine registry — see [render-routines](../render-routines.md).
+`ctx.metrics` is what the context reports about its device and its own activity: the adapter, GPU memory and load, and the stats — see [metrics](metrics.md).
 
 ## The frame loop
 

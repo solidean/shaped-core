@@ -1,0 +1,64 @@
+// the bits of int and uint, componentwise over their vectors; a right shift is arithmetic for an int
+
+test (6 & 3) == 2
+test (0b1010 | 0b0101) == 15
+test (0xf0 ^ 0xff) == 0x0f
+test ~0 == -1
+test (1 << 4) == 16
+test (-16 >> 2) == -4
+
+test:
+    let u: uint = 0x8000'0000
+    (u >> 31) == 1
+
+// a hex or binary literal is a number like any other, and `0xffff'ffff` needs a type that holds it
+test:
+    let all: uint = 0xffff'ffff
+    ~all == 0
+
+@expect(error = "literal-not-representable")
+test:
+    let too_big = 0xffff'ffff
+    true
+
+// only a count's low five bits count, so a runtime 33 shifts by one, and a literal one is refused
+test:
+    let count = 33
+    (1 << count) == 2
+
+@expect(error = "shift-out-of-range")
+test (1 << 32) == 0
+
+// two different bit operators in one run need parentheses (OP-15)
+fun stencil_bits(ref: uint) -> uint => (ref << 4) | (ref & 0xf)
+
+test stencil_bits(5) == 0x55
+
+test:
+    let v = uint3(1, 2, 3) << uint3(1, 2, 3)
+    v.x == 2 and v.y == 8 and v.z == 24
+
+fun hash(x: uint) -> uint:
+    let mut h = x ^ (x >> 16)
+    h = h * 0x45d9'f3b
+    return h ^ (h >> 16)
+
+test hash(1) != hash(2)
+
+// a full-screen triangle from nothing but the vertex's index: corners at 0, 2 and 2, 0 in uv
+fun corner_uv(v: int) -> float2 => float2(((v << 1) & 2) as float, (v & 2) as float)
+
+test corner_uv(0).x == 0.0 and corner_uv(1).x == 2.0 and corner_uv(2).y == 2.0
+
+struct pixel_input:
+    @position position: hpos4
+
+@pixel struct target:
+    color: float4
+
+@pixel fun pattern_ps(p: pixel_input) -> target:
+    let x = p.position.x as int
+    let y = p.position.y as int
+    let bits = (x ^ y) & 7
+    let shifted = (bits << 2) + (x >> 1)
+    return { color = float4(bits as float, shifted as float, ~bits as float, 1.0) }

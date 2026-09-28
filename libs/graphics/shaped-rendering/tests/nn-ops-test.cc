@@ -57,7 +57,7 @@ namespace
     auto const* const constants = [&]() -> sg::binding const*
     {
         for (auto const& b : compiled->bindings)
-            if (b.type == sg::binding_type::uniform_buffer)
+            if (b.type == sg::binding_type::constants_buffer)
                 return &b;
         return nullptr;
     }();
@@ -134,8 +134,7 @@ ASYNC_INVOCABLE_TEST("sr - the network's transfer curve round-trips across the H
         return ctx.persistent.create_texture_2d({.format = format,
                                                  .width = width,
                                                  .height = 1,
-                                                 .usage = sg::texture_usage::readonly_texture
-                                                        | sg::texture_usage::readwrite_texture
+                                                 .usage = sg::texture_usage::texture | sg::texture_usage::image
                                                         | sg::texture_usage::copy_dst | sg::texture_usage::copy_src});
     };
 
@@ -164,9 +163,9 @@ ASYNC_INVOCABLE_TEST("sr - the network's transfer curve round-trips across the H
     cmd->compute.bind_pipeline(*input_pipeline);
     cmd->compute.bind<sr::shaders::nn_input_bindings>(
         *ctx.transient.create_binding_group(*cmd, input_layout,
-                                            sr::shaders::nn_input_bindings{.gColor = color.as_readonly_view(),
-                                                                           .gAlbedo = albedo.as_readonly_view(),
-                                                                           .gNormal = normal.as_readonly_view(),
+                                            sr::shaders::nn_input_bindings{.gColor = color.as_texture_view(),
+                                                                           .gAlbedo = albedo.as_texture_view(),
+                                                                           .gNormal = normal.as_texture_view(),
                                                                            .gTarget = packed.as_readwrite_buffer()}));
     cmd->compute.set_inline_constants(sr::shaders::nn_input_constants{.width = u32(width),
                                                                       .height = 1,
@@ -203,7 +202,7 @@ ASYNC_INVOCABLE_TEST("sr - the network's transfer curve round-trips across the H
     cmd2->compute.bind_pipeline(*output_pipeline);
     cmd2->compute.bind<sr::shaders::nn_output_bindings>(*ctx.transient.create_binding_group(
         *cmd2, output_layout,
-        sr::shaders::nn_output_bindings{.gSource = three.as_readonly_buffer(), .gTarget = result.as_readwrite_view()}));
+        sr::shaders::nn_output_bindings{.gSource = three.as_readonly_buffer(), .gTarget = result.as_any_image_view()}));
     cmd2->compute.set_inline_constants(sr::shaders::nn_output_constants{.width = u32(width),
                                                                         .height = 1,
                                                                         .target_width = u32(width),

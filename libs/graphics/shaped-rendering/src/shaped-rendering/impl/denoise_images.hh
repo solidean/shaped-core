@@ -23,11 +23,10 @@ inline bool ensure_image(sg::context& ctx, sg::texture_2d& image, tg::vec2i exte
 {
     if (is_set(image) && extent_of(image) == extent && image.raw()->format() == format)
         return false;
-    image = ctx.persistent.create_texture_2d(
-        {.format = format,
-         .width = extent[0],
-         .height = extent[1],
-         .usage = sg::texture_usage::readonly_texture | sg::texture_usage::readwrite_texture});
+    image = ctx.persistent.create_texture_2d({.format = format,
+                                              .width = extent[0],
+                                              .height = extent[1],
+                                              .usage = sg::texture_usage::texture | sg::texture_usage::image});
     return true;
 }
 } // namespace sr::impl

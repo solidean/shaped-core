@@ -118,4 +118,4 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
         print(review.console.green(f"all {len(net)} atoms accounted for"))
     else:
         print(review.console.yellow(f"{len(uncovered)} atoms unaccounted — `review ingest {args.name} --rest`"))
-    print(f"refresh the generated entries with `uv run review.py generate {args.name}`")
+    print(f"refresh the generated entries with `{ctx.invocation} generate {args.name}`")

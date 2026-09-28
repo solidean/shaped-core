@@ -64,7 +64,7 @@ namespace sg::backend::dx12
 
 /// Combine the two layouts a subresource is required to be in within a single operation, i.e. a texture bound as more than one view.
 /// The policy is D3D12-specific.
-/// The only mismatch a compute binding group can legitimately produce is a texture bound as both a sampled (`shader_readonly`/SRV) and a storage (`shader_readwrite`/UAV) view.
+/// The only mismatch a compute binding group can legitimately produce is a texture bound as both a sampled (`shader_texture`/SRV) and a storage (`shader_image`/UAV) view.
 /// No specialized layout serves both an SRV and a UAV, so it falls back to COMMON (`general`) and reports `degraded`; sampling in COMMON is slower.
 /// `general` already serves any access, so combining with it is free.
 /// Anything else — a copy/render-target/depth layout mixed with a different one — is a real hazard and reports `conflict`.
@@ -74,7 +74,7 @@ namespace sg::backend::dx12
         return {a, layout_combine::ok};
 
     auto const is_shader = [](sg::texture_layout l)
-    { return l == sg::texture_layout::shader_readonly || l == sg::texture_layout::shader_readwrite; };
+    { return l == sg::texture_layout::shader_texture || l == sg::texture_layout::shader_image; };
     if (is_shader(a) && is_shader(b))
         return {sg::texture_layout::general, layout_combine::degraded};
 

@@ -216,6 +216,12 @@ public:
             auto binding = sg::binding{};
             CC_RETURN_IF_ERROR(to_binding(b, binding));
             result.bindings.push_back(cc::move(binding));
+            if (b.address_space == "uniform" || b.address_space == "storage")
+            {
+                auto layout = block_layout_of(b);
+                CC_RETURN_IF_ERROR(layout);
+                result.layouts.push_back(cc::move(layout.value()));
+            }
         }
         sg::apply_stage_visibility(result.bindings, result.stage);
         return result;
@@ -242,6 +248,7 @@ private:
 
     struct struct_member
     {
+        cc::string name;
         parsed_type type;
         cc::vector<token> explicit_size; // empty when absent; unevaluated like every other integer argument
         cc::vector<token> explicit_align;
@@ -509,7 +516,7 @@ private:
             auto type = read_type();
             CC_RETURN_IF_ERROR(type);
 
-            auto member = struct_member{.type = cc::move(type.value())};
+            auto member = struct_member{.name = cc::string(member_name.value().text), .type = cc::move(type.value())};
             for (auto const& a : attrs)
                 if ((a.name == "size" || a.name == "align") && a.args.size() == 1)
                     (a.name == "size" ? member.explicit_size : member.explicit_align) = a.args[0];
@@ -773,7 +780,7 @@ private:
         return {};
     }
 
-    static cc::optional<sg::pixel_format> storage_format_of(cc::string_view f)
+    static cc::optional<sg::pixel_format> image_format_of(cc::string_view f)
     {
         struct entry
         {
@@ -821,6 +828,66 @@ private:
         return {};
     }
 
+    /// Every builtin value below `type`, placed from `base` by the same rules `layout_of` applies.
+    cc::result<cc::unit> fields_of(parsed_type const& type_in,
+                                   isize base,
+                                   cc::string_view name,
+                                   int line,
+                                   cc::vector<slib::block_field>& out) const
+    {
+        auto const& type = resolved(type_in);
+        auto const* members = _structs.get_ptr(type.name);
+        if (members == nullptr)
+        {
+            out.push_back({.name = cc::string(name), .offset = base});
+            return cc::unit{};
+        }
+        auto offset = isize(0);
+        for (auto const& m : *members)
+        {
+            auto layout = layout_of(m.type, line);
+            CC_RETURN_IF_ERROR(layout);
+            auto member_align = layout.value().align;
+            auto member_size = layout.value().size;
+            if (!m.explicit_align.empty())
+            {
+                auto value = integer_of(m.explicit_align, line);
+                CC_RETURN_IF_ERROR(value);
+                member_align = isize(value.value());
+            }
+            if (!m.explicit_size.empty())
+            {
+                auto value = integer_of(m.explicit_size, line);
+                CC_RETURN_IF_ERROR(value);
+                member_size = isize(value.value());
+            }
+            offset = cc::int_round_up_to_multiple(offset, member_align);
+            auto const inner = name.empty() ? cc::string(m.name) : cc::format("{}.{}", name, m.name);
+            CC_RETURN_IF_ERROR(fields_of(m.type, base + offset, inner, line, out));
+            if (member_size.has_value())
+                offset += member_size.value();
+        }
+        return cc::unit{};
+    }
+
+    /// A uniform's struct, or a storage buffer's `array<T>` element, as WGSL places it.
+    cc::result<slib::block_layout> block_layout_of(pending_binding const& p) const
+    {
+        auto result = slib::block_layout{.global = p.name};
+        auto const& type = resolved(p.type);
+        if (type.name == "array" && !type.args.empty())
+        {
+            auto element = layout_of(type.args[0], p.line);
+            CC_RETURN_IF_ERROR(element);
+            result.stride = cc::int_round_up_to_multiple(element.value().size.value_or(0), element.value().align);
+            if (_structs.get_ptr(resolved(type.args[0]).name) != nullptr)
+                CC_RETURN_IF_ERROR(fields_of(type.args[0], 0, "", p.line, result.fields));
+            return result;
+        }
+        CC_RETURN_IF_ERROR(fields_of(type, 0, "", p.line, result.fields));
+        return result;
+    }
+
     cc::result<cc::unit> to_binding(pending_binding const& p, sg::binding& b) const
     {
         auto const& type = resolved(p.type);
@@ -842,7 +909,7 @@ private:
 
         if (p.address_space == "uniform")
         {
-            b.type = sg::binding_type::uniform_buffer;
+            b.type = sg::binding_type::constants_buffer;
             auto layout = layout_of(type, p.line);
             CC_RETURN_IF_ERROR(layout);
             if (!layout.value().size.has_value())
@@ -850,8 +917,10 @@ private:
             b.block_size = layout.value().size.value();
         }
         else if (p.address_space == "storage")
-            b.type = p.access == "read_write" ? sg::binding_type::readwrite_structured_buffer
-                                              : sg::binding_type::readonly_structured_buffer;
+        {
+            b.type = sg::binding_type::buffer;
+            b.access = p.access == "read_write" ? sg::access_mode::read_write : sg::access_mode::read;
+        }
         else if (!p.address_space.empty())
             return cc::error(cc::format("line {}: '{}' is in the {} address space, which is not a resource sg binds",
                                         p.line, p.name, p.address_space));
@@ -869,26 +938,26 @@ private:
             return cc::error(cc::format("line {}: '{}' is a texture_external, which sg has no view for", p.line, p.name));
         else if (n.starts_with("texture_storage_"))
         {
-            b.type = sg::binding_type::readwrite_texture;
+            b.type = sg::binding_type::image;
             b.texture_dimension = texture_dimension_of(n);
             if (type.args.empty())
                 return cc::error(cc::format("line {}: storage texture '{}' declares no format", p.line, p.name));
-            b.storage_format = storage_format_of(type.args[0].name);
-            if (!b.storage_format.has_value())
+            b.image_format = image_format_of(type.args[0].name);
+            if (!b.image_format.has_value())
                 return cc::error(cc::format("line {}: storage texture '{}' uses format '{}', which has no "
                                             "sg::pixel_format",
                                             p.line, p.name, type.args[0].name));
             // WGSL requires the access mode on a storage texture, so an absent one is a shader naga will refuse anyway.
             if (type.access == "read")
-                b.storage_access = sg::storage_access::read;
+                b.access = sg::access_mode::read;
             else if (type.access == "write")
-                b.storage_access = sg::storage_access::write;
+                b.access = sg::access_mode::write;
             else
-                b.storage_access = sg::storage_access::read_write;
+                b.access = sg::access_mode::read_write;
         }
         else if (n.starts_with("texture_"))
         {
-            b.type = sg::binding_type::readonly_texture;
+            b.type = sg::binding_type::texture;
             b.texture_dimension = texture_dimension_of(n);
             if (!b.texture_dimension.has_value())
                 return cc::error(cc::format("line {}: '{}' is not a texture type sg knows", p.line, n));
@@ -911,7 +980,7 @@ private:
         {
             if (index == 0)
             {
-                if (b.type != sg::binding_type::uniform_buffer)
+                if (b.type != sg::binding_type::constants_buffer)
                     return cc::error(cc::format("line {}: @group({}) @binding(0) is the inline-constants block, so "
                                                 "'{}' must be a var<uniform>",
                                                 p.line, group, p.name));

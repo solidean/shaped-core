@@ -58,7 +58,7 @@ type_id flat_builder::type_named(cc::string_view name) const
 {
     for (auto const& s : m.symbols)
         // the prelude's symbols come first, so a struct of the user file that shadows one is never the one found
-        if (s.kind == symbol_kind::structure && s.name == name)
+        if ((s.kind == symbol_kind::structure || s.kind == symbol_kind::enumeration) && s.name == name)
             return s.type;
     return type_id::none;
 }
@@ -250,6 +250,11 @@ flat_stmt_id flat_builder::for_(label_id label,
 flat_stmt_id flat_builder::continue_(label_id target)
 {
     return add_stmt(flat_continue{.target = target});
+}
+
+flat_stmt_id flat_builder::discard()
+{
+    return add_stmt(flat_discard{});
 }
 
 flat_stmt_id flat_builder::once(cc::span<flat_stmt_id const> body)

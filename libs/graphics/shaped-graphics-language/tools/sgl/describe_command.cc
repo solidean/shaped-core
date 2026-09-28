@@ -16,20 +16,10 @@ constexpr int exit_ok = 0;
 constexpr int exit_usage = 1;
 constexpr int exit_errors = 2;
 
-cc::string_view stage_name(sgl::check::stage s)
+/// The stage as the package's entry lists name it, and `none` for no stage.
+cc::string_view stage_word(sgl::check::stage s)
 {
-    switch (s)
-    {
-    case sgl::check::stage::none:
-        return "none";
-    case sgl::check::stage::vertex:
-        return "vertex";
-    case sgl::check::stage::pixel:
-        return "pixel";
-    case sgl::check::stage::compute:
-        return "compute";
-    }
-    return "none";
+    return s == sgl::check::stage::none ? cc::string_view("none") : sgl::check::stage_name(s);
 }
 
 cc::string_view kind_name(sgl::described_member_kind k)
@@ -74,8 +64,13 @@ void write_binding(babel::json::object_writer& o, sgl::described_binding const& 
             mo.write("size", m.size);
             continue;
         }
-        mo.write("mut", m.is_mut);
+        mo.write("access", cc::string_view(m.access));
         mo.write("slot", m.slot);
+        if (m.kind == sgl::described_member_kind::buffer)
+            mo.write("stride", m.stride);
+        // a binding array's length, which is 1 for any other resource
+        if (m.count > 1)
+            mo.write("count", m.count);
         mo.write("host_name", cc::string_view(m.host_name));
         // The sg enum values a binding of this kind states, each written only where it applies.
         auto const optional = [&](cc::string_view key, cc::string const& value)
@@ -85,8 +80,7 @@ void write_binding(babel::json::object_writer& o, sgl::described_binding const& 
         };
         optional("texture_dimension", m.texture_dimension);
         optional("sample_type", m.sample_type);
-        optional("storage_format", m.storage_format);
-        optional("storage_access", m.storage_access);
+        optional("image_format", m.image_format);
         optional("sampler_type", m.sampler_type);
         if (m.static_sampler.has_value())
         {
@@ -111,7 +105,7 @@ void write_binding(babel::json::object_writer& o, sgl::described_binding const& 
 void write_struct(babel::json::object_writer& o, sgl::described_struct const& s)
 {
     o.write("name", cc::string_view(s.name));
-    o.write("edge", stage_name(s.edge));
+    o.write("edge", stage_word(s.edge));
     o.write("shape", cc::string_view(s.shape));
     auto members = o.write_array("members");
     for (auto const& m : s.members)
@@ -125,21 +119,52 @@ void write_struct(babel::json::object_writer& o, sgl::described_struct const& s)
             mo.write("stream", cc::string_view(m.stream));
             mo.write("per_instance", m.is_per_instance);
         }
+        if (!m.format.empty())
+            mo.write("format", cc::string_view(m.format));
+        if (!m.output.empty())
+            mo.write("output", cc::string_view(m.output));
+    }
+}
+
+void write_memory_struct(babel::json::object_writer& o, sgl::described_memory_struct const& s)
+{
+    o.write("name", cc::string_view(s.name));
+    o.write("space", cc::string_view(s.space));
+    o.write("size", s.size);
+    auto members = o.write_array("members");
+    for (auto const& m : s.members)
+    {
+        auto mo = members.write_object(babel::json::layout::compact);
+        mo.write("name", cc::string_view(m.name));
+        mo.write("type", cc::string_view(m.type));
+        mo.write("offset", m.offset);
+        mo.write("size", m.size);
     }
 }
 
 void write_entry_point(babel::json::object_writer& o, sgl::described_entry_point const& e)
 {
     o.write("name", cc::string_view(e.name));
-    o.write("stage", stage_name(e.stage));
+    o.write("stage", stage_word(e.stage));
     {
         auto grid = o.write_array("workgroup", babel::json::layout::compact);
         for (auto const n : e.workgroup)
             grid.write(n);
     }
-    auto list = o.write_array("bindings", babel::json::layout::compact);
-    for (auto const& name : e.bindings)
-        list.write(cc::string_view(name));
+    {
+        auto list = o.write_array("bindings", babel::json::layout::compact);
+        for (auto const& name : e.bindings)
+            list.write(cc::string_view(name));
+    }
+    {
+        auto list = o.write_array("features", babel::json::layout::compact);
+        for (auto const& name : e.features)
+            list.write(cc::string_view(name));
+    }
+    // One `slot: access` per touched slot, the way a corpus pin spells it.
+    auto list = o.write_array("footprint", babel::json::layout::compact);
+    for (auto const& slot : e.footprint)
+        list.write(cc::string_view(sgl::check::footprint_text(cc::span<sgl::check::slot_footprint const>(&slot, 1))));
 }
 
 void write_pipeline(babel::json::object_writer& o, sgl::described_pipeline const& p)
@@ -147,6 +172,9 @@ void write_pipeline(babel::json::object_writer& o, sgl::described_pipeline const
     o.write("name", cc::string_view(p.name));
     o.write("vertex", cc::string_view(p.vertex));
     o.write("pixel", cc::string_view(p.pixel));
+    o.write("geometry", cc::string_view(p.geometry));
+    o.write("tessellation_control", cc::string_view(p.tessellation_control));
+    o.write("tessellation_evaluation", cc::string_view(p.tessellation_evaluation));
     {
         auto list = o.write_array("layout", babel::json::layout::compact);
         for (auto const& name : p.layout)
@@ -158,6 +186,11 @@ void write_pipeline(babel::json::object_writer& o, sgl::described_pipeline const
     {
         auto list = o.write_array("targets", babel::json::layout::compact);
         for (auto const& name : p.targets)
+            list.write(cc::string_view(name));
+    }
+    {
+        auto list = o.write_array("features", babel::json::layout::compact);
+        for (auto const& name : p.features)
             list.write(cc::string_view(name));
     }
     {
@@ -223,6 +256,14 @@ cc::result<cc::string> to_json(sgl::module_description const& d)
             {
                 auto o = structs.write_object();
                 write_struct(o, s);
+            }
+        }
+        {
+            auto structs = root.write_array("memory_structs");
+            for (auto const& s : d.memory_structs)
+            {
+                auto o = structs.write_object();
+                write_memory_struct(o, s);
             }
         }
         {

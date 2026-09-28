@@ -13,8 +13,7 @@ Back to the [semantics](_index.md); the reasons are in [why/emitting.md](why/emi
 
 * **EMIT-1** A **target** is a text format together with the addressing rules of the backend that reads it.
 * **EMIT-2** The targets are `hlsl-dx12`, `hlsl-vulkan`, `wgsl` and `msl` ([why](why/emitting.md#emit-2)).
-* **EMIT-3** The WGSL and MSL text carries its final addresses: no later pass numbers a binding, a location or an offset.
-  The HLSL text carries every location and offset and the group of each resource, and leaves the register to slib's binding pass (EMIT-86); HLSL with final registers is open.
+* **EMIT-3** Every target's text carries its final addresses: no later pass numbers a binding, a location or an offset.
 * **EMIT-4** No target depends on a flag of the compiler that reads its text ([why](why/emitting.md#emit-4)).
 * **EMIT-5** One emission writes one entry point: that entry point, and exactly the structs and the binding it needs.
 * **EMIT-6** Nothing in the text of one entry point depends on the text of another ([why](why/emitting.md#emit-6)).
@@ -29,15 +28,19 @@ Back to the [semantics](_index.md); the reasons are in [why/emitting.md](why/emi
 * **EMIT-10** A module that reported an error is the error `module-has-errors`, whichever entry point is asked for.
 * **EMIT-11** An entry point the module does not hold is `unknown-entry-point`.
 * **EMIT-12** A construct that no emitter carries yet is `unsupported`, and its detail names the construct; an emitter never guesses an address.
-* **EMIT-13** No error depends on the target but EMIT-89's: an entry point is written for every target or for none ([why](why/emitting.md#emit-13)).
+* **EMIT-13** No error depends on the target but EMIT-89's, EMIT-109's and EMIT-122's: an entry point is written for every target or for none ([why](why/emitting.md#emit-13)).
   The exception is `msl`, which refuses what a Metal entry point takes as an argument.
+* **EMIT-109** An entry point that needs a feature no device of the target has is `target-lacks-feature`, and its detail names the feature.
+  Today that is `wgsl` against `binding_arrays`, `multisampled_array_textures`, `raytracing`, `geometry_shader` and `tessellation_shader`.
+  The shader chose it by `require`, so a portable shader still meets EMIT-13's promise.
 * **EMIT-66** A tree that is not core is the error `not-core`, and its detail names the first node that offends.
 * **EMIT-67** A `print` is `unsupported`: no target writes one yet.
 
 ## Names
 
 * **EMIT-14** Every name an emitter writes comes from the entry point's mint ([CHK-104](checking.md#the-flat-tree)).
-* **EMIT-15** Each target has a list of **reserved words**: its keywords and its predeclared types, together with every function name a builtin is written as in that target (EMIT-74).
+* **EMIT-15** Each target has a list of **reserved words**: its keywords and its predeclared types, together with every name a builtin writes in that target (EMIT-74).
+  That is the function a call is written as, and every name a writer of its own calls, declares or reaches into, which its record lists per target.
 * **EMIT-16** The reserved words of the target are taken in the mint before anything else is minted.
 * **EMIT-17** A struct, a binding or a local whose name is reserved in a target is minted from that name and a trailing underscore, in that target only.
 * **EMIT-96** Two structs of one name, which the program's file shadowing one of the prelude's gives ([CHK-188](checking.md#symbols)), are written under two names: the one written later is minted.
@@ -59,6 +62,22 @@ struct target_ {
 
 * **EMIT-22** A struct of the program keeps its name, and a builtin type is spelled as its record says, which today is the table below.
 * **EMIT-23** A struct is declared after every struct it holds.
+* **EMIT-106** A field of type `void` holds nothing, so no target declares it, and a construction writes no argument for it.
+* **EMIT-107** A struct whose every field is `void` is `unsupported`, since it would be a struct of no member, which WGSL has no spelling for.
+* **EMIT-118** An array is `array<T, N>` in WGSL and MSL, and in HLSL its element type with the lengths after the declared name, `float weights[3]`.
+  A square literal is WGSL's constructor, and in HLSL and MSL a local assigned element by element, as a struct is (EMIT-55).
+* **EMIT-119** Each member of a `@workgroup` binding is a variable of its own, minted `<binding>_<member>`: `groupshared` in HLSL and `var<workgroup>` in WGSL at file scope,
+  and `threadgroup` at the top of the kernel in MSL, which has it nowhere else.
+  It takes no group, so the groups after it in a list keep their numbers.
+* **EMIT-120** An atomic is `atomic<u32>` in WGSL and `atomic_uint` in MSL, updated by `atomicAdd(&a, v)` and `atomic_fetch_add_explicit(&a, v, memory_order_relaxed)`.
+  HLSL declares the plain integer, and its `Interlocked*` gives the value before through an out parameter, so a local declared ahead of the statement holds it.
+  A load is `InterlockedOr` with 0, and a store `InterlockedExchange`, so that no plain access races an update.
+* **EMIT-131** A barrier is the target's own execution barrier with one kind of memory, and MSL's one `threadgroup_barrier` names it by its `mem_flags`.
+  `workgroup_barrier` is `GroupMemoryBarrierWithGroupSync` in HLSL, `workgroupBarrier` in WGSL and `mem_threadgroup` in MSL.
+  `storage_barrier` is `DeviceMemoryBarrierWithGroupSync`, `storageBarrier` and `mem_device`.
+  `texture_barrier` is `DeviceMemoryBarrierWithGroupSync`, `textureBarrier` and `mem_texture`.
+* **EMIT-121** A binding array is its element's declaration with the length after the name, at its first slot, and the resources after it start `count` slots later.
+  HLSL wraps an index marked `nonuniform` in `NonUniformResourceIndex`, which DXC carries into SPIR-V as `NonUniform`.
 
 | SGL | HLSL | WGSL | MSL |
 |---|---|---|---|
@@ -72,6 +91,7 @@ struct target_ {
 ## Enums
 
 * **EMIT-76** An enum is one named constant per case, minted as `<enum>_<case>`, of the target's `int`, and the constants stand in front of the structs.
+* **EMIT-108** A `@builtin` enum is none of that: it is written as its record spells it, and a case of `bool` is the literal `false` or `true`.
 * **EMIT-77** An entry point writes the whole constant set of every enum it mentions, in declaration order ([why](why/emitting.md#emit-77)).
 * **EMIT-81** An enum member of an edge struct or of an `@inline` binding is `unsupported`, as `int` and `bool` are by EMIT-33 and EMIT-39.
 
@@ -110,7 +130,19 @@ const light_kind_sun: i32 = 2;
 | stage | parameter | result |
 |---|---|---|
 | `@vertex` | vertex input | stage link |
+| `@tessellation_control` | an array of stage links, the patch | patch constants |
+| `@tessellation_evaluation` | the patch, and the patch constants | stage link |
+| `@geometry` | an array of stage links, and the stream's element as a stage link | none |
 | `@pixel` | stage link | render targets |
+
+* **EMIT-122** `msl` refuses a geometry and a tessellation entry point as `target-lacks-feature`: Metal has neither stage, and tessellates by a compute kernel instead.
+* **EMIT-123** HLSL writes the stages as dx12 and vulkan both take them:
+  * a geometry stage is `[maxvertexcount(N)]` over `void`, taking `triangle T tri[3]` and last `inout TriangleStream<T>`, and `emit` and `end_strip` are `Append` and `RestartStrip`;
+  * a control stage is a passthrough hull function that returns `patch[point_index]`, named by its `domain`, `partitioning`, `outputtopology`, `outputcontrolpoints` and `patchconstantfunc`;
+  * the SGL body is that patch-constant function, `<name>_patch`, taking the `InputPatch`;
+  * an evaluation stage is `[domain(…)]` over the function, taking the `const OutputPatch`, the patch constants, and `SV_DomainLocation`;
+  * in patch constants, `@edge_factors` is `SV_TessFactor` and `@inside_factors` `SV_InsideTessFactor`;
+  * the other members of patch constants take the locations after the control point's, so vulkan's two never collide.
 
 ```hlsl
 struct pixel_input
@@ -127,9 +159,10 @@ struct pixel_input
 * **EMIT-36** An `@inline binding` is a struct of its members and one global of that struct, which has the binding's name.
 * **EMIT-37** The global is where `sg` expects inline constants, by the table below.
 * **EMIT-38** A second `@inline` binding is `unsupported`, and so is one that is not the last of the list.
-* **EMIT-39** A member of an `@inline` binding is of a builtin type whose record has a size in a block, which `bool` has not, or it is `unsupported`.
-* **EMIT-40** A member's offset follows HLSL's packing of a constant buffer, and `hlsl-vulkan` states it on every member ([why](why/emitting.md#emit-40)).
-* **EMIT-41** A member that WGSL's layout or MSL's places at another offset is `layout-mismatch`, and its detail gives the offset in each.
+* **EMIT-39** A plain member of a binding, and a buffer's element, is a value that can stand in GPU memory, or it is `unsupported`.
+  That is a builtin whose record has a size there, or a struct of such values; `bool` has no size, and the detail names `bool32`, which has one.
+* **EMIT-40** Every value in GPU memory is placed by [the layout rules](#layout), and `hlsl-vulkan` states each offset as `[[vk::offset]]` ([why](why/emitting.md#emit-40)).
+* **EMIT-41** Retired: every target is made to follow the layout rules (EMIT-112), so no offset differs between them, and `layout-mismatch` is reported by nothing.
 
 | target | the global |
 |---|---|
@@ -142,34 +175,37 @@ A binding that is not `@inline` is a group.
 
 * **EMIT-82** A group's number is its position in the entry point's binding list, the `@inline` binding skipped.
 * **EMIT-83** A group's plain members are a struct of their own and one constant buffer of it, named after the binding, at slot 0.
-* **EMIT-84** A group's plain members are placed by EMIT-39 to EMIT-41, as the members of an `@inline` binding are.
+* **EMIT-84** A group's plain members are placed by EMIT-39 and EMIT-40, as the members of an `@inline` binding are.
 * **EMIT-85** A buffer member is one global whose name is minted from `<binding>_<member>`, and a group's constant buffer is named after the binding, as any declaration is.
-* **EMIT-86** HLSL writes a group as `#pragma sc group N` and a namespace `<binding>_bindings`, with no register: slib's binding pass assigns every one ([why](why/emitting.md#emit-86)).
-* **EMIT-87** The struct of a group's constant buffer stands ahead of that namespace, and `hlsl-vulkan` states no offset on its members ([why](why/emitting.md#emit-87)).
+* **EMIT-86** HLSL writes each declaration of a group at file scope, under the name EMIT-85 minted for it, and each carries its address by EMIT-104 ([why](why/emitting.md#emit-86)).
+* **EMIT-87** The struct of a group's constant buffer stands ahead of the group's declarations ([why](why/emitting.md#emit-87)).
+  `hlsl-vulkan` states every member's offset on it, as EMIT-40 says.
 * **EMIT-88** WGSL writes each resource of a group as `@group(N) @binding(slot)`: the constant buffer as `var<uniform>`, a buffer as a `var<storage>` array, `read` or `read_write`.
 * **EMIT-89** MSL writes no group and no compute entry point yet: an entry point that lists a group, or is `@compute`, is `unsupported`.
   How a group will read in MSL is in [bindings.md](../bindings.md#how-a-group-reaches-sg).
 * **EMIT-90** A group's resources — buffers, textures, images and samplers — take the slots after its constant buffer, in declaration order, from 1, or from 0 when it has no plain member.
 * **EMIT-97** A texture, an image and a sampler member are each one global minted as a buffer's is, by EMIT-85, and each has its target's own type by the table below.
-* **EMIT-98** HLSL states an image's format as slib's `#pragma sc format`, with sg's name for it.
-  slib's pass turns it into `[[vk::image_format]]` on the SPIR-V arm, which DXC makes a typed image of, and records it as the binding's `storage_format`.
-* **EMIT-99** A static sampler of a group is its `SamplerState`, or `SamplerComparisonState` where it has a `compare`, preceded by slib's `#pragma sc static`.
-  The pragma carries every filter and address and each other setting that is not its default.
-  WGSL has no static sampler, and writes it as it writes a sampler the host binds: the layout says it is static.
+* **EMIT-98** `hlsl-vulkan` states an image's format as `[[vk::image_format]]`, in DXC's spelling, which DXC makes a typed image of.
+  `hlsl-dx12` states none, since dx12 takes the format from the view, and neither does `bgra8_unorm` on vulkan, which SPIR-V has no name for.
+* **EMIT-99** A static sampler of a group is its `SamplerState`, or `SamplerComparisonState` where it has a `compare`, with its address and nothing else.
+  Its settings reach the layout from `sgl describe`, never from the text, so every target writes it as it writes a sampler the host binds.
 * **EMIT-100** WGSL writes a 1D texture or image as a 2D one and a 1D array as a 2D array, since sg's webgpu backend creates every 1D texture that way (the bindings file, "Shapes").
 * **EMIT-101** A call of a builtin that gives nothing is a statement as it stands, with no `_ =` in WGSL.
 * **EMIT-102** A builtin a target cannot write as one expression declares a helper function ahead of the entry point, once per text, and the call names it.
-  HLSL's `GetDimensions` writes through out parameters, so `DEBUG_size` is an overload of `sgl_size` per texture type the entry point passes.
-* **EMIT-103** WGSL text whose entry point calls a builtin that takes derivatives implicitly, `DEBUG_sample`, opens with `diagnostic(off, derivative_uniformity);`, and other WGSL text does not.
-  HLSL samples under an `if` that differs between pixels, and Tint refuses it, so without the directive a program would be written for some targets only, against EMIT-13.
-  It is a stopgap: SGL is to judge uniformity itself, as the [incubator](../incubator/uniformity.md) sketches.
+  HLSL's `GetDimensions` writes through out parameters, so `size` is an overload of `sgl_size` per texture type the entry point passes.
+* **EMIT-103** *Retired:* WGSL text no longer switches Tint's derivative uniformity analysis off wholesale, since the check pass refuses what is unsound (CHK-282).
+  Where Tint refuses a program the pass accepts, the text silences Tint for that program alone; no such program is known yet.
+* **EMIT-104** A resource at slot i of group N is `register(<class>i, spaceN)` in `hlsl-dx12` and `[[vk::binding(i, N)]]` in `hlsl-vulkan`, which is the address sg's backends give that slot.
+  The class is `b` for the constant buffer, `u` for an image and a `mut` buffer, `s` for a sampler, and `t` for every other resource.
+* **EMIT-105** An entry point that lists more than three groups is `too-many-groups` on every target, since sg binds three besides the inline constants.
+  Only the entry point's list counts: a function that is no entry point takes the groups its caller hands it, which are no addresses of their own.
 
 | SGL | HLSL | WGSL |
 |---|---|---|
-| `texture2d[float4]` | `Texture2D<float4>` | `texture_2d<f32>` |
-| `texture2d_depth` | `Texture2D<float>` | `texture_depth_2d` |
-| `image2d[.rgba8_unorm]` | `RWTexture2D<float4>` | `texture_storage_2d<rgba8unorm, read>` |
-| `out image2d[.r32_float]` | `RWTexture2D<float>` | `texture_storage_2d<r32float, write>` |
+| `texture_2d[float4]` | `Texture2D<float4>` | `texture_2d<f32>` |
+| `texture_2d_depth` | `Texture2D<float>` | `texture_depth_2d` |
+| `image_2d[.rgba8_unorm]` | `RWTexture2D<float4>` | `texture_storage_2d<rgba8unorm, read>` |
+| `out image_2d[.r32_float]` | `RWTexture2D<float>` | `texture_storage_2d<r32float, write>` |
 | `sampler`, `comparison_sampler` | `SamplerState`, `SamplerComparisonState` | `sampler`, `sampler_comparison` |
 
 The other shapes follow the same pattern: HLSL's `Texture2DArray`, `TextureCube`, `Texture2DMS`, and WGSL's `texture_2d_array`, `texture_cube`, `texture_multisampled_2d`.
@@ -199,13 +235,34 @@ binding affine:
 * **EMIT-48** An immutable local is a named constant: `const T name = value;` in HLSL and `let name: T = value;` in WGSL.
 * **EMIT-49** A float literal is the shortest decimal text that reads back as its value, always with a decimal point, and without a suffix.
 * **EMIT-50** A literal that is infinite or not a number is `non-finite-literal`.
-* **EMIT-51** An `@operator` builtin is its operator: `+`, `-`, `*`, `/`, the six comparisons, and the prefix `-`; the products of a matrix are EMIT-43.
+* **EMIT-51** An `@operator` builtin is its operator: `+`, `-`, `*`, `/`, `%`, the six comparisons, and the prefix `-`; the products of a matrix are EMIT-43.
   Parentheses follow the tree, and an operand of equal precedence on the right keeps them.
+* **EMIT-125** An operand of `&`, `|`, `^`, `<<` or `>>` is parenthesized unless it is a name, a call, a literal or a prefix expression, since WGSL takes nothing else there.
+  The operation itself is parenthesized wherever it is embedded.
+  WGSL writes an `int` count as `u32(count)`, and MSL masks the count, `x << (count & 31)`, since a count past 31 is undefined there.
+* **EMIT-126** A maths builtin is the target's function of its name, with these exceptions.
+  `inverse_sqrt` is `rsqrt` in HLSL and MSL and `inverseSqrt` in WGSL; `fract` is `frac` in HLSL; `round` is `rint` in MSL, whose `round` is ties-away.
+  `ddx` and `ddy` are `dpdx` and `dpdy` in WGSL and `dfdx` and `dfdy` in MSL.
+  HLSL's `sign`, `countbits`, `firstbithigh` and `firstbitlow` give an int or a uint whatever they take, so the writer converts back, and `reversebits` of an int goes through a uint.
+  WGSL writes a reinterpretation as `bitcast<T>`, MSL as `as_type<T>` and HLSL as `asuint`, `asint` or `asfloat`.
+  MSL's `first_bit_*` and HLSL's packing functions are helpers the text declares (EMIT-102).
+* **EMIT-127** A stage input is a parameter of the target's entry point, handed over as the target's own type, and converted to SGL's where the body reads it.
+  HLSL marks it with a semantic (`SV_VertexID`, `SV_DispatchThreadID`, …), WGSL with `@builtin(…)` and MSL with an attribute (`[[vertex_id]]`, …).
+  WGSL's `primitive_index` is an extension, which the text enables ahead of every declaration.
+* **EMIT-128** HLSL counts a vertex and an instance from the draw's base, on dx12 and on vulkan through DXC alike, so the text adds `SV_StartVertexLocation` and `SV_StartInstanceLocation` back.
+* **EMIT-129** A stage link's member carries its interpolation: HLSL's `nointerpolation`, `noperspective`, `centroid` and `sample`, and WGSL's `@interpolate(…)`.
+  MSL names each combination as one attribute: `flat`, `centroid_perspective`, `center_no_perspective` and their like.
+  The default, perspective at the centre, is written by none of them.
+* **EMIT-130** A `@depth` member is `SV_Depth` in HLSL, `@builtin(frag_depth)` in WGSL and `[[depth(any)]]` in MSL.
+  A `@sample_mask` member is `SV_Coverage`, `@builtin(sample_mask)` and `[[sample_mask]]`.
+  The conservative forms are `SV_DepthGreaterEqual` / `SV_DepthLessEqual` and `[[depth(greater)]]` / `[[depth(less)]]`; WGSL has none, and drops the promise, which changes no result.
+* **EMIT-117** A `discard` is `discard;` in HLSL and WGSL, and `discard_fragment();` in MSL.
+* **EMIT-124** A float `%` is `fmod(a, b)` in MSL, which has no `%` of floats; HLSL's and WGSL's `%` of floats already mean EVAL-83's remainder.
 * **EMIT-52** Every other builtin function is a call of the target's function of that name, and `mix` is `lerp` in HLSL.
 * **EMIT-53** A construction of a builtin type is a call of the target's type, on one line: `float3(x, y, z)`, `vec3f(x, y, z)`.
 * **EMIT-73** The operand of a prefix `-` that is no name, call or member stands in parentheses, so `-(-0.4)` never reads as a decrement.
 * **EMIT-74** How a builtin is written is a field of its registry record: a call under a name per target, an infix or a prefix operator, or a writer of its own ([why](why/emitting.md#emit-74)).
-  No emitter holds a list of builtins, and the size and alignment EMIT-40, EMIT-41 and EMIT-62 place a member by are fields of the type's record.
+  No emitter holds a list of builtins, and the size and alignment the layout rules and each target's own rule place a value by are fields of the type's record.
 * **EMIT-75** A value that is evaluated and dropped is a statement of its own: `value;` in HLSL, `_ = value;` in WGSL, and `(void)(value);` in MSL ([why](why/emitting.md#emit-75)).
 * **EMIT-54** A construction of a struct of the program is `name(a, b)` in WGSL.
 * **EMIT-55** In HLSL it is a local that is declared and then assigned member by member; a returned one is minted from `result` ([why](why/emitting.md#emit-55)).
@@ -249,7 +306,7 @@ The rules above say HLSL and WGSL by name; these say what `msl` writes in the sa
 * **EMIT-59** The entry point is a `vertex` or a `fragment` function, and its SGL parameter carries `[[stage_in]]`; a compute entry point is EMIT-89's.
 * **EMIT-60** A member with `@position` is `[[position]]`.
 * **EMIT-61** A member at location i is `[[attribute(i)]]` in a vertex input, `[[user(sgli)]]` in a stage link, and `[[color(i)]]` in a render target struct.
-* **EMIT-62** In a block, MSL places `float3` at a multiple of 16 and gives it 16 bytes, and everything else as WGSL does ([why](why/emitting.md#emit-62)).
+* **EMIT-62** MSL's own rule places `float3` at a multiple of 16 and gives it 16 bytes, so a block's `float3` is `packed_float3` in its memory form (EMIT-113) ([why](why/emitting.md#emit-62)).
 * **EMIT-63** The product is `m * v`, an immutable local is `const T name = value;`, and a struct is built as EMIT-55 builds it ([why](why/emitting.md#emit-63)).
 * **EMIT-64** A float literal has no suffix in MSL either ([why](why/emitting.md#emit-64)).
 
@@ -264,7 +321,34 @@ vertex pixel_input main_vs(cube_vertex v [[stage_in]], constant constants_data& 
 }
 ```
 
-So `{float3; float}` is `layout-mismatch`: the `float` is at byte 12 in HLSL and in WGSL, and at byte 16 in MSL.
+So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 on every target, as the layout rules say.
+
+## Layout
+
+Every value in GPU memory — a constant block or a buffer's element — is placed by one rule per address space, the same on every target.
+The C++ struct a package generates is that layout byte for byte, padding included, so the host copies it in as it is.
+**That struct is the only thing the host may rely on**: without an annotation, where a member lands is the compiler's choice (EMIT-116).
+EMIT-110 and EMIT-111 describe today's choice, not a promise.
+
+* **EMIT-110** A constant block, a group's plain members or an `@inline` binding, is placed by HLSL's constant-buffer packing.
+  It is read in rows of 16 bytes, and a value that would cross a row starts the next one.
+  A `float4`, a matrix and a nested struct start a row, and what follows a nested struct packs against its last member.
+* **EMIT-111** A buffer's element is placed by dx12's structured-buffer packing: each value right behind the one before, every one 4-byte aligned.
+  A buffer strides by its element's size, which is where its last value ends.
+* **EMIT-112** Each target is made to follow the two rules ([why](why/emitting.md#emit-112)).
+  `hlsl-dx12` writes nothing, since they are its own rules.
+  `hlsl-vulkan` states every offset, which sg's vulkan backend admits by requiring `scalarBlockLayout`.
+  WGSL and MSL write a root as its memory form wherever their own rule would place one of its values elsewhere.
+* **EMIT-113** A memory form is one struct of the root's builtin values in memory order, with padding fields where the layout leaves room.
+  A value the target places at its offset natively is a field of its own type.
+  A vector that it does not is split into scalar fields in WGSL, and is its `packed_` type in MSL; a matrix is split into its scalars.
+  A read of a value rebuilds it from its fields, and a write stores each field; a whole struct is stored once into a local, then field by field.
+* **EMIT-114** A struct placed both in a constant block and in a buffer's element would have two layouts, and is `layout-conflict`.
+* **EMIT-115** `@no_padding` on a struct or on a binding makes a gap before any of its members `padding-forbidden`, and the detail says where.
+  The rest of a block's last row follows no member, so it is no gap.
+* **EMIT-116** A layout carries no guarantee without an annotation that asks for one ([why](why/emitting.md#emit-116)).
+  The compiler may place members in another order than they are declared, to pack them tighter.
+  Host code reaches GPU memory through the generated struct, never through offsets or an order it assumed.
 
 ## Error kinds
 
@@ -272,23 +356,29 @@ So `{float3; float}` is `layout-mismatch`: the `float` is at byte 12 in HLSL and
 |---|---|
 | `module-has-errors` | EMIT-10 |
 | `unknown-entry-point` | EMIT-11 |
-| `unsupported` | EMIT-12, EMIT-33, EMIT-34, EMIT-38, EMIT-39, EMIT-67, EMIT-81, EMIT-89 |
+| `unsupported` | EMIT-12, EMIT-33, EMIT-34, EMIT-38, EMIT-39, EMIT-67, EMIT-81, EMIT-89, EMIT-107 |
 | `reserved-entry-point-name` | none: retired by EMIT-21 |
 | `system-value-semantic` | EMIT-32 |
-| `layout-mismatch` | EMIT-41 |
+| `layout-mismatch` | none: retired by EMIT-41 |
+| `layout-conflict` | EMIT-114 |
+| `padding-forbidden` | EMIT-115 |
 | `non-finite-literal` | EMIT-50 |
 | `malformed-tree` | a flat tree the check pass does not produce |
 | `not-core` | EMIT-66 |
+| `too-many-groups` | EMIT-105 |
+| `target-lacks-feature` | EMIT-109 |
 
 ## Open
 
 * GLSL, which comes through the same seam.
-* HLSL with final registers, one emission for dx12 and one for vulkan, so that no binding pass reads SGL's text and EMIT-3 holds for every target.
 * A Metal compiler for the MSL text, and the buffer index of EMIT-58, which sg's metal backend has yet to adopt.
-* Whether a block member becomes `packed_float3` in MSL, which would let `{float3; float}` through at the price of a conversion on every read.
+* Arrays in GPU memory, which the checker refuses today (CHK-291).
+  In a constant block every element starts a row, as HLSL places it: an element shorter than a row is `array<vec4f, N>` read through `.x` in WGSL, and `slib::row<T>` on the host.
+* An annotation that fixes a layout, `@layout(.hlsl)` or `@layout(.cpp)`, for memory a host fills without the generated struct; until it exists, EMIT-116 says nothing is fixed.
+* `mat3`, which SGL has no type for yet: its three columns each start a row in a constant block (44 bytes), it is 36 bytes in a buffer's element, and its columns split in a memory form.
+  The host holds a block's as `slib::gpu_mat3` and a buffer's as `tg::mat3f`, which is those 36 bytes.
 * Whether an emit error becomes a diagnostic with a span; today it names a symbol and carries a detail.
 * Whether the size of an inline block has to agree between targets as its offsets do; WGSL rounds it up to 16 bytes.
 * How a vertex input's dx12 semantic is chosen once a member wants one that is not its name.
 * How a splatted value reads once a target can take the vector whole ([checking](checking.md#open)).
 * Whether the reserved words of a target hold every function of that target, or only the ones a builtin is written as.
-* A function that a custom writer of EMIT-74 calls, such as HLSL's `mul`, which is reserved by the target's list and not by the record.

@@ -40,30 +40,33 @@ INVOCABLE_TEST("sg dx12 - storage / sampled texture views create valid UAV / SRV
 
     // storage texture → UAV
     {
-        auto tex = c.persistent.create_raw_texture(tex_desc(sg::texture_usage::readwrite_texture));
+        auto tex = c.persistent.create_raw_texture(tex_desc(sg::texture_usage::image));
         REQUIRE(tex != nullptr);
-        sg::binding const b
-            = {.name = "Tex", .space = 0, .index = 0, .count = 1, .type = sg::binding_type::readwrite_texture};
+        sg::binding const b = {.name = "Tex",
+                               .space = 0,
+                               .index = 0,
+                               .count = 1,
+                               .type = sg::binding_type::image,
+                               .access = sg::access_mode::read_write};
         auto layout = c.cached.acquire_binding_group_layout(cc::span<sg::binding const>(&b, 1));
         REQUIRE(layout != nullptr);
 
         auto const typed = sg::texture_2d::from_raw(tex);
-        sg::named_view const nv = {.name = "Tex", .view = typed.as_readwrite_view()};
+        sg::named_view const nv = {.name = "Tex", .view = typed.as_image_view<sg::pixel_format::rgba8_unorm>()};
         auto group = c.persistent.create_binding_group(layout, cc::span<sg::named_view const>(&nv, 1));
         REQUIRE(group != nullptr); // create_texture_view UAV succeeded + the debug layer accepted it
     }
 
     // sampled texture → SRV
     {
-        auto tex = c.persistent.create_raw_texture(tex_desc(sg::texture_usage::readonly_texture));
+        auto tex = c.persistent.create_raw_texture(tex_desc(sg::texture_usage::texture));
         REQUIRE(tex != nullptr);
-        sg::binding const b
-            = {.name = "Tex", .space = 0, .index = 0, .count = 1, .type = sg::binding_type::readonly_texture};
+        sg::binding const b = {.name = "Tex", .space = 0, .index = 0, .count = 1, .type = sg::binding_type::texture};
         auto layout = c.cached.acquire_binding_group_layout(cc::span<sg::binding const>(&b, 1));
         REQUIRE(layout != nullptr);
 
         auto const typed = sg::texture_2d::from_raw(tex);
-        sg::named_view const nv = {.name = "Tex", .view = typed.as_readonly_view()};
+        sg::named_view const nv = {.name = "Tex", .view = typed.as_texture_view()};
         auto group = c.persistent.create_binding_group(layout, cc::span<sg::named_view const>(&nv, 1));
         REQUIRE(group != nullptr);
     }
@@ -90,14 +93,19 @@ ASYNC_INVOCABLE_TEST("sg dx12 - compute dispatch with a bound storage texture tr
                                           .space = 0,
                                           .index = 0,
                                           .count = 1,
-                                          .type = sg::binding_type::readwrite_structured_buffer});
-    shader.bindings.push_back(
-        sg::binding{.name = "Tex", .space = 0, .index = 1, .count = 1, .type = sg::binding_type::readwrite_texture});
+                                          .type = sg::binding_type::buffer,
+                                          .access = sg::access_mode::read_write});
+    shader.bindings.push_back(sg::binding{.name = "Tex",
+                                          .space = 0,
+                                          .index = 1,
+                                          .count = 1,
+                                          .type = sg::binding_type::image,
+                                          .access = sg::access_mode::read_write});
 
     auto buf = c.persistent.create_raw_buffer(isize(count) * isize(sizeof(u32)),
                                               sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
     REQUIRE(buf != nullptr);
-    auto tex = c.persistent.create_raw_texture(tex_desc(sg::texture_usage::readwrite_texture));
+    auto tex = c.persistent.create_raw_texture(tex_desc(sg::texture_usage::image));
     REQUIRE(tex != nullptr);
 
     auto group_layout = c.cached.acquire_binding_group_layout(shader.bindings);
@@ -111,7 +119,7 @@ ASYNC_INVOCABLE_TEST("sg dx12 - compute dispatch with a bound storage texture tr
     auto const typed = sg::texture_2d::from_raw(tex);
     sg::named_view const views[] = {
         {.name = "Output", .view = sg::buffer<u32>::from_raw(buf).as_readwrite_buffer()},
-        {.name = "Tex", .view = typed.as_readwrite_view()},
+        {.name = "Tex", .view = typed.as_image_view<sg::pixel_format::rgba8_unorm>()},
     };
     auto group = c.persistent.create_binding_group(group_layout, cc::span<sg::named_view const>(views, 2));
     REQUIRE(group != nullptr);

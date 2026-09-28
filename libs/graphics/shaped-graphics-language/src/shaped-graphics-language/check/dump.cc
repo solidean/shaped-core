@@ -7,20 +7,9 @@ namespace
 using namespace sgl;
 using namespace sgl::check;
 
-cc::string_view stage_name(stage s)
+cc::string_view stage_text(stage s)
 {
-    switch (s)
-    {
-    case stage::none:
-        return "";
-    case stage::vertex:
-        return "vertex";
-    case stage::pixel:
-        return "pixel";
-    case stage::compute:
-        return "compute";
-    }
-    return "";
+    return s == stage::none ? cc::string_view() : stage_name(s);
 }
 
 struct dumper
@@ -50,6 +39,9 @@ struct dumper
 
     void dump_symbol(symbol const& s)
     {
+        // A synthesized constructor is its struct's, which the struct's own line already says.
+        if (s.kind == symbol_kind::function && s.role == function_role::constructor)
+            return;
         switch (s.kind)
         {
         case symbol_kind::structure:
@@ -66,6 +58,12 @@ struct dumper
             break;
         case symbol_kind::pipeline:
             out += "(pipeline ";
+            break;
+        case symbol_kind::constant:
+            out += "(const ";
+            break;
+        case symbol_kind::test:
+            out += "(test ";
             break;
         case symbol_kind::unsupported:
             out += "(unsupported ";
@@ -89,7 +87,7 @@ struct dumper
         {
             auto const& type = m.at(s.type);
             if (type.edge != stage::none)
-                out.appendf(" {}", stage_name(type.edge));
+                out.appendf(" {}", stage_text(type.edge));
             if (type.is_opaque)
                 out += " opaque";
             members(type.members);
@@ -110,7 +108,7 @@ struct dumper
         {
             auto const& f = m.functions[s.info];
             if (f.entry_stage != stage::none)
-                out.appendf(" {}", stage_name(f.entry_stage));
+                out.appendf(" {}", stage_text(f.entry_stage));
             signature(f);
         }
         out += ")\n";
@@ -170,9 +168,16 @@ struct dumper
                          auto const is_whole = !text.contains('.') && !text.contains('e') && !text.contains('n');
                          out.appendf("(lit {}{}", text, is_whole ? ".0" : "");
                      },
-                     [&](flat_int_literal const& l) { out.appendf("(lit {}", l.value); },
+                     [&](flat_int_literal const& l)
+                     {
+                         if (l.is_unsigned)
+                             out.appendf("(lit {}u", u32(l.value));
+                         else
+                             out.appendf("(lit {}", l.value);
+                     },
                      [&](flat_bool_literal const& l) { out.appendf("(lit {}", l.value ? "true" : "false"); },
                      [&](flat_buffer_element const& b) { operands("elem", b.buffer, b.index); },
+                     [&](flat_element const& a) { operands("at", a.object, a.index); },
                      [&](flat_enum_value const& v)
                      {
                          auto const cases = m.at(m.at(x.type).cases);
@@ -356,6 +361,7 @@ struct dumper
                          out += ")";
                      },
                      [&](flat_continue const& c) { out.appendf("(continue ${})", label_name(e, c.target)); },
+                     [&](flat_discard const&) { out += "(discard)"; },
                      [&](flat_once const& o)
                      {
                          out += "(once";
@@ -370,6 +376,13 @@ struct dumper
                          out += "(return ";
                          dump_expr(e, r.value, indent, true);
                          out += ")";
+                     },
+                     [&](flat_check const& k)
+                     {
+                         auto const is_known_site = k.site >= 0 && k.site < e.check_sites.size();
+                         out += is_known_site && e.check_sites[k.site].stops ? "(assert" : "(check";
+                         dump_body(e, k.body, indent + 2);
+                         out += ")";
                      });
     }
 
@@ -377,11 +390,11 @@ struct dumper
     {
         if (e.locals.empty())
         {
-            out.appendf("(entry {} {} <no parameter>)\n", stage_name(e.entry_stage), e.name);
+            out.appendf("(entry {} {} <no parameter>)\n", stage_text(e.entry_stage), e.name);
             return;
         }
         auto const& parameter = e.locals.front();
-        out.appendf("(entry {} {} ({} : {})", stage_name(e.entry_stage), e.name, parameter.name,
+        out.appendf("(entry {} {} ({} : {})", stage_text(e.entry_stage), e.name, parameter.name,
                     m.name_of(parameter.type));
         if (!e.bindings.empty())
         {
@@ -400,8 +413,14 @@ struct dumper
 cc::string sgl::check::dump(checked_module const& m)
 {
     auto d = dumper{.m = m};
+    // File by file, since an extension is declared after every file and would otherwise stand among a later file's
+    auto last_file = i32(0);
     for (auto const& s : m.symbols)
-        d.dump_symbol(s);
+        last_file = s.file > last_file ? s.file : last_file;
+    for (auto file = i32(0); file <= last_file; ++file)
+        for (auto const& s : m.symbols)
+            if (s.file == file)
+                d.dump_symbol(s);
     for (auto const& e : m.entry_points)
         d.dump_entry_point(e);
     return d.out;

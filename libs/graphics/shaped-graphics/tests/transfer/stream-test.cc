@@ -633,8 +633,8 @@ ASYNC_INVOCABLE_TEST("sg stream - a fresh texture resting elsewhere is streamed 
     desc.dimension = sg::texture_dimension::d2;
     desc.width = 16;
     desc.height = 16;
-    desc.usage = sg::texture_usage::readonly_texture | sg::texture_usage::copy_src | sg::texture_usage::copy_dst;
-    desc.initial_layout = sg::texture_layout::shader_readonly;
+    desc.usage = sg::texture_usage::texture | sg::texture_usage::copy_src | sg::texture_usage::copy_dst;
+    desc.initial_layout = sg::texture_layout::shader_texture;
     auto tex = c.persistent.create_raw_texture(desc);
     REQUIRE(tex != nullptr);
 

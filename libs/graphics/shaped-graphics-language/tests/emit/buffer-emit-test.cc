@@ -45,16 +45,18 @@ TEST("sgl emit - a buffer is a storage array in WGSL, addressed by its place in 
     CHECK(wgsl.contains("    work_dst[1] = v * 2.0;\n"));
 }
 
-TEST("sgl emit - a buffer is a structured buffer in HLSL, and slib's pass writes its register")
+TEST("sgl emit - a buffer is a structured buffer in HLSL, at its final register")
 {
     auto const hlsl = text_of(k_buffers, target::hlsl_dx12);
-    // The group number is the one address SGL writes; every register is the binding pass's (the spec's bindings file).
-    CHECK(hlsl.contains("#pragma sc group 0\n"));
-    CHECK(hlsl.contains("namespace work_bindings\n"));
-    CHECK(hlsl.contains("    StructuredBuffer<float> work_src;\n"));
-    CHECK(hlsl.contains("    RWStructuredBuffer<float> work_dst;\n"));
-    CHECK(!hlsl.contains("register("));
-    CHECK(hlsl.contains("work_bindings::work_dst[1] = v * 2.0;\n"));
+    // At file scope, under the names they were minted: a group is no namespace (EMIT-86).
+    CHECK(!hlsl.contains("namespace"));
+    CHECK(hlsl.contains("\nStructuredBuffer<float> work_src : register(t0, space0);\n"));
+    CHECK(hlsl.contains("\nRWStructuredBuffer<float> work_dst : register(u1, space0);\n"));
+    CHECK(hlsl.contains("    work_dst[1] = v * 2.0;\n"));
+
+    auto const vulkan = text_of(k_buffers, target::hlsl_vulkan);
+    CHECK(vulkan.contains("\n[[vk::binding(0, 0)]] StructuredBuffer<float> work_src;\n"));
+    CHECK(vulkan.contains("\n[[vk::binding(1, 0)]] RWStructuredBuffer<float> work_dst;\n"));
 }
 
 TEST("sgl emit - the group number is the binding's place in the entry point's list")
@@ -71,6 +73,31 @@ TEST("sgl emit - the group number is the binding's place in the entry point's li
     auto const wgsl = text_of(two, target::wgsl);
     CHECK(wgsl.contains("@group(0) @binding(0) var<storage, read> frame_data_a: array<f32>;\n"));
     CHECK(wgsl.contains("@group(1) @binding(0) var<storage, read> work_b: array<f32>;\n"));
+    // The group is the register space in dx12 and the descriptor set in vulkan.
+    CHECK(text_of(two, target::hlsl_dx12).contains("StructuredBuffer<float> work_b : register(t0, space1);\n"));
+    CHECK(text_of(two, target::hlsl_vulkan).contains("[[vk::binding(0, 1)]] StructuredBuffer<float> work_b;\n"));
+}
+
+TEST("sgl emit - an entry point lists at most three groups besides its @inline binding, as sg binds")
+{
+    constexpr auto groups = "binding g0:\n    a: buffer[float]\n\n"
+                            "binding g1:\n    a: buffer[float]\n\n"
+                            "binding g2:\n    a: buffer[float]\n\n"
+                            "binding g3:\n    a: buffer[float]\n\n"
+                            "@inline binding tuning:\n    scale: float\n\n";
+    auto const three = cc::format("{}@compute(1) fun cs(@thread_id id: int3){{g0, g1, g2, tuning}}:\n"
+                                  "    let v = g2.a[0] * tuning.scale\n",
+                                  groups);
+    auto const four = cc::format("{}@compute(1) fun cs(@thread_id id: int3){{g0, g1, g2, g3}}:\n"
+                                 "    let v = g3.a[0]\n",
+                                 groups);
+    // On every target, so an entry point written for one is written for all of them.
+    for (auto const t : sgl::emit::all_targets())
+        if (t != target::msl)
+        {
+            CHECK(errors_for(three, t) == "");
+            CHECK(errors_for(four, t) == "too-many-groups 'g3' is group 3, and sg binds 3 besides the inline constants\n");
+        }
 }
 
 TEST("sgl emit - an @inline binding takes no group, and stands last")
@@ -186,7 +213,7 @@ TEST("sgl emit - an index that inlines a helper is evaluated in front, the place
     auto const value = hlsl.find("int j_1 = 2;");
     CHECK(place >= 0);
     CHECK(value > place);
-    CHECK(hlsl.contains("work_bindings::work_values[j] = work_bindings::work_values[j_1];\n"));
+    CHECK(hlsl.contains("work_values[j] = work_values[j_1];\n"));
 }
 
 TEST("sgl emit - `op=` on a buffer element evaluates its index once")

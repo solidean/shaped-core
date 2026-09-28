@@ -122,8 +122,8 @@ Each of these is a fact about Metal rather than a gap in the backend.
   That is also what makes a mask clamping to nothing in `flush_barriers` harmless rather than a dropped dependency.
 - **An array binding's elements are declared one at a time, and an undeclared one is an error.**
   Which elements a shader indexes is decided by data no backend sees, so a group keeps its array bindings apart from its scalar ones.
-  The scalar bindings are declared automatically at the dispatch or draw, and the arrays only by `cmd.compute.declare_array_*_access`.
-  A bound array binding with no declare asserts rather than going untracked, and an empty span is how a caller says one is unused — the same accounting dx12 and vulkan keep.
+  The scalar bindings are declared automatically at the dispatch or draw, and the arrays only by the `declare_array_*_access` pair on the scope recording the op.
+  An array the code indexes with no declare is logged and covered whole, and an empty span is how a caller says one is unused — the same accounting dx12 and vulkan keep.
   An acceleration-structure array is the exception and stays automatic.
   A trace reads every structure its table can reach, and sg's two declare calls are split by buffer and texture with no third for that kind to arrive through.
 - **A raster pipeline is three objects where dx12 and vulkan have one.**
@@ -361,7 +361,8 @@ What *is* checked, since Metal has no validation-message callback to lean on:
 - handle ranges are bounds-checked against the pipeline.
 
 **It does not make `sv` run on macOS.**
-`sv`'s path tracer is written against the DXR pipeline path and its shaders are HLSL; nothing in the tree compiles MSL yet.
+`sv`'s path tracer is written against the DXR pipeline path and its shaders are HLSL, and there is no macOS route from HLSL to MSL.
+MSL itself compiles — `shaped-shader-compiler-msl` — so porting those shaders means rewriting them in SGL or building an HLSL route elsewhere.
 The backend having ray tracing and the viewer working on macOS are separate milestones.
 
 ## Validation: no callback exists, so the gate is an abort

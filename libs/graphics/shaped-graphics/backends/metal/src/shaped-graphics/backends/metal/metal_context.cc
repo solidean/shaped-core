@@ -45,6 +45,9 @@ cc::result<cc::unit> metal_context::create_systems(isize upload_bytes, isize dow
 
     CC_RETURN_IF_ERROR(_upload_ring.create(_device, upload_bytes, "sg inline upload ring", "upload"));
     CC_RETURN_IF_ERROR(_download_ring.create(_device, download_bytes, "sg inline download ring", "download"));
+    _upload_ring.count_overflow_into(&_stats);
+    _download_ring.count_overflow_into(&_stats);
+    _epochs.count_waits_into(&_stats);
 
     _residency.add(_upload_ring.buffer());
     _residency.add(_download_ring.buffer());
@@ -119,14 +122,19 @@ bool metal_context::supports(sg::feature f) const
         // An argument buffer holds an array at one `[[id(n)]]` like any other binding, which is what
         // `metal_staging_binding_group` and the bindless tier are built on.
         return true;
-    case sg::feature::readwrite_storage_formats:
+    case sg::feature::readwrite_image_formats:
         // Asked of the device rather than assumed: tier 2 is what lifts read-write past r32, and Metal reports the
         // tier directly instead of leaving it to be inferred from the family.
         return _device != nullptr && _device->readWriteTextureSupport() >= MTL::ReadWriteTextureTier2;
     case sg::feature::float32_filtering:
         return _device != nullptr && _device->supports32BitFloatFiltering();
-    case sg::feature::extended_storage_formats:
+    case sg::feature::extended_image_formats:
         // Apple silicon writes every uncompressed color format from a shader, which is this backend's floor.
+        return true;
+    case sg::feature::multisampled_array_textures:
+    case sg::feature::primitive_index:
+    case sg::feature::sample_rate_shading:
+        // `[[primitive_id]]` and `[[sample_id]]` exist on every Apple GPU this backend's Metal 4 floor admits.
         return true;
     case sg::feature::geometry_shader:
     case sg::feature::tessellation_shader:
@@ -139,7 +147,7 @@ bool metal_context::supports(sg::feature f) const
     return false;
 }
 
-void metal_context::advance_epoch()
+void metal_context::do_advance_epoch()
 {
     // Before any state change, so a caller catching this still has a usable context.
     CC_ASSERT(_slots.live_count() == 0, "all command lists opened this epoch must be submitted or dropped before "
@@ -294,6 +302,9 @@ sg::submission_token metal_context::submit_command_list(std::unique_ptr<sg::comm
             options->release();
 
             _epochs.signal_submission(claimed);
+
+            _stats.fold(sg::impl::recorded_stats(list));
+            _stats.add(sg::stat::command_lists_submitted);
             return claimed;
         });
 

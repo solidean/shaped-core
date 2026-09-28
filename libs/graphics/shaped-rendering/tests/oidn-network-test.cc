@@ -80,8 +80,7 @@ ASYNC_INVOCABLE_TEST("sr - the denoise network runs end to end", (sg::context_ha
         return ctx.persistent.create_texture_2d({.format = format,
                                                  .width = k_width,
                                                  .height = k_height,
-                                                 .usage = sg::texture_usage::readonly_texture
-                                                        | sg::texture_usage::readwrite_texture
+                                                 .usage = sg::texture_usage::texture | sg::texture_usage::image
                                                         | sg::texture_usage::copy_dst | sg::texture_usage::copy_src});
     };
 
@@ -218,12 +217,11 @@ ASYNC_INVOCABLE_TEST("sr - the network agrees with OIDN's own filter", (sg::cont
 
         auto const make = [&]
         {
-            return ctx.persistent.create_texture_2d(
-                {.format = sg::pixel_format::rgba32_float,
-                 .width = k_size,
-                 .height = k_size,
-                 .usage = sg::texture_usage::readonly_texture | sg::texture_usage::readwrite_texture
-                        | sg::texture_usage::copy_dst | sg::texture_usage::copy_src});
+            return ctx.persistent.create_texture_2d({.format = sg::pixel_format::rgba32_float,
+                                                     .width = k_size,
+                                                     .height = k_size,
+                                                     .usage = sg::texture_usage::texture | sg::texture_usage::image
+                                                            | sg::texture_usage::copy_dst | sg::texture_usage::copy_src});
         };
 
         auto const color = make();
@@ -362,8 +360,7 @@ ASYNC_INVOCABLE_TEST("sr - the OIDN member denoises through the denoise front", 
         return ctx.persistent.create_texture_2d({.format = sg::pixel_format::rgba32_float,
                                                  .width = k_width,
                                                  .height = k_height,
-                                                 .usage = sg::texture_usage::readonly_texture
-                                                        | sg::texture_usage::readwrite_texture
+                                                 .usage = sg::texture_usage::texture | sg::texture_usage::image
                                                         | sg::texture_usage::copy_dst | sg::texture_usage::copy_src});
     };
 
@@ -574,12 +571,11 @@ ASYNC_INVOCABLE_TEST("sr - the OIDN network in tiles agrees with the same image 
 
         auto const make = [&]
         {
-            return ctx.persistent.create_texture_2d(
-                {.format = sg::pixel_format::rgba32_float,
-                 .width = w,
-                 .height = h,
-                 .usage = sg::texture_usage::readonly_texture | sg::texture_usage::readwrite_texture
-                        | sg::texture_usage::copy_dst | sg::texture_usage::copy_src});
+            return ctx.persistent.create_texture_2d({.format = sg::pixel_format::rgba32_float,
+                                                     .width = w,
+                                                     .height = h,
+                                                     .usage = sg::texture_usage::texture | sg::texture_usage::image
+                                                            | sg::texture_usage::copy_dst | sg::texture_usage::copy_src});
         };
 
         auto const color = make();
@@ -730,8 +726,7 @@ ASYNC_INVOCABLE_TEST("sr - the tiled network agrees with OIDN's own filter", (sg
         return ctx.persistent.create_texture_2d({.format = sg::pixel_format::rgba32_float,
                                                  .width = k_size,
                                                  .height = k_size,
-                                                 .usage = sg::texture_usage::readonly_texture
-                                                        | sg::texture_usage::readwrite_texture
+                                                 .usage = sg::texture_usage::texture | sg::texture_usage::image
                                                         | sg::texture_usage::copy_dst | sg::texture_usage::copy_src});
     };
 

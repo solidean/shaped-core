@@ -10,6 +10,7 @@ void context_upload_scope::bytes_to_buffer(raw_buffer_handle buffer, cc::pinned_
 {
     CC_ASSERT(buffer != nullptr, "async upload target buffer is null");
     impl::assert_async_transfer_target(*buffer);
+    _ctx._stats.add(stat::bytes_uploaded_async, data.size());
     _ctx.async_upload_bytes_to_buffer(cc::move(buffer), cc::move(data), offset_in_bytes);
 }
 
@@ -26,6 +27,7 @@ void context_upload_scope::bytes_to_texture(raw_texture_handle texture,
     impl::assert_texture_region_in_bounds(texture, subresource, box);
     if (box.is_empty())
         return; // no-op
+    _ctx._stats.add(stat::bytes_uploaded_async, data.size());
     _ctx.async_upload_bytes_to_texture(cc::move(texture), cc::move(data), subresource, box);
 }
 

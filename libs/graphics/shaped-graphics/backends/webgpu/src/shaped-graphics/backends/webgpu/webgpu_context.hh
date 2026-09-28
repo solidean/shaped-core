@@ -106,6 +106,10 @@ public:
     using sg::context::mark_device_lost;
     using sg::context::report_device_error;
     using sg::context::set_adapter_info;
+    using sg::context::set_counted_stats;
+
+    /// The context's stat totals, for the transfer systems that count into them.
+    [[nodiscard]] sg::impl::stat_totals& stat_totals() { return _stats; }
     using sg::context::settle_due_completions;
 
     [[nodiscard]] sg::execution_model execution() const override { return sg::execution_model::never_block; }
@@ -118,16 +122,22 @@ public:
             return _queries.is_supported();
         case sg::feature::headless_present:
             return true;
-        case sg::feature::readwrite_storage_formats:
-            return _readwrite_storage_formats;
+        case sg::feature::readwrite_image_formats:
+            return _readwrite_image_formats;
         case sg::feature::float32_filtering:
             return _float32_filtering;
-        case sg::feature::extended_storage_formats:
-            return _extended_storage_formats;
+        case sg::feature::extended_image_formats:
+            return _extended_image_formats;
+        case sg::feature::sample_rate_shading:
+            // `@builtin(sample_index)` and `@interpolate(…, sample)` are core WGSL.
+            return true;
         case sg::feature::raytracing:
         case sg::feature::geometry_shader:
         case sg::feature::tessellation_shader:
         case sg::feature::binding_arrays:
+        case sg::feature::multisampled_array_textures:
+        case sg::feature::primitive_index:
+            // `primitive-index` is a WebGPU extension the emdawnwebgpu this builds against does not request.
             return false;
         case sg::feature::unaligned_block_compression:
             // Lifted by `texture-compression-unaligned`, which the emdawnwebgpu this builds against does not offer.
@@ -385,7 +395,7 @@ public:
 
     [[nodiscard]] sg::epoch current_epoch() const override { return _current_epoch; }
     [[nodiscard]] sg::epoch completed_epoch() const override { return sg::epoch(_epochs.completed_epoch); }
-    void advance_epoch() override;
+    void do_advance_epoch() override;
     [[nodiscard]] int in_flight_epoch_count() override { return int(_epochs.in_flight.size()); }
     void retire_completed_epochs() override;
     [[nodiscard]] bool is_submission_complete(sg::submission_token token) const override;
@@ -430,9 +440,9 @@ public:
     struct granted_features
     {
         bool timestamps = false;
-        bool readwrite_storage_formats = false; ///< texture-formats-tier2
-        bool float32_filtering = false;         ///< float32-filterable
-        bool extended_storage_formats = false;  ///< texture-formats-tier1 and bgra8unorm-storage
+        bool readwrite_image_formats = false; ///< texture-formats-tier2
+        bool float32_filtering = false;       ///< float32-filterable
+        bool extended_image_formats = false;  ///< texture-formats-tier1 and bgra8unorm-storage
     };
 
     // Set once at creation.
@@ -448,9 +458,9 @@ private:
     wgpu_queue _queue;
     webgpu_config _config;
     isize _uniform_offset_alignment = 256;
-    bool _readwrite_storage_formats = false; // texture-formats-tier2 was granted
+    bool _readwrite_image_formats = false; // texture-formats-tier2 was granted
     bool _float32_filtering = false;
-    bool _extended_storage_formats = false;
+    bool _extended_image_formats = false;
 
     sg::epoch _current_epoch = sg::epoch::first;
     u64 _next_submission = u64(sg::submission_token::first);

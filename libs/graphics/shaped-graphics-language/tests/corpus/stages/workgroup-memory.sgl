@@ -1,0 +1,24 @@
+// a @workgroup binding is memory every thread of a workgroup shares, listed like a group and bound by nobody
+
+@workgroup binding tile:
+    values: float[64]
+    total: float
+
+// each thread loads its own slot, and one of them sums once every thread has
+fun load(slot: int, value: float){tile}:
+    tile.values[slot] = value
+
+fun sum(count: int){tile} -> float:
+    let mut total = 0.0
+    for i in 0 ..< count:
+        total += tile.values[i]
+    tile.total = total
+    return total
+
+// a test holds the memory of its own run, which no host fills, so it names the binding without listing it
+test:
+    load(0, 1.5)
+    load(1, 2.5)
+    workgroup_barrier()
+    sum(2) == 4.0
+    tile.total == 4.0

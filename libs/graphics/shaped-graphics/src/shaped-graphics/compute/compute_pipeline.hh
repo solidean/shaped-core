@@ -53,6 +53,10 @@ public:
     /// so a cache replaces its entry on it rather than trying to predict staleness through the key.
     [[nodiscard]] bool used_cached_pipeline() const { return _used_cached_pipeline; }
 
+    /// What this pipeline's code does to each binding, resolved against its layout, which dispatch follows for barriers.
+    /// Unknown when any stage's shader carried none, or named a binding the layout does not hold.
+    [[nodiscard]] impl::pipeline_footprint const& footprint() const { return _footprint; }
+
 protected:
     explicit compute_pipeline(compute_dimensions workgroup_size) : _workgroup_size(workgroup_size) {}
 
@@ -60,4 +64,9 @@ protected:
 
     /// Set by the backend during creation; see used_cached_pipeline().
     bool _used_cached_pipeline = false;
+
+private:
+    friend void impl::set_footprint(compute_pipeline const& pipeline, impl::pipeline_footprint footprint);
+
+    impl::pipeline_footprint _footprint;
 };

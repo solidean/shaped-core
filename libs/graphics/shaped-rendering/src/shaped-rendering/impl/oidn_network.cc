@@ -523,7 +523,7 @@ bool oidn_programs::build(sg::context& ctx)
         auto const* const constants = [&]() -> sg::binding const*
         {
             for (auto const& b : compiled->bindings)
-                if (b.type == sg::binding_type::uniform_buffer)
+                if (b.type == sg::binding_type::constants_buffer)
                     return &b;
             return nullptr;
         }();
@@ -667,14 +667,14 @@ bool oidn_network::execute(sg::command_list& cmd,
     // Everything else was built with the network, because a tile changes push constants and nothing a group names.
     auto const input_group = ctx.transient.create_binding_group(
         cmd, _programs.input_layout,
-        shaders::nn_input_bindings{.gColor = color.as_readonly_view(),
-                                   .gAlbedo = albedo.as_readonly_view(),
-                                   .gNormal = normal.as_readonly_view(),
+        shaders::nn_input_bindings{.gColor = color.as_texture_view(),
+                                   .gAlbedo = albedo.as_texture_view(),
+                                   .gNormal = normal.as_texture_view(),
                                    .gTarget = _features[f_input].as_readwrite_buffer()});
     auto const output_group = ctx.transient.create_binding_group(
         cmd, _programs.output_layout,
         shaders::nn_output_bindings{.gSource = _features[f_out].as_readonly_buffer(),
-                                    .gTarget = output.as_readwrite_view()});
+                                    .gTarget = output.as_any_image_view()});
 
     // One pass per tile, each writing only its interior.
     // The tensors are reused across tiles, which is the point: they are sized for one tile and never for the image.

@@ -50,7 +50,8 @@ TEST("slib wgsl compiler - the source is the bytecode, and the declarations its 
     REQUIRE(s.workgroup_size.has_value());
     CHECK(s.workgroup_size.value().x == 64);
     REQUIRE(s.bindings.size() == 1);
-    CHECK(s.bindings[0].type == sg::binding_type::readwrite_structured_buffer);
+    CHECK(s.bindings[0].type == sg::binding_type::buffer);
+    CHECK(s.bindings[0].access == sg::access_mode::read_write);
 }
 
 TEST("slib wgsl compiler - a module whose stage is not the declared one is an error")

@@ -126,6 +126,44 @@ constexpr auto quiet_drops_body = cc::string_view("let x = half p.a\n"
                                                   "graded p.b\n"
                                                   "saturate(x + graded(p.a))\n");
 
+/// void as a value: a local, a parameter, a field, a result and an operand of `==`, each written nowhere (LEGAL-52).
+constexpr auto void_values = cc::string_view("struct tagged:\n"
+                                             "    tag: void\n"
+                                             "    v: float\n"
+                                             "fun note(x: float):\n"
+                                             "    print x\n"
+                                             "fun unit(x: float) -> void => note x\n"
+                                             "fun keep(t: tagged, extra: void) -> float => t.v\n");
+constexpr auto quiet_void_values = cc::string_view("struct tagged:\n"
+                                                   "    tag: void\n"
+                                                   "    v: float\n"
+                                                   "fun note(x: float):\n"
+                                                   "    let doubled = x * 2.0\n"
+                                                   "fun unit(x: float) -> void => note x\n"
+                                                   "fun keep(t: tagged, extra: void) -> float => t.v\n");
+constexpr auto void_values_body = cc::string_view("let u = unit p.a\n"
+                                                  "let w: void = u\n"
+                                                  "let mut y = p.b\n"
+                                                  "if w == void => y += 1.0\n"
+                                                  "let t = tagged(unit(p.b), p.a + y)\n"
+                                                  "let x = keep(t, t.tag)\n");
+
+/// `bool` is a builtin enum: a `case` over one names its cases, and `bool.false` is a value like `mode.low`.
+constexpr auto bool_cases = cc::string_view("fun pick(b: bool) -> float:\n"
+                                            "    return case b:\n"
+                                            "        .true => 1.0\n"
+                                            "        .false => 2.0\n");
+constexpr auto bool_cases_body
+    = cc::string_view("let x = pick(p.a < 0.5) + pick(bool.false) + pick(bool.true == (p.b > 0.5))\n");
+
+/// A const is its value where it is named, `true` and `false` included.
+constexpr auto consts = cc::string_view("const scale = 2.0\n"
+                                        "const limit = 3\n"
+                                        "const also_limit = limit\n");
+constexpr auto consts_body = cc::string_view("let mut x = p.a * scale\n"
+                                             "for i in 0 ..< also_limit:\n"
+                                             "    if (i < limit) == true and not false => x += 1.0\n");
+
 struct program
 {
     cc::string_view name;
@@ -144,6 +182,10 @@ constexpr program programs[] = {
     {.name = "dropped values", .helpers = dropped_values, .body = dropped_values_body},
     {.name = "quiet drops", .helpers = quiet_drops, .body = quiet_drops_body},
     {.name = "cases", .helpers = cases, .body = cases_body},
+    {.name = "void values", .helpers = void_values, .body = void_values_body},
+    {.name = "quiet void values", .helpers = quiet_void_values, .body = void_values_body},
+    {.name = "bool cases", .helpers = bool_cases, .body = bool_cases_body},
+    {.name = "consts", .helpers = consts, .body = consts_body},
 };
 
 run_inputs inputs_of(checked_module const& m, f32 a, f32 b)
@@ -180,7 +222,7 @@ TEST("sgl source - both forms of a program behave the same, on every input")
         auto const& m = checked.module;
         auto const& structured = m.entry_points[0];
         auto const core = legalize(m, structured);
-        CHECK(!find_core_violation(core).has_value());
+        CHECK(!find_core_violation(m, core).has_value());
 
         for (auto const a : {-0.5f, 0.0f, 0.125f, 0.25f, 0.375f, 0.5f, 0.75f, 1.5f})
             for (auto const b : {-1.0f, 0.125f, 0.5f, 0.625f, 2.0f})
@@ -204,6 +246,28 @@ TEST("sgl source - the prints of nested calls run left to right, inner before ou
           == "ok 3.5 3.5 3.5 1 | print 0.25 | print 0.75 | print 1.5 | print 0.5");
     CHECK(dump(interpret(m, legalize(m, m.entry_points[0]), test_inputs(m)))
           == "ok 3.5 3.5 3.5 1 | print 0.25 | print 0.75 | print 1.5 | print 0.5");
+}
+
+TEST("sgl source - a call evaluates its arguments in the order written, then its defaults in parameter order")
+{
+    auto const helpers = cc::format("{}fun sub(a: float, b: float = noisy(0.5)) -> float => a - b\n", noisy);
+    // a = 0.25 and b = 0.75: the named arguments run as written, then the default of the call that leaves b out
+    auto const program
+        = check_program(grey_source(helpers, "let x = sub(b = noisy(p.a), a = noisy(p.b)) + sub(noisy(p.a))\n"));
+    REQUIRE(program.module.entry_points.size() == 1);
+    auto const& m = program.module;
+    CHECK(dump(interpret(m, m.entry_points[0], test_inputs(m)))
+          == "ok 0.5 0.5 0.5 1 | print 0.25 | print 0.75 | print 0.25 | print 0.5");
+    CHECK(dump(interpret(m, legalize(m, m.entry_points[0]), test_inputs(m)))
+          == "ok 0.5 0.5 0.5 1 | print 0.25 | print 0.75 | print 0.25 | print 0.5");
+
+    // a builtin's parameters take them in their own order, and the arguments still run as written
+    auto const builtin = check_program(grey_source(noisy, "let x = max(b = noisy(p.a), a = noisy(p.b))\n"));
+    REQUIRE(builtin.module.entry_points.size() == 1);
+    auto const& b = builtin.module;
+    CHECK(dump(interpret(b, b.entry_points[0], test_inputs(b))) == "ok 1.5 1.5 1.5 1 | print 0.25 | print 0.75");
+    CHECK(dump(interpret(b, legalize(b, b.entry_points[0]), test_inputs(b)))
+          == "ok 1.5 1.5 1.5 1 | print 0.25 | print 0.75");
 }
 
 TEST("sgl source - the right side of and / or runs only when the left side has not decided")
@@ -579,6 +643,30 @@ TEST("sgl source - a dropped value: the call's statements stay, and a rest that 
               .contains("    saturate(x + graded_1_result);\n"));
     CHECK(function_text(quiet_drops, quiet_drops_body, sgl::emit::target::msl)
               .contains("    (void)(saturate(x + graded_1_result));\n"));
+}
+
+TEST("sgl source - void is written nowhere: no local, no field and no argument holds it")
+{
+    for (auto const t : sgl::emit::all_targets())
+    {
+        auto const text = function_text(quiet_void_values, void_values_body, t);
+        CHECK(!text.contains(" u"));
+        CHECK(!text.contains(" w"));
+        CHECK(!text.contains(".tag"));
+    }
+    CHECK(function_text(quiet_void_values, void_values_body, sgl::emit::target::wgsl)
+              .contains("let t: tagged = tagged(p.a + y);\n"));
+}
+
+TEST("sgl source - a case of bool is the target's bool, never the int of an enum")
+{
+    for (auto const t : sgl::emit::all_targets())
+    {
+        auto const text = function_text(bool_cases, bool_cases_body, t);
+        CHECK(text.contains("false"));
+        CHECK(!text.contains("bool_false"));
+        CHECK(!text.contains("switch"));
+    }
 }
 
 TEST("sgl source - every program without a print is written for every target")

@@ -34,7 +34,7 @@ VkPipelineStageFlags2 vk_stage2_from(sg::pipeline_stage_flags stages)
 VkAccessFlags2 vk_access2_from(sg::access_flags access)
 {
     VkAccessFlags2 out = VK_ACCESS_2_NONE;
-    if (access.has(sg::access_flag::uniform_read))
+    if (access.has(sg::access_flag::constants_read))
         out |= VK_ACCESS_2_UNIFORM_READ_BIT;
     if (access.has(sg::access_flag::index_read))
         out |= VK_ACCESS_2_INDEX_READ_BIT;
@@ -42,8 +42,14 @@ VkAccessFlags2 vk_access2_from(sg::access_flags access)
         out |= VK_ACCESS_2_VERTEX_ATTRIBUTE_READ_BIT;
     if (access.has(sg::access_flag::shader_read))
         out |= VK_ACCESS_2_SHADER_READ_BIT;
+    // sg declares a view the shader may write as `shader_write` alone, though the shader reads it too.
+    // A destination scope without SHADER_READ would leave the previous writes invisible to those reads.
     if (access.has(sg::access_flag::shader_write))
-        out |= VK_ACCESS_2_SHADER_WRITE_BIT;
+        out |= VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_SHADER_READ_BIT;
+    if (access.has(sg::access_flag::storage_read))
+        out |= VK_ACCESS_2_SHADER_STORAGE_READ_BIT;
+    if (access.has(sg::access_flag::shader_atomic))
+        out |= VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
     if (access.has(sg::access_flag::copy_read))
         out |= VK_ACCESS_2_TRANSFER_READ_BIT;
     if (access.has(sg::access_flag::copy_write))
@@ -71,9 +77,9 @@ VkImageLayout vk_layout_from(sg::texture_layout layout)
         return VK_IMAGE_LAYOUT_UNDEFINED;
     case sg::texture_layout::general:
         return VK_IMAGE_LAYOUT_GENERAL;
-    case sg::texture_layout::shader_readonly:
+    case sg::texture_layout::shader_texture:
         return VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    case sg::texture_layout::shader_readwrite:
+    case sg::texture_layout::shader_image:
         return VK_IMAGE_LAYOUT_GENERAL; // Vulkan has no storage-image layout; GENERAL is the storage-capable one
     case sg::texture_layout::render_target:
         return VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
@@ -168,15 +174,31 @@ VkImageMemoryBarrier2 make_image_barrier(VkImage image,
     };
 }
 
+VkMemoryBarrier2 make_empty_memory_barrier()
+{
+    return VkMemoryBarrier2{.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2};
+}
+
+void merge_into_memory_barrier(VkMemoryBarrier2& global, VkBufferMemoryBarrier2 const& b)
+{
+    global.srcStageMask |= b.srcStageMask;
+    global.srcAccessMask |= b.srcAccessMask;
+    global.dstStageMask |= b.dstStageMask;
+    global.dstAccessMask |= b.dstAccessMask;
+}
+
 void submit_barriers(VkCommandBuffer cmd,
                      cc::span<VkBufferMemoryBarrier2 const> buffer_barriers,
-                     cc::span<VkImageMemoryBarrier2 const> image_barriers)
+                     cc::span<VkImageMemoryBarrier2 const> image_barriers,
+                     cc::span<VkMemoryBarrier2 const> memory_barriers)
 {
-    if (buffer_barriers.empty() && image_barriers.empty())
+    if (buffer_barriers.empty() && image_barriers.empty() && memory_barriers.empty())
         return;
 
     auto const dependency = VkDependencyInfo{
         .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+        .memoryBarrierCount = u32(memory_barriers.size()),
+        .pMemoryBarriers = memory_barriers.data(),
         .bufferMemoryBarrierCount = u32(buffer_barriers.size()),
         .pBufferMemoryBarriers = buffer_barriers.data(),
         .imageMemoryBarrierCount = u32(image_barriers.size()),

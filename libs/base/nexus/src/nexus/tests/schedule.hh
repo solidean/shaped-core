@@ -191,7 +191,7 @@ struct nx::test_schedule_config
     // An alias routes through is_eligible with the alias name as the key instead.
     bool would_run(test_declaration const& decl) const;
 
-    // True if some non-empty filter is a substring of the alias name — or a glob over the alias' source file, in file mode.
+    // True if some non-empty filter is a substring of the alias name — or, in file mode, a glob over the alias' source file, which is its test's (see setup::define_alias).
     // Always false when filters is empty: a full sweep already runs every driver unscoped, invoking every invocable, so expanding aliases too would double-run them.
     // An alias therefore only takes effect under an explicit filter.
     bool alias_filter_matches(test_alias const& alias) const;

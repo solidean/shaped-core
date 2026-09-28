@@ -93,7 +93,7 @@ TEST("sg dx12 - SC_DX12_ADAPTER=warp hides the hardware adapter from every reque
     auto const fallback
         = sg::create_dx12_context({.activate_global_debug_layer = true, .adapter = dx12::dx12_adapter::hardware_or_warp});
     REQUIRE(fallback.has_value());
-    CHECK(fallback.value()->adapter().is_software);
+    CHECK(fallback.value()->metrics.adapter().is_software);
 }
 
 // The mirror, and what keeps WARP off every CI job but one: a WARP driver skips when its context cannot be created.
@@ -111,7 +111,7 @@ TEST("sg dx12 - SC_DX12_ADAPTER=hardware hides WARP from every request", exclusi
     if (dx12::has_hardware_adapter())
     {
         REQUIRE(fallback.has_value());
-        CHECK(!fallback.value()->adapter().is_software);
+        CHECK(!fallback.value()->metrics.adapter().is_software);
     }
     else
         CHECK(fallback.has_error());

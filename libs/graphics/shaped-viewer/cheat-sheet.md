@@ -681,7 +681,7 @@ m.pin_buffer(raw_view) -> sg::bindless_element_handle          // the same for t
 m.lock() / unlock() / is_locked()           // refuse acquires while a snapshot is bound — the manual pair
 m.freeze() -> sv::bound_resources           // RAII: locks, snapshots, unlocks when it dies. SEVERAL per epoch are fine
 bound.group() / bound.layout()              // -> the group to bind, and the layout a pipeline composes it as one of its groups
-bound.elements(table)                       // -> span<u32 const> — this epoch's acquired indices, for declare_array_*_access (which dispatch ASSERTS on)
+bound.elements(table)                       // -> span<u32 const> — this epoch's acquired indices, for declare_array_*_access (an undeclared array the code indexes LOGS and is barriered whole)
 bound.declare_raytracing_access(cmd)        // declares EVERY declared table for the next dispatch_rays, empty ones included
 m.bindless_layout()                         // -> the same layout, without taking a snapshot
 m.has_table(table) / m.table_capacity(table)
@@ -1004,7 +1004,7 @@ sv::layout_routine::execute(scope, window_id, draws, textures)    // borders + p
   byte budget can't hold a frame's working set, `get_ptr` returns null and the renderer asserts.
 - **Indexed and non-indexed are separate paths end to end** — nothing is de-indexed and no index buffer is synthesized.
   `mesh_record::is_indexed` says which a record is, and it reaches the path tracer's closest-hit through `instance_gpu::is_indexed`, per instance.
-  The flat `pbr_raytrace_routine` still carries it per frame, in `frame_constants_gpu::mesh_is_indexed` — an `sr::gpu_boolean`, so the plain `bool` off the record assigns straight into it.
+  The flat `pbr_raytrace_routine` still carries it per frame, in `frame_constants_gpu::mesh_is_indexed` — an `slib::gpu_bool`, so the plain `bool` off the record assigns straight into it.
   A test driving that routine directly must set it, or it will read `Indices` as if it were real.
   A non-indexed record binds the manager's stand-in there, which no shader reads.
 - **Calling `view.camera(...)` every frame restarts the accumulation every frame** — by design, since an animated view has no history worth blending.

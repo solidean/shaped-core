@@ -31,7 +31,8 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
 
 def collect(ctx: Context, name: str) -> dict:
     paths, cfg = ctx.open(name)
-    entries = ctx.entries(paths)
+    entries, broken = ctx.entries_tolerant(paths)
+    ctx.warn_broken(broken)
 
     served = review.read_json(paths.served_marker)
     url = str(served.get("url", ""))

@@ -65,8 +65,8 @@ struct sv::gpu_resource_manager_config
 /// this epoch* — so indices another recording already handed to the GPU survive this one's mints.
 ///
 /// `elements(table)` is what a dispatch needs for `declare_array_texture_access` / `declare_array_buffer_access`:
-/// sg asserts that every bound array binding was declared, and the manager is the only thing that knows which
-/// elements this epoch actually acquired.
+/// sg logs and barriers every element of a bound array the code indexes and nobody declared, and the manager is
+/// the only thing that knows which elements this epoch actually acquired.
 /// Move-only; a moved-from snapshot is disarmed and unlocks nothing.
 class sv::bound_resources
 {

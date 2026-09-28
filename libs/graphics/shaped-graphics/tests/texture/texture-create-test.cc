@@ -19,7 +19,7 @@ INVOCABLE_TEST("sg - allocates a persistent 2D texture", (sg::context_handle con
     desc.width = 256;
     desc.height = 128;
     desc.mip_levels = 1;
-    desc.usage = sg::texture_usage::readonly_texture | sg::texture_usage::copy_dst;
+    desc.usage = sg::texture_usage::texture | sg::texture_usage::copy_dst;
 
     auto tex = ctx->persistent.create_raw_texture(desc);
     REQUIRE(tex != nullptr);
@@ -45,7 +45,7 @@ INVOCABLE_TEST("sg - a single-slice 2D array is distinct from a 2D texture", (sg
     desc.width = 64;
     desc.height = 64;
     desc.array_layers = 1; // an array with one slice — not a plain 2D texture
-    desc.usage = sg::texture_usage::readonly_texture;
+    desc.usage = sg::texture_usage::texture;
 
     auto tex = ctx->persistent.create_raw_texture(desc);
     REQUIRE(tex != nullptr);
@@ -66,7 +66,7 @@ INVOCABLE_TEST("sg - allocates a persistent 3D texture", (sg::context_handle con
     desc.width = 32;
     desc.height = 32;
     desc.depth = 16;
-    desc.usage = sg::texture_usage::readwrite_texture;
+    desc.usage = sg::texture_usage::image;
 
     auto tex = ctx->persistent.create_raw_texture(desc);
     REQUIRE(tex != nullptr);
@@ -101,10 +101,8 @@ INVOCABLE_TEST("sg - typed create_texture_2d (persistent)", (sg::context_handle 
 {
     REQUIRE(ctx != nullptr);
 
-    sg::texture_2d tex = ctx->persistent.create_texture_2d({.format = sg::pixel_format::rgba8_unorm,
-                                                            .width = 256,
-                                                            .height = 128,
-                                                            .usage = sg::texture_usage::readonly_texture});
+    sg::texture_2d tex = ctx->persistent.create_texture_2d(
+        {.format = sg::pixel_format::rgba8_unorm, .width = 256, .height = 128, .usage = sg::texture_usage::texture});
 
     REQUIRE(tex.raw() != nullptr);
     CHECK(tex.width() == 256);
@@ -122,7 +120,7 @@ INVOCABLE_TEST("sg - typed create_texture_3d (persistent)", (sg::context_handle 
                                                             .width = 32,
                                                             .height = 32,
                                                             .depth = 16,
-                                                            .usage = sg::texture_usage::readwrite_texture});
+                                                            .usage = sg::texture_usage::image});
 
     CHECK(tex.raw()->dimension() == sg::texture_dimension::d3);
     CHECK(tex.depth() == 16);
@@ -133,7 +131,7 @@ INVOCABLE_TEST("sg - typed create_texture_cube fills square extents (persistent)
     REQUIRE(ctx != nullptr);
 
     sg::texture_cube tex = ctx->persistent.create_texture_cube(
-        {.format = sg::pixel_format::rgba8_unorm, .size = 64, .usage = sg::texture_usage::readonly_texture});
+        {.format = sg::pixel_format::rgba8_unorm, .size = 64, .usage = sg::texture_usage::texture});
 
     CHECK(tex.raw()->is_cube());
     CHECK(tex.width() == 64);
@@ -148,7 +146,7 @@ INVOCABLE_TEST("sg - typed create_texture_2d_array (persistent)", (sg::context_h
                                                                         .width = 64,
                                                                         .height = 64,
                                                                         .array_layers = 4,
-                                                                        .usage = sg::texture_usage::readonly_texture});
+                                                                        .usage = sg::texture_usage::texture});
 
     CHECK(tex.raw()->is_array());
     CHECK(tex.array_layers() == 4);
@@ -185,7 +183,7 @@ INVOCABLE_TEST("sg - typed create_texture_2d (persistent)", (sg::context_handle 
     REQUIRE(ctx != nullptr);
 
     auto const tex = ctx->persistent.create_texture_2d(
-        {.format = sg::pixel_format::rgba8_unorm, .width = 32, .height = 32, .usage = sg::texture_usage::readonly_texture});
+        {.format = sg::pixel_format::rgba8_unorm, .width = 32, .height = 32, .usage = sg::texture_usage::texture});
 
     CHECK(tex.width() == 32);
     CHECK(tex.height() == 32);

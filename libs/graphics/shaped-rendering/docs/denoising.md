@@ -114,7 +114,7 @@ The oracle below is what makes each step cheap to try: a step either keeps the o
 1. **Workgroup-memory tiling, implicit-GEMM style.**
    A workgroup stages the input halo and a slab of weights in shared memory, and each thread computes a block of outputs by channels from registers.
    It attacks the measured limit, memory divergence, and a well-tuned fp32 kernel lands near 60 ms at 1080p against 378 today.
-   SGL needs workgroup memory and a barrier, both available on every backend.
+   SGL already has both halves it needs: `@workgroup` bindings and `workgroup_barrier()`.
 2. **Fusion**: each max pool folded into the convolution before it, and each upsample and concat into the convolution after it, as OIDN does.
    It removes eight passes and their round trips through memory.
 3. **Half precision**, behind a feature level, for storage first and arithmetic second; [TODO.md](TODO.md) has what it takes here.
@@ -122,7 +122,7 @@ The oracle below is what makes each step cheap to try: a step either keeps the o
 5. **Matrix hardware**, the remaining ~3x to OIDN's own 20.6 ms.
    Vulkan and Metal expose it today; DirectX's is in preview and WebGPU's experimental, so it waits, and a non-matrix path stays mandatory.
 
-[compute-throughput.md](../../shaped-graphics-language/docs/spec/incubator/compute-throughput.md) records what 1, 3 and 5 ask of SGL.
+[compute-throughput.md](../../shaped-graphics-language/docs/spec/incubator/compute-throughput.md) records what 3 and 5 ask of SGL.
 
 ### Held to Intel's output
 

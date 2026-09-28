@@ -188,9 +188,9 @@ MTL::TextureUsage texture_usage_of(sg::texture_usages usage)
 {
     MTL::TextureUsage out = MTL::TextureUsageUnknown;
 
-    if (usage.has(sg::texture_usage::readonly_texture))
+    if (usage.has(sg::texture_usage::texture))
         out |= MTL::TextureUsageShaderRead;
-    if (usage.has(sg::texture_usage::readwrite_texture))
+    if (usage.has(sg::texture_usage::image))
         out |= MTL::TextureUsageShaderRead | MTL::TextureUsageShaderWrite;
     if (usage.has(sg::texture_usage::render_target) || usage.has(sg::texture_usage::depth_stencil))
         out |= MTL::TextureUsageRenderTarget;

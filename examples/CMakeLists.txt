@@ -3,4 +3,3 @@
 add_subdirectory(vdoc/cube-editor)
 add_subdirectory(graphics/rotating-cube)
 add_subdirectory(graphics/sgl-cube)
-add_subdirectory(graphics/metal-cube)

@@ -702,7 +702,6 @@ def emit_header(manifest: Manifest, entries: Entries) -> str:
 
     out.append("/// Pass to slib::shader_library::add_package. The handles above are null until you do.\n")
     out.append("slib::shader_package const& package();\n")
-    out.append(sgl_host_code.emit_check_reflection_decl(entries.sgl, stems))
     if bindings:
         out.append("\n/// Empty while every generated binding table still describes the shader it came from.\n")
         out.append("///\n")
@@ -797,11 +796,11 @@ def emit_source(manifest: Manifest, files: list[ShaderFile], bindings: list[Bind
         out.append("#include <clean-core/common/utility.hh> // cc::memcpy\n")
     if any(b["inline"] for _, b in sgl.bindings):
         out.append("#include <shaped-shader-library/binding/binding_groups.hh> // slib::inline_constants_space\n")
-    if sgl.vertex_inputs:
+    if sgl.vertex_inputs or sgl.memory_structs or any(b["inline"] for _, b in sgl.bindings):
         out.append("#include <cstddef> // offsetof\n")
     if sgl_host_code.entry_wrappers(sgl, {f.path: f.stem for f in files}) or sgl.pipelines:
         out.append("#include <clean-core/thread/async_coroutine.hh>\n")
-        out.append("#include <shaped-shader-library/shader_asset.hh> // slib::reflection_mismatch\n")
+        out.append("#include <shaped-shader-library/shader_asset.hh> // slib::acquire_compute_pipeline\n")
     if sgl.pipelines:
         out.append("#include <shaped-shader-library/impl/pipeline_fields.hh> // a pipeline's settings, as field writes\n")
     out.append("\n")
@@ -866,7 +865,6 @@ def emit_source(manifest: Manifest, files: list[ShaderFile], bindings: list[Bind
         stems = {f.path: f.stem for f in files}
         out.append(sgl_host_code.emit_pipelines_impl(manifest.name, manifest.namespace, sgl, stems,
                                                     sgl_host_code.entry_wrappers(sgl, stems)))
-    out.append(sgl_host_code.emit_check_reflection(manifest.namespace, sgl, {f.path: f.stem for f in files}))
 
     if bindings:
         out.append(f"\ncc::string {manifest.namespace}::self_check()\n{{\n")
@@ -893,10 +891,12 @@ def emit_binding_table(entry: BindingEntry, embedded: list[str]) -> str:
         out.append(f"     .index = {binding.index}u,\n")
         out.append(f"     .count = {binding.count}u,\n")
         out.append(f"     .type = sg::binding_type::{binding.type},\n")
+        if binding.access != "read":
+            out.append(f"     .access = sg::access_mode::{binding.access},\n")
         if binding.dimension is not None:
             out.append(f"     .texture_dimension = sg::texture_view_dimension::{binding.dimension},\n")
-        if binding.storage_format is not None:
-            out.append(f"     .storage_format = sg::pixel_format::{binding.storage_format},\n")
+        if binding.image_format is not None:
+            out.append(f"     .image_format = sg::pixel_format::{binding.image_format},\n")
         out.append("    },\n")
     out.append("};\n")
 
@@ -941,7 +941,8 @@ def emit_self_check(manifest: Manifest, entry: BindingEntry, embedded: list[str]
     out.append("            auto const& a = parsed.bindings[i];\n")
     out.append("            auto const& b = table[i];\n")
     out.append("            if (a.name != b.name || a.index != b.index || a.count != b.count || a.type != b.type\n")
-    out.append("                || a.texture_dimension != b.texture_dimension || a.storage_format != b.storage_format\n")
+    out.append("                || a.access != b.access || a.texture_dimension != b.texture_dimension\n")
+    out.append("                || a.image_format != b.image_format\n")
     out.append("                || a.group_index != b.group_index\n")
     out.append("                || a.space != b.space)\n")
     out.append(f'                return cc::format("{group.name}: binding {{}} reads as \'{{}}\', the table says \'{{}}\'",\n')

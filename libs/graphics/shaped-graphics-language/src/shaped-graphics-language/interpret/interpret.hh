@@ -3,6 +3,7 @@
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/string/string.hh>
+#include <clean-core/thread/atomic.hh>
 #include <shaped-graphics-language/check/checked_module.hh>
 #include <shaped-graphics-language/check/flat.hh>
 #include <shaped-graphics-language/interpret/scalar.hh>
@@ -50,12 +51,22 @@ enum class sgl::check::run_status : sgl::u8
     type_error,
     /// A `var` was read before anything was assigned to it.
     uninitialized_read,
+    /// A `discard` ended the run: the invocation has no result and no effect after it.
+    discarded,
+    /// An operation met a value no target defines it for, such as an integer divisor of zero; `outcome::detail` says which.
+    program_error,
+    /// An `assert` was false; the run stopped there (EVAL-76).
+    assertion_failed,
+    /// The caller raised `run_limits::stop`; what the run had found so far means nothing.
+    stopped,
 };
 
 struct sgl::check::run_inputs
 {
-    /// The value of `locals[0]`.
+    /// The value of the stage struct, `locals[0]`; unread for an entry point without one.
     value parameter;
+    /// Parallel to `flat_entry_point::stage_inputs`; a missing one is zero.
+    cc::vector<value> stage_inputs;
     /// Parallel to `flat_entry_point::bindings`: the members of each binding as one value, in member order.
     /// A buffer member has no scalars there; its contents are `buffers`.
     cc::vector<value> bindings;
@@ -67,6 +78,42 @@ struct sgl::check::run_limits
 {
     /// One unit per statement, per expression node and per iteration.
     i64 fuel = 1'000'000;
+    /// Checks and asserts run, as the structured form means (EVAL-75).
+    /// False skips each with its body, as the core form does, which is what a comparison of the two forms wants.
+    bool run_checks = true;
+    /// Failures past this many are counted in `outcome::failures_dropped` and not kept.
+    i32 max_failures = 8;
+    /// Read every few thousand steps when set, and a raised flag ends the run as `stopped`.
+    /// It is how an editor abandons a test whose document changed, and raising it from another thread is enough.
+    cc::atomic<bool> const* stop = nullptr;
+};
+
+/// One check or `assert` that was false where it ran.
+struct sgl::check::check_failure
+{
+    /// A position in the tree's `check_sites`.
+    i32 site = -1;
+    /// Parallel to the site's nodes: the value each node's `var` held, and whether the node ran at all.
+    cc::vector<value> values;
+    cc::vector<bool> is_evaluated;
+    /// Parallel to the site's `loop_variables`.
+    cc::vector<value> loop_values;
+
+    [[nodiscard]] bool operator==(check_failure const& rhs) const
+    {
+        return site == rhs.site && ast::impl::is_equal(values, rhs.values)
+            && ast::impl::is_equal(is_evaluated, rhs.is_evaluated) && ast::impl::is_equal(loop_values, rhs.loop_values);
+    }
+};
+
+/// How often one check or `assert` held and how often it did not, over one run.
+/// Both zero is a site the run never reached.
+struct sgl::check::site_tally
+{
+    i32 passed = 0;
+    i32 failed = 0;
+
+    constexpr bool operator==(site_tally const&) const = default;
 };
 
 struct sgl::check::outcome
@@ -80,6 +127,16 @@ struct sgl::check::outcome
     cc::vector<buffer_contents> buffers;
     /// For a reader, and no part of what two runs are compared by.
     cc::string detail;
+    /// Every check and `assert` that was false, up to `run_limits::max_failures`, in the order they ran.
+    cc::vector<check_failure> failures;
+    /// How many checks ran, whatever they found, `assert`s included (EVAL-76); a test whose run ran none has checked nothing.
+    i32 checks_run = 0;
+    /// How many of `checks_run` were `assert`s.
+    i32 asserts_run = 0;
+    /// How many failures `max_failures` left out.
+    i32 failures_dropped = 0;
+    /// Parallel to the tree's `check_sites`, and counted past `max_failures`, since it holds no values.
+    cc::vector<site_tally> sites;
 
     /// Same status, same result, same trace, same buffers.
     [[nodiscard]] bool operator==(outcome const& rhs) const
@@ -91,7 +148,7 @@ struct sgl::check::outcome
 
 namespace sgl::check
 {
-/// `ok`, `out-of-fuel`, `fell-off-the-end`, `type-error`, `uninitialized-read`.
+/// The status in kebab case, as `dump` writes it: `out-of-fuel`, `assertion-failed`.
 [[nodiscard]] cc::string_view to_string(run_status s);
 
 /// How many scalars a value of `type` has; 0 for a type that has no value here.
@@ -102,11 +159,20 @@ namespace sgl::check
 
 /// Runs `e`, structured or core, on the abstract machine.
 /// Total: a malformed tree is a `type_error`, a run without end is `out_of_fuel`, and nothing asserts.
-/// Deterministic: equal arguments give equal outcomes.
+/// Deterministic: equal arguments give equal outcomes, unless `stop` is raised.
 [[nodiscard]] outcome interpret(checked_module const& m,
                                 flat_entry_point const& e,
                                 run_inputs const& inputs,
                                 run_limits const& limits = {});
+
+/// True where `id` is a constant of `e`: a literal, an enum value, or a construction, a member, a logical operator or
+/// a call of a `@pure` builtin whose operands are all constants.
+/// It is what WGSL folds when it creates the shader, so what the check pass judges of constants (CHK-310).
+[[nodiscard]] bool is_constant(checked_module const& m, flat_entry_point const& e, flat_expr_id id);
+
+/// The value of constant `id` on the abstract machine: `ok` with it as the result, or `program_error` where some call
+/// under it has none (EVAL-85); a `type_error` for an `id` that is no constant.
+[[nodiscard]] outcome evaluate_constant(checked_module const& m, flat_entry_point const& e, flat_expr_id id);
 
 /// `ok 1.5` with one ` | print …` per printed value, then one ` | buffer …` per buffer, for a failing test to show.
 [[nodiscard]] cc::string dump(outcome const& o);
