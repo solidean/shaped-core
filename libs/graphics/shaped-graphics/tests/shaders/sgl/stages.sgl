@@ -1,0 +1,117 @@
+// The geometry and tessellation stages, which dx12 and vulkan have and WebGPU and Metal do not.
+require geometry_shader
+require tessellation_shader
+
+@vertex struct stage_corner:
+    position: float2
+
+struct control_point:
+    position: float2
+
+struct staged:
+    @position position: hpos4
+    color: float4
+
+@pixel struct stage_target:
+    color: float4
+
+@vertex fun corner_vs(v: stage_corner) -> control_point:
+    return { position = v.position }
+
+@pixel fun staged_ps(p: staged) -> stage_target:
+    return { color = p.color }
+
+// A triangle patch cut four times along each edge, whose evaluation stage writes its domain location as a color.
+struct tri_factors:
+    @edge_factors edges: float[3]
+    @inside_factors inside: float
+
+@tessellation_control(partitioning = .integer, winding = .counter_clockwise)
+fun ccw_tc(patch: control_point[3]) -> tri_factors:
+    return { edges = [4.0, 4.0, 4.0], inside = 4.0 }
+
+@tessellation_control(partitioning = .integer, winding = .clockwise)
+fun cw_tc(patch: control_point[3]) -> tri_factors:
+    return { edges = [4.0, 4.0, 4.0], inside = 4.0 }
+
+// An edge factor of zero culls the whole patch.
+@tessellation_control(partitioning = .integer, winding = .counter_clockwise)
+fun culled_tc(patch: control_point[3]) -> tri_factors:
+    return { edges = [0.0, 4.0, 4.0], inside = 4.0 }
+
+@tessellation_evaluation
+fun domain_te(patch: control_point[3], f: tri_factors, @domain_location uvw: float3) -> staged:
+    let p = patch[0].position * uvw.x + patch[1].position * uvw.y + patch[2].position * uvw.z
+    return {
+        position = hpos4(p.x, p.y, 0.5, 1.0)
+        color = float4(uvw.x, uvw.y, uvw.z, 1.0)
+    }
+
+pipeline tessellated_ccw:
+    vertex = corner_vs
+    tessellation_control = ccw_tc
+    tessellation_evaluation = domain_te
+    pixel = staged_ps
+    cull = .back
+    format = .rgba32_float
+
+pipeline tessellated_cw:
+    vertex = corner_vs
+    tessellation_control = cw_tc
+    tessellation_evaluation = domain_te
+    pixel = staged_ps
+    cull = .back
+    format = .rgba32_float
+
+pipeline tessellated_culled:
+    vertex = corner_vs
+    tessellation_control = culled_tc
+    tessellation_evaluation = domain_te
+    pixel = staged_ps
+    cull = .none
+    format = .rgba32_float
+
+// Each triangle twice, the copy one unit to the right, with the strip ended after each.
+@vertex fun white_vs(v: stage_corner) -> staged:
+    return {
+        position = hpos4(v.position.x, v.position.y, 0.5, 1.0)
+        color = float4(1.0, 1.0, 1.0, 1.0)
+    }
+
+@geometry(max_vertices = 6)
+fun twice_gs(tri: staged[3], stream: mut triangle_stream[staged]):
+    for i in 0 ..< 3:
+        stream.emit(tri[i])
+    stream.end_strip()
+    for i in 0 ..< 3:
+        let p = tri[i].position
+        stream.emit({ position = hpos4(p.x + 1.0, p.y, p.z, p.w), color = tri[i].color })
+    stream.end_strip()
+
+pipeline doubled:
+    vertex = white_vs
+    geometry = twice_gs
+    pixel = staged_ps
+    cull = .none
+    format = .rgba32_float
+
+// Each triangle carries its primitive id to the pixel stage, flat.
+struct primitive_tagged:
+    @position position: hpos4
+    @interpolate(.flat) primitive: int
+
+@geometry(max_vertices = 3)
+fun tag_gs(tri: staged[3], @primitive_id primitive: int, stream: mut triangle_stream[primitive_tagged]):
+    for i in 0 ..< 3:
+        stream.emit({ position = tri[i].position, primitive = primitive })
+    stream.end_strip()
+
+@pixel fun primitive_ps(p: primitive_tagged) -> stage_target:
+    return { color = float4(p.primitive as float, 0.0, 0.0, 1.0) }
+
+pipeline primitive_ids:
+    vertex = white_vs
+    geometry = tag_gs
+    pixel = primitive_ps
+    cull = .none
+    format = .rgba32_float

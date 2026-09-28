@@ -397,6 +397,7 @@ if(SC_BUILD_TESTS)
             tests/pipeline/pixel-semantics-test.cc
             tests/pipeline/sampler-test.cc
             tests/pipeline/texture-shapes-test.cc
+            tests/pipeline/stages-test.cc
         )
         sc_add_shader_package(
             TARGET     shaped-graphics-test
@@ -419,6 +420,7 @@ if(SC_BUILD_TESTS)
                 pixel_semantics.sgl:*
                 sampling.sgl:*
                 shapes.sgl:*
+                stages.sgl:*
         )
     endif()
 

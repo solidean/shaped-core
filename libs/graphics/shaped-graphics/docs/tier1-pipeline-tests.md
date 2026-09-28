@@ -64,15 +64,15 @@ What metal and webgpu still have to be shown doing:
 
 ## Geometry and tessellation stages
 
-SGL writes both stages for dx12 and vulkan, and DXC accepts the text for DXIL and SPIR-V; no draw has run them yet.
-Each test below is gated by its feature, so an adapter without it skips rather than fails.
+`tests/pipeline/stages-test.cc` runs both stages on dx12 and vulkan, each gated by its feature.
+What is left:
 
-- **Tessellation**: a triangle patch with fixed factors, whose evaluation stage writes the domain location as a colour.
-  The covered pixels and one interior colour pin the domain, the partitioning and the winding the control stage names.
-- **A factor of zero culls the patch**, which dx12 and vulkan agree on.
-- **Geometry**: a stage that emits each triangle twice, offset, then ends the strip, so the second copy is drawn and no bridging triangle is.
-- **`@primitive_id`** read by the geometry stage and passed on flat, one value per triangle.
-- **A pipeline without the feature is refused** by `create_raster_pipeline` naming it, which `uncached.cc` does now whatever language the shader is in.
+- **The winding a control stage names is the domain's own.**
+  A patch whose corners wind counter-clockwise is evaluated as `patch[0] * uvw.x + patch[1] * uvw.y + patch[2] * uvw.z`.
+  It is drawn under `winding = .clockwise` and culled under `.counter_clockwise`, on dx12 and vulkan alike.
+  SGL's spec does not say which it means, so either the spec says so or the emitter flips it to follow the patch.
+- **The partitioning** reaches no pixel the test reads, since a fixed integer factor tiles the same area under all three.
+- **A pipeline without the feature is refused** naming it, which only a device lacking the stage shows; the test skips on dx12 and vulkan.
 
 ## What moves out of tier 2
 
