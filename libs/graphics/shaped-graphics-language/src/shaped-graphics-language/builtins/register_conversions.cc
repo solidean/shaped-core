@@ -118,6 +118,8 @@ written write_bool32_to_bool(call_context const& c)
             .binds = precedence::comparison};
 }
 
+constexpr cc::string_view k_select[] = {"select"};
+
 cc::string type_name(numeric const& n, i32 width)
 {
     return width == 1 ? cc::string(n.name) : cc::format("{}{}", n.name, width);
@@ -149,7 +151,7 @@ void sgl::builtins::register_conversions(registry& r)
     r.add(function_record{
         .signature = "@pure @operator(\"as\") fun convert_bool_to_bool32(x: bool) -> bool32",
         .evaluate = bool_to_bool32,
-        .write = {.kind = spelling_kind::custom, .custom = write_bool_to_bool32},
+        .write = {.kind = spelling_kind::custom, .custom = write_bool_to_bool32, .wgsl_names = k_select},
     });
     r.add(function_record{
         .signature = "@pure @operator(\"as\") fun convert_bool32_to_bool(x: bool32) -> bool",

@@ -59,7 +59,8 @@ What each part of the record is for:
   `transform_position` is one: it widens its position by `1.0`, and HLSL writes the product as `mul(m, v)`.
 * **`@pure` stands in the signature**, and a record without it is a function with an effect, which the legalizer then keeps in its place.
 * **The name a target calls is reserved in that target from the record**, so a local named `frac` is renamed in HLSL without an entry in any list.
-  The exception is a function only a custom writer calls, such as `mul`, which stands in [reserved_words.cc](../src/shaped-graphics-language/emit/reserved_words.cc).
+  A custom writer or a helper lists every other name it writes in `hlsl_names`, `wgsl_names` and `msl_names`: `mul`, `asuint`, a helper's own name.
+  A registry test calls every writer and fails on a name that is neither listed there nor a reserved word of the target.
 
 `add_infix`, `add_negate` and `add_function` in `register.hh` cover everything the prelude has today.
 A record that fits none of them is built by hand and added with `r.add(function_record{…})`.

@@ -213,6 +213,7 @@ sgl::builtins::function_record             // signature (SGL SOURCE TEXT, withou
 sgl::builtins::spelling                    // kind: call (text or .hlsl/.wgsl/.msl rename it; empty = the SGL name), infix, prefix, custom
 sgl::builtins::infix("+")                  // an operator at the level it has in every target
 f.called_in(language::hlsl)                // "lerp" for mix
+f.writes_name(language::hlsl, "asuint")    // true for `x.bits`: its custom writer lists the name in `write.hlsl_names`
 sgl::builtins::evaluator                   // void(span<scalar const> in, vector<scalar>& out): every argument's scalars, back to back;
                                            // the interpreter checks counts and kinds, so ONE evaluator serves a whole family
 sgl::builtins::custom_writer               // written(call_context const&): arguments already written, the target language, the registry

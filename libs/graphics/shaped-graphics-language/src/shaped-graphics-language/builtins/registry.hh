@@ -118,6 +118,13 @@ struct sgl::builtins::spelling
     helper_writer helper = nullptr;
     /// Whatever `custom` and `helper` read to tell the records they serve apart, such as which texture call it is.
     u32 data = 0;
+    /// Every name `custom` and `helper` write in one language besides the arguments: a function called or declared, a
+    /// scope reached into.
+    /// A name of the program spelled alike would hide it, so the emitter spells none so (EMIT-15).
+    /// A type the target predeclares need not stand here, since its reserved words hold it already.
+    cc::span<cc::string_view const> hlsl_names;
+    cc::span<cc::string_view const> wgsl_names;
+    cc::span<cc::string_view const> msl_names;
 };
 
 /// Where a value of a builtin type lands in a constant block; a size of 0 means it has no place in one.
@@ -198,6 +205,10 @@ struct sgl::builtins::function_record
 
     /// The name a `call` has in `l`.
     [[nodiscard]] cc::string_view called_in(language l) const;
+    /// `spelling::hlsl_names` and its siblings, by language.
+    [[nodiscard]] cc::span<cc::string_view const> names_in(language l) const;
+    /// True for the name a `call` has in `l`, and for every name of `names_in(l)`: a name of the program must not be it.
+    [[nodiscard]] bool writes_name(language l, cc::string_view name) const;
 };
 
 /// One piece of the generated file, in the order it was registered.

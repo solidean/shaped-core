@@ -39,7 +39,8 @@ Back to the [semantics](_index.md); the reasons are in [why/emitting.md](why/emi
 ## Names
 
 * **EMIT-14** Every name an emitter writes comes from the entry point's mint ([CHK-104](checking.md#the-flat-tree)).
-* **EMIT-15** Each target has a list of **reserved words**: its keywords and its predeclared types, together with every function name a builtin is written as in that target (EMIT-74).
+* **EMIT-15** Each target has a list of **reserved words**: its keywords and its predeclared types, together with every name a builtin writes in that target (EMIT-74).
+  That is the function a call is written as, and every name a writer of its own calls, declares or reaches into, which its record lists per target.
 * **EMIT-16** The reserved words of the target are taken in the mint before anything else is minted.
 * **EMIT-17** A struct, a binding or a local whose name is reserved in a target is minted from that name and a trailing underscore, in that target only.
 * **EMIT-96** Two structs of one name, which the program's file shadowing one of the prelude's gives ([CHK-188](checking.md#symbols)), are written under two names: the one written later is minted.
@@ -380,4 +381,3 @@ EMIT-110 and EMIT-111 describe today's choice, not a promise.
 * How a vertex input's dx12 semantic is chosen once a member wants one that is not its name.
 * How a splatted value reads once a target can take the vector whole ([checking](checking.md#open)).
 * Whether the reserved words of a target hold every function of that target, or only the ones a builtin is written as.
-* A function that a custom writer of EMIT-74 calls, such as HLSL's `mul`, which is reserved by the target's list and not by the record.

@@ -32,14 +32,14 @@ cc::string_view role_name(struct_role role)
     return "";
 }
 
-/// True for a function name some builtin is written as in this target: a local of that name would hide it.
+/// True for a name some builtin writes in this target: a local of that name would hide it.
 /// Read from the registry, so a new builtin needs no entry in a target's list of reserved words.
 bool is_called_by_a_builtin(checked_module const& m, emit::target t, cc::string_view name)
 {
     if (m.builtins == nullptr)
         return false;
     for (auto const& f : m.builtins->functions)
-        if (f.write.kind == builtins::spelling_kind::call && f.called_in(language_of(t)) == name)
+        if (f.writes_name(language_of(t), name))
             return true;
     return false;
 }
@@ -813,8 +813,12 @@ sgl::emit::impl::plan sgl::emit::impl::make_plan(check::checked_module const& m,
         (void)result.names.reserve(word);
     if (m.builtins != nullptr)
         for (auto const& f : m.builtins->functions)
+        {
             if (f.write.kind == builtins::spelling_kind::call)
                 (void)result.names.reserve(f.called_in(language_of(t)));
+            for (auto const name : f.names_in(language_of(t)))
+                (void)result.names.reserve(name);
+        }
     result.struct_of_type.resize_to_filled(m.types.size(), -1);
     result.enum_of_type.resize_to_filled(m.types.size(), -1);
     result.array_of_type.resize_to_filled(m.types.size(), -1);

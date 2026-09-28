@@ -38,6 +38,10 @@ constexpr barrier k_barriers[] = {
      "/// Waits for every thread of the workgroup, after which each sees what the others stored to images."},
 };
 
+constexpr cc::string_view k_barriers_hlsl[] = {"GroupMemoryBarrierWithGroupSync", "DeviceMemoryBarrierWithGroupSync"};
+constexpr cc::string_view k_barriers_wgsl[] = {"workgroupBarrier", "storageBarrier", "textureBarrier"};
+constexpr cc::string_view k_barriers_msl[] = {"threadgroup_barrier", "mem_flags"};
+
 written write_barrier(call_context const& ctx)
 {
     auto const& b = k_barriers[ctx.data];
@@ -94,6 +98,20 @@ constexpr atomic_info k_atomics[] = {
     {atomic_op::exchange, "exchange", "Exchange", "Exchange", "exchange", "/// Stores `v`, and gives the value before."},
     {atomic_op::load, "load", "Or", "Load", "load", "/// The value, read in one step."},
     {atomic_op::store, "store", "Exchange", "Store", "store", "/// Stores `v` in one step."},
+};
+
+constexpr cc::string_view k_atomics_hlsl[] = {
+    "InterlockedAdd", "InterlockedMin", "InterlockedMax",      "InterlockedAnd",
+    "InterlockedOr",  "InterlockedXor", "InterlockedExchange",
+};
+constexpr cc::string_view k_atomics_wgsl[] = {
+    "atomicAdd", "atomicSub", "atomicMin",      "atomicMax",  "atomicAnd",
+    "atomicOr",  "atomicXor", "atomicExchange", "atomicLoad", "atomicStore",
+};
+constexpr cc::string_view k_atomics_msl[] = {
+    "atomic_fetch_add_explicit", "atomic_fetch_sub_explicit", "atomic_fetch_min_explicit", "atomic_fetch_max_explicit",
+    "atomic_fetch_and_explicit", "atomic_fetch_or_explicit",  "atomic_fetch_xor_explicit", "atomic_exchange_explicit",
+    "atomic_load_explicit",      "atomic_store_explicit",     "memory_order_relaxed",
 };
 
 /// The data word: the operation, and whether the atomic holds an `int`.
@@ -244,7 +262,12 @@ void sgl::builtins::register_sync(registry& r)
             .signature = cc::format("@stages(.compute) fun {}()", k_barriers[i].name),
             .doc = k_barriers[i].doc,
             .evaluate = nothing,
-            .write = {.kind = spelling_kind::custom, .custom = write_barrier, .data = i},
+            .write = {.kind = spelling_kind::custom,
+                      .custom = write_barrier,
+                      .data = i,
+                      .hlsl_names = k_barriers_hlsl,
+                      .wgsl_names = k_barriers_wgsl,
+                      .msl_names = k_barriers_msl},
             .is_barrier = true,
         });
 
@@ -264,7 +287,12 @@ void sgl::builtins::register_sync(registry& r)
                 .signature = cc::format("@stages(.pixel, .compute) {}", signature),
                 .doc = info.doc,
                 .evaluate = is_signed ? evaluator_of<true>(info.op) : evaluator_of<false>(info.op),
-                .write = {.kind = spelling_kind::custom, .custom = write_atomic, .data = atomic_data(info.op, is_signed)},
+                .write = {.kind = spelling_kind::custom,
+                          .custom = write_atomic,
+                          .data = atomic_data(info.op, is_signed),
+                          .hlsl_names = k_atomics_hlsl,
+                          .wgsl_names = k_atomics_wgsl,
+                          .msl_names = k_atomics_msl},
                 .is_atomic = true,
             });
         }

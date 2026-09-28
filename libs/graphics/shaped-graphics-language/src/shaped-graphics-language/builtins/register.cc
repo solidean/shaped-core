@@ -54,6 +54,7 @@ using check::scalar;
 using check::value_kind;
 
 constexpr u32 k_int_min_bits = 0x8000'0000u;
+constexpr cc::string_view k_fmod[] = {"fmod"};
 
 /// Past 2^23 every float is an integer already, and a NaN or an infinity is its own truncation.
 f32 truncated(f32 x)
@@ -127,7 +128,8 @@ spelling impl::float_remainder()
                 if (c.target == language::msl)
                     return {.text = cc::format("fmod({}, {})", c.arguments[0].text, c.arguments[1].text)};
                 return write_infix("%", precedence::multiplicative, c.arguments[0], c.arguments[1]);
-            }};
+            },
+            .msl_names = k_fmod};
 }
 
 void impl::add_negate(registry& r, cc::string_view name, cc::string_view type, evaluator evaluate)

@@ -3,6 +3,7 @@
 #include <shaped-graphics-language/builtins/register.hh>
 #include <shaped-graphics-language/builtins/registry.hh>
 #include <shaped-graphics-language/emit/emit.hh>
+#include <shaped-graphics-language/emit/reserved_words.hh>
 
 using namespace sgl_test;
 using namespace sgl::check;
@@ -161,6 +162,122 @@ TEST("sgl builtins - a local may not hide the function a builtin is written as, 
     REQUIRE(wgsl.has_text());
     CHECK(hlsl.text.contains("const float lerp_ = lerp(p.a, p.b, 0.5);"));
     CHECK(wgsl.text.contains("let lerp: f32 = mix(p.a, p.b, 0.5);"));
+}
+
+TEST("sgl builtins - a local may not hide a function a custom writer calls or a helper declares, in that target alone")
+{
+    auto const checked
+        = check_sources(read_prelude(), cc::string(frag_edges)
+                                            + "@pixel fun main_ps(p: frag) -> target:\n"
+                                              "    let asuint = p.a.bits\n"
+                                              "    let countOneBits = count_bits(asuint)\n"
+                                              "    let sgl_pack_half2x16 = pack_half2x16(float2(p.a, p.b))\n"
+                                              "    let sgl_first_bit_high = first_bit_high(sgl_pack_half2x16 + "
+                                              "countOneBits)\n"
+                                              "    let as_type = float.from_bits(sgl_first_bit_high)\n"
+                                              "    let bitcast = as_type\n"
+                                              "    return {\n"
+                                              "        color = float4(bitcast, 0.0, 0.0, 1.0)\n"
+                                              "    }\n");
+    REQUIRE(reports_of(checked) == "");
+    auto const hlsl = sgl::emit::emit(checked.module, 0, sgl::emit::target::hlsl_dx12);
+    auto const wgsl = sgl::emit::emit(checked.module, 0, sgl::emit::target::wgsl);
+    auto const msl = sgl::emit::emit(checked.module, 0, sgl::emit::target::msl);
+    REQUIRE(hlsl.has_text());
+    REQUIRE(wgsl.has_text());
+    REQUIRE(msl.has_text());
+
+    // a custom writer's `asuint`, and the helper `sgl_pack_half2x16`
+    CHECK(hlsl.text.contains("const uint asuint_ = asuint(self);"));
+    CHECK(hlsl.text.contains("const uint sgl_pack_half2x16_ = sgl_pack_half2x16(float2(p.a, p.b));"));
+    CHECK(hlsl.text.contains("const uint countOneBits = countbits(asuint_);"));
+    // WGSL has no helpers: its custom writers' `countOneBits` and `bitcast`
+    CHECK(wgsl.text.contains("let countOneBits_: u32 = countOneBits(asuint);"));
+    CHECK(wgsl.text.contains("let bitcast_: f32 = as_type;"));
+    CHECK(wgsl.text.contains("let sgl_pack_half2x16: u32 = pack2x16float(vec2f(p.a, p.b));"));
+    // a custom writer's `as_type`, and the helper `sgl_first_bit_high`
+    CHECK(msl.text.contains("const float as_type_ = as_type<float>(sgl_first_bit_high_);"));
+    CHECK(msl.text.contains("const uint sgl_first_bit_high_ = sgl_first_bit_high(sgl_pack_half2x16 + countOneBits);"));
+}
+
+namespace
+{
+/// Every name `text` calls, constructs, instantiates or reaches into: an identifier before `(`, `<` or `::`.
+/// A member, behind `.`, is not one, and neither is a number such as `0u` or `1.0f`.
+void collect_written_names(cc::string_view text, cc::vector<cc::string>& out)
+{
+    auto const is_start = [](char c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_'; };
+    auto const is_part = [&](char c) { return is_start(c) || (c >= '0' && c <= '9'); };
+    auto i = isize(0);
+    while (i < text.size())
+    {
+        if (!is_part(text[i]))
+        {
+            ++i;
+            continue;
+        }
+        auto const begin = i;
+        while (i < text.size() && is_part(text[i]))
+            ++i;
+        if (!is_start(text[begin]) || (begin > 0 && text[begin - 1] == '.') || i == text.size())
+            continue;
+        if (text[i] == '(' || text[i] == '<' || (text[i] == ':' && i + 1 < text.size() && text[i + 1] == ':'))
+            out.push_back(cc::string(text.subview({.start = begin, .end = i})));
+    }
+}
+} // namespace
+
+TEST("sgl builtins - every name a custom writer or a helper writes is reserved by its record or by the target")
+{
+    auto const& r = builtins::default_registry();
+    struct each
+    {
+        builtins::language language;
+        sgl::emit::target target;
+    };
+    each const languages[] = {{builtins::language::hlsl, sgl::emit::target::hlsl_dx12},
+                              {builtins::language::wgsl, sgl::emit::target::wgsl},
+                              {builtins::language::msl, sgl::emit::target::msl}};
+    auto unreserved = cc::string();
+    for (auto const& f : r.functions)
+    {
+        // a twin without its sampler is never written: the flattener calls the record it names instead
+        if (f.write.kind != builtins::spelling_kind::custom && f.write.helper == nullptr)
+            continue;
+        if (sgl::is_valid(f.with_default_sampler))
+            continue;
+        for (auto const& l : languages)
+        {
+            auto names = cc::vector<cc::string>();
+            if (f.write.kind == builtins::spelling_kind::custom)
+            {
+                // `1` is an argument no writer reads a name from, and a gather's component of `.y`
+                auto arguments = cc::vector<builtins::written>();
+                for (auto i = isize(0); i < f.parameters.size() + (f.takes_element ? 1 : 0); ++i)
+                    arguments.push_back({.text = "1"});
+                auto const w
+                    = f.write.custom({.target = l.language, .arguments = arguments, .builtins = r, .data = f.write.data});
+                collect_written_names(w.text, names);
+                for (auto const& line : w.lines)
+                    collect_written_names(line, names);
+            }
+            if (f.write.helper != nullptr)
+            {
+                auto types = cc::vector<cc::string>();
+                for (auto const& p : f.parameters)
+                {
+                    auto const type = r.find_type(p);
+                    types.push_back(sgl::is_valid(type) ? cc::string(r.at(type).spelled_in(l.language)) : p);
+                }
+                collect_written_names(
+                    f.write.helper({.target = l.language, .argument_types = types, .data = f.write.data}), names);
+            }
+            for (auto const& n : names)
+                if (!sgl::emit::is_reserved(l.target, n) && !f.writes_name(l.language, n))
+                    unreserved.appendf("{} in {} of '{}'\n", n, sgl::emit::to_string(l.target), f.signature);
+        }
+    }
+    CHECK(unreserved == "");
 }
 
 TEST("sgl builtins - a texture method's MSL and a barrier's, which no entry point reaches until MSL takes a group")

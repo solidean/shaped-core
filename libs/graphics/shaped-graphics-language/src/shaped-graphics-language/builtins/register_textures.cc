@@ -519,6 +519,16 @@ written msl_call(call const& c, call_context const& ctx)
     return {};
 }
 
+// Every name a texture call writes, one list per target for the whole family.
+constexpr cc::string_view k_textures_hlsl[] = {"sgl_layers", "sgl_levels", "sgl_samples", "sgl_size"};
+constexpr cc::string_view k_textures_wgsl[] = {
+    "textureDimensions",  "textureGather",        "textureGatherCompare",      "textureLoad",
+    "textureNumLayers",   "textureNumLevels",     "textureNumSamples",         "textureSample",
+    "textureSampleBias",  "textureSampleCompare", "textureSampleCompareLevel", "textureSampleGrad",
+    "textureSampleLevel", "textureStore",
+};
+constexpr cc::string_view k_textures_msl[] = {"bias", "component", "gradient2d", "gradient3d", "gradientcube", "level"};
+
 written write_texture_call(call_context const& ctx)
 {
     auto const c = call::unpack(ctx.data);
@@ -713,8 +723,13 @@ emitted texture_record(call const& c, cc::string_view texture_type, bool with_sa
 void add_texture_call(registry& r, call const& c, cc::string_view texture_type)
 {
     auto const with = texture_record(c, texture_type, true);
-    auto const spelled
-        = spelling{.kind = spelling_kind::custom, .custom = write_texture_call, .helper = with.helper, .data = c.pack()};
+    auto const spelled = spelling{.kind = spelling_kind::custom,
+                                  .custom = write_texture_call,
+                                  .helper = with.helper,
+                                  .data = c.pack(),
+                                  .hlsl_names = k_textures_hlsl,
+                                  .wgsl_names = k_textures_wgsl,
+                                  .msl_names = k_textures_msl};
     auto const id = r.add(function_record{.signature = with.signature,
                                           .evaluate = with.evaluate,
                                           .write = spelled,
@@ -806,7 +821,12 @@ void add_image_shape(registry& r, shape_traits const& s)
                 .signature = cc::format("fun load(i: {}[{}], xy: {}{}) -> {}", s.image, texel,
                                         coordinate_type(s, false), layer, texel),
                 .evaluate = zeros_of(width, kind),
-                .write = {.kind = spelling_kind::custom, .custom = write_texture_call, .data = load.pack()},
+                .write = {.kind = spelling_kind::custom,
+                          .custom = write_texture_call,
+                          .data = load.pack(),
+                          .hlsl_names = k_textures_hlsl,
+                          .wgsl_names = k_textures_wgsl,
+                          .msl_names = k_textures_msl},
             });
             auto store = c;
             store.what = op::image_store;
@@ -815,7 +835,12 @@ void add_image_shape(registry& r, shape_traits const& s)
                 .signature = cc::format("@stages(.pixel, .compute) fun store(i: out {}[{}], xy: {}, value: {}{})",
                                         s.image, texel, coordinate_type(s, false), texel, layer),
                 .evaluate = nothing,
-                .write = {.kind = spelling_kind::custom, .custom = write_texture_call, .data = store.pack()},
+                .write = {.kind = spelling_kind::custom,
+                          .custom = write_texture_call,
+                          .data = store.pack(),
+                          .hlsl_names = k_textures_hlsl,
+                          .wgsl_names = k_textures_wgsl,
+                          .msl_names = k_textures_msl},
             });
         }
 }
@@ -831,7 +856,10 @@ void add_sizes(registry& r, shape_traits const& s, cc::string_view type_name_tex
         return spelling{.kind = spelling_kind::custom,
                         .custom = write_texture_call,
                         .helper = size_helper,
-                        .data = c.pack()};
+                        .data = c.pack(),
+                        .hlsl_names = k_textures_hlsl,
+                        .wgsl_names = k_textures_wgsl,
+                        .msl_names = k_textures_msl};
     };
     auto const takes_level = !is_image && !s.is_ms;
     r.add(function_record{

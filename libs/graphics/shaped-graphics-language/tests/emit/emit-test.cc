@@ -354,8 +354,6 @@ TEST("sgl emit - the reserved words differ by target and hold no word twice")
     CHECK(sgl::emit::is_reserved(target::wgsl, "filter"));
     CHECK(!sgl::emit::is_reserved(target::hlsl_dx12, "target"));
     CHECK(sgl::emit::is_reserved(target::hlsl_vulkan, "float4x4"));
-    CHECK(sgl::emit::is_reserved(target::hlsl_dx12, "mul"));
-    CHECK(!sgl::emit::is_reserved(target::wgsl, "mul"));
     CHECK(sgl::emit::is_reserved(target::msl, "main"));
     CHECK(sgl::emit::is_reserved(target::msl, "fragment"));
     CHECK(sgl::emit::is_reserved(target::msl, "packed_float3"));

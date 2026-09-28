@@ -474,6 +474,32 @@ written write_unpack_half(call_context const& c)
     return {};
 }
 
+// ---- the names each custom spelling writes, which no name of the program may take in that target ---------------
+
+constexpr cc::string_view k_sign[] = {"sign"};
+constexpr cc::string_view k_count_bits_hlsl[] = {"countbits"};
+constexpr cc::string_view k_count_bits_wgsl[] = {"countOneBits"};
+constexpr cc::string_view k_count_bits_msl[] = {"popcount"};
+constexpr cc::string_view k_first_bit_high_hlsl[] = {"firstbithigh"};
+constexpr cc::string_view k_first_bit_high_wgsl[] = {"firstLeadingBit"};
+constexpr cc::string_view k_first_bit_high_msl[] = {"sgl_first_bit_high", "clz", "select"};
+constexpr cc::string_view k_first_bit_low_hlsl[] = {"firstbitlow"};
+constexpr cc::string_view k_first_bit_low_wgsl[] = {"firstTrailingBit"};
+constexpr cc::string_view k_first_bit_low_msl[] = {"sgl_first_bit_low", "ctz", "select"};
+constexpr cc::string_view k_reverse_bits_hlsl[] = {"reversebits"};
+constexpr cc::string_view k_reverse_bits_wgsl[] = {"reverseBits"};
+constexpr cc::string_view k_reverse_bits_msl[] = {"reverse_bits"};
+constexpr cc::string_view k_reinterpret_hlsl[] = {"asfloat", "asint", "asuint"};
+constexpr cc::string_view k_reinterpret_wgsl[] = {"bitcast"};
+constexpr cc::string_view k_as_type[] = {"as_type"};
+constexpr cc::string_view k_pack_unorm_hlsl[] = {"round", "saturate"};
+constexpr cc::string_view k_pack_snorm_hlsl[] = {"round", "clamp"};
+constexpr cc::string_view k_unpack_snorm_hlsl[] = {"max"};
+constexpr cc::string_view k_pack_half_hlsl[] = {"sgl_pack_half2x16", "f32tof16"};
+constexpr cc::string_view k_pack_half_wgsl[] = {"pack2x16float"};
+constexpr cc::string_view k_unpack_half_hlsl[] = {"sgl_unpack_half2x16", "f16tof32"};
+constexpr cc::string_view k_unpack_half_wgsl[] = {"unpack2x16float"};
+
 struct float_type
 {
     cc::string_view name;
@@ -575,8 +601,8 @@ void sgl::builtins::register_math(registry& r)
             add(r, cc::format("@pure fun {}(x: {}) -> {}", f.name, t.name, t.name), f.evaluate, f.write,
                 f.undefined_when);
         add(r, cc::format("@pure fun sign(x: {}) -> {}", t.name, t.name), unary<sign_of>,
-            {.kind = spelling_kind::custom, .custom = t.sign}, nullptr, false,
-            "/// -1, 0 or 1, by the sign of each component.");
+            {.kind = spelling_kind::custom, .custom = t.sign, .hlsl_names = k_sign, .wgsl_names = k_sign, .msl_names = k_sign},
+            nullptr, false, "/// -1, 0 or 1, by the sign of each component.");
         add(r, cc::format("@pure fun atan2(y: {0}, x: {0}) -> {0}", t.name), binary<soft_atan2>, {}, nullptr, false,
             "/// The angle of (x, y), in -pi to pi; `y` comes first, as in every target.");
         add(r, cc::format("@pure fun pow(x: {0}, y: {0}) -> {0}", t.name), binary<pow_of>, {}, pow_undefined);
@@ -618,14 +644,32 @@ void sgl::builtins::register_math(registry& r)
     for (auto const& t : integers)
     {
         add(r, cc::format("@pure fun count_bits(x: {0}) -> {0}", t.name), count_bits,
-            {.kind = spelling_kind::custom, .custom = t.count_bits});
+            {.kind = spelling_kind::custom,
+             .custom = t.count_bits,
+             .hlsl_names = k_count_bits_hlsl,
+             .wgsl_names = k_count_bits_wgsl,
+             .msl_names = k_count_bits_msl});
         add(r, cc::format("@pure fun first_bit_high(x: {0}) -> {0}", t.name), first_bit_high,
-            {.kind = spelling_kind::custom, .custom = t.first_bit_high, .helper = first_bit_high_helper}, nullptr,
-            false, "/// The highest set bit of a uint; of an int, the highest bit that differs from its sign.");
+            {.kind = spelling_kind::custom,
+             .custom = t.first_bit_high,
+             .helper = first_bit_high_helper,
+             .hlsl_names = k_first_bit_high_hlsl,
+             .wgsl_names = k_first_bit_high_wgsl,
+             .msl_names = k_first_bit_high_msl},
+            nullptr, false, "/// The highest set bit of a uint; of an int, the highest bit that differs from its sign.");
         add(r, cc::format("@pure fun first_bit_low(x: {0}) -> {0}", t.name), first_bit_low,
-            {.kind = spelling_kind::custom, .custom = t.first_bit_low, .helper = first_bit_low_helper});
+            {.kind = spelling_kind::custom,
+             .custom = t.first_bit_low,
+             .helper = first_bit_low_helper,
+             .hlsl_names = k_first_bit_low_hlsl,
+             .wgsl_names = k_first_bit_low_wgsl,
+             .msl_names = k_first_bit_low_msl});
         add(r, cc::format("@pure fun reverse_bits(x: {0}) -> {0}", t.name), reverse_bits,
-            {.kind = spelling_kind::custom, .custom = t.reverse_bits});
+            {.kind = spelling_kind::custom,
+             .custom = t.reverse_bits,
+             .hlsl_names = k_reverse_bits_hlsl,
+             .wgsl_names = k_reverse_bits_wgsl,
+             .msl_names = k_reverse_bits_msl});
     }
 
     r.add_comment("// the bits of a float, read and written; `x.bits` and `float.from_bits(u)` in core.sgl are how a\n"
@@ -651,25 +695,49 @@ void sgl::builtins::register_math(registry& r)
                        : x.to.starts_with("uint") ? "uint"
                                                   : "int",
                        x.from, x.to),
-            x.evaluate, {.kind = spelling_kind::custom, .custom = x.write});
+            x.evaluate,
+            {.kind = spelling_kind::custom,
+             .custom = x.write,
+             .hlsl_names = k_reinterpret_hlsl,
+             .wgsl_names = k_reinterpret_wgsl,
+             .msl_names = k_as_type});
 
     r.add_comment("// packing into a uint and back: bytes rounded to nearest, and halves rounded to even");
     add(r, "@pure fun pack_unorm4x8(v: float4) -> uint", pack_unorm4x8,
-        {.hlsl = "sgl_pack_unorm4x8", .wgsl = "pack4x8unorm", .msl = "pack_float_to_unorm4x8", .helper = pack_unorm_helper});
+        {.hlsl = "sgl_pack_unorm4x8",
+         .wgsl = "pack4x8unorm",
+         .msl = "pack_float_to_unorm4x8",
+         .helper = pack_unorm_helper,
+         .hlsl_names = k_pack_unorm_hlsl});
     add(r, "@pure fun unpack_unorm4x8(u: uint) -> float4", unpack_unorm4x8,
         {.hlsl = "sgl_unpack_unorm4x8",
          .wgsl = "unpack4x8unorm",
          .msl = "unpack_unorm4x8_to_float",
          .helper = unpack_unorm_helper});
     add(r, "@pure fun pack_snorm4x8(v: float4) -> uint", pack_snorm4x8,
-        {.hlsl = "sgl_pack_snorm4x8", .wgsl = "pack4x8snorm", .msl = "pack_float_to_snorm4x8", .helper = pack_snorm_helper});
+        {.hlsl = "sgl_pack_snorm4x8",
+         .wgsl = "pack4x8snorm",
+         .msl = "pack_float_to_snorm4x8",
+         .helper = pack_snorm_helper,
+         .hlsl_names = k_pack_snorm_hlsl});
     add(r, "@pure fun unpack_snorm4x8(u: uint) -> float4", unpack_snorm4x8,
         {.hlsl = "sgl_unpack_snorm4x8",
          .wgsl = "unpack4x8snorm",
          .msl = "unpack_snorm4x8_to_float",
-         .helper = unpack_snorm_helper});
+         .helper = unpack_snorm_helper,
+         .hlsl_names = k_unpack_snorm_hlsl});
     add(r, "@pure fun pack_half2x16(v: float2) -> uint", pack_half2x16,
-        {.kind = spelling_kind::custom, .custom = write_pack_half, .helper = pack_half_helper});
+        {.kind = spelling_kind::custom,
+         .custom = write_pack_half,
+         .helper = pack_half_helper,
+         .hlsl_names = k_pack_half_hlsl,
+         .wgsl_names = k_pack_half_wgsl,
+         .msl_names = k_as_type});
     add(r, "@pure fun unpack_half2x16(u: uint) -> float2", unpack_half2x16,
-        {.kind = spelling_kind::custom, .custom = write_unpack_half, .helper = unpack_half_helper});
+        {.kind = spelling_kind::custom,
+         .custom = write_unpack_half,
+         .helper = unpack_half_helper,
+         .hlsl_names = k_unpack_half_hlsl,
+         .wgsl_names = k_unpack_half_wgsl,
+         .msl_names = k_as_type});
 }

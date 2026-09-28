@@ -79,6 +79,30 @@ cc::string_view function_record::called_in(language l) const
     return write.text.empty() ? cc::string_view(name) : cc::string_view(write.text);
 }
 
+cc::span<cc::string_view const> function_record::names_in(language l) const
+{
+    switch (l)
+    {
+    case language::hlsl:
+        return write.hlsl_names;
+    case language::wgsl:
+        return write.wgsl_names;
+    case language::msl:
+        return write.msl_names;
+    }
+    return {};
+}
+
+bool function_record::writes_name(language l, cc::string_view name) const
+{
+    if (write.kind == spelling_kind::call && called_in(l) == name)
+        return true;
+    for (auto const n : names_in(l))
+        if (n == name)
+            return true;
+    return false;
+}
+
 builtin_type_id registry::add(type_record record)
 {
     items.push_back({.kind = registry_item::kind_t::type, .index = i32(types.size())});
