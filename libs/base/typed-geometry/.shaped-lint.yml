@@ -11,3 +11,8 @@ rules:
     value: <cmath>
     reason: scalar_traits is where sqrt / sin / cos are bound to a scalar type, so exotic scalars can override what std:: cannot
     files: src/typed-geometry/scalar/traits.hh
+
+  - kind: allow-include
+    value: <immintrin.h>
+    reason: the F16C conversion intrinsics, compiled in only where the build target guarantees F16C
+    files: src/typed-geometry/scalar/impl/half_float_convert.hh

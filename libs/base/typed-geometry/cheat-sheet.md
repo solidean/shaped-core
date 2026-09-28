@@ -26,6 +26,7 @@ tg::homogeneous_transform<DSource, DTarget, T, Flags>           // the one trans
 // concrete typedefs — suffix attaches to a trailing digit, else separated by '_':
 tg::vec3f tg::pos3f tg::comp3f tg::bivec3f tg::mat3f   // f=f32, d=f64, i=i32  (e.g. vec2d, mat4i)
 tg::quat_f tg::quat_d   tg::angle_f tg::angle_d        // quat/angle end in a letter -> '_f'/'_d'
+tg::f16                                                // tg::half_float; no linalg aliases, write tg::vec<3, tg::f16>
 ```
 
 ## vec — displacement / direction
@@ -369,6 +370,24 @@ x.to_string(); cc::format("{:'x}", x);                     // decimal; the full 
 // fi192 r = a * b over fi128 does not compile: the product would wrap at 128 bits. Write tg::mul<fi192>(a, b).
 // A shift amount must be in [0, Bits); min() / -1 wraps to min(); division by zero asserts.
 // vec<3, fi64> exists, and its dot product is computed (and wraps) in fi64.
+```
+
+## half_float (binary16)
+
+```cpp
+#include <typed-geometry/scalar/half_float.hh>
+tg::f16 h = tg::f16(0.1f);                        // tg::half_float; explicit, rounds to nearest even -> 0.0999755859375
+tg::f16(0.1); tg::f16(3); 0.5_f16;                // from f64 and integers in one rounding; literal in tg::literals
+f32(h); h.to_f32(); h.to_f64();                    // explicit, exact
+tg::f16::make_from_bits(0x3c00); h.bits();         // the raw u16
+h + h; h * h; h /= h; -h;                          // binary16 arithmetic: computed in f32, rounded once (IEEE-exact)
+h == h; h < h; h <=> h;                            // on the bits; -0 == +0, NaN unordered -> std::partial_ordering
+h.is_nan(); h.is_inf(); h.is_finite(); h.is_subnormal(); h.sign_bit();
+tg::floor(h); tg::sqrt(h); tg::sin(a);             // every scalar_traits family; vec<3, tg::f16> works
+tg::f16::max; lowest; min_normal; denorm_min; epsilon; infinity; quiet_nan;   // constexpr, unlike other tg constants
+cc::format("{}", h);                               // shortest digits for f16: "0.1"; `{:.5f}` prints the exact value
+// h + 1.0f does not compile: widen explicitly, f32(h) + 1.0f, or stay in f16, h + tg::f16(1).
+// Each operation rounds, so a long chain in f16 drifts: widen once for heavy math.
 ```
 
 ## Umbrellas
