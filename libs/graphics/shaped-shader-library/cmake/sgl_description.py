@@ -51,6 +51,8 @@ class SglFile:
     memory_structs: list[dict] = field(default_factory=list)
     entry_points: list[dict] = field(default_factory=list)
     pipelines: list[dict] = field(default_factory=list)
+    # The file-scope samplers, in index order: the static samplers of the layouts that name them.
+    samplers: list[dict] = field(default_factory=list)
 
     def binding(self, name: str) -> dict | None:
         return next((b for b in self.bindings if b["name"] == name), None)
@@ -73,6 +75,8 @@ class SglEntries:
     entry_points: list[tuple[str, str, str]] = field(default_factory=list)
     # (path, entry point) -> what the compiler said about it, for every entry point of a file it described.
     described_entry_points: dict[tuple[str, str], dict] = field(default_factory=dict)
+    # path -> the file-scope samplers of a file the compiler described, which its entry points' layouts name.
+    file_samplers: dict[str, list[dict]] = field(default_factory=dict)
     # (file, the described binding)
     bindings: list[tuple[SglFile, dict]] = field(default_factory=list)
     vertex_inputs: list[tuple[SglFile, dict]] = field(default_factory=list)
@@ -91,7 +95,7 @@ def describe(tool: Path, source: Path, shown_as: str) -> SglFile:
     data = json.loads(result.stdout)
     return SglFile(path=shown_as, bindings=data["bindings"], structs=data["structs"],
                    memory_structs=data.get("memory_structs", []), entry_points=data["entry_points"],
-                   pipelines=data.get("pipelines", []))
+                   pipelines=data.get("pipelines", []), samplers=data.get("samplers", []))
 
 
 def resolve(package: str, entries: list[str], source_dir: Path, tool: Path | None) -> SglEntries:
@@ -136,6 +140,7 @@ def resolve(package: str, entries: list[str], source_dir: Path, tool: Path | Non
             for e in described.entry_points:
                 add("entry_points", (path, e["name"]), (path, e["stage"], e["name"]))
                 out.described_entry_points[(path, e["name"])] = e
+            out.file_samplers[path] = described.samplers
             for b in described.bindings:
                 add("bindings", (path, b["name"]), (described, b))
             for s in described.structs:
