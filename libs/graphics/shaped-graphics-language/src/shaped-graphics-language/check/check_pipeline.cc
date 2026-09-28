@@ -826,14 +826,25 @@ void checker::compile_pipeline(symbol_id id)
         positions += m.is_position ? 1 : 0;
     if (positions != 1 && !pc.is_failed)
         pc.fail(file, where,
-                cc::format("{} hands the rasterizer {}, which has no @position field", out.at(from).name,
-                           out.name_of(passed)));
+                cc::format("{} hands the rasterizer {}, which has {} @position fields and needs exactly one",
+                           out.at(from).name, out.name_of(passed),
+                           positions == 0 ? cc::string("no") : cc::format("{}", positions)));
 
     if (is_valid(pixel))
     {
         auto const& pixel_info = out.functions[out.at(pixel).info];
         // a valid pixel entry point takes its struct first (CHK-271)
         match(passed, from, out.at(pixel_info.parameters)[0].type, pixel);
+        // CHK-308: a pixel stage reads the primitive's id from a geometry stage only where that stage writes it
+        if (is_valid(geometry))
+            for (auto const& parameter : out.at(pixel_info.parameters))
+                if (parameter.input == stage_input::primitive_id)
+                    pc.fail(file, where,
+                            cc::format("{} takes @primitive_id, which a geometry stage must write for the pixel stage "
+                                       "and {} cannot: take `@primitive_id` in {} and pass it on as an "
+                                       "`@interpolate(.flat)` int member of {}",
+                                       out.at(pixel).name, out.at(geometry).name, out.at(geometry).name,
+                                       out.name_of(passed)));
 
         target_set = pixel_info.result;
         for (auto const& m : out.at(out.at(target_set).members))

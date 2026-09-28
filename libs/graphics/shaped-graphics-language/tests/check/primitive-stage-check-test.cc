@@ -229,7 +229,22 @@ TEST("sgl check - a pipeline chains its stages, and the tessellation stages draw
               .contains("the stages pass one interface, member for member"));
     // what reaches the rasterizer has its @position
     CHECK(with_stages(cc::format("pipeline p = (vs, ps):\n{}", format))
-              .contains("vs hands the rasterizer control_point, which has no @position field"));
+              .contains("vs hands the rasterizer control_point, which has no @position fields and needs exactly one"));
+}
+
+TEST("sgl check - a pixel stage after a geometry stage takes no @primitive_id")
+{
+    constexpr auto program = "require primitive_index\n{}{}"
+                             "@vertex fun vp(v: vin) -> varyings => {{ position = hpos4(0.0, 0.0, 0.0, 1.0), color = "
+                             "v.position }}\n"
+                             "@pixel fun pp(p: varyings, @primitive_id id: int) -> target => {{ color = "
+                             "float4(p.color.x, p.color.y, p.color.z, 1.0) }}\n"
+                             "pipeline p = ({}):\n    color_targets.color.format = .rgba8_unorm\n";
+    CHECK(reports_for(cc::format(program, k_head, k_stages, "vp, pp")) == "");
+    CHECK(reports_for(cc::format(program, k_head, k_stages, "vp, gs, pp"))
+              .contains("pp takes @primitive_id, which a geometry stage must write for the pixel stage and gs cannot: "
+                        "take `@primitive_id` in gs and pass it on as an `@interpolate(.flat)` int member of "
+                        "varyings"));
 }
 
 TEST("sgl check - a geometry stage takes the primitive the pipeline assembles")

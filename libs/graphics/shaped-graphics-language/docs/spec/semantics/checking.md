@@ -574,6 +574,9 @@ Nothing in a body uses a feature yet, so a `require` in a test's body is `unused
   A part and a field inside it count as one field here, so `blend = .none` meets every field of another source's blend, and the pipeline's own `blend = .none` settles them.
 * **CHK-183** What a stage returns has the members the next stage takes: as many, with the same names and types, in the same order, and `@position` on the same one.
   CHK-307 says what each stage between the vertex and the pixel stage takes and returns.
+* **CHK-308** A pipeline with a geometry stage whose pixel stage takes `@primitive_id` is `invalid-pipeline`.
+  D3D and vulkan hand the pixel stage the id only where the geometry stage writes it, which an SGL geometry stage cannot yet.
+  The geometry stage takes `@primitive_id` itself and passes it on as an `@interpolate(.flat)` int member of what it appends.
 * **CHK-184** Its stages' binding lists, `@inline` bindings left out, name the same binding at every position they share.
   The longest is the pipeline's layout, and the stages list one `@inline` binding at most.
 * **CHK-185** Every target has a format at the end: a case other than `.undefined`, or `.host`.
@@ -842,7 +845,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `ambiguous-overload` | CHK-72 |
 | `missing-field`, `unknown-field`, `duplicate-field` | CHK-178 |
 | `invalid-entry-point` | CHK-87, CHK-88, CHK-89, CHK-93, CHK-271, CHK-273, CHK-276, CHK-294, CHK-301 to CHK-306 |
-| `invalid-pipeline` | CHK-175 to CHK-185, CHK-187, CHK-276, CHK-307 |
+| `invalid-pipeline` | CHK-175 to CHK-185, CHK-187, CHK-276, CHK-307, CHK-308 |
 | `shadows-unshadowable` | CHK-220, CHK-266 |
 | `test-captures-runtime-value` | CHK-228 |
 | `test-must-end-in-check` | CHK-226 |
