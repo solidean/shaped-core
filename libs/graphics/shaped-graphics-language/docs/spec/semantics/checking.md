@@ -682,6 +682,9 @@ HLSL writes them on dx12 and vulkan; WebGPU and Metal have neither, so WGSL and 
 * **CHK-303** `s.emit(v)` appends the vertex `v`, which converts to `T`, and `s.end_strip()` ends the strip being appended; each is a geometry stage's alone.
 * **CHK-304** `@tessellation_control(partitioning = p, winding = w)` makes an entry point of the tessellation control stage, which needs `tessellation_shader`.
   `p` is `.integer`, `.fractional_even` or `.fractional_odd`, and `w` is `.clockwise` or `.counter_clockwise`.
+  `w` is the patch's winding: the triangles the tessellator makes wind as the corners do, where the evaluation stage weighs the control points in order by the domain location.
+  A triangle patch evaluated as `patch[0] * uvw.x + patch[1] * uvw.y + patch[2] * uvw.z` of counter-clockwise corners is `.counter_clockwise`.
+  So is a quad patch of corners counter-clockwise from its first, blended by `uv.x` from the first to the second and by `uv.y` from that edge to the opposite one.
   Power-of-two partitioning is none of them, since vulkan lacks it.
   Its first parameter is the patch: an array of from 1 to 32 of the struct the vertex stage returns.
   Stage inputs follow it, and it returns a **factors struct**; no other parameter stands.

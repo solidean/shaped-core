@@ -146,6 +146,8 @@ const light_kind_sun: i32 = 2;
   * an evaluation stage is `[domain(…)]` over the function, taking the `const OutputPatch`, the patch constants, and `SV_DomainLocation`;
   * in patch constants, `@edge_factors` is `SV_TessFactor` and `@inside_factors` `SV_InsideTessFactor`;
   * the other members of patch constants take the locations after the control point's, so vulkan's two never collide.
+* **EMIT-134** A control stage's `.counter_clockwise` is HLSL's `triangle_cw` and `.clockwise` its `triangle_ccw`.
+  HLSL names the winding in its domain's own orientation, which mirrors the patch the domain location weighs (CHK-304).
 
 ```hlsl
 struct pixel_input

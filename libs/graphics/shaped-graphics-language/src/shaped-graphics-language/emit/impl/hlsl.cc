@@ -379,9 +379,10 @@ public:
         auto const point = type_text(p, *this, patch.element);
         auto const domain = domain_of(p, p.e.result);
         constexpr cc::string_view partitionings[] = {"integer", "fractional_even", "fractional_odd"};
+        // EMIT-134: HLSL names the winding in its domain's own orientation, which mirrors the patch its points weigh
         auto const topology = domain == "isoline" ? cc::string_view("line")
-                            : info.is_clockwise   ? cc::string_view("triangle_cw")
-                                                  : cc::string_view("triangle_ccw");
+                            : info.is_clockwise   ? cc::string_view("triangle_ccw")
+                                                  : cc::string_view("triangle_cw");
         out.appendf("\n[domain(\"{}\")]\n", domain);
         out.appendf("[partitioning(\"{}\")]\n", partitionings[isize(info.partitioning)]);
         out.appendf("[outputtopology(\"{}\")]\n", topology);
