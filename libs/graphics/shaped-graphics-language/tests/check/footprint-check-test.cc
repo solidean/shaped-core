@@ -78,18 +78,20 @@ TEST("sgl footprint - a builtin's parameter says how an image is used, and a sam
 TEST("sgl footprint - a use under deep nesting still counts")
 {
     // The footprint has no nesting limit of its own, so statements nested inside statements add nothing to what an
-    // expression under them may hold: 100 of each is well inside what the emitter prints.
+    // expression under them may hold.
+    // The counts are bounded by CHK-268 instead, which refuses a flat tree past `k_max_depth` — both the statements
+    // and the terms of the sum land in that one tree, so they share its budget.
     auto source = cc::string(R"(@expect(footprint = "work.source: read, work.values: write")
 @compute(64) fun main(@thread_id id: int3){work}:
 )");
     auto indent = cc::string("    ");
-    for (auto i = 0; i < 100; ++i)
+    for (auto i = 0; i < 12; ++i)
     {
         source += indent + "if id.x >= 0:\n";
         indent += "    ";
     }
     source += indent + "work.values[id.x] = work.source[id.x]";
-    for (auto i = 0; i < 100; ++i)
+    for (auto i = 0; i < 12; ++i)
         source += " + 1.0";
     source += "\n";
     CHECK(reports_for_entry(source) == "");

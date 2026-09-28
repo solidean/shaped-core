@@ -9,7 +9,7 @@ namespace
 // The enum ranges this build knows.
 // Anything outside them is a blob from a future build, or a corrupt one; either way it decodes to nothing.
 constexpr u32 k_shader_stage_count = u32(shader_stage::callable) + 1;
-constexpr u32 k_shader_format_count = u32(shader_format::wgsl) + 1;
+constexpr u32 k_shader_format_count = u32(shader_format::msl) + 1;
 constexpr u32 k_binding_type_count = u32(binding_type::acceleration_structure) + 1;
 constexpr u32 k_texture_view_dimension_count = u32(texture_view_dimension::cube_array) + 1;
 constexpr u32 k_pixel_format_count = u32(pixel_format::bc7_rgba_unorm_srgb) + 1;

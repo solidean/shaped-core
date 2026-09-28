@@ -188,6 +188,8 @@ enum class sgl::diagnostic_kind : sgl::u8
     literal_conversion_result,
     /// An operator over integer literals alone that only an operator of another type takes: `7 / 2` without an int `/`.
     literal_needs_type,
+    /// An entry point whose flat tree, with every call inlined, nests deeper than the compiler walks.
+    nesting_too_deep,
 };
 
 namespace sgl

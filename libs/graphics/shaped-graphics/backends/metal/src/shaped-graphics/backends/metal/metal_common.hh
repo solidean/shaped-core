@@ -178,6 +178,16 @@ void arm_validation_layer();
 /// The message half of `metal_error`: what `error` said, or a note that it said nothing.
 [[nodiscard]] cc::string describe_error(NS::Error const* error, cc::string_view what);
 
+/// Builds the MTL::Library holding `shader`, from either of the two formats metal accepts.
+///
+/// `metal_lib` is AIR in a container, loaded as it stands.
+/// `msl` is source, which the driver compiles here — the arm that exists because producing a metallib needs Apple's
+/// separately-installed Metal toolchain while the driver's compiler ships with the OS.
+/// `what` names the shader in the error, e.g. "vertex" or "compute_pipeline".
+[[nodiscard]] cc::result<MTL::Library*> library_from_shader(MTL::Device* device,
+                                                            sg::compiled_shader const& shader,
+                                                            cc::string_view what);
+
 /// Builds a cc::result error from a failed Metal call that reported an NS::Error, recording the call site (not this helper).
 /// `error` may be null, which is what a call that failed without saying why hands back.
 [[nodiscard]] inline auto metal_error(NS::Error const* error,

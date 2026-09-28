@@ -196,6 +196,8 @@ cc::string_view sgl::to_string(diagnostic_kind kind)
         return "stage-not-allowed";
     case diagnostic_kind::invalid_pipeline:
         return "invalid-pipeline";
+    case diagnostic_kind::nesting_too_deep:
+        return "nesting-too-deep";
     case diagnostic_kind::shadows_unshadowable:
         return "shadows-unshadowable";
     case diagnostic_kind::test_captures_runtime_value:
@@ -532,6 +534,7 @@ sgl::severity sgl::default_severity_of(diagnostic_kind kind)
     case diagnostic_kind::feature_not_declared:
     case diagnostic_kind::stage_not_allowed:
     case diagnostic_kind::invalid_pipeline:
+    case diagnostic_kind::nesting_too_deep:
     case diagnostic_kind::shadows_unshadowable:
     case diagnostic_kind::test_captures_runtime_value:
     case diagnostic_kind::test_must_end_in_check:

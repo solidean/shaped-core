@@ -160,8 +160,7 @@ The size and alignment the layout rules place a value by, and each target's own,
   The function a builtin is called as is reserved from its record, so a local named `lerp` is renamed in HLSL without an entry in any list.
   The exception is a function only a custom writer calls, such as `mul`, which stands in `emit/reserved_words.cc`.
   An entry point is renamed the same way, and `emitted_text::entry_point` is the name a caller compiles.
-* **The `msl` text has met no Metal compiler yet**, and nothing builds it.
-  slib has no metallib compiler; sg's metal backend reads vertex buffers through a vertex descriptor and inline constants at buffer index 4, which is what this text assumes.
+* **The `msl` text compiles**, through `shaped-shader-compiler-msl` and slib's metal edge.
 
 [semantics/emitting.md](spec/semantics/emitting.md) has the rules.
 
@@ -196,5 +195,8 @@ Every "why" is mirrored in a `why/` folder beside its rules, and ideas that are 
 ## What does not exist yet
 
 Generics, lambdas and `mut self`.
-GLSL, a Metal toolchain, and in MSL a compute entry point and a group.
+GLSL, and in MSL a compute entry point and a group.
+Iterative walks: `interpret`'s `eval` and the legalizer's expression walks recurse, so the smallest stack a walk runs on bounds `k_max_depth`.
+That makes a 40-term sum `nesting-too-deep` (CHK-268).
+Over an explicit work stack, with a cycle caught by an on-path bit rather than by depth, the limit could be far higher.
 Modules, interfaces and the parallel driver of [the compilation model](spec/incubator/compilation-model.md).
