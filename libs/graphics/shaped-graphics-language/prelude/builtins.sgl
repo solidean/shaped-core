@@ -852,8 +852,8 @@
 @builtin @pure fun load(t: texture_2d_depth, xy: int2, level: int = 0) -> float
 @builtin @pure @stages(.pixel) fun sample(t: texture_2d_depth, coord: float2, smp: sampler) -> float
 @builtin @pure @stages(.pixel) fun sample(t: texture_2d_depth, coord: float2) -> float
-@builtin @pure fun sample(t: texture_2d_depth, coord: float2, smp: sampler, .level: float) -> float
-@builtin @pure fun sample(t: texture_2d_depth, coord: float2, .level: float) -> float
+@builtin @pure fun sample(t: texture_2d_depth, coord: float2, smp: sampler, .level: int) -> float
+@builtin @pure fun sample(t: texture_2d_depth, coord: float2, .level: int) -> float
 @builtin @pure fun gather(t: texture_2d_depth, coord: float2, smp: sampler) -> float4
 @builtin @pure fun gather(t: texture_2d_depth, coord: float2) -> float4
 @builtin @pure @stages(.pixel) fun sample_compare(t: texture_2d_depth, coord: float2, smp: comparison_sampler, .reference: float) -> float
@@ -971,8 +971,8 @@
 @builtin @pure fun load(t: texture_2d_array_depth, xy: int2, level: int = 0, .layer: int) -> float
 @builtin @pure @stages(.pixel) fun sample(t: texture_2d_array_depth, coord: float2, smp: sampler, .layer: int) -> float
 @builtin @pure @stages(.pixel) fun sample(t: texture_2d_array_depth, coord: float2, .layer: int) -> float
-@builtin @pure fun sample(t: texture_2d_array_depth, coord: float2, smp: sampler, .layer: int, .level: float) -> float
-@builtin @pure fun sample(t: texture_2d_array_depth, coord: float2, .layer: int, .level: float) -> float
+@builtin @pure fun sample(t: texture_2d_array_depth, coord: float2, smp: sampler, .layer: int, .level: int) -> float
+@builtin @pure fun sample(t: texture_2d_array_depth, coord: float2, .layer: int, .level: int) -> float
 @builtin @pure fun gather(t: texture_2d_array_depth, coord: float2, smp: sampler, .layer: int) -> float4
 @builtin @pure fun gather(t: texture_2d_array_depth, coord: float2, .layer: int) -> float4
 @builtin @pure @stages(.pixel) fun sample_compare(t: texture_2d_array_depth, coord: float2, smp: comparison_sampler, .layer: int, .reference: float) -> float
@@ -1173,8 +1173,8 @@
 @builtin @pure fun level_count(t: texture_cube) -> int
 @builtin @pure @stages(.pixel) fun sample(t: texture_cube_depth, coord: float3, smp: sampler) -> float
 @builtin @pure @stages(.pixel) fun sample(t: texture_cube_depth, coord: float3) -> float
-@builtin @pure fun sample(t: texture_cube_depth, coord: float3, smp: sampler, .level: float) -> float
-@builtin @pure fun sample(t: texture_cube_depth, coord: float3, .level: float) -> float
+@builtin @pure fun sample(t: texture_cube_depth, coord: float3, smp: sampler, .level: int) -> float
+@builtin @pure fun sample(t: texture_cube_depth, coord: float3, .level: int) -> float
 @builtin @pure fun gather(t: texture_cube_depth, coord: float3, smp: sampler) -> float4
 @builtin @pure fun gather(t: texture_cube_depth, coord: float3) -> float4
 @builtin @pure @stages(.pixel) fun sample_compare(t: texture_cube_depth, coord: float3, smp: comparison_sampler, .reference: float) -> float
@@ -1230,8 +1230,8 @@
 @builtin @pure fun level_count(t: texture_cube_array) -> int
 @builtin @pure @stages(.pixel) fun sample(t: texture_cube_array_depth, coord: float3, smp: sampler, .layer: int) -> float
 @builtin @pure @stages(.pixel) fun sample(t: texture_cube_array_depth, coord: float3, .layer: int) -> float
-@builtin @pure fun sample(t: texture_cube_array_depth, coord: float3, smp: sampler, .layer: int, .level: float) -> float
-@builtin @pure fun sample(t: texture_cube_array_depth, coord: float3, .layer: int, .level: float) -> float
+@builtin @pure fun sample(t: texture_cube_array_depth, coord: float3, smp: sampler, .layer: int, .level: int) -> float
+@builtin @pure fun sample(t: texture_cube_array_depth, coord: float3, .layer: int, .level: int) -> float
 @builtin @pure fun gather(t: texture_cube_array_depth, coord: float3, smp: sampler, .layer: int) -> float4
 @builtin @pure fun gather(t: texture_cube_array_depth, coord: float3, .layer: int) -> float4
 @builtin @pure @stages(.pixel) fun sample_compare(t: texture_cube_array_depth, coord: float3, smp: comparison_sampler, .layer: int, .reference: float) -> float

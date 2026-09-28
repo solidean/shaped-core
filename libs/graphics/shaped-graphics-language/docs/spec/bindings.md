@@ -191,7 +191,7 @@ They apply in order, so a later setting overrides what an earlier one set, `filt
 | method | of | takes |
 |---|---|---|
 | `sample` | a texture of floats, and a depth texture | the level from derivatives, and only in a pixel stage |
-| `sample(…, level = l)` | the same, and every stage | an explicit level |
+| `sample(…, level = l)` | the same, and every stage | an explicit level: a `float`, and an `int` of a depth texture, which WGSL takes whole |
 | `sample(…, bias = b)` | a texture of floats | a bias on the level derivatives pick, in a pixel stage |
 | `sample(…, grad_x = …, grad_y = …)` | a texture of floats | the derivatives themselves |
 | `gather(…, component = texel_component.y)` | a 2D or cube texture of floats | one channel of the four texels a bilinear sample reads; `.x` by default |

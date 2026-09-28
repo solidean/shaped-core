@@ -285,8 +285,12 @@ written hlsl_call(call const& c, call_context const& ctx)
     case op::sample:
         return {.text = cc::format("{}.Sample({}, {}{})", t, smp, coord, hlsl_offset(l, ctx))};
     case op::sample_level:
-        return {.text = cc::format("{}.SampleLevel({}, {}, {}{})", t, smp, coord, argument(ctx, l.first),
-                                   hlsl_offset(l, ctx))};
+    {
+        // a depth texture's level is an int, as WGSL takes it
+        auto const& level = argument(ctx, l.first);
+        return {.text = cc::format("{}.SampleLevel({}, {}, {}{})", t, smp, coord,
+                                   c.is_depth ? cc::format("float({})", level) : level, hlsl_offset(l, ctx))};
+    }
     case op::sample_bias:
         return {.text = cc::format("{}.SampleBias({}, {}, {})", t, smp, coord, argument(ctx, l.first))};
     case op::sample_grad:
@@ -376,10 +380,8 @@ written wgsl_call(call const& c, call_context const& ctx)
     case op::sample:
         return texel(cc::format("textureSample({}, {}, {}{}{})", t, smp, coord, layer, offset));
     case op::sample_level:
-        // a depth texture's level is an integer in WGSL
-        return texel(cc::format("textureSampleLevel({}, {}, {}{}, {}{})", t, smp, coord, layer,
-                                c.is_depth ? cc::format("i32({})", argument(ctx, l.first)) : argument(ctx, l.first),
-                                offset));
+        return texel(
+            cc::format("textureSampleLevel({}, {}, {}{}, {}{})", t, smp, coord, layer, argument(ctx, l.first), offset));
     case op::sample_bias:
         return texel(cc::format("textureSampleBias({}, {}, {}{}, {})", t, smp, coord, layer, argument(ctx, l.first)));
     case op::sample_grad:
@@ -460,8 +462,12 @@ written msl_call(call const& c, call_context const& ctx)
     case op::sample:
         return texel(cc::format("{}.sample({}, {}{}{})", t, smp, coord, layer, offset));
     case op::sample_level:
-        return texel(cc::format("{}.sample({}, {}{}{}{})", t, smp, coord, layer,
-                                has_levels ? cc::format(", level({})", argument(ctx, l.first)) : cc::string(), offset));
+    {
+        auto const& lod = argument(ctx, l.first);
+        auto const level = c.is_depth ? cc::format(", level(float({}))", lod) : cc::format(", level({})", lod);
+        return texel(
+            cc::format("{}.sample({}, {}{}{}{})", t, smp, coord, layer, has_levels ? level : cc::string(), offset));
+    }
     case op::sample_bias:
         return texel(cc::format("{}.sample({}, {}{}{})", t, smp, coord, layer,
                                 has_levels ? cc::format(", bias({})", argument(ctx, l.first)) : cc::string()));
@@ -664,7 +670,8 @@ emitted texture_record(call const& c, cc::string_view texture_type, bool with_sa
         uses_derivatives = true;
         break;
     case op::sample_level:
-        params.appendf("{}, .level: float", s.is_array ? ", .layer: int" : "");
+        // WGSL takes a depth texture's level as an integer, so every target is given one
+        params.appendf("{}, .level: {}", s.is_array ? ", .layer: int" : "", c.is_depth ? "int" : "float");
         break;
     case op::sample_bias:
         params.appendf("{}, .bias: float", s.is_array ? ", .layer: int" : "");

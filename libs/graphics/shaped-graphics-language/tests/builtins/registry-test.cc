@@ -328,6 +328,12 @@ TEST("sgl builtins - a texture method's MSL and a barrier's, which no entry poin
     cc::string_view const compare_args[] = {"t", "uv", "c", "0.5", "0.0"};
     CHECK(msl("sample_compare", compare_types, compare_names, compare_args) == "t.sample_compare(c, uv, 0.5, level(0))");
 
+    // a depth texture's level is an int, which Metal's `level` takes as a float
+    cc::string_view const depth_level_types[] = {"texture_2d_depth", "float2", "sampler", "int"};
+    cc::string_view const depth_level_names[] = {"", "", "", "level"};
+    cc::string_view const depth_level_args[] = {"t", "uv", "s", "lod"};
+    CHECK(msl("sample", depth_level_types, depth_level_names, depth_level_args) == "t.sample(s, uv, level(float(lod)))");
+
     // a load of three channels reads four, and keeps its own
     cc::string_view const load_types[] = {"texture_2d[float3]", "int2", "int"};
     cc::string_view const load_names[] = {"", "", ""};

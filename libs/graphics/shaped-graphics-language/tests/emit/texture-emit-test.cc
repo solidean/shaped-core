@@ -486,3 +486,24 @@ TEST("sgl emit - a marked index keeps its mark when a later argument moves it in
     CHECK(dx12.contains("const int index = id.x % 4;\n"));
     CHECK(dx12.contains("mats_texs[NonUniformResourceIndex(index)].Load("));
 }
+
+TEST("sgl emit - a depth texture's level is an int, which WGSL takes whole and the others convert")
+{
+    constexpr auto depth = "binding set:\n"
+                           "    @sampler(pt) shadow: texture_2d_depth\n"
+                           "    @non_filtering pt: sampler\n"
+                           "\n"
+                           "struct pixel_input:\n"
+                           "    @position position: hpos4\n"
+                           "    uv: float2\n"
+                           "    @interpolate(.flat) lod: int\n"
+                           "\n"
+                           "@pixel struct target:\n"
+                           "    color: float4\n"
+                           "\n"
+                           "@pixel fun ps(p: pixel_input){set} -> target:\n"
+                           "    let d = set.shadow.sample(p.uv, level = p.lod)\n"
+                           "    return {color = float4(d, d, d, 1.0)}\n";
+    CHECK(text_of(depth, target::wgsl).contains("textureSampleLevel(set_shadow, set_pt, p.uv, p.lod)"));
+    CHECK(text_of(depth, target::hlsl_dx12).contains("set_shadow.SampleLevel(set_pt, p.uv, float(p.lod))"));
+}

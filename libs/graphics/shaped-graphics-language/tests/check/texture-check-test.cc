@@ -62,10 +62,14 @@ TEST("sgl check - a default sampler is the kind the call takes, and filters by t
               .contains("sample_compare takes a comparison_sampler, and the @sampler of work.d is s"));
 
     // CHK-281: WebGPU filters a depth texture in a comparison alone, so a plain sample of one never filters
-    constexpr auto plain = "    let c = work.d.sample(uv, level = 0.0)\n";
+    constexpr auto plain = "    let c = work.d.sample(uv, level = 0)\n";
     CHECK(reports_for(listing(cc::format("{}    @non_filtering s: sampler\n", depth), plain)) == "");
     CHECK(reports_for(listing(cc::format("{}    s: sampler\n", depth), plain))
               .contains("work.d is a depth texture, and work.s filters"));
+    // WGSL takes a depth texture's level as an integer, so a fractional one is no argument on any target
+    CHECK(reports_for(listing(cc::format("{}    @non_filtering s: sampler\n", depth), "    let c = work.d.sample(uv, "
+                                                                                      "level = 0.5)\n"))
+          != "");
 
     CHECK(reports_for(listing("    @unfilterable @sampler(s) t: texture_2d[float4]\n    s: sampler\n",
                               "    let c = work.t.sample(uv, level = 0.0)\n"))
