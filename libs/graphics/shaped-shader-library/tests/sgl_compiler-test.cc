@@ -708,6 +708,74 @@ TEST("slib sgl compiler - a layout the compiler reads elsewhere than SGL states 
     CHECK(value_of(node).bytecode.size() > 0);
 }
 
+namespace
+{
+/// What a `pending_compiler` reports, owned by the test so it outlives the compiler.
+struct pending_state
+{
+    cc::shared_async<sg::compiled_shader> node;
+    bool is_alive = true;
+    bool was_read_alive = false;
+    bool was_read = false;
+};
+
+/// A WGSL compiler whose compile settles only when the test pushes it, and that says whether it was alive when read.
+class pending_compiler final : public slib::shader_compiler
+{
+public:
+    explicit pending_compiler(pending_state& state) : _state(state) {}
+    ~pending_compiler() override { _state.is_alive = false; }
+
+    [[nodiscard]] slib::shader_language source_language() const override { return slib::shader_language::wgsl; }
+    [[nodiscard]] sg::shader_format target_format() const override { return sg::shader_format::wgsl; }
+    [[nodiscard]] cc::result<slib::preprocessed_source> preprocess(slib::shader_source_description const& desc,
+                                                                   slib::include_resolver) const override
+    {
+        return slib::preprocessed_source{.source = desc.source};
+    }
+    [[nodiscard]] sg::async_compiled_shader compile(slib::shader_source_description const&) const override
+    {
+        _state.node = cc::make_async_manual<sg::compiled_shader>();
+        return _state.node;
+    }
+    [[nodiscard]] cc::optional<cc::vector<slib::block_layout>> reflect_layouts(sg::compiled_shader const&) const override
+    {
+        _state.was_read = true;
+        _state.was_read_alive = _state.is_alive;
+        return {};
+    }
+
+private:
+    pending_state& _state;
+};
+} // namespace
+
+ASYNC_TEST("slib sgl compiler - a compile still settling keeps the compiler it is checked through, even once replaced",
+           exclusive("slib-shader-library"))
+{
+    auto state = pending_state();
+    slib::shader_library lib;
+    lib.add_compiler(slib::create_sgl_compiler(std::make_unique<pending_compiler>(state)));
+
+    auto const node = lib.compile_source(k_two_groups_source, sg::shader_stage::compute, "blur", sg::shader_format::wgsl,
+                                         {.language = slib::shader_language::sgl, .label = "two-groups.sgl"});
+    REQUIRE(state.node != nullptr);
+
+    // Replacing the edge drops the library's reference, and the pending check holds the only one left.
+    lib.add_compiler(slib::create_sgl_compiler(
+        std::make_unique<slib_test::fake_compiler>(slib::shader_language::wgsl, sg::shader_format::wgsl)));
+    CHECK(state.is_alive);
+
+    state.node->push_value(
+        sg::compiled_shader{.stage = sg::shader_stage::compute, .format = sg::shader_format::wgsl, .entry_point = "blur"});
+    co_await cc::async_settled(node);
+    CHECK(state.was_read);
+    CHECK(state.was_read_alive);
+    CHECK(value_of(node).workgroup_size.has_value());
+    // Once the check has run, nothing keeps the replaced compiler.
+    CHECK(!state.is_alive);
+}
+
 // sgl links neither sg nor slib, so its emitter repeats what they own; these hold each copy to the original.
 static_assert(sgl::emit::impl::k_max_groups == sg::max_binding_groups);
 

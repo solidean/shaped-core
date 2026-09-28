@@ -149,13 +149,13 @@ sg::compiled_shader assembled(sg::compiled_shader compiled,
                               sg::compiled_shader interface,
                               cc::span<sg::binding const> declared,
                               cc::span<slib::block_layout const> layouts,
-                              slib::shader_compiler const* compiler,
+                              slib::shader_compiler const& compiler,
                               cc::string_view label)
 {
     {
         CC_RECORD_SCOPE("slib.reflection_check");
         auto mismatch = reflection_mismatch(compiled, interface, declared);
-        if (auto const reflected = compiler->reflect_layouts(compiled); reflected.has_value())
+        if (auto const reflected = compiler.reflect_layouts(compiled); reflected.has_value())
             mismatch += layout_mismatch(reflected.value(), layouts);
         if (!mismatch.empty())
             CC_LOG_ERROR("the compiler's reflection of '{}' ({}) disagrees with SGL, whose interface is used:\n{}",
@@ -172,8 +172,8 @@ struct sgl_interface
     sg::compiled_shader shader;
     cc::vector<sg::binding> declared;
     cc::vector<slib::block_layout> layouts;
-    /// The edge that compiled it, whose reflection is compared; the library owns it for as long as it compiles.
-    slib::shader_compiler const* compiler = nullptr;
+    /// The edge that compiled it, whose reflection is compared once the compile settles, however long that takes.
+    std::shared_ptr<slib::shader_compiler const> compiler;
     cc::string label;
 };
 
@@ -181,7 +181,7 @@ sg::async_compiled_shader assembled_once_settled(sg::async_compiled_shader built
 {
     auto shader = co_await built;
     co_return assembled(cc::move(shader), cc::move(interface.shader), interface.declared, interface.layouts,
-                        interface.compiler, interface.label);
+                        *interface.compiler, interface.label);
 }
 
 /// `built` as the shader SGL's interface describes, once it settles.
@@ -192,7 +192,7 @@ sg::async_compiled_shader with_interface(sg::async_compiled_shader built, sgl_in
     if (!built->has_value())
         return assembled_once_settled(cc::move(built), cc::move(interface));
     return cc::make_async_from_value(assembled(*built->try_value(), cc::move(interface.shader), interface.declared,
-                                               interface.layouts, interface.compiler, interface.label));
+                                               interface.layouts, *interface.compiler, interface.label));
 }
 
 sg::async_compiled_shader make_failed_shader(cc::string message)
@@ -269,18 +269,24 @@ void slib::shader_library::add_compiler(std::unique_ptr<shader_compiler> compile
     {
         if (existing->source_language() == language && existing->target_format() == format)
         {
-            existing = cc::move(compiler);
+            existing = std::shared_ptr<shader_compiler const>(cc::move(compiler));
             return;
         }
     }
-    _compilers.push_back(cc::move(compiler));
+    _compilers.push_back(std::shared_ptr<shader_compiler const>(cc::move(compiler)));
 }
 
 slib::shader_compiler const* slib::shader_library::find_compiler(shader_language language, sg::shader_format format) const
 {
+    return find_shared_compiler(language, format).get();
+}
+
+std::shared_ptr<slib::shader_compiler const> slib::shader_library::find_shared_compiler(shader_language language,
+                                                                                        sg::shader_format format) const
+{
     for (auto const& compiler : _compilers)
         if (compiler->source_language() == language && compiler->target_format() == format)
-            return compiler.get();
+            return compiler;
     return nullptr;
 }
 
@@ -429,7 +435,7 @@ void slib::shader_library::_compile_text(compile_outcome& outcome,
                                          cc::string_view entry_point,
                                          sg::shader_format format) const
 {
-    auto const* const compiler = find_compiler(language, format);
+    auto const compiler = find_shared_compiler(language, format);
     if (compiler == nullptr)
     {
         outcome.shader = make_failed_shader(cc::format("no compiler registered to build '{}' into this format", label));
