@@ -373,7 +373,7 @@ TEST("sqlite - an abandoned transaction leaves the database byte-identical")
 
         REQUIRE(db.exec("INSERT INTO people(id, name) VALUES (4, 'ken')").has_value());
         REQUIRE(db.exec("DELETE FROM people WHERE id = 1").has_value());
-        return; // tx dies here, unommitted
+        return; // tx dies here, uncommitted
     };
     abandoned();
 
