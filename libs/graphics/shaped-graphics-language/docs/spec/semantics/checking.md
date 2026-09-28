@@ -564,12 +564,13 @@ Nothing in a body uses a feature yet, so a `require` in a test's body is `unused
   An `int` is held to the range sg keeps its field in: a stencil mask is 0 to 255, `sample_count` a power of two from 1 to 64, and `patch_control_points` 0 to 32.
 * **CHK-179** Under `color_targets` stands one entry per member of the pixel stage's `@pixel struct`; a setting whose path names no member there is one per member.
 * **CHK-180** `.host` stands only for a target's `format`, the `depth_stencil_format` and the `sample_count`, and `.none` only for a target's `blend`.
-* **CHK-181** An attribute of an entry point, of a `@vertex struct` or of a `@pixel struct` is a setting when its name alone is one field.
+* **CHK-181** An attribute of a `@vertex` or `@pixel` entry point, of a `@vertex struct` or of a `@pixel struct` is a setting when its name alone is one field.
+  A geometry or tessellation entry point takes no setting yet, and one there is `unsupported-yet`.
   On a member of a `@pixel struct` it is one of that target's fields.
   Such an attribute takes one value.
   One whose name is two fields is `invalid-pipeline`, and the detail names both and says to set it in the pipeline, since an attribute has no path.
 * **CHK-182** A pipeline's settings apply in this order: the attributes of its vertex input, then of its `@pixel struct` and its members.
-  Then the attributes of its stages, in the order a vertex passes them, then its own.
+  Then the attributes of its vertex stage and of its pixel stage, in that order, then its own.
   Two sources of one step that set one field differently are `invalid-pipeline`, unless the pipeline sets that field itself.
   A part and a field inside it count as one field here, so `blend = .none` meets every field of another source's blend, and the pipeline's own `blend = .none` settles them.
 * **CHK-183** What a stage returns has the members the next stage takes: as many, with the same names and types, in the same order, and `@position` on the same one.
