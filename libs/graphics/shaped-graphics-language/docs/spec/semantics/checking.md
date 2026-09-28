@@ -627,17 +627,21 @@ Nothing in a body uses a feature yet, so a `require` in a test's body is `unused
 
 A barrier waits for every thread of its workgroup, and a derivative compares a pixel with the other three of its quad.
 So each stands where every invocation of its group arrives together, which the check pass judges once every call is inlined.
-Its rules are WGSL's, applied to the tree an emitter prints, so that no target refuses what SGL accepts.
+It judges the tree an emitter prints, and must be sound for every target: what it accepts reaches each call in uniform control flow.
+Its rules start from WGSL's, but refusing all that Tint refuses is no goal; where Tint refuses a sound program, the WGSL text silences it (EMIT-103).
 
 * **CHK-282** A barrier, and a builtin that takes derivatives implicitly, in **non-uniform control flow** is `non-uniform-control-flow`, at the call.
   A note names the branch or the exit that made the flow so, and what the branch tested.
   `sample` without a `level` or gradients, `sample_compare` without a `level`, `ddx` and `ddy` take derivatives.
 * **CHK-283** A value is **non-uniform** where it comes from a stage input other than `@workgroup_id`, from the stage struct, from a `mut` buffer or a `mut` image,
   from a non-uniform value, or from a local set anywhere in non-uniform control flow.
+  A `mut` buffer or image is so whether it is named directly or as an element of a binding array.
+  Every read of workgroup memory is non-uniform, whatever was stored to it, and so is the result of every atomic.
   Every other value is uniform: a literal, a `const`, a member of a constant block, and an element of a read-only buffer at a uniform index.
 * **CHK-284** Control flow is non-uniform inside an `if`, a `case` or a loop whose condition is non-uniform, and the right side of an `and` or an `or` whose left side is.
   It stays so after an `if` or a `case` one of whose sides leaves in non-uniform control flow, and for the rest of the entry point after such a `return`.
   A loop some invocations leave early, by a `break`, a `continue` or a `return` in non-uniform control flow, is non-uniform throughout and after it.
+  A `while` condition is tested again before every iteration, so such a loop's condition runs in non-uniform control flow too.
   An inlined function's early `return` is such an exit of the block it became.
   A `discard` changes nothing, as in WGSL, where the pixel goes on as a helper of its quad.
 

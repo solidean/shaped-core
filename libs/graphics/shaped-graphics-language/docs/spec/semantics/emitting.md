@@ -192,7 +192,8 @@ A binding that is not `@inline` is a group.
 * **EMIT-101** A call of a builtin that gives nothing is a statement as it stands, with no `_ =` in WGSL.
 * **EMIT-102** A builtin a target cannot write as one expression declares a helper function ahead of the entry point, once per text, and the call names it.
   HLSL's `GetDimensions` writes through out parameters, so `size` is an overload of `sgl_size` per texture type the entry point passes.
-* **EMIT-103** *Retired:* WGSL text no longer switches Tint's derivative uniformity analysis off, since the check pass refuses what it would refuse (CHK-282).
+* **EMIT-103** *Retired:* WGSL text no longer switches Tint's derivative uniformity analysis off wholesale, since the check pass refuses what is unsound (CHK-282).
+  Where Tint refuses a program the pass accepts, the text silences Tint for that program alone; no such program is known yet.
 * **EMIT-104** A resource at slot i of group N is `register(<class>i, spaceN)` in `hlsl-dx12` and `[[vk::binding(i, N)]]` in `hlsl-vulkan`, which is the address sg's backends give that slot.
   The class is `b` for the constant buffer, `u` for an image and a `mut` buffer, `s` for a sampler, and `t` for every other resource.
 * **EMIT-105** An entry point that lists more than three groups is `too-many-groups` on every target, since sg binds three besides the inline constants.

@@ -3,7 +3,7 @@
 using namespace sgl_test;
 
 // CHK-282: a barrier, and a call that takes derivatives, stand where every invocation of the group arrives together.
-// The rules are WGSL's, applied to the tree an emitter prints, so that Tint accepts whatever the check pass does.
+// The pass judges the tree an emitter prints, and must be sound for every target; agreeing with Tint is no goal.
 
 namespace
 {
@@ -17,6 +17,22 @@ cc::string compute(cc::string_view body)
                       "    output: mut buffer[int]\n"
                       "\n"
                       "@compute(64) fun cs(@thread_id id: int3, @workgroup_id g: int3){{work}}:\n"
+                      "{}",
+                      body);
+}
+
+/// A compute entry point over workgroup memory: an atomic, and an array the threads share.
+cc::string shared(cc::string_view body)
+{
+    return cc::format("@workgroup binding shared:\n"
+                      "    hits: atomic[int]\n"
+                      "    vals: int[8]\n"
+                      "\n"
+                      "binding work:\n"
+                      "    enabled: bool\n"
+                      "    output: mut buffer[int]\n"
+                      "\n"
+                      "@compute(64) fun cs(@thread_id id: int3){{shared, work}}:\n"
                       "{}",
                       body);
 }
@@ -98,6 +114,81 @@ TEST("sgl check - a loop that some threads leave early is divergent all through,
               .contains(kind));
     // and one called under a uniform condition is fine
     CHECK(reports_for(compute("    if work.enabled => sync()\n") + "\nfun sync():\n    workgroup_barrier()\n") == "");
+
+    // a helper's return from inside its loop leaves the loop, and then the block, in some threads only
+    CHECK(reports_for(compute("    work.output[id.x] = find(id.x)\n"
+                              "    workgroup_barrier()\n")
+                      + "\nfun find(x: int) -> int:\n"
+                        "    for i in 0 ..< 8:\n"
+                        "        if i == x => return i\n"
+                        "    return 8\n")
+              .contains(kind));
+}
+
+TEST("sgl check - a divergent jump out of a case or a loop body reaches past the barrier")
+{
+    // a `case` arm is a branch on its scrutinee
+    CHECK(reports_for(compute("    case id.x:\n"
+                              "        0 => workgroup_barrier()\n"
+                              "        _ => work.output[0] = 1\n"))
+              .contains(kind));
+    CHECK(reports_for(compute("    case work.count:\n"
+                              "        0 => workgroup_barrier()\n"
+                              "        _ => work.output[0] = 1\n"))
+          == "");
+
+    // the threads that continue skip the rest of this iteration's body
+    CHECK(reports_for(compute("    for i in 0 ..< work.count:\n"
+                              "        if id.x == i => continue\n"
+                              "        workgroup_barrier()\n"))
+              .contains(kind));
+
+    // a `break` in a `case` arm leaves the loop, not the case
+    CHECK(reports_for(compute("    for i in 0 ..< work.count:\n"
+                              "        case id.x:\n"
+                              "            0 => break\n"
+                              "            _ => work.output[i] = 1\n"
+                              "    workgroup_barrier()\n"))
+              .contains(kind));
+}
+
+TEST("sgl check - workgroup memory and an atomic's result differ between threads")
+{
+    CHECK(reports_for(shared("    workgroup_barrier()\n")) == "");
+
+    // whatever was stored to it, another thread may have stored something else
+    auto const read = reports_for(shared("    for i in 0 ..< shared.vals[0]:\n"
+                                         "        work.output[i] = 1\n"
+                                         "    workgroup_barrier()\n"));
+    CHECK(read.contains(kind));
+    CHECK(read.contains("is read from shared.vals, workgroup memory the threads write"));
+
+    // an atomic's memory is read first, so the note names the read rather than the result
+    CHECK(reports_for(shared("    if shared.hits.add(1) == 0 => workgroup_barrier()\n")).contains(kind));
+
+    // the right side of an `or` with an effect becomes an `if`, which runs only where the left side is false
+    auto const synced = cc::string("\nfun synced() -> bool:\n    workgroup_barrier()\n    return true\n");
+    CHECK(reports_for(shared("    if id.x < 4 or synced() => work.output[0] = 1\n") + synced).contains(kind));
+    CHECK(reports_for(shared("    if work.enabled or synced() => work.output[0] = 1\n") + synced) == "");
+}
+
+TEST("sgl check - a `while` condition is tested again by the invocations a divergent break left behind")
+{
+    // the first test runs in every pixel, the second only in those that did not break
+    CHECK(reports_for(pixel("    let mut x = 1.0\n"
+                            "    while ddx(x) < 1.0:\n"
+                            "        if p.uv.x < 0.5 => break\n"
+                            "        c.x += 1.0\n"))
+              .contains("ddx takes derivatives"));
+    CHECK(reports_for(pixel("    let mut x = 1.0\n"
+                            "    while ddx(x) < 1.0:\n"
+                            "        if material.threshold < 0.5 => break\n"
+                            "        c.x += 1.0\n"))
+          == "");
+    // and a condition that differs itself leaves some pixels behind at every test
+    CHECK(reports_for(pixel("    while ddx(c.x) < p.uv.x:\n"
+                            "        c.x += 1.0\n"))
+              .contains("ddx takes derivatives"));
 }
 
 TEST("sgl check - a sample that picks its own level stands where every pixel of the quad arrives")
@@ -158,4 +249,22 @@ TEST("sgl check - a dynamic index into a binding array is proven uniform, or mar
     // and a mark where none is needed pays for nothing
     auto const needless = indexed("materials.albedo[nonuniform materials.slot].sample(p.uv)");
     CHECK(needless.contains("needless-nonuniform"));
+}
+
+TEST("sgl check - an image the shader also stores to differs between threads, named alone or in a binding array")
+{
+    auto const images = [](cc::string_view load)
+    {
+        return reports_for(cc::format("require binding_arrays\n\n"
+                                      "binding work:\n"
+                                      "    one: mut image_2d[.r32_float]\n"
+                                      "    many: mut image_2d[.r32_float][4]\n"
+                                      "\n"
+                                      "@compute(8, 8) fun cs(@thread_id id: int3){{work}}:\n"
+                                      "    let v = {}\n"
+                                      "    if v > 0.5 => workgroup_barrier()\n",
+                                      load));
+    };
+    CHECK(images("work.one.load(int2(0, 0))").contains("is loaded from work.one, which the shader also stores to"));
+    CHECK(images("work.many[1].load(int2(0, 0))").contains("is loaded from work.many, which the shader also stores to"));
 }

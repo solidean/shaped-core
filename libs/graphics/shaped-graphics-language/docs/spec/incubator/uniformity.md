@@ -37,12 +37,17 @@ The WGSL text of an entry point that sampled used to open with `diagnostic(off, 
 
 The pass is CHK-282 to CHK-284, over the core tree of each entry point, for barriers and for every builtin that takes derivatives.
 It judges an index into a binding array too, which is marked `nonuniform` or proven uniform (CHK-300).
-Its rules are WGSL's, so Tint accepts what it accepts, and it is coarser than WGSL's in one place:
+**Soundness is the invariant, not agreement with Tint.**
+The pass must be sound for every target: whatever it accepts reaches each barrier and each derivative in uniform control flow.
+It need not refuse everything Tint refuses.
+Where Tint's analysis is coarser than ours and refuses a sound program, the WGSL text silences Tint's check for it.
+No such program is known yet, so no mechanism exists for it; one is built when the first one turns up.
+The pass starts from WGSL's rules, and is coarser than them in one place:
 a local set anywhere in non-uniform control flow is non-uniform everywhere, where WGSL follows each assignment.
 
 ## Open
 
-* Whether a finer analysis proves more programs uniform than WGSL's rules, and whether every target then still accepts them.
+* Whether a finer analysis proves more programs uniform than WGSL's rules, and what silencing Tint for them then looks like.
 * Where `@uniform` stands: on the branch, on the value it tests, or on a function's parameter.
 * Whether an annotated branch is trusted, or checked at run time in a debug build.
 * Subgroup operations, which need the same judgement once they exist.

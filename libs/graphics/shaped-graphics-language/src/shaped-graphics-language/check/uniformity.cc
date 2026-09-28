@@ -10,8 +10,10 @@ using namespace sgl::check::impl;
 //
 // A barrier waits for every thread of the workgroup, and a derivative compares a pixel with its quad's neighbours,
 // so both need every invocation of the group to reach them together.
-// The pass reads the core tree an emitter prints, whose shape is what WGSL's own analysis sees, and follows its rules:
-// whatever this pass accepts, Tint accepts too.
+// The pass reads the core tree an emitter prints, whose shape is what every target runs.
+// It must be sound for every target: whatever it accepts reaches each barrier and derivative in uniform flow.
+// Refusing all that Tint refuses is no goal; where Tint's coarser analysis refuses a sound program, the WGSL text
+// silences Tint's check.
 
 namespace
 {
@@ -197,19 +199,22 @@ struct uniformity_pass
         // what another thread did to it first is what an atomic gives
         if (record->is_atomic && !result.is)
             result = {.is = true, .where = e.at(id).from, .why = cc::format("is what {} gave", record->name)};
-        // an image the shader also stores to may hold what another invocation just stored
-        if (!arguments.empty())
-            if (auto const* const member = e.at(arguments[0]).node.try_as<flat_binding_member>())
-            {
-                auto const& info = m.bindings[m.at(member->binding).info];
-                auto const& image = m.at(info.members)[member->member];
-                auto const& t = m.at(image.type);
-                if (t.kind == type_kind::image && t.access == access_mode::read_write && !result.is)
-                    result = {.is = true,
-                              .where = e.at(id).from,
-                              .why = cc::format("is loaded from {}.{}, which the shader also stores to",
-                                                m.at(member->binding).name, image.name)};
-            }
+        // an image the shader also stores to may hold what another invocation just stored, whether it is named
+        // directly or as an element of a binding array
+        if (arguments.empty() || result.is)
+            return result;
+        auto const& t = m.at(e.at(arguments[0]).type);
+        if (t.kind != type_kind::image || t.access != access_mode::read_write)
+            return result;
+        auto named = arguments[0];
+        if (auto const* const element = e.at(named).node.try_as<flat_element>())
+            named = element->object;
+        if (auto const* const member = e.at(named).node.try_as<flat_binding_member>())
+            result
+                = {.is = true,
+                   .where = e.at(id).from,
+                   .why = cc::format("is loaded from {}.{}, which the shader also stores to", m.at(member->binding).name,
+                                     m.at(m.bindings[m.at(member->binding).info].members)[member->member].name)};
         return result;
     }
 
@@ -252,13 +257,22 @@ struct uniformity_pass
     }
 
     /// A loop, a `once` among them: a divergent exit anywhere in it makes all of it divergent, and what follows it.
-    flow_out loop(ast::range_of<flat_stmt_id> body, divergence const& flow, divergence const& condition)
+    /// A `while` passes its `condition`, which runs at the top of every iteration, so under every flow the body meets.
+    flow_out loop(ast::range_of<flat_stmt_id> body,
+                  divergence const& flow,
+                  divergence const& bounds,
+                  flat_expr_id condition = flat_expr_id::none,
+                  origin const& from = {})
     {
         auto const returns_before = returns;
-        scopes.push_back({.divergent_exit = condition});
-        auto const entered = first_of(flow, condition);
+        auto const tested = first_of(bounds, as_branch(value(condition, flow), from));
+        scopes.push_back({.divergent_exit = tested});
+        auto const entered = first_of(flow, tested);
         (void)statements(body, entered);
         auto const exit = scopes.back().divergent_exit;
+        // the later iterations run for the invocations that stayed, and test the condition again first
+        if (exit.is && !flow.is)
+            (void)value(condition, exit);
         if (exit.is && !entered.is)
             (void)statements(body, exit);
         scopes.pop_back();
@@ -313,11 +327,7 @@ struct uniformity_pass
                      },
                      [&](flat_loop const& l) { result = loop(l.body, flow, {}); },
                      [&](flat_once const& o) { result = loop(o.body, flow, {}); },
-                     [&](flat_while const& w)
-                     {
-                         auto const condition = as_branch(value(w.condition, flow), s.from);
-                         result = loop(w.body, flow, condition);
-                     },
+                     [&](flat_while const& w) { result = loop(w.body, flow, {}, w.condition, s.from); },
                      [&](flat_for const& f)
                      {
                          auto const bounds = first_of(value(f.first, flow), value(f.end, flow));
