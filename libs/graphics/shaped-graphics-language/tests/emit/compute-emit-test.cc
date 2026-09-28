@@ -80,12 +80,12 @@ TEST("sgl emit - the dispatch id's unsigned twin is minted, so a local of the pr
     CHECK(wgsl.contains("    let id_in: f32 = 2.0;\n"));
 }
 
-TEST("sgl emit - MSL writes a compute entry point as a kernel, its workgroup as the pragma the Metal compiler reads")
+TEST("sgl emit - MSL writes a compute entry point as a kernel, which states no workgroup")
 {
-    // EMIT-59: MSL states no threadgroup shape, so the line above the signature does.
+    // EMIT-59: MSL has no spelling for the threadgroup shape, so it reaches sg from SGL's own statement alone.
     auto const msl = text_of(k_double, target::msl);
-    CHECK(msl.contains("#pragma sc numthreads 64 1 1\n"
-                       "kernel void double_values(uint3 id_in [[thread_position_in_grid]], constant work_arguments& "
+    CHECK(!msl.contains("numthreads"));
+    CHECK(msl.contains("kernel void double_values(uint3 id_in [[thread_position_in_grid]], constant work_arguments& "
                        "work_group [[buffer(0)]])\n"
                        "{\n"
                        "    constant auto& work_values = work_group.work_values;\n"

@@ -308,7 +308,7 @@ The rules above say HLSL and WGSL by name; these say what `msl` writes in the sa
 * **EMIT-57** MSL's reserved words also hold every name the Metal toolchain declares at global scope or in `metal`, its macros included, and `main` ([why](why/emitting.md#emit-57)).
 * **EMIT-58** An `@inline binding` is a struct of its members and the parameter `constant T& name [[buffer(4)]]` of the entry point ([why](why/emitting.md#emit-58)).
 * **EMIT-59** The entry point is a `vertex`, `fragment` or `kernel` function, and its SGL parameter carries `[[stage_in]]`.
-  A kernel's workgroup is the line `#pragma sc numthreads x y z` directly above it, since MSL states none and slib's Metal compiler reads it there.
+  MSL has no spelling for a kernel's workgroup, so the text states none, and the shape reaches sg from what SGL states alone.
 * **EMIT-60** A member with `@position` is `[[position]]`.
 * **EMIT-61** A member at location i is `[[attribute(i)]]` in a vertex input, `[[user(sgli)]]` in a stage link, and `[[color(i)]]` in a render target struct.
 * **EMIT-62** MSL's own rule places `float3` at a multiple of 16 and gives it 16 bytes, so a block's `float3` is `packed_float3` in its memory form (EMIT-113) ([why](why/emitting.md#emit-62)).

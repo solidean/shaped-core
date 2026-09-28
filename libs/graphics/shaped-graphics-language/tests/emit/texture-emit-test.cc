@@ -137,8 +137,7 @@ TEST("sgl emit - MSL passes a group of textures as one argument buffer, its stat
                        "    texture2d<float, access::read_write> post_acc [[id(3)]];\n"
                        "    sampler post_bilinear [[id(4)]];\n"
                        "};\n"));
-    CHECK(msl.contains("#pragma sc numthreads 8 8 1\n"
-                       "kernel void blur(uint3 id_in [[thread_position_in_grid]], constant post_arguments& post_group "
+    CHECK(msl.contains("kernel void blur(uint3 id_in [[thread_position_in_grid]], constant post_arguments& post_group "
                        "[[buffer(0)]])\n"));
     CHECK(msl.contains("    constant auto& post = *post_group.post;\n"));
     CHECK(msl.contains("    constant auto& post_src = post_group.post_src;\n"));

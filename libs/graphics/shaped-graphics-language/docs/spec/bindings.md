@@ -383,7 +383,6 @@ struct post_arguments
     sampler post_bilinear [[id(3)]];
 };
 
-#pragma sc numthreads 8 8 1
 kernel void blur(uint3 id_in [[thread_position_in_grid]], constant post_arguments& post_group [[buffer(0)]])
 {
     constant auto& post = *post_group.post;

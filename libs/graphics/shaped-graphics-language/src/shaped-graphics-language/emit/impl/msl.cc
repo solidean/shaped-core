@@ -250,12 +250,9 @@ public:
         for (auto const& parameter : parameters)
             list += cc::format("{}{}", list.empty() ? "" : ", ", parameter);
 
+        // EMIT-59: MSL states no threadgroup shape, so a kernel carries none; SGL's stated one is what reaches sg
         if (p.e.entry_stage == stage::compute)
-        {
-            // EMIT-59: MSL states no threadgroup shape of its own, so the line the Metal compiler reads it from does
-            out.appendf("#pragma sc numthreads {} {} {}\n", p.e.workgroup[0], p.e.workgroup[1], p.e.workgroup[2]);
             out.appendf("kernel void {}({})\n{{\n", p.entry_name, list);
-        }
         else
             out.appendf("{} {} {}({})\n{{\n", p.e.entry_stage == stage::vertex ? "vertex" : "fragment",
                         type_text(p, *this, p.e.result), p.entry_name, list);
