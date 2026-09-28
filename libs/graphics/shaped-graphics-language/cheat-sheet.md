@@ -533,6 +533,7 @@ sgl::print_source(file)      // == file.source for EVERY input: the lossless inv
   A constant block packs as an HLSL constant buffer does, and a buffer's element as a dx12 structured buffer: tight, like a `tg` struct.
   WGSL and MSL are made to follow by a memory form, where a vector their own rule would place elsewhere is split or packed.
   A struct in both a block and a buffer is `layout-conflict`; `@no_padding` turns a gap into `padding-forbidden`; `bool` has no layout, `bool32` does.
+  **No layout is guaranteed without an annotation** (EMIT-116): the compiler may reorder members, so the host goes through the generated struct, never through offsets it assumed.
 - **`compile_to_text` drops warnings.** It gives the text or the errors; a caller that wants warnings runs the phases itself.
 - **`prelude/builtins.sgl` is GENERATED and committed; never edit it.** A hand edit fails `dev.py check` (`sgl-prelude`) and a library test.
   `prelude/core.sgl` is the hand-written half, embedded at CONFIGURE time: editing it re-runs CMake, and a test pins the embedded text to the file.

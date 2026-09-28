@@ -89,10 +89,20 @@ The layout of a vertex input is not the struct's: `[[attribute(i)]]` reads throu
 One C++ struct copied into what every target reads needs one layout, and the targets' own rules disagree on it.
 HLSL's is the one the rules take: dx12 then needs nothing, and every other target can be made to reach it.
 Rejecting what one target cannot place natively was the alternative, and it rejects a `{float; float3}` block and a buffer of `float3` everywhere because of one target.
+A rule of GPU alignment instead, as std430 and WGSL place, only moves the cost.
+A `float3` member then needs padding in the host struct that nobody wrote, and dx12 needs a `packoffset` on every member.
+MSL's 16-byte `float3` would still need a memory form.
 WGSL can only raise an alignment, never lower one, so a vector it would align further than SGL's offset becomes scalars; MSL has packed vectors for the same case.
 Vulkan's relaxed block layout refuses a few of these layouts: a member packed into a nested struct's last row, a vector across a row of a buffer's element, a 12-byte stride.
 `scalarBlockLayout` admits all of them, and nearly every Vulkan device has it, so sg's vulkan backend requires it rather than SGL narrowing its rules for devices without it.
 Only the root that needs it becomes a memory form: the rest reads in a capture as the source does (EMIT-46), and the form is invisible to the program.
+
+## EMIT-116
+
+Reordering members is how a compiler packs a struct tighter, and it is planned: a `{float; float4; float}` block takes three rows where `{float4; float; float}` takes two.
+Promising declaration order now would make that a breaking change for every host that computed an offset by hand.
+The generated struct already follows whatever the compiler chose, so a host that uses it loses nothing.
+A host that needs a fixed layout, such as memory shared with a hand-written struct, will ask for one by annotation rather than by accident.
 
 ## EMIT-63
 

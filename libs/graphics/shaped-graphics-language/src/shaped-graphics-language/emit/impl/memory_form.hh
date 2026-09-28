@@ -15,7 +15,7 @@
 /// Otherwise the root is written as its *memory form*: one flat struct of its builtin values in memory order, each
 /// declared as the target can place it at SGL's offset, with padding between them.
 /// A value that fits is declared as itself; a vector that does not is split into scalars (WGSL) or packed (MSL), and a
-/// matrix into its columns.
+/// matrix into its scalars.
 /// A read rebuilds the value from its pieces, and a write stores each piece; nothing of it reaches the program.
 
 namespace sgl::emit::impl
@@ -36,12 +36,10 @@ struct memory_leaf
     cc::vector<i32> path;
     check::type_id type = check::type_id::none;
     /// Positions in `memory_form::fields`: one where the value is a field of its own type, one per scalar where it is
-    /// split, or one per column for a matrix whose columns are fields.
+    /// split.
     cc::vector<i32> fields;
     /// The fields are the value's scalars, in order, rather than the value itself.
     bool is_split = false;
-    /// A matrix held as one field per column.
-    bool is_columns = false;
     /// The field is MSL's packed spelling of the value, which a read converts back.
     bool is_packed = false;
 };

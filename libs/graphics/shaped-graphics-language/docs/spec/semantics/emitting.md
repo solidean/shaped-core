@@ -281,6 +281,8 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
 
 Every value in GPU memory — a constant block or a buffer's element — is placed by one rule per address space, the same on every target.
 The C++ struct a package generates is that layout byte for byte, padding included, so the host copies it in as it is.
+**That struct is the only thing the host may rely on**: without an annotation, where a member lands is the compiler's choice (EMIT-116).
+EMIT-110 and EMIT-111 describe today's choice, not a promise.
 
 * **EMIT-110** A constant block, a group's plain members or an `@inline` binding, is placed by HLSL's constant-buffer packing.
   It is read in rows of 16 bytes, and a value that would cross a row starts the next one.
@@ -298,6 +300,9 @@ The C++ struct a package generates is that layout byte for byte, padding include
 * **EMIT-114** A struct placed both in a constant block and in a buffer's element would have two layouts, and is `layout-conflict`.
 * **EMIT-115** `@no_padding` on a struct or on a binding makes a gap before any of its members `padding-forbidden`, and the detail says where.
   The rest of a block's last row follows no member, so it is no gap.
+* **EMIT-116** A layout carries no guarantee without an annotation that asks for one ([why](why/emitting.md#emit-116)).
+  The compiler may place members in another order than they are declared, to pack them tighter.
+  Host code reaches GPU memory through the generated struct, never through offsets or an order it assumed.
 
 ## Error kinds
 
@@ -323,6 +328,7 @@ The C++ struct a package generates is that layout byte for byte, padding include
 * A Metal compiler for the MSL text, and the buffer index of EMIT-58, which sg's metal backend has yet to adopt.
 * Arrays in GPU memory, which SGL has no type for yet.
   In a constant block every element starts a row, as HLSL places it: an element shorter than a row is `array<vec4f, N>` read through `.x` in WGSL, and `slib::row<T>` on the host.
+* An annotation that fixes a layout, `@layout(.hlsl)` or `@layout(.cpp)`, for memory a host fills without the generated struct; until it exists, EMIT-116 says nothing is fixed.
 * `mat3`, which SGL has no type for yet: three rows in a constant block (44 bytes), 36 bytes in a buffer's element, and its columns split in a memory form.
 * Whether an emit error becomes a diagnostic with a span; today it names a symbol and carries a detail.
 * Whether the size of an inline block has to agree between targets as its offsets do; WGSL rounds it up to 16 bytes.
