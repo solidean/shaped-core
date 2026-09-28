@@ -54,13 +54,12 @@ ASYNC_INVOCABLE_TEST("sr - the denoise network runs end to end", (sg::context_ha
             FAIL(cc::format("a network shader did not compile: {}", shader->try_error()->underlying().to_string()));
     }
 
-    // A refusal is logged with its reason, and the commonest is simply that nobody fetched the weights.
-    // Said as "could not be created" rather than naming one cause, because it has several and a message that picks
-    // the wrong one sends the next reader somewhere else entirely.
+    // Unfetched weights are the one reason to skip; with them present, a network that cannot be created is a failure,
+    // since that is exactly what a broken weights bump or loader change looks like.
+    if (!sr::impl::oidn_weights_present())
+        SKIP("the OIDN weights were not fetched (extern/oidn-weights/fetch-oidn-weights.py)");
     auto network = sr::impl::oidn_network();
-    if (!network.create(ctx, extent))
-        SKIP("the network could not be created; the commonest reason is unfetched weights "
-             "(extern/oidn-weights/fetch-oidn-weights.py), and sr's log says which it was");
+    REQUIRE(network.create(ctx, extent)).context("the weights are present and still did not load; sr's log says why");
 
     // The pipelines are built from the compiled shaders, which may still be a tick behind.
     auto ready = network.prepare();
@@ -172,7 +171,10 @@ ASYNC_INVOCABLE_TEST("sr - the network agrees with OIDN's own filter", (sg::cont
     auto& ctx = *ctx_h;
 
     if (!sr::impl::oidn_is_compiled_in() || !sr::impl::oidn_has_device())
-        SKIP("OIDN itself was not fetched, so there is nothing to compare against");
+        SKIP("OIDN itself was not fetched, so there is nothing to compare against "
+             "(uv run extern/oidn/fetch-oidn.py)");
+    if (!sr::impl::oidn_weights_present())
+        SKIP("the OIDN weights were not fetched (extern/oidn-weights/fetch-oidn-weights.py)");
 
     (void)sr_test::shader_fixtures(); // sr's one library, alive for the whole binary
 
@@ -233,8 +235,7 @@ ASYNC_INVOCABLE_TEST("sr - the network agrees with OIDN's own filter", (sg::cont
     };
 
     auto network = sr::impl::oidn_network();
-    if (!network.create(ctx, extent))
-        SKIP("the network could not be created; sr's log says why");
+    REQUIRE(network.create(ctx, extent)).context("the weights are present and still did not load; sr's log says why");
 
     auto ready = network.prepare();
     for (auto attempt = 0; attempt < 16 && !ready; ++attempt)
@@ -284,13 +285,13 @@ ASYNC_INVOCABLE_TEST("sr - the network agrees with OIDN's own filter", (sg::cont
                 }
             }
 
-    // The bounds have roughly a decade of headroom over what this machine actually returns — a mean of 1.0e-05 and a
-    // worst of 7.5e-05, which is what sixteen layers of fp32 on the GPU against OIDN's own CPU inference costs.
-    // Loose enough not to chase a driver, and orders of magnitude tighter than any real mistake: a transposed weight
-    // index or a wrong padding moves whole regions, not the fifth significant figure.
+    // The bounds have roughly a decade of headroom over what this machine actually returns — a mean of 4.9e-07 and a
+    // worst of 4.3e-06, which is what sixteen layers of fp32 on the GPU against OIDN's own CPU inference costs.
+    // Loose enough not to chase a driver, and tight enough to see a weight decoded one exponent off: doubling the
+    // subnormal weights alone moves the mean to 1.0e-05.
     auto const mean = f32(total / f64(samples));
-    CHECK(mean < 1e-4f).context(cc::format("mean difference {} over {} samples", mean, samples));
-    CHECK(worst < 1e-3f)
+    CHECK(mean < 5e-6f).context(cc::format("mean difference {} over {} samples", mean, samples));
+    CHECK(worst < 5e-5f)
         .context(cc::format("worst difference {} at {},{} (ours {}, OIDN {})", worst, worst_at[0], worst_at[1],
                             got[worst_at[1] * k_size + worst_at[0]][0], reference[worst_at[1] * k_size + worst_at[0]][0]));
 
@@ -321,22 +322,17 @@ ASYNC_INVOCABLE_TEST("sr - the OIDN member denoises through the denoise front", 
     if (!sr::query_denoise_support(ctx).oidn)
         SKIP("the OIDN weights were not fetched (extern/oidn-weights/fetch-oidn-weights.py)");
 
-    // A named member resolves to itself, and it is spatial — so it is what `automatic` reaches for on a converging
-    // mean, ahead of a-trous.
+    // A named member resolves to itself; `automatic` never picks it, being far too slow for a frame loop.
     auto const settings = sr::denoise_settings{.method = sr::denoise_method::oidn};
     CHECK(sr::resolve_denoise_method(ctx, settings) == sr::denoise_method::oidn);
     CHECK(!sr::is_temporal(sr::denoise_method::oidn));
-    CHECK(sr::resolve_denoise_method(ctx, {.method = sr::denoise_method::automatic}) == sr::denoise_method::oidn)
-        .context("automatic should prefer the trained spatial member over a-trous");
+    CHECK(sr::resolve_denoise_method(ctx, {.method = sr::denoise_method::automatic}) != sr::denoise_method::oidn);
+    CHECK(sr::resolve_denoise_method(ctx, {.method = sr::denoise_method::automatic, .fresh_samples = true})
+          != sr::denoise_method::oidn);
 
     sr::oidn_denoise_routine::prewarm(ctx);
     (void)co_await ctx.routines.idle_completion();
 
-    // The same wait the member's `init` performs, repeated here against THIS test's shader library.
-    // The routine initializes once per context, and every test in this binary brings its own library, so by the time
-    // this one runs the pipelines `init` built belong to a library that is gone — and the first call would otherwise
-    // sit on a compile that nothing in a frame loop drives.
-    REQUIRE(co_await sr::impl::oidn_prewarm_pipelines(ctx)).context("the network's pipelines did not build");
 
     constexpr auto k_width = 48;
     constexpr auto k_height = 48;
@@ -475,11 +471,11 @@ ASYNC_INVOCABLE_TEST("sr - the OIDN member denoises through the denoise front", 
     CHECK(mean_out < 1.4 * mean_in).context(cc::format("mean went from {} to {}", mean_in, mean_out));
 }
 
-// What the network costs at a real resolution, which is the reason it cannot yet be pointed at one.
+// What the network costs at a real resolution when run whole, which is why it runs in tiles.
 //
 // Asked of a small network rather than a large one: the widths come from the weights and the extents are arithmetic,
 // so the figure for 1080p is computable without allocating a byte of it.
-ASYNC_INVOCABLE_TEST("sr - the OIDN network's memory is what stands between it and a real image",
+ASYNC_INVOCABLE_TEST("sr - the OIDN network run whole needs gigabytes, which is why it tiles",
                      (sg::context_handle const& ctx_h))
 {
     REQUIRE(ctx_h != nullptr);
@@ -491,9 +487,10 @@ ASYNC_INVOCABLE_TEST("sr - the OIDN network's memory is what stands between it a
     // Drained rather than abandoned, because work still carrying a finished test's context is what nexus reports.
     (void)co_await sr::impl::oidn_prewarm_pipelines(ctx);
 
+    if (!sr::impl::oidn_weights_present())
+        SKIP("the OIDN weights were not fetched (extern/oidn-weights/fetch-oidn-weights.py)");
     auto network = sr::impl::oidn_network();
-    if (!network.create(ctx, tg::vec2i(64, 64)))
-        SKIP("the network could not be created; sr's log says why");
+    REQUIRE(network.create(ctx, tg::vec2i(64, 64))).context("the weights are present and still did not load");
 
     auto const mib = [](i64 bytes) { return f64(bytes) / (1024.0 * 1024.0); };
 
@@ -510,11 +507,8 @@ ASYNC_INVOCABLE_TEST("sr - the OIDN network's memory is what stands between it a
     CHECK(f64(at_1080p) / f64(at_64) < 600.0)
         .context(cc::format("64x64 {} MiB, 1080p {} MiB, 4K {} MiB", mib(at_64), mib(at_1080p), mib(at_4k)));
 
-    // The number this test exists to pin: one 1080p frame wants 2.7 GiB of feature maps, and 4K wants 10.7 GiB.
-    // That is what makes tiling a prerequisite for pointing the member at a real image rather than an optimisation.
-    //
-    // This measures the UNTILED cost and will keep measuring it once tiles exist — a tile is what the network is
-    // created at, so the figure below is exactly the reason a whole frame is not.
+    // The number this test exists to pin: one 1080p frame run whole wants over 2 GiB of feature maps.
+    // That is what makes tiling a prerequisite for a real image rather than an optimisation.
     CHECK(at_1080p > i64(2) * 1024 * 1024 * 1024).context(cc::format("1080p needs {} MiB of feature maps", mib(at_1080p)));
 
     co_return;
@@ -681,7 +675,10 @@ ASYNC_INVOCABLE_TEST("sr - the tiled network agrees with OIDN's own filter", (sg
     auto& ctx = *ctx_h;
 
     if (!sr::impl::oidn_is_compiled_in() || !sr::impl::oidn_has_device())
-        SKIP("OIDN itself was not fetched, so there is nothing to compare against");
+        SKIP("OIDN itself was not fetched, so there is nothing to compare against "
+             "(uv run extern/oidn/fetch-oidn.py)");
+    if (!sr::impl::oidn_weights_present())
+        SKIP("the OIDN weights were not fetched (extern/oidn-weights/fetch-oidn-weights.py)");
 
     (void)sr_test::shader_fixtures(); // sr's one library, alive for the whole binary
 
@@ -776,12 +773,10 @@ ASYNC_INVOCABLE_TEST("sr - the tiled network agrees with OIDN's own filter", (sg
             }
 
     auto const mean = f32(total / f64(samples));
-    // The same bounds the untiled oracle carries, and this machine returns a mean of 1.1e-05 and a worst of 1.4e-04
+    // The same bounds the untiled oracle carries, and this machine returns a mean of 4.9e-07 and a worst of 6.6e-06
     // against them — so tiling costs nothing measurable in agreement with Intel.
-    // The worst is about twice the untiled one over thirty-six times the pixels, which is what sampling more of the
-    // same distribution looks like rather than a seam.
-    CHECK(mean < 1e-4f).context(cc::format("mean difference {} over {} samples", mean, samples));
-    CHECK(worst < 1e-3f).context(cc::format("worst difference {} at {},{} (mean {})", worst, worst_at[0], worst_at[1], mean));
+    CHECK(mean < 5e-6f).context(cc::format("mean difference {} over {} samples", mean, samples));
+    CHECK(worst < 5e-5f).context(cc::format("worst difference {} at {},{} (mean {})", worst, worst_at[0], worst_at[1], mean));
 }
 
 // The tile is CHOSEN rather than taken as large as it may be, and this is what that has to mean.

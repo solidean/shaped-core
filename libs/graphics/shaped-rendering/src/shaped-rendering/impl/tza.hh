@@ -36,9 +36,10 @@ struct tza_tensor
     cc::vector<i32> dims;
     cc::string layout;
     tza_element element = tza_element::float16;
-    cc::span<std::byte const> data;
+    cc::span<cc::byte const> data;
 
     /// The product of `dims`, which is how many elements `data` holds.
+    /// Only meaningful on a tensor `read_tza` returned, which has already checked that the product fits the blob.
     [[nodiscard]] i64 element_count() const;
 };
 
@@ -47,7 +48,7 @@ struct tza_tensor
 /// Bounds-checked throughout, because the blob is a file: a truncated or hostile one has to come back empty rather
 /// than reading past its end.
 /// The tensors alias `blob`, which must outlive them.
-[[nodiscard]] cc::vector<tza_tensor> read_tza(cc::span<std::byte const> blob);
+[[nodiscard]] cc::vector<tza_tensor> read_tza(cc::span<cc::byte const> blob);
 
 /// The tensor of that name, or null.
 [[nodiscard]] tza_tensor const* find_tza(cc::span<tza_tensor const> tensors, cc::string_view name);

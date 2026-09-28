@@ -1,5 +1,7 @@
 #include <clean-core/common/assert.hh>
+#include <clean-core/common/endian.hh>
 #include <clean-core/common/utility.hh>
+#include <clean-core/error/optional.hh>
 #include <clean-core/record/log.hh>
 #include <clean-core/streams/file_stream.hh>
 #include <clean-core/string/format.hh>
@@ -114,40 +116,6 @@ constexpr int k_upsample_count = int(sizeof(k_upsamples) / sizeof(k_upsamples[0]
 /// Must match NN_CONV_TEXELS in nn_conv.hlsl; the oracle test is what notices if it does not.
 constexpr int k_conv_texels = 8;
 
-/// Half a fp16 lane, widened.
-///
-/// Written out rather than taken from a library because this is the only place the repo reads one, and the weights
-/// arrive in no other format.
-[[nodiscard]] f32 from_half(u16 h)
-{
-    auto const sign = u32(h >> 15) << 31;
-    auto exponent = u32((h >> 10) & 0x1F);
-    auto mantissa = u32(h & 0x3FF);
-
-    if (exponent == 0)
-    {
-        if (mantissa == 0)
-            return cc::bit_cast<f32>(sign); // a signed zero
-
-        // Subnormal: normalize it by shifting until the implicit bit appears.
-        auto e = -1;
-        do
-        {
-            ++e;
-            mantissa <<= 1;
-        } while ((mantissa & 0x400) == 0);
-        mantissa &= 0x3FF;
-        exponent = u32(1 - e);
-    }
-    else if (exponent == 0x1F)
-    {
-        // Infinity or NaN, which the trained weights do not contain but a corrupt file would.
-        return cc::bit_cast<f32>(sign | 0x7F800000u | (mantissa << 13));
-    }
-
-    return cc::bit_cast<f32>(sign | ((exponent + 127 - 15) << 23) | (mantissa << 13));
-}
-
 /// `v` rounded up to a multiple of sixteen, and at least sixteen.
 /// Four pools halve a tensor four times, so every tensor extent and every tile origin lives on this grid.
 [[nodiscard]] int round_up(int v)
@@ -160,19 +128,228 @@ constexpr int k_conv_texels = 8;
 {
     return tg::vec2i(extent[0] >> level, extent[1] >> level);
 }
+/// Reads, checks and packs the weights file, which is what `oidn_load_weights` does once per process.
+[[nodiscard]] cc::optional<oidn_weights> load_weights_from_disk();
 } // namespace
+
+f32 half_to_float(u16 h)
+{
+    auto const sign = u32(h >> 15) << 31;
+    auto exponent = u32((h >> 10) & 0x1F);
+    auto mantissa = u32(h & 0x3FF);
+
+    if (exponent == 0)
+    {
+        if (mantissa == 0)
+            return cc::bit_cast<f32>(sign); // a signed zero
+
+        // Subnormal: shift until the implicit bit appears, and take one off the exponent per shift.
+        // A subnormal is `mantissa * 2^-24`, which is `1.m * 2^(-14 - shifts)` once normalized.
+        auto shifts = 0;
+        while ((mantissa & 0x400) == 0)
+        {
+            mantissa <<= 1;
+            ++shifts;
+        }
+        mantissa &= 0x3FF;
+        return cc::bit_cast<f32>(sign | (u32(127 - 15 + 1 - shifts) << 23) | (mantissa << 13));
+    }
+
+    if (exponent == 0x1F)
+    {
+        // Infinity or NaN, which the trained weights do not contain but a corrupt file would.
+        return cc::bit_cast<f32>(sign | 0x7F800000u | (mantissa << 13));
+    }
+
+    return cc::bit_cast<f32>(sign | ((exponent + 127 - 15) << 23) | (mantissa << 13));
+}
 
 bool oidn_weights_present()
 {
-    auto const dir = cc::string_view(k_weights_dir);
-    if (dir.empty())
-        return false;
-
-    // Opened rather than merely tested for, because the path is baked in at configure time and an install that was
-    // removed afterwards is exactly the case this has to answer `false` for.
-    auto adapter = cc::file_read_stream_adapter::open(cc::string(dir) + "/rt_hdr_alb_nrm.tza");
-    return adapter.has_value();
+    // Asked once per process, because `query_denoise_support` asks on every denoise call, whichever member runs.
+    // Opened rather than merely tested for: the path is baked in at configure time, and an install removed since
+    // then has to answer `false`.
+    static auto const present = []
+    {
+        auto const dir = cc::string_view(k_weights_dir);
+        if (dir.empty())
+            return false;
+        return cc::file_read_stream_adapter::open(cc::string(dir) + "/rt_hdr_alb_nrm.tza").has_value();
+    }();
+    return present;
 }
+
+oidn_weights const* oidn_load_weights()
+{
+    // Thread-safe by the language's rules for a function-local static, and logged at most once for the same reason.
+    static auto const loaded = load_weights_from_disk();
+    return loaded.has_value() ? &loaded.value() : nullptr;
+}
+
+namespace
+{
+cc::optional<oidn_weights> load_weights_from_disk()
+{
+    auto out = oidn_weights();
+
+    auto const path = cc::string(k_weights_dir) + "/rt_hdr_alb_nrm.tza";
+    auto adapter = cc::file_read_stream_adapter::open(path);
+    if (adapter.has_error())
+    {
+        CC_LOG_WARNING("oidn: the weights are not at '{}'", path);
+        return cc::nullopt;
+    }
+
+    auto stream = adapter.value().stream();
+    auto blob = stream.read_all();
+    if (blob.has_error())
+    {
+        CC_LOG_WARNING("oidn: the weights at '{}' could not be read", path);
+        return cc::nullopt;
+    }
+
+    auto const tensors = read_tza(blob.value());
+    if (tensors.empty())
+        return cc::nullopt;
+
+    // Read every layer first, because the weights cannot be packed until the feature shapes are known.
+    //
+    // CHANNELS ARE PADDED TO A MULTIPLE OF FOUR so the convolution can read its source four channels at a time.
+    // That is OIDN's `tensorBlockC` in our own terms, and it is what the measurement asked for: the input reads were
+    // two thirds of the shader's time.
+    // Only three of the network's shapes are not already a multiple of four — the nine input channels, the three
+    // output ones, and the seventy-three `dec_conv1a` concatenates — so the padding costs almost nothing to compute.
+    struct layer_source
+    {
+        tza_tensor const* weight = nullptr;
+        tza_tensor const* bias = nullptr;
+        i32 in_channels = 0;
+        i32 out_channels = 0;
+    };
+
+    auto sources = cc::vector<layer_source>();
+    sources.reserve(k_conv_count);
+
+    for (auto const& step : k_convs)
+    {
+        auto const* const weight = find_tza(tensors, cc::string(step.name) + ".weight");
+        auto const* const bias = find_tza(tensors, cc::string(step.name) + ".bias");
+        if (weight == nullptr || bias == nullptr || weight->dims.size() != 4 || bias->dims.size() != 1)
+        {
+            CC_LOG_WARNING("oidn: the weights carry no layer '{}'", step.name);
+            return cc::nullopt;
+        }
+
+        auto const out_channels = weight->dims[0];
+        auto const in_channels = weight->dims[1];
+        if (weight->dims[2] != 3 || weight->dims[3] != 3 || bias->dims[0] != out_channels)
+        {
+            CC_LOG_WARNING("oidn: layer '{}' is not a 3x3 convolution with a matching bias", step.name);
+            return cc::nullopt;
+        }
+        if (weight->layout != "oihw")
+        {
+            CC_LOG_WARNING("oidn: layer '{}' is laid out as '{}', not the oihw this packs from", step.name,
+                           weight->layout);
+            return cc::nullopt;
+        }
+        if (weight->element != tza_element::float16 || bias->element != tza_element::float16)
+        {
+            CC_LOG_WARNING("oidn: layer '{}' is not stored as half precision", step.name);
+            return cc::nullopt;
+        }
+
+        sources.push_back({.weight = weight, .bias = bias, .in_channels = in_channels, .out_channels = out_channels});
+    }
+
+    // Every feature map's shape, in one forward pass.
+    // The enum's order is the order the network produces them, so a tensor's source is always already known — which
+    // is what lets this be a loop rather than a recursion.
+    auto real_channels = cc::vector<i32>::create_filled(f_count, 0);
+    out.feature_levels = cc::vector<i32>::create_filled(f_count, 0);
+
+    real_channels[f_input] = 9;
+    for (auto n = 0; n < k_conv_count; ++n)
+    {
+        real_channels[k_convs[n].target] = sources[n].out_channels;
+        out.feature_levels[k_convs[n].target] = k_convs[n].level;
+    }
+    for (auto const& p : k_pools)
+    {
+        real_channels[p.target] = real_channels[p.source];
+        out.feature_levels[p.target] = p.level;
+    }
+    for (auto const& u : k_upsamples)
+    {
+        real_channels[u.target] = real_channels[u.source];
+        out.feature_levels[u.target] = u.level - 1; // an upsample lands one level finer than its source
+    }
+
+    // What every tensor is actually stored with: the padded count, which is what every shader is told.
+    // A padding channel carries a hard zero rather than whatever was left in memory, because the next layer would
+    // multiply it by a weight of zero and a NaN times zero is still a NaN.
+    out.feature_channels = cc::vector<i32>::create_filled(f_count, 0);
+    for (auto t = 0; t < f_count; ++t)
+        out.feature_channels[t] = ((real_channels[t] + 3) / 4) * 4;
+
+    // Every layer's weights, as [ky][kx][i][o] over the PADDED channel spaces, then its bias.
+    // One buffer for the network, because a layer is cheaper to address as a pair of offsets than as a binding.
+    auto& packed = out.packed;
+
+    for (auto n = 0; n < k_conv_count; ++n)
+    {
+        auto const& step = k_convs[n];
+        auto const& src = sources[n];
+
+        auto const real_a = real_channels[step.source];
+        auto const stored_a = out.feature_channels[step.source];
+        auto const real_b = step.skip == f_count ? 0 : real_channels[step.skip];
+        auto const stored_b = step.skip == f_count ? 0 : out.feature_channels[step.skip];
+
+        auto const stored_in = stored_a + stored_b;
+        auto const stored_out = out.feature_channels[step.target];
+
+        if (real_a + real_b != src.in_channels)
+        {
+            CC_LOG_WARNING("oidn: layer '{}' wants {} input channels and the tensors carry {}", step.name,
+                           src.in_channels, real_a + real_b);
+            return cc::nullopt;
+        }
+
+        out.in_channels.push_back(stored_in);
+        out.out_channels.push_back(stored_out);
+        out.weight_offsets.push_back(u32(packed.size()));
+
+        // Which real input channel a stored one carries, or -1 where it is padding.
+        auto const real_of = [&](i32 stored)
+        {
+            return stored < stored_a ? (stored < real_a ? stored : -1)
+                                     : (stored - stored_a < real_b ? real_a + (stored - stored_a) : -1);
+        };
+
+        // Read a half at a time with an explicit byte order, since the file offsets need not be aligned for a u16.
+        auto const half_at = [](tza_tensor const& t, i64 index) { return cc::load_bytes_le<u16>(t.data, index * 2); };
+        for (auto k = 0; k < 9; ++k)
+            for (auto i = 0; i < stored_in; ++i)
+            {
+                auto const j = real_of(i);
+                for (auto o = 0; o < stored_out; ++o)
+                {
+                    // oihw: o major, then i, then the 3x3 — so one element is at ((o * in + i) * 9 + k).
+                    auto const live = j >= 0 && o < src.out_channels;
+                    packed.push_back(live ? half_to_float(half_at(*src.weight, (o * src.in_channels + j) * 9 + k))
+                                          : 0.0f);
+                }
+            }
+
+        out.bias_offsets.push_back(u32(packed.size()));
+        for (auto o = 0; o < stored_out; ++o)
+            packed.push_back(o < src.out_channels ? half_to_float(half_at(*src.bias, o)) : 0.0f);
+    }
+
+    return out;
+}
+} // namespace
 
 bool oidn_network::create(sg::context& ctx, tg::vec2i image_extent, int max_tile, int overlap)
 {
@@ -246,157 +423,9 @@ bool oidn_network::create(sg::context& ctx, tg::vec2i image_extent, int max_tile
 
     auto const extent = _extent;
 
-    auto const path = cc::string(k_weights_dir) + "/rt_hdr_alb_nrm.tza";
-    auto adapter = cc::file_read_stream_adapter::open(path);
-    if (adapter.has_error())
-    {
-        CC_LOG_WARNING("oidn: the weights are not at '{}'", path);
+    _source = oidn_load_weights();
+    if (_source == nullptr)
         return false;
-    }
-
-    auto stream = adapter.value().stream();
-    auto blob = stream.read_all();
-    if (blob.has_error())
-    {
-        CC_LOG_WARNING("oidn: the weights at '{}' could not be read", path);
-        return false;
-    }
-
-    auto const tensors = read_tza(blob.value());
-    if (tensors.empty())
-        return false;
-
-    // Read every layer first, because the weights cannot be packed until the feature shapes are known.
-    //
-    // CHANNELS ARE PADDED TO A MULTIPLE OF FOUR so the convolution can read its source four channels at a time.
-    // That is OIDN's `tensorBlockC` in our own terms, and it is what the measurement asked for: the input reads were
-    // two thirds of the shader's time, eighteen scattered loads for every three weight loads.
-    // Only three of the network's shapes are not already a multiple of four — the nine input channels, the three
-    // output ones, and the seventy-three `dec_conv1a` concatenates — so the padding costs almost nothing to compute.
-    struct layer_source
-    {
-        tza_tensor const* weight = nullptr;
-        tza_tensor const* bias = nullptr;
-        i32 in_channels = 0;
-        i32 out_channels = 0;
-    };
-
-    auto sources = cc::vector<layer_source>();
-    sources.reserve(k_conv_count);
-
-    for (auto const& step : k_convs)
-    {
-        auto const* const weight = find_tza(tensors, cc::string(step.name) + ".weight");
-        auto const* const bias = find_tza(tensors, cc::string(step.name) + ".bias");
-        if (weight == nullptr || bias == nullptr || weight->dims.size() != 4 || bias->dims.size() != 1)
-        {
-            CC_LOG_WARNING("oidn: the weights carry no layer '{}'", step.name);
-            return false;
-        }
-
-        auto const out_channels = weight->dims[0];
-        auto const in_channels = weight->dims[1];
-        if (weight->dims[2] != 3 || weight->dims[3] != 3 || bias->dims[0] != out_channels)
-        {
-            CC_LOG_WARNING("oidn: layer '{}' is not a 3x3 convolution with a matching bias", step.name);
-            return false;
-        }
-        if (weight->element != tza_element::float16 || bias->element != tza_element::float16)
-        {
-            CC_LOG_WARNING("oidn: layer '{}' is not stored as half precision", step.name);
-            return false;
-        }
-
-        sources.push_back({.weight = weight, .bias = bias, .in_channels = in_channels, .out_channels = out_channels});
-    }
-
-    // Every feature map's shape, in one forward pass.
-    // The enum's order is the order the network produces them, so a tensor's source is always already known — which
-    // is what lets this be a loop rather than a recursion.
-    auto real_channels = cc::vector<i32>::create_filled(f_count, 0);
-    _feature_levels = cc::vector<i32>::create_filled(f_count, 0);
-
-    real_channels[f_input] = 9;
-    for (auto n = 0; n < k_conv_count; ++n)
-    {
-        real_channels[k_convs[n].target] = sources[n].out_channels;
-        _feature_levels[k_convs[n].target] = k_convs[n].level;
-    }
-    for (auto const& p : k_pools)
-    {
-        real_channels[p.target] = real_channels[p.source];
-        _feature_levels[p.target] = p.level;
-    }
-    for (auto const& u : k_upsamples)
-    {
-        real_channels[u.target] = real_channels[u.source];
-        _feature_levels[u.target] = u.level - 1; // an upsample lands one level finer than its source
-    }
-
-    // What every tensor is actually stored with: the padded count, which is what every shader is told.
-    // A padding channel carries a hard zero rather than whatever was left in memory, because the next layer would
-    // multiply it by a weight of zero and a NaN times zero is still a NaN.
-    _feature_channels = cc::vector<i32>::create_filled(f_count, 0);
-    for (auto t = 0; t < f_count; ++t)
-        _feature_channels[t] = ((real_channels[t] + 3) / 4) * 4;
-
-    // Every layer's weights, as [ky][kx][i][o] over the PADDED channel spaces, then its bias.
-    // One buffer for the network, because a layer is cheaper to address as a pair of offsets than as a binding.
-    auto packed = cc::vector<f32>();
-    _weight_offsets.clear();
-    _bias_offsets.clear();
-
-    auto widths = cc::vector<tg::vec2i>(); // stored in, stored out — what the shader is dispatched against
-    widths.reserve(k_conv_count);
-
-    for (auto n = 0; n < k_conv_count; ++n)
-    {
-        auto const& step = k_convs[n];
-        auto const& src = sources[n];
-
-        auto const real_a = real_channels[step.source];
-        auto const stored_a = _feature_channels[step.source];
-        auto const real_b = step.skip == f_count ? 0 : real_channels[step.skip];
-        auto const stored_b = step.skip == f_count ? 0 : _feature_channels[step.skip];
-
-        auto const stored_in = stored_a + stored_b;
-        auto const stored_out = _feature_channels[step.target];
-
-        if (real_a + real_b != src.in_channels)
-        {
-            CC_LOG_WARNING("oidn: layer '{}' wants {} input channels and the tensors carry {}", step.name,
-                           src.in_channels, real_a + real_b);
-            return false;
-        }
-
-        widths.push_back(tg::vec2i(stored_in, stored_out));
-        _weight_offsets.push_back(u32(packed.size()));
-
-        // Which real input channel a stored one carries, or -1 where it is padding.
-        auto const real_of = [&](i32 stored)
-        {
-            return stored < stored_a ? (stored < real_a ? stored : -1)
-                                     : (stored - stored_a < real_b ? real_a + (stored - stored_a) : -1);
-        };
-
-        auto const* const weights = reinterpret_cast<u16 const*>(src.weight->data.data());
-        for (auto k = 0; k < 9; ++k)
-            for (auto i = 0; i < stored_in; ++i)
-            {
-                auto const j = real_of(i);
-                for (auto o = 0; o < stored_out; ++o)
-                {
-                    // oihw: o major, then i, then the 3x3 — so one element is at ((o * in + i) * 9 + k).
-                    auto const live = j >= 0 && o < src.out_channels;
-                    packed.push_back(live ? from_half(weights[(o * src.in_channels + j) * 9 + k]) : 0.0f);
-                }
-            }
-
-        _bias_offsets.push_back(u32(packed.size()));
-        auto const* const bias_source = reinterpret_cast<u16 const*>(src.bias->data.data());
-        for (auto o = 0; o < stored_out; ++o)
-            packed.push_back(o < src.out_channels ? from_half(bias_source[o]) : 0.0f);
-    }
 
     // One buffer per tensor: the skips stay live across the whole decoder, and reusing one that is still wanted is a
     // wrong image rather than a crash.
@@ -404,25 +433,22 @@ bool oidn_network::create(sg::context& ctx, tg::vec2i image_extent, int max_tile
     _features.reserve(f_count);
     for (auto t = 0; t < f_count; ++t)
     {
-        auto const e = level_extent(extent, _feature_levels[t]);
-        auto const count = isize(e[0]) * isize(e[1]) * isize(_feature_channels[t]);
+        auto const e = level_extent(extent, _source->feature_levels[t]);
+        auto const count = isize(e[0]) * isize(e[1]) * isize(_source->feature_channels[t]);
         _features.push_back(ctx.persistent.create_buffer<f32>(
             count, sg::buffer_usage::readonly_buffer | sg::buffer_usage::readwrite_buffer));
     }
 
-    _in_channels.clear();
-    _out_channels.clear();
-    for (auto const& w : widths)
-    {
-        _in_channels.push_back(w[0]);
-        _out_channels.push_back(w[1]);
-    }
-
-    _weights = ctx.persistent.create_buffer<f32>(packed.size(),
+    _weights = ctx.persistent.create_buffer<f32>(_source->packed.size(),
                                                  sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);
 
-    // Held until the first `execute`, which records the upload on the caller's list.
-    _pending_weights = cc::move(packed);
+    // Recorded by the first `execute`, on the caller's list.
+    _weights_uploaded = false;
+
+    // A second `create` on one object would otherwise keep groups naming the buffers it just replaced.
+    _conv_groups.clear();
+    _pool_groups.clear();
+    _upsample_groups.clear();
 
     // Whether the network was CREATED, which is not whether it can run yet.
     // The pipelines compile in the background, so `prepare` is what a caller drives afterwards — returning its answer
@@ -433,21 +459,21 @@ bool oidn_network::create(sg::context& ctx, tg::vec2i image_extent, int max_tile
 
 i64 oidn_network::feature_bytes() const
 {
-    if (_feature_channels.size() != f_count)
+    if (_source == nullptr)
         return 0;
 
     auto total = i64(0);
     for (auto t = 0; t < f_count; ++t)
     {
-        auto const e = level_extent(_extent, _feature_levels[t]);
-        total += i64(e[0]) * i64(e[1]) * i64(_feature_channels[t]) * i64(sizeof(f32));
+        auto const e = level_extent(_extent, _source->feature_levels[t]);
+        total += i64(e[0]) * i64(e[1]) * i64(_source->feature_channels[t]) * i64(sizeof(f32));
     }
     return total;
 }
 
 i64 oidn_network::feature_bytes_for(tg::vec2i image_extent) const
 {
-    if (_feature_channels.size() != f_count)
+    if (_source == nullptr)
         return 0;
 
     auto const extent = tg::vec2i(round_up(image_extent[0]), round_up(image_extent[1]));
@@ -455,8 +481,8 @@ i64 oidn_network::feature_bytes_for(tg::vec2i image_extent) const
     auto total = i64(0);
     for (auto t = 0; t < f_count; ++t)
     {
-        auto const e = level_extent(extent, _feature_levels[t]);
-        total += i64(e[0]) * i64(e[1]) * i64(_feature_channels[t]) * i64(sizeof(f32));
+        auto const e = level_extent(extent, _source->feature_levels[t]);
+        total += i64(e[0]) * i64(e[1]) * i64(_source->feature_channels[t]) * i64(sizeof(f32));
     }
     return total;
 }
@@ -554,6 +580,8 @@ bool oidn_network::prepare()
 {
     if (_ctx == nullptr || !is_valid())
         return false;
+    if (!_conv_groups.empty())
+        return true; // built, and nothing a later call could change
     if (!_programs.build(*_ctx))
         return false;
 
@@ -616,10 +644,10 @@ bool oidn_network::execute(sg::command_list& cmd,
 
     // The weights go up once, ahead of the first layer that reads them and on this same list, so the ordering is the
     // command list's rather than something this has to arrange.
-    if (!_pending_weights.empty())
+    if (!_weights_uploaded)
     {
-        cmd.upload.data_to_buffer(_weights, _pending_weights);
-        _pending_weights.clear();
+        cmd.upload.data_to_buffer(_weights, cc::span<f32 const>(_source->packed));
+        _weights_uploaded = true;
     }
 
     // The two groups that name the CALLER's textures, built once per call rather than once per tile.
@@ -682,7 +710,7 @@ bool oidn_network::execute(sg::command_list& cmd,
                     if (p.target == target)
                     {
                         auto const e = level_extent(_extent, p.level);
-                        auto const channels = _feature_channels[p.target];
+                        auto const channels = _source->feature_channels[p.target];
                         cmd.compute.bind_pipeline(**_programs.pool->try_value());
                         cmd.compute.bind<shaders::nn_pool_bindings>(*_pool_groups[i]);
                         cmd.compute.set_inline_constants(shaders::nn_pool_constants{.width = u32(e[0]),
@@ -699,7 +727,7 @@ bool oidn_network::execute(sg::command_list& cmd,
                     if (u.target == target)
                     {
                         auto const e = level_extent(_extent, u.level);
-                        auto const channels = _feature_channels[u.target];
+                        auto const channels = _source->feature_channels[u.target];
                         cmd.compute.bind_pipeline(**_programs.upsample->try_value());
                         cmd.compute.bind<shaders::nn_upsample_bindings>(*_upsample_groups[i]);
                         cmd.compute.set_inline_constants(shaders::nn_upsample_constants{.width = u32(e[0]),
@@ -717,14 +745,14 @@ bool oidn_network::execute(sg::command_list& cmd,
                 run_resamples_before(step.source);
 
                 auto const e = level_extent(_extent, step.level);
-                auto const in_channels = _in_channels[n];
-                auto const out_channels = _out_channels[n];
+                auto const in_channels = _source->in_channels[n];
+                auto const out_channels = _source->out_channels[n];
 
                 // A concatenated source is two buffers and a split point; a plain one names the same buffer twice, which the
                 // shader never reads past.
                 auto const& source_a = _features[step.source];
                 auto const& source_b = step.skip == f_count ? _features[step.source] : _features[step.skip];
-                auto const channels_a = _feature_channels[step.source];
+                auto const channels_a = _source->feature_channels[step.source];
 
                 cmd.compute.bind_pipeline(**_programs.conv->try_value());
                 cmd.compute.bind<shaders::nn_conv_bindings>(*_conv_groups[n]);
@@ -733,8 +761,8 @@ bool oidn_network::execute(sg::command_list& cmd,
                     .height = u32(e[1]),
                     .in_channels = u32(in_channels),
                     .out_channels = u32(out_channels),
-                    .weight_offset = _weight_offsets[n],
-                    .bias_offset = _bias_offsets[n],
+                    .weight_offset = _source->weight_offsets[n],
+                    .bias_offset = _source->bias_offsets[n],
                     .in_channels_a = u32(step.skip == f_count ? in_channels : channels_a),
                     ._pad = 0,
                 });

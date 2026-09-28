@@ -241,7 +241,7 @@ ASYNC_INVOCABLE_TEST("sr - the network's transfer curve round-trips across the H
     }
 
     // The curve is not the identity, or none of the above would mean anything.
-    CHECK(encoded[10 * 9 + 0] != pixels[10][0]).context("the encoded value equals the input, so no transfer was applied");
+    CHECK(encoded[10 * 12 + 0] != pixels[10][0]).context("the encoded value equals the input, so no transfer was applied");
 }
 
 // The max pool and the nearest upsample, which are the only other things the network does to a feature map.

@@ -3,6 +3,7 @@
 #include <clean-core/streams/file_stream.hh>
 #include <clean-core/string/format.hh>
 #include <nexus/test.hh>
+#include <shaped-rendering/impl/oidn_network.hh>
 #include <shaped-rendering/impl/tza.hh>
 
 // The tensor archive OIDN stores its trained network in, and the network it describes.
@@ -16,7 +17,7 @@
 namespace
 {
 /// The pinned blob, or empty when the weights were not fetched into this build.
-[[nodiscard]] cc::vector<std::byte> load_weights()
+[[nodiscard]] cc::vector<cc::byte> load_weights()
 {
     auto const path = cc::string(SR_OIDN_WEIGHTS_DIR) + "/rt_hdr_alb_nrm.tza";
 
@@ -31,6 +32,43 @@ namespace
         return {};
     return cc::move(bytes.value());
 }
+
+/// A tensor archive written by hand, little-endian like the real one, so a malformed case needs no file on disk.
+struct archive_writer
+{
+    cc::vector<cc::byte> bytes;
+
+    void put_u8(cc::u32 v) { bytes.push_back(cc::byte(v & 0xFF)); }
+    void put_u16(cc::u32 v)
+    {
+        for (auto i = 0; i < 2; ++i)
+            put_u8(v >> (8 * i));
+    }
+    void put_u32(cc::u64 v)
+    {
+        for (auto i = 0; i < 4; ++i)
+            put_u8(cc::u32(v >> (8 * i)));
+    }
+    void put_u64(cc::u64 v)
+    {
+        for (auto i = 0; i < 8; ++i)
+            put_u8(cc::u32(v >> (8 * i)));
+    }
+    void put_chars(cc::string_view s)
+    {
+        for (auto const ch : s)
+            put_u8(cc::u32(cc::u8(ch)));
+    }
+
+    /// The header, with the table at `table_offset`.
+    void header(cc::u64 table_offset)
+    {
+        put_u16(0x41D7);
+        put_u8(2);
+        put_u8(0);
+        put_u64(table_offset);
+    }
+};
 } // namespace
 
 TEST("sr - the OIDN weights parse into the network the shaders expect")
@@ -87,7 +125,7 @@ TEST("sr - the OIDN weights parse into the network the shaders expect")
         CHECK(bias->element == sr::impl::tza_element::float16);
     }
 
-    // The declared bytes are inside the blob and the largest layer is the size it should be.
+    // Every tensor's declared bytes are inside the blob and match its shape.
     for (auto const& t : tensors)
         CHECK(t.data.size() == t.element_count() * 2).context(cc::format("{} has {} bytes", t.name, t.data.size()));
 }
@@ -102,22 +140,103 @@ TEST("sr - a corrupt tensor archive is refused rather than followed")
 
     CHECK(sr::impl::read_tza({}).empty());
 
-    std::byte not_an_archive[] = {std::byte(1), std::byte(2), std::byte(3), std::byte(4)};
+    cc::byte not_an_archive[] = {cc::byte(1), cc::byte(2), cc::byte(3), cc::byte(4)};
     CHECK(sr::impl::read_tza(not_an_archive).empty());
 
     // A well-formed header whose table offset points past the end.
-    std::byte header[12] = {};
-    header[0] = std::byte(0xD7);
-    header[1] = std::byte(0x41);
-    header[2] = std::byte(2);
-    header[3] = std::byte(0);
+    cc::byte header[12] = {};
+    header[0] = cc::byte(0xD7);
+    header[1] = cc::byte(0x41);
+    header[2] = cc::byte(2);
+    header[3] = cc::byte(0);
     for (auto i = 4; i < 12; ++i)
-        header[i] = std::byte(0xFF);
+        header[i] = cc::byte(0xFF);
     CHECK(sr::impl::read_tza(header).empty());
 
-    // And a truncated real one: the header survives, the table does not.
-    auto const blob = load_weights();
-    if (blob.empty())
-        return;
-    CHECK(sr::impl::read_tza(cc::span<std::byte const>(blob).subspan({.offset = 0, .size = 64})).empty());
+    // A table claiming more tensors than its bytes could describe is refused before anything is sized by it.
+    {
+        auto w = archive_writer();
+        w.header(12);
+        w.put_u32(0xFFFFFFFFu);
+        CHECK(sr::impl::read_tza(w.bytes).empty());
+    }
+
+    // Dimensions whose product overflows any integer are refused rather than wrapped into a small, plausible size.
+    {
+        auto w = archive_writer();
+        w.header(12);
+        w.put_u32(1);
+        w.put_u16(1);
+        w.put_chars("w");
+        w.put_u8(3);
+        for (auto i = 0; i < 3; ++i)
+            w.put_u32(cc::u64(1) << 30);
+        w.put_chars("abc");
+        w.put_chars("h");
+        w.put_u64(0);
+        CHECK(sr::impl::read_tza(w.bytes).empty());
+    }
+
+    // A well-formed one-tensor archive parses, which is what makes the two refusals above mean something,
+    // and every prefix of it short of the whole is refused.
+    {
+        auto w = archive_writer();
+        w.header(12 + 8);
+        w.put_u16(0x3C00); // the tensor's data: four fp16 values, 1.0 each
+        w.put_u16(0x3C00);
+        w.put_u16(0x3C00);
+        w.put_u16(0x3C00);
+        w.put_u32(1);
+        w.put_u16(4);
+        w.put_chars("bias");
+        w.put_u8(1);
+        w.put_u32(4);
+        w.put_chars("x");
+        w.put_chars("h");
+        w.put_u64(12);
+
+        auto const whole = sr::impl::read_tza(w.bytes);
+        REQUIRE(whole.size() == 1);
+        CHECK(whole[0].name == "bias");
+        CHECK(whole[0].element_count() == 4);
+        CHECK(whole[0].data.size() == 8);
+
+        for (auto size = 0; size < w.bytes.size(); ++size)
+            CHECK(sr::impl::read_tza(cc::span<cc::byte const>(w.bytes).subspan({.offset = 0, .size = size})).empty())
+                .context(cc::format("a {}-byte prefix of a {}-byte archive", size, w.bytes.size()));
+    }
+}
+
+// fp16 widened, against values written out rather than computed by a second implementation.
+//
+// Subnormals are the case worth pinning: a trained network's smallest weights are exactly those, and getting their
+// exponent off by one doubles every one of them without moving the oracle's mean far enough to notice.
+TEST("sr - a half widens to the float it encodes")
+{
+    struct pair
+    {
+        cc::u16 half = 0;
+        cc::f32 value = 0.0f;
+    };
+    constexpr pair cases[] = {
+        {0x0000, 0.0f},
+        {0x0001, 5.9604644775390625e-08f}, // 2^-24, the smallest subnormal
+        {0x0200, 3.0517578125e-05f},       // 2^-15, a subnormal one shift from normal
+        {0x03FF, 6.0975551605224609e-05f}, // the largest subnormal
+        {0x0400, 6.103515625e-05f},        // 2^-14, the smallest normal
+        {0x3C00, 1.0f},
+        {0x3555, 0.333251953125f},
+        {0xC000, -2.0f},
+        {0x7BFF, 65504.0f}, // the largest finite half
+        {0x8001, -5.9604644775390625e-08f},
+    };
+
+    for (auto const& c : cases)
+        CHECK(sr::impl::half_to_float(c.half) == c.value)
+            .context(cc::format("half {} widened to {} rather than {}", c.half, sr::impl::half_to_float(c.half), c.value));
+
+    CHECK(cc::bit_cast<cc::u32>(sr::impl::half_to_float(0x8000)) == 0x80000000u).context("negative zero keeps its sign");
+    CHECK(sr::impl::half_to_float(0x7C00) > 3.0e38f).context("infinity");
+    auto const nan = sr::impl::half_to_float(0x7E00);
+    CHECK(nan != nan).context("NaN");
 }

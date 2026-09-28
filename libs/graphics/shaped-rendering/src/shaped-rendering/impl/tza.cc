@@ -12,7 +12,7 @@ namespace
 /// between a truncated download and a crash is that every one of these is checked.
 struct cursor
 {
-    cc::span<std::byte const> blob;
+    cc::span<cc::byte const> blob;
     i64 at = 0;
     bool bad = false;
 
@@ -57,8 +57,26 @@ struct cursor
 constexpr u16 k_magic = 0x41D7;
 constexpr u8 k_major_version = 2;
 
-/// The largest dimension the format allows, which is what keeps a product of them from overflowing.
+/// The largest single dimension this reader accepts.
+/// It keeps each factor small; `element_count_within` is what keeps their product from overflowing.
 constexpr i64 k_max_dim = i64(1) << 30;
+
+/// The fewest bytes one table record can take: a name length, a rank, an element type and a data offset.
+constexpr i64 k_min_record_bytes = 2 + 1 + 1 + 8;
+
+/// The product of `dims`, or -1 as soon as it exceeds `limit`.
+/// Checked per factor, because a rank of up to 255 dimensions of up to 2^30 each overflows any integer.
+[[nodiscard]] i64 element_count_within(cc::span<i32 const> dims, i64 limit)
+{
+    auto count = i64(1);
+    for (auto const d : dims)
+    {
+        if (i64(d) > limit / count)
+            return -1;
+        count *= i64(d);
+    }
+    return count;
+}
 } // namespace
 
 i64 tza_tensor::element_count() const
@@ -69,7 +87,7 @@ i64 tza_tensor::element_count() const
     return count;
 }
 
-cc::vector<tza_tensor> read_tza(cc::span<std::byte const> blob)
+cc::vector<tza_tensor> read_tza(cc::span<cc::byte const> blob)
 {
     auto c = cursor{.blob = blob};
 
@@ -90,9 +108,16 @@ cc::vector<tza_tensor> read_tza(cc::span<std::byte const> blob)
     // The table lives at the END of the blob, so its offset is the first thing that can point anywhere.
     c.seek(i64(c.read<u64>()));
     auto const count = i64(c.read<u32>());
-    if (c.bad || count < 0)
+    if (c.bad)
     {
         CC_LOG_WARNING("tza: the tensor table is not where the header says");
+        return {};
+    }
+
+    // The count sizes an allocation below, so it is held to what the remaining bytes could possibly describe.
+    if (count > (blob.size() - c.at) / k_min_record_bytes)
+    {
+        CC_LOG_WARNING("tza: the table claims {} tensors, more than its {} bytes could hold", count, blob.size() - c.at);
         return {};
     }
 
@@ -139,8 +164,15 @@ cc::vector<tza_tensor> read_tza(cc::span<std::byte const> blob)
         }
 
         auto const stride = tensor.element == tza_element::float32 ? i64(4) : i64(2);
-        auto const bytes = tensor.element_count() * stride;
-        if (offset < 0 || bytes < 0 || offset > blob.size() || bytes > blob.size() - offset)
+        auto const elements = element_count_within(tensor.dims, blob.size() / stride);
+        if (elements < 0)
+        {
+            CC_LOG_WARNING("tza: tensor '{}' declares more elements than the blob holds", tensor.name);
+            return {};
+        }
+
+        auto const bytes = elements * stride;
+        if (offset < 0 || offset > blob.size() || bytes > blob.size() - offset)
         {
             CC_LOG_WARNING("tza: tensor '{}' claims bytes outside the blob", tensor.name);
             return {};

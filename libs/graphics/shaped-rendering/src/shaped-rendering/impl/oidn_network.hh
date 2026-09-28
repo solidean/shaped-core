@@ -17,7 +17,40 @@
 /// honest: a changed layer count fails to find its tensor, and a changed width fails the shape test beside it.
 namespace sr::impl
 {
+/// fp16 bits widened to fp32, subnormals, infinities and NaNs included.
+///
+/// Local because typed-geometry has no half conversion yet; it is the one place the repo reads fp16.
+[[nodiscard]] f32 half_to_float(u16 h);
+
+/// The weights file, checked against the network's topology and packed for the convolution shader.
+///
+/// None of it depends on an image, so one copy serves every network in the process.
+struct oidn_weights
+{
+    /// Every layer's weights as [ky][kx][i][o] over the padded channel counts, each followed by its bias.
+    cc::vector<f32> packed;
+
+    /// Where each convolution's weights and bias start in `packed`, in elements, in the order the layers run.
+    cc::vector<u32> weight_offsets;
+    cc::vector<u32> bias_offsets;
+
+    /// How many channels and which resolution level each feature map holds, channel counts padded to four.
+    cc::vector<i32> feature_channels;
+    cc::vector<i32> feature_levels;
+
+    /// Each convolution's padded input and output widths, which is what its dispatch is told.
+    cc::vector<i32> in_channels;
+    cc::vector<i32> out_channels;
+};
+
+/// The weights, read and packed on the first call and shared by every later one.
+///
+/// Null when they were not fetched, or are not the network this was written against; that is logged once.
+[[nodiscard]] oidn_weights const* oidn_load_weights();
+
 /// Whether the trained weights were fetched into this build, which is what the member's availability rests on.
+///
+/// Answered once per process.
 ///
 /// About the WEIGHTS rather than about OIDN the library: the member runs the network itself, so the library beside it
 /// is a reference implementation for tests rather than something the render path needs.
@@ -92,7 +125,7 @@ public:
     /// So this is not a tolerance to trade against — below it the answer is wrong, and above it nothing improves.
     static constexpr int k_tile_overlap = 80;
 
-    /// Reads the weights, uploads them, and allocates every feature map for an image of `image_extent`.
+    /// Takes the process's weights (read on the first create) and allocates every feature map for `image_extent`.
     ///
     /// The TENSORS are allocated at that size rounded up to a multiple of 16, because four pools halve it four times.
     /// The padding repeats the image's edge rather than being black, and nothing is written back for it.
@@ -137,7 +170,7 @@ public:
     ///
     /// Answered from the layer widths this network already read, so it needs a created network but not one at that
     /// size — which is the only way to ask the question for an extent too large to allocate.
-    /// The weights themselves are not counted: they are a fixed few megabytes and are shared by nothing here.
+    /// The weights themselves are not counted: they are a fixed few megabytes, and one host copy serves every network.
     [[nodiscard]] i64 feature_bytes_for(tg::vec2i image_extent) const;
 
     /// What this network ACTUALLY allocated, which is one tile's worth however large the image is.
@@ -164,47 +197,35 @@ private:
     tg::vec2i _extent = tg::vec2i(0, 0); // the padded one the tensors are sized by — one TILE, not the image
 
     /// How far the interior of one tile advances, and how wide the discarded border around it is.
-    /// `_overlap` is 0 exactly when the image fits one tile, which is what keeps a small image bit-identical to what
-    /// it produced before tiles existed.
+    /// `_overlap` is 0 exactly when the image fits one tile, so a small image is run whole and has no seams at all.
+    /// An axis that fits under the cap has a count of 1 and a step of its whole extent even when the other axis tiles.
     tg::vec2i _tile_step = tg::vec2i(0, 0);
     tg::vec2i _tile_counts = tg::vec2i(1, 1);
     int _overlap = 0;
 
+    /// The weights and every shape derived from them, read once per process and shared by every network.
+    oidn_weights const* _source = nullptr;
+
     /// Every layer's weights and bias, in one buffer; a layer is a pair of offsets into it.
     sg::buffer<f32> _weights;
 
-    /// The same, host-side, until the first `execute` records its upload.
+    /// Whether `_weights` has been filled yet.
     ///
-    /// Uploaded on the caller's command list rather than one of `create`'s own: a create that submitted would put
-    /// work on the queue outside any frame, and a caller draining its own epoch would never see it.
-    cc::vector<f32> _pending_weights;
-
-    /// Where each convolution's weights and bias start, in elements, in the order the layers run.
-    cc::vector<u32> _weight_offsets;
-    cc::vector<u32> _bias_offsets;
+    /// Filled on the caller's command list by the first `execute`, never by `create`: a create that submitted would
+    /// put work on the queue outside any frame, and a caller draining its own epoch would never see it.
+    bool _weights_uploaded = false;
 
     /// The feature maps, indexed by the table in the implementation.
     /// One per tensor rather than a ping-pong: the skips have to stay live across the decoder, and an aliasing
     /// mistake here is a wrong image rather than a crash.
     cc::vector<sg::buffer<f32>> _features;
 
-    /// How many channels and which resolution level each feature map holds.
-    /// Recorded rather than recovered from a buffer's size, because a buffer does not carry its shape and the two
-    /// would have to agree anyway.
-    cc::vector<i32> _feature_channels;
-    cc::vector<i32> _feature_levels;
-
-    /// Each convolution's input and output widths, read from the weights at creation.
-    cc::vector<i32> _in_channels;
-    cc::vector<i32> _out_channels;
-
     oidn_programs _programs;
 
     /// The binding groups the network dispatches against, built once and reused by every tile and every frame.
     ///
-    /// They are tile-invariant on purpose: a tile changes the push constants and nothing a group names, so building
-    /// one per tile would mean 26 groups per tile and 6240 in a 1080p frame — past what a transient descriptor region
-    /// holds, which is how this was found.
+    /// They are tile-invariant on purpose: a tile changes the push constants and nothing a group names.
+    /// Building them per tile would mean 26 groups per tile, 624 over the 24 tiles of a 1080p frame at the default cap.
     /// The input and output groups are NOT here, because they name the caller's textures rather than ours.
     cc::vector<sg::binding_group_handle> _conv_groups;
     cc::vector<sg::binding_group_handle> _pool_groups;
