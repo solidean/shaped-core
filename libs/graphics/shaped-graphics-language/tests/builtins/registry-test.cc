@@ -66,6 +66,16 @@ TEST("sgl builtins - the registry generates a prelude that parses, and reads eve
     cc::string_view const all_positional[] = {"", "", "", ""};
     CHECK(!sgl::is_valid(r.find_function("sample", on_sample, all_positional)));
 
+    // an offset on a 2D shape, and none on a 1D one, which Metal samples with no offset
+    cc::string_view const with_offset[] = {"", "", "", "offset"};
+    cc::string_view const on_2d_offset[] = {"texture_2d[float4]", "float2", "sampler", "int2"};
+    cc::string_view const on_1d_offset[] = {"texture_1d[float4]", "float", "sampler", "int"};
+    cc::string_view const on_1d_array_offset[] = {"texture_1d_array[float4]", "float", "sampler", "int", "int"};
+    cc::string_view const layer_and_offset[] = {"", "", "", "layer", "offset"};
+    CHECK(sgl::is_valid(r.find_function("sample", on_2d_offset, with_offset)));
+    CHECK(!sgl::is_valid(r.find_function("sample", on_1d_offset, with_offset)));
+    CHECK(!sgl::is_valid(r.find_function("sample", on_1d_array_offset, layer_and_offset)));
+
     // no two records are the same overload, or a declaration could not say which one it stands for
     for (auto i = isize(0); i < r.functions.size(); ++i)
     {

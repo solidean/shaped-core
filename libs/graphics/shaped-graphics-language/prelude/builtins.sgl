@@ -630,12 +630,8 @@
 @builtin @pure fun load(t: texture_1d[float], xy: int, level: int = 0) -> float
 @builtin @pure @stages(.pixel) fun sample(t: texture_1d[float], coord: float, smp: sampler) -> float
 @builtin @pure @stages(.pixel) fun sample(t: texture_1d[float], coord: float) -> float
-@builtin @pure @stages(.pixel) fun sample(t: texture_1d[float], coord: float, smp: sampler, .offset: int) -> float
-@builtin @pure @stages(.pixel) fun sample(t: texture_1d[float], coord: float, .offset: int) -> float
 @builtin @pure fun sample(t: texture_1d[float], coord: float, smp: sampler, .level: float) -> float
 @builtin @pure fun sample(t: texture_1d[float], coord: float, .level: float) -> float
-@builtin @pure fun sample(t: texture_1d[float], coord: float, smp: sampler, .level: float, .offset: int) -> float
-@builtin @pure fun sample(t: texture_1d[float], coord: float, .level: float, .offset: int) -> float
 @builtin @pure @stages(.pixel) fun sample(t: texture_1d[float], coord: float, smp: sampler, .bias: float) -> float
 @builtin @pure @stages(.pixel) fun sample(t: texture_1d[float], coord: float, .bias: float) -> float
 @builtin @pure fun sample(t: texture_1d[float], coord: float, smp: sampler, .grad_x: float, .grad_y: float) -> float
@@ -643,12 +639,8 @@
 @builtin @pure fun load(t: texture_1d[float2], xy: int, level: int = 0) -> float2
 @builtin @pure @stages(.pixel) fun sample(t: texture_1d[float2], coord: float, smp: sampler) -> float2
 @builtin @pure @stages(.pixel) fun sample(t: texture_1d[float2], coord: float) -> float2
-@builtin @pure @stages(.pixel) fun sample(t: texture_1d[float2], coord: float, smp: sampler, .offset: int) -> float2
-@builtin @pure @stages(.pixel) fun sample(t: texture_1d[float2], coord: float, .offset: int) -> float2
 @builtin @pure fun sample(t: texture_1d[float2], coord: float, smp: sampler, .level: float) -> float2
 @builtin @pure fun sample(t: texture_1d[float2], coord: float, .level: float) -> float2
-@builtin @pure fun sample(t: texture_1d[float2], coord: float, smp: sampler, .level: float, .offset: int) -> float2
-@builtin @pure fun sample(t: texture_1d[float2], coord: float, .level: float, .offset: int) -> float2
 @builtin @pure @stages(.pixel) fun sample(t: texture_1d[float2], coord: float, smp: sampler, .bias: float) -> float2
 @builtin @pure @stages(.pixel) fun sample(t: texture_1d[float2], coord: float, .bias: float) -> float2
 @builtin @pure fun sample(t: texture_1d[float2], coord: float, smp: sampler, .grad_x: float, .grad_y: float) -> float2
@@ -656,12 +648,8 @@
 @builtin @pure fun load(t: texture_1d[float3], xy: int, level: int = 0) -> float3
 @builtin @pure @stages(.pixel) fun sample(t: texture_1d[float3], coord: float, smp: sampler) -> float3
 @builtin @pure @stages(.pixel) fun sample(t: texture_1d[float3], coord: float) -> float3
-@builtin @pure @stages(.pixel) fun sample(t: texture_1d[float3], coord: float, smp: sampler, .offset: int) -> float3
-@builtin @pure @stages(.pixel) fun sample(t: texture_1d[float3], coord: float, .offset: int) -> float3
 @builtin @pure fun sample(t: texture_1d[float3], coord: float, smp: sampler, .level: float) -> float3
 @builtin @pure fun sample(t: texture_1d[float3], coord: float, .level: float) -> float3
-@builtin @pure fun sample(t: texture_1d[float3], coord: float, smp: sampler, .level: float, .offset: int) -> float3
-@builtin @pure fun sample(t: texture_1d[float3], coord: float, .level: float, .offset: int) -> float3
 @builtin @pure @stages(.pixel) fun sample(t: texture_1d[float3], coord: float, smp: sampler, .bias: float) -> float3
 @builtin @pure @stages(.pixel) fun sample(t: texture_1d[float3], coord: float, .bias: float) -> float3
 @builtin @pure fun sample(t: texture_1d[float3], coord: float, smp: sampler, .grad_x: float, .grad_y: float) -> float3
@@ -669,12 +657,8 @@
 @builtin @pure fun load(t: texture_1d[float4], xy: int, level: int = 0) -> float4
 @builtin @pure @stages(.pixel) fun sample(t: texture_1d[float4], coord: float, smp: sampler) -> float4
 @builtin @pure @stages(.pixel) fun sample(t: texture_1d[float4], coord: float) -> float4
-@builtin @pure @stages(.pixel) fun sample(t: texture_1d[float4], coord: float, smp: sampler, .offset: int) -> float4
-@builtin @pure @stages(.pixel) fun sample(t: texture_1d[float4], coord: float, .offset: int) -> float4
 @builtin @pure fun sample(t: texture_1d[float4], coord: float, smp: sampler, .level: float) -> float4
 @builtin @pure fun sample(t: texture_1d[float4], coord: float, .level: float) -> float4
-@builtin @pure fun sample(t: texture_1d[float4], coord: float, smp: sampler, .level: float, .offset: int) -> float4
-@builtin @pure fun sample(t: texture_1d[float4], coord: float, .level: float, .offset: int) -> float4
 @builtin @pure @stages(.pixel) fun sample(t: texture_1d[float4], coord: float, smp: sampler, .bias: float) -> float4
 @builtin @pure @stages(.pixel) fun sample(t: texture_1d[float4], coord: float, .bias: float) -> float4
 @builtin @pure fun sample(t: texture_1d[float4], coord: float, smp: sampler, .grad_x: float, .grad_y: float) -> float4
@@ -717,12 +701,8 @@
 @builtin @pure fun load(t: texture_1d_array[float], xy: int, level: int = 0, .layer: int) -> float
 @builtin @pure @stages(.pixel) fun sample(t: texture_1d_array[float], coord: float, smp: sampler, .layer: int) -> float
 @builtin @pure @stages(.pixel) fun sample(t: texture_1d_array[float], coord: float, .layer: int) -> float
-@builtin @pure @stages(.pixel) fun sample(t: texture_1d_array[float], coord: float, smp: sampler, .layer: int, .offset: int) -> float
-@builtin @pure @stages(.pixel) fun sample(t: texture_1d_array[float], coord: float, .layer: int, .offset: int) -> float
 @builtin @pure fun sample(t: texture_1d_array[float], coord: float, smp: sampler, .layer: int, .level: float) -> float
 @builtin @pure fun sample(t: texture_1d_array[float], coord: float, .layer: int, .level: float) -> float
-@builtin @pure fun sample(t: texture_1d_array[float], coord: float, smp: sampler, .layer: int, .level: float, .offset: int) -> float
-@builtin @pure fun sample(t: texture_1d_array[float], coord: float, .layer: int, .level: float, .offset: int) -> float
 @builtin @pure @stages(.pixel) fun sample(t: texture_1d_array[float], coord: float, smp: sampler, .layer: int, .bias: float) -> float
 @builtin @pure @stages(.pixel) fun sample(t: texture_1d_array[float], coord: float, .layer: int, .bias: float) -> float
 @builtin @pure fun sample(t: texture_1d_array[float], coord: float, smp: sampler, .layer: int, .grad_x: float, .grad_y: float) -> float
@@ -730,12 +710,8 @@
 @builtin @pure fun load(t: texture_1d_array[float2], xy: int, level: int = 0, .layer: int) -> float2
 @builtin @pure @stages(.pixel) fun sample(t: texture_1d_array[float2], coord: float, smp: sampler, .layer: int) -> float2
 @builtin @pure @stages(.pixel) fun sample(t: texture_1d_array[float2], coord: float, .layer: int) -> float2
-@builtin @pure @stages(.pixel) fun sample(t: texture_1d_array[float2], coord: float, smp: sampler, .layer: int, .offset: int) -> float2
-@builtin @pure @stages(.pixel) fun sample(t: texture_1d_array[float2], coord: float, .layer: int, .offset: int) -> float2
 @builtin @pure fun sample(t: texture_1d_array[float2], coord: float, smp: sampler, .layer: int, .level: float) -> float2
 @builtin @pure fun sample(t: texture_1d_array[float2], coord: float, .layer: int, .level: float) -> float2
-@builtin @pure fun sample(t: texture_1d_array[float2], coord: float, smp: sampler, .layer: int, .level: float, .offset: int) -> float2
-@builtin @pure fun sample(t: texture_1d_array[float2], coord: float, .layer: int, .level: float, .offset: int) -> float2
 @builtin @pure @stages(.pixel) fun sample(t: texture_1d_array[float2], coord: float, smp: sampler, .layer: int, .bias: float) -> float2
 @builtin @pure @stages(.pixel) fun sample(t: texture_1d_array[float2], coord: float, .layer: int, .bias: float) -> float2
 @builtin @pure fun sample(t: texture_1d_array[float2], coord: float, smp: sampler, .layer: int, .grad_x: float, .grad_y: float) -> float2
@@ -743,12 +719,8 @@
 @builtin @pure fun load(t: texture_1d_array[float3], xy: int, level: int = 0, .layer: int) -> float3
 @builtin @pure @stages(.pixel) fun sample(t: texture_1d_array[float3], coord: float, smp: sampler, .layer: int) -> float3
 @builtin @pure @stages(.pixel) fun sample(t: texture_1d_array[float3], coord: float, .layer: int) -> float3
-@builtin @pure @stages(.pixel) fun sample(t: texture_1d_array[float3], coord: float, smp: sampler, .layer: int, .offset: int) -> float3
-@builtin @pure @stages(.pixel) fun sample(t: texture_1d_array[float3], coord: float, .layer: int, .offset: int) -> float3
 @builtin @pure fun sample(t: texture_1d_array[float3], coord: float, smp: sampler, .layer: int, .level: float) -> float3
 @builtin @pure fun sample(t: texture_1d_array[float3], coord: float, .layer: int, .level: float) -> float3
-@builtin @pure fun sample(t: texture_1d_array[float3], coord: float, smp: sampler, .layer: int, .level: float, .offset: int) -> float3
-@builtin @pure fun sample(t: texture_1d_array[float3], coord: float, .layer: int, .level: float, .offset: int) -> float3
 @builtin @pure @stages(.pixel) fun sample(t: texture_1d_array[float3], coord: float, smp: sampler, .layer: int, .bias: float) -> float3
 @builtin @pure @stages(.pixel) fun sample(t: texture_1d_array[float3], coord: float, .layer: int, .bias: float) -> float3
 @builtin @pure fun sample(t: texture_1d_array[float3], coord: float, smp: sampler, .layer: int, .grad_x: float, .grad_y: float) -> float3
@@ -756,12 +728,8 @@
 @builtin @pure fun load(t: texture_1d_array[float4], xy: int, level: int = 0, .layer: int) -> float4
 @builtin @pure @stages(.pixel) fun sample(t: texture_1d_array[float4], coord: float, smp: sampler, .layer: int) -> float4
 @builtin @pure @stages(.pixel) fun sample(t: texture_1d_array[float4], coord: float, .layer: int) -> float4
-@builtin @pure @stages(.pixel) fun sample(t: texture_1d_array[float4], coord: float, smp: sampler, .layer: int, .offset: int) -> float4
-@builtin @pure @stages(.pixel) fun sample(t: texture_1d_array[float4], coord: float, .layer: int, .offset: int) -> float4
 @builtin @pure fun sample(t: texture_1d_array[float4], coord: float, smp: sampler, .layer: int, .level: float) -> float4
 @builtin @pure fun sample(t: texture_1d_array[float4], coord: float, .layer: int, .level: float) -> float4
-@builtin @pure fun sample(t: texture_1d_array[float4], coord: float, smp: sampler, .layer: int, .level: float, .offset: int) -> float4
-@builtin @pure fun sample(t: texture_1d_array[float4], coord: float, .layer: int, .level: float, .offset: int) -> float4
 @builtin @pure @stages(.pixel) fun sample(t: texture_1d_array[float4], coord: float, smp: sampler, .layer: int, .bias: float) -> float4
 @builtin @pure @stages(.pixel) fun sample(t: texture_1d_array[float4], coord: float, .layer: int, .bias: float) -> float4
 @builtin @pure fun sample(t: texture_1d_array[float4], coord: float, smp: sampler, .layer: int, .grad_x: float, .grad_y: float) -> float4

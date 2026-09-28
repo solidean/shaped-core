@@ -625,9 +625,10 @@ cc::string offset_type(shape_traits const& s)
     return type_name("int", s.dim);
 }
 
+/// Metal samples a 1D texture with no offset, so no target does.
 bool takes_offset(shape_traits const& s)
 {
-    return !s.is_cube && !s.is_ms;
+    return !s.is_cube && !s.is_ms && s.dim != 1;
 }
 
 struct emitted

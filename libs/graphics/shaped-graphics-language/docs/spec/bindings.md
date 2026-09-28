@@ -203,7 +203,8 @@ They apply in order, so a later setting overrides what an earlier one set, `filt
 | `size(level)`, `layer_count()`, `level_count()`, `sample_count()` | textures and images | what the shape has |
 
 An array's layer is always named, `layer = 2`, since it is no coordinate on every target.
-An offset, `offset = int2(1, -1)`, is a constant from -8 to 7 on a shape that is no cube and no multisampled texture.
+An offset, `offset = int2(1, -1)`, is a constant from -8 to 7 on a 2D, 2D array or 3D texture.
+A cube and a multisampled texture take none, and neither does a 1D one, which Metal samples with no offset.
 A gather's component, an offset and a comparison's level are constants, because some target takes each only as written (CHK-280).
 
 **A texture may name the sampler it is sampled with, and a call then leaves it out.**
