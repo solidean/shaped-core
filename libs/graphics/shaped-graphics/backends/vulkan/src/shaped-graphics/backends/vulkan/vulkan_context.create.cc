@@ -645,6 +645,9 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     auto vk13_features = VkPhysicalDeviceVulkan13Features{
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
         .pNext = &descriptor_buffer_features,
+        // DXC writes HLSL's `discard` as a demotion to a helper, which keeps the pixel in its quad's derivatives.
+        // SGL states that on every target, and the capability is invalid unless the feature, which 1.3 requires, is enabled.
+        .shaderDemoteToHelperInvocation = VK_TRUE,
         .synchronization2 = VK_TRUE,
         .dynamicRendering = VK_TRUE,
     };
