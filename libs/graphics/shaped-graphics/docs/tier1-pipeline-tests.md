@@ -71,8 +71,6 @@ Tier 2 keeps one native-route smoke test per backend — an embedded blob, compu
 
 ## sg follow-ups this plan found
 
-- **`blend_factor` has no constant factor**, so `set_blend_constants` has no observable effect and the blend test cannot pin it.
-  `constant` and `one_minus_constant` exist on every backend.
 - **A point list needs its point size written on vulkan without `VK_KHR_maintenance5`, and on metal.**
   sg enables maintenance5 wherever the device has it, which makes an unwritten size 1.0; SGL writes none.
   DXC refuses `[[vk::builtin("PointSize")]]` on an `out` parameter, so SGL would write it as a member of the vertex stage's output struct.

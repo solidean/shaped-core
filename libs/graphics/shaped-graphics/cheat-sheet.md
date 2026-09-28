@@ -768,7 +768,7 @@ sg::vertex_input_layout           // { small_vector<vertex_input_slot,8> slots; 
                                   //   via a sg::vertex_layout_of<V> specialization (static vertex_type_layout get()). vertex_attribute { string semantic; u32 semantic_index; vertex_attribute_format format; isize offset; int slot }
 // state vocab (backend-neutral enums; primitive_topology.hh / rasterization_state.hh / blend_state.hh / depth_stencil_state.hh):
 //   primitive_topology {point_list,line_list,line_strip,triangle_list,triangle_strip,patch_list}  fill_mode{solid,wireframe}  cull_mode{none,front,back}  front_face{counter_clockwise,clockwise}
-//   blend_factor / blend_op / color_channel {r,g,b,a} with color_write_mask = cc::flags<color_channel> and color_write_mask_all  stencil_op  depth_stencil_state reuses sg::compare_op (from sampler.hh)
+//   blend_factor (incl. constant / one_minus_constant, read from cmd.raster.set_blend_constants per draw) / blend_op / color_channel {r,g,b,a} with color_write_mask = cc::flags<color_channel> and color_write_mask_all  stencil_op  depth_stencil_state reuses sg::compare_op (from sampler.hh)
 //   depth_stencil_state { depth_test, depth_write, depth_compare, stencil_test, stencil_read_mask, stencil_write_mask, stencil_front, stencil_back }
 //   blend presets: sg::blend_alpha, sg::blend_premultiplied_alpha, sg::blend_additive — opaque is an unset `blend`
 //   vertex_attribute_format {f32,vec2f,vec3f,vec4f, i32.., u32.., rgba8_unorm, rgba8_uint}   index_format {uint16, uint32}

@@ -82,6 +82,10 @@ D3D12_BLEND to_d3d12_blend(sg::blend_factor f)
         return D3D12_BLEND_DEST_ALPHA;
     case sg::blend_factor::one_minus_dst_alpha:
         return D3D12_BLEND_INV_DEST_ALPHA;
+    case sg::blend_factor::constant:
+        return D3D12_BLEND_BLEND_FACTOR;
+    case sg::blend_factor::one_minus_constant:
+        return D3D12_BLEND_INV_BLEND_FACTOR;
     }
     CC_UNREACHABLE("unhandled blend_factor");
 }

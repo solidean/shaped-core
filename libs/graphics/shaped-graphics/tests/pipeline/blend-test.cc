@@ -22,8 +22,11 @@ namespace
 constexpr auto source = tg::vec4f(0.25f, 0.5f, 2.0f, 0.125f);
 constexpr auto destination = tg::vec4f(0.0625f, 4.0f, 0.5f, 0.03125f);
 
-/// The value `f` weighs channel `c` by (3 is alpha).
-float factor_value(sg::blend_factor f, int c)
+// The blend constant, red and alpha distinct from every factor above, and so are one minus each: 5/8 and 13/16.
+constexpr auto blend_constant = tg::vec4f(0.375f, 0.5f, 0.75f, 0.1875f);
+
+/// The value `f` weighs channel `c` by (3 is alpha), under the blend constant `k`.
+float factor_value(sg::blend_factor f, int c, tg::vec4f k)
 {
     switch (f)
     {
@@ -47,6 +50,10 @@ float factor_value(sg::blend_factor f, int c)
         return destination[3];
     case sg::blend_factor::one_minus_dst_alpha:
         return 1 - destination[3];
+    case sg::blend_factor::constant:
+        return k[c];
+    case sg::blend_factor::one_minus_constant:
+        return 1 - k[c];
     }
     return 0;
 }
@@ -75,6 +82,7 @@ constexpr sg::blend_factor all_factors[] = {
     sg::blend_factor::dst_color, sg::blend_factor::one_minus_dst_color,
     sg::blend_factor::src_alpha, sg::blend_factor::one_minus_src_alpha,
     sg::blend_factor::dst_alpha, sg::blend_factor::one_minus_dst_alpha,
+    sg::blend_factor::constant,  sg::blend_factor::one_minus_constant,
 };
 
 // D3D12 refuses a *_color factor in the alpha equation, so alpha sweeps these.
@@ -82,6 +90,7 @@ constexpr sg::blend_factor alpha_factors[] = {
     sg::blend_factor::zero,      sg::blend_factor::one,
     sg::blend_factor::src_alpha, sg::blend_factor::one_minus_src_alpha,
     sg::blend_factor::dst_alpha, sg::blend_factor::one_minus_dst_alpha,
+    sg::blend_factor::constant,  sg::blend_factor::one_minus_constant,
 };
 
 constexpr sg::blend_op all_ops[]
@@ -90,8 +99,8 @@ constexpr sg::blend_op all_ops[]
 constexpr sg::color_channel channels[]
     = {sg::color_channel::r, sg::color_channel::g, sg::color_channel::b, sg::color_channel::a};
 
-/// The pixel `state` leaves of `source` drawn over `destination`.
-tg::vec4f blended(sg::color_target_state const& state)
+/// The pixel `state` leaves of `source` drawn over `destination` under the blend constant `k`.
+tg::vec4f blended(sg::color_target_state const& state, tg::vec4f k)
 {
     auto result = source;
     if (state.blend.has_value())
@@ -104,8 +113,8 @@ tg::vec4f blended(sg::color_target_state const& state)
             if (component.op == sg::blend_op::min || component.op == sg::blend_op::max)
                 result[c] = op_value(component.op, source[c], destination[c]);
             else
-                result[c] = op_value(component.op, source[c] * factor_value(component.source, c),
-                                     destination[c] * factor_value(component.target, c));
+                result[c] = op_value(component.op, source[c] * factor_value(component.source, c, k),
+                                     destination[c] * factor_value(component.target, c, k));
         }
     }
     for (auto c = 0; c < 4; ++c)
@@ -114,10 +123,11 @@ tg::vec4f blended(sg::color_target_state const& state)
     return result;
 }
 
-/// One column of the blend test: the target's state, and what its pixel must read.
+/// One column of the blend test: the target's state, the blend constant its draw sets, and what its pixel must read.
 struct blend_case
 {
     sg::color_target_state state;
+    tg::vec4f constant;
     tg::vec4f expected;
 };
 } // namespace
@@ -130,10 +140,10 @@ ASYNC_INVOCABLE_TEST("sg - each blend factor, op and write-mask channel leaves i
         SKIP("no compiler builds this binary's shaders into a format this context accepts");
 
     auto cases = cc::vector<blend_case>();
-    auto const add_case = [&](sg::color_target_state state)
+    auto const add_case = [&](sg::color_target_state state, tg::vec4f constant = blend_constant)
     {
         state.format = sg::pixel_format::rgba16_float;
-        cases.push_back({.state = state, .expected = blended(state)});
+        cases.push_back({.state = state, .constant = constant, .expected = blended(state, constant)});
     };
     auto const opaque = sg::blend_component{.source = sg::blend_factor::one, .target = sg::blend_factor::zero};
 
@@ -155,6 +165,13 @@ ASYNC_INVOCABLE_TEST("sg - each blend factor, op and write-mask channel leaves i
         auto const both = sg::blend_component{.source = sg::blend_factor::one, .target = sg::blend_factor::one, .op = op};
         add_case({.blend = sg::blend_state{.color = both, .alpha = both}});
     }
+
+    // The blend constant is set per draw: a second constant, set between two draws, is what the second one reads.
+    auto const constant_source
+        = sg::blend_state{.color = {.source = sg::blend_factor::constant, .target = sg::blend_factor::zero},
+                          .alpha = {.source = sg::blend_factor::constant, .target = sg::blend_factor::zero}};
+    add_case({.blend = constant_source}, tg::vec4f(0.625f, 0.125f, 0.25f, 0.5f));
+    add_case({.blend = constant_source}, blend_constant);
 
     // Each channel left out of the write mask once, with blending off.
     for (auto const c : channels)
@@ -187,6 +204,7 @@ ASYNC_INVOCABLE_TEST("sg - each blend factor, op and write-mask channel leaves i
                                                              for (auto x = 0; x < width; ++x)
                                                              {
                                                                  scope.bind_pipeline(*pipelines[x]);
+                                                                 scope.set_blend_constants(cases[x].constant);
                                                                  batch.draw(scope, x);
                                                              }
                                                          });
