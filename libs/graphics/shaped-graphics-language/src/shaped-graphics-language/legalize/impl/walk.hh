@@ -60,6 +60,11 @@ void for_each_operand(flat_entry_point const& e, flat_expr const& x, Fn&& fn)
         fn(element->buffer);
         fn(element->index);
     }
+    else if (auto const* const element = x.node.try_as<flat_element>())
+    {
+        fn(element->object);
+        fn(element->index);
+    }
     else if (auto const* const construct = x.node.try_as<flat_construct>())
     {
         if (is_known(e, construct->arguments))
@@ -115,6 +120,7 @@ void for_each_expr_of(flat_stmt const& s, Fn&& fn)
                      visit(n.end);
                  },
                  [&](flat_continue const&) {}, //
+                 [&](flat_discard const&) {},  //
                  [&](flat_once const&) {},     //
                  [&](flat_break const&) {},    //
                  [&](flat_case const& n) { visit(n.scrutinee); }, [&](flat_switch const& n) { visit(n.scrutinee); },

@@ -271,6 +271,9 @@ cc::optional<sgl::emit::impl::memory_form> sgl::emit::impl::element_form_of(chec
                                                                             check::type_id element,
                                                                             emit::target t)
 {
+    // an atomic is a 4-byte integer at offset 0 in every target's own rule
+    if (m.at(element).kind == type_kind::atomic)
+        return {};
     auto const stride = element_stride(m, element);
     if (m.builtin_type_of(element) != nullptr)
     {

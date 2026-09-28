@@ -81,24 +81,28 @@ struct sg::impl::array_plan
         /// Nothing: the code never indexes it, or the caller declared it unused and the code does not write it.
         skip,
 
-        /// Each declared element, at its declared access joined with `widen_by`.
+        /// Each declared element, at its declared access joined with `widen_by`, at `stages`.
         as_declared,
 
-        /// Every element, at `cover_access` and `cover_stages`, as for an array nobody declared.
+        /// Every element, at `cover_access` and `stages`, as for an array nobody declared.
         cover_all,
     };
 
     mode how = mode::skip;
     access_flags widen_by;
     access_flags cover_access;
-    pipeline_stage_flags cover_stages;
+
+    /// Where the pipeline's code touches the array within the op, as for a scalar binding; the op's stages without a footprint.
+    pipeline_stage_flags stages;
 };
 
 namespace sg::impl
 {
 /// How an op whose pipeline touches the array `name` as `use` meets the caller's declarations for it.
 ///
-/// `use` is empty where the pipeline's footprint is unknown, and the array is then taken as `bound_as` allows.
+/// `use` is empty where the pipeline's footprint is unknown, and the array is then taken as `bound_as` allows, at every
+/// stage of the op.
+/// That is only a hand-supplied shader blob: one that wants narrower barriers supplies a footprint.
 /// Where the declarations and the code disagree it logs once per pipeline, array and kind of mismatch, and covers both, never asserts:
 /// a hot-reloaded shader can make them disagree at any frame.
 /// The one disagreement it cannot see is per element — a declaration narrower than the code, element by element, is

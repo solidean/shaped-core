@@ -1,0 +1,30 @@
+// an atomic is memory every invocation updates in one step; each update gives the value before it
+
+@workgroup binding counters:
+    hits: atomic[uint]
+    lowest: atomic[int]
+    slots: atomic[uint][4]
+
+fun claim(){counters} -> uint => counters.hits.add(1)
+
+// a run is one invocation, so each update meets only the ones before it
+test:
+    counters.hits.store(0)
+    claim() == 0
+    claim() == 1
+    counters.hits.load() == 2
+
+test:
+    counters.lowest.store(5)
+    counters.lowest.min(-3) == 5
+    counters.lowest.max(10) == -3
+    counters.lowest.exchange(7) == 10
+    counters.lowest.subtract(2) == 7
+    counters.lowest.load() == 5
+
+test:
+    counters.slots[2].store(12)
+    counters.slots[2].bit_and(10) == 12
+    counters.slots[2].bit_or(1) == 8
+    counters.slots[2].bit_xor(3) == 9
+    counters.slots[2].load() == 10

@@ -9,18 +9,19 @@ namespace
 /// Every test of `source` run, each result that is no pass as its diagnostic, in the form `reports_of` writes.
 cc::string failures_of(cc::string_view source)
 {
-    auto const checked = check_sources(read_prelude(), source);
+    auto checked = check_sources(read_prelude(), source);
     REQUIRE(reports_of(checked) == "");
     auto files = cc::vector<sgl::check::module_file>();
     for (auto i = isize(0); i < checked.files.size(); ++i)
-        files.push_back({.file = checked.files[i], .ast = checked.asts[i]});
+        files.push_back({.file = *checked.files[i], .ast = *checked.asts[i]});
 
-    auto shown = checked;
-    shown.module.diagnostics.clear();
+    auto shown = cc::vector<sgl::check::located_diagnostic>();
     for (auto const& r : sgl::test::run_tests(checked.module, files, {.file = checked.user_file()}))
         if (!r.is_passed())
-            shown.module.diagnostics.push_back(sgl::test::diagnostic_of(checked.module, r));
-    return reports_of(shown);
+            shown.push_back(sgl::test::diagnostic_of(checked.module, r));
+    // the module is done with, so its list is what `reports_of` shows
+    checked.module.diagnostics = cc::move(shown);
+    return reports_of(checked);
 }
 } // namespace
 
@@ -92,12 +93,12 @@ cc::string marks_of(cc::string_view source)
     REQUIRE(reports_of(checked) == "");
     auto files = cc::vector<sgl::check::module_file>();
     for (auto i = isize(0); i < checked.files.size(); ++i)
-        files.push_back({.file = checked.files[i], .ast = checked.asts[i]});
+        files.push_back({.file = *checked.files[i], .ast = *checked.asts[i]});
 
     auto out = cc::string();
     for (auto t = isize(0); t < checked.module.tests.size(); ++t)
         for (auto const& s : sgl::test::run_test(checked.module, files, i32(t)).sites)
-            out.appendf("{}{} {}/{}\n", s.is_assert ? "assert " : "", checked.files[s.file].text_of(s.where), s.passed,
+            out.appendf("{}{} {}/{}\n", s.is_assert ? "assert " : "", checked.files[s.file]->text_of(s.where), s.passed,
                         s.failed);
     return out;
 }
@@ -121,7 +122,7 @@ TEST("sgl tests - one test runs alone, and a test that expects diagnostics is ju
         = check_sources(read_prelude(), "test 1 < 2\n@expect(error = \"unknown-name\")\ntest nope\ntest nope\n");
     auto files = cc::vector<sgl::check::module_file>();
     for (auto i = isize(0); i < checked.files.size(); ++i)
-        files.push_back({.file = checked.files[i], .ast = checked.asts[i]});
+        files.push_back({.file = *checked.files[i], .ast = *checked.asts[i]});
     REQUIRE(checked.module.tests.size() == 3);
     CHECK(sgl::test::run_test(checked.module, files, 0).is_passed());
     CHECK(sgl::test::run_test(checked.module, files, 1).status == sgl::test::test_status::judged_by_diagnostics);
@@ -135,10 +136,124 @@ TEST("sgl tests - a raised stop flag ends a run as stopped, and nothing is judge
                                                        "      i = i + 1\n    i < 0\n");
     auto files = cc::vector<sgl::check::module_file>();
     for (auto i = isize(0); i < checked.files.size(); ++i)
-        files.push_back({.file = checked.files[i], .ast = checked.asts[i]});
+        files.push_back({.file = *checked.files[i], .ast = *checked.asts[i]});
     auto stop = cc::atomic<bool>(true);
     auto const r = sgl::test::run_test(checked.module, files, 0, {.stop = &stop});
     // `stopped` rather than `passed`: the `@expect(.fail)` was not judged against the unfinished run
     CHECK(r.status == sgl::test::test_status::stopped);
     CHECK(!r.is_passed()); // a stopped run is no pass
+}
+
+TEST("sgl tests - an integer divisor of zero is a program error, and no expectation of a failed check passes on it")
+{
+    // Division by zero has no value on any target, so the interpreter stops rather than invent one.
+    // `@expect(.fail)` expects a false check, which this is not, so the test with it fails too.
+    auto const checked = check_sources(read_prelude(), "test:\n    let zero = 0\n    7 / zero == 0\n"
+                                                       "@expect(.fail)\ntest:\n    let zero = 0\n    7 % zero == 1\n"
+                                                       "test:\n    let n = -2147483647 - 1\n    n / -1 == n\n"
+                                                       "test:\n    let zero: uint = 0\n    (7 as uint) / zero == 0\n");
+    auto files = cc::vector<sgl::check::module_file>();
+    for (auto i = isize(0); i < checked.files.size(); ++i)
+        files.push_back({.file = *checked.files[i], .ast = *checked.asts[i]});
+    REQUIRE(checked.module.tests.size() == 4);
+    for (auto i = isize(0); i < 4; ++i)
+    {
+        auto const r = sgl::test::run_test(checked.module, files, i);
+        CHECK(r.status == sgl::test::test_status::program_error).dump("test", i);
+        CHECK(!r.is_passed()).dump("test", i);
+    }
+    CHECK(sgl::test::run_test(checked.module, files, 0).detail.contains("divided by zero"));
+    CHECK(sgl::test::run_test(checked.module, files, 2).detail.contains("most negative int"));
+}
+
+TEST("sgl tests - a maths builtin outside the domain WGSL defines it on is a program error")
+{
+    auto const checked = check_sources(read_prelude(), "test:\n    let x = -2.0\n    pow(x, 0.5) > 0.0\n"
+                                                       "test:\n    let zero = 0.0\n    pow(zero, zero) == 1.0\n"
+                                                       "test:\n    let x = 2.0\n    asin(x) > 0.0\n"
+                                                       "test:\n    let e = 1.0\n    smoothstep(e, e, 0.5) == 0.0\n"
+                                                       "test:\n    let zero = 0.0\n    atan2(zero, zero) == 0.0\n"
+                                                       "test:\n    let x = 0.5\n    clamp(x, 1.0, 0.0) == 0.0\n"
+                                                       "test:\n    let x = 5\n    clamp(x, 3, 2) == 2\n"
+                                                       "test:\n    let x = 2.0\n    pow(x, 0.5) > 1.0\n"
+                                                       "test:\n    let y = 0.0\n    atan2(y, 1.0) == 0.0\n"
+                                                       "test:\n    let x = 0.5\n    clamp(x, 1.0, 1.0) == 1.0\n");
+    auto files = cc::vector<sgl::check::module_file>();
+    for (auto i = isize(0); i < checked.files.size(); ++i)
+        files.push_back({.file = *checked.files[i], .ast = *checked.asts[i]});
+    REQUIRE(checked.module.tests.size() == 10);
+    for (auto i = isize(0); i < 7; ++i)
+        CHECK(sgl::test::run_test(checked.module, files, i).status == sgl::test::test_status::program_error).dump("test", i);
+    CHECK(sgl::test::run_test(checked.module, files, 4).detail.contains("atan2"));
+    CHECK(sgl::test::run_test(checked.module, files, 5).detail.contains("clamp"));
+    // inside the domain it is an ordinary value, and a clamp to one value is no empty range
+    for (auto i = isize(7); i < 10; ++i)
+        CHECK(sgl::test::run_test(checked.module, files, i).is_passed()).dump("test", i);
+}
+
+TEST("sgl tests - a run that reaches discard ends as discarded, which only @expect(.discard) accepts")
+{
+    // CHK-278
+    auto const checked
+        = check_sources(read_prelude(), "fun cut(a: float) -> float:\n    if a < 0.5 => discard\n    return a\n"
+                                        "test cut(0.25) == 0.25\n"
+                                        "@expect(.fail)\ntest cut(0.25) == 0.25\n"
+                                        "@expect(.discard)\ntest:\n    cut(0.25)\n"
+                                        "@expect(.discard)\ntest cut(0.75) == 0.75\n");
+    auto files = cc::vector<sgl::check::module_file>();
+    for (auto i = isize(0); i < checked.files.size(); ++i)
+        files.push_back({.file = *checked.files[i], .ast = *checked.asts[i]});
+    REQUIRE(checked.module.tests.size() == 4);
+    CHECK(sgl::test::run_test(checked.module, files, 0).status == sgl::test::test_status::discarded);
+    // a discard is no failed check
+    CHECK(sgl::test::run_test(checked.module, files, 1).status == sgl::test::test_status::discarded);
+    CHECK(sgl::test::run_test(checked.module, files, 2).is_passed());
+    // one that was to discard and ran to its end fails
+    auto const ran_through = sgl::test::run_test(checked.module, files, 3);
+    CHECK(ran_through.status == sgl::test::test_status::failed);
+    CHECK(ran_through.detail == "it was to discard, and it ran to its end");
+}
+
+TEST("sgl tests - an array index outside the array is a program error, read or written")
+{
+    // EVAL-90: no target agrees on what an index past the end does, so a correct program never has one
+    auto const checked
+        = check_sources(read_prelude(), "test:\n    let xs = [1, 2, 3]\n    let i = 3\n    xs[i] == 0\n"
+                                        "test:\n    let mut xs = [1, 2, 3]\n    let i = -1\n    xs[i] = 4\n"
+                                        "    xs[0] == 1\n"
+                                        "test:\n    let grid: int[2, 2] = [[1, 2], [3, 4]]\n    let j = 2\n"
+                                        "    grid[1, j] == 0\n"
+                                        "test:\n    let xs = [1, 2, 3]\n    let i = 2\n    xs[i] == 3\n");
+    auto files = cc::vector<sgl::check::module_file>();
+    for (auto i = isize(0); i < checked.files.size(); ++i)
+        files.push_back({.file = *checked.files[i], .ast = *checked.asts[i]});
+    REQUIRE(checked.module.tests.size() == 4);
+    for (auto i = isize(0); i < 3; ++i)
+    {
+        auto const r = sgl::test::run_test(checked.module, files, i);
+        CHECK(r.status == sgl::test::test_status::program_error).dump("test", i);
+        CHECK(r.detail.contains("out of bounds")).dump(r.detail);
+    }
+    CHECK(sgl::test::run_test(checked.module, files, 3).status == sgl::test::test_status::passed);
+}
+
+TEST("sgl tests - workgroup memory holds nothing before a store, element by element")
+{
+    // EVAL-92: no target defines what it holds first, so a read of what was never stored is a program error
+    auto const checked
+        = check_sources(read_prelude(), "@workgroup binding tile:\n    values: int[4]\n    total: int\n\n"
+                                        "test:\n    tile.values[0] = 1\n    tile.values[1] == 0\n"
+                                        "test:\n    tile.total == 0\n"
+                                        "test:\n    tile.values[2] = 5\n    tile.values[2] == 5\n");
+    auto files = cc::vector<sgl::check::module_file>();
+    for (auto i = isize(0); i < checked.files.size(); ++i)
+        files.push_back({.file = *checked.files[i], .ast = *checked.asts[i]});
+    REQUIRE(checked.module.tests.size() == 3);
+    for (auto i = isize(0); i < 2; ++i)
+    {
+        auto const r = sgl::test::run_test(checked.module, files, i);
+        CHECK(r.status == sgl::test::test_status::program_error).dump("test", i);
+        CHECK(r.detail.contains("where nothing was stored")).dump(r.detail);
+    }
+    CHECK(sgl::test::run_test(checked.module, files, 2).status == sgl::test::test_status::passed);
 }

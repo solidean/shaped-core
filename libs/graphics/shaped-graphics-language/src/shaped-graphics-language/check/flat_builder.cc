@@ -252,6 +252,11 @@ flat_stmt_id flat_builder::continue_(label_id target)
     return add_stmt(flat_continue{.target = target});
 }
 
+flat_stmt_id flat_builder::discard()
+{
+    return add_stmt(flat_discard{});
+}
+
 flat_stmt_id flat_builder::once(cc::span<flat_stmt_id const> body)
 {
     return add_stmt(flat_once{.body = stmt_list(body)});

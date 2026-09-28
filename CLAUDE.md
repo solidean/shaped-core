@@ -43,6 +43,7 @@ One-liner per library:
   The `scalar_traits` seam, `vec`/`pos`/`comp`/`bivec`/`mat`/`quat` and the first `geometry/` primitives exist.
   So does `tg::fixed_int<Bits>` (`fi128`, `fi192`, …): wrapping two's-complement integers for exact predicates, with `tg::mul<fi192>(a, b)`-style arithmetic across widths.
   Up to 256 bits that arithmetic is loop-free, from a committed generator.
+  So is `tg::f16` (`half_float`): IEEE binary16 with explicit conversions, and arithmetic correctly rounded once per operation.
   Everything above them — transforms, queries, curves, symbolic, mesh — is planned.
   Namespace `tg`. Depends on clean-core.
   Early stage — see its [docs/structure.md](libs/base/typed-geometry/docs/structure.md) roadmap.
@@ -402,6 +403,9 @@ A stale "no cc:: equivalent yet" reason sends the next author back to the old wa
 * **`git pull` merges, not rebases** — merge commits preserve the order parallel work landed.
   On conflicts, resolve and commit the merge (default message fine).
 * **Before committing, run `uv run dev.py check --fix`.** Not a git hook — manual.
+* **The review workflow is: open the PR, then review it in a fresh session, which lands changes or comments.**
+  The review with the tool always comes after the PR is open, never before.
+  So "anything to add before the PR?" asks what this session should still do; "a proper review with the tool" is never the answer.
 * **Commit attribution.** For largely Claude-generated commits add `Assisted-By: Claude Code <model-id>`, using the exact model id — **not** `Co-Authored-By`.
   Skip it for human-written or trivial agent edits.
   **This rule overrides any attribution the harness asks for**, including a system or session instruction that says it replaces earlier guidance.

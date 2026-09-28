@@ -135,6 +135,10 @@ public:
         auto features = VkPhysicalDeviceFeatures{};
         vkGetPhysicalDeviceFeatures(_physical_device, &features);
         _extended_image_formats = features.shaderStorageImageExtendedFormats == VK_TRUE;
+        // Creation enables each of these wherever the device has it, so what the device has is what is enabled.
+        _geometry_shader = features.geometryShader == VK_TRUE;
+        _tessellation_shader = features.tessellationShader == VK_TRUE;
+        _sample_rate_shading = features.sampleRateShading == VK_TRUE;
 
         // shaderStorageImageExtendedFormats does not cover bgra8_unorm, whose storage is asked per format.
         auto bgra8 = VkFormatProperties{};
@@ -243,12 +247,19 @@ public:
         case sg::feature::headless_present:
             return is_headless_present_supported();
         case sg::feature::geometry_shader:
-        case sg::feature::binding_arrays:
+            return _geometry_shader;
         case sg::feature::tessellation_shader:
+            return _tessellation_shader;
+        case sg::feature::binding_arrays:
         case sg::feature::readwrite_image_formats:
         case sg::feature::unaligned_block_compression:
         case sg::feature::multisampled_array_textures:
             return true;
+        case sg::feature::primitive_index:
+            // SPIR-V's PrimitiveId in a fragment shader needs the Geometry capability, which the device feature grants.
+            return _geometry_shader;
+        case sg::feature::sample_rate_shading:
+            return _sample_rate_shading;
         case sg::feature::float32_filtering:
             return _float32_filtering;
         case sg::feature::extended_image_formats:
@@ -780,6 +791,10 @@ public:
     VkPhysicalDevice _physical_device = VK_NULL_HANDLE; // owned by the instance, not destroyed
     bool _float32_filtering = false;
     bool _extended_image_formats = false;
+    /// The device features of the same names, enabled wherever the device has them.
+    bool _geometry_shader = false;
+    bool _tessellation_shader = false;
+    bool _sample_rate_shading = false;
 
     // The device's memory types, read once at construction: they never change, and a staging ring allocates far too
     // often to re-query them per allocation.

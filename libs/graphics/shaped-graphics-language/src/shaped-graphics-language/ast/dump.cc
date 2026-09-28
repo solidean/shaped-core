@@ -342,8 +342,9 @@ struct dumper
                 out += ")";
             },
             [&](return_expr const& n) { unary("return", n.value); }, [&](yield_expr const& n)
-            { unary("yield", n.value); }, [&](break_expr const& n) { unary("break", n.value); }, [&](continue_expr const&)
-            { out += "(continue)"; }, [&](struct_type const& n) { dump_fields("struct-type", n.fields, depth); },
+            { unary("yield", n.value); }, [&](break_expr const& n) { unary("break", n.value); },
+            [&](continue_expr const&) { out += "(continue)"; }, [&](discard_expr const&) { out += "(discard)"; },
+            [&](struct_type const& n) { dump_fields("struct-type", n.fields, depth); },
             [&](function_type const& n)
             {
                 out += "(function-type ";

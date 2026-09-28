@@ -21,6 +21,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
+import sgl_description  # noqa: E402
 import sgl_host_code  # noqa: E402
 from sgl_description import SglFile  # noqa: E402
 
@@ -209,6 +210,101 @@ def a_groups_static_sampler_is_declared_and_its_dynamic_one_gathered():
     expect_in('samplers.push_back({.name = "shadow_picked", .sampler = picked});', source, "the dynamic sampler")
     expect_not_in('.sampler = compare}', source, "a static sampler gathered as a dynamic one")
     expect_in("views.reserve(3);", source, "only views are gathered as views")
+
+
+ARRAYS = {
+    "name": "materials",
+    "inline": False,
+    "members": [
+        {"kind": "texture", "name": "albedo", "type": "texture_2d[float4]", "host_name": "materials_albedo",
+         "slot": 0, "count": 8, "texture_dimension": "tex_2d", "sample_type": "filterable_float"},
+        {"kind": "buffer", "name": "params", "type": "float4", "host_name": "materials_params", "slot": 8,
+         "count": 2, "access": "read"},
+    ],
+}
+
+
+@test
+def a_binding_array_is_a_fixed_array_of_views_gathered_as_one_binding():
+    header = sgl_host_code.emit_group("pkg", {}, "ns", FILE, ARRAYS)
+    expect_in("cc::fixed_array<sg::texture_view_2d, 8> albedo;", header, "a texture array's field")
+    expect_in("cc::fixed_array<sg::readonly_buffer_view<tg::vec4f>, 2> params;", header, "a buffer array's field")
+    source = sgl_host_code.emit_group_impl("pkg", {}, "ns", FILE, ARRAYS)
+    expect_in('{.name = "materials_albedo", .index = 0u, .count = 8u, .type = sg::binding_type::texture', source,
+              "a binding array's count")
+    expect_in("        for (auto const& element : albedo)\n"
+              "            elements.push_back(element);\n"
+              "        views.push_back({.slot = sg::binding_slot(0), .view = cc::move(elements)});\n", source,
+              "every element gathered, in order")
+    # sg keys a view by its position among the group's bindings, which is 1 here although `params` starts at register 8
+    expect_in("        views.push_back({.slot = sg::binding_slot(1), .view = cc::move(elements)});\n", source,
+              "a binding after an array keyed by its position, not its register")
+
+
+# ---- a vertex input ---------------------------------------------------------------------------------------------------
+
+MESH = {
+    "name": "mesh_vertex",
+    "edge": "vertex",
+    "members": [
+        {"name": "position", "type": "float3", "location": 0, "stream": "per_vertex", "per_instance": False},
+        {"name": "color", "type": "float4", "location": 1, "stream": "per_vertex", "per_instance": False,
+         "format": "rgba8_unorm"},
+        {"name": "material", "type": "uint", "location": 2, "stream": "per_vertex", "per_instance": False},
+    ],
+}
+
+
+@test
+def a_packed_vertex_member_is_its_bytes_on_the_host_and_its_format_in_the_layout():
+    header = sgl_host_code.emit_vertex_input("pkg", "ns", FILE, MESH)
+    # four bytes the host writes, whatever the shader reads them as
+    expect_in("cc::u32 color;", header, "a packed member's host field")
+    expect_in("cc::u32 material;", header, "a uint member's host field")
+    source = sgl_host_code.emit_vertex_input_impl("pkg", "ns", FILE, MESH)
+    expect_in(".format = sg::vertex_attribute_format::rgba8_unorm", source, "a packed member's format")
+    expect_in(".format = sg::vertex_attribute_format::u32", source, "an integer member's format, from its type")
+    expect_in(".format = sg::vertex_attribute_format::vec3f", source, "a float member's format, from its type")
+
+
+# ---- a pipeline -------------------------------------------------------------------------------------------------------
+
+# Every stage filled, and a vertex stage that draws from no vertex buffer.
+TESSELLATED = {
+    "name": "tessellated",
+    "vertex": "vs",
+    "tessellation_control": "tc",
+    "tessellation_evaluation": "te",
+    "geometry": "gs",
+    "pixel": "ps",
+    "vertex_input": "",
+    "target_set": "",
+    "targets": [],
+    "layout": ["shadow"],
+    "inline": "",
+    "open": [],
+    "settings": [],
+    "frozen": ["layout = shadow@0", "inline constants = ", "vertex input = ", "target set = ",
+               "stages = vs, tc, te, gs, ps", "features = geometry_shader, tessellation_shader"],
+}
+
+
+@test
+def a_pipeline_names_every_stage_in_pipeline_definitions_field_order():
+    entries = sgl_description.SglEntries(bindings=[(FILE, GROUP)], pipelines=[(FILE, TESSELLATED)])
+    source = sgl_host_code.emit_pipelines_impl("pkg", "ns", entries, {FILE.path: "shadow"}, {})
+    # a designated initializer follows the declaration, which is not the order a vertex passes the stages
+    fields = [".vertex = &ns::shadow.vs,", ".pixel = &ns::shadow.ps,", ".geometry = &ns::shadow.gs,",
+              ".tessellation_control = &ns::shadow.tc,", ".tessellation_evaluation = &ns::shadow.te,"]
+    positions = []
+    for f in fields:
+        expect_in(f, source, "a stage of the pipeline")
+        positions.append(source.index(f))
+    expect_equal(positions, sorted(positions), "the stages in pipeline_definition's field order")
+    expect_in('    "stages = vs, tc, te, gs, ps",\n', source, "the stages frozen, in the order a vertex passes them")
+    expect_not_in(".vertex_input", source, "a vertex stage that draws from no vertex buffer")
+    header = sgl_host_code.emit_pipelines(entries, {FILE.path: "shadow"})
+    expect_in("vs, tc, te, gs and ps, writing depth alone", header, "the stages the doc comment names")
 
 
 # ---- the runner -----------------------------------------------------------------------------------------------------

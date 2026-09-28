@@ -37,6 +37,17 @@ void append_zero(checked_module const& m, type_id type, cc::vector<scalar>& leav
         leaves.push_back({.kind = value_kind::scalar_int, .bits = 0});
         return;
     }
+    if (is_valid(type) && m.at(type).kind == type_kind::atomic)
+    {
+        append_zero(m, m.at(type).element, leaves, depth + 1);
+        return;
+    }
+    if (is_valid(type) && m.at(type).kind == type_kind::array)
+    {
+        for (auto i = 0; i < m.at(type).count; ++i)
+            append_zero(m, m.at(type).element, leaves, depth + 1);
+        return;
+    }
     for (auto const& member : members_of(m, type))
         append_zero(m, member.type, leaves, depth + 1);
 }
@@ -71,6 +82,17 @@ struct machine
 
     cc::vector<value> locals;
     cc::vector<bool> is_set;
+
+    /// One member of a `@workgroup` binding, which the run holds from its start: memory of one invocation's workgroup.
+    struct workgroup_cell
+    {
+        symbol_id binding = symbol_id::none;
+        i32 member = -1;
+        value memory;
+        /// Parallel to `memory.leaves`: nothing is defined before it is stored (CHK-292).
+        cc::vector<bool> is_written;
+    };
+    cc::vector<workgroup_cell> workgroup;
     /// Parallel to `out.buffers`: whether the run stored to that buffer, which is what the outcome keeps.
     cc::vector<bool> is_stored;
     /// The value a `leave` or a `return` under way carries.
@@ -139,8 +161,100 @@ struct machine
         return {};
     }
 
+    /// Where element `index` of an array of `type` starts among its scalars; outside it is a program error (EVAL-90).
+    flow element_offset(type_id type, value const& index, isize& offset, isize& count)
+    {
+        if (index.leaves.size() != 1 || index.leaves[0].kind != value_kind::scalar_int)
+            return type_error("an array index that is no int");
+        if (!is_valid(type) || m.at(type).kind != type_kind::array)
+            return type_error("an element of what is no array");
+        auto const& info = m.at(type);
+        auto const at = isize(index.leaves[0].as_int());
+        if (at < 0 || at >= info.count)
+            return fail(run_status::program_error,
+                        cc::format("the index {} is out of bounds of {}", at, m.name_of(type)));
+        count = leaf_count_of(m, info.element);
+        offset = at * count;
+        return {};
+    }
+
+    /// EVAL-93: the atomic's place, then the other arguments, then the update, in one step.
+    flow atomic_call(flat_expr const& x, flat_call const& c, builtins::function_record const& record, value& result)
+    {
+        auto const arguments = e.at(c.arguments);
+        if (arguments.empty() || !is_known(e, arguments[0]))
+            return type_error("an atomic call without its atomic");
+
+        // where the atomic is: an element of a buffer's scalars, or of a cell of workgroup memory
+        auto buffer = isize(-1);
+        auto where = place_ref();
+        auto offset = isize(0);
+        auto const atomic = arguments[0];
+        if (auto const* const element = e.at(atomic).node.try_as<flat_buffer_element>())
+        {
+            if (auto const f = locate(*element, e.at(atomic).type, buffer, offset); !f.is_normal())
+                return f;
+        }
+        else if (is_in_workgroup(atomic))
+        {
+            auto type = type_id::none;
+            if (auto const f = locate_place(atomic, where, offset, type); !f.is_normal())
+                return f;
+        }
+        else
+            return type_error("an atomic that is no buffer element and no workgroup memory");
+
+        auto in = cc::vector<scalar>();
+        in.push_back({});
+        for (auto k = isize(1); k < arguments.size(); ++k)
+        {
+            auto v = value();
+            if (auto const f = eval(arguments[k], v); !f.is_normal())
+                return f;
+            in.push_back_range(v.leaves);
+        }
+
+        auto const is_store = !is_valid(record.result);
+        if (where.cell >= 0)
+        {
+            auto const& cell = workgroup[where.cell];
+            if (!is_store && !cell.is_written[offset])
+                return fail(
+                    run_status::program_error,
+                    cc::format("an atomic {} of {}.{} where nothing was stored", record.name, m.at(cell.binding).name,
+                               m.at(m.bindings[m.at(cell.binding).info].members)[cell.member].name));
+            in[0] = cell.memory.leaves[offset];
+        }
+        else
+            in[0] = out.buffers[buffer].leaves[offset];
+
+        auto after = cc::vector<scalar>();
+        record.evaluate(in, after);
+        if (after.size() != 1)
+            return type_error(cc::format("an atomic '{}' whose evaluator gave no one value", record.name));
+        if (where.cell >= 0)
+        {
+            workgroup[where.cell].memory.leaves[offset] = after[0];
+            workgroup[where.cell].is_written[offset] = true;
+        }
+        else
+        {
+            out.buffers[buffer].leaves[offset] = after[0];
+            is_stored[buffer] = true;
+        }
+
+        result.type = x.type;
+        result.leaves.clear();
+        if (!is_store)
+            result.leaves.push_back(in[0]);
+        out.trace.push_back(result);
+        return {};
+    }
+
     flow call(flat_expr const& x, flat_call const& c, value& result)
     {
+        if (auto const* const record = m.builtin_function(c.intrinsic); record != nullptr && record->is_atomic)
+            return atomic_call(x, c, *record, result);
         auto args = cc::vector<value>();
         if (auto const f = eval_all(c.arguments, args); !f.is_normal())
             return f;
@@ -164,6 +278,9 @@ struct machine
                 is_typed = is_typed && leaf.kind == m.builtins->at(type).leaf_kind;
             in.push_back_range(args[k].leaves);
         }
+        if (is_typed && record->undefined_when != nullptr)
+            if (auto const why = record->undefined_when(in); !why.empty())
+                return fail(run_status::program_error, cc::format("{}, in a call of '{}'", why, record->name));
         if (is_typed)
             record->evaluate(in, result.leaves);
 
@@ -206,10 +323,15 @@ struct machine
             return type_error("a buffer the inputs do not hold");
 
         auto const count = leaf_count_of(m, element_type);
+        if (count <= 0 || out.buffers[buffer].leaves.size() % count != 0)
+            return type_error(cc::format("a buffer of {} scalars, which holds no whole number of its elements",
+                                         out.buffers[buffer].leaves.size()));
+        // EVAL-90: no target agrees on an index past the end, so a correct program never has one
         auto const at = isize(index.leaves[0].as_int());
-        if (count <= 0 || at < 0 || (at + 1) * count > out.buffers[buffer].leaves.size())
-            return type_error(
-                cc::format("the element {} of a buffer of {} scalars", at, out.buffers[buffer].leaves.size()));
+        auto const length = out.buffers[buffer].leaves.size() / count;
+        if (at < 0 || at >= length)
+            return fail(run_status::program_error,
+                        cc::format("the index {} is out of bounds of a buffer of {} elements", at, length));
         offset = at * count;
         return {};
     }
@@ -234,7 +356,7 @@ struct machine
         if (!burn())
             return {.kind = flow_kind::failed};
         ++depth;
-        auto const f = eval_node(e.at(id), result);
+        auto const f = is_in_workgroup(id) ? read_workgroup(id, result) : eval_node(e.at(id), result);
         --depth;
         return f;
     }
@@ -310,6 +432,26 @@ struct machine
             result.leaves.clear();
             result.leaves.push_back_range(cc::span<scalar const>(out.buffers[buffer].leaves)
                                               .subspan({.offset = offset, .size = leaf_count_of(m, x.type)}));
+            return {};
+        }
+        if (auto const* const element = x.node.try_as<flat_element>())
+        {
+            auto object = value();
+            if (auto const f = eval(element->object, object); !f.is_normal())
+                return f;
+            auto index = value();
+            if (auto const f = eval(element->index, index); !f.is_normal())
+                return f;
+            auto offset = isize(0);
+            auto count = isize(0);
+            if (auto const f = element_offset(e.at(element->object).type, index, offset, count); !f.is_normal())
+                return f;
+            if (offset + count > object.leaves.size())
+                return type_error("a value with fewer scalars than its type");
+            result.type = x.type;
+            result.leaves.clear();
+            result.leaves.push_back_range(
+                cc::span<scalar const>(object.leaves).subspan({.offset = offset, .size = count}));
             return {};
         }
         if (auto const* const member = x.node.try_as<flat_member>())
@@ -392,47 +534,156 @@ struct machine
         return {};
     }
 
-    flow assign(flat_expr_id place, value const& v)
+    /// Where a place lies in its local: evaluates its array indices, the one nearest the local first (EVAL-14).
+    /// The cell of workgroup memory `b` names, which starts as the run's first touch of it.
+    isize cell_of(flat_binding_member const& b)
     {
-        // the path from the place down to its local, innermost member first
-        auto path = cc::vector<i32>();
+        for (auto i = isize(0); i < workgroup.size(); ++i)
+            if (workgroup[i].binding == b.binding && workgroup[i].member == b.member)
+                return i;
+        auto const type = m.at(m.bindings[m.at(b.binding).info].members)[b.member].type;
+        auto cell = workgroup_cell{.binding = b.binding, .member = b.member, .memory = zero_value(m, type)};
+        cell.is_written.resize_to_filled(cell.memory.leaves.size(), false);
+        workgroup.push_back(cc::move(cell));
+        return workgroup.size() - 1;
+    }
+
+    /// True for a member or an element of workgroup memory, at any depth.
+    [[nodiscard]] bool is_in_workgroup(flat_expr_id id) const
+    {
+        for (auto i = 0; i < k_max_depth && is_known(e, id); ++i)
+        {
+            auto const& node = e.at(id).node;
+            if (auto const* const b = node.try_as<flat_binding_member>())
+                return b->is_workgroup;
+            if (auto const* const element = node.try_as<flat_element>())
+                id = element->object;
+            else if (auto const* const member = node.try_as<flat_member>())
+                id = member->object;
+            else
+                return false;
+        }
+        return false;
+    }
+
+    /// A read of workgroup memory, of what the run stored there and nothing else (EVAL-92).
+    flow read_workgroup(flat_expr_id id, value& result)
+    {
+        auto where = place_ref();
+        auto offset = isize(0);
+        auto type = type_id::none;
+        if (auto const f = locate_place(id, where, offset, type); !f.is_normal())
+            return f;
+        auto const& cell = workgroup[where.cell];
+        auto const count = leaf_count_of(m, type);
+        for (auto i = isize(0); i < count; ++i)
+            if (!cell.is_written[offset + i])
+                return fail(run_status::program_error,
+                            cc::format("a read of {}.{} where nothing was stored", m.at(cell.binding).name,
+                                       m.at(m.bindings[m.at(cell.binding).info].members)[cell.member].name));
+        result.type = type;
+        result.leaves.clear();
+        result.leaves.push_back_range(
+            cc::span<scalar const>(cell.memory.leaves).subspan({.offset = offset, .size = count}));
+        return {};
+    }
+
+    /// What a place is part of: a mutable local, or a cell of workgroup memory.
+    struct place_ref
+    {
+        local_id local = local_id::none;
+        isize cell = -1;
+    };
+
+    flow locate_place(flat_expr_id place, place_ref& where, isize& offset, type_id& type)
+    {
+        // the steps from the place down to its local, innermost first: a member, or an element's index expression
+        struct step
+        {
+            i32 member = -1;
+            flat_expr_id index = flat_expr_id::none;
+        };
+        auto path = cc::vector<step>();
         auto id = place;
-        auto local = local_id::none;
+        where = {};
         for (auto i = 0; i < k_max_depth && is_known(e, id); ++i)
         {
             auto const& x = e.at(id);
             if (auto const* const ref = x.node.try_as<flat_local_ref>())
             {
-                local = ref->local;
+                where.local = ref->local;
                 break;
+            }
+            if (auto const* const b = x.node.try_as<flat_binding_member>(); b != nullptr && b->is_workgroup)
+            {
+                where.cell = cell_of(*b);
+                break;
+            }
+            if (auto const* const element = x.node.try_as<flat_element>())
+            {
+                path.push_back({.index = element->index});
+                id = element->object;
+                continue;
             }
             auto const* const member = x.node.try_as<flat_member>();
             if (member == nullptr)
                 break;
-            path.push_back(member->member);
+            path.push_back({.member = member->member});
             id = member->object;
         }
-        if (!is_known(e, local) || !e.at(local).is_mut)
+        if (where.cell < 0 && (!is_known(e, where.local) || !e.at(where.local).is_mut))
             return type_error("an assignment to what is no mutable local");
 
-        auto& target = locals[index_of(local)];
-        auto type = e.at(local).type;
-        auto offset = isize(0);
+        type = where.cell >= 0 ? workgroup[where.cell].memory.type : e.at(where.local).type;
+        offset = 0;
         for (auto k = path.size() - 1; k >= 0; --k)
         {
+            if (is_valid(path[k].index))
+            {
+                auto index = value();
+                if (auto const f = eval(path[k].index, index); !f.is_normal())
+                    return f;
+                auto at = isize(0);
+                auto count = isize(0);
+                if (auto const f = element_offset(type, index, at, count); !f.is_normal())
+                    return f;
+                offset += at;
+                type = m.at(type).element;
+                continue;
+            }
             auto const members = members_of(m, type);
-            if (path[k] < 0 || path[k] >= members.size())
+            if (path[k].member < 0 || path[k].member >= members.size())
                 return type_error("an assignment to a member its type does not have");
-            for (auto i = 0; i < path[k]; ++i)
+            for (auto i = 0; i < path[k].member; ++i)
                 offset += leaf_count_of(m, members[i].type);
-            type = members[path[k]].type;
+            type = members[path[k].member].type;
         }
+        return {};
+    }
+
+    flow assign(flat_expr_id place, value const& v)
+    {
+        auto where = place_ref();
+        auto offset = isize(0);
+        auto type = type_id::none;
+        if (auto const f = locate_place(place, where, offset, type); !f.is_normal())
+            return f;
+        return write(where, offset, type, v);
+    }
+
+    flow write(place_ref const& where, isize offset, type_id type, value const& v)
+    {
+        auto& target = where.cell >= 0 ? workgroup[where.cell].memory : locals[index_of(where.local)];
         auto const count = leaf_count_of(m, type);
         if (v.leaves.size() != count || offset + count > target.leaves.size())
             return type_error("an assignment of a value of the wrong size");
         for (auto i = isize(0); i < count; ++i)
             target.leaves[offset + i] = v.leaves[i];
-        is_set[index_of(local)] = true;
+        if (where.cell >= 0)
+            for (auto i = isize(0); i < count; ++i)
+                workgroup[where.cell].is_written[offset + i] = true;
+        else
+            is_set[index_of(where.local)] = true;
         return {};
     }
 
@@ -622,10 +873,16 @@ struct machine
                 = is_known(e, a->place) ? e.at(a->place).node.try_as<flat_buffer_element>() : nullptr;
             if (element != nullptr)
                 return store_element(*element, e.at(a->place).type, a->value);
+            // EVAL-14: the place's indices, then the value
+            auto where = place_ref();
+            auto offset = isize(0);
+            auto type = type_id::none;
+            if (auto const f = locate_place(a->place, where, offset, type); !f.is_normal())
+                return f;
             auto v = value();
             if (auto const f = eval(a->value, v); !f.is_normal())
                 return f;
-            return assign(a->place, v);
+            return write(where, offset, type, v);
         }
         if (auto const* const p = s.node.try_as<flat_print>())
         {
@@ -728,6 +985,8 @@ struct machine
         }
         if (auto const* const c = s.node.try_as<flat_continue>())
             return {.kind = flow_kind::continue_, .label = c->target};
+        if (s.node.is<flat_discard>())
+            return fail(run_status::discarded, "");
         if (auto const* const once = s.node.try_as<flat_once>())
         {
             auto const f = run_body(once->body);
@@ -789,6 +1048,10 @@ cc::string_view sgl::check::to_string(run_status s)
         return "type-error";
     case run_status::uninitialized_read:
         return "uninitialized-read";
+    case run_status::program_error:
+        return "program-error";
+    case run_status::discarded:
+        return "discarded";
     case run_status::assertion_failed:
         return "assertion-failed";
     case run_status::stopped:
@@ -822,11 +1085,18 @@ outcome sgl::check::interpret(checked_module const& m,
     run.out.sites.resize_to_defaulted(e.check_sites.size());
     run.locals.resize_to_defaulted(e.locals.size());
     run.is_set.resize_to_filled(e.locals.size(), false);
-    // A test has no parameter, and its first local is one of its own.
-    if (!e.locals.empty() && e.locals[0].kind == local_kind::parameter)
+    // A test has no parameter, and its first local is one of its own; an entry point may have stage inputs alone.
+    if (is_valid(e.input) && !e.locals.empty() && e.locals[0].kind == local_kind::parameter)
     {
         run.locals[0] = inputs.parameter;
         run.is_set[0] = true;
+    }
+    // A stage input the caller did not state is zero, which is what one invocation of a draw or a dispatch would read.
+    for (auto i = isize(0); i < e.stage_inputs.size(); ++i)
+    {
+        auto const local = index_of(e.stage_inputs[i].local);
+        run.locals[local] = i < inputs.stage_inputs.size() ? inputs.stage_inputs[i] : zero_value(m, e.locals[local].type);
+        run.is_set[local] = true;
     }
 
     auto const f = run.run_body(e.body);
@@ -851,6 +1121,58 @@ outcome sgl::check::interpret(checked_module const& m,
         if (run.is_stored[i])
             stored.push_back(cc::move(run.out.buffers[i]));
     run.out.buffers = cc::move(stored);
+    return cc::move(run.out);
+}
+
+bool sgl::check::is_constant(checked_module const& m, flat_entry_point const& e, flat_expr_id id)
+{
+    if (!is_known(e, id))
+        return false;
+    auto const& x = e.at(id);
+    auto const all_constant = [&](ast::range_of<flat_expr_id> range)
+    {
+        if (!is_known(e, range))
+            return false;
+        for (auto const argument : e.at(range))
+            if (!is_constant(m, e, argument))
+                return false;
+        return true;
+    };
+    if (x.node.is<flat_literal>() || x.node.is<flat_int_literal>() || x.node.is<flat_bool_literal>()
+        || x.node.is<flat_enum_value>())
+        return true;
+    if (auto const* const construct = x.node.try_as<flat_construct>())
+        return all_constant(construct->arguments);
+    if (auto const* const member = x.node.try_as<flat_member>())
+        return is_constant(m, e, member->object);
+    if (auto const* const n = x.node.try_as<flat_not>())
+        return is_constant(m, e, n->operand);
+    if (auto const* const a = x.node.try_as<flat_and>())
+        return is_constant(m, e, a->lhs) && is_constant(m, e, a->rhs);
+    if (auto const* const o = x.node.try_as<flat_or>())
+        return is_constant(m, e, o->lhs) && is_constant(m, e, o->rhs);
+    if (auto const* const c = x.node.try_as<flat_call>())
+    {
+        auto const* const record = m.builtin_function(c->intrinsic);
+        return c->is_pure && record != nullptr && record->evaluate != nullptr && !record->is_atomic
+            && all_constant(c->arguments);
+    }
+    return false;
+}
+
+outcome sgl::check::evaluate_constant(checked_module const& m, flat_entry_point const& e, flat_expr_id id)
+{
+    auto const inputs = run_inputs();
+    auto const limits = run_limits();
+    auto run = machine{.m = m, .e = e, .inputs = inputs, .limits = limits, .fuel = limits.fuel};
+    if (!is_constant(m, e, id))
+    {
+        run.type_error("an expression that is no constant");
+        return cc::move(run.out);
+    }
+    auto result = value();
+    if (run.eval(id, result).is_normal())
+        run.out.result = cc::move(result);
     return cc::move(run.out);
 }
 

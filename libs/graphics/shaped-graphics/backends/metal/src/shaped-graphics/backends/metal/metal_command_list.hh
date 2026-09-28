@@ -181,6 +181,10 @@ private:
     void raster_bind_group(int group_index, binding_group const& group) override;
     void raster_bind_vertex_buffers(int first_slot, cc::span<vertex_buffer_view const> views) override;
     void raster_bind_index_buffer(index_buffer_view const& view) override;
+    void raster_declare_array_buffer_access(cc::string_view binding_name,
+                                            cc::span<array_buffer_access const> elements) override;
+    void raster_declare_array_texture_access(cc::string_view binding_name,
+                                             cc::span<array_texture_access const> elements) override;
     void raster_set_viewport(viewport const& vp) override;
     void raster_set_scissor(tg::aabb2i const& rect) override;
     void raster_set_stencil_reference(u32 reference) override;
@@ -240,17 +244,19 @@ private:
     ///
     /// **`_group_arrays` is the one that must be cleared rather than merely should.**
     /// A stale entry in the other three costs one redundant declare, which folds into a barrier already being
-    /// emitted; a stale array binding is an assertion failure at the next draw.
+    /// emitted; a stale array binding lets a draw's declaration name an array no group of its scope binds.
     void clear_bound_groups();
 
-    /// Declare what the pending `declare_array_*_access` calls named, and clear them.
+    /// Declare what one bind point's pending `declare_array_*_access` calls named, and clear them.
     ///
-    /// An array binding is the one thing a dispatch cannot infer, so this is the caller's declaration being applied
+    /// An array binding is the one thing an op cannot infer, so this is the caller's declaration being applied
     /// rather than a derived one, met with what `footprint` says the code does as sg::impl::plan_array_declarations decides.
-    /// `pipeline` is the bound compute or raytracing pipeline, which a mismatch is logged against.
+    /// `pipeline` is the bound pipeline, which a mismatch is logged against.
     void declare_array_accesses(sg::impl::pipeline_footprint const* footprint,
                                 void const* pipeline,
-                                sg::pipeline_stage_flags op_stages);
+                                sg::pipeline_stage_flags op_stages,
+                                cc::vector<array_buffer_declare>& buffer_declares,
+                                cc::vector<array_texture_declare>& texture_declares);
 
     /// Patch the inline-constants shadow, for whichever pipeline kind is bound.
     ///
@@ -436,9 +442,13 @@ private:
     cc::vector<sg::tlas_handle> _group_tlases[sg::max_binding_groups];
     cc::vector<metal_binding_group::array_binding> _group_arrays[sg::max_binding_groups];
 
-    /// The array declares recorded since the last dispatch or draw, applied by `declare_array_accesses`.
+    /// The array declares recorded since the last dispatch, applied by `declare_array_accesses`.
     cc::vector<array_buffer_declare> _pending_array_buffer_declares;
     cc::vector<array_texture_declare> _pending_array_texture_declares;
+
+    /// The same for the next draw, kept apart as dx12 and vulkan keep theirs, and dropped when the scope closes.
+    cc::vector<array_buffer_declare> _pending_raster_array_buffer_declares;
+    cc::vector<array_texture_declare> _pending_raster_array_texture_declares;
 
     /// Counted for `barriers_emitted`, incremented where a barrier actually reaches an encoder.
     /// A pass reopen counts as one too: it is the barrier, for a dependency the encoder cannot name.

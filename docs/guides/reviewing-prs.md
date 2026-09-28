@@ -318,6 +318,23 @@ hand-writing bindings is a very uncommon escape hatch. part of sgl's purpose is 
 
 Name the default's exposure — which paths leave it unset — before offering to change its type or its value.
 
+### A shader does not pay for an edge case no program reaches
+
+Where targets disagree on a value no correct shader produces, SGL leaves it undefined, and the interpreter reports it as a program error.
+It never defines a result that some target has to buy with extra instructions on every execution.
+A design review recommended WGSL's defined integer division by zero on every target, a compare and a select per division on HLSL and MSL, so that the interpreter would predict the GPU exactly:
+
+```raw
+we usually write our programs to avoid those values. so an unconditional pessimization for literally no gain in practice is what makes A unattractive. so we define it "undefined" and "program error" under test/interpreter.
+```
+
+The same review then chose the same way for an out-of-bounds array index, with no clamp, and for workgroup memory read before it is written, with no zeroing prologue.
+In the maintainer's words, "shaders are NOT a place where we can give up performance nilly-willy".
+The checking goes elsewhere: the interpreter reports the program error in a `test`, and a debug build can check live shaders through the logging machinery the incubator plans.
+**Portability is still not optional.**
+A construct that is missing on some target is lowered or feature-gated, never left target-dependent; this rule covers only a value no program should produce.
+Price a defined-everywhere option by what every correct program pays for it, not by what it buys the rare incorrect one.
+
 ### "No callers in the repo" is not evidence of dead code
 
 A symbol in an exported header is reachable by consumers this tree does not contain; an unused-looking member there wants its *correctness* checked, not its existence questioned.

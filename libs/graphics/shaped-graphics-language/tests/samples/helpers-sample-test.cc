@@ -47,7 +47,7 @@ TEST("sgl samples - helpers checks without a diagnostic, and every call is gone 
             if (auto const* const call = x.node.try_as<flat_call>())
                 CHECK(sgl::is_valid(call->intrinsic));
         auto const core = legalize(m, e);
-        CHECK(!find_core_violation(core).has_value());
+        CHECK(!find_core_violation(m, core).has_value());
     }
 
     // `to_clip` reads the binding, and the entry point that calls it lists it
@@ -187,7 +187,9 @@ TEST("sgl samples - the pipeline is total over helpers: every truncation checks,
     auto const prelude = read_prelude();
     auto const source = read_helpers();
     // A prime stride cuts through every kind of token over the length of the file.
-    for (auto length = isize(0); length < source.size(); length += 7)
+    // Each length checks against the whole prelude, so the default run takes a coarser one.
+    auto const stride = nx::is_thorough() ? 7 : 31;
+    for (auto length = isize(0); length < source.size(); length += stride)
     {
         auto const checked = check_sources(prelude, cc::string_view(source).subview({.offset = 0, .size = length}));
         auto const& m = checked.module;
@@ -202,7 +204,7 @@ TEST("sgl samples - the pipeline is total over helpers: every truncation checks,
         for (auto const& e : m.entry_points)
         {
             auto const core = legalize(m, e);
-            CHECK(!find_core_violation(core).has_value());
+            CHECK(!find_core_violation(m, core).has_value());
             (void)sgl::emit::emit_entry_point(m, core, sgl::emit::target::wgsl);
         }
     }

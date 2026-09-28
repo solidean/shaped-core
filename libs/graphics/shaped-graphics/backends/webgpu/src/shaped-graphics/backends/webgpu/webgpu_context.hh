@@ -128,11 +128,16 @@ public:
             return _float32_filtering;
         case sg::feature::extended_image_formats:
             return _extended_image_formats;
+        case sg::feature::sample_rate_shading:
+            // `@builtin(sample_index)` and `@interpolate(…, sample)` are core WGSL.
+            return true;
         case sg::feature::raytracing:
         case sg::feature::geometry_shader:
         case sg::feature::tessellation_shader:
         case sg::feature::binding_arrays:
         case sg::feature::multisampled_array_textures:
+        case sg::feature::primitive_index:
+            // `primitive-index` is a WebGPU extension the emdawnwebgpu this builds against does not request.
             return false;
         case sg::feature::unaligned_block_compression:
             // Lifted by `texture-compression-unaligned`, which the emdawnwebgpu this builds against does not offer.

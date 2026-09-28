@@ -186,27 +186,47 @@ void sgl::builtins::register_scalar_math(registry& r)
     r.add_comment("// float");
     add_infix(r, "*", "multiply", "float", "float", "float", multiply);
     add_infix(r, "/", "divide", "float", "float", "float", divide);
+    add_operator(r, "%", "remainder", "float", "float", "float", remainder_floats, float_remainder());
     add_infix(r, "+", "add", "float", "float", "float", add);
     add_infix(r, "-", "subtract", "float", "float", "float", subtract);
     add_negate(r, "negate", "float", negate);
 
-    r.add_comment("// int: division is left out until the language says what dividing by zero is");
+    r.add_comment("// int: `/` and `%` truncate toward zero, and a zero divisor has no value on any target");
+    // WGSL folds an int of constants exactly, so a constant outside the ints is refused rather than wrapped (CHK-312)
+    auto const constant_rule = [&](undefined_check unrepresentable, judged_operand judged = judged_operand::none)
+    {
+        r.functions.back().unrepresentable_when_constant = unrepresentable;
+        r.functions.back().judged_last = judged;
+    };
     add_infix(r, "*", "multiply_int", "int", "int", "int", multiply_int);
+    constant_rule(product_unrepresentable);
+    add_infix(r, "/", "divide_int", "int", "int", "int", divide_integers, integer_division_undefined);
+    constant_rule(nullptr, judged_operand::divisor);
+    add_infix(r, "%", "remainder_int", "int", "int", "int", remainder_integers, integer_division_undefined);
+    constant_rule(nullptr, judged_operand::divisor);
     add_infix(r, "+", "add_int", "int", "int", "int", add_int);
+    constant_rule(sum_unrepresentable);
     add_infix(r, "-", "subtract_int", "int", "int", "int", subtract_int);
+    constant_rule(difference_unrepresentable);
     add_negate(r, "negate_int", "int", negate_int);
+    constant_rule(negation_unrepresentable);
     add_function(r, "abs", {"x", "int"}, "int", abs_int);
+    constant_rule(negation_unrepresentable);
     add_function(r, "min", {"a", "int", "b", "int"}, "int", min_int);
     add_function(r, "max", {"a", "int", "b", "int"}, "int", max_int);
-    add_function(r, "clamp", {"x", "int", "low", "int", "high", "int"}, "int", clamp_int);
+    add_function(r, "clamp", {"x", "int", "low", "int", "high", "int"}, "int", clamp_int, {}, {}, clamp_undefined);
 
-    r.add_comment("// uint: division is left out, as it is for int");
+    r.add_comment("// uint: a zero divisor has no value, as for int");
     add_infix(r, "*", "multiply_uint", "uint", "uint", "uint", multiply_uint);
+    add_infix(r, "/", "divide_uint", "uint", "uint", "uint", divide_integers, integer_division_undefined);
+    constant_rule(nullptr, judged_operand::divisor);
+    add_infix(r, "%", "remainder_uint", "uint", "uint", "uint", remainder_integers, integer_division_undefined);
+    constant_rule(nullptr, judged_operand::divisor);
     add_infix(r, "+", "add_uint", "uint", "uint", "uint", add_uint);
     add_infix(r, "-", "subtract_uint", "uint", "uint", "uint", subtract_uint);
     add_function(r, "min", {"a", "uint", "b", "uint"}, "uint", min_uint);
     add_function(r, "max", {"a", "uint", "b", "uint"}, "uint", max_uint);
-    add_function(r, "clamp", {"x", "uint", "low", "uint", "high", "uint"}, "uint", clamp_uint);
+    add_function(r, "clamp", {"x", "uint", "low", "uint", "high", "uint"}, "uint", clamp_uint, {}, {}, clamp_undefined);
 
     r.add_comment("// comparisons, of float, of int and of uint");
     comparison const comparisons[] = {

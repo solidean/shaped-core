@@ -17,8 +17,11 @@ The worked examples are WGSL, since it is the strictest target: no `do … while
 * **LEGAL-4** `continue` names the innermost enclosing loop, and no `once` stands between the two ([why](why/legalization.md#legal-4)).
 * **LEGAL-50** A `switch` may stand between them: every target takes a `continue` inside one as the enclosing loop's, WGSL included ([why](why/legalization.md#legal-50)).
 * **LEGAL-5** `return` is legal at any depth: it is the exit of the root block.
+* **LEGAL-54** `discard` is legal at any depth, and no pass moves anything across it: it ends the invocation, not a construct around it.
 * **LEGAL-6** The right operand of `and` / `or` has no effect ([why](why/legalization.md#legal-6)).
 * **LEGAL-7** The `end` of a `for` has no effect and reads no mutable local and no buffer element, since a target evaluates it before every iteration.
+  It calls no builtin that takes derivatives either: after a divergent `break`, that re-test runs in part of a quad.
+* **LEGAL-55** An assignment whose place has an index with an effect has a value without one, since a target may write the value's effect first (EVAL-14).
 * **LEGAL-8** A tree that is core already is left as it is.
 * **LEGAL-9** An emitter refuses a tree that is not core with the error `not-core`, whose detail names the first violation; it never asserts.
 * **LEGAL-53** (V0) A core tree holds no `check`: each goes with its body, first, since no target writes a check or an `assert` (EVAL-75).
@@ -106,6 +109,7 @@ The rules run cheapest first, and each costs what its line says.
 * **LEGAL-17** (E2) An operand is left unpinned when it has no effect AND the moved statements assign no local it reads and store to no buffer it reads an element of.
 * **LEGAL-18** So a literal, an immutable local and a member of one are never pinned, and a read of a `var` that the block assigns always is.
 * **LEGAL-51** (E2) An assignment to a buffer element lowers the element's index before its value, and pins the index into a `let` when the value's moved statements could change it (EVAL-14).
+  An index with an effect is pinned too wherever the value has one, in an element of a local or of workgroup memory as well, which is what LEGAL-55 asks.
 * **LEGAL-19** (E3) `and` / `or` whose right operand moved statements, or has an effect, is an `if` over a `var`; any other stays `&&` / `||`.
   It costs one `var` and one `if`.
 * **LEGAL-20** (E4) A `while` whose condition moved statements is a `loop` that starts with them and with `if not c { break }`.

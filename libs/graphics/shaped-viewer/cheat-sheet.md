@@ -681,7 +681,7 @@ m.pin_buffer(raw_view) -> sg::bindless_element_handle          // the same for t
 m.lock() / unlock() / is_locked()           // refuse acquires while a snapshot is bound — the manual pair
 m.freeze() -> sv::bound_resources           // RAII: locks, snapshots, unlocks when it dies. SEVERAL per epoch are fine
 bound.group() / bound.layout()              // -> the group to bind, and the layout a pipeline composes it as one of its groups
-bound.elements(table)                       // -> span<u32 const> — this epoch's acquired indices, for declare_array_*_access (which dispatch ASSERTS on)
+bound.elements(table)                       // -> span<u32 const> — this epoch's acquired indices, for declare_array_*_access (an undeclared array the code indexes LOGS and is barriered whole)
 bound.declare_raytracing_access(cmd)        // declares EVERY declared table for the next dispatch_rays, empty ones included
 m.bindless_layout()                         // -> the same layout, without taking a snapshot
 m.has_table(table) / m.table_capacity(table)

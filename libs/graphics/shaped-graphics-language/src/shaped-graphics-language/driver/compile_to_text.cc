@@ -23,7 +23,7 @@ bool is_reached(check::checked_module const& m, check::flat_entry_point const& l
         auto const* const b = x.node.try_as<check::flat_binding_member>();
         if (b == nullptr || b->binding != binding)
             continue;
-        auto const is_resource = !info.is_inline && check::is_resource(m.at(members[b->member].type).kind);
+        auto const is_resource = !info.is_inline && m.takes_slots(members[b->member].type);
         if ((is_resource ? b->member : -1) == member)
             return true;
     }
@@ -48,6 +48,9 @@ cc::vector<interface_binding> interface_of(check::checked_module const& m,
     for (auto const id : legal.bindings)
     {
         auto const& s = m.at(id);
+        // workgroup memory takes no group, and no host binds it
+        if (m.bindings[s.info].is_workgroup)
+            continue;
         auto const is_inline = m.bindings[s.info].is_inline;
         auto const described = driver::impl::describe_binding(m, s);
         if (is_inline || described.block_slot == 0)
@@ -71,6 +74,7 @@ cc::vector<interface_binding> interface_of(check::checked_module const& m,
                               .kind = member.kind,
                               .group = group,
                               .slot = member.slot,
+                              .count = member.count,
                               .is_used = is_reached(m, legal, id, i32(i)),
                               .access = member.access,
                               .texture_dimension = member.texture_dimension,
@@ -110,7 +114,7 @@ cc::result<sgl::emitted_source, cc::string> sgl::compile_to_text(text_request co
     {
         auto held = cc::string();
         for (auto const& e : m.entry_points)
-            held.appendf("{}{} '{}'", held.empty() ? "" : ", ", emit::impl::stage_name(e.entry_stage), e.name);
+            held.appendf("{}{} '{}'", held.empty() ? "" : ", ", check::stage_name(e.entry_stage), e.name);
         return cc::error(cc::format("{}: error: no entry point named '{}' (the source holds: {})\n", request.source_name,
                                     request.entry_point, held.empty() ? cc::string_view("none") : cc::string_view(held)));
     }
@@ -118,8 +122,8 @@ cc::result<sgl::emitted_source, cc::string> sgl::compile_to_text(text_request co
     auto const& e = m.entry_points[index];
     if (request.stage != check::stage::none && e.entry_stage != request.stage)
         return cc::error(cc::format("{}: error: entry point '{}' is a {} entry point, and a {} one was asked for\n",
-                                    request.source_name, e.name, emit::impl::stage_name(e.entry_stage),
-                                    emit::impl::stage_name(request.stage)));
+                                    request.source_name, e.name, check::stage_name(e.entry_stage),
+                                    check::stage_name(request.stage)));
 
     // The check pass writes the structured form, and a target prints the core form.
     auto const legal = check::legalize(m, e);

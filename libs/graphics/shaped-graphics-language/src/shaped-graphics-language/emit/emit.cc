@@ -123,7 +123,8 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
     if (t == target::wgsl)
     {
         auto const never = check::feature_set(check::feature::binding_arrays)
-                         | check::feature::multisampled_array_textures | check::feature::raytracing;
+                         | check::feature::multisampled_array_textures | check::feature::raytracing
+                         | check::feature::geometry_shader | check::feature::tessellation_shader;
         for (auto i = isize(0); i < check::k_feature_count; ++i)
             if (e.features.has(check::feature(i)) && never.has(check::feature(i)))
                 result.errors.push_back({.kind = error_kind::target_lacks_feature,
@@ -132,6 +133,17 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
                                                               check::k_feature_names[i])});
         if (!result.errors.empty())
             return result;
+    }
+
+    // EMIT-122: Metal has no geometry stage, and its tessellation is shaped otherwise: a compute kernel writes the factors
+    if (t == target::msl
+        && (e.features.has(check::feature::geometry_shader) || e.features.has(check::feature::tessellation_shader)))
+    {
+        result.errors.push_back({.kind = error_kind::target_lacks_feature,
+                                 .symbol = e.function,
+                                 .detail = cc::format("{} is a {} stage, which Metal does not have", e.name,
+                                                      check::stage_name(e.entry_stage))});
+        return result;
     }
 
     auto plan = impl::make_plan(m, e, t);

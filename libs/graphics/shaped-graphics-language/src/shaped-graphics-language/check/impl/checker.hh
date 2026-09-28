@@ -17,9 +17,9 @@ enum class number_class : u8
 {
     /// A decimal literal with a DOT or an exponent and no suffix.
     plain_float,
-    /// Decimal digits and nothing else.
+    /// Decimal digits, or hexadecimal or binary ones behind `0x` or `0b`, and nothing else.
     plain_integer,
-    /// A prefix, a suffix or a `p` exponent: spellings whose meaning needs literal types.
+    /// A suffix or a `p` exponent: spellings whose meaning needs literal types.
     other,
 };
 
@@ -283,6 +283,8 @@ struct checker
     /// The functions of each struct's and enum's type scope, keyed by the index of the type's symbol, then by name.
     /// Members are declared with their type, and extensions once every file is declared (CHK-233, CHK-237).
     cc::map<i32, cc::map<cc::string, cc::vector<symbol_id>>> type_scopes;
+    /// The types `resource_type` and `buffer_type` interned, by spelling, so a mention looks up only its equals.
+    cc::map<cc::string, cc::vector<type_id>> interned_types;
     cc::vector<pending_extension> pending_extensions;
     /// Integer literals that do not fit an `int`, judged once every literal has met the type it converts to (CHK-61).
     cc::vector<wide_literal> wide_literals;
@@ -292,10 +294,14 @@ struct checker
     /// The symbols in compilation, outermost first, which is the loop a dependency cycle names.
     cc::vector<symbol_id> compiling;
     cc::vector<function_notes> notes;
+    /// Parallel to the registry's functions: the prelude symbol declaring each, filled before any tree is flattened.
+    cc::vector<symbol_id> symbol_of_builtin;
     /// Every call of a function that is no `@builtin`, in the order the bodies were checked.
     cc::vector<call_edge> calls;
     /// The object `check_index` is checking right now: the one place a buffer may stand as an expression.
     ast::expr_id subscripted = ast::expr_id::none;
+    /// The index into a binding array `check_index` is checking right now: the one place `nonuniform i` may stand.
+    ast::expr_id binding_index = ast::expr_id::none;
     /// The arguments of the call being checked, which a texture, an image or a sampler may stand as (CHK-206).
     cc::vector<ast::expr_id> handed;
     /// Parallel to `out.tests`: what a test in a function body sees of that function, and the function.
@@ -416,16 +422,65 @@ struct checker
     [[nodiscard]] bool is_int3(type_id type) const;
     /// The stages a `@stages` attribute names, as `function_info::stages`; every stage without one or after a bad one.
     [[nodiscard]] u8 stages_of(i32 file, ast::attribute const* a);
+    [[nodiscard]] interpolation interpolation_of(i32 file, ast::attribute const* a);
     /// The grid of a `@compute` attribute; `{1, 1, 1}` without one, and after a bad argument it reports.
     [[nodiscard]] cc::fixed_array<i32, 3> workgroup_of(i32 file, ast::attribute const* a);
-    /// The name of a `@stream(name)`; empty without one, and after a bad argument it reports.
-    [[nodiscard]] cc::string stream_of(i32 file, ast::attribute const* a);
+    /// `@geometry(max_vertices = N)`'s `N`, from 1 to 256; 1 after a bad argument, which it reports (CHK-301).
+    [[nodiscard]] i32 max_vertices_of(i32 file, ast::attribute const& a);
+    struct tessellation_mode
+    {
+        tessellation_partitioning partitioning = tessellation_partitioning::integer;
+        bool is_clockwise = true;
+    };
+    /// `@tessellation_control(partitioning = …, winding = …)`, both named (CHK-304).
+    [[nodiscard]] tessellation_mode tessellation_of(i32 file, ast::attribute const& a);
+    /// `point_stream[T]`, `line_stream[T]` and `triangle_stream[T]` in a type position (CHK-302).
+    [[nodiscard]] type_id resolve_stream(i32 file, ast::expr_id expr, ast::index const& node, function_scope const* scope);
+    /// CHK-303: `s.emit(v)` or `s.end_strip()` on a geometry stage's stream, which `check_dot_call` hands on.
+    type_id check_stream_call(function_scope& scope, ast::expr_id id, ast::call const& call, type_id stream);
+    /// CHK-301 to CHK-306: an entry point of the geometry or a tessellation stage, which `judge_entry_point` hands on.
+    void judge_primitive_stage(symbol_id id, cc::function_ref<void(cc::string_view)> invalid);
+    /// The one name of a `@stream(name)` or a `@sampler(name)`; empty without one, and after a bad argument it reports.
+    [[nodiscard]] cc::string name_argument_of(i32 file, ast::attribute const* a);
     /// The members of a struct or a binding, collected locally and appended whole so the range stays contiguous.
     /// A `@pixel struct`'s members are targets, so their attributes may be a target's settings.
+    /// A `@workgroup` binding's members are memory of the workgroup: values, arrays among them, and never a resource.
     [[nodiscard]] ast::range_of<member_info> compile_members(i32 file,
                                                              ast::range_of<ast::decl_id> members,
                                                              bool is_struct,
-                                                             bool is_target_struct = false);
+                                                             bool is_target_struct = false,
+                                                             bool is_vertex_struct = false,
+                                                             bool is_workgroup = false);
+    /// The bytes a value of `type` takes in workgroup memory, laid out as WGSL lays out its workgroup variables.
+    [[nodiscard]] i32 workgroup_size_of(type_id type) const;
+    /// A `@workgroup` binding, whose members a shader writes and a test holds without listing it (CHK-292).
+    [[nodiscard]] bool is_workgroup_binding(symbol_id id) const
+    {
+        return is_valid(id) && out.at(id).kind == symbol_kind::binding && out.at(id).info >= 0
+            && out.bindings[out.at(id).info].is_workgroup;
+    }
+    /// A resource, or an array or a struct holding one at any depth.
+    [[nodiscard]] bool holds_resource(type_id type) const;
+    /// An atomic, or an array of them.
+    [[nodiscard]] bool holds_atomic(type_id type) const;
+    /// CHK-291: the path from `type` down to the first array it holds, through struct members, as `.corners: float2[3]`.
+    /// Empty when it holds none; a tessellation factor member is skipped, since it is an array by design (CHK-305).
+    [[nodiscard]] cc::string array_path(type_id type) const;
+    /// CHK-291: refuses each array a struct crossing a stage edge holds, reported at `where` of `file`.
+    void judge_edge_arrays(i32 file, source_span where, type_id type);
+    /// `atomic[uint]` and `atomic[int]` in a type position.
+    [[nodiscard]] type_id resolve_atomic(i32 file, ast::expr_id expr, ast::index const& node, function_scope const* scope);
+    /// CHK-297: an expression of an atomic's type, which only a builtin's argument may be.
+    [[nodiscard]] bool judge_atomic_use(i32 file, ast::expr_id id, type_id type);
+    /// What every target gives a workgroup of memory: WebGPU's default limit, and vulkan's required minimum.
+    static constexpr i32 k_portable_workgroup_bytes = 16384;
+    /// A `@vertex struct` member's `@format(.case)`: the case's name, checked against the member's type (CHK-275).
+    [[nodiscard]] cc::string vertex_format_of(i32 file, ast::attribute const* a, type_id member_type);
+    /// A `@pixel struct` member's `@depth` or `@sample_mask`, checked against its type (CHK-276).
+    [[nodiscard]] pixel_output pixel_output_of(i32 file,
+                                               ast::range_of<ast::attribute> attributes,
+                                               type_id member_type,
+                                               cc::string_view name);
     /// The type an expression in a type position names; the error type when it names none.
     /// Inside a body, `scope` holds the locals, which hide a module-level type of their name.
     [[nodiscard]] type_id resolve_type(i32 file, ast::expr_id expr, function_scope const* scope = nullptr);
@@ -438,6 +493,17 @@ struct checker
     [[nodiscard]] type_id buffer_type(type_id element, bool is_mut);
     /// `buffer[T]` in a type position, which is the `index` node `buffer` heads.
     [[nodiscard]] type_id resolve_buffer(i32 file, ast::expr_id expr, ast::index const& node, function_scope const* scope);
+    /// `T[N]` and `T[a, b]` in a type position; the caller has ruled out `buffer` and every resource.
+    [[nodiscard]] type_id resolve_array(i32 file, ast::expr_id expr, ast::index const& node, function_scope const* scope);
+    /// The interned `element[count]`, spelled outermost first.
+    [[nodiscard]] type_id array_type(type_id element, i32 count);
+    /// Whether `expr` in a type position names a complete type, so that a group applied to it makes an array of it.
+    /// Reports nothing, so a caller may still read the group as something else.
+    [[nodiscard]] bool is_type_name(i32 file, ast::expr_id expr) const;
+    /// An array's length as written: an int literal or a `const`; none for anything else.
+    [[nodiscard]] cc::optional<i32> constant_count(i32 file, ast::expr_id expr);
+    /// A checked index's value when it is an int literal or names a `const`; none for anything else.
+    [[nodiscard]] cc::optional<i32> constant_index(i32 file, ast::expr_id expr) const;
     /// A texture, image or sampler type, interned like `buffer_type`; `info` needs no `spelled`.
     [[nodiscard]] type_id resource_type(type_info info);
     /// The resource type a bare name in a type position names — a depth texture or a sampler — and `none` otherwise.
@@ -449,7 +515,21 @@ struct checker
     /// The settings of a `sampler name:` block; a setting that is wrong is reported and left at its default.
     [[nodiscard]] sampler_state compile_sampler(i32 file, ast::sampler_decl const& s);
     /// Reports a call that hands over an `@unfilterable` texture member together with a sampler member that filters.
-    void judge_filtering(i32 file, source_span call, cc::span<written_argument const> arguments);
+    /// The sampler a sampling call reads against its texture: filtering (CHK-210, CHK-281), and a `@sampler` supplied
+    /// where the call names none (CHK-279).
+    void judge_filtering(i32 file, ast::expr_id id, source_span call, cc::span<written_argument const> arguments);
+    /// CHK-280: a texel offset and a gather's component are constants, and a compare's level is the literal 0.0.
+    void judge_constant_arguments(i32 file, ast::expr_id id);
+    void judge_offset_range(i32 file, ast::expr_id expr);
+    void index_builtin_symbols();
+    /// CHK-282: every barrier and every call that takes derivatives stands where all invocations of its group arrive.
+    void judge_uniformity(flat_entry_point const& structured);
+    /// CHK-270, CHK-311 and CHK-312: every constant of the tree folded, and what WGSL would refuse of it reported.
+    void judge_constants(flat_entry_point const& structured);
+    /// The prelude symbol that declares `id`; `none` for a record no declaration names.
+    [[nodiscard]] symbol_id symbol_declaring(builtin_id id) const;
+    /// A literal, an enum case, a `const`, or a construction of those: what a target takes where it takes no value.
+    [[nodiscard]] bool is_constant_argument(i32 file, ast::expr_id expr) const;
     /// A builtin's parameter type, where an image names the texel it reads or writes: `out image_2d[float4]`.
     [[nodiscard]] type_id resolve_pattern_type(i32 file, ast::expr_id expr);
     /// True where an argument of type `argument` may stand for a parameter of type `parameter` (CHK-70, CHK-207).
@@ -610,6 +690,10 @@ struct checker
     type_id resolve_literal(function_scope& scope, ast::expr_id expr, type_id to, i32 literal);
     /// `expr` where the type `to` is expected, which a literal converts to (CHK-82); reports a value of another type.
     type_id check_expected(function_scope& scope, ast::expr_id expr, type_id to, cc::string_view what = {});
+    /// A square literal: of the array type `to` where one is expected, and of its first element's type otherwise.
+    type_id check_array_literal(function_scope& scope, ast::expr_id expr, type_id to);
+    /// `T[N].filled(v)`, which `check_dot_call` hands over once its object names an array type.
+    type_id check_filled(function_scope& scope, ast::expr_id id, ast::call const& call);
     /// Gives each literal argument of a chosen call the type of the parameter it fills.
     void commit_literals(function_scope& scope,
                          call_arguments const& arguments,

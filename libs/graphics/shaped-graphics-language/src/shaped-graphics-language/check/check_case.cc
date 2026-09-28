@@ -19,7 +19,8 @@ bool is_jump(ast::file_ast const& ast, ast::expr_id id)
     if (!ast::is_valid(id))
         return false;
     auto const& e = ast.at(id);
-    return e.node.is<ast::return_expr>() || e.node.is<ast::break_expr>() || e.node.is<ast::continue_expr>();
+    return e.node.is<ast::return_expr>() || e.node.is<ast::break_expr>() || e.node.is<ast::continue_expr>()
+        || e.node.is<ast::discard_expr>();
 }
 } // namespace
 

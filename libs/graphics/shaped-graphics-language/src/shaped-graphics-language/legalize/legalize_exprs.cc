@@ -1,5 +1,6 @@
 #include <clean-core/common/utility.hh>
 #include <clean-core/string/format.hh>
+#include <shaped-graphics-language/builtins/registry.hh>
 #include <shaped-graphics-language/legalize/core.hh>
 #include <shaped-graphics-language/legalize/impl/legalizer.hh>
 #include <shaped-graphics-language/legalize/impl/walk.hh>
@@ -85,6 +86,18 @@ struct assigned_locals
                 buffers.push_back(buffer_of(e, *element));
                 return;
             }
+            // workgroup memory is written where it stands, as a buffer is
+            if (auto const* const b = x.node.try_as<flat_binding_member>(); b != nullptr && b->is_workgroup)
+            {
+                buffers.push_back({.binding = b->binding, .member = b->member});
+                return;
+            }
+            // an array's element is part of the local that holds the array
+            if (auto const* const element = x.node.try_as<flat_element>())
+            {
+                id = element->object;
+                continue;
+            }
             auto const* const member = x.node.try_as<flat_member>();
             if (member == nullptr)
                 return;
@@ -126,6 +139,10 @@ bool reads_any(flat_entry_point const& e, flat_expr_id id, assigned_locals const
         for (auto const b : assigned.buffers)
             if (b == buffer_of(e, *element))
                 return true;
+    if (auto const* const member = x.node.try_as<flat_binding_member>(); member != nullptr && member->is_workgroup)
+        for (auto const b : assigned.buffers)
+            if (b == buffer_ref{.binding = member->binding, .member = member->member})
+                return true;
     auto result = false;
     for_each_operand(e, x, [&](flat_expr_id operand) { result = result || reads_any(e, operand, assigned, depth + 1); });
     return result;
@@ -138,8 +155,10 @@ bool reads_mutable(flat_entry_point const& e, flat_expr_id id, int depth = 0)
     auto const& x = e.at(id);
     if (auto const* const ref = x.node.try_as<flat_local_ref>())
         return !is_known(e, ref->local) || e.at(ref->local).is_mut;
-    // an element may be stored to between two reads of it
+    // an element may be stored to between two reads of it, and so may workgroup memory
     if (x.node.is<flat_buffer_element>())
+        return true;
+    if (auto const* const b = x.node.try_as<flat_binding_member>(); b != nullptr && b->is_workgroup)
         return true;
     auto result = false;
     for_each_operand(e, x, [&](flat_expr_id operand) { result = result || reads_mutable(e, operand, depth + 1); });
@@ -203,6 +222,43 @@ struct expr_lowering
 
     /// Rule E2 over the operands of one node.
     /// `pre` is the list the statement that holds them will join, so whatever lands there runs before it.
+    /// The atomic element `place` names, over a local that holds its index from here on.
+    flat_expr_id pin_atomic_index(flat_expr_id place, stmt_list& pre, isize& at)
+    {
+        // by value: pinning appends to the tree
+        auto copy = out.e.at(place);
+        auto pinned = [&](flat_expr_id index)
+        {
+            // `nonuniform i` pins `i`, and marks the pinned local, since a mark is read only where it indexes (CHK-300)
+            auto const mark = out.e.at(index);
+            auto const* const call = mark.node.try_as<flat_call>();
+            auto const* const record = call != nullptr ? out.m.builtin_function(call->intrinsic) : nullptr;
+            auto const is_marked = record != nullptr && record->is_nonuniform_mark;
+            auto const pin = out.let("index", is_marked ? out.e.at(call->arguments)[0] : index);
+            out.e.locals[index_of(pin.local)].kind = local_kind::temporary;
+            pre.insert_at(at++, pin.stmt);
+            if (!is_marked)
+                return out.local(pin.local);
+            flat_expr_id const arguments[] = {out.local(pin.local)};
+            auto const from = out.from;
+            out.from = mark.from;
+            auto const result = out.add_expr(mark.type, flat_call{.callee = call->callee,
+                                                                  .intrinsic = call->intrinsic,
+                                                                  .is_pure = call->is_pure,
+                                                                  .arguments = out.expr_list(arguments)});
+            out.from = from;
+            return result;
+        };
+        if (auto* const element = copy.node.try_as<flat_buffer_element>())
+            element->index = pinned(element->index);
+        else if (auto* const element = copy.node.try_as<flat_element>())
+            element->index = pinned(element->index);
+        else
+            return place;
+        out.e.exprs.push_back(cc::move(copy));
+        return flat_expr_id(out.e.exprs.size() - 1);
+    }
+
     cc::vector<flat_expr_id> lower_operands(cc::span<flat_expr_id const> operands, stmt_list& pre)
     {
         auto result = cc::vector<flat_expr_id>();
@@ -226,6 +282,14 @@ struct expr_lowering
                 if (!has_effect(out.e, operand) && !reads_any(out.e, operand, moved))
                     continue;
                 out.from = out.e.at(operand).from;
+                // an atomic names the memory a call updates, and a binding array's element a resource, so either's
+                // index is pinned, and never its value
+                if (auto const kind = out.m.at(out.e.at(operand).type).kind;
+                    kind == type_kind::atomic || is_resource(kind))
+                {
+                    result[j] = pin_atomic_index(operand, pre, at);
+                    continue;
+                }
                 auto const pin = out.let(pin_name(operand), operand);
                 out.e.locals[index_of(pin.local)].kind = local_kind::temporary;
                 pre.insert_at(at++, pin.stmt);
@@ -331,6 +395,11 @@ struct expr_lowering
         else if (auto* const element = copy.node.try_as<flat_buffer_element>())
         {
             element->buffer = lowered[0];
+            element->index = lowered[1];
+        }
+        else if (auto* const element = copy.node.try_as<flat_element>())
+        {
+            element->object = lowered[0];
             element->index = lowered[1];
         }
         else if (auto* const construct = copy.node.try_as<flat_construct>())
@@ -465,6 +534,8 @@ struct expr_lowering
             auto const target = is_known(out.e, c->target) || loops.empty() ? c->target : loops.back();
             into.push_back(attributed().continue_(target));
         }
+        else if (s.node.is<flat_discard>())
+            into.push_back(attributed().discard());
         else if (auto const* const once = s.node.try_as<flat_once>())
         {
             auto const label = label_or_new(label_id::none, "once");
@@ -520,19 +591,42 @@ struct expr_lowering
         }
     }
 
-    /// EVAL-14: a buffer element's index is evaluated before the value that is stored to it.
+    /// True when an index of a place must be pinned ahead of the value stored to it (EVAL-14).
     /// What evaluating the value moves in front runs after the index, so an index it could change is pinned first.
+    /// A target may write the value's effect ahead of the place's, as HLSL does with an atomic's, so an index with an
+    /// effect is pinned too wherever the value has one.
+    [[nodiscard]] bool must_pin_index(flat_expr_id index, flat_expr_id value, stmt_list const& value_pre) const
+    {
+        if (options.skip_pinning || !is_known(out.e, index))
+            return false;
+        if (has_effect(out.e, index) && is_known(out.e, value) && has_effect(out.e, value))
+            return true;
+        if (value_pre.empty())
+            return false;
+        auto moved = assigned_locals{.e = out.e};
+        for (auto const id : value_pre)
+            moved.stmt(id, 0);
+        return has_effect(out.e, index) || reads_any(out.e, index, moved);
+    }
+
+    /// A `let` of `index` at the end of `into`, and the local that holds it.
+    flat_expr_id pin_index(flat_expr_id index, stmt_list& into)
+    {
+        out.from = out.e.at(index).from;
+        auto const pin = out.let("index", index);
+        out.e.locals[index_of(pin.local)].kind = local_kind::temporary;
+        into.push_back(pin.stmt);
+        return out.local(pin.local);
+    }
+
+    /// EVAL-14: a buffer element's index is evaluated before the value that is stored to it.
     template <class Attributed>
     void lower_assign(flat_assign const& assign, Attributed&& attributed, stmt_list& into)
     {
         auto place = assign.place;
         auto const* const element = is_known(out.e, place) ? out.e.at(place).node.try_as<flat_buffer_element>() : nullptr;
         if (element == nullptr)
-        {
-            auto const value = lower_expr(assign.value, into);
-            into.push_back(attributed().assign(place, value));
-            return;
-        }
+            return lower_local_assign(assign, attributed, into);
 
         // by value: lowering appends to the tree
         auto const x = out.e.at(place);
@@ -540,24 +634,72 @@ struct expr_lowering
         auto index = lower_expr(written.index, into);
         auto value_pre = stmt_list();
         auto const value = lower_expr(assign.value, value_pre);
-        if (!value_pre.empty() && !options.skip_pinning && is_known(out.e, index))
-        {
-            auto moved = assigned_locals{.e = out.e};
-            for (auto const id : value_pre)
-                moved.stmt(id, 0);
-            if (has_effect(out.e, index) || reads_any(out.e, index, moved))
-            {
-                out.from = out.e.at(index).from;
-                auto const pin = out.let("index", index);
-                out.e.locals[index_of(pin.local)].kind = local_kind::temporary;
-                into.push_back(pin.stmt);
-                index = out.local(pin.local);
-            }
-        }
+        if (must_pin_index(index, value, value_pre))
+            index = pin_index(index, into);
         if (index != written.index)
         {
             out.from = x.from;
             place = out.add_expr(x.type, flat_buffer_element{.buffer = written.buffer, .index = index});
+        }
+        into.push_back_range(value_pre);
+        into.push_back(attributed().assign(place, value));
+    }
+
+    /// A place in a local: its array indices, at any depth, are evaluated before the value, as a buffer's index is.
+    template <class Attributed>
+    void lower_local_assign(flat_assign const& assign, Attributed&& attributed, stmt_list& into)
+    {
+        // the place's steps, from the place down to the local it is part of
+        auto steps = cc::vector<flat_expr_id>();
+        auto root = assign.place;
+        for (auto depth = 0; is_known(out.e, root) && depth < k_max_depth; ++depth)
+        {
+            auto const& node = out.e.at(root).node;
+            auto next = flat_expr_id::none;
+            if (auto const* const member = node.try_as<flat_member>())
+                next = member->object;
+            else if (auto const* const element = node.try_as<flat_element>())
+                next = element->object;
+            else
+                break;
+            steps.push_back(root);
+            root = next;
+        }
+        auto has_index = false;
+        for (auto const step : steps)
+            has_index = has_index || out.e.at(step).node.is<flat_element>();
+        if (!has_index)
+        {
+            auto const value = lower_expr(assign.value, into);
+            into.push_back(attributed().assign(assign.place, value));
+            return;
+        }
+
+        // the indices in evaluation order, the one nearest the local first
+        auto indices = cc::vector<flat_expr_id>::create_filled(steps.size(), flat_expr_id::none);
+        for (auto k = steps.size(); k-- > 0;)
+            if (auto const* const element = out.e.at(steps[k]).node.try_as<flat_element>())
+                indices[k] = lower_expr(element->index, into);
+        auto value_pre = stmt_list();
+        auto const value = lower_expr(assign.value, value_pre);
+        for (auto& index : indices)
+            if (must_pin_index(index, value, value_pre))
+                index = pin_index(index, into);
+
+        // the place again, over the lowered indices
+        auto place = root;
+        for (auto k = steps.size(); k-- > 0;)
+        {
+            auto copy = out.e.at(steps[k]);
+            if (auto* const member = copy.node.try_as<flat_member>())
+                member->object = place;
+            else if (auto* const element = copy.node.try_as<flat_element>())
+            {
+                element->object = place;
+                element->index = indices[k];
+            }
+            out.e.exprs.push_back(cc::move(copy));
+            place = flat_expr_id(out.e.exprs.size() - 1);
         }
         into.push_back_range(value_pre);
         into.push_back(attributed().assign(place, value));
@@ -591,7 +733,10 @@ struct expr_lowering
         auto lowered = lower_operands(bounds, into);
 
         // A target evaluates the end before every iteration, so it must give the same value every time.
-        if (is_known(out.e, lowered[1]) && (has_effect(out.e, lowered[1]) || reads_mutable(out.e, lowered[1])))
+        // One that takes derivatives is hoisted too: after a divergent `break` the re-test would run in part of a quad.
+        if (is_known(out.e, lowered[1])
+            && (has_effect(out.e, lowered[1]) || reads_mutable(out.e, lowered[1])
+                || takes_derivatives(out.m, out.e, lowered[1])))
         {
             out.from = from;
             if (is_known(out.e, lowered[0]) && has_effect(out.e, lowered[0]))

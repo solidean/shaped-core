@@ -52,7 +52,7 @@ TEST("sgl emit - textures, images and a static sampler are resources of the grou
              "    let xy: vec2i = vec2i(id.x, id.y);\n"
              "    let uv: vec2f = (vec2f(xy) + vec2f(0.5, 0.5)) * post.texel_size;\n"
              "    let c: vec4f = textureSampleLevel(post_src, post_bilinear, uv, 0.0);\n"
-             "    textureStore(post_dst, xy, vec4f(c));\n"
+             "    textureStore(post_dst, xy, c);\n"
              "    textureStore(post_acc, xy, vec4f(textureLoad(post_acc, xy).x + c.x, 0.0, 0.0, 0.0));\n"
              "}\n");
 
@@ -161,7 +161,7 @@ TEST("sgl emit - a size is one HLSL helper per texture type, declared once howev
                         "    return int2(width, height);\n"
                         "}\n"));
     CHECK(hlsl.contains("int2 sgl_size(Texture2D<uint> t, int level)\n"));
-    CHECK(hlsl.contains("int2 sgl_size(RWTexture2D<float4> i)\n"));
+    CHECK(hlsl.contains("int2 sgl_size(RWTexture2D<float4> t)\n"));
     // Two calls on one texture type, one overload.
     auto const first = hlsl.find("int2 sgl_size(Texture2D<float4> t");
     REQUIRE(first >= 0);
@@ -208,7 +208,7 @@ TEST("sgl emit - a local named as a builtin the text calls is renamed, and the c
                                "    set.dst.store(xy, set.src.load(xy, textureLoad))\n";
     auto const wgsl = text_of(shadowing, target::wgsl);
     CHECK(wgsl.contains("    let textureLoad_: i32 = id.z;\n"));
-    CHECK(wgsl.contains("    textureStore(set_dst, xy, vec4f(textureLoad(set_src, xy, textureLoad_)));\n"));
+    CHECK(wgsl.contains("    textureStore(set_dst, xy, textureLoad(set_src, xy, textureLoad_));\n"));
 
     // A texture's load takes its level in the coordinate's third component in HLSL, which reserves no `textureLoad`.
     CHECK(text_of(shadowing, target::hlsl_dx12).contains("    set_dst[xy] = set_src.Load(int3(xy, textureLoad));\n"));
@@ -295,35 +295,25 @@ TEST("sgl emit - a static sampler that compares is a comparison sampler, and its
     CHECK(text_of(shadowed, target::wgsl).contains("var set_shadow: sampler_comparison;\n"));
 }
 
-TEST("sgl emit - WGSL lets an implicit-derivative sample stand in non-uniform control flow, only where one is called")
+TEST("sgl emit - WGSL takes an implicit-derivative sample as it stands, since the check pass judged its uniformity")
 {
-    // Tint refuses what HLSL accepts, so the directive keeps the program written for every target (EMIT-103).
-    constexpr auto branched = "binding material:\n"
-                              "    albedo: texture_2d[float4]\n"
-                              "    smp: sampler\n"
-                              "\n"
-                              "struct pixel_input:\n"
-                              "    @position position: hpos4\n"
-                              "    uv: float2\n"
-                              "\n"
-                              "@pixel struct target:\n"
-                              "    color: float4\n"
-                              "\n"
-                              "@pixel fun ps(p: pixel_input){material} -> target:\n"
-                              "    let mut c = float4(0.0, 0.0, 0.0, 1.0)\n"
-                              "    if p.uv.x < 0.5:\n"
-                              "        c = material.albedo.sample(p.uv, material.smp)\n"
-                              "    return {color = c}\n";
-    CHECK(text_of(branched, target::wgsl)
-              .contains("// Generated: the SGL source is what to edit.\n"
-                        "\n"
-                        "diagnostic(off, derivative_uniformity);\n"
-                        "\n"
-                        "@group(0) @binding(0) var material_albedo: texture_2d<f32>;\n"));
-    CHECK(!text_of(branched, target::hlsl_dx12).contains("diagnostic"));
-
-    // A sample at an explicit level takes no derivative, so it leaves Tint's analysis on.
-    CHECK(!text_of(k_blur, target::wgsl).contains("diagnostic"));
+    // CHK-282 refuses what Tint's analysis would, so no directive switches that analysis off
+    constexpr auto sampled = "binding material:\n"
+                             "    albedo: texture_2d[float4]\n"
+                             "    smp: sampler\n"
+                             "\n"
+                             "struct pixel_input:\n"
+                             "    @position position: hpos4\n"
+                             "    uv: float2\n"
+                             "\n"
+                             "@pixel struct target:\n"
+                             "    color: float4\n"
+                             "\n"
+                             "@pixel fun ps(p: pixel_input){material} -> target:\n"
+                             "    let c = material.albedo.sample(p.uv, material.smp)\n"
+                             "    if p.uv.x < 0.5 => return {color = c}\n"
+                             "    return {color = float4(0.0, 0.0, 0.0, 1.0)}\n";
+    CHECK(!text_of(sampled, target::wgsl).contains("diagnostic"));
 }
 
 TEST("sgl emit - a builtin's default fills the level a call leaves out, and a texture stays where it is named")
@@ -339,4 +329,181 @@ TEST("sgl emit - a builtin's default fills the level a call leaves out, and a te
     CHECK(wgsl.contains("textureDimensions(frame_src, 0)"));
     auto const hlsl = text_of(source, target::hlsl_dx12);
     CHECK(hlsl.contains("frame_src.Load(int3(xy, 0))"));
+}
+
+TEST("sgl emit - every texture method is its target's own call, with a layer and an offset where it takes them")
+{
+    constexpr auto methods
+        = "binding set:\n"
+          "    @sampler(lin) arr: texture_2d_array[float4]\n"
+          "    @sampler(lin) sky: texture_cube[float4]\n"
+          "    @sampler(cmp) shadow: texture_2d_depth\n"
+          "    line: texture_1d[float]\n"
+          "    ms: texture_2d_ms[uint2]\n"
+          "    layers: mut image_2d_array[.r32_uint]\n"
+          "    lin: sampler\n"
+          "    cmp: comparison_sampler\n"
+          "\n"
+          "struct pixel_input:\n"
+          "    @position position: hpos4\n"
+          "    uv: float2\n"
+          "\n"
+          "@pixel struct target:\n"
+          "    color: float4\n"
+          "\n"
+          "@pixel fun ps(p: pixel_input){set} -> target:\n"
+          "    let a = set.arr.sample(p.uv, layer = 2)\n"
+          "    let b = set.arr.sample(p.uv, layer = 1, bias = 0.5)\n"
+          "    let c = set.arr.sample(p.uv, layer = 0, grad_x = p.uv, grad_y = p.uv)\n"
+          "    let d = set.arr.gather(p.uv, layer = 1, component = texel_component.z, offset = int2(1, -1))\n"
+          "    let e = set.sky.gather(float3(1.0, 0.0, 0.0), component = texel_component.y)\n"
+          "    let f = set.shadow.sample_compare(p.uv, reference = 0.5)\n"
+          "    let g = set.shadow.sample_compare(p.uv, reference = 0.5, level = 0.0)\n"
+          "    let h = set.line.sample(0.5, set.lin, level = 1.0)\n"
+          "    let i = set.ms.load(int2(1, 2), sample = 3)\n"
+          "    let j = set.layers.load(int2(0, 0), layer = 1)\n"
+          "    set.layers.store(int2(0, 0), j, layer = 2)\n"
+          "    let k = set.arr.layer_count() + set.ms.sample_count() + set.line.size()\n"
+          "    return {color = a + b + c + d + e + float4(f + g + h, (i.x + j) as float, k as float, 1.0)}\n";
+
+    auto const wgsl = text_of(methods, target::wgsl);
+    CHECK(wgsl.contains("textureSample(set_arr, set_lin, p.uv, 2)"));
+    CHECK(wgsl.contains("textureSampleBias(set_arr, set_lin, p.uv, 1, 0.5)"));
+    CHECK(wgsl.contains("textureSampleGrad(set_arr, set_lin, p.uv, 0, p.uv, p.uv)"));
+    // the component and the offset are constants WGSL takes only as written
+    CHECK(wgsl.contains("textureGather(2, set_arr, set_lin, p.uv, 1, vec2i(1, -1))"));
+    CHECK(wgsl.contains("textureGather(1, set_sky, set_lin, vec3f(1.0, 0.0, 0.0))"));
+    CHECK(wgsl.contains("textureSampleCompare(set_shadow, set_cmp, p.uv, 0.5)"));
+    CHECK(wgsl.contains("textureSampleCompareLevel(set_shadow, set_cmp, p.uv, 0.5)"));
+    // a 1D texture is a 2D one on WebGPU, sampled along its middle row
+    CHECK(wgsl.contains("textureSampleLevel(set_line, set_lin, vec2f(0.5, 0.5), 1.0).x"));
+    CHECK(wgsl.contains("textureLoad(set_ms, vec2i(1, 2), 3).xy"));
+    CHECK(wgsl.contains("textureLoad(set_layers, vec2i(0, 0), 1).x"));
+    CHECK(wgsl.contains("textureStore(set_layers, vec2i(0, 0), 2, vec4u(j, 0u, 0u, 0u));\n"));
+    CHECK(wgsl.contains("i32(textureNumLayers(set_arr)) + i32(textureNumSamples(set_ms)) + "
+                        "i32(textureDimensions(set_line, 0).x)"));
+
+    // HLSL packs the layer into the coordinate, and names a gather's component in the method
+    auto const hlsl = text_of(methods, target::hlsl_dx12);
+    CHECK(hlsl.contains("set_arr.Sample(set_lin, float3(p.uv, float(2)))"));
+    CHECK(hlsl.contains("set_arr.SampleBias(set_lin, float3(p.uv, float(1)), 0.5)"));
+    CHECK(hlsl.contains("set_arr.SampleGrad(set_lin, float3(p.uv, float(0)), p.uv, p.uv)"));
+    CHECK(hlsl.contains("set_arr.GatherBlue(set_lin, float3(p.uv, float(1)), int2(1, -1))"));
+    CHECK(hlsl.contains("set_sky.GatherGreen(set_lin, float3(1.0, 0.0, 0.0))"));
+    CHECK(hlsl.contains("set_shadow.SampleCmp(set_cmp, p.uv, 0.5)"));
+    CHECK(hlsl.contains("set_shadow.SampleCmpLevelZero(set_cmp, p.uv, 0.5)"));
+    CHECK(hlsl.contains("set_line.SampleLevel(set_lin, 0.5, 1.0)"));
+    CHECK(hlsl.contains("set_ms.Load(int2(1, 2), 3)"));
+    CHECK(hlsl.contains("set_layers[int3(int2(0, 0), 1)]"));
+    CHECK(hlsl.contains("set_layers[int3(int2(0, 0), 2)] = j;\n"));
+    CHECK(hlsl.contains("sgl_layers(set_arr) + sgl_samples(set_ms) + sgl_size(set_line, 0)"));
+    CHECK(hlsl.contains("int sgl_samples(Texture2DMS<uint2> t)\n"
+                        "{\n"
+                        "    uint width, height, samples;\n"
+                        "    t.GetDimensions(width, height, samples);\n"
+                        "    return int(samples);\n"
+                        "}\n"));
+}
+
+TEST("sgl emit - a binding array takes consecutive registers, and a marked index is NonUniformResourceIndex")
+{
+    constexpr auto arrays
+        = "require binding_arrays\n"
+          "\n"
+          "binding materials:\n"
+          "    @sampler(smp) albedo: texture_2d[float4][8]\n"
+          "    params: buffer[float4][2]\n"
+          "    smp: sampler\n"
+          "\n"
+          "struct pixel_input:\n"
+          "    @position position: hpos4\n"
+          "    uv: float2\n"
+          "    @interpolate(.flat) material: int\n"
+          "\n"
+          "@pixel struct target:\n"
+          "    color: float4\n"
+          "\n"
+          "@pixel fun ps(p: pixel_input){materials} -> target:\n"
+          "    return {color = materials.albedo[nonuniform p.material].sample(p.uv) * materials.params[1][0]}\n";
+    auto const dx12 = text_of(arrays, target::hlsl_dx12);
+    CHECK(dx12.contains("Texture2D<float4> materials_albedo[8] : register(t0, space0);\n"
+                        "StructuredBuffer<float4> materials_params[2] : register(t8, space0);\n"
+                        "SamplerState materials_smp : register(s10, space0);\n"));
+    CHECK(dx12.contains("materials_albedo[NonUniformResourceIndex(p.material)].Sample(materials_smp, p.uv) * "
+                        "materials_params[1][0]"));
+    CHECK(text_of(arrays, target::hlsl_vulkan)
+              .contains("[[vk::binding(8, 0)]] StructuredBuffer<float4> materials_params[2];\n"));
+
+    // WebGPU has no binding arrays, so WGSL refuses by the feature rather than guessing
+    CHECK(sgl::emit::dump_errors(emit_source(arrays, 0, target::wgsl)).contains("binding_arrays"));
+}
+
+TEST("sgl emit - a `for` end that takes derivatives is evaluated once, ahead of the loop")
+{
+    // LEGAL-7: re-tested after a divergent `break`, the sample would run in part of a quad
+    constexpr auto source = "binding material:\n"
+                            "    @sampler(smp) albedo: texture_2d[float4]\n"
+                            "    smp: sampler\n"
+                            "\n"
+                            "struct pixel_input:\n"
+                            "    @position position: hpos4\n"
+                            "    uv: float2\n"
+                            "\n"
+                            "@pixel struct target:\n"
+                            "    color: float4\n"
+                            "\n"
+                            "@pixel fun ps(p: pixel_input){material} -> target:\n"
+                            "    let mut c = float4(0.0, 0.0, 0.0, 1.0)\n"
+                            "    for i in 0 ..< ((material.albedo.sample(float2(0.5, 0.5)).x * 4.0) as int):\n"
+                            "        if p.uv.x < 0.5 => break\n"
+                            "        c.x += 1.0\n"
+                            "    return {color = c}\n";
+    CHECK(text_of(source, target::wgsl)
+              .contains("    let i_end: i32 = i32(textureSample(material_albedo, material_smp, vec2f(0.5, 0.5)).x * "
+                        "4.0);\n"
+                        "    for (var i: i32 = 0; i < i_end; i++) {\n"));
+    CHECK(text_of(source, target::hlsl_dx12).contains("i < i_end; "));
+}
+
+TEST("sgl emit - a marked index keeps its mark when a later argument moves it into a local")
+{
+    // `pick` returns early, so its value is computed ahead of the call, and the index ahead of that
+    constexpr auto pinned = "require binding_arrays\n"
+                            "\n"
+                            "binding mats:\n"
+                            "    texs: texture_2d[float4][4]\n"
+                            "\n"
+                            "binding results:\n"
+                            "    values: mut buffer[float4]\n"
+                            "\n"
+                            "fun pick(x: int) -> int:\n"
+                            "    if x == 0 => return 1\n"
+                            "    return 0\n"
+                            "\n"
+                            "@compute(64) fun cs(@thread_id id: int3){mats, results}:\n"
+                            "    results.values[id.x] = mats.texs[nonuniform (id.x % 4)].load(int2(pick(id.x), 0))\n";
+    auto const dx12 = text_of(pinned, target::hlsl_dx12);
+    CHECK(dx12.contains("const int index = id.x % 4;\n"));
+    CHECK(dx12.contains("mats_texs[NonUniformResourceIndex(index)].Load("));
+}
+
+TEST("sgl emit - a depth texture's level is an int, which WGSL takes whole and the others convert")
+{
+    constexpr auto depth = "binding set:\n"
+                           "    @sampler(pt) shadow: texture_2d_depth\n"
+                           "    @non_filtering pt: sampler\n"
+                           "\n"
+                           "struct pixel_input:\n"
+                           "    @position position: hpos4\n"
+                           "    uv: float2\n"
+                           "    @interpolate(.flat) lod: int\n"
+                           "\n"
+                           "@pixel struct target:\n"
+                           "    color: float4\n"
+                           "\n"
+                           "@pixel fun ps(p: pixel_input){set} -> target:\n"
+                           "    let d = set.shadow.sample(p.uv, level = p.lod)\n"
+                           "    return {color = float4(d, d, d, 1.0)}\n";
+    CHECK(text_of(depth, target::wgsl).contains("textureSampleLevel(set_shadow, set_pt, p.uv, p.lod)"));
+    CHECK(text_of(depth, target::hlsl_dx12).contains("set_shadow.SampleLevel(set_pt, p.uv, float(p.lod))"));
 }

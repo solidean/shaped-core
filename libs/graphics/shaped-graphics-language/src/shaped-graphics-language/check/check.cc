@@ -1,5 +1,6 @@
 #include "check.hh"
 
+#include <clean-core/common/hash.hh>
 #include <clean-core/common/utility.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/from_string.hh>
@@ -42,6 +43,22 @@ number_class impl::classify_number(cc::string_view text)
 
     if (at < size && (text[at] == '-' || text[at] == '+'))
         ++at;
+
+    // NUM-10: `0x` and `0b` spell an integer like any other, held to the type asked of it (CHK-269)
+    if (at + 1 < size && text[at] == '0' && (text[at + 1] == 'x' || text[at + 1] == 'b'))
+    {
+        auto const is_hex = text[at + 1] == 'x';
+        at += 2;
+        auto const start = at;
+        while (at < size
+               && (text[at] == '\'' || (text[at] >= '0' && text[at] <= '1')
+                   || (is_hex
+                       && (is_digit(text[at]) || (text[at] >= 'a' && text[at] <= 'f')
+                           || (text[at] >= 'A' && text[at] <= 'F')))))
+            ++at;
+        return at > start && at == size ? number_class::plain_integer : number_class::other;
+    }
+
     if (!digits())
         return number_class::other;
     if (at == size)
@@ -78,11 +95,43 @@ cc::optional<f64> impl::parse_plain_float(cc::string_view text)
 
 cc::optional<i64> impl::parse_literal_integer(cc::string_view text)
 {
-    auto plain = cc::string();
-    for (auto const c : text)
-        if (c != '\'' && c != '+')
-            plain += c;
-    return cc::from_string<i64>(plain);
+    auto at = isize(0);
+    auto const is_negative = !text.empty() && text[0] == '-';
+    if (!text.empty() && (text[0] == '-' || text[0] == '+'))
+        ++at;
+    auto base = u64(10);
+    if (at + 1 < text.size() && text[at] == '0' && (text[at + 1] == 'x' || text[at + 1] == 'b'))
+    {
+        base = text[at + 1] == 'x' ? 16 : 2;
+        at += 2;
+    }
+
+    // The magnitude of the most negative i64 is one past the largest positive one.
+    auto const limit = is_negative ? u64(1) << 63 : (u64(1) << 63) - 1;
+    auto magnitude = u64(0);
+    auto has_digit = false;
+    for (; at < text.size(); ++at)
+    {
+        auto const c = text[at];
+        if (c == '\'')
+            continue;
+        auto digit = u64(0);
+        if (c >= '0' && c <= '9')
+            digit = u64(c - '0');
+        else if (c >= 'a' && c <= 'f')
+            digit = u64(c - 'a' + 10);
+        else if (c >= 'A' && c <= 'F')
+            digit = u64(c - 'A' + 10);
+        else
+            return cc::nullopt;
+        if (digit >= base || magnitude > (limit - digit) / base)
+            return cc::nullopt;
+        magnitude = magnitude * base + digit;
+        has_digit = true;
+    }
+    if (!has_digit)
+        return cc::nullopt;
+    return is_negative ? i64(0u - magnitude) : i64(magnitude);
 }
 
 cc::optional<i32> impl::parse_plain_integer(cc::string_view text)
@@ -219,8 +268,9 @@ void checker::judge_attributes(i32 file,
                 report(diagnostic_kind::invalid_attribute_arguments, file, a.name,
                        "@shadowable takes `false` or `true`, as in @shadowable(false)");
         }
-        else if (sgl::is_valid(a.list) && name != "operator" && name != "compute" && name != "stream"
-                 && name != "stages" && name != "shadowable" && name != "expect")
+        else if (sgl::is_valid(a.list) && name != "operator" && name != "compute" && name != "stream" && name != "stages"
+                 && name != "shadowable" && name != "expect" && name != "interpolate" && name != "format"
+                 && name != "depth" && name != "sampler" && name != "geometry" && name != "tessellation_control")
             report(diagnostic_kind::invalid_attribute_arguments, file, span_of(file, a.list),
                    cc::format("@{} takes no arguments", name));
     }
@@ -297,6 +347,7 @@ void checker::run()
             judge_entry_features(symbol_id(i));
     report_unused_requires();
 
+    index_builtin_symbols();
     for (auto i = isize(0); i < out.symbols.size(); ++i)
         if (out.symbols[i].kind == symbol_kind::function && out.symbols[i].state == symbol_state::checked)
             flatten_entry_point(symbol_id(i));
@@ -509,10 +560,26 @@ cc::vector<symbol_id> checker::candidates_of(i32 file, cc::string_view name, typ
 
 void checker::judge_redeclarations()
 {
+    // Two overloads can clash only when their parameters hash alike, so each meets only the earlier ones that do.
+    auto const signature_hash = [&](symbol const& s) -> u64
+    {
+        auto h = u64(0);
+        for (auto const& p : out.at(out.functions[s.info].parameters))
+            h = cc::make_hash(h, u32(p.type), p.name, p.is_named_only);
+        return h;
+    };
     auto const judge = [&](cc::span<symbol_id const> set)
     {
+        if (set.size() < 2)
+            return;
+        auto earlier = cc::map<u64, cc::vector<isize>>();
         for (auto i = isize(0); i < set.size(); ++i)
-            for (auto j = isize(0); j < i; ++j)
+        {
+            auto const& candidate = out.at(set[i]);
+            if (candidate.kind != symbol_kind::function || candidate.info < 0)
+                continue;
+            auto& alike = earlier[signature_hash(candidate)];
+            for (auto const j : alike)
             {
                 auto const& a = out.at(set[j]);
                 auto const& b = out.at(set[i]);
@@ -539,6 +606,8 @@ void checker::judge_redeclarations()
                 // No call could choose between the two, so the later one is out of every lookup.
                 out.symbols[index_of(later)].state = symbol_state::failed;
             }
+            alike.push_back(i);
+        }
     };
     for (auto const& [name, ids] : prelude_names)
         judge(ids);

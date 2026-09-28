@@ -62,7 +62,8 @@ public:
     void dispatch_rays(raytracing_shader_table const& table, raygen_index raygen, int width, int height = 1, int depth = 1);
 
     /// Declares per-element access for a *buffer* array / bindless binding, applied to the **next dispatch_rays only** — the compute scope's contract, at the raytracing stage.
-    /// Every bound array binding must be declared before each dispatch; an empty `elements` span declares "unused".
+    /// Every array the pipeline's code indexes must be declared before each dispatch.
+    /// An undeclared one logs and is covered whole, and an empty `elements` span declares it unused.
     void declare_array_buffer_access(cc::string_view binding_name, cc::span<array_buffer_access const> elements);
 
     /// Declares per-element access for a *texture* array / bindless binding.

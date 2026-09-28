@@ -116,9 +116,21 @@ struct writer
         auto const& x = p.e.at(id);
         if (needs_member_assignment(x))
             return true;
+        if (is_hlsl_atomic(id))
+            return true;
         auto result = false;
         check::impl::for_each_operand(p.e, x, [&](flat_expr_id operand) { result = result || writes_lines(operand); });
         return result;
+    }
+
+    /// An atomic call in HLSL, which hands its value before through an out parameter a statement of its own declares.
+    [[nodiscard]] bool is_hlsl_atomic(flat_expr_id id) const
+    {
+        if (d.language() != builtins::language::hlsl)
+            return false;
+        auto const* const c = p.e.at(id).node.try_as<flat_call>();
+        auto const* const record = c != nullptr ? p.m.builtin_function(c->intrinsic) : nullptr;
+        return record != nullptr && record->is_atomic;
     }
 
     bool needs_member_assignment(flat_expr const& x) const
@@ -126,15 +138,36 @@ struct writer
         return x.node.is<flat_construct>() && !is_builtin_type(p.m, x.type) && !d.has_struct_constructor();
     }
 
-    /// Declares `name` and assigns its members one by one, for a target without a struct constructor.
+    /// `nonuniform i`, whose own text is `i`.
+    [[nodiscard]] bool is_nonuniform_mark(flat_expr_id id) const
+    {
+        auto const* const c = p.e.at(id).node.try_as<flat_call>();
+        auto const* const record = c != nullptr ? p.m.builtin_function(c->intrinsic) : nullptr;
+        return record != nullptr && record->is_nonuniform_mark;
+    }
+
+    [[nodiscard]] bool is_array(check::type_id type) const
+    {
+        return is_valid(type) && p.m.at(type).kind == check::type_kind::array;
+    }
+
+    /// Declares `name` and assigns its members, or its elements, one by one, for a target without a struct constructor.
     void build_struct(flat_expr const& x, cc::string_view name)
     {
         auto declaration = cc::string();
-        d.write_local(declaration, {.name = name, .type = type_text(p, d, x.type), .is_mut = true});
+        auto const dimensions = array_dimensions(p, x.type);
+        d.write_local(declaration,
+                      {.name = name, .type = type_text(p, d, x.type), .dimensions = dimensions, .is_mut = true});
         line(declaration);
 
-        auto const& planned = p.structs[p.struct_of_type[index_of(x.type)]];
         auto const arguments = p.e.at(x.node.as<flat_construct>().arguments);
+        if (is_array(x.type))
+        {
+            for (auto i = isize(0); i < arguments.size(); ++i)
+                line(cc::format("{}[{}] = {};", name, i, expr(arguments[i]).text));
+            return;
+        }
+        auto const& planned = p.structs[p.struct_of_type[index_of(x.type)]];
         for (auto i = isize(0); i < arguments.size() && i < planned.member_of.size(); ++i)
             if (planned.member_of[i] >= 0)
                 line(cc::format("{}.{} = {};", name, planned.members[planned.member_of[i]].name, expr(arguments[i]).text));
@@ -146,7 +179,8 @@ struct writer
         if (needs_member_assignment(x))
         {
             // A construction in the middle of an expression: every expression is pure, so building it first changes nothing.
-            auto name = p.names.mint(cc::format("{}_value", type_text(p, d, x.type)));
+            auto name = p.names.mint(is_array(x.type) ? cc::string("array_value")
+                                                      : cc::format("{}_value", type_text(p, d, x.type)));
             build_struct(x, name);
             return {.text = cc::move(name)};
         }
@@ -198,7 +232,7 @@ struct writer
         auto const& x = p.e.at(id);
         if (auto const* const b = x.node.try_as<flat_binding_member>())
         {
-            if (resource_of(p, b->binding, b->member) >= 0)
+            if (resource_of(p, b->binding, b->member) >= 0 || workgroup_of(p, b->binding, b->member) >= 0)
                 return {};
             auto const& block = *block_of(p, b->binding);
             if (!block.form.has_value())
@@ -406,7 +440,16 @@ struct writer
             return {.text = cc::format("{}{}", how.text, wrapped(cc::move(arguments[0]), level::primary)),
                     .binds = level::unary};
         case builtins::spelling_kind::custom:
-            return how.custom({.target = d.language(), .arguments = arguments, .builtins = *p.m.builtins});
+        {
+            auto mint = [&](cc::string_view desired) { return p.names.mint(desired); };
+            auto result = how.custom(
+                {.target = d.language(), .arguments = arguments, .builtins = *p.m.builtins, .data = how.data, .mint = mint});
+            // the statements its value needs, ahead of the one that holds it
+            for (auto const& l : result.lines)
+                line(l);
+            result.lines.clear();
+            return result;
+        }
         case builtins::spelling_kind::call:
             break;
         }
@@ -462,6 +505,11 @@ struct writer
                     result = {.text = p.resources[found].name};
                     return;
                 }
+                if (auto const found = workgroup_of(p, b.binding, b.member); found >= 0)
+                {
+                    result = {.text = p.workgroup[found].name};
+                    return;
+                }
                 auto const& block = *block_of(p, b.binding);
                 result = {.text = cc::format("{}.{}", block.name, block.members[block.block_member_of[b.member]].name)};
             },
@@ -469,6 +517,16 @@ struct writer
             {
                 auto const buffer = wrapped(expr(b.buffer), level::primary);
                 result = {.text = cc::format("{}[{}]", buffer, expr(b.index).text), .binds = level::primary};
+            },
+            [&](flat_element const& a)
+            {
+                auto const object = wrapped(expr(a.object), level::primary);
+                auto index = expr(a.index).text;
+                // EMIT-121: a marked index into a binding array tells HLSL, and SPIR-V through it, that it may differ
+                if (d.language() == builtins::language::hlsl && is_nonuniform_mark(a.index)
+                    && p.m.takes_slots(p.e.at(a.object).type))
+                    index = cc::format("NonUniformResourceIndex({})", index);
+                result = {.text = cc::format("{}[{}]", object, index), .binds = level::primary};
             },
             [&](flat_member const& member)
             {
@@ -554,7 +612,8 @@ struct writer
         auto const statements = p.e.at(s.body);
         auto const ends_in_exit
             = !statements.empty()
-           && (p.e.at(statements.back()).node.is<flat_break>() || p.e.at(statements.back()).node.is<flat_return>());
+           && (p.e.at(statements.back()).node.is<flat_break>() || p.e.at(statements.back()).node.is<flat_return>()
+               || p.e.at(statements.back()).node.is<flat_discard>());
         if (!ends_in_exit)
             line("break;");
         close();
@@ -571,7 +630,10 @@ struct writer
         }
         auto const text = is_valid(value) ? expr(value, true).text : cc::string();
         auto declaration = cc::string();
-        d.write_local(declaration, {.name = name, .type = type_text(p, d, local.type), .value = text, .is_mut = is_mut});
+        auto const dimensions = array_dimensions(p, local.type);
+        d.write_local(
+            declaration,
+            {.name = name, .type = type_text(p, d, local.type), .value = text, .dimensions = dimensions, .is_mut = is_mut});
         line(declaration);
     }
 
@@ -582,7 +644,8 @@ struct writer
         if (statements.empty())
             return false;
         auto const& last = p.e.at(statements.back());
-        return last.node.is<flat_break>() || last.node.is<flat_return>() || last.node.is<flat_continue>();
+        return last.node.is<flat_break>() || last.node.is<flat_return>() || last.node.is<flat_continue>()
+            || last.node.is<flat_discard>();
     }
 
     /// One arm: its labels, its body, and the `break` that stops the C-like targets falling into the next one.
@@ -631,6 +694,12 @@ struct writer
                      [&](flat_print const&) {}, //
                      [&](flat_eval const& v)
                      {
+                         // an atomic HLSL writes as statements alone has nothing left to evaluate
+                         if (is_hlsl_atomic(v.value))
+                         {
+                             (void)expr(v.value);
+                             return;
+                         }
                          // A call that gives nothing is a statement as it stands, in every target.
                          auto text = cc::string();
                          if (p.e.at(v.value).type == checked_module::void_type)
@@ -661,9 +730,9 @@ struct writer
                          body(f.body);
                          close();
                      },
-                     [&](flat_continue const&) { line("continue;"); }, //
-                     [&](flat_once const& o) { once(o); },             //
-                     [&](flat_break const&) { line("break;"); },       //
+                     [&](flat_continue const&) { line("continue;"); },                                                //
+                     [&](flat_discard const&) { line(d.discard_statement()); }, [&](flat_once const& o) { once(o); }, //
+                     [&](flat_break const&) { line("break;"); },                                                      //
                      [&](flat_switch const& sw) { switch_(sw); },
                      // a core tree holds none, and the plan refuses one that is not core (EMIT-66)
                      [&](flat_check const&) {},
@@ -730,24 +799,13 @@ cc::string_view sgl::emit::impl::type_text(plan const& p, dialect const& d, chec
         if (p.m.builtins->is_known(id))
             return p.m.builtins->at(id).spelled_in(d.language());
     }
+    if (is_valid(type) && p.m.at(type).kind == check::type_kind::array)
+        return p.array_texts[p.array_of_type[index_of(type)]];
+    if (is_valid(type) && p.m.at(type).kind == check::type_kind::atomic)
+        return atomic_text(p, type);
     return p.structs[p.struct_of_type[index_of(type)]].name;
 }
 
-cc::string_view sgl::emit::impl::stage_name(check::stage s)
-{
-    switch (s)
-    {
-    case check::stage::none:
-        return "";
-    case check::stage::vertex:
-        return "vertex";
-    case check::stage::pixel:
-        return "pixel";
-    case check::stage::compute:
-        return "compute";
-    }
-    return "";
-}
 
 void sgl::emit::impl::write_helpers(cc::string& out, plan const& p, dialect const& d)
 {
@@ -766,7 +824,7 @@ void sgl::emit::impl::write_helpers(cc::string& out, plan const& p, dialect cons
             types.push_back(check::is_resource(p.m.at(type).kind) ? d.resource_text(p, type)
                                                                   : cc::string(type_text(p, d, type)));
         }
-        auto text = record->write.helper({.target = d.language(), .argument_types = types});
+        auto text = record->write.helper({.target = d.language(), .argument_types = types, .data = record->write.data});
         auto is_known = text.empty();
         for (auto const& w : written)
             is_known = is_known || w == text;
@@ -777,29 +835,25 @@ void sgl::emit::impl::write_helpers(cc::string& out, plan const& p, dialect cons
         out.appendf("{}\n", w);
 }
 
-bool sgl::emit::impl::uses_derivatives(plan const& p)
-{
-    for (auto const& x : p.e.exprs)
-    {
-        auto const* const call = x.node.try_as<check::flat_call>();
-        auto const* const record = call != nullptr ? p.m.builtin_function(call->intrinsic) : nullptr;
-        if (record != nullptr && record->uses_derivatives)
-            return true;
-    }
-    return false;
-}
-
 cc::string sgl::emit::impl::write_text(plan& p, dialect const& d)
 {
     auto w = writer{.p = p, .d = d};
-    w.out.appendf("// SGL {} entry point '{}', written as {}.\n", stage_name(p.e.entry_stage), p.entry_name,
+    w.out.appendf("// SGL {} entry point '{}', written as {}.\n", check::stage_name(p.e.entry_stage), p.entry_name,
                   d.description());
     w.out += "// Generated: the SGL source is what to edit.\n\n";
     d.write_declarations(w.out, p);
     write_helpers(w.out, p, d);
     d.write_function_head(w.out, p);
+    if (d.declares_workgroup_in_function())
+        for (auto const& memory : p.workgroup)
+        {
+            auto declaration = cc::string();
+            d.write_workgroup(declaration, memory, p);
+            w.line(declaration);
+        }
     for (auto const id : p.e.at(p.e.body))
         w.statement(p.e.at(id));
     w.out += "}\n";
+    d.write_function_tail(w.out, p);
     return cc::move(w.out);
 }

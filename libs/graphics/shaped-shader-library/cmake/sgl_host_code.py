@@ -31,6 +31,9 @@ HOST_TYPES: dict[str, tuple[str, int, str | None]] = {
     "float4": ("tg::vec4f", 16, "vec4f"),
     "int3": ("tg::vec3i", 12, "vec3i"),
     "mat4": ("tg::mat4f", 64, None),
+    # an atomic is a plain integer to the host, which never updates it while the shader does
+    "atomic[uint]": ("cc::u32", 4, None),
+    "atomic[int]": ("cc::i32", 4, None),
     "bool32": ("slib::gpu_bool", 4, None),
 }
 
@@ -93,12 +96,14 @@ def includes(entries: SglEntries) -> list[str]:
                 "<shaped-graphics/raster/raster_pipeline.hh>"]
     if any(b["inline"] for _, b in entries.bindings):
         out += ["<clean-core/container/fixed_array.hh>", "<clean-core/fwd.hh>"]
+    if any(m.get("count", 1) > 1 for _, b in entries.bindings for m in b["members"]):
+        out += ["<clean-core/container/fixed_array.hh>"]
 
     # Every type a field names: a constant's own, a buffer's element, and a vertex attribute's.
     types = {m["type"] for _, b in entries.bindings for m in b["members"]}
     types |= {m["type"] for _, v in entries.vertex_inputs for m in v["members"]}
     types |= {m["type"] for _, s in entries.memory_structs for m in s["members"]}
-    if types & {"int", "uint"}:
+    if types & {"int", "uint", "atomic[int]", "atomic[uint]"}:
         out.append("<clean-core/fwd.hh>")
     if types & {"float2", "float3", "vec3", "float4", "int2", "int3", "int4", "uint2", "uint3", "uint4"}:
         out.append("<typed-geometry/linalg/vec.hh>")
@@ -133,16 +138,19 @@ def emit_group(package: str, memory: dict[str, int], namespace: str, file: SglFi
     # A plain member is a plain field: the group owns the constant buffer it lands in, and sg fills it at creation.
     for member in binding["members"]:
         where = f"'{file.path}' `binding {name}` member '{member['name']}'"
+        # a binding array is one field holding a view per element
+        count = member.get("count", 1)
+        array = (lambda view: f"cc::fixed_array<{view}, {count}>") if count > 1 else (lambda view: view)
         if member["kind"] == "constant":
             out.append(f"    {host_type(package, memory, where, member['type'])} {member['name']}; ///< `{member['type']}`, "
                        f"at byte {member['offset']} of the group's constant buffer\n")
             continue
         if member["kind"] == "texture":
-            out.append(f"    sg::texture_view_{view_shape(member)} {member['name']}; ///< `{member['type']}`\n")
+            out.append(f"    {array(f'sg::texture_view_{view_shape(member)}')} {member['name']}; ///< `{member['type']}`\n")
             continue
         if member["kind"] == "image":
             view = f"sg::image_view_{view_shape(member)}<sg::pixel_format::{member['image_format']}>"
-            out.append(f"    {view} {member['name']}; ///< `{member['type']}`\n")
+            out.append(f"    {array(view)} {member['name']}; ///< `{member['type']}`\n")
             continue
         if member["kind"] == "sampler":
             # A static sampler is the layout's, so the group has no field for it.
@@ -153,7 +161,7 @@ def emit_group(package: str, memory: dict[str, int], namespace: str, file: SglFi
         is_written = member["access"] == "read_write"
         access = "readwrite" if is_written else "readonly"
         sgl_type = f"mut buffer[{member['type']}]" if is_written else f"buffer[{member['type']}]"
-        out.append(f"    sg::{access}_buffer_view<{element}> {member['name']}; ///< `{sgl_type}`\n")
+        out.append(f"    {array(f'sg::{access}_buffer_view<{element}>')} {member['name']}; ///< `{sgl_type}`\n")
     out.append("\n")
     if has_block(binding):
         out.append("    /// The group's constant buffer: its plain members, laid out as the shader reads them, at this slot.\n")
@@ -223,7 +231,8 @@ def sampler_initializer(state: dict) -> str:
 
 def binding_entry(member: dict) -> str:
     """The sg::binding a resource member is, its fields in sg::binding's declaration order."""
-    head = f'{{.name = "{member["host_name"]}", .index = {member["slot"]}u, .count = 1u, '
+    # a binding array takes `count` consecutive slots from its own
+    head = f'{{.name = "{member["host_name"]}", .index = {member["slot"]}u, .count = {member.get("count", 1)}u, '
     kind = member["kind"]
     if kind == "buffer":
         access = "" if member["access"] == "read" else f", .access = sg::access_mode::{member['access']}"
@@ -275,8 +284,20 @@ def emit_group_impl(package: str, memory: dict[str, int], namespace: str, file: 
     if not dynamic:
         out.append("    (void)samplers;\n")
     out.append(f"    views.reserve({len(views)});\n")
+    # sg keys a view by its position in declared_bindings(), which a binding array's run of registers no longer matches.
+    position = {m["name"]: i + (1 if has_block(binding) else 0) for i, m in enumerate(resources)}
     for member in views:
-        out.append(f"    views.push_back({{.slot = sg::binding_slot({member['slot']}), .view = {member['name']}}});\n")
+        slot = position[member["name"]]
+        if member.get("count", 1) > 1:
+            # one view per element, in element order
+            out.append("    {\n")
+            out.append("        auto elements = cc::vector<sg::raw_view>();\n")
+            out.append(f"        for (auto const& element : {member['name']})\n")
+            out.append("            elements.push_back(element);\n")
+            out.append(f"        views.push_back({{.slot = sg::binding_slot({slot}), .view = cc::move(elements)}});\n")
+            out.append("    }\n")
+            continue
+        out.append(f"    views.push_back({{.slot = sg::binding_slot({slot}), .view = {member['name']}}});\n")
     for member in dynamic:
         out.append(f'    samplers.push_back({{.name = "{member["host_name"]}", .sampler = {member["name"]}}});\n')
     out.append("}\n")
@@ -504,7 +525,20 @@ def streams_of(struct: dict) -> list[tuple[str, bool, list[dict]]]:
     return [(name, per_instance, members) for name, (per_instance, members) in out.items()]
 
 
+# A member whose `@format` packs it: the bytes the host writes, whatever type the shader reads them as.
+PACKED_HOST_TYPES = {"rgba8_unorm": "cc::u32", "rgba8_uint": "cc::u32"}
+
+
+def vertex_member_host_type(package: str, where: str, member: dict) -> str:
+    fmt = member.get("format", "")
+    if fmt in PACKED_HOST_TYPES:
+        return PACKED_HOST_TYPES[fmt]
+    return host_type(package, {}, where, member["type"])
+
+
 def vertex_format(package: str, file: SglFile, struct: str, member: dict) -> str:
+    if member.get("format"):
+        return member["format"]
     # A vertex attribute is a builtin, never a struct in GPU memory.
     host_type(package, {}, f"'{file.path}' `@vertex struct {struct}` member '{member['name']}'", member["type"])
     fmt = HOST_TYPES[member["type"]][2]
@@ -527,7 +561,7 @@ def emit_vertex_input(package: str, namespace: str, file: SglFile, struct: dict)
     def fields(members: list[dict], indent: str) -> str:
         out = []
         for m in members:
-            cpp = host_type(package, {}, f"'{file.path}' `@vertex struct {name}` member '{m['name']}'", m["type"])
+            cpp = vertex_member_host_type(package, f"'{file.path}' `@vertex struct {name}` member '{m['name']}'", m)
             out.append(f"{indent}{cpp} {m['name']}; ///< location {m['location']}, `{m['name'].upper()}` on dx12\n")
         return "".join(out)
 
@@ -608,7 +642,8 @@ def emit_render_target(package: str, namespace: str, file: SglFile, struct: dict
     mixes two target sets even where their formats agree.
     """
     name = struct["name"]
-    members = struct["members"]
+    # the depth and the sample mask a pixel stage writes are outputs, and no color target a rendering binds
+    members = [m for m in struct["members"] if not m.get("output")]
     for m in members:
         if m["name"] in RENDER_TARGET_RESERVED:
             raise HostCodeError(
@@ -642,7 +677,7 @@ def emit_render_target(package: str, namespace: str, file: SglFile, struct: dict
 
 def emit_render_target_impl(namespace: str, struct: dict) -> str:
     qualified = f"{namespace}::{struct['name']}"
-    names = [m["name"] for m in struct["members"]]
+    names = [m["name"] for m in struct["members"] if not m.get("output")]
     out = [f"\n{qualified}::operator sg::rendering_info() const\n{{\n"]
     out.append("    return {.color_targets = {" + ", ".join(names) + "}, .depth_stencil_target = depth_stencil, "
                ".target_set = name};\n}\n")
@@ -672,6 +707,10 @@ def open_fields(pipeline: dict) -> list[tuple[str, str, str]]:
     return out
 
 
+# A pipeline's stages in the order a vertex passes through them, each a field of `describe`'s pipeline.
+PIPELINE_STAGES = ("vertex", "tessellation_control", "tessellation_evaluation", "geometry", "pixel")
+
+
 def pipeline_includes(entries: SglEntries) -> list[str]:
     if not entries.pipelines:
         return []
@@ -685,7 +724,8 @@ def emit_pipelines(entries: SglEntries, stems: dict[str, str]) -> str:
         stem = stems[file.path]
         type_name = pipeline_type(stem, p["name"])
         fields = open_fields(p)
-        stages = p["vertex"] + (f" and {p['pixel']}" if p["pixel"] else "")
+        named = [p[s] for s in PIPELINE_STAGES if p[s]]
+        stages = ", ".join(named[:-1]) + " and " + named[-1] if len(named) > 1 else named[0]
         writes = f", writing `{p['target_set']}`" if p["target_set"] else ", writing depth alone"
         out.append(f"/// `pipeline {p['name']}` of {file.path}: {stages}{writes}. Generated; do not edit.\n")
         out.append(f"/// Acquired as `ctx.cached.acquire_raster_pipeline({stem}.{p['name']}, …)`.\n")
@@ -754,7 +794,8 @@ def emit_pipelines_impl(package: str, namespace: str, entries: SglEntries, stems
         key = f"{stem}_{p['name']}"
         groups = p["layout"] + ([p["inline"]] if p["inline"] else [])
         missing = [g for g in groups if g not in generated]
-        if p["vertex_input"] not in vertex_inputs:
+        # empty for a vertex stage that draws from no vertex buffer
+        if p["vertex_input"] and p["vertex_input"] not in vertex_inputs:
             missing.append(p["vertex_input"])
         if missing:
             raise HostCodeError(
@@ -791,11 +832,13 @@ def emit_pipelines_impl(package: str, namespace: str, entries: SglEntries, stems
         out.append("    static slib::pipeline_definition const d = {\n")
         out.append(f'        .file = "{file.path}",\n')
         out.append(f'        .name = "{p["name"]}",\n')
-        out.append(f"        .vertex = {handle(p['vertex'])},\n")
-        if p["pixel"]:
-            out.append(f"        .pixel = {handle(p['pixel'])},\n")
+        # in pipeline_definition's field order, which a designated initializer has to follow
+        for s in ("vertex", "pixel", "geometry", "tessellation_control", "tessellation_evaluation"):
+            if p[s]:
+                out.append(f"        .{s} = {handle(p[s])},\n")
         out.append(f"        .acquire_layout = &{key}_layout,\n")
-        out.append(f"        .vertex_input = &{namespace}::{p['vertex_input']}::layout,\n")
+        if p["vertex_input"]:
+            out.append(f"        .vertex_input = &{namespace}::{p['vertex_input']}::layout,\n")
         if p["target_set"]:
             out.append(f"        .target_set = {namespace}::{p['target_set']}::name,\n")
         if p["targets"]:

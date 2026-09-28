@@ -9,19 +9,22 @@ What the compiler carries today is the [spec](spec/_index.md); a construct it do
   It did so before the footprint became a linear pass too.
   The recursive passes each guard their own depth at 200, which a release frame fits and a debug frame does not.
   Either the limit shrinks to what the smallest stack carries, or the deepest walks stop recursing on an operand chain.
-- **Hex literals.** `0xFF` is a number, and the checker refuses it as `unsupported-yet: a hex literal`.
-  `classify_number` puts every prefixed literal in `number_class::other`, since those need literal types the checker does not have.
-  A stencil mask in a `pipeline` is where it bites first.
-- **Binary literals.** `0b1010`, the same way and for the same reason: `unsupported-yet: a binary literal`.
+- **Array equality and `const` arrays.** `==` of two arrays, and a `const` whose value is an array literal, are both `unsupported-yet`.
 - **Values as type arguments.** `image_2d[.rgba8_unorm]` takes an enum case, and the checker reads exactly that argument today, as a special case of image types.
   The general feature is a type parameterized on an integer or an enum value, which math templated on a dimension wants as well, and it lets code branch on the value.
 - **Scoped extensions.** An extension inside a type's block is `unsupported-yet` (CHK-237).
   It is meant to extend the type it names where that block alone sees it, as when implementing a method.
-- **Literal folding.** `7 / 2` is refused while no `/` takes `int` (CHK-257); folding literal subtrees is what [literal-types.md](spec/incubator/literal-types.md) sketches in its place.
-- **Texture methods past 2D.** `sample`, `load`, `store` and `size` cover 2D shapes, with the sampler always passed.
-  A default sampler per texture, the other shapes and subscripts are [texture-methods.md](spec/incubator/texture-methods.md).
-- **Features used in a body.** Only a binding member uses a feature today, so a body's `require` can only declare one for its entry point (CHK-262).
-  The first builtin or binding array that needs one in a body brings the use into the inlined entry point, and `feature-not-declared` then names the call chain down to it.
+- **Literal folding.** `1 / 3` over integer literals alone is refused (CHK-313), and so is an operator over them that only a float takes (CHK-257).
+  Folding literal subtrees is what [literal-types.md](spec/incubator/literal-types.md) sketches in their place.
+- **What `discard` does to a quad's derivatives, per target.** SGL writes `discard;` and MSL `discard_fragment();`, which every target reads as "no effect after this".
+  Whether the pixel keeps running as a helper is where they differ, and a sample after a discard in a neighbouring pixel depends on it.
+  The tier-1 foliage test pins it per backend; a target that terminates gets the emulation the design settled: a flag, guarded stores, and the real discard at the end.
+- **Texture methods in MSL.** Every method has an MSL spelling, pinned by the registry's tests, which no emitted entry point reaches until MSL takes a group.
+  The first corpus shader that binds a texture on Metal is where each one meets a Metal compiler.
+- **What is left of texture methods** is [texture-methods.md](spec/incubator/texture-methods.md)'s: subscripts, a file-scope `@sampler`, and gathers of integer textures.
+- **Features used in a body.** Only an entry point's signature uses a feature today, so a body's `require` can only declare one for its entry point (CHK-262).
+  A listed binding's member does, and so do a stage input, a member taken per sample and the stage itself (CHK-263).
+  The first builtin that needs one in a body brings the use into the inlined entry point, and `feature-not-declared` then names the call chain down to it.
   A `require` inside a nested block, and `if feature f:` to branch on one, wait for that too.
 - **Features used through another symbol.** A binding's `required` counts only the uses resolved while its members compile, and `checker::compile` clears the grant around any symbol they demand.
   No such symbol can hold a resource yet; once a type alias or a struct field can, its use has to reach every binding that names it.
@@ -29,9 +32,14 @@ What the compiler carries today is the [spec](spec/_index.md); a construct it do
   A compute shader or a stage acquired on its own has no frozen part: its reload compiles, and its pipeline is then refused by the feature's name.
 - **Unsigned literals by suffix.** A literal takes a `uint` wherever one is expected (CHK-253), and `1u` is `unsupported-yet` (CHK-61).
   Whether the suffix is needed at all is the question [literal-types.md](spec/incubator/literal-types.md) holds.
-- **Arrays and `mat3` in GPU memory.** Neither type exists yet, and their layout is decided (the spec's emitting file, "Open").
+- **Arrays and `mat3` in GPU memory, and matrices and arrays across a stage edge.** An array is a value everywhere else (CHK-285).
+  It is `unsupported-yet` wherever GPU memory or a stage edge holds one (CHK-291).
+  `mat3` does not exist yet.
+  Their layout is decided (the spec's emitting file, "Open"), and they land together, after the tier-1 work.
   In a constant block an array element starts a row: `slib::row<T>` pads a shorter one to 16 bytes on the host, and WGSL reads it through `array<vec4f, N>`.
-  A `mat3` is three rows in a block and 36 bytes in a buffer's element, and a memory form splits its columns where a target sizes it otherwise.
+  The mechanism that is missing is a memory form holding an array, which a runtime index walks into.
+  A `mat3` is its three columns, each starting a row, in a block (44 bytes), and `slib::gpu_mat3` holds that on the host; in a buffer's element it is 36 bytes, which is `tg::mat3f` itself.
+  WGSL passes no matrix and no array between stages, so both cross as one location per column or element.
 - **The layout double check on dxil.** slib compares what SPIR-V and WGSL place against what SGL states, and reads no DXIL layout: the bytecode carries no reflection container to read it from.
   dx12's packing is SGL's own rule, so this is the target least likely to disagree, and a DXIL arm would need the container kept beside the bytecode.
 - **File-scope samplers.** A `sampler name:` at file scope is a pipeline layout's `sg::bound_sampler`, which vulkan and metal do not bind yet (sg's TODO.md).

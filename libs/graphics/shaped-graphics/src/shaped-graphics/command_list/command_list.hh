@@ -150,6 +150,13 @@ protected:
     virtual void raster_bind_group(int group_index, binding_group const& group) = 0;
     virtual void raster_bind_vertex_buffers(int first_slot, cc::span<vertex_buffer_view const> views) = 0;
     virtual void raster_bind_index_buffer(index_buffer_view const& view) = 0;
+
+    // The raster twin of the compute pair above, held for the next draw rather than the next dispatch.
+    // The graphics bind point keeps its own pending declarations, since its bound groups are its own.
+    virtual void raster_declare_array_buffer_access(cc::string_view binding_name,
+                                                    cc::span<array_buffer_access const> elements) = 0;
+    virtual void raster_declare_array_texture_access(cc::string_view binding_name,
+                                                     cc::span<array_texture_access const> elements) = 0;
     virtual void raster_set_viewport(viewport const& vp) = 0;
     virtual void raster_set_scissor(tg::aabb2i const& rect) = 0;
     virtual void raster_set_stencil_reference(u32 reference) = 0;

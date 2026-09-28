@@ -183,6 +183,51 @@ They apply in order, so a later setting overrides what an earlier one set, `filt
 | `max_anisotropy` | an int from 1 to 16, where 1 is off; above 1 every filter is `.linear`, since WebGPU refuses anything else |
 | `min_lod`, `max_lod`, `mip_lod_bias` | the mip clamp and bias |
 
+## Sampling
+
+**A texture is read through its methods, which are builtins of the prelude called with the texture first.**
+`frame.sky.sample(dir, smp)` is `sample(frame.sky, dir, smp)`, and every argument of a sample or a gather after the coordinate that is not the sampler is named.
+
+| method | of | takes |
+|---|---|---|
+| `sample` | a texture of floats, and a depth texture | the level from derivatives, and only in a pixel stage |
+| `sample(…, level = l)` | the same, and every stage | an explicit level: a `float`, and an `int` of a depth texture, which WGSL takes whole |
+| `sample(…, bias = b)` | a texture of floats | a bias on the level derivatives pick, in a pixel stage |
+| `sample(…, grad_x = …, grad_y = …)` | a texture of floats | the derivatives themselves |
+| `gather(…, component = texel_component.y)` | a 2D or cube texture of floats | one channel of the four texels a bilinear sample reads; `.x` by default |
+| `sample_compare(…, reference = r)` | a depth texture | a comparison, through a `comparison_sampler`, in a pixel stage |
+| `sample_compare(…, reference = r, level = 0.0)` | the same, and every stage | a comparison at level 0, the one level every target compares at |
+| `gather_compare(…, reference = r)` | a 2D or cube depth texture | the comparisons of four texels |
+| `load(xy, level)` | every texture but a cube | one texel, with no sampler; a multisampled one takes `sample = s` instead |
+| `load(xy)`, `store(xy, value)` | an image | one texel of an image the shader may read, or write |
+| `size(level)`, `layer_count()`, `level_count()`, `sample_count()` | textures and images | what the shape has |
+
+An array's layer is always named, `layer = 2`, since it is no coordinate on every target.
+An offset, `offset = int2(1, -1)`, is a constant from -8 to 7 on a 2D, 2D array or 3D texture.
+A cube and a multisampled texture take none, and neither does a 1D one, which Metal samples with no offset.
+A gather's component, an offset and a comparison's level are constants, because some target takes each only as written (CHK-280).
+
+**A texture may name the sampler it is sampled with, and a call then leaves it out.**
+`@sampler(name)` on a texture member names a sampler of the same binding, static or dynamic:
+
+```sgl
+binding material:
+    @sampler(albedo_smp)
+    albedo: texture_2d[float4]
+    sampler albedo_smp:
+        filter = .linear
+
+// in a pixel stage
+let a = material.albedo.sample(uv)
+let b = material.albedo.sample(uv, other_smp)
+```
+
+A call that names a sampler takes that one, and a call without one on a texture without `@sampler` is `missing-sampler` (CHK-279).
+A file-scope sampler is not yet one `@sampler` may name.
+
+**A depth texture filters only in a comparison**, because WebGPU refuses a filtering sampler on one otherwise.
+So a plain `sample` of a depth texture goes through a `@non_filtering` sampler, as an `@unfilterable` texture does (CHK-281).
+
 ## Features
 
 **SGL refuses a non-portable form by feature, never by target.**
@@ -234,6 +279,81 @@ A binding an entry point lists but never reads still takes its position, because
 **`@inline` constants stand last.**
 They are listed like any other binding and skipped when numbering, since sg addresses them itself.
 An `@inline` binding anywhere but the last position of a list is a normal error, so that reading order matches binding order.
+
+## Binding arrays
+
+**`T[N]` of a resource is a binding array**: `N` consecutive slots of one resource type under one name, which a device grants through `require binding_arrays`.
+
+```sgl
+require binding_arrays
+
+binding materials:
+    @sampler(bilinear) albedo: texture_2d[float4][64]
+    params: buffer[float4][8]
+    bilinear: sampler
+
+let base = materials.albedo[nonuniform p.material].sample(p.uv)
+let fixed = materials.albedo[materials.slot].sample(p.uv)
+```
+
+* It is read by element, and an element is the resource itself, handed to a builtin as the member would be.
+* It takes `N` slots from its first, so the resources after it start `N` later, as sg's bindings concept requires of every array.
+* `N` is at least 2: sg and the generated host code bind a count of 1 as a plain member, which is what one resource is written as (CHK-299).
+* An index the uniformity pass cannot prove the same in every invocation is marked `nonuniform i`, or refused (CHK-300).
+  Forgetting the mark is silent on the GPU: some hardware reads one invocation's descriptor for its whole wave.
+  A mark on an index the pass proves uniform is a warning, since it pays for nothing.
+  The mark stands only as the index itself; on a `let` or on a value array's index it would mean nothing, and is refused.
+* `T[]`, whose length the host binds, is the spelling an unbounded array has, and `unsupported-yet` until sg binds one.
+  An array of samplers, and one of more than one dimension, are `unsupported-yet` too.
+* HLSL writes `Texture2D<float4> albedo[64]` and `NonUniformResourceIndex` around a marked index; WebGPU has no binding arrays, so WGSL refuses by the feature.
+
+## Workgroup memory
+
+**A `@workgroup` binding is memory every thread of one workgroup shares**, alive for that workgroup's run: HLSL's `groupshared`, WGSL's `var<workgroup>`, MSL's `threadgroup`.
+
+```sgl
+@workgroup binding tile:
+    values: float[256]
+    total: float
+
+@compute(256) fun reduce(@local_thread_index li: int, @workgroup_id g: int3){work, tile}:
+    tile.values[li] = work.input[g.x * 256 + li]
+    workgroup_barrier()
+    …
+```
+
+* It is listed like any binding and takes no group, as `@inline` constants take none, since no host binds it; describe tells the host nothing of it.
+* Its members are values — scalars, vectors, structs and arrays of them — and never a resource (CHK-292).
+* A shader writes it, and only a compute entry point may list it (CHK-294).
+* A barrier waits for every thread of the workgroup, after which each sees what the others wrote (EMIT-131).
+  `workgroup_barrier()` makes workgroup memory visible, `storage_barrier()` buffers and `texture_barrier()` images.
+* Everything it holds together fits 16 KiB, WebGPU's default limit and vulkan's required minimum (CHK-293).
+* Nothing is defined before it is stored: no target but WGSL zeroes it, and a shader that relies on either pays for it on every target.
+  The interpreter reports a read of what was never stored as a program error (EVAL-92).
+* A test holds workgroup memory of its own run, so it uses a `@workgroup` binding without listing it (CHK-295).
+
+## Atomics
+
+**`atomic[uint]` and `atomic[int]` are memory every invocation updates in one indivisible step**, and like a resource they are never a value.
+One stands as the element of a `mut buffer`, or as a member of a `@workgroup` binding, arrays of them included:
+
+```sgl
+binding stats:
+    hits: mut buffer[atomic[uint]]
+
+@workgroup binding local:
+    count: atomic[uint]
+
+let slot = local.count.add(1)        // the value before the add
+stats.hits[slot].max(7)
+```
+
+Its operations are builtins that take it first, called as methods: `add`, `subtract`, `min`, `max`, `bit_and`, `bit_or`, `bit_xor` and `exchange` each give the value before,
+`load()` reads it, and `store(v)` writes it.
+`and` and `or` are keywords, so the bitwise updates carry the `bit_` their operators lack.
+Every one is relaxed, the one ordering WGSL has, and a vertex stage has none, since WebGPU has no writable storage there (CHK-296).
+The host holds a buffer of atomics as the plain integers it is.
+Floats, 64 bits, images, a compare-exchange and a vertex stage are [the incubator's](incubator/atomics.md).
 
 ## How a group reaches sg
 
@@ -314,9 +434,12 @@ Everything not named here is the diagnostic `unsupported-yet`, never a guess.
 * Every texture, depth texture, image and sampler form above, with `@unfilterable` and `@non_filtering`.
 * A static sampler in a binding, and the `needs-feature` refusals.
 * A texture, an image or a sampler handed to a builtin, which is the only way one is used ([CHK-206](semantics/checking.md#bindings)).
-  The builtins that take one are `sample`, `load`, `store` and `size` in `prelude/builtins.sgl`, called as methods of it: `tex.sample(uv, smp)`.
+  The builtins that take one are the texture methods of [Sampling](#sampling), called as methods of it: `tex.sample(uv, smp)`.
 * A plain member of a group, as a field of the constant buffer the group owns, for a type whose place in a block every target agrees on.
 * The positional group numbering, and `@inline` last.
+* Binding arrays of textures, images and buffers, under `require binding_arrays`, with `nonuniform`.
+* `@workgroup` bindings, which take no group.
+* `atomic[uint]` and `atomic[int]`, in a `mut buffer` and in workgroup memory, with every update but a compare-exchange.
 * A resource's host name, its path `binding.member` ([CHK-171](semantics/checking.md#bindings)), which the text reports beside the identifier it minted.
 
 Three targets write a group, and the fourth declines rather than guessing.

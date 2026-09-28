@@ -42,11 +42,11 @@ auto const t = sgl::test_source(text, "colors.sgl");
 #include <shaped-graphics-language/driver/describe.hh>
 auto const d = sgl::describe({.source = text, .source_name = "cube.sgl"});
                                            // -> cc::result<module_description, cc::string>: what the host side is generated from
-d.value().bindings                         // name, is_inline, members (constant: offset + size; buffer: slot + host_name `work.values`), block_size
+d.value().bindings                         // name, is_inline, members (constant: offset + size; buffer: slot + host_name `work.values`; a binding array: `count` slots from `slot`), block_size
                                            // texture / image / sampler members also carry the sg enum values of their binding:
                                            // texture_dimension, sample_type, image_format + access, sampler_type, static_sampler
 d.value().structs                          // the @vertex / @pixel structs: name, edge, members with their location
-d.value().entry_points                     // name, stage, workgroup, bindings (the list as written), footprint
+d.value().entry_points                     // name, stage, workgroup, bindings (the list as written, @workgroup ones left out), footprint
 @expect(footprint = "work: read, work.values: read write")   // on an entry point: pins its footprint (CHK-267), any order
 d.value().pipelines                        // name, stages, layout, vertex_input, target_set, targets, settings, open (the `.host` paths)
                                            // bindings and structs carry `shape`: check::structural_hash of their members,
@@ -58,6 +58,8 @@ d.value().pipelines                        // name, stages, layout, vertex_input
 sgl::prelude_files()                       // -> cc::span<prelude_file const> { name, source }, in module order:
                                            // "builtins.sgl": GENERATED in memory from the builtin registry, never read from disk
                                            // "core.sgl": the hand-written prelude/core.sgl as it was when the library was built
+sgl::parsed_prelude()                      // -> cc::span<parsed_prelude_file const> { file, ast }: the same files, parsed ONCE per
+                                           // process and shared by every thread; point a module_file at it rather than parsing again
 sgl::prelude_file_of(path)                 // -> i32: which prelude file an ABSOLUTE path or file:// uri is, else -1;
                                            // only the library's own prelude/ dir counts: shaders/prelude/core.sgl is -1
                                            // a driver checks such a source IN that file's place, never behind a 2nd prelude
@@ -211,6 +213,7 @@ sgl::builtins::function_record             // signature (SGL SOURCE TEXT, withou
 sgl::builtins::spelling                    // kind: call (text or .hlsl/.wgsl/.msl rename it; empty = the SGL name), infix, prefix, custom
 sgl::builtins::infix("+")                  // an operator at the level it has in every target
 f.called_in(language::hlsl)                // "lerp" for mix
+f.writes_name(language::hlsl, "asuint")    // true for `x.bits`: its custom writer lists the name in `write.hlsl_names`
 sgl::builtins::evaluator                   // void(span<scalar const> in, vector<scalar>& out): every argument's scalars, back to back;
                                            // the interpreter checks counts and kinds, so ONE evaluator serves a whole family
 sgl::builtins::custom_writer               // written(call_context const&): arguments already written, the target language, the registry
@@ -231,7 +234,7 @@ impl::add_function(r, "mix", {"a", t, "b", t, "t", "float"}, t, eval, {.hlsl = "
 #include <shaped-graphics-language/check/check.hh>
 auto const m = sgl::check::check(prelude_files, {.file = user, .ast = user_ast});   // + a registry; default_registry() without
                                            // -> sgl::check::checked_module; TOTAL; a module_file is two REFERENCES
-                                           // prelude_files: cc::span<module_file const>, parsed from sgl::prelude_files() or a test's own
+                                           // prelude_files: cc::span<module_file const>, from sgl::parsed_prelude() or a test's own
                                            // file i is prelude file i, and the program is the LAST file; never concatenated
                                            // carried: let / let mut, assignment and `op=`, if chains, while, for over `a ..< b`, loop with
                                            // break / break value / continue, and / or / not, comparison chains, int literals, print,
@@ -316,8 +319,8 @@ b.set_body({…});  b.e                      // a statement joins no list until 
                                            // a span given to a method must not alias the tree (it grows while read)
 
 #include <shaped-graphics-language/legalize/core.hh>
-sgl::check::is_core(e)                     // the definition of the core form
-sgl::check::find_core_violation(e)         // -> cc::optional<core_violation { reason, stmt, expr }>: the FIRST offending node
+sgl::check::is_core(m, e)                  // the definition of the core form
+sgl::check::find_core_violation(m, e)      // -> cc::optional<core_violation { reason, stmt, expr }>: the FIRST offending node
 sgl::check::has_effect(e, expr_id)         // a call that is not pure, or a block
 
 #include <shaped-graphics-language/legalize/legalize.hh>
@@ -343,6 +346,8 @@ o == other                                 // status, result and trace; NOT the 
 sgl::check::zero_value(m, type)  sgl::check::leaf_count_of(m, type)   // a value is its scalars in field order; mat4 is 16
 sgl::check::scalar::of(0.5f)  .as_float()  .as_int()  .as_bool()      // equality is on the BITS
 sgl::check::dump(o)                        // `ok 1.5 | print 1 | print true`
+sgl::check::is_constant(m, e, id)          // literals, and pure builtins, constructions and members of them alone (CHK-310)
+sgl::check::evaluate_constant(m, e, id)    // -> outcome: `ok` with .result, or `program_error` where a call has no value
 
 #include <shaped-graphics-language/test/run_tests.hh>
 m.tests  m.test_units                      // test_info { symbol, file, where, scope_path, comment, unit } and its flat tree
@@ -466,9 +471,11 @@ sgl::print_source(file)      // == file.source for EVERY input: the lossless inv
 - **Recursion is `recursive-call`**, once per loop of calls, at the call that closes it: `a -> b -> a`.
 - **Bindings are an effect.** A call needs the callee's `{…}` list inside the caller's, or it is `binding-not-listed` at the call; so an entry point lists what its shader reads.
 - **`require` permits, and use sets the floor.** `require extended_image_formats` in a file, a binding or a body grants the feature, named as `sg::feature` names it.
-  An entry point needs what the bindings it lists use, and must declare each of those by its file, a listed binding or its own body, or it is `feature-not-declared`.
+  An entry point needs what the bindings it lists use, its stage inputs, a member it takes per sample and its stage.
+  It must declare each of those by its file, a listed binding or its own body, or it is `feature-not-declared`.
   A form used without a grant is `needs-feature`, an unknown name `unknown-feature`, and a body `require` nothing needed is the WARNING `unused-require`; a file's or a binding's never is.
-  WGSL refuses an entry point needing `binding_arrays`, `multisampled_array_textures` or `raytracing` as `target-lacks-feature`.
+  WGSL refuses an entry point needing `binding_arrays`, `multisampled_array_textures`, `raytracing`, `geometry_shader` or `tessellation_shader` as `target-lacks-feature`.
+  MSL refuses one needing `geometry_shader` or `tessellation_shader` the same way.
 - **Every path of a function that returns a value ends in a `return`**, or it is `missing-return`.
   A `loop:` without a `break` never ends; a `while` always may, whatever its condition.
   What follows a jump in its list is the WARNING `unreachable-code`.
@@ -489,7 +496,32 @@ sgl::print_source(file)      // == file.source for EVERY input: the lossless inv
   A default is checked ONCE in its function's scope, and evaluated at each call that leaves it out, after every written argument (EVAL-80).
 - **A literal converts where a type is expected** (CHK-81, CHK-253): `(1, 2)` or `{a = 1}` is a call of the struct's name, `1` meets a float.
   Leaving its default type is one step of a literal's chain; candidates rank by dominance over those chains, then a type-scope function wins (CHK-254).
-  `7 / 2` is `literal-needs-type` while no `/` takes `int` (CHK-257); an integer literal is held in 64 bits and refused only in a type that cannot hold it.
+  `0xff`, `0b1010` are integer literals like decimal ones (CHK-269); `&`, `|`, `^`, `~`, `<<`, `>>` take int, uint and their vectors, a shift's count keeps its low five bits.
+  `1 / 3` is `literal-needs-type` (CHK-313): `/` and `%` over integer literals alone say nothing of int or float; an integer literal is held in 64 bits and refused only in a type that cannot hold it.
+- **The maths builtins** are records of `register_math.cc`: trig, `exp`/`log`, `pow`, `sqrt`/`inverse_sqrt`, rounding, `sign`, `step`/`smoothstep`.
+  Beside them `ddx`/`ddy`, `cross`, `distance`, `reflect`/`refract`, the integer bit functions and packing; `round` is ties to even.
+  The interpreter computes them with `builtins/impl/soft_math.hh`, never a libm, so every host meets the same bits; a test compares them with `nearly_equal(a, b, within = …)`.
+  `x.bits` and `float.from_bits(u)` are extensions in `core.sgl` over `reinterpret_as_*`, and a WGSL-indeterminate argument (`pow(-1.0, 0.5)`) is a `program-error`.
+- **Stage inputs are parameters** (CHK-271): the stage struct first, then `@vertex_index i: int`, `@is_front_facing f: bool`, `@thread_id id: int3`, ….
+  `flat_entry_point::input` is `none` for a vertex stage without a vertex buffer, and `stage_inputs` holds each input's local; `run_inputs::stage_inputs` gives them values.
+- **Geometry and tessellation stages** (CHK-301 to CHK-307): `@geometry(max_vertices = N)` takes `tri: varyings[3]` first and `stream: mut triangle_stream[varyings]` last.
+  `N` is at most 256, and `N` times the scalars of `varyings` at most 1024.
+  Each stage takes what the stage before hands on first, and its stage inputs after it.
+  `@tessellation_control(partitioning = …, winding = …)` takes the patch and returns a factors struct, and `@tessellation_evaluation` takes both and `@domain_location`.
+  HLSL writes them; WGSL and MSL refuse by the feature, so they are tested in C++ rather than in the corpus, which emits for all four targets.
+- **`T[N]` is a value like a struct** (CHK-285 to CHK-290): copied where passed, `float[3, 5]` is three arrays of five, and `xs.length` is a constant.
+  `T[N].filled(v)` and a square literal `[a, b, c]` build one; `T[]` is a binding member's alone.
+- **`discard` is a jump, and only a `@pixel fun` may reach it** (CHK-277): anywhere else it is `stage-not-allowed` at the `discard`.
+  A path that ends in one needs no value, and the uniformity pass does not count it as an exit (CHK-284).
+- **A `@workgroup binding` is memory one workgroup shares** (CHK-292 to CHK-295): listed like a binding, in no group, and left out of describe.
+  Only a compute entry point lists one, all of it within 16 KiB; `workgroup_barrier()`, `storage_barrier()` and `texture_barrier()` sync it (EMIT-131).
+- **`atomic[uint]` and `atomic[int]` live only in a `mut buffer` or a `@workgroup` binding** (CHK-296), and an expression of one is only ever a builtin's argument (CHK-297).
+- **A binding array, `texture_2d[float4][64]`, needs `binding_arrays`** and is read by element alone (CHK-299).
+  An index the uniformity pass cannot prove uniform is `nonuniform i`, or it is `non-uniform-index`; a needless mark is a warning (CHK-300).
+- **The uniformity pass judges the inlined entry point** (CHK-282 to CHK-284) by WGSL's rules, so no target refuses what SGL accepts.
+  A barrier, or a call that takes derivatives implicitly (`sample` without `level`, `ddx`), in non-uniform control flow is `non-uniform-control-flow`.
+- **`@sampler(name)` on a texture member names a sampler of the same binding** (CHK-279), which a method call then leaves out: `material.albedo.sample(uv)`.
+  A call without a sampler on a texture without one is `missing-sampler`.
 - **Still `unsupported-yet`:** generics, `mut self` and `mut` parameters, lambdas and function values, nested functions, `use`,
   a `const` whose value is no literal, enum case or const, a `for` over anything but `a ..< b`, a `let` without a value,
   an expression statement that is no call outside a `test`, an `assert` message, and an `assert` whose condition writes.
@@ -503,7 +535,7 @@ sgl::print_source(file)      // == file.source for EVERY input: the lossless inv
 - **A `@builtin struct` is keyed by its name, a `@builtin fun` by its name AND its parameter types**, against the registry.
   An `@operator` function is found through its operator alone: no lookup sees its name, which is documentation and what a dump shows.
 - **Adding a builtin touches ONE record**, then `uv run dev.py check sgl-prelude --fix` regenerates `prelude/builtins.sgl`.
-  No emitter, interpreter or layout switch exists to extend, and a test adds `fract` to a registry of its own to keep that true.
+  No emitter, interpreter or layout switch exists to extend, and a test adds `sawtooth` to a registry of its own to keep that true.
 - **The user file is the LAST file, not file 1.** Behind the library's prelude it is file 2; a test with one prelude file of its own still has it at 1.
 - **An entry point with any error has no flat tree.** `m.entry_points` holds only what an emitter may read.
 - **The check pass writes the structured form**, and only `once` and a bare `break` never come from it.

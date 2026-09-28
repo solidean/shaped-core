@@ -48,12 +48,13 @@ Access is inferred everywhere except where sg cannot see into the code, and ther
 **Arrays / bindless.**
 Element usage of a resource *array* bound to a shader cannot be inferred: the shader may index only some elements, or use them differently.
 So the caller declares it explicitly, split by resource family since buffers carry no layout.
-`declare_array_buffer_access` takes `array_buffer_access` `{index, stages, access}`; `declare_array_texture_access` takes `array_texture_access`, which also names the required `layout`.
-A declaration applies to the next dispatch only, resolved by binding name against the bound groups' array elements and tracked exactly like an inferred scalar access.
+`declare_array_buffer_access` takes `array_buffer_access` `{index, access}`; `declare_array_texture_access` takes `array_texture_access`, which also names the required `layout`.
+A declaration applies to the next dispatch or draw only, resolved by binding name against the bound groups' array elements and tracked exactly like an inferred scalar access.
+The compute, raytracing and raster scopes each carry the pair, and an element is tracked at the stages the pipeline's code touches its array in, as a scalar binding is.
 The footprint still says whether the code touches the array at all:
 
 - an array the code never indexes needs no declaration, and one declared anyway is dropped;
-- one it indexes and nobody declared logs an error, and every element is covered at the op's stages — one global barrier for the buffers, and a transition for each texture whose layout is wrong;
+- one it indexes and nobody declared logs an error, and every element is covered at those stages — one global barrier for the buffers, and a transition for each texture whose layout is wrong;
 - one declared unused (an empty span) that the code writes is covered the same way;
 - declarations that write nothing, for an array the code writes, log an error, and every declared element is covered for the code's write too;
 - a declared access the code cannot perform logs an error, and the barrier covers the declaration and the code together.

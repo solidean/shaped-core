@@ -101,7 +101,7 @@ static_assert(
     auto result = sg::binding{.name = b.name,
                               .reflected_name = b.emitted == b.name ? cc::string() : b.emitted,
                               .index = u32(b.slot),
-                              .count = 1u};
+                              .count = u32(b.count)};
     auto const is_dx12 = format == sg::shader_format::dxil;
     if (b.is_inline)
     {
@@ -162,16 +162,30 @@ public:
         (void)resolve; // SGL has no include directive
 
         auto stage = sgl::check::stage::none;
-        if (desc.stage == sg::shader_stage::vertex)
+        switch (desc.stage)
+        {
+        case sg::shader_stage::vertex:
             stage = sgl::check::stage::vertex;
-        else if (desc.stage == sg::shader_stage::fragment)
+            break;
+        case sg::shader_stage::tessellation_control:
+            stage = sgl::check::stage::tessellation_control;
+            break;
+        case sg::shader_stage::tessellation_evaluation:
+            stage = sgl::check::stage::tessellation_evaluation;
+            break;
+        case sg::shader_stage::geometry:
+            stage = sgl::check::stage::geometry;
+            break;
+        case sg::shader_stage::fragment:
             stage = sgl::check::stage::pixel;
-        else if (desc.stage == sg::shader_stage::compute)
+            break;
+        case sg::shader_stage::compute:
             stage = sgl::check::stage::compute;
-        else
-            return cc::error(cc::format("SGL has vertex, pixel and compute entry points only, and '{}' is declared as "
-                                        "none of them",
-                                        desc.entry_point));
+            break;
+        default:
+            return cc::error(
+                cc::format("SGL has no ray tracing entry points yet, and '{}' is declared as one", desc.entry_point));
+        }
 
         auto text = sgl::compile_to_text(
             {.source = desc.source,

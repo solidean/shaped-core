@@ -8,6 +8,7 @@ Back to the [specification](_index.md).
 ## Graphics terms
 
 * "inline constants". called push constants or root constants or SetBytes* in other apis
+* "stage input" - a value the GPU hands an invocation, such as its vertex index or its thread id; an entry point takes it as a parameter marked `@vertex_index`, `@thread_id`, …
 * "buffer"
 * "texture" - a sampled texture, read through the texture unit; also sg's word for the resource itself
 * "image" - a storage texture, addressed per texel in a named format, read, written or both
@@ -17,7 +18,7 @@ Back to the [specification](_index.md).
         * "vertex"
         * "pixel" - not fragment
         * "geometry"
-        * "tessellation eval/control" - TODO i feel like we want "tessellation" in the name but not sure about the other
+        * "tessellation_control", "tessellation_evaluation" - sg's names, spelled out; the control stage returns a patch's factors, and the evaluation stage runs once per domain location
     * mesh shading??
         * "mesh" - is this right? what about amplification? this is basically TODO
     * compute

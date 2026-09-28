@@ -16,20 +16,10 @@ constexpr int exit_ok = 0;
 constexpr int exit_usage = 1;
 constexpr int exit_errors = 2;
 
-cc::string_view stage_name(sgl::check::stage s)
+/// The stage as the package's entry lists name it, and `none` for no stage.
+cc::string_view stage_word(sgl::check::stage s)
 {
-    switch (s)
-    {
-    case sgl::check::stage::none:
-        return "none";
-    case sgl::check::stage::vertex:
-        return "vertex";
-    case sgl::check::stage::pixel:
-        return "pixel";
-    case sgl::check::stage::compute:
-        return "compute";
-    }
-    return "none";
+    return s == sgl::check::stage::none ? cc::string_view("none") : sgl::check::stage_name(s);
 }
 
 cc::string_view kind_name(sgl::described_member_kind k)
@@ -78,6 +68,9 @@ void write_binding(babel::json::object_writer& o, sgl::described_binding const& 
         mo.write("slot", m.slot);
         if (m.kind == sgl::described_member_kind::buffer)
             mo.write("stride", m.stride);
+        // a binding array's length, which is 1 for any other resource
+        if (m.count > 1)
+            mo.write("count", m.count);
         mo.write("host_name", cc::string_view(m.host_name));
         // The sg enum values a binding of this kind states, each written only where it applies.
         auto const optional = [&](cc::string_view key, cc::string const& value)
@@ -112,7 +105,7 @@ void write_binding(babel::json::object_writer& o, sgl::described_binding const& 
 void write_struct(babel::json::object_writer& o, sgl::described_struct const& s)
 {
     o.write("name", cc::string_view(s.name));
-    o.write("edge", stage_name(s.edge));
+    o.write("edge", stage_word(s.edge));
     o.write("shape", cc::string_view(s.shape));
     auto members = o.write_array("members");
     for (auto const& m : s.members)
@@ -126,6 +119,10 @@ void write_struct(babel::json::object_writer& o, sgl::described_struct const& s)
             mo.write("stream", cc::string_view(m.stream));
             mo.write("per_instance", m.is_per_instance);
         }
+        if (!m.format.empty())
+            mo.write("format", cc::string_view(m.format));
+        if (!m.output.empty())
+            mo.write("output", cc::string_view(m.output));
     }
 }
 
@@ -148,7 +145,7 @@ void write_memory_struct(babel::json::object_writer& o, sgl::described_memory_st
 void write_entry_point(babel::json::object_writer& o, sgl::described_entry_point const& e)
 {
     o.write("name", cc::string_view(e.name));
-    o.write("stage", stage_name(e.stage));
+    o.write("stage", stage_word(e.stage));
     {
         auto grid = o.write_array("workgroup", babel::json::layout::compact);
         for (auto const n : e.workgroup)
@@ -175,6 +172,9 @@ void write_pipeline(babel::json::object_writer& o, sgl::described_pipeline const
     o.write("name", cc::string_view(p.name));
     o.write("vertex", cc::string_view(p.vertex));
     o.write("pixel", cc::string_view(p.pixel));
+    o.write("geometry", cc::string_view(p.geometry));
+    o.write("tessellation_control", cc::string_view(p.tessellation_control));
+    o.write("tessellation_evaluation", cc::string_view(p.tessellation_evaluation));
     {
         auto list = o.write_array("layout", babel::json::layout::compact);
         for (auto const& name : p.layout)

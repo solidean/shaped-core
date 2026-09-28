@@ -52,6 +52,11 @@ public:
 
     void write_eval(cc::string& out, cc::string_view value) const override { out.appendf("_ = {};", value); }
 
+    void write_workgroup(cc::string& out, planned_workgroup const& w, plan const& p) const override
+    {
+        out.appendf("var<workgroup> {}: {};\n", w.name, type_text(p, *this, w.type));
+    }
+
     void write_local(cc::string& out, local_declaration const& local) const override
     {
         auto const keyword = local.is_mut ? "var" : "let";
@@ -68,8 +73,24 @@ public:
             out += k_indent;
             if (member.is_position)
                 out += "@builtin(position) ";
+            // EMIT-130: WGSL has no conservative depth, and the promise changes no result, so it is dropped
+            else if (member.output == check::pixel_output::sample_mask)
+                out += "@builtin(sample_mask) ";
+            else if (member.output != check::pixel_output::color)
+                out += "@builtin(frag_depth) ";
             else if (member.location >= 0)
                 out.appendf("@location({}) ", member.location);
+            // EMIT-129: only what differs from perspective at the centre is written
+            using kind = check::interpolation::kind_t;
+            using sampling = check::interpolation::sampling_t;
+            auto const& i = member.interpolate;
+            if (i.kind == kind::flat)
+                out += "@interpolate(flat) ";
+            else if (i.kind == kind::linear || i.sampling != sampling::center)
+                out.appendf("@interpolate({}{}) ", i.kind == kind::linear ? "linear" : "perspective",
+                            i.sampling == sampling::centroid ? ", centroid"
+                            : i.sampling == sampling::sample ? ", sample"
+                                                             : "");
             out.appendf("{}: {},\n", member.name, type_text(p, *this, member.type));
         }
     }
@@ -159,9 +180,10 @@ public:
 
     void write_declarations(cc::string& out, plan const& p) const override
     {
-        // EMIT-103: a directive, so it stands ahead of every declaration.
-        if (uses_derivatives(p))
-            out += "diagnostic(off, derivative_uniformity);\n\n";
+        // EMIT-127: `@builtin(primitive_index)` is an extension of WGSL, which the text enables first.
+        for (auto const& input : p.e.stage_inputs)
+            if (input.input == check::stage_input::primitive_id)
+                out += "enable primitive_index;\n\n";
         write_enum_constants(out, p, *this);
         write_buffers(out, p, *this);
         for (auto const& s : p.structs)
@@ -170,6 +192,10 @@ public:
             write_members(out, s.members, p);
             out += "}\n\n";
         }
+        for (auto const& w : p.workgroup)
+            write_workgroup(out, w, p);
+        if (!p.workgroup.empty())
+            out += "\n";
 
         if (!p.constants.has_value())
             return;
@@ -181,16 +207,31 @@ public:
 
     void write_function_head(cc::string& out, plan const& p) const override
     {
+        auto list = cc::string();
+        if (check::is_valid(p.e.input))
+            list = cc::format("{}: {}", p.locals[0], type_text(p, *this, p.e.input));
+        for (auto i = isize(0); i < p.e.stage_inputs.size(); ++i)
+        {
+            auto const& spelled = spelling_of(p.e.stage_inputs[i].input);
+            list += cc::format("{}@builtin({}) {}: {}", list.empty() ? "" : ", ", spelled.wgsl_builtin,
+                               p.stage_input_names[i], spelled.wgsl_type);
+        }
+
         if (p.e.entry_stage == stage::compute)
         {
             out.appendf("@compute @workgroup_size({}, {}, {})\n", p.e.workgroup[0], p.e.workgroup[1], p.e.workgroup[2]);
-            out.appendf("fn {}(@builtin(global_invocation_id) {}: vec3u) {{\n", p.entry_name, p.dispatch_name);
-            // WebGPU reports the id unsigned and SGL has one integer type, so the conversion stands at the top.
-            out.appendf("    let {}: vec3i = vec3i({});\n", p.locals[0], p.dispatch_name);
-            return;
+            out.appendf("fn {}({}) {{\n", p.entry_name, list);
         }
-        out.appendf("@{}\nfn {}({}: {}) -> {} {{\n", p.e.entry_stage == stage::vertex ? "vertex" : "fragment",
-                    p.entry_name, p.locals[0], type_text(p, *this, p.e.input), type_text(p, *this, p.e.result));
+        else
+            out.appendf("@{}\nfn {}({}) -> {} {{\n", p.e.entry_stage == stage::vertex ? "vertex" : "fragment",
+                        p.entry_name, list, type_text(p, *this, p.e.result));
+        // WebGPU hands an index over unsigned and SGL counts in int, so each conversion stands at the top.
+        for (auto i = isize(0); i < p.e.stage_inputs.size(); ++i)
+        {
+            auto const local = p.e.stage_inputs[i].local;
+            out.appendf("    let {}: {} = {};\n", p.locals[index_of(local)], type_text(p, *this, p.e.at(local).type),
+                        stage_input_value(p, i));
+        }
     }
 };
 

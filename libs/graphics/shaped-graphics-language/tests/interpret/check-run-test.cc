@@ -137,7 +137,7 @@ TEST("sgl run - an assert is no part of what a target writes, and the two forms 
     REQUIRE(checked.module.entry_points.size() == 1);
     auto const& structured = checked.module.entry_points[0];
     auto const core = legalize(checked.module, structured);
-    CHECK(!find_core_violation(core).has_value());
+    CHECK(!find_core_violation(checked.module, core).has_value());
     CHECK(core.check_sites.empty());
 
     auto inputs = run_inputs{.parameter = zero_value(checked.module, structured.input)};

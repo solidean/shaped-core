@@ -257,6 +257,7 @@ if(SC_BUILD_TESTS)
         tests/barrier/subresource-test.cc
         tests/barrier/slot-test.cc
         tests/barrier/slot-recording-test.cc
+        tests/barrier/array-plan-test.cc
         tests/context/stats-recording-test.cc
     )
     sc_nexus_binary(shaped-graphics-test KINDS tests ${SG_WARP_TEST_BINARY_ARGS})
@@ -382,6 +383,7 @@ if(SC_BUILD_TESTS)
             tests/shaders/shader_fixtures.cc
             tests/shaders/sgl-package-test.cc
             tests/compute/compute-test.cc
+            tests/compute/compute-sync-test.cc
             tests/compute/compute-texture-test.cc
             tests/raster/raster-test.cc
             tests/barrier/footprint-barrier-test.cc
@@ -398,6 +400,8 @@ if(SC_BUILD_TESTS)
                 textures.sgl:*
                 footprint.sgl:*
                 layout.sgl:*
+                sync.sgl:*
+                binding_arrays.sgl:*
         )
     endif()
 
