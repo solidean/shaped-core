@@ -7,6 +7,7 @@
 #include <clean-core/error/result.hh>
 #include <clean-core/string/string.hh>
 #include <shaped-graphics/binding/binding.hh>
+#include <shaped-graphics/binding/binding_group.hh> // sg::impl::buffer_use
 #include <shaped-graphics/binding/binding_group_layout.hh>
 #include <shaped-graphics/binding/sampler.hh>
 #include <shaped-graphics/fwd.hh>
