@@ -52,6 +52,15 @@ expr_id builder::type_expression(form_id form)
         auto const parts = keyword_parts_of(form);
         if (parts.keywords.size() == 1 && parts.arguments.empty() && !is_valid(parts.block))
             return make_expr(form, name{.where = at(parts.keywords[0]).where});
+        // `sampler[2]` subscripts that name, as `comparison_sampler[2]` does its own
+        if (parts.keywords.size() == 1 && parts.arguments.size() == 1 && !is_valid(parts.block)
+            && is_kind(parts.arguments[0], form_kind::square_list)
+            && at(parts.keywords[0]).where.end() == at(parts.arguments[0]).where.offset)
+        {
+            auto const object = make_expr(parts.keywords[0], name{.where = at(parts.keywords[0]).where});
+            auto const arguments = list_elements(parts.arguments[0]);
+            return make_expr(form, ast::index{.object = object, .arguments = arguments});
+        }
     }
     return expression(form, attribute_mode::keep);
 }

@@ -593,6 +593,8 @@ Nothing in a body uses a feature yet, so a `require` in a test's body is `unused
   An array of arrays is one group, outermost first, `float[3, 5]` for three arrays of five; two groups in a row are `wrong-kind-of-name` ([why](why/checking.md#chk-285)).
 * **CHK-286** `T[]`, a group with no length, is an array whose length the host binds, which only a binding member may be; anywhere else it is `wrong-kind-of-name`.
 * **CHK-287** `xs[i]` is an element of an array, and `xs[i, j]` is `xs[i][j]`: one `int` index per dimension, at most as many as the array has.
+* **CHK-309** An index that is an `int` literal or names an `int` `const` lies in `0 ..< N` for its dimension's length `N`, or it is `invalid-constant-argument`.
+  An index computed at run time is not judged here.
 * **CHK-288** `xs.length` is an array's length, an `int` constant, and the one member an array has; it is never assigned.
 * **CHK-289** `T[N].filled(v)` is an array of `T[N]` whose every element is `v`, which converts to `T` as an argument does.
 * **CHK-290** A square literal converts to the array type expected where it stands, with exactly as many elements, each converting to the element type.
@@ -600,8 +602,10 @@ Nothing in a body uses a feature yet, so a `require` in a test's body is `unused
   It holds at least one element, and no name and no splat.
 * **CHK-291** An array in a constant block, in a buffer's element or in a struct that crosses a stage edge is `unsupported-yet`, until a layout rule settles it.
 * **CHK-299** A binding member `T[N]` of a texture, an image or a buffer is a **binding array**, which needs `binding_arrays`.
+  Its `N` is at least 2, or it is `invalid-constant-argument`: one resource is a plain member.
   It is read by element alone, `name[i]`, and naming it whole is `wrong-kind-of-name`; an element is the resource, which only a builtin takes.
   `T[]`, an array of samplers and one of more than one dimension are `unsupported-yet`.
+  An array whose innermost element is a value is no binding array, whatever its dimensions: CHK-291 is what judges it.
   An access word stands before it and qualifies its element: `out image_2d[.rgba8_unorm][4]`.
 * **CHK-300** An index into a binding array that the uniformity pass cannot prove the same in every invocation is `non-uniform-index` unless it is `nonuniform i` ([why](why/checking.md#chk-300)).
   `nonuniform i` is its argument unchanged, and on an index the pass proves uniform it is the warning `needless-nonuniform`.
@@ -610,7 +614,7 @@ Nothing in a body uses a feature yet, so a `require` in a test's body is `unused
 
 * **CHK-292** A `@workgroup` binding's members are values its workgroup shares; a resource or a sampler block in one is `wrong-kind-of-name`.
   An array stands in one, since workgroup memory has no host layout, and a member of one is a place a shader assigns.
-  `@inline` and `@workgroup` together are `invalid-attribute-arguments`.
+  `@inline` or `@no_padding` together with `@workgroup` is `invalid-attribute-arguments`.
 * **CHK-293** A `@workgroup` binding whose members take more than 16384 bytes, laid out as WGSL lays out workgroup variables, is `invalid-attribute-arguments`.
 * **CHK-294** An entry point listing a `@workgroup` binding is a compute stage, and all it lists fits the same 16384 bytes, or it is `invalid-entry-point`.
 * **CHK-295** A test uses a `@workgroup` binding, and calls a function listing one, without listing it: the run holds its own.
@@ -862,7 +866,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `literal-needs-type` | CHK-257, CHK-268 |
 | `shift-out-of-range` | CHK-270 |
 | `missing-sampler` | CHK-279 |
-| `invalid-constant-argument` | CHK-280, CHK-285 |
+| `invalid-constant-argument` | CHK-280, CHK-285, CHK-299, CHK-309 |
 | `non-uniform-control-flow` | CHK-282 |
 | `non-uniform-index` | CHK-300 |
 | `needless-nonuniform` | CHK-300 |

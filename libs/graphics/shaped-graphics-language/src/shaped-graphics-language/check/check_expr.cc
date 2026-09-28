@@ -194,6 +194,13 @@ type_id checker::check_index(function_scope& scope, ast::expr_id id, ast::index 
             report(diagnostic_kind::type_mismatch, file, span_of(file, a.value),
                    cc::format("{} is indexed by an int, and this is a {}",
                               kind == type_kind::buffer ? "a buffer" : "an array", out.name_of(index)));
+        // CHK-309: a constant index names one element, and one past the end is refused by every target
+        auto const count = out.at(result).count;
+        if (auto const at = index == int_type ? constant_index(file, a.value) : cc::optional<i32>();
+            kind == type_kind::array && count > 0 && at.has_value() && (at.value() < 0 || at.value() >= count))
+            report(diagnostic_kind::invalid_constant_argument, file, span_of(file, a.value),
+                   cc::format("{} is no index into {}, whose elements are 0 ..< {}", at.value(), out.name_of(result),
+                              count));
         result = out.at(result).element;
     }
     if (!judge_atomic_use(file, id, result))

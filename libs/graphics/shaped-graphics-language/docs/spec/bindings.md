@@ -297,6 +297,7 @@ let fixed = materials.albedo[materials.slot].sample(p.uv)
 
 * It is read by element, and an element is the resource itself, handed to a builtin as the member would be.
 * It takes `N` slots from its first, so the resources after it start `N` later, as sg's bindings concept requires of every array.
+* `N` is at least 2: sg and the generated host code bind a count of 1 as a plain member, which is what one resource is written as (CHK-299).
 * An index the uniformity pass cannot prove the same in every invocation is marked `nonuniform i`, or refused (CHK-300).
   Forgetting the mark is silent on the GPU: some hardware reads one invocation's descriptor for its whole wave.
   A mark on an index the pass proves uniform is a warning, since it pays for nothing.

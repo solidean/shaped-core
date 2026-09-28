@@ -74,6 +74,25 @@ cc::optional<i32> checker::constant_count(i32 file, ast::expr_id expr)
     return c.integer;
 }
 
+cc::optional<i32> checker::constant_index(i32 file, ast::expr_id expr) const
+{
+    auto const& e = ast_of(file).at(expr);
+    if (e.node.is<ast::literal>())
+    {
+        auto const text = text_of(file, span_of(file, expr));
+        return classify_number(text) == number_class::plain_integer ? parse_plain_integer(text) : cc::optional<i32>();
+    }
+    // the name already checked, so what it names is known, and a local that hides a `const` is no constant
+    if (!e.node.is<ast::name>())
+        return {};
+    auto const& where = out.files[file].target_at(expr);
+    if (where.kind != target_kind::symbol || out.at(where.symbol).kind != symbol_kind::constant
+        || out.at(where.symbol).state != symbol_state::checked)
+        return {};
+    auto const& c = out.constants[out.at(where.symbol).info];
+    return c.kind == constant_kind::integer ? cc::optional<i32>(c.integer) : cc::optional<i32>();
+}
+
 type_id checker::resolve_array(i32 file, ast::expr_id expr, ast::index const& node, function_scope const* scope)
 {
     auto const where = span_of(file, expr);
@@ -247,7 +266,8 @@ i32 checker::workgroup_size_of(type_id type) const
             return {.size = record->wgsl_layout.size, .alignment = record->wgsl_layout.alignment};
         }
         auto const& info = out.at(t);
-        if (info.kind == type_kind::enumeration)
+        // an atomic holds a `uint` or an `int` (CHK-296)
+        if (info.kind == type_kind::enumeration || info.kind == type_kind::atomic)
             return {.size = 4, .alignment = 4};
         if (info.kind == type_kind::array)
         {

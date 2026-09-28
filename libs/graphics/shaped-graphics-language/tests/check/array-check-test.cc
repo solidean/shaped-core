@@ -61,6 +61,24 @@ TEST("sgl check - an array is read by as many int indices as it has dimensions, 
               .contains("the value it is filled with is float, got bool"));
 }
 
+TEST("sgl check - a constant index names an element of its array")
+{
+    constexpr auto grid = "    let g: int[2, 3] = [[1, 2, 3], [4, 5, 6]]\n";
+    CHECK(reports_for(in_function(cc::format("{}    let a = g[1, 2] + g[k, 0]\n", grid), "const k = 1\n\n")) == "");
+
+    // CHK-309: one past the end is refused by DXC and by WGSL, so the checker refuses it first
+    auto const literal = reports_for(in_function(cc::format("{}    let a = g[1, 3]\n", grid)));
+    CHECK(literal.contains("invalid-constant-argument"));
+    CHECK(literal.contains("3 is no index into int[3], whose elements are 0 ..< 3"));
+    CHECK(reports_for(in_function(cc::format("{}    let a = g[k]\n", grid), "const k = 2\n\n"))
+              .contains("2 is no index into int[2, 3], whose elements are 0 ..< 2"));
+    CHECK(reports_for(in_function(cc::format("{}    let a = g[k]\n", grid), "const k = -1\n\n"))
+              .contains("-1 is no index into int[2, 3]"));
+
+    // a value computed at run time is the target's to bound
+    CHECK(reports_for(in_function(cc::format("{}    let k = 2\n    let a = g[k]\n", grid))) == "");
+}
+
 TEST("sgl check - an element of a mutable array is assigned, and its length never is")
 {
     CHECK(reports_for(in_function("    let mut xs = [1, 2]\n    xs[0] = 3\n    xs[1] += 1\n")) == "");
@@ -74,6 +92,10 @@ TEST("sgl check - an array in a constant block waits for a layout rule, and a bi
     CHECK(reports_for("binding work:\n    weights: float[4]\n")
               .contains("unsupported-yet user:[float[4]] an array in a constant block, whose layout no rule settles "
                         "yet"));
+    // an array of arrays of values is values still, and no binding array
+    CHECK(reports_for("binding work:\n    grid: float[2, 3]\n")
+              .contains("unsupported-yet user:[float[2, 3]] an array in a constant block, whose layout no rule "
+                        "settles yet"));
     // a binding array is a feature a device grants (CHK-299)
     CHECK(reports_for("binding work:\n    maps: texture_2d[float4][4]\n").contains("needs binding_arrays"));
 }

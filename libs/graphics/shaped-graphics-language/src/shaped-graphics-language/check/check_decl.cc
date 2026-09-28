@@ -568,7 +568,11 @@ ast::range_of<member_info> checker::compile_members(i32 file,
         {
             auto const& t = out.at(type);
             auto const& element = out.at(t.element);
-            if (!is_resource(element.kind) && element.kind != type_kind::array)
+            // `float[2, 3]` is an array of values, whose innermost element says so
+            auto innermost = t.element;
+            while (out.at(innermost).kind == type_kind::array)
+                innermost = out.at(innermost).element;
+            if (!is_resource(out.at(innermost).kind))
             {
                 unsupported(file, span_of(file, f.type),
                             "an array in a constant block, whose layout no rule settles yet");
@@ -588,6 +592,15 @@ ast::range_of<member_info> checker::compile_members(i32 file,
             else if (element.kind == type_kind::sampler)
             {
                 unsupported(file, span_of(file, f.type), "an array of samplers");
+                type = checked_module::error_type;
+            }
+            // one slot is a plain member, and never a binding array
+            else if (t.count == 1)
+            {
+                report(diagnostic_kind::invalid_constant_argument, file, span_of(file, f.type),
+                       cc::format("{} is a binding array of one element; a binding array has at least 2, and one "
+                                  "resource is a plain member: `{}`",
+                                  out.name_of(type), out.name_of(t.element)));
                 type = checked_module::error_type;
             }
             else
@@ -985,6 +998,11 @@ void checker::compile_binding(symbol_id id)
     if (is_inline && is_workgroup)
         report(diagnostic_kind::invalid_attribute_arguments, file, find_attribute(file, d.attributes, "workgroup")->name,
                "a binding is @inline constants or @workgroup memory, never both");
+    // CHK-292: workgroup memory has no host layout for @no_padding to guard
+    if (auto const* const no_padding = find_attribute(file, d.attributes, "no_padding");
+        no_padding != nullptr && is_workgroup)
+        report(diagnostic_kind::invalid_attribute_arguments, file, no_padding->name,
+               "@no_padding guards a constant block's layout, and @workgroup memory has none a host sees");
     // CHK-293: WebGPU's default limit, and vulkan's required minimum, is what every target has
     if (is_workgroup)
     {

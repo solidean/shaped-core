@@ -168,6 +168,7 @@ let v = {1 + 2}
   The AST checks neither the word against the type nor the type against anything.
 * **AST-130** `mut` or `out` outside a type position is read as it is elsewhere, so `mut` keeps AST-45 and `out` in an expression is a normal error.
 * **AST-135** `sampler` alone in a type position reads as the name `sampler`: the keyword denotes the sampler type there, `smp: sampler`.
+  A square group right after it, `sampler[2]`, is an index of that name, as it would be of any other type name.
 
 ```sgl
 type blend = (vec3, vec3) -> vec3

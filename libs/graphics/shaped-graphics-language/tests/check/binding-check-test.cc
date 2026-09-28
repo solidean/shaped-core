@@ -296,11 +296,18 @@ TEST("sgl check - a @workgroup binding holds values a compute stage shares, with
               .contains("a @workgroup binding holds values the workgroup shares, and a sampler is none"));
     CHECK(reports_for("@inline @workgroup binding tile:\n    x: float\n")
               .contains("a binding is @inline constants or @workgroup memory, never both"));
+    auto const padded = reports_for("@no_padding @workgroup binding tile:\n    x: float\n");
+    CHECK(padded.contains("invalid-attribute-arguments"));
+    CHECK(padded.contains("@no_padding guards a constant block's layout, and @workgroup memory has none a host sees"));
 
     // CHK-293: 16 KiB is what WebGPU gives by default and vulkan at least
     CHECK(reports_for("@workgroup binding tile:\n    values: float[4096]\n") == "");
     CHECK(reports_for("@workgroup binding tile:\n    values: float[4097]\n")
               .contains("tile holds 16388 bytes, and a workgroup has 16384 on every target"));
+    // an atomic takes the four bytes of the int it holds
+    CHECK(reports_for("@workgroup binding tile:\n    hits: atomic[uint][4096]\n") == "");
+    CHECK(reports_for("@workgroup binding tile:\n    hits: atomic[uint][8192]\n")
+              .contains("tile holds 32768 bytes, and a workgroup has 16384 on every target"));
 
     // CHK-294: only a compute stage has a workgroup
     auto const raster = reports_for("@workgroup binding tile:\n    values: float[4]\n\n"
@@ -352,8 +359,22 @@ TEST("sgl check - a binding array is one dimension of resources, bounded, grante
               .contains("an unbounded binding array, which sg binds none of yet"));
     CHECK(
         reports_for(cc::format("{}binding b:\n    s: comparison_sampler[4]\n", granted)).contains("an array of samplers"));
+    // `sampler` is a keyword, and subscripted in a type position it reads as the name does (AST-135)
+    CHECK(reports_for(cc::format("{}binding b:\n    s: sampler[2]\n", granted))
+              .contains("unsupported-yet user:[sampler[2]] an array of samplers"));
     CHECK(reports_for(cc::format("{}binding b:\n    t: texture_2d[float4][2, 2]\n", granted))
               .contains("a binding array of more than one dimension"));
+
+    // one resource is a plain member, which needs no feature and binds the way a host binds it
+    auto const one = reports_for(cc::format("{}binding b:\n    t: texture_2d[float4][1]\n", granted));
+    CHECK(one.contains("invalid-constant-argument"));
+    CHECK(one.contains("texture_2d[float4][1] is a binding array of one element; a binding array has at least 2"));
+
+    // a constant index names one of its elements
+    auto const past = reports_for(cc::format("{}binding b:\n    t: texture_2d[float4][2]\n\n"
+                                             "@compute(1) fun cs(){{b}}:\n    let n = b.t[2].load(int2(0, 0))\n",
+                                             granted));
+    CHECK(past.contains("2 is no index into texture_2d[float4][2], whose elements are 0 ..< 2"));
 
     auto const whole = reports_for(cc::format("{}binding b:\n    t: texture_2d[float4][8]\n\n"
                                               "@compute(1) fun cs(){{b}}:\n    let n = b.t\n",
