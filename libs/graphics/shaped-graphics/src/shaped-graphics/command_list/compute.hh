@@ -11,12 +11,12 @@
 #include <type_traits>
 
 /// Per-element access for a *buffer* array bound to a shader — the payload of `declare_array_buffer_access`.
-/// Buffers have no layout, so only the accessed element, stage(s), and access are named.
+/// Buffers have no layout, so only the accessed element and its access are named.
+/// It is tracked at the stages the pipeline's code touches the array in, as a scalar binding is.
 struct sg::array_buffer_access
 {
-    int index = 0;                    ///< element index within the bound array
-    pipeline_stage_flags stages = {}; ///< stage(s) the shader accesses it in
-    access_flags access = {};         ///< how the shader accesses this element
+    int index = 0;            ///< element index within the bound array
+    access_flags access = {}; ///< how the shader accesses this element
 };
 
 /// Per-element access for a *texture* array bound to a shader — the payload of `declare_array_texture_access`.
@@ -24,7 +24,6 @@ struct sg::array_buffer_access
 struct sg::array_texture_access
 {
     int index = 0;                                   ///< element index within the bound array
-    pipeline_stage_flags stages = {};                ///< stage(s) the shader accesses it in
     access_flags access = {};                        ///< how the shader accesses this element
     texture_layout layout = texture_layout::general; ///< the layout the element must be in
     // A subresource range (which mips / array slices / aspects) is a future addition — see resource/subresource.hh.

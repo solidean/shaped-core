@@ -150,7 +150,9 @@ Three rules distinguish an array binding from a scalar one:
 - **Access is never inferred.**
   Which elements a shader indexes, and how, cannot be read from the binding, so array bindings skip the automatic hazard tracking scalar bindings get.
   The caller declares the touched elements via `declare_array_buffer_access` / `declare_array_texture_access`, applied to the next dispatch or draw only.
-  The compute, raytracing and raster scopes each carry the pair, and each element names the stages it is accessed in — a table only a fragment shader indexes says `fragment`.
+  The compute, raytracing and raster scopes each carry the pair.
+  An element is tracked at the stages the pipeline's code touches the array in, as a scalar binding is.
+  A pipeline with no footprint — only a hand-supplied shader blob — has its elements tracked at every stage of the op; one that wants narrower barriers supplies a footprint.
   A declaration belongs to the bind point it was made on: a draw never resolves a compute declaration, and one still pending when its rendering scope closes is dropped with it.
 - **Every array the pipeline's code indexes must be declared before each dispatch or draw.**
   A missing one logs an error and costs a global barrier over every element, since a hot-reloaded shader can start indexing an array at any frame.

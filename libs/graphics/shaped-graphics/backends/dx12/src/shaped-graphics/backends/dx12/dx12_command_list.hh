@@ -136,7 +136,7 @@ public:
     }
 
     // Array-access declarations for the *next* dispatch (compute + ray tracing share them); cleared after it.
-    // Resolved against the bound groups' array_bindings — every bound array binding must be covered by one.
+    // Resolved against the bound groups' array_bindings; an array the code indexes and none names is logged and covered whole.
     cc::vector<dx12_array_buffer_declare> _pending_array_buffer_declares;
     cc::vector<dx12_array_texture_declare> _pending_array_texture_declares;
 

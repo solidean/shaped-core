@@ -373,7 +373,7 @@ void dx12_command_list::raster_set_inline_constants(cc::span<byte const> data, c
 void dx12_command_list::declare_raster_draw_barriers(bool indexed)
 {
     // Bound groups' shader reads/writes (same policy as compute_dispatch), keyed to the graphics stages.
-    // Array bindings are tracked as the caller declared them, at each element's own stages.
+    // Array bindings are tracked as the caller declared them, at the stages the code touches each in.
     auto const graphics_stages = sg::pipeline_stage_flag::vertex | sg::pipeline_stage_flag::fragment;
     declare_group_accesses(_bound_raster_groups, _bound_raster_footprint, graphics_stages);
     declare_array_accesses(_bound_raster_groups, _bound_raster_footprint, _bound_raster_footprint_owner, graphics_stages,

@@ -430,7 +430,7 @@ TEST("sg metal - a draw resolves its array declarations against the groups it bi
         scope.draw({.vertex_range = {.offset = 2, .size = 4}});
 
         sg::array_buffer_access const out_of_range[] = {
-            {.index = 4, .stages = sg::pipeline_stage_flag::fragment, .access = sg::access_flag::shader_read},
+            {.index = 4, .access = sg::access_flag::shader_read},
         };
         scope.declare_array_buffer_access("inputs", out_of_range);
         CHECK_ASSERTS(scope.draw({.vertex_range = {.offset = 2, .size = 4}}));

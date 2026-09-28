@@ -156,10 +156,11 @@ public:
     /// Binds the index buffer read by draw_indexed.
     void bind_index_buffer(index_buffer_view const& view);
     /// Declares per-element access for a *buffer* array / bindless binding, applied to the **next draw only**.
-    /// Every bound array binding must be declared before each draw, and an empty `elements` span declares it unused.
+    /// Every array the pipeline's code indexes must be declared before each draw.
+    /// An undeclared one logs and is covered whole, and an empty `elements` span declares it unused.
     /// A scalar binding has its access inferred from the shader and the bound view.
     /// Array element usage cannot be, since a shader may index only some elements, or use them differently.
-    /// Each element's `stages` is what it is tracked at, so a table only the fragment shader indexes says `fragment`.
+    /// Each element is tracked at the stages the pipeline's code touches the array in, as a scalar binding is.
     void declare_array_buffer_access(cc::string_view binding_name, cc::span<array_buffer_access const> elements);
     /// Declares per-element access for a *texture* array / bindless binding.
     /// Like the buffer form it applies to the next draw only, but each element also names the layout it must be in.

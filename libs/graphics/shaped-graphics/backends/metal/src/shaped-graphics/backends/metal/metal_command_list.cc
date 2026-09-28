@@ -912,23 +912,23 @@ void metal_command_list::declare_array_accesses(sg::impl::pipeline_footprint con
                     for (auto const& declare : texture_declares)
                         if (declare.name == array.name)
                             for (auto const& e : declare.elements)
-                                declare_texture(array.elements[e.index].texture, e.stages, e.access | plan.widen_by);
+                                declare_texture(array.elements[e.index].texture, plan.stages, e.access | plan.widen_by);
                 }
                 else
                 {
                     for (auto const& declare : buffer_declares)
                         if (declare.name == array.name)
                             for (auto const& e : declare.elements)
-                                declare_buffer(array.elements[e.index].buffer, e.stages, e.access | plan.widen_by);
+                                declare_buffer(array.elements[e.index].buffer, plan.stages, e.access | plan.widen_by);
                 }
                 break;
             case sg::impl::array_plan::mode::cover_all:
                 for (auto const& element : array.elements)
                 {
                     if (element.buffer != nullptr)
-                        declare_buffer(element.buffer, plan.cover_stages, plan.cover_access);
+                        declare_buffer(element.buffer, plan.stages, plan.cover_access);
                     else if (element.texture != nullptr)
-                        declare_texture(element.texture, plan.cover_stages, plan.cover_access);
+                        declare_texture(element.texture, plan.stages, plan.cover_access);
                 }
                 break;
             }
@@ -1113,7 +1113,7 @@ void metal_command_list::declare_raster_draw(bool indexed)
     auto const* const footprint = _bound_raster != nullptr ? &_bound_raster->footprint() : nullptr;
     declare_bound_groups(graphics_stages, footprint);
 
-    // The array bindings as the caller declared them, each element at its own stages.
+    // The array bindings as the caller declared them, at the stages the code touches each in.
     declare_array_accesses(footprint, _bound_raster, graphics_stages, _pending_raster_array_buffer_declares,
                            _pending_raster_array_texture_declares);
 

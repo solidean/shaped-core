@@ -125,19 +125,15 @@ void bound_resources::declare_raytracing_access(sg::command_list& cmd) const
         {
             buffers.clear();
             for (auto const e : t.acquired)
-                buffers.push_back({.index = i32(e),
-                                   .stages = sg::pipeline_stage_flag::raytracing,
-                                   .access = sg::access_flag::shader_read});
+                buffers.push_back({.index = i32(e), .access = sg::access_flag::shader_read});
             cmd.raytracing.declare_array_buffer_access(name_of(t.table), buffers);
             continue;
         }
 
         textures.clear();
         for (auto const e : t.acquired)
-            textures.push_back({.index = i32(e),
-                                .stages = sg::pipeline_stage_flag::raytracing,
-                                .access = sg::access_flag::shader_read,
-                                .layout = sg::texture_layout::shader_texture});
+            textures.push_back(
+                {.index = i32(e), .access = sg::access_flag::shader_read, .layout = sg::texture_layout::shader_texture});
         cmd.raytracing.declare_array_texture_access(name_of(t.table), textures);
     }
 }

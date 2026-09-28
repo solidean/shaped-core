@@ -101,7 +101,7 @@ An attribute's `[[attribute(n)]]` index is its position in `attributes`, the sam
 
 **webgpu** records through `wgpuRenderPassEncoderSetIndexBuffer` / `wgpuRenderPassEncoderDrawIndexed`, re-binding its pass state when a pass reopens.
 
-**A draw declares its array bindings the way a dispatch does**, through the raster scope's `declare_array_*_access` pair, each element at the stages it names.
+**A draw declares its array bindings the way a dispatch does**, through the raster scope's `declare_array_*_access` pair, each element tracked at the stages the code touches its array in.
 webgpu has no binding arrays, so there only the empty declaration is accepted.
 See [bindings](bindings.md#array-bindings).
 

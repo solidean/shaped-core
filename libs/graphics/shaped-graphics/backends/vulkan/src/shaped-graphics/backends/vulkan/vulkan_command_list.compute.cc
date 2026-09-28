@@ -223,7 +223,7 @@ void vulkan_command_list::declare_array_accesses(cc::span<vulkan_binding_group c
                             for (auto const& e : declare.elements)
                             {
                                 auto const& element = ab.elements[e.index];
-                                (void)track_texture_access(*element.texture, element.range, e.stages,
+                                (void)track_texture_access(*element.texture, element.range, plan.stages,
                                                            e.access | plan.widen_by, e.layout);
                             }
                 }
@@ -232,7 +232,7 @@ void vulkan_command_list::declare_array_accesses(cc::span<vulkan_binding_group c
                     for (auto const& declare : buffer_declares)
                         if (declare.name == ab.name)
                             for (auto const& e : declare.elements)
-                                track_buffer_access(*ab.elements[e.index].buffer, e.stages, e.access | plan.widen_by);
+                                track_buffer_access(*ab.elements[e.index].buffer, plan.stages, e.access | plan.widen_by);
                 }
                 break;
             case sg::impl::array_plan::mode::cover_all:
@@ -241,14 +241,14 @@ void vulkan_command_list::declare_array_accesses(cc::span<vulkan_binding_group c
                 {
                     if (element.buffer != nullptr)
                     {
-                        track_buffer_access(*element.buffer, plan.cover_stages, plan.cover_access);
+                        track_buffer_access(*element.buffer, plan.stages, plan.cover_access);
                         _global_barrier_buffers.insert(element.buffer.get());
                     }
                     else if (element.texture != nullptr)
                     {
                         // A memory barrier moves no layout, so a texture still gets its own transition where it needs one.
-                        (void)track_texture_access(*element.texture, element.range, plan.cover_stages,
-                                                   plan.cover_access, sg::shader_layout_of(ab.bound_as));
+                        (void)track_texture_access(*element.texture, element.range, plan.stages, plan.cover_access,
+                                                   sg::shader_layout_of(ab.bound_as));
                     }
                 }
                 break;

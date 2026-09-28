@@ -349,10 +349,9 @@ ASYNC_INVOCABLE_TEST("sg vulkan - a draw declares its array elements and reads w
     auto vertex_buffer = ctx.persistent.create_buffer_from_data(covering_triangle, sg::buffer_usage::vertex_buffer).raw();
     REQUIRE(vertex_buffer != nullptr);
 
-    // The fragment stage alone, where a scalar binding would have been inferred as vertex | fragment.
     sg::array_buffer_access const declared[] = {
-        {.index = 0, .stages = sg::pipeline_stage_flag::fragment, .access = sg::access_flag::shader_read},
-        {.index = 3, .stages = sg::pipeline_stage_flag::fragment, .access = sg::access_flag::shader_read},
+        {.index = 0, .access = sg::access_flag::shader_read},
+        {.index = 3, .access = sg::access_flag::shader_read},
     };
 
     auto cmd = ctx.create_command_list();

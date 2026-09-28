@@ -179,14 +179,11 @@ ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - array bindings: partial fill, declared a
     disp->compute.bind_group(1, *g1);
     disp->compute.bind_group(2, *g2);
     sg::array_buffer_access const buf_access[] = {
-        {.index = 0, .stages = sg::pipeline_stage_flag::compute, .access = sg::access_flag::shader_read},
-        {.index = 3, .stages = sg::pipeline_stage_flag::compute, .access = sg::access_flag::shader_read},
+        {.index = 0, .access = sg::access_flag::shader_read},
+        {.index = 3, .access = sg::access_flag::shader_read},
     };
     sg::array_texture_access const tex_access[] = {
-        {.index = 1,
-         .stages = sg::pipeline_stage_flag::compute,
-         .access = sg::access_flag::shader_read,
-         .layout = sg::texture_layout::shader_texture},
+        {.index = 1, .access = sg::access_flag::shader_read, .layout = sg::texture_layout::shader_texture},
     };
     disp->compute.declare_array_buffer_access("Bufs", buf_access);
     disp->compute.declare_array_texture_access("Texs", tex_access);
@@ -345,7 +342,7 @@ ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - array bindings: a declaration for an arr
     disp->compute.bind_group(1, *g1);
     disp->compute.bind_group(2, *g2);
     sg::array_buffer_access const buf_access[] = {
-        {.index = 0, .stages = sg::pipeline_stage_flag::compute, .access = sg::access_flag::shader_read},
+        {.index = 0, .access = sg::access_flag::shader_read},
     };
     disp->compute.declare_array_buffer_access("Bufs", buf_access);
     disp->compute.declare_array_texture_access("Texs", {});
@@ -387,7 +384,7 @@ ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - array bindings: a write the declarations
         disp->compute.bind_pipeline(*pipeline);
         disp->compute.bind_group(0, *group);
         sg::array_buffer_access const reads[] = {
-            {.index = 1, .stages = sg::pipeline_stage_flag::compute, .access = sg::access_flag::storage_read},
+            {.index = 1, .access = sg::access_flag::storage_read},
         };
         disp->compute.declare_array_buffer_access("Rws", reads);
         disp->compute.dispatch_groups(1);
@@ -566,16 +563,12 @@ ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - raster array bindings: partial fill, dec
     auto texs_group = ctx.persistent.create_binding_group(p.texs_layout, cc::span<sg::named_view const>(&texs_nv, 1));
     REQUIRE(texs_group != nullptr);
 
-    // The fragment stage alone, where the scalar path keys every bound view of a draw to vertex | fragment.
     sg::array_buffer_access const buf_access[] = {
-        {.index = 0, .stages = sg::pipeline_stage_flag::fragment, .access = sg::access_flag::shader_read},
-        {.index = 3, .stages = sg::pipeline_stage_flag::fragment, .access = sg::access_flag::shader_read},
+        {.index = 0, .access = sg::access_flag::shader_read},
+        {.index = 3, .access = sg::access_flag::shader_read},
     };
     sg::array_texture_access const tex_access[] = {
-        {.index = 1,
-         .stages = sg::pipeline_stage_flag::fragment,
-         .access = sg::access_flag::shader_read,
-         .layout = sg::texture_layout::shader_texture},
+        {.index = 1, .access = sg::access_flag::shader_read, .layout = sg::texture_layout::shader_texture},
     };
 
     u32 const b0_data[] = {raster_b0_value, 0, 0, 0};
@@ -662,7 +655,7 @@ ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - raster array bindings: a draw resolves o
     REQUIRE(target != nullptr);
 
     sg::array_buffer_access const vacant_access[] = {
-        {.index = 2, .stages = sg::pipeline_stage_flag::fragment, .access = sg::access_flag::shader_read},
+        {.index = 2, .access = sg::access_flag::shader_read},
     };
     auto const rtv = sg::texture_2d::from_raw(target).as_render_target_view();
 
