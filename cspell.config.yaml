@@ -34,6 +34,7 @@ words:
   - fprofile
   - GLFW
   - hlsli
+  - hpos
   - HRESULT
   - hwnd
   - IDXGI
@@ -98,6 +99,7 @@ words:
   - uncompiled
   - unknwn
   - usemtl
+  - varyings
   - vbuf
   - vcvars
   - vdoc
