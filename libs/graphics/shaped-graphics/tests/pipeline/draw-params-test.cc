@@ -173,3 +173,28 @@ ASYNC_INVOCABLE_TEST("sg - vertex buffers bound from a first slot other than 0 f
     CHECK(indices_at(pixels, 1, rows - 1) == tg::vec2f(1, 0));
     CHECK(indices_at(pixels, 1, 0) == tg::vec2f(-1, -1));
 }
+
+ASYNC_INVOCABLE_TEST("sg - inline constants set between two draws reach each its own", (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+
+    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::draws.tagged_points);
+    auto const grid = point_grid(*ctx);
+
+    // Column 2 drawn tagged 7, then column 5 tagged 9, in one scope.
+    auto const pixels = co_await sg_test::draw_offscreen(*ctx, grid_target(),
+                                                         [&](sg::rendering_scope& scope)
+                                                         {
+                                                             scope.bind_pipeline(*pipeline);
+                                                             grid.bind(scope);
+                                                             scope.set_inline_constants(shaders::draw_tag{.tag = 7.0f});
+                                                             scope.draw({.vertex_range = {.offset = 2, .size = 1}});
+                                                             scope.set_inline_constants(shaders::draw_tag{.tag = 9.0f});
+                                                             scope.draw({.vertex_range = {.offset = 5, .size = 1}});
+                                                         });
+
+    CHECK(pixels[0].rgba_float(2, 0) == tg::vec4f(2, 0, 7, 1));
+    CHECK(pixels[0].rgba_float(5, 0) == tg::vec4f(5, 0, 9, 1));
+}

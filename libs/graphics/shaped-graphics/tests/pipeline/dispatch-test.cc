@@ -1,4 +1,5 @@
 #include "../shaders/shader_fixtures.hh"
+#include "rects.hh"
 
 #include <clean-core/container/vector.hh>
 #include <clean-core/thread/async_coroutine.hh>
@@ -235,4 +236,98 @@ ASYNC_INVOCABLE_TEST("sg - two groups rebound between dispatches, and one group 
     REQUIRE(got.size() == count);
     for (auto i = 0; i < count; ++i)
         CHECK(got[i] == 30.0f).context(cc::format("element {}", i));
+}
+
+ASYNC_INVOCABLE_TEST("sg - three groups bound at once each reach the shader, and one rebound changes only its own",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+
+    // 1 × 2 × 3 through three groups, then × 2 × 5 with only the second rebound: 60.
+    constexpr int count = 64;
+    auto const pipeline = co_await shaders::dispatch.multiply_three.acquire_pipeline(*ctx);
+    auto const factor = [&](i32 v)
+    { return ctx->persistent.create_buffer_from_data(cc::vector<i32>{v}, sg::buffer_usage::readonly_buffer); };
+    auto const two = factor(2);
+    auto const three = factor(3);
+    auto const five = factor(5);
+    auto const values = ctx->persistent.create_buffer_from_data(
+        cc::vector<i32>::create_filled(count, 1), sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
+
+    auto const first_layout = ctx->cached.acquire_binding_group_layout<shaders::first_factor>();
+    auto const second_layout = ctx->cached.acquire_binding_group_layout<shaders::second_factor>();
+    auto const product_layout = ctx->cached.acquire_binding_group_layout<shaders::product>();
+    auto const first
+        = ctx->persistent.create_binding_group(first_layout, shaders::first_factor{.by = two.as_readonly_buffer()});
+    auto const second_three
+        = ctx->persistent.create_binding_group(second_layout, shaders::second_factor{.by = three.as_readonly_buffer()});
+    auto const second_five
+        = ctx->persistent.create_binding_group(second_layout, shaders::second_factor{.by = five.as_readonly_buffer()});
+    auto const product
+        = ctx->persistent.create_binding_group(product_layout, shaders::product{.values = values.as_readwrite_buffer()});
+
+    auto cmd = ctx->create_command_list();
+    cmd->compute.bind_pipeline(*pipeline);
+    cmd->compute.bind_group(0, *first);
+    cmd->compute.bind_group(1, *second_three);
+    cmd->compute.bind_group(2, *product);
+    cmd->compute.dispatch_threads(count);
+    cmd->compute.bind_group(1, *second_five);
+    cmd->compute.dispatch_threads(count);
+    auto const back = cmd->download.data_from_buffer(values);
+    ctx->submit_command_list(cc::move(cmd));
+
+    auto const got = co_await back.data();
+    REQUIRE(got.size() == count);
+    for (auto i = 0; i < count; ++i)
+        CHECK(got[i] == 60).context(cc::format("element {}", i));
+}
+
+ASYNC_INVOCABLE_TEST("sg - a group bound for a dispatch is not bound at a later draw", (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::binding_arrays))
+        SKIP("this context has no binding arrays");
+
+    // `lanes` carries the array `lanes.sources`, and a declaration of an array's access asserts where no bound group
+    // carries it — so it is how a draw shows whether the dispatch's group is still bound.
+    auto const gather = co_await shaders::binding_arrays.gather.acquire_pipeline(*ctx);
+    auto const draw = co_await ctx->cached.acquire_raster_pipeline(shaders::rects.floating);
+    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::lanes>();
+    auto const source = ctx->persistent.create_buffer_from_data(cc::vector<i32>::create_filled(64, 1),
+                                                                sg::buffer_usage::readonly_buffer);
+    auto const merged = ctx->persistent.create_buffer_from_data(
+        cc::vector<i32>::create_defaulted(64), sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
+    auto const target = ctx->persistent.create_texture_2d(
+        {.format = sg::pixel_format::rgba16_float, .width = 1, .height = 1, .usage = sg::texture_usage::render_target});
+    sg_test::rect const whole[] = {sg_test::rect_at(0, 0, 1, 1, 1, 1, 0.5f, tg::vec4f(1, 1, 1, 1))};
+    auto const batch = sg_test::rect_batch(*ctx, whole);
+
+    auto cmd = ctx->create_command_list();
+    auto const group = ctx->transient.create_binding_group(
+        *cmd, layout,
+        shaders::lanes{.sources = {source.as_readonly_buffer(), source.as_readonly_buffer(), source.as_readonly_buffer()},
+                       .merged = merged.as_readwrite_buffer()});
+    cmd->compute.bind_pipeline(*gather);
+    cmd->compute.bind_group(0, *group);
+    auto const reads = cc::vector<sg::array_buffer_access>{{.index = 0, .access = sg::access_flag::shader_read},
+                                                           {.index = 1, .access = sg::access_flag::shader_read},
+                                                           {.index = 2, .access = sg::access_flag::shader_read}};
+    cmd->compute.declare_array_buffer_access("lanes.sources", reads);
+    cmd->compute.dispatch_threads(64);
+    {
+        auto scope
+            = cmd->raster.render_to({.color_targets = {target.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 0))},
+                                     .target_set = shaders::rect_target::name});
+        scope.bind_pipeline(*draw);
+        scope.declare_array_buffer_access("lanes.sources", {});
+        CHECK_ASSERTS(batch.draw(scope, 0));
+    }
+    auto const back = cmd->download.data_from_buffer(merged);
+    ctx->submit_command_list(cc::move(cmd));
+    CHECK((co_await back.data())[0] == 1); // the dispatch before the scope ran, gathering a 1
 }

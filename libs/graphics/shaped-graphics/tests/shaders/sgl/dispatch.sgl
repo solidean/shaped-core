@@ -44,3 +44,16 @@ binding within:
 
 @compute(64) fun copy_within(@thread_id id: int3){within}:
     within.target[id.x] = within.source[id.x] + 1
+
+// Three groups at once, each a factor of the one product.
+binding first_factor:
+    by: buffer[int]
+
+binding second_factor:
+    by: buffer[int]
+
+binding product:
+    values: mut buffer[int]
+
+@compute(64) fun multiply_three(@thread_id id: int3){first_factor, second_factor, product}:
+    product.values[id.x] = product.values[id.x] * first_factor.by[0] * second_factor.by[0]

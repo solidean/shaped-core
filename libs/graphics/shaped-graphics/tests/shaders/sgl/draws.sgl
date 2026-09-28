@@ -31,3 +31,18 @@ pipeline indexed_points:
     pixel = index_ps
     topology = .point_list
     format = .rgba32_float
+
+// The same points, each draw tagged by inline constants the host sets between draws.
+@inline binding draw_tag:
+    tag: float
+
+@pixel fun tagged_ps(p: drawn_indices){draw_tag} -> index_target:
+    return {
+        indices = float4(p.vertex as float, p.instance as float, draw_tag.tag, 1.0)
+    }
+
+pipeline tagged_points:
+    vertex = index_vs
+    pixel = tagged_ps
+    topology = .point_list
+    format = .rgba32_float

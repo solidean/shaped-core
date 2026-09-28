@@ -44,15 +44,10 @@ Two values that could agree on the chosen inputs get a second quad with inputs t
 Each test runs every value by default when it is one draw per value into one target.
 A combinatorial sweep — every blend factor against every op — narrows to a covering subset under `!nx::is_thorough()`.
 
-## Draw and dispatch parameters
-
-- Inline constants that change per draw; per dispatch is executed.
-
 ## Binding semantics, executed
 
 - A buffer view's size, which SGL cannot observe yet: it has no buffer length, which WGSL's `arrayLength` and HLSL's `GetDimensions` both give.
-- Three and more groups at once; two are executed.
-- Bound state across `render_to` scopes: a group bound in one scope is not bound in the next, and a compute-bound group does not leak into a draw.
+- Bound state from one rendering scope to the next, which wants a raster pipeline with a binding array; a dispatch's group not leaking into a draw is executed.
 
 ## SGL semantics that only a GPU pins
 
