@@ -271,14 +271,19 @@ ASYNC_INVOCABLE_TEST("sr - denoise automatic resolves to a supported member", (s
         = sr::denoise_settings{.method = sr::denoise_method::atrous, .scale = sr::render_scale_preset::performance};
     CHECK(sr::denoise_input_extent(ctx, scaled, tg::vec2i(640, 480)) == tg::vec2i(640, 480));
 
-    // ...and an upscaling member this device cannot run answers the output's own size too.
-    // Otherwise a caller would trace at half resolution for a call that is about to be refused, and then composite
-    // that half-resolution image into a full-resolution output.
+    // ...and what an upscaling member answers depends on whether THIS device can run it, so both arms are pinned.
+    // Asserting `!support.dlss_rr` instead would be the same mistake the temporal order above avoids: a test that
+    // passes only on the machines where the SDK is absent, and fails on the ones it was written for.
     auto const dlss_scaled = sr::denoise_settings{.method = sr::denoise_method::dlss_rr,
                                                   .scale = sr::render_scale_preset::performance,
                                                   .fresh_samples = true};
-    CHECK(!support.dlss_rr);
-    CHECK(sr::denoise_input_extent(ctx, dlss_scaled, tg::vec2i(640, 480)) == tg::vec2i(640, 480));
+    auto const dlss_extent = sr::denoise_input_extent(ctx, dlss_scaled, tg::vec2i(640, 480));
+    if (support.dlss_rr)
+        CHECK(dlss_extent == tg::vec2i(320, 240)).context("performance halves each axis");
+    else
+        // A caller that traced smaller for a call about to be refused would composite a half-resolution image into a
+        // full-resolution output.
+        CHECK(dlss_extent == tg::vec2i(640, 480)).context("a member this device cannot run does not upscale");
     co_return;
 }
 
